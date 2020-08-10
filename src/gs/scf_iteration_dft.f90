@@ -24,12 +24,11 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               stencil,  &
                               srg,srg_scalar,   &
                               spsi,shpsi,sttpsi,  &
-                              rho,rho_s,  &
+                              rho,rho_jm,rho_s,  &
                               V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
                               rho_old,Vlocal_old,  &
-                              band,ilevel_print,  &
-                              rho_jm )
+                              band,ilevel_print )
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -74,7 +73,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
@@ -86,7 +85,6 @@ type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
-type(s_scalar),intent(in),optional :: rho_jm
 
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
@@ -107,22 +105,12 @@ if(nscf_init_mix_zero.gt.1)then
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,mg,rho_s,mixing)
-      if(yn_jm=='n')then
-        call scf_iteration_step(lg,mg,system,info,stencil,  &
-                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
-                       cg,ppg,V_local,  &
-                       iter,  &
-                       nscf_init_no_diagonal, mixing, iter,  &
-                       poisson,fg,Vh,xc_func,ppn,Vxc,energy)
-      else
-        call scf_iteration_step(lg,mg,system,info,stencil,  &
-                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
-                       cg,ppg,V_local,  &
-                       iter,  &
-                       nscf_init_no_diagonal, mixing, iter,  &
-                       poisson,fg,Vh,xc_func,ppn,Vxc,energy,  &
-                       rho_jm )
-      end if
+      call scf_iteration_step(lg,mg,system,info,stencil,  &
+                     srg,srg_scalar,spsi,shpsi,rho,rho_jm,rho_s,  &
+                     cg,ppg,V_local,  &
+                     iter,  &
+                     nscf_init_no_diagonal, mixing, iter,  &
+                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
@@ -135,10 +123,16 @@ if(nscf_init_mix_zero.gt.1)then
       if(comm_is_root(nproc_id_global)) then
          select case(iperiodic)
          case(0); write(*,300) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, poisson%iterVh
-         case(3); write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+         case(3)
+           if(yn_jm=='n') then
+             write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+           else
+             write(*,302) iter, ene_gap*au_energy_ev
+           end if
          end select
 300      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 301      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
+302      format(2x,"no-mixing iter=",i6,                         5x,"Gap=",f15.8)
       endif
       !(convergence: energy gap is over specified energy)
       if(ene_gap .ge. conv_gap_mix_zero) then
@@ -183,22 +177,12 @@ DFT_Iteration : do iter=Miter+1,nscf
       end if
    end if
    call copy_density(Miter,system%nspin,mg,rho_s,mixing)
-   if(yn_jm=='n')then
-     call scf_iteration_step(lg,mg,system,info,stencil,  &
-                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
-                       cg,ppg,V_local,  &
-                       Miter,  &
-                       nscf_init_no_diagonal, mixing, iter,  &
-                       poisson,fg,Vh,xc_func,ppn,Vxc,energy)
-   else
-     call scf_iteration_step(lg,mg,system,info,stencil,  &
-                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
-                       cg,ppg,V_local,  &
-                       Miter,  &
-                       nscf_init_no_diagonal, mixing, iter,  &
-                       poisson,fg,Vh,xc_func,ppn,Vxc,energy, &
-                       rho_jm)
-   end if
+   call scf_iteration_step(lg,mg,system,info,stencil,  &
+                     srg,srg_scalar,spsi,shpsi,rho,rho_jm,rho_s,  &
+                     cg,ppg,V_local,  &
+                     Miter,  &
+                     nscf_init_no_diagonal, mixing, iter,  &
+                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
@@ -300,10 +284,15 @@ DFT_Iteration : do iter=Miter+1,nscf
       case(0)
          write(*,100) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, poisson%iterVh
       case(3)
-         write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+        if(yn_jm=='n') then
+          write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+        else
+          write(*,102) Miter, ene_gap*au_energy_ev
+        end if
       end select
 100   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 101   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
+102   format(1x,"iter=",i6,5x,                         "Gap=",f15.8)
 
       do is=1,system%nspin
          if(system%nspin==2.and.is==1) write(*,*) "for up-spin"
@@ -341,12 +330,17 @@ DFT_Iteration : do iter=Miter+1,nscf
    if(comm_is_root(nproc_id_global)) then
       select case(iperiodic)
       case(0)
-         write(*,400) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1,poisson%iterVh
+        write(*,400) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1,poisson%iterVh
       case(3)
-         write(*,401) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1
+        if(yn_jm=='n') then
+          write(*,401) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1
+        else
+          write(*,402) Miter,                           ene_gap*au_energy_ev, sum1
+        end if  
       end select
 400   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7,3x,"Vh iter=",i4)
 401   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7)
+402   format(5x,"#SCF ",i6,3x,                     "Gap=",f15.8,3x,"conv[au]=",e15.7)
    endif
 
    end if  !ilevel_print

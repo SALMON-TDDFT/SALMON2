@@ -261,6 +261,7 @@ contains
 
   subroutine calc_current(system,mg,stencil,info,srg,psi,ppg,curr)
     use structures
+    use salmon_global, only: yn_jm
     use sendrecv_grid, only: update_overlap_complex8
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
@@ -296,7 +297,7 @@ contains
     call timer_end(LOG_CURRENT_CALC)
 
     call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
-    if(info%if_divide_rspace) then
+    if(info%if_divide_rspace .and. yn_jm=='n') then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
     end if
@@ -315,7 +316,7 @@ contains
       wrk4 = 0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
-!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
 !$omp             reduction(+:wrk4) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -325,11 +326,15 @@ contains
                             ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
         wrk2 = matmul(BT,wrk2)
 
-        if(info%if_divide_rspace) then
-          uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
-          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+        if(yn_jm=='n') then
+          if(info%if_divide_rspace) then
+            uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+            call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+          else
+            call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          end if
         else
-          call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          wrk3 = 0d0
         end if
 
         wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
@@ -351,7 +356,7 @@ contains
     end do
     end do
 
-    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2,uVpsi)
+    if(info%if_divide_rspace .and. yn_jm=='n') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     return
 
@@ -421,6 +426,7 @@ contains
 
   subroutine calc_current_use_dmat(system,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
+    use salmon_global, only: yn_jm
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use code_optimization, only: current_omp_mode
@@ -453,7 +459,7 @@ contains
     call timer_end(LOG_CURRENT_CALC)
 
     call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
-    if(info%if_divide_rspace) then
+    if(info%if_divide_rspace .and. yn_jm=='n') then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
     end if
@@ -465,7 +471,7 @@ contains
       wrk3 = 0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,uVpsi) &
-!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
 !$omp             reduction(+:wrk3) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -473,11 +479,15 @@ contains
         kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
         call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),kAc,mg%is_array,mg%ie_array,mg%is,mg%ie)
 
-        if(info%if_divide_rspace) then
-          uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
-          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+        if(yn_jm=='n') then
+          if(info%if_divide_rspace) then
+            uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+            call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+          else
+            call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          end if
         else
-          call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          wrk2 = 0d0
         end if
 
         wrk3 = wrk3 + (wrk1 + wrk2) * system%rocc(io,ik,ispin)*system%wtk(ik)
@@ -500,7 +510,7 @@ contains
     end do
     end do
 
-    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2,uVpsi)
+    if(info%if_divide_rspace .and. yn_jm=='n') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     return
 

@@ -122,7 +122,8 @@ contains
     complex(8),allocatable :: u_rVnl_Vnlr_u(:,:,:,:),u_rVnl_Vnlr_u_l(:,:,:,:)
     complex(8) :: u_rVnl_u(3),u_Vnlr_u(3),veik
     complex(8),allocatable ::  u_rVnlr_Vnlrr_u(:,:,:,:),u_rVnlr_Vnlrr_u_l(:,:,:,:)
-    complex(8) :: ctmp1,ctmp2,wrk(3)
+!    complex(8) :: ctmp1,ctmp2
+    complex(8) :: wrk(3)
     character(100) :: file_tm_data
 
     if(info%im_s/=1 .or. info%im_e/=1) then!??????
@@ -610,7 +611,7 @@ contains
     use structures, only: s_ofile,s_dft_energy,s_md
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_global, only: ensemble, thermostat, out_rt_energy_step
+    use salmon_global, only: ensemble, thermostat, out_rt_energy_step, yn_periodic, yn_jm
     use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
@@ -642,10 +643,16 @@ contains
        endif
        endif
 
-       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-        & 1, "Time", trim(t_unit_time%name), &
-        & 2, "Eall", trim(t_unit_energy%name), &
-        & 3, "Eall-Eall0", trim(t_unit_energy%name)
+       if(yn_periodic=='y' .and. yn_jm=='y') then
+         write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+          & 1, "Time", trim(t_unit_time%name), &
+          & 2, "Eall-Eall0", trim(t_unit_energy%name)
+       else
+         write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+          & 1, "Time", trim(t_unit_time%name), &
+          & 2, "Eall", trim(t_unit_energy%name), &
+          & 3, "Eall-Eall0", trim(t_unit_energy%name)
+       end if
 
        if(yn_md=='y') then
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
@@ -663,10 +670,16 @@ contains
        write(uid,*)
        flush(uid)
        
-       write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
-           & 0d0,        &
-           & energy%E_tot0 * t_unit_energy%conv, &
-           & 0d0
+       if(yn_periodic=='y' .and. yn_jm=='y') then
+         write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+             & 0d0,        &
+             & 0d0
+       else
+         write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+             & 0d0,        &
+             & energy%E_tot0 * t_unit_energy%conv, &
+             & 0d0
+       end if
        if(yn_md=='y') then
          write(uid, "(99(1X,E23.15E3))",advance='no') &
              & md%Tene * t_unit_energy%conv, &
@@ -681,10 +694,16 @@ contains
        if(mod(it,out_rt_energy_step)==0)then
           uid = ofl%fh_rt_energy
    
-          write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
-             & it * dt * t_unit_time%conv,        &
-             & energy%E_tot * t_unit_energy%conv, &
-             & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
+          if(yn_periodic=='y' .and. yn_jm=='y') then
+            write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+               & it * dt * t_unit_time%conv,        &
+               & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
+          else
+            write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+               & it * dt * t_unit_time%conv,        &
+               & energy%E_tot * t_unit_energy%conv, &
+               & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
+          end if
           if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
              & md%Tene * t_unit_energy%conv, &
@@ -1153,7 +1172,8 @@ contains
   !! export SYSNAME_info.data file (GS info)
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
-    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system, yn_jm
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nstate_spin,nelec_spin,unit_system, &
+                                   yn_jm, yn_periodic
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1164,7 +1184,7 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_pp_info)   ,intent(in) :: pp
     !
-    integer :: fh,is,p1,p2,p5,iob,ii,jj,ik,ikoa,iatom,ix
+    integer :: fh,is,p1,p2,p5,iob,jj,ik,ikoa,iatom,ix
     character(100) :: file_gs_info
 
     file_gs_info = trim(sysname)//"_info.data"
@@ -1183,7 +1203,11 @@ contains
           write(fh,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
        end select
        write(fh,*)
-       write(fh,*) "Total energy (eV) = ", energy%E_tot*au_energy_ev
+       if(yn_jm=='y'.and.yn_periodic=='y') then
+         write(fh,*) "For yn_jm = y and yn_periodic=y, this version still cannot output Total Energy."
+       else
+         write(fh,*) "Total energy (eV) = ", energy%E_tot*au_energy_ev
+       end if
        write(fh,*) "1-particle energies (eV)"
        select case (system%nspin)
        case(1)

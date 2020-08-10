@@ -482,8 +482,8 @@ contains
       & yn_output_dns_jm,     &
       & shape_file_jm,        &
       & num_jm,               &
-      & nelec_jm,             &
       & rs_bohr_jm,           &
+      & sphere_nelec_jm,      &
       & sphere_loc_jm
 
     namelist/group_fundamental/ &  !remove later
@@ -800,8 +800,8 @@ contains
     yn_output_dns_jm     = 'y'
     shape_file_jm        = 'none'
     num_jm               = 0
-    nelec_jm(:)          = 0
     rs_bohr_jm(:)        = 0d0
+    sphere_nelec_jm(:)   = 0
     sphere_loc_jm(:,:)   = 0d0
 !! == default for &group_fundamental
     iwrite_projection      = 0
@@ -1276,8 +1276,8 @@ contains
     call comm_bcast(yn_output_dns_jm     ,nproc_group_global)
     call comm_bcast(shape_file_jm        ,nproc_group_global)
     call comm_bcast(num_jm               ,nproc_group_global)
-    call comm_bcast(nelec_jm             ,nproc_group_global)
     call comm_bcast(rs_bohr_jm           ,nproc_group_global)
+    call comm_bcast(sphere_nelec_jm      ,nproc_group_global)
     call comm_bcast(sphere_loc_jm        ,nproc_group_global)
     sphere_loc_jm = sphere_loc_jm * ulength_to_au
 !! == bcast for &group_fundamental
@@ -2043,14 +2043,14 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')  'shape_file', trim(shape_file_jm)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
       if(num_jm==0) then
-        write(fh_variables_log, '("#",4X,A,"=",I6)')      'nelec_jm', nelec_jm
-        write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'obs_loc_em', rs_bohr_jm(1)
+        write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
+        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nelec_jm', sphere_nelec_jm
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
                                                           sphere_loc_jm(1,1),sphere_loc_jm(1,2),sphere_loc_jm(1,3)
       else
         do i = 1,num_jm
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'nelec_jm(',i,')', nelec_jm(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)')  'rs_bohr_jm(',i,')', rs_bohr_jm(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nelec_jm(',i,')', sphere_nelec_jm(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
         end do
       end if

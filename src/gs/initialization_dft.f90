@@ -25,7 +25,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg,  &
                                 info,  &
                                 srg, srg_scalar,  &
-                                rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
                                 spsi, shpsi, sttpsi,  &
                                 pp, ppg, ppn,  &
                                 ofl )
@@ -58,7 +58,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 !type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl !,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl !,rho_old,Vlocal_old
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
@@ -98,6 +98,8 @@ if(yn_jm=='n') then
     write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
     write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
   end if
+else
+  call allocate_scalar(mg,rho_jm)
 end if
 
 if(system%if_real_orbital) then
@@ -145,11 +147,10 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 system,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,info,  &
                                 srg,srg_scalar,  &
-                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
-                                xc_func,mixing, &
-                                rho_jm )
+                                xc_func,mixing )
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -174,6 +175,7 @@ use hamiltonian
 use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
+use jellium, only: make_rho_jm
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -184,7 +186,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
@@ -194,7 +196,6 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ewald_ion_ion) :: ewald
 type(s_mixing) :: mixing
-type(s_scalar),intent(in), optional :: rho_jm
 
 logical :: rion_update
 integer :: Miter,jspin, nspin,i,ix,iy,iz
@@ -287,11 +288,13 @@ real(8) :: rNe0,rNe
     end if
   end if
 
-  if(yn_jm=='n') then
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
+  !make positive back ground charge density for using jellium model
+  if(yn_jm=='y') then
+    call make_rho_jm(lg,mg,info,system,rho_jm)
+    rho%f = rho%f + rho_jm%f
   end if
+
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
@@ -326,7 +329,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                                 lg,mg,  &
                                 info,  &
                                 srg,srg_scalar,  &
-                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
                                 xc_func,mixing )
@@ -366,7 +369,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
-  type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+  type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
   type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
@@ -409,7 +412,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           stencil,  &
                           srg,srg_scalar,   &
                           spsi,shpsi,sttpsi,  &
-                          rho,rho_s,  &
+                          rho,rho_jm,rho_s,  &
                           V_local,Vh,Vxc,Vpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &

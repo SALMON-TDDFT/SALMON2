@@ -21,16 +21,18 @@ contains
   !===========================================================================================
   != check condition =========================================================================
   subroutine check_condition_jm
-    use salmon_global,   only: yn_md, yn_opt, yn_out_pdos, yn_out_tm, nelem, natom, nelec, spin, xc, &
-                               yn_periodic, layout_multipole, shape_file_jm, num_jm, nelec_jm
+    use salmon_global,   only: yn_md, yn_opt, yn_out_pdos, yn_out_tm, yn_out_rvf_rt, nelem, natom, nelec, spin, xc, &
+                               yn_periodic, layout_multipole, shape_file_jm, num_jm, sphere_nelec_jm, &
+                               method_singlescale
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
     implicit none
     
-    call condition_yn_jm(yn_md,      'yn_md',      'n')
-    call condition_yn_jm(yn_opt,     'yn_opt',     'n')
-    call condition_yn_jm(yn_out_pdos,'yn_out_pdos','n')
-    call condition_yn_jm(yn_out_tm,  'yn_out_tm',  'n')
+    call condition_yn_jm(yn_md,        'yn_md',        'n')
+    call condition_yn_jm(yn_opt,       'yn_opt',       'n')
+    call condition_yn_jm(yn_out_pdos,  'yn_out_pdos',  'n')
+    call condition_yn_jm(yn_out_tm,    'yn_out_tm',    'n')
+    call condition_yn_jm(yn_out_rvf_rt,'yn_out_rvf_rt','n')
 
     call condition_int_jm(nelem,'nelem',1)
     call condition_int_jm(natom,'natom',1)
@@ -46,23 +48,28 @@ contains
       stop
     end if
     
-    if (trim(spin)/='unpolarized') then
+    if(trim(spin)/='unpolarized') then
       if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, spin must be even unpolarized.")')
       stop
     end if
     
-    if (trim(xc)/='pz') then
+    if(trim(xc)/='pz') then
       if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, xc must be pz.")')
       stop
     end if
     
-    if (trim(shape_file_jm)=='none' .and. nelec/=sum(nelec_jm(:)))then
-      if(comm_is_root(nproc_id_global)) &
-        write(*,'("For yn_jm = y and shape_file_jm = none, nelec must be sum(nelec_jm).")')
+    if(trim(method_singlescale)/='3d') then
+      if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, method_singlescale must be 3d.")')
       stop
     end if
     
-    if (num_jm<1) then
+    if (trim(shape_file_jm)=='none' .and. nelec/=sum(sphere_nelec_jm(:)))then
+      if(comm_is_root(nproc_id_global)) &
+        write(*,'("For yn_jm = y and shape_file_jm = none, nelec must be sum(sphere_nelec_jm).")')
+      stop
+    end if
+    
+    if(num_jm<1) then
       if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, num_jm must be larger than 0.")')
       stop
     end if
@@ -106,9 +113,9 @@ contains
   
   !===========================================================================================
   != meke positive back ground charge density ================================================
-  subroutine make_rho_jm(lg,mg,system,info,rho_jm)
-    use salmon_global,   only: shape_file_jm, num_jm, nelec_jm, rs_bohr_jm, sphere_loc_jm, &
-                               yn_charge_neutral_jm, yn_output_dns_jm, nelec, unit_system
+  subroutine make_rho_jm(lg,mg,info,system,rho_jm)
+    use salmon_global,   only: shape_file_jm, num_jm, rs_bohr_jm, sphere_nelec_jm, sphere_loc_jm, &
+                               yn_charge_neutral_jm, yn_output_dns_jm, yn_periodic, nelec, unit_system
     use inputoutput,     only: ulength_from_au
     use structures,      only: s_rgrid, s_dft_system, s_parallel_info, s_scalar, allocate_scalar
     use parallelization, only: nproc_id_global, nproc_group_global
@@ -118,12 +125,12 @@ contains
     use math_constants,  only: pi
     implicit none
     type(s_rgrid),         intent(in)    :: lg, mg
-    type(s_dft_system),    intent(in)    :: system
     type(s_parallel_info), intent(in)    :: info
+    type(s_dft_system),    intent(in)    :: system
     type(s_scalar),        intent(inout) :: rho_jm
     type(s_scalar)                       :: work_l1,work_l2
     integer,allocatable :: imedia(:,:,:)
-    integer             :: ii, ix, iy, iz, mod_nelec
+    integer             :: ii, ix, iy, iz, nelec_sum, mod_nelec
     real(8),allocatable :: dens(:), radi(:), mod_rs_bohr_jm(:)
     real(8)             :: rab, charge_sum, charge_error 
     character(60)       :: suffix
@@ -146,7 +153,7 @@ contains
       !make spheres
       do ii=1,num_jm
         !set radius
-        radi(ii) = ( dble(nelec_jm(ii))/dens(ii)/(4.0d0*pi/3.0) )**(1.0d0/3.0d0)
+        radi(ii) = ( dble(sphere_nelec_jm(ii))/dens(ii)/(4.0d0*pi/3.0) )**(1.0d0/3.0d0)
         
         !make ii-th sphere
         do iz=mg%is(3),mg%ie(3)
@@ -161,8 +168,8 @@ contains
         end do
       end do
       
-      !check charge neutrality
-      call check_neutral_jm(charge_sum,charge_error,sum(nelec_jm(:)))
+      !set total electron number
+      nelec_sum = sum(sphere_nelec_jm(:))
     else
       !**************************************************************************************!
       !*** rho_jm is generated by cube file *************************************************!
@@ -199,10 +206,12 @@ contains
       end do
       end do
       
-      !check charge neutrality
-      call check_neutral_jm(charge_sum,charge_error,nelec)
+      !set total electron number
+      nelec_sum = nelec
     end if
     
+    !check charge neutrality
+    call check_neutral_jm(charge_sum,charge_error,nelec_sum)
     
     !propose modified parameter & stop
     !or modify parameters
@@ -223,11 +232,7 @@ contains
         rho_jm%f(:,:,:)   = rho_jm%f(:,:,:) * ( dble(nelec)/charge_sum )
         dens(:)           = dens(:)         * ( dble(nelec)/charge_sum )
         mod_rs_bohr_jm(:) = ( 1.0d0/(4.0d0*pi/3.0*dens(:)) )**(1.0d0/3.0d0)
-        if (trim(shape_file_jm)=='none')then
-          call check_neutral_jm(charge_sum,charge_error,sum(nelec_jm(:)))
-        else
-          call check_neutral_jm(charge_sum,charge_error,nelec)
-        end if
+        call check_neutral_jm(charge_sum,charge_error,nelec_sum)
       end if
     end if
     
@@ -272,6 +277,11 @@ contains
       end if
       write(*,*) " in the atomic unit(Bohr)."
       write(*,'(A,E23.15E3," %")') '  Chrge neutrality error =', charge_error
+      if(yn_periodic=='y') then
+        write(*,*)
+        write(*,'("  For yn_jm = y and yn_periodic=y, this version still cannot output Total Energy.")')
+        write(*,*)
+      end if
       write(*,*) '*********************************************************'
       write(*,*)
     end if
