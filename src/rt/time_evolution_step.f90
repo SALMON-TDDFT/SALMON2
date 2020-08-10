@@ -90,9 +90,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   ! for calc_total_energy_periodic
   if(yn_md=='y') then
-     rion_update = .true.
+    rion_update = .true.
   else
-     if(yn_jm=='n') rion_update = check_rion_update()
+    if(yn_jm=='n') then
+      rion_update = check_rion_update()
+    else
+      rion_update = .false.
+    end if
   endif
 
   if(ae_shape1 == 'impulse')then
