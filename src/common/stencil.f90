@@ -321,8 +321,8 @@ subroutine zstencil_microAc_symmetrized(is_array,ie_array,is,ie,idx,idy,idz &
   real(8) :: kAc(3)
   complex(8) :: w(3),v,psi0,x
 
-!$OMP parallel
-!$OMP do collapse(3) private(iz,iy,ix,w,v,psi0,kAc,x)
+!!!!$OMP parallel
+!!!!$OMP do collapse(2) private(iz,iy,ix,w,v,psi0,kAc,x)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -383,8 +383,8 @@ subroutine zstencil_microAc_symmetrized(is_array,ie_array,is,ie,idx,idy,idz &
   end do
   end do
   end do
-!$OMP end do
-!$OMP end parallel
+!!!!$OMP end do
+!!!!$OMP end parallel
   
 end subroutine zstencil_microAc_symmetrized
 
