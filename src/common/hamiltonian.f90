@@ -182,7 +182,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     ! orthogonal lattice, single-scale Maxwell-TDDFT
     
       if(yn_symmetrized_stencil=='y') then
-      
+
+!$omp parallel do collapse(4) default(none) &
+!$omp          private(im,ik,io,ispin) &
+!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,system,stencil)
         do im=im_s,im_e
         do ik=ik_s,ik_e
         do io=io_s,io_e
@@ -195,6 +198,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
         end do
+!$omp end parallel do
         
       else if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
         ! OpenMP parallelization: rgrid
