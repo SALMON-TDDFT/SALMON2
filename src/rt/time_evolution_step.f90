@@ -92,11 +92,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   if(yn_md=='y') then
     rion_update = .true.
   else
-    if(yn_jm=='n') then
-      rion_update = check_rion_update()
-    else
-      rion_update = .false.
-    end if
+    rion_update = check_rion_update()
   endif
 
   if(ae_shape1 == 'impulse')then
