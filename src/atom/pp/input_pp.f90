@@ -38,7 +38,7 @@ subroutine input_pp(pp,hx,hy,hz)
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
   real(8),intent(in) :: hx,hy,hz
-  integer :: ik,l,i,l0,ll,nprj,i1,nr
+  integer :: ik,l,i,l0,ll,nprj,i1,nr,j
   real(8) :: rrc(0:pp%lmax0)
   real(8) :: r1
   real(8),allocatable :: rhor_nlcc(:,:)   !zero in radial index for taking derivative
@@ -72,7 +72,7 @@ subroutine input_pp(pp,hx,hy,hz)
       case('ADPACK')
         call read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
       case('UPF')
-        call read_ps_upf(pp,rrc,rhor_nlcc,ik,ps_file)
+        call read_ps_upf(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
         flag_beta_proj_is_given =.true.
 !      case('ATOM')      ; call read_ps_ATOM
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'

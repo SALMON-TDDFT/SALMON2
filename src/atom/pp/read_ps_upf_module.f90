@@ -12,13 +12,14 @@ module read_ps_upf_module
 
 contains
 
-  subroutine read_ps_upf( pp, rrc, rhor_nlcc, ik, ps_file )
+  subroutine read_ps_upf( pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file )
     use structures, only: s_pp_info
     implicit none
     integer,intent(in) :: ik
     type(s_pp_info) :: pp
     real(8),intent(out) :: rrc(0:)
     real(8),intent(out) :: rhor_nlcc(0:,0:)
+    logical,intent(inout) :: flag_nlcc_element(:)
     character(*),intent(in) :: ps_file
     character(30) :: cbuf
     integer,parameter :: g=4
@@ -32,11 +33,12 @@ contains
     if ( cbuf(1:21) == '<UPF version="2.0.1">' ) then
        rewind g
        call read_ps_upf_ver201( g, pp, rrc, rhor_nlcc, ik )
-       return
     else
        write(*,*) "This may be an old UPF format"
        stop 'stop@read_ps_upf'
     end if
+
+    if ( any(rhor_nlcc/=0.0d0) ) flag_nlcc_element(ik)=.true.
 
     return
 10  stop 'Format is invalid (stop@read_ps_upf)'
@@ -55,13 +57,15 @@ contains
     real(8),intent(out) :: rhor_nlcc(0:,0:)
     integer,intent(in) :: ik
     integer,parameter :: max_loop=1000000, max_array_size = 16
-    integer :: loop,i,j,k,l,ir,ic,nr
+    integer :: loop,i,j,k,l,ir,ic,nr,l0,ll
     integer,allocatable :: lo(:),no(:)
     character(100) :: cbuf, ckey
     integer :: norb,nrr,nsize,ltmp,columns
     real(8) :: Zps,r,dx,x1,x
     real(8),allocatable :: rr(:),rx(:),vql(:),cdc(:),cdd(:)
     real(8),allocatable :: viod(:,:),anorm(:),Dij(:,:),work(:)
+    logical :: flag_spin_orb = .false.
+    integer,allocatable :: i2l(:)
 
     write(*,'(a40," read_ps_upf_ver201")') repeat("-",40)
 
@@ -272,7 +276,18 @@ contains
           !write(*,*) ckey(1:12)
 
           read(g,*) cdd(1:nrr)
-          exit
+          !exit
+
+       end if
+
+       if ( ckey(1:13) == "<PP_SPIN_ORB>" ) then
+
+          flag_spin_orb = .true.
+
+          do j=1,norb
+             read(g,*) cbuf
+             write(*,*) j, lo(j),cbuf
+          end do
 
        end if
 
@@ -291,20 +306,78 @@ contains
        pp%nproj(l,ik) = pp%nproj(l,ik) + 1
     end do
 
-    do i=1,norb
-       pp%anorm(i-1,ik) = anorm(i)
-    end do
+    if( flag_spin_orb )then
+       do ll=1,pp%mlps(ik)
+          pp%nproj(ll,ik) = pp%nproj(ll,ik)/2
+       end do
+    end if
+
+    if( flag_spin_orb )then
+       allocate( i2l(norb) ); i2l=0
+       i=0
+       l0=0
+       do ll=0,pp%mlps(ik)
+       do l=l0,l0+pp%nproj(ll,ik)-1
+          i=i+1
+          i2l(i)=l
+          if( ll > 0 )then
+             i=i+1
+             i2l(i)=l
+          end if
+       end do
+       l0=l
+       end do
+    end if
+
+    if( flag_spin_orb )then
+       pp%anorm(:,ik)=0.0d0
+       do i=1,norb
+          l=i2l(i)
+          if( pp%anorm(l,ik) == 0.0d0 )then
+             pp%anorm(l,ik)=anorm(i)
+          else
+             pp%anorm_so(l,ik)=anorm(i)
+          end if
+       end do
+       l0=0
+       do ll=0,pp%mlps(ik)
+       do l=l0,l0+pp%nproj(ll,ik)-1
+          write(*,*) l,ll,pp%anorm(l,ik), pp%anorm_so(l,ik)
+       end do
+       l0=l
+       end do
+    else
+       do i=1,norb
+          pp%anorm(i-1,ik) = anorm(i)
+       end do
+    end if
 
     if ( rr(1) == 0.0d0 ) then
        pp%mr(ik) = nrr
        do i=1,nrr
           pp%rad(i,ik)=rr(i)
        end do
-       do j=1,norb
-          do i=1,nrr
-             pp%vpp(i-1,j-1) = sqrt(0.5d0)*viod(i,j)
+       if( flag_spin_orb )then
+          pp%vpp(:,:)=0.0d0
+          do i=1,norb
+             l=i2l(i)
+             if( all(pp%vpp(:,l)==0.0d0) )then
+                do j=1,nrr
+                   pp%vpp(j-1,l) = sqrt(0.5d0)*viod(j,i)
+                end do
+             else
+                do j=1,nrr
+                   pp%vpp_so(j-1,l) = sqrt(0.5d0)*viod(j,i)
+                end do
+             end if
           end do
-       end do
+       else
+          do j=1,norb
+             do i=1,nrr
+                pp%vpp(i-1,j-1) = sqrt(0.5d0)*viod(i,j)
+             end do
+          end do
+       end if
        do i=1,nrr
           pp%vpp(i-1,pp%lref(ik)) = 0.5d0*vql(i)
        end do
@@ -317,12 +390,30 @@ contains
           pp%rad(i,ik) = rr(i-1)
        end do
        pp%rad(1,ik)=0.0d0
-       do j=1,norb
-          do i=1,nrr
-             pp%vpp(i,j-1) = sqrt(0.5d0)*viod(i,j)
+       if( flag_spin_orb )then
+          pp%vpp(:,:)=0.0d0
+          do i=1,norb
+             l=i2l(i)
+             if( all(pp%vpp(:,l)==0.0d0) )then
+                do j=1,nrr
+                   pp%vpp(j,l) = sqrt(0.5d0)*viod(j,i)
+                end do
+                pp%vpp(0,l) = pp%vpp(1,l)
+             else
+                do j=1,nrr
+                   pp%vpp_so(j,l) = sqrt(0.5d0)*viod(j,i)
+                end do
+                pp%vpp_so(0,l) = pp%vpp_so(1,l)
+             end if
           end do
-          pp%vpp(0,j-1)=pp%vpp(1,j-1)
-       end do
+       else
+          do j=1,norb
+             do i=1,nrr
+                pp%vpp(i,j-1) = sqrt(0.5d0)*viod(i,j)
+             end do
+             pp%vpp(0,j-1)=pp%vpp(1,j-1)
+          end do
+       end if
        do i=1,nrr
           pp%vpp(i,pp%lref(ik)) = 0.5d0*vql(i)
        end do
@@ -347,16 +438,61 @@ contains
        end do
     end if
 
-    rrc=0.0d0
-    do j=1,norb
-       l=lo(j)
-       do i=pp%mr(ik),1,-1
-          if ( abs(pp%vpp(i-1,j-1)) > 1.0d-6 ) then
-             rrc(l) = max( rrc(l), pp%rad(i,ik) )
-             exit
-          end if
+    !i=0
+    !l0=0
+    !do ll=0,pp%mlps(ik)
+    !   do l=l0,l0+pp%nproj(ll,ik)-1
+    !      i=i+1
+    !      write(*,'(1x,3i4,3f20.15)') i,l,ll,pp%anorm(l,ik),sum(pp%vpp(:,l)**2)*2.0d0,sum(viod(:,i)**2) 
+    !      if( ll > 0 )then
+    !         i=i+1
+    !         write(*,'(1x,3i4,3f20.15)') i,l,ll,pp%anorm_so(l,ik),sum(pp%vpp_so(:,l)**2)*2.0d0,sum(viod(:,i)**2) 
+    !      end if
+    !   end do
+    !   l0=l
+    !end do
+
+    if( flag_spin_orb )then
+       lo=0
+       i=0
+       l0=0
+       do ll=0,pp%mlps(ik)
+       do l=l0,l0+pp%nproj(ll,ik)-1
+          lo(l+1)=ll
        end do
-    end do
+       l0=l
+       end do
+       rrc=0.0d0
+       l0=0
+       do ll=0,pp%mlps(ik)
+       do l=l0,l0+pp%nproj(ll,ik)-1
+          do i=pp%mr(ik),1,-1
+             if ( abs(pp%vpp(i-1,l)) > 1.0d-6 ) then
+                rrc(ll) = max( rrc(ll), pp%rad(i,ik) )
+                exit
+             end if
+          end do
+          do i=pp%mr(ik),1,-1
+             if ( abs(pp%vpp_so(i-1,l)) > 1.0d-6 ) then
+                rrc(ll) = max( rrc(ll), pp%rad(i,ik) )
+                exit
+             end if
+          end do
+       end do
+       l0=l
+       end do
+    else
+       rrc=0.0d0
+       do j=1,norb
+          l=lo(j)
+          do i=pp%mr(ik),1,-1
+             if ( abs(pp%vpp(i-1,j-1)) > 1.0d-6 ) then
+                rrc(l) = max( rrc(l), pp%rad(i,ik) )
+                exit
+             end if
+          end do
+       end do
+    end if
 
     if ( allocated(Dij)   ) deallocate( Dij )
     if ( allocated(anorm) ) deallocate( anorm )
@@ -372,6 +508,10 @@ contains
     write(*,*) "# of radial mesh points =",pp%mr(ik)
     write(*,*) "uVu integral (anorm) ="
     write(*,'(1x,8f10.5)') ( pp%anorm(i,ik),i=0,norb-1 )
+    if( flag_spin_orb )then
+       write(*,*) "uVu integral (anorm_so) ="
+       write(*,'(1x,8f10.5)') ( pp%anorm_so(i,ik),i=0,norb-1 )
+    end if
     r=0.0d0
     do i=1,pp%mr(ik)
        r=r+rhor_nlcc(i,0)*pp%rad(i+1,ik)**2*(pp%rad(i+1,ik)-pp%rad(i,ik))
