@@ -20,9 +20,9 @@ filelist = [
 reference_value_1 = 15.56457
 permissible_error_1 = 0.0004 # (~0.01eV)
 
-# difference of eigen energies for io=5 and io=6 with ik=2"
-reference_value_2 = 2.643055
-permissible_error_2 = 0.0004 # (~0.01eV)
+# difference of eigen energies for io=4 and io=5 with ik=2"
+reference_value_2 = 9.99940
+permissible_error_2 = 0.0008 # (~0.02eV)
 
 print("# Checking the existance of outputfile")
 for item in filelist:
@@ -41,10 +41,10 @@ for line in open("JM_eigen.data"):
     if linecount == 13: # line 13 (io=2, ik=2)
        data = line.split()
        v2 = float(data[1])
-    if linecount == 16: # line 16 (io=5, ik=2)
+    if linecount == 15: # line 15 (io=4, ik=2)
        data = line.split()
        v3 = float(data[1])
-    if linecount == 17: # line 17 (io=6, ik=2)
+    if linecount == 16: # line 16 (io=5, ik=2)
        data = line.split()
        v4 = float(data[1])
 
