@@ -150,7 +150,7 @@ contains
     end if
 
     if (xc_func%use_gradient) then
-      if(nspin==2) stop "error: GGA or metaGGA & ispin==1"
+      if(nspin==2) stop "error: GGA or metaGGA & spin=='polarized'"
       call calc_xc(xc_func, rho=rho_tmp, grho=delr, rlrho=lrho, tau=tau, rj=j, &
       & eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else
@@ -210,7 +210,7 @@ contains
       use math_constants,only : zi
       implicit none
       integer :: im,ik,io,ispin
-      real(8) :: kAc(3),occ
+      real(8) :: k(3),occ
       complex(8) :: zs(3),p
       real(8) :: j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
                & j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
@@ -225,11 +225,19 @@ contains
       
       tau_tmp1 = 0d0
       j_tmp1 = 0d0
-      
-      if(info%if_divide_rspace) then
-         call update_overlap_complex8(srg, mg, spsi%zwf)
-      end if
-      
+
+      if(allocated(spsi%rwf)) then
+         if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
+         if(.not.allocated(spsi%zwf)) &
+              allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1) &
+                               ,mg%is_array(2):mg%ie_array(2) &
+                               ,mg%is_array(3):mg%ie_array(3) &
+                               ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+         spsi%zwf = cmplx(spsi%rwf)
+      else
+         if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
+      endif
+
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
       do ispin=1,Nspin
@@ -239,13 +247,13 @@ contains
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
             
         occ = system%rocc(io,ik,ispin)*system%wtk(ik)
-        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        k(1:3) = system%vec_k(1:3,ik)
 !$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi* kAc(1:3)* p
+          zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi* k(1:3)* p
           tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
           j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
         end do
@@ -270,6 +278,8 @@ contains
       end do
       end do
 !$omp end parallel do
+
+      if(allocated(spsi%rwf)) deallocate(spsi%zwf)
   
       return
     end subroutine calc_tau
@@ -292,10 +302,10 @@ contains
 
 
 
-  subroutine init_xc(xc, ispin, cval, xcname, xname, cname)
+  subroutine init_xc(xc, spin, cval, xcname, xname, cname)
     implicit none
     type(s_xc_functional), intent(inout) :: xc
-    integer, intent(in)                :: ispin
+    character(*), intent(in)           :: spin
     real(8), intent(in)                :: cval
     character(*), intent(in), optional :: xcname
     character(*), intent(in), optional :: xname
@@ -303,12 +313,17 @@ contains
 
     ! Initialization of xc variable
     xc%xctype(1:3) = salmon_xctype_none
-    xc%ispin = ispin
     xc%cval = cval
     xc%use_gradient = .false.
     xc%use_laplacian = .false.
     xc%use_kinetic_energy = .false.
     xc%use_current = .false.
+    
+    if(spin=='unpolarized') then
+      xc%ispin=0
+    else if(spin=='polarized') then
+      xc%ispin=1
+    end if
 
     ! Exchange correlation
     if (present(xcname) .and. (len_trim(xcname) > 0)) then
@@ -332,8 +347,6 @@ contains
 
 
     subroutine setup_xcfunc(name)
-      use salmon_global, only: iperiodic
-      use inputoutput, only: stop_by_bad_input2
       implicit none
       character(*), intent(in) :: name
 
@@ -384,7 +397,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "TPSS functional is not implemented" ! future work
 
       case ('vs98')
 
@@ -393,7 +406,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "VS98 functional is not implemented" ! future work
 
       ! Please insert additional functional here:
       ! e.g.
@@ -520,7 +533,7 @@ contains
         stop
       end if
 
-      if (ispin > 0) then
+      if (spin /= 'unpolarized') then
         print '(A)', "Spin polarized is not available"
         stop
       end if

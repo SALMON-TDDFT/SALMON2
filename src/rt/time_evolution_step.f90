@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -37,7 +37,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, update_vlocal
   use fdtd_coulomb_gauge, only: fdtd_singlescale,fourier_singlescale
   use sendrecv_grid, only: update_overlap_complex8
-  use salmon_xc
+  use salmon_xc, only: exchange_correlation,salmon_xctype_tbmbj
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
@@ -60,6 +60,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: rho,rho_s(system%nspin),V_local(system%nspin),Vh,Vxc(system%nspin),Vpsl
+  type(s_scalar), intent(in)    :: rho_jm
   type(s_scalar), intent(inout) :: Vh_stock1,Vh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
@@ -90,9 +91,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   ! for calc_total_energy_periodic
   if(yn_md=='y') then
-     rion_update = .true.
+    rion_update = .true.
   else
-     rion_update = check_rion_update()
+    rion_update = check_rion_update()
   endif
 
   if(ae_shape1 == 'impulse')then
@@ -118,11 +119,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   case(3)
     if(.not.singlescale%flag_use) then
-      system%vec_Ac(1:3) = rt%Ac_ext(1:3,itt) + rt%Ac_ind(1:3,itt)
-      system%vec_E(1:3) = -((rt%Ac_ext(1:3,itt) + rt%Ac_ind(1:3,itt))-(rt%Ac_ext(1:3,itt-1) + rt%Ac_ind(1:3,itt-1)))/dt
-      system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt) 
-      system%vec_E_ext(1:3) = -(rt%Ac_ext(1:3,itt) - rt%Ac_ext(1:3,itt-1))/dt
-      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      if(propagator == 'middlepoint') then
+        system%vec_Ac(1:3) = 0.5d0* (rt%Ac_tot(1:3,itt)+rt%Ac_tot(1:3,itt-1))
+      else if(propagator == 'aetrs') then
+        system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
+      else
+        stop 'invalid propagator'
+      end if
+      if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
 
@@ -138,8 +142,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
-! predictor-corrector for metaGGA
-  else if(xc == 'tbmbj') then
+  else if(yn_predictor_corrector=='y' .or. xc_func%xctype(1)==salmon_xctype_tbmbj) then
     call predictor_corrector
   end if
 
@@ -173,6 +176,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     rho%f = rho_s(1)%f + rho_s(2)%f
     !$omp end workshare
   end if
+  
+  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
+  
   call timer_end(LOG_CALC_RHO)
   
   if(singlescale%flag_use) then
@@ -188,7 +194,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
     Vh_stock2%f = Vh_stock1%f
   end if
-  if(singlescale%flag_use .and. yn_gbp=='y' .and. yn_ffte=='y') then
+  if(singlescale%flag_use .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
   else
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
@@ -212,7 +218,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
-  if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+  if(itt==1.or.itt==itotNtime.or.mod(itt,out_rt_energy_step)==0)then
     call timer_begin(LOG_CALC_EIGEN_ENERGY)
     ! tpsi,spsi_in = working arrays
     call calc_eigen_energy(energy,spsi_out,tpsi,spsi_in,system,info,mg,V_local,stencil,srg,ppg)
@@ -233,22 +239,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     endif
     call timer_end(LOG_CALC_DENSITY_MATRIX)
 
-    call timer_begin(LOG_CALC_CURRENT)
-    if(if_use_dmat) then
-       call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
-    else
-       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
-       spsi_out%update_zwf_overlap = .true. 
-    end if
-    call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
-    call timer_end(LOG_CALC_CURRENT)
-
-    if(yn_md=='y') then
-      call timer_begin(LOG_CALC_CURRENT_ION)
-      call calc_current_ion(lg,system,pp,curr_i_tmp)
-      call timer_end(LOG_CALC_CURRENT_ION)
-    end if
-
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
@@ -258,14 +248,35 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,mg,system,info,rho, &
       & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
-      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+      if(yn_jm=='n') call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+      rt%curr(1:3,itt) = singlescale%curr_ave(1:3)
       call timer_end(LOG_CALC_SINGLESCALE)
+    else
+      call timer_begin(LOG_CALC_CURRENT)
+      system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
+      if(if_use_dmat) then
+         call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
+      else
+         call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+         spsi_out%update_zwf_overlap = .true.
+      end if
+      call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
+      system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt)
+      system%vec_E_ext(1:3)  = rt%E_ext (1:3,itt)
+      system%vec_E(1:3)      = rt%E_tot (1:3,itt)
+      call timer_end(LOG_CALC_CURRENT)
+    end if
+    
+    if(yn_md=='y') then
+      call timer_begin(LOG_CALC_CURRENT_ION)
+      call calc_current_ion(lg,system,pp,curr_i_tmp)
+      call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(info%icomm_r,itt,rt,lg,mg,rho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   !(force)
@@ -317,7 +328,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,system,rho%f,rho%f,itt)
+      call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then
@@ -381,6 +392,9 @@ contains
       rho%f = rho_s(1)%f + rho_s(2)%f
       !$omp end workshare
     end if
+    
+    if(yn_jm=='y') rho%f = rho%f + rho_jm%f
+    
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
@@ -397,26 +411,6 @@ contains
     !$omp workshare
     spsi_in%zwf = psi_tmp
     !$omp end workshare
-    
-    if(yn_periodic=='y') then
-    
-      if(trans_longi=="lo")then
-        call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
-        if(nspin==1) then
-          rt%curr(1:3,itt) = curr_e_tmp(1:3,1)
-        else if(nspin==2) then
-          rt%curr(1:3,itt) = curr_e_tmp(1:3,1) + curr_e_tmp(1:3,2)
-        end if
-        rt%Ac_ind(:,itt+1) = 2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
-      else if(trans_longi=="tr")then
-        rt%Ac_ind(:,itt+1) = 0d0
-      end if
-      rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
-      
-      system%vec_Ac(1:3) = 0.5d0* ( rt%Ac_tot(:,itt) + rt%Ac_tot(:,itt+1) )
-      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
-      
-    end if
 
 !  if(functional == 'VS98' .or. functional == 'TPSS')then
 !    tmass=0.5d0*(tmass+tmass_t)

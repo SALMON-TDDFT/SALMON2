@@ -32,7 +32,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
   use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-  use salmon_global, only: yn_want_communication_overlapping,yn_periodic
+  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
   use communication, only: comm_summation
@@ -107,10 +107,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     ! nonlocal potential
     if ( SPIN_ORBIT_ON ) then
       ! pseudopotential
-      call dpseudo(tpsi,htpsi,info,nspin,ppg)
+      if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
     else
       ! pseudopotential
-      call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+      if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
     end if
 
     ! DFT+U
@@ -193,8 +193,27 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       
     else if(stencil%if_orthogonal .and. if_singlescale) then
     ! orthogonal lattice, single-scale Maxwell-TDDFT
+    
+      if(yn_symmetrized_stencil=='y') then
 
-      if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
+!$omp parallel do collapse(4) default(none) &
+!$omp          private(im,ik,io,ispin) &
+!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,system,stencil)
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call zstencil_microAc_symmetrized(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                        ,V_local(ispin)%f,system%Ac_micro%v,stencil%coef_lap0 &
+                        ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
+        end do
+        end do
+        end do
+        end do
+!$omp end parallel do
+        
+      else if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
         ! OpenMP parallelization: rgrid
 
         if (is_enable_overlapping) then
@@ -239,11 +258,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
-      if(.not.allocated(htpsi%ztmp)) allocate(htpsi%ztmp(mg%is_array(1):mg%ie_array(1) &
-                                                        ,mg%is_array(2):mg%ie_array(2) &
-                                                        ,mg%is_array(3):mg%ie_array(3),2) )
+!$omp parallel do collapse(4) default(none) &
+!$omp private(im,ik,io,ispin,kAc,k_lap0) &
+!$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
       do im=im_s,im_e
       do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
         kAc = 0d0
         k_lap0 = 0d0
         if(if_kAc) then
@@ -251,15 +272,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
           kAc(1:3) = matmul(system%rmatrix_B,kAc) ! B* (k+A/c)
         end if
-        do io=io_s,io_e
-        do ispin=1,Nspin
-          call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
+          call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                                      ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
-        end do
-        end do
       end do
       end do
+      end do
+      end do
+!$omp end parallel do
       
     end if
     call timer_end(LOG_UHPSI_STENCIL)
@@ -316,15 +336,17 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
   ! nonlocal potential
-    if ( SPIN_ORBIT_ON ) then
-      call nondiagonal_so(tpsi,htpsi,info,mg)
-      call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
-    else
-    ! pseudopotential
-      call zpseudo(tpsi,htpsi,info,nspin,ppg)
-    end if
-    if ( PLUS_U_ON ) then
-      call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+    if(yn_jm=='n') then
+      if ( SPIN_ORBIT_ON ) then
+        call nondiagonal_so(tpsi,htpsi,info,mg)
+        call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
+      else
+      ! pseudopotential
+        call zpseudo(tpsi,htpsi,info,nspin,ppg)
+      end if
+      if ( PLUS_U_ON ) then
+        call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+      end if
     end if
 
   end if
@@ -700,6 +722,8 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   end if
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
+
+!$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
   do ik=ik_s,ik_e
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
@@ -712,7 +736,8 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
-  
+!$omp end parallel do  
+
   deallocate(kAc)
   return
 end subroutine update_kvector_nonlocalpt

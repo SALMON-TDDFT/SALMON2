@@ -20,13 +20,13 @@ module scf_iteration_sub
 contains
 
 subroutine scf_iteration_step(lg,mg,system,info,stencil, &
-               srg,srg_scalar,spsi,shpsi,rho,rho_s, &
+               srg,srg_scalar,spsi,shpsi,rho,rho_jm,rho_s, &
                cg,ppg,vlocal,  &
                miter,   &
-               iditer_nosubspace_diag,mixing,iter, &
-               poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+               nscf_init_no_diagonal, mixing, iter, &
+               poisson,fg,Vh,xc_func,ppn,Vxc,energy )
   use salmon_global, only: calc_mode,method_mixing  &
-                        ,yn_subspace_diagonalization,ncg,ncg_init
+                        ,yn_subspace_diagonalization,ncg,ncg_init,yn_jm
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
@@ -39,30 +39,31 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   use noncollinear_module, only: SPIN_ORBIT_ON, calc_dm_noncollinear, rot_dm_noncollinear, rot_vxc_noncollinear
   implicit none
 
-  type(s_rgrid),         intent(in)    :: lg
-  type(s_rgrid),         intent(in)    :: mg
-  type(s_dft_system),    intent(in)    :: system
-  type(s_parallel_info), intent(in)    :: info
-  type(s_orbital),       intent(inout) :: spsi,shpsi
-  type(s_scalar),        intent(inout) :: rho
-  type(s_scalar),        intent(inout) :: rho_s(system%nspin)
-  type(s_stencil),       intent(in)    :: stencil
-  type(s_sendrecv_grid), intent(inout) :: srg
-  type(s_sendrecv_grid), intent(inout) :: srg_scalar
-  type(s_pp_grid),       intent(in)    :: ppg
-  type(s_cg),            intent(inout) :: cg
-  type(s_scalar),        intent(in)    :: vlocal(system%nspin)
-  integer,               intent(in)    :: miter
-  integer,               intent(in)    :: iditer_nosubspace_diag
-  type(s_mixing),        intent(inout) :: mixing
-  integer,               intent(in)    :: iter
-  type(s_poisson),       intent(inout) :: poisson
-  type(s_reciprocal_grid),intent(inout):: fg
-  type(s_scalar),        intent(inout) :: Vh
-  type(s_xc_functional), intent(in)    :: xc_func
-  type(s_pp_nlcc),       intent(in)    :: ppn
-  type(s_scalar),        intent(inout) :: Vxc(system%nspin)
-  type(s_dft_energy),    intent(inout) :: energy
+  type(s_rgrid),          intent(in)    :: lg
+  type(s_rgrid),          intent(in)    :: mg
+  type(s_dft_system),     intent(in)    :: system
+  type(s_parallel_info),  intent(in)    :: info
+  type(s_orbital),        intent(inout) :: spsi,shpsi
+  type(s_scalar),         intent(inout) :: rho
+  type(s_scalar),         intent(in)    :: rho_jm
+  type(s_scalar),         intent(inout) :: rho_s(system%nspin)
+  type(s_stencil),        intent(in)    :: stencil
+  type(s_sendrecv_grid),  intent(inout) :: srg
+  type(s_sendrecv_grid),  intent(inout) :: srg_scalar
+  type(s_pp_grid),        intent(in)    :: ppg
+  type(s_cg),             intent(inout) :: cg
+  type(s_scalar),         intent(in)    :: vlocal(system%nspin)
+  integer,                intent(in)    :: miter
+  integer,                intent(in)    :: nscf_init_no_diagonal
+  type(s_mixing),         intent(inout) :: mixing
+  integer,                intent(in)    :: iter
+  type(s_poisson),        intent(inout) :: poisson
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_scalar),         intent(inout) :: Vh
+  type(s_xc_functional),  intent(in)    :: xc_func
+  type(s_pp_nlcc),        intent(in)    :: ppn
+  type(s_scalar),         intent(inout) :: Vxc(system%nspin)
+  type(s_dft_energy),     intent(inout) :: energy
   !
   integer :: j,nncg
 
@@ -87,7 +88,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
-    if(miter>iditer_nosubspace_diag)then
+    if(miter > nscf_init_no_diagonal)then
       call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
   end if
@@ -116,6 +117,8 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   do j=1,system%nspin
     rho%f = rho%f + rho_s(j)%f
   end do
+  
+  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
   if(calc_mode/='DFT_BAND')then
 

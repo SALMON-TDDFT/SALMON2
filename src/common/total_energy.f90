@@ -23,7 +23,7 @@ CONTAINS
 
   SUBROUTINE calc_Total_Energy_isolated(system,info,mg,pp,rho,Vh,Vxc,rion_update,energy)
     use structures
-    use salmon_global, only: kion
+    use salmon_global, only: kion, yn_jm
     use communication, only: comm_summation
     use timer
     implicit none
@@ -59,6 +59,8 @@ CONTAINS
       end do
 !$omp end parallel do
       energy%E_ion_ion = Eion
+    else
+      if(yn_jm=='y') energy%E_ion_ion = 0d0
     end if
 
     Etot = 0d0
@@ -112,7 +114,7 @@ CONTAINS
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,aEwald, cutoff_r
+    use salmon_global, only: kion,aEwald, cutoff_r, yn_jm
     use communication, only: comm_summation,comm_is_root
     use parallelization, only: nproc_id_global
     use timer
@@ -199,7 +201,7 @@ CONTAINS
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
-!$omp          shared(mg,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
+!$omp          shared(mg,fg,aEwald,system,sysvol,kion,poisson,ppg,info,yn_jm)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -208,16 +210,18 @@ CONTAINS
       g(3) = fg%vec_G(3,ix,iy,iz)
       
       rho_e = poisson%zrhoG_ele(ix,iy,iz)
-      rho_i = ppg%zrhoG_ion(ix,iy,iz)
-      
       E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
-      E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
-
-      do ia=info%ia_s,info%ia_e
-        r = system%Rion(1:3,ia)
-        Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
-      end do
+      
+      if (yn_jm=='n') then
+        rho_i = ppg%zrhoG_ion(ix,iy,iz)
+        E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
+        
+        do ia=info%ia_s,info%ia_e
+          r = system%Rion(1:3,ia)
+          Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+        end do
+      end if
     end do
     end do
     end do
@@ -495,7 +499,7 @@ CONTAINS
     use structures
     use salmon_math
 !    use math_constants,only : pi,zi
-    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
+    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g, quiet
     use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
     use parallelization, only: nproc_id_global
     use inputoutput, only: au_length_aa
@@ -525,7 +529,7 @@ CONTAINS
     endif
     if(cutoff_g .lt. 0d0) cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space
 
-    if(comm_is_root(nproc_id_global)) then
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
        write(*,900) " == Ewald =="
        write(*,800) " cutoff length in real-space in ewald =", cutoff_r*au_length_aa, " [A]"
        write(*,800) " (buffer length in bookkeeping =", cutoff_r_buff*au_length_aa, " [A])"
@@ -580,7 +584,7 @@ CONTAINS
       allocate( ewald%bk(4,ewald%nmax_pair_bk,info%nion_mg) )
       allocate( ewald%npair_bk(info%nion_mg) )
 
-      if(comm_is_root(nproc_id_global)) then
+      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
          write(*,820) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
          write(*,*)"==========="
 820      format(a,i6)

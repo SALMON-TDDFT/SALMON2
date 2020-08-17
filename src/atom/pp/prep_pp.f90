@@ -24,7 +24,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic,natom
+  use salmon_global, only: iperiodic,natom,quiet
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
@@ -52,8 +52,10 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   else
     property='initial'
     if(comm_is_root(nproc_id_global))then
+      if (.not. quiet) then
       write(*,*) ''
       write(*,*) '============init_ps=============='
+      end if
     endif
     allocate(ppg%mps(natom))
     if (.not. allocated(ppg%jxyz_max)) then
@@ -169,7 +171,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
   
-  if(comm_is_root(nproc_id_global) .and. property=='initial') write(*,*)'end init_ps'
+  if(comm_is_root(nproc_id_global) .and. property=='initial' .and. (.not. quiet)) write(*,*)'end init_ps'
 
   call timer_end(LOG_INIT_PS_TOTAL)
   return
@@ -534,7 +536,7 @@ END SUBROUTINE dealloc_init_ps
 
 SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   use structures
-  use salmon_global,only : natom, kion
+  use salmon_global,only : natom, kion, quiet
   use parallelization, only: nproc_id_global
   implicit none
   type(s_rgrid)     ,intent(in) :: lg,mg
@@ -559,6 +561,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
       if(abs(system%Rion(j,a))<lg%num(j)*system%Hgs(j))then
         continue
       else
+        if (.not. quiet) &
         write(*,*) "Rion error",nproc_id_global,a,j,system%Rion(j,a)
       end if
     end do

@@ -68,14 +68,14 @@ contains
       if (write_mode == write_mode_readable) then
         write (fd,'(a30,6(a12))') headers(0),'min','max','average','std. dev.','difference','relative'
       else
-        write (fd,'(a30,",",5(a12,","),a12)') trim(headers(0)),'min','max','average','std. dev.','difference','relative'
+        write (fd,'(a,",",5(a,","),a)') trim(headers(0)),'min','max','average','std. dev.','difference','relative'
       end if
       do i=1,nsize
         if (.not. is_zero(trel(i))) then
           if (write_mode == write_mode_readable) then
             write (fd,'(a30,6(e12.5e2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
           else
-            write (fd,'(a30,",",5(e12.5e2,","),e12.5e2)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            write (fd,'(a,",",5(e12.5e2,","),e12.5e2)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
           end if
         end if
       end do
@@ -136,7 +136,7 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory,yn_gbp,yn_ffte
+    use salmon_global, only: theory,method_singlescale,yn_ffte
     use timer
     implicit none
     integer, intent(in) :: fd, mode
@@ -202,7 +202,7 @@ contains
       call set_sub( 2, LOG_CALC_VBOX            , 'Vbox')
       call set_sub( 3, LOG_CALC_TIME_PROPAGATION, 'time propagation')
       call set_sub( 4, LOG_CALC_RHO             , 'calculating rho')
-      if (theory=='single_scale_maxwell_tddft' .and. yn_gbp=='y' .and. yn_ffte=='y') then
+      if (theory=='single_scale_maxwell_tddft' .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
         call set_sub( 5, LOG_CALC_HARTREE       , 'Hartree+FDTD by FFTE')
       else
         call set_sub( 5, LOG_CALC_HARTREE       , 'Hartree routine')

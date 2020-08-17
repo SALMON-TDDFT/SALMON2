@@ -92,9 +92,9 @@ end subroutine init_dft
 subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
   & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin, &
-  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
+  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -145,7 +145,7 @@ subroutine init_dft_system(lg,system,stencil)
     case(0)
       system%if_real_orbital = .true.
     case(3)
-      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1) then
+      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1 .and. stencil%if_orthogonal) then
         system%if_real_orbital = .true.
       else
         system%if_real_orbital = .false.
@@ -153,15 +153,15 @@ subroutine init_dft_system(lg,system,stencil)
       if ( SPIN_ORBIT_ON ) system%if_real_orbital=.false.
     end select
   end if
-  if(comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital
   endif
 
   system%nion = natom
 
-  if(ispin==0)then
+  if(spin=='unpolarized') then
     system%nspin=1
-  else
+  else if(spin=='polarized') then
     system%nspin=2
   end if
 
@@ -473,7 +473,7 @@ end subroutine check_ffte_condition
 
 subroutine init_grid_parallel(info,lg,mg)
   use communication, only: comm_is_root
-  use salmon_global, only: yn_periodic
+  use salmon_global, only: yn_periodic, quiet
   use structures, only: s_rgrid,s_parallel_info
   implicit none
   type(s_parallel_info),intent(in)    :: info
@@ -538,7 +538,8 @@ subroutine init_grid_parallel(info,lg,mg)
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
 
   if(yn_periodic=='y' .and. product(nproc_domain_orbital)==1) then
-    if(comm_is_root(myrank)) write(*,*) "r-space parallelization: off"
+    if((.not. quiet) .and. comm_is_root(myrank)) &
+      & write(*,*) "r-space parallelization: off"
     mg%is_array(1:3) = mg%is(1:3)
     mg%ie_array(1:3) = mg%ie(1:3)
     do j=mg%is_overlap(1),mg%ie_overlap(1)

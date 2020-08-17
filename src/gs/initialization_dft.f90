@@ -25,7 +25,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg,  &
                                 info,  &
                                 srg, srg_scalar,  &
-                                rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
                                 spsi, shpsi, sttpsi,  &
                                 pp, ppg, ppn,  &
                                 ofl )
@@ -58,7 +58,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 !type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl !,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl !,rho_old,Vlocal_old
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
@@ -90,12 +90,16 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,V_local(jspin))
   call allocate_scalar(mg,Vxc(jspin))
 end do
-call read_pslfile(system,pp)
-call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
-call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
-if(comm_is_root(nproc_id_global)) then
-  write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-  write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+if(yn_jm=='n') then
+  call read_pslfile(system,pp)
+  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+  call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+    write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+    write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+  end if
+else
+  call allocate_scalar(mg,rho_jm)
 end if
 
 if(system%if_real_orbital) then
@@ -131,7 +135,7 @@ subroutine init_code_optimization
   end if
   call set_modulo_tables(ignum)
 
-  if (comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
     call optimization_log(info)
   end if
 end subroutine
@@ -143,7 +147,7 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 system,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,info,  &
                                 srg,srg_scalar,  &
-                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
                                 xc_func,mixing )
@@ -171,6 +175,7 @@ use hamiltonian
 use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
+use jellium, only: make_rho_jm
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -181,7 +186,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
@@ -283,6 +288,12 @@ real(8) :: rNe0,rNe
     end if
   end if
 
+  !make positive back ground charge density for using jellium model
+  if(yn_jm=='y') then
+    call make_rho_jm(lg,mg,info,system,rho_jm)
+    rho%f = rho%f + rho_jm%f
+  end if
+
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
@@ -297,7 +308,11 @@ real(8) :: rNe0,rNe
   if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-  rion_update = .true. ! it's first calculation
+  if(yn_jm=='n') then
+    rion_update = .true. ! it's first calculation
+  else
+    rion_update = .false.
+  end if
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
@@ -314,7 +329,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                                 lg,mg,  &
                                 info,  &
                                 srg,srg_scalar,  &
-                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
                                 xc_func,mixing )
@@ -354,7 +369,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
-  type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+  type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
   type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
@@ -397,11 +412,11 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           stencil,  &
                           srg,srg_scalar,   &
                           spsi,shpsi,sttpsi,  &
-                          rho,rho_s,  &
+                          rho,rho_jm,rho_s,  &
                           V_local,Vh,Vxc,Vpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &
-                          band, 1 )
+                          band, 2 )
 
   call init_md(system,md)
   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)

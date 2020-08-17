@@ -1,0 +1,18 @@
+&input
+! All variables must be in the atomic unit.
+! These variables must be the same as in the SALMON input file.
+  sysname='Li'
+  num_kgrid = 24,24,24
+  nstate = 10
+  nelec = 2
+  al = 6.62,6.62,6.62
+  
+! axis of the tensor component \sigma_{\mu \nu}(\omega)
+  mu = 3 ! z-axis
+  nu = 3 ! z-axis
+
+! input variables for the frequency (energy) region.
+  nomega = 1000
+  omega_max = 1.0
+  delta = 0.01
+/

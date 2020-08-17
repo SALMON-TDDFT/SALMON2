@@ -21,7 +21,7 @@ subroutine main_dft
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use parallelization, only: nproc_id_global,nproc_group_global
+use parallelization, only: nproc_id_global,nproc_group_global,adjust_elapse_time
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
@@ -45,6 +45,7 @@ use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 use initialization_dft
+use jellium, only: check_condition_jm
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -60,7 +61,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
 type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
@@ -78,10 +79,14 @@ logical :: rion_update
 logical :: flag_opt_conv
 integer :: Miopt, iopt,nopt_max
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
+logical :: is_checkpoint_iter, is_shutdown_time
 
 if(theory=='dft_band'.and.iperiodic/=3) return
 
-call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
+!check condition for using jellium model
+if(yn_jm=='y') call check_condition_jm
+
+call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
@@ -90,12 +95,11 @@ call timer_begin(LOG_INIT_GS)
 call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
-
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg,   &
                           info,  &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
                           ofl )
@@ -104,7 +108,7 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           system, energy, ewald, stencil, fg, poisson,&
                           lg, mg, info,   &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
@@ -131,6 +135,7 @@ if(iopt>=2)then
   call dealloc_init_ps(ppg)
   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call calc_nlcc(pp, system, mg, ppn)
+  if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
   call timer_end(LOG_INIT_GS)
 end if
 
@@ -186,21 +191,16 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         stencil,  &
                         srg,srg_scalar,   &
                         spsi,shpsi,sttpsi,  &
-                        rho,rho_s,  &
+                        rho,rho_jm,rho_s,  &
                         V_local,Vh,Vxc,Vpsl,xc_func,  &
                         pp,ppg,ppn,  &
                         rho_old,Vlocal_old,  &
-                        band, 2 )
+                        band, 3)
 
 
 if(theory=='dft_band')then
    call write_band(system,energy)
 end if
-
-! print k-point, but now only with yn_gbp option (no printing in default??)
-if(yn_gbp /= 'n') then
-   call write_k_data(system,stencil)
-endif
 
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
@@ -218,24 +218,26 @@ end if
 if(yn_out_tm  == 'y') then
    select case(iperiodic)
    case(3)
-      call write_k_data(system,stencil)
+      call write_k_data(system,stencil)  !need? (probably remove later)
       call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
    case(0)
      write(*,*) "error: yn_out_tm='y' & iperiodic=0"
   end select
 end if
 
-! force
-   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
-   if(comm_is_root(nproc_id_global))then
-      write(*,*) "===== force ====="
-      do iatom=1,natom
-         select case(unit_system)
-         case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
-         case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
-         end select
-      end do
+   ! force
+   if(yn_jm=='n')then
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+     if(comm_is_root(nproc_id_global))then
+        write(*,*) "===== force ====="
+        do iatom=1,natom
+           select case(unit_system)
+           case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
+           case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
+           end select
+        end do
 300   format(i6,3e16.8)
+     end if
    end if
 
 call timer_end(LOG_GS_ITERATION)
@@ -269,7 +271,14 @@ if(yn_opt=='y') then
    if(flag_opt_conv) then
       call structure_opt_fin(opt)
    else
-      if((checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval)==0)) then
+      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval) == 0)
+      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+      if(is_checkpoint_iter .or. is_shutdown_time) then
+         if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+           print *, 'shutdown the calculation, iopt =', iopt
+         end if
+
          call checkpoint_gs(lg,mg,system,info,spsi,iopt,mixing)
          call comm_sync_all
          call checkpoint_opt(iopt,opt)
@@ -277,6 +286,10 @@ if(yn_opt=='y') then
             write(*,'(a,i5)')"  checkpoint data is printed: iopt=", iopt
          endif
          call comm_sync_all
+
+         if (is_shutdown_time) then
+           exit Structure_Optimization_Iteration
+         end if
       endif
    endif
 
@@ -303,10 +316,11 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 call write_info_data(Miter,system,energy,pp)
+call write_k_data(system,stencil)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,system,rho%f)
+if(yn_out_dns =='y') call write_dns(lg,mg,system,rho_s)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)

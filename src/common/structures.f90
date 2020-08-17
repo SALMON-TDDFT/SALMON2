@@ -184,7 +184,6 @@ module structures
   ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_parallel_info)
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
-    complex(8),allocatable :: ztmp(:,:,:,:)
     logical :: update_zwf_overlap   !flag of update_overlap_complex8 for zwf
   end type s_orbital
 
@@ -447,6 +446,7 @@ module structures
     complex(8), allocatable :: zc(:)
     type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
     type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
+    type(s_scalar),allocatable :: rho0_s(:) ! =rho_s(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
   end type s_rt
@@ -455,7 +455,7 @@ module structures
   type s_singlescale
     logical :: flag_use
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3)
+    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),curr_ave(3)
     real(8),allocatable :: vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
     & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
     & ,current4pi(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
@@ -467,7 +467,7 @@ module structures
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:)
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
     type(s_rgrid)         :: eg
-  ! for yn_gbp
+  ! for method_singlescale=='1d','1d_fourier'
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
     real(8),allocatable :: Ac_fourier(:,:,:,:)
@@ -541,7 +541,7 @@ contains
     do iz=rg%is(3),rg%ie(3)
     do iy=rg%is(2),rg%ie(2)
     do ix=rg%is(1),rg%ie(1)
-      field%v = 0d0
+      field%v(:,ix,iy,iz) = 0d0
     end do
     end do
     end do
@@ -557,7 +557,7 @@ contains
     do iz=rg%is_array(3),rg%ie_array(3)
     do iy=rg%is_array(2),rg%ie_array(2)
     do ix=rg%is_array(1),rg%ie_array(1)
-      field%v = 0d0
+      field%v(:,ix,iy,iz) = 0d0
     end do
     end do
     end do
@@ -673,7 +673,6 @@ contains
     type(s_orbital) :: psi
     DEAL(psi%rwf)
     DEAL(psi%zwf)
-    DEAL(psi%ztmp)
   end subroutine deallocate_orbital
 
   subroutine deallocate_pp_info(pp)

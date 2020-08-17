@@ -19,7 +19,6 @@ module salmon_global
 
 !Parameters for pseudo-potential
   integer, parameter :: maxmki=10
-  integer :: MI,MKI
    !shinohara
   integer :: ipsfileform(maxmki)   ! file format for pseudo potential
   character(16)  :: ps_format(maxmki)
@@ -35,6 +34,8 @@ module salmon_global
   integer,parameter :: ntype_atom_coor_cartesian = 1
   integer,parameter :: ntype_atom_coor_reduced   = 2
 
+! Flag for suppress standard outputs 
+  logical :: quiet
 
   character(16)  :: calc_mode      !old input variable, but used as a flag; move later
 
@@ -56,8 +57,6 @@ module salmon_global
   real(8)        :: time_shutdown
   character(20)  :: method_wf_distributor
   integer        :: nblock_wf_distribute
-  character(1)   :: yn_gbp
-  character(1)   :: yn_gbp_fourier0 ! temporary
   !remove later
   character(1)   :: read_gs_dns_cube
   character(1)   :: write_gs_wfn_k
@@ -76,18 +75,16 @@ module salmon_global
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
   character(1)   :: yn_scalapack
-  character(1)   :: yn_scalapack_red_mem
   character(1)   :: yn_eigenexa
+  character(1)   :: yn_diagonalization_red_mem
   character(32)  :: process_allocation
 
 !! &system
   integer        :: iperiodic  !this is old keyword but still defined here
   character(1)   :: yn_periodic
-  integer        :: ispin
+  character(16)  :: spin
   real(8)        :: al(3)
   real(8)        :: al_vec1(3),al_vec2(3),al_vec3(3)
-  integer        :: isym
-  character(32)  :: crystal_structure
   integer        :: nstate
   integer        :: nstate_spin(2)
   integer        :: nelec
@@ -136,6 +133,7 @@ module salmon_global
   integer        :: n_hamil
   character(16)  :: propagator
   character(1)   :: yn_fix_func
+  character(1)   :: yn_predictor_corrector
 
 !! &scf
   character(8)   :: method_init_wf
@@ -154,8 +152,9 @@ module salmon_global
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
-  integer        :: iditer_notemperature
-  integer        :: step_initial_mix_zero
+  integer        :: nscf_init_redistribution
+  integer        :: nscf_init_no_diagonal
+  integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
 
 
@@ -185,7 +184,14 @@ module salmon_global
   real(8)        :: vec_dipole_source(3,2)
   real(8)        :: cood_dipole_source(3,2)
   real(8)        :: rad_dipole_source
+
+!! &singlescale
+  character(32)  :: method_singlescale
   real(8)        :: cutoff_G2_emfield
+  character(1)   :: yn_symmetrized_stencil
+  character(1)   :: yn_put_wall_z_boundary
+  real(8)        :: wall_height
+  real(8)        :: wall_width
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -211,6 +217,7 @@ module salmon_global
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   !! TODO: remove num_macropoint later
+  integer        :: nmacro_chunk
 
 !! &maxwell
   real(8)        :: al_em(3)
@@ -238,12 +245,18 @@ module salmon_global
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
   character(1)   :: yn_obs_plane_em(200)
+  character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
+  real(8)        :: film_thickness
+  integer        :: media_id_pml(3,2)
+  integer        :: media_id_source1
+  integer        :: media_id_source2
 
 !! &analysis
   character(2)   :: projection_option
   integer        :: nenergy
   real(8)        :: de
+  integer        :: out_rt_energy_step
   character(1)   :: yn_out_psi
   character(1)   :: yn_out_dos
   character(1)   :: yn_out_dos_set_fe_origin
@@ -273,10 +286,13 @@ module salmon_global
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
+  character(1)   :: yn_out_perflog
+  character(6)   :: format_perflog ! 'stdout','text','csv'
 
 !! &poisson
   integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)
+  integer        :: lmax_multipole
   real(8)        :: threshold_cg
 
 !! &ewald
@@ -302,34 +318,25 @@ module salmon_global
   real(8)        :: thermostat_tau
   character(1)   :: yn_stop_system_momt
 
+!! &jellium
+  character(1)   :: yn_jm
+  character(1)   :: yn_charge_neutral_jm
+  character(1)   :: yn_output_dns_jm
+  character(256) :: shape_file_jm
+  integer        :: num_jm
+  real(8)        :: rs_bohr_jm(200)
+  integer        :: sphere_nelec_jm(200)
+  real(8)        :: sphere_loc_jm(200,3)
+
 !! &group_fundamental
-  integer        :: iditer_nosubspace_diag
-  integer        :: ntmg
-  integer        :: idisnum(2)
   integer        :: iwrite_projection
   integer        :: itwproj
   integer        :: iwrite_projnum
-  integer        :: itcalc_ene
-
-!! &group_hartree
-  integer        :: lmax_lmp
 
 !! &group_others
-  integer        :: iswitch_orbital_mesh
-  integer        :: iflag_psicube
   integer        :: num_projection
   integer        :: iwrite_projection_ob(200)
   integer        :: iwrite_projection_k(200)
-  character(100) :: filename_pot
-  integer        :: iwrite_external
-  integer        :: iflag_intelectron
-  integer        :: num_dip2
-  real(8)        :: dip2boundary(100)
-  real(8)        :: dip2center(100)
-  integer        :: itotntime2
-  integer        :: iwdenoption
-  integer        :: iwdenstep
-  integer        :: iflag_estatic
 
 !! &atomic_coor
 !! &atomic_red_coor
@@ -345,5 +352,6 @@ character(256),allocatable :: atom_name(:)
   character(10) :: stencil_openmp_mode  ! 'auto', 'orbital', 'rgrid'
   character(10) :: current_openmp_mode  ! 'auto', 'orbital', 'rgrid'
   character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
+
 
 end module salmon_global

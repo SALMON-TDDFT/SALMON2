@@ -60,11 +60,11 @@ function check_input_variables_ms() result(flag)
     if (dt_em > 1d-6) &
         call raise("ERROR! 'dt_em' must not be specified!")
         
-    if (nxvacl_m < 1) &
-        call raise("ERROR! 'nxvacl_m' must not larger than 1!")
+    if (abs(nxvacl_m) < 2) &
+        call raise("ERROR! 'nxvacl_m' must not larger than 2!")
         
-    if (nxvacr_m < 1) &
-        call raise("ERROR! 'nxvacr_m' must not larger than 1!")
+    if (abs(nxvacr_m) < 2) &
+        call raise("ERROR! 'nxvacr_m' must not larger than 2!")
         
     if (trim(boundary_em(1,1)) .ne. 'periodic' &
         & .and. trim(boundary_em(1,1)) .ne. 'pec' &
@@ -76,6 +76,9 @@ function check_input_variables_ms() result(flag)
         & .and. trim(boundary_em(1,2)) .ne. 'pec' &
         & .and. trim(boundary_em(1,2)) .ne. 'abc') &
             call raise("ERROR! 'boundary_em(1,2)' unknown boundary condition!")
+
+    if (nmacro_chunk < 1) &
+        call raise("ERROR! 'nmacro_chunk' must not larger than 1!")
 
     return
 

@@ -49,7 +49,6 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
                  mg%is(3):mg%ie(3))
   type(s_sendrecv_grid),intent(inout) :: srg_scalar
   type(s_stencil),intent(in) :: stencil
-  
   integer,parameter :: maxiter=1000
   integer :: ix,iy,iz,iter
   real(8) :: sum1,sum2,ak,ck
@@ -68,7 +67,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   integer :: tid
   real(8),allocatable :: reduce_work(:)
   allocate(reduce_work(0:get_nthreads()-1))
-
+  
   call poisson_boundary(lg,mg,info,system,poisson,trho,pk)
   
 !------------------------- C-G minimization
@@ -260,7 +259,7 @@ subroutine laplacian_poisson(mg,pk,rlap_wk,lap0,lapt)
 end subroutine laplacian_poisson
 
 subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
-  use inputoutput, only: natom,lmax_lmp,layout_multipole,natom
+  use inputoutput, only: natom,lmax_multipole,layout_multipole,natom
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson
   use salmon_math, only: ylm
   use communication, only: comm_summation
@@ -306,7 +305,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   integer,allocatable :: ig_num(:)
   integer,allocatable :: ig(:,:,:)
   real(8),allocatable :: coordinate(:,:)
- !integer :: lmax_lmp_tmp !iwata
+ !integer :: lmax_multipole_tmp !iwata
   integer :: comm_xyz(3),nproc_xyz(3),myrank_xyz(3)
 
   integer :: tid
@@ -338,10 +337,12 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     end if
     ig_num=poisson%ig_num
   end if
-  if(.not.allocated(ig))then
-    allocate(ig(3,maxval(poisson%ig_num(:)),poisson%npole_partial))
+  if(layout_multipole/=1) then
+    if(.not.allocated(ig))then
+      allocate(ig(3,maxval(poisson%ig_num(:)),poisson%npole_partial))
+    end if
+    ig=poisson%ig
   end if
-  ig=poisson%ig
 
   if(.not.allocated(coordinate))then
     allocate(coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))
@@ -360,21 +361,21 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   case(1)
   
   num_center=1
-  allocate (rholm((lmax_lmp+1)**2,1))
-  allocate (rholm2((lmax_lmp+1)**2,1))
+  allocate (rholm((lmax_multipole+1)**2,1))
+  allocate (rholm2((lmax_multipole+1)**2,1))
   allocate(itrho(1))
   allocate(center_trho(3,1))
   do jj=1,3
     center_trho(jj,1)=0.d0
     center_trho2(jj)=0.d0
   end do
-  do lm=1,(lmax_lmp+1)**2
+  do lm=1,(lmax_multipole+1)**2
     rholm(lm,1)=0.d0
     rholm2(lm,1)=0.d0
   end do
   itrho(1)=1
   
-  do ll=0,lmax_lmp
+  do ll=0,lmax_multipole
   do m=-ll,ll
     lm=ll*ll+ll+1+m
     reduce_work=0d0
@@ -401,8 +402,8 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   case(2)
   
   num_center=natom
-  allocate (rholm((lmax_lmp+1)**2,natom))
-  allocate (rholm2((lmax_lmp+1)**2,natom))
+  allocate (rholm((lmax_multipole+1)**2,natom))
+  allocate (rholm2((lmax_multipole+1)**2,natom))
   allocate(itrho(natom))
   allocate(center_trho(3,natom))
   allocate(Rion2(3,natom))
@@ -410,7 +411,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   
   !$OMP parallel do private(icen, lm, jj)
   do icen=1,num_center
-    do lm=1,(lmax_lmp+1)**2
+    do lm=1,(lmax_multipole+1)**2
       rholm(lm,icen)=0.d0
       rholm2(lm,icen)=0.d0
     end do
@@ -421,7 +422,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   end do
   
   do icen=1,poisson%npole_partial
-    do ll=0,lmax_lmp
+    do ll=0,lmax_multipole
     do m=-ll,ll
       lm=ll*ll+ll+1+m
       reduce_work=0d0
@@ -449,8 +450,8 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   
   num_center=poisson%npole_total
   
-  allocate (rholm((lmax_lmp+1)**2,num_center))
-  allocate (rholm2((lmax_lmp+1)**2,num_center))
+  allocate (rholm((lmax_multipole+1)**2,num_center))
+  allocate (rholm2((lmax_multipole+1)**2,num_center))
   allocate(itrho(num_center))
   allocate(center_trho(3,num_center))
   allocate(center_trho_nume_deno(4,num_center))
@@ -461,7 +462,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     do jj=1,4
       center_trho_nume_deno2(jj,icen)=0.d0
     end do
-    do lm=1,(lmax_lmp+1)**2
+    do lm=1,(lmax_multipole+1)**2
       rholm(lm,icen)=0.d0
       rholm2(lm,icen)=0.d0
     end do
@@ -506,13 +507,13 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   end do
   
 !  if(omp_get_max_threads() > 16) then
-!  !$omp parallel shared(rholm3,lmax_lmp)
+!  !$omp parallel shared(rholm3,lmax_multipole)
 !  !$omp master
-!      allocate(rholm3((lmax_lmp+1)**2,0:ceiling_pow2(omp_get_num_threads())-1))
+!      allocate(rholm3((lmax_multipole+1)**2,0:ceiling_pow2(omp_get_num_threads())-1))
 !  !$omp end master
 !  !$omp end parallel
 !
-!    lmax_lmp_tmp=lmax_lmp !iwata
+!    lmax_multipole_tmp=lmax_multipole !iwata
 !    rholm2=0.d0
 !    rholm3=0.d0
 !    do ii=1,poisson%npole_partial
@@ -522,7 +523,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
 !  !$omp parallel default(none) &
 !  !$omp          shared(ig,coordinate,center_trho,trho,rholm3) &
 !  !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz) &
-!  !$omp          firstprivate(ii,pl,cl,lmax_lmp_tmp,hvol) !iwata
+!  !$omp          firstprivate(ii,pl,cl,lmax_multipole_tmp,hvol) !iwata
 !        tid=omp_get_thread_num()
 !        rholm3(:,tid)=0.d0
 !
@@ -539,7 +540,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
 !          xxxx=xx*rinv
 !          yyyy=yy*rinv
 !          zzzz=zz*rinv
-!          do ll=0,lmax_lmp_tmp !iwata
+!          do ll=0,lmax_multipole_tmp !iwata
 !          do m=-ll,ll
 !            lm=ll*ll+ll+1+m
 !            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
@@ -566,7 +567,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     do ii=1,poisson%npole_partial
       if(itrho(poisson%ipole_tbl(ii))==1)then
         rholm=0.d0
-        do ll=0,lmax_lmp
+        do ll=0,lmax_multipole
         do m=-ll,ll
           lm=ll*ll+ll+1+m
           reduce_work=0d0
@@ -603,7 +604,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       rholm(:,icen)=rholm2(:,icen)
     end do
   else
-    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,info%icomm_r)
+    call comm_summation(rholm2,rholm,(lmax_multipole+1)**2*num_center,info%icomm_r)
   end if
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -630,7 +631,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       iend(ii)=(ii+1)*icount/nproc_xyz(k)
     end do
           
-    do ll=0,lmax_lmp
+    do ll=0,lmax_multipole
       do lm=ll**2+1,(ll+1)**2
         l2(lm)=ll
       end do
@@ -696,7 +697,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
           deno(17:25)=rbox
   
           sum1=0.d0
-          do lm=1,(lmax_lmp+1)**2
+          do lm=1,(lmax_multipole+1)**2
             sum1=sum1+ylm2(lm)*deno(lm)*rholm(lm,icen)
           end do
           poisson%wkbound2(jj) = poisson%wkbound2(jj) + sum1

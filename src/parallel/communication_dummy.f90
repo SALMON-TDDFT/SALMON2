@@ -240,6 +240,9 @@ module communication
   end interface
 
   interface comm_get_min
+    ! scalar
+    module procedure comm_get_min_double
+
     ! 1-D array
     module procedure comm_get_min_array1d_double
   end interface
@@ -1232,6 +1235,14 @@ contains
     outvalue = invalue
   end subroutine
 
+  subroutine comm_get_min_double(svalue, ngroup)
+    implicit none
+    real(8), intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(svalue)
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_get_min_double")
+  end subroutine
 
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
     implicit none

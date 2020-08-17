@@ -571,14 +571,9 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 #else
     ! single process execution
     select case(method_wf_distributor)
-    ! create single shared file
-    case('single')
-      call write_all
-    ! sliced shared file
-    case('slice')
-      call write_sliced
-    case default
-      stop 'write_wavefunction: fatal error'
+    case('single') ; call write_all    ! create single shared file
+    case('slice')  ; call write_sliced ! sliced shared file
+    case default   ; stop 'write_wavefunction: fatal error'
     end select
 #endif
   end if
@@ -621,43 +616,18 @@ contains
     use filesystem
     implicit none
     integer :: nblock_orbital
-    integer :: ik,io,nb,io_e
-    logical :: check
+    integer :: ik,io,nb
     integer :: mo
 
     mo = info%io_e - info%io_s + 1
     nblock_orbital = min(mo,nblock_wf_distribute)
 
     ! create all directory
-    if (mod(info%io_e,nblock_orbital) > 0) then
-      io_e = (info%io_e / nblock_orbital + 1) * nblock_orbital
-    else
-      io_e = info%io_e
-    end if
-
     do ik=info%ik_s,info%ik_e
-    do io=info%io_s,io_e,nblock_orbital
-      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      if (nb >= (info%io_s - nblock_orbital + 1)) then
-        write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',nb
-        if (comm_is_root(info%id_r)) then
-          call create_directory(dir_file_out)
-        end if
-      end if
+    do io=info%io_s,info%io_e,nblock_orbital
+      write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
+      call create_directory(dir_file_out)
     end do
-    end do
-
-    ! check own path
-    do while(.true.)
-      check = .true.
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,io_e,nblock_orbital
-        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-        write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',nb
-        check = check .and. directory_exists(dir_file_out)
-      end do
-      end do
-      if (check) exit
     end do
 
     do ik=info%ik_s,info%ik_e
@@ -971,7 +941,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_gbp
+  use salmon_global, only: method_singlescale
   implicit none
   character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg,mg
@@ -1008,7 +978,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     write(iu1_w) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     write(iu1_w) singlescale%Energy_joule
     write(iu1_w) singlescale%Energy_poynting
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       write(iu1_w) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
       write(iu1_w) singlescale%zc_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
@@ -1093,7 +1063,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     end do
     call comm_summation(d0,d1,lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_r)
     
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
     
       allocate(z0(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3))
       allocate(z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3))
@@ -1124,7 +1094,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
       write(iu1_w) d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
       write(iu1_w) singlescale%Energy_joule
       write(iu1_w) singlescale%Energy_poynting
-      if(yn_gbp=='y') then
+      if(method_singlescale/='3d') then
         write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,2)
@@ -1138,7 +1108,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     end if
 
     deallocate(matbox0,matbox1,v0,v1,b0,b1,d0,d1)
-    if(yn_gbp=='y') deallocate(z0,z1)
+    if(method_singlescale/='3d') deallocate(z0,z1)
   end if
 
 end subroutine write_singlescale
@@ -1165,6 +1135,11 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   integer :: iu2_r
   character(256) :: dir_file_in
   logical :: is_read
+#ifdef USE_MPI
+#else
+  real(8),allocatable :: ddummy(:,:,:)
+  complex(8),allocatable :: zdummy(:,:,:)
+#endif
 
   iu2_r = 86
 
@@ -1196,16 +1171,10 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 #else
     ! single process execution
     select case(method_wf_distributor)
-    ! create single shared file
-    case('single')
-      call read_all
-    ! sliced shared file
-    case ('slice')
-      call read_sliced
-    case default
-      stop 'read_wavefunction: fatal error'
+    case('single') ; call read_all    ! create single shared file
+    case('slice')  ; call read_sliced ! sliced shared file
+    case default   ; stop 'read_wavefunction: fatal error'
     end select
-
 #endif
   end if
 
@@ -1218,8 +1187,6 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 contains
   subroutine read_all
     implicit none
-    real(8),allocatable :: ddummy(:,:,:)
-    complex(8),allocatable :: zdummy(:,:,:)
     integer :: im,ik,io,is
 
     dir_file_in = trim(idir)//"wfn.bin"
@@ -1268,9 +1235,6 @@ contains
     implicit none
     integer :: nblock_orbital
     integer :: ik,io,nb,io_e,is
-    logical :: check
-    real(8),allocatable :: ddummy(:,:,:)
-    complex(8),allocatable :: zdummy(:,:,:)
 
     nblock_orbital = min(mo,nblock_wf_distribute)
 
@@ -1573,7 +1537,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_gbp
+  use salmon_global, only: directory_read_data,yn_self_checkpoint,method_singlescale
   implicit none
   integer      ,intent(in) :: comm
   type(s_rgrid),intent(in) :: lg,mg
@@ -1617,7 +1581,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     read(iu1_r) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     read(iu1_r) singlescale%Energy_joule
     read(iu1_r) singlescale%Energy_poynting
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       read(iu1_r) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
       read(iu1_r) singlescale%zc_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
@@ -1634,7 +1598,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
     allocate(matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
     allocate(matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
-    if(yn_gbp=='y') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
+    if(method_singlescale/='3d') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_r,file=dir_file_in,form='unformatted',status='old',iostat=ierr)
@@ -1645,7 +1609,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
       read(iu1_r) matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
       read(iu1_r) singlescale%Energy_joule
       read(iu1_r) singlescale%Energy_poynting
-      if(yn_gbp=='y') then
+      if(method_singlescale/='3d') then
         read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         read(iu1_r) zbox(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3)
         read(iu1_r) singlescale%Ac_zt_boundary_bottom
@@ -1666,7 +1630,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     call comm_bcast(matbox4,comm)
     call comm_bcast(singlescale%Energy_joule,comm)
     call comm_bcast(singlescale%Energy_poynting,comm)
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       call comm_bcast(singlescale%Ac_zt_m,comm)
       call comm_bcast(zbox,comm)
       call comm_bcast(singlescale%Ac_zt_boundary_bottom,comm)
@@ -1699,7 +1663,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     end do
     end do
 
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       !$omp parallel do collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1713,7 +1677,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     end if
 
     deallocate(matbox1,matbox2,matbox3,matbox4)
-    if(yn_gbp=='y') deallocate(zbox)
+    if(method_singlescale/='3d') deallocate(zbox)
   end if
 
   return
@@ -1957,31 +1921,26 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
   if (allocated(spsi%rwf)) then
     source_type = MPI_DOUBLE
   else if (allocated(spsi%zwf)) then
-    source_type = MPI_DOUBLE_COMPLEX
-  end if
-
-  if (rw_mode == read_mode .and. if_real_orbital) then
-    source_type = MPI_DOUBLE
+    if (rw_mode == read_mode .and. if_real_orbital) then
+      source_type = MPI_DOUBLE
+    else
+      source_type = MPI_DOUBLE_COMPLEX
+    end if
   end if
 
   call set_mpi_info
 
   select case(method_wf_distributor)
-  ! create single shared file
-  case('single')
-    call write_all
-  ! sliced shared file
-  case ('slice')
-    call write_sliced
-  case default
-    stop 'rw_wavefunction: fatal error'
+  case('single') ; call rw_all    ! create single shared file
+  case('slice')  ; call rw_sliced ! sliced shared file
+  case default   ; stop 'rw_wavefunction: fatal error'
   end select
 
   call free_mpi_info
   call deallocate_orbital(dummy)
 
 contains
-  subroutine write_all
+  subroutine rw_all
     implicit none
 
     iofile = trim(iodir)//"wfn.bin"
@@ -2028,8 +1987,7 @@ contains
         else if (allocated(spsi%zwf)) then
           if (source_type == MPI_DOUBLE) then
             ! convert from double to double complex
-            ! NOTE: When simulating large-scale isolated system, it's possible that
-            !       SALMON hangs by failing memory allocation.
+            ! NOTE: When simulating large-scale isolated system, it's possible that SALMON hangs by failing memory allocation.
             MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
             spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
               = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
@@ -2042,9 +2000,9 @@ contains
     MPI_CHECK(MPI_File_close(mfile, ierr))
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
-  end subroutine write_all
+  end subroutine rw_all
 
-  subroutine write_sliced
+  subroutine rw_sliced
     use filesystem
     use communication, only: comm_is_root
     implicit none
@@ -2094,17 +2052,11 @@ contains
       end if
 
       do ik=info%ik_s,info%ik_e
-      do io=info%io_s,io_e,nblock_orbital
-        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-        if (nb >= (info%io_s - nblock_orbital + 1) .and. nb <= info%io_e) then
+      do io=1,mo+nblock_orbital-1,nblock_orbital
+        if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o .and. comm_is_root(info%id_r)) then
+          nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
           write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
-          if (comm_is_root(info%id_r)) then
-            ! FIXME: Any process will randomly crashes when a directory is
-            ! already created by other process, because this routine is
-            ! sometimes called by some processes.
-            ! Currently, we ignore an error of the routine.
-            call create_directory(iofile,iret)
-          end if
+          call create_directory(iofile)
         end if
       end do
       end do
@@ -2163,7 +2115,7 @@ contains
 
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
-  end subroutine write_sliced
+  end subroutine rw_sliced
 
   subroutine set_mpi_info
     implicit none

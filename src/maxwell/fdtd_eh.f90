@@ -46,7 +46,8 @@ module fdtd_eh
     integer,allocatable :: inc_po_id(:,:)  !id at incident current source point
     character(16)       :: inc_dist1       !spatial distribution type of inc.
     character(16)       :: inc_dist2       !spatial distribution type of inc.
-    real(8)             :: c2_inc_xyz(3)   !coeff. for inc., xyz(1:3) means propa. direc. of the inc.
+    real(8)             :: c2_inc1_xyz(3)   !coeff. for inc.1, xyz(1:3) means propa. direc. of the inc.
+    real(8)             :: c2_inc2_xyz(3)   !coeff. for inc.2, xyz(1:3) means propa. direc. of the inc.
     real(8),allocatable :: ex_y(:,:,:),c1_ex_y(:,:,:),c2_ex_y(:,:,:),ex_z(:,:,:),c1_ex_z(:,:,:),c2_ex_z(:,:,:) !e
     real(8),allocatable :: ey_z(:,:,:),c1_ey_z(:,:,:),c2_ey_z(:,:,:),ey_x(:,:,:),c1_ey_x(:,:,:),c2_ey_x(:,:,:) !e
     real(8),allocatable :: ez_x(:,:,:),c1_ez_x(:,:,:),c2_ez_x(:,:,:),ez_y(:,:,:),c1_ez_y(:,:,:),c2_ez_y(:,:,:) !e
@@ -107,7 +108,9 @@ contains
     use salmon_global,   only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
                                media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
-                               obs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
+                               obs_num_em,obs_loc_em,yn_obs_plane_integral_em,&
+                               media_id_pml,media_id_source1,media_id_source2,&
+                               wave_input,trans_longi,e_impulse,nenergy,&
                                source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
                                phi_cep1,I_wcm2_1,E_amplitude1,&
                                source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
@@ -119,7 +122,7 @@ contains
     use structures,      only: s_fdtd_system
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
-    use common_maxwell,  only: set_coo_em,find_point_em
+    use common_maxwell,  only: set_coo_em,find_point_em,input_shape_em
     use ttm           ,  only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
@@ -127,6 +130,7 @@ contains
     integer                           :: ii,ij,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
     real(8)                           :: dt_cfl
     character(1)                      :: dir
+    character(2)                      :: plane_name
     character(128)                    :: save_name
     
     !*** set initial parameter and value **********************************************************************!
@@ -270,7 +274,7 @@ contains
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "shape file is inputed by .cube format."
         end if
-        call eh_input_shape(fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
+        call input_shape_em(shape_file,fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
         fe%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
         call eh_sendrecv(fs,fe,'r')
         fs%imedia(:,:,:)=int(fe%rmedia(:,:,:)+1d-3)
@@ -341,7 +345,7 @@ contains
       fe%c1_j_ld(:,:)=0.0d0; fe%c2_j_ld(:,:)=0.0d0; fe%c3_j_ld(:,:)=0.0d0;
     end if
     
-    !*** set fdtd coeffient and write media information *******************************************************!
+    !*** set fdtd coeffient ***********************************************************************************!
     allocate(fe%rep(0:media_num),fe%rmu(0:media_num),fe%sig(0:media_num))
     fe%rep(:)=1.0d0; fe%rmu(:)=1.0d0; fe%sig(:)=0.0d0;
     do ii=0,media_num
@@ -351,7 +355,7 @@ contains
       call eh_coeff
     end do
 
-    !*** Check TTM On/Off, and initialization
+    !*** check TTM On/Off, and initialization *****************************************************************!
     call init_ttm_parameters( dt_em )
     if( use_ttm )then
        call init_ttm_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
@@ -368,6 +372,7 @@ contains
        end if
     end if !use_ttm
 
+    !*** write media information ******************************************************************************!
     deallocate(fs%imedia); deallocate(fe%rmedia);
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
@@ -409,11 +414,11 @@ contains
             end if
           end do
         case default
-          write(*,'(A,A)')       ' media_type  =  ', trim(media_type(ii))
+          write(*,'(A,A)')     ' media_type  =  ', trim(media_type(ii))
         end select
-        write(*,'(A,ES12.5)')    ' epsilon_em  = ', fe%rep(ii)
-        write(*,'(A,ES12.5)')    ' mu_em       = ', fe%rmu(ii)
-        write(*,'(A,ES12.5)'   ) ' sigma_em    = ', fe%sig(ii)
+        write(*,'(A,ES12.5)')  ' epsilon_em  = ', fe%rep(ii)
+        write(*,'(A,ES12.5)')  ' mu_em       = ', fe%rmu(ii)
+        write(*,'(A,ES12.5)')  ' sigma_em    = ', fe%sig(ii)
       end do
       write(*,*) "**************************"
     end if
@@ -528,6 +533,7 @@ contains
         end do
         write(*,*) "**************************"
         do ii=1,obs_num_em
+          !set header for point data
           write(save_name,*) ii
           save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
           open(fe%ifn,file=save_name)
@@ -537,12 +543,12 @@ contains
           select case(unit_system)
           case('au','a.u.')
             write(fe%ifn,'("#",99(1X,I0,":",A))') &
-                  1, "Time[a.u.]",              &
-                  2, "E_x[a.u.]",         &
-                  3, "E_y[a.u.]",         &
-                  4, "E_z[a.u.]",         &
-                  5, "H_x[a.u.]",         &
-                  6, "H_y[a.u.]",         &
+                  1, "Time[a.u.]",                &
+                  2, "E_x[a.u.]",                 &
+                  3, "E_y[a.u.]",                 &
+                  4, "E_z[a.u.]",                 &
+                  5, "H_x[a.u.]",                 &
+                  6, "H_y[a.u.]",                 &
                   7, "H_z[a.u.]"
           case('A_eV_fs')
             write(fe%ifn,'("#",99(1X,I0,":",A))') &
@@ -555,6 +561,50 @@ contains
                   7, "H_z[A/Angstrom]"
           end select
           close(fe%ifn)
+          
+          !set header for plane integral data
+          if(yn_obs_plane_integral_em(ii)=='y') then
+            do ij=1,3
+              !set plane name
+              if(ij==1)     then !xy plane
+                plane_name='xy';
+              elseif(ij==2) then !yz plane
+                plane_name='yz';
+              elseif(ij==3) then !xz plane
+                plane_name='xz';
+              end if
+              
+              !set header
+              write(save_name,*) ii
+              save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//&
+                        '_'//plane_name//'_integral_rt.data'
+              open(fe%ifn,file=save_name)
+              write(fe%ifn,'(A)') "# Real time calculation:" 
+              write(fe%ifn,'(A)') "# IE: Plane integration of electric field" 
+              write(fe%ifn,'(A)') "# IH: Plane integration of magnetic field" 
+              select case(unit_system)
+              case('au','a.u.')
+                write(fe%ifn,'("#",99(1X,I0,":",A))') &
+                      1, "Time[a.u.]",                &
+                      2, "IE_x[a.u.]",                &
+                      3, "IE_y[a.u.]",                &
+                      4, "IE_z[a.u.]",                &
+                      5, "IH_x[a.u.]",                &
+                      6, "IH_y[a.u.]",                &
+                      7, "IH_z[a.u.]"
+              case('A_eV_fs')
+                write(fe%ifn,'("#",99(1X,I0,":",A))') &
+                      1, "Time[fs]",                  &
+                      2, "IE_x[V*Angstrom]",          &
+                      3, "IE_y[V*Angstrom]",          &
+                      4, "IE_z[V*Angstrom]",          &
+                      5, "IH_x[A*Angstrom]",          &
+                      6, "IH_y[A*Angstrom]",          &
+                      7, "IH_z[A*Angstrom]"
+              end select
+              close(fe%ifn)
+            end do
+          end if
         end do
       end if
     end if
@@ -604,9 +654,12 @@ contains
       allocate(fe%inc_pl_pe(fe%inc_num,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
       fe%inc_po_id(:,:)=0; fe%inc_po_pe(:)=0; fe%inc_li_pe(:,:)=0; fe%inc_pl_pe(:,:)=0; 
       do ii=1,3
-        fe%c2_inc_xyz(ii)=(cspeed_au/fe%rep(0)*dt_em) &
-                           /(1.0d0+2.0d0*pi*fe%sig(0)/fe%rep(0)*dt_em) &
-                           *2.0d0/( fs%hgs(ii)*sqrt(fe%rmu(0)/fe%rep(0)) )
+        fe%c2_inc1_xyz(ii)=(cspeed_au/fe%rep(media_id_source1)*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(media_id_source1)/fe%rep(media_id_source1)*dt_em) &
+                            *2.0d0/( fs%hgs(ii)*sqrt(fe%rmu(media_id_source1)/fe%rep(media_id_source1)) )
+        fe%c2_inc2_xyz(ii)=(cspeed_au/fe%rep(media_id_source2)*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(media_id_source2)/fe%rep(media_id_source2)*dt_em) &
+                            *2.0d0/( fs%hgs(ii)*sqrt(fe%rmu(media_id_source2)/fe%rep(media_id_source2)) )
       end do
       
       !search incident current source point and check others
@@ -1053,43 +1106,66 @@ contains
                                    fs%mg%is_array(2):fs%mg%ie_array(2),&
                                    fs%mg%is_array(3):fs%mg%ie_array(3))
       integer :: ista,iend
-      real(8) :: pml_del,s_max
-      real(8) :: s_l(fe%ipml_l+1),sh_l(fe%ipml_l), &
-                 c1_pml(fe%ipml_l+1),c2_pml(fe%ipml_l+1),c1_pml_h(fe%ipml_l),c2_pml_h(fe%ipml_l)
-  
+      real(8) :: pml_del,s_max_bot,s_max_top
+      real(8) :: s_l_bot(fe%ipml_l+1),sh_l_bot(fe%ipml_l), &
+                 s_l_top(fe%ipml_l+1),sh_l_top(fe%ipml_l), &
+                 c1_pml_bot(fe%ipml_l+1),c2_pml_bot(fe%ipml_l+1),c1_pml_bot_h(fe%ipml_l),c2_pml_bot_h(fe%ipml_l), &
+                 c1_pml_top(fe%ipml_l+1),c2_pml_top(fe%ipml_l+1),c1_pml_top_h(fe%ipml_l),c2_pml_top_h(fe%ipml_l)
+      
       !set pml conductivity
       pml_del=fs%hgs(idir)
-      s_max=-(fe%pml_m+1.0d0)*log(fe%pml_r)/(2.0d0*dble(fe%ipml_l)*pml_del) &
-            *cspeed_au/(4.0d0*pi)*sqrt(fe%rep(0)/fe%rmu(0));
+      s_max_bot=-(fe%pml_m+1.0d0)*log(fe%pml_r)/(2.0d0*dble(fe%ipml_l)*pml_del) &
+                *cspeed_au/(4.0d0*pi)*sqrt(fe%rep(media_id_pml(idir,1))/fe%rmu(media_id_pml(idir,1)));
+      s_max_top=-(fe%pml_m+1.0d0)*log(fe%pml_r)/(2.0d0*dble(fe%ipml_l)*pml_del) &
+                *cspeed_au/(4.0d0*pi)*sqrt(fe%rep(media_id_pml(idir,2))/fe%rmu(media_id_pml(idir,2)));
       do ii=1,(fe%ipml_l+1)
-        s_l(ii)=s_max*(&
-                      (dble(fe%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fe%ipml_l)*pml_del)&
-                      )**fe%pml_m;
+        s_l_bot(ii)=s_max_bot*(&
+                              (dble(fe%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                               )**fe%pml_m;
+        s_l_top(ii)=s_max_top*(&
+                              (dble(fe%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                               )**fe%pml_m;
       end do
       do ii=1,fe%ipml_l
-        sh_l(ii)=(fe%rmu(0)/fe%rep(0)) &
-                 *s_max*(&
-                        (dble(fe%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fe%ipml_l)*pml_del)&
-                        )**fe%pml_m;
+        sh_l_bot(ii)=(fe%rmu(media_id_pml(idir,1))/fe%rep(media_id_pml(idir,1))) &
+                     *s_max_bot*(&
+                                (dble(fe%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                                 )**fe%pml_m;
+        sh_l_top(ii)=(fe%rmu(media_id_pml(idir,2))/fe%rep(media_id_pml(idir,2))) &
+                     *s_max_top*(&
+                                (dble(fe%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                                 )**fe%pml_m;
       end do
       
       !set pml coefficient
       do ii=1,(fe%ipml_l+1)
-        c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/fe%rep(0)*dt_em) &
-                   /(1.0d0+2.0d0*pi*s_l(ii)/fe%rep(0)*dt_em);
-        c2_pml(ii)=(cspeed_au/fe%rep(0)*dt_em) &
-                   /(1.0d0+2.0d0*pi*s_l(ii)/fe%rep(0)*dt_em)/pml_del
+        c1_pml_bot(ii)=(1.0d0-2.0d0*pi*s_l_bot(ii)/fe%rep(media_id_pml(idir,1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_bot(ii)/fe%rep(media_id_pml(idir,1))*dt_em)
+        c2_pml_bot(ii)=(cspeed_au/fe%rep(media_id_pml(idir,1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_bot(ii)/fe%rep(media_id_pml(idir,1))*dt_em)/pml_del
+        c1_pml_top(ii)=(1.0d0-2.0d0*pi*s_l_top(ii)/fe%rep(media_id_pml(idir,2))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_top(ii)/fe%rep(media_id_pml(idir,2))*dt_em)
+        c2_pml_top(ii)=(cspeed_au/fe%rep(media_id_pml(idir,2))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_top(ii)/fe%rep(media_id_pml(idir,2))*dt_em)/pml_del
       end do
-      call comm_bcast(c1_pml,nproc_group_global)
-      call comm_bcast(c2_pml,nproc_group_global)
+      call comm_bcast(c1_pml_bot,nproc_group_global)
+      call comm_bcast(c2_pml_bot,nproc_group_global)
+      call comm_bcast(c1_pml_top,nproc_group_global)
+      call comm_bcast(c2_pml_top,nproc_group_global)
       do ii=1,fe%ipml_l
-        c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/fe%rmu(0)*dt_em) &
-                     /(1.0d0+2.0d0*pi*sh_l(ii)/fe%rmu(0)*dt_em);
-        c2_pml_h(ii)=(cspeed_au/fe%rmu(0)*dt_em) &
-                     /(1.0d0+2.0d0*pi*sh_l(ii)/fe%rmu(0)*dt_em)/pml_del
+        c1_pml_bot_h(ii)=(1.0d0-2.0d0*pi*sh_l_bot(ii)/fe%rmu(media_id_pml(idir,1))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_bot(ii)/fe%rmu(media_id_pml(idir,1))*dt_em)
+        c2_pml_bot_h(ii)=(cspeed_au/fe%rmu(media_id_pml(idir,1))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_bot(ii)/fe%rmu(media_id_pml(idir,1))*dt_em)/pml_del
+        c1_pml_top_h(ii)=(1.0d0-2.0d0*pi*sh_l_top(ii)/fe%rmu(media_id_pml(idir,2))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_top(ii)/fe%rmu(media_id_pml(idir,2))*dt_em)
+        c2_pml_top_h(ii)=(cspeed_au/fe%rmu(media_id_pml(idir,2))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_top(ii)/fe%rmu(media_id_pml(idir,2))*dt_em)/pml_del
       end do
-      call comm_bcast(c1_pml_h,nproc_group_global)
-      call comm_bcast(c2_pml_h,nproc_group_global)
+      call comm_bcast(c1_pml_bot_h,nproc_group_global)
+      call comm_bcast(c2_pml_bot_h,nproc_group_global)
+      call comm_bcast(c1_pml_top_h,nproc_group_global)
+      call comm_bcast(c2_pml_top_h,nproc_group_global)
       
       !set pml(bottom)
       if((fs%a_bc(idir,1)=='pml').and.(fs%mg%is(idir)<=(fs%lg%is(idir)+fe%ipml_l))) then
@@ -1101,20 +1177,20 @@ contains
         icount=1
         do ii=fs%mg%is(idir),iend
           if(idir==1) then
-            c1_e1(ii,:,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(ii,:,:)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(ii,:,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(ii,:,:)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(ii,:,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(ii,:,:)=-c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(ii,:,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(ii,:,:)= c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==2) then
-            c1_e1(:,ii,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(:,ii,:)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(:,ii,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(:,ii,:)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(:,ii,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(:,ii,:)=-c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(:,ii,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(:,ii,:)= c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==3) then
-            c1_e1(:,:,ii)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(:,:,ii)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(:,:,ii)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(:,:,ii)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(:,:,ii)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(:,:,ii)=-c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(:,:,ii)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(:,:,ii)= c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           end if
           icount=icount+1
         end do
@@ -1126,20 +1202,20 @@ contains
         icount=1
         do ii=fs%mg%is(idir),iend
           if(idir==1) then
-            c1_h1(ii,:,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(ii,:,:)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(ii,:,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(ii,:,:)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(ii,:,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(ii,:,:)= c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(ii,:,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(ii,:,:)=-c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==2) then
-            c1_h1(:,ii,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(:,ii,:)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(:,ii,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(:,ii,:)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(:,ii,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(:,ii,:)= c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(:,ii,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(:,ii,:)=-c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==3) then
-            c1_h1(:,:,ii)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(:,:,ii)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(:,:,ii)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(:,:,ii)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(:,:,ii)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(:,:,ii)= c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(:,:,ii)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(:,:,ii)=-c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           end if
           icount=icount+1
         end do
@@ -1155,20 +1231,20 @@ contains
         icount=1
         do ii=ista,fs%mg%ie(idir)
           if(idir==1) then
-            c1_e1(ii,:,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e1(ii,:,:)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_e2(ii,:,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e2(ii,:,:)= c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e1(ii,:,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e1(ii,:,:)=-c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e2(ii,:,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e2(ii,:,:)= c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==2) then
-            c1_e1(:,ii,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e1(:,ii,:)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_e2(:,ii,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e2(:,ii,:)= c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e1(:,ii,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e1(:,ii,:)=-c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e2(:,ii,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e2(:,ii,:)= c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==3) then
-            c1_e1(:,:,ii)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e1(:,:,ii)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_e2(:,:,ii)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e2(:,:,ii)= c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e1(:,:,ii)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e1(:,:,ii)=-c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e2(:,:,ii)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e2(:,:,ii)= c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           end if
           icount=icount+1
         end do
@@ -1182,20 +1258,20 @@ contains
         icount=1
         do ii=ista,iend
           if(idir==1) then
-            c1_h1(ii,:,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h1(ii,:,:)= c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_h2(ii,:,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h2(ii,:,:)=-c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h1(ii,:,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h1(ii,:,:)= c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h2(ii,:,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h2(ii,:,:)=-c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==2) then
-            c1_h1(:,ii,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h1(:,ii,:)= c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_h2(:,ii,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h2(:,ii,:)=-c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h1(:,ii,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h1(:,ii,:)= c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h2(:,ii,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h2(:,ii,:)=-c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==3) then
-            c1_h1(:,:,ii)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h1(:,:,ii)= c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_h2(:,:,ii)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h2(:,:,ii)=-c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h1(:,:,ii)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h1(:,:,ii)= c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h2(:,:,ii)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h2(:,:,ii)=-c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           end if
           icount=icount+1
         end do
@@ -1328,11 +1404,11 @@ contains
   !===========================================================================================
   != calculate eh-FDTD =======================================================================
   subroutine eh_calc(fs,fe)
-    use salmon_global,   only: dt_em,pole_num_ld,obs_num_em,obs_samp_em,yn_obs_plane_em,&
+    use salmon_global,   only: dt_em,pole_num_ld,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                base_directory,t1_t2,t1_start,&
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
-    use inputoutput,     only: utime_from_au, uenergy_from_au
+    use inputoutput,     only: utime_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_size_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
@@ -1343,13 +1419,13 @@ contains
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: iter,ii,ij,ix,iy,iz
     character(128)                    :: save_name
-    
+    !for ttm
     integer :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
-    real(8) :: dV, tmp(4)
-    real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
+    real(8)             :: dV, tmp(4)
+    real(8), parameter  :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
 
     !time-iteration
     do iter=fe%iter_sta,fe%iter_end
@@ -1379,9 +1455,9 @@ contains
                  fe%c1_ez_y,fe%c2_ez_y,fe%ez_y,fe%hx_y,fe%hx_z,      'e','y') !ez_y
       if(fe%inc_num>0) then !add incident current source
         if(fe%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,&
-                                                    epdir_re1,epdir_im1,ae_shape1,fe%inc_dist1)
+                                                    epdir_re1,epdir_im1,fe%c2_inc1_xyz,ae_shape1,fe%inc_dist1)
         if(fe%inc_dist2/='none') call eh_add_inc(2,E_amplitude2,tw2,omega2,phi_cep2,&
-                                                    epdir_re2,epdir_im2,ae_shape2,fe%inc_dist2)
+                                                    epdir_re2,epdir_im2,fe%c2_inc2_xyz,ae_shape2,fe%inc_dist2)
       end if
       if(fe%num_ld>0) then
         call eh_add_curr(fe%rjx_sum_ld(:,:,:),fe%rjy_sum_ld(:,:,:),fe%rjz_sum_ld(:,:,:))
@@ -1425,8 +1501,8 @@ contains
                  fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,      'h','y') !hz_y
       call eh_sendrecv(fs,fe,'h')
       
+      !ttm
       if( use_ttm )then
-
          !Poynting vector
          if ( .not.allocated(Spoynting) ) then
             call allocate_poynting(fs, Spoynting, divS, u_energy)
@@ -1436,12 +1512,12 @@ contains
          call calc_poynting_vector(fs, fe, Spoynting)
          call calc_poynting_vector_div(fs, Spoynting, divS)
          u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
-
+         
          u_energy_p = u_energy
          call ttm_penetration( fs%mg%is, u_energy_p )
-
+         
          call ttm_main( fs%srg_ng, fs%mg, u_energy_p )
-
+         
          if( mod(iter,obs_samp_em) == 0 )then
             ix=fs%lg%is(1)-fe%Nd; jx=fs%lg%ie(1)+fe%Nd
             iy=fs%lg%is(2)-fe%Nd; jy=fs%lg%ie(2)+fe%Nd
@@ -1462,7 +1538,7 @@ contains
                write(unit1,*)
                end do
             end if
-!
+            
             dV=fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
             tmp(3)=sum(u_energy)*dV*uenergy_from_au
             tmp(4)=sum(u_energy_p)*dV*uenergy_from_au
@@ -1534,6 +1610,13 @@ contains
                                fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hy_s,'hy')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
                                fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hz_s,'hz')
+          end if
+          
+          !plane integral
+          if(yn_obs_plane_integral_em(ii)=='y') then
+            call eh_save_plane_integral(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,fe%uAperm_from_au, &
+                                        dble(iter)*dt_em*utime_from_au,fs%mg%is,fs%mg%ie,fs%hgs,fe%Nd,fe%ifn,ii,     &
+                                        fe%ex_s,fe%ey_s,fe%ez_s,fe%hx_s,fe%hy_s,fe%hz_s)
           end if
         end do
         
@@ -1763,11 +1846,11 @@ contains
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ add incident current source +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine eh_add_inc(iord,amp,tw,omega,cep,ep_r,ep_i,aes,typ)
+    subroutine eh_add_inc(iord,amp,tw,omega,cep,ep_r,ep_i,c2_inc_xyz,aes,typ)
       implicit none
       integer,intent(in)       :: iord
       real(8),intent(in)       :: amp,tw,omega,cep
-      real(8),intent(in)       :: ep_r(3),ep_i(3)
+      real(8),intent(in)       :: ep_r(3),ep_i(3),c2_inc_xyz(3)
       character(16),intent(in) :: aes,typ
       real(8)                  :: t_sta,t,theta1,theta2_r,theta2_i,alpha,beta,gamma,tf_r,tf_i
       real(8)                  :: add_inc(3)
@@ -1850,7 +1933,7 @@ contains
 !$omp do private(ix,iy)
           do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
           do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
-            fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+fe%c2_inc_xyz(3)*add_inc(1)
+            fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(1)
           end do
           end do
 !$omp end do
@@ -1859,7 +1942,7 @@ contains
 !$omp do private(ix,iy)
           do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
           do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
-            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+fe%c2_inc_xyz(3)*add_inc(2)
+            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)
           end do
           end do
 !$omp end do
@@ -1872,7 +1955,7 @@ contains
 !$omp do private(iy,iz)
           do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
           do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
-            fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+fe%c2_inc_xyz(1)*add_inc(2)
+            fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(2)
           end do
           end do
 !$omp end do
@@ -1881,7 +1964,7 @@ contains
 !$omp do private(iy,iz)
           do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
           do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
-            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+fe%c2_inc_xyz(1)*add_inc(3)
+            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)
           end do
           end do
 !$omp end do
@@ -1894,7 +1977,7 @@ contains
 !$omp do private(ix,iz)
           do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
           do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
-            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+fe%c2_inc_xyz(2)*add_inc(1)
+            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(1)
           end do
           end do
 !$omp end do
@@ -1903,7 +1986,7 @@ contains
 !$omp do private(ix,iz)
           do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
           do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
-            fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+fe%c2_inc_xyz(2)*add_inc(3)
+            fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)
           end do
           end do
 !$omp end do
@@ -2312,7 +2395,7 @@ contains
   !===========================================================================================
   != prepare mpi, grid, and sendrecv enviroments==============================================
   subroutine eh_mpi_grid_sr(fs,fe)
-    use salmon_global,     only: nproc_rgrid,yn_periodic,nproc_k,nproc_ob
+    use salmon_global,     only: nproc_rgrid,nproc_k,nproc_ob
     use parallelization,   only: nproc_group_global
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
     use init_communicator, only: init_communicator_dft
@@ -2369,100 +2452,6 @@ contains
     
     return
   end subroutine eh_mpi_grid_sr
-  
-  !===========================================================================================
-  != input fdtd shape data ===================================================================
-  subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
-    use salmon_global,   only: shape_file
-    use parallelization, only: nproc_id_global
-    use communication,   only: comm_is_root
-    implicit none
-    integer,intent(in)      :: ifn,Nd
-    integer,intent(in)      :: ng_is(3),ng_ie(3),lg_is(3),lg_ie(3)
-    integer,intent(out)     :: imat(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                    ng_is(2)-Nd:ng_ie(2)+Nd,&
-                                    ng_is(3)-Nd:ng_ie(3)+Nd)
-    character(2),intent(in) :: format
-    real(8),allocatable     :: rtmp1d(:)
-    integer                 :: inum(3),inum_check(3)
-    integer                 :: ii,ij,ix,iy,iz,iflag_x,iflag_y,iflag_z
-    
-    !open file
-    open(ifn,file=trim(shape_file), status='old')
-    
-    if(trim(format)=='cu') then
-      !check grid information
-      inum(:)=lg_ie(:)-lg_is(:)+1
-      read(ifn,*); read (ifn,*); read (ifn,*); !skip
-      allocate(rtmp1d(4))
-      read (ifn,*) rtmp1d; inum_check(1)=int(rtmp1d(1)+1d-3);
-      read (ifn,*) rtmp1d; inum_check(2)=int(rtmp1d(1)+1d-3);
-      read (ifn,*) rtmp1d; inum_check(3)=int(rtmp1d(1)+1d-3);
-      deallocate(rtmp1d)
-      do ii=1,3
-        if(inum(ii)/=inum_check(ii)) then
-          if(comm_is_root(nproc_id_global)) write(*,*) "al_em or dl_em does not mutch shape file."
-          stop
-        end if
-      end do
-      read (ifn,*); !skip
-      
-      !input shape(general case)
-      allocate(rtmp1d(6))
-      ix=lg_is(1); iy=lg_is(2); iz=lg_is(3);
-      do ii=1,int(inum(1)*inum(2)*inum(3)/6)
-        read (ifn,*) rtmp1d
-        do ij=1,6
-          !check flag and write imat
-          iflag_x=0; iflag_y=0; iflag_z=0;
-          if(ix>=ng_is(1) .and. ix<=ng_ie(1)) iflag_x=1
-          if(iy>=ng_is(2) .and. iy<=ng_ie(2)) iflag_y=1
-          if(iz>=ng_is(3) .and. iz<=ng_ie(3)) iflag_z=1
-          if(iflag_x==1 .and. iflag_y==1 .and. iflag_z==1) then
-            imat(ix,iy,iz)=int(rtmp1d(ij)+1d-3)
-          end if        
-          
-          !update iz, iy, ix 
-          iz=iz+1                                          !iz
-          if(iz>lg_ie(3))                      iz=lg_is(3) !iz
-          if(iz==lg_is(3))                     iy=iy+1     !iy
-          if(iy>lg_ie(2))                      iy=lg_is(2) !iy
-          if(iz==lg_is(3) .and. iy==lg_is(2))  ix=ix+1     !ix
-        end do
-      end do
-      deallocate(rtmp1d)
-      
-      !input shape(special case)
-      if(mod(inum(1)*inum(2)*inum(3),6)>0) then
-        allocate(rtmp1d(mod(inum(1)*inum(2)*inum(3),6)))
-        read (ifn,*) rtmp1d
-        do ij=1,mod(inum(1)*inum(2)*inum(3),6)
-          !check flag and write imat
-          iflag_x=0; iflag_y=0; iflag_z=0;
-          if(ix>=ng_is(1) .and. ix<=ng_ie(1)) iflag_x=1
-          if(iy>=ng_is(2) .and. iy<=ng_ie(2)) iflag_y=1
-          if(iz>=ng_is(3) .and. iz<=ng_ie(3)) iflag_z=1
-          if(iflag_x==1 .and. iflag_y==1 .and. iflag_z==1) then
-            imat(ix,iy,iz)=int(rtmp1d(ij)+1d-3)
-          end if        
-          
-          !update iz, iy, ix 
-          iz=iz+1                                          !iz
-          if(iz>lg_ie(3))                      iz=lg_is(3) !iz
-          if(iz==lg_is(3))                     iy=iy+1     !iy
-          if(iy>lg_ie(2))                      iy=lg_is(2) !iy
-          if(iz==lg_is(3) .and. iy==lg_is(2)) ix=ix+1      !ix
-        end do      
-        deallocate(rtmp1d)
-      end if
-    elseif(trim(format)=='mp') then
-    end if
-    
-    !close file
-    close(ifn)
-    
-    return
-  end subroutine eh_input_shape
   
   !===========================================================================================
   != send and receive eh =====================================================================
@@ -2569,20 +2558,20 @@ contains
     implicit none
     integer,intent(in)      :: ista(3),iend(3),ng_is(3),ng_ie(3)
     integer,intent(in)      :: Nd
-    real(8),intent(in)      :: c1(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+    real(8),intent(in)      :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd),&
-                               c2(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+                               c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),intent(inout)   :: f1(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+    real(8),intent(inout)   :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),intent(in)      :: f2(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+    real(8),intent(in)      :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd),&
-                               f3(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+                               f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd)
     character(1),intent(in) :: var,dir
     integer :: ix,iy,iz
@@ -2702,7 +2691,7 @@ contains
     
     do ii=1,3
       !allocate
-      if(ii==1) then     !xy plane
+      if(ii==1)     then !xy plane
         i1s=1; i2s=2; plane_name='xy';
       elseif(ii==2) then !yz plane
         i1s=2; i2s=3; plane_name='yz';
@@ -2773,6 +2762,118 @@ contains
   end subroutine eh_save_plane
   
   !===========================================================================================
+  != save plane data =========================================================================
+  subroutine eh_save_plane_integral(id,ipl,conv_e,conv_h,ti,ng_is,ng_ie,dl,Nd,ifn,iobs,ex,ey,ez,hx,hy,hz)
+    use salmon_global,   only: base_directory
+    use inputoutput,     only: ulength_from_au
+    use parallelization, only: nproc_id_global,nproc_group_global
+    use communication,   only: comm_is_root,comm_summation
+    implicit none
+    integer,intent(in) :: id(3),ipl(3)
+    real(8),intent(in) :: conv_e,conv_h,ti
+    integer,intent(in) :: ng_is(3),ng_ie(3)
+    real(8),intent(in) :: dl(3)
+    integer,intent(in) :: Nd,ifn,iobs
+    real(8),intent(in) :: ex(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          ey(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          ez(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          hx(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          hy(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          hz(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd)
+    real(8)          :: ds,&
+                        ex_sum1,ex_sum2,ey_sum1,ey_sum2,ez_sum1,ez_sum2,&
+                        hx_sum1,hx_sum2,hy_sum1,hy_sum2,hz_sum1,hz_sum2
+    integer          :: ii,i1,i1s,i2,i2s
+    character(2)     :: plane_name
+    character(128)   :: save_name
+    
+    do ii=1,3
+      !set plane
+      if(ii==1)     then !xy plane
+        i1s=1; i2s=2; plane_name='xy';
+      elseif(ii==2) then !yz plane
+        i1s=2; i2s=3; plane_name='yz';
+      elseif(ii==3) then !xz plane
+        i1s=1; i2s=3; plane_name='xz';
+      end if
+      ds=dl(i1s)*dl(i2s)*(ulength_from_au**2.0d0);
+
+      !prepare integral data
+      ex_sum1=0.0d0; ex_sum2=0.0d0; ey_sum1=0.0d0; ey_sum2=0.0d0; ez_sum1=0.0d0; ez_sum2=0.0d0;
+      hx_sum1=0.0d0; hx_sum2=0.0d0; hy_sum1=0.0d0; hy_sum2=0.0d0; hz_sum1=0.0d0; hz_sum2=0.0d0;
+      if(ipl(ii)==1) then
+        if(ii==1) then     !xy plane
+!$omp parallel
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+          do i2=ng_is(i2s),ng_ie(i2s)
+          do i1=ng_is(i1s),ng_ie(i1s)
+            ex_sum1=ex_sum1+ex(i1,i2,id(3)); ey_sum1=ey_sum1+ey(i1,i2,id(3)); ez_sum1=ez_sum1+ez(i1,i2,id(3));
+            hx_sum1=hx_sum1+hx(i1,i2,id(3)); hy_sum1=hy_sum1+hy(i1,i2,id(3)); hz_sum1=hz_sum1+hz(i1,i2,id(3));
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        elseif(ii==2) then !yz plane
+!$omp parallel
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+          do i2=ng_is(i2s),ng_ie(i2s)
+          do i1=ng_is(i1s),ng_ie(i1s)
+            ex_sum1=ex_sum1+ex(id(1),i1,i2); ey_sum1=ey_sum1+ey(id(1),i1,i2); ez_sum1=ez_sum1+ez(id(1),i1,i2);
+            hx_sum1=hx_sum1+hx(id(1),i1,i2); hy_sum1=hy_sum1+hy(id(1),i1,i2); hz_sum1=hz_sum1+hz(id(1),i1,i2);
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        elseif(ii==3) then !xz plane
+!$omp parallel
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+          do i2=ng_is(i2s),ng_ie(i2s)
+          do i1=ng_is(i1s),ng_ie(i1s)
+            ex_sum1=ex_sum1+ex(i1,id(2),i2); ey_sum1=ey_sum1+ey(i1,id(2),i2); ez_sum1=ez_sum1+ez(i1,id(2),i2);
+            hx_sum1=hx_sum1+hx(i1,id(2),i2); hy_sum1=hy_sum1+hy(i1,id(2),i2); hz_sum1=hz_sum1+hz(i1,id(2),i2);
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        end if
+      end if
+      call comm_summation(ex_sum1,ex_sum2,nproc_group_global)
+      call comm_summation(ey_sum1,ey_sum2,nproc_group_global)
+      call comm_summation(ez_sum1,ez_sum2,nproc_group_global)
+      call comm_summation(hx_sum1,hx_sum2,nproc_group_global)
+      call comm_summation(hy_sum1,hy_sum2,nproc_group_global)
+      call comm_summation(hz_sum1,hz_sum2,nproc_group_global)
+      ex_sum2=ex_sum2*ds; ey_sum2=ey_sum2*ds; ez_sum2=ez_sum2*ds;
+      hx_sum2=hx_sum2*ds; hy_sum2=hy_sum2*ds; hz_sum2=hz_sum2*ds;
+      
+      !save plane integral data
+      if(comm_is_root(nproc_id_global)) then
+        write(save_name,*) iobs
+        save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//&
+                  '_'//plane_name//'_integral_rt.data'
+        open(ifn,file=save_name,status='old',position='append')
+        write(ifn,"(F16.8,99(1X,E23.15E3))",advance='no') &
+              ti,ex_sum2*conv_e,ey_sum2*conv_e,ez_sum2*conv_e,hx_sum2*conv_h,hy_sum2*conv_h,hz_sum2*conv_h
+        close(ifn)
+      end if
+    end do
+    
+    return
+  end subroutine eh_save_plane_integral
+  
+  !===========================================================================================
   != Fourier transformation in eh ============================================================
   subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
     use salmon_global,  only: yn_wf_em
@@ -2812,6 +2913,8 @@ contains
     return
   end subroutine eh_fourier
   
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine calc_es_and_hs(fs, fe)
     use structures, only: s_fdtd_system
     use sendrecv_grid, only: update_overlap_real8
@@ -2844,6 +2947,8 @@ contains
     call update_overlap_real8( fs%srg_ng, fs%mg, fe%hz_s )
   end subroutine calc_es_and_hs
 
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine allocate_poynting(fs, S, divS, u)
     use structures, only: s_fdtd_system
     implicit none
@@ -2872,6 +2977,8 @@ contains
     end if
   end subroutine allocate_poynting
 
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine calc_poynting_vector(fs, fe, Spoynting)
     use structures, only: s_fdtd_system
     use sendrecv_grid, only: update_overlap_real8
@@ -2904,6 +3011,8 @@ contains
 !$omp end parallel
   end subroutine calc_poynting_vector
 
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine calc_poynting_vector_div(fs, Spoynting, divS)
     use structures, only: s_fdtd_system
     implicit none

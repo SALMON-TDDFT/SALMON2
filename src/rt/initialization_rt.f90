@@ -27,9 +27,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      lg, mg, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_scalar,  &
-                     spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                     spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn )
+                     pp, ppg, ppn  )
   use inputoutput
   use math_constants, only: pi, zi
   use structures
@@ -55,6 +55,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
+  use salmon_global, only: quiet
+  use gram_schmidt_orth, only: gram_schmidt
+  use jellium, only: make_rho_jm
   implicit none
   integer,parameter :: Nd = 4
 
@@ -75,7 +78,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_md) :: md
   type(s_ofile) :: ofl
   type(s_scalar) :: Vpsl
-  type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
   type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
   type(s_dmatrix) :: dmat
   type(s_orbital) :: spsi_in,spsi_out
@@ -91,7 +94,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   integer :: iob, i1,iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
-  real(8) :: rbox_array2(4),tt
+  real(8) :: rbox_array2(4) !,tt
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
@@ -101,19 +104,16 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_INIT_RT)
 
-  call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
-  
-  iwdenstep=30 
+  call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
   
   Ntime=nt
   
-  if(comm_is_root(nproc_id_global))then
+  if((.not. quiet) .and. comm_is_root(nproc_id_global))then
     write(*,*)
     write(*,*) "Total time step      =",Ntime
     write(*,*) "Time step[fs]        =",dt*au_time_fs
     write(*,*) "Energy range         =",Nenergy
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
-    write(*,*) "Step for writing dens=", iwdenstep
     if(ae_shape1 == 'impulse')then 
       write(*,*) "Field strength[a.u.] =",e_impulse
     else
@@ -134,8 +134,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   23 format(a21,2f5.2, a4)
   24 format(a21,2f16.8,a4)
   25 format(a21,2e16.8,a8)
+  endif
   
-  end if
   
   debye2au = 0.393428d0
 
@@ -167,20 +167,27 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call allocate_scalar(mg,Vh_stock2)
   call allocate_scalar_with_shadow(lg,Nd,Vbox)
   call allocate_scalar(mg,Vpsl)
-  allocate(rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin))
+  allocate(rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin),rt%rho0_s(system%nspin))
   do jspin=1,system%nspin
     call allocate_scalar(mg,rho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,Vxc(jspin))
+    call allocate_scalar(mg,rt%rho0_s(jspin))
   end do
-  call read_pslfile(system,pp)
-  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+  if(yn_jm=='n') then
+    call read_pslfile(system,pp)
+    call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+  else
+    !make positive back ground charge density for using jellium model
+    call allocate_scalar(mg,rho_jm)
+    call make_rho_jm(lg,mg,info,system,rho_jm)
+  end if
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
   call allocate_dmatrix(system%nspin,mg,info,dmat)
-
+  
   if(propagator=='aetrs')then
     allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
     do jspin=1,system%nspin
@@ -200,17 +207,24 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
-  
-  call calc_nlcc(pp, system, mg, ppn)
-  if (comm_is_root(nproc_id_global)) then
-    write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-    write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+
+  if((gram_schmidt_interval == 0) ) then
+    call gram_schmidt(system, mg, info, spsi_in)
+  end if
+
+  if(yn_jm=='n') then
+    call calc_nlcc(pp, system, mg, ppn)
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+      write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+      write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+    end if
   end if
   
   call calc_density(system,rho_s,spsi_in,info,mg)
   rho%f = 0d0
   do jspin=1,system%nspin
      rho%f = rho%f + rho_s(jspin)%f
+     rt%rho0_s(jspin)%f = rho_s(jspin)%f ! electron density @ t=0 (GS)
   end do
   if(yn_restart=='y')then
     Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
@@ -218,6 +232,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
+
+  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
@@ -253,7 +269,11 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
-  rion_update = .true. ! it's first calculation
+  if(yn_jm=='n') then
+    rion_update = .true. ! it's first calculation
+  else
+    rion_update = .false.
+  end if
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
@@ -300,9 +320,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_INIT_RT)
   
-  ntmg=1
   ! 'Hartree' parameter
-  
   poisson%iterVh = 0        ! Iteration counter
   
   call timer_end(LOG_INIT_RT)
@@ -376,10 +394,10 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(info%icomm_r,lg,mg,rho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,mg,system,rho_s,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
-  if(comm_is_root(nproc_id_global))then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global))then
     write(*,'(a30)', advance="no") "Static dipole moment(xyz) ="
     write(*,'(3e20.10)') (rt%Dp0_e(i1)*au_length_aa, i1=1,3)
     write(*,*)
@@ -407,8 +425,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-         !!XXX bug XXX dnsdiff data is wrong as reference dns is rho%f now !AY
-        call write_dns(lg,mg,system,rho%f,rho%f,itt)
+        call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
       end if
       if(yn_out_elf_rt=='y')then
         call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
@@ -419,11 +436,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     end do
   
   if(iperiodic==3) then
-    ! do itt=Mit+1,itotNtime+1
-    !   tt = dt*dble(itt)
-    !   call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
-    ! end do
-    call calc_Ac_ext_t(0d0, dt, Mit+1, itotNtime+1, rt%Ac_ext(:,Mit+1:itotNtime+1))
+    call calc_Ac_ext_t(0d0, dt, Mit, itotNtime+1, rt%Ac_ext(:,Mit:itotNtime+1))
+    ! future work: restart input of rt%Ac_ind
+    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
   end if
   
   if(yn_md=='y') call init_md(system,md)
@@ -435,7 +450,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
-
     call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
@@ -506,7 +520,7 @@ subroutine init_code_optimization
   end if
   call set_modulo_tables(ignum)
 
-  if (comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      call optimization_log(info)
   end if
 end subroutine init_code_optimization

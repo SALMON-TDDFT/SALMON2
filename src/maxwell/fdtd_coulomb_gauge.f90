@@ -25,7 +25,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,yn_gbp
+  use salmon_global, only: dt,method_singlescale,yn_symmetrized_stencil
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use communication, only: comm_is_root, comm_summation
@@ -47,7 +47,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
   real(8) :: Hvol,hgs(3),dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
-  real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
+  real(8),dimension(3) :: out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
   real(8) :: e_poy1,e_poy2,rtmp1(6),rtmp2(6)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -84,7 +84,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(wrk,out_curr,3,info%icomm_r)
+  call comm_summation(wrk,fw%curr_ave,3,info%icomm_r)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
 ! gradient of d(Vh)/dt (Vh: Hartree potential)
@@ -110,10 +110,10 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
 ! FDTD loop: Ac(t) --> Ac(t+dt)
 
-  if(yn_gbp=='y') then
-    call fdtd_gbp
-  else
+  if(method_singlescale=='3d') then
     call fdtd
+  else
+    call fdtd_gbp
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -187,6 +187,12 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   end do
   end do
   end do
+  
+  if(yn_symmetrized_stencil=='y' .and. info%if_divide_rspace) then
+    call update_overlap_real8(srg_scalar, mg, Ac%v(1,:,:,:))
+    call update_overlap_real8(srg_scalar, mg, Ac%v(2,:,:,:))
+    call update_overlap_real8(srg_scalar, mg, Ac%v(3,:,:,:))
+  end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -297,7 +303,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   fw%Energy_poynting = fw%Energy_poynting + dt*e_poynting
 
   if(comm_is_root(info%id_rko)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
-    dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,out_curr,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule
+    dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,fw%curr_ave,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule
     
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -615,7 +621,7 @@ end subroutine fdtd_singlescale
 subroutine fourier_singlescale(lg,mg,info,fg,rho,j_e,Vh,poisson,singlescale)
   use structures
   use math_constants,only : zi,pi
-  use salmon_global,only: dt,yn_gbp_fourier0
+  use salmon_global,only: dt,method_singlescale
   use phys_constants, only: cspeed_au
   use communication, only: comm_summation,comm_bcast
   implicit none
@@ -756,7 +762,7 @@ subroutine fourier_singlescale(lg,mg,info,fg,rho,j_e,Vh,poisson,singlescale)
   end do
   end do
   
-  if(yn_gbp_fourier0=='y') then
+  if(method_singlescale=='1d') then
     singlescale%Ac_fourier = 0d0
   end if
 
@@ -769,7 +775,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,yn_gbp
+  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,method_singlescale,yn_symmetrized_stencil
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use initialization_sub, only: set_bn
@@ -792,10 +798,16 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   real(8) :: bnmat(4,4)
   
   call allocate_scalar(mg,div_Ac)
-  call allocate_vector(mg,Ac)
+  
+  if(yn_symmetrized_stencil=='y') then
+    call allocate_vector_with_ovlp(mg,Ac)
+  else
+    call allocate_vector(mg,Ac)
+  end if
 
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
+  fw%curr_ave = 0d0
 
   call set_bn(bnmat)
   do jj=1,3
@@ -845,7 +857,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   fw%tmp_zt = 0d0
   
 ! gbp
-  if(yn_gbp=='y') then
+  if(method_singlescale/='3d') then
     allocate( fw%curr4pi_zt(lg%is(3):lg%ie(3),3) )
     allocate(fw%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3))
     allocate(fw%Ac_fourier(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))

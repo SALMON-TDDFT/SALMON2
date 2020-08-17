@@ -22,12 +22,14 @@ subroutine main_tddft
 use math_constants, only: pi
 use salmon_global
 use structures
+use parallelization, only: adjust_elapse_time
 use communication, only: comm_is_root, comm_sync_all
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
 use checkpoint_restart_sub
+use jellium, only: check_condition_jm
 implicit none
 
 type(s_rgrid) :: lg
@@ -44,7 +46,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: Vpsl
-type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
 type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -56,6 +58,10 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 
 integer :: Mit, itt,itotNtime
+logical :: is_checkpoint_iter, is_shutdown_time
+
+!check condition for using jellium model
+if(yn_jm=='y') call check_condition_jm
 
 call timer_begin(LOG_TOTAL)
 
@@ -66,10 +72,9 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         info,  &
                         xc_func, dmat, ofl,  &
                         srg, srg_scalar,  &
-                        spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                        spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                         pp, ppg, ppn )
-
 
 #ifdef __FUJITSU
 call fapp_start('time_evol',1,0) ! performance profiling
@@ -84,15 +89,23 @@ TE : do itt=Mit+1,itotNtime
 
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
 
-  if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
+
+  is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
+  is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+  if(is_checkpoint_iter .or. is_shutdown_time) then
+    if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+      print *, 'shutdown the calculation, iter =', itt
+    end if
+
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
@@ -103,6 +116,10 @@ TE : do itt=Mit+1,itotNtime
     call timer_end(LOG_CHECKPOINT_SELF)
     call comm_sync_all
     call timer_end(LOG_CHECKPOINT_SYNC)
+
+    if (is_shutdown_time) then
+      exit TE
+    end if
   endif
 
 end do TE
@@ -164,10 +181,17 @@ subroutine print_header()
                   "Dipole moment(xyz)[A]"     &
                 ,"electrons", "Total energy[eV]", "iterVh"
     case(3)
-      write(*,'(1x,a10,a11,a48,a15,a18)')   &
-                  "time-step", "time[fs] ", &
-                  "Current(xyz)[a.u.]",     &
-                  "electrons", "Total energy[eV] "
+      if(yn_jm=='n')then
+        write(*,'(1x,a10,a11,a48,a15,a18)')   &
+                    "time-step", "time[fs] ", &
+                    "Current(xyz)[a.u.]",     &
+                    "electrons", "Total energy[eV] "
+      else
+        write(*,'(1x,a10,a11,a48,a15,a18)')   &
+                    "time-step", "time[fs] ", &
+                    "Current(xyz)[a.u.]",     &
+                    "electrons"
+      end if
     end select
     write(*,'("#",7("----------"))')
   endif

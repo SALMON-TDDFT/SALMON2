@@ -32,11 +32,14 @@ use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pu
 use initialization_rt_sub
 use checkpoint_restart_sub
 use fdtd_weyl, only: ls_fdtd_weyl, weyl_init, weyl_calc, weyl_finalize
-use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global
+use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global, &
+                           adjust_elapse_time
 use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
 use input_checker_ms, only: check_input_variables_ms
+
+use inputoutput, only: t_unit_ac, t_unit_elec, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
 implicit none
 
 type(s_rgrid) :: lg
@@ -53,7 +56,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: Vpsl
-type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
 type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -80,6 +83,11 @@ real(8), allocatable :: Ac_inc(:, :)
 
 integer :: nmacro_mygroup, isize_mygroup
 
+logical :: is_checkpoint_iter, is_shutdown_time
+! Only for 1D calculation outputs:
+integer :: fh_wave
+
+
 ! character(256) :: file_debug_log
 !! Open logfile for debugging
 ! write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
@@ -97,13 +105,25 @@ call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 
-! if (comm_is_root(ms%id_ms_world)) call print_header()
+call print_header()
 
 TE : do itt=Mit+1,itotNtime
     call time_evolution_step_ms()
 
-   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) &
-        & call checkpoint_ms()
+    is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
+    is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+    if (is_checkpoint_iter .or. is_shutdown_time) then
+      if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+        print *, 'shutdown the calculation, iter =', itt
+      end if
+
+      call checkpoint_ms()
+
+      if (is_shutdown_time) then
+        exit TE
+      end if
+    end if
 end do TE
 
 call timer_end(LOG_RT_ITERATION)
@@ -177,6 +197,7 @@ end function restart_directory_macro
 subroutine initialization_ms()
     implicit none
     integer :: ii, jj
+    integer :: iimacro_s, iimacro_e, iimacro
 
     ! Store global information
     ms%nmacro = nx_m * ny_m * nz_m
@@ -202,9 +223,7 @@ subroutine initialization_ms()
     else
         stop "number of procs must be larger than number of points!"
     end if
-    
-    if (ms%nmacro < 1) stop "Invalid macropoint number"
-    
+        
     allocate(iranklists(isize_mygroup))
     do i = 1, isize_mygroup
         iranklists(i) = ms%id_mygroup_s + (i - 1)
@@ -223,8 +242,8 @@ subroutine initialization_ms()
 
     fw%dt = dt
     fw%fdtddim = '1d'
-    fs%mg%is(1) = -nxvacl_m
-    fs%mg%ie(1) = nx_m+nxvacr_m
+    fs%mg%is(1) = - abs(nxvacl_m)
+    fs%mg%ie(1) = nx_m + abs(nxvacr_m)
     fs%mg%is(2) = 1
     fs%mg%ie(2) = ny_m
     fs%mg%is(3) = 1
@@ -241,10 +260,11 @@ subroutine initialization_ms()
     fs%origin(3) = 0d0
     do ii = 1, 3
         do jj = 1, 2
-        fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
+            fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
         end do
     end do
 
+    ! incident field
     call Weyl_init(fs, fw)
 
     allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
@@ -274,7 +294,6 @@ subroutine initialization_ms()
         end do
     end do
 
-
     if (comm_is_root(ms%id_ms_world)) then
         call create_directory(trim(ms%base_directory_RT_Ac))
         do i = 1, ms%nmacro
@@ -282,71 +301,98 @@ subroutine initialization_ms()
         end do
     end if
 
-    do i = 1, ms%nmacro
+    call comm_sync_all(ms%icomm_ms_world)
 
-        call comm_sync_all()
+    do iimacro_s = 1, ms%nmacro, nmacro_chunk
+        iimacro_e = min(iimacro_s + nmacro_chunk - 1, ms%nmacro)
+        if (comm_is_root(ms%id_ms_world)) &
+            write(*, '(a, i6, "-", i6)') "Initializing macropoint:", iimacro_s, iimacro_e
+        
+        do iimacro = iimacro_s, iimacro_e
 
-        if (macropoint_in_mygroup(i)) then
-            ! Override global variables
-            base_directory = trim(base_directory_macro(i))
-            nproc_group_global = ms%icomm_macropoint
-            nproc_id_global = ms%id_macropoint
-            nproc_size_global = ms%isize_macropoint
+            if (macropoint_in_mygroup(iimacro)) then
+                ! Override global variables
+                base_directory = trim(base_directory_macro(iimacro))
+                nproc_group_global = ms%icomm_macropoint
+                nproc_id_global = ms%id_macropoint
+                nproc_size_global = ms%isize_macropoint
+                quiet = (1 < iimacro)
 
-            if (yn_restart == 'y') then
-                directory_read_data = trim(directory_read_data_macro(trim(ms%directory_read_data), i))
+                if (yn_restart == 'y') then
+                    directory_read_data = trim(directory_read_data_macro(trim(ms%directory_read_data), iimacro))
+                end if
+                
+                ! Initializa TDKS system
+                call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
+                                        singlescale,  &
+                                        stencil, fg, poisson,  &
+                                        lg, mg,   &
+                                        info,  &
+                                        xc_func, dmat, ofl,  &
+                                        srg, srg_scalar,  &
+                                        spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
+                                        V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
+                                        pp, ppg, ppn )
+
+                ! Override global variables (restore)
+                base_directory = trim(ms%base_directory)
+                nproc_group_global = ms%icomm_ms_world
+                nproc_id_global = ms%id_ms_world
+                nproc_size_global = ms%isize_ms_world        
+                directory_read_data = trim(ms%directory_read_data)
+                quiet = .false.
             end if
-                    
-            ! Initializa TDKS system
-            call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
-                                    singlescale,  &
-                                    stencil, fg, poisson,  &
-                                    lg, mg,   &
-                                    info,  &
-                                    xc_func, dmat, ofl,  &
-                                    srg, srg_scalar,  &
-                                    spsi_in, spsi_out, tpsi, rho, rho_s,  &
-                                    V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                                    pp, ppg, ppn )
-
-            ! Override global variables (restore)
-            base_directory = trim(ms%base_directory)
-            nproc_group_global = ms%icomm_ms_world
-            nproc_id_global = ms%id_ms_world
-            nproc_size_global = ms%isize_ms_world        
-            directory_read_data = trim(ms%directory_read_data)
-        end if
+        end do
+        call comm_sync_all()
     end do
 
+    itt = mit
+    allocate(Ac_inc(1:3, -1:itotNtime+2))
     call incident()
+
+    ! Experimental implementation
+    if (comm_is_root(ms%id_ms_world)) then
+        if (trim(fdtddim) == '1d' .or. trim(fdtddim) == '1D') then
+            call open_wave_data_file()
+        end if
+    end if
 
     return    
 end subroutine initialization_ms
 
 
 
-
-
 subroutine print_header()
     implicit none
-    !(header of standard output)
-    ! if(comm_is_root(nproc_id_global))then
+    if (comm_is_root(ms%id_ms_world)) then
         write(*,*)
-        select case(iperiodic)
-        case(0)
-        write(*,'(1x,a10,a11,a11,a10,a48,a15,a18,a10)') &
-                    "time-step ", "time[fs]", "macropoint", &
-                    "Dipole moment(xyz)[A]"     &
-                    ,"electrons", "Total energy[eV]", "iterVh"
-        case(3)
-        write(*,'(1x,a10,a11,a10,a48,a15,a18)')   &
-                    "time-step", "time[fs] ", "macropoint", &
-                    "Current(xyz)[a.u.]",     &
-                    "electrons", "Total energy[eV] "
-        end select
+        write(*,'(a7,a7,a9,a33,a11)') &
+            & "Step", "Macro", "Time", "Current", "Eabs/cell"
+        write(*,'(7x,7x,a9,a33,a11)') &
+            & trim(t_unit_time%name), &
+            & trim(t_unit_current%name), &
+            & trim(t_unit_energy%name)
         write(*,'("#",7("----------"))')
-    ! endif
+    endif
 end subroutine print_header
+
+
+subroutine print_linelog()
+    implicit none
+    integer :: iimacro, iix, iiy, iiz
+    if (comm_is_root(ms%id_ms_world)) then
+        do iimacro = 1, ms%nmacro
+            iix = ms%ixyz_tbl(1, iimacro)
+            iiy = ms%ixyz_tbl(2, iimacro)
+            iiz = ms%ixyz_tbl(3, iimacro)
+            write(*,'(i7,i7,f9.3,4(es11.2e3))') &
+                & itt, iimacro, &
+                & itt * dt * t_unit_time%conv, &
+                & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%edensity_absorb%f(iix, iiy, iiz) * system%det_a * t_unit_energy%conv
+        end do
+    end if
+end subroutine
 
 
 
@@ -360,8 +406,8 @@ subroutine time_evolution_step_ms
     ! ----------------------------------------
     ! Time Evolution of FDTD System
     ! ----------------------------------------
-    fw%Ac_inc_new(:) = Ac_inc(:, itt+1)
-    fw%Ac_inc(:) = Ac_inc(:, itt)
+    fw%Ac_inc_new(:) = Ac_inc(:, itt)
+    fw%Ac_inc(:) = Ac_inc(:, itt-1)
     call weyl_calc(fs, fw)
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
 
@@ -372,21 +418,23 @@ subroutine time_evolution_step_ms
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
+    quiet = .true.
+
     curr_tmp(:, :) = 0d0
     do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        rt%Ac_ext(1:3, itt) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
-        rt%Ac_ext(1:3, itt + 1) = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
+        rt%Ac_tot(1:3, itt-1) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
+        rt%Ac_tot(1:3, itt)   = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         else
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
     
@@ -397,6 +445,7 @@ subroutine time_evolution_step_ms
     nproc_group_global = ms%icomm_ms_world
     nproc_id_global = ms%id_ms_world
     nproc_size_global = ms%isize_ms_world
+    quiet = .false.
 
     call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
 
@@ -407,9 +456,19 @@ subroutine time_evolution_step_ms
         fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
     end do
 
+    if (mod(itt, out_ms_step) == 0) call print_linelog()
+
+    ! Experimental implementation
+    if (comm_is_root(ms%id_ms_world)) then
+        if (mod(itt, 2) == 0) then
+            if (trim(fdtddim) == '1d' .or. trim(fdtddim) == '1D') then
+                call write_wave_data_file()
+            end if
+        end if
+    end if
+
     return
 end subroutine time_evolution_step_ms
-
 
 
 
@@ -436,7 +495,10 @@ subroutine checkpoint_ms(odir)
             idir = trim(restart_directory_macro(itt, i))
         end if
 
-        if (comm_is_root(ms%id_ms_world)) call create_directory(trim(idir))
+        if (comm_is_root(ms%id_ms_world)) then
+            call create_directory(trim(idir))
+            write(*, *) "Checkpointing macropoint:", i
+        end if
 
         call comm_sync_all()
 
@@ -487,69 +549,66 @@ end subroutine checkpoint_ms
 
 
 subroutine write_RT_Ac_file()
-    use inputoutput, only: t_unit_ac, t_unit_current, t_unit_elec, t_unit_length
     implicit none
     integer ::  iix, iiy, iiz
-    character(256) :: filename
+    integer :: fh_ac_data   
+    character(256) :: file_ac_data
+    
+    if (comm_is_root(ms%id_ms_world)) then
+        fh_ac_data = get_filehandle()
+        write(file_ac_data, '(a,a,"_Ac_",i6.6,".data")') trim(ms%base_directory_RT_Ac), trim(sysname), itt
+        open(fh_ac_data, file=trim(file_ac_data))
+        write(fh_ac_data, '(a)') "# Multiscale TDDFT calculation"
+        write(fh_ac_data, '(a)') "# IX, IY, IZ: FDTD Grid index"
+        write(fh_ac_data, '(a)') "# x, y, z: Coordinates"
+        write(fh_ac_data, '(a)') "# Ac: Vector potential field"
+        write(fh_ac_data, '(a)') "# E: Electric field"
+        write(fh_ac_data, '(a)') "# J_em: Electromagnetic current density"
+        write(fh_ac_data, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+            & 1, "IX", "none", &
+            & 2, "IY", "none", &
+            & 3, "IZ", "none", &
+            & 4, "Ac_x", trim(t_unit_ac%name), &
+            & 5, "Ac_y", trim(t_unit_ac%name), &
+            & 6, "Ac_z", trim(t_unit_ac%name), &
+            & 7, "E_x", trim(t_unit_elec%name), &
+            & 8, "E_y", trim(t_unit_elec%name), &
+            & 9, "E_z", trim(t_unit_elec%name), &
+            & 10, "B_x", "a.u.", &
+            & 11, "B_y", "a.u.", &
+            & 12, "B_z", "a.u.", &
+            & 13, "Jem_x", trim(t_unit_current%name), &
+            & 14, "Jem_y", trim(t_unit_current%name), &
+            & 15, "Jem_z", trim(t_unit_current%name), &
+            & 16, "E_em", trim(t_unit_energy%name) // "/vol", &
+            & 17, "E_abs", trim(t_unit_energy%name) //  "/vol"
 
-
-    if (ms%id_ms_world == 0) then
-            write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory_RT_Ac), trim(sysname), "_Ac_",  itt, '.data'
-            open(8888, file=trim(filename))
-            write(8888, '(a)') "# Multiscale TDDFT calculation"
-            write(8888, '(a)') "# IX, IY, IZ: FDTD Grid index"
-            write(8888, '(a)') "# x, y, z: Coordinates"
-            write(8888, '(a)') "# Ac: Vector potential field"
-            write(8888, '(a)') "# E: Electric field"
-            write(8888, '(a)') "# J_em: Electromagnetic current density"
-            write(8888, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-              & 1, "IX", "none", &
-              & 2, "IY", "none", &
-              & 3, "IZ", "none", &
-            !   & 4, "x", trim(t_unit_length%name), &
-            !   & 5, "y", trim(t_unit_length%name), &
-            !   & 6, "z", trim(t_unit_length%name), &
-              & 4, "Ac_x", trim(t_unit_ac%name), &
-              & 5, "Ac_y", trim(t_unit_ac%name), &
-              & 6, "Ac_z", trim(t_unit_ac%name), &
-              & 7, "E_x", trim(t_unit_elec%name), &
-              & 8, "E_y", trim(t_unit_elec%name), &
-              & 9, "E_z", trim(t_unit_elec%name), &
-              & 10, "B_x", "a.u.", &
-              & 11, "B_y", "a.u.", &
-              & 12, "B_z", "a.u.", &
-              & 13, "Jm_x", trim(t_unit_current%name), &
-              & 14, "Jm_y", trim(t_unit_current%name), &
-              & 15, "Jm_z", trim(t_unit_current%name)
-
-            do iiz = fs%mg%is(3), fs%mg%ie(3)
-            do iiy = fs%mg%is(2), fs%mg%ie(2)
-            do iix = fs%mg%is(1), fs%mg%ie(1)
-                write(8888, '(3(i6, 1x), 12(e23.15e3, 1x))')  &
-                    & iix, & 
-                    & iiy, & 
-                    & iiz, & 
-                    ! & iix * fs%hgs(1) * t_unit_length%conv, &
-                    ! & iiy * fs%hgs(2) * t_unit_length%conv, &
-                    ! & iiz * fs%hgs(3) * t_unit_length%conv, &
-                    & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
-                    & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
-                    & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
-                    & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
-                    & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
-                    & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
-                    & fw%vec_H%v(1, iix, iiy, iiz), &
-                    & fw%vec_H%v(2, iix, iiy, iiz), &
-                    & fw%vec_H%v(3, iix, iiy, iiz), &
-                    & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv
-            end do
-            end do
-            end do
-            close(8888)
+        do iiz = fs%mg%is(3), fs%mg%ie(3)
+        do iiy = fs%mg%is(2), fs%mg%ie(2)
+        do iix = fs%mg%is(1), fs%mg%ie(1)
+            write(fh_ac_data, '(3(i6, 1x), 14(e23.15e3, 1x))')  &
+                & iix, & 
+                & iiy, & 
+                & iiz, & 
+                & fw%vec_Ac_new%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac_new%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac_new%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
+                & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
+                & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
+                & fw%vec_H%v(1, iix, iiy, iiz), &
+                & fw%vec_H%v(2, iix, iiy, iiz), &
+                & fw%vec_H%v(3, iix, iiy, iiz), &
+                & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
+                & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
+        end do
+        end do
+        end do
+        close(fh_ac_data)
     end if
-
 
 end subroutine write_RT_Ac_file
 
@@ -566,13 +625,13 @@ subroutine incident()
     fw%vec_Ac%v = 0d0
     fw%vec_Ac_old%v = 0d0
 
-    ! x-directed incident
-    allocate(Ac_inc(1:3, -1:itotNtime+1))
 
     call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
-        & -1, itotNtime+1, Ac_inc)
+        & -1, itotNtime+2, Ac_inc)
 
     if (yn_restart == 'y') then
+
+        itt = Mit
 
         if (comm_is_root(ms%id_ms_world)) then
             fh_bin = get_filehandle()
@@ -600,34 +659,112 @@ subroutine incident()
         call comm_bcast(fw%vec_j_em%v, ms%icomm_ms_world)
 
     else
-
+        itt = -1  ! Prepare itt=-1 Ac_vec field profile
         allocate(Ac_new(1:3, fs%mg%is_overlap(1):0))
         allocate(Ac(1:3, fs%mg%is_overlap(1):0))
-        allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))    
-        call calc_Ac_ext_t(0*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac_new)
-        call calc_Ac_ext_t(-1*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac)
-        call calc_Ac_ext_t(-2*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac_old)
+        allocate(Ac_old(1:3, fs%mg%is_overlap(1):0)) 
+        call calc_Ac_ext_t((itt)*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac_new)   ! Ac_new = Ac(itt) with itt=-1
+        call calc_Ac_ext_t((itt-1)*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac)       ! Ac = Ac(itt-1) with itt=-1
+        call calc_Ac_ext_t((itt-2)*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac_old)   ! Ac = Ac(itt-2) with itt=-1
         do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
             do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
-                fw%vec_Ac%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3,  fs%mg%is_overlap(1):0)
-                fw%vec_Ac_new%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_new(1:3,  fs%mg%is_overlap(1):0)
-                fw%vec_Ac_old%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3,  fs%mg%is_overlap(1):0)
+                fw%vec_Ac_new%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac_new(1:3, fs%mg%is_overlap(1):0)
+                fw%vec_Ac%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3, fs%mg%is_overlap(1):0)
+                fw%vec_Ac_old%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3, fs%mg%is_overlap(1):0)
             end do
         end do
         deallocate(Ac_new, Ac, Ac_old)
 
-        fw%Ac_inc(:) = Ac_inc(:, 0)
-        fw%Ac_inc_new(:) = Ac_inc(:, 1)
+        itt = 0 ! Update to itt=0 Ac_vec field prodile
+        fw%Ac_inc(:) = Ac_inc(:, itt-1)
+        fw%Ac_inc_new(:) = Ac_inc(:, itt)
         call weyl_calc(fs, fw)
 
-        call write_RT_Ac_file()
     end if
+
+    ! Write out initial field profile:
+    call write_RT_Ac_file()
 
     return
  end subroutine incident
+
+
+ ! Experimetal Implementation of Incident/Reflection/Transmit field output
+ subroutine open_wave_data_file()
+    use filesystem, only: open_filehandle
+    implicit none
+    fh_wave = open_filehandle(trim(ms%base_directory) // trim(sysname) // "_wave.data")
+    write(fh_wave, '(a)') "# 1D multiscale calculation:"
+    write(fh_wave, '(a)') "# E_inc: E-field amplitude of incident wave"
+    write(fh_wave, '(a)') "# E_ref: E-field amplitude of reflected wave"
+    write(fh_wave, '(a)') "# E_tra: E-field amplitude of transmitted wave"
+    write(fh_wave, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "Time", trim(t_unit_time%name), &
+        & 2, "E_inc_x", trim(t_unit_elec%name), &
+        & 3, "E_inc_y", trim(t_unit_elec%name), &
+        & 4, "E_inc_z", trim(t_unit_elec%name), &
+        & 5, "E_ref_x", trim(t_unit_elec%name), &
+        & 6, "E_ref_y", trim(t_unit_elec%name), &
+        & 7, "E_ref_z", trim(t_unit_elec%name), &
+        & 8, "E_tra_x", trim(t_unit_elec%name), &
+        & 9, "E_tra_y", trim(t_unit_elec%name), &
+        & 10, "E_tra_z", trim(t_unit_elec%name)
+end subroutine open_wave_data_file
+
+ ! Experimetal Implementation of Incident/Reflection/Transmit field output
+subroutine write_wave_data_file()
+    implicit none
+    real(8) :: e_inc(3)
+    real(8) :: e_ref(3)
+    real(8) :: e_tra(3)
+    real(8) :: dt_Ac(3)
+    real(8) :: dx_Ac(3)
+    integer :: iiy, iiz
+
+    iiy = fs%mg%is(2)
+    iiz = fs%mg%is(3)
+
+    ! Left side boundary:
+    dx_Ac(:) = (fw%vec_Ac%v(:,0,iiy,iiz) - fw%vec_Ac%v(:,-1,iiy,iiz)) / fs%hgs(1)
+    dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,0,iiy,iiz) + fw%vec_Ac_new%v(:,-1,iiy,iiz)) & 
+        & - 0.5d0 * (fw%vec_Ac_old%v(:,0,iiy,iiz) + fw%vec_Ac_old%v(:,-1,iiy,iiz))) / (2 * dt)
+    
+    e_inc(:) = 0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
+    e_ref(:) = 0.5d0 * (dt_Ac + cspeed_au * dx_Ac)
+
+    ! Right side boundary:
+    dx_Ac(:) = (fw%vec_Ac%v(:,nx_m+2,iiy,iiz) - fw%vec_Ac%v(:,nx_m+1,iiy,iiz)) / fs%hgs(1)
+    dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_new%v(:,nx_m+1,iiy,iiz)) & 
+        & - 0.5d0 * (fw%vec_Ac_old%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_old%v(:,nx_m+1,iiy,iiz))) / (2 * dt)
+    
+    e_tra(:) = 0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
+
+    write(fh_wave, '(99(e23.15e3, 1x))')  &
+        & itt * dt * t_unit_time%conv, &
+        & e_inc(1) * t_unit_elec%conv, &
+        & e_inc(2) * t_unit_elec%conv, &
+        & e_inc(3) * t_unit_elec%conv, &
+        & e_ref(1) * t_unit_elec%conv, &
+        & e_ref(2) * t_unit_elec%conv, &
+        & e_ref(3) * t_unit_elec%conv, &
+        & e_tra(1) * t_unit_elec%conv, &
+        & e_tra(2) * t_unit_elec%conv, &
+        & e_tra(3) * t_unit_elec%conv
+    return
+end subroutine write_wave_data_file
+    
+    
+ ! Experimetal Implementation of Incident/Reflection/Transmit field output
+subroutine close_wave_data_file()
+    implicit none
+    close(fh_wave)
+    return
+end subroutine close_wave_data_file
+    
+
 
 
 end subroutine main_ms

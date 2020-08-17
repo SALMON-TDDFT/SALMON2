@@ -30,7 +30,6 @@ contains
 
   subroutine ssdg_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
-    use salmon_global, only: yn_scalapack_red_mem
     use communication, only: comm_summation,comm_bcast
     use timer
     use hamiltonian, only: hpsi
@@ -47,15 +46,15 @@ contains
     type(s_orbital)            :: spsi,shpsi
     type(s_sendrecv_grid)      :: srg
     if (system%if_real_orbital) then
-      if (yn_scalapack_red_mem == 'y') then
-        !call ssdg_rwf_rblas_red_mem(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-        write(*,*) "WARNING: ssdg_rwf_rblas_red_mem is inavailable with SO"
+      !if (yn_scalapack_red_mem == 'y') then
+      !  !call ssdg_rwf_rblas_red_mem(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+      !  write(*,*) "WARNING: ssdg_rwf_rblas_red_mem is inavailable with SO"
+      !  !call ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+      !  call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+      !else
         !call ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
         call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-      else
-        !call ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-        call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-      end if
+      !end if
     else
       !call ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
       call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)

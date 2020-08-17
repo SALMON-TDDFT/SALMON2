@@ -95,7 +95,7 @@ end subroutine write_avs
 !======================================================================
 
 subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,system)
-  use inputoutput, only: natom,kion,izatom
+  use inputoutput, only: natom,kion,izatom,yn_jm
   use structures, only: s_rgrid, s_dft_system
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
@@ -119,6 +119,8 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,system)
       write(fp,*) "Molecular Orbital"
     else if(phys_quantity=="dns")then
       write(fp,*) "Electron Density"
+    else if(phys_quantity=="pbcd")then
+      write(fp,*) "Positive Background Charge Density"
     else if(phys_quantity=="elf")then
       write(fp,*) "Electron Localization Function"
     else if(phys_quantity=="dnsdiff")then
@@ -135,10 +137,14 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,system)
     write(fp,'(i5,3f12.6)') lg%num(1),system%hgs(1),0.d0,0.d0
     write(fp,'(i5,3f12.6)') lg%num(2),0.d0,system%hgs(2),0.d0
     write(fp,'(i5,3f12.6)') lg%num(3),0.d0,0.d0,system%hgs(3)
-    do iatom=1,natom
-      ik=Kion(iatom)
-      write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(system%Rion(j,iatom),j=1,3)
-    end do
+    if(yn_jm=='n')then
+      do iatom=1,natom
+        ik=Kion(iatom)
+        write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(system%Rion(j,iatom),j=1,3)
+      end do
+    else
+      write(fp,'(i5,4f12.6)') 1,1.0d0,0.0d0,0.0d0,0.0d0
+    end if
 
     do ix=lg%is(1),lg%ie(1)
     do iy=lg%is(2),lg%ie(2)

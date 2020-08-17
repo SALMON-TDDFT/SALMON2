@@ -52,9 +52,9 @@
   
   !angular momentum of pseudopotential that will be treated as local
   lloc_ps(1) = 2
-  !--- Caution ---------------------------------------!
-  ! Index must correspond to those in &atomic_coor.   !
-  !---------------------------------------------------!
+  !--- Caution -------------------------------------------!
+  ! Index must correspond to those in &atomic_red_coor.   !
+  !-------------------------------------------------------!
 /
 
 &functional
@@ -79,7 +79,7 @@
 /
 
 &emfield
-  !envelope shape of the incident pulse('Ecos2': cos^2 type envelope for scalar potential)
+  !envelope shape of the incident pulse('Acos2': cos^2 type envelope for vector potential)
   ae_shape1 = 'Acos2'
   
   !peak intensity(W/cm^2) of the incident pulse

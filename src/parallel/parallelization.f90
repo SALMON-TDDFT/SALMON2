@@ -21,14 +21,20 @@ module parallelization
   integer, public :: nproc_id_global
   integer, public :: nproc_size_global
 
+  !!! elapsed-time gap between compute node.
+  real(8), private :: gap_time_system
+
   ! call once
   public :: setup_parallel
   public :: end_parallel
 
   ! util
+  public :: adjust_elapse_time
   public :: get_thread_id
   public :: get_nthreads
   public :: is_distributed_parallel
+
+  private :: find_elapse_time_gap
 
 contains
   subroutine setup_parallel
@@ -36,6 +42,7 @@ contains
     implicit none
     call comm_init
     call comm_get_globalinfo(nproc_group_global, nproc_id_global, nproc_size_global)
+    call find_elapse_time_gap
   end subroutine
 
   subroutine end_parallel
@@ -43,6 +50,26 @@ contains
     implicit none
     call comm_finalize
   end subroutine
+
+  subroutine find_elapse_time_gap
+    use communication
+    use misc_routines, only: get_wtime
+    implicit none
+    real(8) :: now, me
+    call comm_sync_all
+    now = get_wtime()
+    me  = now
+    call comm_sync_all
+    call comm_get_min(now, nproc_group_global)
+    gap_time_system = me - now
+  end subroutine
+
+  function adjust_elapse_time(time)
+    implicit none
+    real(8), intent(in) :: time
+    real(8)             :: adjust_elapse_time
+    adjust_elapse_time = time - gap_time_system
+  end function
 
   function get_thread_id() result(nid)
 #ifdef _OPENMP

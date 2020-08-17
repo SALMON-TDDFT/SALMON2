@@ -68,9 +68,7 @@
 /
 &system
 	al=1.026000d+01,1.026000d+01,1.026000d+01
-	crystal_structure='diamond'
 	yn_periodic = 'y'
-	isym=8
 	natom=8
 	nelec=32
 	nelem=1

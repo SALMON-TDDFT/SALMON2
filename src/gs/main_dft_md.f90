@@ -55,7 +55,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
 type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
@@ -75,7 +75,7 @@ real(8) :: dt_h, sum1
 character(100) :: comment_line
 
 
-call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
+call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
@@ -86,12 +86,11 @@ it=0
 call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
-
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg,  &
                           info,  &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
                           ofl )
@@ -100,7 +99,7 @@ call initialization2_dft( it, nspin, rion_update,  &
                           system, energy, ewald, stencil, fg, poisson,&
                           lg, mg, info,   &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
@@ -110,7 +109,7 @@ call initialization_dft_md( it, rion_update,  &
                           lg, mg,  &
                           info,  &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
@@ -147,6 +146,8 @@ call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
 
+   if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
+
    call time_evolution_step_md_part1(it,system,md)
 
    call update_pseudo_rt(it,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
@@ -178,11 +179,11 @@ MD_Loop : do it=1,nt
                            stencil,  &
                            srg,srg_scalar,   &
                            spsi,shpsi,sttpsi,  &
-                           rho,rho_s,  &
+                           rho,rho_jm,rho_s,  &
                            V_local,Vh,Vxc,Vpsl,xc_func,  &
                            pp,ppg,ppn,  &
                            rho_old,Vlocal_old,  &
-                           band,1 )
+                           band,2 )
 
    ! force
    call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
@@ -216,7 +217,7 @@ MD_Loop : do it=1,nt
 
    ! Export electronic density (cube or vtk)
    if(yn_out_dns_rt=='y' .and. mod(it,out_dns_rt_step)==0) then
-      call write_dns(lg,mg,system,rho%f,rho%f,it)
+      call write_dns(lg,mg,system,rho_s,rho_s,it)
    end if
 
 end do MD_Loop
@@ -246,7 +247,7 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 
 ! write GS: analysis option
 !if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-!if(yn_out_dns =='y') call write_dns(lg,mg,system,rho%f)
+!if(yn_out_dns =='y') call write_dns(lg,mg,system,rho_s)
 !if(yn_out_dos =='y') call write_dos(system,energy)
 !if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 !if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
