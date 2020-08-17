@@ -19,6 +19,7 @@ module input_pp_sub
 
   logical,private :: flag_potential_is_given=.true.  ! Pseudopotential data is given as the potentitals and the wavefunctions
   logical,private :: flag_beta_proj_is_given=.false. ! Pseudopotential data is given as projection operators
+  logical,private :: flag_so=.false.
 
 contains
 
@@ -38,7 +39,7 @@ subroutine input_pp(pp,hx,hy,hz)
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
   real(8),intent(in) :: hx,hy,hz
-  integer :: ik,l,i,l0,ll,nprj,i1,nr,j
+  integer :: ik,l,i,l0,ll,nprj,i1,nr
   real(8) :: rrc(0:pp%lmax0)
   real(8) :: r1
   real(8),allocatable :: rhor_nlcc(:,:)   !zero in radial index for taking derivative
@@ -79,6 +80,7 @@ subroutine input_pp(pp,hx,hy,hz)
       end select
 
       if ( flag_beta_proj_is_given ) flag_potential_is_given=.false.
+      if ( any(pp%vpp_so/=0.0d0) ) flag_so=.true.
 
       if ( all(pp%nproj(:,ik)==0) ) pp%nproj(0:pp%mlps(ik),ik)=1
 
@@ -137,20 +139,22 @@ subroutine input_pp(pp,hx,hy,hz)
         end do
         l0=l
         end do
-        l0=0
-        do ll=0,pp%mlps(ik)
-        do l=l0,l0+pp%nproj(ll,ik)-1
-          if ( pp%anorm_so(l,ik) == 0.0d0 ) cycle
-          pp%inorm_so(l,ik) = 1
-          if( pp%anorm_so(l,ik) < 0.0d0 )then
-            pp%anorm_so(l,ik) = -pp%anorm_so(l,ik)
-            pp%inorm_so(l,ik) = -1
-          end if
-          if ( abs(pp%anorm_so(l,ik)) < Eps0 ) pp%inorm_so(l,ik)=0
-          pp%anorm_so(l,ik) = sqrt( pp%anorm_so(l,ik) )
-        end do
-        l0=l
-        end do
+        if ( flag_so ) then
+          l0=0
+          do ll=0,pp%mlps(ik)
+          do l=l0,l0+pp%nproj(ll,ik)-1
+            if ( pp%anorm_so(l,ik) == 0.0d0 ) cycle
+            pp%inorm_so(l,ik) = 1
+            if( pp%anorm_so(l,ik) < 0.0d0 )then
+              pp%anorm_so(l,ik) = -pp%anorm_so(l,ik)
+              pp%inorm_so(l,ik) = -1
+            end if
+            if ( abs(pp%anorm_so(l,ik)) < Eps0 ) pp%inorm_so(l,ik)=0
+            pp%anorm_so(l,ik) = sqrt( pp%anorm_so(l,ik) )
+          end do
+          l0=l
+          end do
+        end if
       else
         do l=0,pp%mlps(ik)
           pp%anorm(l,ik) = 0.d0
@@ -183,7 +187,7 @@ subroutine input_pp(pp,hx,hy,hz)
       write(*,*) 'nproj(ik,l) =',(pp%nproj(l,ik),l=0,pp%mlps(ik))
       write(*,*) 'anorm(ik,l) =',(real(pp%anorm(l,ik)),l=0,sum(pp%nproj(:,ik))-1)
       write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,sum(pp%nproj(:,ik))-1)
-      if( any(pp%anorm_so/=0.0d0) )then
+      if( flag_so )then
         write(*,*) 'anorm_so(ik,l) =',(real(pp%anorm_so(l,ik)),l=0,sum(pp%nproj(:,ik))-1)
         write(*,*) 'inorm_so(ik,l) =',(pp%inorm_so(l,ik),l=0,sum(pp%nproj(:,ik))-1)
       end if
@@ -200,7 +204,7 @@ subroutine input_pp(pp,hx,hy,hz)
         write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,pp%mlps(ik))
       else if (yn_psmask == 'n') then
         call making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
-
+        if ( flag_so ) call making_ps_without_masking_so( pp, ik )
       else
         stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
@@ -973,7 +977,7 @@ end subroutine making_ps_with_masking
 !====
 subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   use structures,only : s_pp_info
-  use salmon_global, only: nelem, ps_format
+  use salmon_global, only: nelem
   use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -1074,10 +1078,6 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
       pp%udvtbl(1:pp%nrps(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
       pp%dudvtbl(1:pp%nrps(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
     enddo
-  end if
-
-  if ( ps_format(ik) == "ADPACK" ) then
-    call making_ps_without_masking_so( pp, ik )
   end if
 
   pp%flag_nlcc = pp%flag_nlcc.or.flag_nlcc_element(ik)

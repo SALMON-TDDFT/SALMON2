@@ -98,11 +98,11 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
 ! density
   call timer_begin(LOG_CALC_RHO)
 
-  call calc_density(system,rho_s,spsi,info,mg)
-
   if ( SPIN_ORBIT_ON ) then
     call calc_dm_noncollinear( spsi, system, info, mg )
     call rot_dm_noncollinear( rho_s, system, mg )
+  else
+    call calc_density(system,rho_s,spsi,info,mg)
   end if
 
   select case(method_mixing)

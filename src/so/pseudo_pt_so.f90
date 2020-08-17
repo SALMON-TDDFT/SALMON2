@@ -22,17 +22,17 @@ module pseudo_pt_so_sub
 ! WARNING: We must not call these except for hpsi routine.
 
   private
-  public :: pseudo_so
   public :: SPIN_ORBIT_ON
+  public :: pseudo_so
+  public :: calc_uVpsi_so
+  public :: calc_force_uVpsi_so
 
 contains
-
-!-----------------------------------------------------------------------------------------------------------------------------------
 
   subroutine pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
     use structures, only: s_parallel_info, s_pp_grid, s_rgrid, s_orbital
     use communication, only: comm_summation
-    use parallelization, only: nproc_id_global
+    !use parallelization, only: nproc_id_global
     use timer
     implicit none
     integer,intent(in) :: nspin
@@ -48,9 +48,9 @@ contains
     complex(8) :: uVpsi(2),wrk
     complex(8),allocatable :: uVpsibox1(:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
-    real(8) :: tmp(2),tmp1(2),tmp2(2),tmp3(2)
-    real(8) :: wf_check(2)
-    integer :: iu
+    !real(8) :: tmp(2),tmp1(2),tmp2(2),tmp3(2)
+    !real(8) :: wf_check(2)
+    !integer :: iu
 
     !write(*,*) "------------------ pseudo_so"
 
@@ -299,94 +299,172 @@ contains
     return
   end subroutine pseudo_so
 
-  subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
-  use structures
-  use timer
-  use communication, only: comm_summation
-#ifdef SALMON_ENABLE_MPI3
-  use communication, only: comm_wait_all
-  use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
-#endif
-  implicit none
-  integer        ,intent(in) :: nspin
-  type(s_parallel_info),intent(in) :: info
-  type(s_pp_grid),intent(in) :: ppg
-  type(s_orbital),intent(in) :: tpsi
-  complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
-  complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  integer :: ilma,ia,j,ix,iy,iz,Nlma
-  complex(8) :: uVpsi
 
-  call timer_begin(LOG_UHPSI_PSEUDO)
+  subroutine calc_uVpsi_so(Nspin,info,ppg,tpsi,uVpsibox2)
+    use structures, only: s_parallel_info, s_pp_grid, s_rgrid, s_orbital
+    use communication, only: comm_summation
+    use timer
+    implicit none
+    integer,intent(in) :: Nspin
+    type(s_parallel_info),intent(in) :: info
+    type(s_pp_grid),intent(in) :: ppg
+    type(s_orbital),intent(in) :: tpsi
+    complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+    !
+    integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
+    integer :: ilma,ia,j,ix,iy,iz,Nlma
+    complex(8),parameter :: zero=(0.0d0,0.0d0)
+    complex(8) :: uVpsi(2),wrk
+    complex(8),allocatable :: uVpsibox1(:,:,:,:,:)
 
-  im_s = info%im_s
-  im_e = info%im_e
-  ik_s = info%ik_s
-  ik_e = info%ik_e
-  io_s = info%io_s
-  io_e = info%io_e
-  norb = Nspin* info%numo * info%numk * info%numm
+    !write(*,*) "------------------ calc_uVpsi_so"
 
-  Nlma = ppg%Nlma
+    call timer_begin(LOG_UHPSI_PSEUDO)
 
-  allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
-  allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+    im_s = info%im_s
+    im_e = info%im_e
+    ik_s = info%ik_s
+    ik_e = info%ik_e
+    io_s = info%io_s
+    io_e = info%io_e
 
-!$omp parallel do collapse(4) &
-!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
-  do im=im_s,im_e
-  do ik=ik_s,ik_e
-  do io=io_s,io_e
-  do ispin=1,Nspin
+    Nlma = size(ppg%ia_tbl_so)
+
+    allocate(uVpsibox2(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox2=zero
+
+    if ( info%if_divide_rspace ) then
+
+      allocate(uVpsibox1(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox1=zero
+
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+
+        do ilma=1,Nlma
+
+          ia = ppg%ia_tbl_so(ilma)
+
+          do ispin=1,2
+            wrk=zero
+            do j=1,ppg%mps(ia)
+              ix = ppg%jxyz(1,j,ia)
+              iy = ppg%jxyz(2,j,ia)
+              iz = ppg%jxyz(3,j,ia)
+              wrk = wrk + conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) ) &
+                        * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+            end do
+            wrk = wrk * ppg%rinv_uvu_so(ilma)
+            uVpsibox1(ispin,ilma,io,ik,im) = wrk
+          end do !ispin
+
+        end do !ilma
+
+      end do !io
+      end do !ik
+      end do !im
+
+      call timer_end(LOG_UHPSI_PSEUDO)
+
+      call timer_begin(LOG_UHPSI_PSEUDO_COMM)
+      call comm_summation(uVpsibox1,uVpsibox2,size(uVpsibox2),info%icomm_r)
+      call timer_end(LOG_UHPSI_PSEUDO_COMM)
+
+      call timer_begin(LOG_UHPSI_PSEUDO)
+
+      deallocate( uVpsibox1 )
+
+    else !if ( .not. info%if_divide_rspace ) then
+
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+
+        do ilma=1,Nlma
+
+          ia = ppg%ia_tbl_so(ilma)
+
+          do ispin=1,2
+
+            wrk=zero
+            do j=1,ppg%mps(ia)
+              ix = ppg%jxyz(1,j,ia)
+              iy = ppg%jxyz(2,j,ia)
+              iz = ppg%jxyz(3,j,ia)
+              wrk = wrk + conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) ) &
+                        * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+            end do
+
+            uVpsi(ispin) = wrk * ppg%rinv_uvu_so(ilma)
+
+            uVpsibox2(ispin,ilma,io,ik,im)=uVpsi(ispin)
+
+          end do !ispin
+
+        end do !ilma
+
+      end do !io
+      end do !ik
+      end do !im
+
+    end if
+
+    call timer_end(LOG_UHPSI_PSEUDO)
+
+    return
+  end subroutine calc_uVpsi_so
+
+
+  subroutine calc_force_uVpsi_so( force, ppg, mg, ik, ispin, gtpsi, uVpsibox2 )
+    use structures, only: s_pp_grid, s_rgrid
+    use communication, only: comm_summation
+    use timer
+    implicit none
+    real(8),intent(inout) :: force(:,:)
+    type(s_pp_grid),intent(in) :: ppg
+    type(s_rgrid),intent(in) ::mg
+    integer,intent(in) :: ik, ispin
+    complex(8),intent(in) :: gtpsi(:,mg%is_array(1):,mg%is_array(2):,mg%is_array(3):)
+    complex(8),intent(in) :: uVpsibox2(:,:)
+    !
+    integer :: ilma,ia,j,ix,iy,iz,Nlma
+    complex(8),parameter :: zero=(0.0d0,0.0d0)
+    complex(8) :: uVpsi(2),wrk1,wrk2,wrk3,conjg_zekr_uV_so
+
+    !write(*,*) "------------------ calc_force_uVpsi_so"
+
+    call timer_begin(LOG_UHPSI_PSEUDO)
+
+    Nlma = size(ppg%ia_tbl_so)
 
     do ilma=1,Nlma
-      ia = ppg%ia_tbl(ilma)
-      uVpsi = 0.d0
+
+      ia = ppg%ia_tbl_so(ilma)
+
+      uVpsi(1) = uVpsibox2(1,ilma)
+      uVpsi(2) = uVpsibox2(2,ilma)
+
+      wrk1=zero
+      wrk2=zero
+      wrk3=zero
       do j=1,ppg%mps(ia)
         ix = ppg%jxyz(1,j,ia)
         iy = ppg%jxyz(2,j,ia)
         iz = ppg%jxyz(3,j,ia)
-        uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        conjg_zekr_uV_so = conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) )
+        wrk1 = wrk1 + conjg_zekr_uV_so*gtpsi(1,ix,iy,iz)
+        wrk2 = wrk2 + conjg_zekr_uV_so*gtpsi(2,ix,iy,iz)
+        wrk3 = wrk3 + conjg_zekr_uV_so*gtpsi(3,ix,iy,iz)
       end do
-      uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-      uVpsibox(ispin,io,ik,im,ilma) = uVpsi
-    end do
 
-  end do
-  end do
-  end do
-  end do
-!$omp end parallel do
+      force(1,ia) = force(1,ia) + dble( wrk1*(uVpsi(1)+uVpsi(2)) )
+      force(2,ia) = force(2,ia) + dble( wrk2*(uVpsi(1)+uVpsi(2)) )
+      force(3,ia) = force(3,ia) + dble( wrk3*(uVpsi(1)+uVpsi(2)) )
 
-  call timer_end(LOG_UHPSI_PSEUDO)
+    end do !ilma
 
-  call timer_begin(LOG_UHPSI_PSEUDO_COMM)
-#ifdef SALMON_ENABLE_MPI3
-! FIXME: This subroutine uses MPI functions directly...
-  nreq = 0
-  do ia=1,natom
-    if (ppg%ireferred_atom(ia)) then
-      is = ppg%irange_atom(1,ia)
-      ie = ppg%irange_atom(2,ia)
-      ns = ie - is + 1
-      nreq = nreq + 1
-      call MPI_Iallreduce( uvpsibox (Nspin,io_s,ik_s,im_s,is) &
-                         , uvpsibox2(Nspin,io_s,ik_s,im_s,is) &
-                         , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
-                         , ireqs(nreq), ierr )
-    !else
-      ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
-      ! We can skip self copy.
-    end if
-  end do
-  call comm_wait_all(ireqs(1:nreq))
-#else
-  call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-#endif
-  call timer_end(LOG_UHPSI_PSEUDO_COMM)
+    call timer_end(LOG_UHPSI_PSEUDO)
 
-  return
-  end subroutine calc_uVpsi_rdivided
+    return
+  end subroutine calc_force_uVpsi_so
 
 end module pseudo_pt_so_sub

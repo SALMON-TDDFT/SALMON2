@@ -264,6 +264,8 @@ contains
     use sendrecv_grid, only: update_overlap_complex8
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
+    use pseudo_pt_current_so, only: SPIN_ORBIT_ON, calc_current_nonlocal_so &
+                                  , calc_current_nonlocal_rdivided_so
     use sym_vector_sub, only: sym_vector_xyz
     use code_optimization, only: current_omp_mode
     use timer
@@ -296,7 +298,7 @@ contains
     call timer_end(LOG_CURRENT_CALC)
 
     call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
-    if(info%if_divide_rspace) then
+    if ( info%if_divide_rspace .and. .not.SPIN_ORBIT_ON ) then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
     end if
@@ -316,6 +318,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             shared(SPIN_ORBIT_NO) &
 !$omp             reduction(+:wrk4) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -325,11 +328,21 @@ contains
                             ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
         wrk2 = matmul(BT,wrk2)
 
-        if(info%if_divide_rspace) then
-          uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
-          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+        if ( SPIN_ORBIT_ON ) then
+          if ( info%if_divide_rspace ) then
+            call calc_current_nonlocal_rdivided_so &
+                 ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,info%icomm_r )
+          else
+            call calc_current_nonlocal_so &
+                 ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+          end if
         else
-          call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          if ( info%if_divide_rspace)then
+            uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+            call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+          else
+            call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          end if
         end if
 
         wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
@@ -351,7 +364,7 @@ contains
     end do
     end do
 
-    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2,uVpsi)
+    if (info%if_divide_rspace .and. .not.SPIN_ORBIT_ON) deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     return
 

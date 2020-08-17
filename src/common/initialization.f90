@@ -166,7 +166,9 @@ subroutine init_dft_system(lg,system,stencil)
   end if
 
   if(calc_mode=='RT'.and.temperature<-1.d-12)then
-    if(system%nspin==2.and.sum(nelec_spin(:))>0)then
+    if( SPIN_ORBIT_ON )then
+       system%no = nelec
+    else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
       system%no = maxval(nelec_spin(:))
     else
       if(mod(nelec,2)==0)then

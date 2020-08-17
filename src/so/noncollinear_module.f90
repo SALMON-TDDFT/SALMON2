@@ -28,6 +28,7 @@ contains
     type(s_rgrid),intent(in) :: mg
     integer :: io,ik,im,is,js,ix,iy,iz,m1,m2,m3,n1,n2,n3
     complex(8),allocatable :: ztmp(:,:,:)
+    real(8) :: occ
 
     if ( .not.allocated(den_mat) ) then
        m1=mg%is(1); n1=mg%ie(1)
@@ -42,12 +43,14 @@ contains
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
+       occ=system%rocc(io,ik,1)*system%wtk(ik)
+       if ( abs(occ) < 1.0d-15 ) cycle
        do js=1,2
        do is=1,2
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-             den_mat(ix,iy,iz,is,js) = den_mat(ix,iy,iz,is,js) + system%rocc(io,ik,1) &
+             den_mat(ix,iy,iz,is,js) = den_mat(ix,iy,iz,is,js) + occ &
                   * conjg( psi%zwf(ix,iy,iz,is,io,ik,im) )*psi%zwf(ix,iy,iz,js,io,ik,im)
           end do
           end do
