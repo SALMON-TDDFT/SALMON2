@@ -29,7 +29,7 @@ contains
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
     use sym_vector_sub, only: sym_vector_xyz
     use sym_sub, only: use_symmetry
-    use pseudo_pt_so_sub, only: SPIN_ORBIT_ON, calc_uVpsi_so, calc_force_uVpsi_so
+    use pseudo_pt_so_sub, only: SPIN_ORBIT_ON, calc_uVpsi_so
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     use salmon_global, only: kion,cutoff_g,yn_periodic
     use code_optimization, only: force_omp_mode
@@ -60,6 +60,7 @@ contains
     complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
+    complex(8) :: ztmp
     integer :: Norb,iorb,ilocal
 
     call timer_begin(LOG_CALC_ION_FORCE)
@@ -195,7 +196,7 @@ contains
 !$omp   private(jlma,l,n,m1,m2,ddm_mms_nla,gtpsi) &
 !$omp   shared(im,ik_s,ik_e,io_s,io_e,nspin,tpsi,mg,stencil,system,ppg,uVpsibox2,yn_periodic) &
 !$omp   shared(PLUS_U_ON,Nlma_ao,phipsibox2,iorb,zF_tmp,U_eff,dm_mms_nla) &
-!$omp   shared(SPIN_ORBIT_ON) &
+!$omp   shared(SPIN_ORBIT_ON,ztmp) &
 !$omp   shared(dden) &
 !$omp   reduction(+:F_tmp) &
 !$omp   if(force_omp_mode)
@@ -238,16 +239,25 @@ contains
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
        if( SPIN_ORBIT_ON )then
-         do iz=mg%is_array(3),mg%ie_array(3)
-         do iy=mg%is_array(2),mg%ie_array(2)
-         do ix=mg%is_array(1),mg%ie_array(1)
-           gtpsi(1,ix,iy,iz) = -rtmp*( gtpsi(1,ix,iy,iz) + zI*kAc(1)*tpsi%zwf(ix,iy,iz,ispin,io,ik,im) )
-           gtpsi(2,ix,iy,iz) = -rtmp*( gtpsi(2,ix,iy,iz) + zI*kAc(2)*tpsi%zwf(ix,iy,iz,ispin,io,ik,im) )
-           gtpsi(3,ix,iy,iz) = -rtmp*( gtpsi(3,ix,iy,iz) + zI*kAc(3)*tpsi%zwf(ix,iy,iz,ispin,io,ik,im) )
+         do ilma=1,size(ppg%ia_tbl_so)
+           ia = ppg%ia_tbl_so(ilma)
+           duVpsi=zero
+           do j=1,ppg%mps(ia)
+             ix = ppg%jxyz(1,j,ia)
+             iy = ppg%jxyz(2,j,ia)
+             iz = ppg%jxyz(3,j,ia)
+             w(1) = gtpsi(1,ix,iy,iz) + zI*kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(2) = gtpsi(2,ix,iy,iz) + zI*kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(3) = gtpsi(3,ix,iy,iz) + zI*kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             duVpsi(1) = duVpsi(1) + conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) )*w(1)
+             duVpsi(2) = duVpsi(2) + conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) )*w(2)
+             duVpsi(3) = duVpsi(3) + conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) )*w(3)
+           end do
+           ztmp=uVpsibox2(1,ilma,io,ik,im)+uVpsibox2(2,ilma,io,ik,im)
+           F_tmp(1,ia) = F_tmp(1,ia) - rtmp*dble( conjg(duVpsi(1)) * ztmp )
+           F_tmp(2,ia) = F_tmp(2,ia) - rtmp*dble( conjg(duVpsi(2)) * ztmp )
+           F_tmp(3,ia) = F_tmp(3,ia) - rtmp*dble( conjg(duVpsi(3)) * ztmp )
          end do
-         end do
-         end do
-         call calc_force_uVpsi_so( F_tmp, ppg, mg, ik, ispin, gtpsi, uVpsibox2(:,:,io,ik,im) )
        else
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
        do ilocal=1,ppg%ilocal_nlma

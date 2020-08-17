@@ -318,7 +318,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
-!$omp             shared(SPIN_ORBIT_NO) &
+!$omp             shared(SPIN_ORBIT_ON) &
 !$omp             reduction(+:wrk4) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
