@@ -21,13 +21,14 @@ contains
 
   subroutine calc_dm_noncollinear( psi, system, info, mg )
     use structures, only : s_dft_system, s_parallel_info, s_rgrid, s_orbital
+    use communication, only: comm_summation
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
     type(s_rgrid),intent(in) :: mg
     integer :: io,ik,im,is,js,ix,iy,iz,m1,m2,m3,n1,n2,n3
-    complex(8),allocatable :: ztmp(:,:,:)
+    complex(8),allocatable :: ztmp(:,:,:),dmat_tmp(:,:,:,:,:)
     real(8) :: occ
 
     if ( .not.allocated(den_mat) ) then
@@ -60,6 +61,13 @@ contains
     end do !io
     end do !ik
     end do !im
+
+    ix=size(den_mat,1)
+    iy=size(den_mat,2)
+    iz=size(den_mat,3)
+    allocate( dmat_tmp(ix,iy,iz,2,2) ); dmat_tmp=den_mat
+    call comm_summation( dmat_tmp, den_mat, size(dmat_tmp), info%icomm_ko )
+    deallocate( dmat_tmp )
 
     !m1=mg%is(1); n1=mg%ie(1)
     !m2=mg%is(2); n2=mg%ie(2)

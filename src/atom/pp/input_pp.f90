@@ -200,6 +200,7 @@ subroutine input_pp(pp,hx,hy,hz)
       if (yn_psmask == 'y') then
         call making_ps_with_masking(pp,hx,hy,hz,ik, &
                                     rhor_nlcc,flag_nlcc_element)
+        if ( flag_so ) call making_ps_with_masking_so( pp,hx,hy,hz,ik )
         if (.not. quiet) then
         write(*,*) 'Following quantities are modified by masking procedure'
         write(*,*) 'Rps(ik), NRps(ik) =',pp%rps(ik), pp%nrps(ik)
@@ -981,6 +982,99 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
 
   return
 end subroutine making_ps_with_masking
+!====
+subroutine making_ps_with_masking_so(pp,hx,hy,hz,ik)
+  use structures,only : s_pp_info
+  use math_constants, only : pi
+  implicit none
+  type(s_pp_info),intent(inout) :: pp
+  integer,intent(in) :: ik
+  real(8),intent(in) :: hx,hy,hz
+  integer :: ncounter
+  real(8) :: uvpp(0:pp%nrmax0,0:2*pp%lmax0+1),duvpp(0:pp%nrmax0,0:2*pp%lmax0+1)
+  real(8) :: grid_function(0:pp%nrmax0)
+  integer :: i,l,ll,l0,mr
+  real(8) :: r1,r2,r3,r4
+
+  ncounter = 0
+  do i=0,pp%mr(ik)
+    if (pp%rad(i+1,ik) > dble(ncounter+1.d0)*max(Hx,Hy,Hz)) then
+      ncounter = ncounter + 1
+    end if
+    if (ncounter/2*2 == ncounter) then 
+      grid_function(i) = 1.d0
+    else
+      grid_function(i) = 0.d0
+    end if
+  end do
+
+  if( flag_beta_proj_is_given )then
+    mr=pp%mr(ik)
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=0,mr
+        uvpp(i,l)=pp%vpp_so(i,l)
+      end do
+      do i=1,mr-1
+        r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+        r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+        r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+        r4 = r1/r2
+        duvpp(i,l)=(r4+1.d0)*(uvpp(i,l)-uvpp(i-1,l))/r1-(uvpp(i+1,l)-uvpp(i-1,l))/r3*r4
+      end do
+      duvpp(0,l)=2.d0*duvpp(1,l)-duvpp(2,l)
+      duvpp(mr,l)=2.d0*duvpp(mr-1,l)-duvpp(mr-2,l)
+    end do
+    l0=l
+    end do
+  else
+    write(*,*) "so with upp-given pseudopotential has not been implemented"
+    stop "stop@making_ps_with_masking_so"
+  end if
+
+!  open(4,file="PSbeforemask_so_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//".dat")
+!  write(4,*) "# Mr =",pp%mr(ik)
+!  write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
+!  write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
+!  do i=0,pp%mr(ik)
+!    write(4,'(30e21.12)') pp%rad(i+1,ik),(uvpp(i,l),l=0,pp%mlps(ik)),(duvpp(i,l),l=0,pp%mlps(ik)),  &
+!                          vpploc(i),dvpploc(i),grid_function(i)
+!  end do
+!  close(4)
+
+  call ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
+
+!  open(4,file="PSaftermask_so_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//".dat")
+!  write(4,*) "# Mr =",pp%mr(ik)
+!  write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
+!  write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
+!  eta = alpha_mask*Pi*pp%rps(ik)/max(Hx,Hy,Hz)
+!  write(4,*) "# eta_mask, eta =",eta_mask,eta
+!  do i=0,pp%mr(ik)
+!    write(4,'(30e21.12)') pp%rad(i+1,ik),(uvpp(i,l),l=0,pp%mlps(ik)),(duvpp(i,l),l=0,pp%mlps(ik)),  &
+!                          vpploc(i),dvpploc(i),grid_function(i)
+!  end do
+!  close(4)
+
+  if( flag_beta_proj_is_given )then
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=1,pp%mr(ik)+1
+        pp%udvtbl_so(i,l,ik)=uvpp(i-1,l)
+        pp%dudvtbl_so(i,l,ik)=duvpp(i-1,l)
+      end do
+      if (pp%inorm_so(l,ik) == 0) cycle
+      pp%udvtbl_so(1:pp%mr(ik)+1,l,ik)=pp%udvtbl_so(1:pp%mr(ik)+1,l,ik)*pp%anorm_so(l,ik)
+      pp%dudvtbl_so(1:pp%mr(ik)+1,l,ik)=pp%dudvtbl_so(1:pp%mr(ik)+1,l,ik)*pp%anorm_so(l,ik)
+    end do
+    l0=l  
+    end do
+  end if
+
+  return
+end subroutine making_ps_with_masking_so
 !====
 subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   use structures,only : s_pp_info
