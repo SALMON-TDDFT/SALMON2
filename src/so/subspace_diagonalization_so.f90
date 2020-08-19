@@ -613,6 +613,7 @@ contains
     real(8) :: wf_block_send(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo_max)
     real(8) :: hmat_block(info%numo_max, info%numo)
     real(8) :: hmat_block_tmp(info%numo_max, info%numo)
+    real(8) :: eval(system%no)
 
     call timer_begin(LOG_SSDG_PERIODIC_HPSI)
     call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
