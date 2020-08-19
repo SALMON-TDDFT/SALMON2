@@ -41,6 +41,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
+  use noncollinear_module, only: SPIN_ORBIT_ON, calc_dm_noncollinear, rot_dm_noncollinear
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -158,7 +159,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
 
   call timer_begin(LOG_CALC_RHO)
-  call calc_density(system,rho_s,spsi_out,info,mg)
+
+  if( SPIN_ORBIT_ON )then
+    call calc_dm_noncollinear( spsi_out, system, info, mg )
+    call rot_dm_noncollinear( rho_s, system, mg )
+  else
+    call calc_density(system,rho_s,spsi_out,info,mg)
+  end if
 
   if(nspin==1)then
     !$omp workshare

@@ -257,6 +257,7 @@ module structures
     real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)
+    real(8),allocatable :: rinv_uvu_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)

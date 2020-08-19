@@ -95,6 +95,7 @@ module salmon_global
   integer        :: natom
   character(256) :: file_atom_coor
   character(256) :: file_atom_red_coor
+  character(1)   :: yn_spinorbit
 
 !! &pseudo
   character(256) :: file_pseudo(maxmki)

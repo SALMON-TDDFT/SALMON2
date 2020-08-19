@@ -35,6 +35,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
+  use communication, only: comm_summation
   implicit none
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
@@ -50,6 +51,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
   logical :: if_kAc,if_singlescale
   logical :: is_enable_overlapping
+  !real(8) :: tmp,tmp1
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -102,8 +104,19 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     end do
     call timer_end(LOG_UHPSI_STENCIL)
 
-  ! pseudopotential
-    if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+    ! nonlocal potential
+    if ( SPIN_ORBIT_ON ) then
+      ! pseudopotential
+      if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+    else
+      ! pseudopotential
+      if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+    end if
+
+    ! DFT+U
+    if ( PLUS_U_ON ) then
+      call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+    end if
 
   else
 
@@ -325,8 +338,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   ! nonlocal potential
     if(yn_jm=='n') then
       if ( SPIN_ORBIT_ON ) then
-        call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
-        call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+        call nondiagonal_so(tpsi,htpsi,info,mg)
+        call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
       else
       ! pseudopotential
         call zpseudo(tpsi,htpsi,info,nspin,ppg)
@@ -701,12 +714,11 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
     kAc(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
   end do
   
-  if ( PLUS_U_ON ) then
-    call update_kvector_plusU( ppg, kAc, ik_s, ik_e )
-  end if
   if ( SPIN_ORBIT_ON ) then
     call update_kvector_so( ppg, kAc, ik_s, ik_e )
-    return
+  end if
+  if ( PLUS_U_ON ) then
+    call update_kvector_plusU( ppg, kAc, ik_s, ik_e )
   end if
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))

@@ -15,6 +15,8 @@
 !
 module nondiagonal_so_sub
 
+  use noncollinear_module, only: op_xc_noncollinear
+
   implicit none
 
   private
@@ -22,15 +24,15 @@ module nondiagonal_so_sub
 
 contains
 
-  subroutine nondiagonal_so( tpsi, htpsi, info, nspin, ppg )
-    use structures
+  subroutine nondiagonal_so( tpsi, hpsi, info, mg )
+    use structures, only: s_parallel_info, s_rgrid, s_orbital
     implicit none
-    integer,intent(in) :: nspin
     type(s_parallel_info),intent(in) :: info
-    type(s_pp_grid),intent(in) :: ppg
+    type(s_rgrid),intent(in) :: mg
     type(s_orbital),intent(in) :: tpsi
-    type(s_orbital) :: htpsi
-write(*,*) "-------------- nondiagonal_so"
+    type(s_orbital),intent(inout) :: hpsi
+    !write(*,*) "-------------- nondiagonal_so"
+    call op_xc_noncollinear( tpsi, hpsi, info, mg )
     return
   end subroutine nondiagonal_so
 

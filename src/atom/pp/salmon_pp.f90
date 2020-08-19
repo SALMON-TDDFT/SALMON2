@@ -98,6 +98,9 @@ module salmon_pp
         else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.vps')then
           ips_type = 0
           ps_format(ik) = 'ADPACK'
+        else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.upf')then
+          ips_type = 0
+          ps_format(ik) = 'UPF'
         else
           stop 'Unprepared ps_format is required input_pseudopotential_YS'
         end if

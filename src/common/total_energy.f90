@@ -116,6 +116,7 @@ CONTAINS
     use math_constants,only : pi,zi
     use salmon_global, only: kion,aEwald, cutoff_r, yn_jm
     use communication, only: comm_summation,comm_is_root
+    use parallelization, only: nproc_id_global
     use timer
     implicit none
     type(s_rgrid)           ,intent(in) :: mg
@@ -261,6 +262,16 @@ CONTAINS
   ! total energy
     energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
 
+!    if ( comm_is_root(nproc_id_global) ) then
+!      write(*,*) "E_tot     =",energy%E_tot
+!      write(*,*) "E_kin     =",energy%E_kin
+!      write(*,*) "E_h       =",energy%E_h
+!      write(*,*) "E_ion_loc =",energy%E_ion_loc
+!      write(*,*) "E_ion_nloc=",energy%E_ion_nloc
+!      write(*,*) "E_xc      =",energy%E_xc
+!      write(*,*) "E_ion_ion =",energy%E_ion_ion
+!    end if
+
     call timer_end(LOG_TE_PERIODIC_COMM_COLL)
 
     return
@@ -273,7 +284,7 @@ CONTAINS
     use structures
     use communication, only: comm_summation
     use hamiltonian, only: hpsi
-    use spin_orbit_global, only: SPIN_ORBIT_ON
+    use pseudo_pt_so_sub, only: SPIN_ORBIT_ON, pseudo_so
     use timer
     implicit none
     type(s_dft_energy)                     :: energy
@@ -329,6 +340,11 @@ CONTAINS
       end do
       
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      if ( SPIN_ORBIT_ON ) then
+        energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
+        energy%esp(:,:,2) = energy%esp(:,:,1)
+      end if
+
     ! kinetic energy (E_kin)
       E_tmp = 0d0
 !$omp parallel do collapse(3) default(none) &
@@ -418,8 +434,24 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
-      E_local(1) = E_tmp
+      E_local(1) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
 
+      if ( SPIN_ORBIT_ON ) then
+        ttpsi%zwf=(0.0d0,0.0d0)
+        call pseudo_so( tpsi,ttpsi,info,Nspin,ppg,mg )
+      ! nonlocal part (E_ion_nloc)
+        E_tmp=0.0d0
+        do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) * system%hvol &
+            * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
+                  *ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )
+        end do
+        end do
+        end do
+        E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
+      else
     ! nonlocal part (E_ion_nloc)
       E_tmp = 0d0
 !$omp parallel do collapse(3) default(none) &
@@ -444,7 +476,8 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
-      E_local(2) = E_tmp
+      E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
+      end if
       call timer_end(LOG_EIGEN_ENERGY_CALC)
 
     end if

@@ -24,7 +24,7 @@ contains
     Nlma = size( ppg%ia_tbl_so )
 
     if ( .not.allocated(ppg%zekr_uV_so) ) then
-      allocate(ppg%zekr_uV_so(ppg%nps,Nlma,ik_s:ik_e,2,2))
+      allocate(ppg%zekr_uV_so(ppg%nps,Nlma,ik_s:ik_e,2,1))
     end if
 
     do ik=ik_s,ik_e
@@ -36,7 +36,6 @@ contains
         iatom = ppg%ia_tbl_so(ilma)
 
         do ispin=1,2
-        do jangl=1,2
 
           do j=1,ppg%mps(iatom)
             x = ppg%rxyz(1,j,iatom)
@@ -44,10 +43,9 @@ contains
             z = ppg%rxyz(3,j,iatom)
             kr = k(1)*x + k(2)*y + k(3)*z
             conjg_ekr = dcmplx( cos(kr),-sin(kr) )
-            ppg%zekr_uV_so(j,ilma,ik,jangl,ispin) = conjg_ekr * ppg%uv_so(j,ilma,jangl,ispin)
+            ppg%zekr_uV_so(j,ilma,ik,ispin,1) = conjg_ekr * ppg%uv_so(j,ilma,ispin,1)
           end do
 
-        end do !jangl
         end do !ispin
 
       end do !ilma

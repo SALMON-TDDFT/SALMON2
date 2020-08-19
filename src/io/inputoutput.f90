@@ -255,7 +255,8 @@ contains
       & nelem, &
       & natom, &
       & file_atom_coor, &
-      & file_atom_red_coor
+      & file_atom_red_coor, &
+      & yn_spinorbit
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -585,6 +586,7 @@ contains
     natom              = 0
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
+    yn_spinorbit       = 'n'
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -987,6 +989,7 @@ contains
     call comm_bcast(natom              ,nproc_group_global)
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
+    call comm_bcast(yn_spinorbit       ,nproc_group_global)
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1736,6 +1739,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'natom', natom
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
 
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
@@ -2169,6 +2173,7 @@ contains
     call yn_argument_check(yn_wf_em)
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
+    call yn_argument_check(yn_spinorbit)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2269,7 +2274,13 @@ contains
       !  stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
       !end select
     end select
-    
+
+    if( yn_spinorbit == 'y' )then
+       if( spin == 'unpolarized' )then
+          stop 'spin = "polarized" is necessary when spin-orbit calculation is performed'
+       end if
+    end if
+
     select case(method_singlescale)
     case('3d', '1d', '1d_fourier')
       if(method_singlescale=='1d_fourier') then
