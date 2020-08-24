@@ -732,15 +732,15 @@ subroutine write_wave_data_file()
     dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,0,iiy,iiz) + fw%vec_Ac_new%v(:,-1,iiy,iiz)) & 
         & - 0.5d0 * (fw%vec_Ac_old%v(:,0,iiy,iiz) + fw%vec_Ac_old%v(:,-1,iiy,iiz))) / (2 * dt)
     
-    e_inc(:) = 0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
-    e_ref(:) = 0.5d0 * (dt_Ac + cspeed_au * dx_Ac)
+    e_inc(:) = -0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
+    e_ref(:) = -0.5d0 * (dt_Ac + cspeed_au * dx_Ac)
 
     ! Right side boundary:
     dx_Ac(:) = (fw%vec_Ac%v(:,nx_m+2,iiy,iiz) - fw%vec_Ac%v(:,nx_m+1,iiy,iiz)) / fs%hgs(1)
     dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_new%v(:,nx_m+1,iiy,iiz)) & 
         & - 0.5d0 * (fw%vec_Ac_old%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_old%v(:,nx_m+1,iiy,iiz))) / (2 * dt)
     
-    e_tra(:) = 0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
+    e_tra(:) = -0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
 
     write(fh_wave, '(99(e23.15e3, 1x))')  &
         & itt * dt * t_unit_time%conv, &
