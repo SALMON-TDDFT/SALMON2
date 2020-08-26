@@ -1824,7 +1824,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
       write(fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', file_input1
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', trim(file_input1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
@@ -2048,7 +2048,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
       if(num_jm==0) then
         write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
-        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nelec_jm', sphere_nelec_jm
+        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nelec_jm', sphere_nelec_jm(1)
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
                                                           sphere_loc_jm(1,1),sphere_loc_jm(1,2),sphere_loc_jm(1,3)
       else
