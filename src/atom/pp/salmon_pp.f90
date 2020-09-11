@@ -28,7 +28,7 @@ module salmon_pp
     type(s_pp_info)    :: pp
     !
     integer :: nrmax
-    integer,parameter :: Lmax=4
+    integer,parameter :: Lmax=8
     logical :: flag_nlcc = .false.
 
     if(iperiodic==0)then
@@ -57,7 +57,7 @@ module salmon_pp
     use communication, only: comm_bcast, comm_is_root
     implicit none
     type(s_pp_info) :: pp
-    integer, parameter :: nrmax0=50000, lmax0=4
+    integer, parameter :: nrmax0=50000, lmax0=8
     integer,intent(in) :: nrmax,lmax
     logical,intent(in) :: flag_nlcc
     integer :: ik
