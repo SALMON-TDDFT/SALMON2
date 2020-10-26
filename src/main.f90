@@ -6,6 +6,7 @@
   use math_constants
   use timer
   use plusU_global, only: read_Hubbard_parameters
+  use spin_orbit_global, only: read_sw_spin_orbit
   implicit none
 
 
@@ -19,6 +20,7 @@
   call set_basic_flag(theory)
 
   call read_Hubbard_parameters  !should move into read_input subroutine!
+  call read_sw_spin_orbit( yn_spinorbit )
 
   call timer_initialize
 

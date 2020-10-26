@@ -337,10 +337,12 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     end if
     ig_num=poisson%ig_num
   end if
-  if(.not.allocated(ig))then
-    allocate(ig(3,maxval(poisson%ig_num(:)),poisson%npole_partial))
+  if(layout_multipole/=1) then
+    if(.not.allocated(ig))then
+      allocate(ig(3,maxval(poisson%ig_num(:)),poisson%npole_partial))
+    end if
+    ig=poisson%ig
   end if
-  if(layout_multipole/=1) ig=poisson%ig
 
   if(.not.allocated(coordinate))then
     allocate(coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))

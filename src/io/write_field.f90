@@ -21,20 +21,21 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_dns(lg,mg,system,rho,rho0,itt)
+subroutine write_dns(lg,mg,system,rho_s,rho0_s,itt)
   use inputoutput, only: format_voxel_data,au_length_aa,theory
   use structures, only: s_rgrid,s_scalar,s_dft_system,allocate_scalar,deallocate_scalar
   use parallelization, only: nproc_group_global
   use communication, only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: mg
-  type(s_dft_system),intent(in) :: system
-  real(8),intent(in) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  integer,intent(in),optional :: itt
-  integer :: ix,iy,iz
+  type(s_rgrid)     ,intent(in)          :: lg
+  type(s_rgrid)     ,intent(in)          :: mg
+  type(s_dft_system),intent(in)          :: system
+  type(s_scalar)    ,intent(in)          :: rho_s (system%nspin)
+  type(s_scalar)    ,intent(in),optional :: rho0_s(system%nspin)
+  integer           ,intent(in),optional :: itt
+  !
+  integer :: ispin
   character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
@@ -44,33 +45,22 @@ subroutine write_dns(lg,mg,system,rho,rho0,itt)
   call allocate_scalar(lg,work_l1)
   call allocate_scalar(lg,work_l2)
 
-  !$OMP parallel do collapse(2) private(iz,iy,ix)
-  do iz=lg%is(3),lg%ie(3)
-  do iy=lg%is(2),lg%ie(2)
-  do ix=lg%is(1),lg%ie(1)
-    work_l1%f(ix,iy,iz)=0.d0
-  end do
-  end do
-  end do
+  !$omp workshare
+  work_l1%f = 0.d0
+  !$omp end workshare
 
-  !$OMP parallel do collapse(2) private(iz,iy,ix)
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
-  do ix=mg%is(1),mg%ie(1)
-    work_l1%f(ix,iy,iz)=rho(ix,iy,iz)
+  do ispin=1,system%nspin
+    !$omp workshare
+    work_l1%f = work_l1%f + rho_s(ispin)%f ! total electron density
+    !$omp end workshare
   end do
-  end do
-  end do
+  
+! future work: individual electron density for each spin
 
   if(format_voxel_data=='avs')then
-    !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      work_l1%f(ix,iy,iz)=work_l1%f(ix,iy,iz)/(au_length_aa**3)
-    end do
-    end do
-    end do
+    !$omp workshare
+    work_l1%f = work_l1%f /(au_length_aa**3)
+    !$omp end workshare
   end if
   
   call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
@@ -94,36 +84,31 @@ subroutine write_dns(lg,mg,system,rho,rho0,itt)
   else if(format_voxel_data=='vtk')then
     call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
   end if
+  
+  if(.not.present(rho0_s)) then
+    call deallocate_scalar(work_l1)
+    call deallocate_scalar(work_l2)
+    return
+  end if
 
   select case(theory)
   case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-    !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=lg%is(3),lg%ie(3)
-    do iy=lg%is(2),lg%ie(2)
-    do ix=lg%is(1),lg%ie(1)
-      work_l1%f(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
+    !$omp workshare
+    work_l1%f = 0.d0
+    !$omp end workshare
 
-    !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      work_l1%f(ix,iy,iz)=rho(ix,iy,iz)-rho0(ix,iy,iz)
+    do ispin=1,system%nspin
+      !$omp workshare
+      work_l1%f = work_l1%f + ( rho_s(ispin)%f - rho0_s(ispin)%f )
+      !$omp end workshare
     end do
-    end do
-    end do
+    
+! future work: individual electron density for each spin
   
     if(format_voxel_data=='avs')then
-      !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        work_l1%f(ix,iy,iz)=work_l1%f(ix,iy,iz)/(au_length_aa**3)
-      end do
-      end do
-      end do
+      !$omp workshare
+      work_l1%f = work_l1%f /(au_length_aa**3)
+      !$omp end workshare
     end if
 
     call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)

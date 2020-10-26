@@ -255,7 +255,8 @@ contains
       & nelem, &
       & natom, &
       & file_atom_coor, &
-      & file_atom_red_coor
+      & file_atom_red_coor, &
+      & yn_spinorbit
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -482,8 +483,8 @@ contains
       & yn_output_dns_jm,     &
       & shape_file_jm,        &
       & num_jm,               &
-      & nelec_jm,             &
       & rs_bohr_jm,           &
+      & sphere_nelec_jm,      &
       & sphere_loc_jm
 
     namelist/group_fundamental/ &  !remove later
@@ -585,6 +586,7 @@ contains
     natom              = 0
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
+    yn_spinorbit       = 'n'
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -800,8 +802,8 @@ contains
     yn_output_dns_jm     = 'y'
     shape_file_jm        = 'none'
     num_jm               = 0
-    nelec_jm(:)          = 0
     rs_bohr_jm(:)        = 0d0
+    sphere_nelec_jm(:)   = 0
     sphere_loc_jm(:,:)   = 0d0
 !! == default for &group_fundamental
     iwrite_projection      = 0
@@ -987,6 +989,7 @@ contains
     call comm_bcast(natom              ,nproc_group_global)
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
+    call comm_bcast(yn_spinorbit       ,nproc_group_global)
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1276,8 +1279,8 @@ contains
     call comm_bcast(yn_output_dns_jm     ,nproc_group_global)
     call comm_bcast(shape_file_jm        ,nproc_group_global)
     call comm_bcast(num_jm               ,nproc_group_global)
-    call comm_bcast(nelec_jm             ,nproc_group_global)
     call comm_bcast(rs_bohr_jm           ,nproc_group_global)
+    call comm_bcast(sphere_nelec_jm      ,nproc_group_global)
     call comm_bcast(sphere_loc_jm        ,nproc_group_global)
     sphere_loc_jm = sphere_loc_jm * ulength_to_au
 !! == bcast for &group_fundamental
@@ -1736,6 +1739,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'natom', natom
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
 
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
@@ -1820,7 +1824,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
       write(fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', file_input1
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', trim(file_input1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
@@ -2043,14 +2047,14 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')  'shape_file', trim(shape_file_jm)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
       if(num_jm==0) then
-        write(fh_variables_log, '("#",4X,A,"=",I6)')      'nelec_jm', nelec_jm
-        write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'obs_loc_em', rs_bohr_jm(1)
+        write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
+        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nelec_jm', sphere_nelec_jm(1)
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
                                                           sphere_loc_jm(1,1),sphere_loc_jm(1,2),sphere_loc_jm(1,3)
       else
         do i = 1,num_jm
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'nelec_jm(',i,')', nelec_jm(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)')  'rs_bohr_jm(',i,')', rs_bohr_jm(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nelec_jm(',i,')', sphere_nelec_jm(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
         end do
       end if
@@ -2169,6 +2173,7 @@ contains
     call yn_argument_check(yn_wf_em)
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
+    call yn_argument_check(yn_spinorbit)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2269,7 +2274,13 @@ contains
       !  stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
       !end select
     end select
-    
+
+    if( yn_spinorbit == 'y' )then
+       if( spin == 'unpolarized' )then
+          stop 'spin = "polarized" is necessary when spin-orbit calculation is performed'
+       end if
+    end if
+
     select case(method_singlescale)
     case('3d', '1d', '1d_fourier')
       if(method_singlescale=='1d_fourier') then

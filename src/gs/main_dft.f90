@@ -45,7 +45,7 @@ use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 use initialization_dft
-use jellium, only: check_condition_jm, make_rho_jm
+use jellium, only: check_condition_jm
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -99,35 +99,19 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg,   &
                           info,  &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
                           ofl )
 
-if(yn_jm=='n')then
-  call initialization2_dft( Miter, nspin, rion_update,  &
-                            system, energy, ewald, stencil, fg, poisson,&
-                            lg, mg, info,   &
-                            srg, srg_scalar,  &
-                            rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
-                            spsi, shpsi, sttpsi,  &
-                            pp, ppg, ppn,   &
-                            xc_func, mixing )
-else
-  !make positive back ground charge density for using jellium model
-  call allocate_scalar(mg,rho_jm)
-  call make_rho_jm(lg,mg,system,info,rho_jm)
-  
-  call initialization2_dft( Miter, nspin, rion_update,  &
-                            system, energy, ewald, stencil, fg, poisson,&
-                            lg, mg, info,   &
-                            srg, srg_scalar,  &
-                            rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
-                            spsi, shpsi, sttpsi,  &
-                            pp, ppg, ppn,   &
-                            xc_func, mixing,  &
-                            rho_jm )
-end if
+call initialization2_dft( Miter, nspin, rion_update,  &
+                          system, energy, ewald, stencil, fg, poisson,&
+                          lg, mg, info,   &
+                          srg, srg_scalar,  &
+                          rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                          spsi, shpsi, sttpsi,  &
+                          pp, ppg, ppn,   &
+                          xc_func, mixing )
 
 Miopt = 0
 nopt_max = 1
@@ -198,38 +182,20 @@ call timer_end(LOG_INIT_GS_ITERATION)
 call timer_begin(LOG_GS_ITERATION)
 !------------------------------------ SCF Iteration
 !Iteration loop for SCF (DFT_Iteration)
-if(yn_jm=='n')then
-  call scf_iteration_dft( Miter,rion_update,sum1,  &
-                          system,energy,ewald,  &
-                          lg,mg,  &
-                          info,  &
-                          poisson,fg,  &
-                          cg,mixing,  &
-                          stencil,  &
-                          srg,srg_scalar,   &
-                          spsi,shpsi,sttpsi,  &
-                          rho,rho_s,  &
-                          V_local,Vh,Vxc,Vpsl,xc_func,  &
-                          pp,ppg,ppn,  &
-                          rho_old,Vlocal_old,  &
-                          band, 3)
-else
-  call scf_iteration_dft( Miter,rion_update,sum1,  &
-                          system,energy,ewald,  &
-                          lg,mg,  &
-                          info,  &
-                          poisson,fg,  &
-                          cg,mixing,  &
-                          stencil,  &
-                          srg,srg_scalar,   &
-                          spsi,shpsi,sttpsi,  &
-                          rho,rho_s,  &
-                          V_local,Vh,Vxc,Vpsl,xc_func,  &
-                          pp,ppg,ppn,  &
-                          rho_old,Vlocal_old,  &
-                          band, 3,  &
-                          rho_jm )
-end if
+call scf_iteration_dft( Miter,rion_update,sum1,  &
+                        system,energy,ewald,  &
+                        lg,mg,  &
+                        info,  &
+                        poisson,fg,  &
+                        cg,mixing,  &
+                        stencil,  &
+                        srg,srg_scalar,   &
+                        spsi,shpsi,sttpsi,  &
+                        rho,rho_jm,rho_s,  &
+                        V_local,Vh,Vxc,Vpsl,xc_func,  &
+                        pp,ppg,ppn,  &
+                        rho_old,Vlocal_old,  &
+                        band, 3)
 
 
 if(theory=='dft_band')then
@@ -354,7 +320,7 @@ call write_k_data(system,stencil)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,system,rho%f)
+if(yn_out_dns =='y') call write_dns(lg,mg,system,rho_s)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)

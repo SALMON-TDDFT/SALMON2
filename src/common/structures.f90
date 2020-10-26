@@ -257,6 +257,7 @@ module structures
     real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)
+    real(8),allocatable :: rinv_uvu_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
@@ -445,6 +446,7 @@ module structures
     complex(8), allocatable :: zc(:)
     type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
     type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
+    type(s_scalar),allocatable :: rho0_s(:) ! =rho_s(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
   end type s_rt

@@ -95,6 +95,7 @@ module salmon_global
   integer        :: natom
   character(256) :: file_atom_coor
   character(256) :: file_atom_red_coor
+  character(1)   :: yn_spinorbit
 
 !! &pseudo
   character(256) :: file_pseudo(maxmki)
@@ -323,8 +324,8 @@ module salmon_global
   character(1)   :: yn_output_dns_jm
   character(256) :: shape_file_jm
   integer        :: num_jm
-  integer        :: nelec_jm(200)
   real(8)        :: rs_bohr_jm(200)
+  integer        :: sphere_nelec_jm(200)
   real(8)        :: sphere_loc_jm(200,3)
 
 !! &group_fundamental

@@ -65,7 +65,7 @@ subroutine main_dft_k_expand_single
   type(s_dft_system) :: system
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
-  type(s_scalar) :: rho,Vh,Vpsl
+  type(s_scalar) :: rho,rho_jm,Vh,Vpsl
   type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
@@ -100,7 +100,7 @@ subroutine main_dft_k_expand_single
                             lg, mg,  &
                             info,  &
                             srg, srg_scalar,  &
-                            rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
+                            rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
                             spsi, shpsi, sttpsi,  &
                             pp, ppg, ppn,  &
                             ofl )

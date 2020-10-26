@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -41,6 +41,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
+  use noncollinear_module, only: SPIN_ORBIT_ON, calc_dm_noncollinear, rot_dm_noncollinear
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -59,6 +60,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: rho,rho_s(system%nspin),V_local(system%nspin),Vh,Vxc(system%nspin),Vpsl
+  type(s_scalar), intent(in)    :: rho_jm
   type(s_scalar), intent(inout) :: Vh_stock1,Vh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
@@ -89,9 +91,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   ! for calc_total_energy_periodic
   if(yn_md=='y') then
-     rion_update = .true.
+    rion_update = .true.
   else
-     rion_update = check_rion_update()
+    rion_update = check_rion_update()
   endif
 
   if(ae_shape1 == 'impulse')then
@@ -124,7 +126,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       else
         stop 'invalid propagator'
       end if
-      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
 
@@ -157,7 +159,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
 
   call timer_begin(LOG_CALC_RHO)
-  call calc_density(system,rho_s,spsi_out,info,mg)
+
+  if( SPIN_ORBIT_ON )then
+    call calc_dm_noncollinear( spsi_out, system, info, mg )
+    call rot_dm_noncollinear( rho_s, system, mg )
+  else
+    call calc_density(system,rho_s,spsi_out,info,mg)
+  end if
 
   if(nspin==1)then
     !$omp workshare
@@ -168,6 +176,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     rho%f = rho_s(1)%f + rho_s(2)%f
     !$omp end workshare
   end if
+  
+  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
+  
   call timer_end(LOG_CALC_RHO)
   
   if(singlescale%flag_use) then
@@ -237,7 +248,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,mg,system,info,rho, &
       & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
-      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+      if(yn_jm=='n') call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       rt%curr(1:3,itt) = singlescale%curr_ave(1:3)
       call timer_end(LOG_CALC_SINGLESCALE)
     else
@@ -265,7 +276,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(info%icomm_r,itt,rt,lg,mg,rho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   !(force)
@@ -317,7 +328,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,system,rho%f,rho%f,itt)
+      call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then
@@ -381,6 +392,9 @@ contains
       rho%f = rho_s(1)%f + rho_s(2)%f
       !$omp end workshare
     end if
+    
+    if(yn_jm=='y') rho%f = rho%f + rho_jm%f
+    
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)

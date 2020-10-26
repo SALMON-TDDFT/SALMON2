@@ -56,7 +56,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: Vpsl
-type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
 type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -330,7 +330,7 @@ subroutine initialization_ms()
                                         info,  &
                                         xc_func, dmat, ofl,  &
                                         srg, srg_scalar,  &
-                                        spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                                        spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                                         pp, ppg, ppn )
 
@@ -430,11 +430,11 @@ subroutine time_evolution_step_ms
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         else
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
     
@@ -732,15 +732,15 @@ subroutine write_wave_data_file()
     dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,0,iiy,iiz) + fw%vec_Ac_new%v(:,-1,iiy,iiz)) & 
         & - 0.5d0 * (fw%vec_Ac_old%v(:,0,iiy,iiz) + fw%vec_Ac_old%v(:,-1,iiy,iiz))) / (2 * dt)
     
-    e_inc(:) = 0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
-    e_ref(:) = 0.5d0 * (dt_Ac + cspeed_au * dx_Ac)
+    e_inc(:) = -0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
+    e_ref(:) = -0.5d0 * (dt_Ac + cspeed_au * dx_Ac)
 
     ! Right side boundary:
     dx_Ac(:) = (fw%vec_Ac%v(:,nx_m+2,iiy,iiz) - fw%vec_Ac%v(:,nx_m+1,iiy,iiz)) / fs%hgs(1)
     dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_new%v(:,nx_m+1,iiy,iiz)) & 
         & - 0.5d0 * (fw%vec_Ac_old%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_old%v(:,nx_m+1,iiy,iiz))) / (2 * dt)
     
-    e_tra(:) = 0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
+    e_tra(:) = -0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
 
     write(fh_wave, '(99(e23.15e3, 1x))')  &
         & itt * dt * t_unit_time%conv, &
