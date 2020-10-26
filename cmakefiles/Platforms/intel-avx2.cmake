@@ -13,7 +13,7 @@ set(General_C_FLAGS             "-Wall -restrict -ansi-alias -fno-alias")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")
 set(CMAKE_Fortran_FLAGS_RELEASE "-O3 ${General_Fortran_FLAGS}")
-set(CMAKE_C_FLAGS_RELEASE       "-O3 ${General_Fortran_FLAGS}")
+set(CMAKE_C_FLAGS_RELEASE       "-O3 ${General_C_FLAGS}")
 
 set(USE_MPI_DEFAULT             ON)
 
