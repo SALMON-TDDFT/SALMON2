@@ -27,12 +27,11 @@ contains
       allocate(ppg%zekr_uV_so(ppg%nps,Nlma,ik_s:ik_e,2,1))
     end if
 
+!$omp parallel do collapse(2) default(shared) private(ik,k,ilma,iatom,ispin,j,x,y,z,kr,conjg_ekr)
     do ik=ik_s,ik_e
-
-      k(:) = kAc(:,ik)
-
       do ilma=1,Nlma
 
+        k(:) = kAc(:,ik)
         iatom = ppg%ia_tbl_so(ilma)
 
         do ispin=1,2
@@ -49,7 +48,6 @@ contains
         end do !ispin
 
       end do !ilma
-
     end do !ik
 
   end subroutine update_kvector_so
