@@ -41,6 +41,7 @@ contains
 
     den_mat=zero
 
+!$omp parallel do collapse(3) default(shared) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -191,6 +192,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     integer :: ix,iy,iz,im,ik,io
     if ( .not.allocated(vxc_mat) ) return
+!$omp parallel do collapse(5) default(shared) private(im,ik,io,iz,iy,ix)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
