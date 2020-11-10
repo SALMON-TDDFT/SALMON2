@@ -49,6 +49,8 @@ contains
 
     jw = 0.0d0
 
+!$omp parallel do default(shared) private(ilma,ia,ispin,wrk0,wrk1,wrk2,wrk3,j,x,y,z,jx,jy,jz,wrk) &
+!$omp private(uVpsi0,uVpsiX,uVpsiY,uVpsiZ) reduction(+:jw)
     do ilma=1,Nlma
 
        ia=ppg%ia_tbl_so(ilma)
@@ -129,6 +131,7 @@ contains
     allocate( uVpsibox1(2,Nlma) ); uVpsibox1=zero
     allocate( uVpsibox2(2,Nlma) ); uVpsibox2=zero
 
+!$omp parallel do default(shared) private(ilma,ia,ispin,wrk0,j,x,y,z,jx,jy,jz)
     do ilma=1,Nlma
        ia=ppg%ia_tbl_so(ilma)
        do ispin=1,2
@@ -151,6 +154,8 @@ contains
     call timer_end(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
 
     jw = 0.0d0
+!$omp parallel do default(shared) private(ilma,ia,ispin,wrk1,wrk2,wrk3,j,x,y,z,jx,jy,jz,wrk) &
+!$omp private(uVpsi0,uVpsiX,uVpsiY,uVpsiZ) reduction(+:jw)
     do ilma=1,Nlma
 
        ia=ppg%ia_tbl_so(ilma)
