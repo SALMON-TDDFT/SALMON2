@@ -2,7 +2,6 @@ set(SOURCES
     builtin_pz.f90
     builtin_pzm.f90
     builtin_pz_sp.f90
-    builtin_pbe.f90
     builtin_tbmbj.f90
     salmon_xc.f90
    )

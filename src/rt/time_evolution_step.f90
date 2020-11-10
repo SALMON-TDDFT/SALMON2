@@ -17,11 +17,11 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
+  use density_matrix, only: calc_density, calc_current, calc_microscopic_current
   use writefield
   use timer
   use salmon_global
@@ -62,7 +62,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_scalar), intent(inout) :: rho,rho_s(system%nspin),V_local(system%nspin),Vh,Vxc(system%nspin),Vpsl
   type(s_scalar), intent(in)    :: rho_jm
   type(s_scalar), intent(inout) :: Vh_stock1,Vh_stock2,Vbox
-  type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
   type(s_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
@@ -76,7 +75,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   character(100) :: comment_line
-  logical :: rion_update,if_use_dmat
+  logical :: rion_update
   integer :: ihpsieff
 
   spsi_out%update_zwf_overlap = .false. 
@@ -87,7 +86,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   idensity=0
   idiffDensity=1
   ielf=2
-  if_use_dmat = .false. !(singlescale%flag_use==.true.) ! .or. if_metaGGA ! (future work)
 
   ! for calc_total_energy_periodic
   if(yn_md=='y') then
@@ -232,13 +230,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   case(3)
 
-    call timer_begin(LOG_CALC_DENSITY_MATRIX)
-    if(if_use_dmat) then
-       call calc_density_matrix(system,info,mg,srg,spsi_out,dmat)
-       spsi_out%update_zwf_overlap = .true. 
-    endif
-    call timer_end(LOG_CALC_DENSITY_MATRIX)
-
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
@@ -254,12 +245,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     else
       call timer_begin(LOG_CALC_CURRENT)
       system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
-      if(if_use_dmat) then
-         call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
-      else
-         call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
-         spsi_out%update_zwf_overlap = .true.
-      end if
+      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+      spsi_out%update_zwf_overlap = .true.
       call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
       system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt)
       system%vec_E_ext(1:3)  = rt%E_ext (1:3,itt)

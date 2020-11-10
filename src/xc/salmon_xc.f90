@@ -26,7 +26,6 @@ module salmon_xc
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
-  use builtin_pbe, only: exc_cor_pbe
   use builtin_tbmbj, only: exc_cor_tbmbj
 
 #ifdef USE_LIBXC
@@ -370,7 +369,7 @@ contains
       
         xc%xctype(1) = salmon_xctype_pbe
         xc%use_gradient = .true.
-        return
+        stop "Error: xc=pbe is not available. please use libxc_pbe."
 
       case ('tbmbj')
 
@@ -657,8 +656,6 @@ contains
       call exec_builtin_pz()
     case(salmon_xctype_pzm)
       call exec_builtin_pzm()
-    case(salmon_xctype_pbe)
-      call exec_builtin_pbe()
     case(salmon_xctype_tbmbj)
       call exec_builtin_tbmbj()
 #ifdef USE_LIBXC
@@ -775,39 +772,7 @@ contains
 
       return
     end subroutine exec_builtin_pzm
-
-
-
-    subroutine exec_builtin_pbe()
-      implicit none
-      real(8) :: rho_1d(nl)
-      real(8) :: grho_s_1d(nl, 3)
-      real(8) :: exc_1d(nl)
-      real(8) :: eexc_1d(nl)
-      real(8) :: vexc_1d(nl)
-
-      rho_1d = reshape(rho, (/nl/))
-      grho_s_1d = reshape(grho(:, :, :, :), (/nl, 3/)) * 0.5
-
-      call exc_cor_pbe(nl, rho_1d, grho_s_1d, exc_1d, eexc_1d, vexc_1d, &
-      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
-
-      if (present(vxc)) then
-         vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
-      endif
-
-      if (present(exc)) then
-         exc = exc + reshape(exc_1d, (/nx, ny, nz/))
-      endif
-
-      if (present(eexc)) then
-         eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
-      endif
-
-      return
-    end subroutine exec_builtin_pbe
-
-
+    
 
     subroutine exec_builtin_tbmbj()
       implicit none

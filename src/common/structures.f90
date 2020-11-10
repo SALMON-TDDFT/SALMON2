@@ -42,11 +42,6 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
-! density matrix rho(r,r')
-  type s_dmatrix
-    complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
-  end type s_dmatrix
-
   type s_dft_system
     logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
@@ -563,29 +558,6 @@ contains
     end do
   end subroutine allocate_vector_with_ovlp
 
-  subroutine allocate_dmatrix(nspin,mg,info,dmat)
-    implicit none
-    integer                 ,intent(in) :: nspin
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_parallel_info)   ,intent(in) :: info
-    type(s_dmatrix)                     :: dmat
-    integer :: im,is,ix,iy,iz
-    allocate(dmat%zrho_mat(mg%Nd,mg%ndir,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
-    & nspin,info%im_s:info%im_e))
-!$omp parallel do collapse(4) private(im,is,iz,iy,ix)
-    do im=info%im_s,info%im_e
-    do is=1,nspin
-    do iz=mg%is(3)-mg%Nd,mg%ie(3)
-    do iy=mg%is(2)-mg%Nd,mg%ie(2)
-    do ix=mg%is(1)-mg%Nd,mg%ie(1)
-      dmat%zrho_mat(:,:,ix,iy,iz,is,im) = 0d0
-    end do
-    end do
-    end do
-    end do
-    end do
-  end subroutine allocate_dmatrix
-
   subroutine allocate_orbital_real(nspin,mg,info,psi)
     implicit none
     integer                 ,intent(in) :: nspin
@@ -728,10 +700,5 @@ contains
     type(s_vector) :: x
     DEAL(x%v)
   end subroutine deallocate_vector
-
-  subroutine deallocate_dmatrix(dm)
-    type(s_dmatrix) :: dm
-    DEAL(dm%zrho_mat)
-  end subroutine deallocate_dmatrix
 
 end module structures

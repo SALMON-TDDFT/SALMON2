@@ -25,7 +25,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, info,  &
-                     xc_func, dmat, ofl,  &
+                     xc_func, ofl,  &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
@@ -80,7 +80,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_scalar) :: Vpsl
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
   type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
-  type(s_dmatrix) :: dmat
   type(s_orbital) :: spsi_in,spsi_out
   type(s_orbital) :: tpsi ! temporary wavefunctions
   type(s_sendrecv_grid) :: srg,srg_scalar
@@ -186,7 +185,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
-  call allocate_dmatrix(system%nspin,mg,info,dmat)
   
   if(propagator=='aetrs')then
     allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
