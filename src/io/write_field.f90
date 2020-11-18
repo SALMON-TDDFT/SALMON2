@@ -35,7 +35,7 @@ subroutine write_dns(lg,mg,system,rho_s,rho0_s,itt)
   type(s_scalar)    ,intent(in),optional :: rho0_s(system%nspin)
   integer           ,intent(in),optional :: itt
   !
-  integer :: ispin
+  integer :: ispin,ix,iy,iz
   character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
