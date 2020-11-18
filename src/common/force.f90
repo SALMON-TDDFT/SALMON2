@@ -207,7 +207,7 @@ contains
                       ,mg%is_array(3):mg%ie_array(3)))
     end if
 
-!$omp do collapse(2)
+!$omp do collapse(2) reduction(+:dden)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
