@@ -50,9 +50,14 @@ subroutine write_dns(lg,mg,system,rho_s,rho0_s,itt)
   !$omp end workshare
 
   do ispin=1,system%nspin
-    !$omp workshare
-    work_l1%f = work_l1%f + rho_s(ispin)%f ! total electron density
-    !$omp end workshare
+!$OMP parallel do collapse(2) private(iz,iy,ix)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      work_l1%f(ix,iy,iz) = work_l1%f(ix,iy,iz) + rho_s(ispin)%f(ix,iy,iz)
+    end do
+    end do
+    end do
   end do
   
 ! future work: individual electron density for each spin
@@ -98,9 +103,14 @@ subroutine write_dns(lg,mg,system,rho_s,rho0_s,itt)
     !$omp end workshare
 
     do ispin=1,system%nspin
-      !$omp workshare
-      work_l1%f = work_l1%f + ( rho_s(ispin)%f - rho0_s(ispin)%f )
-      !$omp end workshare
+!$OMP parallel do collapse(2) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        work_l1%f(ix,iy,iz) = work_l1%f(ix,iy,iz) + ( rho_s(ispin)%f(ix,iy,iz) - rho0_s(ispin)%f(ix,iy,iz) )
+      end do
+      end do
+      end do
     end do
     
 ! future work: individual electron density for each spin
