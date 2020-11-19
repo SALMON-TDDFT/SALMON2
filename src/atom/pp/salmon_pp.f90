@@ -353,7 +353,7 @@ module salmon_pp
     integer :: i, i1, i2, i3, j1, j2, j3
     integer :: irepr_min, irepr_max
     real(8) :: Rion_repr(3)
-    real(8) :: r, rc, r1, r2, r3
+    real(8) :: r, rc, r1, r2, r3, u, v, w
     real(8) :: ratio1, ratio2
 
     if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
@@ -403,9 +403,15 @@ module salmon_pp
         do j1 = rg%is(1), rg%ie(1)
         do j2 = rg%is(2), rg%ie(2)
         do j3 = rg%is(3), rg%ie(3)
-          r1 = (j1-1) * sys%hgs(1) - Rion_repr(1) ! iwata
-          r2 = (j2-1) * sys%hgs(2) - Rion_repr(2) ! iwata
-          r3 = (j3-1) * sys%hgs(3) - Rion_repr(3) ! iwata
+!          r1 = (j1-1) * sys%hgs(1) - Rion_repr(1) ! iwata
+!          r2 = (j2-1) * sys%hgs(2) - Rion_repr(2) ! iwata
+!          r3 = (j3-1) * sys%hgs(3) - Rion_repr(3) ! iwata
+          u = (j1-1) * sys%hgs(1)
+          v = (j2-1) * sys%hgs(2)
+          w = (j3-1) * sys%hgs(3)
+          r1 = u*sys%rmatrix_a(1,1) + v*sys%rmatrix_a(1,2) + w*sys%rmatrix_a(1,3) - Rion_repr(1)
+          r2 = u*sys%rmatrix_a(2,1) + v*sys%rmatrix_a(2,2) + w*sys%rmatrix_a(2,3) - Rion_repr(2)
+          r3 = u*sys%rmatrix_a(3,1) + v*sys%rmatrix_a(3,2) + w*sys%rmatrix_a(3,3) - Rion_repr(3)
           r = sqrt(r1**2 + r2**2 + r3**2)
           if (r <= rc) then
             do ir = 1, pp%nrmax ! iwata
