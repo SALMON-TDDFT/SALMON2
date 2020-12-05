@@ -22,7 +22,7 @@ SUBROUTINE ne2mu(energy,system)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: nelec, nelec_spin, temperature
+  use salmon_global, only: nelec, nelec_spin, temperature, yn_spinorbit
   implicit none
   type(s_dft_energy),intent(in) :: energy
   type(s_dft_system)            :: system
@@ -161,6 +161,10 @@ contains
       end do
       end do
       end do
+    end if
+    
+    if(yn_spinorbit=='y') then
+      neout = neout*0.5d0 !!! For the SO mode, jspin=2 components are duplicate copy of jspin=1.
     end if
 
   END SUBROUTINE mu2ne
