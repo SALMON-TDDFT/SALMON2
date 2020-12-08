@@ -324,6 +324,13 @@ contains
       xc%ispin=1
     end if
 
+#ifdef USE_LIBXC
+    if( xcname=="none" .and. xname=="none" .and. cname=="none" ) then
+       print '(A, A)', "Error! Exchange nad Correction functionals are not specified!"
+       stop
+    endif
+#endif         
+
     ! Exchange correlation
     if (present(xcname) .and. (len_trim(xcname) > 0)) then
       call setup_xcfunc(xcname)
@@ -352,9 +359,11 @@ contains
       select case(lower(name))
       case('none')
 
+#ifdef USE_LIBXC
+#else
         print '(A, A)', "Error! Exchange functional is not specified!"
         stop
-
+#endif         
         return
       
       case ('pz')
