@@ -452,7 +452,7 @@ end subroutine
     zylm=(0.0d0,0.0d0)
     if ( l < 0 .or. abs(m) > l ) return
     zylm=Ylm(x,y,z,l,m)
-    return
+!    return
     if ( m < 0 ) then
       zylm = factor*dcmplx( -Ylm(x,y,z,l,m), Ylm(x,y,z,l,-m) )
     else if ( m == 0 ) then
