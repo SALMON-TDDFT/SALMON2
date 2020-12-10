@@ -451,10 +451,11 @@ end subroutine
     real(8),parameter :: factor=0.70710678118654752d0 ! =sqrt(0.5)
     zylm=(0.0d0,0.0d0)
     if ( l < 0 .or. abs(m) > l ) return
-    zylm=Ylm(x,y,z,l,m)
+!    zylm=Ylm(x,y,z,l,m)
 !    return
     if ( m < 0 ) then
-      zylm = factor*dcmplx( -Ylm(x,y,z,l,m), Ylm(x,y,z,l,-m) )
+!      zylm = factor*dcmplx( -Ylm(x,y,z,l,m), Ylm(x,y,z,l,-m) )
+      zylm = (-1)**m * factor * dcmplx( Ylm(x,y,z,l,-m), -Ylm(x,y,z,l,m) )
     else if ( m == 0 ) then
       zylm = Ylm(x,y,z,l,m)
     else if ( m > 0 ) then
