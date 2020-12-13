@@ -21,7 +21,8 @@ contains
 subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
   use salmon_global, only: theory, step_update_ps, natom,yn_out_rvf_rt, ensemble, thermostat, &
-      yn_set_ini_velocity,step_velocity_scaling,file_ini_velocity,yn_restart
+      yn_set_ini_velocity,step_velocity_scaling,file_ini_velocity,yn_restart, &
+      nscf_init_no_diagonal
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
   use checkpoint_restart_sub, only: restart_Velocity
@@ -40,6 +41,10 @@ subroutine init_md(system,md)
      if (comm_is_root(nproc_id_global)) &
           write(*,*)"  step_update_ps --> 1 : changed for theory=dft_md"
      step_update_ps = 1
+
+     if (comm_is_root(nproc_id_global)) &
+          write(*,*)"  nscf_init_no_diagonal --> -1 : changed for theory=dft_md"
+     nscf_init_no_diagonal = -1
   end select
 
 

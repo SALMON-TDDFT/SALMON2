@@ -385,6 +385,8 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   integer :: Miter,ix,iy,iz
   real(8) :: sum1
 
+  call init_md(system,md)
+
   if(allocated(rho_old%f))    deallocate(rho_old%f)
   if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
   call allocate_scalar(mg,rho_old)
@@ -418,7 +420,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           rho_old,Vlocal_old,  &
                           band, 2 )
 
-  call init_md(system,md)
   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
 
   md%Uene0 = energy%E_tot

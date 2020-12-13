@@ -18,7 +18,7 @@ module occupation
 
 contains
 
-SUBROUTINE ne2mu(energy,system)
+SUBROUTINE ne2mu(energy,system,ilevel_print)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
@@ -27,6 +27,7 @@ SUBROUTINE ne2mu(energy,system)
   type(s_dft_energy),intent(in) :: energy
   type(s_dft_system)            :: system
   !
+  integer :: ilevel_print
   integer :: jspin,io,ik,nspin,nk,no,iter,ii,p5,p1,p2,nc
   real(8) :: nein,muout,mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne,diff_mu,muo,diff_ne2,wspin
 
@@ -100,7 +101,7 @@ SUBROUTINE ne2mu(energy,system)
   muout = mu3
   call mu2ne(muout,ne3)
 
-  if(comm_is_root(nproc_id_global))then
+  if(ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
      write(*,*)
      write(*,*) 'Fractional Occupation Numbers :'
      write(*,*)
