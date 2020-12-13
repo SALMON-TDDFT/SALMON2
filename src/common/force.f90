@@ -102,6 +102,9 @@ contains
                       ,mg%is_array(3):mg%ie_array(3)))
       dden = 0d0
     case('y')
+
+    allocate(dden(1,1,1,1)); dden=0d0 !! dummy allocation to avoid crush: not use in isolated system
+
     ! Fourier part (local part, etc)
       !$omp parallel do collapse(2) private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
       do iz=mg%is(3),mg%ie(3)
