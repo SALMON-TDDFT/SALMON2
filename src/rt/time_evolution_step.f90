@@ -211,8 +211,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 ! result
 
   call timer_begin(LOG_CALC_PROJECTION)
-  if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
-    call projection(itt,mg,system,info,spsi_out,tpsi) ! tpsi must be GS orbital (future work)
+  if(projection_option/='no' .and. mod(itt,out_projection_step)==0)then
+    call projection(itt,ofl,dt,mg,system,info,spsi_out,tpsi) ! tpsi must be GS orbital (future work)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 

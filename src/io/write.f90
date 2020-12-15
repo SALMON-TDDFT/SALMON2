@@ -1172,7 +1172,7 @@ contains
   !! export SYSNAME_info.data file (GS info)
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
-    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nstate_spin,nelec_spin,unit_system, &
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
                                    yn_jm, yn_periodic
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
@@ -1194,14 +1194,12 @@ contains
 
        write(fh,*) "Total number of iteration = ", Miter
        write(fh,*)
-       select case (system%nspin)
-       case(1)
-          write(fh,*) "Number of states = ", nstate
+       write(fh,*) "Number of states = ", nstate
+       if(sum(nelec_spin(:))==0) then
           write(fh,*) "Number of electrons = ", nelec
-       case(2)
-          write(fh,*) "Number of states = ", (nstate_spin(is),is=1,2)
+       else
           write(fh,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
-       end select
+       end if
        write(fh,*)
        if(yn_jm=='y'.and.yn_periodic=='y') then
          write(fh,*) "For yn_jm = y and yn_periodic=y, this version still cannot output Total Energy."
@@ -1217,23 +1215,17 @@ contains
              write(fh,100) (iob,energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
           end do
        case(2)
-          do is=1,2
-             select case(is)
-             case(1)
-                write(fh,*) "for up-spin"
-                do p5=1,(nstate_spin(is)+3)/4
-                   p1=4*(p5-1)+1
-                   p2=4*p5 ; if ( p2 > nstate_spin(1) ) p2=nstate_spin(1)
-                   write(fh,100) (iob,energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
-                end do
-             case(2)
-                write(fh,*) "for down-spin"
-                do p5=1,(nstate_spin(is)+3)/4
-                   p1=4*(p5-1)+1+nstate_spin(1)
-                   p2=4*p5+nstate_spin(1) ; if ( p2 > nstate_spin(1)+nstate_spin(2) ) p2=nstate_spin(1)+nstate_spin(2)
-                   write(fh,100) (iob-nstate_spin(1),energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
-                end do
-             end select
+          write(fh,*) "for up-spin"
+          do p5=1,(nstate+3)/4
+            p1=4*(p5-1)+1
+            p2=4*p5 ; if ( p2 > nstate ) p2=nstate
+            write(fh,100) (iob,energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
+          end do
+          write(fh,*) "for down-spin"
+          do p5=1,(nstate+3)/4
+            p1=4*(p5-1)+1
+            p2=4*p5 ; if ( p2 > nstate ) p2=nstate
+            write(fh,100) (iob,energy%esp(iob,1,2)*au_energy_ev,iob=p1,p2)
           end do
        end select
        write(fh,*)       
@@ -1624,14 +1616,15 @@ contains
   
 !===================================================================================================================================
   
-  subroutine projection(itt,mg,system,info,tpsi,tpsi0)
+  subroutine projection(itt,ofl,dt,mg,system,info,tpsi,tpsi0)
     use structures
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root, comm_summation, comm_bcast
-    use salmon_global, only: dt,iwrite_projnum,iwrite_projection_k,iwrite_projection_ob,num_projection
     use pack_unpack, only: copy_data
     implicit none
     integer                 ,intent(in) :: itt
+    type(s_ofile)           ,intent(in) :: ofl
+    real(8)                 ,intent(in) :: dt
     type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
@@ -1643,14 +1636,6 @@ contains
     complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
     real(8) :: coef(system%no,system%nk,system%nspin)
     complex(8) :: cbox
-    character(100) :: projOutFile
-    character(20) :: fileNumber
-
-    if(iwrite_projnum==1)then
-      write(fileNumber, '(i8)') itt
-      projOutFile = trim("proj.")//adjustl(fileNumber)
-      open(61,file=projOutFile)
-    end if
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
 
@@ -1725,24 +1710,13 @@ contains
     end do
     end do
 
+    io=1 ! future work
+    ik=1 ! future work
+    ispin=1 ! future work
     if(comm_is_root(nproc_id_global))then
-      write(41,'(200f14.8)') dble(itt)*dt*2.41888d-2, &
-      & ((coef(iwrite_projection_ob(io),iwrite_projection_k(io),ispin),io=1,num_projection),ispin=1,nspin),  &
-        sum(coef(1:no,:,1)),sum(coef(1:no,:,1)) ! no ---> no0
-    end if
-    if(mod(itt,100)==0)then
-      if(comm_is_root(nproc_id_global))then
-        do ik=1,nk
-        do io=1,no ! no --> no0
-          write(*,'(a12,3i6,f16.8)') "projection",io,ik,(coef(io,ik,ispin),ispin=1,nspin)
-        end do
-        end do
-      end if
+      write(ofl%fh_proj,'(200f14.8)') dble(itt)*dt*2.41888d-2, coef(io,ik,ispin)
     end if
 
-    if(iwrite_projnum==1)then
-      close(61)
-    end if
     return
   end subroutine projection
   

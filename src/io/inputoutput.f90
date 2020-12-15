@@ -57,8 +57,6 @@ module inputoutput
   integer :: inml_opt
   integer :: inml_md
   integer :: inml_jellium
-  integer :: inml_group_fundamental
-  integer :: inml_group_others
   integer :: inml_code
 
 !Input/Output units
@@ -247,7 +245,6 @@ contains
       & al, &
       & al_vec1,al_vec2,al_vec3, &
       & nstate, &
-      & nstate_spin, &
       & nelec, &
       & nelec_spin, &
       & temperature, &
@@ -487,16 +484,6 @@ contains
       & sphere_nelec_jm,      &
       & sphere_loc_jm
 
-    namelist/group_fundamental/ &  !remove later
-      & iwrite_projection, &       !remove later
-      & itwproj, &                 !remove later
-      & iwrite_projnum             !remove later
-
-    namelist/group_others/ &       !remove later
-      & num_projection, &          !remove later
-      & iwrite_projection_ob, &    !remove later
-      & iwrite_projection_k        !remove later
-
     namelist/code/ &
       & yn_want_stencil_hand_vectorization, &
       & yn_want_communication_overlapping, &
@@ -577,7 +564,6 @@ contains
     al_vec2            = 0d0
     al_vec3            = 0d0
     nstate             = 0
-    nstate_spin(:)     = 0
     nelec              = 0
     nelec_spin (:)     = 0
     temperature        = -1d0
@@ -805,16 +791,6 @@ contains
     rs_bohr_jm(:)        = 0d0
     sphere_nelec_jm(:)   = 0
     sphere_loc_jm(:,:)   = 0d0
-!! == default for &group_fundamental
-    iwrite_projection      = 0
-    itwproj                = -1
-    iwrite_projnum         = 0
-!! == default for &group_others
-    num_projection       = 1
-    do ii=1,200
-      iwrite_projection_ob(ii) = ii
-    end do
-    iwrite_projection_k(1:200) = 1
 !! == default for code
     yn_want_stencil_hand_vectorization = 'y'
     yn_want_communication_overlapping  = 'n'
@@ -887,12 +863,6 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=jellium, iostat=inml_jellium)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=group_fundamental, iostat=inml_group_fundamental)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=group_others, iostat=inml_group_others)
       rewind(fh_namelist)
 
       read(fh_namelist, nml=code, iostat=inml_code)
@@ -979,7 +949,6 @@ contains
     al_vec2 = al_vec2 * ulength_to_au
     al_vec3 = al_vec3 * ulength_to_au
     call comm_bcast(nstate             ,nproc_group_global)
-    call comm_bcast(nstate_spin        ,nproc_group_global)
     call comm_bcast(nelec              ,nproc_group_global)
     call comm_bcast(nelec_spin         ,nproc_group_global)
     call comm_bcast(temperature        ,nproc_group_global)
@@ -1283,14 +1252,6 @@ contains
     call comm_bcast(sphere_nelec_jm      ,nproc_group_global)
     call comm_bcast(sphere_loc_jm        ,nproc_group_global)
     sphere_loc_jm = sphere_loc_jm * ulength_to_au
-!! == bcast for &group_fundamental
-    call comm_bcast(iwrite_projection     ,nproc_group_global)
-    call comm_bcast(itwproj               ,nproc_group_global)
-    call comm_bcast(iwrite_projnum        ,nproc_group_global)
-!! == bcast for &group_others
-    call comm_bcast(num_projection      ,nproc_group_global)
-    call comm_bcast(iwrite_projection_ob,nproc_group_global)
-    call comm_bcast(iwrite_projection_k ,nproc_group_global)
 !! == bcast for code
     call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
@@ -1730,7 +1691,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
-      write(fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nstate_spin(1:2)', nstate_spin
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
       write(fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nelec_spin(1:2)', nelec_spin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature', temperature
@@ -2058,24 +2018,6 @@ contains
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
         end do
       end if
-
-!(remove later)
-!      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
-!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-!      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
-
-!(remove later)
-!      if(inml_group_others >0)ierr_nml = ierr_nml +1
-!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
-!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
-
 
       select case(iflag_atom_coor)
       case(ntype_atom_coor_cartesian)
