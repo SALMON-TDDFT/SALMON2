@@ -58,6 +58,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use salmon_global, only: quiet
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
+  use filesystem, only: open_filehandle
   implicit none
   integer,parameter :: Nd = 4
 
@@ -349,14 +350,12 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call write_rt_energy_data(-1,ofl,dt,energy,md)
   
     !(header in SYSname_proj.data)
-    if(iwrite_projection==1)then
-     !ofl%fh_proj = 41  !use open_filehandle !!
+    if(projection_option/='no')then
       ofl%file_proj_data = trim(sysname)//"_proj.data"
-      open(41,file=ofl%file_proj_data)
-      write(41,'("#",5X,"time[fs]",4("    projection"))')
-      write(41,'("#",13x,4("  orbital",i5))') (iwrite_projection_ob(jj),jj=1,4)
-      write(41,'("#",13x,4("        k",i5))') (iwrite_projection_k(jj), jj=1,4)
-      write(41,'("#",7("----------"))')
+      ofl%fh_proj = open_filehandle(ofl%file_proj_data)
+      open(ofl%fh_proj,file=ofl%file_proj_data)
+      write(ofl%fh_proj,'("#",5X,"time[fs]",4("    projection"))')
+      write(ofl%fh_proj,'("#",7("----------"))')
     end if
   end if
   

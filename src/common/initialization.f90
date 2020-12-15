@@ -93,8 +93,8 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin, &
-  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin,quiet
+  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,projection_option,nelec_spin, &
+  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -165,7 +165,7 @@ subroutine init_dft_system(lg,system,stencil)
     system%nspin=2
   end if
 
-  if(calc_mode=='RT'.and.temperature<-1.d-12)then
+  if(calc_mode=='RT'.and. temperature<-1.d-12 .and. projection_option=='no')then
     if( SPIN_ORBIT_ON )then
        system%no = nelec
     else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
@@ -178,7 +178,7 @@ subroutine init_dft_system(lg,system,stencil)
       end if
     end if
   else
-    system%no = max( nstate, maxval(nstate_spin) )
+    system%no = nstate
   end if
 
   allocate(system%mass(1:nelem))
