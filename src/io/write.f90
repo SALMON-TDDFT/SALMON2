@@ -1704,7 +1704,7 @@ contains
     do ik=1,nk
     do io1=1,no
       do io2=1,no
-        coef(io1,ik,ispin) = coef(io1,ik,ispin)+abs(mat2(io2,io1,ispin,ik)*system%Hvol)**2
+        coef(io1,ik,ispin) = coef(io1,ik,ispin)+abs(mat2(io2,io1,ispin,ik))**2
       end do
     end do
     end do

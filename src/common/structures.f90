@@ -444,6 +444,7 @@ module structures
     type(s_scalar),allocatable :: rho0_s(:) ! =rho_s(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
+    type(s_orbital) :: gspsi ! wavefunction @ t=0 (GS)
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method
