@@ -202,6 +202,15 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_RESTART_SELF)
   call restart_rt(lg,mg,system,info,spsi_in,Mit,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   if(yn_reset_step_restart=='y' ) Mit=0
+  if(projection_option/='no') then
+    call allocate_orbital_complex(system%nspin,mg,info,rt%gspsi) ! wavefunction @ t=0 (ground state)
+    !$omp workshare
+    rt%gspsi%zwf = spsi_in%zwf
+    !$omp end workshare
+    if(yn_restart=='y' .and. comm_is_root(nproc_id_global)) then
+      write(*,*) "CAUTION: projection_option will be calculated with the orbitals of the restart data (not GS)"
+    end if
+  end if
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
