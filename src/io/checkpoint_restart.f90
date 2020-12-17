@@ -362,7 +362,9 @@ subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2
 
   !rho_inout
   if( flag_GS.and. &
-     (write_gs_restart_data=='all'.or.write_gs_restart_data=='rho_inout'))then
+     (write_gs_restart_data=='rho'.or.write_gs_restart_data=='wfn'))then
+     ! this case => do not write rho_inout
+  else
      if (present(mixing)) then
         call write_rho_inout(odir,lg,mg,system,info,mixing,iself)
      end if
