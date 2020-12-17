@@ -247,14 +247,14 @@ real(8) :: rNe0,rNe
            end do
         endif
 
-        if( read_gs_restart_data=='rho_inout'.or. &
-            read_gs_restart_data=='rho'         )then
+        if( read_gs_restart_data=='rho' .or. &
+            read_gs_restart_data(1:9)=='rho_inout')then
            call init_wf(lg,mg,system,info,spsi)
         endif
      endif
 
      if(yn_reset_step_restart=='y' .or. &
-        (read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout') ) Miter=0
+        (read_gs_restart_data=='rho'.or.read_gs_restart_data(1:9)=='rho_inout')) Miter=0
 
   else
     ! new calculation

@@ -143,8 +143,10 @@ subroutine restart_gs(lg,mg,system,info,spsi,iter,mixing)
   if (.not. iself) then
     wdir = gdir
   end if
-  if (read_gs_restart_data=='rho') then
+  if (read_gs_restart_data=='rho' .or. &
+      read_gs_restart_data=='rho_inout:single') then
     wdir = gdir
+    iself = .false. !turn off self_checkpoint format in reading and behave like single file format
   end if
 
   call read_bin(wdir,lg,mg,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
@@ -413,7 +415,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   flag_read_info = .true.
   flag_read_occ  = .true.
   if( flag_GS ) then
-     if( read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout' ) then
+     if(read_gs_restart_data=='rho'.or.read_gs_restart_data(1:9)=='rho_inout')then
         flag_read_info = .false.
         flag_read_occ  = .false.
      endif
@@ -487,14 +489,14 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
 
   !wave function
   if( flag_GS .and. &
-      (read_gs_restart_data=='rho_inout'.or.read_gs_restart_data=='rho') )then
+      (read_gs_restart_data(1:9)=='rho_inout'.or.read_gs_restart_data=='rho'))then
      ! this case => do not read wavefunction
   else
      call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,iself)
   endif
   !rho_inout
   if( flag_GS.and. &
-     (read_gs_restart_data=='all'.or.read_gs_restart_data=='rho_inout'))then
+     (read_gs_restart_data=='all'.or.read_gs_restart_data(1:9)=='rho_inout'))then
     if (present(mixing)) then
       call read_rho_inout(idir,lg,mg,system,info,mixing,iself)
     end if
