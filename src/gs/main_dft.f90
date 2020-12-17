@@ -329,14 +329,30 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
-if(yn_opt=='y') then
-   if(.not.flag_opt_conv) then
-      call comm_sync_all
-      call checkpoint_opt(nopt_max,opt,ofl%dir_out_restart)
-      call comm_sync_all
+if(write_gs_restart_data.ne."checkpoint_only") then
+   if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
+   call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
+   if(yn_opt=='y') then
+      if(.not.flag_opt_conv) then
+         call comm_sync_all
+         call checkpoint_opt(nopt_max,opt,ofl%dir_out_restart)
+         call comm_sync_all
+      endif
+   endif
+else
+   if(yn_self_checkpoint=='n') then
+      if(comm_is_root(nproc_id_global)) then
+           write(*,'(a)')"  no restart data writing:"
+           write(*,'(a)')"  check input keywords if you need restart data"
+       endif
    endif
 endif
+if(yn_self_checkpoint=='y') then
+   if(comm_is_root(nproc_id_global)) &
+   write(*,'(a)')"  writing restart data in checkpoint format ..."
+   call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
+endif
+if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing completed."
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
