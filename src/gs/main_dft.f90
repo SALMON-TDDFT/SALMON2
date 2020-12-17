@@ -332,6 +332,7 @@ call timer_begin(LOG_WRITE_GS_DATA)
 if(write_gs_restart_data.ne."checkpoint_only") then
    if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
+   call comm_sync_all
    if(yn_opt=='y') then
       if(.not.flag_opt_conv) then
          call comm_sync_all
@@ -351,6 +352,7 @@ if(yn_self_checkpoint=='y') then
    if(comm_is_root(nproc_id_global)) &
    write(*,'(a)')"  writing restart data in checkpoint format ..."
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
+   call comm_sync_all
 endif
 if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing completed."
 call timer_end(LOG_WRITE_GS_DATA)
