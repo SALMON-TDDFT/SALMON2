@@ -215,6 +215,7 @@ module structures
     real(8),allocatable :: dvloctbl(:,:)
     real(8),allocatable :: udvtbl(:,:,:)
     real(8),allocatable :: dudvtbl(:,:,:)
+    real(8),allocatable :: rho_pp_tbl(:,:)
     real(8),allocatable :: rho_nlcc_tbl(:,:)
     real(8),allocatable :: tau_nlcc_tbl(:,:)
     real(8),allocatable :: upp_f(:,:,:)

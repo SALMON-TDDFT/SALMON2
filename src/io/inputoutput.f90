@@ -316,7 +316,8 @@ contains
       & nscf_init_redistribution, &
       & nscf_init_no_diagonal, &
       & nscf_init_mix_zero, &
-      & conv_gap_mix_zero
+      & conv_gap_mix_zero, &
+      & method_init_density
 
     namelist/emfield/ &
       & trans_longi, &
@@ -628,6 +629,7 @@ contains
     nscf_init_no_diagonal= 10
     nscf_init_mix_zero   = -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
+    method_init_density  = 'wf'
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -889,6 +891,7 @@ contains
     call string_lowercase(method_min)
     call string_lowercase(method_mixing)
     call string_lowercase(convergence)
+    call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
     do ii = 0,media_num
@@ -1043,6 +1046,7 @@ contains
     call comm_bcast(nscf_init_mix_zero    ,nproc_group_global)
     call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
+    call comm_bcast(method_init_density   ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1779,6 +1783,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_density', method_init_density
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
@@ -2150,6 +2155,11 @@ contains
         write(*,*) 'check a keyword of convergence.'
       endif
       call end_parallel
+    end select
+
+    select case(method_init_density)
+    case ('wf','pp') ; continue
+    case default     ; stop 'method_init_density must be wf or pp'
     end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then

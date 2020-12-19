@@ -244,6 +244,8 @@ module salmon_pp
     allocate(pp%udvtbl(nrmax,0:2*lmax+1,nelem)); pp%udvtbl=0.0d0
     allocate(pp%dudvtbl(nrmax,0:2*lmax+1,nelem)); pp%dudvtbl=0.0d0
     
+    allocate(pp%rho_pp_tbl(nrmax,nelem)); pp%rho_pp_tbl=0.0d0
+
     allocate(pp%rho_nlcc_tbl(nrmax,nelem))
     allocate(pp%tau_nlcc_tbl(nrmax,nelem))
   
