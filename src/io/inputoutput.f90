@@ -2231,7 +2231,13 @@ contains
     case default
       stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
     end select
-    
+
+    if(theory=='multi_scale_maxwell_tddft') then
+       if( propagator == 'aetrs' )then
+          stop 'propagator = "aetrs" is not supported in multi-scale calculation'
+       end if
+    endif
+
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)

@@ -461,8 +461,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit
-       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"new")
-       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
+       call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"new")
+       call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
 
   end if

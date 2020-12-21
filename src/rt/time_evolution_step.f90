@@ -320,7 +320,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then
     if(mod(itt,out_dns_ac_je_step)==0)then
-      call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
+     !call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
+      call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
   end if
   if(yn_out_elf_rt=='y')then
