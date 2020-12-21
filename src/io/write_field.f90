@@ -143,8 +143,9 @@ subroutine write_dns(lg,mg,system,rho_s,rho0_s,itt)
 end subroutine write_dns
 
 !===================================================================================================================================
-subroutine write_dns_ac_je(info,mg,system,rho,j_e,itt,action)
-  use structures, only: s_dft_system,s_parallel_info,s_rgrid,s_scalar,allocate_scalar,deallocate_scalar,s_vector
+!subroutine write_dns_ac_je(info,mg,system,rho,j_e,itt,action)
+subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
+  use structures, only: s_dft_system,s_parallel_info,s_rgrid,s_scalar,allocate_scalar,deallocate_scalar,s_singlescale  !,s_vector
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use salmon_global, only: kion,izatom
@@ -153,7 +154,8 @@ subroutine write_dns_ac_je(info,mg,system,rho,j_e,itt,action)
   type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in) :: system
   type(s_rgrid),intent(in)  :: mg
-  type(s_vector),intent(in) :: j_e
+ !type(s_vector),intent(in) :: j_e
+  type(s_singlescale) :: fw
   real(8),intent(in) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer,intent(in) :: itt
   character(3),intent(in) :: action
@@ -214,7 +216,8 @@ subroutine write_dns_ac_je(info,mg,system,rho,j_e,itt,action)
         write(fp) dummy(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         write(fp) dummy(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         else
-        write(fp) j_e%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+       !write(fp) j_e%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+        write(fp) fw%curr(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
         write(fp) system%Ac_micro%v( &
                         1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         endif
