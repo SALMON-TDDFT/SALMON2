@@ -144,7 +144,8 @@ subroutine restart_gs(lg,mg,system,info,spsi,iter,mixing)
     wdir = gdir
   end if
   if (read_gs_restart_data=='rho' .or. &
-      read_gs_restart_data=='rho_inout:single') then
+      read_gs_restart_data=='rho_inout:single' .or. &
+      read_gs_restart_data=='all:single'  ) then
     wdir = gdir
     iself = .false. !turn off self_checkpoint format in reading and behave like single file format
   end if
@@ -390,7 +391,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data
+  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data, yn_reset_step_restart
   implicit none
   character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg
@@ -464,7 +465,9 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
      !debug check
      if (yn_restart == 'y') then
         if (nprocs /= nproc_size_global) then
-           stop 'number of processes do not match!'
+           if(comm_is_root(nproc_id_global)) &
+           write(*,*) 'Warning: number of processes do not match!'
+          !stop 'number of processes do not match!'
         end if
      end if
   else
@@ -498,7 +501,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   endif
   !rho_inout
   if( flag_GS.and. &
-     (read_gs_restart_data=='all'.or.read_gs_restart_data(1:9)=='rho_inout'))then
+     (read_gs_restart_data(1:3)=='all'.or.read_gs_restart_data(1:9)=='rho_inout'))then
     if (present(mixing)) then
       call read_rho_inout(idir,lg,mg,system,info,mixing,iself)
     end if
@@ -510,7 +513,8 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   endif
 
   !Vh_stock
-  if( flag_RT .and. yn_restart=='y')then
+ !if( flag_RT .and. yn_restart=='y')then
+  if( flag_RT .and. yn_restart=='y' .and. yn_reset_step_restart=='n' )then
     if (present(Vh_stock1) .and. present(Vh_stock2)) then
       call read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,iself)
     end if
