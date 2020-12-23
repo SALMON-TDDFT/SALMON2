@@ -1620,7 +1620,8 @@ contains
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: ncg
+    use salmon_global, only: ncg,nelec
+    use inputoutput, only: t_unit_time
     use subspace_diagonalization, only: ssdg
     use gram_schmidt_orth, only: gram_schmidt
     use Conjugate_Gradient, only: gscg_zwf
@@ -1642,6 +1643,7 @@ contains
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS
     complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
     real(8) :: coef(system%no,system%nk,system%nspin)
+    real(8) :: nee, neh, wspin
     complex(8) :: cbox
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
@@ -1655,6 +1657,11 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
+    if(nspin==1) then
+      wspin = 2d0
+    else if(nspin==2) then
+      wspin = 1d0
+    end if
     
     do iter_GS=1,10
       call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
@@ -1676,11 +1683,20 @@ contains
     end do
     end do
 
-    io=1 ! future work
-    ik=1 ! future work
-    ispin=1 ! future work
+    nee = 0d0
+    neh = dble(nelec)
+    do ispin=1,nspin
+    do ik=1,nk
+    do io=1,no
+      nee = nee + ((wspin-system%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
+      neh = neh - system%rocc(io,ik,ispin)/wspin * coef(io,ik,ispin)
+    end do
+    end do
+    end do
+   !nee  = sum(ovlp_occ(NBoccmax+1:NB,:))
+   !neh  = sum(occ)-sum(ovlp_occ(1:NBoccmax,:))
     if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_proj,'(200f14.8)') dble(itt)*dt*2.41888d-2, coef(io,ik,ispin)
+      write(ofl%fh_proj,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
     end if
 
     return
