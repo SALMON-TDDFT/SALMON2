@@ -202,15 +202,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_RESTART_SELF)
   call restart_rt(lg,mg,system,info,spsi_in,Mit,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   if(yn_reset_step_restart=='y' ) Mit=0
-  if(projection_option/='no') then
-    call allocate_orbital_complex(system%nspin,mg,info,rt%gspsi) ! wavefunction @ t=0 (ground state)
-    !$omp workshare
-    rt%gspsi%zwf = spsi_in%zwf
-    !$omp end workshare
-    if(yn_restart=='y' .and. comm_is_root(nproc_id_global)) then
-      write(*,*) "CAUTION: projection_option will be calculated with the orbitals of the restart data (not GS)"
-    end if
-  end if
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
@@ -261,6 +252,20 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   allocate(energy%esp(system%no,system%nk,system%nspin))
+  
+  if(projection_option/='no') then
+    call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
+    !$omp workshare
+    rt%tpsi0%zwf = spsi_in%zwf
+    !$omp end workshare
+    allocate(rt%vloc0(system%nspin))
+    do jspin=1,system%nspin
+      call allocate_scalar(mg,rt%vloc0(jspin))
+      !$omp workshare
+      rt%vloc0(jspin)%f = V_local(jspin)%f
+      !$omp end workshare
+    end do
+  end if
   
   call timer_end(LOG_READ_GS_DATA)
 
