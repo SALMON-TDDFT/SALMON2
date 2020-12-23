@@ -212,7 +212,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(projection_option/='no' .and. mod(itt,out_projection_step)==0)then
-    call projection(itt,ofl,dt,mg,system,info,spsi_out,rt%gspsi)
+    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,tpsi,srg,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
