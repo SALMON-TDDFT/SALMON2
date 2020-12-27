@@ -37,6 +37,9 @@ module salmon_global
 ! Flag for suppress standard outputs 
   logical :: quiet
 
+! For band
+  integer,parameter :: max_num_of_segments = 10
+
   character(16)  :: calc_mode      !old input variable, but used as a flag; move later
 
 !Input variables
@@ -343,5 +346,13 @@ character(256),allocatable :: atom_name(:)
   character(10) :: current_openmp_mode  ! 'auto', 'orbital', 'rgrid'
   character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
 
+!! &band
+  character(3) :: lattice
+  integer :: nref_band
+  real(8) :: tol_esp_diff
+  integer :: num_of_segments
+  integer :: ndiv_segment(max_num_of_segments)
+  real(8) :: kpt(3,max_num_of_segments+1)
+  character(1) :: kpt_label(max_num_of_segments+1)
 
 end module salmon_global

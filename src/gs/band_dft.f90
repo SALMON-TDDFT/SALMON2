@@ -33,16 +33,17 @@ subroutine init_band_dft(system,band)
   
   band%num_band_kpt = size( band%band_kpt, 2 )
   !write(*,*) "num_band_kpt=",band%num_band_kpt
-  
+
   allocate( band%check_conv_esp(band%nref_band,system%nk,system%nspin) )
   band%check_conv_esp=.false.
-  
+
   if ( comm_is_root(nproc_id_global) ) then
      open(100,file='band.dat')
      write(100,*) "Number_of_Bands:",system%no
      write(100,*) "Number_of_kpt_in_each_block:",system%nk
      write(100,*) "Number_of_blocks:",band%num_band_kpt/system%nk
-  end if
+     close(100) 
+ end if
 
 
 end subroutine init_band_dft
@@ -65,10 +66,12 @@ subroutine calc_band_write(iter_band_kpt,system,band,info)
    if( comm_is_root(nproc_id_global) ) then
       write(*,10) iter_band_kpt, iter_band_kpt+system%nk-1
       write(*,20) "kpoints","kpoints in Cartesian"
+      open(100,file='band.dat',position="append")
       do ik=iter_band_kpt,iter_band_kpt+system%nk-1
          write(*,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
          write(100,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
       end do
+      close(100)
    end if
 10 format(1x,"iter_band_kpt=",i3," to",i3)
 20 format(1x,3x,2x,a30,2x,a30)
@@ -84,6 +87,7 @@ subroutine write_band(system,energy)
   integer :: ik, iob, ispin
 
   if( comm_is_root(nproc_id_global) ) then
+     open(100,file='band.dat',position="append")
      do ik=1,size(energy%esp,2)
      do iob=1,size(energy%esp,1)
         write(100,*) ik,iob,(energy%esp(iob,ik,ispin),ispin=1,system%nspin)
@@ -95,6 +99,12 @@ subroutine write_band(system,energy)
 end subroutine write_band
 
 subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label )
+  use salmon_global, only: lattice_nml => lattice &
+                         , nref_band_nml => nref_band &
+                         , num_of_segments_nml => num_of_segments &
+                         , ndiv_segment_nml => ndiv_segment &
+                         , kpt_nml => kpt &
+                         , kpt_label_nml => kpt_label
   implicit none
   character(3),intent(out) :: lattice
   integer,intent(out) :: nref_band
@@ -102,13 +112,15 @@ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label
   real(8),allocatable,intent(inout) :: kpt(:,:)  ! given in reduced coordinates in reciprocal space
   character(1),allocatable,intent(inout) :: kpt_label(:)
   integer,parameter :: unit=100
-  integer :: i, num_of_segments, iformat
+  integer :: num_of_segments !,i,iformat
   if ( comm_is_root(nproc_id_global) ) then
      write(*,'(a50)') repeat("-",24)//"read_bandcalc_param(start)"
   end if
-  open(unit,file='bandcalc.dat',status='old')
-  read(unit,*) lattice; write(*,*) lattice
-  read(unit,*) nref_band
+  !open(unit,file='bandcalc.dat',status='old')
+  !read(unit,*) lattice; write(*,*) lattice
+  !read(unit,*) nref_band
+  lattice=lattice_nml
+  nref_band=nref_band_nml; write(*,*) "nref",nref_band,nproc_id_global
   if ( lattice == "non" ) then
   else
      close(unit)
@@ -117,23 +129,27 @@ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label
      end if
      return
   end if
-  read(unit,*) num_of_segments
+  !read(unit,*) num_of_segments
+  num_of_segments=num_of_segments_nml
   allocate( ndiv_segment(num_of_segments) ); ndiv_segment=0
   allocate( kpt(3,num_of_segments+1)      ); kpt=0.0d0
   allocate( kpt_label(num_of_segments+1)  ); kpt_label=""
-  read(unit,*) ndiv_segment(:)
-  call check_data_format( unit, iformat )
-  select case( iformat )
-  case( 0 )
-     do i=1,num_of_segments+1
-        read(unit,*) kpt(1:3,i)
-     end do
-  case( 1 )
-     do i=1,num_of_segments+1
-        read(unit,*) kpt_label(i), kpt(1:3,i)
-     end do
-  end select
-  close(unit)
+  !read(unit,*) ndiv_segment(:)
+  ndiv_segment=ndiv_segment_nml(1:num_of_segments)
+  kpt=kpt_nml(:,1:num_of_segments)
+  kpt_label=kpt_label_nml(1:num_of_segments)
+  !call check_data_format( unit, iformat )
+  !select case( iformat )
+  !case( 0 )
+  !   do i=1,num_of_segments+1
+  !      read(unit,*) kpt(1:3,i)
+  !   end do
+  !case( 1 )
+  !   do i=1,num_of_segments+1
+  !      read(unit,*) kpt_label(i), kpt(1:3,i)
+  !   end do
+  !end select
+  !close(unit)
   if ( comm_is_root(nproc_id_global) ) then
      write(*,'(a50)') repeat("-",26)//"read_bandcalc_param(end)"
   end if

@@ -36,7 +36,7 @@ subroutine init_dir_out_restart(ofl)
   type(s_ofile), intent(inout) :: ofl
 
   select case(theory)
-    case('dft','dft_md')
+    case('dft','dft_md','dft_band')
       ofl%dir_out_restart = 'data_for_restart/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
     case('tddft_response','tddft_pulse','single_scale_maxwell_tddft')
@@ -407,7 +407,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   integer :: comm,itt,nprocs
   logical :: iself,if_real_orbital
 
-  flag_GS = (theory=='dft'.or.theory=='dft_md'.or.calc_mode=='GS')
+  flag_GS = (theory=='dft'.or.theory=='dft_md'.or.theory=='dft_band'.or.calc_mode=='GS')
   flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
 
   flag_read_info = .true.
@@ -452,9 +452,10 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
      call comm_bcast(nprocs,comm)
      call comm_bcast(if_real_orbital,comm)
 
-     if((theory=='dft'.or.calc_mode=='GS').or.  &
+     if((theory=='dft'.or.theory=='dft_band'.or.calc_mode=='GS').or.  &
         ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
         iter = itt
+        if ( theory == 'dft_band' ) iter=0
      end if
 
      !debug check

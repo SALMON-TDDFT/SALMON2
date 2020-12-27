@@ -91,7 +91,7 @@ integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
 
 real(8),allocatable :: esp_old(:,:,:)
-real(8) :: tol_esp_diff, ene_gap
+real(8) :: ene_gap
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
@@ -163,7 +163,10 @@ DFT_Iteration : do iter=Miter+1,nscf
       exit DFT_Iteration
    endif
    if(calc_mode=='DFT_BAND')then
-      if(all(band%check_conv_esp)) cycle DFT_Iteration
+      if(all(band%check_conv_esp)) then
+        if ( comm_is_root(nproc_id_global) ) write(*,*) "cycle!!! : iter=",iter
+        cycle DFT_Iteration
+      end if
    end if
 
    Miter=Miter+1
@@ -198,7 +201,6 @@ DFT_Iteration : do iter=Miter+1,nscf
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
    if(calc_mode=='DFT_BAND')then
-      tol_esp_diff=1.0d-5
       esp_old=abs(esp_old-energy%esp)
       band%check_conv_esp(:,:,:)=.false.
       do is=1,system%nspin
@@ -224,6 +226,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       esp_old=energy%esp
    end if
 
+   if( calc_mode/='DFT_BAND' )then
    call timer_begin(LOG_WRITE_GS_RESULTS)
 
    select case(convergence)
@@ -323,7 +326,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 203   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2             = ",i6,e15.8)
 204   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
 
-   end if
+   end if !comm_is_root
 
    else if( ilevel_print==2 ) then
 
@@ -376,6 +379,8 @@ DFT_Iteration : do iter=Miter+1,nscf
    end do
    end do
 
+   end if !calc_mode/=DFT_BAND
+
    if(theory=='dft' .and. yn_opt=='n')then
      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -397,10 +402,12 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 end do DFT_Iteration
 
+if(calc_mode/='DFT_BAND')then
 if(.not.flag_conv) then
    if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then
       write(*,'(a,e15.8)') "  #GS does not converged :",sum1
    endif
+endif
 endif
 
 end subroutine scf_iteration_dft

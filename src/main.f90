@@ -62,6 +62,8 @@ contains
     case('dft_md')
        yn_md='y'
        calc_mode='GS'
+    case('dft_band')
+       calc_mode='DFT_BAND'
     case('tddft_response','tddft_pulse')
        calc_mode='RT'
     case('multi_scale_maxwell_tddft')
