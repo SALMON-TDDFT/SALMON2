@@ -254,7 +254,8 @@ contains
       & natom, &
       & file_atom_coor, &
       & file_atom_red_coor, &
-      & yn_spinorbit
+      & yn_spinorbit, &
+      & yn_symmetry
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -584,6 +585,7 @@ contains
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
+    yn_symmetry        = 'n'
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -984,6 +986,7 @@ contains
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
+    call comm_bcast(yn_symmetry        ,nproc_group_global)
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1734,6 +1737,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
 
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
@@ -2163,6 +2167,7 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
+    call yn_argument_check(yn_symmetry)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue

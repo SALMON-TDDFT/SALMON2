@@ -5,6 +5,7 @@ module sym_sub
   implicit none
 
   private
+  public :: read_sw_symmetry
   public :: init_sym_sub
 
   logical,public :: DISPLAY     =.false.
@@ -21,6 +22,12 @@ module sym_sub
 contains
 
 
+  subroutine read_sw_symmetry( yn )
+    implicit none
+    character(1),intent(in) :: yn
+    use_symmetry = ( yn == 'y' )
+  end subroutine read_sw_symmetry
+
   subroutine init_sym_sub( Amat_in, Bmat_in, epdir )
     implicit none
     real(8),intent(in) :: Amat_in(3,3), Bmat_in(3,3) ! Lattice vectors
@@ -30,6 +37,8 @@ contains
     integer :: ngid, npid, nprocs
     integer :: nsym, isym, n, j
     logical :: ok(3)
+
+    if ( .not.use_symmetry ) return
 
     if ( flag_init ) return
 
