@@ -1635,7 +1635,7 @@ contains
     type(s_parallel_info)   ,intent(in) :: info
     type(s_stencil)         ,intent(in) :: stencil
     type(s_pp_grid)         ,intent(in) :: ppg
-    type(s_orbital)         ,intent(in) :: psi_t
+    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
     type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
     type(s_sendrecv_grid)               :: srg
     type(s_dft_energy)                  :: energy
@@ -1670,6 +1670,7 @@ contains
       niter = nscf
     end if
     
+  ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
     call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
     dE = energy%E_kin - rt%E_old
     if(abs(dE) < 1e-12) then
@@ -1687,7 +1688,7 @@ contains
       end do
     end if
     
-    call inner_product(psi_t,rt%tpsi0,mat)
+    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
     
     coef=0.d0
     do ispin=1,nspin
@@ -1695,7 +1696,7 @@ contains
     do io1=1,no
       do io2=1,no
         coef(io1,ik,ispin) = coef(io1,ik,ispin) &
-        & + system%rocc(io2,ik,ispin)*system%wtk(ik)* abs(mat(io2,io1,ispin,ik))**2
+        & + system%rocc(io2,ik,ispin)*system%wtk(ik)* abs(mat(io1,io2,ispin,ik))**2
       end do
     end do
     end do
@@ -1754,9 +1755,9 @@ contains
       if(info%if_divide_orbit) then
         do ik=ik_s,ik_e
         do ispin = 1, nspin
-          do io1 = 1, no ! future work: no --> no0 (# of GS orbitals)
+          do io1 = 1, no
             if (io_s<= io1 .and. io1 <= io_e) then
-              call copy_data(psi2%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
+              call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
             end if
             call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
             do io2 = 1, no
@@ -1766,7 +1767,7 @@ contains
                 do iz=is(3),ie(3)
                 do iy=is(2),ie(2)
                 do ix=is(1),ie(1)
-                  cbox = cbox + conjg(wf_io1(ix,iy,iz)) * psi1%zwf(ix,iy,iz,ispin,io2,ik,1)
+                  cbox = cbox + conjg(wf_io1(ix,iy,iz)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
                 end do
                 end do
                 end do
@@ -1786,7 +1787,7 @@ contains
           do iz=is(3),ie(3)
           do iy=is(2),ie(2)
           do ix=is(1),ie(1)
-            cbox = cbox + conjg(psi2%zwf(ix,iy,iz,ispin,io1,ik,1)) * psi1%zwf(ix,iy,iz,ispin,io2,ik,1)
+            cbox = cbox + conjg(psi1%zwf(ix,iy,iz,ispin,io1,ik,1)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
           end do
           end do
           end do
