@@ -1616,15 +1616,16 @@ contains
   
 !===================================================================================================================================
   
-  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,srg,rt)
+  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: ncg,nelec
+    use salmon_global, only: ncg,nelec,yn_spinorbit,nscf
     use inputoutput, only: t_unit_time
     use subspace_diagonalization, only: ssdg
     use gram_schmidt_orth, only: gram_schmidt
     use Conjugate_Gradient, only: gscg_zwf
+    use Total_Energy, only: calc_eigen_energy
     implicit none
     integer                 ,intent(in) :: itt
     type(s_ofile)           ,intent(in) :: ofl
@@ -1635,15 +1636,16 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi_t
-    type(s_orbital)                     :: tpsi
+    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
     type(s_sendrecv_grid)               :: srg
+    type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
     !
     integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
-    integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS
+    integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
     complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
     real(8) :: coef(system%no,system%nk,system%nspin)
-    real(8) :: nee, neh, wspin
+    real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
@@ -1662,12 +1664,28 @@ contains
     else if(nspin==2) then
       wspin = 1d0
     end if
+    if(nscf==0) then
+      niter = 10
+    else
+      niter = nscf
+    end if
     
-    do iter_GS=1,10
-      call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
-      call gscg_zwf(ncg,mg,system,info,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
-      call gram_schmidt(system, mg, info, rt%tpsi0)
-    end do
+    call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+    dE = energy%E_kin - rt%E_old
+    if(abs(dE) < 1e-12) then
+      if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
+    else
+      do iter_GS=1,niter
+        call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
+        call gscg_zwf(ncg,mg,system,info,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
+        call gram_schmidt(system, mg, info, rt%tpsi0)
+        call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+        dE = energy%E_kin - rt%E_old
+        if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
+        if(abs(dE) < 1e-6) exit
+        rt%E_old = energy%E_kin
+      end do
+    end if
     
     call inner_product(psi_t,rt%tpsi0,mat)
     
@@ -1689,15 +1707,32 @@ contains
     do ik=1,nk
     do io=1,no
       nee = nee + ((wspin-system%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
-      neh = neh - system%rocc(io,ik,ispin)/wspin * coef(io,ik,ispin)
+      neh = neh - (system%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
     end do
     end do
     end do
    !nee  = sum(ovlp_occ(NBoccmax+1:NB,:))
    !neh  = sum(occ)-sum(ovlp_occ(1:NBoccmax,:))
     if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_proj,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
+      write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
+      write(ofl%fh_ovlp,'(i11)') itt
+      ispin = 1
+      do ik=1,nk
+        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
+      end do
+      if(nspin==2 .and. yn_spinorbit=='n') then
+        ispin = 2
+        do ik=1,nk
+          write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
+        end do
+      end if
     end if
+    
+!        if(action=="proj_last ") then
+!       tconv = t_unit_energy%conv
+!       do ik=1,NK
+!          write(409,10)ik,(esp_all(ib,ik)*tconv,ovlp_occ(ib,ik)*NKxyz,ib=1,NB)
+!       end do
 
     return
     

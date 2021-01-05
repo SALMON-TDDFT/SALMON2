@@ -363,13 +363,30 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     !(header of SYSname_rt_energy.data)
     call write_rt_energy_data(-1,ofl,dt,energy,md)
   
-    !(header in SYSname_proj.data)
     if(projection_option/='no')then
-      ofl%file_proj_data = trim(sysname)//"_proj.data"
-      ofl%fh_proj = open_filehandle(ofl%file_proj_data)
-      open(ofl%fh_proj,file=ofl%file_proj_data)
-      write(ofl%fh_proj,'("#",5X,"time[fs]",4("    projection"))')
-      write(ofl%fh_proj,'("#",7("----------"))')
+      rt%E_old = energy%E_kin
+    !(header in SYSname_ovlp.data)
+      write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
+      ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
+      open(ofl%fh_ovlp,file=ofl%file_ovlp)
+      write(ofl%fh_ovlp, '("#",1X,A)') "Projection"
+      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ovlp_occup", "Occupation"
+      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "NB", "Number of bands"
+      write(ofl%fh_ovlp, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "ik", "none", &
+      & 2, "ovlp_occup(NB)", "none"
+    !(header in SYSname_nex.data)
+      write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
+      ofl%fh_nex = open_filehandle(ofl%file_nex)
+      open(ofl%fh_nex,file=ofl%file_nex)
+      write(ofl%fh_nex, '("#",1X,A)') "Excitation"
+      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nelec", "Number of excited electrons"
+      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nhole", "Number of excited holes"
+      write(ofl%fh_nex, '("#",99(1X,I0,":",A,"[",A,"]"))')  &
+      &           1, "time", trim(t_unit_time%name), &
+      &           2, "nelec", "none", &
+      &           3, "nhole", "none"
     end if
   end if
   
