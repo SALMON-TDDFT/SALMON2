@@ -211,8 +211,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 ! result
 
   call timer_begin(LOG_CALC_PROJECTION)
-  if(projection_option/='no' .and. mod(itt,out_projection_step)==0)then
-    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,tpsi,srg,rt)
+  if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
+    ! tpsi,spsi_in = working arrays
+    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,tpsi,spsi_in,srg,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 

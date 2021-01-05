@@ -382,14 +382,14 @@ module structures
     integer :: fh_response
     integer :: fh_pulse
     integer :: fh_dft_md
-    integer :: fh_proj
+    integer :: fh_ovlp,fh_nex
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
     character(256) :: file_response_data
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
-    character(256) :: file_proj_data
+    character(256) :: file_ovlp,file_nex
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
@@ -445,8 +445,9 @@ module structures
     type(s_scalar),allocatable :: vloc0(:)  ! =v_local(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
-    type(s_orbital) :: tpsi0 ! wavefunction for projection_option
-    type(s_cg) :: cg ! for projection_option
+    type(s_orbital) :: tpsi0 ! for projection_option
+    type(s_cg) :: cg         ! for projection_option
+    real(8) :: E_old         ! for projection_option
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method
