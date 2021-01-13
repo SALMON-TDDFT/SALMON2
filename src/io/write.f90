@@ -1319,9 +1319,11 @@ contains
     use math_constants, only: pi
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
-                           out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au, unit_energy, &
-                           nelec,nstate
+    use inputoutput, only: uenergy_from_au
+    use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
+                           out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
+                           nelec,nstate,temperature
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1329,16 +1331,22 @@ contains
     integer :: iob,iik,is
     real(8) :: dos_l(1:out_dos_nenergy,system%nspin)
     real(8) :: fk,ww,dw
-    integer :: iw
-    real(8) :: ene_homo,ene_lumo,ene_min,ene_max,efermi,eshift
+    integer :: iw,index_vbm
+    real(8) :: ene_min,ene_max,eshift
 
     ene_min = minval(energy%esp)
     ene_max = maxval(energy%esp)
-    ene_homo = energy%esp(nelec/2  ,1,1)
-    ene_lumo = energy%esp(nelec/2+1,1,1)
-    if(yn_out_dos_set_fe_origin=='y'.and.nstate>nelec/2) then
-      efermi = (ene_homo+ene_lumo)*0.5d0
-      eshift = efermi
+    if(yn_out_dos_set_fe_origin=='y') then
+      if(temperature>=0.d0) then
+        eshift = system%mu
+      else
+        if( SPIN_ORBIT_ON )then
+          index_vbm=nelec
+        else
+          index_vbm=nelec/2
+        end if
+        eshift = maxval(energy%esp(1:index_vbm,:,:)) ! valence band maximum (HOMO)
+      end if
     else
       eshift = 0.d0
     endif
@@ -1398,9 +1406,10 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy
+                                   nelec, kion, natom, nstate, unit_energy, temperature
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1424,8 +1433,8 @@ contains
     real(8) :: pdos_l(out_dos_nenergy,0:4,natom)
     character(100) :: Outfile
     real(8) :: fk,ww,dw
-    integer :: iw
-    real(8) :: ene_homo,ene_lumo,ene_min,ene_max,efermi,eshift
+    integer :: iw,index_vbm
+    real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
 
     if( all(pp%upp_f==0.0d0) )then
@@ -1435,13 +1444,19 @@ contains
 
     ene_min = minval(energy%esp(:,:,:))
     ene_max = maxval(energy%esp(:,:,:))
-    if(yn_out_dos_set_fe_origin=='y'.and.nstate>nelec/2) then
-      ene_homo = energy%esp(nelec/2,1,1)
-      ene_lumo = energy%esp(nelec/2+1,1,1)
-      efermi = (ene_homo+ene_lumo)*0.5d0
-      eshift = efermi
+    if(yn_out_dos_set_fe_origin=='y') then
+      if(temperature>=0.d0) then
+        eshift = system%mu
+      else
+        if( SPIN_ORBIT_ON )then
+          index_vbm=nelec
+        else
+          index_vbm=nelec/2
+        end if
+        eshift = maxval(energy%esp(1:index_vbm,:,:)) ! valence band maximum (HOMO)
+      end if
     else
-      eshift = 0d0
+      eshift = 0.d0
     endif
     out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
     out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
@@ -1580,18 +1595,25 @@ contains
     use inputoutput, only: au_energy_ev
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
     !
-    integer :: ik
+    integer :: ik,index_vbm
     real(8),dimension(system%nk) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
-    if(comm_is_root(nproc_id_global) .and. nelec/2<system%no) then
+    !
+    if( SPIN_ORBIT_ON )then
+      index_vbm=nelec
+    else
+      index_vbm=nelec/2
+    end if
+    if(comm_is_root(nproc_id_global) .and. index_vbm<system%no) then
       do ik=1,system%nk
-        esp_vb_min(ik)=minval(energy%esp(1:nelec/2,ik,:))
-        esp_vb_max(ik)=maxval(energy%esp(1:nelec/2,ik,:))
-        esp_cb_min(ik)=minval(energy%esp(nelec/2+1:system%no,ik,:))
-        esp_cb_max(ik)=maxval(energy%esp(nelec/2+1:system%no,ik,:))
+        esp_vb_min(ik)=minval(energy%esp(1:index_vbm,ik,:))
+        esp_vb_max(ik)=maxval(energy%esp(1:index_vbm,ik,:))
+        esp_cb_min(ik)=minval(energy%esp(index_vbm+1:system%no,ik,:))
+        esp_cb_max(ik)=maxval(energy%esp(index_vbm+1:system%no,ik,:))
       end do
       write(*,*) 'band information-----------------------------------------'
       write(*,*) 'Bottom of VB',minval(esp_vb_min(:))

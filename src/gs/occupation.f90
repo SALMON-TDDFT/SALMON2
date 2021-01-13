@@ -100,6 +100,7 @@ SUBROUTINE ne2mu(energy,system,ilevel_print)
 
   muout = mu3
   call mu2ne(muout,ne3)
+  system%mu = muout
 
   if(ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
      write(*,*)
