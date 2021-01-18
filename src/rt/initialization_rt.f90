@@ -364,7 +364,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call write_rt_energy_data(-1,ofl,dt,energy,md)
   
     if(projection_option/='no')then
-      rt%E_old = energy%E_kin
     !(header in SYSname_ovlp.data)
       write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
       ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
@@ -470,6 +469,11 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   if(yn_md=='y') call init_md(system,md)
+  
+  ! preparation for projection
+  if(projection_option/='no') then
+    rt%E_old = energy%E_kin
+  end if
   
   ! single-scale Maxwell-TDDFT
   singlescale%flag_use=.false.
