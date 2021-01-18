@@ -2223,14 +2223,16 @@ contains
        end if
     end if
 
-    select case(method_singlescale)
-    case('3d', '1d', '1d_fourier')
-      if(method_singlescale=='1d_fourier') then
-        if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
-      end if
-    case default
-      stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
-    end select
+    if(theory=='single_scale_maxwell_tddft') then
+      select case(method_singlescale)
+      case('3d', '1d', '1d_fourier')
+        if(method_singlescale=='1d_fourier') then
+          if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
+        end if
+      case default
+        stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+      end select
+    end if
 
     if(theory=='multi_scale_maxwell_tddft') then
        if( propagator == 'aetrs' )then

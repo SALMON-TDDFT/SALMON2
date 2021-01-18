@@ -1739,16 +1739,11 @@ contains
     if(comm_is_root(nproc_id_global))then
       write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
       write(ofl%fh_ovlp,'(i11)') itt
-      ispin = 1
+      do ispin=1,nspin
       do ik=1,nk
         write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
       end do
-      if(nspin==2 .and. yn_spinorbit=='n') then
-        ispin = 2
-        do ik=1,nk
-          write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
-        end do
-      end if
+      end do
     end if
     
 !        if(action=="proj_last ") then

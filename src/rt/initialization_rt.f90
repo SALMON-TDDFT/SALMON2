@@ -481,6 +481,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 
   if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
+    if(.not. stencil%if_orthogonal) stop "error: single-scale Maxwell-TDDFT & non-orthogonal lattice"
     call allocate_vector(mg,rt%j_e)
     call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
