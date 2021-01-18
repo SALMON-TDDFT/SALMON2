@@ -364,7 +364,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call write_rt_energy_data(-1,ofl,dt,energy,md)
   
     if(projection_option/='no')then
-      rt%E_old = energy%E_kin
     !(header in SYSname_ovlp.data)
       write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
       ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
@@ -471,12 +470,18 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   if(yn_md=='y') call init_md(system,md)
   
+  ! preparation for projection
+  if(projection_option/='no') then
+    rt%E_old = energy%E_kin
+  end if
+  
   ! single-scale Maxwell-TDDFT
   singlescale%flag_use=.false.
   if(theory=='single_scale_maxwell_tddft') singlescale%flag_use=.true.
 
   if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
+    if(.not. stencil%if_orthogonal) stop "error: single-scale Maxwell-TDDFT & non-orthogonal lattice"
     call allocate_vector(mg,rt%j_e)
     call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
