@@ -99,6 +99,7 @@ module salmon_global
   character(256) :: file_atom_red_coor
   character(1)   :: yn_spinorbit
   character(1)   :: yn_symmetry
+  real(8)        :: hubbard_u
 
 !! &pseudo
   character(256) :: file_pseudo(maxmki)

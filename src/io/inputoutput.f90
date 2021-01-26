@@ -255,7 +255,8 @@ contains
       & file_atom_coor, &
       & file_atom_red_coor, &
       & yn_spinorbit, &
-      & yn_symmetry
+      & yn_symmetry, &
+      & hubbard_u
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -586,6 +587,7 @@ contains
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
     yn_symmetry        = 'n'
+    hubbard_u          = 0.0d0
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -987,6 +989,7 @@ contains
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
     call comm_bcast(yn_symmetry        ,nproc_group_global)
+    call comm_bcast(hubbard_u          ,nproc_group_global)
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1738,6 +1741,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hubbard_u', hubbard_u
 
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
