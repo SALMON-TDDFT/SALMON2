@@ -118,6 +118,13 @@ else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
 end if
 
+!$acc enter data copyin(info)
+!$acc enter data copyin(system)
+!$acc enter data copyin(mg)
+!$acc enter data copyin(stencil)
+!$acc enter data copyin(V_local)
+!$acc enter data copyin(spsi,shpsi,sttpsi) 
+!$acc enter data copyin(ppg)
 
 contains
 
