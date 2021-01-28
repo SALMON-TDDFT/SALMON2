@@ -17,6 +17,7 @@
 subroutine zstencil_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
                                ,tpsi,htpsi,V_local,lap0,lapt,nabt &
                                )
+  !$acc routine worker
   implicit none
 
   integer,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
@@ -53,6 +54,7 @@ subroutine zstencil_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
 
+  !$acc loop collapse(3)
   do iz=igs(3),ige(3)
   do iy=igs(2),ige(2)
 
