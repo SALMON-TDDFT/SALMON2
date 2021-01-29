@@ -7,6 +7,7 @@ SALMON has been tested and optimized to run in the following supercomputer platf
 
 - K-computer (It is scheduled to be permanently shut down at the end of August, 2019)
 - Fujitsu FX100 supercomputer system
+- Fujitsu supercomputer (Fugaku, FX1000, FX700) with A64FX processor
 - Linux PC Cluster with Intel Xeon Phi (Knights Landing architecture)
 - Linux PC Cluster with x86-64 CPU
 
@@ -18,7 +19,7 @@ http://salmon-tddft.jp/
 
 SALMON is available under Apache License version 2.0.
 
-    Copyright 2017-2020 SALMON developers
+    Copyright 2017-2021 SALMON developers
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
