@@ -338,7 +338,7 @@ contains
   end subroutine calc_current
 
   subroutine stencil_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,psi,j1,j2)
-    !$acc routine seq
+    !$acc routine worker
     integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3) &
                             ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
     real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
@@ -352,7 +352,9 @@ contains
     xtmp = 0d0
     ytmp = 0d0
     ztmp = 0d0
-#ifndef USE_OPENACC
+#ifdef USE_OPENACC
+!$acc loop worker collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #endif
     do iz=is(3),ie(3)
@@ -403,19 +405,25 @@ contains
   end subroutine stencil_current
 
   subroutine calc_current_nonlocal(jw,psi,ppg,is_array,ie_array,ik)
-!$acc routine seq
+    !$acc routine worker
     use structures
     implicit none
     integer   ,intent(in) :: is_array(3),ie_array(3),ik
     complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
     type(s_pp_grid),intent(in) :: ppg
     real(8)               :: jw(3)
+    real(8)               :: jw_1, jw_2, jw_3
     !
     integer    :: ilma,ia,j,ix,iy,iz
     real(8)    :: x,y,z
     complex(8) :: uVpsi,uVpsi_r(3)
     jw = 0d0
-#ifndef USE_OPENACC
+#ifdef USE_OPENACC
+	jw_1 = 0d0
+	jw_2 = 0d0
+	jw_3 = 0d0
+!$acc loop worker private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw_1, jw_2, jw_3)
+#else
 !$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
 #endif
     do ilma=1,ppg%Nlma
@@ -438,9 +446,19 @@ contains
         uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
       end do
       uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+#ifdef USE_OPENACC
+      jw_1 = jw_1 + aimag(conjg(uVpsi_r(1))*uVpsi)
+      jw_2 = jw_2 + aimag(conjg(uVpsi_r(2))*uVpsi)
+      jw_3 = jw_3 + aimag(conjg(uVpsi_r(3))*uVpsi)
+#else
       jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
+#endif
     end do
-#ifndef USE_OPENACC
+#ifdef USE_OPENACC
+	jw(1) = jw_1
+	jw(2) = jw_2
+	jw(3) = jw_3
+#else
 !$omp end parallel do
 #endif
     jw = jw * 2d0
