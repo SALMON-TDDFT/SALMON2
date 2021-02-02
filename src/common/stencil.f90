@@ -110,6 +110,7 @@ end subroutine zstencil
 
 subroutine zstencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz &
                                  ,tpsi,htpsi,V_local,lap0,lapt,nabt,Bk,F)
+!$acc routine seq
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)

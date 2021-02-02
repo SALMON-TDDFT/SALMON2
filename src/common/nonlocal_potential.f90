@@ -234,8 +234,13 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
   else
 
+#ifdef USE_OPENACC
+!$acc kernels present(ppg,tpsi,htpsi)
+!$acc loop private(ilma,ia,uvpsi,j,ix,iy,iz,wrk) collapse(4) auto
+#else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
+#endif
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -251,7 +256,9 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
           uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+#ifndef USE_OPENACC
 !OCL norecurrence
+#endif
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -265,7 +272,11 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
   end if
 

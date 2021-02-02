@@ -197,6 +197,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     end do
   end if
 
+  !$acc enter data copyin(system)
+  !$acc enter data copyin(info)
+  !$acc enter data copyin(mg)
+  !$acc enter data copyin(stencil)
+  !$acc enter data copyin(V_local)
+  !$acc enter data copyin(spsi_in,spsi_out,tpsi) 
+  !$acc enter data copyin(ppg)
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)

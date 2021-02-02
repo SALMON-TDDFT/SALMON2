@@ -52,6 +52,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   logical :: if_kAc,if_singlescale
   logical :: is_enable_overlapping
   !real(8) :: tmp,tmp1
+  real(8) :: kAc0(3)
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -258,9 +259,15 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
+#ifdef USE_OPENACC
+!$acc update device(system%vec_Ac)
+!$acc kernels present(system,mg,V_local,stencil,tpsi,htpsi)
+!$acc loop private(kAc,kAc0,k_lap0)
+#else
 !$omp parallel do collapse(4) default(none) &
 !$omp private(im,ik,io,ispin,kAc,k_lap0) &
 !$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -270,7 +277,15 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         if(if_kAc) then
           kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3) ! Cartesian vector k+A/c
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+#ifdef USE_OPENACC
+          kAc0 = kAc
+          kAc(1) = system%rmatrix_B(1,1) * kAc0(1) + system%rmatrix_B(1,2) * kAc0(2) + system%rmatrix_B(1,3) * kAc0(3)
+          kAc(2) = system%rmatrix_B(2,1) * kAc0(1) + system%rmatrix_B(2,2) * kAc0(2) + system%rmatrix_B(2,3) * kAc0(3)
+          kAc(3) = system%rmatrix_B(3,1) * kAc0(1) + system%rmatrix_B(3,2) * kAc0(2) + system%rmatrix_B(3,3) * kAc0(3)
+#else
           kAc(1:3) = matmul(system%rmatrix_B,kAc) ! B* (k+A/c)
+#endif
+
         end if
           call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
@@ -279,7 +294,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
       
     end if
     call timer_end(LOG_UHPSI_STENCIL)
@@ -484,7 +503,9 @@ contains
           ie(2) = ie(2) - 4
       end select
 
+#ifndef USE_OPENACC
 !$omp do collapse(4) schedule(dynamic,1)
+#endif
       do io=io_s,io_e
       do ispin=1,Nspin
       do ibz=ibs(3),ibe(3),nzblk
@@ -509,7 +530,9 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do nowait
+#endif
     end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
@@ -639,7 +662,9 @@ contains
 
       do im=im_s,im_e
       do ik=ik_s,ik_e
+#ifndef USE_OPENACC
 !$omp do collapse(4) schedule(dynamic,1)
+#endif
       do io=io_s,io_e
       do ispin=1,Nspin
       do ibz=ibs(3),ibe(3),nzblk
@@ -656,7 +681,9 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do nowait
+#endif
       end do
       end do
     end do
