@@ -58,6 +58,7 @@ contains
 
     if(allocated(psi%rwf)) then
 
+#ifndef USE_OPENACC
       do im=info%im_s,info%im_e
       do ispin=1,nspin
         call timer_begin(LOG_DENSITY_CALC)
@@ -98,6 +99,7 @@ contains
         call timer_end(LOG_DENSITY_COMM_COLL)
       end do
       end do
+#endif
 
     else
 
@@ -105,6 +107,29 @@ contains
       do ispin=1,nspin
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
+#ifdef USE_OPENACC
+!$acc kernels present(system,info,psi) copyin(is,ie) copy(wrk)
+        wrk(:,:,:,tid) = 0.d0
+!$acc loop gang vector(1)
+        do ik=info%ik_s,info%ik_e
+!$acc loop collapse(3) gang vector(128) private(wrk2)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          wrk2 = 0d0
+!$acc loop seq
+          do io=info%io_s,info%io_e
+            wrk2 = wrk2 + system%rocc(io,ik,ispin)*system%wtk(ik) * abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
+          end do
+!$acc atomic update
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2
+!$acc end atomic
+        end do
+        end do
+        end do
+        end do
+!$acc end kernels
+#else
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
         wrk(:,:,:,tid) = 0.d0
@@ -134,6 +159,7 @@ contains
         end do
 
 !$omp end parallel
+#endif
         call timer_end(LOG_DENSITY_CALC)
 
         call timer_begin(LOG_DENSITY_COMM_COLL)
@@ -181,6 +207,7 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
+    real(8) :: jx,jy,jz
 
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -211,6 +238,37 @@ contains
     do ispin=1,nspin
       call timer_begin(LOG_CURRENT_CALC)
       wrk4 = 0d0
+#ifdef USE_OPENACC
+      jx = 0d0
+      jy = 0d0
+      jz = 0d0
+
+!$acc update device(system%vec_Ac)
+
+!$acc kernels present(system,info,mg,stencil,psi,ppg) copyin(BT,ispin,im) copy(jx,jy,jz)
+!$acc loop private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto 
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
+                            ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
+        wrk3(1) = BT(1,1) * wrk2(1) + BT(1,2) * wrk2(2) + BT(1,3) * wrk2(3)
+        wrk3(2) = BT(2,1) * wrk2(1) + BT(2,2) * wrk2(2) + BT(2,3) * wrk2(3)
+        wrk3(3) = BT(3,1) * wrk2(1) + BT(3,2) * wrk2(2) + BT(3,3) * wrk2(3)
+        wrk2 = wrk3
+        call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+        wrk4 = (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin) * system%wtk(ik)
+        jx = jx + wrk4(1)
+        jy = jy + wrk4(2)
+        jz = jz + wrk4(3)
+      end do
+      end do
+!$acc end kernels
+      wrk4(1) = jx
+      wrk4(2) = jy
+      wrk4(3) = jz
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
@@ -250,6 +308,7 @@ contains
       end do
       end do
 !$omp end parallel do
+#endif
       call timer_end(LOG_CURRENT_CALC)
 
       call timer_begin(LOG_CURRENT_COMM_COLL)
@@ -268,71 +327,75 @@ contains
 
     return
 
-  contains
-
-    subroutine stencil_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,psi,j1,j2)
-      integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3) &
-                              ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
-      real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
-      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-      real(8)               :: j1(3),j2(3)
-      !
-      integer :: ix,iy,iz
-      real(8) :: rtmp
-      complex(8) :: cpsi,xtmp,ytmp,ztmp
-      rtmp = 0d0
-      xtmp = 0d0
-      ytmp = 0d0
-      ztmp = 0d0
-!$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-
-!OCL swp
-      do ix=is(1),ie(1)
-        rtmp = rtmp + abs(psi(ix,iy,iz))**2
-      end do
-
-!OCL swp
-      do ix=is(1),ie(1)
-        cpsi = conjg(psi(ix,iy,iz))
-        xtmp = xtmp + nabt(1,1) * cpsi * psi(idx(ix+1),iy,iz) &
-                    + nabt(2,1) * cpsi * psi(idx(ix+2),iy,iz) &
-                    + nabt(3,1) * cpsi * psi(idx(ix+3),iy,iz) &
-                    + nabt(4,1) * cpsi * psi(idx(ix+4),iy,iz)
-      end do
-
-!OCL swp
-      do ix=is(1),ie(1)
-        cpsi = conjg(psi(ix,iy,iz))
-        ytmp = ytmp + nabt(1,2) * cpsi * psi(ix,idy(iy+1),iz) &
-                    + nabt(2,2) * cpsi * psi(ix,idy(iy+2),iz) &
-                    + nabt(3,2) * cpsi * psi(ix,idy(iy+3),iz) &
-                    + nabt(4,2) * cpsi * psi(ix,idy(iy+4),iz)
-      end do
-
-!OCL swp
-      do ix=is(1),ie(1)
-        cpsi = conjg(psi(ix,iy,iz))
-        ztmp = ztmp + nabt(1,3) * cpsi * psi(ix,iy,idz(iz+1)) &
-                    + nabt(2,3) * cpsi * psi(ix,iy,idz(iz+2)) &
-                    + nabt(3,3) * cpsi * psi(ix,iy,idz(iz+3)) &
-                    + nabt(4,3) * cpsi * psi(ix,iy,idz(iz+4))
-      end do
-
-      end do
-      end do
-!$omp end parallel do
-      j1 = kAc(:) * rtmp
-      j2(1) = aimag(xtmp * 2d0)
-      j2(2) = aimag(ytmp * 2d0)
-      j2(3) = aimag(ztmp * 2d0)
-      return
-    end subroutine stencil_current
-
   end subroutine calc_current
 
+  subroutine stencil_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,psi,j1,j2)
+    !$acc routine seq
+    integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3) &
+                            ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
+    real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
+    complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+    real(8)               :: j1(3),j2(3)
+    !
+    integer :: ix,iy,iz
+    real(8) :: rtmp
+    complex(8) :: cpsi,xtmp,ytmp,ztmp
+    rtmp = 0d0
+    xtmp = 0d0
+    ytmp = 0d0
+    ztmp = 0d0
+#ifndef USE_OPENACC
+!$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
+#endif
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+
+!OCL swp
+    do ix=is(1),ie(1)
+      rtmp = rtmp + abs(psi(ix,iy,iz))**2
+    end do
+
+!OCL swp
+    do ix=is(1),ie(1)
+      cpsi = conjg(psi(ix,iy,iz))
+      xtmp = xtmp + nabt(1,1) * cpsi * psi(idx(ix+1),iy,iz) &
+                  + nabt(2,1) * cpsi * psi(idx(ix+2),iy,iz) &
+                  + nabt(3,1) * cpsi * psi(idx(ix+3),iy,iz) &
+                  + nabt(4,1) * cpsi * psi(idx(ix+4),iy,iz)
+    end do
+
+!OCL swp
+    do ix=is(1),ie(1)
+      cpsi = conjg(psi(ix,iy,iz))
+      ytmp = ytmp + nabt(1,2) * cpsi * psi(ix,idy(iy+1),iz) &
+                  + nabt(2,2) * cpsi * psi(ix,idy(iy+2),iz) &
+                  + nabt(3,2) * cpsi * psi(ix,idy(iy+3),iz) &
+                  + nabt(4,2) * cpsi * psi(ix,idy(iy+4),iz)
+    end do
+
+!OCL swp
+    do ix=is(1),ie(1)
+      cpsi = conjg(psi(ix,iy,iz))
+      ztmp = ztmp + nabt(1,3) * cpsi * psi(ix,iy,idz(iz+1)) &
+                  + nabt(2,3) * cpsi * psi(ix,iy,idz(iz+2)) &
+                  + nabt(3,3) * cpsi * psi(ix,iy,idz(iz+3)) &
+                  + nabt(4,3) * cpsi * psi(ix,iy,idz(iz+4))
+    end do
+
+    end do
+    end do
+#ifndef USE_OPENACC
+!$omp end parallel do
+#endif
+    j1 = kAc(:) * rtmp
+    j2(1) = aimag(xtmp * 2d0)
+    j2(2) = aimag(ytmp * 2d0)
+    j2(3) = aimag(ztmp * 2d0)
+    return
+  end subroutine stencil_current
+
   subroutine calc_current_nonlocal(jw,psi,ppg,is_array,ie_array,ik)
+!$acc routine seq
     use structures
     implicit none
     integer   ,intent(in) :: is_array(3),ie_array(3),ik
@@ -344,11 +407,16 @@ contains
     real(8)    :: x,y,z
     complex(8) :: uVpsi,uVpsi_r(3)
     jw = 0d0
+#ifndef USE_OPENACC
 !$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
+#endif
     do ilma=1,ppg%Nlma
       ia=ppg%ia_tbl(ilma)
       uVpsi = 0d0
-      uVpsi_r = 0d0
+      uVpsi_r(1) = 0d0
+      uVpsi_r(2) = 0d0
+      uVpsi_r(3) = 0d0
+
       do j=1,ppg%Mps(ia)
         x = ppg%Rxyz(1,j,ia)
         y = ppg%Rxyz(2,j,ia)
@@ -364,7 +432,9 @@ contains
       uVpsi = uVpsi * ppg%rinv_uvu(ilma)
       jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
     end do
+#ifndef USE_OPENACC
 !$omp end parallel do
+#endif
     jw = jw * 2d0
     return
   end subroutine calc_current_nonlocal

@@ -47,6 +47,7 @@ module structures
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3)
     real(8) :: rmatrix_a(3,3),rmatrix_b(3,3)
+    real(8) :: mu
     real(8),allocatable :: vec_k(:,:)    ! (1:3,1:nk), k-vector
     real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
     real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
@@ -383,14 +384,14 @@ module structures
     integer :: fh_response
     integer :: fh_pulse
     integer :: fh_dft_md
-    integer :: fh_proj
+    integer :: fh_ovlp,fh_nex
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
     character(256) :: file_response_data
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
-    character(256) :: file_proj_data
+    character(256) :: file_ovlp,file_nex
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
@@ -443,8 +444,12 @@ module structures
     type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
     type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
     type(s_scalar),allocatable :: rho0_s(:) ! =rho_s(1:nspin) @ t=0 (GS)
+    type(s_scalar),allocatable :: vloc0(:)  ! =v_local(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
+    type(s_orbital) :: tpsi0 ! for projection_option
+    type(s_cg) :: cg         ! for projection_option
+    real(8) :: E_old         ! for projection_option
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method

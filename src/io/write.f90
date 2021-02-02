@@ -1319,9 +1319,11 @@ contains
     use math_constants, only: pi
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
-                           out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au, unit_energy, &
-                           nelec,nstate
+    use inputoutput, only: uenergy_from_au
+    use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
+                           out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
+                           nelec,nstate,temperature
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1329,21 +1331,27 @@ contains
     integer :: iob,iik,is
     real(8) :: dos_l(1:out_dos_nenergy,system%nspin)
     real(8) :: fk,ww,dw
-    integer :: iw
-    real(8) :: ene_homo,ene_lumo,ene_min,ene_max,efermi,eshift
+    integer :: iw,index_vbm
+    real(8) :: ene_min,ene_max,eshift
 
     ene_min = minval(energy%esp)
     ene_max = maxval(energy%esp)
-    ene_homo = energy%esp(nelec/2  ,1,1)
-    ene_lumo = energy%esp(nelec/2+1,1,1)
-    if(yn_out_dos_set_fe_origin=='y'.and.nstate>nelec/2) then
-      efermi = (ene_homo+ene_lumo)*0.5d0
-      eshift = efermi
+    if(yn_out_dos_set_fe_origin=='y') then
+      if(temperature>=0.d0) then
+        eshift = system%mu
+      else
+        if( SPIN_ORBIT_ON )then
+          index_vbm=nelec
+        else
+          index_vbm=nelec/2
+        end if
+        eshift = maxval(energy%esp(1:index_vbm,:,:)) ! valence band maximum (HOMO)
+      end if
     else
       eshift = 0.d0
     endif
-    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
-    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
+    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min)-eshift)
+    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
 
     dos_l = 0.d0
@@ -1380,7 +1388,7 @@ contains
       end select
       write(101,'("#-----------------------")')
       do iw=1,out_dos_nenergy
-        ww=out_dos_start+dble(iw-1)*dw+eshift
+        ww=out_dos_start+dble(iw-1)*dw
         write(101,'(F16.8,99(1X,E23.15E3))') ww*uenergy_from_au, ( dos_l(iw,is)/uenergy_from_au, is=1,system%nspin )
       end do
       close(101)
@@ -1398,9 +1406,10 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy
+                                   nelec, kion, natom, nstate, unit_energy, temperature
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1424,8 +1433,8 @@ contains
     real(8) :: pdos_l(out_dos_nenergy,0:4,natom)
     character(100) :: Outfile
     real(8) :: fk,ww,dw
-    integer :: iw
-    real(8) :: ene_homo,ene_lumo,ene_min,ene_max,efermi,eshift
+    integer :: iw,index_vbm
+    real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
 
     if( all(pp%upp_f==0.0d0) )then
@@ -1435,16 +1444,22 @@ contains
 
     ene_min = minval(energy%esp(:,:,:))
     ene_max = maxval(energy%esp(:,:,:))
-    if(yn_out_dos_set_fe_origin=='y'.and.nstate>nelec/2) then
-      ene_homo = energy%esp(nelec/2,1,1)
-      ene_lumo = energy%esp(nelec/2+1,1,1)
-      efermi = (ene_homo+ene_lumo)*0.5d0
-      eshift = efermi
+    if(yn_out_dos_set_fe_origin=='y') then
+      if(temperature>=0.d0) then
+        eshift = system%mu
+      else
+        if( SPIN_ORBIT_ON )then
+          index_vbm=nelec
+        else
+          index_vbm=nelec/2
+        end if
+        eshift = maxval(energy%esp(1:index_vbm,:,:)) ! valence band maximum (HOMO)
+      end if
     else
-      eshift = 0d0
+      eshift = 0.d0
     endif
-    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
-    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
+    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min)-eshift)
+    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
 
     pdos_l_tmp=0.d0
@@ -1547,22 +1562,22 @@ contains
         write(101,'("#-----------------------")')
         if(pp%mlps(ikoa)==0)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==1)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,2f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==2)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,3f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==3)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,4f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         end if
@@ -1580,18 +1595,25 @@ contains
     use inputoutput, only: au_energy_ev
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
     !
-    integer :: ik
+    integer :: ik,index_vbm
     real(8),dimension(system%nk) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
-    if(comm_is_root(nproc_id_global) .and. nelec/2<system%no) then
+    !
+    if( SPIN_ORBIT_ON )then
+      index_vbm=nelec
+    else
+      index_vbm=nelec/2
+    end if
+    if(comm_is_root(nproc_id_global) .and. index_vbm<system%no) then
       do ik=1,system%nk
-        esp_vb_min(ik)=minval(energy%esp(1:nelec/2,ik,:))
-        esp_vb_max(ik)=maxval(energy%esp(1:nelec/2,ik,:))
-        esp_cb_min(ik)=minval(energy%esp(nelec/2+1:system%no,ik,:))
-        esp_cb_max(ik)=maxval(energy%esp(nelec/2+1:system%no,ik,:))
+        esp_vb_min(ik)=minval(energy%esp(1:index_vbm,ik,:))
+        esp_vb_max(ik)=maxval(energy%esp(1:index_vbm,ik,:))
+        esp_cb_min(ik)=minval(energy%esp(index_vbm+1:system%no,ik,:))
+        esp_cb_max(ik)=maxval(energy%esp(index_vbm+1:system%no,ik,:))
       end do
       write(*,*) 'band information-----------------------------------------'
       write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
@@ -1616,11 +1638,16 @@ contains
   
 !===================================================================================================================================
   
-  subroutine projection(itt,ofl,dt,mg,system,info,tpsi,tpsi0)
+  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
     use structures
+    use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use communication, only: comm_is_root, comm_summation, comm_bcast
-    use pack_unpack, only: copy_data
+    use salmon_global, only: ncg,nelec,yn_spinorbit,nscf
+    use inputoutput, only: t_unit_time
+    use subspace_diagonalization, only: ssdg
+    use gram_schmidt_orth, only: gram_schmidt
+    use Conjugate_Gradient, only: gscg_zwf
+    use Total_Energy, only: calc_eigen_energy
     implicit none
     integer                 ,intent(in) :: itt
     type(s_ofile)           ,intent(in) :: ofl
@@ -1628,13 +1655,19 @@ contains
     type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
-    type(s_orbital)         ,intent(in) :: tpsi,tpsi0
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
+    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
+    type(s_sendrecv_grid)               :: srg
+    type(s_dft_energy)                  :: energy
+    type(s_rt)                          :: rt
     !
     integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
-    integer :: ix,iy,iz,io1,io2,io,ik,ispin
-    complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat1,mat2
-    complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+    integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
+    complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
     real(8) :: coef(system%no,system%nk,system%nspin)
+    real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
@@ -1648,76 +1681,144 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
-
-    ! copied from subspace_diagonalization.f90
-    mat1 = 0d0
-    if(info%if_divide_orbit) then
-      do ik=ik_s,ik_e
-      do ispin = 1, nspin
-        do io1 = 1, no ! future work: no --> no0 (# of GS orbitals)
-          if (io_s<= io1 .and. io1 <= io_e) then
-            call copy_data(tpsi0%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
-          end if
-          call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
-          do io2 = 1, no
-            if (io_s<= io2 .and. io2 <= io_e) then
-              cbox = 0d0
-              !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+:cbox)
-              do iz=is(3),ie(3)
-              do iy=is(2),ie(2)
-              do ix=is(1),ie(1)
-                cbox = cbox + conjg(wf_io1(ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
-              end do
-              end do
-              end do
-              mat1(io1,io2,ispin,ik) = cbox * system%hvol
-            end if
-          end do
-        end do !io1
-      end do !ispin
-      end do
+    if(nspin==1) then
+      wspin = 2d0
+    else if(nspin==2) then
+      wspin = 1d0
+    end if
+    if(nscf==0) then
+      niter = 10
     else
-      !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
-      do ik=ik_s,ik_e
-      do ispin=1,nspin
-      do io1=io_s,io_e
-      do io2=io_s,io_e
-        cbox = 0d0
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          cbox = cbox + conjg(tpsi0%zwf(ix,iy,iz,ispin,io1,ik,1)) * tpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
-        end do
-        end do
-        end do
-        mat1(io1,io2,ispin,ik) = cbox * system%hvol
-      end do
-      end do
-      end do
+      niter = nscf
+    end if
+    
+  ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
+    call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+    dE = energy%E_kin - rt%E_old
+    if(abs(dE) < 1e-12) then
+      if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
+    else
+      do iter_GS=1,niter
+        call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
+        call gscg_zwf(ncg,mg,system,info,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
+        call gram_schmidt(system, mg, info, rt%tpsi0)
+        call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+        dE = energy%E_kin - rt%E_old
+        if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
+        if(abs(dE) < 1e-6) exit
+        rt%E_old = energy%E_kin
       end do
     end if
-
-    call comm_summation(mat1,mat2,no**2*nspin*nk,info%icomm_rko)
-
+    
+    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
+    
     coef=0.d0
     do ispin=1,nspin
     do ik=1,nk
     do io1=1,no
       do io2=1,no
-        coef(io1,ik,ispin) = coef(io1,ik,ispin)+abs(mat2(io2,io1,ispin,ik)*system%Hvol)**2
+        coef(io1,ik,ispin) = coef(io1,ik,ispin) &
+        & + system%rocc(io2,ik,ispin)*system%wtk(ik)* abs(mat(io1,io2,ispin,ik))**2
       end do
     end do
     end do
     end do
 
-    io=1 ! future work
-    ik=1 ! future work
-    ispin=1 ! future work
+    nee = 0d0
+    neh = dble(nelec)
+    do ispin=1,nspin
+    do ik=1,nk
+    do io=1,no
+      nee = nee + ((wspin-system%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
+      neh = neh - (system%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
+    end do
+    end do
+    end do
+   !nee  = sum(ovlp_occ(NBoccmax+1:NB,:))
+   !neh  = sum(occ)-sum(ovlp_occ(1:NBoccmax,:))
     if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_proj,'(200f14.8)') dble(itt)*dt*2.41888d-2, coef(io,ik,ispin)
+      write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
+      write(ofl%fh_ovlp,'(i11)') itt
+      do ispin=1,nspin
+      do ik=1,nk
+        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
+      end do
+      end do
     end if
+    
+!        if(action=="proj_last ") then
+!       tconv = t_unit_energy%conv
+!       do ik=1,NK
+!          write(409,10)ik,(esp_all(ib,ik)*tconv,ovlp_occ(ib,ik)*NKxyz,ib=1,NB)
+!       end do
 
     return
+    
+  contains
+  
+    subroutine inner_product(psi1,psi2,mat)
+      use communication, only: comm_summation, comm_bcast
+      use pack_unpack, only: copy_data
+      implicit none
+      type(s_orbital), intent(in) :: psi1,psi2
+      complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
+      !
+      complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat1
+      complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1) &
+                        & ,mg%is_array(2):mg%ie_array(2) &
+                        & ,mg%is_array(3):mg%ie_array(3))
+      ! copied from subspace_diagonalization.f90
+      mat1 = 0d0
+      if(info%if_divide_orbit) then
+        do ik=ik_s,ik_e
+        do ispin = 1, nspin
+          do io1 = 1, no
+            if (io_s<= io1 .and. io1 <= io_e) then
+              call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
+            end if
+            call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+            do io2 = 1, no
+              if (io_s<= io2 .and. io2 <= io_e) then
+                cbox = 0d0
+                !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+:cbox)
+                do iz=is(3),ie(3)
+                do iy=is(2),ie(2)
+                do ix=is(1),ie(1)
+                  cbox = cbox + conjg(wf_io1(ix,iy,iz)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
+                end do
+                end do
+                end do
+                mat1(io1,io2,ispin,ik) = cbox * system%hvol
+              end if
+            end do
+          end do !io1
+        end do !ispin
+        end do
+      else
+        !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
+        do ik=ik_s,ik_e
+        do ispin=1,nspin
+        do io1=io_s,io_e
+        do io2=io_s,io_e
+          cbox = 0d0
+          do iz=is(3),ie(3)
+          do iy=is(2),ie(2)
+          do ix=is(1),ie(1)
+            cbox = cbox + conjg(psi1%zwf(ix,iy,iz,ispin,io1,ik,1)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
+          end do
+          end do
+          end do
+          mat1(io1,io2,ispin,ik) = cbox * system%hvol
+        end do
+        end do
+        end do
+        end do
+      end if
+
+      call comm_summation(mat1,mat,no**2*nspin*nk,info%icomm_rko)
+
+    end subroutine inner_product
+
   end subroutine projection
   
 !===================================================================================================================================

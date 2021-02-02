@@ -197,6 +197,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     end do
   end if
 
+  !$acc enter data copyin(system)
+  !$acc enter data copyin(info)
+  !$acc enter data copyin(mg)
+  !$acc enter data copyin(stencil)
+  !$acc enter data copyin(V_local)
+  !$acc enter data copyin(spsi_in,spsi_out,tpsi) 
+  !$acc enter data copyin(ppg)
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
@@ -252,6 +259,20 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   allocate(energy%esp(system%no,system%nk,system%nspin))
+  
+  if(projection_option/='no') then
+    call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
+    !$omp workshare
+    rt%tpsi0%zwf = spsi_in%zwf
+    !$omp end workshare
+    allocate(rt%vloc0(system%nspin))
+    do jspin=1,system%nspin
+      call allocate_scalar(mg,rt%vloc0(jspin))
+      !$omp workshare
+      rt%vloc0(jspin)%f = V_local(jspin)%f
+      !$omp end workshare
+    end do
+  end if
   
   call timer_end(LOG_READ_GS_DATA)
 
@@ -349,13 +370,29 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     !(header of SYSname_rt_energy.data)
     call write_rt_energy_data(-1,ofl,dt,energy,md)
   
-    !(header in SYSname_proj.data)
     if(projection_option/='no')then
-      ofl%file_proj_data = trim(sysname)//"_proj.data"
-      ofl%fh_proj = open_filehandle(ofl%file_proj_data)
-      open(ofl%fh_proj,file=ofl%file_proj_data)
-      write(ofl%fh_proj,'("#",5X,"time[fs]",4("    projection"))')
-      write(ofl%fh_proj,'("#",7("----------"))')
+    !(header in SYSname_ovlp.data)
+      write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
+      ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
+      open(ofl%fh_ovlp,file=ofl%file_ovlp)
+      write(ofl%fh_ovlp, '("#",1X,A)') "Projection"
+      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ovlp_occup", "Occupation"
+      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "NB", "Number of bands"
+      write(ofl%fh_ovlp, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "ik", "none", &
+      & 2, "ovlp_occup(NB)", "none"
+    !(header in SYSname_nex.data)
+      write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
+      ofl%fh_nex = open_filehandle(ofl%file_nex)
+      open(ofl%fh_nex,file=ofl%file_nex)
+      write(ofl%fh_nex, '("#",1X,A)') "Excitation"
+      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nelec", "Number of excited electrons"
+      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nhole", "Number of excited holes"
+      write(ofl%fh_nex, '("#",99(1X,I0,":",A,"[",A,"]"))')  &
+      &           1, "time", trim(t_unit_time%name), &
+      &           2, "nelec", "none", &
+      &           3, "nhole", "none"
     end if
   end if
   
@@ -440,20 +477,26 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   if(yn_md=='y') call init_md(system,md)
   
+  ! preparation for projection
+  if(projection_option/='no') then
+    rt%E_old = energy%E_kin
+  end if
+  
   ! single-scale Maxwell-TDDFT
   singlescale%flag_use=.false.
   if(theory=='single_scale_maxwell_tddft') singlescale%flag_use=.true.
 
   if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
+    if(.not. stencil%if_orthogonal) stop "error: single-scale Maxwell-TDDFT & non-orthogonal lattice"
     call allocate_vector(mg,rt%j_e)
     call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit
-       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"new")
-       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
+       call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"new")
+       call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
 
   end if
