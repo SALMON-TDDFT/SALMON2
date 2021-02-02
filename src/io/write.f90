@@ -1350,8 +1350,8 @@ contains
     else
       eshift = 0.d0
     endif
-    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
-    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
+    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min)-eshift)
+    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
 
     dos_l = 0.d0
@@ -1388,7 +1388,7 @@ contains
       end select
       write(101,'("#-----------------------")')
       do iw=1,out_dos_nenergy
-        ww=out_dos_start+dble(iw-1)*dw+eshift
+        ww=out_dos_start+dble(iw-1)*dw
         write(101,'(F16.8,99(1X,E23.15E3))') ww*uenergy_from_au, ( dos_l(iw,is)/uenergy_from_au, is=1,system%nspin )
       end do
       close(101)
@@ -1458,8 +1458,8 @@ contains
     else
       eshift = 0.d0
     endif
-    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
-    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
+    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min)-eshift)
+    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
 
     pdos_l_tmp=0.d0
@@ -1562,22 +1562,22 @@ contains
         write(101,'("#-----------------------")')
         if(pp%mlps(ikoa)==0)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==1)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,2f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==2)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,3f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==3)then
           do iw=1,out_dos_nenergy
-            ww=out_dos_start+dble(iw-1)*dw+eshift
+            ww=out_dos_start+dble(iw-1)*dw
             write(101,'(f10.5,4f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         end if
