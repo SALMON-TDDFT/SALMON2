@@ -176,6 +176,7 @@ use code_optimization
 use initialization_sub
 use occupation
 use prep_pp_sub
+use prep_density_pp_sub, only: calc_density_pp
 use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
@@ -267,7 +268,12 @@ real(8) :: rNe0,rNe
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     call init_wf(lg,mg,system,info,spsi)
-    call calc_density(system,rho_s,spsi,info,mg)
+    select case(method_init_density)
+    case('pp')
+      call calc_density_pp(lg,mg,system,info,pp,fg,poisson,rho_s)
+    case default
+      call calc_density(system,rho_s,spsi,info,mg)
+    end select
   end if
 
   rho%f = 0d0

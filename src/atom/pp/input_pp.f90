@@ -27,7 +27,7 @@ contains
 
 subroutine input_pp(pp,hx,hy,hz)
   use structures,only : s_pp_info
-  use salmon_global,only : file_pseudo, quiet
+  use salmon_global,only : file_pseudo, quiet, method_init_density
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
     & yn_psmask
@@ -64,14 +64,19 @@ subroutine input_pp(pp,hx,hy,hz)
         call read_ps_ky(pp,rrc,ik,ps_file)
       case('ABINIT')
         call read_ps_abinit(pp,rrc,ik,ps_file)
+        method_init_density = 'wf' ! pseudo-atom density is unavailable
       case('ABINITFHI')
         call read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        method_init_density = 'wf' ! pseudo-atom density is unavailable
       case('ABINITPSP8')
         call read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        method_init_density = 'wf' ! pseudo-atom density is unavailable
       case('FHI')
         call read_ps_fhi(pp,rrc,ik,ps_file)
+        method_init_density = 'wf' ! pseudo-atom density is unavailable
       case('ADPACK')
         call read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        method_init_density = 'wf' ! pseudo-atom density is unavailable
       case('UPF')
         call read_ps_upf(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
         flag_beta_proj_is_given =.true.
@@ -249,6 +254,7 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%dudvtbl,nproc_group_global)
   call comm_bcast(pp%upp_f,nproc_group_global)
   call comm_bcast(pp%vpp_f,nproc_group_global)
+  call comm_bcast(pp%rho_pp_tbl,nproc_group_global)
   call comm_bcast(pp%rho_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%tau_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%flag_nlcc,nproc_group_global)
@@ -275,7 +281,7 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   character(256),intent(in) :: ps_file
 !local variable
   integer :: l,i,irPC
-  real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps
+  real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps,cl,u
 
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
@@ -304,6 +310,35 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   enddo
 
   if(Lmax_ps(ik) >= 0)pp%mlps(ik) = Lmax_ps(ik) ! Maximum angular momentum given by input
+
+  !do i = 0, pp%mr(ik)
+  !  write(100,'(5g15.6)') pp%rad(i+1,ik), (pp%upp(i,l),l=0,pp%mlps(ik) )
+  !end do
+
+  loop_l: do l = 0, pp%mlps(ik)
+    do i = pp%mr(ik), 0, -1
+      u = abs( pp%upp(i,l) )
+      if ( u /= 0.0d0 ) then
+        if ( u > 1.0d-1 ) cycle loop_l
+        exit
+      end if
+    end do
+    cl = 2*l+1
+    do i = 0, pp%mr(ik)
+      pp%rho_pp_tbl(i+1,ik) = pp%rho_pp_tbl(i+1,ik) + cl*pp%upp(i,l)**2
+    end do
+  end do loop_l
+
+  r=0.0d0
+  do i = 0,pp%mr(ik)
+    r = r + pp%rho_pp_tbl(i+1,ik)
+  end do
+  write(*,*) 'Int(rho)@read_ps_KY',sum(pp%rho_pp_tbl(:,ik))*step
+  !rewind 100
+  !do i = 2, pp%mr(ik)+1
+  !  r = pp%rad(i,ik)
+  !  write(100,'(5g15.6)') pp%rad(i,ik), pp%rho_pp_tbl(i,ik)/(4.0d0*acos(-1.0d0)*r*r)
+  !end do
 
   return
 end subroutine read_ps_KY

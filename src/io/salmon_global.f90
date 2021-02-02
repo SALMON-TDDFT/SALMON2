@@ -155,6 +155,7 @@ module salmon_global
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
+  character(2)   :: method_init_density
 
 
 !! &emfield

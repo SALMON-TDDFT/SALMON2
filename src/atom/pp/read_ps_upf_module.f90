@@ -384,6 +384,9 @@ contains
        do i=1,nrr
           rhor_nlcc(i-1,0) = cdc(i)
        end do
+       do i=1,nrr
+          pp%rho_pp_tbl(i,ik) = cdd(i)
+       end do
     else
        pp%mr(ik) = nrr + 1
        do i=2,nrr+1
@@ -422,6 +425,10 @@ contains
           rhor_nlcc(i,0) = cdc(i)
        end do
        rhor_nlcc(0,0) = rhor_nlcc(1,0)
+       do i=1,nrr
+          pp%rho_pp_tbl(i+1,ik) = cdd(i)
+       end do
+       pp%rho_pp_tbl(1,ik) = cdd(1)
     end if
 
     if ( all(rx(2:nrr)==rx(1)) ) then
@@ -517,6 +524,17 @@ contains
        r=r+rhor_nlcc(i,0)*pp%rad(i+1,ik)**2*(pp%rad(i+1,ik)-pp%rad(i,ik))
     end do
     write(*,*) "sum(rhor_nlcc)=",r, r*4.0d0*acos(-1.0d0)
+
+    r=0.0d0
+    do i=1,pp%mr(ik)
+       r=r+pp%rho_pp_tbl(i,ik)*(pp%rad(i+1,ik)-pp%rad(i,ik))
+    end do
+    write(*,*) "sum(rho_pp_tbl)=",r
+    !rewind 100
+    !do i=1,pp%mr(ik)
+    !  if ( pp%rad(i,ik) == 0.0d0 ) cycle
+    !  write(100,*) pp%rad(i,ik), pp%rho_pp_tbl(i,ik)/(4.0d0*acos(-1.0d0)*pp%rad(i,ik)**2)
+    !end do
 
     return
   end subroutine read_ps_upf_ver201
