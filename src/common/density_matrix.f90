@@ -245,20 +245,30 @@ contains
 
 !$acc update device(system%vec_Ac)
 
-!$acc kernels present(system,info,mg,stencil,psi,ppg) copyin(BT,ispin,im) copy(jx,jy,jz)
+!$acc kernels present(system,info,mg,stencil,psi) copyin(BT,ispin,im) copy(jx,jy,jz)
 !$acc loop private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto 
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
-
         kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
         call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
                             ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
         wrk3(1) = BT(1,1) * wrk2(1) + BT(1,2) * wrk2(2) + BT(1,3) * wrk2(3)
         wrk3(2) = BT(2,1) * wrk2(1) + BT(2,2) * wrk2(2) + BT(2,3) * wrk2(3)
         wrk3(3) = BT(3,1) * wrk2(1) + BT(3,2) * wrk2(2) + BT(3,3) * wrk2(3)
-        wrk2 = wrk3
+        wrk4 = (wrk1 + wrk3) * system%rocc(io,ik,ispin) * system%wtk(ik)
+        jx = jx + wrk4(1)
+        jy = jy + wrk4(2)
+        jz = jz + wrk4(3)
+      end do
+      end do
+!$acc end kernels
+
+!$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
+!$acc loop private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
         call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
-        wrk4 = (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin) * system%wtk(ik)
+        wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
         jx = jx + wrk4(1)
         jy = jy + wrk4(2)
         jz = jz + wrk4(3)
