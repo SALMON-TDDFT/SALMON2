@@ -105,7 +105,6 @@
   !---------------------------------------------------------------------!
 /
 
-
 &multiscale
   !number of macro grids in electromagnetic analysis for x, y, and z directions
   nx_m = 8
