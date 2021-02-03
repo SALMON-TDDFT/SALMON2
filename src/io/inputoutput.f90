@@ -371,7 +371,6 @@ contains
       & ny_origin_m, &
       & nz_origin_m, &
       & file_macropoint, &
-      & num_macropoint,  &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
       & nmacro_chunk
@@ -1126,7 +1125,6 @@ contains
     call comm_bcast(ny_origin_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
     call comm_bcast(file_macropoint, nproc_group_global)
-    call comm_bcast(num_macropoint,  nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
@@ -1856,7 +1854,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_macropoint', num_macropoint
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk

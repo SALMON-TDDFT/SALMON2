@@ -47,6 +47,7 @@ subroutine input_pp(pp,hx,hy,hz)
   logical,allocatable :: flag_nlcc_element(:)
 
   allocate(rhor_nlcc(0:pp%nrmax0,0:2))
+  rhor_nlcc=0d0
 
 ! Nonlinear core correction
   allocate(flag_nlcc_element(nelem)); flag_nlcc_element(:) = .false. ; pp%flag_nlcc = .false.
