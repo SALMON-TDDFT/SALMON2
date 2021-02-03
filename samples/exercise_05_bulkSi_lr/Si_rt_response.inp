@@ -95,7 +95,6 @@
   !---------------------------------------------------------------------!
 /
 
-
 &analysis
   !energy grid size and number of energy grids for output files
   de      = 4.0d-4

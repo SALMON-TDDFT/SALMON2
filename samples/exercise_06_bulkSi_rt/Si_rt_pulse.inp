@@ -104,7 +104,6 @@
   !---------------------------------------------------------------------!
 /
 
-
 &atomic_red_coor
   !cartesian atomic reduced coodinates
   'Si'	.0	.0	.0	1
