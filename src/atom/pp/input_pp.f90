@@ -47,6 +47,7 @@ subroutine input_pp(pp,hx,hy,hz)
   logical,allocatable :: flag_nlcc_element(:)
 
   allocate(rhor_nlcc(0:pp%nrmax0,0:2))
+  rhor_nlcc=0d0
 
 ! Nonlinear core correction
   allocate(flag_nlcc_element(nelem)); flag_nlcc_element(:) = .false. ; pp%flag_nlcc = .false.
@@ -503,7 +504,8 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   use salmon_global,only : nelem
   implicit none
   type(s_pp_info),intent(inout) :: pp
-  real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
+!  real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
+  real(8),intent(inout) :: rhor_nlcc(0:pp%nrmax0,0:2)
   logical,intent(inout) :: flag_nlcc_element(nelem)
 !argument
   integer,intent(in) :: ik
