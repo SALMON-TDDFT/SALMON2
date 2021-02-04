@@ -32,7 +32,11 @@ contains
     ! rho_s=rho*0.5d0
     ! if(flag_nlcc)rho_s = rho_s + 0.5d0*rho_nlcc
     
+#ifdef USE_OPENACC
+!$acc kernels loop private(i,trho,e_xc,de_xc_drho)
+#else
 !$omp parallel do private(i,trho,e_xc,de_xc_drho)
+#endif
     do i=1,NL
       trho=2*rho_s(i)
       call PZxc(trho,e_xc,de_xc_drho)
@@ -40,12 +44,16 @@ contains
       Eexc(i)=e_xc*trho
       Vexc(i)=e_xc+trho*de_xc_drho
     enddo
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
     return
   end subroutine exc_cor_pz
 
 
 
   Subroutine PZxc(trho,exc,dexc_drho)
+    !$acc routine seq
     implicit none
     real(8),parameter :: Pi=3.141592653589793d0
     real(8),parameter :: gammaU=-0.1423d0,beta1U=1.0529d0
