@@ -174,10 +174,12 @@ contains
       rho(2)%f(:,:,:) = rho(1)%f(:,:,:)
     end if
 
+    !write(*,*) "sum(rho)=",sum(rho(1)%f)*system%hvol
     !rewind 200
     !do ix = mg%is(1),mg%ie(1)
-    !  write(200,*) (ix-1)*system%hgs(1),rho(1)%f(ix,mg%num(2)/2,mg%num(3)/2)
+    !  write(200,*) (ix-1)*system%hgs(1), rho(1)%f(ix,1,1)
     !end do
+    !stop
 
     return
 

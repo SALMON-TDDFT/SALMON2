@@ -211,8 +211,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 ! result
 
   call timer_begin(LOG_CALC_PROJECTION)
-  if(projection_option/='no' .and. mod(itt,out_projection_step)==0)then
-    call projection(itt,ofl,dt,mg,system,info,spsi_out,tpsi) ! tpsi must be GS orbital (future work)
+  if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
+    ! tpsi,spsi_in = working arrays
+    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,tpsi,spsi_in,srg,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -320,7 +321,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then
     if(mod(itt,out_dns_ac_je_step)==0)then
-      call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
+     !call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
+      call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
   end if
   if(yn_out_elf_rt=='y')then

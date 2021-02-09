@@ -217,10 +217,8 @@ module salmon_global
   integer        :: ny_origin_m
   integer        :: nz_origin_m
   character(100) :: file_macropoint
-  integer        :: num_macropoint
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
-  !! TODO: remove num_macropoint later
   integer        :: nmacro_chunk
 
 !! &maxwell

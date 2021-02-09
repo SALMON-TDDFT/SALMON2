@@ -1,0 +1,76 @@
+&calculation
+  theory='tddft_pulse'
+/
+
+&control
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&parallel
+  nproc_k=4
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec2 = 0.0, 5.13, 5.13
+  al_vec3 = 5.13, 0.0, 5.13
+  al_vec1 = 5.13, 5.13, 0.0
+  nstate = 8
+  nelec = 8
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  num_rgrid = 6, 6, 6
+/
+
+&kgrid
+  num_kgrid = 2, 2, 2
+/
+
+&tgrid
+  nt = 250
+  dt = 0.16
+/
+
+&scf
+  ncg = 4
+  nscf = 120
+  threshold = 1.d-9
+/
+
+&emfield
+  ae_shape1 = 'Acos2'
+  I_wcm2_1 = 1d14
+  omega1 = 0.05696145187d0
+  tw1 = 441.195136248d0
+  epdir_re1 = 0., 0., 1.
+/
+
+&analysis
+  nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+/

@@ -373,7 +373,6 @@ contains
       & ny_origin_m, &
       & nz_origin_m, &
       & file_macropoint, &
-      & num_macropoint,  &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
       & nmacro_chunk
@@ -1151,7 +1150,6 @@ contains
     call comm_bcast(ny_origin_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
     call comm_bcast(file_macropoint, nproc_group_global)
-    call comm_bcast(num_macropoint,  nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
@@ -1890,7 +1888,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_macropoint', num_macropoint
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
@@ -2280,15 +2277,23 @@ contains
        end if
     end if
 
-    select case(method_singlescale)
-    case('3d', '1d', '1d_fourier')
-      if(method_singlescale=='1d_fourier') then
-        if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
-      end if
-    case default
-      stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
-    end select
-    
+    if(theory=='single_scale_maxwell_tddft') then
+      select case(method_singlescale)
+      case('3d', '1d', '1d_fourier')
+        if(method_singlescale=='1d_fourier') then
+          if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
+        end if
+      case default
+        stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+      end select
+    end if
+
+    if(theory=='multi_scale_maxwell_tddft') then
+       if( propagator == 'aetrs' )then
+          stop 'propagator = "aetrs" is not supported in multi-scale calculation'
+       end if
+    endif
+
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)

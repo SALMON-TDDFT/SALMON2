@@ -10,6 +10,11 @@
 !     /                                                                                  !
 !   (see chapter: 'List of all input keywords' in the manual)                            !
 !----------------------------------------------------------------------------------------!
+! * Conversion from unit_system = 'a.u.' to 'A_eV_fs':                                   !
+!   Length: 1 [a.u.] = 0.52917721067    [Angstrom]                                       !
+!   Energy: 1 [a.u.] = 27.21138505      [eV]                                             !
+!   Time  : 1 [a.u.] = 0.02418884326505 [fs]                                             !
+!----------------------------------------------------------------------------------------!
 ! * Copy the ground state data directory('data_for_restart') (or make symbolic link)     !
 !   calculated in 'samples/exercise_04_bulkSi_gs/' and rename the directory to 'restart/'!
 !   in the current directory.                                                            !
@@ -99,7 +104,6 @@
   ! https://www.sciencedirect.com/science/article/pii/S0010465518303412 !
   !---------------------------------------------------------------------!
 /
-
 
 &multiscale
   !number of macro grids in electromagnetic analysis for x, y, and z directions

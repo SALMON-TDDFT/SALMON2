@@ -238,6 +238,7 @@ subroutine init_communicator_dft(comm,info)
 contains
   subroutine tofu_network_oriented_mapping(iret)
     use mpi_ext
+    use inputoutput, only: nx_m,ny_m,nz_m, theory
     implicit none
     integer,intent(out) :: iret
     integer,parameter :: maxppn = 16
@@ -261,9 +262,16 @@ contains
     if (ierr /= MPI_SUCCESS) &
       stop 'FJMPI_Topology_get_coords: error'
 
-    nprocs_per_node = info%isize_rko / product(tofu_shape(1:tofu_dim))
-    if (mod(info%isize_rko, product(tofu_shape(1:tofu_dim))) /= 0) &
-      stop 'logical error: calcluate # of process/node'
+
+    if(theory=='multi_scale_maxwell_tddft') then
+       nprocs_per_node = info%isize_rko *nx_m*ny_m*nz_m / product(tofu_shape(1:tofu_dim))
+      if (mod(info%isize_rko*nx_m*ny_m*nz_m, product(tofu_shape(1:tofu_dim))) /= 0) &
+          stop 'logical error (ms): calcluate # of process/node'
+    else
+       nprocs_per_node = info%isize_rko / product(tofu_shape(1:tofu_dim))
+      if (mod(info%isize_rko, product(tofu_shape(1:tofu_dim))) /= 0) &
+          stop 'logical error: calcluate # of process/node'
+    endif
 
     call FJMPI_Topology_get_ranks(info%icomm_rko, FJMPI_LOGICAL, icoords, maxppn, outppn, iranks, ierr)
     if (ierr /= MPI_SUCCESS) &
