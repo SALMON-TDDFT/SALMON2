@@ -78,7 +78,7 @@ integer :: i, ix, iy, iz
 
 integer, allocatable :: iranklists(:)
 
-real(8), allocatable :: Ac_inc(:, :)
+real(8), allocatable :: Ac_inc(:, :), rNe(:)
 
 integer :: nmacro_mygroup, isize_mygroup
 
@@ -266,6 +266,7 @@ subroutine initialization_ms()
     ! incident field
     call Weyl_init(fs, fw)
 
+    allocate(rNe(1:ms%nmacro))
     allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
                        fs%mg%is_array(2):fs%mg%ie_array(2), &
                        fs%mg%is_array(3):fs%mg%ie_array(3)))
@@ -365,13 +366,20 @@ subroutine print_header()
     implicit none
     if (comm_is_root(ms%id_ms_world)) then
         write(*,*)
-        write(*,'(a7,a7,a9,a33,a11)') &
-            & "Step", "Macro", "Time", "Current", "Eabs/cell"
-        write(*,'(7x,7x,a9,a33,a11)') &
+!        write(*,'(a7,a7,a9,a33,a11)') &
+!            & "Step", "Macro", "Time", "Current", "Eabs/cell"
+        write(*,'(a7,a7,a9,a33,a15,a11)') &
+            & "Step", "Macro", "Time", "Current","Electrons", "Eabs/cell"
+!        write(*,'(7x,7x,a9,a33,a11)') &
+!            & trim(t_unit_time%name), &
+!            & trim(t_unit_current%name), &
+!            & trim(t_unit_energy%name)
+        write(*,'(7x,7x,a9,a33,a15,a11)') &
             & trim(t_unit_time%name), &
             & trim(t_unit_current%name), &
+            & "", &
             & trim(t_unit_energy%name)
-        write(*,'("#",7("----------"))')
+        write(*,'("#",9("----------"))')
     endif
 end subroutine print_header
 
@@ -384,10 +392,11 @@ subroutine print_linelog()
             iix = ms%ixyz_tbl(1, iimacro)
             iiy = ms%ixyz_tbl(2, iimacro)
             iiz = ms%ixyz_tbl(3, iimacro)
-            write(*,'(i7,i7,f9.3,4(es11.2e3))') &
+            write(*,'(i7,i7,f9.3,3(es11.2e3),f15.8,es11.2e3)') &
                 & itt, iimacro, &
                 & itt * dt * t_unit_time%conv, &
                 & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
+                & rNe(iimacro), &
                 & fw%edensity_absorb%f(iix, iiy, iiz) * system%det_a * t_unit_energy%conv
         end do
     end if
@@ -400,7 +409,7 @@ end subroutine
 subroutine time_evolution_step_ms
     implicit none
     integer :: iimacro, iix, iiy, iiz
-    real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro)
+    real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro), rNe_tmp(ms%nmacro)
 
     ! ----------------------------------------
     ! Time Evolution of FDTD System
@@ -419,7 +428,8 @@ subroutine time_evolution_step_ms
     nproc_size_global = ms%isize_macropoint
     quiet = .true.
 
-    curr_tmp(:, :) = 0d0
+    curr_tmp(:,:) = 0d0
+    rNe_tmp(:) = 0d0
     do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
@@ -437,8 +447,10 @@ subroutine time_evolution_step_ms
             & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
     
-        if (comm_is_root(ms%id_macropoint)) &
-            & curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
+        if (comm_is_root(ms%id_macropoint)) then
+            curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
+            rNe_tmp(iimacro) = rt%rIe(itt)
+         endif
     end do
     ! Override Global Variables (Repair)
     nproc_group_global = ms%icomm_ms_world
@@ -447,6 +459,7 @@ subroutine time_evolution_step_ms
     quiet = .false.
 
     call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
+    call comm_summation(rNe_tmp, rNe, ms%nmacro, ms%icomm_ms_world)
 
     do iimacro = 1, ms%nmacro
         iix = ms%ixyz_tbl(1, iimacro)
