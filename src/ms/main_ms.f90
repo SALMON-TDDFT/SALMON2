@@ -366,14 +366,8 @@ subroutine print_header()
     implicit none
     if (comm_is_root(ms%id_ms_world)) then
         write(*,*)
-!        write(*,'(a7,a7,a9,a33,a11)') &
-!            & "Step", "Macro", "Time", "Current", "Eabs/cell"
         write(*,'(a7,a7,a9,a33,a15,a11)') &
             & "Step", "Macro", "Time", "Current","Electrons", "Eabs/cell"
-!        write(*,'(7x,7x,a9,a33,a11)') &
-!            & trim(t_unit_time%name), &
-!            & trim(t_unit_current%name), &
-!            & trim(t_unit_energy%name)
         write(*,'(7x,7x,a9,a33,a15,a11)') &
             & trim(t_unit_time%name), &
             & trim(t_unit_current%name), &
