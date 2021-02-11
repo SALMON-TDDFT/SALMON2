@@ -238,7 +238,7 @@ subroutine init_communicator_dft(comm,info)
 contains
   subroutine tofu_network_oriented_mapping(iret)
     use mpi_ext
-    use inputoutput, only: nx_m,ny_m,nz_m, theory
+    use salmon_global, only: nx_m,ny_m,nz_m, theory
     implicit none
     integer,intent(out) :: iret
     integer,parameter :: maxppn = 16
