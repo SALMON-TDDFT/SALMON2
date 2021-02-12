@@ -10,6 +10,7 @@ module sym_sub
 
   logical,public :: DISPLAY     =.false.
   logical,public :: use_symmetry=.false.
+  logical :: use_symmetry_dir(3) = .false.
 
   character(8)   :: sym_file    ='sym.dat'
   real(8),allocatable :: SymMatR(:,:,:)
@@ -24,14 +25,19 @@ contains
 
   subroutine read_sw_symmetry( yn )
     implicit none
-    character(1),intent(in) :: yn
-    use_symmetry = ( yn == 'y' )
+    character(*),intent(in) :: yn
+    integer :: n,i
+    if ( index(yn,'y') /= 0 ) use_symmetry_dir(:)=.true.
+    n=len(trim(yn))
+    do i = 1, n
+      if ( yn(i:i) == 'n' ) use_symmetry_dir(i) = .false.
+    end do
+    use_symmetry = any( use_symmetry_dir )
   end subroutine read_sw_symmetry
 
-  subroutine init_sym_sub( Amat_in, Bmat_in, epdir )
+  subroutine init_sym_sub( Amat_in, Bmat_in )
     implicit none
     real(8),intent(in) :: Amat_in(3,3), Bmat_in(3,3) ! Lattice vectors
-    real(8),intent(in) :: epdir(3)
     real(8) :: tmpmat(3,3), pi2
     real(8),allocatable :: work(:,:,:)
     integer :: ngid, npid, nprocs
@@ -47,7 +53,7 @@ contains
 
     if ( DISPLAY ) write(*,'(a60)') repeat("-",40)//" init_sym_sub(start)"
 
-    call read_SymMat( use_symmetry ); if ( .not.use_symmetry ) goto 90
+    call read_SymMat( use_symmetry )
     nsym=size(SymMatR,3)
 
     allocate( work(3,4,nsym) ); work=0.0d0
@@ -55,15 +61,15 @@ contains
     n=0
     do isym=1,nsym
        ok=.true.
-       if ( epdir(1)/=0.0d0 ) then
+       if ( .not.use_symmetry_dir(1) ) then
           ok(1)=.false.
           if ( SymMatR(1,1,isym)==1.0d0 .and. SymMatR(2,1,isym)==0.0d0 .and. SymMatR(3,1,isym)==0.0d0 ) ok(1)=.true.
        end if
-       if ( epdir(2)/=0.0d0 ) then
+       if ( .not.use_symmetry_dir(2) ) then
           ok(2)=.false.
           if ( SymMatR(1,2,isym)==0.0d0 .and. SymMatR(2,2,isym)==1.0d0 .and. SymMatR(3,2,isym)==0.0d0 ) ok(2)=.true.
        end if
-       if ( epdir(3)/=0.0d0 ) then
+       if ( .not.use_symmetry_dir(3) ) then
           ok(3)=.false.
           if ( SymMatR(1,3,isym)==0.0d0 .and. SymMatR(2,3,isym)==0.0d0 .and. SymMatR(3,3,isym)==1.0d0 ) ok(3)=.true.
        end if
@@ -97,18 +103,16 @@ contains
     pi2=2.0d0*acos(-1.0d0)
     Ainv=transpose(Bmat)/pi2
     Binv=transpose(Amat)/pi2
+    SymMatA(:,:,1:nsym)=SymMatR(:,:,1:nsym)
     do isym=1,nsym
-       tmpmat=matmul( SymMatR(1:3,1:3,isym), Amat )
-       SymMatA(1:3,1:3,isym)=matmul( Ainv, tmpmat )
-       SymMatA(1:3,4,isym)=SymMatR(1:3,4,isym)
-    end do
-    do isym=1,nsym
+       tmpmat=matmul( SymMatA(1:3,1:3,isym), Ainv )
+       SymMatR(1:3,1:3,isym)=matmul( Amat, tmpmat )
        tmpmat=matmul( SymMatR(1:3,1:3,isym), Bmat )
        SymMatB(1:3,1:3,isym)=matmul( Binv, tmpmat )
        SymMatB(1:3,4,isym)=SymMatR(1:3,4,isym)
     end do
     flag_init=.true.
-90  if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
+    if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
 
 
@@ -121,7 +125,7 @@ contains
     inquire( FILE=sym_file, EXIST=flag )
     if ( .not.flag ) then
        if ( DISPLAY ) write(*,*) "symmetry-operation file ( "//sym_file//" ) can not be found."
-       return
+       stop 'stop@read_SymMat'
     else
        if ( DISPLAY ) write(*,*) "symmetry-operation file is found ( "//sym_file//" )."
     end if

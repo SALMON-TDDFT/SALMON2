@@ -2164,7 +2164,7 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
-    call yn_argument_check(yn_symmetry)
+    call yyynnn_argument_check(yn_symmetry)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2329,5 +2329,15 @@ contains
       stop
     end if
   end subroutine yn_argument_check
+
+  subroutine yyynnn_argument_check(str)
+    implicit none
+    character(*), intent(inout) :: str
+    integer :: i,n
+    n = len(trim(str))
+    do i = 1, n
+      call yn_argument_check( str(i:i) )
+    end do
+  end subroutine yyynnn_argument_check
 
 end module inputoutput
