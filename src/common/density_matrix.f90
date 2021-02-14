@@ -58,7 +58,6 @@ contains
 
     if(allocated(psi%rwf)) then
 
-#ifndef USE_OPENACC
       do im=info%im_s,info%im_e
       do ispin=1,nspin
         call timer_begin(LOG_DENSITY_CALC)
@@ -99,7 +98,6 @@ contains
         call timer_end(LOG_DENSITY_COMM_COLL)
       end do
       end do
-#endif
 
     else
 
