@@ -2225,7 +2225,6 @@ contains
             if (rt%io_s0<= io1 .and. io1 <= rt%io_e0) then
               call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
             end if
-           !call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
             call comm_bcast(wf_io1, info%icomm_o, rt%irank_io0(io1))
             do io2 = 1, no
               if (io_s<= io2 .and. io2 <= io_e) then
