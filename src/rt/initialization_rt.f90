@@ -38,7 +38,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use salmon_xc
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
-                       write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
+                       write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
+                       init_projection
   use code_optimization
   use initialization_sub
   use prep_pp_sub
@@ -261,17 +262,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   allocate(energy%esp(system%no,system%nk,system%nspin))
   
   if(projection_option/='no') then
-    call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
-    !$omp workshare
-    rt%tpsi0%zwf = spsi_in%zwf
-    !$omp end workshare
-    allocate(rt%vloc0(system%nspin))
-    do jspin=1,system%nspin
-      call allocate_scalar(mg,rt%vloc0(jspin))
-      !$omp workshare
-      rt%vloc0(jspin)%f = V_local(jspin)%f
-      !$omp end workshare
-    end do
+     call init_projection(system,lg,mg,info,spsi_in,V_local,rt)
   end if
   
   call timer_end(LOG_READ_GS_DATA)
