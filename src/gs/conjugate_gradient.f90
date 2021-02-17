@@ -383,8 +383,8 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_complex(nspin,mg,info,cg%gk)
     call allocate_orbital_complex(nspin,mg,info,cg%pko)
     call allocate_orbital_complex(nspin,mg,info,cg%hwf)
+    !$acc enter data copyin(cg)
   end if
-  !$acc enter data copyin(cg)
 
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
   do ik=ik_s,ik_e

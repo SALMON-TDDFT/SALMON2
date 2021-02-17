@@ -37,6 +37,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use code_optimization, only: stencil_is_parallelized_by_omp
   use communication, only: comm_summation
   implicit none
+
+  external :: zstencil_typical_seq
+  !$acc routine(zstencil_typical_seq) worker
+
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
@@ -164,9 +168,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       else
       ! OpenMP parallelization: k-point & orbital indices
       
+#ifdef USE_OPENACC
+!$acc parallel loop private(im,ik,io,ispin,kAc,k_lap0,k_nabt) collapse(4) gang
+#else
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin,kAc,k_lap0,k_nabt) &
 !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
+#endif
         do im=im_s,im_e
         do ik=ik_s,ik_e
         do io=io_s,io_e
@@ -181,14 +189,26 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
             k_lap0 = stencil%coef_lap0
             k_nabt = 0d0
           end if
+#ifdef USE_OPENACC
+          call zstencil_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                            ,mg%is,mg%ie &
+                            ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                            ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+#else
           call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                             ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                             ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+#endif
         end do
         end do
         end do
         end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
+
         
       end if
       
@@ -261,8 +281,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     
 #ifdef USE_OPENACC
 !$acc update device(system%vec_Ac)
-!$acc kernels present(system,mg,V_local,stencil,tpsi,htpsi)
-!$acc loop private(kAc,kAc0,k_lap0)
+!$acc parallel present(system,mg,V_local,stencil,tpsi,htpsi)
+!$acc loop collapse(4) private(kAc,kAc0,k_lap0) gang
 #else
 !$omp parallel do collapse(4) default(none) &
 !$omp private(im,ik,io,ispin,kAc,k_lap0) &
@@ -295,7 +315,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end do
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end parallel
 #else
 !$omp end parallel do
 #endif
@@ -329,10 +349,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         !$omp end parallel do
       else
+#ifdef USE_OPENACC
+        !$acc kernels loop private(im,ik,io,ispin,iz,iy,ix) collapse(6) independent
+#else
         !$omp parallel do collapse(6) default(none) &
         !$omp          private(im,ik,io,ispin,iz,iy,ix) &
         !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
         !$omp          shared(ttpsi,htpsi,V_local,tpsi)
+#endif
         do im=im_s,im_e
         do ik=ik_s,ik_e
         do io=io_s,io_e
@@ -349,7 +373,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
         end do
+#ifdef USE_OPENACC
+        !$acc end kernels
+#else
         !$omp end parallel do
+#endif
       end if
     end if
     call timer_end(LOG_UHPSI_SUBTRACTION)
