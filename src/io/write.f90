@@ -1637,8 +1637,211 @@ contains
   end subroutine write_band_information
   
 !===================================================================================================================================
-  
+  subroutine init_projection(system,lg,mg,info,ttpsi,V_local,rt)
+    use structures
+    use communication, only: comm_is_root, comm_bcast, comm_summation, comm_sync_all
+    use parallelization, only: nproc_id_global,nproc_group_global
+    use salmon_global, only: projection_option,directory_read_data
+    use checkpoint_restart_sub, only: read_wavefunction
+    implicit none
+    type(s_rgrid)           ,intent(in) :: lg,mg
+    type(s_dft_system)                  :: system
+    type(s_parallel_info)               :: info
+    type(s_orbital)                     :: ttpsi, spsi_tmp !ttpsi= spsi_in
+    type(s_scalar)          ,intent(in) :: V_local(system%nspin)
+    type(s_rt)                          :: rt
+    integer :: jspin
+
+    character(256) :: dir_gs
+    character(1024) :: dir_file_in
+    integer :: m, iu1, iu2, mk, mo,io, itt_tmp, nprocs_tmp, comm, im, nproc_ob
+    logical :: if_real_orbital, iself
+
+
+    if(projection_option=='gs') then
+
+       call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
+
+       !$omp workshare
+       rt%tpsi0%zwf = ttpsi%zwf
+       !$omp end workshare
+
+    else if(projection_option=='gx') then
+
+       ! read gs data 
+       dir_gs = directory_read_data   ! default= ./restart/
+       comm = nproc_group_global
+       iu1 = 96
+       if(comm_is_root(nproc_id_global))then
+          dir_file_in = trim(dir_gs)//"info.bin"
+          open(iu1,file=dir_file_in,form='unformatted')
+          read(iu1) mk
+          read(iu1) mo
+          read(iu1) itt_tmp
+          read(iu1) nprocs_tmp
+          read(iu1) if_real_orbital
+          close(iu1)
+          rt%no0 = mo
+       end if
+       call comm_bcast(mk,comm)
+       call comm_bcast(mo,comm)
+       call comm_bcast(rt%no0,comm)
+       call comm_bcast(if_real_orbital,comm)
+
+       if(comm_is_root(nproc_id_global)) then
+          write(*,*) "  initialize projection option(gs)"
+          write(*,*) "    num. of rt orbitals=", system%no
+          write(*,*) "    num. of gs orbitals=", rt%no0
+       endif
+    
+       !occupation
+       allocate(rt%rocc0(rt%no0, system%nk, system%nspin))
+       if(comm_is_root(nproc_id_global))then
+          dir_file_in = trim(dir_gs)//"occupation.bin"
+          open(iu1,file=dir_file_in,form='unformatted')
+          read(iu1) rt%rocc0(1:mo,1:mk,1:system%nspin)
+          close(iu1)
+       end if
+       call comm_bcast(rt%rocc0,comm)
+
+       ! make orbital info for gs
+       nproc_ob = info%nporbital
+       rt%io_s0 = (info%id_o * rt%no0) / nproc_ob + 1
+       rt%io_e0 = ((info%id_o+1) * rt%no0) / nproc_ob
+       rt%numo0 = rt%io_e0 - rt%io_s0 + 1
+
+       allocate(rt%io_s_all0(0:nproc_ob-1))
+       allocate(rt%io_e_all0(0:nproc_ob-1))
+       allocate(rt%numo_all0(0:nproc_ob-1))
+       do m=0,nproc_ob-1
+          rt%io_s_all0(m) = m * rt%no0 / nproc_ob + 1
+          rt%io_e_all0(m) = (m+1) * rt%no0 / nproc_ob
+          rt%numo_all0(m) = rt%io_e_all0(m) - rt%io_s_all0(m) + 1
+       end do
+       rt%numo_max0 = maxval(rt%numo_all0(0:nproc_ob-1))
+
+       if ( allocated(rt%irank_io0) ) deallocate(rt%irank_io0)
+       allocate(rt%irank_io0(1:rt%no0))
+       do io=1, rt%no0
+          if(mod(io*nproc_ob,rt%no0)==0)then
+             rt%irank_io0(io) = io*nproc_ob/rt%no0 - 1
+          else
+             rt%irank_io0(io) = io*nproc_ob/rt%no0
+          end if
+       end do
+
+       ! store original orbital info values of rt
+       rt%no_org   = system%no
+       rt%io_s_org = info%io_s
+       rt%io_e_org = info%io_e
+       rt%numo_org     = info%numo
+       rt%numo_max_org = info%numo_max
+
+       allocate(rt%io_s_all_org(0:nproc_ob-1))
+       allocate(rt%io_e_all_org(0:nproc_ob-1))
+       allocate(rt%numo_all_org(0:nproc_ob-1))
+       allocate(rt%irank_io_org(1:system%no))
+       rt%io_s_all_org(:) = info%io_s_all(:)
+       rt%io_e_all_org(:) = info%io_e_all(:)
+       rt%numo_all_org(:) = info%numo_all(:)
+       rt%irank_io_org(:) = info%irank_io(:)
+
+       ! switch no,io_s,io_e,numo,numo_max : rt => gs
+       call norb_rt2gs_for_proj(system,info,rt)
+
+       !wavefunction
+       iself=.false. ! assuming yn_restart=='n' .and. yn_self_checkpoint=='n'
+       call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
+       call allocate_orbital_complex(system%nspin,mg,info,spsi_tmp)
+       call read_wavefunction(dir_gs,lg,mg,system,info,spsi_tmp,mk,mo,if_real_orbital,iself)
+
+       !$omp workshare
+       rt%tpsi0%zwf(:,:,:,:,:,:,:) = spsi_tmp%zwf(:,:,:,:,:,:,:)
+       !$omp end workshare
+
+       ! switch back no,io_s,io_e,numo,numo_max : gs => rt
+       call norb_gs2rt_for_proj(system,info,rt)
+
+    endif  ! projection_option
+
+
+    allocate(rt%vloc0(system%nspin))
+    do jspin=1,system%nspin
+      call allocate_scalar(mg,rt%vloc0(jspin))
+      !$omp workshare
+      rt%vloc0(jspin)%f = V_local(jspin)%f
+      !$omp end workshare
+    end do
+
+  end subroutine init_projection
+
+  subroutine norb_rt2gs_for_proj(system,info,rt)
+    use structures, only: s_dft_system, s_parallel_info, s_rt
+    implicit none
+    type(s_dft_system)   ,intent(inout) :: system
+    type(s_parallel_info),intent(inout) :: info
+    type(s_rt)           ,intent(in) :: rt
+    system%no = rt%no0  
+    info%io_s = rt%io_s0
+    info%io_e = rt%io_e0
+    info%numo     = rt%numo0
+    info%numo_max = rt%numo_max0
+    info%io_s_all(:) = rt%io_s_all0(:)
+    info%io_e_all(:) = rt%io_e_all0(:)
+    info%numo_all(:) = rt%numo_all0(:)
+    deallocate(info%irank_io)
+    allocate(info%irank_io(1:system%no))
+    info%irank_io(:) = rt%irank_io0(:)
+  end subroutine norb_rt2gs_for_proj
+
+  subroutine norb_gs2rt_for_proj(system,info,rt)
+    use structures, only: s_dft_system, s_parallel_info, s_rt
+    implicit none
+    type(s_dft_system)   ,intent(inout) :: system
+    type(s_parallel_info),intent(inout) :: info
+    type(s_rt)           ,intent(in)  :: rt
+    system%no = rt%no_org
+    info%io_s = rt%io_s_org
+    info%io_e = rt%io_e_org
+    info%numo     = rt%numo_org
+    info%numo_max = rt%numo_max_org
+    info%io_s_all(:) = rt%io_s_all_org(:)
+    info%io_e_all(:) = rt%io_e_all_org(:)
+    info%numo_all(:) = rt%numo_all_org(:)
+    deallocate(info%irank_io)
+    allocate(info%irank_io(1:system%no))
+    info%irank_io(:) = rt%irank_io_org(:)
+  end subroutine norb_gs2rt_for_proj
+
   subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+    use structures
+    use salmon_global, only: projection_option
+    implicit none
+    integer                 ,intent(in) :: itt
+    type(s_ofile)           ,intent(in) :: ofl
+    real(8)                 ,intent(in) :: dt
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_dft_system)                  :: system
+    type(s_parallel_info)               :: info
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
+    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
+    type(s_sendrecv_grid)               :: srg
+    type(s_dft_energy)                  :: energy
+    type(s_rt)                          :: rt
+
+    select case(projection_option)
+    case('gs')
+       call  projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+    case('gx')
+       call  projection_gx(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+    end select
+
+    return
+  end subroutine projection
+
+  subroutine projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -1818,9 +2021,255 @@ contains
       call comm_summation(mat1,mat,no**2*nspin*nk,info%icomm_rko)
 
     end subroutine inner_product
+  end subroutine projection_gs
 
-  end subroutine projection
+
+  ! Trial: num. of gs orbital is taken from restart file (full gsorbitals) 
+  !        while that of rt orbital is from nstate in input (or Nelec/2 for temperature<0)
+  subroutine projection_gx(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+    use structures
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global
+    use salmon_global, only: ncg,nelec,nscf
+    use inputoutput, only: t_unit_time
+    use subspace_diagonalization, only: ssdg
+    use gram_schmidt_orth, only: gram_schmidt
+    use Conjugate_Gradient, only: gscg_zwf
+    use Total_Energy, only: calc_eigen_energy
+    use sendrecv_grid
+    implicit none
+    integer                 ,intent(in) :: itt
+    type(s_ofile)           ,intent(in) :: ofl
+    real(8)                 ,intent(in) :: dt
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_dft_system)                  :: system
+    type(s_parallel_info)               :: info
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
+    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
+    type(s_sendrecv_grid)               :: srg
+    type(s_dft_energy)                  :: energy
+    type(s_rt)                          :: rt
+    !
+    integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
+    integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
+    complex(8),dimension(rt%no0,system%no,system%nspin,system%nk) :: mat
+    real(8) :: coef(rt%no0,system%nk,system%nspin)
+    real(8) :: nee, neh, wspin, dE
+    complex(8) :: cbox
+    !
+    integer :: mo
+    real(8) :: rocc_rt_bk(1:system%no,1:system%nk,1:system%nspin)
+    integer,dimension(2,3) :: neig
+     
+    if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
+
+    if(nscf==0) then
+      niter = 10
+    else
+      niter = nscf
+    end if
+
+    ! switch no,io_s,io_e,numo : rt => gs
+    call norb_rt2gs_for_proj(system,info,rt)
+
+    ! change size of rocc : rt => gs
+    call change_size_rt2gs_for_proj
+
+
+    ! GS iteration
+    ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
+    call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+    dE = energy%E_kin - rt%E_old
+    if(abs(dE) < 1e-12) then
+      if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
+    else
+      do iter_GS=1,niter
+        call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
+        call gscg_zwf(ncg,mg,system,info,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
+        call gram_schmidt(system, mg, info, rt%tpsi0)
+        call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+        dE = energy%E_kin - rt%E_old
+        if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
+        if(abs(dE) < 1e-6) exit
+        rt%E_old = energy%E_kin
+      end do
+    end if
+
+
+    ! switch back no,io_s,io_e,numo : gs => rt
+    call norb_gs2rt_for_proj(system,info,rt)
+
+    ! change back size of rocc : gs => rt
+    call change_size_gs2rt_for_proj
+
+    nspin = system%nspin
+    no = system%no
+    nk = system%nk
+    is = mg%is
+    ie = mg%ie
+    ik_s = info%ik_s
+    ik_e = info%ik_e
+    io_s = info%io_s
+    io_e = info%io_e
+    if(nspin==1) then
+      wspin = 2d0
+    else if(nspin==2) then
+      wspin = 1d0
+    end if
+    mo = rt%no0
+
+    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
+    
+    coef=0.d0
+    do ispin=1,nspin
+    do ik=1,nk
+    do io1=1,mo
+      do io2=1,no
+        coef(io1,ik,ispin) = coef(io1,ik,ispin) &
+        & + system%rocc(io2,ik,ispin)*system%wtk(ik)* abs(mat(io1,io2,ispin,ik))**2
+      end do
+    end do
+    end do
+    end do
+
+    nee = 0d0
+    neh = dble(nelec)
+    do ispin=1,nspin
+    do ik=1,nk
+    do io=1,mo
+      nee = nee + ((wspin-rt%rocc0(io,ik,ispin))/wspin) * coef(io,ik,ispin)
+      neh = neh - (rt%rocc0(io,ik,ispin)/wspin) * coef(io,ik,ispin)
+    end do
+    end do
+    end do
+   !nee  = sum(ovlp_occ(NBoccmax+1:NB,:))
+   !neh  = sum(occ)-sum(ovlp_occ(1:NBoccmax,:))
+    if(comm_is_root(nproc_id_global))then
+      write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
+      write(ofl%fh_ovlp,'(i11)') itt
+      do ispin=1,nspin
+      do ik=1,nk
+        write(ofl%fh_ovlp,'(i6,5000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,mo)
+      end do
+      end do
+    end if
+
+    return
+    
+  contains
+
+
+    subroutine change_size_rt2gs_for_proj
+      implicit none
+
+      !$omp workshare
+      rocc_rt_bk(:,:,:) = system%rocc(:,:,:)
+      !$omp end workshare
+      deallocate(system%rocc)
+      allocate(system%rocc(1:system%no,1:system%nk,1:system%nspin)) !size of gs
+      !$omp workshare
+      system%rocc = rt%rocc0
+      !$omp end workshare
+      deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
+      allocate(energy%esp(system%no,system%nk,system%nspin))
+      call allocate_orbital_complex(system%nspin,mg,info, tpsi)
+      call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
+      ! sendrecv_grid object for wavefunction updates
+      call create_sendrecv_neig(neig, info) ! neighboring node array
+      call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
+      call dealloc_cache(srg)
+
+    end subroutine change_size_rt2gs_for_proj
+
+    subroutine change_size_gs2rt_for_proj
+      implicit none
+
+      !$omp workshare
+      rt%rocc0 = system%rocc 
+      !$omp end workshare
+      deallocate(system%rocc)
+      allocate(system%rocc(1:system%no,1:system%nk,1:system%nspin)) !size of rt
+      !$omp workshare
+      system%rocc(:,:,:) = rocc_rt_bk(:,:,:)
+      !$omp end workshare
+      deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
+      allocate(energy%esp(system%no,system%nk,system%nspin))
+      call allocate_orbital_complex(system%nspin,mg,info, tpsi)
+      call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
+      ! sendrecv_grid object for wavefunction updates
+      call create_sendrecv_neig(neig, info) ! neighboring node array
+      call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
+      call dealloc_cache(srg)
+
+    end subroutine change_size_gs2rt_for_proj
+
   
+    subroutine inner_product(psi1,psi2,mat)
+      use communication, only: comm_summation, comm_bcast
+      use pack_unpack, only: copy_data
+      implicit none
+      type(s_orbital), intent(in) :: psi1,psi2
+      complex(8),dimension(rt%no0,system%no,system%nspin,system%nk) :: mat
+      complex(8),dimension(rt%no0,system%no,system%nspin,system%nk) :: mat1
+      complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1) &
+                        & ,mg%is_array(2):mg%ie_array(2) &
+                        & ,mg%is_array(3):mg%ie_array(3))
+      ! copied from subspace_diagonalization.f90
+      mat1 = 0d0
+      if(info%if_divide_orbit) then
+        do ik=ik_s,ik_e
+        do ispin = 1, nspin
+          do io1 = 1, mo
+            if (rt%io_s0<= io1 .and. io1 <= rt%io_e0) then
+              call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
+            end if
+            call comm_bcast(wf_io1, info%icomm_o, rt%irank_io0(io1))
+            do io2 = 1, no
+              if (io_s<= io2 .and. io2 <= io_e) then
+                cbox = 0d0
+                !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+:cbox)
+                do iz=is(3),ie(3)
+                do iy=is(2),ie(2)
+                do ix=is(1),ie(1)
+                  cbox = cbox + conjg(wf_io1(ix,iy,iz)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
+                end do
+                end do
+                end do
+                mat1(io1,io2,ispin,ik) = cbox * system%hvol
+              end if
+            end do
+          end do !io1
+        end do !ispin
+        end do
+      else
+        !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
+        do ik=ik_s,ik_e
+        do ispin=1,nspin
+        do io1=rt%io_s0,rt%io_e0
+        do io2=io_s,io_e
+          cbox = 0d0
+          do iz=is(3),ie(3)
+          do iy=is(2),ie(2)
+          do ix=is(1),ie(1)
+            cbox = cbox + conjg(psi1%zwf(ix,iy,iz,ispin,io1,ik,1)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
+          end do
+          end do
+          end do
+          mat1(io1,io2,ispin,ik) = cbox * system%hvol
+        end do
+        end do
+        end do
+        end do
+      end if
+
+      call comm_summation(mat1,mat,mo*no*nspin*nk,info%icomm_rko)
+
+    end subroutine inner_product
+
+  end subroutine projection_gx
+
 !===================================================================================================================================
 
 end module write_sub
