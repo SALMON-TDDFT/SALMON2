@@ -27,7 +27,7 @@ contains
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
-    use sym_vector_sub, only: sym_vector_xyz
+    use sym_vector_sub, only: sym_vector_force_xyz
     use sym_sub, only: use_symmetry
     use pseudo_pt_so_sub, only: SPIN_ORBIT_ON, calc_uVpsi_so
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
@@ -372,9 +372,7 @@ contains
 !$omp end parallel do
 !
     if (use_symmetry) then
-      do ia=1,nion
-        call sym_vector_xyz( system%Force(:,ia) )
-      end do
+      call sym_vector_force_xyz( system%Force, system%Rion )
     end if
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)

@@ -135,7 +135,7 @@ subroutine init_dft_system(lg,system,stencil)
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
   call init_lattice(system,stencil)
-  call init_sym_sub( system%primitive_a, system%primitive_b, epdir_re1 )
+  call init_sym_sub( system%primitive_a, system%primitive_b )
   call init_kvector(num_kgrid,system)
 
   if(calc_mode=='RT') then

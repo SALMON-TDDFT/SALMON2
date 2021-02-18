@@ -7,6 +7,7 @@
   use timer
   use plusU_global, only: read_Hubbard_parameters
   use spin_orbit_global, only: read_sw_spin_orbit
+  use sym_sub, only: read_sw_symmetry
   implicit none
 
 
@@ -21,6 +22,7 @@
 
   call read_Hubbard_parameters  !should move into read_input subroutine!
   call read_sw_spin_orbit( yn_spinorbit )
+  call read_sw_symmetry( yn_symmetry )
 
   call timer_initialize
 
@@ -62,6 +64,8 @@ contains
     case('dft_md')
        yn_md='y'
        calc_mode='GS'
+    case('dft_band')
+       calc_mode='DFT_BAND'
     case('tddft_response','tddft_pulse')
        calc_mode='RT'
     case('multi_scale_maxwell_tddft')

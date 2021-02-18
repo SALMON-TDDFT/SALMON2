@@ -77,7 +77,7 @@ type(s_opt) :: opt
 
 logical :: rion_update
 logical :: flag_opt_conv
-integer :: Miopt, iopt,nopt_max
+integer :: Miopt, iopt,nopt_max,i
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
 
@@ -142,7 +142,7 @@ end if
 !---------------------------------------- Band Iteration
 
 if(theory=='dft_band')then
-   call init_band_dft(system,band)
+   call init_band_dft(system,band) ! --> system%wtk=0.0
    iter_band_kpt_end    = band%num_band_kpt
    iter_band_kpt_stride = system%nk
 else
