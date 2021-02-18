@@ -165,18 +165,24 @@ subroutine init_dft_system(lg,system,stencil)
     system%nspin=2
   end if
 
-  if(calc_mode=='RT'.and. temperature<-1.d-12 .and. projection_option=='no')then
-    if( SPIN_ORBIT_ON )then
-       system%no = nelec
-    else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
-      system%no = maxval(nelec_spin(:))
-    else
-      if(mod(nelec,2)==0)then
-        system%no = nelec/2
-      else
-        system%no = (nelec+1)/2
-      end if
-    end if
+  if(calc_mode=='RT'.and. temperature<-1.d-12)then
+     if(projection_option=='no' .or. projection_option=='gx')then  !'gx' is hidden option by AY
+        if( SPIN_ORBIT_ON )then
+           system%no = nelec
+        else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
+           system%no = maxval(nelec_spin(:))
+        else
+           if(mod(nelec,2)==0)then
+              system%no = nelec/2
+           else
+              system%no = (nelec+1)/2
+           end if
+        end if
+     else if(projection_option=='gs')then
+        system%no = nstate
+     else
+        stop 'wrong projection option'
+     endif
   else
     system%no = nstate
   end if

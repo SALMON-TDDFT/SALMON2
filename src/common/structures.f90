@@ -447,9 +447,17 @@ module structures
     type(s_scalar),allocatable :: vloc0(:)  ! =v_local(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
-    type(s_orbital) :: tpsi0 ! for projection_option
-    type(s_cg) :: cg         ! for projection_option
-    real(8) :: E_old         ! for projection_option
+    ! for projection_option
+    type(s_orbital) :: tpsi0
+    type(s_cg) :: cg
+    real(8) :: E_old
+    integer :: no0, io_s0, io_e0, numo0, numo_max0
+    integer :: no_org, io_s_org, io_e_org, numo_org, numo_max_org
+    integer,allocatable :: irank_io0(:), irank_io_org(:)
+    integer,allocatable :: io_s_all0(:), io_s_all_org(:)
+    integer,allocatable :: io_e_all0(:), io_e_all_org(:)
+    integer,allocatable :: numo_all0(:), numo_all_org(:)
+    real(8),allocatable :: rocc0(:,:,:)
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method
