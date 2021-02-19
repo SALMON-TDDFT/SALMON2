@@ -253,7 +253,10 @@ contains
       & natom, &
       & file_atom_coor, &
       & file_atom_red_coor, &
-      & yn_spinorbit
+      & yn_spinorbit, &
+      & absorbing_boundary, &
+      & imagnary_potential_w0, &
+      & imagnary_potential_dr
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -573,6 +576,10 @@ contains
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
+    absorbing_boundary = 'none'
+    imagnary_potential_w0 = 0d0
+    imagnary_potential_dr = 0d0
+
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -961,6 +968,12 @@ contains
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
+    call comm_bcast(absorbing_boundary    ,nproc_group_global)
+    call comm_bcast(imagnary_potential_w0 ,nproc_group_global)
+    call comm_bcast(imagnary_potential_dr ,nproc_group_global)
+    imagnary_potential_w0 = imagnary_potential_w0 * uenergy_to_au
+    imagnary_potential_dr = imagnary_potential_dr * ulength_to_au
+
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1703,6 +1716,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
 
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_dr', imagnary_potential_dr
+
+
+
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
 
@@ -2068,6 +2087,7 @@ contains
     implicit none
     integer :: i,round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
+    logical :: if_orthogonal_tmp
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -2118,6 +2138,13 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
+
+    if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+       al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+       if_orthogonal_tmp = .true.
+    else
+       if_orthogonal_tmp = .false.
+    endif
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2246,6 +2273,16 @@ contains
           stop 'propagator = "aetrs" is not supported in multi-scale calculation'
        end if
     endif
+
+    if(absorbing_boundary/='none') then
+       if( absorbing_boundary /= 'z' )then
+          stop 'Only absorbing_boundary = "z" is supported currently'
+       end if
+       if(.not.if_orthogonal_tmp)then
+          stop 'absorbing_boundary is supported for orthogonal cell only'
+       endif
+    endif
+
 
   end subroutine check_bad_input
 
