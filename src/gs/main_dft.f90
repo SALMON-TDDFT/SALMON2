@@ -154,6 +154,8 @@ call comm_sync_all
 call timer_enable_sub
 Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
+if ( iter_band_kpt > 1 )  Miter = 0  ! Miter: Iteration counter set to zero
+
 if(theory=='dft_band')then
    call calc_band_write(iter_band_kpt,system,band,info)
 end if

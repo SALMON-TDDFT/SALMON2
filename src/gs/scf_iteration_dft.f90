@@ -164,7 +164,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    endif
    if(calc_mode=='DFT_BAND')then
       if(all(band%check_conv_esp)) then
-        if ( comm_is_root(nproc_id_global) ) write(*,*) "cycle!!! : iter=",iter
+   !     if ( comm_is_root(nproc_id_global) ) write(*,*) "cycle!!! : iter=",iter
         cycle DFT_Iteration
       end if
    end if
@@ -205,20 +205,16 @@ DFT_Iteration : do iter=Miter+1,nscf
       band%check_conv_esp(:,:,:)=.false.
       do is=1,system%nspin
       do ik=1,system%nk
-         i=0
-         j=0
          do iob=1,system%no
             if ( esp_old(iob,ik,is) <= tol_esp_diff ) then
-               i=i+1
-               j=max(j,iob)
-               if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,is)=.true.
+               if ( iob <= band%nref_band ) band%check_conv_esp(iob,ik,is)=.true.
             end if
          end do !io
          if( ilevel_print.ge.3 ) then
          if( is==1 .and. ik==1 ) then
-            write(*,'(/,1x,"ispin","   ik",2x,"converged bands (total, maximum band index)")')
+            write(*,'(/,1x,"ispin","   ik",2x,"# of converged bands(1:nref_band)")')
          end if
-         write(*,'(1x,2i5,2x,2i5)') is,ik,i,j
+         write(*,'(1x,2i5,2x,i5)') is,ik,count( band%check_conv_esp(:,ik,is) )
          end if
       end do !ik
       end do !is
