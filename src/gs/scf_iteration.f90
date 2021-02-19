@@ -96,31 +96,31 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
 
   if(mixing%flag_mix_zero) return
 
+  if(calc_mode/='DFT_BAND')then
+
 ! density
-  call timer_begin(LOG_CALC_RHO)
+    call timer_begin(LOG_CALC_RHO)
 
-  if ( SPIN_ORBIT_ON ) then
-    call calc_dm_noncollinear( spsi, system, info, mg )
-    call rot_dm_noncollinear( rho_s, system, mg )
-  else
-    call calc_density(system,rho_s,spsi,info,mg)
-  end if
+    if ( SPIN_ORBIT_ON ) then
+      call calc_dm_noncollinear( spsi, system, info, mg )
+      call rot_dm_noncollinear( rho_s, system, mg )
+    else
+      call calc_density(system,rho_s,spsi,info,mg)
+    end if
 
-  select case(method_mixing)
+    select case(method_mixing)
     case ('simple') ; call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
     case ('broyden'); call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter,mixing)
     case ('pulay')  ; call pulay(mg,info,system,rho_s,iter,mixing)
-  end select
-  call timer_end(LOG_CALC_RHO)
+    end select
+    call timer_end(LOG_CALC_RHO)
 
-  rho%f = 0d0
-  do j=1,system%nspin
-    rho%f = rho%f + rho_s(j)%f
-  end do
+    rho%f = 0d0
+    do j=1,system%nspin
+      rho%f = rho%f + rho_s(j)%f
+    end do
   
-  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
-
-  if(calc_mode/='DFT_BAND')then
+    if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
     call timer_begin(LOG_CALC_HARTREE)
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)

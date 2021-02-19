@@ -58,6 +58,7 @@ module inputoutput
   integer :: inml_md
   integer :: inml_jellium
   integer :: inml_code
+  integer :: inml_band
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -254,6 +255,7 @@ contains
       & file_atom_coor, &
       & file_atom_red_coor, &
       & yn_spinorbit, &
+      & yn_symmetry, &
       & absorbing_boundary, &
       & imagnary_potential_w0, &
       & imagnary_potential_dr
@@ -494,6 +496,15 @@ contains
       & current_openmp_mode, &
       & force_openmp_mode
 
+    namelist/band/ &
+      & lattice, &
+      & nref_band, &
+      & tol_esp_diff, &
+      & num_of_segments, &
+      & ndiv_segment, &
+      & kpt, &
+      & kpt_label
+
 !! == default for &unit ==
     unit_system='au'
 !! =======================
@@ -576,6 +587,7 @@ contains
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
+    yn_symmetry        = 'n'
     absorbing_boundary = 'none'
     imagnary_potential_w0 = 0d0
     imagnary_potential_dr = 0d0
@@ -805,6 +817,14 @@ contains
     stencil_openmp_mode = 'auto'
     current_openmp_mode = 'auto'
     force_openmp_mode   = 'auto'
+!! == default for &band
+    lattice =''
+    nref_band = 0
+    tol_esp_diff = 1.0d-5
+    num_of_segments = 0
+    ndiv_segment(:) = 0
+    kpt(:,:) = 0.0d0
+    kpt_label(:) = ''
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -876,6 +896,9 @@ contains
       read(fh_namelist, nml=code, iostat=inml_code)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=band, iostat=inml_band)
+      rewind(fh_namelist)
+
       close(fh_namelist)
     end if
 
@@ -903,6 +926,7 @@ contains
     do ii = 0,media_num
       call string_lowercase(media_type(ii))
     end do
+    call string_lowercase(lattice)
 
 ! Broad cast
 !! == bcast for &calculation
@@ -968,6 +992,7 @@ contains
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
+    call comm_bcast(yn_symmetry        ,nproc_group_global)
     call comm_bcast(absorbing_boundary    ,nproc_group_global)
     call comm_bcast(imagnary_potential_w0 ,nproc_group_global)
     call comm_bcast(imagnary_potential_dr ,nproc_group_global)
@@ -1273,6 +1298,14 @@ contains
     call comm_bcast(stencil_openmp_mode                    ,nproc_group_global)
     call comm_bcast(current_openmp_mode                    ,nproc_group_global)
     call comm_bcast(force_openmp_mode                      ,nproc_group_global)
+!! == bcast for band
+    call comm_bcast(lattice         ,nproc_group_global)
+    call comm_bcast(nref_band       ,nproc_group_global)
+    call comm_bcast(num_of_segments ,nproc_group_global)
+    call comm_bcast(tol_esp_diff    ,nproc_group_global)
+    call comm_bcast(ndiv_segment    ,nproc_group_global)
+    call comm_bcast(kpt             ,nproc_group_global)
+    call comm_bcast(kpt_label       ,nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -1715,6 +1748,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
 
       write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
@@ -2062,6 +2096,18 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'current_openmp_mode', current_openmp_mode
       write(fh_variables_log, '("#",4X,A,"=",A)') 'force_openmp_mode',   force_openmp_mode
 
+      if(inml_band >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'band', inml_band
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'lattice', lattice
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nref_band', nref_band
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'tol_esp_diff', tol_esp_diff
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
+      write(fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', ndiv_segment(1:num_of_segments)
+      do i = 1, num_of_segments+1
+      write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
+      end do 
+      write(fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
+
       close(fh_variables_log)
 
     end if
@@ -2138,6 +2184,7 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
+    call yyynnn_argument_check(yn_symmetry)
 
     if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
        al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
@@ -2319,5 +2366,15 @@ contains
       stop
     end if
   end subroutine yn_argument_check
+
+  subroutine yyynnn_argument_check(str)
+    implicit none
+    character(*), intent(inout) :: str
+    integer :: i,n
+    n = len(trim(str))
+    do i = 1, n
+      call yn_argument_check( str(i:i) )
+    end do
+  end subroutine yyynnn_argument_check
 
 end module inputoutput
