@@ -32,6 +32,7 @@ contains
 !! Error function and its complement are implemented based on the reference
 !! W. J. Cody, Math. Comp. 23 631 (1969)
   function erf_salmon(x) result(y)
+    !$acc routine seq
     implicit none
     real(8),intent(in) :: x
     real(8) :: y
@@ -51,6 +52,7 @@ contains
   end function erf_salmon
 !--------------------------------------------------------------------------------
   function erfc_salmon(x) result(y)
+    !$acc routine seq
     implicit none
     real(8),intent(in) :: x
     real(8) :: y
@@ -70,6 +72,7 @@ contains
   end function erfc_salmon
 !--------------------------------------------------------------------------------
   function erf_salmon_short(x) result(y) ! 0d0 <=x<0.5d0
+    !$acc routine seq
     implicit none
     real(8),intent(in) :: x
     real(8) :: y
@@ -98,6 +101,7 @@ contains
   end function erf_salmon_short
 !--------------------------------------------------------------------------------
   function erfc_salmon_mid(x) result(y) ! 0.46875d0 <x< 4d0
+    !$acc routine seq
     implicit none
     real(8),intent(in) :: x
     real(8) :: y
@@ -136,6 +140,7 @@ contains
   end function erfc_salmon_mid
 !--------------------------------------------------------------------------------
   function erfc_salmon_long(x) result(y) ! 4d0 <x
+    !$acc routine seq
     use math_constants, only : pi
     implicit none
     real(8),intent(in) :: x
