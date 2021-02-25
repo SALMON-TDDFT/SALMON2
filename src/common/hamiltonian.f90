@@ -795,7 +795,11 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   integer :: is,ix,iy,iz
 
   do is=1,nspin
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ix,iy,iz)
+#else
 !$omp parallel do collapse(2) private(ix,iy,iz)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -803,6 +807,9 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#endif
   end do
 
   return
