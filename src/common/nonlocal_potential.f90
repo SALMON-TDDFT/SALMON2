@@ -179,6 +179,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+  complex(8) :: IMAGINARY_UNIT = (0, 1)
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
@@ -233,6 +234,31 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     deallocate(uVpsibox,uVpsibox2)
 
   else
+#ifdef USE_OPENACC
+! copy number from htpsi%zwf complex type to real type 
+! 
+!$acc kernels present(ppg,tpsi,htpsi) 
+!$acc loop collapse(7)
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+
+      do iz=lbound(htpsi%zwf,3),ubound(htpsi%zwf,3)                                                                                                                                                       
+      do iy=lbound(htpsi%zwf,2),ubound(htpsi%zwf,2)  
+      do ix=lbound(htpsi%zwf,1),ubound(htpsi%zwf,1)                                                                                                                                                       
+          htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) = real(htpsi%zwf(ix,iy,iz,ispin,io,ik,im))
+          htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) = imag(htpsi%zwf(ix,iy,iz,ispin,io,ik,im))
+      end do
+      end do
+      end do
+
+    end do
+    end do
+    end do
+    end do
+!$acc end kernels 
+#endif
 
 #ifdef USE_OPENACC
 !$acc kernels present(ppg,tpsi,htpsi)
@@ -249,6 +275,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = 0.d0
+        !$acc loop reduction(+:uVpsi)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -264,7 +291,16 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
           wrk = uVpsi * ppg%zekr_uV(j,ilma,ik)
+#ifdef USE_OPENACC
+          !use real(8) type data
+          !OpenACC compiler can not construe complex type for atomicadd operation.
+          !$acc atomic
+          htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) + real(wrk)
+          !$acc atomic
+          htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) + imag(wrk)
+#else
           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
+#endif
         end do
       end do
 
@@ -276,6 +312,31 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 !$acc end kernels
 #else
 !$omp end parallel do
+#endif
+
+#ifdef USE_OPENACC
+! copy number from real type to htpsi%zwf complex type
+!
+!$acc kernels present(ppg,tpsi,htpsi) 
+!$acc loop collapse(7)
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+
+      do iz=lbound(htpsi%zwf,3),ubound(htpsi%zwf,3)                                                                                                                                                       
+      do iy=lbound(htpsi%zwf,2),ubound(htpsi%zwf,2)  
+      do ix=lbound(htpsi%zwf,1),ubound(htpsi%zwf,1)                                                                                                                                                       
+           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) + htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) * IMAGINARY_UNIT
+      end do
+      end do
+      end do
+
+    end do
+    end do
+    end do
+    end do
+!$acc end kernels 
 #endif
 
   end if
