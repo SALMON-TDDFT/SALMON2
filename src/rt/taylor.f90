@@ -44,11 +44,22 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
     if(mod(nn,2)==1)then
       call hpsi(tspsi_in,sshtpsi,info,mg,V_local,system,stencil,srg,ppg)
       if (nn==1) then
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(2) private(ik,io,is,iz,iy,ix) gang
+#else
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
+#endif
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
+#ifdef USE_OPENACC
+!$acc loop collapse(2) private(ik,io,is,iz,iy,ix) worker
+#endif
           do is=1,nspin
             do iz=mg%is(3),mg%ie(3)
+#ifdef USE_OPENACC
+!$acc loop collapse(2) private(ik,io,is,iz,iy,ix) vector
+#endif
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
               tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_in%zwf(ix,iy,iz,is,io,ik,1)+ &
@@ -59,8 +70,15 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
           end do
         end do
         end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
       else
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(5) private(ik,io,is,iz,iy,ix)
+#else
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
+#endif
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           do is=1,nspin
@@ -75,10 +93,17 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
           end do
         end do
         end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#endif
       end if
     else
       call hpsi(sshtpsi,tspsi_in,info,mg,V_local,system,stencil,srg,ppg)
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(5) private(ik,io,is,iz,iy,ix)
+#else
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
+#endif
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         do is=1,nspin
@@ -93,6 +118,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
         end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#endif
     end if
   end do
 

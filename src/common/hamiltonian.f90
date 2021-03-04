@@ -795,7 +795,11 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   integer :: is,ix,iy,iz
 
   do is=1,nspin
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ix,iy,iz)
+#else
 !$omp parallel do collapse(2) private(ix,iy,iz)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -803,6 +807,9 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#endif
   end do
 
   return
@@ -839,7 +846,12 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+#else
 !$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+#endif
   do ik=ik_s,ik_e
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
@@ -852,7 +864,11 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do  
+#endif
 
   deallocate(kAc)
   return
