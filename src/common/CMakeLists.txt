@@ -28,6 +28,7 @@ else ()
       zstencil_core/typical/omp.f90
       zstencil_microac_core/typical/seq.f90
       zstencil_microac_core/typical/omp.f90
+      zstencil_core/gpu/seq.f90
       )
 endif ()
 
