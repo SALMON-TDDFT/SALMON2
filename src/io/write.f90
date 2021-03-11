@@ -1873,7 +1873,7 @@ contains
     type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
     !
-    integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
+    integer :: nspin,nspin_tmp,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
     complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
     real(8) :: coef(system%no,system%nk,system%nspin)
@@ -1891,11 +1891,18 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
+    
     if(nspin==1) then
       wspin = 2d0
     else if(nspin==2) then
       wspin = 1d0
     end if
+    
+    nspin_tmp = nspin
+    if(yn_spinorbit=='y') then
+      nspin_tmp = 1
+    end if
+    
     if(nscf==0) then
       niter = 10
     else
@@ -1933,12 +1940,18 @@ contains
     end do
     end do
     end do
+    
+    if(yn_spinorbit=='y') then
+      coef(1:no,1:nk,1) = coef(1:no,1:nk,1) + coef(1:no,1:nk,2)
+      coef(1:no,1:nk,2) = coef(1:no,1:nk,1)
+    end if
 
     nee = 0d0
     neh = dble(nelec)
-    do ispin=1,nspin
+    do ispin=1,nspin_tmp
     do ik=1,nk
     do io=1,no
+    ! /wspin: for canceling double counting of 2 in rocc.
       nee = nee + ((wspin-system%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
       neh = neh - (system%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
     end do
@@ -1949,7 +1962,7 @@ contains
     if(comm_is_root(nproc_id_global))then
       write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
       write(ofl%fh_ovlp,'(i11)') itt
-      do ispin=1,nspin
+      do ispin=1,nspin_tmp
       do ik=1,nk
         write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
       end do
