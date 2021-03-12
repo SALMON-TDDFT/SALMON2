@@ -1,0 +1,75 @@
+&calculation
+  theory='dft_band'
+/
+
+&control
+  sysname = 'Si'
+  yn_restart = 'y'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 10.26d0, 10.26d0, 10.26d0
+  nstate = 32
+  nelec = 32
+  nelem = 1
+  natom = 8
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.855d0, 0.855d0, 0.855d0
+/
+
+&kgrid
+  num_kgrid = 1, 1, 1
+/
+
+&scf
+  ncg = 4
+  nscf = 120
+  threshold = 1.d-9
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+  'Si'	5.13	.0	5.13	1
+  'Si'	.0	5.13	5.13	1
+  'Si'	5.13	5.13	.0	1
+  'Si'	7.695	2.565	7.695	1
+  'Si'	2.565	7.695	7.695	1
+  'Si'	7.695	7.695	2.565	1
+/
+
+&band
+  !lattice = 'sc'
+  !nref_band = 20
+  !tol_esp_diff = 1.d-7
+  !num_of_segments = 5
+  !ndiv_segment =  10 10 10 10 10
+  !kpt = 0.0,0.0,0.0, 0.5,0.0,0.0, 0.5,0.5,0.0, 0.5,0.5,0.5, 0.0,0.0,0.0, 0.5,0.5,0.0
+  !kpt_label = 'G','X','M','R','G','M'
+  !
+  lattice = 'non'
+  nref_band = 20
+  tol_esp_diff = 1.d-7
+  num_of_segments = 1
+  ndiv_segment = 2
+  kpt = 0.0,0.0,0.0, 0.5,0.5,0.5
+  kpt_label = 'G','R'
+/

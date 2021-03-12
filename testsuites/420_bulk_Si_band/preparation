@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON. 
+# if required, this script file can utilized for the preparation of 
+# the input data for the following calculations.
+
+ln -s ../pseudo/Si_rps.dat
+ln -s ../111_bulk_Si_gs_dp/data_for_restart ./restart
