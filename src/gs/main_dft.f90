@@ -42,7 +42,7 @@ use checkpoint_restart_sub
 use hamiltonian
 use structure_opt_sub
 use total_energy
-use band_dft_sub
+use band_dft_sub, only: set_vec_k_band_dft, init_band_dft, write_band_dft
 use init_gs, only: init_wf
 use initialization_dft
 use jellium, only: check_condition_jm
@@ -77,7 +77,7 @@ type(s_opt) :: opt
 
 logical :: rion_update
 logical :: flag_opt_conv
-integer :: Miopt, iopt,nopt_max,i
+integer :: Miopt, iopt,nopt_max
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
 
@@ -156,10 +156,10 @@ Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
 if ( iter_band_kpt > 1 )  Miter = 0  ! Miter: Iteration counter set to zero
 
-if(theory=='dft_band')then
-   call calc_band_write(iter_band_kpt,system,band,info)
+if ( theory == 'dft_band' ) then
+  call set_vec_k_band_dft(iter_band_kpt,system,band,info)
+  call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
 end if
-
 
 call timer_begin(LOG_INIT_GS_ITERATION)
 
@@ -201,7 +201,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
 
 
 if(theory=='dft_band')then
-   call write_band(system,energy)
+   call write_band_dft(system,energy)
 end if
 
 ! output the wavefunctions for next GS calculations
