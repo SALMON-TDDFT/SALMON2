@@ -53,15 +53,15 @@ contains
       !  call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
       !else
         !call ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-        call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+        call ssdg_rwf_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
       !end if
     else
       !call ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-      call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+      call ssdg_zwf_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
   end subroutine ssdg_so
 
-  subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_rwf_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -245,13 +245,13 @@ contains
     end do
     call timer_end(LOG_SSDG_ISOLATED_CALC)
 
-  end subroutine ssdg_rwf
+  end subroutine ssdg_rwf_so
 
 !===================================================================================================================================
 
   !===================================================================================================================================
 
-  subroutine ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_zwf_cblas_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use salmon_global, only: yn_scalapack
     use structures
     use communication, only: comm_summation,comm_bcast
@@ -409,12 +409,12 @@ contains
 
     return
 
-  end subroutine ssdg_zwf_cblas
+  end subroutine ssdg_zwf_cblas_so
 !===================================================================================================================================
 
 !===================================================================================================================================
 
-  subroutine ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_rwf_rblas_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -579,11 +579,11 @@ contains
     enddo ! im
 
     return
-  end subroutine ssdg_rwf_rblas
+  end subroutine ssdg_rwf_rblas_so
 
 !===================================================================================================================================
 
-  subroutine ssdg_rwf_rblas_red_mem(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_rwf_rblas_red_mem_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -750,14 +750,14 @@ contains
     enddo ! im
 
     return
-  end subroutine ssdg_rwf_rblas_red_mem
+  end subroutine ssdg_rwf_rblas_red_mem_so
 
 
 !===================================================================================================================================
 
 
 
-  subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_zwf_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -962,6 +962,6 @@ contains
     end do
     call timer_end(LOG_SSDG_PERIODIC_CALC)
 
-  end subroutine ssdg_zwf
+  end subroutine ssdg_zwf_so
 
 end module subspace_diagonalization_so

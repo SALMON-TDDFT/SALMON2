@@ -99,6 +99,9 @@ module salmon_global
   character(256) :: file_atom_red_coor
   character(1)   :: yn_spinorbit
   character(3)   :: yn_symmetry
+  character(16)  :: absorbing_boundary
+  real(8)        :: imagnary_potential_w0
+  real(8)        :: imagnary_potential_dr
 
 !! &pseudo
   character(256) :: file_pseudo(maxmki)

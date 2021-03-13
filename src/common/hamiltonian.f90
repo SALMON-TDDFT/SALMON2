@@ -32,7 +32,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
   use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil
+  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil, &
+          absorbing_boundary
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
   use communication, only: comm_summation
@@ -41,7 +42,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   external :: zstencil_typical_seq
   !$acc routine(zstencil_typical_seq) worker
 
-  type(s_dft_system)      ,intent(in) :: system
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(system%Nspin)
@@ -208,9 +209,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 #else
 !$omp end parallel do
 #endif
-
         
       end if
+
+      ! absorbing boundary condition
+      if(absorbing_boundary=='z')then
+         call add_imaginary_potential_for_absorbing_boundary_z(system,tpsi,htpsi)
+      endif
       
     else if(stencil%if_orthogonal .and. if_singlescale) then
     ! orthogonal lattice, single-scale Maxwell-TDDFT
@@ -275,6 +280,12 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 !$omp end parallel do
 
       end if
+
+      ! absorbing boundary condition
+      if(absorbing_boundary=='z')then
+         call add_imaginary_potential_for_absorbing_boundary_z(system,tpsi,htpsi)
+      endif
+
 
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
@@ -718,6 +729,56 @@ contains
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
   end subroutine zstencil_microac_overlapped
+
+  subroutine add_imaginary_potential_for_absorbing_boundary_z(system,tpsi,htpsi)
+    use structures, only: s_dft_system,s_orbital
+    use salmon_global, only: al,imagnary_potential_w0,imagnary_potential_dr
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_orbital) :: tpsi,htpsi
+    real(8) :: W0, dr, z,z0,z1,z2
+    complex(8) :: W
+
+    dr = imagnary_potential_dr
+    W0 = imagnary_potential_w0
+
+!    z0 = lg%num(3) * system%hgs(3)   !cell length in z
+    z0 = al(3)   !cell length in z
+    z1 = dr      ! left boundary
+    z2 = z0-dr   ! right boundary
+
+    do im=im_s,im_e
+!$omp parallel do collapse(4) &
+!$omp          private(ik,io,ispin,ix,iy,iz,z,w)
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+       do iz = mg%is(3),mg%ie(3)
+          z  = iz*system%hgs(3)
+          if( z .le. z1 ) then
+             w = cmplx( 0d0, -w0*(z1-z)/dr )
+          else if( z .ge. z2 ) then
+             w = cmplx( 0d0, -w0*(z-z2)/dr )
+          else
+             cycle
+          endif
+
+          do iy = mg%is(2),mg%ie(2)
+          do ix = mg%is(1),mg%ie(1)
+             htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = &
+                   htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+                   + w * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          end do
+          end do
+      end do
+    end do
+    end do
+    end do
+!$omp end parallel do
+    end do
+
+  end subroutine add_imaginary_potential_for_absorbing_boundary_z
+
 end subroutine hpsi
 
 !===================================================================================================================================
@@ -734,7 +795,11 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   integer :: is,ix,iy,iz
 
   do is=1,nspin
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ix,iy,iz)
+#else
 !$omp parallel do collapse(2) private(ix,iy,iz)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -742,6 +807,9 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#endif
   end do
 
   return
@@ -778,7 +846,12 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+#else
 !$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+#endif
   do ik=ik_s,ik_e
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
@@ -791,7 +864,11 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do  
+#endif
 
   deallocate(kAc)
   return

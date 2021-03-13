@@ -83,7 +83,11 @@ contains
     nspin = system%nspin
 
     if(nspin==1)then
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -91,7 +95,11 @@ contains
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     else if(nspin==2)then
 !$omp parallel private(is,iz,iy,ix)
       do is=1,2
@@ -161,7 +169,11 @@ contains
     end if
 
     if(nspin==1)then
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -169,7 +181,11 @@ contains
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     else if(nspin==2)then
 !$omp parallel private(is,iz,iy,ix)
       do is=1,2
@@ -187,7 +203,11 @@ contains
     end if
 
     tot_exc=0.d0
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
+#endif
     do iz=1,mg%num(3)
     do iy=1,mg%num(2)
     do ix=1,mg%num(1)
@@ -195,7 +215,11 @@ contains
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)

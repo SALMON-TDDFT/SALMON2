@@ -132,6 +132,7 @@ CONTAINS
     !
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(5),E_sum(5)
+    real(8) :: E_wrk_local_1,E_wrk_local_2
     real(8) :: etmp
     complex(8) :: rho_e,rho_i
 
@@ -145,7 +146,12 @@ CONTAINS
 
       if(ewald%yn_bookkeep=='y') then
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
+#else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
+#endif
          do iia=1,info%nion_mg
         !do ia=1,system%nion
             ia = info%ia_mg(iia)
@@ -173,7 +179,11 @@ CONTAINS
 
             end do  !ipair
          end do     !ia
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
 
       else
@@ -181,10 +191,15 @@ CONTAINS
 
       endif
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(2) reduction(+:E_tmp_l) private(ix,iy,iz,rho_i)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_tmp_l) &
 !$omp          private(ix,iy,iz,rho_i) &
 !$omp          shared(fg,aEwald,sysvol,mg,ppg)
+#endif
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -193,11 +208,45 @@ CONTAINS
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     end if
 
     etmp = 0d0
     E_wrk = 0d0
+#ifdef USE_OPENACC
+!$acc parallel copyin(yn_jm)
+!$acc loop collapse(2) reduction(+:E_wrk_local_1,E_wrk_local_2,etmp) private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      g(1) = fg%vec_G(1,ix,iy,iz)
+      g(2) = fg%vec_G(2,ix,iy,iz)
+      g(3) = fg%vec_G(3,ix,iy,iz)
+      
+      rho_e = poisson%zrhoG_ele(ix,iy,iz)
+      E_wrk_local_1 = E_wrk_local_1 + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
+      
+      if (yn_jm=='n') then
+        rho_i = ppg%zrhoG_ion(ix,iy,iz)
+        E_wrk_local_2 = E_wrk_local_2 + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
+        
+        do ia=info%ia_s,info%ia_e
+          r = system%Rion(1:3,ia)
+          Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+        end do
+      end if
+    end do
+    end do
+    end do
+!$acc end parallel
+    E_wrk(1) = E_wrk_local_1
+    E_wrk(2) = E_wrk_local_2
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
@@ -226,6 +275,7 @@ CONTAINS
     end do
     end do
 !$omp end parallel do
+#endif
     call timer_end(LOG_TE_PERIODIC_CALC)
 
     call timer_begin(LOG_TE_PERIODIC_COMM_COLL)
@@ -240,12 +290,21 @@ CONTAINS
   ! ion-ion energy
       zps1 = 0
       zps2 = 0
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop private(ia) reduction(+:zps1,zps2)
+#else
 !$omp parallel do default(none) private(ia) shared(system,pp,Kion) reduction(+:zps1,zps2)
+#endif
       do ia=1,system%nion
         zps1 = zps1 + pp%Zps(Kion(ia))
         zps2 = zps2 + pp%Zps(Kion(ia))**2
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
       E_sum(5) = E_sum(5) - Pi*zps1**2/(2*aEwald*sysvol) - sqrt(aEwald/Pi)*zps2
       energy%E_ion_ion = E_sum(5) + E_sum(4)
@@ -394,16 +453,24 @@ CONTAINS
     ! eigen energies (esp)
       do ispin=1,Nspin
         call timer_begin(LOG_EIGEN_ENERGY_CALC)
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) private(ik,io) copy(wrk1)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
+#endif
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk1(io,ik) = sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
                                  * htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
         call timer_end(LOG_EIGEN_ENERGY_CALC)
 
         call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
@@ -420,10 +487,14 @@ CONTAINS
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
 !$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
+#endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -433,7 +504,11 @@ CONTAINS
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
       E_local(1) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
 
       if ( SPIN_ORBIT_ON ) then
@@ -454,10 +529,14 @@ CONTAINS
       else
     ! nonlocal part (E_ion_nloc)
       E_tmp = 0d0
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(3) reduction(+:E_tmp) private(ispin,ik,io)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
 !$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
+#endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -475,7 +554,11 @@ CONTAINS
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
       E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
       end if
       call timer_end(LOG_EIGEN_ENERGY_CALC)

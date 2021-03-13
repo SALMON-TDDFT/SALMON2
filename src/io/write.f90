@@ -738,8 +738,8 @@ contains
   
 !===================================================================================================================================
   subroutine write_response_0d(ofl,rt)
-    use inputoutput, only: e_impulse, nt, dt, nenergy, de,  &
-                           t_unit_energy,t_unit_polarizability
+    use salmon_global, only: e_impulse, nt, dt, nenergy, de
+    use inputoutput, only: t_unit_energy,t_unit_polarizability
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
@@ -801,8 +801,8 @@ contains
 
 !===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
-    use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de,  &
-                           t_unit_energy,t_unit_conductivity
+    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de
+    use inputoutput, only: t_unit_energy,t_unit_conductivity
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
@@ -814,6 +814,7 @@ contains
     integer :: ihw,n,ixyz
     real(8) :: tt,hw,t2
     complex(8) :: zsigma(3),zeps(3)
+    real(8) :: rtdata(1:3,1:nt)
 
     if (comm_is_root(nproc_id_global)) then
       ofl%fh_response  = open_filehandle(ofl%file_response_data)
@@ -840,20 +841,26 @@ contains
         & 13, "Im(eps_z)", "none"
 
       tt = dt*dble(nt)
+      if(trans_longi=="tr") then
+        rtdata(1:3,1:nt) = rt%curr(1:3,1:nt)
+      else if(trans_longi=="lo")then
+        rtdata(1:3,1:nt) = rt%E_tot(1:3,1:nt)
+      end if
 
       do ihw=1,nenergy
         hw=dble(ihw)*de
         zsigma(:)=(0.d0,0.d0)
         do n=1,nt
           t2=dble(n)*dt
-          zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          zsigma(:)=zsigma(:)+exp(zi*hw*t2)* rtdata(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
         end do
 
         zsigma(:) = (zsigma(:)/e_impulse)*dt
         if(trans_longi=="tr")then
           zeps(:)=1.d0+4.d0*pi*zi*zsigma(:)/hw
         else if(trans_longi=="lo")then
-          zeps(:)=1.d0/(1.d0-zi*hw*zsigma(:))
+          zeps(:)=1.d0/(1.d0-zsigma(:))
+          zsigma(:)=(zeps(:)-1.d0)/(4.d0*pi*zi/hw)
         end if
 
         write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
@@ -1866,7 +1873,7 @@ contains
     type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
     !
-    integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
+    integer :: nspin,nspin_tmp,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
     complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
     real(8) :: coef(system%no,system%nk,system%nspin)
@@ -1884,11 +1891,18 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
+    
     if(nspin==1) then
       wspin = 2d0
     else if(nspin==2) then
       wspin = 1d0
     end if
+    
+    nspin_tmp = nspin
+    if(yn_spinorbit=='y') then
+      nspin_tmp = 1
+    end if
+    
     if(nscf==0) then
       niter = 10
     else
@@ -1926,12 +1940,18 @@ contains
     end do
     end do
     end do
+    
+    if(yn_spinorbit=='y') then
+      coef(1:no,1:nk,1) = coef(1:no,1:nk,1) + coef(1:no,1:nk,2)
+      coef(1:no,1:nk,2) = coef(1:no,1:nk,1)
+    end if
 
     nee = 0d0
     neh = dble(nelec)
-    do ispin=1,nspin
+    do ispin=1,nspin_tmp
     do ik=1,nk
     do io=1,no
+    ! /wspin: for canceling double counting of 2 in rocc.
       nee = nee + ((wspin-system%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
       neh = neh - (system%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
     end do
@@ -1942,7 +1962,7 @@ contains
     if(comm_is_root(nproc_id_global))then
       write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
       write(ofl%fh_ovlp,'(i11)') itt
-      do ispin=1,nspin
+      do ispin=1,nspin_tmp
       do ik=1,nk
         write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
       end do
