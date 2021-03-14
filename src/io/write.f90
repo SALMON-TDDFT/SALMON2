@@ -1928,7 +1928,12 @@ contains
     end if
     
     call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
-    
+
+    if(yn_spinorbit=='y') then
+      mat(1:no,1:no,1,1:nk) = mat(1:no,1:no,1,1:nk) + mat(1:no,1:no,2,1:nk)
+      mat(1:no,1:no,2,1:nk) = mat(1:no,1:no,1,1:nk)
+    end if
+
     coef=0.d0
     do ispin=1,nspin
     do ik=1,nk
@@ -1940,11 +1945,6 @@ contains
     end do
     end do
     end do
-    
-    if(yn_spinorbit=='y') then
-      coef(1:no,1:nk,1) = coef(1:no,1:nk,1) + coef(1:no,1:nk,2)
-      coef(1:no,1:nk,2) = coef(1:no,1:nk,1)
-    end if
 
     nee = 0d0
     neh = dble(nelec)
