@@ -179,12 +179,29 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       ! OpenMP parallelization: k-point & orbital indices
       
 #ifdef USE_OPENACC
-!$acc parallel loop private(im,ik,io,ispin,kAc,k_lap0,k_nabt) collapse(4) gang
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+          if(if_kAc) then
+            kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+            k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
+            k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
+            k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
+          else
+            k_lap0 = stencil%coef_lap0
+            k_nabt = 0d0
+          end if
+          call zstencil_typical_gpu(io_s, io_e, Nspin,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                          ,mg%is,mg%ie &
+                          ,tpsi%zwf(:,:,:,:,:,ik,im),htpsi%zwf(:,:,:,:,:,ik,im) &
+                          ,V_local(:),k_lap0,stencil%coef_lap,k_nabt &
+                          )
+        end do
+        end do
 #else
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin,kAc,k_lap0,k_nabt) &
 !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
-#endif
         do im=im_s,im_e
         do ik=ik_s,ik_e
         do io=io_s,io_e
@@ -199,23 +216,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
             k_lap0 = stencil%coef_lap0
             k_nabt = 0d0
           end if
-#ifdef USE_OPENACC
-          call zstencil_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
-                            ,mg%is,mg%ie &
-                            ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                            ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
-#else
           call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                             ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                             ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
-#endif
         end do
         end do
         end do
         end do
-#ifdef USE_OPENACC
-!$acc end parallel
-#else
 !$omp end parallel do
 #endif
         
