@@ -65,8 +65,8 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     do i=1,nl
       vecf(i,iter) = vecr_out(i,iter_mod) - vecr_in(i,iter_mod)
     end do
-!$omp parallel do private(i)
 write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
+!$omp parallel do private(i)
     do i=1,nl
       vecr_in(i,iter_mod+1) = vecr_in(i,iter_mod) + amix*vecf(i,iter)
     end do

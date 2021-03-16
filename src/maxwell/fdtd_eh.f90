@@ -1963,9 +1963,9 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy)
-write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
           do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
             fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)
@@ -1988,9 +1988,9 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(iy,iz)
-write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
           do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
             fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)
@@ -2013,9 +2013,9 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iz)
-write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
           do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
             fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)
@@ -2057,9 +2057,9 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
-write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       do iz=fe%iex_z_is(3),fe%iex_z_ie(3)
       do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
       do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
@@ -2084,9 +2084,9 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
-write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
       do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
       do ix=fe%iey_x_is(1),fe%iey_x_ie(1)
@@ -2111,9 +2111,9 @@ write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
-write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
       do iy=fe%iez_y_is(2),fe%iez_y_ie(2)
       do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
