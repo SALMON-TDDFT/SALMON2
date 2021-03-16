@@ -293,12 +293,14 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
 
   !update ion velocity with dt/2
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iatom,mass_au)
   do iatom=1,natom
      mass_au = umass * system%Mass(Kion(iatom))
      system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
   enddo
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   !velocity scaling
   if(step_velocity_scaling>=1 .and. mod(itt,step_velocity_scaling)==0) then
@@ -306,19 +308,23 @@ subroutine time_evolution_step_md_part1(itt,system,md)
      call apply_velocity_scaling_ion(md%Temperature,system)
   endif
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iatom)
   do iatom=1,natom
      md%Rion_last(:,iatom) = system%Rion(:,iatom)
      md%Force_last(:,iatom)= system%Force(:,iatom)
   enddo
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   !update ion coordinate with dt
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iatom)
   do iatom=1,natom
      system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
   enddo
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
 !(remove later)
 !!$omp parallel do private(iatom)

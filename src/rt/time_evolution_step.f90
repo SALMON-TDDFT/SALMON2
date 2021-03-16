@@ -273,11 +273,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_out,ewald)
 
      !force on ion directly from field --- should put in calc_force?
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iatom)
      do iatom=1,system%nion
         system%Force(:,iatom)= system%Force(:,iatom) + pp%Zps(Kion(iatom)) * rt%E_tot(:,itt)
      enddo
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   endif
 

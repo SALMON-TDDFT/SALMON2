@@ -31,6 +31,7 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   integer :: ix,iy,iz
   
   if(system%nspin == 1)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -40,6 +41,7 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
     end do
     end do
   elseif(system%nspin == 2)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -53,6 +55,7 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   
   !rho = c1*rho + c2*matmul( psi**2, occ )
   if(system%nspin == 1)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -64,6 +67,7 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
     end do
     end do
   else if(system%nspin == 2)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -104,6 +108,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
 
   if(system%nspin==1)then
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -113,6 +118,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,iz,iy,ix) collapse(3)
     do i=1,mixing%num_rho_stock+1
        do iz=mg%is(3),mg%ie(3)
@@ -129,6 +135,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
                  mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                  mixing%flag_mix_zero)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -138,6 +145,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,iz,iy,ix) collapse(3)
     do i=1,mixing%num_rho_stock+1
        do iz=mg%is(3),mg%ie(3)
@@ -153,6 +161,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
   else if(system%nspin==2)then
     
     do is=1,2
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -162,6 +171,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
       end do
       end do
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,iz,iy,ix) collapse(3)
       do i=1,mixing%num_rho_stock+1
         do iz=mg%is(3),mg%ie(3)
@@ -178,6 +188,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
                    mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                    mixing%flag_mix_zero )
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -187,6 +198,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
       end do
       end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,iz,iy,ix) collapse(3)
       do i=1,mixing%num_rho_stock+1
         do iz=mg%is(3),mg%ie(3)
@@ -237,6 +249,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
 !pulay mixing
 
     if(system%nspin == 1)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -246,6 +259,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
       end do
       end do
     elseif(system%nspin == 2)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -283,6 +297,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
       j=mixing%num_rho_stock-nsize+j0
       ss=0.d0
       if(system%nspin==1)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(2) reduction(+:ss)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -293,6 +308,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
         end do
         end do
       else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(3) reduction(+:ss)
         do is=1,system%nspin
           do iz=mg%is(3),mg%ie(3)
@@ -320,6 +336,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
     b1(1:nsize)=rc*b1(1:nsize)
  
     do is=1,system%nspin
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -333,6 +350,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
       do i0=1,nsize
         i=mixing%num_rho_stock-nsize+i0
         if(system%nspin==1)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -343,6 +361,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
           end do
           end do
         else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -356,6 +375,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
       end do
   
       if(system%nspin==1)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -367,6 +387,7 @@ subroutine pulay(mg,info,system,rho_s,iter,mixing)
         end do
         end do
       else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)

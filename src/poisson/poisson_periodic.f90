@@ -38,11 +38,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 #ifdef USE_OPENACC
 !$acc kernels copyin(poisson)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
 #endif
   poisson%ff1z = 0d0
 #ifndef USE_OPENACC
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 
@@ -67,11 +69,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 #ifdef USE_OPENACC
 !$acc kernels copyin(poisson)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
 #endif
   poisson%ff1y = 0d0
 #ifndef USE_OPENACC
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 #ifdef USE_OPENACC
@@ -94,11 +98,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 #ifdef USE_OPENACC
 !$acc kernels copyin(poisson)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
 #endif
   poisson%ff1x = 0.d0
 #ifndef USE_OPENACC
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 #ifdef USE_OPENACC
@@ -141,11 +147,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 #ifdef USE_OPENACC
 !$acc kernels copyin(poisson)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
 #endif
   poisson%ff1z = 0.d0
 #ifndef USE_OPENACC
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 #ifdef USE_OPENACC
@@ -170,11 +178,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 #ifdef USE_OPENACC
 !$acc kernels copyin(poisson)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
 #endif
   poisson%ff1y = 0.d0
 #ifndef USE_OPENACC
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 #ifdef USE_OPENACC
@@ -197,11 +207,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 #ifdef USE_OPENACC
 !$acc kernels copyin(poisson)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
 #endif
   poisson%ff1x = 0.d0
 #ifndef USE_OPENACC
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 #ifdef USE_OPENACC
@@ -277,6 +289,7 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
                     info%icomm_y,info%icomm_z)
 
   poisson%zrhoG_ele=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,iiy,iiz,iix) &
 !$omp             shared(mg,lg,poisson,inv_lgnum3,fg)
@@ -294,6 +307,7 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
                     info%isize_y,info%isize_z,1, &

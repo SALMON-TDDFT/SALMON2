@@ -717,6 +717,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
@@ -727,6 +728,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     end do
 
     do i=1,mixing%num_rho_stock+1
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -742,6 +744,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     end do
 
     do i=1,mixing%num_rho_stock
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -759,6 +762,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     if(system%nspin == 2)then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -774,6 +778,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
         end do
 
         do i=1,mixing%num_rho_stock
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -903,6 +908,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint
     allocate(matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -912,6 +918,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -922,6 +929,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint
     end do
     call comm_summation(matbox0,matbox1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -1003,10 +1011,13 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     allocate(matbox0(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
     allocate(matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
     matbox0 = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -1020,10 +1031,13 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     allocate(v0(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
     allocate(v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
     v0 = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -1039,10 +1053,13 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     allocate(b0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
     allocate(b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
     b0 = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -1057,10 +1074,13 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     allocate(d0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
     allocate(d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
     d0 = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -1340,6 +1360,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
       end if
       call comm_bcast(matbox,info%icomm_rko)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1356,6 +1377,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
       end if
       call comm_bcast(matbox,info%icomm_rko)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1374,6 +1396,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
           end if
           call comm_bcast(matbox,info%icomm_rko)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -1390,6 +1413,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
           end if
           call comm_bcast(matbox,info%icomm_rko)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -1518,6 +1542,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
     call comm_bcast(matbox1,info%icomm_rko)
     call comm_bcast(matbox2,info%icomm_rko)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -1527,6 +1552,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -1648,6 +1674,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
       call comm_bcast(singlescale%Ac_zt_boundary_top_old,comm)
     end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)

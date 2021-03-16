@@ -181,6 +181,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 #ifdef USE_OPENACC
 !$acc parallel loop private(im,ik,io,ispin,kAc,k_lap0,k_nabt) collapse(4) gang
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin,kAc,k_lap0,k_nabt) &
 !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
@@ -217,6 +218,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 !$acc end parallel
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
         
       end if
@@ -231,6 +233,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     
       if(yn_symmetrized_stencil=='y') then
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin) &
 !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,system,stencil)
@@ -247,6 +250,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         
       else if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
         ! OpenMP parallelization: rgrid
@@ -271,6 +275,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       else
         ! OpenMP parallelization: k-point & orbital indices
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin) &
 !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,system,stencil)
@@ -287,6 +292,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
       end if
 
@@ -304,6 +310,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 !$acc parallel present(system,mg,V_local,stencil,tpsi,htpsi)
 !$acc loop collapse(4) private(kAc,kAc0,k_lap0) gang
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp private(im,ik,io,ispin,kAc,k_lap0) &
 !$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
@@ -338,6 +345,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 !$acc end parallel
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       
     end if
@@ -458,20 +466,24 @@ contains
 
 ! phase 2. halo communication and computation without halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE2)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel default(none) &
 !$omp          private(io,ispin,igs,ige,ibx,iby,ibz) &
 !$omp          shared(is,ie,ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
 !$omp          shared(optimized_stencil_is_callable)
 
 ! halo communication by master thread (tid = 0)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp master
     call timer_begin(LOG_UHPSI_OVL_PHASE2_COMM)
     call update_overlap_complex8(srg, mg, tpsi%zwf, srg_communication)
     call timer_end  (LOG_UHPSI_OVL_PHASE2_COMM)
 !$omp end master
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
 ! A computation with multi-thread except master thread,
 ! but master thread can join this loop if the communication completed before computation done.
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(4) schedule(dynamic,1)
     do io=io_s,io_e
     do ispin=1,Nspin
@@ -499,6 +511,7 @@ contains
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call timer_end  (LOG_UHPSI_OVL_PHASE2)
 
 ! phase 3. unpack halo region
@@ -510,6 +523,7 @@ contains
     ie(:) = mg%ie(:)
 ! phase 4. computation with halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE4)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel default(none) &
 !$omp          firstprivate(is,ie) &
 !$omp          private(io,ispin,iplane,igs,ige,ibx,iby,ibz,ibs,ibe) &
@@ -552,6 +566,7 @@ contains
       end select
 
 #ifndef USE_OPENACC
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(4) schedule(dynamic,1)
 #endif
       do io=io_s,io_e
@@ -580,9 +595,11 @@ contains
       end do
 #ifndef USE_OPENACC
 !$omp end do nowait
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
   end subroutine zstencil_overlapped
 
@@ -621,21 +638,25 @@ contains
 
 ! phase 2. halo communication and computation without halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE2)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel default(none) &
 !$omp          private(ik,im,io,ispin,igs,ige,ibx,iby,ibz) &
 !$omp          shared(is,ie,im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,system,srg)
 
 ! halo communication by master thread (tid = 0)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp master
     call timer_begin(LOG_UHPSI_OVL_PHASE2_COMM)
     call update_overlap_complex8(srg, mg, tpsi%zwf, srg_communication)
     call timer_end  (LOG_UHPSI_OVL_PHASE2_COMM)
 !$omp end master
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
 ! A computation with multi-thread except master thread,
 ! but master thread can join this loop if the communication completed before computation done.
     do im=im_s,im_e
     do ik=ik_s,ik_e
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(4) schedule(dynamic,1)
     do io=io_s,io_e
     do ispin=1,Nspin
@@ -654,9 +675,11 @@ contains
     end do
     end do
 !$omp end do nowait
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     end do
     end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call timer_end  (LOG_UHPSI_OVL_PHASE2)
 
 ! phase 3. unpack halo region
@@ -668,6 +691,7 @@ contains
     ie(:) = mg%ie(:)
 ! phase 4. computation with halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE4)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel default(none) &
 !$omp          firstprivate(is,ie) &
 !$omp          private(im,ik,io,ispin,iplane,igs,ige,ibx,iby,ibz,ibs,ibe) &
@@ -711,6 +735,7 @@ contains
       do im=im_s,im_e
       do ik=ik_s,ik_e
 #ifndef USE_OPENACC
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(4) schedule(dynamic,1)
 #endif
       do io=io_s,io_e
@@ -731,11 +756,13 @@ contains
       end do
 #ifndef USE_OPENACC
 !$omp end do nowait
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       end do
       end do
     end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
   end subroutine zstencil_microac_overlapped
 
@@ -757,6 +784,7 @@ contains
     z2 = z0-dr   ! right boundary
 
     do im=im_s,im_e
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp          private(ik,io,ispin,ix,iy,iz,z,w)
     do ik=ik_s,ik_e
@@ -784,6 +812,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     end do
 
   end subroutine add_imaginary_potential_for_absorbing_boundary_z
@@ -807,6 +836,7 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
 #ifdef USE_OPENACC
 !$acc parallel loop collapse(2) private(ix,iy,iz)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(ix,iy,iz)
 #endif
     do iz=mg%is(3),mg%ie(3)
@@ -859,6 +889,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
 !$acc kernels
 !$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
 #endif
   do ik=ik_s,ik_e
@@ -877,6 +908,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
 !$acc end kernels
 #else
 !$omp end parallel do  
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
   deallocate(kAc)

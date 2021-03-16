@@ -45,6 +45,7 @@ CONTAINS
 
     if (rion_update) then
       Eion = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do default(none) &
 !$omp          reduction(+:Eion) &
 !$omp          private(ia,ib,r) &
@@ -58,12 +59,14 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       energy%E_ion_ion = Eion
     else
       if(yn_jm=='y') energy%E_ion_ion = 0d0
     end if
 
     Etot = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:Etot) &
 !$omp          private(ispin,ik,io) &
@@ -76,8 +79,10 @@ CONTAINS
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     sum1 = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:sum1) &
 !$omp          private(ispin,ix,iy,iz) &
@@ -93,6 +98,7 @@ CONTAINS
       end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call timer_end(LOG_TE_ISOLATED_CALC)
 
     call timer_begin(LOG_TE_ISOLATED_COMM_COLL)
@@ -150,6 +156,7 @@ CONTAINS
 !$acc kernels
 !$acc loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
 #endif
          do iia=1,info%nion_mg
@@ -183,6 +190,7 @@ CONTAINS
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 
@@ -195,6 +203,7 @@ CONTAINS
 !$acc kernels
 !$acc loop collapse(2) reduction(+:E_tmp_l) private(ix,iy,iz,rho_i)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_tmp_l) &
 !$omp          private(ix,iy,iz,rho_i) &
@@ -212,6 +221,7 @@ CONTAINS
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     end if
 
@@ -247,6 +257,7 @@ CONTAINS
     E_wrk(1) = E_wrk_local_1
     E_wrk(2) = E_wrk_local_2
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
@@ -275,6 +286,7 @@ CONTAINS
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     call timer_end(LOG_TE_PERIODIC_CALC)
 
@@ -294,6 +306,7 @@ CONTAINS
 !$acc kernels
 !$acc loop private(ia) reduction(+:zps1,zps2)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do default(none) private(ia) shared(system,pp,Kion) reduction(+:zps1,zps2)
 #endif
       do ia=1,system%nion
@@ -304,6 +317,7 @@ CONTAINS
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
       E_sum(5) = E_sum(5) - Pi*zps1**2/(2*aEwald*sysvol) - sqrt(aEwald/Pi)*zps2
@@ -380,6 +394,7 @@ CONTAINS
     if(allocated(tpsi%rwf)) then
       do ispin=1,Nspin
         call timer_begin(LOG_EIGEN_ENERGY_CALC)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
@@ -390,6 +405,7 @@ CONTAINS
         end do
         end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         call timer_end(LOG_EIGEN_ENERGY_CALC)
 
         call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
@@ -406,6 +422,7 @@ CONTAINS
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
@@ -420,10 +437,12 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       E_local(1) = E_tmp
 
     ! nonlocal part (E_ion_nloc)
       E_tmp = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
@@ -446,6 +465,7 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       E_local(2) = E_tmp
       call timer_end(LOG_EIGEN_ENERGY_CALC)
       
@@ -456,6 +476,7 @@ CONTAINS
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(2) private(ik,io) copy(wrk1)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
@@ -470,6 +491,7 @@ CONTAINS
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
         call timer_end(LOG_EIGEN_ENERGY_CALC)
 
@@ -490,6 +512,7 @@ CONTAINS
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
@@ -508,6 +531,7 @@ CONTAINS
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       E_local(1) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
 
@@ -532,6 +556,7 @@ CONTAINS
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(3) reduction(+:E_tmp) private(ispin,ik,io)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
@@ -558,6 +583,7 @@ CONTAINS
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
       end if
@@ -627,6 +653,7 @@ CONTAINS
 
     !(check maximum number of pairs and allocate)
     npair_bk_max = 0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
 !$omp             reduction(max:npair_bk_max)
     do iia=1,info%nion_mg
@@ -661,6 +688,7 @@ CONTAINS
         npair_bk_max = max(npair_bk_max,npair_bk_loc)
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
       ewald%nmax_pair_bk = npair_bk_max
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
@@ -673,6 +701,7 @@ CONTAINS
 820      format(a,i6)
       endif
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
     do iia=1,info%nion_mg
    !do ia=1,system%nion
@@ -710,6 +739,7 @@ CONTAINS
         ewald%npair_bk(iia) = ipair
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
       return
       !xxxxxxxxxxxxxx

@@ -52,6 +52,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
      if(flag_mix_zero) amix=0d0
   endif
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i)
   do i=1,nl
     vecr_out(i,iter_mod)=vecr(i)
@@ -59,11 +60,13 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
 
   if (iter <= iter_mb+1) then
     allocate(vecf(1:nl,iter:iter))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i)
     do i=1,nl
       vecf(i,iter) = vecr_out(i,iter_mod) - vecr_in(i,iter_mod)
     end do
 !$omp parallel do private(i)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     do i=1,nl
       vecr_in(i,iter_mod+1) = vecr_in(i,iter_mod) + amix*vecf(i,iter)
     end do
@@ -85,6 +88,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
 
     omega_mb(:) = 1.d0 !???
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j) collapse(2)
     do i=iter_s,iter_mod
     do j=1,nl
@@ -92,6 +96,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i) collapse(2)
     do i=iter_s,iter_e
     do j=1,nl
@@ -101,6 +106,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end do
 
     if(present(icomm)) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,ss)
       do i=iter_s,iter_e
         ss = 0d0
@@ -111,6 +117,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,ss) collapse(2)
       do i=iter_s,iter_e
       do j=1,nl
@@ -128,6 +135,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end if
 
     if(present(icomm)) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(i,j,k,ss)
       do i=1,iter_e-iter_s+1
       do j=1,iter_e-iter_s+1
@@ -140,6 +148,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
       call comm_summation(aa_tmp1,aa,(iter_e-iter_s+1)**2,icomm)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(i,j)
       do i=1,iter_e-iter_s+1
       do j=1,iter_e-iter_s+1
@@ -162,6 +171,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
 
     call matrix_inverse(aa)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j) collapse(2)
     do i=iter_s,iter_e
     do j=iter_s,iter_e
@@ -170,6 +180,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end do
 
     if(present(icomm)) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,ss)
       do i=iter_s,iter_e
         ss = 0d0
@@ -181,6 +192,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
 
       vecr_tmp(1:nl)=0.d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(k,i,j,ss)
       do k=1,nl
         ss = 0d0
@@ -201,6 +213,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
     end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i)
     do i=1,nl
       vecr_in(i,iter_mod+1)=vecr_in(i,iter_mod)+amix*vecf(i,iter_mod)-vecr_tmp(i)
@@ -208,6 +221,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
 
     if(present(icomm)) then
       nnegative_tmp=0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i) reduction(+:nnegative_tmp)
       do i=1,nl
         if(vecr_in(i,iter_mod+1) < 0.d0) then
@@ -224,6 +238,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
     end if
     if(nnegative > 0) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i)
       do i=1,nl
         vecr_in(i,iter_mod+1)=vecr_in(i,iter_mod)+amix*vecf(i,iter_mod)
@@ -236,6 +251,7 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end if
   end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i)
   do i=1,nl
     vecr(i)=vecr_in(i,iter_mod+1)

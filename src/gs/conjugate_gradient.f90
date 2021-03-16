@@ -70,6 +70,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
   do io=io_s,io_e
   do ispin=1,nspin
@@ -91,6 +92,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   Iteration : do iter=1,Ncg
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -110,6 +112,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     if(iter==1)then
       uk = 0d0
     else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin)
       do io=io_s,io_e
       do ispin=1,nspin
@@ -122,6 +125,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -138,6 +142,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -153,6 +158,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -174,6 +180,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -190,6 +197,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -209,6 +217,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -251,6 +260,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   io_e = info%io_e
 
   sum_obmat0 = 0.d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ispin,io1,io2,sum0,iz,iy,ix) collapse(2)
   do ispin=1,nspin
     do io1=io_s,io_e
@@ -275,6 +285,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   call timer_end(LOG_GSCG_ISOLATED_COMM_COLL)
 
   call timer_begin(LOG_GSCG_ISOLATED_CALC)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ispin,io1,io2,iz,iy,ix) collapse(2)
   do ispin=1,nspin
     do io1=io_s,io_e
@@ -386,6 +397,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     !$acc enter data copyin(cg)
   end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
   do ik=ik_s,ik_e
   do io=io_s,io_e
@@ -409,6 +421,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   Iteration : do iter=1,Ncg
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -430,6 +443,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     if(iter==1)then
       uk = 0d0
     else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin) collapse(2)
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -444,6 +458,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -462,6 +477,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -479,6 +495,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -502,6 +519,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin) collapse(2)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -520,6 +538,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -541,6 +560,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -588,6 +608,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   io_e = info%io_e
 
   sum_obmat0 = 0.d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,ispin,io1,io2,sum0,iz,iy,ix) collapse(3)
   do ik=ik_s,ik_e
   do ispin=1,nspin
@@ -614,6 +635,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   call timer_end(LOG_GSCG_PERIODIC_COMM_COLL)
 
   call timer_begin(LOG_GSCG_PERIODIC_CALC)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ik,ispin,io1,io2,iz,iy,ix) collapse(3)
   do ik=ik_s,ik_e
   do ispin=1,nspin

@@ -193,6 +193,7 @@ write(*,*) "sym_rho(1)"
     is2=is(2)-1
     is3=is(3)-1
     fac=1.0d0/nsym
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) private(i1,i2,i3,isym)  &
 !$omp             private(t1,t2,t3,r1,r2,r3,j1,j2,j3,d1,d2,d3) &
 !$omp             reduction(+:rho)
@@ -226,6 +227,7 @@ write(*,*) "sym_rho(1)"
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     deallocate( work )
   end subroutine sym_rho
 #endif

@@ -66,6 +66,7 @@ subroutine zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
   bz_step = 8
   by_step = 8
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(ix,iy,iz,v,w,t,bz,by,bz_e,by_e)
   do bz=is(3),ie(3),bz_step
   do by=is(2),ie(2),by_step
@@ -76,6 +77,7 @@ subroutine zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
   do iz=bz,bz_e
   do iy=by,by_e
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(ix,iy,iz,v,w,t)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
@@ -129,6 +131,7 @@ subroutine zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
 
 #if _OPENMP >= 201307
 #ifndef __ARM_FLANG
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp simd
 #endif
 #endif

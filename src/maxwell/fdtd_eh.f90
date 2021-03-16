@@ -1471,6 +1471,7 @@ contains
       
       !store old h
       if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
@@ -1484,6 +1485,7 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end if
       
       !update h
@@ -1560,6 +1562,7 @@ contains
       !observation
       if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
         !prepare e and h for save
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
@@ -1576,6 +1579,7 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         call eh_sendrecv(fs,fe,'s')
         
         !save data
@@ -1634,6 +1638,7 @@ contains
       implicit none
       
       !initialize
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1646,10 +1651,12 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       
       !update ld polarization vector
       do ii=1,fe%num_ld
       do ij=1,pole_num_ld(fe%media_ld(ii))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1666,12 +1673,14 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
       end do
       
       !update ld polarization  current
       do ii=1,fe%num_ld
       do ij=1,pole_num_ld(fe%media_ld(ii))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1697,6 +1706,7 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
       end do
       
@@ -1716,6 +1726,7 @@ contains
       
       if(yn_periodic=='n') then
         !initialize polarization vector
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1727,9 +1738,11 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         
         !add all polarization vector
         if(fe%num_ld>0) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
           do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1743,11 +1756,13 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
         
         !calculate dipolemoment
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1761,11 +1776,13 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         sum_lr(1)=sum_lr_x; sum_lr(2)=sum_lr_y; sum_lr(3)=sum_lr_z;
         call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
         fe%dip_lr(fe%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
       elseif(yn_periodic=='y') then
         !initialize current density
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1777,9 +1794,11 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         
         !add all current density
         if(fe%num_ld>0) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
           do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1793,11 +1812,13 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
         
         !calculate average current density
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1811,6 +1832,7 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         sum_lr(1)=sum_lr_x; sum_lr(2)=sum_lr_y; sum_lr(3)=sum_lr_z;
         call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
         fe%curr_lr(fe%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
@@ -1819,6 +1841,7 @@ contains
         !calculate average electric field
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -1832,6 +1855,7 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         sum_lr(1)=sum_lr_x; sum_lr(2)=sum_lr_y; sum_lr(3)=sum_lr_z;
         call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
         fe%e_lr(fe%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
@@ -1929,6 +1953,7 @@ contains
       elseif(typ=='xy-plane') then !z propagation !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if(fe%inc_pl_pe(iord,1)==1) then
           iz=fe%inc_po_id(iord,3)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy)
           do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
@@ -1940,6 +1965,7 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
           do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
             fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)
@@ -1947,10 +1973,12 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       elseif(typ=='yz-plane') then !x propagation !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if(fe%inc_pl_pe(iord,2)==1) then
           ix=fe%inc_po_id(iord,1)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(iy,iz)
           do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
@@ -1962,6 +1990,7 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(iy,iz)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
           do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
             fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)
@@ -1969,10 +1998,12 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       elseif(typ=='xz-plane') then !y propagation !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if(fe%inc_pl_pe(iord,3)==1) then
           iy=fe%inc_po_id(iord,2)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iz)
           do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
@@ -1984,6 +2015,7 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iz)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
           do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
             fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)
@@ -1991,6 +2023,7 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       end if
       
@@ -2012,6 +2045,7 @@ contains
                                 fs%mg%is_array(3):fs%mg%ie_array(3))
       
       !ex
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
@@ -2025,6 +2059,7 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy,iz)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       do iz=fe%iex_z_is(3),fe%iex_z_ie(3)
       do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
       do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
@@ -2034,8 +2069,10 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       
       !ey
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fe%iey_z_is(3),fe%iey_z_ie(3)
@@ -2049,6 +2086,7 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy,iz)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
       do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
       do ix=fe%iey_x_is(1),fe%iey_x_ie(1)
@@ -2058,8 +2096,10 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       
       !ez
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
@@ -2073,6 +2113,7 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy,iz)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
       do iy=fe%iez_y_is(2),fe%iez_y_ie(2)
       do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
@@ -2082,6 +2123,7 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       
       return
     end subroutine eh_add_curr
@@ -2495,6 +2537,7 @@ contains
       f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
       
       !spatially adjust e for save
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -2508,10 +2551,12 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       fe%ex_s(:,:,:)=f1(:,:,:); fe%ey_s(:,:,:)=f2(:,:,:); fe%ez_s(:,:,:)=f3(:,:,:);
       f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
       
       !spatially adjust h for save
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -2525,11 +2570,13 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       fe%hx_s(:,:,:)=f1(:,:,:); fe%hy_s(:,:,:)=f2(:,:,:); fe%hz_s(:,:,:)=f3(:,:,:);
       f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_s)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -2543,6 +2590,7 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       fe%hx_s(:,:,:)=f1(:,:,:); fe%hy_s(:,:,:)=f2(:,:,:); fe%hz_s(:,:,:)=f3(:,:,:);
       
       !deallocate temporary variable
@@ -2578,6 +2626,7 @@ contains
     
     if(var=='e') then
       if(dir=='x') then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=ista(3),iend(3)
@@ -2591,7 +2640,9 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       elseif(dir=='y') then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=ista(3),iend(3)
@@ -2605,7 +2656,9 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       elseif(dir=='z') then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=ista(3),iend(3)
@@ -2619,9 +2672,11 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end if
     elseif(var=='h') then
       if(dir=='x') then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=ista(3),iend(3)
@@ -2635,7 +2690,9 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       elseif(dir=='y') then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=ista(3),iend(3)
@@ -2649,7 +2706,9 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       elseif(dir=='z') then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=ista(3),iend(3)
@@ -2663,6 +2722,7 @@ contains
         end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end if
     end if
     
@@ -2706,6 +2766,7 @@ contains
       !prepare save data
       if(ipl(ii)==1) then
         if(ii==1) then     !xy plane
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(i1,i2)
           do i2=ng_is(i2s),ng_ie(i2s)
@@ -2715,7 +2776,9 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         elseif(ii==2) then !yz plane
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(i1,i2)
           do i2=ng_is(i2s),ng_ie(i2s)
@@ -2725,7 +2788,9 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         elseif(ii==3) then !xz plane
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(i1,i2)
           do i2=ng_is(i2s),ng_ie(i2s)
@@ -2735,6 +2800,7 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       end if
       call comm_summation(save_pl,save_pl2,inum,nproc_group_global)
@@ -2815,6 +2881,7 @@ contains
       hx_sum1=0.0d0; hx_sum2=0.0d0; hy_sum1=0.0d0; hy_sum2=0.0d0; hz_sum1=0.0d0; hz_sum2=0.0d0;
       if(ipl(ii)==1) then
         if(ii==1) then     !xy plane
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
           do i2=ng_is(i2s),ng_ie(i2s)
@@ -2825,7 +2892,9 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         elseif(ii==2) then !yz plane
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
           do i2=ng_is(i2s),ng_ie(i2s)
@@ -2836,7 +2905,9 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         elseif(ii==3) then !xz plane
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
           do i2=ng_is(i2s),ng_ie(i2s)
@@ -2847,6 +2918,7 @@ contains
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       end if
       call comm_summation(ex_sum1,ex_sum2,nproc_group_global)
@@ -2900,6 +2972,7 @@ contains
     !Fourier transformation
     do ie=1,ne
       hw=dble(ie)*de; zf=(0.0d0,0.0d0);
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(it) reduction( + : zf )
       do it=1,nt
@@ -2907,6 +2980,7 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       zf=zf*dt; fr(ie)=real(zf,8); fi(ie)=aimag(zf)
     end do
     
@@ -2922,6 +2996,7 @@ contains
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh), intent(inout)   :: fe
     integer :: ix,iy,iz
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz)
     do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
@@ -2938,6 +3013,7 @@ contains
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call eh_sendrecv(fs,fe,'s')
     call update_overlap_real8( fs%srg_ng, fs%mg, fe%ex_s )
     call update_overlap_real8( fs%srg_ng, fs%mg, fe%ey_s )
@@ -2993,6 +3069,7 @@ contains
     ix1=fs%mg%ie_array(1)
     iy1=fs%mg%ie_array(2)
     iz1=fs%mg%ie_array(3)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz,jx,jy,jz)
     do iz = iz0, iz1
@@ -3009,6 +3086,7 @@ contains
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine calc_poynting_vector
 
   !===========================================================================================
@@ -3030,6 +3108,7 @@ contains
     jx0=fs%mg%is_array(1)-1
     jy0=fs%mg%is_array(2)-1
     jz0=fs%mg%is_array(3)-1
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(jx,jy,jz)
     do iz=fs%mg%is(3),fs%mg%ie(3)
@@ -3047,6 +3126,7 @@ contains
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine calc_poynting_vector_div
 
 end module fdtd_eh

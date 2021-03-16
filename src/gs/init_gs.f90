@@ -110,6 +110,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
           end do
           end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       end do !ig
       end do
@@ -162,6 +163,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
           end do
           end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         end if
       end do !ig
       end do

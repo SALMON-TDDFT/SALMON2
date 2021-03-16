@@ -513,6 +513,7 @@ contains
     type(s_scalar)           :: field
     integer :: ix,iy,iz
     allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=rg%is(3),rg%ie(3)
     do iy=rg%is(2),rg%ie(2)
@@ -532,6 +533,7 @@ contains
     allocate(field%f(rg%is(1)-nshadow:rg%ie(1)+nshadow &
                     ,rg%is(2)-nshadow:rg%ie(2)+nshadow &
                     ,rg%is(3)-nshadow:rg%ie(3)+nshadow))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=rg%is(3)-nshadow,rg%ie(3)+nshadow
     do iy=rg%is(2)-nshadow,rg%ie(2)+nshadow
@@ -548,6 +550,7 @@ contains
     type(s_vector)           :: field
     integer :: ix,iy,iz
     allocate(field%v(3,rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=rg%is(3),rg%ie(3)
     do iy=rg%is(2),rg%ie(2)
@@ -564,6 +567,7 @@ contains
     type(s_vector)           :: field
     integer :: ix,iy,iz
     allocate(field%v(3,rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3)))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=rg%is_array(3),rg%ie_array(3)
     do iy=rg%is_array(2),rg%ie_array(2)
@@ -585,6 +589,7 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
@@ -622,6 +627,7 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e

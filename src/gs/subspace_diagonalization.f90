@@ -164,9 +164,11 @@ subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     call eigen_dsyev(mat2(:,:,ispin),eval,evec(:,:,ispin))
   end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
   shpsi%rwf = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   if(info%if_divide_orbit) then
     do ispin=1,nspin
@@ -866,9 +868,11 @@ subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
 
   call timer_begin(LOG_SSDG_PERIODIC_CALC)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
   shpsi%zwf = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   if(info%if_divide_orbit) then
     do ik=ik_s,ik_e

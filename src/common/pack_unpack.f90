@@ -231,6 +231,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ix,iy,iz) &
 !$omp          firstprivate(nx,ny,nz) &
@@ -243,6 +244,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_3d_complex8(src,dst)
@@ -256,6 +258,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ix,iy,iz) &
 !$omp          firstprivate(nx,ny,nz) &
@@ -268,6 +271,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_4d_real8(src,dst)
@@ -282,6 +286,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
 !$omp          firstprivate(nx,ny,nz,nw) &
@@ -296,6 +301,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_4d_complex8(src,dst)
@@ -310,6 +316,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
 !$omp          firstprivate(nx,ny,nz,nw) &
@@ -324,6 +331,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_5d_real8(src,dst)
@@ -339,6 +347,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(ix,iy,iz,iw,il) &
 !$omp          firstprivate(nx,ny,nz,nw,nl) &
@@ -355,6 +364,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_5d_complex8(src,dst)
@@ -370,6 +380,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(ix,iy,iz,iw,il) &
 !$omp          firstprivate(nx,ny,nz,nw,nl) &
@@ -386,6 +397,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_6d_real8(src,dst)
@@ -402,6 +414,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(5) default(none) &
 !$omp          private(ix,iy,iz,iw,il,im) &
 !$omp          firstprivate(nx,ny,nz,nw,nl,nm) &
@@ -420,6 +433,7 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   subroutine copy_data_6d_complex8(src,dst)
@@ -436,6 +450,7 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(5) default(none) &
 !$omp          private(ix,iy,iz,iw,il,im) &
 !$omp          firstprivate(nx,ny,nz,nw,nl,nm) &
@@ -454,5 +469,6 @@ contains
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 end module

@@ -72,6 +72,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   
 !------------------------- C-G minimization
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
@@ -81,6 +82,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   end do
   end do
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
@@ -93,6 +95,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, pk)
   call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
@@ -102,6 +105,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   end do
   end do
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
@@ -113,8 +117,10 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   end do
   
   reduce_work=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(iz,iy,ix,tid)
   tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
@@ -125,6 +131,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   sum1=sum(reduce_work)
   
   if(info%isize_r==1)then
@@ -139,8 +146,10 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
     call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
     reduce_work=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(iz,iy,ix,tid)
     tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -151,6 +160,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     totbox=sum(reduce_work)
   
     if(info%isize_r==1)then
@@ -161,6 +171,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   
     ak=sum1/tottmp/system%hvol
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) firstprivate(ak) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -172,8 +183,10 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
     end do
   
     reduce_work=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(iz,iy,ix,tid)
     tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -184,6 +197,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     totbox=sum(reduce_work)
   
     if(info%isize_r==1)then
@@ -198,6 +212,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   
     ck=sum2/sum1 ; sum1=sum2
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) firstprivate(ck) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -233,6 +248,7 @@ subroutine laplacian_poisson(mg,pk,rlap_wk,lap0,lapt)
   real(8),intent(in)  :: lap0,lapt(4,3)
   integer :: ix,iy,iz
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
@@ -379,8 +395,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   do m=-ll,ll
     lm=ll*ll+ll+1+m
     reduce_work=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
     tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -395,6 +413,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     rholm2(lm,1)=sum(reduce_work)
   end do
   end do
@@ -426,8 +445,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     do m=-ll,ll
       lm=ll*ll+ll+1+m
       reduce_work=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
       tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do
       do jj=1,ig_num(icen)
         ix=ig(1,jj,icen)
@@ -441,6 +462,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       rholm2(lm,poisson%ipole_tbl(icen))=sum(reduce_work)
     end do
     end do
@@ -470,8 +492,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   
   do ii=1,poisson%npole_partial
     reduce_work4=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(jj,ixbox,iybox,izbox,xx,yy,zz,tid)
     tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do
     do jj=1,ig_num(ii)
       ixbox=ig(1,jj,ii)
@@ -488,6 +512,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     center_trho_nume_deno2(1,poisson%ipole_tbl(ii))=sum(reduce_work4(1,:))
     center_trho_nume_deno2(2,poisson%ipole_tbl(ii))=sum(reduce_work4(2,:))
     center_trho_nume_deno2(3,poisson%ipole_tbl(ii))=sum(reduce_work4(3,:))
@@ -571,8 +596,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
         do m=-ll,ll
           lm=ll*ll+ll+1+m
           reduce_work=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
           tid=get_thread_id()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do
           do jj=1,ig_num(ii)
             ixbox=ig(1,jj,ii)
@@ -586,6 +613,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
           end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
           rholm2(lm,poisson%ipole_tbl(ii))=sum(reduce_work)
         end do
         end do

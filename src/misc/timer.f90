@@ -460,9 +460,11 @@ contains
     if (ticked_t(id,tid)) then
       print '(A,I3,A,I3,A,"(",A," line.",I4,")")', 'thread ',tid,': timer ',id,' now ticked... please check it.',sn,ln
 #ifdef __INTEL_COMPILER
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp critical
       call tracebackqq
 !$omp end critical
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       stop 'error'
     end if
@@ -488,9 +490,11 @@ contains
     if (.not.ticked_t(id,tid)) then
       print '(A,I3,A,I3,A,"(",A," line.",I4,")")', 'thread ',tid,': timer ',id,' now stopped... please check it.',sn,ln
 #ifdef __INTEL_COMPILER
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp critical
       call tracebackqq
 !$omp end critical
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       stop 'error'
     end if

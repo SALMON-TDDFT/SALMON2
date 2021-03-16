@@ -167,9 +167,11 @@ contains
       call eigen_dsyev(mat2(:,:,ispin),eval(:,ispin),evec(:,:,ispin))
     end do
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp workshare
     shpsi%rwf = 0d0
 !$omp end workshare
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     if (info%if_divide_orbit) then
       do ispin=1,nspin

@@ -214,6 +214,7 @@ contains
        end do
        uVpsi  = uVpsi * ppg%rinv_uvu(ilma)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ib1,ib2,u_rVnl_u,u_Vnlr_u) collapse(2)
        do ib1=1,NB
@@ -233,6 +234,7 @@ contains
        enddo
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     enddo  !ilma
     enddo  !ik
     call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_rko)

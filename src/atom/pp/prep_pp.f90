@@ -193,6 +193,7 @@ contains
 
     mps_tmp = 0
     ppg%jxyz_changed(:) = .false.
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do default(none) &
 !$omp private(ia,ik,j,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
 !$omp shared(ia_s,ia_e,kion,nc,flag_cuboid,system,al,hgs,rps_max,mg,rshift,matrix_a,pp,ppg) &
@@ -253,6 +254,7 @@ contains
       mps_tmp = max(mps_tmp,j)
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     ppg%nps=mps_tmp
     if (allocated(ppg%jxyz_old)) then
@@ -283,6 +285,7 @@ contains
     ppg%rxyz = 0d0
     ppg%mps  = 0
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do default(none) &
 !$omp private(ia,ik,j,i,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
 !$omp shared(ia_s,ia_e,natom,kion,nc,al,system,hgs,rshift,matrix_a,pp,ppg,mg,flag_cuboid,rps_max)
@@ -350,6 +353,7 @@ contains
       end if
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     call comm_summation(ppg%jxyz,info%icomm_ko)
     call comm_summation(ppg%rxyz,info%icomm_ko)
@@ -876,6 +880,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
 
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ia,ilma)
   do ia=1,natom
     ppg%ireferred_atom(ia) = (ppg%mps(ia) > 0)
@@ -897,10 +902,12 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end do
   end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
   iupdated = .false.
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ia,i,t,u)
   do ia=1,natom
     do i=1,isize_r
@@ -913,6 +920,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end do
   end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   ppg%ireferred_atom_comm_r = ireferred_atom_comm_r
 
@@ -940,12 +948,14 @@ subroutine init_uvpsi_table(ppg)
   integer :: ilma,ia,ilocal,ilocal_nlma
 
   ilocal_nlma = 0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ilma,ia) reduction(+:ilocal_nlma)
   do ilma=1,ppg%nlma
     ia = ppg%ia_tbl(ilma)
     if (ppg%ireferred_atom(ia)) ilocal_nlma = ilocal_nlma + 1
   end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   ppg%ilocal_nlma = ilocal_nlma
 
   allocate(ppg%ilocal_nlma2ilma(ppg%ilocal_nlma))

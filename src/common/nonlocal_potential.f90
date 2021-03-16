@@ -57,6 +57,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
     allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
     do im=im_s,im_e
@@ -82,6 +83,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     call timer_end(LOG_UHPSI_PSEUDO)
 
@@ -91,6 +93,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
@@ -117,11 +120,13 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     deallocate(uVpsibox,uVpsibox2)
 
   else
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
@@ -154,6 +159,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   end if
 
@@ -204,6 +210,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
@@ -230,6 +237,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     deallocate(uVpsibox,uVpsibox2)
 
@@ -264,6 +272,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 !$acc kernels present(ppg,tpsi,htpsi)
 !$acc loop private(ilma,ia,uvpsi,j,ix,iy,iz,wrk) collapse(4) auto
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
 #endif
@@ -312,6 +321,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
 
 #ifdef USE_OPENACC
@@ -374,6 +384,7 @@ subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
 
   allocate(uVpsibox(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
   do im=im_s,im_e
@@ -400,6 +411,7 @@ subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
   end do
   end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   call timer_end(LOG_UHPSI_PSEUDO)
 
@@ -451,6 +463,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   uVpsibox  = 0d0
 #endif
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
   do im=im_s,im_e
@@ -477,6 +490,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   end do
   end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
   call timer_end(LOG_UHPSI_PSEUDO)
 

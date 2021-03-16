@@ -62,10 +62,12 @@ contains
       do ispin=1,nspin
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
         wrk(:,:,:,tid) = 0.d0
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -80,6 +82,7 @@ contains
         end do
         end do
 !$omp end do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
         ix = size(wrk,4)/2
         do while(ix > 0)
@@ -87,10 +90,12 @@ contains
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
           end if
           ix = ix/2
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp barrier
         end do
 
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         call timer_end(LOG_DENSITY_CALC)
 
         call timer_begin(LOG_DENSITY_COMM_COLL)
@@ -128,10 +133,12 @@ contains
         end do
 !$acc end kernels
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
         wrk(:,:,:,tid) = 0.d0
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -146,6 +153,7 @@ contains
         end do
         end do
 !$omp end do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
         ix = size(wrk,4)/2
         do while(ix > 0)
@@ -153,10 +161,12 @@ contains
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
           end if
           ix = ix/2
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp barrier
         end do
 
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
         call timer_end(LOG_DENSITY_CALC)
 
@@ -277,6 +287,7 @@ contains
       wrk4(2) = jy
       wrk4(3) = jz
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
@@ -316,6 +327,7 @@ contains
       end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
       call timer_end(LOG_CURRENT_CALC)
 
@@ -355,6 +367,7 @@ contains
 #ifdef USE_OPENACC
 !$acc loop worker collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #endif
     do iz=is(3),ie(3)
@@ -396,6 +409,7 @@ contains
     end do
 #ifndef USE_OPENACC
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     j1 = kAc(:) * rtmp
     j2(1) = aimag(xtmp * 2d0)
@@ -424,6 +438,7 @@ contains
 	jw_3 = 0d0
 !$acc loop worker private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw_1, jw_2, jw_3)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
 #endif
     do ilma=1,ppg%Nlma
@@ -460,6 +475,7 @@ contains
 	jw(3) = jw_3
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     jw = jw * 2d0
     return
@@ -478,6 +494,7 @@ contains
     real(8)    :: x,y,z
     complex(8) :: uVpsi,uVpsi_r(3)
     jw = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ilocal,ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
     do ilocal=1,ppg%ilocal_nlma
       ilma=ppg%ilocal_nlma2ilma(ilocal)
@@ -498,6 +515,7 @@ contains
       jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     jw = jw * 2d0
     return
   end subroutine calc_current_nonlocal_rdivided
@@ -541,6 +559,7 @@ contains
       call micro_current(mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz, &
       & stencil%coef_nab,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
@@ -583,6 +602,7 @@ contains
       !
       integer :: ix,iy,iz
       complex(8) :: xtmp,ytmp,ztmp,px,py,pz
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp,px,py,pz)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
@@ -620,6 +640,7 @@ contains
       end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       return
     end subroutine micro_current
 
@@ -631,6 +652,7 @@ contains
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
       integer :: ik,io,ix,iy,iz
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
@@ -640,6 +662,7 @@ contains
       end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       return
     end subroutine kvec_part
 
@@ -652,6 +675,7 @@ contains
       !
       integer :: ix,iy,iz
       complex(8) :: xtmp,ytmp,ztmp
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
@@ -686,6 +710,7 @@ contains
       end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       return
     end subroutine stencil_current
 

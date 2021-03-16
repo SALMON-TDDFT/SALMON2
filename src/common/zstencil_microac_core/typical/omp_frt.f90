@@ -42,6 +42,7 @@ subroutine zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
   endy = ie(2)
   endx = ie(1)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(none) schedule(runtime) &
 !$omp             private(iz,iy,ix,t1,t2,t3,t4,t5,t6,t7,t8,v,w,psi0,kAc1,kAc2,kAc3,div) &
 !$omp             firstprivate(lap0,lapt,nabt,k) &

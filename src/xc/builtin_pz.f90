@@ -35,6 +35,7 @@ contains
 #ifdef USE_OPENACC
 !$acc kernels loop private(i,trho,e_xc,de_xc_drho)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,trho,e_xc,de_xc_drho)
 #endif
     do i=1,NL

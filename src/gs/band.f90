@@ -73,6 +73,7 @@ module band
         call retrieve_entire_zwf()
 
         ! Calculate production <k,io|k+dk,jo> for all k,io,jo:
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(4) default(none) &
 !$omp private(ik,jdk1,jdk2,jdk3,ik1,ik2,ik3,jk1,jk2,jk3) &
 !$omp shared(par,ndk,ik3d_tbl,prod_dk_tmp)
@@ -98,6 +99,7 @@ module band
             end do
         end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
         ! Summarize results of prod_dk:
         call comm_summation( &

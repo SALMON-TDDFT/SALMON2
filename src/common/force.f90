@@ -193,6 +193,7 @@ contains
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc = 0d0
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel default(none) &
 !$omp   firstprivate(kAc) &
 !$omp   private(ik,io,ispin,rtmp,rtmp2,ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w,dphipsi_lma,dphipsi,Nproj_pairs) &
@@ -210,6 +211,7 @@ contains
                       ,mg%is_array(3):mg%ie_array(3)))
     end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2) reduction(+:dden)
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -223,6 +225,7 @@ contains
        
        if(yn_periodic=='n') then
          rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix,w,rtmp2)
          do iz=mg%is(3),mg%ie(3)
          do iy=mg%is(2),mg%ie(2)
@@ -234,6 +237,7 @@ contains
          enddo
          enddo
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
        end if
 
        ! nonlocal part
@@ -262,6 +266,7 @@ contains
            F_tmp(3,ia) = F_tmp(3,ia) - rtmp*dble( conjg(duVpsi(3)) * ztmp )
          end do
        else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
        do ilocal=1,ppg%ilocal_nlma
           ilma=ppg%ilocal_nlma2ilma(ilocal)
@@ -285,6 +290,7 @@ contains
           F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
        end if
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
@@ -335,14 +341,17 @@ contains
     end do !io
     end do !ik
 !$omp end do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
     if (allocated(gtpsi)) deallocate(gtpsi)
 
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     if(yn_periodic=='n') then
     ! local part (based on density gradient)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iz,iy,ix,ia)
       do ia=1,nion
         do iz=mg%is(3),mg%ie(3)
@@ -354,6 +363,7 @@ contains
         end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       deallocate(dden)
     end if
 
@@ -365,11 +375,13 @@ contains
 
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ia)
     do ia=1,nion
       system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !
     if (use_symmetry) then
       call sym_vector_force_xyz( system%Force, system%Rion )
@@ -428,6 +440,7 @@ contains
       if(ewald%yn_bookkeep=='y') then
 
          F_tmp_l = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
          do iia= 1,info%nion_mg
         !do ia= system%nion_s, system%nion_e
@@ -463,6 +476,7 @@ contains
             end do  !ipair
          end do     !ia
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
          call comm_summation(F_tmp_l,F_tmp,3*nion,comm)
 
       else

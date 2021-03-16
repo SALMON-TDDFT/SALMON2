@@ -302,6 +302,7 @@ contains
       real(8)                :: sum_tmp
       
       sum_tmp = 0.0d0; sum_c = 0.0d0;
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_tmp )
       do iz=mg%is(3),mg%ie(3)
@@ -313,6 +314,7 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       call comm_summation(sum_tmp,sum_c,info%icomm_r)
       sum_c = sum_c * system%hvol
       err   = abs( (sum_c - dble(num_e)) / dble(num_e) )

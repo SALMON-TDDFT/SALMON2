@@ -397,6 +397,7 @@ module salmon_pp
         abs(sys%primitive_a(2,3)).ge.1d-10 )  flag_cuboid=.false.
 
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do &
 !$omp   private(a,ik,rc,i,i1,i2,i3,j1,j2,j3,u,v,w,r1,r2,r3,r,ir,intr,ratio1,ratio2,Rion_repr) &
 !$omp   reduction(+:rho_nlcc_tmp,tau_nlcc_tmp)
@@ -462,6 +463,7 @@ module salmon_pp
       end do
     end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   
     ppn%rho_nlcc = rho_nlcc_tmp
     ppn%tau_nlcc = tau_nlcc_tmp

@@ -45,6 +45,7 @@ contains
               v_div(info%nrow_local,info%ncol_local), &
               v_tmp(n,n), iwork(len_iwork), work(info%len_work) )
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
     do i=1,n
     do j=1,n
@@ -59,6 +60,7 @@ contains
                   work, info%len_work, iwork, len_iwork, ierr )
 
     v_tmp=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
     do i=1,n
     do j=1,n
@@ -105,6 +107,7 @@ contains
 
     do m = 0, info%nporbital - 1
       if(m == info%id_o) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j) collapse(2)
         do i = 1, system%no
         do j = info%io_s, info%io_e
@@ -114,6 +117,7 @@ contains
       end if
       call comm_bcast( tmp_mat(:,1:info%numo_all(m)), info%icomm_o, info%irank_io(info%io_s_all(m)) )
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(k)
       do k = 1, info%ndiv(m)
         h_div(info%iloc_tbl(k,m), info%jloc_tbl(k,m)) = tmp_mat(info%i_tbl(k,m), info%j_tbl(k,m)-info%io_s_all(m)+1)
@@ -126,12 +130,14 @@ contains
 
     do m = 0, info%nporbital - 1
       tmp_mat = 0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(k)
       do k = 1, info%ndiv(m)
         tmp_mat(info%i_tbl(k,m), info%j_tbl(k,m)-info%io_s_all(m)+1) = v_div(info%iloc_tbl(k,m), info%jloc_tbl(k,m))
       end do
       call comm_summation(tmp_mat, tmp_mat2, system%no*info%numo_all(m), info%icomm_o)
       if(m == info%id_o) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j) collapse(2)
         do i = 1, system%no
         do j = info%io_s, info%io_e
@@ -175,6 +181,7 @@ contains
               v_tmp(n,n), work(info%len_work), rwork(info%len_rwork), &
               iwork(len_iwork) )
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
     do i=1,n
     do j=1,n
@@ -189,6 +196,7 @@ contains
                   work, info%len_work, rwork, info%len_rwork, iwork, len_iwork, ierr )
 
     v_tmp=0d0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
     do i=1,n
     do j=1,n

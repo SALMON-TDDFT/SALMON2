@@ -86,6 +86,7 @@ contains
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(2) private(iz,iy,ix)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
       do iz=1,mg%num(3)
@@ -99,10 +100,13 @@ contains
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     else if(nspin==2)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(is,iz,iy,ix)
       do is=1,2
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2)
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
@@ -112,8 +116,10 @@ contains
       end do
       end do
 !$omp end do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     end if
 
     if(xc_func%use_gradient) then ! meta GGA
@@ -127,6 +133,7 @@ contains
                 j   (mg%num(1), mg%num(2), mg%num(3) ,3), &
                 tau (mg%num(1), mg%num(2), mg%num(3)) )
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -136,12 +143,14 @@ contains
       enddo
       enddo
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
       call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
       & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )
       
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
@@ -151,6 +160,7 @@ contains
       end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
       call calc_tau
       
@@ -172,6 +182,7 @@ contains
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(2) private(iz,iy,ix)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
       do iz=1,mg%num(3)
@@ -185,10 +196,13 @@ contains
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     else if(nspin==2)then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(is,iz,iy,ix)
       do is=1,2
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do collapse(2)
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
@@ -198,14 +212,17 @@ contains
       end do
       end do
 !$omp end do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
       end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
     end if
 
     tot_exc=0.d0
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
 #else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
 #endif
     do iz=1,mg%num(3)
@@ -219,6 +236,7 @@ contains
 !$acc end kernels
 #else
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 #endif
     tot_exc = tot_exc*system%hvol
 
@@ -271,6 +289,7 @@ contains
             
         occ = system%rocc(io,ik,ispin)*system%wtk(ik)
         k(1:3) = system%vec_k(1:3,ik)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -283,6 +302,7 @@ contains
         end do
         end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
         
       end do
       end do
@@ -291,6 +311,7 @@ contains
       call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
       call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
       
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
@@ -301,6 +322,7 @@ contains
       end do
       end do
 !$omp end parallel do
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 
       if(allocated(spsi%rwf)) deallocate(spsi%zwf)
   

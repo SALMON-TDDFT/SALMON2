@@ -235,6 +235,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   ! integral(A) @ z = 0 (bottom boundary)
   wrk = 0d0
   if (mg%is(3) == lg%is(3)) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) reduction(+:wrk)
     do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -248,6 +249,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   ! integral(A) @ z = az (top boundary)
   wrk3 = 0d0
   if (mg%ie(3) == lg%ie(3)) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) reduction(+:wrk3)
     do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -275,6 +277,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   e_poy2 = 0d0
   coef = Hgs(1)*Hgs(2)
   if(mg%is(3)==lg%is(3)) then ! integral(S) @ z = 0 (bottom boundary)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) reduction(+:e_poy1)
     do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -283,6 +286,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
     end do
   end if
   if(mg%ie(3)==lg%ie(3)) then ! integral(S) @ z = az (top boundary)
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do private(ix,iy,iz) reduction(+:e_poy2)
     do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)

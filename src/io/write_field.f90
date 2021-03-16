@@ -546,6 +546,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
   do io=1,system%no
   do ispin=1,system%nspin
   
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -557,6 +558,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
       if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
          info%io_s <= io .and. io <= info%io_e) then
         if(allocated(spsi%rwf)) then
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -566,6 +568,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
           end do
           end do
         else
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

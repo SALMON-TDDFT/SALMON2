@@ -103,14 +103,17 @@ contains
 
     tid = 0
     chunk_size(:) = 0
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel private(tid) shared(chunk_size)
 !$ tid = omp_get_thread_num()
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp do private(ikb)
     do ikb=1,NKB
       chunk_size(tid) = chunk_size(tid) + 1
     end do
 !$omp end do
 !$omp end parallel
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
   end subroutine
 
   function get_stencil_FLOP(chunk_size)

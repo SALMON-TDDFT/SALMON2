@@ -27,6 +27,7 @@ contains
       allocate(ppg%zekr_uV_so(ppg%nps,Nlma,ik_s:ik_e,2,1))
     end if
 
+write(*,'(a, a, a, i0)') "OMP DEBUG STRING" , __FILE__ , ": ",  __LINE__
 !$omp parallel do collapse(2) default(shared) private(ik,k,ilma,iatom,ispin,j,x,y,z,kr,conjg_ekr)
     do ik=ik_s,ik_e
       do ilma=1,Nlma
