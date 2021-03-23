@@ -329,7 +329,10 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-if(write_gs_restart_data.ne."checkpoint_only") then
+if(write_gs_restart_data=="no") then
+   if(comm_is_root(nproc_id_global)) &
+      write(*,'(a)')"  no restart data writing."
+else if(write_gs_restart_data.ne."checkpoint_only") then
    if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
    call comm_sync_all
