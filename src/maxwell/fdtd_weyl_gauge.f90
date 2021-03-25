@@ -335,9 +335,10 @@ contains
         ! impose boundary condition for x-lower side
         select case (fs%a_bc(1, 1))
         case('periodic')
-            call copy_data( &
-            & Ac_tmp(1:3, ie(1)-nd+1:ie(1), is(2):ie(2), is(3):ie(3)), &
-            & Ac_tmp(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)))
+            ! call copy_data( &
+            ! & Ac_tmp(1:3, ie(1)-nd+1:ie(1), is(2):ie(2), is(3):ie(3)), &
+            ! & Ac_tmp(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)))
+            Ac_tmp(:, is(1)-nd:is(1)-1, :, :) = Ac_tmp(:, ie(1)-nd+1:ie(1), :, :)        
         case('pec')
             call copy_data( &
             & fw%vec_Ac%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)), &
@@ -347,9 +348,10 @@ contains
         ! impose boundary condition for x-upper side
         select case (fs%a_bc(1, 2))
         case('periodic')
-            call copy_data( &
-            & Ac_tmp(1:3, is(1):is(1)+nd-1, is(2):ie(2), is(3):ie(3)), &
-            & Ac_tmp(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)))
+            ! call copy_data( &
+            ! & Ac_tmp(1:3, is(1):is(1)+nd-1, is(2):ie(2), is(3):ie(3)), &
+            ! & Ac_tmp(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)))
+            Ac_tmp(:, ie(1)+1:ie(1)+nd, :, :) = Ac_tmp(:, is(1):is(1)+nd-1, :, :)
         case('pec')
             call copy_data( &
             & fw%vec_Ac%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)), &
@@ -359,9 +361,10 @@ contains
         ! impose boundary condition for y-lower side
         select case (fs%a_bc(2, 1))
         case('periodic')
-            call copy_data( &
-            & Ac_tmp(1:3, is(1):ie(1), ie(2)-nd+1:ie(2), is(3):ie(3)), &
-            & Ac_tmp(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)))
+            ! call copy_data( &
+            ! & Ac_tmp(1:3, is(1):ie(1), ie(2)-nd+1:ie(2), is(3):ie(3)), &
+            ! & Ac_tmp(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)))
+            Ac_tmp(:, :, is(2)-nd:is(2)-1, :) = Ac_tmp(:, :, ie(2)-nd+1:ie(2), :)
         case('pec')
             call copy_data( &
             & fw%vec_Ac%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)), &
@@ -371,9 +374,10 @@ contains
         ! impose boundary condition for y-upper side
         select case (fs%a_bc(2, 2))
         case('periodic')
-            call copy_data( &
-            & Ac_tmp(1:3, is(1):ie(1), is(2):is(2)+nd-1, is(3):ie(3)), &
-            & Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)))
+            ! call copy_data( &
+            ! & Ac_tmp(1:3, is(1):ie(1), is(2):is(2)+nd-1, is(3):ie(3)), &
+            ! & Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)))
+            Ac_tmp(:, :, ie(2)+1:ie(2)+nd, :) = Ac_tmp(:, :, is(2):is(2)+nd-1, :)
         case('pec')
             call copy_data( &
             & fw%vec_Ac%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)), &
@@ -383,9 +387,10 @@ contains
         ! impose boundary condition for z-lower side
         select case (fs%a_bc(3, 1))
         case('periodic')
-            call copy_data( &
-            & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)-nd+1:ie(3)), &
-            & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1))
+            ! call copy_data( &
+            ! & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)-nd+1:ie(3)), &
+            ! & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1))
+            Ac_tmp(:, :, :, is(3)-nd:is(3)-1) = Ac_tmp(:, :, :, ie(3)-nd+1:ie(3))
         case('pec')
             call copy_data( &
             & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1), &
@@ -395,9 +400,10 @@ contains
         ! impose boundary condition for z-upper side
         select case (fs%a_bc(3, 2))
         case('periodic')
-            call copy_data( &
-            & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3):is(3)+nd-1), &
-            & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
+            ! call copy_data( &
+            ! & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3):is(3)+nd-1), &
+            ! & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
+            Ac_tmp(:, :, :, ie(3)+1:ie(3)+nd) = Ac_tmp(:, :, :, is(3):is(3)+nd-1)
         case('pec')
             call copy_data( &
             & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd), &
