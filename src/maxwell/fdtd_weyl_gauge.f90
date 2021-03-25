@@ -275,7 +275,7 @@ contains
     
         r_inv_h(:) = 1.00 / fs%hgs(:)
     
-        !$omp parallel do collapse(3) default(shared) private(i1,i2,i3,rot2_Ac)
+        !$omp parallel do collapse(2) default(shared) private(i1,i2,i3,rot2_Ac)
         do i3 = fs%mg%is(3), fs%mg%ie(3)
             do i2 = fs%mg%is(2), fs%mg%ie(2)
             do i1 = fs%mg%is(1), fs%mg%ie(1)
