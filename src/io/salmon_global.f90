@@ -330,7 +330,7 @@ module salmon_global
   character(256) :: shape_file_jm
   integer        :: num_jm
   real(8)        :: rs_bohr_jm(200)
-  integer        :: sphere_nelec_jm(200)
+  integer        :: sphere_nion_jm(200)
   real(8)        :: sphere_loc_jm(200,3)
 
 !! &atomic_coor

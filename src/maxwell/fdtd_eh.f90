@@ -1004,6 +1004,13 @@ contains
               fe%c1_ex_y(ix,iy,iz)=c1_e_mid; fe%c2_ex_y(ix,iy,iz)= c2_e_y_mid;
               fe%c1_ex_z(ix,iy,iz)=c1_e_mid; fe%c2_ex_z(ix,iy,iz)=-c2_e_z_mid;
               fe%c2_jx(ix,iy,iz)=-c2_j_mid;
+              if(fe%num_ld>0) then !LD update
+                do ij=1,fe%num_ld
+                  if(fe%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
+                    fe%idx_ld(ix,iy,iz,ij)=1;
+                  end if
+                end do
+              end if
             end if
             
             !ey and jy
@@ -1029,6 +1036,13 @@ contains
               fe%c1_ey_z(ix,iy,iz)=c1_e_mid; fe%c2_ey_z(ix,iy,iz)= c2_e_z_mid;
               fe%c1_ey_x(ix,iy,iz)=c1_e_mid; fe%c2_ey_x(ix,iy,iz)=-c2_e_x_mid;
               fe%c2_jy(ix,iy,iz)=-c2_j_mid;
+              if(fe%num_ld>0) then !LD update
+                do ij=1,fe%num_ld
+                  if(fe%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
+                    fe%idy_ld(ix,iy,iz,ij)=1;
+                  end if
+                end do
+              end if
             end if
             
             !ez and jz
@@ -1046,14 +1060,21 @@ contains
               c2_e_x_mid= (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                          /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                          /fs%hgs(1)
-              c2_e_y_mid= (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                         /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+              c2_e_y_mid= (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                         /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                          /fs%hgs(2)
               c2_j_mid  = (4.0d0*pi/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                          /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
               fe%c1_ez_x(ix,iy,iz)=c1_e_mid; fe%c2_ez_x(ix,iy,iz)= c2_e_x_mid;
               fe%c1_ez_y(ix,iy,iz)=c1_e_mid; fe%c2_ez_y(ix,iy,iz)=-c2_e_y_mid;
               fe%c2_jz(ix,iy,iz)=-c2_j_mid;
+              if(fe%num_ld>0) then !LD update
+                do ij=1,fe%num_ld
+                  if(fe%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
+                    fe%idz_ld(ix,iy,iz,ij)=1;
+                  end if
+                end do
+              end if
             end if
             
             !hx
