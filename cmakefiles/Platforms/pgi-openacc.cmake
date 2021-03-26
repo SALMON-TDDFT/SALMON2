@@ -11,6 +11,7 @@ set(CMAKE_Fortran_FLAGS_RELEASE "-O3 ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE       "-O3 ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
 
 set(USE_MPI_DEFAULT             ON)
+set(USE_OPENACC ON)
 
 ########
 # CMake Platform-specific variables
