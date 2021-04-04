@@ -41,6 +41,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   external :: zstencil_typical_seq
   !$acc routine(zstencil_typical_seq) worker
+  external :: zstencil_typical_gpu
 
   type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
@@ -155,6 +156,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
           if (is_enable_overlapping) then
             call zstencil_overlapped
           else
+#ifdef USE_OPENACC
+            call zstencil_typical_gpu(io_s, io_e, Nspin,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                          ,mg%is,mg%ie &
+                          ,tpsi%zwf(:,:,:,:,:,ik,im),htpsi%zwf(:,:,:,:,:,ik,im) &
+                          ,V_local(:),k_lap0,stencil%coef_lap,k_nabt &
+                          )
+#else
             do io=io_s,io_e
             do ispin=1,Nspin
               call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
@@ -162,6 +170,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
                             ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
             end do
             end do
+#endif
           end if
         end do
         end do
