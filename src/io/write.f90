@@ -112,10 +112,11 @@ contains
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)       :: tpsi
     !
-    integer :: fh_tm
+    integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,ik_s,ik_e,is(3),ie(3)
     real(8) :: x,y,z
-    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:),gtpsi(:,:,:,:)
+    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
+    complex(8),allocatable :: gtpsi(:,:,:,:),gtpsi_l(:,:,:,:)
     complex(8),allocatable :: uVpsi(:,:),uVpsix(:,:),uVpsiy(:,:),uVpsiz(:,:)
     complex(8),allocatable :: uVpsixx(:,:),uVpsixy(:,:),uVpsixz(:,:)
     complex(8),allocatable :: uVpsiyy(:,:),uVpsiyz(:,:),uVpsizz(:,:)
@@ -135,8 +136,11 @@ contains
       return
     endif
     if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
-      write(*,*) "error @ write_tm_data: do not use orbital parallelization"
-      return
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) "error @ write_tm_data: do not use orbital parallelization"
+        write(*,*) "Only <u|p|u> is printed (pseudopotential terms are not printed)"
+      endif
+     !return
     endif
     if(.not. allocated(tpsi%zwf)) then!??????
       write(*,*) "error @ write_tm_data: do not use real wavefunction (iperiodic=0)"
@@ -165,9 +169,16 @@ contains
 
     upu_l(:,:,:,:) = 0d0
 
+    allocate(gtpsi_l(3,mg%is_array(1):mg%ie_array(1) &
+                      ,mg%is_array(2):mg%ie_array(2) &
+                      ,mg%is_array(3):mg%ie_array(3)))
     allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
                     ,mg%is_array(2):mg%ie_array(2) &
                     ,mg%is_array(3):mg%ie_array(3)))
+    narray= 3 * ( mg%ie_array(1) - mg%is_array(1) + 1 ) &
+              * ( mg%ie_array(2) - mg%is_array(2) + 1 ) &
+              * ( mg%ie_array(3) - mg%is_array(3) + 1 )
+
   ! overlap region communication
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, tpsi%zwf)
@@ -176,10 +187,15 @@ contains
     do ik=ik_s,ik_e
     do ib2=1,NB
 
-    ! gtpsi = (nabla) psi
-      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-      do ib1=1,NB
+      ! gtpsi = (nabla) psi
+      gtpsi_l(:,:,:,:) = 0d0
+      if(ib2.ge.info%io_s .and. ib2.le.info%io_e) &
+        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi_l,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+      call comm_summation(gtpsi_l,gtpsi,narray,info%icomm_o)
+
+!     do ib1=1,NB
+      do ib1=info%io_s,info%io_e
         do i=1,3
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
                             * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
@@ -190,6 +206,30 @@ contains
     end do
     call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
     deallocate(gtpsi)
+
+    !--(Print only for orbital parallelization: just temporal)
+    if(info%io_s/=1 .or. info%io_e/=system%no) then
+
+       file_tm_data = trim(sysname)//'_tm.data'
+       if (comm_is_root(nproc_id_global)) then
+          fh_tm = open_filehandle(file_tm_data, status="replace")
+          write(fh_tm, '("#",1X,A)') "#Transition Moment between occupied and unocupied orbitals in GS"
+          write(fh_tm, '("#",1X,A)') "# (Separated analysis tool is available)"
+
+          !<u_nk|p_j|u_mk>  (j=x,y,z)
+          write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+          do ik =1,NK
+          do ib1=1,NB
+          do ib2=1,NB
+             write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
+          enddo
+          enddo
+          enddo
+          close(fh_tm)
+       endif
+       return
+    endif
+    !-------------------------------------------------
 
     !calculate <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
     u_rVnl_Vnlr_u_l = 0d0
