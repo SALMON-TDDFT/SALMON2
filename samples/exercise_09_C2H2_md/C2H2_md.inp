@@ -75,8 +75,8 @@
 /
 
 &rgrid
-  !spatial grid spacing(x,y,z)
-  dl(1:3) = 0.20d0, 0.20d0, 0.20d0
+  !number of spatial grids(x,y,z)
+  num_rgrid(1:3) = 60, 60, 80
 /
 
 &tgrid
