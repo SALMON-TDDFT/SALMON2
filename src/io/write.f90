@@ -2233,6 +2233,7 @@ contains
       system%rocc = rt%rocc0
       !$omp end workshare
       deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
+      deallocate(tpsi%zwf_real,tpsi%zwf_imag,ttpsi%zwf_real,ttpsi%zwf_imag)
       allocate(energy%esp(system%no,system%nk,system%nspin))
       call allocate_orbital_complex(system%nspin,mg,info, tpsi)
       call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
@@ -2255,6 +2256,7 @@ contains
       system%rocc(:,:,:) = rocc_rt_bk(:,:,:)
       !$omp end workshare
       deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
+      deallocate(tpsi%zwf_real,tpsi%zwf_imag,ttpsi%zwf_real,ttpsi%zwf_imag)
       allocate(energy%esp(system%no,system%nk,system%nspin))
       call allocate_orbital_complex(system%nspin,mg,info, tpsi)
       call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
