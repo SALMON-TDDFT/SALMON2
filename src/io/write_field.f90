@@ -21,124 +21,135 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_dns(lg,mg,system,rho_s,rho0_s,itt)
-  use inputoutput, only: format_voxel_data,au_length_aa,theory
-  use structures, only: s_rgrid,s_scalar,s_dft_system,allocate_scalar,deallocate_scalar
-  use parallelization, only: nproc_group_global
-  use communication, only: comm_summation
-  use write_file3d
+subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
+  use inputoutput, only: au_length_aa
+  use salmon_global, only: format_voxel_data,theory
+  use structures
   implicit none
   type(s_rgrid)     ,intent(in)          :: lg
   type(s_rgrid)     ,intent(in)          :: mg
   type(s_dft_system),intent(in)          :: system
+  type(s_parallel_info),intent(in)       :: info
   type(s_scalar)    ,intent(in)          :: rho_s (system%nspin)
   type(s_scalar)    ,intent(in),optional :: rho0_s(system%nspin)
   integer           ,intent(in),optional :: itt
   !
   integer :: ispin,ix,iy,iz
-  character(60) :: suffix
+  character(60) :: suffix,suffix_u,suffix_d
   character(30) :: phys_quantity
   character(10) :: filenum
-  character(20) :: header_unit
-  type(s_scalar) :: work_l1,work_l2
-
-  call allocate_scalar(lg,work_l1)
-  call allocate_scalar(lg,work_l2)
-
+  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:system%nspin) :: wrk1,wrk2,dns
+  
+  call calc_wrk2(rho_s)
   !$omp workshare
-  work_l1%f = 0.d0
+  dns = wrk2
   !$omp end workshare
-
-  do ispin=1,system%nspin
-!$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      work_l1%f(ix,iy,iz) = work_l1%f(ix,iy,iz) + rho_s(ispin)%f(ix,iy,iz)
-    end do
-    end do
-    end do
-  end do
-  
-! future work: individual electron density for each spin
-
-  if(format_voxel_data=='avs')then
-    !$omp workshare
-    work_l1%f = work_l1%f /(au_length_aa**3)
-    !$omp end workshare
-  end if
-  
-  call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
   select case(theory)
   case('dft','dft_band','dft_md') 
     suffix = "dns"
+    suffix_u = "dns_u"
+    suffix_d = "dns_d"
   case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
+    suffix_u = "dns_u_"//adjustl(filenum)
+    suffix_d = "dns_d_"//adjustl(filenum)
   case default
-    stop 'invalid theory @ writefield'
+    stop 'invalid theory @ write_dns'
   end select
-
   phys_quantity = "dns"
-  if(format_voxel_data=='avs')then
-    header_unit='A**(-3)'
-    call write_avs(lg,103,suffix,header_unit,work_l2%f)
-  else if(format_voxel_data=='cube')then
-    call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
-  else if(format_voxel_data=='vtk')then
-    call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
+  
+  if(system%nspin==1) then
+    call write_dns_core(suffix,dns(:,:,:,1))
+  else if(system%nspin==2) then
+    call write_dns_core(suffix_u,dns(:,:,:,1))
+    call write_dns_core(suffix_d,dns(:,:,:,2))
+    !$omp workshare
+    wrk1(:,:,:,1) = dns(:,:,:,1) + dns(:,:,:,2)
+    !$omp end workshare
+    call write_dns_core(suffix,wrk1(:,:,:,1))
+  else
+    stop 'invalid nspin'
   end if
   
   if(.not.present(rho0_s)) then
-    call deallocate_scalar(work_l1)
-    call deallocate_scalar(work_l2)
     return
   end if
 
   select case(theory)
   case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
+
+    call calc_wrk2(rho0_s)
     !$omp workshare
-    work_l1%f = 0.d0
+    dns = dns - wrk2
     !$omp end workshare
 
+    write(filenum, '(i6.6)') itt
+    suffix = "dnsdiff_"//adjustl(filenum)
+    suffix_u = "dnsdiff_u_"//adjustl(filenum)
+    suffix_d = "dnsdiff_d_"//adjustl(filenum)
+    phys_quantity = "dnsdiff"
+    
+    if(system%nspin==1) then
+      call write_dns_core(suffix,dns(:,:,:,1))
+    else if(system%nspin==2) then
+      call write_dns_core(suffix_u,dns(:,:,:,1))
+      call write_dns_core(suffix_d,dns(:,:,:,2))
+      !$omp workshare
+      wrk1(:,:,:,1) = dns(:,:,:,1) + dns(:,:,:,2)
+      !$omp end workshare
+      call write_dns_core(suffix,wrk1(:,:,:,1))
+    else
+      stop 'invalid nspin'
+    end if
+    
+  case default
+    stop 'invalid theory @ write_dns'
+  end select
+  
+contains
+
+  subroutine calc_wrk2(trho)
+    use communication, only: comm_summation
+    implicit none
+    type(s_scalar),intent(in) :: trho(system%nspin)
+    !$omp workshare
+    wrk1 = 0.d0
+    !$omp end workshare
     do ispin=1,system%nspin
-!$OMP parallel do collapse(2) private(iz,iy,ix)
+      !$OMP parallel do collapse(2) private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        work_l1%f(ix,iy,iz) = work_l1%f(ix,iy,iz) + ( rho_s(ispin)%f(ix,iy,iz) - rho0_s(ispin)%f(ix,iy,iz) )
+        wrk1(ix,iy,iz,ispin) = trho(ispin)%f(ix,iy,iz)
       end do
       end do
       end do
     end do
-    
-! future work: individual electron density for each spin
-  
     if(format_voxel_data=='avs')then
       !$omp workshare
-      work_l1%f = work_l1%f /(au_length_aa**3)
+      wrk1 = wrk1 /(au_length_aa**3)
       !$omp end workshare
     end if
-
-    call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
-
-    write(filenum, '(i6.6)') itt
-    suffix = "dnsdiff_"//adjustl(filenum)
-    phys_quantity = "dnsdiff"
+    call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*system%nspin,info%icomm_r)
+  end subroutine calc_wrk2
+  
+  subroutine write_dns_core(tsuffix,tdns)
+    use write_file3d, only: write_avs, write_cube, write_vtk
+    implicit none
+    real(8)      ,intent(in) :: tdns(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+    character(60),intent(in) :: tsuffix
+    character(20)            :: header_unit
     if(format_voxel_data=='avs')then
       header_unit='A**(-3)'
-      call write_avs(lg,103,suffix,header_unit,work_l2%f)
+      call write_avs(lg,103,tsuffix,header_unit,tdns)
     else if(format_voxel_data=='cube')then
-      call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
+      call write_cube(lg,103,tsuffix,phys_quantity,tdns,system)
     else if(format_voxel_data=='vtk')then
-      call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
+      call write_vtk(lg,103,tsuffix,tdns,system%hgs)
     end if
-  case default
-  end select
- 
-  call deallocate_scalar(work_l1)
-  call deallocate_scalar(work_l2)
+  end subroutine write_dns_core
 
 end subroutine write_dns
 

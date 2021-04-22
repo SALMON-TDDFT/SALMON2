@@ -316,7 +316,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
+      call write_dns(lg,mg,system,info,rho_s,rt%rho0_s,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then
