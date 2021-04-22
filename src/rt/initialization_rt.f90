@@ -450,7 +450,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-        call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
+        call write_dns(lg,mg,system,info,rho_s,rt%rho0_s,itt)
       end if
       if(yn_out_elf_rt=='y')then
         call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
