@@ -839,7 +839,29 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use salmon_global, only: yn_spinorbit
   use update_kvector_so_sub, only: update_kvector_so
   use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
+  use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
+  use iso_c_binding
   implicit none
+  interface
+    subroutine update_kvector_nonlocalpt_kernel(ppg_zekr_uV, ik_s, ik_e, natom, ppg_nlma, ppg_nps, ia_tbl_size, ppg_ia_tbl, ppg_mps, ppg_rxyz, ppg_uv, kAc) bind(c)
+      import
+      ! Input (size)
+      integer(c_int), VALUE :: ik_s
+      integer(c_int), VALUE :: ik_e
+      integer(c_int), VALUE :: natom
+      integer(c_int), VALUE :: ppg_nlma
+      integer(c_int), VALUE :: ppg_nps
+      integer(c_int), VALUE :: ia_tbl_size
+      ! Output
+      complex(c_double_complex), intent(inout) :: ppg_zekr_uV(ppg_nps, ppg_nlma, 1)
+      ! Input (ptr)
+      integer(c_int),            intent(in)    :: ppg_ia_tbl(ia_tbl_size)
+      integer(c_int),            intent(in)    :: ppg_mps(natom)
+      real   (c_double),         intent(in)    :: ppg_rxyz(3, ppg_nps, natom)
+      real   (c_double),         intent(in)    :: ppg_uv(ppg_nps, ppg_nlma)
+      real   (c_double),         intent(in)    :: kAc(3, ik_s:ik_e)
+    end subroutine update_kvector_nonlocalpt_kernel
+  end interface
   integer           ,intent(in) :: ik_s,ik_e !,n_max
   type(s_dft_system),intent(in) :: system
   type(s_pp_grid)               :: ppg
@@ -848,6 +870,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   real(8) :: x,y,z
   complex(8) :: ekr
   real(8),allocatable :: kAc(:,:)
+  integer natom, ia_tbl_size
   
   allocate(kAc(3,ik_s:ik_e))
   do ik=ik_s,ik_e
@@ -862,6 +885,10 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   end if
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
+
+  natom=size(ppg%mps, kind=c_int)
+  ia_tbl_size=size(ppg%ia_tbl, kind=c_int)
+  call update_kvector_nonlocalpt_kernel(ppg%zekr_uV, ik_s, ik_e, natom, ppg%nlma, ppg%nps, ia_tbl_size, ppg%ia_tbl, ppg%mps, ppg%rxyz, ppg%uv, kAc)
 
 #ifdef USE_OPENACC
 !$acc kernels
