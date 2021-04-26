@@ -25,7 +25,7 @@ contains
   !! export SYSNAME_k.data file
   subroutine write_k_data(system,stencil)
     use structures
-    use salmon_global, only: sysname
+    use salmon_global, only: sysname,yn_periodic
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -36,6 +36,10 @@ contains
     integer :: fh_k
     integer :: ik,NK
     character(100) :: file_k_data
+    
+    if(yn_periodic=='n') then
+      return
+    end if
 
     NK = system%nk
     file_k_data = trim(sysname)//'_k.data'
@@ -1638,7 +1642,7 @@ contains
 
   subroutine write_band_information(system,energy)
     use structures
-    use salmon_global, only: nelec
+    use salmon_global, only: nelec,yn_periodic
     use inputoutput, only: au_energy_ev
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
@@ -1662,23 +1666,44 @@ contains
         esp_cb_min(ik)=minval(energy%esp(index_vbm+1:system%no,ik,:))
         esp_cb_max(ik)=maxval(energy%esp(index_vbm+1:system%no,ik,:))
       end do
-      write(*,*) 'band information-----------------------------------------'
-      write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
-      write(*,*) 'Top of VB',maxval(esp_vb_max(:))
-      write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
-      write(*,*) 'Top of CB',maxval(esp_cb_max(:))
-      write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
-      write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
-      write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
-      write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
-      write(*,*) '---------------------------------------------------------'
-      write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
-      write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
-      write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
-      write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
-      write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
-      write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
-      write(*,*) '---------------------------------------------------------'
+      if(yn_periodic=='y') then
+        write(*,*) 'band information-----------------------------------------'
+        write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
+        write(*,*) 'Top of VB',maxval(esp_vb_max(:))
+        write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
+        write(*,*) 'Top of CB',maxval(esp_cb_max(:))
+        write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+        write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
+        write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
+        write(*,*) 'Physicaly upper bound of eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
+        write(*,*) '---------------------------------------------------------'
+        write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
+        write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
+        write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
+        write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
+        write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
+        write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of CB for DOS[eV]',minval(esp_cb_max(:))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of eps(omega)[eV]',minval(esp_cb_max(:)-esp_vb_min(:))*au_energy_ev
+        write(*,*) '---------------------------------------------------------'
+      else
+        if(system%nk /= 1) stop "error: yn_periodic='n' and Nk/=1"
+        write(*,*) 'orbital energy information-------------------------------'
+        write(*,*) 'Lowest occupied orbital',esp_vb_min(1)
+        write(*,*) 'Highest occupied orbital (HOMO)',esp_vb_max(1)
+        write(*,*) 'Lowest unoccupied orbital (LUMO)',esp_cb_min(1)
+        write(*,*) 'Highest unoccupied orbital',esp_cb_max(1)
+        write(*,*) 'HOMO-LUMO gap',esp_cb_min(1)-esp_vb_max(1)
+        write(*,*) 'Physicaly upper bound of eps(omega)',esp_cb_max(1)-esp_vb_min(1)
+        write(*,*) '---------------------------------------------------------'
+        write(*,*) 'Lowest occupied orbital[eV]',esp_vb_min(1)*au_energy_ev
+        write(*,*) 'Highest occupied orbital (HOMO)[eV]',esp_vb_max(1)*au_energy_ev
+        write(*,*) 'Lowest unoccupied orbital (LUMO)[eV]',esp_cb_min(1)*au_energy_ev
+        write(*,*) 'Highest unoccupied orbital[eV]',esp_cb_max(1)*au_energy_ev
+        write(*,*) 'HOMO-LUMO gap[eV]',(esp_cb_min(1)-esp_vb_max(1))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of eps(omega)[eV]',(esp_cb_max(1)-esp_vb_min(1))*au_energy_ev
+        write(*,*) '---------------------------------------------------------'
+      end if
     end if
     return
   end subroutine write_band_information
