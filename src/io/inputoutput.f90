@@ -447,6 +447,7 @@ contains
       & out_ms_step, &
       & format_voxel_data, &
       & nsplit_voxel_data, &
+      & yn_lr_w0_correction, &
       & yn_out_perflog, &
       & format_perflog
 
@@ -773,6 +774,7 @@ contains
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
+    yn_lr_w0_correction = 'n'
 
     yn_out_perflog      = 'y'
     format_perflog      = 'stdout'
@@ -1249,6 +1251,7 @@ contains
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
+    call comm_bcast(yn_lr_w0_correction ,nproc_group_global)
     call comm_bcast(yn_out_perflog      ,nproc_group_global)
     call comm_bcast(format_perflog      ,nproc_group_global)
 
@@ -2017,6 +2020,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
@@ -2330,6 +2334,11 @@ contains
        endif
     endif
 
+    if(yn_lr_w0_correction=='y') then
+       if( yn_periodic=='n' )then
+          stop 'yn_lr_w0_correction="y" is currently for yn_periodic="y"'
+       end if
+    endif
 
   end subroutine check_bad_input
 
