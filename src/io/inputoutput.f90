@@ -2189,6 +2189,10 @@ contains
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
     call yyynnn_argument_check(yn_symmetry)
+    
+    if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
+      stop "Nk must be 1 when yn_periodic=='n'"
+    end if
 
     if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
        al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
