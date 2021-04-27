@@ -845,7 +845,7 @@ contains
 
 !===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
-    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de
+    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de, temperature, yn_lr_w0_correction
     use inputoutput, only: t_unit_energy,t_unit_conductivity
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
@@ -855,8 +855,8 @@ contains
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
     integer :: uid
-    integer :: ihw,n,ixyz
-    real(8) :: tt,hw,t2
+    integer :: ihw,n,ixyz, it
+    real(8) :: tt,hw,t2, smoothing, jav_d(3), jav_s(3), smt_s
     complex(8) :: zsigma(3),zeps(3)
     real(8) :: rtdata(1:3,1:nt)
 
@@ -884,6 +884,7 @@ contains
         & 12, "Im(eps_y)", "none", &
         & 13, "Im(eps_z)", "none"
 
+     
       tt = dt*dble(nt)
       if(trans_longi=="tr") then
         rtdata(1:3,1:nt) = rt%curr(1:3,1:nt)
@@ -891,12 +892,28 @@ contains
         rtdata(1:3,1:nt) = rt%E_tot(1:3,1:nt)
       end if
 
+      ! sigma(omega=0) correcton
+      jav_d(:)=0d0
+      if( yn_lr_w0_correction=='y' .and. temperature < 0d0) then
+         jav_s = 0d0
+         smt_s = 0d0;
+         do it = 1,nt
+            t2 = dble(it)*dt
+            smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+            jav_s(:)  = jav_s(:) + rtdata(:,it) * smoothing
+            smt_s     = smt_s + smoothing
+         end do
+         jav_d(:) = jav_s(:)/smt_s
+      end if
+
       do ihw=1,nenergy
         hw=dble(ihw)*de
         zsigma(:)=(0.d0,0.d0)
         do n=1,nt
           t2=dble(n)*dt
-          zsigma(:)=zsigma(:)+exp(zi*hw*t2)* rtdata(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+         !zsigma(:)=zsigma(:) + exp(zi*hw*t2)* rtdata(:,n) * smoothing
+          zsigma(:)=zsigma(:) + exp(zi*hw*t2)* (rtdata(:,n)-jav_d(:)) * smoothing
         end do
 
         zsigma(:) = (zsigma(:)/e_impulse)*dt
