@@ -13,7 +13,7 @@ set(SOURCES
    lattice.f90
    force.f90
    calc_gradient_psi.f90
-   update_kvector_nonlocalpt.c
+   update_kvector_nonlocalpt.cu
    )
 
 if (IS_FUJITSU_COMPILER)
