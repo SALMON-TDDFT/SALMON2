@@ -363,20 +363,32 @@ subroutine zstencil_microAc_symmetrized(is_array,ie_array,is,ie,idx,idy,idz &
          & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
          
   ! divergence of (k+Ac)*psi
-    x    =  nabt(1,1)* ( (k(1)+Ac(1,DX(1)))*tpsi(DX(1)) - (k(1)+Ac(1,DX(-1)))*tpsi(DX(-1)) ) &
-         & +nabt(2,1)* ( (k(1)+Ac(1,DX(2)))*tpsi(DX(2)) - (k(1)+Ac(1,DX(-2)))*tpsi(DX(-2)) ) &
-         & +nabt(3,1)* ( (k(1)+Ac(1,DX(3)))*tpsi(DX(3)) - (k(1)+Ac(1,DX(-3)))*tpsi(DX(-3)) ) &
-         & +nabt(4,1)* ( (k(1)+Ac(1,DX(4)))*tpsi(DX(4)) - (k(1)+Ac(1,DX(-4)))*tpsi(DX(-4)) )
+    x    =  nabt(1,1)* ( (k(1)+Ac(1,DX(1)))*tpsi(DX(1)) &
+         &              -(k(1)+Ac(1,DX(-1)))*tpsi(DX(-1)) ) &
+         & +nabt(2,1)* ( (k(1)+Ac(1,DX(2)))*tpsi(DX(2)) &
+         &              -(k(1)+Ac(1,DX(-2)))*tpsi(DX(-2)) ) &
+         & +nabt(3,1)* ( (k(1)+Ac(1,DX(3)))*tpsi(DX(3)) &
+         &              -(k(1)+Ac(1,DX(-3)))*tpsi(DX(-3)) ) &
+         & +nabt(4,1)* ( (k(1)+Ac(1,DX(4)))*tpsi(DX(4)) &
+         &              -(k(1)+Ac(1,DX(-4)))*tpsi(DX(-4)) )
          
-    x    =  nabt(1,2)* ( (k(2)+Ac(2,DY(1)))*tpsi(DY(1)) - (k(2)+Ac(2,DY(-1)))*tpsi(DY(-1)) ) &
-         & +nabt(2,2)* ( (k(2)+Ac(2,DY(2)))*tpsi(DY(2)) - (k(2)+Ac(2,DY(-2)))*tpsi(DY(-2)) ) &
-         & +nabt(3,2)* ( (k(2)+Ac(2,DY(3)))*tpsi(DY(3)) - (k(2)+Ac(2,DY(-3)))*tpsi(DY(-3)) ) &
-         & +nabt(4,2)* ( (k(2)+Ac(2,DY(4)))*tpsi(DY(4)) - (k(2)+Ac(2,DY(-4)))*tpsi(DY(-4)) ) + x
+    x    =  nabt(1,2)* ( (k(2)+Ac(2,DY(1)))*tpsi(DY(1)) &
+         &              -(k(2)+Ac(2,DY(-1)))*tpsi(DY(-1)) ) &
+         & +nabt(2,2)* ( (k(2)+Ac(2,DY(2)))*tpsi(DY(2)) &
+         &              -(k(2)+Ac(2,DY(-2)))*tpsi(DY(-2)) ) &
+         & +nabt(3,2)* ( (k(2)+Ac(2,DY(3)))*tpsi(DY(3)) &
+         &              -(k(2)+Ac(2,DY(-3)))*tpsi(DY(-3)) ) &
+         & +nabt(4,2)* ( (k(2)+Ac(2,DY(4)))*tpsi(DY(4)) &
+         &              -(k(2)+Ac(2,DY(-4)))*tpsi(DY(-4)) ) + x
          
-    x    =  nabt(1,3)* ( (k(3)+Ac(3,DZ(1)))*tpsi(DZ(1)) - (k(3)+Ac(3,DZ(-1)))*tpsi(DZ(-1)) ) &
-         & +nabt(2,3)* ( (k(3)+Ac(3,DZ(2)))*tpsi(DZ(2)) - (k(3)+Ac(3,DZ(-2)))*tpsi(DZ(-2)) ) &
-         & +nabt(3,3)* ( (k(3)+Ac(3,DZ(3)))*tpsi(DZ(3)) - (k(3)+Ac(3,DZ(-3)))*tpsi(DZ(-3)) ) &
-         & +nabt(4,3)* ( (k(3)+Ac(3,DZ(4)))*tpsi(DZ(4)) - (k(3)+Ac(3,DZ(-4)))*tpsi(DZ(-4)) ) + x
+    x    =  nabt(1,3)* ( (k(3)+Ac(3,DZ(1)))*tpsi(DZ(1)) &
+         &              -(k(3)+Ac(3,DZ(-1)))*tpsi(DZ(-1)) ) &
+         & +nabt(2,3)* ( (k(3)+Ac(3,DZ(2)))*tpsi(DZ(2)) &
+         &              -(k(3)+Ac(3,DZ(-2)))*tpsi(DZ(-2)) ) &
+         & +nabt(3,3)* ( (k(3)+Ac(3,DZ(3)))*tpsi(DZ(3)) &
+         &              -(k(3)+Ac(3,DZ(-3)))*tpsi(DZ(-3)) ) &
+         & +nabt(4,3)* ( (k(3)+Ac(3,DZ(4)))*tpsi(DZ(4)) &
+         &              -(k(3)+Ac(3,DZ(-4)))*tpsi(DZ(-4)) ) + x
 
     htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )* psi0 - 0.5d0* v           &
                     & + 0.5d0* ( kAc(1)**2 + kAc(2)**2 + kAc(3)**2 ) * psi0   &
