@@ -138,9 +138,8 @@ contains
 !$omp end parallel do
 
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
-      call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
-      call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
-      & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )
+      call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
+      call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
       
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,mg%num(3)
