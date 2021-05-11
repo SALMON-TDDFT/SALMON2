@@ -93,7 +93,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   call timer_end(LOG_SS_FDTD_COMM)
 
   call timer_begin(LOG_SS_FDTD_CALC)
-  call calc_gradient_field(mg,fw%coef_nab,fw%box1,fw%grad_Vh) ! grad[Vh(t+dt/2)]
+  call calc_gradient_field(mg,fw%coef_nab,system%rmatrix_B,fw%box1,fw%grad_Vh) ! grad[Vh(t+dt/2)]
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=mg%is(3),mg%ie(3)
@@ -771,7 +771,7 @@ end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
+subroutine init_singlescale(mg,lg,info,hgs,matrix_B,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -786,7 +786,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   implicit none
   type(s_rgrid)         ,intent(in) :: lg,mg
   type(s_parallel_info) ,intent(in) :: info
-  real(8)               ,intent(in) :: hgs(3)
+  real(8)               ,intent(in) :: hgs(3),matrix_B(3,3)
   type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_sendrecv_grid)             :: srg_scalar
   type(s_singlescale)               :: fw
@@ -929,7 +929,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   end do
   end do
   if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, fw%box1)
-  call calc_gradient_field(mg,fw%coef_nab,fw%box1,fw%grad_Vh_old)
+  call calc_gradient_field(mg,fw%coef_nab,matrix_B,fw%box1,fw%grad_Vh_old)
   
   if(yn_restart=='y') then
     call restart_singlescale(info%icomm_rko,lg,mg,fw,Ac,div_Ac)
