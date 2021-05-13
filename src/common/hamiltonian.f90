@@ -843,7 +843,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use iso_c_binding
   implicit none
   interface
-    subroutine update_kvector_nonlocalpt_kernel(ppg_zekr_uV, ik_s, ik_e, natom, ppg_nlma, ppg_nps, ia_tbl_size, ppg_ia_tbl, ppg_mps, ppg_rxyz, ppg_uv, kAc) bind(c)
+    subroutine update_kvector_nonlocalpt_core(ppg_zekr_uV, ik_s, ik_e, natom, ppg_nlma, ppg_nps, ia_tbl_size, ppg_ia_tbl, ppg_mps, ppg_rxyz, ppg_uv, kAc) bind(c)
       import
       ! Input (size)
       integer(c_int), VALUE :: ik_s
@@ -860,7 +860,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       real   (c_double),         intent(in)    :: ppg_rxyz(3, ppg_nps, natom)
       real   (c_double),         intent(in)    :: ppg_uv(ppg_nps, ppg_nlma)
       real   (c_double),         intent(in)    :: kAc(3, ik_s:ik_e)
-    end subroutine update_kvector_nonlocalpt_kernel
+    end subroutine update_kvector_nonlocalpt_core
   end interface
   integer           ,intent(in) :: ik_s,ik_e !,n_max
   type(s_dft_system),intent(in) :: system
@@ -886,10 +886,11 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 
+#ifdef USE_CUDA
   natom=size(ppg%mps, kind=c_int)
   ia_tbl_size=size(ppg%ia_tbl, kind=c_int)
-  call update_kvector_nonlocalpt_kernel(ppg%zekr_uV, ik_s, ik_e, natom, ppg%nlma, ppg%nps, ia_tbl_size, ppg%ia_tbl, ppg%mps, ppg%rxyz, ppg%uv, kAc)
-
+  call update_kvector_nonlocalpt_core(ppg%zekr_uV, ik_s, ik_e, natom, ppg%nlma, ppg%nps, ia_tbl_size, ppg%ia_tbl, ppg%mps, ppg%rxyz, ppg%uv, kAc)
+#else
 #ifdef USE_OPENACC
 !$acc kernels
 !$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
@@ -912,6 +913,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
 !$acc end kernels
 #else
 !$omp end parallel do  
+#endif
 #endif
 
   deallocate(kAc)
