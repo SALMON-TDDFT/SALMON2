@@ -54,7 +54,7 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    poisson%ff1z(ix,iy,iz) = cmplx(rho%f(ix,iy,iz))
+    poisson%ff1z(ix,iy,iz) = dcmplx(rho%f(ix,iy,iz))
   end do
   end do
   end do
@@ -267,7 +267,7 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
   do iy=1,mg%num(2)
     iiz=iz+mg%is(3)-1
     iiy=iy+mg%is(2)-1
-    poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz) = cmplx(rho%f(mg%is(1):mg%ie(1),iiy,iiz))
+    poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz) = dcmplx(rho%f(mg%is(1):mg%ie(1),iiy,iiz))
   end do
   end do
   call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_x)

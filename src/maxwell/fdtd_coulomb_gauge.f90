@@ -655,13 +655,13 @@ subroutine fourier_singlescale(lg,mg,info,fg,rho,j_e,Vh,poisson,singlescale)
     iiz=iz+mg%is(3)-1
     iiy=iy+mg%is(2)-1
     do ix=mg%is(1),mg%ie(1)
-      singlescale%b_ffte(ix,iy,iz,0) = cmplx(rho%f(ix,iiy,iiz)) ! charge density rho
+      singlescale%b_ffte(ix,iy,iz,0) = dcmplx(rho%f(ix,iiy,iiz)) ! charge density rho
       vec_je = ( j_e%v(1:3,ix,iiy,iiz) + singlescale%vec_je_old(1:3,ix,iiy,iiz) )*0.5d0 ! j(t) = ( j(t+dt/2) + j(t-dt/2) )/2
       rho_t  = ( rho%f(ix,iiy,iiz) + singlescale%rho_old(ix,iiy,iiz) )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
       vec_je = vec_je + rho_t * singlescale%vec_Ac_m(1,ix,iiy,iiz,1:3) ! electron number current density
-      singlescale%b_ffte(ix,iy,iz,1) = cmplx(vec_je(1)) ! current density j_x
-      singlescale%b_ffte(ix,iy,iz,2) = cmplx(vec_je(2)) ! current density j_y
-      singlescale%b_ffte(ix,iy,iz,3) = cmplx(vec_je(3)) ! current density j_z
+      singlescale%b_ffte(ix,iy,iz,1) = dcmplx(vec_je(1)) ! current density j_x
+      singlescale%b_ffte(ix,iy,iz,2) = dcmplx(vec_je(2)) ! current density j_y
+      singlescale%b_ffte(ix,iy,iz,3) = dcmplx(vec_je(3)) ! current density j_z
     end do
   end do
   end do

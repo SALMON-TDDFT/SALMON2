@@ -231,7 +231,7 @@ CONTAINS
     do iy=lbound(spsi%zwf,2),ubound(spsi%zwf,2)
     do ix=lbound(spsi%zwf,1),ubound(spsi%zwf,1)
       call random_number(u)
-      spsi%zwf(ix,iy,iz,is,io,ik,ip) = cmplx(u(1),u(2))
+      spsi%zwf(ix,iy,iz,is,io,ik,ip) = dcmplx(u(1),u(2))
     end do
     end do
     end do

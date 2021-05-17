@@ -1223,7 +1223,7 @@ contains
           if (allocated(spsi%rwf)) then
             spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = ddummy(:,:,:)
           else
-            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = cmplx(ddummy(:,:,:))
+            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = dcmplx(ddummy(:,:,:))
           end if
         else
           spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = zdummy(:,:,:)
@@ -1270,7 +1270,7 @@ contains
           if (allocated(spsi%rwf)) then
             spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = ddummy(:,:,:)
           else
-            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = cmplx(ddummy(:,:,:))
+            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = dcmplx(ddummy(:,:,:))
           end if
         else
           spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = zdummy(:,:,:)
@@ -1999,7 +1999,7 @@ contains
             ! NOTE: When simulating large-scale isolated system, it's possible that SALMON hangs by failing memory allocation.
             MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
             spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
-              = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
+              = dcmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
           else
             MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
           end if
@@ -2111,7 +2111,7 @@ contains
               !       SALMON hangs by failing memory allocation.
               MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf(:,:,:,:,1,1,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
               spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,io,ik,1) &
-                = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,1,1,1))
+                = dcmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,1,1,1))
             else
               MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
             end if
