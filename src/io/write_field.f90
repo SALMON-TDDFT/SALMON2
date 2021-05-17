@@ -357,7 +357,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
   do ispin=1,nspin
     
     if(allocated(tpsi%rwf)) then
-      ztmp = cmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
+      ztmp = dcmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
     else
       ztmp = tpsi%zwf(:,:,:,ispin,io,ik,1)
     end if

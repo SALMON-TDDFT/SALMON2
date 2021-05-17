@@ -589,7 +589,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   end do
 
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
-  ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
+  ppg%zekr_uV(:,:,1) = dcmplx(ppg%uV)
 
   return
 END SUBROUTINE calc_Vpsl_isolated

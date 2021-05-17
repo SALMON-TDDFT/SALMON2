@@ -79,7 +79,7 @@ contains
       do ia=info%ia_s,info%ia_e
         ik=kion(ia)
         gd = g(1)*system%Rion(1,ia) + g(2)*system%Rion(2,ia) + g(3)*system%Rion(3,ia)
-        tmp_exp = cmplx( cos(gd), -sin(gd) )
+        tmp_exp = dcmplx( cos(gd), -sin(gd) )
         vtmp1(ix,iy,iz) = vtmp1(ix,iy,iz) + zrhoG(ix,iy,iz,ik)*tmp_exp
       end do
     end do

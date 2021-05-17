@@ -765,9 +765,9 @@ contains
        do iz = mg%is(3),mg%ie(3)
           z  = iz*system%hgs(3)
           if( z .le. z1 ) then
-             w = cmplx( 0d0, -w0*(z1-z)/dr )
+             w = dcmplx( 0d0, -w0*(z1-z)/dr )
           else if( z .ge. z2 ) then
-             w = cmplx( 0d0, -w0*(z-z2)/dr )
+             w = dcmplx( 0d0, -w0*(z-z2)/dr )
           else
              cycle
           endif

@@ -255,7 +255,7 @@ contains
                                ,mg%is_array(2):mg%ie_array(2) &
                                ,mg%is_array(3):mg%ie_array(3) &
                                ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-         spsi%zwf = cmplx(spsi%rwf)
+         spsi%zwf = dcmplx(spsi%rwf)
       else
          if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
       endif

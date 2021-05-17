@@ -143,7 +143,7 @@ contains
                        ,mg%is_array(2):mg%ie_array(2) &
                        ,mg%is_array(3):mg%ie_array(3) &
                        ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-      tpsi%zwf = cmplx(tpsi%rwf)
+      tpsi%zwf = dcmplx(tpsi%rwf)
     end if
 
     if( SPIN_ORBIT_ON )then

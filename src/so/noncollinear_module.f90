@@ -169,8 +169,8 @@ contains
        vxc_1 = 0.5d0*( Vxc(1)%f(ix,iy,iz) - Vxc(2)%f(ix,iy,iz) )
 
        vxc_mat(ix,iy,iz,1,1) = vxc_0 + vxc_1*cos(theta)
-       vxc_mat(ix,iy,iz,2,1) = vxc_1*cmplx( cos(phi), sin(phi) )*sin(theta)
-       vxc_mat(ix,iy,iz,1,2) = vxc_1*cmplx( cos(phi),-sin(phi) )*sin(theta)
+       vxc_mat(ix,iy,iz,2,1) = vxc_1*dcmplx( cos(phi), sin(phi) )*sin(theta)
+       vxc_mat(ix,iy,iz,1,2) = vxc_1*dcmplx( cos(phi),-sin(phi) )*sin(theta)
        vxc_mat(ix,iy,iz,2,2) = vxc_0 - vxc_1*cos(theta)
 
     end do !ix
