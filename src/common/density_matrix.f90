@@ -116,27 +116,33 @@ contains
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
 #ifdef USE_OPENACC
-!$acc kernels present(system,info,psi) copyin(is,ie) copy(wrk)
         wrk(:,:,:,tid) = 0.d0
-!$acc loop gang vector(1)
+
+!$acc kernels
+!$acc loop collapse(2) private(wrk2)
         do ik=info%ik_s,info%ik_e
-!$acc loop collapse(3) gang vector(128) private(wrk2)
+        do io=info%io_s,info%io_e
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
-          wrk2 = 0d0
-!$acc loop seq
-          do io=info%io_s,info%io_e
-            wrk2 = wrk2 + system%rocc(io,ik,ispin)*system%wtk(ik) * abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
-          end do
-!$acc atomic update
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2
-!$acc end atomic
+          wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
+        end do
         end do
         end do
         end do
         end do
 !$acc end kernels
+
+!!$acc end kernels
+        ix = size(wrk,4)/2
+        do while(ix > 0)
+          if(tid < ix .and. tid + ix < nthreads) then
+            wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
+          end if
+          ix = ix/2
+        end do
+
 #else
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
