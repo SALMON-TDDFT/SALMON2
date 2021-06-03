@@ -132,16 +132,21 @@ contains
         end do
         end do
         end do
-!$acc end kernels
-
-!!$acc end kernels
+!$acc loop collapse(3) private(ix)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
         ix = size(wrk,4)/2
         do while(ix > 0)
           if(tid < ix .and. tid + ix < nthreads) then
-            wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
+            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + ix)
           end if
           ix = ix/2
         end do
+        end do
+        end do
+        end do
+!$acc end kernels
 
 #else
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
