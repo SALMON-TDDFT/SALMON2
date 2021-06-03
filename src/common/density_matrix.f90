@@ -120,9 +120,10 @@ contains
         tid = 0
 #ifdef USE_OPENACC
         wrk(:,:,:,tid) = 0.d0
+        tid_offset = size(wrk,4)/2
 
 !$acc kernels copyin(is,ie)
-!$acc loop collapse(2) private(wrk2,ik,io,iz,iy,ix)
+!$acc loop collapse(2) gang worker(256) private(wrk2,ik,io,iz,iy,ix)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
         do iz=is(3),ie(3)
@@ -135,11 +136,10 @@ contains
         end do
         end do
         end do
-!$acc loop collapse(3) private(tid_offset,ik,io,iz,iy,ix)
+!$acc loop collapse(3) private(tid_offset,iz,iy,ix)
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
-        tid_offset = size(wrk,4)/2
         do while(tid_offset > 0)
           if(tid < tid_offset .and. tid + tid_offset < nthreads) then
             wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
