@@ -42,6 +42,9 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
+#ifdef USE_OPENACC
+    integer :: tid_offset
+#endif
 
     call timer_begin(LOG_DENSITY_CALC)
     
@@ -118,8 +121,8 @@ contains
 #ifdef USE_OPENACC
         wrk(:,:,:,tid) = 0.d0
 
-!$acc kernels
-!$acc loop collapse(2) private(wrk2)
+!$acc kernels copyin(is,ie)
+!$acc loop collapse(2) private(wrk2,ik,io,iz,iy,ix)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
         do iz=is(3),ie(3)
@@ -132,16 +135,16 @@ contains
         end do
         end do
         end do
-!$acc loop collapse(3) private(ix)
+!$acc loop collapse(3) private(tid_offset,ik,io,iz,iy,ix)
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
-        ix = size(wrk,4)/2
-        do while(ix > 0)
-          if(tid < ix .and. tid + ix < nthreads) then
-            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + ix)
+        tid_offset = size(wrk,4)/2
+        do while(tid_offset > 0)
+          if(tid < tid_offset .and. tid + tid_offset < nthreads) then
+            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
           end if
-          ix = ix/2
+          tid_offset = tid_offset/2
         end do
         end do
         end do
