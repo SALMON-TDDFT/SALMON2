@@ -228,17 +228,18 @@ subroutine restart_opt(Miopt,opt)
 
 end subroutine restart_opt
 
-subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2,singlescale,idir)
-  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale
+subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,singlescale,idir)
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale, s_rt
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_parallel_info),intent(in) :: info
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
+  type(s_rt)              ,intent(in) :: rt
   type(s_scalar)          ,intent(in) :: Vh_stock1,Vh_stock2
   type(s_singlescale)     ,intent(in) :: singlescale
   character(*),optional   ,intent(in) :: idir
@@ -268,17 +269,21 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2,singles
   if(singlescale%flag_use) then
     call write_singlescale(wdir,lg,mg,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
+
+  call write_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
+  
 end subroutine checkpoint_rt
 
-subroutine restart_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2)
-  use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
+subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
+  use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar, s_rt
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
-  type(s_rgrid)             ,intent(in) :: lg, mg
+  type(s_rgrid)          ,intent(in)    :: lg, mg
   type(s_dft_system)     ,intent(inout) :: system
-  type(s_parallel_info)  ,intent(in) :: info
+  type(s_parallel_info)  ,intent(in)    :: info
   type(s_orbital)        ,intent(inout) :: spsi
-  integer                  ,intent(out) :: iter
+  integer                ,intent(out)   :: iter
+  type(s_rt)             ,intent(inout) :: rt
   type(s_scalar)         ,intent(inout) :: Vh_stock1,Vh_stock2
 
   character(256) :: gdir,wdir
@@ -293,6 +298,11 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2)
 
   call read_bin(wdir,lg,mg,system,info,spsi,iter &
                ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
+       
+  if(yn_restart =='y') then
+    call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
+  end if
+  
 end subroutine restart_rt
 
 !===================================================================================================================================
@@ -1897,6 +1907,100 @@ subroutine read_Velocity(idir,system)
 20 continue
 
 end subroutine read_Velocity
+
+!===================================================================================================================================
+
+subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
+  use structures
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  use filesystem, only: create_directory
+  use salmon_global, only: trans_longi, projection_option
+  implicit none
+  character(*),            intent(in) :: wdir
+  integer,                 intent(in) :: itt
+  type(s_rgrid),           intent(in) :: lg, mg
+  type(s_dft_system),      intent(in) :: system
+  type(s_parallel_info),   intent(in) :: info
+  logical,                 intent(in) :: iself
+  type(s_rt),              intent(in) :: rt
+  !
+  integer,parameter :: iunit = 333
+  integer :: ierr,comm
+  character(256) :: tdir,filename
+  
+  comm = info%icomm_rko
+  
+  if(comm_is_root(nproc_id_global)) then
+    filename = trim(wdir)//"rtdata.bin"
+    open(iunit,file=filename,form='unformatted',iostat=ierr)
+    write(iunit) lbound(rt%Ac_tot,2), ubound(rt%Ac_tot,2)
+    write(iunit) rt%Ac_tot
+    write(iunit) rt%Ac_ext
+    write(iunit) rt%Ac_ind
+    write(iunit) rt%curr
+    write(iunit) rt%E_tot
+    write(iunit) rt%E_ext
+    write(iunit) rt%E_ind
+    close(iunit)
+  end if
+
+! future work
+  if(projection_option/='no') then
+!  call create_directory(tdir)
+!  call write_wavefunction(tdir,lg,mg,system,info,rt%tpsi0,iself)
+  end if
+  
+end subroutine write_rtdata
+
+subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
+  use structures
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  use salmon_global, only: trans_longi, projection_option
+  implicit none
+  character(*),            intent(in) :: wdir
+  integer,                 intent(in) :: itt
+  type(s_rgrid),           intent(in) :: lg, mg
+  type(s_dft_system),      intent(in) :: system
+  type(s_parallel_info),   intent(in) :: info
+  logical,                 intent(in) :: iself
+  type(s_rt)                          :: rt
+  !
+  integer,parameter :: iunit = 333
+  integer :: ierr,comm,i1,i2
+  character(256) :: tdir,filename
+  
+  comm = info%icomm_rko
+  
+  if(comm_is_root(nproc_id_global)) then
+    filename = trim(wdir)//"rtdata.bin"
+    open(iunit,file=filename,form='unformatted',status='old',iostat=ierr)
+    read(iunit) i1,i2
+    read(iunit) rt%Ac_tot(1:3,i1:i2)
+    read(iunit) rt%Ac_ext(1:3,i1:i2)
+    read(iunit) rt%Ac_ind(1:3,i1:i2)
+    read(iunit) rt%curr  (1:3,i1:i2)
+    read(iunit) rt%E_tot (1:3,i1:i2)
+    read(iunit) rt%E_ext (1:3,i1:i2)
+    read(iunit) rt%E_ind (1:3,i1:i2)
+    close(iunit)
+    write(*,*) "  read rtdata from restart data"
+  end if
+  call comm_bcast(rt%Ac_tot,comm)
+  call comm_bcast(rt%Ac_ext,comm)
+  call comm_bcast(rt%Ac_ind,comm)
+  call comm_bcast(rt%curr,comm)
+  call comm_bcast(rt%E_tot,comm)
+  call comm_bcast(rt%E_ext,comm)
+  call comm_bcast(rt%E_ind,comm)
+  
+! future work
+  if(projection_option/='no') then
+   !call read_wavefunction(idir,lg,mg,system,info,rt%tpsi0,mk,mo,if_real_orbital,iself)
+  end if
+
+end subroutine read_rtdata
 
 !===================================================================================================================================
 
