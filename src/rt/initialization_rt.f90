@@ -175,6 +175,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%Ac_ind = 0d0
   rt%Ac_tot = 0d0
   
+  if(yn_periodic=='y') then
+    call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:,0:nt+1))
+    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
+  end if
+  
   if (yn_restart == 'n') Mit=0
   call timer_end(LOG_READ_RT_DATA)
   
@@ -446,13 +451,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
         call write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
       end if
     end do
-  
-  if(yn_periodic=='y') then
-    call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:,0:nt+1))
-    if(yn_restart=='n') then
-      rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
-    end if
-  end if
   
   if(yn_md=='y') call init_md(system,md)
   
