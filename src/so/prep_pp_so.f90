@@ -76,7 +76,7 @@ contains
 
     Nlma_so = lma
 
-    write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
+    !write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
 
     allocate( lma_tbl_so(lm_max,natom,2) ); lma_tbl_so=0
     allocate( ppg%ia_tbl_so(Nlma_so) ); ppg%ia_tbl_so=0
