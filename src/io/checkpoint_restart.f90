@@ -1931,18 +1931,15 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   
   comm = info%icomm_rko
   
-  if(comm_is_root(nproc_id_global)) then
-    filename = trim(wdir)//"rtdata.bin"
-    open(iunit,file=filename,form='unformatted',iostat=ierr)
-    write(iunit) lbound(rt%Ac_tot,2), ubound(rt%Ac_tot,2)
-    write(iunit) rt%Ac_tot
-    write(iunit) rt%Ac_ext
-    write(iunit) rt%Ac_ind
-    write(iunit) rt%curr
-    write(iunit) rt%E_tot
-    write(iunit) rt%E_ext
-    write(iunit) rt%E_ind
-    close(iunit)
+  if(trans_longi /= 'tr') then
+    if(comm_is_root(nproc_id_global)) then
+      filename = trim(wdir)//"rtdata.bin"
+      open(iunit,file=filename,form='unformatted',iostat=ierr)
+      write(iunit) rt%Ac_tot(:,itt),rt%Ac_tot(:,itt+1)
+      write(iunit) rt%Ac_ind(:,itt),rt%Ac_ind(:,itt+1)
+      write(iunit) rt%Ac_ind(:,0) ! for the 2D approximation
+      close(iunit)
+    end if
   end if
 
 ! future work
@@ -1973,28 +1970,20 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   
   comm = info%icomm_rko
   
-  if(comm_is_root(nproc_id_global)) then
-    filename = trim(wdir)//"rtdata.bin"
-    open(iunit,file=filename,form='unformatted',status='old',iostat=ierr)
-    read(iunit) i1,i2
-    read(iunit) rt%Ac_tot(1:3,i1:i2)
-    read(iunit) rt%Ac_ext(1:3,i1:i2)
-    read(iunit) rt%Ac_ind(1:3,i1:i2)
-    read(iunit) rt%curr  (1:3,i1:i2)
-    read(iunit) rt%E_tot (1:3,i1:i2)
-    read(iunit) rt%E_ext (1:3,i1:i2)
-    read(iunit) rt%E_ind (1:3,i1:i2)
-    close(iunit)
-    write(*,*) "  read rtdata from restart data"
+  if(trans_longi /= 'tr') then
+    if(comm_is_root(nproc_id_global)) then
+      filename = trim(wdir)//"rtdata.bin"
+      open(iunit,file=filename,form='unformatted',status='old',iostat=ierr)
+      read(iunit) rt%Ac_tot(:,itt),rt%Ac_tot(:,itt+1)
+      read(iunit) rt%Ac_ind(:,itt),rt%Ac_ind(:,itt+1)
+      read(iunit) rt%Ac_ind(:,0) ! for the 2D approximation
+      close(iunit)
+      write(*,*) "  read rtdata from restart data"
+    end if
+    call comm_bcast(rt%Ac_tot,comm)
+    call comm_bcast(rt%Ac_ind,comm)
   end if
-  call comm_bcast(rt%Ac_tot,comm)
-  call comm_bcast(rt%Ac_ext,comm)
-  call comm_bcast(rt%Ac_ind,comm)
-  call comm_bcast(rt%curr,comm)
-  call comm_bcast(rt%E_tot,comm)
-  call comm_bcast(rt%E_ext,comm)
-  call comm_bcast(rt%E_ind,comm)
-  
+ 
 ! future work
   if(projection_option/='no') then
    !call read_wavefunction(idir,lg,mg,system,info,rt%tpsi0,mk,mo,if_real_orbital,iself)

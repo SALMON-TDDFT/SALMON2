@@ -405,7 +405,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call set_vonf(mg,lg,system%Hgs,rt)
   end if
   
-  if(yn_restart /= 'y')then
+  if(yn_restart == 'n')then
     call calc_dip(info%icomm_r,lg,mg,system,rho_s,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
@@ -416,7 +416,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   endif
   
   ! Initial wave function
-  if(iperiodic==0 .and. ae_shape1 == 'impulse' .and. yn_restart /= 'y')then
+  if(iperiodic==0 .and. ae_shape1 == 'impulse' .and. yn_restart == 'n')then
     do iik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
     do jspin=1,system%nspin
@@ -447,9 +447,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
       end if
     end do
   
-  if(yn_periodic=='y' .and. yn_restart=='n') then
+  if(yn_periodic=='y') then
     call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:,0:nt+1))
-    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
+    if(yn_restart=='n') then
+      rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
+    end if
   end if
   
   if(yn_md=='y') call init_md(system,md)
