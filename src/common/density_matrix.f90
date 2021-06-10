@@ -30,6 +30,8 @@ contains
     use misc_routines, only: ceiling_pow2
     use timer
     use sym_rho_sub, only: sym_rho
+    use salmon_global, only: yn_spinorbit
+    use noncollinear_module, only: calc_dm_noncollinear, rot_dm_noncollinear
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -42,6 +44,14 @@ contains
     real(8),allocatable :: wrk(:,:,:,:)
 
     call timer_begin(LOG_DENSITY_CALC)
+    
+    if(yn_spinorbit=='y') then
+      call calc_dm_noncollinear( psi, system, info, mg )
+      call rot_dm_noncollinear( rho, system, mg )
+      call timer_end(LOG_DENSITY_CALC)
+      return
+    end if
+    
     nspin = system%nspin
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
