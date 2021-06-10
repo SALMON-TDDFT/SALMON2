@@ -58,6 +58,8 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
+    use salmon_global, only: yn_spinorbit
+    use noncollinear_module, only: rot_vxc_noncollinear
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
@@ -222,6 +224,10 @@ contains
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+    
+    if(yn_spinorbit=='y') then
+      call rot_vxc_noncollinear( Vxc, system, mg )
+    end if
 
     return
     

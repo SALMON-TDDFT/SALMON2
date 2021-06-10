@@ -109,19 +109,19 @@ contains
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
 
-       phi = -atan( aimag(den_mat(ix,iy,iz,a,b))/real(den_mat(ix,iy,iz,a,b)) )
-       theta = atan( 2.0d0*( real(den_mat(ix,iy,iz,a,b))*cos(phi) &
+       phi = -atan( aimag(den_mat(ix,iy,iz,a,b))/dble(den_mat(ix,iy,iz,a,b)) )
+       theta = atan( 2.0d0*( dble(den_mat(ix,iy,iz,a,b))*cos(phi) &
             -aimag(den_mat(ix,iy,iz,a,b))*sin(phi) ) &
-            /real( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) ) )
+            /dble( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) ) )
 
-       rho(1)%f(ix,iy,iz) = 0.5d0*real( den_mat(ix,iy,iz,a,a)+den_mat(ix,iy,iz,b,b) ) &
-            + 0.5d0*real( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) )*cos(theta) &
-            + (  real(den_mat(ix,iy,iz,a,b))*cos(phi) &
+       rho(1)%f(ix,iy,iz) = 0.5d0*dble( den_mat(ix,iy,iz,a,a)+den_mat(ix,iy,iz,b,b) ) &
+            + 0.5d0*dble( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) )*cos(theta) &
+            + (  dble(den_mat(ix,iy,iz,a,b))*cos(phi) &
             -aimag(den_mat(ix,iy,iz,a,b))*sin(phi) )*sin(theta)
 
-       rho(2)%f(ix,iy,iz) = 0.5d0*real( den_mat(ix,iy,iz,a,a)+den_mat(ix,iy,iz,b,b) ) &
-            - 0.5d0*real( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) )*cos(theta) &
-            - (  real(den_mat(ix,iy,iz,a,b))*cos(phi) &
+       rho(2)%f(ix,iy,iz) = 0.5d0*dble( den_mat(ix,iy,iz,a,a)+den_mat(ix,iy,iz,b,b) ) &
+            - 0.5d0*dble( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) )*cos(theta) &
+            - (  dble(den_mat(ix,iy,iz,a,b))*cos(phi) &
             -aimag(den_mat(ix,iy,iz,a,b))*sin(phi) )*sin(theta)
 
        rot_ang(ix,iy,iz,1) = phi
