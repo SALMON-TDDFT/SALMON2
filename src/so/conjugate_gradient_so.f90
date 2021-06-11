@@ -14,14 +14,10 @@
 !  limitations under the License.
 !
 module Conjugate_Gradient_so
-
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
   private
   public :: gscg_rwf_so
   public :: gscg_zwf_so
-  public :: SPIN_ORBIT_ON
 
 contains
 

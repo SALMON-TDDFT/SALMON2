@@ -414,17 +414,16 @@ end subroutine scf_iteration_dft
 
 subroutine  get_band_gap(system,energy,gap)
   use structures
-  use salmon_global, only: nelec
+  use salmon_global, only: nelec,yn_spinorbit
   use inputoutput, only: au_energy_ev
   use communication, only: comm_is_root
-  use spin_orbit_global, only: SPIN_ORBIT_ON
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_dft_energy),intent(in) :: energy
   integer :: ik, index_vbm
   real(8) :: gap
   real(8),dimension(system%nk) :: esp_vb_max, esp_cb_min
-  if( SPIN_ORBIT_ON )then
+  if( yn_spinorbit=='y' )then
      index_vbm=nelec
   else
      index_vbm=nelec/2

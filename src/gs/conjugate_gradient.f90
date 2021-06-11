@@ -14,13 +14,7 @@
 !  limitations under the License.
 !
 module Conjugate_Gradient
-
-  use Conjugate_Gradient_so, only: gscg_rwf_so, gscg_zwf_so, SPIN_ORBIT_ON
-
   implicit none
-  private
-  public :: gscg_rwf
-  public :: gscg_zwf
 
 contains
 
@@ -29,6 +23,8 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
+  use salmon_global, only: yn_spinorbit
+  use Conjugate_Gradient_so, only: gscg_rwf_so
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -47,7 +43,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call gscg_rwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     return
   end if
@@ -342,6 +338,8 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
+  use salmon_global, only: yn_spinorbit
+  use Conjugate_Gradient_so, only: gscg_zwf_so
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -360,7 +358,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call gscg_zwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     return
   end if

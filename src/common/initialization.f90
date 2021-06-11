@@ -93,12 +93,11 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,projection_option,nelec_spin, &
+  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,projection_option,nelec_spin,yn_spinorbit, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
-  use occupation_so, only: SPIN_ORBIT_ON, init_occupation_so
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -156,7 +155,7 @@ subroutine init_dft_system(lg,system,stencil)
       else
         system%if_real_orbital = .false.
       end if
-      if ( SPIN_ORBIT_ON ) system%if_real_orbital=.false.
+      if ( yn_spinorbit=='y' ) system%if_real_orbital=.false.
     end select
   end if
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
@@ -173,7 +172,7 @@ subroutine init_dft_system(lg,system,stencil)
 
   if(calc_mode=='RT'.and. temperature<-1.d-12)then
      if(projection_option=='no' .or. projection_option=='gx')then  !'gx' is hidden option by AY
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
            system%no = nelec
         else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
            system%no = maxval(nelec_spin(:))
@@ -209,8 +208,8 @@ subroutine init_dft_system(lg,system,stencil)
 
 ! initial value of occupation
   system%rocc = 0d0
-  if ( SPIN_ORBIT_ON ) then
-    call init_occupation_so( system%rocc, nelec )
+  if ( yn_spinorbit=='y' ) then
+    system%rocc(1:nelec,:,:) = 1.0d0
   else
     select case(system%nspin)
     case(1)

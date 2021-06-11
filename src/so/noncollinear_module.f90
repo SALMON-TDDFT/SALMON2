@@ -1,11 +1,8 @@
 module noncollinear_module
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
   private
-  public :: SPIN_ORBIT_ON
   public :: calc_dm_noncollinear
   public :: rot_dm_noncollinear
   public :: rot_vxc_noncollinear

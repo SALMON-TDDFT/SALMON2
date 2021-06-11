@@ -18,13 +18,10 @@
 
 module subspace_diagonalization_so
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
   private
   public :: ssdg_so
-  public :: SPIN_ORBIT_ON
 
 contains
 

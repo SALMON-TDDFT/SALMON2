@@ -16,13 +16,10 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module prep_pp_so_sub
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
   private
   public :: calc_uv_so
-  public :: SPIN_ORBIT_ON
 
   integer,allocatable :: lma_tbl_so(:,:,:)
   integer :: Nlma_so
