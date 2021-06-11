@@ -21,13 +21,11 @@ module gram_schmidt_so_sub
   use pack_unpack, only: copy_data
   use timer
   use communication, only: comm_bcast, comm_summation
-  use spin_orbit_global, only: SPIN_ORBIT_ON
 
   implicit none
 
   private
   public :: gram_schmidt_so
-  public :: SPIN_ORBIT_ON
 
   complex(8),allocatable :: wf_io1(:,:,:,:)
   complex(8),allocatable :: wf_exc(:,:,:,:)

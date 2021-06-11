@@ -83,11 +83,8 @@ F90_SRCS = \
 ./plusu/prep_pp_plusu.f90 \
 ./plusu/pseudo_pt_plusu.f90 \
 ./plusu/update_kvector_plusu.f90 \
-./so/spin_orbit_global.f90 \
 ./so/gram_schmidt_so.f90 \
 ./so/noncollinear_module.f90 \
-./so/nondiagonal_so.f90 \
-./so/occupation_so.f90 \
 ./common/initialization.f90 \
 ./so/prep_pp_so.f90 \
 ./so/pseudo_pt_current_so.f90 \

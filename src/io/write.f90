@@ -1390,8 +1390,7 @@ contains
     use inputoutput, only: uenergy_from_au
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
                            out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
-                           nelec,nstate,temperature
-    use spin_orbit_global, only: SPIN_ORBIT_ON
+                           nelec,nstate,temperature,yn_spinorbit
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1408,7 +1407,7 @@ contains
       if(temperature>=0.d0) then
         eshift = system%mu
       else
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
           index_vbm=nelec
         else
           index_vbm=nelec/2
@@ -1474,10 +1473,9 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy, temperature
+                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1516,7 +1514,7 @@ contains
       if(temperature>=0.d0) then
         eshift = system%mu
       else
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
           index_vbm=nelec
         else
           index_vbm=nelec/2
@@ -1659,11 +1657,10 @@ contains
 
   subroutine write_band_information(system,energy)
     use structures
-    use salmon_global, only: nelec,yn_periodic
+    use salmon_global, only: nelec,yn_periodic,yn_spinorbit
     use inputoutput, only: au_energy_ev
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1671,7 +1668,7 @@ contains
     integer :: ik,index_vbm
     real(8),dimension(system%nk) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
     !
-    if( SPIN_ORBIT_ON )then
+    if( yn_spinorbit=='y' )then
       index_vbm=nelec
     else
       index_vbm=nelec/2

@@ -17,24 +17,20 @@
 #include "config.h"
 
 module subspace_diagonalization
-
-  use subspace_diagonalization_so, only: ssdg_so, SPIN_ORBIT_ON
-
   implicit none
-  private
-  public :: ssdg
 
 contains
 
 subroutine ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
-  use salmon_global, only: yn_diagonalization_red_mem
+  use salmon_global, only: yn_diagonalization_red_mem,yn_spinorbit
   use communication, only: comm_summation,comm_bcast
   use timer
   use hamiltonian, only: hpsi
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
+  use subspace_diagonalization_so, only: ssdg_so
   implicit none
   type(s_rgrid)        ,intent(in) :: mg
   type(s_dft_system)   ,intent(in) :: system
@@ -45,7 +41,7 @@ subroutine ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_orbital)            :: spsi,shpsi
   type(s_sendrecv_grid)      :: srg
 
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
      call ssdg_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
      return
   end if
