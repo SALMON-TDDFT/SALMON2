@@ -230,7 +230,7 @@ contains
     complex(8) :: zmat(2,2)
     
     zmat = zero
-!$omp parallel do collapse(2) private(ix,iy,iz)
+!$omp parallel do collapse(2) private(ix,iy,iz) reduction(+:zmat)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -269,14 +269,23 @@ contains
        !$omp end workshare
     end if
   
-    ! rho = c1*rho + c2*matmul( psi**2, occ )
+  ! rho = c1*rho + c2*matmul( psi**2, occ )
 
     !$omp workshare
     den_mat = c1*dmat_old + c2*den_mat
     dmat_old = den_mat
     !$omp end workshare
 
+  ! calculate the rotation matrix
+  
     call rot_dm_noncollinear( rho_s, system, mg )
+    
+  ! update the density from the diagonal components
+  
+    !$omp workshare
+    rho_s(1)%f = dble(den_mat(:,:,:,1,1))
+    rho_s(2)%f = dble(den_mat(:,:,:,2,2))
+    !$omp end workshare
   
   end subroutine simple_mixing_so
 
