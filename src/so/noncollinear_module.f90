@@ -230,7 +230,7 @@ contains
     complex(8) :: zmat(2,2)
     
     zmat = zero
-!$omp parallel do collapse(2) private(ix,iy,iz)
+!$omp parallel do collapse(2) private(ix,iy,iz) reduction(+:zmat)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
