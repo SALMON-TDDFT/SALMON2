@@ -1,13 +1,10 @@
 set(SOURCES
     noncollinear_module.f90
     gram_schmidt_so.f90
-    nondiagonal_so.f90
     prep_pp_so.f90
     pseudo_pt_so.f90
-    spin_orbit_global.f90
     subspace_diagonalization_so.f90
     update_kvector_so.f90
-    occupation_so.f90
     conjugate_gradient_so.f90
     pseudo_pt_current_so.f90
    )

@@ -56,7 +56,7 @@ type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 
-integer :: Mit, itt,itotNtime
+integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time
 
 !check condition for using jellium model
@@ -64,7 +64,7 @@ if(yn_jm=='y') call check_condition_jm
 
 call timer_begin(LOG_TOTAL)
 
-call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
+call initialization_rt( Mit, system, energy, ewald, rt, md, &
                         singlescale,  &
                         stencil, fg, poisson,  &
                         lg, mg,   &
@@ -84,14 +84,14 @@ call print_header()
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
-TE : do itt=Mit+1,itotNtime
+TE : do itt=Mit+1,nt
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+    call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
-    call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+    call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
@@ -108,9 +108,9 @@ TE : do itt=Mit+1,itotNtime
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
-      call checkpoint_rt(lg,mg,system,info,spsi_out,itt,Vh_stock1,Vh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale)
     else
-      call checkpoint_rt(lg,mg,system,info,spsi_in, itt,Vh_stock1,Vh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,system,info,spsi_in, itt,rt,Vh_stock1,Vh_stock2,singlescale)
     endif
     call timer_end(LOG_CHECKPOINT_SELF)
     call comm_sync_all
@@ -160,7 +160,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,Vh_stock1,Vh_stock2,singlescale,ofl%dir_out_restart)
+  call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,rt,Vh_stock1,Vh_stock2,singlescale,ofl%dir_out_restart)
 end if
 
 call finalize_xc(xc_func)

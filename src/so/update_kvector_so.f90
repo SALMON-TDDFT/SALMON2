@@ -1,12 +1,9 @@
 module update_kvector_so_sub
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
   private
   public :: update_kvector_so
-  public :: SPIN_ORBIT_ON
 
 contains
 

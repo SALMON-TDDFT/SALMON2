@@ -25,7 +25,7 @@ contains
   !! export SYSNAME_k.data file
   subroutine write_k_data(system,stencil)
     use structures
-    use salmon_global, only: sysname
+    use salmon_global, only: sysname,yn_periodic
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -36,6 +36,10 @@ contains
     integer :: fh_k
     integer :: ik,NK
     character(100) :: file_k_data
+    
+    if(yn_periodic=='n') then
+      return
+    end if
 
     NK = system%nk
     file_k_data = trim(sysname)//'_k.data'
@@ -112,10 +116,11 @@ contains
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)       :: tpsi
     !
-    integer :: fh_tm
+    integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,ik_s,ik_e,is(3),ie(3)
     real(8) :: x,y,z
-    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:),gtpsi(:,:,:,:)
+    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
+    complex(8),allocatable :: gtpsi(:,:,:,:),gtpsi_l(:,:,:,:)
     complex(8),allocatable :: uVpsi(:,:),uVpsix(:,:),uVpsiy(:,:),uVpsiz(:,:)
     complex(8),allocatable :: uVpsixx(:,:),uVpsixy(:,:),uVpsixz(:,:)
     complex(8),allocatable :: uVpsiyy(:,:),uVpsiyz(:,:),uVpsizz(:,:)
@@ -135,8 +140,11 @@ contains
       return
     endif
     if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
-      write(*,*) "error @ write_tm_data: do not use orbital parallelization"
-      return
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) "error @ write_tm_data: do not use orbital parallelization"
+        write(*,*) "Only <u|p|u> is printed (pseudopotential terms are not printed)"
+      endif
+     !return
     endif
     if(.not. allocated(tpsi%zwf)) then!??????
       write(*,*) "error @ write_tm_data: do not use real wavefunction (iperiodic=0)"
@@ -165,9 +173,16 @@ contains
 
     upu_l(:,:,:,:) = 0d0
 
+    allocate(gtpsi_l(3,mg%is_array(1):mg%ie_array(1) &
+                      ,mg%is_array(2):mg%ie_array(2) &
+                      ,mg%is_array(3):mg%ie_array(3)))
     allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
                     ,mg%is_array(2):mg%ie_array(2) &
                     ,mg%is_array(3):mg%ie_array(3)))
+    narray= 3 * ( mg%ie_array(1) - mg%is_array(1) + 1 ) &
+              * ( mg%ie_array(2) - mg%is_array(2) + 1 ) &
+              * ( mg%ie_array(3) - mg%is_array(3) + 1 )
+
   ! overlap region communication
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, tpsi%zwf)
@@ -176,10 +191,15 @@ contains
     do ik=ik_s,ik_e
     do ib2=1,NB
 
-    ! gtpsi = (nabla) psi
-      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-      do ib1=1,NB
+      ! gtpsi = (nabla) psi
+      gtpsi_l(:,:,:,:) = 0d0
+      if(ib2.ge.info%io_s .and. ib2.le.info%io_e) &
+        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi_l,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+      call comm_summation(gtpsi_l,gtpsi,narray,info%icomm_o)
+
+!     do ib1=1,NB
+      do ib1=info%io_s,info%io_e
         do i=1,3
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
                             * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
@@ -190,6 +210,30 @@ contains
     end do
     call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
     deallocate(gtpsi)
+
+    !--(Print only for orbital parallelization: just temporal)
+    if(info%io_s/=1 .or. info%io_e/=system%no) then
+
+       file_tm_data = trim(sysname)//'_tm.data'
+       if (comm_is_root(nproc_id_global)) then
+          fh_tm = open_filehandle(file_tm_data, status="replace")
+          write(fh_tm, '("#",1X,A)') "#Transition Moment between occupied and unocupied orbitals in GS"
+          write(fh_tm, '("#",1X,A)') "# (Separated analysis tool is available)"
+
+          !<u_nk|p_j|u_mk>  (j=x,y,z)
+          write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+          do ik =1,NK
+          do ib1=1,NB
+          do ib2=1,NB
+             write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
+          enddo
+          enddo
+          enddo
+          close(fh_tm)
+       endif
+       return
+    endif
+    !-------------------------------------------------
 
     !calculate <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
     u_rVnl_Vnlr_u_l = 0d0
@@ -801,7 +845,7 @@ contains
 
 !===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
-    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de
+    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de, temperature, yn_lr_w0_correction
     use inputoutput, only: t_unit_energy,t_unit_conductivity
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
@@ -811,8 +855,8 @@ contains
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
     integer :: uid
-    integer :: ihw,n,ixyz
-    real(8) :: tt,hw,t2
+    integer :: ihw,n,ixyz, it
+    real(8) :: tt,hw,t2, smoothing, jav_d(3), jav_s(3), smt_s
     complex(8) :: zsigma(3),zeps(3)
     real(8) :: rtdata(1:3,1:nt)
 
@@ -840,6 +884,7 @@ contains
         & 12, "Im(eps_y)", "none", &
         & 13, "Im(eps_z)", "none"
 
+     
       tt = dt*dble(nt)
       if(trans_longi=="tr") then
         rtdata(1:3,1:nt) = rt%curr(1:3,1:nt)
@@ -847,12 +892,28 @@ contains
         rtdata(1:3,1:nt) = rt%E_tot(1:3,1:nt)
       end if
 
+      ! sigma(omega=0) correcton
+      jav_d(:)=0d0
+      if( yn_lr_w0_correction=='y' .and. temperature < 0d0) then
+         jav_s = 0d0
+         smt_s = 0d0;
+         do it = 1,nt
+            t2 = dble(it)*dt
+            smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+            jav_s(:)  = jav_s(:) + rtdata(:,it) * smoothing
+            smt_s     = smt_s + smoothing
+         end do
+         jav_d(:) = jav_s(:)/smt_s
+      end if
+
       do ihw=1,nenergy
         hw=dble(ihw)*de
         zsigma(:)=(0.d0,0.d0)
         do n=1,nt
           t2=dble(n)*dt
-          zsigma(:)=zsigma(:)+exp(zi*hw*t2)* rtdata(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+         !zsigma(:)=zsigma(:) + exp(zi*hw*t2)* rtdata(:,n) * smoothing
+          zsigma(:)=zsigma(:) + exp(zi*hw*t2)* (rtdata(:,n)-jav_d(:)) * smoothing
         end do
 
         zsigma(:) = (zsigma(:)/e_impulse)*dt
@@ -1329,8 +1390,7 @@ contains
     use inputoutput, only: uenergy_from_au
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
                            out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
-                           nelec,nstate,temperature
-    use spin_orbit_global, only: SPIN_ORBIT_ON
+                           nelec,nstate,temperature,yn_spinorbit
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1347,7 +1407,7 @@ contains
       if(temperature>=0.d0) then
         eshift = system%mu
       else
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
           index_vbm=nelec
         else
           index_vbm=nelec/2
@@ -1413,10 +1473,9 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy, temperature
+                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1455,7 +1514,7 @@ contains
       if(temperature>=0.d0) then
         eshift = system%mu
       else
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
           index_vbm=nelec
         else
           index_vbm=nelec/2
@@ -1598,11 +1657,10 @@ contains
 
   subroutine write_band_information(system,energy)
     use structures
-    use salmon_global, only: nelec
+    use salmon_global, only: nelec,yn_periodic,yn_spinorbit
     use inputoutput, only: au_energy_ev
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1610,7 +1668,7 @@ contains
     integer :: ik,index_vbm
     real(8),dimension(system%nk) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
     !
-    if( SPIN_ORBIT_ON )then
+    if( yn_spinorbit=='y' )then
       index_vbm=nelec
     else
       index_vbm=nelec/2
@@ -1622,23 +1680,44 @@ contains
         esp_cb_min(ik)=minval(energy%esp(index_vbm+1:system%no,ik,:))
         esp_cb_max(ik)=maxval(energy%esp(index_vbm+1:system%no,ik,:))
       end do
-      write(*,*) 'band information-----------------------------------------'
-      write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
-      write(*,*) 'Top of VB',maxval(esp_vb_max(:))
-      write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
-      write(*,*) 'Top of CB',maxval(esp_cb_max(:))
-      write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
-      write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
-      write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
-      write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
-      write(*,*) '---------------------------------------------------------'
-      write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
-      write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
-      write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
-      write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
-      write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
-      write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
-      write(*,*) '---------------------------------------------------------'
+      if(yn_periodic=='y') then
+        write(*,*) 'band information-----------------------------------------'
+        write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
+        write(*,*) 'Top of VB',maxval(esp_vb_max(:))
+        write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
+        write(*,*) 'Top of CB',maxval(esp_cb_max(:))
+        write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+        write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
+        write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
+        write(*,*) 'Physicaly upper bound of eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
+        write(*,*) '---------------------------------------------------------'
+        write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
+        write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
+        write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
+        write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
+        write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
+        write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of CB for DOS[eV]',minval(esp_cb_max(:))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of eps(omega)[eV]',minval(esp_cb_max(:)-esp_vb_min(:))*au_energy_ev
+        write(*,*) '---------------------------------------------------------'
+      else
+        if(system%nk /= 1) stop "error: yn_periodic='n' and Nk/=1"
+        write(*,*) 'orbital energy information-------------------------------'
+        write(*,*) 'Lowest occupied orbital',esp_vb_min(1)
+        write(*,*) 'Highest occupied orbital (HOMO)',esp_vb_max(1)
+        write(*,*) 'Lowest unoccupied orbital (LUMO)',esp_cb_min(1)
+        write(*,*) 'Highest unoccupied orbital',esp_cb_max(1)
+        write(*,*) 'HOMO-LUMO gap',esp_cb_min(1)-esp_vb_max(1)
+        write(*,*) 'Physicaly upper bound of eps(omega)',esp_cb_max(1)-esp_vb_min(1)
+        write(*,*) '---------------------------------------------------------'
+        write(*,*) 'Lowest occupied orbital[eV]',esp_vb_min(1)*au_energy_ev
+        write(*,*) 'Highest occupied orbital (HOMO)[eV]',esp_vb_max(1)*au_energy_ev
+        write(*,*) 'Lowest unoccupied orbital (LUMO)[eV]',esp_cb_min(1)*au_energy_ev
+        write(*,*) 'Highest unoccupied orbital[eV]',esp_cb_max(1)*au_energy_ev
+        write(*,*) 'HOMO-LUMO gap[eV]',(esp_cb_min(1)-esp_vb_max(1))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of eps(omega)[eV]',(esp_cb_max(1)-esp_vb_min(1))*au_energy_ev
+        write(*,*) '---------------------------------------------------------'
+      end if
     end if
     return
   end subroutine write_band_information
@@ -2193,6 +2272,7 @@ contains
       system%rocc = rt%rocc0
       !$omp end workshare
       deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
+      deallocate(tpsi%zwf_real,tpsi%zwf_imag,ttpsi%zwf_real,ttpsi%zwf_imag)
       allocate(energy%esp(system%no,system%nk,system%nspin))
       call allocate_orbital_complex(system%nspin,mg,info, tpsi)
       call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
@@ -2215,6 +2295,7 @@ contains
       system%rocc(:,:,:) = rocc_rt_bk(:,:,:)
       !$omp end workshare
       deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
+      deallocate(tpsi%zwf_real,tpsi%zwf_imag,ttpsi%zwf_real,ttpsi%zwf_imag)
       allocate(energy%esp(system%no,system%nk,system%nspin))
       call allocate_orbital_complex(system%nspin,mg,info, tpsi)
       call allocate_orbital_complex(system%nspin,mg,info,ttpsi)

@@ -29,11 +29,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use stencil_sub
   use nonlocal_potential
   use pseudo_pt_plusU_sub, only: pseudo_plusU, PLUS_U_ON
-  use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
-  use nondiagonal_so_sub, only: nondiagonal_so
+  use pseudo_pt_so_sub, only: pseudo_so
+  use noncollinear_module, only: op_xc_noncollinear
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil, &
-          absorbing_boundary
+          absorbing_boundary, yn_spinorbit
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
   use communication, only: comm_summation
@@ -112,7 +112,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_STENCIL)
 
     ! nonlocal potential
-    if ( SPIN_ORBIT_ON ) then
+    if ( yn_spinorbit=='y' ) then
       ! pseudopotential
       if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
     else
@@ -411,8 +411,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   ! nonlocal potential
     if(yn_jm=='n') then
-      if ( SPIN_ORBIT_ON ) then
-        call nondiagonal_so(tpsi,htpsi,info,mg)
+      if ( yn_spinorbit=='y' ) then
+        call op_xc_noncollinear( tpsi, htpsi, info, mg )
         call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
       else
       ! pseudopotential
@@ -772,9 +772,9 @@ contains
        do iz = mg%is(3),mg%ie(3)
           z  = iz*system%hgs(3)
           if( z .le. z1 ) then
-             w = cmplx( 0d0, -w0*(z1-z)/dr )
+             w = dcmplx( 0d0, -w0*(z1-z)/dr )
           else if( z .ge. z2 ) then
-             w = cmplx( 0d0, -w0*(z-z2)/dr )
+             w = dcmplx( 0d0, -w0*(z-z2)/dr )
           else
              cycle
           endif
@@ -836,7 +836,8 @@ end subroutine update_vlocal
 subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use math_constants,only : zi
   use structures
-  use update_kvector_so_sub, only: update_kvector_so, SPIN_ORBIT_ON
+  use salmon_global, only: yn_spinorbit
+  use update_kvector_so_sub, only: update_kvector_so
   use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
   implicit none
   integer           ,intent(in) :: ik_s,ik_e !,n_max
@@ -853,7 +854,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
     kAc(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
   end do
   
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call update_kvector_so( ppg, kAc, ik_s, ik_e )
   end if
   if ( PLUS_U_ON ) then

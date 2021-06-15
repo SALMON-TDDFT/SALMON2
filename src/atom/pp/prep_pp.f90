@@ -24,8 +24,8 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic,natom,quiet
-  use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
+  use salmon_global, only: iperiodic,natom,quiet,yn_spinorbit
+  use prep_pp_so_sub, only: calc_uv_so
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
   implicit none
@@ -145,7 +145,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call timer_begin(LOG_INIT_PS_LMA_UV)
   call set_lma
   call calc_uv
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call calc_uv_so(pp,ppg,lg%num,hgs,hvol,property)
   end if
   if ( PLUS_U_ON ) then
@@ -589,7 +589,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   end do
 
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
-  ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
+  ppg%zekr_uV(:,:,1) = dcmplx(ppg%uV)
 
   return
 END SUBROUTINE calc_Vpsl_isolated

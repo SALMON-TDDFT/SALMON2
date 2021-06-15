@@ -343,7 +343,8 @@ CONTAINS
     use structures
     use communication, only: comm_summation
     use hamiltonian, only: hpsi
-    use pseudo_pt_so_sub, only: SPIN_ORBIT_ON, pseudo_so
+    use pseudo_pt_so_sub, only: pseudo_so
+    use salmon_global, only: yn_spinorbit
     use timer
     implicit none
     type(s_dft_energy)                     :: energy
@@ -399,7 +400,7 @@ CONTAINS
       end do
       
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
-      if ( SPIN_ORBIT_ON ) then
+      if ( yn_spinorbit=='y' ) then
         energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
         energy%esp(:,:,2) = energy%esp(:,:,1)
       end if
@@ -480,7 +481,7 @@ CONTAINS
       end do
 
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
-      if ( SPIN_ORBIT_ON ) then
+      if ( yn_spinorbit=='y' ) then
         energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
         energy%esp(:,:,2) = energy%esp(:,:,1)
       end if
@@ -511,7 +512,7 @@ CONTAINS
 #endif
       E_local(1) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
 
-      if ( SPIN_ORBIT_ON ) then
+      if ( yn_spinorbit=='y' ) then
         ttpsi%zwf=(0.0d0,0.0d0)
         call pseudo_so( tpsi,ttpsi,info,Nspin,ppg,mg )
       ! nonlocal part (E_ion_nloc)

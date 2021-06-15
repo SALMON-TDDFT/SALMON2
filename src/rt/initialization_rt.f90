@@ -21,7 +21,7 @@ module initialization_rt_sub
 
 contains
 
-subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
+subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, info,  &
@@ -63,8 +63,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   implicit none
   integer,parameter :: Nd = 4
 
-  real(8)       :: debye2au   ! [D]  -> [a.u.] 
-  integer       :: Ntime
+  real(8)       :: debye2au   ! [D]  -> [a.u.]
 
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
@@ -91,7 +90,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_singlescale) :: singlescale
   type(s_ofile) :: ofile
   
-  integer :: itotNtime
   integer :: iob, i1,iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
@@ -100,18 +98,16 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   character(10) :: fileLaser
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
-  integer :: itt,t_max
+  integer :: itt
   logical :: rion_update
   
   call timer_begin(LOG_INIT_RT)
 
   call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
   
-  Ntime=nt
-  
   if((.not. quiet) .and. comm_is_root(nproc_id_global))then
     write(*,*)
-    write(*,*) "Total time step      =",Ntime
+    write(*,*) "Total time step      =",Nt
     write(*,*) "Time step[fs]        =",dt*au_time_fs
     write(*,*) "Energy range         =",Nenergy
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
@@ -154,6 +150,38 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   call timer_end(LOG_INIT_RT)
+  
+  call timer_begin(LOG_READ_RT_DATA)
+  
+  allocate( rt%rIe(     0:nt) )
+  allocate( rt%dDp_e( 3,0:nt) )
+  allocate( rt%Dp_e(  3,0:nt) )
+  allocate( rt%Dp_i(  3,0:nt) )
+  allocate( rt%Qp_e(3,3,0:nt) )
+  
+  allocate( rt%curr  (3,0:nt+1) )
+  allocate( rt%E_ext (3,0:nt+1) )
+  allocate( rt%E_ind (3,0:nt+1) )
+  allocate( rt%E_tot (3,0:nt+1) )
+  allocate( rt%Ac_ext(3,0:nt+1) )
+  allocate( rt%Ac_ind(3,0:nt+1) )
+  allocate( rt%Ac_tot(3,0:nt+1) )
+  
+  rt%curr  = 0d0
+  rt%E_ext = 0d0
+  rt%E_ind = 0d0
+  rt%E_tot = 0d0
+  rt%Ac_ext = 0d0
+  rt%Ac_ind = 0d0
+  rt%Ac_tot = 0d0
+  
+  if(yn_periodic=='y') then
+    call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:,0:nt+1))
+    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
+  end if
+  
+  if (yn_restart == 'n') Mit=0
+  call timer_end(LOG_READ_RT_DATA)
   
   call timer_begin(LOG_READ_GS_DATA)
   
@@ -208,7 +236,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call restart_rt(lg,mg,system,info,spsi_in,Mit,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
+  call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
@@ -292,42 +320,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
-  
-  
-  
-  call timer_begin(LOG_READ_RT_DATA)
-  
-  allocate( rt%rIe(     0:Ntime) )
-  allocate( rt%dDp_e( 3,0:Ntime) )
-  allocate( rt%Dp_e(  3,0:Ntime) )
-  allocate( rt%Dp_i(  3,0:Ntime) )
-  allocate( rt%Qp_e(3,3,0:Ntime) )
-  
-  if(yn_restart /= 'y')then
-    t_max = Ntime
-  else
-    t_max = Ntime + Mit
-  end if
-  allocate( rt%curr( 3,0:t_max) )
-  allocate( rt%E_ext(3,0:t_max) )
-  allocate( rt%E_ind(3,0:t_max) )
-  allocate( rt%E_tot(3,0:t_max) )
-  allocate( rt%Ac_ext(3,0:t_max+1) )
-  allocate( rt%Ac_ind(3,0:t_max+1) )
-  allocate( rt%Ac_tot(3,0:t_max+1) )
-  
-  rt%curr  = 0d0
-  rt%E_ext = 0d0
-  rt%E_ind = 0d0
-  rt%E_tot = 0d0
-  rt%Ac_ext = 0d0
-  rt%Ac_ind = 0d0
-  rt%Ac_tot = 0d0
-  
-  itotNtime = Ntime
-  if (yn_restart /= 'y') Mit=0
-  call timer_end(LOG_READ_RT_DATA)
-  
   
   call timer_begin(LOG_INIT_RT)
   
@@ -418,7 +410,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call set_vonf(mg,lg,system%Hgs,rt)
   end if
   
-  if(yn_restart /= 'y')then
+  if(yn_restart == 'n')then
     call calc_dip(info%icomm_r,lg,mg,system,rho_s,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
@@ -429,7 +421,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   endif
   
   ! Initial wave function
-  if(iperiodic==0 .and. ae_shape1 == 'impulse' .and. yn_restart /= 'y')then
+  if(iperiodic==0 .and. ae_shape1 == 'impulse' .and. yn_restart == 'n')then
     do iik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
     do jspin=1,system%nspin
@@ -450,7 +442,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-        call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
+        call write_dns(lg,mg,system,info,rho_s,rt%rho0_s,itt)
       end if
       if(yn_out_elf_rt=='y')then
         call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
@@ -459,12 +451,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
         call write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
       end if
     end do
-  
-  if(iperiodic==3) then
-    call calc_Ac_ext_t(0d0, dt, Mit, itotNtime+1, rt%Ac_ext(:,Mit:itotNtime+1))
-    ! future work: restart input of rt%Ac_ind
-    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
-  end if
   
   if(yn_md=='y') call init_md(system,md)
   
@@ -481,7 +467,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     if(.not. stencil%if_orthogonal) stop "error: single-scale Maxwell-TDDFT & non-orthogonal lattice"
     call allocate_vector(mg,rt%j_e)
-    call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
+    call init_singlescale(mg,lg,info,system%hgs,system%rmatrix_B,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then

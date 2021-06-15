@@ -71,7 +71,7 @@ type(ls_fdtd_weyl) :: fw
 type(s_multiscale) :: ms
 
 
-integer :: Mit, itt, itotNtime
+integer :: Mit, itt
 integer :: nntime
 
 integer :: i, ix, iy, iz
@@ -106,7 +106,7 @@ call timer_begin(LOG_RT_ITERATION)
 
 call print_header()
 
-TE : do itt=Mit+1,itotNtime
+TE : do itt=Mit+1,nt
     call time_evolution_step_ms()
 
     is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
@@ -323,7 +323,7 @@ subroutine initialization_ms()
                 end if
                 
                 ! Initializa TDKS system
-                call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
+                call initialization_rt( Mit, system, energy, ewald, rt, md, &
                                         singlescale,  &
                                         stencil, fg, poisson,  &
                                         lg, mg,   &
@@ -347,7 +347,7 @@ subroutine initialization_ms()
     end do
 
     itt = mit
-    allocate(Ac_inc(1:3, -1:itotNtime+2))
+    allocate(Ac_inc(1:3, -1:nt+2))
     call incident()
 
     ! Experimental implementation
@@ -432,11 +432,11 @@ subroutine time_evolution_step_ms
         rt%Ac_tot(1:3, itt)   = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
 
         if(mod(itt,2)==1)then
-            call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+            call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
         else
-            call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+            call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
@@ -510,9 +510,9 @@ subroutine checkpoint_ms(odir)
 
         if (macropoint_in_mygroup(i)) then
             if (mod(itt,2)==1) then
-                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,Vh_stock1,Vh_stock2,singlescale,idir)
+                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)
             else
-                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,Vh_stock1,Vh_stock2,singlescale,idir)
+                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)
             endif
         end if
     end do
@@ -633,7 +633,7 @@ subroutine incident()
 
 
     call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
-        & -1, itotNtime+2, Ac_inc)
+        & -1, nt+2, Ac_inc)
 
     if (yn_restart == 'y') then
 

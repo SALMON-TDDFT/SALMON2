@@ -30,6 +30,8 @@ contains
     use misc_routines, only: ceiling_pow2
     use timer
     use sym_rho_sub, only: sym_rho
+    use salmon_global, only: yn_spinorbit
+    use noncollinear_module, only: calc_dm_noncollinear, rot_dm_noncollinear
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -42,6 +44,14 @@ contains
     real(8),allocatable :: wrk(:,:,:,:)
 
     call timer_begin(LOG_DENSITY_CALC)
+    
+    if(yn_spinorbit=='y') then
+      call calc_dm_noncollinear( psi, system, info, mg )
+      call rot_dm_noncollinear( rho, system, mg )
+      call timer_end(LOG_DENSITY_CALC)
+      return
+    end if
+    
     nspin = system%nspin
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -180,11 +190,11 @@ contains
 
   subroutine calc_current(system,mg,stencil,info,srg,psi,ppg,curr)
     use structures
-    use salmon_global, only: yn_jm
+    use salmon_global, only: yn_jm,yn_spinorbit
     use sendrecv_grid, only: update_overlap_complex8
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
-    use pseudo_pt_current_so, only: SPIN_ORBIT_ON, calc_current_nonlocal_so &
+    use pseudo_pt_current_so, only: calc_current_nonlocal_so &
                                   , calc_current_nonlocal_rdivided_so
     use sym_vector_sub, only: sym_vector_xyz
     use code_optimization, only: current_omp_mode
@@ -219,7 +229,7 @@ contains
     call timer_end(LOG_CURRENT_CALC)
 
     call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
-    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not.SPIN_ORBIT_ON) then
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
     end if
@@ -280,7 +290,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
-!$omp             shared(SPIN_ORBIT_ON) &
+!$omp             shared(yn_spinorbit) &
 !$omp             reduction(+:wrk4) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -291,7 +301,7 @@ contains
         wrk2 = matmul(BT,wrk2)
 
         if ( yn_jm == 'n' ) then
-          if ( SPIN_ORBIT_ON ) then
+          if ( yn_spinorbit=='y' ) then
             if ( info%if_divide_rspace ) then
               call calc_current_nonlocal_rdivided_so &
                    ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,info%icomm_r )
@@ -331,7 +341,7 @@ contains
     end do
     end do
 
-    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not.SPIN_ORBIT_ON) deallocate(uVpsibox,uVpsibox2,uVpsi)
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     return
 
