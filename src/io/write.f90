@@ -1751,7 +1751,7 @@ contains
       dir_gs = directory_read_data
     else
       dir_gs = 'restart/' ! default GS directory
-      if(comm_is_root(nproc_id_global)) write(*,*) " read GS data from directory ./restart/"
+      if(comm_is_root(nproc_id_global)) write(*,*) " projection_option: read GS data from directory ./restart/"
     end if
 
   ! # of orbitals for GS
