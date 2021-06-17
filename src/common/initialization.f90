@@ -93,7 +93,7 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,projection_option,nelec_spin,yn_spinorbit, &
+  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
@@ -171,23 +171,17 @@ subroutine init_dft_system(lg,system,stencil)
   end if
 
   if(calc_mode=='RT'.and. temperature<-1.d-12)then
-     if(projection_option=='no' .or. projection_option=='gx')then  !'gx' is hidden option by AY
-        if( yn_spinorbit=='y' )then
-           system%no = nelec
-        else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
-           system%no = maxval(nelec_spin(:))
-        else
-           if(mod(nelec,2)==0)then
-              system%no = nelec/2
-           else
-              system%no = (nelec+1)/2
-           end if
-        end if
-     else if(projection_option=='gs')then
-        system%no = nstate
-     else
-        stop 'wrong projection option'
-     endif
+    if( yn_spinorbit=='y' )then
+       system%no = nelec
+    else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
+       system%no = maxval(nelec_spin(:))
+    else
+       if(mod(nelec,2)==0)then
+          system%no = nelec/2
+       else
+          system%no = (nelec+1)/2
+       end if
+    end if
   else
     system%no = nstate
   end if
