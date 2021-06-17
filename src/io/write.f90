@@ -1753,35 +1753,14 @@ contains
       dir_gs = 'restart/' ! default GS directory
       if(comm_is_root(nproc_id_global)) write(*,*) " projection_option: read GS data from directory ./restart/"
     end if
-
-  ! # of orbitals for GS
-    rt%system_gs%no = nstate ! future work: nstate --> nstate_proj (for finite temperature, etc.)
     
-  ! copy system --> rt%system_gs
-    rt%system_gs%nspin = system%nspin
-    rt%system_gs%nk = system%nk
-    rt%system_gs%hvol = system%hvol
-    rt%system_gs%if_real_orbital = system%if_real_orbital
-    rt%system_gs%rmatrix_B = system%rmatrix_B
-    allocate(rt%system_gs%rocc(rt%system_gs%no,system%nk,system%nspin),rt%system_gs%wtk(system%nk) &
-    &, rt%system_gs%vec_k(3,system%nk) )
-    rt%system_gs%wtk = system%wtk
-    rt%system_gs%vec_k = system%vec_k
+    rt%system_gs = system
+    rt%system_gs%no = nstate ! # of orbitals for GS ! future work: nstate --> nstate_proj
+    deallocate(rt%system_gs%rocc)
+    allocate(rt%system_gs%rocc(rt%system_gs%no,system%nk,system%nspin))
     
-  ! rt%info_gs
-    rt%info_gs%npk  = info%npk
-    rt%info_gs%nporbital = info%nporbital
-    rt%info_gs%nprgrid = info%nprgrid
-    rt%info_gs%if_divide_rspace = info%if_divide_rspace
-    rt%info_gs%if_divide_orbit = info%if_divide_orbit
-    rt%info_gs%icomm_r = info%icomm_r
-    rt%info_gs%icomm_k = info%icomm_k
-    rt%info_gs%icomm_o = info%icomm_o
-    rt%info_gs%icomm_rko = info%icomm_rko
-    rt%info_gs%id_o = info%id_o
-    rt%info_gs%id_k = info%id_k
-    rt%info_gs%id_ko = info%id_ko
-    rt%info_gs%isize_ko = info%isize_ko
+    rt%info_gs = info
+    deallocate(rt%info_gs%io_s_all,rt%info_gs%io_e_all,rt%info_gs%numo_all,rt%info_gs%irank_io)
     call init_parallel_dft(rt%system_gs,rt%info_gs)
 
     call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%tpsi0)
@@ -1823,13 +1802,14 @@ contains
         call allocate_scalar(mg,Vxc(jspin))
       end do
       
-      call calc_density(system,rho_s,rt%tpsi0,info,mg)
+      call calc_density(rt%system_gs,rho_s,rt%tpsi0,rt%info_gs,mg)
       rho%f = 0d0
       do jspin=1,system%nspin
         rho%f = rho%f + rho_s(jspin)%f
       end do
-      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,rt%tpsi0,stencil,Vxc,E_xc)
+      call hartree(lg,mg,rt%info_gs,rt%system_gs,fg,poisson,srg_scalar,stencil,rho,Vh)
+      call exchange_correlation(rt%system_gs,xc_func,mg,srg_scalar,srg,rho_s &
+      & ,ppn,rt%info_gs,rt%tpsi0,stencil,Vxc,E_xc)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
       
       call deallocate_scalar(rho)
@@ -2023,10 +2003,10 @@ contains
         do ik=ik_s,ik_e
         do ispin = 1, nspin
           do io1 = 1, no0
-            if (io_s<= io1 .and. io1 <= io_e) then
+            if (rt%info_gs%io_s<= io1 .and. io1 <= rt%info_gs%io_e) then
               call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
             end if
-            call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+            call comm_bcast(wf_io1, rt%info_gs%icomm_o, rt%info_gs%irank_io(io1))
             do io2 = 1, no
               if (io_s<= io2 .and. io2 <= io_e) then
                 cbox = 0d0
@@ -2048,8 +2028,8 @@ contains
         !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
         do ik=ik_s,ik_e
         do ispin=1,nspin
-        do io1=rt%info_gs%io_s,rt%info_gs%io_e
-        do io2=io_s,io_e
+        do io1=1,no0
+        do io2=1,no
           cbox = 0d0
           do iz=is(3),ie(3)
           do iy=is(2),ie(2)
