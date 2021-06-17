@@ -290,7 +290,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   allocate(energy%esp(system%no,system%nk,system%nspin))
   
   if(projection_option/='no') then
-     call init_projection(system,lg,mg,info,spsi_in,V_local,rt)
+    call init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt)
   end if
   
   call timer_end(LOG_READ_GS_DATA)

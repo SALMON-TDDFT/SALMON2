@@ -1915,7 +1915,7 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use filesystem, only: create_directory
-  use salmon_global, only: trans_longi, projection_option
+  use salmon_global, only: trans_longi
   implicit none
   character(*),            intent(in) :: wdir
   integer,                 intent(in) :: itt
@@ -1941,12 +1941,6 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
       close(iunit)
     end if
   end if
-
-! future work
-  if(projection_option/='no') then
-!  call create_directory(tdir)
-!  call write_wavefunction(tdir,lg,mg,system,info,rt%tpsi0,iself)
-  end if
   
 end subroutine write_rtdata
 
@@ -1954,7 +1948,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: trans_longi, projection_option
+  use salmon_global, only: trans_longi
   implicit none
   character(*),            intent(in) :: wdir
   integer,                 intent(in) :: itt
@@ -1982,11 +1976,6 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
     end if
     call comm_bcast(rt%Ac_tot,comm)
     call comm_bcast(rt%Ac_ind,comm)
-  end if
- 
-! future work
-  if(projection_option/='no') then
-   !call read_wavefunction(idir,lg,mg,system,info,rt%tpsi0,mk,mo,if_real_orbital,iself)
   end if
 
 end subroutine read_rtdata
