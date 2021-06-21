@@ -41,7 +41,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
-  use noncollinear_module, only: SPIN_ORBIT_ON, calc_dm_noncollinear, rot_dm_noncollinear
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -158,12 +157,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_RHO)
 
-  if( SPIN_ORBIT_ON )then
-    call calc_dm_noncollinear( spsi_out, system, info, mg )
-    call rot_dm_noncollinear( rho_s, system, mg )
-  else
-    call calc_density(system,rho_s,spsi_out,info,mg)
-  end if
+  call calc_density(system,rho_s,spsi_out,info,mg)
 
   if(nspin==1)then
     !$omp workshare
@@ -212,8 +206,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
-    ! tpsi,spsi_in = working arrays
-    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,tpsi,spsi_in,srg,energy,rt)
+    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,srg,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -316,7 +309,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
+      call write_dns(lg,mg,system,info,rho_s,rt%rho0_s,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then

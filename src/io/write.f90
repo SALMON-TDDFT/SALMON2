@@ -25,7 +25,7 @@ contains
   !! export SYSNAME_k.data file
   subroutine write_k_data(system,stencil)
     use structures
-    use salmon_global, only: sysname
+    use salmon_global, only: sysname,yn_periodic
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -36,6 +36,10 @@ contains
     integer :: fh_k
     integer :: ik,NK
     character(100) :: file_k_data
+    
+    if(yn_periodic=='n') then
+      return
+    end if
 
     NK = system%nk
     file_k_data = trim(sysname)//'_k.data'
@@ -112,10 +116,11 @@ contains
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)       :: tpsi
     !
-    integer :: fh_tm
+    integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,ik_s,ik_e,is(3),ie(3)
     real(8) :: x,y,z
-    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:),gtpsi(:,:,:,:)
+    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
+    complex(8),allocatable :: gtpsi(:,:,:,:),gtpsi_l(:,:,:,:)
     complex(8),allocatable :: uVpsi(:,:),uVpsix(:,:),uVpsiy(:,:),uVpsiz(:,:)
     complex(8),allocatable :: uVpsixx(:,:),uVpsixy(:,:),uVpsixz(:,:)
     complex(8),allocatable :: uVpsiyy(:,:),uVpsiyz(:,:),uVpsizz(:,:)
@@ -135,8 +140,11 @@ contains
       return
     endif
     if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
-      write(*,*) "error @ write_tm_data: do not use orbital parallelization"
-      return
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) "error @ write_tm_data: do not use orbital parallelization"
+        write(*,*) "Only <u|p|u> is printed (pseudopotential terms are not printed)"
+      endif
+     !return
     endif
     if(.not. allocated(tpsi%zwf)) then!??????
       write(*,*) "error @ write_tm_data: do not use real wavefunction (iperiodic=0)"
@@ -165,9 +173,16 @@ contains
 
     upu_l(:,:,:,:) = 0d0
 
+    allocate(gtpsi_l(3,mg%is_array(1):mg%ie_array(1) &
+                      ,mg%is_array(2):mg%ie_array(2) &
+                      ,mg%is_array(3):mg%ie_array(3)))
     allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
                     ,mg%is_array(2):mg%ie_array(2) &
                     ,mg%is_array(3):mg%ie_array(3)))
+    narray= 3 * ( mg%ie_array(1) - mg%is_array(1) + 1 ) &
+              * ( mg%ie_array(2) - mg%is_array(2) + 1 ) &
+              * ( mg%ie_array(3) - mg%is_array(3) + 1 )
+
   ! overlap region communication
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, tpsi%zwf)
@@ -176,10 +191,15 @@ contains
     do ik=ik_s,ik_e
     do ib2=1,NB
 
-    ! gtpsi = (nabla) psi
-      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-      do ib1=1,NB
+      ! gtpsi = (nabla) psi
+      gtpsi_l(:,:,:,:) = 0d0
+      if(ib2.ge.info%io_s .and. ib2.le.info%io_e) &
+        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi_l,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+      call comm_summation(gtpsi_l,gtpsi,narray,info%icomm_o)
+
+!     do ib1=1,NB
+      do ib1=info%io_s,info%io_e
         do i=1,3
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
                             * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
@@ -190,6 +210,30 @@ contains
     end do
     call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
     deallocate(gtpsi)
+
+    !--(Print only for orbital parallelization: just temporal)
+    if(info%io_s/=1 .or. info%io_e/=system%no) then
+
+       file_tm_data = trim(sysname)//'_tm.data'
+       if (comm_is_root(nproc_id_global)) then
+          fh_tm = open_filehandle(file_tm_data, status="replace")
+          write(fh_tm, '("#",1X,A)') "#Transition Moment between occupied and unocupied orbitals in GS"
+          write(fh_tm, '("#",1X,A)') "# (Separated analysis tool is available)"
+
+          !<u_nk|p_j|u_mk>  (j=x,y,z)
+          write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+          do ik =1,NK
+          do ib1=1,NB
+          do ib2=1,NB
+             write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
+          enddo
+          enddo
+          enddo
+          close(fh_tm)
+       endif
+       return
+    endif
+    !-------------------------------------------------
 
     !calculate <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
     u_rVnl_Vnlr_u_l = 0d0
@@ -801,7 +845,7 @@ contains
 
 !===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
-    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de
+    use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de, temperature, yn_lr_w0_correction
     use inputoutput, only: t_unit_energy,t_unit_conductivity
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
@@ -811,8 +855,8 @@ contains
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
     integer :: uid
-    integer :: ihw,n,ixyz
-    real(8) :: tt,hw,t2
+    integer :: ihw,n,ixyz, it
+    real(8) :: tt,hw,t2, smoothing, jav_d(3), jav_s(3), smt_s
     complex(8) :: zsigma(3),zeps(3)
     real(8) :: rtdata(1:3,1:nt)
 
@@ -840,6 +884,7 @@ contains
         & 12, "Im(eps_y)", "none", &
         & 13, "Im(eps_z)", "none"
 
+     
       tt = dt*dble(nt)
       if(trans_longi=="tr") then
         rtdata(1:3,1:nt) = rt%curr(1:3,1:nt)
@@ -847,12 +892,28 @@ contains
         rtdata(1:3,1:nt) = rt%E_tot(1:3,1:nt)
       end if
 
+      ! sigma(omega=0) correcton
+      jav_d(:)=0d0
+      if( yn_lr_w0_correction=='y' .and. temperature < 0d0) then
+         jav_s = 0d0
+         smt_s = 0d0;
+         do it = 1,nt
+            t2 = dble(it)*dt
+            smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+            jav_s(:)  = jav_s(:) + rtdata(:,it) * smoothing
+            smt_s     = smt_s + smoothing
+         end do
+         jav_d(:) = jav_s(:)/smt_s
+      end if
+
       do ihw=1,nenergy
         hw=dble(ihw)*de
         zsigma(:)=(0.d0,0.d0)
         do n=1,nt
           t2=dble(n)*dt
-          zsigma(:)=zsigma(:)+exp(zi*hw*t2)* rtdata(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+         !zsigma(:)=zsigma(:) + exp(zi*hw*t2)* rtdata(:,n) * smoothing
+          zsigma(:)=zsigma(:) + exp(zi*hw*t2)* (rtdata(:,n)-jav_d(:)) * smoothing
         end do
 
         zsigma(:) = (zsigma(:)/e_impulse)*dt
@@ -1329,8 +1390,7 @@ contains
     use inputoutput, only: uenergy_from_au
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
                            out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
-                           nelec,nstate,temperature
-    use spin_orbit_global, only: SPIN_ORBIT_ON
+                           nelec,nstate,temperature,yn_spinorbit
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1347,7 +1407,7 @@ contains
       if(temperature>=0.d0) then
         eshift = system%mu
       else
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
           index_vbm=nelec
         else
           index_vbm=nelec/2
@@ -1413,10 +1473,9 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy, temperature
+                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1455,7 +1514,7 @@ contains
       if(temperature>=0.d0) then
         eshift = system%mu
       else
-        if( SPIN_ORBIT_ON )then
+        if( yn_spinorbit=='y' )then
           index_vbm=nelec
         else
           index_vbm=nelec/2
@@ -1598,11 +1657,10 @@ contains
 
   subroutine write_band_information(system,energy)
     use structures
-    use salmon_global, only: nelec
+    use salmon_global, only: nelec,yn_periodic,yn_spinorbit
     use inputoutput, only: au_energy_ev
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1610,7 +1668,7 @@ contains
     integer :: ik,index_vbm
     real(8),dimension(system%nk) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
     !
-    if( SPIN_ORBIT_ON )then
+    if( yn_spinorbit=='y' )then
       index_vbm=nelec
     else
       index_vbm=nelec/2
@@ -1622,205 +1680,150 @@ contains
         esp_cb_min(ik)=minval(energy%esp(index_vbm+1:system%no,ik,:))
         esp_cb_max(ik)=maxval(energy%esp(index_vbm+1:system%no,ik,:))
       end do
-      write(*,*) 'band information-----------------------------------------'
-      write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
-      write(*,*) 'Top of VB',maxval(esp_vb_max(:))
-      write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
-      write(*,*) 'Top of CB',maxval(esp_cb_max(:))
-      write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
-      write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
-      write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
-      write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
-      write(*,*) '---------------------------------------------------------'
-      write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
-      write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
-      write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
-      write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
-      write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
-      write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
-      write(*,*) '---------------------------------------------------------'
+      if(yn_periodic=='y') then
+        write(*,*) 'band information-----------------------------------------'
+        write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
+        write(*,*) 'Top of VB',maxval(esp_vb_max(:))
+        write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
+        write(*,*) 'Top of CB',maxval(esp_cb_max(:))
+        write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+        write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
+        write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
+        write(*,*) 'Physicaly upper bound of eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
+        write(*,*) '---------------------------------------------------------'
+        write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
+        write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
+        write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
+        write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
+        write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
+        write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of CB for DOS[eV]',minval(esp_cb_max(:))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of eps(omega)[eV]',minval(esp_cb_max(:)-esp_vb_min(:))*au_energy_ev
+        write(*,*) '---------------------------------------------------------'
+      else
+        if(system%nk /= 1) stop "error: yn_periodic='n' and Nk/=1"
+        write(*,*) 'orbital energy information-------------------------------'
+        write(*,*) 'Lowest occupied orbital',esp_vb_min(1)
+        write(*,*) 'Highest occupied orbital (HOMO)',esp_vb_max(1)
+        write(*,*) 'Lowest unoccupied orbital (LUMO)',esp_cb_min(1)
+        write(*,*) 'Highest unoccupied orbital',esp_cb_max(1)
+        write(*,*) 'HOMO-LUMO gap',esp_cb_min(1)-esp_vb_max(1)
+        write(*,*) 'Physicaly upper bound of eps(omega)',esp_cb_max(1)-esp_vb_min(1)
+        write(*,*) '---------------------------------------------------------'
+        write(*,*) 'Lowest occupied orbital[eV]',esp_vb_min(1)*au_energy_ev
+        write(*,*) 'Highest occupied orbital (HOMO)[eV]',esp_vb_max(1)*au_energy_ev
+        write(*,*) 'Lowest unoccupied orbital (LUMO)[eV]',esp_cb_min(1)*au_energy_ev
+        write(*,*) 'Highest unoccupied orbital[eV]',esp_cb_max(1)*au_energy_ev
+        write(*,*) 'HOMO-LUMO gap[eV]',(esp_cb_min(1)-esp_vb_max(1))*au_energy_ev
+        write(*,*) 'Physicaly upper bound of eps(omega)[eV]',(esp_cb_max(1)-esp_vb_min(1))*au_energy_ev
+        write(*,*) '---------------------------------------------------------'
+      end if
     end if
     return
   end subroutine write_band_information
   
 !===================================================================================================================================
-  subroutine init_projection(system,lg,mg,info,ttpsi,V_local,rt)
+  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt)
     use structures
-    use communication, only: comm_is_root, comm_bcast, comm_summation, comm_sync_all
-    use parallelization, only: nproc_id_global,nproc_group_global
-    use salmon_global, only: projection_option,directory_read_data
-    use checkpoint_restart_sub, only: read_wavefunction
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global
+    use salmon_global, only: projection_option,nstate,directory_read_data,yn_restart,yn_self_checkpoint
+    use checkpoint_restart_sub, only: read_bin,generate_restart_directory_name
+    use initialization_sub, only: init_parallel_dft
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
-    type(s_dft_system)                  :: system
-    type(s_parallel_info)               :: info
-    type(s_orbital)                     :: ttpsi, spsi_tmp !ttpsi= spsi_in
-    type(s_scalar)          ,intent(in) :: V_local(system%nspin)
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_parallel_info)   ,intent(in) :: info
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_scalar)          ,intent(in) :: Vpsl
+    type(s_xc_functional)   ,intent(in) :: xc_func
+    type(s_pp_nlcc)         ,intent(in) :: ppn
+    type(s_reciprocal_grid) ,intent(in) :: fg
+    type(s_poisson)                     :: poisson
+    type(s_sendrecv_grid)               :: srg_scalar, srg
     type(s_rt)                          :: rt
-    integer :: jspin
-
-    character(256) :: dir_gs
-    character(1024) :: dir_file_in
-    integer :: m, iu1, iu2, mk, mo,io, itt_tmp, nprocs_tmp, comm, im, nproc_ob
-    logical :: if_real_orbital, iself
-
-
-    if(projection_option=='gs') then
-
-       call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
-
-       !$omp workshare
-       rt%tpsi0%zwf = ttpsi%zwf
-       !$omp end workshare
-
-    else if(projection_option=='gx') then
-
-       ! read gs data 
-       dir_gs = directory_read_data   ! default= ./restart/
-       comm = nproc_group_global
-       iu1 = 96
-       if(comm_is_root(nproc_id_global))then
-          dir_file_in = trim(dir_gs)//"info.bin"
-          open(iu1,file=dir_file_in,form='unformatted')
-          read(iu1) mk
-          read(iu1) mo
-          read(iu1) itt_tmp
-          read(iu1) nprocs_tmp
-          read(iu1) if_real_orbital
-          close(iu1)
-          rt%no0 = mo
-       end if
-       call comm_bcast(mk,comm)
-       call comm_bcast(mo,comm)
-       call comm_bcast(rt%no0,comm)
-       call comm_bcast(if_real_orbital,comm)
-
-       if(comm_is_root(nproc_id_global)) then
-          write(*,*) "  initialize projection option(gs)"
-          write(*,*) "    num. of rt orbitals=", system%no
-          write(*,*) "    num. of gs orbitals=", rt%no0
-       endif
+    !
+    character(256) :: wdir,gdir,dir_gs
+    logical :: iself
+    integer :: iter,jspin
     
-       !occupation
-       allocate(rt%rocc0(rt%no0, system%nk, system%nspin))
-       if(comm_is_root(nproc_id_global))then
-          dir_file_in = trim(dir_gs)//"occupation.bin"
-          open(iu1,file=dir_file_in,form='unformatted')
-          read(iu1) rt%rocc0(1:mo,1:mk,1:system%nspin)
-          close(iu1)
-       end if
-       call comm_bcast(rt%rocc0,comm)
+    if(yn_restart=='n') then
+      dir_gs = directory_read_data
+    else
+      dir_gs = 'restart/' ! default GS directory
+      if(comm_is_root(nproc_id_global)) write(*,*) " projection_option: read GS data from directory ./restart/"
+    end if
+    
+    rt%system_gs = system
+    rt%system_gs%no = nstate ! # of orbitals for GS ! future work: nstate --> nstate_proj
+    deallocate(rt%system_gs%rocc)
+    allocate(rt%system_gs%rocc(rt%system_gs%no,system%nk,system%nspin))
+    
+    rt%info_gs = info
+    deallocate(rt%info_gs%io_s_all,rt%info_gs%io_e_all,rt%info_gs%numo_all,rt%info_gs%irank_io)
+    call init_parallel_dft(rt%system_gs,rt%info_gs)
 
-       ! make orbital info for gs
-       nproc_ob = info%nporbital
-       rt%io_s0 = (info%id_o * rt%no0) / nproc_ob + 1
-       rt%io_e0 = ((info%id_o+1) * rt%no0) / nproc_ob
-       rt%numo0 = rt%io_e0 - rt%io_s0 + 1
+    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%tpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%ttpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%htpsi0)
+    
+  ! wavefunctions @ GS
+    call generate_restart_directory_name(dir_gs,gdir,wdir)
+    iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'
+    if (.not. iself) then
+      wdir = gdir
+    end if
+    call read_bin(wdir,lg,mg,rt%system_gs,rt%info_gs,rt%tpsi0,iter,is_self_checkpoint=iself)
 
-       allocate(rt%io_s_all0(0:nproc_ob-1))
-       allocate(rt%io_e_all0(0:nproc_ob-1))
-       allocate(rt%numo_all0(0:nproc_ob-1))
-       do m=0,nproc_ob-1
-          rt%io_s_all0(m) = m * rt%no0 / nproc_ob + 1
-          rt%io_e_all0(m) = (m+1) * rt%no0 / nproc_ob
-          rt%numo_all0(m) = rt%io_e_all0(m) - rt%io_s_all0(m) + 1
-       end do
-       rt%numo_max0 = maxval(rt%numo_all0(0:nproc_ob-1))
-
-       if ( allocated(rt%irank_io0) ) deallocate(rt%irank_io0)
-       allocate(rt%irank_io0(1:rt%no0))
-       do io=1, rt%no0
-          if(mod(io*nproc_ob,rt%no0)==0)then
-             rt%irank_io0(io) = io*nproc_ob/rt%no0 - 1
-          else
-             rt%irank_io0(io) = io*nproc_ob/rt%no0
-          end if
-       end do
-
-       ! store original orbital info values of rt
-       rt%no_org   = system%no
-       rt%io_s_org = info%io_s
-       rt%io_e_org = info%io_e
-       rt%numo_org     = info%numo
-       rt%numo_max_org = info%numo_max
-
-       allocate(rt%io_s_all_org(0:nproc_ob-1))
-       allocate(rt%io_e_all_org(0:nproc_ob-1))
-       allocate(rt%numo_all_org(0:nproc_ob-1))
-       allocate(rt%irank_io_org(1:system%no))
-       rt%io_s_all_org(:) = info%io_s_all(:)
-       rt%io_e_all_org(:) = info%io_e_all(:)
-       rt%numo_all_org(:) = info%numo_all(:)
-       rt%irank_io_org(:) = info%irank_io(:)
-
-       ! switch no,io_s,io_e,numo,numo_max : rt => gs
-       call norb_rt2gs_for_proj(system,info,rt)
-
-       !wavefunction
-       iself=.false. ! assuming yn_restart=='n' .and. yn_self_checkpoint=='n'
-       call allocate_orbital_complex(system%nspin,mg,info,rt%tpsi0)
-       call allocate_orbital_complex(system%nspin,mg,info,spsi_tmp)
-       call read_wavefunction(dir_gs,lg,mg,system,info,spsi_tmp,mk,mo,if_real_orbital,iself)
-
-       !$omp workshare
-       rt%tpsi0%zwf(:,:,:,:,:,:,:) = spsi_tmp%zwf(:,:,:,:,:,:,:)
-       !$omp end workshare
-
-       ! switch back no,io_s,io_e,numo,numo_max : gs => rt
-       call norb_gs2rt_for_proj(system,info,rt)
-
-    endif  ! projection_option
-
-
+  ! V_local @ GS
     allocate(rt%vloc0(system%nspin))
     do jspin=1,system%nspin
       call allocate_scalar(mg,rt%vloc0(jspin))
-      !$omp workshare
-      rt%vloc0(jspin)%f = V_local(jspin)%f
-      !$omp end workshare
     end do
+    call calc_vloc0
+    
+  contains
+  
+    subroutine calc_vloc0
+      use density_matrix, only: calc_density
+      use hartree_sub, only: hartree
+      use salmon_xc, only: exchange_correlation
+      use hamiltonian, only: update_vlocal
+      implicit none
+      real(8) :: E_xc
+      type(s_scalar) :: rho,Vh
+      type(s_scalar),allocatable :: rho_s(:),Vxc(:)
+      
+      call allocate_scalar(mg,rho)
+      call allocate_scalar(mg,Vh)
+      allocate(rho_s(system%nspin),Vxc(system%nspin))
+      do jspin=1,system%nspin
+        call allocate_scalar(mg,rho_s(jspin))
+        call allocate_scalar(mg,Vxc(jspin))
+      end do
+      
+      call calc_density(rt%system_gs,rho_s,rt%tpsi0,rt%info_gs,mg)
+      rho%f = 0d0
+      do jspin=1,system%nspin
+        rho%f = rho%f + rho_s(jspin)%f
+      end do
+      call hartree(lg,mg,rt%info_gs,rt%system_gs,fg,poisson,srg_scalar,stencil,rho,Vh)
+      call exchange_correlation(rt%system_gs,xc_func,mg,srg_scalar,srg,rho_s &
+      & ,ppn,rt%info_gs,rt%tpsi0,stencil,Vxc,E_xc)
+      call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
+      
+      call deallocate_scalar(rho)
+      call deallocate_scalar(Vh)
+      do jspin=1,system%nspin
+        call deallocate_scalar(rho_s(jspin))
+        call deallocate_scalar(Vxc(jspin))
+      end do
+      deallocate(rho_s,Vxc)
+    end subroutine calc_vloc0
 
   end subroutine init_projection
 
-  subroutine norb_rt2gs_for_proj(system,info,rt)
-    use structures, only: s_dft_system, s_parallel_info, s_rt
-    implicit none
-    type(s_dft_system)   ,intent(inout) :: system
-    type(s_parallel_info),intent(inout) :: info
-    type(s_rt)           ,intent(in) :: rt
-    system%no = rt%no0  
-    info%io_s = rt%io_s0
-    info%io_e = rt%io_e0
-    info%numo     = rt%numo0
-    info%numo_max = rt%numo_max0
-    info%io_s_all(:) = rt%io_s_all0(:)
-    info%io_e_all(:) = rt%io_e_all0(:)
-    info%numo_all(:) = rt%numo_all0(:)
-    deallocate(info%irank_io)
-    allocate(info%irank_io(1:system%no))
-    info%irank_io(:) = rt%irank_io0(:)
-  end subroutine norb_rt2gs_for_proj
-
-  subroutine norb_gs2rt_for_proj(system,info,rt)
-    use structures, only: s_dft_system, s_parallel_info, s_rt
-    implicit none
-    type(s_dft_system)   ,intent(inout) :: system
-    type(s_parallel_info),intent(inout) :: info
-    type(s_rt)           ,intent(in)  :: rt
-    system%no = rt%no_org
-    info%io_s = rt%io_s_org
-    info%io_e = rt%io_e_org
-    info%numo     = rt%numo_org
-    info%numo_max = rt%numo_max_org
-    info%io_s_all(:) = rt%io_s_all_org(:)
-    info%io_e_all(:) = rt%io_e_all_org(:)
-    info%numo_all(:) = rt%numo_all_org(:)
-    deallocate(info%irank_io)
-    allocate(info%irank_io(1:system%no))
-    info%irank_io(:) = rt%irank_io_org(:)
-  end subroutine norb_gs2rt_for_proj
-
-  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
     use structures
     use salmon_global, only: projection_option
     implicit none
@@ -1828,27 +1831,26 @@ contains
     type(s_ofile)           ,intent(in) :: ofl
     real(8)                 ,intent(in) :: dt
     type(s_rgrid)           ,intent(in) :: mg
-    type(s_dft_system)                  :: system
-    type(s_parallel_info)               :: info
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_stencil)         ,intent(in) :: stencil
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
     type(s_sendrecv_grid)               :: srg
     type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
 
     select case(projection_option)
     case('gs')
-       call  projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
-    case('gx')
-       call  projection_gx(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+      call  projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
+    case default
+      stop "invalid projection_option"
     end select
 
     return
   end subroutine projection
 
-  subroutine projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
+  subroutine projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -1868,20 +1870,23 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
     type(s_sendrecv_grid)               :: srg
     type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
     !
-    integer :: nspin,nspin_tmp,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
+    integer :: nspin,nspin_tmp,no,no0,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
-    complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
-    real(8) :: coef(system%no,system%nk,system%nspin)
+    complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat
+    real(8) :: coef(rt%system_gs%no,system%nk,system%nspin)
     real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
+    
+    rt%system_gs%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
 
+    no0 = rt%system_gs%no ! # of orbitals @ GS
+    
     nspin = system%nspin
     no = system%no
     nk = system%nk
@@ -1910,16 +1915,18 @@ contains
     end if
     
   ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
-    call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+    call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
+    & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
     dE = energy%E_kin - rt%E_old
     if(abs(dE) < 1e-12) then
       if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
     else
       do iter_GS=1,niter
-        call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
-        call gscg_zwf(ncg,mg,system,info,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
-        call gram_schmidt(system, mg, info, rt%tpsi0)
-        call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
+        call ssdg(mg,rt%system_gs,rt%info_gs,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,srg)
+        call gscg_zwf(ncg,mg,rt%system_gs,rt%info_gs,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
+        call gram_schmidt(rt%system_gs, mg, rt%info_gs, rt%tpsi0)
+        call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
+        & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
         dE = energy%E_kin - rt%E_old
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
         if(abs(dE) < 1e-6) exit
@@ -1930,14 +1937,14 @@ contains
     call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
 
     if(yn_spinorbit=='y') then
-      mat(1:no,1:no,1,1:nk) = mat(1:no,1:no,1,1:nk) + mat(1:no,1:no,2,1:nk)
-      mat(1:no,1:no,2,1:nk) = mat(1:no,1:no,1,1:nk)
+      mat(1:no0,1:no,1,1:nk) = mat(1:no0,1:no,1,1:nk) + mat(1:no0,1:no,2,1:nk)
+      mat(1:no0,1:no,2,1:nk) = mat(1:no0,1:no,1,1:nk)
     end if
 
     coef=0.d0
     do ispin=1,nspin
     do ik=1,nk
-    do io1=1,no
+    do io1=1,no0
       do io2=1,no
         coef(io1,ik,ispin) = coef(io1,ik,ispin) &
         & + system%rocc(io2,ik,ispin)*system%wtk(ik)* abs(mat(io1,io2,ispin,ik))**2
@@ -1950,10 +1957,10 @@ contains
     neh = dble(nelec)
     do ispin=1,nspin_tmp
     do ik=1,nk
-    do io=1,no
+    do io=1,no0
     ! /wspin: for canceling double counting of 2 in rocc.
-      nee = nee + ((wspin-system%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
-      neh = neh - (system%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
+      nee = nee + ((wspin-rt%system_gs%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
+      neh = neh - (rt%system_gs%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
     end do
     end do
     end do
@@ -1964,7 +1971,7 @@ contains
       write(ofl%fh_ovlp,'(i11)') itt
       do ispin=1,nspin_tmp
       do ik=1,nk
-        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no)
+        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no0)
       end do
       end do
     end if
@@ -1984,9 +1991,9 @@ contains
       use pack_unpack, only: copy_data
       implicit none
       type(s_orbital), intent(in) :: psi1,psi2
-      complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat
+      complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat
       !
-      complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat1
+      complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat1
       complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1) &
                         & ,mg%is_array(2):mg%ie_array(2) &
                         & ,mg%is_array(3):mg%ie_array(3))
@@ -1995,11 +2002,11 @@ contains
       if(info%if_divide_orbit) then
         do ik=ik_s,ik_e
         do ispin = 1, nspin
-          do io1 = 1, no
-            if (io_s<= io1 .and. io1 <= io_e) then
+          do io1 = 1, no0
+            if (rt%info_gs%io_s<= io1 .and. io1 <= rt%info_gs%io_e) then
               call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
             end if
-            call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+            call comm_bcast(wf_io1, rt%info_gs%icomm_o, rt%info_gs%irank_io(io1))
             do io2 = 1, no
               if (io_s<= io2 .and. io2 <= io_e) then
                 cbox = 0d0
@@ -2021,8 +2028,8 @@ contains
         !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
         do ik=ik_s,ik_e
         do ispin=1,nspin
-        do io1=io_s,io_e
-        do io2=io_s,io_e
+        do io1=1,no0
+        do io2=1,no
           cbox = 0d0
           do iz=is(3),ie(3)
           do iy=is(2),ie(2)
@@ -2038,257 +2045,10 @@ contains
         end do
       end if
 
-      call comm_summation(mat1,mat,no**2*nspin*nk,info%icomm_rko)
+      call comm_summation(mat1,mat,no0*no*nspin*nk,info%icomm_rko)
 
     end subroutine inner_product
   end subroutine projection_gs
-
-
-  ! Trial: num. of gs orbital is taken from restart file (full gsorbitals) 
-  !        while that of rt orbital is from nstate in input (or Nelec/2 for temperature<0)
-  subroutine projection_gx(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,tpsi,ttpsi,srg,energy,rt)
-    use structures
-    use communication, only: comm_is_root
-    use parallelization, only: nproc_id_global
-    use salmon_global, only: ncg,nelec,nscf
-    use inputoutput, only: t_unit_time
-    use subspace_diagonalization, only: ssdg
-    use gram_schmidt_orth, only: gram_schmidt
-    use Conjugate_Gradient, only: gscg_zwf
-    use Total_Energy, only: calc_eigen_energy
-    use sendrecv_grid
-    implicit none
-    integer                 ,intent(in) :: itt
-    type(s_ofile)           ,intent(in) :: ofl
-    real(8)                 ,intent(in) :: dt
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_dft_system)                  :: system
-    type(s_parallel_info)               :: info
-    type(s_stencil)         ,intent(in) :: stencil
-    type(s_pp_grid)         ,intent(in) :: ppg
-    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_orbital)                     :: tpsi,ttpsi ! temporary arrays
-    type(s_sendrecv_grid)               :: srg
-    type(s_dft_energy)                  :: energy
-    type(s_rt)                          :: rt
-    !
-    integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
-    integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
-    complex(8),dimension(rt%no0,system%no,system%nspin,system%nk) :: mat
-    real(8) :: coef(rt%no0,system%nk,system%nspin)
-    real(8) :: nee, neh, wspin, dE
-    complex(8) :: cbox
-    !
-    integer :: mo
-    real(8) :: rocc_rt_bk(1:system%no,1:system%nk,1:system%nspin)
-    integer,dimension(2,3) :: neig
-     
-    if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
-
-    if(nscf==0) then
-      niter = 10
-    else
-      niter = nscf
-    end if
-
-    ! switch no,io_s,io_e,numo : rt => gs
-    call norb_rt2gs_for_proj(system,info,rt)
-
-    ! change size of rocc : rt => gs
-    call change_size_rt2gs_for_proj
-
-
-    ! GS iteration
-    ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
-    call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
-    dE = energy%E_kin - rt%E_old
-    if(abs(dE) < 1e-12) then
-      if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
-    else
-      do iter_GS=1,niter
-        call ssdg(mg,system,info,stencil,rt%tpsi0,tpsi,ppg,rt%vloc0,srg)
-        call gscg_zwf(ncg,mg,system,info,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
-        call gram_schmidt(system, mg, info, rt%tpsi0)
-        call calc_eigen_energy(energy,rt%tpsi0,tpsi,ttpsi,system,info,mg,rt%vloc0,stencil,srg,ppg)
-        dE = energy%E_kin - rt%E_old
-        if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
-        if(abs(dE) < 1e-6) exit
-        rt%E_old = energy%E_kin
-      end do
-    end if
-
-
-    ! switch back no,io_s,io_e,numo : gs => rt
-    call norb_gs2rt_for_proj(system,info,rt)
-
-    ! change back size of rocc : gs => rt
-    call change_size_gs2rt_for_proj
-
-    nspin = system%nspin
-    no = system%no
-    nk = system%nk
-    is = mg%is
-    ie = mg%ie
-    ik_s = info%ik_s
-    ik_e = info%ik_e
-    io_s = info%io_s
-    io_e = info%io_e
-    if(nspin==1) then
-      wspin = 2d0
-    else if(nspin==2) then
-      wspin = 1d0
-    end if
-    mo = rt%no0
-
-    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
-    
-    coef=0.d0
-    do ispin=1,nspin
-    do ik=1,nk
-    do io1=1,mo
-      do io2=1,no
-        coef(io1,ik,ispin) = coef(io1,ik,ispin) &
-        & + system%rocc(io2,ik,ispin)*system%wtk(ik)* abs(mat(io1,io2,ispin,ik))**2
-      end do
-    end do
-    end do
-    end do
-
-    nee = 0d0
-    neh = dble(nelec)
-    do ispin=1,nspin
-    do ik=1,nk
-    do io=1,mo
-      nee = nee + ((wspin-rt%rocc0(io,ik,ispin))/wspin) * coef(io,ik,ispin)
-      neh = neh - (rt%rocc0(io,ik,ispin)/wspin) * coef(io,ik,ispin)
-    end do
-    end do
-    end do
-   !nee  = sum(ovlp_occ(NBoccmax+1:NB,:))
-   !neh  = sum(occ)-sum(ovlp_occ(1:NBoccmax,:))
-    if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_nex,'(99(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv, nee, neh
-      write(ofl%fh_ovlp,'(i11)') itt
-      do ispin=1,nspin
-      do ik=1,nk
-        write(ofl%fh_ovlp,'(i6,5000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,mo)
-      end do
-      end do
-    end if
-
-    return
-    
-  contains
-
-
-    subroutine change_size_rt2gs_for_proj
-      implicit none
-
-      !$omp workshare
-      rocc_rt_bk(:,:,:) = system%rocc(:,:,:)
-      !$omp end workshare
-      deallocate(system%rocc)
-      allocate(system%rocc(1:system%no,1:system%nk,1:system%nspin)) !size of gs
-      !$omp workshare
-      system%rocc = rt%rocc0
-      !$omp end workshare
-      deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
-      allocate(energy%esp(system%no,system%nk,system%nspin))
-      call allocate_orbital_complex(system%nspin,mg,info, tpsi)
-      call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
-      ! sendrecv_grid object for wavefunction updates
-      call create_sendrecv_neig(neig, info) ! neighboring node array
-      call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
-      call dealloc_cache(srg)
-
-    end subroutine change_size_rt2gs_for_proj
-
-    subroutine change_size_gs2rt_for_proj
-      implicit none
-
-      !$omp workshare
-      rt%rocc0 = system%rocc 
-      !$omp end workshare
-      deallocate(system%rocc)
-      allocate(system%rocc(1:system%no,1:system%nk,1:system%nspin)) !size of rt
-      !$omp workshare
-      system%rocc(:,:,:) = rocc_rt_bk(:,:,:)
-      !$omp end workshare
-      deallocate(energy%esp,tpsi%zwf,ttpsi%zwf)
-      allocate(energy%esp(system%no,system%nk,system%nspin))
-      call allocate_orbital_complex(system%nspin,mg,info, tpsi)
-      call allocate_orbital_complex(system%nspin,mg,info,ttpsi)
-      ! sendrecv_grid object for wavefunction updates
-      call create_sendrecv_neig(neig, info) ! neighboring node array
-      call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
-      call dealloc_cache(srg)
-
-    end subroutine change_size_gs2rt_for_proj
-
-  
-    subroutine inner_product(psi1,psi2,mat)
-      use communication, only: comm_summation, comm_bcast
-      use pack_unpack, only: copy_data
-      implicit none
-      type(s_orbital), intent(in) :: psi1,psi2
-      complex(8),dimension(rt%no0,system%no,system%nspin,system%nk) :: mat
-      complex(8),dimension(rt%no0,system%no,system%nspin,system%nk) :: mat1
-      complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1) &
-                        & ,mg%is_array(2):mg%ie_array(2) &
-                        & ,mg%is_array(3):mg%ie_array(3))
-      ! copied from subspace_diagonalization.f90
-      mat1 = 0d0
-      if(info%if_divide_orbit) then
-        do ik=ik_s,ik_e
-        do ispin = 1, nspin
-          do io1 = 1, mo
-            if (rt%io_s0<= io1 .and. io1 <= rt%io_e0) then
-              call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
-            end if
-            call comm_bcast(wf_io1, info%icomm_o, rt%irank_io0(io1))
-            do io2 = 1, no
-              if (io_s<= io2 .and. io2 <= io_e) then
-                cbox = 0d0
-                !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+:cbox)
-                do iz=is(3),ie(3)
-                do iy=is(2),ie(2)
-                do ix=is(1),ie(1)
-                  cbox = cbox + conjg(wf_io1(ix,iy,iz)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
-                end do
-                end do
-                end do
-                mat1(io1,io2,ispin,ik) = cbox * system%hvol
-              end if
-            end do
-          end do !io1
-        end do !ispin
-        end do
-      else
-        !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
-        do ik=ik_s,ik_e
-        do ispin=1,nspin
-        do io1=rt%io_s0,rt%io_e0
-        do io2=io_s,io_e
-          cbox = 0d0
-          do iz=is(3),ie(3)
-          do iy=is(2),ie(2)
-          do ix=is(1),ie(1)
-            cbox = cbox + conjg(psi1%zwf(ix,iy,iz,ispin,io1,ik,1)) * psi2%zwf(ix,iy,iz,ispin,io2,ik,1)
-          end do
-          end do
-          end do
-          mat1(io1,io2,ispin,ik) = cbox * system%hvol
-        end do
-        end do
-        end do
-        end do
-      end if
-
-      call comm_summation(mat1,mat,mo*no*nspin*nk,info%icomm_rko)
-
-    end subroutine inner_product
-
-  end subroutine projection_gx
 
 !===================================================================================================================================
 

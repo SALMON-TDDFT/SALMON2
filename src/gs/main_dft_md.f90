@@ -217,7 +217,7 @@ MD_Loop : do it=1,nt
 
    ! Export electronic density (cube or vtk)
    if(yn_out_dns_rt=='y' .and. mod(it,out_dns_rt_step)==0) then
-      call write_dns(lg,mg,system,rho_s,rho_s,it)
+      call write_dns(lg,mg,system,info,rho_s,rho_s,it)
    end if
 
 end do MD_Loop

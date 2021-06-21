@@ -15,14 +15,11 @@
 !
 module pseudo_pt_so_sub
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
 ! WARNING: We must not call these except for hpsi routine.
 
   private
-  public :: SPIN_ORBIT_ON
   public :: pseudo_so
   public :: calc_uVpsi_so
   public :: calc_force_uVpsi_so

@@ -356,7 +356,7 @@ End Subroutine calc_E_ext
 !===================================================================================================================================
 
 subroutine add_Ac_from_file(filename, t0, delta_t, is, ie, Ac_ext_t)
-  use read_rtdata_file, only: count_rows_from_rtdata_file, load_Ac_from_rtdata_file
+  use read_rtdata_file, only: count_rows_from_rtdata_file, load_Ac_from_rtdata_file, load_Ac_from_rtdata_file_Ac_tot
   implicit none
   character(256), intent(in) :: filename
   real(8),intent(in) :: t0
@@ -371,7 +371,9 @@ subroutine add_Ac_from_file(filename, t0, delta_t, is, ie, Ac_ext_t)
   n_dat = count_rows_from_rtdata_file(trim(filename))
 
   allocate(t_dat(1:n_dat), Ac_dat(1:3, 1:n_dat))
+  !(choose Ac_ext or Ac_tot to load)
   call load_Ac_from_rtdata_file(trim(filename), n_dat, t_dat, Ac_dat)
+!  call load_Ac_from_rtdata_file_Ac_tot(trim(filename), n_dat,t_dat,Ac_dat)
 
   do i = is, ie
       call interp_Ac(t0 + delta_t * i, Ac)

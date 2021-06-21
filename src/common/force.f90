@@ -29,9 +29,9 @@ contains
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
     use sym_vector_sub, only: sym_vector_force_xyz
     use sym_sub, only: use_symmetry
-    use pseudo_pt_so_sub, only: SPIN_ORBIT_ON, calc_uVpsi_so
+    use pseudo_pt_so_sub, only: calc_uVpsi_so
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
-    use salmon_global, only: kion,cutoff_g,yn_periodic
+    use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit
     use code_optimization, only: force_omp_mode
     use timer
     implicit none
@@ -143,10 +143,10 @@ contains
                        ,mg%is_array(2):mg%ie_array(2) &
                        ,mg%is_array(3):mg%ie_array(3) &
                        ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-      tpsi%zwf = cmplx(tpsi%rwf)
+      tpsi%zwf = dcmplx(tpsi%rwf)
     end if
 
-    if( SPIN_ORBIT_ON )then
+    if( yn_spinorbit=='y' )then
       call calc_uVpsi_so(nspin,info,ppg,tpsi,uVpsibox2)
     else
     ! uVpsibox2 = < uV | exp(ikr) | psi >
@@ -199,7 +199,7 @@ contains
 !$omp   private(jlma,l,n,m1,m2,ddm_mms_nla,gtpsi) &
 !$omp   shared(im,ik_s,ik_e,io_s,io_e,nspin,tpsi,mg,stencil,system,ppg,uVpsibox2,yn_periodic) &
 !$omp   shared(PLUS_U_ON,Nlma_ao,phipsibox2,iorb,zF_tmp,U_eff,dm_mms_nla) &
-!$omp   shared(SPIN_ORBIT_ON,ztmp) &
+!$omp   shared(yn_spinorbit,ztmp) &
 !$omp   shared(dden) &
 !$omp   reduction(+:F_tmp) &
 !$omp   if(force_omp_mode)
@@ -241,7 +241,7 @@ contains
        if(yn_periodic=='y') kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
-       if( SPIN_ORBIT_ON )then
+       if( yn_spinorbit=='y' )then
          do ilma=1,size(ppg%ia_tbl_so)
            ia = ppg%ia_tbl_so(ilma)
            duVpsi=zero

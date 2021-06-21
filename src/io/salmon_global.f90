@@ -291,9 +291,10 @@ module salmon_global
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
+  character(1)   :: yn_lr_w0_correction
   character(1)   :: yn_out_perflog
   character(6)   :: format_perflog ! 'stdout','text','csv'
-
+  
 !! &poisson
   integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)

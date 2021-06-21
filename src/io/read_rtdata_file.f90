@@ -16,7 +16,7 @@
 !=======================================================================
 module read_rtdata_file
   use filesystem, only: open_filehandle
-  use inputoutput, only: t_unit_ac
+  use inputoutput, only: t_unit_ac,t_unit_time
   implicit none
 
 contains
@@ -55,7 +55,8 @@ contains
   subroutine load_Ac_from_rtdata_file(filename, n_dat, t_dat, Ac_dat)
     ! This subroutine Reads the data of the given number of samples 
     ! from `???_rt.data` file. The empty and comment lines are skipped,
-    ! and the values of the first four columns are stored in t_dat, Ac_dat.
+    ! and the values of the first four columns:
+    ! time(1) and Ac_ext (2-4) are stored in t_dat, Ac_dat.
     implicit none
     character(256), intent(in) :: filename
     integer, intent(in) :: n_dat
@@ -79,9 +80,46 @@ contains
 
     ! Transform unit of Ac field
     Ac_dat(:, :) = Ac_dat(:, :) / t_unit_ac%conv
-
+    t_dat(:) = t_dat(:) / t_unit_time%conv
+    
     return
   end subroutine load_Ac_from_rtdata_file
+
+  ! if you want use this subroutine, please switch subroutine name in
+  ! rt/em_filed.f90
+  subroutine load_Ac_from_rtdata_file_Ac_tot(filename, n_dat, t_dat, Ac_dat)
+    ! This subroutine Reads the data of the given number of samples 
+    ! from `???_rt.data` file. The empty and comment lines are skipped,
+    ! and the values of the four columns:
+    ! time(1) and Ac_tot (8-10) are stored in t_dat, Ac_dat.
+    implicit none
+    character(256), intent(in) :: filename
+    integer, intent(in) :: n_dat
+    real(8), intent(out) :: t_dat(n_dat)
+    real(8), intent(out) :: Ac_dat(1:3, n_dat)
+    real(8) :: tmp(10)
+
+    integer :: i, fh
+    character(1024) :: buf
+
+    fh = open_filehandle(trim(filename), status='old')
+    i = 1
+    do while (i <= n_dat)
+        read(fh, '(a)')  buf
+        buf = adjustl(buf)
+        if (len_trim(buf) < 1) cycle
+        if (buf(1:1) == '#' .or. buf(1:1) == '!') cycle
+        read(buf, *) t_dat(i), tmp(1:6), Ac_dat(1:3, i)  !Ac_tot
+        i = i + 1
+    end do
+    close(fh)
+
+    ! Transform unit of Ac field
+    Ac_dat(:, :) = Ac_dat(:, :) / t_unit_ac%conv
+    t_dat(:) = t_dat(:) / t_unit_time%conv
+    
+    return
+  end subroutine load_Ac_from_rtdata_file_Ac_tot
 
 !===================================================================================================================================
 

@@ -93,12 +93,11 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,projection_option,nelec_spin, &
+  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
-  use occupation_so, only: SPIN_ORBIT_ON, init_occupation_so
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -110,6 +109,12 @@ subroutine init_dft_system(lg,system,stencil)
   if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
      al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
     stencil%if_orthogonal = .true.
+    if(al(1)*al(2)*al(3)==0d0) then
+      if(num_rgrid(1)*num_rgrid(2)*num_rgrid(3)==0 .or. dl(1)*dl(2)*dl(3)==0d0) then
+        stop "error: invalid cell"
+      end if
+      al = dl * dble(num_rgrid)
+    end if
     system%primitive_a = 0d0
     system%primitive_a(1,1) = al(1)
     system%primitive_a(2,2) = al(2)
@@ -150,7 +155,7 @@ subroutine init_dft_system(lg,system,stencil)
       else
         system%if_real_orbital = .false.
       end if
-      if ( SPIN_ORBIT_ON ) system%if_real_orbital=.false.
+      if ( yn_spinorbit=='y' ) system%if_real_orbital=.false.
     end select
   end if
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
@@ -166,23 +171,17 @@ subroutine init_dft_system(lg,system,stencil)
   end if
 
   if(calc_mode=='RT'.and. temperature<-1.d-12)then
-     if(projection_option=='no' .or. projection_option=='gx')then  !'gx' is hidden option by AY
-        if( SPIN_ORBIT_ON )then
-           system%no = nelec
-        else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
-           system%no = maxval(nelec_spin(:))
-        else
-           if(mod(nelec,2)==0)then
-              system%no = nelec/2
-           else
-              system%no = (nelec+1)/2
-           end if
-        end if
-     else if(projection_option=='gs')then
-        system%no = nstate
-     else
-        stop 'wrong projection option'
-     endif
+    if( yn_spinorbit=='y' )then
+       system%no = nelec
+    else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
+       system%no = maxval(nelec_spin(:))
+    else
+       if(mod(nelec,2)==0)then
+          system%no = nelec/2
+       else
+          system%no = (nelec+1)/2
+       end if
+    end if
   else
     system%no = nstate
   end if
@@ -203,8 +202,8 @@ subroutine init_dft_system(lg,system,stencil)
 
 ! initial value of occupation
   system%rocc = 0d0
-  if ( SPIN_ORBIT_ON ) then
-    call init_occupation_so( system%rocc, nelec )
+  if ( yn_spinorbit=='y' ) then
+    system%rocc(1:nelec,:,:) = 1.0d0
   else
     select case(system%nspin)
     case(1)

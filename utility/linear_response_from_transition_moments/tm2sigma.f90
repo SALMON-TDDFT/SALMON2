@@ -76,11 +76,11 @@ program main
         do ib2=1,nb
           if(ib2==ib1) cycle
           sigma = sigma + (zi/(w*V))* occ(ib1,ik)*   &
-          & ( matrix_v(ib1,ib2,mu,ik) * matrix_p(ib2,ib1,nu,ik) / ( w + eigen(ib1,ik) - eigen(ib2,ik) + zi*delta ) &
-          & + matrix_v(ib2,ib1,mu,ik) * matrix_p(ib1,ib2,nu,ik) / (-w + eigen(ib1,ik) - eigen(ib2,ik) - zi*delta ) )
+          & ( matrix_v(ib1,ib2,mu,ik) * matrix_v(ib2,ib1,nu,ik) / ( w + eigen(ib1,ik) - eigen(ib2,ik) + zi*delta ) &
+          & + matrix_v(ib2,ib1,mu,ik) * matrix_v(ib1,ib2,nu,ik) / (-w + eigen(ib1,ik) - eigen(ib2,ik) - zi*delta ) )
           sigma_intra = sigma_intra + (zi/(w*V))* occ(ib1,ik)*   &
-          & ( matrix_v(ib1,ib2,mu,ik) * matrix_p(ib2,ib1,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) &
-          & + matrix_v(ib2,ib1,mu,ik) * matrix_p(ib1,ib2,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) )
+          & ( matrix_v(ib1,ib2,mu,ik) * matrix_v(ib2,ib1,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) &
+          & + matrix_v(ib2,ib1,mu,ik) * matrix_v(ib1,ib2,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) )
         end do
       end do
     end do

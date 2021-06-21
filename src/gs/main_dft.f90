@@ -320,7 +320,7 @@ call write_k_data(system,stencil)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,system,rho_s)
+if(yn_out_dns =='y') call write_dns(lg,mg,system,info,rho_s)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
@@ -329,7 +329,10 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-if(write_gs_restart_data.ne."checkpoint_only") then
+if(write_gs_restart_data=="no") then
+   if(comm_is_root(nproc_id_global)) &
+      write(*,'(a)')"  no restart data writing."
+else if(write_gs_restart_data.ne."checkpoint_only") then
    if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
    call comm_sync_all
