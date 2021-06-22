@@ -158,7 +158,6 @@ contains
     use structures,     only : s_pp_info, s_pp_grid
     use salmon_math,    only : spline
     use communication,  only : comm_summation
-    use mpi, only: MPI_COMM_WORLD
     use parallelization, only: nproc_id_global
     implicit none
     type(s_pp_info) :: pp
