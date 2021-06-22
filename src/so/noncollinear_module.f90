@@ -86,7 +86,6 @@ contains
   subroutine rot_dm_noncollinear( rho, system, mg )
     use structures, only : s_dft_system, s_rgrid, s_scalar
     use communication, only : comm_summation
-    use mpi, only: MPI_COMM_WORLD
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
