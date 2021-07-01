@@ -891,7 +891,8 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   natom=size(ppg%mps, kind=c_int)
   ia_tbl_size=size(ppg%ia_tbl, kind=c_int)
   call update_kvector_nonlocalpt_core(ppg%zekr_uV, ik_s, ik_e, natom, ppg%nlma, ppg%nps, ia_tbl_size, ppg%ia_tbl, ppg%mps, ppg%rxyz, ppg%uv, kAc)
-#elif defined(USE_OPENACC)
+#else
+#ifdef USE_OPENACC
 !$acc kernels
 !$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
 #else
@@ -909,7 +910,6 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
-#ifndef USE_CUDA
 #ifdef USE_OPENACC
 !$acc end kernels
 #else
