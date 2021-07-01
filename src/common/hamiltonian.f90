@@ -869,7 +869,9 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   real(8) :: x,y,z
   complex(8) :: ekr
   real(8),allocatable :: kAc(:,:)
+#if defined(USE_OPENACC) && defined(USE_CUDA)
   integer natom, ia_tbl_size
+#endif
   
   allocate(kAc(3,ik_s:ik_e))
   do ik=ik_s,ik_e
@@ -885,15 +887,13 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 
-#ifdef USE_OPENACC
-#ifdef USE_CUDA
+#if defined(USE_OPENACC) && defined(USE_CUDA)
   natom=size(ppg%mps, kind=c_int)
   ia_tbl_size=size(ppg%ia_tbl, kind=c_int)
   call update_kvector_nonlocalpt_core(ppg%zekr_uV, ik_s, ik_e, natom, ppg%nlma, ppg%nps, ia_tbl_size, ppg%ia_tbl, ppg%mps, ppg%rxyz, ppg%uv, kAc)
-#else
+#elif defined(USE_OPENACC)
 !$acc kernels
 !$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
-#endif
 #else
 !$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
 #endif
@@ -909,12 +909,12 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
-#ifdef USE_OPENACC
 #ifndef USE_CUDA
+#ifdef USE_OPENACC
 !$acc end kernels
-#endif
 #else
 !$omp end parallel do  
+#endif
 #endif
 
   deallocate(kAc)
