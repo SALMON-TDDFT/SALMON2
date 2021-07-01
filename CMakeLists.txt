@@ -39,12 +39,6 @@ set(CMAKE_CUDA_FLAGS  ${CUDA_NVCC_FLAGS} "-std=c++14 -arch=sm_80 -rdc=false")
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-std=c++14 -O3")
 set(CUDA_HOST_COMPILER nvcc)
 
-# Prevent linking to libcudart_static.
-if (CMAKE_CUDA_IMPLICIT_LINK_LIBRARIES)
-  list(REMOVE_ITEM CMAKE_CUDA_IMPLICIT_LINK_LIBRARIES "cudart_static" )
-endif()
-
-
 include(cmakefiles/check_build_environments.cmake)
 
 
