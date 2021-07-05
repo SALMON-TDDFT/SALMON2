@@ -146,7 +146,7 @@ module salmon_global
   integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
-  character(8)   :: method_mixing
+  character(16)  :: method_mixing
   real(8)        :: mixrate
   integer        :: nmemory_mb
   real(8)        :: alpha_mb
