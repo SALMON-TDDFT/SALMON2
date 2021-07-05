@@ -214,12 +214,6 @@ real(8) :: rNe0,rNe
   case default ; stop 'Specify "cg" for method_min.'
   end select
 
-  select case(method_mixing)
-  case ('simple','broyden','pulay') ; continue
-  case default ; stop 'Specify any one of "simple" or "broyden" or "pulay" for method_mixing.'
-  end select
-
-
   nspin = system%nspin
   spsi%update_zwf_overlap = .false.
 
@@ -231,7 +225,10 @@ real(8) :: rNe0,rNe
      call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
      if(read_gs_restart_data=='wfn') then
         call calc_density(system,rho_s,spsi,info,mg)
-     else 
+     else
+        if(yn_spinorbit=='y') then
+          call calc_density(system,rho_s,spsi,info,mg) ! for initialization of the spin density matrix.
+        end if
         i = mixing%num_rho_stock+1
         !rho%f      => mg (orbital domain allocation)
         !rho_s(j)%f => mg (orbital domain allocation)

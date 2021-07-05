@@ -20,9 +20,7 @@ contains
 
 !===================================================================================================================================
 subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
-  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing
-  use salmon_global, only: yn_spinorbit
-  use noncollinear_module, only: simple_mixing_so
+  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing  
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
@@ -31,11 +29,6 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   type(s_mixing),intent(inout) :: mixing
   
   integer :: ix,iy,iz
-  
-  if(yn_spinorbit=='y') then
-    call simple_mixing_so(mg,system,c1,c2,rho_s,mixing)
-    return
-  end if
   
   if(system%nspin == 1)then
 !$omp parallel do private(iz,iy,ix) collapse(2)
