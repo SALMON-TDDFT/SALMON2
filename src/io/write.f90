@@ -2052,4 +2052,40 @@ contains
 
 !===================================================================================================================================
 
+  subroutine write_magnetization(itt,ofl,system,mg,info,psi)
+    use structures
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global
+    use salmon_global, only: yn_spinorbit
+    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed
+    implicit none
+    integer                 ,intent(in) :: itt
+    type(s_ofile)           ,intent(in) :: ofl
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_parallel_info)   ,intent(in) :: info
+    type(s_orbital)         ,intent(in) :: psi
+    !
+    integer ik,io
+    real(8) :: m(3),mag_orb(3,system%no,system%nk)
+    
+    if(yn_spinorbit=='n') stop "error: write_magnetization with yn_spinorbit=n"
+    
+    call calc_magnetization(system,mg,info,m)
+    call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+  
+    if(comm_is_root(nproc_id_global))then
+      write(ofl%fh_mag,'(i11)') itt
+      write(ofl%fh_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
+      do ik=1,system%nk
+      do io=1,system%no
+        write(ofl%fh_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+      end do
+      end do
+    end if
+    
+  end subroutine write_magnetization
+
+!===================================================================================================================================
+
 end module write_sub
