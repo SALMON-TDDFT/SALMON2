@@ -44,12 +44,6 @@ __global__ void zpseudo_kernel(
 		const unsigned io_s,
 		const unsigned io_e,
 		const unsigned Nspin,
-		const unsigned iz_min,
-		const unsigned iz_max,
-		const unsigned iy_min,
-		const unsigned iy_max,
-		const unsigned ix_min,
-		const unsigned ix_max,
 		const unsigned Nlma,
 		const unsigned ppg_nps,
 		const unsigned natom,
@@ -134,10 +128,11 @@ __global__ void zpseudo_kernel(
 }
 
 
-void zpseudo(
+void zpseudo_cuda(
 		// Output & Input
 		cuDoubleComplex* const htpsi_zwf,
 		// Input
+		const unsigned n,
 		const unsigned im_s,
 		const unsigned im_e,
 		const unsigned ik_s,
@@ -145,12 +140,6 @@ void zpseudo(
 		const unsigned io_s,
 		const unsigned io_e,
 		const unsigned Nspin,
-		const unsigned iz_min,
-		const unsigned iz_max,
-		const unsigned iy_min,
-		const unsigned iy_max,
-		const unsigned ix_min,
-		const unsigned ix_max,
 		const unsigned Nlma,
 		const unsigned ppg_nps,
 		const unsigned natom,
@@ -185,12 +174,6 @@ void zpseudo(
 		io_s,
 		io_e,
 		Nspin,
-		iz_min,
-		iz_max,
-		iy_min,
-		iy_max,
-		ix_min,
-		ix_max,
 		Nlma,
 		ppg_nps,
 		natom,
