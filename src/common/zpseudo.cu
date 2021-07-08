@@ -15,6 +15,7 @@
 	+ ((C6) - (F6s)) * ((F0e) - (F0s) + 1) * ((F1e) - (F1s) + 1)  * ((F2e) - (F2s) + 1) * ((F3e) - (F3s) + 1) * ((F4e) - (F4s) + 1) * ((F5e) - (F5s) + 1) \
 	 )
 
+extern "C" {
 __device__ cuDoubleComplex operator*(const cuDoubleComplex& a, const cuDoubleComplex& b) {
 	return make_double2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
@@ -37,34 +38,34 @@ __global__ void zpseudo_kernel(
         //           nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
 		cuDoubleComplex* const htpsi_zwf,
 		// Input
-		const unsigned im_s,
-		const unsigned im_e,
-		const unsigned ik_s,
-		const unsigned ik_e,
-		const unsigned io_s,
-		const unsigned io_e,
-		const unsigned Nspin,
-		const unsigned Nlma,
-		const unsigned ppg_nps,
-		const unsigned natom,
-		const unsigned mg_is_array_1,
-		const unsigned mg_ie_array_1,
-		const unsigned mg_is_array_2,
-		const unsigned mg_ie_array_2,
-		const unsigned mg_is_array_3,
-		const unsigned mg_ie_array_3,
+		const int im_s,
+		const int im_e,
+		const int ik_s,
+		const int ik_e,
+		const int io_s,
+		const int io_e,
+		const int Nspin,
+		const int Nlma,
+		const int ppg_nps,
+		const int natom,
+		const int mg_is_array_1,
+		const int mg_ie_array_1,
+		const int mg_is_array_2,
+		const int mg_ie_array_2,
+		const int mg_is_array_3,
+		const int mg_ie_array_3,
 		// allocate(ppg%ia_tbl(n*natom))
-		const unsigned* const ppg_ia_tbl,
+		const int* const ppg_ia_tbl,
 		// allocate(ppg%mps(natom))
-		const unsigned* const ppg_mps,
+		const int* const ppg_mps,
 		// allocate(ppg%jxyz(3,ppg%nps,natom))
-		const unsigned* const ppg_jxyz,
+		const int* const ppg_jxyz,
 		// allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 		const cuDoubleComplex* const ppg_zekr_uV,
 		// allocate(ppg%rinv_uvu(n*natom))
 		const double* const ppg_rinv_uvu,
 		// Same as htpsi_zwf
-		cuDoubleComplex* const tpsi_zwf
+		const cuDoubleComplex* const tpsi_zwf
 		) {
 	const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -132,26 +133,26 @@ void zpseudo_cuda(
 		// Output & Input
 		cuDoubleComplex* const htpsi_zwf,
 		// Input
-		const unsigned n,
-		const unsigned im_s,
-		const unsigned im_e,
-		const unsigned ik_s,
-		const unsigned ik_e,
-		const unsigned io_s,
-		const unsigned io_e,
-		const unsigned Nspin,
-		const unsigned Nlma,
-		const unsigned ppg_nps,
-		const unsigned natom,
-		const unsigned mg_is_array_1,
-		const unsigned mg_ie_array_1,
-		const unsigned mg_is_array_2,
-		const unsigned mg_ie_array_2,
-		const unsigned mg_is_array_3,
-		const unsigned mg_ie_array_3,
-		const unsigned* const ppg_ia_tbl,
-		const unsigned* const ppg_mps,
-		const unsigned* const ppg_jxyz,
+		const int n,
+		const int im_s,
+		const int im_e,
+		const int ik_s,
+		const int ik_e,
+		const int io_s,
+		const int io_e,
+		const int Nspin,
+		const int Nlma,
+		const int ppg_nps,
+		const int natom,
+		const int mg_is_array_1,
+		const int mg_ie_array_1,
+		const int mg_is_array_2,
+		const int mg_ie_array_2,
+		const int mg_is_array_3,
+		const int mg_ie_array_3,
+		const int* const ppg_ia_tbl,
+		const int* const ppg_mps,
+		const int* const ppg_jxyz,
 		const cuDoubleComplex* const ppg_zekr_uV,
 		const double* const ppg_rinv_uvu,
 		cuDoubleComplex* const tpsi_zwf
@@ -192,3 +193,4 @@ void zpseudo_cuda(
 		);
 	cudaDeviceSynchronize();
 }
+} // extern "C"
