@@ -29,7 +29,7 @@ __device__ cuDoubleComplex operator+=(cuDoubleComplex& a, const cuDoubleComplex&
 
 // Kernel function for (src/common/nonlocal_potential.f90: l.271)
 // Num threads = (im_e - im_s + 1) * (ik_e - ik_s + 1) * (io_e - io_s + 1) * Nlma
-__global__ void zpseudo_kernel_0(
+__global__ void zpseudo_kernel(
 		// Output & Input
 		// allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
         //           mg%is_array(2):mg%ie_array(2),  &
@@ -131,4 +131,81 @@ __global__ void zpseudo_kernel_0(
 					)] += wrk;
 		}
 	}
+}
+
+
+void zpseudo(
+		// Output & Input
+		cuDoubleComplex* const htpsi_zwf,
+		// Input
+		const unsigned im_s,
+		const unsigned im_e,
+		const unsigned ik_s,
+		const unsigned ik_e,
+		const unsigned io_s,
+		const unsigned io_e,
+		const unsigned Nspin,
+		const unsigned iz_min,
+		const unsigned iz_max,
+		const unsigned iy_min,
+		const unsigned iy_max,
+		const unsigned ix_min,
+		const unsigned ix_max,
+		const unsigned Nlma,
+		const unsigned ppg_nps,
+		const unsigned natom,
+		const unsigned mg_is_array_1,
+		const unsigned mg_ie_array_1,
+		const unsigned mg_is_array_2,
+		const unsigned mg_ie_array_2,
+		const unsigned mg_is_array_3,
+		const unsigned mg_ie_array_3,
+		const unsigned* const ppg_ia_tbl,
+		const unsigned* const ppg_mps,
+		const unsigned* const ppg_jxyz,
+		const cuDoubleComplex* const ppg_zekr_uV,
+		const double* const ppg_rinv_uvu,
+		cuDoubleComplex* const tpsi_zwf
+		) {
+	const unsigned im_size = im_e - im_s + 1;
+	const unsigned ik_size = ik_e - ik_s + 1;
+	const unsigned io_size = io_e - io_s + 1;
+	const unsigned num_threads = im_size * ik_size * io_size * Nspin;
+
+	const unsigned block_size = 256;
+	const unsigned grid_size = (num_threads + block_size - 1) / block_size;
+
+	zpseudo_kernel<<<grid_size, block_size>>>(
+		htpsi_zwf,
+		// Input
+		im_s,
+		im_e,
+		ik_s,
+		ik_e,
+		io_s,
+		io_e,
+		Nspin,
+		iz_min,
+		iz_max,
+		iy_min,
+		iy_max,
+		ix_min,
+		ix_max,
+		Nlma,
+		ppg_nps,
+		natom,
+		mg_is_array_1,
+		mg_ie_array_1,
+		mg_is_array_2,
+		mg_ie_array_2,
+		mg_is_array_3,
+		mg_ie_array_3,
+		ppg_ia_tbl,
+		ppg_mps,
+		ppg_jxyz,
+		ppg_zekr_uV,
+		ppg_rinv_uvu,
+		tpsi_zwf
+		);
+	cudaDeviceSynchronize();
 }
