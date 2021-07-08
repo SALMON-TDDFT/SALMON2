@@ -83,11 +83,11 @@ __global__ void zpseudo_kernel(
 	const unsigned io = (tid / (im_size * ik_size)) % io_size;
 	const unsigned ispin = (tid / (im_size * ik_size * io_size));
 
-	for (unsigned ilma = 0; ilma < Nlma; ilma++) {
+	for (unsigned ilma = 1; ilma <= Nlma; ilma++) {
 		const unsigned ia = ppg_ia_tbl[ilma];
 		cuDoubleComplex uVpsi = make_double2(0., 0.);
 
-		for (unsigned j = 0; j < ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++) {
+		for (unsigned j = 1; j <= ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++) {
 			const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
 			const unsigned iy = ppg_jxyz[ARRAY_INDEX_3D(2, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
 			const unsigned iz = ppg_jxyz[ARRAY_INDEX_3D(3, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
@@ -108,13 +108,13 @@ __global__ void zpseudo_kernel(
 
 		uVpsi *= ppg_rinv_uvu[ARRAY_INDEX_1D(ia, 1)];
 
-		for (unsigned j = 0; j < ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++) {
+		for (unsigned j = 1; j <= ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++) {
 			const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
 			const unsigned iy = ppg_jxyz[ARRAY_INDEX_3D(2, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
 			const unsigned iz = ppg_jxyz[ARRAY_INDEX_3D(3, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
 
 			const cuDoubleComplex wrk = uVpsi * ppg_zekr_uV[ARRAY_INDEX_3D(j, ilma, ik, 1, ppg_nps, 1, Nlma, ik_s, ik_e)];
-			htpsi_zwf[ARRAY_INDEX_7D(
+			const unsigned mem_offset = ARRAY_INDEX_7D(
 					ix, iy, iz, ispin, io, ik, im,
 					mg_is_array_1, mg_ie_array_1,
 					mg_is_array_2, mg_ie_array_2,
@@ -123,7 +123,10 @@ __global__ void zpseudo_kernel(
 					io_s, io_e,
 					ik_s, ik_e,
 					im_s, im_e
-					)] += wrk;
+					);
+			atomicAdd(&(htpsi_zwf[mem_offset].x), wrk.x);
+			atomicAdd(&(htpsi_zwf[mem_offset].y), wrk.y);
+			
 		}
 	}
 }
