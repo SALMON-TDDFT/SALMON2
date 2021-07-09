@@ -231,10 +231,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ix,iy,iz) firstprivate(nx,ny,nz)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ix,iy,iz) &
 !$omp          firstprivate(nx,ny,nz) &
 !$omp          shared(src,dst)
+#endif
     do iz=1,nz
     do iy=1,ny
     do ix=1,nx
@@ -242,7 +246,11 @@ contains
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_3d_complex8(src,dst)
