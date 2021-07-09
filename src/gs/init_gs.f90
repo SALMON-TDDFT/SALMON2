@@ -92,7 +92,11 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
         y1=Ymax*(2.d0*q(2)-1.d0)
         z1=Zmax*(2.d0*q(3)-1.d0)
         if(info%io_s <= io .and. io <= info%io_e) then
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix,xx,yy,zz,rr)
+#else
 !$OMP parallel do collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
+#endif
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
@@ -109,7 +113,11 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
           end do
           end do
           end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
         end if
       end do !ig
       end do
