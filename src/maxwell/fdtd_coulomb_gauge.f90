@@ -71,12 +71,16 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(1:3,ix,iy,iz) )*0.5d0 ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
-    rho_t  = ( rho%f(ix,iy,iz)     + fw%rho_old(ix,iy,iz)        )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+!    vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(1:3,ix,iy,iz) )*0.5d0 ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
+!    rho_t  = ( rho%f(ix,iy,iz)     + fw%rho_old(ix,iy,iz)        )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+!    fw%curr(ix,iy,iz,1:3) = vec_je + rho_t * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! curr(t): electron number current density
+!    wrk = wrk + fw%curr(ix,iy,iz,1:3)
+    vec_je = j_e%v(1:3,ix,iy,iz) ! j_e(t)
+    rho_t  = rho%f(ix,iy,iz)     ! rho(t)
     fw%curr(ix,iy,iz,1:3) = vec_je + rho_t * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! curr(t): electron number current density
     wrk = wrk + fw%curr(ix,iy,iz,1:3)
 
-    fw%box(ix,iy,iz) = Vh%f(ix,iy,iz) ! Vh(t+dt/2)
+    fw%box(ix,iy,iz) = Vh%f(ix,iy,iz) ! Vh(t)
   end do
   end do
   end do
@@ -93,7 +97,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   call timer_end(LOG_SS_FDTD_COMM)
 
   call timer_begin(LOG_SS_FDTD_CALC)
-  call calc_gradient_field(mg,fw%coef_nab,system%rmatrix_B,fw%box1,fw%grad_Vh) ! grad[Vh(t+dt/2)]
+  call calc_gradient_field(mg,fw%coef_nab,system%rmatrix_B,fw%box1,fw%grad_Vh) ! grad[Vh]
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=mg%is(3),mg%ie(3)
