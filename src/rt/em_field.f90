@@ -488,8 +488,8 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
           end do
           end do
           end do
-          system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+E_amplitude1*epdir_re1(1:3)*env_trigon_1   &
-                                                       +E_amplitude1*epdir_im1(1:3)*env_trigon_1
+          system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+epdir_re1(1:3)*env_trigon_1   &
+                                                     +epdir_im1(1:3)*env_trigon_1
         end if
         if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
           ipulse=2
@@ -508,8 +508,8 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
           end do
           end do
           end do
-          system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+E_amplitude2*epdir_re2(1:3)*env_trigon_2   &
-                                                       +E_amplitude2*epdir_im2(1:3)*env_trigon_2
+          system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+epdir_re2(1:3)*env_trigon_2   &
+                                                     +epdir_im2(1:3)*env_trigon_2
         end if
     end if
   end if
