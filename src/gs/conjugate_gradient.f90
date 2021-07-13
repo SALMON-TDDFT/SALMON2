@@ -87,7 +87,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   Iteration : do iter=1,Ncg
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -106,7 +110,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     if(iter==1)then
       uk = 0d0
     else
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin)
+#else
 !$omp parallel do private(io,ispin)
+#endif
       do io=io_s,io_e
       do ispin=1,nspin
         if (abs(gkgk(ispin,io)) > 1d-16) then
@@ -118,7 +126,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -134,7 +146,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -149,7 +165,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -170,7 +190,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin)
+#else
 !$omp parallel do private(io,ispin)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
       ev(ispin,io)=0.5d0*((xkHxk(ispin,io)+pkHpk(ispin,io))   &
@@ -186,7 +210,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
