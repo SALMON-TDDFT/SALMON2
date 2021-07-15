@@ -25,7 +25,7 @@ __device__ cuDoubleComplex operator*=(cuDoubleComplex& a, const double b) {
 }
 
 __device__ cuDoubleComplex operator+=(cuDoubleComplex& a, const cuDoubleComplex& b) {
-	return a = make_double2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+	return a = make_double2(a.x + b.x, a.y + b.y);
 }
 
 // Kernel function for (src/common/nonlocal_potential.f90: l.271)
@@ -106,7 +106,7 @@ __global__ void zpseudo_kernel(
 					)];
 		}
 
-		uVpsi *= ppg_rinv_uvu[ARRAY_INDEX_1D(ia, 1)];
+		uVpsi *= ppg_rinv_uvu[ARRAY_INDEX_1D(ilma, 1)];
 
 		for (unsigned j = 1; j <= ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++) {
 			const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
