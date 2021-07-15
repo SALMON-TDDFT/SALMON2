@@ -4,7 +4,7 @@
 #define ARRAY_INDEX_3D(C_i, C_j, C_k, Fort_i_start, Fort_i_end, Fort_j_start, Fort_j_end, Fort_k_start, Fort_k_end) \
 	(((C_i) - (Fort_i_start)) \
 	 + ((C_j) - (Fort_j_start)) * ((Fort_i_end) - (Fort_i_start) + 1) \
-	 + ((C_j) - (Fort_j_start)) * ((Fort_i_end) - (Fort_i_start) + 1) * ((Fort_j_end) - (Fort_j_start) + 1))
+	 + ((C_k) - (Fort_k_start)) * ((Fort_i_end) - (Fort_i_start) + 1) * ((Fort_j_end) - (Fort_j_start) + 1))
 #define ARRAY_INDEX_7D(C0, C1, C2, C3, C4, C5, C6, F0s, F0e, F1s, F1e, F2s, F2e, F3s, F3e, F4s, F4e, F5s, F5e, F6s, F6e) \
 	(((C0) - (F0s)) \
 	+ ((C1) - (F1s)) * ((F0e) - (F0s) + 1) \
@@ -78,13 +78,13 @@ __global__ void zpseudo_kernel(
 		return;
 	}
 
-	const unsigned im = tid % im_size;
-	const unsigned ik = (tid / im_size) % ik_size;
-	const unsigned io = (tid / (im_size * ik_size)) % io_size;
-	const unsigned ispin = (tid / (im_size * ik_size * io_size));
+	const unsigned im = tid % im_size + im_s;
+	const unsigned ik = (tid / im_size) % ik_size + ik_s;
+	const unsigned io = (tid / (im_size * ik_size)) % io_size + io_s;
+	const unsigned ispin = (tid / (im_size * ik_size * io_size)) + 1;
 
 	for (unsigned ilma = 1; ilma <= Nlma; ilma++) {
-		const unsigned ia = ppg_ia_tbl[ilma];
+		const unsigned ia = ppg_ia_tbl[ARRAY_INDEX_1D(ilma, 1)];
 		cuDoubleComplex uVpsi = make_double2(0., 0.);
 
 		for (unsigned j = 1; j <= ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++) {
@@ -126,7 +126,6 @@ __global__ void zpseudo_kernel(
 					);
 			atomicAdd(&(htpsi_zwf[mem_offset].x), wrk.x);
 			atomicAdd(&(htpsi_zwf[mem_offset].y), wrk.y);
-			
 		}
 	}
 }
