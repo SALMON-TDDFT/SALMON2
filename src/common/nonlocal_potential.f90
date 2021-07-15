@@ -298,12 +298,20 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
 #ifdef USE_OPENACC
 #ifdef USE_CUDA
-    n=size(ppg%jxyz)/(ppg%nps)/3
     natom=size(ppg%mps)
-    call zpseudo_cuda(htpsi%zwf,n,im_s,im_e,ik_s,ik_e,io_s,io_e,Nspin,Nlma,ppg%nps,natom,&
-        lbound(htpsi%zwf,3),ubound(htpsi%zwf,3),&
-        lbound(htpsi%zwf,2),ubound(htpsi%zwf,2),&
+    n=size(ppg%rinv_uvu)/natom
+    call zpseudo_cuda(htpsi%zwf,&
+        n,&
+        im_s,im_e,&
+        ik_s,ik_e,&
+        io_s,io_e,&
+        Nspin,&
+        Nlma,&
+        ppg%nps,&
+        natom,&
         lbound(htpsi%zwf,1),ubound(htpsi%zwf,1),&
+        lbound(htpsi%zwf,2),ubound(htpsi%zwf,2),&
+        lbound(htpsi%zwf,3),ubound(htpsi%zwf,3),&
         ppg%ia_tbl,&
         ppg%mps,&
         ppg%jxyz,&
