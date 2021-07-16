@@ -57,6 +57,7 @@ module timer
   integer,public,parameter :: LOG_CALC_VBOX             = 50
   integer,public,parameter :: LOG_CALC_TIME_PROPAGATION = 51
   integer,public,parameter :: LOG_HPSI                  = 52
+  integer,public,parameter :: LOG_CALC_STENCIL_CURRENT  = 53
   integer,public,parameter :: LOG_CALC_DP               = 55
   integer,public,parameter :: LOG_CALC_CURRENT          = 56
   integer,public,parameter :: LOG_CALC_ALLGATHERV_VLOCAL = 58
