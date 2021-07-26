@@ -317,6 +317,7 @@ call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 call write_info_data(Miter,system,energy,pp)
 call write_k_data(system,stencil)
+if(yn_spinorbit=='y') call write_gs_magnetization(ofl,system,mg,info,spsi)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
