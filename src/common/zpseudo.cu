@@ -16,15 +16,15 @@
 	 )
 
 extern "C" {
-__device__ cuDoubleComplex operator*(const cuDoubleComplex& a, const cuDoubleComplex& b) {
+__host__ __device__ cuDoubleComplex operator*(const cuDoubleComplex& a, const cuDoubleComplex& b) {
 	return make_double2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-__device__ cuDoubleComplex operator*=(cuDoubleComplex& a, const double b) {
+__host__ __device__ cuDoubleComplex operator*=(cuDoubleComplex& a, const double b) {
 	return a = make_double2(a.x * b, a.y * b);
 }
 
-__device__ cuDoubleComplex operator+=(cuDoubleComplex& a, const cuDoubleComplex& b) {
+__host__ __device__ cuDoubleComplex operator+=(cuDoubleComplex& a, const cuDoubleComplex& b) {
 	return a = make_double2(a.x + b.x, a.y + b.y);
 }
 
@@ -129,7 +129,6 @@ __global__ void zpseudo_kernel(
 		}
 	}
 }
-
 
 void zpseudo_cuda(
 		// Output & Input
