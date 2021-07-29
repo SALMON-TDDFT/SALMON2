@@ -15,6 +15,7 @@ set(SOURCES
    calc_gradient_psi.f90
    update_kvector_nonlocalpt.cu
    stencil_current.cu
+   zpseudo.cu
    )
 
 if (IS_FUJITSU_COMPILER)
