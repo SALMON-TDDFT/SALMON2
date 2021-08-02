@@ -57,7 +57,7 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 
 integer :: Mit, itt
-logical :: is_checkpoint_iter, is_shutdown_time
+logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
 !check condition for using jellium model
 if(yn_jm=='y') call check_condition_jm
@@ -100,7 +100,11 @@ TE : do itt=Mit+1,nt
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
-  if(is_checkpoint_iter .or. is_shutdown_time) then
+  is_checkpoint = is_checkpoint_iter .or. is_shutdown_time
+  call comm_bcast(is_checkpoint,nproc_group_global)
+
+
+  if(is_checkpoint) then
     if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
       print *, 'shutdown the calculation, iter =', itt
     end if
