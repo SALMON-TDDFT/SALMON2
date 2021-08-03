@@ -62,6 +62,9 @@ contains
     complex(8),allocatable :: zF_tmp(:,:)
     complex(8) :: ztmp
     integer :: Norb,iorb,ilocal
+#ifdef USE_OPENACC
+    complex(8) :: duVpsi_1, duVpsi_2, duVpsi_3
+#endif
 
     call timer_begin(LOG_CALC_ION_FORCE)
 
@@ -262,6 +265,30 @@ contains
            F_tmp(3,ia) = F_tmp(3,ia) - rtmp*dble( conjg(duVpsi(3)) * ztmp )
          end do
        else
+#ifdef USE_OPENACC
+       do ilocal=1,ppg%ilocal_nlma
+          ilma=ppg%ilocal_nlma2ilma(ilocal)
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
+          duVpsi_1 = 0d0
+          duVpsi_2 = 0d0
+          duVpsi_3 = 0d0
+!$acc parallel loop private(ix,iy,iz,w) reduction(+:duVpsi_1, duVpsi_2, duVpsi_3)
+          do j=1,ppg%mps(ia)
+             ix = ppg%jxyz(1,j,ia)
+             iy = ppg%jxyz(2,j,ia)
+             iz = ppg%jxyz(3,j,ia)
+             w(1) = gtpsi(1,ix,iy,iz) + zI* kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(2) = gtpsi(2,ix,iy,iz) + zI* kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(3) = gtpsi(3,ix,iy,iz) + zI* kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             duVpsi_1 = duVpsi_1 + conjg(ppg%zekr_uV(j,ilma,ik)) * w(1) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi_2 = duVpsi_2 + conjg(ppg%zekr_uV(j,ilma,ik)) * w(2) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi_3 = duVpsi_3 + conjg(ppg%zekr_uV(j,ilma,ik)) * w(3) ! < uV | exp(ikr) (nabla) | psi >
+          end do
+          F_tmp(1,ia) = F_tmp(1,ia) - rtmp * dble( conjg(duVpsi_1) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp(2,ia) = F_tmp(2,ia) - rtmp * dble( conjg(duVpsi_2) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi_3) * uVpsibox2(ispin,io,ik,im,ilma) )
+       end do
+#else
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
        do ilocal=1,ppg%ilocal_nlma
           ilma=ppg%ilocal_nlma2ilma(ilocal)
@@ -285,6 +312,7 @@ contains
           F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 !$omp end parallel do
+#endif
        end if
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
