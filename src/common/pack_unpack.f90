@@ -290,10 +290,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
 !$omp          firstprivate(nx,ny,nz,nw) &
 !$omp          shared(src,dst)
+#endif
     do iw=1,nw
     do iz=1,nz
     do iy=1,ny
@@ -303,7 +307,9 @@ contains
     end do
     end do
     end do
+#ifndef USE_OPENACC
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_4d_complex8(src,dst)
@@ -318,10 +324,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
 !$omp          firstprivate(nx,ny,nz,nw) &
 !$omp          shared(src,dst)
+#endif
     do iw=1,nw
     do iz=1,nz
     do iy=1,ny
@@ -331,7 +341,9 @@ contains
     end do
     end do
     end do
+#ifndef USE_OPENACC
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_5d_real8(src,dst)
