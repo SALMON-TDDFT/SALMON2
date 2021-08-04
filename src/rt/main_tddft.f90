@@ -22,8 +22,8 @@ subroutine main_tddft
 use math_constants, only: pi
 use salmon_global
 use structures
-use parallelization, only: adjust_elapse_time
-use communication, only: comm_is_root, comm_sync_all
+use parallelization, only: adjust_elapse_time, nproc_group_global
+use communication, only: comm_is_root, comm_sync_all, comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
