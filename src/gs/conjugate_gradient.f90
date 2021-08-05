@@ -66,7 +66,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
   do io=io_s,io_e
   do ispin=1,nspin
   do iz=is(3),ie(3)
