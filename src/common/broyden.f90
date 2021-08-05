@@ -52,18 +52,30 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
      if(flag_mix_zero) amix=0d0
   endif
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i)
+#else
 !$omp parallel do private(i)
+#endif
   do i=1,nl
     vecr_out(i,iter_mod)=vecr(i)
   end do
 
   if (iter <= iter_mb+1) then
     allocate(vecf(1:nl,iter:iter))
+#ifdef USE_OPENACC
+!$acc parallel loop private(i)
+#else
 !$omp parallel do private(i)
+#endif
     do i=1,nl
       vecf(i,iter) = vecr_out(i,iter_mod) - vecr_in(i,iter_mod)
     end do
+#ifdef USE_OPENACC
+!$acc parallel loop private(i)
+#else
 !$omp parallel do private(i)
+#endif
     do i=1,nl
       vecr_in(i,iter_mod+1) = vecr_in(i,iter_mod) + amix*vecf(i,iter)
     end do
@@ -236,7 +248,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end if
   end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i)
+#else
 !$omp parallel do private(i)
+#endif
   do i=1,nl
     vecr(i)=vecr_in(i,iter_mod+1)
   end do
