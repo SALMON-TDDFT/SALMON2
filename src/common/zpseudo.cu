@@ -29,14 +29,15 @@ __host__ __device__ cuDoubleComplex operator+=(cuDoubleComplex& a, const cuDoubl
 }
 
 // Kernel function for (src/common/nonlocal_potential.f90: l.271)
-// Num threads = (im_e - im_s + 1) * (ik_e - ik_s + 1) * (io_e - io_s + 1) * Nlma
+// Num threads = (im_e - im_s + 1) * (ik_e - ik_s + 1) * (io_e - io_s + 1) * Nlma.
 __global__ void zpseudo_kernel(
 		// Output & Input
-		// allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
+		cuDoubleComplex* const htpsi_zwf,
+		// Shape :  (psi%zwf(mg%is_array(1):mg%ie_array(1),  &
 		//           mg%is_array(2):mg%ie_array(2),  &
 		//           mg%is_array(3):mg%ie_array(3),  &
 		//           nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-		cuDoubleComplex* const htpsi_zwf,
+		//
 		// Input
 		const int im_s,
 		const int im_e,
@@ -54,18 +55,18 @@ __global__ void zpseudo_kernel(
 		const int mg_ie_array_2,
 		const int mg_is_array_3,
 		const int mg_ie_array_3,
-		// allocate(ppg%ia_tbl(n*natom))
 		const int* const ppg_ia_tbl,
-		// allocate(ppg%mps(natom))
+		// Shape :  (ppg%ia_tbl(n*natom))
 		const int* const ppg_mps,
-		// allocate(ppg%jxyz(3,ppg%nps,natom))
+		// Shape :  (ppg%mps(natom))
 		const int* const ppg_jxyz,
-		// allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
+		// Shape :  (ppg%jxyz(3,ppg%nps,natom))
 		const cuDoubleComplex* const ppg_zekr_uV,
-		// allocate(ppg%rinv_uvu(n*natom))
+		// Shape :  (ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 		const double* const ppg_rinv_uvu,
-		// Same as htpsi_zwf
+		// Shape :  (ppg%rinv_uvu(n*natom))
 		const cuDoubleComplex* const tpsi_zwf
+		// Shape :  The same with htpsi_zwf
 		) {
 	const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
 
