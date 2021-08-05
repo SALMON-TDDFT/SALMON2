@@ -508,16 +508,24 @@ CONTAINS
     if(allocated(tpsi%rwf)) then
       do ispin=1,Nspin
         call timer_begin(LOG_EIGEN_ENERGY_CALC)
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ik,io)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
+#endif
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk1(io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                         * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
         call timer_end(LOG_EIGEN_ENERGY_CALC)
 
         call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
@@ -534,10 +542,14 @@ CONTAINS
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
 !$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
+#endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -547,15 +559,23 @@ CONTAINS
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
       E_local(1) = E_tmp
 
     ! nonlocal part (E_ion_nloc)
       E_tmp = 0d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
 !$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
+#endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -573,7 +593,11 @@ CONTAINS
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
       E_local(2) = E_tmp
       call timer_end(LOG_EIGEN_ENERGY_CALC)
       
