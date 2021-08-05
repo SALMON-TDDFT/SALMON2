@@ -379,7 +379,11 @@ contains
 
     if(yn_periodic=='n') then
     ! local part (based on density gradient)
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix,ia)
+#else
 !$omp parallel do private(iz,iy,ix,ia)
+#endif
       do ia=1,nion
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -389,7 +393,11 @@ contains
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end loop
+#else
 !$omp end parallel do
+#endif
       deallocate(dden)
     end if
 
@@ -401,11 +409,19 @@ contains
 
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
+#ifdef USE_OPENACC
+!$omp parallel loop private(ia)
+#else
 !$omp parallel do private(ia)
+#endif
     do ia=1,nion
       system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
+#ifdef USE_OPENACC
+!$omp end parallel
+#else
 !$omp end parallel do
+#endif
 !
     if (use_symmetry) then
       call sym_vector_force_xyz( system%Force, system%Rion )
