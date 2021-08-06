@@ -594,7 +594,11 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(6) private(im,ik,io,is,iz,iy,ix)
+#else
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
