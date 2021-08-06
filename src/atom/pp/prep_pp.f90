@@ -1090,12 +1090,20 @@ subroutine init_uvpsi_table(ppg)
   integer :: ilma,ia,ilocal,ilocal_nlma
 
   ilocal_nlma = 0
+#ifdef USE_OPENACC
+!$acc parallel loop private(ilma,ia) reduction(+:ilocal_nlma)
+#else
 !$omp parallel do private(ilma,ia) reduction(+:ilocal_nlma)
+#endif
   do ilma=1,ppg%nlma
     ia = ppg%ia_tbl(ilma)
     if (ppg%ireferred_atom(ia)) ilocal_nlma = ilocal_nlma + 1
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
   ppg%ilocal_nlma = ilocal_nlma
 
   allocate(ppg%ilocal_nlma2ilma(ppg%ilocal_nlma))
