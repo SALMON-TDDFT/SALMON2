@@ -43,6 +43,10 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
+#ifdef USE_OPENACC
+  real(8),allocatable :: rwf_tmp(:,:,:,:,:,:,:)
+#endif
+
   if ( yn_spinorbit=='y' ) then
     call gscg_rwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     return
@@ -237,6 +241,35 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
+#ifdef USE_OPENACC
+    allocate(rwf_tmp, source=spsi%rwf)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      rwf_tmp(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(xkxk(ispin,io))
+    end do
+    end do
+    end do
+    end do
+
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      if(1d-16 < abs(xkxk(ispin,io)) .and. abs(xkxk(ispin,io)) <= 1d30) then
+        spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = rwf_tmp(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end if
+    end do
+    end do
+    end do
+    end do
+
+    deallocate(rwf_tmp)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -250,6 +283,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
     end do
+#endif
 
   end do Iteration
   call timer_end(LOG_GSCG_ISOLATED_CALC)
