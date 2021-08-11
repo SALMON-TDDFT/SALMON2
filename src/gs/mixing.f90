@@ -485,7 +485,11 @@ subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
   end if
 
   do iiter=1,mixing%num_rho_stock
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+#else
 !$OMP parallel do private(iz,iy,ix) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -495,7 +499,11 @@ subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
     end do
   end do
   do iiter=1,mixing%num_rho_stock-1
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+#else
 !$OMP parallel do private(iz,iy,ix) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
