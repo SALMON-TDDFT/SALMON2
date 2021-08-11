@@ -779,8 +779,12 @@ CONTAINS
 
     !(check maximum number of pairs and allocate)
     npair_bk_max = 0
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) reduction(max:npair_bk_max)
+#else
 !$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
 !$omp             reduction(max:npair_bk_max)
+#endif
     do iia=1,info%nion_mg
    !do ia=1,system%nion
        ia = info%ia_mg(iia)
@@ -812,7 +816,11 @@ CONTAINS
         end do
         npair_bk_max = max(npair_bk_max,npair_bk_loc)
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
       ewald%nmax_pair_bk = npair_bk_max
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
@@ -825,7 +833,11 @@ CONTAINS
 820      format(a,i6)
       endif
 
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#endif
     do iia=1,info%nion_mg
    !do ia=1,system%nion
        ia = info%ia_mg(iia)
@@ -861,7 +873,11 @@ CONTAINS
         end do
         ewald%npair_bk(iia) = ipair
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
       return
       !xxxxxxxxxxxxxx
