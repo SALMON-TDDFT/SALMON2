@@ -289,6 +289,8 @@ contains
           F_tmp_local(3,ilocal) = rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 
+       !$acc kernels
+       !$acc loop seq
        do ilocal=1,ppg%ilocal_nlma
           ia  =ppg%ilocal_nlma2ia  (ilocal)
 
@@ -296,6 +298,7 @@ contains
           F_tmp(2,ia) = F_tmp(2,ia) - F_tmp_local(2,ilocal)
           F_tmp(3,ia) = F_tmp(3,ia) - F_tmp_local(3,ilocal)
        end do
+       !$acc end kernels
 #else
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
        do ilocal=1,ppg%ilocal_nlma
@@ -410,7 +413,7 @@ contains
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
 #ifdef USE_OPENACC
-!$omp parallel loop private(ia)
+!$acc parallel loop private(ia)
 #else
 !$omp parallel do private(ia)
 #endif
@@ -418,7 +421,7 @@ contains
       system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
 #ifdef USE_OPENACC
-!$omp end parallel
+!$acc end parallel
 #else
 !$omp end parallel do
 #endif
@@ -483,7 +486,11 @@ contains
       if(ewald%yn_bookkeep=='y') then
 
          F_tmp_l = 0d0
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#endif
          do iia= 1,info%nion_mg
         !do ia= system%nion_s, system%nion_e
         !do ia=1,nion
@@ -517,7 +524,11 @@ contains
 
             end do  !ipair
          end do     !ia
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
          call comm_summation(F_tmp_l,F_tmp,3*nion,comm)
 
       else
