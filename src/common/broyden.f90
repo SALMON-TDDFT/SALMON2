@@ -97,14 +97,22 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
 
     omega_mb(:) = 1.d0 !???
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,j) collapse(2)
+#else
 !$omp parallel do private(i,j) collapse(2)
+#endif
     do i=iter_s,iter_mod
     do j=1,nl
       vecf(j,i) = vecr_out(j,i) - vecr_in(j,i)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i) collapse(2)
+#else
 !$omp parallel do private(i) collapse(2)
+#endif
     do i=iter_s,iter_e
     do j=1,nl
       del_vecx(j,i)=vecr_in(j,i+1)-vecr_in(j,i)
@@ -113,7 +121,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end do
 
     if(present(icomm)) then
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,j,ss)
+#else
 !$omp parallel do private(i,j,ss)
+#endif
       do i=iter_s,iter_e
         ss = 0d0
         do j=1,nl
@@ -123,7 +135,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,j,ss) collapse(2)
+#else
 !$omp parallel do private(i,j,ss) collapse(2)
+#endif
       do i=iter_s,iter_e
       do j=1,nl
         ss = sqrt(ss_tmp2(i))
@@ -140,7 +156,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end if
 
     if(present(icomm)) then
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(i,j,k,ss)
+#else
 !$omp parallel do collapse(2) private(i,j,k,ss)
+#endif
       do i=1,iter_e-iter_s+1
       do j=1,iter_e-iter_s+1
         ss = 0d0
@@ -152,7 +172,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
       call comm_summation(aa_tmp1,aa,(iter_e-iter_s+1)**2,icomm)
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(i,j)
+#else
 !$omp parallel do collapse(2) private(i,j)
+#endif
       do i=1,iter_e-iter_s+1
       do j=1,iter_e-iter_s+1
         aa(i,j)=omega_mb(iter_s-1+i)*omega_mb(iter_s-1+j)*aa(i,j)
@@ -174,7 +198,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
 
     call matrix_inverse(aa)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,j) collapse(2)
+#else
 !$omp parallel do private(i,j) collapse(2)
+#endif
     do i=iter_s,iter_e
     do j=iter_s,iter_e
       beta(i,j) = aa(i-iter_s+1, j-iter_s+1)
@@ -182,7 +210,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
     end do
 
     if(present(icomm)) then
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,j,ss)
+#else
 !$omp parallel do private(i,j,ss)
+#endif
       do i=iter_s,iter_e
         ss = 0d0
         do j=1,nl
@@ -193,7 +225,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
 
       vecr_tmp(1:nl)=0.d0
+#ifdef USE_OPENACC
+!$acc parallel loop private(k,i,j,ss)
+#else
 !$omp parallel do private(k,i,j,ss)
+#endif
       do k=1,nl
         ss = 0d0
         do j=iter_s,iter_e
@@ -213,14 +249,22 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
     end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i)
+#else
 !$omp parallel do private(i)
+#endif
     do i=1,nl
       vecr_in(i,iter_mod+1)=vecr_in(i,iter_mod)+amix*vecf(i,iter_mod)-vecr_tmp(i)
     end do
 
     if(present(icomm)) then
       nnegative_tmp=0
+#ifdef USE_OPENACC
+!$acc parallel loop private(i) reduction(+:nnegative_tmp)
+#else
 !$omp parallel do private(i) reduction(+:nnegative_tmp)
+#endif
       do i=1,nl
         if(vecr_in(i,iter_mod+1) < 0.d0) then
           nnegative_tmp=nnegative_tmp+1
@@ -236,7 +280,11 @@ subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,
       end do
     end if
     if(nnegative > 0) then
+#ifdef USE_OPENACC
+!$acc parallel loop private(i)
+#else
 !$omp parallel do private(i)
+#endif
       do i=1,nl
         vecr_in(i,iter_mod+1)=vecr_in(i,iter_mod)+amix*vecf(i,iter_mod)
       end do
