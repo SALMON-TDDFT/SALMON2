@@ -193,14 +193,10 @@ contains
 
     mps_tmp = 0
     ppg%jxyz_changed(:) = .false.
-#ifdef USE_OPENACC
-!$acc parallel loop private(ia,ik,j,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) reduction(max:mps_tmp) copyin(pp, ppg)
-#else
 !$omp parallel do default(none) &
 !$omp private(ia,ik,j,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
 !$omp shared(ia_s,ia_e,kion,nc,flag_cuboid,system,al,hgs,rps_max,mg,rshift,matrix_a,pp,ppg) &
 !$omp reduction(max:mps_tmp)
-#endif
     do ia=ia_s,ia_e
       ik=kion(ia)
       j=0
@@ -256,11 +252,7 @@ contains
       ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia) .or. (ppg%mps_old(ia) /= j)
       mps_tmp = max(mps_tmp,j)
     end do
-#ifdef USE_OPENACC
-!$acc end parallel
-#else
 !$omp end parallel do
-#endif
 
     ppg%nps=mps_tmp
     if (allocated(ppg%jxyz_old)) then
@@ -291,13 +283,9 @@ contains
     ppg%rxyz = 0d0
     ppg%mps  = 0
 
-#ifdef USE_OPENACC
-!$acc parallel loop private(ia,ik,j,i,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) copyin(pp, ppg)
-#else
 !$omp parallel do default(none) &
 !$omp private(ia,ik,j,i,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
 !$omp shared(ia_s,ia_e,natom,kion,nc,al,system,hgs,rshift,matrix_a,pp,ppg,mg,flag_cuboid,rps_max)
-#endif
     do ia=ia_s,ia_e
       if (ppg%jxyz_changed(ia)) then
         ik=kion(ia)
@@ -361,11 +349,7 @@ contains
         end do
       end if
     end do
-#ifdef USE_OPENACC
-!$acc end parallel
-#else
 !$omp end parallel do
-#endif
 
     call comm_summation(ppg%jxyz,info%icomm_ko)
     call comm_summation(ppg%rxyz,info%icomm_ko)
