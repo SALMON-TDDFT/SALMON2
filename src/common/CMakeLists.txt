@@ -13,7 +13,6 @@ set(SOURCES
    lattice.f90
    force.f90
    calc_gradient_psi.f90
-   update_kvector_nonlocalpt.cu
    stencil_current.cu
    zpseudo.cu
    )
