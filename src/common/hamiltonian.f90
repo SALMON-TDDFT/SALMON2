@@ -839,7 +839,6 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use salmon_global, only: yn_spinorbit
   use update_kvector_so_sub, only: update_kvector_so
   use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
-  use iso_c_binding
   implicit none
   integer           ,intent(in) :: ik_s,ik_e !,n_max
   type(s_dft_system),intent(in) :: system
