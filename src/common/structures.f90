@@ -518,11 +518,7 @@ contains
     type(s_scalar)           :: field
     integer :: ix,iy,iz
     allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
-#ifdef USE_OPENACC
-!$acc parallel loop collapse(2) private(iz,iy,ix)
-#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
-#endif
     do iz=rg%is(3),rg%ie(3)
     do iy=rg%is(2),rg%ie(2)
     do ix=rg%is(1),rg%ie(1)
