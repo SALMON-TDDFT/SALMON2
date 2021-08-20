@@ -719,7 +719,11 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   nspin = system%nspin
 
   zbox2(:,:,:) = 0.d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+#else
 !$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+#endif
   do ik=info%ik_s,info%ik_e
   do io=info%io_s,info%io_e
   do ispin=1,nspin
