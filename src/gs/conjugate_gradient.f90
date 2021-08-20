@@ -454,7 +454,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     !$acc enter data copyin(cg)
   end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
   do ik=ik_s,ik_e
   do io=io_s,io_e
   do ispin=1,nspin
@@ -477,7 +481,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   Iteration : do iter=1,Ncg
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -498,7 +506,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     if(iter==1)then
       uk = 0d0
     else
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin) collapse(2)
+#else
 !$omp parallel do private(ik,io,ispin) collapse(2)
+#endif
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,nspin
@@ -512,7 +524,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -530,7 +546,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -547,7 +567,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -570,7 +594,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin) collapse(2)
+#else
 !$omp parallel do private(ik,io,ispin) collapse(2)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -588,7 +616,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -609,7 +641,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
