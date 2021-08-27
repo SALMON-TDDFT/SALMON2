@@ -68,7 +68,7 @@ __global__ void zpseudo_kernel( cuDoubleComplex* const htpsi_zwf
   const unsigned im_size = im_e - im_s + 1;
   const unsigned ik_size = ik_e - ik_s + 1;
   const unsigned io_size = io_e - io_s + 1;
-  const unsigned array_length = im_size * ik_size * io_size * Nspin;
+  const unsigned array_length = im_size * ik_size * io_size * Nspin * Nlma;
   if (tid >= array_length)
   {
     return;
@@ -77,9 +77,9 @@ __global__ void zpseudo_kernel( cuDoubleComplex* const htpsi_zwf
   const unsigned im = tid % im_size + im_s;
   const unsigned ik = (tid / im_size) % ik_size + ik_s;
   const unsigned io = (tid / (im_size * ik_size)) % io_size + io_s;
-  const unsigned ispin = (tid / (im_size * ik_size * io_size)) + 1;
+  const unsigned ispin = (tid / (im_size * ik_size * io_size)) % Nspin+ 1;
+  const unsigned ilma = (tid / (im_size * ik_size * io_size * Nspin)) + 1;
 
-  for (unsigned ilma = 1; ilma <= Nlma; ilma++)
   {
     const unsigned ia = ppg_ia_tbl[ARRAY_INDEX_1D(ilma, 1)];
     cuDoubleComplex uVpsi = make_double2(0., 0.);
@@ -158,7 +158,7 @@ void zpseudo_cuda( cuDoubleComplex* const htpsi_zwf
   const unsigned im_size = im_e - im_s + 1;
   const unsigned ik_size = ik_e - ik_s + 1;
   const unsigned io_size = io_e - io_s + 1;
-  const unsigned num_threads = im_size * ik_size * io_size * Nspin;
+  const unsigned num_threads = im_size * ik_size * io_size * Nspin * Nlma;
 
   constexpr unsigned block_size = 256;
   const unsigned grid_size = (num_threads + block_size - 1) / block_size;
