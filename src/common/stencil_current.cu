@@ -3,6 +3,7 @@
 #include <complex>
 #include <cuComplex.h>
 #include <cub/cub.cuh>
+#include "array_index.h"
 
 extern "C" {
     static constexpr unsigned block_size = 128;
@@ -83,13 +84,13 @@ extern "C" {
         }
         typedef cub::BlockReduce<double, block_size> BlockReduce;
         __shared__ typename BlockReduce::TempStorage temp_storage;
-        const int ix = tid % xsize;
-        const int iy = (tid/xsize) % ysize;
-        const int iz = (tid/(xsize*ysize)) % zsize;
+        const int ix = (tid % xsize) + 1;
+        const int iy = ((tid/xsize) % ysize) + 1;
+        const int iz = ((tid/(xsize*ysize)) % zsize) + 1;
         cuDoubleComplex tmp;
         double val, block_sum;
-        const cuDoubleComplex cpsi = cuConj(psi_data[ix + iy*xlen + iz*xlen*ylen]);
-        tmp = psi_data[ix + iy*xlen + iz*xlen*ylen]; // psi_data[ix][iy][iz]
+        const cuDoubleComplex cpsi = cuConj(psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)]);
+        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)];
         const double psi_abs = cuCabs(tmp);
         val = psi_abs*psi_abs;
         __syncthreads();
@@ -98,13 +99,13 @@ extern "C" {
              atomicAdd(&d_res[0], block_sum);
         }
 
-        tmp = psi_data[(idx[ix + 1] - 1) + iy*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+1, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
         val = nabt0*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[(idx[ix + 2] - 1) + iy*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+2, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
         val += nabt1*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[(idx[ix + 3] - 1) + iy*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+3, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
         val += nabt2*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[(idx[ix + 4] - 1) + iy*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+4, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
         val += nabt3*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         __syncthreads();
         block_sum = BlockReduce(temp_storage).Sum(val);
@@ -112,13 +113,13 @@ extern "C" {
              atomicAdd(&d_res[1], block_sum);
         }
         
-        tmp = psi_data[ix+(idy[iy + 1] - 1)*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+1, 1)], iz, 1, xlen, 1, ylen, 1)];
         val = nabt4*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[ix + (idy[iy + 2] - 1)*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+2, 1)], iz, 1, xlen, 1, ylen, 1)];
         val += nabt5*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[ix + (idy[iy + 3] - 1)*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+3, 1)], iz, 1, xlen, 1, ylen, 1)];
         val += nabt6*(cpsi.y*tmp.x+cpsi.x*tmp.y);
-        tmp = psi_data[ix + (idy[iy + 4] - 1)*xlen + iz*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+4, 1)], iz, 1, xlen, 1, ylen, 1)];
         val += nabt7*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         __syncthreads();
         block_sum = BlockReduce(temp_storage).Sum(val);
@@ -126,13 +127,13 @@ extern "C" {
              atomicAdd(&d_res[2], block_sum);
         }
         
-        tmp = psi_data[ix + iy*xlen + (idz[iz + 1] - 1)*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+1, 1)], 1, xlen, 1, ylen, 1)];
         val = nabt8*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[ix + iy*xlen + (idz[iz + 2] - 1)*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+2, 1)], 1, xlen, 1, ylen, 1)];
         val += nabt9*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[ix + iy*xlen + (idz[iz + 3] - 1)*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+3, 1)], 1, xlen, 1, ylen, 1)];
         val += nabt10*(cpsi.y*tmp.x + cpsi.x*tmp.y);
-        tmp = psi_data[ix + iy*xlen + (idz[iz + 4] - 1)*xlen*ylen];
+        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+4, 1)], 1, xlen, 1, ylen, 1)];
         val += nabt11*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         __syncthreads();
         block_sum = BlockReduce(temp_storage).Sum(val);
@@ -167,12 +168,12 @@ extern "C" {
         cudaMemcpy(d_idx, idx, sizeof(int)*(ie[0] - is[0] + 1 + Nd), cudaMemcpyHostToDevice);
         cudaMemcpy(d_idy, idy, sizeof(int)*(ie[1] - is[1] + 1 + Nd), cudaMemcpyHostToDevice);
         cudaMemcpy(d_idz, idz, sizeof(int)*(ie[2] - is[2] + 1 + Nd), cudaMemcpyHostToDevice);
-        for(int ik = ik_s - 1; ik < ik_e; ik++) {
+        for(int ik = ik_s; ik <= ik_e; ik++) {
             double kAc[3];
-            for(int i = 0; i < 3; i++) {
-                kAc[i] = vec_k[i + 3*ik] + vec_Ac[i];
+            for(int i = 1; i <= 3; i++) {
+                kAc[ARRAY_INDEX_1D(i, 1)] = vec_k[ARRAY_INDEX_2D(i, ik, 1, 3, 1)] + vec_Ac[ARRAY_INDEX_1D(i, 1)];
             }
-            for(int io = io_s - 1; io < io_e; io++) {
+            for(int io = io_s; io <= io_e; io++) {
                 const int grid_size = ((maxlen+block_size - 1)/block_size);
                 // gpu kernel
                 cudaMemset(reinterpret_cast<void*>(d_res), static_cast<double>(0), sizeof(double)*4);
@@ -192,7 +193,7 @@ extern "C" {
                     wrk3[i] = BT[i]*wrk2[0] + BT[i + 3]*wrk2[1] + BT[i + 6]*wrk2[2];
                 }
                 for(int i = 0; i < 3; i++) {
-                    wrk4[i] = (wrk1[i] + wrk3[i])*rocc[io + ik*(io_e - io_s + 1)]*wtk[ik];
+                    wrk4[i] = (wrk1[i] + wrk3[i])*rocc[ARRAY_INDEX_2D(io, ik, io_s, io_e, 1)]*wtk[ARRAY_INDEX_1D(ik, 1)];
                 }
                 *jx += wrk4[0];
                 *jy += wrk4[1];
