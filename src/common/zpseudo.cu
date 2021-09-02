@@ -86,13 +86,13 @@ __global__ void zpseudo_kernel( cuDoubleComplex* const htpsi_zwf
 
     for (unsigned j = 1; j <= ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++)
     {
-      const cuDoubleComplex ppg_zekr_uV_v = ppg_zekr_uV[ARRAY_INDEX_3D(j, ilma, ik, 1, ppg_nps, 1, Nlma, ik_s, ik_e)];
+      const cuDoubleComplex ppg_zekr_uV_v = ppg_zekr_uV[ARRAY_INDEX_3D(j, ilma, ik, 1, ppg_nps, 1, Nlma, ik_s)];
       // calculate conj
       const cuDoubleComplex conjg_ppg_zekr_uV = make_double2(ppg_zekr_uV_v.x, -ppg_zekr_uV_v.y);
 
-      const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
-      const unsigned iy = ppg_jxyz[ARRAY_INDEX_3D(2, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
-      const unsigned iz = ppg_jxyz[ARRAY_INDEX_3D(3, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
+      const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1)];
+      const unsigned iy = ppg_jxyz[ARRAY_INDEX_3D(2, j, ia, 1, 3, 1, ppg_nps, 1)];
+      const unsigned iz = ppg_jxyz[ARRAY_INDEX_3D(3, j, ia, 1, 3, 1, ppg_nps, 1)];
       uVpsi += conjg_ppg_zekr_uV * tpsi_zwf[ARRAY_INDEX_7D( ix, iy, iz, ispin, io, ik, im
                                                           , mg_is_array_1, mg_ie_array_1
                                                           , mg_is_array_2, mg_ie_array_2
@@ -100,7 +100,7 @@ __global__ void zpseudo_kernel( cuDoubleComplex* const htpsi_zwf
                                                           , 1, Nspin
                                                           , io_s, io_e
                                                           , ik_s, ik_e
-                                                          , im_s, im_e
+                                                          , im_s
                                                           )];
     }
 
@@ -108,11 +108,11 @@ __global__ void zpseudo_kernel( cuDoubleComplex* const htpsi_zwf
 
     for (unsigned j = 1; j <= ppg_mps[ARRAY_INDEX_1D(ia, 1)]; j++)
     {
-      const cuDoubleComplex wrk = uVpsi * ppg_zekr_uV[ARRAY_INDEX_3D(j, ilma, ik, 1, ppg_nps, 1, Nlma, ik_s, ik_e)];
+      const cuDoubleComplex wrk = uVpsi * ppg_zekr_uV[ARRAY_INDEX_3D(j, ilma, ik, 1, ppg_nps, 1, Nlma, ik_s)];
 
-      const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
-      const unsigned iy = ppg_jxyz[ARRAY_INDEX_3D(2, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
-      const unsigned iz = ppg_jxyz[ARRAY_INDEX_3D(3, j, ia, 1, 3, 1, ppg_nps, 1, natoms)];
+      const unsigned ix = ppg_jxyz[ARRAY_INDEX_3D(1, j, ia, 1, 3, 1, ppg_nps, 1)];
+      const unsigned iy = ppg_jxyz[ARRAY_INDEX_3D(2, j, ia, 1, 3, 1, ppg_nps, 1)];
+      const unsigned iz = ppg_jxyz[ARRAY_INDEX_3D(3, j, ia, 1, 3, 1, ppg_nps, 1)];
 
       const unsigned mem_offset = ARRAY_INDEX_7D( ix, iy, iz, ispin, io, ik, im
                                                 , mg_is_array_1, mg_ie_array_1
@@ -121,7 +121,7 @@ __global__ void zpseudo_kernel( cuDoubleComplex* const htpsi_zwf
                                                 , 1, Nspin
                                                 , io_s, io_e
                                                 , ik_s, ik_e
-                                                , im_s, im_e
+                                                , im_s
                                                 );
       atomicAdd(&(htpsi_zwf[mem_offset].x), wrk.x);
       atomicAdd(&(htpsi_zwf[mem_offset].y), wrk.y);
