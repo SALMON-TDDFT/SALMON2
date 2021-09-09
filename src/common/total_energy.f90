@@ -342,6 +342,8 @@ CONTAINS
 
     etmp = 0d0
     E_wrk = 0d0
+    E_wrk_local_1 =0d0
+    E_wrk_local_2 =0d0
 #ifdef USE_OPENACC
 !$acc parallel copyin(yn_jm)
 !$acc loop collapse(2) reduction(+:E_wrk_local_1,E_wrk_local_2,etmp) private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd)

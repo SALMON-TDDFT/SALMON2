@@ -42,6 +42,9 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
+#ifdef USE_OPENACC
+    integer :: tid_offset
+#endif
 
     call timer_begin(LOG_DENSITY_CALC)
     
@@ -116,27 +119,38 @@ contains
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
 #ifdef USE_OPENACC
-!$acc kernels present(system,info,psi) copyin(is,ie) copy(wrk)
         wrk(:,:,:,tid) = 0.d0
-!$acc loop gang vector(1)
+        tid_offset = size(wrk,4)/2
+
+!$acc kernels copyin(is,ie)
+!$acc loop collapse(2) gang worker(256) private(wrk2,ik,io,iz,iy,ix)
         do ik=info%ik_s,info%ik_e
-!$acc loop collapse(3) gang vector(128) private(wrk2)
+        do io=info%io_s,info%io_e
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
-          wrk2 = 0d0
-!$acc loop seq
-          do io=info%io_s,info%io_e
-            wrk2 = wrk2 + system%rocc(io,ik,ispin)*system%wtk(ik) * abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
-          end do
-!$acc atomic update
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2
-!$acc end atomic
+          wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
+        end do
+        end do
+        end do
+        end do
+        end do
+!$acc loop collapse(3) private(tid_offset,iz,iy,ix)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+        do while(tid_offset > 0)
+          if(tid < tid_offset .and. tid + tid_offset < nthreads) then
+            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
+          end if
+          tid_offset = tid_offset/2
         end do
         end do
         end do
         end do
 !$acc end kernels
+
 #else
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()

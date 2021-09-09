@@ -146,7 +146,7 @@ module salmon_global
   integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
-  character(8)   :: method_mixing
+  character(16)  :: method_mixing
   real(8)        :: mixrate
   integer        :: nmemory_mb
   real(8)        :: alpha_mb
@@ -292,6 +292,7 @@ module salmon_global
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
   character(1)   :: yn_lr_w0_correction
+  integer        :: out_magnetization_step
   character(1)   :: yn_out_perflog
   character(6)   :: format_perflog ! 'stdout','text','csv'
   

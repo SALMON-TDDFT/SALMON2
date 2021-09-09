@@ -328,6 +328,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
     end if
   end if
+  
+  if(yn_spinorbit=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_magnetization_step)==0)) then
+    call write_magnetization(itt,ofl,system,mg,info,spsi_out)
+  end if
+  
   call timer_end(LOG_WRITE_RT_INFOS)
 
   return

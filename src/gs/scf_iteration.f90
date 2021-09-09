@@ -26,7 +26,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
                nscf_init_no_diagonal, mixing, iter, &
                poisson,fg,Vh,xc_func,ppn,Vxc,energy )
   use salmon_global, only: calc_mode,method_mixing  &
-                        ,yn_subspace_diagonalization,ncg,ncg_init,yn_jm
+                        ,yn_subspace_diagonalization,ncg,ncg_init,yn_jm,yn_spinorbit
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
@@ -36,6 +36,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   use mixing_sub
   use hartree_sub, only: hartree
   use salmon_xc
+  use noncollinear_module, only: simple_mixing_so
   implicit none
 
   type(s_rgrid),          intent(in)    :: lg
@@ -103,9 +104,17 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
     call calc_density(system,rho_s,spsi,info,mg)
 
     select case(method_mixing)
-    case ('simple') ; call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
-    case ('broyden'); call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter,mixing)
-    case ('pulay')  ; call pulay(mg,info,system,rho_s,iter,mixing)
+    case ('simple')
+      call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
+    case ('simple_dm')
+      if(yn_spinorbit=='n') stop 'yn_spinorbit must be y when method_mixing=simple_dm'
+      call simple_mixing_so(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
+    case ('broyden')
+      call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter,mixing)
+    case ('pulay')
+      call pulay(mg,info,system,rho_s,iter,mixing)
+    case default
+      stop 'Invalid method_mixing. Specify any one of "simple" or "broyden" or "pulay" for method_mixing.'
     end select
     call timer_end(LOG_CALC_RHO)
 
