@@ -95,12 +95,12 @@ extern "C" {
             return;
         }
         extern __shared__ double smem[];
-        const int ix = tid % xsize;
-        const int iy = (tid/xsize) % ysize;
-        const int iz = (tid/(xsize*ysize)) % zsize;
+        const int ix = (tid % xsize) + 1;
+        const int iy = ((tid/xsize) % ysize) + 1;
+        const int iz = ((tid/(xsize*ysize)) % zsize) + 1;
         cuDoubleComplex tmp;
-        const cuDoubleComplex cpsi = cuConj(psi_data[ix + iy*xlen + iz*xlen*ylen]);
-        tmp = psi_data[ix + iy*xlen + iz*xlen*ylen]; // psi_data[ix][iy][iz]
+        const cuDoubleComplex cpsi = cuConj(psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)]);
+        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)]; // psi_data[ix][iy][iz]
         const double psi_abs = cuCabs(tmp);
         smem[threadId] = psi_abs*psi_abs;
         __syncthreads();
