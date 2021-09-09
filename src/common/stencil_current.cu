@@ -2,8 +2,8 @@
 #include <cstdlib>
 #include <complex>
 #include <cuComplex.h>
-#include <cub/cub.cuh>
 #include "array_index.h"
+#include <thrust/device_vector.h>
 
 extern "C" {
     static constexpr unsigned block_size = 128;
@@ -73,6 +73,18 @@ extern "C" {
         }
     }
 
+    __device__ void thread_reduction(const int threadId, double* const d_res, double* const smem, const int blockDim) {
+        for(int i = 1; i < blockDim; i *= 2) { // blockDim must be 2^n
+            if ((threadId % (2*i)) == 0) {
+                smem[threadId] += smem[threadId + i];
+            }
+            __syncthreads();
+        }
+        if(threadId == 0) {
+            atomicAdd(d_res, smem[0]);
+        }
+    }
+
     __global__ void stencil_current_kernel(double* const d_res, const cuDoubleComplex* const psi_data, const int xlen,
                                            const int ylen, const int xsize, const int ysize, const int zsize, const int maxlen, const double* const nabt, const int* const idx, const int* const idy,
                                            const int* const idz, const double nabt0, const double nabt1, const double nabt2, const double nabt3, const double nabt4, const double nabt5, const double nabt6,
@@ -82,64 +94,50 @@ extern "C" {
         if (tid >= maxlen) {
             return;
         }
-        typedef cub::BlockReduce<double, block_size> BlockReduce;
-        __shared__ typename BlockReduce::TempStorage temp_storage;
-        const int ix = (tid % xsize) + 1;
-        const int iy = ((tid/xsize) % ysize) + 1;
-        const int iz = ((tid/(xsize*ysize)) % zsize) + 1;
+        extern __shared__ double smem[];
+        const int ix = tid % xsize;
+        const int iy = (tid/xsize) % ysize;
+        const int iz = (tid/(xsize*ysize)) % zsize;
         cuDoubleComplex tmp;
-        double val, block_sum;
-        const cuDoubleComplex cpsi = cuConj(psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)]);
-        tmp = psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)];
+        const cuDoubleComplex cpsi = cuConj(psi_data[ix + iy*xlen + iz*xlen*ylen]);
+        tmp = psi_data[ix + iy*xlen + iz*xlen*ylen]; // psi_data[ix][iy][iz]
         const double psi_abs = cuCabs(tmp);
-        val = psi_abs*psi_abs;
+        smem[threadId] = psi_abs*psi_abs;
         __syncthreads();
-        block_sum = BlockReduce(temp_storage).Sum(val);
-        if(threadId == 0) {
-             atomicAdd(&d_res[0], block_sum);
-        }
+        thread_reduction(threadId, &d_res[0], smem, blockDim.x);
 
         tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+1, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
-        val = nabt0*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] = nabt0*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+2, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
-        val += nabt1*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt1*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+3, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
-        val += nabt2*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt2*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(idx[ARRAY_INDEX_1D(ix+4, 1)], iy, iz, 1, xlen, 1, ylen, 1)];
-        val += nabt3*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt3*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         __syncthreads();
-        block_sum = BlockReduce(temp_storage).Sum(val);
-        if(threadId == 0) {
-             atomicAdd(&d_res[1], block_sum);
-        }
-        
+        thread_reduction(threadId, &d_res[1], smem, blockDim.x);
+
         tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+1, 1)], iz, 1, xlen, 1, ylen, 1)];
-        val = nabt4*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] = nabt4*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+2, 1)], iz, 1, xlen, 1, ylen, 1)];
-        val += nabt5*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt5*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+3, 1)], iz, 1, xlen, 1, ylen, 1)];
-        val += nabt6*(cpsi.y*tmp.x+cpsi.x*tmp.y);
+        smem[threadId] += nabt6*(cpsi.y*tmp.x+cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(ix, idy[ARRAY_INDEX_1D(iy+4, 1)], iz, 1, xlen, 1, ylen, 1)];
-        val += nabt7*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt7*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         __syncthreads();
-        block_sum = BlockReduce(temp_storage).Sum(val);
-        if(threadId == 0) {
-             atomicAdd(&d_res[2], block_sum);
-        }
-        
+        thread_reduction(threadId, &d_res[2], smem, blockDim.x);
+
         tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+1, 1)], 1, xlen, 1, ylen, 1)];
-        val = nabt8*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] = nabt8*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+2, 1)], 1, xlen, 1, ylen, 1)];
-        val += nabt9*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt9*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+3, 1)], 1, xlen, 1, ylen, 1)];
-        val += nabt10*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt10*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         tmp = psi_data[ARRAY_INDEX_3D(ix, iy, idz[ARRAY_INDEX_1D(iz+4, 1)], 1, xlen, 1, ylen, 1)];
-        val += nabt11*(cpsi.y*tmp.x + cpsi.x*tmp.y);
+        smem[threadId] += nabt11*(cpsi.y*tmp.x + cpsi.x*tmp.y);
         __syncthreads();
-        block_sum = BlockReduce(temp_storage).Sum(val);
-        if(threadId == 0) {
-             atomicAdd(&d_res[3], block_sum);
-        }
+        thread_reduction(threadId, &d_res[3], smem, blockDim.x);
     }
 
     void stencil_current_core_gpu(const int ik_s, const int ik_e, const int io_s, const int io_e, const double* const vec_k, const double* const vec_Ac,
