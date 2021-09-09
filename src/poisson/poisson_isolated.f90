@@ -27,7 +27,7 @@ module poisson_isolated
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
+subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
   use communication, only: comm_is_root, comm_summation
@@ -218,7 +218,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   
   return
 
-end subroutine poisson_cg
+end subroutine poisson_isolated_cg
 
 subroutine laplacian_poisson(mg,pk,rlap_wk,lap0,lapt)
   use structures, only: s_rgrid
@@ -738,5 +738,303 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   return
   
 end subroutine poisson_boundary
+
+!===================================================================================================================================
+
+subroutine poisson_isolated_ft(lg,mg,info,fg,rho,Vh,poisson)
+  use structures
+  use communication, only: comm_summation, comm_bcast
+  implicit none
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: mg
+  type(s_parallel_info)  ,intent(in) :: info
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_scalar)                     :: Vh
+  type(s_poisson)                    :: poisson
+  !
+  integer :: ix,iy,iz
+  integer :: kx,ky,kz
+  integer :: iix,iiy,iiz
+
+  integer :: imgx_s,imgx_e
+  integer :: imgy_s,imgy_e
+  integer :: imgz_s,imgz_e
+  integer :: ifgx_s,ifgx_e
+  integer :: ifgy_s,ifgy_e
+  integer :: ifgz_s,ifgz_e
+
+  imgx_s = mg%is(1)-lg%is(1)+1
+  imgx_e = mg%is(1)-lg%is(1)+mg%num(1)
+  imgy_s = mg%is(2)-lg%is(2)+1
+  imgy_e = mg%is(2)-lg%is(2)+mg%num(2)
+  imgz_s = mg%is(3)-lg%is(3)+1
+  imgz_e = mg%is(3)-lg%is(3)+mg%num(3)
+    
+  ifgx_s = (mg%is(1)-lg%is(1))*2+1
+  ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
+  ifgy_s = (mg%is(2)-lg%is(2))*2+1
+  ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
+  ifgz_s = (mg%is(3)-lg%is(3))*2+1
+  ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
+
+  poisson%ff1z = 0d0
+
+!$OMP parallel do private(iz,iy,ix,iix,iiy,iiz)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    iix = ix-lg%is(1)+1
+    iiy = iy-lg%is(2)+1
+    iiz = iz-lg%is(3)+1
+    poisson%ff1z(iix,iiy,iiz) = dcmplx(rho%f(ix,iy,iz))
+  end do
+  end do
+  end do
+  
+  call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*2*lg%num(3),info%icomm_z)
+
+  poisson%ff1y = 0d0
+
+!$OMP parallel do private(kz,iy,ix)
+  do kz = ifgz_s,ifgz_e
+  do iy = imgy_s,imgy_e
+  do ix = imgx_s,imgx_e
+    poisson%ff1y(ix,iy,kz) = sum(fg%egzc(kz,:)*poisson%ff2z(ix,iy,:))
+  end do
+  end do
+  end do
+
+  call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*2*lg%num(2)*2*mg%num(3),info%icomm_y)
+
+  poisson%ff1x = 0.d0
+
+!$OMP parallel do private(kz,ky,ix)
+  do kz = ifgz_s,ifgz_e
+  do ky = ifgy_s,ifgy_e
+  do ix = imgx_s,imgx_e
+    poisson%ff1x(ix,ky,kz) = sum(fg%egyc(ky,:)*poisson%ff2y(ix,:,kz))
+  end do
+  end do
+  end do
+
+  call comm_summation(poisson%ff1x,poisson%ff2x,2*lg%num(1)*2*mg%num(2)*2*mg%num(3),info%icomm_x)
+
+  poisson%ff1 = 0.d0
+
+!$OMP parallel do private(kz,ky,kx)
+  do kz = ifgz_s,ifgz_e
+  do ky = ifgy_s,ifgy_e
+  do kx = ifgx_s,ifgx_e
+    poisson%ff1(kx,ky,kz) = sum(fg%egxc(kx,:)*poisson%ff2x(:,ky,kz))/dble(8*lg%num(1)*lg%num(2)*lg%num(3))
+  end do
+  end do
+  end do
+
+  call comm_summation(poisson%ff1,poisson%ff2,2*lg%num(1)*2*mg%num(2)*2*mg%num(3),info%icomm_x)
+  
+  poisson%ff3z = 0.d0
+
+!$OMP parallel do private(kz,ky,kx)
+  do kz = ifgz_s,ifgz_e
+  do ky = ifgy_s,ifgy_e
+  do kx = ifgx_s,ifgx_e
+    poisson%zrhoG_ele(kx,ky,kz) = poisson%ff4z(kx,ky,kz)
+    poisson%ff3z(kx,ky,kz) = fg%coef(kx,ky,kz)*poisson%ff2(kx,ky,kz)
+  end do
+  end do
+  end do
+
+  call comm_summation(poisson%ff3z,poisson%ff4z,2*mg%num(1)*2*mg%num(2)*2*lg%num(3),info%icomm_z)
+
+  poisson%ff3y = 0.d0
+
+!$OMP parallel do private(iz,ky,kx)
+  do iz = imgz_s,imgz_e
+  do ky = ifgy_s,ifgy_e
+  do kx = ifgx_s,ifgx_e
+    poisson%ff3y(kx,ky,iz) = sum(fg%egz(:,iz)*poisson%ff4z(kx,ky,:))
+  end do
+  end do
+  end do
+
+  call comm_summation(poisson%ff3y,poisson%ff4y,2*mg%num(1)*2*lg%num(2)*mg%num(3),info%icomm_y)
+
+  poisson%ff3x = 0.d0
+
+!$OMP parallel do private(iz,iy,kx)
+  do iz = imgz_s,imgz_e
+  do iy = imgy_s,imgy_e
+  do kx = ifgx_s,ifgx_e
+    poisson%ff3x(kx,iy,iz) = sum(fg%egy(:,iy)*poisson%ff4y(kx,:,iz))
+  end do
+  end do
+  end do
+
+  call comm_summation(poisson%ff3x,poisson%ff4x,2*lg%num(1)*mg%num(2)*mg%num(3),info%icomm_x)
+
+!$OMP parallel do private(iz,iy,ix,iix,iiy,iiz)
+  do iz = mg%is(3),mg%ie(3)
+  do iy = mg%is(2),mg%ie(2)
+  do ix = mg%is(1),mg%ie(1)
+    iix = ix-lg%is(1)+1
+    iiy = iy-lg%is(2)+1
+    iiz = iz-lg%is(3)+1
+    Vh%f(ix,iy,iz) = sum(fg%egx(:,iix)*poisson%ff4x(:,iiy,iiz))
+  end do
+  end do
+  end do
+
+end subroutine poisson_isolated_ft
+
+!===================================================================================================================================
+
+subroutine poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
+  use structures
+  use communication, only: comm_summation, comm_bcast
+  implicit none
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: mg
+  type(s_parallel_info)  ,intent(in) :: info
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_scalar)                     :: Vh
+  type(s_poisson)                    :: poisson
+  !
+  integer :: ix,iy,iz
+  integer :: iiy,iiz,iix
+  real(8) :: inv_lgnum3
+
+  integer :: ishift_y,ishift_z
+  integer :: nproc_ob
+  
+  inv_lgnum3=1.d0/(8*lg%num(1)*lg%num(2)*lg%num(3))
+
+  poisson%a_ffte=0.d0
+  poisson%b_ffte=0.d0
+  
+  nproc_ob  = info%nporbital
+
+  if(mod(nproc_ob,4)==0)then
+
+    if(info%id_o_isolated_ffte == 0) then
+!$OMP parallel do private(iiz,iiy,ix) collapse(2)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+        iiz=iz+mg%is(3)-1
+        iiy=iy+mg%is(2)-1
+        poisson%b_ffte(1:lg%num(1),iy,iz) = dcmplx(rho%f(lg%is(1):lg%ie(1),iiy,iiz))
+      end do
+      end do
+    end if
+  
+    call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_x)
+  
+    CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,2*lg%num(1),2*lg%num(2),2*lg%num(3),   &
+                      info%isize_y_isolated_ffte,info%isize_z_isolated_ffte,-1, &
+                      info%icomm_y_isolated_ffte,info%icomm_z_isolated_ffte)
+  
+    poisson%zrhoG_ele=0d0
+    if(info%id_z_isolated_ffte>=info%isize_z_isolated_ffte/2)then
+      ishift_z = lg%num(3)
+    else
+      ishift_z = 0
+    end if
+    if(info%id_y_isolated_ffte>=info%isize_y_isolated_ffte/2)then
+      ishift_y = lg%num(2)
+    else
+      ishift_y = 0
+    end if
+  
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(iz,iy,ix,iiy,iiz,iix) &
+!$omp             shared(mg,lg,poisson,inv_lgnum3,fg,info,ishift_z,ishift_y)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+      iiz=iz+mg%is(3)-lg%is(3)+ishift_z
+      iiy=iy+mg%is(2)-lg%is(2)+ishift_y
+      do ix=1,2*lg%num(1)
+        iix=ix+lg%is(1)-1
+        poisson%zrhoG_ele(iix,iiy,iiz) = poisson%b_ffte(ix,iy,iz)*inv_lgnum3
+      end do
+      do ix=1,2*lg%num(1)
+        poisson%b_ffte(ix,iy,iz) = poisson%b_ffte(ix,iy,iz) * fg%coef(ix,iiy,iiz)
+      end do
+    end do
+    end do
+!$omp end parallel do
+  
+    CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,2*lg%num(1),2*lg%num(2),2*lg%num(3), &
+                      info%isize_y_isolated_ffte,info%isize_z_isolated_ffte,1, &
+                      info%icomm_y_isolated_ffte,info%icomm_z_isolated_ffte)
+  
+    call comm_bcast(poisson%a_ffte,info%icomm_o_isolated_ffte,0)
+  
+!$OMP parallel do private(iiz,iiy) collapse(2)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+      iiz=iz+mg%is(3)-1
+      iiy=iy+mg%is(2)-1
+      Vh%f(lg%is(1):lg%ie(1),iiy,iiz) = poisson%a_ffte(1:lg%num(1),iy,iz)
+    end do
+    end do
+
+  else
+
+!$OMP parallel do private(iiz,iiy) collapse(2)
+    do iz=1+mg%is(3)-lg%is(3),mg%num(3)+mg%is(3)-lg%is(3)
+    do iy=1+mg%is(2)-lg%is(2),mg%num(2)+mg%is(2)-lg%is(2)
+    do ix=1+mg%is(1)-lg%is(1),mg%num(1)+mg%is(1)-lg%is(1)
+      iiz=iz+lg%is(3)-1
+      iiy=iy+lg%is(2)-1
+      iix=ix+lg%is(1)-1
+      poisson%b_ffte(ix,iy,iz) = dcmplx(rho%f(iix,iiy,iiz))
+    end do
+    end do
+    end do
+
+    call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_r)
+  
+    CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,2*lg%num(1),2*lg%num(2),2*lg%num(3),   &
+                      info%isize_y_isolated_ffte,info%isize_z_isolated_ffte,-1, &
+                      info%icomm_y_isolated_ffte,info%icomm_z_isolated_ffte)
+  
+    poisson%zrhoG_ele=0d0
+
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(iz,iy,ix,iiy,iiz,iix) &
+!$omp             shared(mg,lg,poisson,inv_lgnum3,fg,info,ishift_z,ishift_y)
+    do iz=1,2*lg%num(3)
+    do iy=1,2*lg%num(2)
+      do ix=1,2*lg%num(1)
+        iix=ix+lg%is(1)-1
+        poisson%zrhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+      end do
+      do ix=1,2*lg%num(1)
+        poisson%b_ffte(ix,iy,iz) = poisson%b_ffte(ix,iy,iz) * fg%coef(ix,iy,iz)
+      end do
+    end do
+    end do
+!$omp end parallel do
+  
+    CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,2*lg%num(1),2*lg%num(2),2*lg%num(3), &
+                      info%isize_y_isolated_ffte,info%isize_z_isolated_ffte,1, &
+                      info%icomm_y_isolated_ffte,info%icomm_z_isolated_ffte)
+ 
+!$OMP parallel do private(iiz,iiy) collapse(2)
+    do iz=1+mg%is(3)-lg%is(3),mg%num(3)+mg%is(3)-lg%is(3)
+    do iy=1+mg%is(2)-lg%is(2),mg%num(2)+mg%is(2)-lg%is(2)
+      iiz=iz+lg%is(3)-1
+      iiy=iy+lg%is(2)-1
+      Vh%f(mg%is(1):mg%ie(1),iiy,iiz) = poisson%a_ffte(1+mg%is(1)-lg%is(1):mg%num(1)+mg%is(1)-lg%is(1),iy,iz)
+    end do
+    end do
+
+  end if
+
+  return
+end subroutine poisson_isolated_ffte
+
+
 
 end module poisson_isolated

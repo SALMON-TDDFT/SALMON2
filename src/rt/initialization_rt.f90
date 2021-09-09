@@ -315,7 +315,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end if
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
   case(3)
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select

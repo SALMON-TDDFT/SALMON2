@@ -455,7 +455,8 @@ contains
       & layout_multipole, &
       & num_multipole_xyz, &
       & lmax_multipole, &
-      & threshold_cg
+      & threshold_cg, &
+      & method_poisson
 
     namelist/ewald/ &
       & newald, &
@@ -784,6 +785,7 @@ contains
     num_multipole_xyz = 0
     lmax_multipole    = 4
     threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
+    method_poisson    = 'cg'
 !! == default for &ewald
     newald = 4
     aewald = 0.5d0
@@ -1261,6 +1263,7 @@ contains
     call comm_bcast(lmax_multipole    ,nproc_group_global)
     call comm_bcast(threshold_cg      ,nproc_group_global)
     threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3
+    call comm_bcast(method_poisson    ,nproc_group_global)
 !! == bcast for &ewald
     call comm_bcast(newald        ,nproc_group_global)
     call comm_bcast(aewald        ,nproc_group_global)
@@ -2032,6 +2035,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_poisson', method_poisson
 
       if(inml_ewald >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', inml_ewald
@@ -2343,6 +2347,11 @@ contains
           stop 'yn_lr_w0_correction="y" is currently for yn_periodic="y"'
        end if
     endif
+
+    select case(method_poisson)
+    case ('cg','ft') ; continue
+    case default     ; stop "method_poisson must be 'cg' or 'ft'"
+    end select
 
   end subroutine check_bad_input
 

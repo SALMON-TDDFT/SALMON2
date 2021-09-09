@@ -220,7 +220,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   select case(iperiodic)
   case(0)
 
-    call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+    call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
 
   case(3)
 
