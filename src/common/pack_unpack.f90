@@ -291,7 +291,7 @@ contains
     nx = size(src,1)
 
 #ifdef USE_OPENACC
-!$acc parallel loop collapse(3)
+!$acc parallel loop collapse(3) private(ix,iy,iz,iw) firstprivate(nx,ny,nz,nw)
 #else
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
@@ -325,7 +325,7 @@ contains
     nx = size(src,1)
 
 #ifdef USE_OPENACC
-!$acc parallel loop collapse(3)
+!$acc parallel loop collapse(3) private(ix,iy,iz,iw) firstprivate(nx,ny,nz,nw)
 #else
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
