@@ -10,69 +10,6 @@ extern "C" {
     static constexpr unsigned Nd = 4;
     static_assert(block_size != 0 && (block_size & (block_size-1)) == 0, "block_size must be 2^n");
 
-    void stencil_current_core_cpu(const int ik_s, const int ik_e, const int io_s, const int io_e, const double* const vec_k, const double* const vec_Ac,
-                                  const int* const is_array, const int* const ie_array, const int* const is, const int* const ie, const int* const idx, const int* const idy,
-                                  const int* const idz, const double* const nabt, const int ispin, const int im, const int spin_len, const std::complex<double>* const psi, const double* const BT,
-                                  const double* const rocc, const double* const wtk, double* const jx, double* const jy, double* const jz) {
-        const int xlen = ie_array[0] - is_array[0] + 1;
-        const int ylen = ie_array[1] - is_array[1] + 1;
-        const int zlen = ie_array[2] - is_array[2] + 1;
-        int psi_index = xlen*ylen*zlen*(ispin - 1) + xlen*ylen*zlen*spin_len*(ik_e - ik_s + 1)*(io_e - io_s + 1)*(im - 1);
-        for(int ik = ik_s-1; ik < ik_e; ik++) {
-            double kAc[3];
-            for(int i = 0; i < 3; i++) {
-                kAc[i] = vec_k[i+3*ik] + vec_Ac[i];
-            }
-            for(int io = io_s-1; io < io_e; io++) {
-                double rtmp = 0.0;
-                std::complex<double> xtmp(0.0, 0.0);
-                std::complex<double> ytmp(0.0, 0.0);
-                std::complex<double> ztmp(0.0, 0.0);
-                std::complex<double> cpsi;
-                for(int iz = is[2]-1; iz < ie[2]; iz++) {
-                    for(int iy = is[1]-1; iy < ie[1]; iy++) {
-                        for(int ix = is[0]-1; ix < ie[0]; ix++) {
-                            rtmp = rtmp + std::abs(psi[psi_index + ix + iy*xlen + iz*xlen*ylen])*std::abs(psi[psi_index + ix + iy*xlen + iz*xlen*ylen]);
-                            cpsi = std::conj(psi[psi_index + ix + iy*xlen + iz*xlen*ylen]);
-                            xtmp = xtmp + nabt[0] * cpsi * (psi[psi_index + (idx[ix + 1] - 1) + iy*xlen + iz*xlen*ylen])
-                                        + nabt[1] * cpsi * (psi[psi_index + (idx[ix + 2] - 1) + iy*xlen + iz*xlen*ylen])
-                                        + nabt[2] * cpsi * (psi[psi_index + (idx[ix + 3] - 1) + iy*xlen + iz*xlen*ylen])
-                                        + nabt[3] * cpsi * (psi[psi_index + (idx[ix + 4] - 1) + iy*xlen + iz*xlen*ylen]);
-
-                            ytmp = ytmp + nabt[4] * cpsi * (psi[psi_index + ix + (idy[iy + 1] - 1)*xlen + iz*xlen*ylen])
-                                        + nabt[5] * cpsi * (psi[psi_index + ix + (idy[iy + 2] - 1)*xlen + iz*xlen*ylen])
-                                        + nabt[6] * cpsi * (psi[psi_index + ix + (idy[iy + 3] - 1)*xlen + iz*xlen*ylen])
-                                        + nabt[7] * cpsi * (psi[psi_index + ix + (idy[iy + 4] - 1)*xlen + iz*xlen*ylen]);
-
-                            ztmp = ztmp + nabt[8]  * cpsi * (psi[psi_index + ix + iy*xlen + (idz[iz + 1] - 1)*xlen*ylen])
-                                        + nabt[9]  * cpsi * (psi[psi_index + ix + iy*xlen + (idz[iz + 2] - 1)*xlen*ylen])
-                                        + nabt[10] * cpsi * (psi[psi_index + ix + iy*xlen + (idz[iz + 3] - 1)*xlen*ylen])
-                                        + nabt[11] * cpsi * (psi[psi_index + ix + iy*xlen + (idz[iz + 4] - 1)*xlen*ylen]);
-                        }
-                    }
-                }
-                psi_index += xlen*ylen*zlen*spin_len;
-                double wrk1[3], wrk2[3], wrk3[3], wrk4[3];
-                for(int i = 0; i < 3; i++) {
-                    wrk1[i] = kAc[i]*rtmp;
-                }
-                wrk2[0] = xtmp.imag()*static_cast<double>(2);
-                wrk2[1] = ytmp.imag()*static_cast<double>(2);
-                wrk2[2] = ztmp.imag()*static_cast<double>(2);
-
-                for(int i = 0; i < 3; i++) {
-                    wrk3[i] = BT[i]*wrk2[0]+BT[i + 3]*wrk2[1]+BT[i + 6]*wrk2[2];
-                }
-                for(int i = 0; i < 3; i++) {
-                    wrk4[i] = (wrk1[i] + wrk3[i])*rocc[io + ik*(io_e - io_s + 1)]*wtk[ik];
-                }
-                *jx += wrk4[0];
-                *jy += wrk4[1];
-                *jz += wrk4[2];
-            }
-        }
-    }
-
     __device__ void thread_reduction(const int threadId, double* const d_res, double* const smem, const int blockDim) {
         for(int i = 1; i < blockDim; i *= 2) { // blockDim must be 2^n
             if ((threadId % (2*i)) == 0) {

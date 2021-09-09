@@ -216,37 +216,6 @@ contains
     use iso_c_binding
     implicit none
     interface
-      subroutine stencil_current_core_cpu(ik_s,ik_e,io_s,io_e,vec_k,vec_Ac,is_array,ie_array &
-                                         ,is,ie,idx,idy,idz,nabt,ispin,im,spin_len,psi,BT,rocc,wtk,jx,jy,jz) bind(c)
-        import
-        ! Input
-        integer(c_int), value :: ik_s
-        integer(c_int), value :: ik_e
-        integer(c_int), value :: io_s
-        integer(c_int), value :: io_e
-        integer(c_int), value :: ispin
-        integer(c_int), value :: im
-        integer(c_int), value :: spin_len
-        ! Output
-        real(c_double), intent(inout) :: jx
-        real(c_double), intent(inout) :: jy
-        real(c_double), intent(inout) :: jz
-        ! Input (ptr)
-        real(c_double), intent(in) :: vec_k(3:ik_e-ik_e+1)
-        real(c_double), intent(in) :: vec_Ac(3)
-        integer(c_int), intent(in) :: is_array(3)
-        integer(c_int), intent(in) :: ie_array(3)
-        integer(c_int), intent(in) :: is(3)
-        integer(c_int), intent(in) :: ie(3)
-        integer(c_int), intent(in) :: idx(is(1)-Nd:ie(1)+Nd)
-        integer(c_int), intent(in) :: idy(is(1)-Nd:ie(1)+Nd)
-        integer(c_int), intent(in) :: idz(is(1)-Nd:ie(1)+Nd)
-        real(c_double), intent(in) :: nabt(Nd,3)
-        complex(c_double_complex), intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_arary(3))
-        real(c_double), intent(in) :: BT(3,3)
-        real(c_double), intent(in) :: rocc(io_e-io_s+1,ik_e-ik_s+1)
-        real(c_double), intent(in) :: wtk(ik_e-ik_s+1)
-      end  subroutine stencil_current_core_cpu
       subroutine stencil_current_core_gpu(ik_s,ik_e,io_s,io_e,vec_k,vec_Ac,is_array,ie_array &
                                          ,is,ie,idx,idy,idz,nabt,ispin,im,spin_len,psi,BT,rocc,wtk,jx,jy,jz) bind(c)
         import
