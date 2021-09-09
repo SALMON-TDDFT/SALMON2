@@ -125,15 +125,18 @@ extern "C" {
                 wrk2[0] = res[1]*static_cast<double>(2);
                 wrk2[1] = res[2]*static_cast<double>(2);
                 wrk2[2] = res[3]*static_cast<double>(2);
-                for(int i = 0; i < 3; i++) {
-                    wrk3[i] = BT[i]*wrk2[0] + BT[i + 3]*wrk2[1] + BT[i + 6]*wrk2[2];
+                for(int i = 1; i <= 3; i++) {
+                    wrk3[ARRAY_INDEX_1D(i, 1)] =
+						BT[ARRAY_INDEX_2D(i, 1, 1, 3, 1)]*wrk2[ARRAY_INDEX_1D(1, 1)] +
+						BT[ARRAY_INDEX_2D(i, 2, 1, 3, 1)]*wrk2[ARRAY_INDEX_1D(2, 1)] +
+						BT[ARRAY_INDEX_2D(i, 3, 1, 3, 1)]*wrk2[ARRAY_INDEX_1D(3, 1)];
                 }
                 for(int i = 0; i < 3; i++) {
                     wrk4[i] = (wrk1[i] + wrk3[i])*rocc[ARRAY_INDEX_2D(io, ik, io_s, io_e, 1)]*wtk[ARRAY_INDEX_1D(ik, 1)];
                 }
-                *jx += wrk4[0];
-                *jy += wrk4[1];
-                *jz += wrk4[2];
+                *jx += wrk4[ARRAY_INDEX_1D(1, 1)];
+                *jy += wrk4[ARRAY_INDEX_1D(2, 1)];
+                *jz += wrk4[ARRAY_INDEX_1D(3, 1)];
             }
         }
     }
