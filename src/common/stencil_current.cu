@@ -23,18 +23,19 @@ extern "C" {
     }
 
     __global__ void stencil_current_kernel(double* const d_res, const cuDoubleComplex* const psi_data, const int xlen,
-                                           const int ylen, const int xsize, const int ysize, const int zsize, const int maxlen, const double* const nabt, const int* const idx, const int* const idy,
-                                           const int* const idz, const double nabt0, const double nabt1, const double nabt2, const double nabt3, const double nabt4, const double nabt5, const double nabt6,
-                                           const double nabt7, const double nabt8, const double nabt9, const double nabt10, const double nabt11) {
+                                           const int ylen, const int xoffset, const int yoffset, const int zoffset, const int xsize, const int ysize, const int zsize, const int maxlen,
+                                           const double* const nabt, const int* const idx, const int* const idy, const int* const idz, const double nabt0, const double nabt1,
+                                           const double nabt2, const double nabt3, const double nabt4, const double nabt5, const double nabt6, const double nabt7, const double nabt8,
+                                           const double nabt9, const double nabt10, const double nabt11) {
         const int tid = blockIdx.x * blockDim.x + threadIdx.x;
         const int threadId = threadIdx.x;
         if (tid >= maxlen) {
             return;
         }
         extern __shared__ double smem[];
-        const int ix = (tid % xsize) + 1;
-        const int iy = ((tid/xsize) % ysize) + 1;
-        const int iz = ((tid/(xsize*ysize)) % zsize) + 1;
+        const int ix = (tid % xsize) + xoffset;
+        const int iy = ((tid/xsize) % ysize) + yoffset;
+        const int iz = ((tid/(xsize*ysize)) % zsize) + zoffset;
         cuDoubleComplex tmp;
         const cuDoubleComplex cpsi = cuConj(psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)]);
         tmp = psi_data[ARRAY_INDEX_3D(ix, iy, iz, 1, xlen, 1, ylen, 1)]; // psi_data[ix][iy][iz]
@@ -113,7 +114,7 @@ extern "C" {
                 // gpu kernel
                 cudaMemset(reinterpret_cast<void*>(d_res), static_cast<double>(0), sizeof(double)*4);
                 stencil_current_kernel<<<grid_size, block_size, sizeof(double)*block_size>>>(
-                        d_res, &psi[psi_index], xlen, ylen, xsize, ysize, zsize, maxlen, d_nabt, d_idx, d_idy, d_idz,
+                        d_res, &psi[psi_index], xlen, ylen, is[0], is[1], is[2], xsize, ysize, zsize, maxlen, d_nabt, d_idx, d_idy, d_idz,
                         nabt[0], nabt[1], nabt[2], nabt[3], nabt[4], nabt[5], nabt[6], nabt[7], nabt[8], nabt[9], nabt[10], nabt[11]);
                 cudaMemcpy(res, d_res, sizeof(double)*4, cudaMemcpyDeviceToHost);
                 psi_index += xlen*ylen*zlen*spin_len;
