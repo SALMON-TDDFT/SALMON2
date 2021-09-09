@@ -96,7 +96,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   Iteration : do iter=1,Ncg
 
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
@@ -135,7 +135,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end if
 
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
@@ -155,7 +155,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
@@ -174,7 +174,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
@@ -219,7 +219,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
 
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
