@@ -23,10 +23,14 @@ contains
 !===================================================================================================================================
 subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use math_constants,only: pi
-  use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary
+  use phys_constants,only: au_aa, au_ev
+  use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary, &
+                         method_poisson
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid,  &
                         allocate_scalar, deallocate_scalar
+  use communication, only: comm_is_root
+  use parallelization, only: nproc_id_global
   use poisson_isolated
   use poisson_periodic
   implicit none
@@ -40,10 +44,30 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   type(s_stencil)        ,intent(in)    :: stencil
   type(s_scalar)         ,intent(in)    :: rho
   type(s_scalar)         ,intent(inout) :: Vh
+  integer :: iz
 
   select case(iperiodic)
   case(0)
-    call poisson_cg(lg,mg,info,system,poisson,rho%f,Vh%f,srg_scalar,stencil)
+    select case(method_poisson)
+    case('cg')
+      call poisson_isolated_cg(lg,mg,info,system,poisson,rho%f,Vh%f,srg_scalar,stencil)
+    case('ft')
+      select case(yn_ffte)
+      case('n')
+        call poisson_isolated_ft(lg,mg,info,fg,rho,Vh,poisson)
+      case('y')
+        call poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
+      end select
+    end select
+    if(comm_is_root(nproc_id_global)) then
+      if(mg%is(1)<=0.and.mg%ie(1)>=0.and.mg%is(2)<=0.and.mg%ie(2)>=0)then
+        open(2991,file="Vh_z.data")
+        do iz=mg%is(3),mg%ie(3)
+          write(2991,*) lg%coordinate(iz,3)*au_aa, Vh%f(0,0,iz)*au_ev
+        end do
+        close(2991)
+      end if
+    end if
   case(3)
     select case(yn_ffte)
     case('n')

@@ -116,7 +116,7 @@ if(nscf_init_mix_zero.gt.1)then
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
       call get_band_gap(system,energy,ene_gap)
@@ -199,7 +199,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
    end if
