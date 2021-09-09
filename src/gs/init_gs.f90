@@ -93,7 +93,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
         z1=Zmax*(2.d0*q(3)-1.d0)
         if(info%io_s <= io .and. io <= info%io_e) then
 #ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy,ix,xx,yy,zz,rr)
+!$acc parallel loop collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
 #else
 !$OMP parallel do collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
 #endif
