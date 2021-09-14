@@ -36,7 +36,7 @@
 /
 &scf
   ncg = 4
-  nscf = 200
+  nscf = 50
 /
 &functional
   xc = 'PZ'

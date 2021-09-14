@@ -2,13 +2,13 @@
   unit_system='A_eV_fs'
 /
 &calculation
-  theory='tddft_response'
+  theory='dft'
 /
 &control
   sysname = 'C2H2'
 /
 &parallel
-  yn_ffte = 'y'
+  yn_ffte='y'
   nproc_k = 1
   nproc_ob = 1
   nproc_rgrid = 1,2,2
@@ -16,7 +16,7 @@
 &system
   yn_periodic = 'n'
   al = 16d0, 16d0, 16d0
-  nstate = 5
+  nstate = 10
   nelem = 2
   natom = 4
   nelec = 10
@@ -34,16 +34,12 @@
 &rgrid
   dl = 0.25d0, 0.25d0, 0.25d0
 /
+&scf
+  ncg = 4
+  nscf = 50
+/
 &functional
   xc = 'PZ'
-/
-&tgrid
-  dt=1.25d-3
-  nt=200
-/
-&emfield
-  ae_shape1 = 'impulse'
-  epdir_re1 = 0.d0,0.d0,1.d0
 /
 &poisson
   method_poisson = 'ft'
