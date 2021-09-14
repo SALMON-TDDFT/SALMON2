@@ -186,7 +186,7 @@ CONTAINS
 
       if(yn_ffte=='n')then
         call comm_summation(etmp,E_wrk(3),info%icomm_ko) ! for atom index #ia
-        call comm_summation(E_wrk,E_sum,5,info%icomm_r)
+        E_sum(1:3) = E_wrk(1:3)
       else
         if(mod(info%nporbital,4)==0)then
           E_wrk(3) = etmp
