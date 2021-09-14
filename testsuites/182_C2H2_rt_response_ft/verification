@@ -36,7 +36,7 @@ result = {}
 linecount = 0
 for line in open("C2H2_rt.data"):
     linecount += 1
-    if linecount == 29: # corresponds to line 28 (0.02500 fs)
+    if linecount == 28: # corresponds to line 28 (0.02500 fs)
         for name, [resval, refval, error] in checklist.items(): 
             data = line.split()
             result[name] = float(data[15])
