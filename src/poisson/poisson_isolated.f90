@@ -1002,13 +1002,12 @@ subroutine poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
     poisson%zrhoG_ele=0d0
 
 !$omp parallel do collapse(2) default(none) &
-!$omp             private(iz,iy,ix,iiy,iiz,iix) &
+!$omp             private(iz,iy,ix) &
 !$omp             shared(mg,lg,poisson,inv_lgnum3,fg,info,ishift_z,ishift_y)
     do iz=1,2*lg%num(3)
     do iy=1,2*lg%num(2)
       do ix=1,2*lg%num(1)
-        iix=ix+lg%is(1)-1
-        poisson%zrhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+        poisson%zrhoG_ele(ix,iy,iz) = poisson%b_ffte(ix,iy,iz)*inv_lgnum3
       end do
       do ix=1,2*lg%num(1)
         poisson%b_ffte(ix,iy,iz) = poisson%b_ffte(ix,iy,iz) * fg%coef(ix,iy,iz)
