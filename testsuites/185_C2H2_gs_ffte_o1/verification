@@ -20,7 +20,7 @@ checklist1 = {
     "eigen energy for io=1": [
         100,  # Temporary value for result
         -31.1347,  # Reference value
-        0.001,  # Permissible error
+        0.01,  # Permissible error
     ],
 }
 
@@ -28,7 +28,7 @@ checklist2 = {
     "eigen energy for io=5": [
         100,  # Temporary value for result
         -20.0607,  # Reference value
-        0.001,  # Permissible error
+        0.01,  # Permissible error
     ],
 }
 
