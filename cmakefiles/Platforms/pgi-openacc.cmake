@@ -12,6 +12,10 @@ set(OpenACC_FLAGS               "${OpenACC_FLAGS} -DUSE_CUDA")
 set(CMAKE_CUDA_FLAGS            "${CUDA_NVCC_FLAGS} -std=c++14 -arch=sm_80 -rdc=false")
 set(CMAKE_CXX_FLAGS             "${CMAKE_CXX_FLAGS} -std=c++14 -O3")
 set(CUDA_HOST_COMPILER          nvcc)
+foreach(arch 70 80)
+	set(CMAKE_CUDA_FLAGS            "${CUDA_NVCC_FLAGS} -gencode arch=compute_${arch},code=sm_${arch}")
+endforeach()
+
 
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS} ${OpenACC_FLAGS}")
