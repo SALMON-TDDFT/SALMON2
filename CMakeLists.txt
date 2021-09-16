@@ -29,13 +29,6 @@ message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
 message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
-# CUDA
-option(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
-
-set(CMAKE_CUDA_FLAGS  ${CUDA_NVCC_FLAGS} "-std=c++14 -arch=sm_80 -rdc=false")
-set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-std=c++14 -O3")
-set(CUDA_HOST_COMPILER nvcc)
-
 include(cmakefiles/check_build_environments.cmake)
 
 

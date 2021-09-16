@@ -13,8 +13,6 @@ set(SOURCES
    lattice.f90
    force.f90
    calc_gradient_psi.f90
-   stencil_current.cu
-   zpseudo.cu
    )
 
 if (IS_FUJITSU_COMPILER)
@@ -34,6 +32,8 @@ else ()
   if(USE_OPENACC)
       set(SOURCES ${SOURCES}
           zstencil_core/gpu/seq.f90
+          zpseudo.cu
+          stencil_current.cu
           )
   endif()
 endif ()
