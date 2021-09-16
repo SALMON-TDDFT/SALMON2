@@ -30,7 +30,6 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid,  &
                         allocate_scalar, deallocate_scalar
   use communication, only: comm_is_root
-  use parallelization, only: nproc_id_global
   use poisson_isolated
   use poisson_periodic
   implicit none
@@ -44,7 +43,6 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   type(s_stencil)        ,intent(in)    :: stencil
   type(s_scalar)         ,intent(in)    :: rho
   type(s_scalar)         ,intent(inout) :: Vh
-  integer :: iz
 
   select case(iperiodic)
   case(0)
