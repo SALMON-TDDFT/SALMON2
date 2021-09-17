@@ -103,9 +103,16 @@ contains
 !$omp end parallel do
 #endif
     else if(nspin==2)then
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(3) private(is,iz,iy,ix)
+#else
 !$omp parallel private(is,iz,iy,ix)
+#endif
       do is=1,2
+#ifndef USE_OPENACC
 !$omp do collapse(2)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -113,9 +120,15 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do
+#endif
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel
+#endif
     end if
 
     if(xc_func%use_gradient) then ! meta GGA
@@ -188,9 +201,16 @@ contains
 !$omp end parallel do
 #endif
     else if(nspin==2)then
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(3) private(is,iz,iy,ix)
+#else
 !$omp parallel private(is,iz,iy,ix)
+#endif
       do is=1,2
+#ifndef USE_OPENACC
 !$omp do collapse(2)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -198,9 +218,15 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do
+#endif
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel
+#endif
     end if
 
     tot_exc=0.d0
