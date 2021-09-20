@@ -325,21 +325,79 @@ contains
 !$acc end kernels
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
+
+        if ( yn_jm == 'n' ) then
+          if ( yn_spinorbit=='y' ) then
+            if ( info%if_divide_rspace ) then
+              do ik=info%ik_s,info%ik_e
+              do io=info%io_s,info%io_e
+                      call calc_current_nonlocal_rdivided_so &
+                           ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,info%icomm_r )
+                      wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+                      jx = jx + wrk4(1)
+                      jy = jy + wrk4(2)
+                      jz = jz + wrk4(3)
+              end do
+              end do
+            else
 !$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
 !$acc loop private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
-        wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
-        jx = jx + wrk4(1)
-        jy = jy + wrk4(2)
-        jz = jz + wrk4(3)
-      end do
-      end do
+              do ik=info%ik_s,info%ik_e
+              do io=info%io_s,info%io_e
+                      call calc_current_nonlocal_so &
+                           ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+                      wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+                      jx = jx + wrk4(1)
+                      jy = jy + wrk4(2)
+                      jz = jz + wrk4(3)
+              end do
+              end do
 !$acc end kernels
-      wrk4(1) = jx
-      wrk4(2) = jy
-      wrk4(3) = jz
+            end if
+          else
+            if ( info%if_divide_rspace)then
+              do ik=info%ik_s,info%ik_e
+              do io=info%io_s,info%io_e
+                      uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+                      call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+                      wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+                      jx = jx + wrk4(1)
+                      jy = jy + wrk4(2)
+                      jz = jz + wrk4(3)
+              end do
+              end do
+            else
+!$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
+!$acc loop private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto
+              do ik=info%ik_s,info%ik_e
+              do io=info%io_s,info%io_e
+                      call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+                      wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+                      jx = jx + wrk4(1)
+                      jy = jy + wrk4(2)
+                      jz = jz + wrk4(3)
+              end do
+              end do
+!$acc end kernels
+            end if
+          end if
+        else
+!$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
+!$acc loop private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto
+              do ik=info%ik_s,info%ik_e
+              do io=info%io_s,info%io_e
+                      wrk3=0d0
+                      wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+                      jx = jx + wrk4(1)
+                      jy = jy + wrk4(2)
+                      jz = jz + wrk4(3)
+              end do
+              end do
+!$acc end kernels
+        end if
+        wrk4(1) = jx
+        wrk4(2) = jy
+        wrk4(3) = jz
 #else
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &

@@ -27,6 +27,7 @@ module pseudo_pt_current_so
 contains
 
   subroutine calc_current_nonlocal_so( jw, psi, ppg, is_array, ie_array,ik )
+    !$acc routine worker
     use structures, only: s_pp_grid
     implicit none
     real(8)   ,intent(out) :: jw(3)
