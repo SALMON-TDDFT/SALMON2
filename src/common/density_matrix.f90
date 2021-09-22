@@ -334,7 +334,8 @@ contains
       jy = 0d0
       jz = 0d0
       call timer_begin(LOG_CALC_STENCIL_CURRENT)
-#if defined(USE_OPENACC) && defined(USE_CUDA)
+#if 0
+! #if defined(USE_OPENACC) && defined(USE_CUDA)
       call stencil_current_core_gpu(info%ik_s,info%ik_e,info%io_s,info%io_e,system%vec_k,system%vec_Ac &
                                    ,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx(1:),mg%idy(1:),mg%idz(1:) &
                                    ,stencil%coef_nab,ispin,im,nspin,psi%zwf,BT,system%rocc,system%wtk,jx,jy,jz)

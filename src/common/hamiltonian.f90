@@ -306,7 +306,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
-#ifdef USE_OPENACC
+#if 0
+! #ifdef USE_OPENACC
 !$acc update device(system%vec_Ac)
 !$acc parallel present(system,mg,V_local,stencil,tpsi,htpsi)
 !$acc loop collapse(4) private(kAc,kAc0,k_lap0) gang
@@ -324,7 +325,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         if(if_kAc) then
           kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3) ! Cartesian vector k+A/c
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
-#ifdef USE_OPENACC
+#if 0
+! #ifdef USE_OPENACC
           kAc0 = kAc
           kAc(1) = system%rmatrix_B(1,1) * kAc0(1) + system%rmatrix_B(1,2) * kAc0(2) + system%rmatrix_B(1,3) * kAc0(3)
           kAc(2) = system%rmatrix_B(2,1) * kAc0(1) + system%rmatrix_B(2,2) * kAc0(2) + system%rmatrix_B(2,3) * kAc0(3)
@@ -341,7 +343,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end do
       end do
       end do
-#ifdef USE_OPENACC
+#if 0
+! #ifdef USE_OPENACC
 !$acc end parallel
 #else
 !$omp end parallel do
