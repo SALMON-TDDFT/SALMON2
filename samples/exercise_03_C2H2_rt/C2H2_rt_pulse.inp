@@ -82,7 +82,7 @@
 /
 
 &emfield
-  !envelope shape of the incident pulse('Ecos2': cos^2 type envelope for scalar potential)
+  !envelope shape of the incident pulse('Acos2': cos^2 type envelope for vector potential)
   ae_shape1 = 'Acos2'
   
   !peak intensity(W/cm^2) of the incident pulse
