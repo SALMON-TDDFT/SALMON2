@@ -31,6 +31,10 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 include(cmakefiles/check_build_environments.cmake)
 
+if(USE_OPENACC)
+	enable_language(CUDA)
+endif()
+
 
 # Bulid options
 ## For third party libraries
