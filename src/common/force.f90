@@ -62,6 +62,11 @@ contains
     complex(8),allocatable :: zF_tmp(:,:)
     complex(8) :: ztmp
     integer :: Norb,iorb,ilocal
+#ifdef USE_OPENACC
+    real(8),allocatable :: F_tmp_local(:,:)
+
+    allocate( F_tmp_local(3, ppg%ilocal_nlma) )
+#endif
 
     call timer_begin(LOG_CALC_ION_FORCE)
 
@@ -262,6 +267,39 @@ contains
            F_tmp(3,ia) = F_tmp(3,ia) - rtmp*dble( conjg(duVpsi(3)) * ztmp )
          end do
        else
+#ifdef USE_OPENACC
+!$acc parallel loop private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w)
+       do ilocal=1,ppg%ilocal_nlma
+          ilma=ppg%ilocal_nlma2ilma(ilocal)
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
+          duVpsi = 0d0
+          do j=1,ppg%mps(ia)
+             ix = ppg%jxyz(1,j,ia)
+             iy = ppg%jxyz(2,j,ia)
+             iz = ppg%jxyz(3,j,ia)
+             w(1) = gtpsi(1,ix,iy,iz) + zI* kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(2) = gtpsi(2,ix,iy,iz) + zI* kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(3) = gtpsi(3,ix,iy,iz) + zI* kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             duVpsi(1) = duVpsi(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(1) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi(2) = duVpsi(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(2) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(3) ! < uV | exp(ikr) (nabla) | psi >
+          end do
+          F_tmp_local(1,ilocal) = rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp_local(2,ilocal) = rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp_local(3,ilocal) = rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
+       end do
+
+       !$acc kernels
+       !$acc loop seq
+       do ilocal=1,ppg%ilocal_nlma
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
+
+          F_tmp(1,ia) = F_tmp(1,ia) - F_tmp_local(1,ilocal)
+          F_tmp(2,ia) = F_tmp(2,ia) - F_tmp_local(2,ilocal)
+          F_tmp(3,ia) = F_tmp(3,ia) - F_tmp_local(3,ilocal)
+       end do
+       !$acc end kernels
+#else
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
        do ilocal=1,ppg%ilocal_nlma
           ilma=ppg%ilocal_nlma2ilma(ilocal)
@@ -285,6 +323,7 @@ contains
           F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 !$omp end parallel do
+#endif
        end if
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
@@ -343,7 +382,11 @@ contains
 
     if(yn_periodic=='n') then
     ! local part (based on density gradient)
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix,ia)
+#else
 !$omp parallel do private(iz,iy,ix,ia)
+#endif
       do ia=1,nion
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -353,7 +396,11 @@ contains
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end loop
+#else
 !$omp end parallel do
+#endif
       deallocate(dden)
     end if
 
@@ -365,11 +412,19 @@ contains
 
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ia)
+#else
 !$omp parallel do private(ia)
+#endif
     do ia=1,nion
       system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 !
     if (use_symmetry) then
       call sym_vector_force_xyz( system%Force, system%Rion )
@@ -384,6 +439,9 @@ contains
       deallocate( dphipsi_lma )
       deallocate( zF_tmp )
     end if 
+#ifdef USE_OPENACC
+    deallocate(F_tmp_local)
+#endif
 
     call timer_end(LOG_CALC_ION_FORCE)
     return
@@ -428,7 +486,11 @@ contains
       if(ewald%yn_bookkeep=='y') then
 
          F_tmp_l = 0d0
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#endif
          do iia= 1,info%nion_mg
         !do ia= system%nion_s, system%nion_e
         !do ia=1,nion
@@ -462,7 +524,11 @@ contains
 
             end do  !ipair
          end do     !ia
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
          call comm_summation(F_tmp_l,F_tmp,3*nion,comm)
 
       else
