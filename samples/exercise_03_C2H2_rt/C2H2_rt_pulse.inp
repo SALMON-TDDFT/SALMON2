@@ -7,7 +7,7 @@
 !     &group                                                                             !
 !       input keyword = xxx                                                              !
 !     /                                                                                  !
-!   (see chapter: 'List of all input keywords' in the manual)                            !
+!   (see chapter: 'List of input keywords' in the manual)                                !
 !----------------------------------------------------------------------------------------!
 ! * Conversion from unit_system = 'a.u.' to 'A_eV_fs':                                   !
 !   Length: 1 [a.u.] = 0.52917721067    [Angstrom]                                       !
@@ -82,7 +82,7 @@
 /
 
 &emfield
-  !envelope shape of the incident pulse('Ecos2': cos^2 type envelope for scalar potential)
+  !envelope shape of the incident pulse('Acos2': cos^2 type envelope for vector potential)
   ae_shape1 = 'Acos2'
   
   !peak intensity(W/cm^2) of the incident pulse
