@@ -108,7 +108,7 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
     
   case('dft','dft_band','dft_md') 
     if(comm_is_root(nproc_id_global)) then
-       write(*,*) '   invalid theory for printing dnsdiff cube @ write_dns'
+       write(*,*) '  invalid theory for printing dnsdiff cube @ write_dns'
     endif
   case default
     stop 'invalid theory @ write_dns'
