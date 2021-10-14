@@ -644,7 +644,7 @@ contains
     ! create all directory
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e,nblock_orbital
-      write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
+      write (dir_file_out,'(A,I6.6,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
       call create_directory(dir_file_out)
     end do
     end do
@@ -652,7 +652,7 @@ contains
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      write (dir_file_out,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      write (dir_file_out,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
       open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
 
       do is=1,system%nspin
@@ -1266,7 +1266,7 @@ contains
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      write (dir_file_in,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      write (dir_file_in,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
       open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
 
       do is=1,system%nspin
@@ -2146,7 +2146,7 @@ contains
       do io=1,mo+nblock_orbital-1,nblock_orbital
         if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o .and. comm_is_root(info%id_r)) then
           nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-          write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+          write (iofile,'(A,I6.6,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
           call create_directory(iofile)
         end if
       end do
@@ -2158,7 +2158,7 @@ contains
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,io_e,nblock_orbital
           nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-          write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+          write (iofile,'(A,I6.6,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
           check = check .and. directory_exists(iofile)
         end do
         end do
@@ -2169,7 +2169,7 @@ contains
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      write (iofile,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      write (iofile,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
 
       ! write/read file
       MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
