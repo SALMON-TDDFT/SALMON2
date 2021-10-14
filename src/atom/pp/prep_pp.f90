@@ -149,7 +149,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
     call calc_uv_so(pp,ppg,lg%num,hgs,hvol,property)
   end if
   if ( PLUS_U_ON ) then
-!    call calc_uv_plusU( pp, ppg, property )
+    call calc_uv_plusU( pp, ppg, property )
   end if
   call timer_end(LOG_INIT_PS_LMA_UV)
 
