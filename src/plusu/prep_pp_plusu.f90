@@ -178,6 +178,11 @@ contains
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
     real(8) :: upp(0:2*pp%lmax+1)
     real(8) :: r,x,y,z, xx
+    
+    ppg%nps_ao = ppg%nps
+    ppg%jxyz_ao = ppg%jxyz
+    ppg%rxyz_ao = ppg%rxyz
+    ppg%mps_ao = ppg%mps
 
     call set_nlma_ao( pp, ppg )
 
