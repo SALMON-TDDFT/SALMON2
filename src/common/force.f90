@@ -68,11 +68,6 @@ contains
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
     allocate( F_tmp(3,nion), F_sum(3,nion) )
-    if( PLUS_U_ON ) then
-      allocate( zF_tmp(3,nion) )
-      zF_tmp=zero
-    end if
-
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
     im = 1
@@ -158,9 +153,13 @@ contains
     end if
 
     if( PLUS_U_ON )then
+      allocate( zF_tmp(3,nion) )
+      zF_tmp=zero
       Nlma_ao = size(ppg%ia_tbl_ao)
       allocate( phipsibox(Nlma_ao,Norb)  ); phipsibox=zero
       allocate( phipsibox2(Nlma_ao,Norb) ); phipsibox2=zero
+      allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
+    
       iorb = 0
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -289,9 +288,6 @@ contains
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
        if( PLUS_U_ON )then
-          if( .not.allocated(dphipsi_lma) )then
-             allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
-          end if
           do ilma=1,Nlma_ao
              ia = ppg%ia_tbl_ao(ilma)
              dphipsi = zero
