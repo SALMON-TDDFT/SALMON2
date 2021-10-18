@@ -59,7 +59,7 @@ contains
 
     Nlma_ao = lma
 
-    write(*,*) "Nlma_ao (ppg%nlma)=", Nlma_ao, " (",ppg%nlma,")"
+!    write(*,*) "Nlma_ao (ppg%nlma)=", Nlma_ao, " (",ppg%nlma,")"
 
     allocate( lma_tbl_ao(lm_max,natom) ); lma_tbl_ao=0
     allocate( ppg%ia_tbl_ao(Nlma_ao) ); ppg%ia_tbl_ao=0
@@ -124,7 +124,7 @@ contains
       end do
     end do
 
-    write(*,*) "----- set_nlma_ao(end)"
+!    write(*,*) "----- set_nlma_ao(end)"
 
   end subroutine set_nlma_ao
 
