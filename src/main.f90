@@ -1,3 +1,4 @@
+! main test 
   program main
   use salmon_global
   use parallelization
