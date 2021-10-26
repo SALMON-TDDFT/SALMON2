@@ -1,7 +1,3 @@
-logical, parameter      :: GIT_FOUND       = .false.
-character(*), parameter :: GIT_BRANCH      = ''
-character(*), parameter :: GIT_COMMIT_HASH = ''
-
 character(*), parameter :: SALMON_VERSION_STRING = '2.0.0'
 
 integer, parameter :: SALMON_VER_MAJOR = 2
