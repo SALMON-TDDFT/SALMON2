@@ -1971,7 +1971,7 @@ contains
       write(ofl%fh_ovlp,'(i11)') itt
       do ispin=1,nspin_tmp
       do ik=1,nk
-        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no0)
+        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)/system%wtk(ik),io=1,no0)
       end do
       end do
     end if
