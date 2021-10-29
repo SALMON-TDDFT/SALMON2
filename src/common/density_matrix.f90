@@ -250,6 +250,7 @@ contains
     use timer
     use iso_c_binding
     implicit none
+#if defined(USE_OPENACC)
     interface
       subroutine stencil_current_core_gpu(ik_s,ik_e,io_s,io_e,vec_k,vec_Ac,is_array,ie_array &
                                          ,is,ie,idx,idy,idz,nabt,ispin,im,spin_len,psi,BT,rocc,wtk,jx,jy,jz) bind(c)
@@ -283,6 +284,7 @@ contains
         real(c_double), intent(in) :: wtk(ik_e-ik_s+1)
       end  subroutine stencil_current_core_gpu
     end interface
+#endif
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
