@@ -73,8 +73,8 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
   do ix=igs(1),ige(1)
     t_0 = tpsi(DX( 1), ispin, io)
     t_1 = tpsi(DX(-1), ispin, io)
-    v=lapt(1)*(t_0+t_1) + v
-    w=nabt(1)*(t_0-t_1) + w
+    v=lapt(1)*(t_0+t_1)
+    w=nabt(1)*(t_0-t_1)
 
     t_0 = tpsi(DX( 2), ispin, io)
     t_1 = tpsi(DX(-2), ispin, io)

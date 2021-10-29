@@ -181,24 +181,28 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call calc_microscopic_current(system,mg,stencil,info,spsi_out,rt%j_e)
   end if
 
-  call timer_begin(LOG_CALC_HARTREE)
-  if(iperiodic==0 .and. itt/=1)then
-    Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
-    Vh_stock2%f = Vh_stock1%f
-  end if
-  if(singlescale%flag_use .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
-    call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
-  else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  end if
-  if(iperiodic==0 .and. itt/=1)then
-    Vh_stock1%f = Vh%f
-  end if
-  call timer_end(LOG_CALC_HARTREE)
+  if(yn_fix_func=='n') then
+  
+    call timer_begin(LOG_CALC_HARTREE)
+    if(iperiodic==0 .and. itt/=1)then
+      Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
+      Vh_stock2%f = Vh_stock1%f
+    end if
+    if(singlescale%flag_use .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
+      call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
+    else
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    end if
+    if(iperiodic==0 .and. itt/=1)then
+      Vh_stock1%f = Vh%f
+    end if
+    call timer_end(LOG_CALC_HARTREE)
 
-  call timer_begin(LOG_CALC_EXC_COR)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
-  call timer_end(LOG_CALC_EXC_COR)
+    call timer_begin(LOG_CALC_EXC_COR)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    call timer_end(LOG_CALC_EXC_COR)
+    
+  end if
 
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
@@ -220,7 +224,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   select case(iperiodic)
   case(0)
 
-    call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+    call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
 
   case(3)
 
@@ -328,6 +332,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
     end if
   end if
+  
+  if(yn_spinorbit=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_magnetization_step)==0)) then
+    call write_magnetization(itt,ofl,system,mg,info,spsi_out)
+  end if
+  
   call timer_end(LOG_WRITE_RT_INFOS)
 
   return
@@ -377,8 +386,10 @@ contains
     
     if(yn_jm=='y') rho%f = rho%f + rho_jm%f
     
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    if(yn_fix_func=='n') then
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
     !$omp workshare

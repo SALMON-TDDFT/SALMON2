@@ -21,23 +21,34 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_isolated(system,info,mg,pp,rho,Vh,Vxc,rion_update,energy)
+  SUBROUTINE calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho,Vh,Vxc,rion_update,energy)
     use structures
-    use salmon_global, only: kion, yn_jm
+    use math_constants,only : pi,zi
+    use salmon_global, only: kion, yn_jm, method_poisson, yn_ffte, natom
     use communication, only: comm_summation
     use timer
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
+    type(s_rgrid)           ,intent(in) :: lg
     type(s_rgrid)           ,intent(in) :: mg
     type(s_pp_info)         ,intent(in) :: pp
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_reciprocal_grid) ,intent(in) :: fg
+    type(s_poisson)         ,intent(in) :: poisson
     type(s_scalar)          ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
     logical                 ,intent(in) :: rion_update
     type(s_dft_energy)                  :: energy
     !
     integer :: io,ik,ispin,Nspin
     integer :: ix,iy,iz,ia,ib
-    real(8) :: sum1,sum2,Eion,Etot,r
+    real(8) :: sum1,sum2,Eion,Etot,rr,r(3),g(3),Gd,sysvol,E_wrk(5),E_sum(5)
+    real(8) :: etmp
+    integer :: ifgx_s,ifgx_e
+    integer :: ifgy_s,ifgy_e
+    integer :: ifgz_s,ifgz_e
+    integer :: ia_s,ia_e
+    complex(8) :: rho_e,rho_i
 
     call timer_begin(LOG_TE_ISOLATED_CALC)
 
@@ -47,14 +58,14 @@ CONTAINS
       Eion = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:Eion) &
-!$omp          private(ia,ib,r) &
+!$omp          private(ia,ib,rr) &
 !$omp          shared(system,pp,Kion)
       do ia=1,system%nion
         do ib=1,ia-1
-          r = sqrt((system%Rion(1,ia)-system%Rion(1,ib))**2      &
-                  +(system%Rion(2,ia)-system%Rion(2,ib))**2      &
-                  +(system%Rion(3,ia)-system%Rion(3,ib))**2)
-          Eion = Eion + pp%Zps(Kion(ia)) * pp%Zps(Kion(ib)) /r
+          rr = sqrt((system%Rion(1,ia)-system%Rion(1,ib))**2      &
+                   +(system%Rion(2,ia)-system%Rion(2,ib))**2      &
+                   +(system%Rion(3,ia)-system%Rion(3,ib))**2)
+          Eion = Eion + pp%Zps(Kion(ia)) * pp%Zps(Kion(ib)) /rr
         end do
       end do
 !$omp end parallel do
@@ -77,22 +88,133 @@ CONTAINS
     end do
 !$omp end parallel do
 
-    sum1 = 0d0
+    select case(method_poisson)
+    case('cg')
+      sum1 = 0d0
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:sum1) &
 !$omp          private(ispin,ix,iy,iz) &
 !$omp          shared(Nspin,mg,Vh,rho,Vxc)
-    do ispin=1,Nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)    &
-                    - ( Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz) )
+      do ispin=1,Nspin
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)    &
+                      - ( Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz) )
+        end do
+        end do
+        end do
       end do
-      end do
-      end do
-    end do
 !$omp end parallel do
+    case('ft')
+      if(yn_ffte=='n')then
+        ifgx_s = (mg%is(1)-lg%is(1))*2+1
+        ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
+        ifgy_s = (mg%is(2)-lg%is(2))*2+1
+        ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
+        ifgz_s = (mg%is(3)-lg%is(3))*2+1
+        ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
+      else
+        if(mod(info%nporbital,4)==0)then
+          ! start and end point of reciprocal grids for x, y, z
+          ifgx_s = 1
+          ifgx_e = 2*lg%num(1)
+          if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
+            ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
+          else
+            ifgy_s = mg%is(2)-lg%is(2)+1
+          end if
+          ifgy_e = ifgy_s+mg%num(2)-1
+          if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+            ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
+          else
+            ifgz_s = mg%is(3)-lg%is(3)+1
+          end if
+          ifgz_e = ifgz_s+mg%num(3)-1
+        else
+          ! start and end point of reciprocal grids for x, y, z
+          ifgx_s = 1
+          ifgx_e = 2*lg%num(1)
+          ifgy_s = 1
+          ifgy_e = 2*lg%num(2)
+          ifgz_s = 1
+          ifgz_e = 2*lg%num(3)
+        end if
+      end if
+
+      etmp = 0d0
+      E_wrk = 0d0
+      
+      sysvol = system%det_a*8.d0
+      
+      if(yn_ffte=='n'.or.(yn_ffte=='y'.and.mod(info%nporbital,4)/=0))then
+        ia_s = info%ia_s
+        ia_e = info%ia_e
+      else
+        ia_s = 1
+        ia_e = natom
+      end if
+
+!$omp parallel do collapse(2) default(none) &
+!$omp          reduction(+:E_wrk,etmp) &
+!$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
+!$omp          shared(mg,fg,system,sysvol,kion,poisson,ppg,info,yn_jm,ifgx_s,ifgx_e,ifgy_s,ifgy_e,ifgz_s,ifgz_e,ia_s,ia_e)
+      do iz=ifgz_s,ifgz_e
+      do iy=ifgy_s,ifgy_e
+      do ix=ifgx_s,ifgx_e
+        g(1) = fg%vec_G(1,ix,iy,iz)
+        g(2) = fg%vec_G(2,ix,iy,iz)
+        g(3) = fg%vec_G(3,ix,iy,iz)
+        
+        rho_e = poisson%zrhoG_ele(ix,iy,iz)
+        E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
+        
+        if (yn_jm=='n') then
+          rho_i = ppg%zrhoG_ion(ix,iy,iz)
+          E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
+         
+          do ia=ia_s,ia_e
+            r = system%Rion(1:3,ia)
+            Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+            etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+          end do
+        end if
+      end do
+      end do
+      end do
+!$omp end parallel do
+
+      if(yn_ffte=='n')then
+        call comm_summation(etmp,E_wrk(3),info%icomm_ko) ! for atom index #ia
+        E_sum(1:3) = E_wrk(1:3)
+      else
+        if(mod(info%nporbital,4)==0)then
+          E_wrk(3) = etmp
+          call comm_summation(E_wrk,E_sum,5,info%icomm_o_isolated_ffte)
+          E_wrk(1:3) = E_sum(1:3)
+          call comm_summation(E_wrk,E_sum,5,info%icomm_r)
+        else
+          E_sum(1:2)=E_wrk(1:2)
+          call comm_summation(etmp,E_sum(3),info%icomm_ko) ! for atom index #ia
+        end if
+      end if
+
+      sum1 = 0d0
+!$omp parallel do collapse(4) default(none) &
+!$omp          reduction(+:sum1) &
+!$omp          private(ispin,ix,iy,iz) &
+!$omp          shared(Nspin,mg,Vh,rho,Vxc)
+      do ispin=1,Nspin
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          sum1 = sum1 - Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)
+        end do
+        end do
+        end do
+      end do
+    end select
+
     call timer_end(LOG_TE_ISOLATED_CALC)
 
     call timer_begin(LOG_TE_ISOLATED_COMM_COLL)
@@ -100,6 +222,10 @@ CONTAINS
     call comm_summation(sum1,sum2,info%icomm_r)
 
     Etot = Etot + sum2*system%Hvol + energy%E_xc + energy%E_ion_ion
+    select case(method_poisson)
+    case('ft')
+      Etot = Etot + E_sum(1) + E_sum(2) + E_sum(3)
+    end select
 
     energy%E_tot = Etot
 
@@ -116,7 +242,6 @@ CONTAINS
     use math_constants,only : pi,zi
     use salmon_global, only: kion,aEwald, cutoff_r, yn_jm
     use communication, only: comm_summation,comm_is_root
-    use parallelization, only: nproc_id_global
     use timer
     implicit none
     type(s_rgrid)           ,intent(in) :: mg
@@ -217,6 +342,8 @@ CONTAINS
 
     etmp = 0d0
     E_wrk = 0d0
+    E_wrk_local_1 =0d0
+    E_wrk_local_2 =0d0
 #ifdef USE_OPENACC
 !$acc parallel copyin(yn_jm)
 !$acc loop collapse(2) reduction(+:E_wrk_local_1,E_wrk_local_2,etmp) private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd)
@@ -381,16 +508,24 @@ CONTAINS
     if(allocated(tpsi%rwf)) then
       do ispin=1,Nspin
         call timer_begin(LOG_EIGEN_ENERGY_CALC)
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ik,io)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
+#endif
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk1(io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                         * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
         call timer_end(LOG_EIGEN_ENERGY_CALC)
 
         call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
@@ -407,10 +542,14 @@ CONTAINS
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
 !$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
+#endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -420,15 +559,23 @@ CONTAINS
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
       E_local(1) = E_tmp
 
     ! nonlocal part (E_ion_nloc)
       E_tmp = 0d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
 !$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
+#endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -446,7 +593,11 @@ CONTAINS
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
       E_local(2) = E_tmp
       call timer_end(LOG_EIGEN_ENERGY_CALC)
       
@@ -628,8 +779,12 @@ CONTAINS
 
     !(check maximum number of pairs and allocate)
     npair_bk_max = 0
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) reduction(max:npair_bk_max)
+#else
 !$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
 !$omp             reduction(max:npair_bk_max)
+#endif
     do iia=1,info%nion_mg
    !do ia=1,system%nion
        ia = info%ia_mg(iia)
@@ -661,7 +816,11 @@ CONTAINS
         end do
         npair_bk_max = max(npair_bk_max,npair_bk_loc)
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
       ewald%nmax_pair_bk = npair_bk_max
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
@@ -674,7 +833,11 @@ CONTAINS
 820      format(a,i6)
       endif
 
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#endif
     do iia=1,info%nion_mg
    !do ia=1,system%nion
        ia = info%ia_mg(iia)
@@ -710,7 +873,11 @@ CONTAINS
         end do
         ewald%npair_bk(iia) = ipair
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
       return
       !xxxxxxxxxxxxxx

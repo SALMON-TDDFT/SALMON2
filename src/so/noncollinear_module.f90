@@ -8,6 +8,7 @@ module noncollinear_module
   public :: rot_vxc_noncollinear
   public :: op_xc_noncollinear
   public :: calc_magnetization
+  public :: calc_magnetization_decomposed
   public :: simple_mixing_so
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
@@ -41,7 +42,12 @@ contains
 
     den_mat=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(3) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
+#else
 !$omp parallel do collapse(3) default(shared) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -62,6 +68,9 @@ contains
     end do !io
     end do !ik
     end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
     ix=size(den_mat,1)
     iy=size(den_mat,2)
@@ -86,7 +95,6 @@ contains
   subroutine rot_dm_noncollinear( rho, system, mg )
     use structures, only : s_dft_system, s_rgrid, s_scalar
     use communication, only : comm_summation
-    use mpi, only: MPI_COMM_WORLD
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
@@ -245,6 +253,49 @@ contains
     call comm_summation( m_tmp, m, 3, info%icomm_r )
     return
   end subroutine calc_magnetization
+  
+  
+  subroutine calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+    use structures
+    use communication, only: comm_summation
+    implicit none
+    type(s_dft_system),   intent(in) :: system
+    type(s_rgrid),        intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),      intent(in) :: psi
+    real(8)                          :: mag_orb(3,system%no,system%nk)
+    !
+    integer,parameter :: im = 1
+    integer :: ix,iy,iz,ik,io,is,js
+    real(8)    :: m_tmp(3,system%no,system%nk)
+    complex(8) :: zmat(2,2)
+    
+    m_tmp = zero
+!$omp parallel do collapse(2) private(ik,io,is,js,ix,iy,iz,zmat)
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      zmat = zero
+      do js=1,2
+      do is=1,2
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          zmat(is,js) = zmat(is,js) + conjg( psi%zwf(ix,iy,iz,is,io,ik,im) ) * psi%zwf(ix,iy,iz,js,io,ik,im)
+        end do
+        end do
+        end do
+      end do !is
+      end do !js
+      zmat = zmat * system%hvol
+      m_tmp(1,io,ik) = 0.5d0* dble( zmat(1,2) + zmat(2,1) )
+      m_tmp(2,io,ik) = 0.5d0* dble( -zi* zmat(1,2) + zi* zmat(2,1) )
+      m_tmp(3,io,ik) = 0.5d0* dble( zmat(1,1) - zmat(2,2) )
+    end do !io
+    end do !ik
+    
+    call comm_summation( m_tmp, mag_orb, 3*system%no*system%nk, info%icomm_rko )
+    return
+  end subroutine calc_magnetization_decomposed
   
   
 ! for GS calculation

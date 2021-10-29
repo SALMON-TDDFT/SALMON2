@@ -21,7 +21,7 @@ CONTAINS
 !===================================================================================================================================
 
 subroutine init_communicator_dft(comm,info)
-  use salmon_global, only: process_allocation
+  use salmon_global, only: process_allocation, method_poisson, yn_ffte
   use structures, only: s_parallel_info
   use communication, only: comm_create_group, comm_get_groupinfo, &
                            comm_is_root, comm_summation, comm_create_group_byid
@@ -32,7 +32,7 @@ subroutine init_communicator_dft(comm,info)
   integer :: myrank,nproc
   integer :: nproc_k,nproc_ob
   integer :: nproc_d_o(3)
-  integer :: i1,i2,i3,i4,i5,ix,iy,iz,nl
+  integer :: i1,i2,i3,i4,i5,ix,iy,iz,nl,io1,io2,io3,io4
   integer,allocatable :: iranklists(:)
 
 #ifdef __FUJITSU
@@ -233,6 +233,140 @@ subroutine init_communicator_dft(comm,info)
   end do
   info%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_xy, info%id_xy, info%isize_xy)
+
+! begin: preparation of communicator for isolated_ffte
+  if(method_poisson=='ft'.and.yn_ffte=='y')then
+
+! condition of parallel calulations
+    if(mod(nproc_ob,4)==0) then
+
+! begin: allocation of imap_isolated_ffte
+      allocate(info%imap_isolated_ffte(0:nproc_d_o(1)-1, &
+                                       0:nproc_d_o(2)-1, &
+                                       0:nproc_d_o(3)-1, &
+                                       0:1, &
+                                       0:1, &
+                                       0:nproc_ob/4-1, &
+                                       0:nproc_k-1))
+! end: allocation of imap_isolated_ffte
+    
+! begin: definition of iaddress_isolated_ffte
+      nl = -1
+      if (process_allocation == 'grid_sequential') then
+        do i5=0,nproc_k-1
+        do io4=0,nproc_ob/4-1
+        do io3=0,1 ! z-dir
+        do io2=0,1 ! y-dir
+        do i3=0,nproc_d_o(3)-1
+        do i2=0,nproc_d_o(2)-1
+        do i1=0,nproc_d_o(1)-1
+          nl = nl + 1
+          info%imap_isolated_ffte(i1,i2,i3,io2,io3,io4,i5) = nl
+          if (nl == myrank) then
+            info%iaddress_isolated_ffte = [i1,i2,i3,io2,io3,io4,i5]
+          end if
+        end do
+        end do
+        end do
+        end do
+        end do
+        end do
+        end do
+      else if (process_allocation == 'orbital_sequential') then
+        do i3=0,nproc_d_o(3)-1
+        do i2=0,nproc_d_o(2)-1
+        do i1=0,nproc_d_o(1)-1
+        do i5=0,nproc_k-1
+        do io4=0,nproc_ob/4-1
+        do io3=0,1 ! z-dir
+        do io2=0,1 ! y-dir
+          nl = nl + 1
+          info%imap_isolated_ffte(i1,i2,i3,io2,io3,io4,i5) = nl
+          if (nl == myrank) then
+            info%iaddress_isolated_ffte = [i1,i2,i3,io2,io3,io4,i5]
+          end if
+        end do
+        end do
+        end do
+        end do
+        end do
+        end do
+        end do
+      else
+        stop 'undefined: process_allocation'
+      end if
+! end: definition of iaddress_isolated_ffte
+
+! begin: definition of communicator
+! y-dir 
+      i5 = info%iaddress_isolated_ffte(7)
+      io4 = info%iaddress_isolated_ffte(6)
+      io3 = info%iaddress_isolated_ffte(5)
+      iz = info%iaddress_isolated_ffte(3)
+      ix = info%iaddress_isolated_ffte(1)
+      nl = 0
+      do io2=0,1
+      do iy=0,nproc_d_o(2)-1
+        nl = nl + 1
+        iranklists(nl) = info%imap_isolated_ffte(ix,iy,iz,io2,io3,io4,i5)
+      end do
+      end do
+      info%icomm_y_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_y_isolated_ffte, info%id_y_isolated_ffte, info%isize_y_isolated_ffte)
+
+! z-dir 
+      i5 = info%iaddress_isolated_ffte(7)
+      io4 = info%iaddress_isolated_ffte(6)
+      io2 = info%iaddress_isolated_ffte(4)
+      iy = info%iaddress_isolated_ffte(2)
+      ix = info%iaddress_isolated_ffte(1)
+      nl = 0
+      do io3=0,1
+      do iz=0,nproc_d_o(3)-1
+        nl = nl + 1
+        iranklists(nl) = info%imap_isolated_ffte(ix,iy,iz,io2,io3,io4,i5)
+      end do
+      end do
+      info%icomm_z_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_z_isolated_ffte, info%id_z_isolated_ffte, info%isize_z_isolated_ffte)
+    
+! orbital-dir 
+      i5 = info%iaddress_isolated_ffte(7)
+      io4 = info%iaddress_isolated_ffte(6)
+      iz = info%iaddress_isolated_ffte(3)
+      iy = info%iaddress_isolated_ffte(2)
+      ix = info%iaddress_isolated_ffte(1)
+      nl = 0
+      do io3=0,1
+      do io2=0,1
+        nl = nl + 1
+        iranklists(nl) = info%imap_isolated_ffte(ix,iy,iz,io2,io3,io4,i5)
+      end do
+      end do
+      info%icomm_o_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_o_isolated_ffte, info%id_o_isolated_ffte, info%isize_o_isolated_ffte)
+
+! condition of single calulations
+    else
+! x-dir, y-dir, z-dir, o-dir
+      i5 = info%iaddress(5)
+      i4 = info%iaddress(4)
+      iz = info%iaddress(3)
+      iy = info%iaddress(2)
+      ix = info%iaddress(1)
+      nl = 1
+      iranklists(nl) = info%imap(ix,iy,iz,i4,i5)
+      info%icomm_x_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_x_isolated_ffte, info%id_x_isolated_ffte, info%isize_x_isolated_ffte)
+      info%icomm_y_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_y_isolated_ffte, info%id_y_isolated_ffte, info%isize_y_isolated_ffte)
+      info%icomm_z_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_z_isolated_ffte, info%id_z_isolated_ffte, info%isize_z_isolated_ffte)
+      info%icomm_o_isolated_ffte = comm_create_group_byid(comm, iranklists(1:nl))
+      call comm_get_groupinfo(info%icomm_o_isolated_ffte, info%id_o_isolated_ffte, info%isize_o_isolated_ffte)
+    end if
+  end if
+! end: preparation of communicator for isolated_ffte
 
 #ifdef __FUJITSU
 contains

@@ -27,7 +27,7 @@ contains
 subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
-                           nproc_k,nproc_ob,nproc_rgrid
+                           nproc_k,nproc_ob,nproc_rgrid,method_poisson
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
@@ -76,6 +76,9 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   select case(iperiodic)
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,mg,system,poisson)
+    if(method_poisson=='ft') then
+      call init_reciprocal_grid_isolated_ft(lg,mg,fg,system,info,poisson)
+    end if
   case(3)
     call init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   end select
@@ -94,7 +97,7 @@ subroutine init_dft_system(lg,system,stencil)
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
   & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
-  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,quiet
+  & iflag_atom_coor,ntype_atom_coor_reduced,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -720,6 +723,200 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
 
   return
 end subroutine init_reciprocal_grid
+
+!===================================================================================================================================
+
+subroutine init_reciprocal_grid_isolated_ft(lg,mg,fg,system,info,poisson)
+  use structures, only: s_rgrid,s_reciprocal_grid,s_dft_system,s_parallel_info,s_poisson
+  use math_constants,  only : pi,zi
+  use salmon_global, only: yn_ffte,aEwald
+  implicit none
+  type(s_rgrid)          ,intent(in)    :: lg
+  type(s_rgrid)          ,intent(in)    :: mg
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_dft_system)     ,intent(in)    :: system
+  type(s_parallel_info)  ,intent(in)    :: info
+  type(s_poisson)        ,intent(inout) :: poisson
+  !
+  real(8) :: brl(3,3)
+  integer :: ix,iy,iz
+  integer :: kx,ky,kz
+  integer :: iix,iiy,iiz
+  real(8) :: G2,g(3)
+  integer :: imgx_s,imgx_e
+  integer :: imgy_s,imgy_e
+  integer :: imgz_s,imgz_e
+  integer :: ifgx_s,ifgx_e
+  integer :: ifgy_s,ifgy_e
+  integer :: ifgz_s,ifgz_e
+  complex(8) :: tmp
+
+  if(yn_ffte=='n') then
+    ifgx_s = (mg%is(1)-lg%is(1))*2+1
+    ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
+    ifgy_s = (mg%is(2)-lg%is(2))*2+1
+    ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
+    ifgz_s = (mg%is(3)-lg%is(3))*2+1
+    ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
+  else
+    if(mod(info%nporbital,4)==0)then
+      ! start and end point of reciprocal grids for x, y, z
+      ifgx_s = 1
+      ifgx_e = 2*lg%num(1)
+      if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
+        ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
+      else
+        ifgy_s = mg%is(2)-lg%is(2)+1
+      end if
+      ifgy_e = ifgy_s+mg%num(2)-1
+      if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+        ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
+      else
+        ifgz_s = mg%is(3)-lg%is(3)+1
+      end if
+      ifgz_e = ifgz_s+mg%num(3)-1
+    else
+      ! start and end point of reciprocal grids for x, y, z
+      ifgx_s = 1
+      ifgx_e = 2*lg%num(1)
+      ifgy_s = 1
+      ifgy_e = 2*lg%num(2)
+      ifgz_s = 1
+      ifgz_e = 2*lg%num(3)
+    end if
+  end if
+
+  if(yn_ffte=='n') then
+    imgx_s = mg%is(1)-lg%is(1)+1
+    imgx_e = mg%is(1)-lg%is(1)+mg%num(1)
+    imgy_s = mg%is(2)-lg%is(2)+1
+    imgy_e = mg%is(2)-lg%is(2)+mg%num(2)
+    imgz_s = mg%is(3)-lg%is(3)+1
+    imgz_e = mg%is(3)-lg%is(3)+mg%num(3)
+    
+    allocate(fg%egx(1:2*lg%num(1),1:2*lg%num(1)))  ! (kx, ix)
+    allocate(fg%egxc(1:2*lg%num(1),1:2*lg%num(1))) ! (kx, ix)
+    allocate(fg%egy(1:2*lg%num(2),1:2*lg%num(2)))  ! (ky, iy)
+    allocate(fg%egyc(1:2*lg%num(2),1:2*lg%num(2))) ! (ky, iy)
+    allocate(fg%egz(1:2*lg%num(3),1:2*lg%num(3)))  ! (kz, iz)
+    allocate(fg%egzc(1:2*lg%num(3),1:2*lg%num(3))) ! (kz, iz)
+
+    allocate(poisson%ff1x(1:2*lg%num(1),ifgy_s:ifgy_e,ifgz_s:ifgz_e)) ! (ix, ky, kz)
+    allocate(poisson%ff1y(imgx_s:imgx_e,1:2*lg%num(2),ifgz_s:ifgz_e)) ! (ix, iy, kz)
+    allocate(poisson%ff1z(imgx_s:imgx_e,imgy_s:imgy_e,1:2*lg%num(3))) ! (ix, iy, iz)
+    allocate(poisson%ff2x(1:2*lg%num(1),ifgy_s:ifgy_e,ifgz_s:ifgz_e)) ! (ix, ky, kz)
+    allocate(poisson%ff2y(imgx_s:imgx_e,1:2*lg%num(2),ifgz_s:ifgz_e)) ! (ix, iy, kz)
+    allocate(poisson%ff2z(imgx_s:imgx_e,imgy_s:imgy_e,1:2*lg%num(3))) ! (ix, iy, iz)
+    
+    allocate(poisson%ff1(1:2*lg%num(1),ifgy_s:ifgy_e,ifgz_s:ifgz_e))  ! (kx, ky, kz)
+    allocate(poisson%ff2(1:2*lg%num(1),ifgy_s:ifgy_e,ifgz_s:ifgz_e))  ! (kx, ky, kz)
+
+    allocate(poisson%ff3x(1:2*lg%num(1),imgy_s:imgy_e,imgz_s:imgz_e)) ! (kx, iy, iz)
+    allocate(poisson%ff3y(ifgx_s:ifgx_e,1:2*lg%num(2),imgz_s:imgz_e)) ! (kx, ky, iz)
+    allocate(poisson%ff3z(ifgx_s:ifgx_e,ifgy_s:ifgy_e,1:2*lg%num(3))) ! (kx, ky, kz)
+    allocate(poisson%ff4x(1:2*lg%num(1),imgy_s:imgy_e,imgz_s:imgz_e)) ! (kx, iy, iz)
+    allocate(poisson%ff4y(ifgx_s:ifgx_e,1:2*lg%num(2),imgz_s:imgz_e)) ! (kx, ky, iz)
+    allocate(poisson%ff4z(ifgx_s:ifgx_e,ifgy_s:ifgy_e,1:2*lg%num(3))) ! (kx, ky, kz)
+
+  !$OMP parallel do private(ix,kx,tmp)
+    do ix=1,lg%num(1)
+      do kx=1,2*lg%num(1)
+        !tmp = exp(zI*(2.d0*Pi*dble(lg%coordinate(ix,1)*system%hgs(1)*(kx-1))/dble(2*lg%num(1))))
+        tmp = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(2*lg%num(1))))
+        fg%egx(kx,ix)  = tmp
+        fg%egxc(kx,ix) = conjg(tmp)
+        !tmp = exp(zI*(2.d0*Pi*dble((lg%coordinate(ix,1)*system%hgs(1)+lg%num(1))*(kx-1))/dble(2*lg%num(1))))
+        tmp = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(2*lg%num(1))))
+        fg%egx(kx,ix+lg%num(1))  = tmp
+        fg%egxc(kx,ix+lg%num(1)) = conjg(tmp)
+      end do
+    end do
+  !$OMP parallel do private(iy,ky,tmp)
+    do iy=1,lg%num(2)
+      do ky=1,2*lg%num(2)
+        !tmp = exp(zI*(2.d0*Pi*dble(lg%coordinate(iy,2)*system%hgs(2)*(ky-1))/dble(2*lg%num(2))))
+        tmp = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(2*lg%num(2))))
+        fg%egy(ky,iy)  = tmp
+        fg%egyc(ky,iy) = conjg(tmp)
+        !tmp = exp(zI*(2.d0*Pi*dble((lg%coordinate(iy,2)*system%hgs(2)+lg%num(2))*(ky-1))/dble(2*lg%num(2))))
+        tmp = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(2*lg%num(2))))
+        fg%egy(ky,iy+lg%num(2))  = tmp
+        fg%egyc(ky,iy+lg%num(2)) = conjg(tmp)
+      end do
+    end do
+  !$OMP parallel do private(iz,kz,tmp)
+    do iz=1,lg%num(3)
+      do kz=1,2*lg%num(3)
+        !tmp = exp(zI*(2.d0*Pi*dble(lg%coordinate(iz,3)*system%hgs(3)*(kz-1))/dble(2*lg%num(3))))
+        tmp = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(2*lg%num(3))))
+        fg%egz(kz,iz)  = tmp
+        fg%egzc(kz,iz) = conjg(tmp)
+        !tmp = exp(zI*(2.d0*Pi*dble((lg%coordinate(iz,3)*system%hgs(3)+lg%num(3))*(kz-1))/dble(2*lg%num(3))))
+        tmp = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(2*lg%num(3))))
+        fg%egz(kz,iz+lg%num(3))  = tmp
+        fg%egzc(kz,iz+lg%num(3)) = conjg(tmp)
+      end do
+    end do
+  else
+  ! FFTE
+    if(mod(info%nporbital,4)==0)then
+      allocate(poisson%a_ffte(2*lg%num(1),mg%num(2),mg%num(3)))
+      allocate(poisson%b_ffte(2*lg%num(1),mg%num(2),mg%num(3)))
+    else
+      allocate(poisson%a_ffte(2*lg%num(1),2*lg%num(2),2*lg%num(3)))
+      allocate(poisson%b_ffte(2*lg%num(1),2*lg%num(2),2*lg%num(3)))
+    end if
+    ! FFTE initialization step
+    call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,2*lg%num(1),2*lg%num(2),2*lg%num(3), &
+                      info%isize_y_isolated_ffte,info%isize_z_isolated_ffte,0, &
+                      info%icomm_y_isolated_ffte,info%icomm_z_isolated_ffte)
+  end if
+
+  allocate(poisson%zrhoG_ele(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e))
+  poisson%zrhoG_ele = 0.d0
+  
+  brl(:,:)=system%primitive_b(:,:)
+
+  allocate(fg%if_Gzero (ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e))
+  allocate(fg%vec_G(1:3,ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e))
+  allocate(fg%coef     (ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e))
+  allocate(fg%exp_ewald(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e))
+  fg%if_Gzero = .false.
+  fg%vec_G = 0d0
+  fg%coef = 0d0
+  fg%exp_ewald = 0d0
+
+  do iz=ifgz_s,ifgz_e
+  do iy=ifgy_s,ifgy_e
+  do ix=ifgx_s,ifgx_e
+
+    iix=ix-1-2*lg%num(1)*(1+sign(1,(ix-1-(2*lg%num(1)+1)/2)))/2
+    iiy=iy-1-2*lg%num(2)*(1+sign(1,(iy-1-(2*lg%num(2)+1)/2)))/2
+    iiz=iz-1-2*lg%num(3)*(1+sign(1,(iz-1-(2*lg%num(3)+1)/2)))/2
+    
+    if(iix**2+iiy**2+iiz**2 == 0) fg%if_Gzero(ix,iy,iz) = .true.
+
+    g(1) = dble(iix)*brl(1,1)/2.d0
+    g(2) = dble(iiy)*brl(2,2)/2.d0
+    g(3) = dble(iiz)*brl(3,3)/2.d0
+    fg%vec_G(1,ix,iy,iz) = g(1)
+    fg%vec_G(2,ix,iy,iz) = g(2)
+    fg%vec_G(3,ix,iy,iz) = g(3)
+    G2 = g(1)**2+g(2)**2+g(3)**2
+    
+    if(fg%if_Gzero(ix,iy,iz)) then
+      fg%coef(ix,iy,iz) = 0.d0
+    else
+      fg%coef(ix,iy,iz) = 4.d0*pi/G2
+    end if
+    fg%exp_ewald(ix,iy,iz) = exp(-G2/(4d0*aEwald))
+
+  enddo
+  enddo
+  enddo
+
+  return
+end subroutine init_reciprocal_grid_isolated_ft
 
 !===================================================================================================================================
 

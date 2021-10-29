@@ -719,6 +719,16 @@ contains
     integer, intent(in)  :: ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
     else
@@ -734,6 +744,16 @@ contains
     integer, intent(in)  :: ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -749,6 +769,16 @@ contains
     integer, intent(in)     :: ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else
@@ -764,6 +794,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
     else
@@ -779,6 +819,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -794,6 +844,16 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else
@@ -809,6 +869,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
     else
@@ -824,6 +894,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -839,6 +919,16 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else
@@ -869,6 +959,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -884,6 +984,16 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else
@@ -899,6 +1009,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -914,6 +1034,16 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else
@@ -929,6 +1059,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -944,6 +1084,16 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else
@@ -959,6 +1109,16 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
     else
@@ -974,6 +1134,16 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     integer :: ierr
+#ifdef USE_OPENACC
+    integer :: npid, nprocs
+    call comm_get_groupinfo(ngroup ,npid, nprocs)
+    if(nprocs == 1) then
+!$acc kernels
+      outvalue = invalue
+!$acc end kernels
+      return
+    endif
+#endif
     if (present(dest)) then
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
     else

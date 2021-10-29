@@ -315,7 +315,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end if
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
   case(3)
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
@@ -376,6 +376,28 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
       &           1, "time", trim(t_unit_time%name), &
       &           2, "nelec", "none", &
       &           3, "nhole", "none"
+    end if
+    
+    if(yn_spinorbit=='y') then
+    !(header in mag.data)
+      write(ofl%file_mag,"(2A,'_mag.data')") trim(base_directory),trim(SYSname)
+      ofl%fh_mag = open_filehandle(ofl%file_mag)
+      open(ofl%fh_mag,file=ofl%file_mag)
+      write(ofl%fh_mag, '("#",1X,A)') "Magnetization"
+      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
+      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
+      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
+      write(ofl%fh_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "mag(1)", "none", &
+      & 2, "mag(2)", "none", &
+      & 3, "mag(3)", "none"
+      write(ofl%fh_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "ik", "none", &
+      & 2, "io", "none", &
+      & 3, "mag_orb(1)", "none", &
+      & 4, "mag_orb(2)", "none", &
+      & 5, "mag_orb(3)", "none"
     end if
   end if
   

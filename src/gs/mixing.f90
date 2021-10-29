@@ -20,9 +20,7 @@ contains
 
 !===================================================================================================================================
 subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
-  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing
-  use salmon_global, only: yn_spinorbit
-  use noncollinear_module, only: simple_mixing_so
+  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing  
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
@@ -31,11 +29,6 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   type(s_mixing),intent(inout) :: mixing
   
   integer :: ix,iy,iz
-  
-  if(yn_spinorbit=='y') then
-    call simple_mixing_so(mg,system,c1,c2,rho_s,mixing)
-    return
-  end if
   
   if(system%nspin == 1)then
 !$omp parallel do private(iz,iy,ix) collapse(2)
@@ -111,7 +104,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
 
   if(system%nspin==1)then
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -120,7 +117,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,iz,iy,ix) collapse(3)
+#else
 !$omp parallel do private(i,iz,iy,ix) collapse(3)
+#endif
     do i=1,mixing%num_rho_stock+1
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
@@ -136,7 +137,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
                  mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                  mixing%flag_mix_zero)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -145,7 +150,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(i,iz,iy,ix) collapse(3)
+#else
 !$omp parallel do private(i,iz,iy,ix) collapse(3)
+#endif
     do i=1,mixing%num_rho_stock+1
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
@@ -476,7 +485,11 @@ subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
   end if
 
   do iiter=1,mixing%num_rho_stock
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+#else
 !$OMP parallel do private(iz,iy,ix) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -486,7 +499,11 @@ subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
     end do
   end do
   do iiter=1,mixing%num_rho_stock-1
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+#else
 !$OMP parallel do private(iz,iy,ix) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
