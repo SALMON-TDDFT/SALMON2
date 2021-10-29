@@ -200,7 +200,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
-  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+  if(yn_fix_func=='n') call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
 ! result
 
