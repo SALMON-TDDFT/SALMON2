@@ -727,7 +727,11 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
     do ix=lg%is(1),lg%ie(1)
@@ -737,7 +741,11 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     end do
 
     do i=1,mixing%num_rho_stock+1
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -752,7 +760,11 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     end do
 
     do i=1,mixing%num_rho_stock
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)

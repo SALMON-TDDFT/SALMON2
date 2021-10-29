@@ -39,8 +39,13 @@ subroutine dstencil(is_array,ie_array,is,ie,idx,idy,idz &
   integer :: iz,iy,ix
   real(8) :: v
 
+#ifdef USE_OPENACC
+!$acc parallel
+!$acc loop private(iz,iy,ix,v)
+#else
 !$OMP parallel
 !$OMP do private(iz,iy,ix,v)
+#endif
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -64,8 +69,12 @@ subroutine dstencil(is_array,ie_array,is,ie,idx,idy,idz &
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$OMP end do
 !$OMP end parallel
+#endif
 
   return
 end subroutine dstencil
