@@ -24,7 +24,12 @@ contains
       allocate(ppg%zekr_uV_so(ppg%nps,Nlma,ik_s:ik_e,2,1))
     end if
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(2) private(ik,k,ilma,iatom,ispin,j,x,y,z,kr,conjg_ekr)
+#else
 !$omp parallel do collapse(2) default(shared) private(ik,k,ilma,iatom,ispin,j,x,y,z,kr,conjg_ekr)
+#endif
     do ik=ik_s,ik_e
       do ilma=1,Nlma
 
@@ -46,6 +51,9 @@ contains
 
       end do !ilma
     end do !ik
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
   end subroutine update_kvector_so
 

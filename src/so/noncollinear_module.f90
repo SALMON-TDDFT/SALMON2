@@ -42,7 +42,12 @@ contains
 
     den_mat=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(3) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
+#else
 !$omp parallel do collapse(3) default(shared) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -63,6 +68,9 @@ contains
     end do !io
     end do !ik
     end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
     ix=size(den_mat,1)
     iy=size(den_mat,2)

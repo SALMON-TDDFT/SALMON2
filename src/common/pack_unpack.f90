@@ -231,10 +231,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ix,iy,iz) firstprivate(nx,ny,nz)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ix,iy,iz) &
 !$omp          firstprivate(nx,ny,nz) &
 !$omp          shared(src,dst)
+#endif
     do iz=1,nz
     do iy=1,ny
     do ix=1,nx
@@ -242,7 +246,11 @@ contains
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_3d_complex8(src,dst)
@@ -256,10 +264,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2)
+#else
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ix,iy,iz) &
 !$omp          firstprivate(nx,ny,nz) &
 !$omp          shared(src,dst)
+#endif
     do iz=1,nz
     do iy=1,ny
     do ix=1,nx
@@ -267,7 +279,9 @@ contains
     end do
     end do
     end do
+#ifndef USE_OPENACC
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_4d_real8(src,dst)
@@ -282,10 +296,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3) private(ix,iy,iz,iw) firstprivate(nx,ny,nz,nw)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
 !$omp          firstprivate(nx,ny,nz,nw) &
 !$omp          shared(src,dst)
+#endif
     do iw=1,nw
     do iz=1,nz
     do iy=1,ny
@@ -295,7 +313,9 @@ contains
     end do
     end do
     end do
+#ifndef USE_OPENACC
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_4d_complex8(src,dst)
@@ -310,10 +330,14 @@ contains
     ny = size(src,2)
     nx = size(src,1)
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(3) private(ix,iy,iz,iw) firstprivate(nx,ny,nz,nw)
+#else
 !$omp parallel do collapse(3) default(none) &
 !$omp          private(ix,iy,iz,iw) &
 !$omp          firstprivate(nx,ny,nz,nw) &
 !$omp          shared(src,dst)
+#endif
     do iw=1,nw
     do iz=1,nz
     do iy=1,ny
@@ -323,7 +347,9 @@ contains
     end do
     end do
     end do
+#ifndef USE_OPENACC
 !$omp end parallel do
+#endif
   end subroutine
 
   subroutine copy_data_5d_real8(src,dst)

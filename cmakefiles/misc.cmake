@@ -1,11 +1,3 @@
-# add_compile_definitions_if(ENV_VAL, DEF_VAL)
-#   If ENV_VAL is defined, this command calls add_definitions command.
-macro (add_compile_definitions_if ENV_VAL DEF_VAL)
-  if (${ENV_VAL})
-    add_compile_definitions(${DEF_VAL} ${ARGN})
-  endif ()
-endmacro (add_compile_definitions_if)
-
 # option_set(ENV_VAL, HELP_STR, DEFAULT_VAL)
 #   If option is not declare, this command initializes the option with ${DEFAULT_VAL}
 function (option_set ENV_VAL HELP_STR DEFAULT_VAL)
