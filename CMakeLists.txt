@@ -10,10 +10,9 @@ if ("${CMAKE_CURRENT_SOURCE_DIR}" MATCHES "${CMAKE_CURRENT_BINARY_DIR}")
   )
 endif ()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Platforms)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/platforms)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Modules)
 include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
-include(${CMAKE_SOURCE_DIR}/cmakefiles/get_git_info.cmake)
 
 
 ### Project settings
@@ -38,16 +37,14 @@ endif()
 
 # Bulid options
 ## For third party libraries
-option_set(USE_MPI                 "Use MPI parallelization" OFF)
-option_set(USE_SCALAPACK           "Use ScaLAPACK Library"   OFF)
-option_set(USE_EIGENEXA            "Use EigenExa Library"    OFF)
-option_set(USE_LIBXC               "Use Libxc library"       OFF)
+option_set(USE_MPI       "Use MPI parallelization" OFF)
+option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
+option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
+option_set(USE_LIBXC     "Use Libxc library"       OFF)
 
 ## Optimization for stencil compitations
-option_set(USE_OPT_DOMAIN_IS_POW2          "Enable whether the opimization assumes that a stencil domain size is power of two" OFF)
-option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"                                              ON)
-option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil"                                     OFF)
-option_set(USE_OPT_SOFTWARE_PREFETCH       "Enable software prefetch in the explicit vec of the stencil"                       OFF)
+option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
+option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
 
 
 # variables

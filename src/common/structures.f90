@@ -131,6 +131,8 @@ module structures
   ! parallelization of orbital wavefunction
     integer :: iaddress(5) ! address of MPI under orbital wavefunction (ix,iy,iz,io,ik)
     integer,allocatable :: imap(:,:,:,:,:) ! address map
+    integer :: iaddress_isolated_ffte(7) ! address of MPI for isolated_ffte (ix,iy,iz,io1,io2,io3,ik)
+    integer,allocatable :: imap_isolated_ffte(:,:,:,:,:,:,:) ! address map for isolated_ffte 
     logical :: if_divide_rspace
     logical :: if_divide_orbit
     integer :: icomm_r,   id_r,   isize_r   ! communicator, process ID, & # of processes for r-space
@@ -174,6 +176,10 @@ module structures
 #ifdef USE_EIGENEXA
     logical :: flag_eigenexa_init
 #endif
+    integer :: icomm_x_isolated_ffte,id_x_isolated_ffte,isize_x_isolated_ffte ! x-axis for isolated_ffte
+    integer :: icomm_y_isolated_ffte,id_y_isolated_ffte,isize_y_isolated_ffte ! y-axis for isolated_ffte
+    integer :: icomm_z_isolated_ffte,id_z_isolated_ffte,isize_z_isolated_ffte ! z-axis for isolated_ffte
+    integer :: icomm_o_isolated_ffte,id_o_isolated_ffte,isize_o_isolated_ffte ! o-axis for isolated_ffte
   end type s_parallel_info
 
   type s_orbital
@@ -337,8 +343,8 @@ module structures
 
 ! Poisson equation
   type s_poisson
-  ! for poisson_cg (conjugate-gradient method)
-    integer :: iterVh                              ! iteration number for poisson_cg
+  ! for poisson_isolated_cg (conjugate-gradient method)
+    integer :: iterVh                              ! iteration number for poisson_isolated_cg
     integer :: npole_partial                       ! number of multipoles calculated in each node
     integer :: npole_total                         ! total number of multipoles
     integer,allocatable :: ipole_tbl(:)            ! table for multipoles
@@ -351,6 +357,8 @@ module structures
     complex(8),allocatable :: zrhoG_ele(:,:,:)     ! rho_ele(G): Fourier transform of the electron density
   ! for discrete Fourier transform (general)
     complex(8),allocatable :: ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
+    complex(8),allocatable :: ff1(:,:,:),ff2(:,:,:) ! for isolated_ffte
+    complex(8),allocatable :: ff3x(:,:,:),ff3y(:,:,:),ff3z(:,:,:),ff4x(:,:,:),ff4y(:,:,:),ff4z(:,:,:) ! for isolated_ffte
   ! for FFTE
     complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)
   end type s_poisson
@@ -387,7 +395,7 @@ module structures
     integer :: fh_pulse
     integer :: fh_dft_md
     integer :: fh_ovlp,fh_nex
-    integer :: fh_mag
+    integer :: fh_mag,fh_gs_mag
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
@@ -395,7 +403,7 @@ module structures
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
     character(256) :: file_ovlp,file_nex
-    character(256) :: file_mag
+    character(256) :: file_mag, file_gs_mag
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
@@ -582,7 +590,11 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(6) private(im,ik,io,is,iz,iy,ix)
+#else
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -619,7 +631,11 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(6) private(im,ik,io,is,iz,iy,ix)
+#else
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e

@@ -644,7 +644,7 @@ contains
     ! create all directory
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e,nblock_orbital
-      write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
+      write (dir_file_out,'(A,I6.6,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
       call create_directory(dir_file_out)
     end do
     end do
@@ -652,7 +652,7 @@ contains
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      write (dir_file_out,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      write (dir_file_out,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
       open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
 
       do is=1,system%nspin
@@ -727,7 +727,11 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
     do ix=lg%is(1),lg%ie(1)
@@ -737,7 +741,11 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     end do
 
     do i=1,mixing%num_rho_stock+1
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -752,7 +760,11 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     end do
 
     do i=1,mixing%num_rho_stock
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -1266,7 +1278,7 @@ contains
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      write (dir_file_in,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      write (dir_file_in,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
       open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
 
       do is=1,system%nspin
@@ -2146,7 +2158,7 @@ contains
       do io=1,mo+nblock_orbital-1,nblock_orbital
         if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o .and. comm_is_root(info%id_r)) then
           nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-          write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+          write (iofile,'(A,I6.6,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
           call create_directory(iofile)
         end if
       end do
@@ -2158,7 +2170,7 @@ contains
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,io_e,nblock_orbital
           nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-          write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+          write (iofile,'(A,I6.6,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
           check = check .and. directory_exists(iofile)
         end do
         end do
@@ -2169,7 +2181,7 @@ contains
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      write (iofile,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      write (iofile,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
 
       ! write/read file
       MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))

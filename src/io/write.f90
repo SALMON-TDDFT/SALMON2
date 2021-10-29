@@ -1971,7 +1971,7 @@ contains
       write(ofl%fh_ovlp,'(i11)') itt
       do ispin=1,nspin_tmp
       do ik=1,nk
-        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no0)
+        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)/system%wtk(ik),io=1,no0)
       end do
       end do
     end if
@@ -2085,6 +2085,59 @@ contains
     end if
     
   end subroutine write_magnetization
+  
+  subroutine write_gs_magnetization(ofl,system,mg,info,psi)
+    use structures
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global
+    use salmon_global, only: yn_spinorbit, base_directory, sysname
+    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed
+    use filesystem, only: open_filehandle
+    implicit none
+    type(s_ofile)                       :: ofl
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_parallel_info)   ,intent(in) :: info
+    type(s_orbital)         ,intent(in) :: psi
+    !
+    integer ik,io
+    real(8) :: m(3),mag_orb(3,system%no,system%nk)
+    
+    if(yn_spinorbit=='n') stop "error: write_magnetization with yn_spinorbit=n"
+    
+    call calc_magnetization(system,mg,info,m)
+    call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+    
+    if(comm_is_root(nproc_id_global))then
+      !(header in gs_mag.data)
+      write(ofl%file_gs_mag,"(2A,'_gs_mag.data')") trim(base_directory),trim(SYSname)
+      ofl%fh_gs_mag = open_filehandle(ofl%file_gs_mag)
+      open(ofl%fh_gs_mag,file=ofl%file_gs_mag)
+      write(ofl%fh_gs_mag, '("#",1X,A)') "Magnetization of the ground state"
+      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
+      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
+      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
+      write(ofl%fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "mag(1)", "none", &
+      & 2, "mag(2)", "none", &
+      & 3, "mag(3)", "none"
+      write(ofl%fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "ik", "none", &
+      & 2, "io", "none", &
+      & 3, "mag_orb(1)", "none", &
+      & 4, "mag_orb(2)", "none", &
+      & 5, "mag_orb(3)", "none"
+      write(ofl%fh_gs_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
+      do ik=1,system%nk
+      do io=1,system%no
+        write(ofl%fh_gs_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+      end do
+      end do
+      close(ofl%fh_gs_mag)
+    end if
+    
+  end subroutine write_gs_magnetization
 
 !===================================================================================================================================
 

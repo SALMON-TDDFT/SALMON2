@@ -266,6 +266,9 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%inorm_so,nproc_group_global)
   call comm_bcast(pp%udvtbl_so,nproc_group_global)
   call comm_bcast(pp%dudvtbl_so,nproc_group_global)
+  
+  call comm_bcast(pp%rps_ao,nproc_group_global)
+  call comm_bcast(pp%nrps_ao,nproc_group_global)
 
   return
 end subroutine input_pp

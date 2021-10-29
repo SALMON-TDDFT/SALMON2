@@ -122,8 +122,12 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
 
   else
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(4) private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
+#else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
+#endif
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -153,7 +157,11 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 
   end if
 
@@ -452,8 +460,12 @@ subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
 
   allocate(uVpsibox(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
 
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(4) private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
+#else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
+#endif
   do im=im_s,im_e
   do ik=ik_s,ik_e
   do io=io_s,io_e
@@ -477,7 +489,11 @@ subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 
   call timer_end(LOG_UHPSI_PSEUDO)
 

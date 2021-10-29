@@ -24,6 +24,8 @@ contains
 subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
   use inputoutput, only: au_length_aa
   use salmon_global, only: format_voxel_data,theory
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
   use structures
   implicit none
   type(s_rgrid)     ,intent(in)          :: lg
@@ -46,11 +48,11 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
   !$omp end workshare
 
   select case(theory)
-  case('dft','dft_band','dft_md') 
+  case('dft','dft_band') 
     suffix = "dns"
     suffix_u = "dns_u"
     suffix_d = "dns_d"
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
+  case('dft_md','tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
     suffix_u = "dns_u_"//adjustl(filenum)
@@ -104,6 +106,10 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
       stop 'invalid nspin'
     end if
     
+  case('dft','dft_band','dft_md') 
+    if(comm_is_root(nproc_id_global)) then
+       write(*,*) '  invalid theory for printing dnsdiff cube @ write_dns'
+    endif
   case default
     stop 'invalid theory @ write_dns'
   end select

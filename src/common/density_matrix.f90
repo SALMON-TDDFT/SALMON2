@@ -75,6 +75,40 @@ contains
       do ispin=1,nspin
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
+#ifdef USE_OPENACC
+        wrk(:,:,:,tid) = 0.d0
+        tid_offset = size(wrk,4)/2
+
+!$acc kernels copyin(is,ie)
+!$acc loop collapse(2) gang worker(256) private(wrk2,ik,io,iz,iy,ix)
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
+        end do
+        end do
+        end do
+        end do
+        end do
+!$acc loop collapse(3) private(tid_offset,iz,iy,ix)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+        do while(tid_offset > 0)
+          if(tid < tid_offset .and. tid + tid_offset < nthreads) then
+            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
+          end if
+          tid_offset = tid_offset/2
+        end do
+        end do
+        end do
+        end do
+!$acc end kernels
+
+#else
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
         wrk(:,:,:,tid) = 0.d0
@@ -104,6 +138,7 @@ contains
         end do
 
 !$omp end parallel
+#endif
         call timer_end(LOG_DENSITY_CALC)
 
         call timer_begin(LOG_DENSITY_COMM_COLL)

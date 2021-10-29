@@ -168,6 +168,10 @@ contains
       call create_directory(dirpath)
     end if
 
+    ! wait until the root process creates the directory
+    ! to avoid potential conflict between directory_exists() and posix_mkdir()...
+    call comm_sync_all(igroup)
+
     ! busy-wait until all process can read the directory...
     do while(.true.)
       if (directory_exists(dirpath)) then
