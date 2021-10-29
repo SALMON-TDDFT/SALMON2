@@ -175,6 +175,7 @@ end subroutine dpseudo
 subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use structures
   use timer
+  use iso_c_binding
   implicit none
   integer,intent(in) :: nspin
   type(s_parallel_info),intent(in) :: info
@@ -188,6 +189,41 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
   complex(8) :: IMAGINARY_UNIT = (0, 1)
+#if defined(USE_OPENACC) && defined(USE_CUDA)
+  integer :: n,natom
+  interface
+    subroutine zpseudo_cuda(htpsi_zwf,n,im_s,im_e,ik_s,ik_e,io_s,io_e,Nspin,Nlma,ppg_nps,natom,mg_is_array_1,mg_ie_array_1,mg_is_array_2,mg_ie_array_2,mg_is_array_3,mg_ie_array_3,ppg_ia_tbl,ppg_mps,ppg_jxyz,ppg_zekr_uV,ppg_rinv_uvu,tpsi_zwf) bind(c)
+      import
+      ! Input integer
+      integer(c_int), intent(in), value :: n
+      integer(c_int), intent(in), value :: im_s
+      integer(c_int), intent(in), value :: im_e
+      integer(c_int), intent(in), value :: ik_s
+      integer(c_int), intent(in), value :: ik_e
+      integer(c_int), intent(in), value :: io_s
+      integer(c_int), intent(in), value :: io_e
+      integer(c_int), intent(in), value :: Nspin
+      integer(c_int), intent(in), value :: Nlma
+      integer(c_int), intent(in), value :: ppg_nps
+      integer(c_int), intent(in), value :: natom
+      integer(c_int), intent(in), value :: mg_is_array_1
+      integer(c_int), intent(in), value :: mg_ie_array_1
+      integer(c_int), intent(in), value :: mg_is_array_2
+      integer(c_int), intent(in), value :: mg_ie_array_2
+      integer(c_int), intent(in), value :: mg_is_array_3
+      integer(c_int), intent(in), value :: mg_ie_array_3
+      ! Output
+      complex(c_double_complex), intent(inout) :: htpsi_zwf(mg_is_array_1:mg_ie_array_1, mg_is_array_2:mg_ie_array_2, mg_is_array_2:mg_ie_array_3, Nspin, io_e:io_s, ik_s:ik_e, im_s:im_e)
+      ! Input
+      integer(c_int)           , intent(in) :: ppg_ia_tbl(n * natom)
+      integer(c_int)           , intent(in) :: ppg_mps(natom)
+      integer(c_int)           , intent(in) :: ppg_jxyz(3, ppg_nps, natom)
+      complex(c_double_complex), intent(in) :: ppg_zekr_uV(ppg_nps, ppg_Nlma, ik_s:ik_e)
+      real(c_double)           , intent(in) :: ppg_rinv_uvu(n * natom)
+      complex(c_double_complex), intent(in) :: tpsi_zwf(mg_is_array_1:mg_ie_array_1, mg_is_array_2:mg_ie_array_2,mg_is_array_2:mg_ie_array_3, Nspin, io_e:io_s, ik_s:ik_e, im_s:im_e)
+    end subroutine zpseudo_cuda
+  end interface
+#endif
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
@@ -242,7 +278,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     deallocate(uVpsibox,uVpsibox2)
 
   else
-#ifdef USE_OPENACC
+#if defined(USE_OPENACC) && !defined(USE_CUDA)
 ! copy number from htpsi%zwf complex type to real type 
 ! 
 !$acc kernels present(ppg,tpsi,htpsi) 
@@ -269,6 +305,28 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 #endif
 
 #ifdef USE_OPENACC
+#ifdef USE_CUDA
+    natom=size(ppg%mps)
+    n=size(ppg%rinv_uvu)/natom
+    call zpseudo_cuda(htpsi%zwf,&
+        n,&
+        im_s,im_e,&
+        ik_s,ik_e,&
+        io_s,io_e,&
+        Nspin,&
+        Nlma,&
+        ppg%nps,&
+        natom,&
+        lbound(htpsi%zwf,1),ubound(htpsi%zwf,1),&
+        lbound(htpsi%zwf,2),ubound(htpsi%zwf,2),&
+        lbound(htpsi%zwf,3),ubound(htpsi%zwf,3),&
+        ppg%ia_tbl,&
+        ppg%mps,&
+        ppg%jxyz,&
+        ppg%zekr_uV,&
+        ppg%rinv_uvu,&
+        tpsi%zwf)
+#else
 !$acc kernels present(ppg,tpsi,htpsi)
 !$acc loop private(ilma,ia,uvpsi,j,ix,iy,iz,wrk) collapse(4) auto
     do im=im_s,im_e
@@ -306,6 +364,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$acc end kernels
+#endif
 #else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
@@ -341,7 +400,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 !$omp end parallel do
 #endif
 
-#ifdef USE_OPENACC
+#if defined(USE_OPENACC) && !defined(USE_CUDA)
 ! copy number from real type to htpsi%zwf complex type
 !
 !$acc kernels present(ppg,tpsi,htpsi) 
