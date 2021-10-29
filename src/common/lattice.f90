@@ -127,6 +127,7 @@ SUBROUTINE init_kvector(num_kgrid,system)
            read(iu, *) i, k(1:3,ik), wtk(ik)
         enddo
         close(iu)
+        wtk(:) = wtk(:) * (1.0d0 / sum(wtk))
      endif
 
      call comm_bcast(nk,  nproc_group_global)

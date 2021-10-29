@@ -55,7 +55,7 @@ contains
     real(8),allocatable :: dden(:,:,:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
-    complex(8),allocatable :: phipsibox(:,:),phipsibox2(:,:)
+    complex(8),allocatable :: phipsibox(:,:,:,:),phipsibox2(:,:,:,:)
     complex(8),allocatable :: dphipsi_lma(:,:)
     complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
@@ -73,11 +73,6 @@ contains
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
     allocate( F_tmp(3,nion), F_sum(3,nion) )
-    if( PLUS_U_ON ) then
-      allocate( zF_tmp(3,nion) )
-      zF_tmp=zero
-    end if
-
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
     im = 1
@@ -163,14 +158,17 @@ contains
     end if
 
     if( PLUS_U_ON )then
+!!!!! future work: force for PLUS_U_ON
+      
       Nlma_ao = size(ppg%ia_tbl_ao)
-      allocate( phipsibox(Nlma_ao,Norb)  ); phipsibox=zero
-      allocate( phipsibox2(Nlma_ao,Norb) ); phipsibox2=zero
-      iorb = 0
+!      allocate( zF_tmp(3,nion) ); zF_tmp=zero
+!      allocate( phipsibox(Nlma_ao,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e)  ); phipsibox=zero
+!      allocate( phipsibox2(Nlma_ao,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e) ); phipsibox2=zero
+!      allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
+    
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,Nspin
-        iorb = iorb + 1
         do ilma=1,Nlma_ao
           ia = ppg%ia_tbl_ao(ilma)
           phipsi = 0.0d0
@@ -182,12 +180,12 @@ contains
                             * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           end do
           phipsi = phipsi * system%Hvol
-          phipsibox(ilma,iorb) = phipsi
+!          phipsibox(ilma,ispin,io,ik) = phipsi
         end do
       end do
       end do
       end do
-      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
+!      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
     end if
     call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
@@ -328,9 +326,6 @@ contains
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
        if( PLUS_U_ON )then
-          if( .not.allocated(dphipsi_lma) )then
-             allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
-          end if
           do ilma=1,Nlma_ao
              ia = ppg%ia_tbl_ao(ilma)
              dphipsi = zero
@@ -341,10 +336,8 @@ contains
                 w  = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
                 dphipsi(:) = dphipsi(:) + conjg(ppg%zekr_phi_ao(j,ilma,ik)) * w(:)
              end do
-             dphipsi_lma(:,ilma) = dphipsi(:) * system%Hvol
+!             dphipsi_lma(:,ilma) = dphipsi(:) * system%Hvol
           end do
-       end if
-       if( PLUS_U_ON )then
           Nproj_pairs = size(ppg%proj_pairs_ao,2)
           do iprj=1,Nproj_pairs
              ilma=ppg%proj_pairs_ao(1,iprj)
@@ -354,18 +347,18 @@ contains
              n  = ppg%proj_pairs_info_ao(3,iprj)
              m1 = ppg%proj_pairs_info_ao(4,iprj)
              m2 = ppg%proj_pairs_info_ao(5,iprj)
-             ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
-                  system%rocc(io,ispin,ik)*system%wtk(ik) &
-                  *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,iorb)) &
-                  + phipsibox2(ilma,iorb)*conjg(dphipsi_lma(:,jlma)) )
+!             ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
+!                  system%rocc(io,ispin,ik)*system%wtk(ik) &
+!                  *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,ispin,io,ik)) &
+!                  + phipsibox2(ilma,ispin,io,ik)*conjg(dphipsi_lma(:,jlma)) )
              if( m1 == m2 )then
-                zF_tmp(:,ia) = zF_tmp(:,ia) &
-                     - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
-                     * ddm_mms_nla(:)
+!                zF_tmp(:,ia) = zF_tmp(:,ia) &
+!                     - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+!                     * ddm_mms_nla(:)
              else
-                zF_tmp(:,ia) = zF_tmp(:,ia) &
-                     - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
-                     * ddm_mms_nla(:)
+!                zF_tmp(:,ia) = zF_tmp(:,ia) &
+!                     - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+!                     * ddm_mms_nla(:)
              end if
           end do !iprj
        end if
@@ -435,9 +428,9 @@ contains
     if(allocated(uVpsibox)) deallocate(uVpsibox)
     deallocate(F_tmp,F_sum,uVpsibox2)
     if( PLUS_U_ON )then
-      deallocate( phipsibox, phipsibox2 )
-      deallocate( dphipsi_lma )
-      deallocate( zF_tmp )
+!      deallocate( phipsibox, phipsibox2 )
+!      deallocate( dphipsi_lma )
+!      deallocate( zF_tmp )
     end if 
 #ifdef USE_OPENACC
     deallocate(F_tmp_local)

@@ -13,22 +13,22 @@ print("#" * 60)
 print("# Verification start") 
 
 dirlist = [
-    "data_for_restart/k_001_ob_000001",
-    "data_for_restart/k_001_ob_000017",
-    "data_for_restart/k_002_ob_000001",
-    "data_for_restart/k_002_ob_000017",
-    "data_for_restart/k_003_ob_000001",
-    "data_for_restart/k_003_ob_000017",
-    "data_for_restart/k_004_ob_000001",
-    "data_for_restart/k_004_ob_000017",
-    "data_for_restart/k_005_ob_000001",
-    "data_for_restart/k_005_ob_000017",
-    "data_for_restart/k_006_ob_000001",
-    "data_for_restart/k_006_ob_000017",
-    "data_for_restart/k_007_ob_000001",
-    "data_for_restart/k_007_ob_000017",
-    "data_for_restart/k_008_ob_000001",
-    "data_for_restart/k_008_ob_000017",
+    "data_for_restart/k_000001_ob_000001",
+    "data_for_restart/k_000001_ob_000017",
+    "data_for_restart/k_000002_ob_000001",
+    "data_for_restart/k_000002_ob_000017",
+    "data_for_restart/k_000003_ob_000001",
+    "data_for_restart/k_000003_ob_000017",
+    "data_for_restart/k_000004_ob_000001",
+    "data_for_restart/k_000004_ob_000017",
+    "data_for_restart/k_000005_ob_000001",
+    "data_for_restart/k_000005_ob_000017",
+    "data_for_restart/k_000006_ob_000001",
+    "data_for_restart/k_000006_ob_000017",
+    "data_for_restart/k_000007_ob_000001",
+    "data_for_restart/k_000007_ob_000017",
+    "data_for_restart/k_000008_ob_000001",
+    "data_for_restart/k_000008_ob_000017",
 ]
 
 filelist = [ 

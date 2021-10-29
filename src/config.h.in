@@ -19,9 +19,7 @@
 #cmakedefine USE_EIGENEXA
 #cmakedefine USE_LIBXC
 
-#cmakedefine USE_OPT_DOMAIN_IS_POW2
 #cmakedefine USE_OPT_ARRAY_PADDING
 #cmakedefine USE_OPT_EXPLICIT_VECTORIZATION
-#cmakedefine USE_OPT_SOFTWARE_PREFETCH
 
 #endif
