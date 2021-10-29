@@ -92,7 +92,7 @@ contains
       a=orb_info_Hubbard(1,i)
       l=orb_info_Hubbard(2,i)
       n=orb_info_Hubbard(3,i)
-      U_eff(a,l,n) = U_Hubbard(i) - J_Hubbard(i)
+      U_eff(n,l,a) = U_Hubbard(i) - J_Hubbard(i)
     end do
   end subroutine prep_Hubbard_parameters
 

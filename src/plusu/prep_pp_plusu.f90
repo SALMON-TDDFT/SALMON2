@@ -59,7 +59,7 @@ contains
 
     Nlma_ao = lma
 
-    write(*,*) "Nlma_ao (ppg%nlma)=", Nlma_ao, " (",ppg%nlma,")"
+!    write(*,*) "Nlma_ao (ppg%nlma)=", Nlma_ao, " (",ppg%nlma,")"
 
     allocate( lma_tbl_ao(lm_max,natom) ); lma_tbl_ao=0
     allocate( ppg%ia_tbl_ao(Nlma_ao) ); ppg%ia_tbl_ao=0
@@ -124,7 +124,7 @@ contains
       end do
     end do
 
-    write(*,*) "----- set_nlma_ao(end)"
+!    write(*,*) "----- set_nlma_ao(end)"
 
   end subroutine set_nlma_ao
 
@@ -178,6 +178,11 @@ contains
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
     real(8) :: upp(0:2*pp%lmax+1)
     real(8) :: r,x,y,z, xx
+    
+    ppg%nps_ao = ppg%nps
+    ppg%jxyz_ao = ppg%jxyz
+    ppg%rxyz_ao = ppg%rxyz
+    ppg%mps_ao = ppg%mps
 
     call set_nlma_ao( pp, ppg )
 

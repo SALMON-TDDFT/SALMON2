@@ -34,6 +34,59 @@ subroutine calc_gradient_psi(tpsi,gtpsi,is_array,ie_array,is,ie,idx,idy,idz,nabt
 
   Bt = transpose(matrix_B)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+    gtpsi(1,ix,iy,iz) = &
+         &  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
+         & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+         & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+         & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+    end do
+  end do
+  end do
+
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      gtpsi(2,ix,iy,iz) = &
+           &  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
+           & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+           & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+           & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
+    end do
+  end do
+  end do
+
+!$acc parallel loop private(iz,iy,ix) collapse(2)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      gtpsi(3,ix,iy,iz) = &
+           &  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
+           & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+           & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+           & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
+    end do
+  end do
+  end do
+
+!$acc parallel loop private(iz,iy,ix,w) collapse(3)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+    w(:) = gtpsi(:,ix,iy,iz)
+    gtpsi(1,ix,iy,iz) = dot_product(matrix_B(:,1),w) ! B^{T} * (nabla) psi
+    gtpsi(2,ix,iy,iz) = dot_product(matrix_B(:,2),w) ! B^{T} * (nabla) psi
+    gtpsi(3,ix,iy,iz) = dot_product(matrix_B(:,3),w) ! B^{T} * (nabla) psi
+  end do
+  end do
+  end do
+
+#else
 !$OMP parallel do collapse(2) private(iz,iy,ix,w) schedule(runtime)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
@@ -98,6 +151,7 @@ subroutine calc_gradient_psi(tpsi,gtpsi,is_array,ie_array,is,ie,idx,idy,idz,nabt
   end do
   end do
 !$OMP end parallel do
+#endif
 
   return
 end subroutine calc_gradient_psi

@@ -55,24 +55,24 @@ contains
     real(8),allocatable :: dden(:,:,:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
-    complex(8),allocatable :: phipsibox(:,:),phipsibox2(:,:)
+    complex(8),allocatable :: phipsibox(:,:,:,:),phipsibox2(:,:,:,:)
     complex(8),allocatable :: dphipsi_lma(:,:)
     complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
     complex(8) :: ztmp
     integer :: Norb,iorb,ilocal
+#ifdef USE_OPENACC
+    real(8),allocatable :: F_tmp_local(:,:)
+
+    allocate( F_tmp_local(3, ppg%ilocal_nlma) )
+#endif
 
     call timer_begin(LOG_CALC_ION_FORCE)
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
     allocate( F_tmp(3,nion), F_sum(3,nion) )
-    if( PLUS_U_ON ) then
-      allocate( zF_tmp(3,nion) )
-      zF_tmp=zero
-    end if
-
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
     im = 1
@@ -158,14 +158,17 @@ contains
     end if
 
     if( PLUS_U_ON )then
+!!!!! future work: force for PLUS_U_ON
+      
       Nlma_ao = size(ppg%ia_tbl_ao)
-      allocate( phipsibox(Nlma_ao,Norb)  ); phipsibox=zero
-      allocate( phipsibox2(Nlma_ao,Norb) ); phipsibox2=zero
-      iorb = 0
+!      allocate( zF_tmp(3,nion) ); zF_tmp=zero
+!      allocate( phipsibox(Nlma_ao,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e)  ); phipsibox=zero
+!      allocate( phipsibox2(Nlma_ao,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e) ); phipsibox2=zero
+!      allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
+    
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,Nspin
-        iorb = iorb + 1
         do ilma=1,Nlma_ao
           ia = ppg%ia_tbl_ao(ilma)
           phipsi = 0.0d0
@@ -177,12 +180,12 @@ contains
                             * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           end do
           phipsi = phipsi * system%Hvol
-          phipsibox(ilma,iorb) = phipsi
+!          phipsibox(ilma,ispin,io,ik) = phipsi
         end do
       end do
       end do
       end do
-      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
+!      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
     end if
     call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
@@ -262,6 +265,39 @@ contains
            F_tmp(3,ia) = F_tmp(3,ia) - rtmp*dble( conjg(duVpsi(3)) * ztmp )
          end do
        else
+#ifdef USE_OPENACC
+!$acc parallel loop private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w)
+       do ilocal=1,ppg%ilocal_nlma
+          ilma=ppg%ilocal_nlma2ilma(ilocal)
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
+          duVpsi = 0d0
+          do j=1,ppg%mps(ia)
+             ix = ppg%jxyz(1,j,ia)
+             iy = ppg%jxyz(2,j,ia)
+             iz = ppg%jxyz(3,j,ia)
+             w(1) = gtpsi(1,ix,iy,iz) + zI* kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(2) = gtpsi(2,ix,iy,iz) + zI* kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(3) = gtpsi(3,ix,iy,iz) + zI* kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             duVpsi(1) = duVpsi(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(1) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi(2) = duVpsi(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(2) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(3) ! < uV | exp(ikr) (nabla) | psi >
+          end do
+          F_tmp_local(1,ilocal) = rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp_local(2,ilocal) = rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp_local(3,ilocal) = rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
+       end do
+
+       !$acc kernels
+       !$acc loop seq
+       do ilocal=1,ppg%ilocal_nlma
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
+
+          F_tmp(1,ia) = F_tmp(1,ia) - F_tmp_local(1,ilocal)
+          F_tmp(2,ia) = F_tmp(2,ia) - F_tmp_local(2,ilocal)
+          F_tmp(3,ia) = F_tmp(3,ia) - F_tmp_local(3,ilocal)
+       end do
+       !$acc end kernels
+#else
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
        do ilocal=1,ppg%ilocal_nlma
           ilma=ppg%ilocal_nlma2ilma(ilocal)
@@ -285,13 +321,11 @@ contains
           F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 !$omp end parallel do
+#endif
        end if
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
        if( PLUS_U_ON )then
-          if( .not.allocated(dphipsi_lma) )then
-             allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
-          end if
           do ilma=1,Nlma_ao
              ia = ppg%ia_tbl_ao(ilma)
              dphipsi = zero
@@ -302,10 +336,8 @@ contains
                 w  = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
                 dphipsi(:) = dphipsi(:) + conjg(ppg%zekr_phi_ao(j,ilma,ik)) * w(:)
              end do
-             dphipsi_lma(:,ilma) = dphipsi(:) * system%Hvol
+!             dphipsi_lma(:,ilma) = dphipsi(:) * system%Hvol
           end do
-       end if
-       if( PLUS_U_ON )then
           Nproj_pairs = size(ppg%proj_pairs_ao,2)
           do iprj=1,Nproj_pairs
              ilma=ppg%proj_pairs_ao(1,iprj)
@@ -315,18 +347,18 @@ contains
              n  = ppg%proj_pairs_info_ao(3,iprj)
              m1 = ppg%proj_pairs_info_ao(4,iprj)
              m2 = ppg%proj_pairs_info_ao(5,iprj)
-             ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
-                  system%rocc(io,ispin,ik)*system%wtk(ik) &
-                  *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,iorb)) &
-                  + phipsibox2(ilma,iorb)*conjg(dphipsi_lma(:,jlma)) )
+!             ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
+!                  system%rocc(io,ispin,ik)*system%wtk(ik) &
+!                  *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,ispin,io,ik)) &
+!                  + phipsibox2(ilma,ispin,io,ik)*conjg(dphipsi_lma(:,jlma)) )
              if( m1 == m2 )then
-                zF_tmp(:,ia) = zF_tmp(:,ia) &
-                     - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
-                     * ddm_mms_nla(:)
+!                zF_tmp(:,ia) = zF_tmp(:,ia) &
+!                     - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+!                     * ddm_mms_nla(:)
              else
-                zF_tmp(:,ia) = zF_tmp(:,ia) &
-                     - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
-                     * ddm_mms_nla(:)
+!                zF_tmp(:,ia) = zF_tmp(:,ia) &
+!                     - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+!                     * ddm_mms_nla(:)
              end if
           end do !iprj
        end if
@@ -343,7 +375,11 @@ contains
 
     if(yn_periodic=='n') then
     ! local part (based on density gradient)
+#ifdef USE_OPENACC
+!$acc parallel loop private(iz,iy,ix,ia)
+#else
 !$omp parallel do private(iz,iy,ix,ia)
+#endif
       do ia=1,nion
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -353,7 +389,11 @@ contains
         end do
         end do
       end do
+#ifdef USE_OPENACC
+!$acc end loop
+#else
 !$omp end parallel do
+#endif
       deallocate(dden)
     end if
 
@@ -365,11 +405,19 @@ contains
 
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ia)
+#else
 !$omp parallel do private(ia)
+#endif
     do ia=1,nion
       system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 !
     if (use_symmetry) then
       call sym_vector_force_xyz( system%Force, system%Rion )
@@ -380,10 +428,13 @@ contains
     if(allocated(uVpsibox)) deallocate(uVpsibox)
     deallocate(F_tmp,F_sum,uVpsibox2)
     if( PLUS_U_ON )then
-      deallocate( phipsibox, phipsibox2 )
-      deallocate( dphipsi_lma )
-      deallocate( zF_tmp )
+!      deallocate( phipsibox, phipsibox2 )
+!      deallocate( dphipsi_lma )
+!      deallocate( zF_tmp )
     end if 
+#ifdef USE_OPENACC
+    deallocate(F_tmp_local)
+#endif
 
     call timer_end(LOG_CALC_ION_FORCE)
     return
@@ -428,7 +479,11 @@ contains
       if(ewald%yn_bookkeep=='y') then
 
          F_tmp_l = 0d0
+#ifdef USE_OPENACC
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+#endif
          do iia= 1,info%nion_mg
         !do ia= system%nion_s, system%nion_e
         !do ia=1,nion
@@ -462,7 +517,11 @@ contains
 
             end do  !ipair
          end do     !ia
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
          call comm_summation(F_tmp_l,F_tmp,3*nion,comm)
 
       else
