@@ -149,7 +149,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
     call calc_uv_so(pp,ppg,lg%num,hgs,hvol,property)
   end if
   if ( PLUS_U_ON ) then
-!    call calc_uv_plusU( pp, ppg, property )
+    call calc_uv_plusU( pp, ppg, property )
   end if
   call timer_end(LOG_INIT_PS_LMA_UV)
 
@@ -1010,7 +1010,11 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
 
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
+#ifdef USE_OPENACC
+!$acc parallel loop private(ia,ilma)
+#else
 !$omp parallel do private(ia,ilma)
+#endif
   do ia=1,natom
     ppg%ireferred_atom(ia) = (ppg%mps(ia) > 0)
 
@@ -1030,12 +1034,20 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
       end if
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 
   call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
   iupdated = .false.
+#ifdef USE_OPENACC
+!$acc parallel loop private(ia,i,t,u)
+#else
 !$omp parallel do private(ia,i,t,u)
+#endif
   do ia=1,natom
     do i=1,isize_r
       t = ppg%ireferred_atom_comm_r(ia,i)
@@ -1046,7 +1058,11 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
       end if
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 
   ppg%ireferred_atom_comm_r = ireferred_atom_comm_r
 
@@ -1074,12 +1090,20 @@ subroutine init_uvpsi_table(ppg)
   integer :: ilma,ia,ilocal,ilocal_nlma
 
   ilocal_nlma = 0
+#ifdef USE_OPENACC
+!$acc parallel loop private(ilma,ia) reduction(+:ilocal_nlma)
+#else
 !$omp parallel do private(ilma,ia) reduction(+:ilocal_nlma)
+#endif
   do ilma=1,ppg%nlma
     ia = ppg%ia_tbl(ilma)
     if (ppg%ireferred_atom(ia)) ilocal_nlma = ilocal_nlma + 1
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
   ppg%ilocal_nlma = ilocal_nlma
 
   allocate(ppg%ilocal_nlma2ilma(ppg%ilocal_nlma))

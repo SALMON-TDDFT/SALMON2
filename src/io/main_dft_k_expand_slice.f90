@@ -323,7 +323,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
     do ik=1,system%nk 
     do io=1,system%no, nblock
        i=i+1
-       write (pdir(i),'(A,I3.3,A,I6.6)') trim(gdir)//'k_',ik,'_ob_',io
+       write (pdir(i),'(A,I6.6,A,I6.6)') trim(gdir)//'k_',ik,'_ob_',io
     enddo
     enddo
 
@@ -343,7 +343,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
     i=0
     do io_new= 1,kex%no_new, nblock
        i=i+1
-       write(pdir(i),'(A,I3.3,A,I6.6)') trim(gdir)//'k_',ik_new,'_ob_',io_new
+       write(pdir(i),'(A,I6.6,A,I6.6)') trim(gdir)//'k_',ik_new,'_ob_',io_new
        do icnt=1,kex%nmax
           if(kex%iaddress_new(1,icnt)==io_new) then
              call create_directory(pdir(i))
