@@ -269,6 +269,7 @@ subroutine input_pp(pp,hx,hy,hz)
   
   call comm_bcast(pp%rps_ao,nproc_group_global)
   call comm_bcast(pp%nrps_ao,nproc_group_global)
+  call comm_bcast(pp%upptbl_ao,nproc_group_global)
 
   return
 end subroutine input_pp
@@ -1127,7 +1128,16 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   integer :: i,l,l0,ll
   real(8) :: r1,r2,r3,r4,const
 
-! copy the radial wave functions
+! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
+  do l=0,pp%mlps(ik)
+    do i=1,pp%mr(ik)
+      pp%upp(i,l)=pp%upp(i,l)*sqrt((2*l+1.d0)/(4*pi))/(pp%rad(i+1,ik))**(l+1)
+    enddo
+    pp%upp(0,l)=pp%upp(1,l)
+!    pp%upp(0,l)=2.d0*pp%upp(1,l)-pp%upp(2,l)
+  enddo
+  
+! copy the radial wave functions for DFT+U
   l0=0
   do ll=0,pp%mlps(ik)
   do l=l0,l0+pp%nproj(ll,ik)-1
@@ -1137,15 +1147,6 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   end do
   l0=l
   end do
-
-! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
-  do l=0,pp%mlps(ik)
-    do i=1,pp%mr(ik)
-      pp%upp(i,l)=pp%upp(i,l)*sqrt((2*l+1.d0)/(4*pi))/(pp%rad(i+1,ik))**(l+1)
-    enddo
-    pp%upp(0,l)=pp%upp(1,l)
-!    pp%upp(0,l)=2.d0*pp%upp(1,l)-pp%upp(2,l)
-  enddo
 
   l0=0
   do ll=0,pp%mlps(ik)
