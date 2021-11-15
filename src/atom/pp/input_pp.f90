@@ -82,7 +82,9 @@ subroutine input_pp(pp,hx,hy,hz)
 
       if ( flag_beta_proj_is_given ) then
         flag_potential_is_given=.false.
-        if(method_init_density=='pp') stop "method_init_density='pp': radial wavefuncion is not available."
+        if(method_init_density=='pp' .and. ps_format(ik)/='UPF') then
+          stop "method_init_density='pp': radial density is not available."
+        end if
       end if
       if ( any(pp%vpp_so/=0.0d0) ) flag_so=.true.
 
