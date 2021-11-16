@@ -48,7 +48,7 @@ contains
           cycle
         end if 
         s=0.0d0
-        do i = 1, pp%mr(ik)-1
+        do i = 1, pp%mr(ik)
           x = g2sq*pp%rad(i,ik)
           ! --- Spherical Bessel (l=0) ---
           if ( x < 1.d-1 ) then
