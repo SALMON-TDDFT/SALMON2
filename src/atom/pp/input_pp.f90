@@ -286,7 +286,7 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   character(256),intent(in) :: ps_file
 !local variable
   integer :: l,i,irPC
-  real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps,cl,u
+  real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps
 
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
@@ -1111,20 +1111,19 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   
   if(method_init_density=='pp' .and. (.not. flag_beta_proj_is_given)) then
     pp%rho_pp_tbl(:,ik) = 0d0
+    u = 0d0
     loop_l: do l = 0, pp%mlps(ik)
-      do i = pp%mr(ik), 0, -1
-        u = abs( pp%upp(i,l) )
-        if ( u /= 0.0d0 ) then
-          if ( u > 1.0d-1 ) cycle loop_l
-          exit
+      loop_i: do i = 1, pp%mr(ik)
+        pp%rho_pp_tbl(i,ik) = pp%rho_pp_tbl(i,ik) + dble(2*l+1)* pp%upp(i,l)**2
+        u = u + dble(2*l+1)* pp%upp(i,l)**2 * (pp%rad(i+1,ik)-pp%rad(i,ik))
+        if( u > pp%zps(ik) ) then
+          exit loop_l
+          exit loop_i
         end if
-      end do
-      do i = 0, pp%mr(ik)
-        pp%rho_pp_tbl(i+1,ik) = pp%rho_pp_tbl(i+1,ik) + dble(2*l+1)* pp%upp(i,l)**2
-      end do
+      end do loop_i
     end do loop_l
     u = 0d0
-    do i = 1, pp%mr(ik)-1
+    do i = 1, pp%mr(ik)
       u = u + pp%rho_pp_tbl(i,ik)*(pp%rad(i+1,ik)-pp%rad(i,ik))
     end do
     write(*,*) "Int(rho) for method_init_density=pp",u
