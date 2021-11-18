@@ -322,7 +322,8 @@ contains
       & nscf_init_no_diagonal, &
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero, &
-      & method_init_density
+      & method_init_density, &
+      & magdir_atom
 
     namelist/emfield/ &
       & trans_longi, &
@@ -651,6 +652,7 @@ contains
     nscf_init_mix_zero   = -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
+    magdir_atom          = 0d0
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -1090,6 +1092,7 @@ contains
     call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
     call comm_bcast(method_init_density   ,nproc_group_global)
+    call comm_bcast(magdir_atom ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1844,6 +1847,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_density', method_init_density
+      if(method_init_density == 'pp_magdir') then
+        write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
+      end if
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
@@ -2246,6 +2252,9 @@ contains
 
     select case(method_init_density)
     case ('wf','pp') ; continue
+    case('pp_magdir')
+      if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
+      if(spin=='unpolarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
     case default     ; stop 'method_init_density must be wf or pp'
     end select
 

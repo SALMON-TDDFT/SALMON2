@@ -82,8 +82,8 @@ subroutine input_pp(pp,hx,hy,hz)
 
       if ( flag_beta_proj_is_given ) then
         flag_potential_is_given=.false.
-        if(method_init_density=='pp' .and. ps_format(ik)/='UPF') then
-          stop "method_init_density='pp': radial density is not available."
+        if(method_init_density/='wf' .and. ps_format(ik)/='UPF') then
+          stop "radial density is not available (method_init_density=pp...)"
         end if
       end if
       if ( any(pp%vpp_so/=0.0d0) ) flag_so=.true.
@@ -1109,7 +1109,7 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   integer :: i,l,l0,ll
   real(8) :: r1,r2,r3,r4,const,u
   
-  if(method_init_density=='pp' .and. (.not. flag_beta_proj_is_given)) then
+  if(method_init_density/='wf' .and. (.not. flag_beta_proj_is_given)) then
     pp%rho_pp_tbl(:,ik) = 0d0
     u = 0d0
     loop_l: do l = 0, pp%mlps(ik)
@@ -1126,7 +1126,7 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
     do i = 1, pp%mr(ik)
       u = u + pp%rho_pp_tbl(i,ik)*(pp%rad(i+1,ik)-pp%rad(i,ik))
     end do
-    write(*,*) "Int(rho) for method_init_density=pp",u
+    write(*,*) "Int(rho)= ",u, " (for method_init_density=pp...)"
   end if
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
