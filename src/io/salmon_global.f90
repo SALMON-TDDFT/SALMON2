@@ -162,8 +162,8 @@ module salmon_global
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
-  character(2)   :: method_init_density
-
+  character(16)  :: method_init_density
+  real(8)        :: magdir_atom(100)
 
 !! &emfield
   character(2)   :: trans_longi
