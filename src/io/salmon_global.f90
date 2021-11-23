@@ -256,7 +256,19 @@ module salmon_global
   integer        :: media_id_pml(3,2)
   integer        :: media_id_source1
   integer        :: media_id_source2
-
+  character(1)   :: yn_make_shape
+  character(1)   :: yn_output_shape
+  character(1)   :: yn_copy_x
+  character(1)   :: yn_copy_y
+  character(1)   :: yn_copy_z
+  character(6)   :: rot_type
+  integer        :: n_s
+  character(32)  :: typ_s(1000)
+  integer        :: id_s(1000)
+  real(8)        :: inf_s(1000,10)
+  real(8)        :: ori_s(1000,3)
+  real(8)        :: rot_s(1000,3)
+  
 !! &analysis
   character(2)   :: projection_option
   integer        :: nenergy
