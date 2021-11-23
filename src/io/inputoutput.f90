@@ -412,7 +412,20 @@ contains
       & film_thickness,           &
       & media_id_pml,             &
       & media_id_source1,         &
-      & media_id_source2
+      & media_id_source1,         &
+      & media_id_source2,         &
+      & yn_make_shape,            &
+      & yn_output_shape,          &
+      & yn_copy_x,                &
+      & yn_copy_y,                &
+      & yn_copy_z,                &
+      & rot_type,                 &
+      & n_s,                      &
+      & typ_s,                    &
+      & id_s,                     &
+      & inf_s,                    &
+      & ori_s,                    &
+      & rot_s
 
     namelist/analysis/ &
       & projection_option, &
@@ -742,7 +755,19 @@ contains
     media_id_pml(:,:)           = 0
     media_id_source1            = 0
     media_id_source2            = 0
-
+    yn_make_shape               = 'n'
+    yn_output_shape             = 'n'
+    yn_copy_x                   = 'n'
+    yn_copy_y                   = 'n'
+    yn_copy_z                   = 'n'
+    rot_type                    = 'radian'
+    n_s                         = 0
+    typ_s(:)                    = 'none'
+    id_s(:)                     = 0
+    inf_s(:,:)                  = 0d0
+    ori_s(:,:)                  = 0d0
+    rot_s(:,:)                  = 0d0
+    
 !! == default for &analysis
     projection_option   = 'no'
     out_projection_step = 100
@@ -1218,7 +1243,21 @@ contains
     call comm_bcast(media_id_pml             ,nproc_group_global)
     call comm_bcast(media_id_source1         ,nproc_group_global)
     call comm_bcast(media_id_source2         ,nproc_group_global)
-
+    call comm_bcast(yn_make_shape            ,nproc_group_global)
+    call comm_bcast(yn_output_shape          ,nproc_group_global)
+    call comm_bcast(yn_copy_x                ,nproc_group_global)
+    call comm_bcast(yn_copy_y                ,nproc_group_global)
+    call comm_bcast(yn_copy_z                ,nproc_group_global)
+    call comm_bcast(rot_type                 ,nproc_group_global)
+    call comm_bcast(n_s                      ,nproc_group_global)
+    call comm_bcast(typ_s                    ,nproc_group_global)
+    call comm_bcast(id_s                     ,nproc_group_global)
+    call comm_bcast(inf_s                    ,nproc_group_global)
+    inf_s = inf_s * ulength_to_au
+    call comm_bcast(ori_s                    ,nproc_group_global)
+    ori_s = ori_s * ulength_to_au
+    call comm_bcast(rot_s                    ,nproc_group_global)
+    
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
     call comm_bcast(out_projection_step ,nproc_group_global)
@@ -1996,7 +2035,21 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
-
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_y', yn_copy_y
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
+      do i = 0,n_s
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'inf_s(',i,',:)', inf_s(i,:)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
+      end do
+      
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
@@ -2199,6 +2252,11 @@ contains
       end do
     end if
     call yn_argument_check(yn_wf_em)
+    call yn_argument_check(yn_make_shape)
+    call yn_argument_check(yn_output_shape)
+    call yn_argument_check(yn_copy_x)
+    call yn_argument_check(yn_copy_y)
+    call yn_argument_check(yn_copy_z)
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
