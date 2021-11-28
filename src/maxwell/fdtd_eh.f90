@@ -105,7 +105,7 @@ contains
   !===========================================================================================
   != initialize eh-FDTD ======================================================================
   subroutine eh_init(fs,fe)
-    use salmon_global,   only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
+    use salmon_global,   only: nt_em,al_em,dl_em,num_rgrid_em,dt_em,boundary_em,yn_periodic,base_directory,&
                                media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                obs_num_em,obs_loc_em,yn_obs_plane_integral_em,&
@@ -138,12 +138,38 @@ contains
     fe%Nd        = 1
     fe%iter_sta  = 1
     fe%iter_end  = nt_em
-    fs%rlsize(:) = al_em(:)
-    fs%hgs(:)    = dl_em(:)
     fe%ifn       = 600
     fe%ipml_l    = 8
     fe%pml_m     = 4.0d0
     fe%pml_r     = 1.0d-7
+    if( ( (al_em(1)*al_em(2)*al_em(3) >0.0d0).and.               &
+          (dl_em(1)*dl_em(2)*dl_em(3) >0.0d0).and.               &
+          (num_rgrid_em(1)*num_rgrid_em(2)*num_rgrid_em(3) >0) ) &
+        .or.                                                     &
+        ( (al_em(1)*al_em(2)*al_em(3)==0.0d0).and.               &
+          (dl_em(1)*dl_em(2)*dl_em(3)==0.0d0)                  ) &
+        .or.                                                     &
+        ( (al_em(1)*al_em(2)*al_em(3)==0.0d0).and.               &
+          (num_rgrid_em(1)*num_rgrid_em(2)*num_rgrid_em(3)==0) ) &
+        .or.                                                     &
+        ( (dl_em(1)*dl_em(2)*dl_em(3)==0.0d0).and.               &
+          (num_rgrid_em(1)*num_rgrid_em(2)*num_rgrid_em(3)==0) ) ) then
+      if(comm_is_root(nproc_id_global)) &
+      write(*,*) "Only two of al_em, dl_em, and num_rgrid_em must be set."
+      stop
+    end if
+    if(al_em(1)*al_em(2)*al_em(3)==0.0d0) then
+      fs%rlsize(:) = dl_em(:) * dble(num_rgrid_em(:))
+      fs%hgs(:)    = dl_em(:)
+    else
+      if(num_rgrid_em(1)*num_rgrid_em(2)*num_rgrid_em(3)>0) then
+        fs%rlsize(:) = al_em(:)
+        fs%hgs(:)    = fs%rlsize(:) / dble(num_rgrid_em(:))
+      else
+        fs%rlsize(:) = al_em(:)
+        fs%hgs(:)    = dl_em(:)
+      end if
+    end if
     do ii=1,3
     do ij=1,2
       select case(boundary_em(ii,ij))

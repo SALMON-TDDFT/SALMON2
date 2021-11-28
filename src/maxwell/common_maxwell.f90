@@ -183,7 +183,7 @@ contains
       deallocate(rtmp1d)
       do ii=1,3
         if(inum(ii)/=inum_check(ii)) then
-          if(comm_is_root(nproc_id_global)) write(*,*) "al_em or dl_em does not mutch shape file."
+          if(comm_is_root(nproc_id_global)) write(*,*) "al_em, dl_em or num_rgrid_em do not mutch shape file."
           stop
         end if
       end do

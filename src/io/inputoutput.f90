@@ -384,6 +384,7 @@ contains
     namelist/maxwell/             &
       & al_em,                    &
       & dl_em,                    &
+      & num_rgrid_em,             &
       & dt_em,                    &
       & nt_em,                    &
       & boundary_em,              &
@@ -726,6 +727,7 @@ contains
 !! == default for &maxwell
     al_em(:)                    = 0d0
     dl_em(:)                    = 0d0
+    num_rgrid_em(:)             = 0
     dt_em                       = 0d0
     nt_em                       = 0
     boundary_em(:,:)            = 'default'
@@ -1206,6 +1208,7 @@ contains
     al_em = al_em * ulength_to_au
     call comm_bcast(dl_em                    ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
+    call comm_bcast(num_rgrid_em             ,nproc_group_global)
     call comm_bcast(dt_em                    ,nproc_group_global)
     dt_em = dt_em * utime_to_au
     call comm_bcast(nt_em                    ,nproc_group_global)
@@ -1973,6 +1976,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(1)', dl_em(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(2)', dl_em(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(3)', dl_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
