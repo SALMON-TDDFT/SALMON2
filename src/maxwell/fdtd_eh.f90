@@ -157,7 +157,7 @@ contains
       if(comm_is_root(nproc_id_global)) &
       write(*,*) "Only two of al_em, dl_em, and num_rgrid_em must be set."
       stop
-    end
+    end if
     if(al_em(1)*al_em(2)*al_em(3)==0.0d0) then
       fs%rlsize(:) = dl_em(:) * dble(num_rgrid_em(:))
       fs%hgs(:)    = dl_em(:)
