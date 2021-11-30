@@ -2048,10 +2048,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
       write(fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
-      do i = 0,n_s
+      do i = 1,n_s
         write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'inf_s(',i,',:)', inf_s(i,:)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
       end do
@@ -2092,7 +2092,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_magnetization_step', out_magnetization_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_magnetization_step', out_magnetization_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
