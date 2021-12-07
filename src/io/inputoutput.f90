@@ -2048,13 +2048,21 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
       write(fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
-      do i = 1,n_s
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
-      end do
+      if(n_s==0) then
+        write(fh_variables_log, '("#",4X,A,"=",A)')       'typ_s', typ_s(1)
+        write(fh_variables_log, '("#",4X,A,"=",I6)')      'id_s', id_s(1)
+        write(fh_variables_log, '("#",4X,A,"=",10ES14.5)')'inf_s', inf_s(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'ori_s', ori_s(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'rot_s', rot_s(1,:)
+      else
+        do i = 1,n_s
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
+        end do
+      end if
       
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
