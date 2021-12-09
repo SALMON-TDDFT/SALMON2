@@ -250,6 +250,7 @@ module salmon_global
   integer        :: obs_num_em
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
+  real(8)        :: obs_plane_ene_em(200,100)
   character(1)   :: yn_obs_plane_em(200)
   character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em

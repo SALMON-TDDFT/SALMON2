@@ -39,6 +39,15 @@ module fdtd_eh
     integer,allocatable :: iobs_li_pe(:,:) !processor element at observation line
     integer,allocatable :: iobs_pl_pe(:,:) !processor element at observation plane
     integer,allocatable :: iobs_po_id(:,:) !id at observation point
+    integer,allocatable :: iobs_num_ene(:) !number of energy point used for obs_plane_ene_em option
+    !array used for obs_plane_ene_em option
+    !(r1,r2,obs_num_em,iobs_num_ene,with or without window function)
+    complex(8),allocatable :: obs_ex_xy_ene(:,:,:,:,:),obs_ex_yz_ene(:,:,:,:,:),obs_ex_xz_ene(:,:,:,:,:), &
+                              obs_ey_xy_ene(:,:,:,:,:),obs_ey_yz_ene(:,:,:,:,:),obs_ey_xz_ene(:,:,:,:,:), &
+                              obs_ez_xy_ene(:,:,:,:,:),obs_ez_yz_ene(:,:,:,:,:),obs_ez_xz_ene(:,:,:,:,:), &
+                              obs_hx_xy_ene(:,:,:,:,:),obs_hx_yz_ene(:,:,:,:,:),obs_hx_xz_ene(:,:,:,:,:), &
+                              obs_hy_xy_ene(:,:,:,:,:),obs_hy_yz_ene(:,:,:,:,:),obs_hy_xz_ene(:,:,:,:,:), &
+                              obs_hz_xy_ene(:,:,:,:,:),obs_hz_yz_ene(:,:,:,:,:),obs_hz_xz_ene(:,:,:,:,:)
     integer             :: inc_num         !number of incident current source
     integer,allocatable :: inc_po_pe(:)    !processor element at incident current source point
     integer,allocatable :: inc_li_pe(:,:)  !processor element at incident current source line
@@ -46,8 +55,8 @@ module fdtd_eh
     integer,allocatable :: inc_po_id(:,:)  !id at incident current source point
     character(16)       :: inc_dist1       !spatial distribution type of inc.
     character(16)       :: inc_dist2       !spatial distribution type of inc.
-    real(8)             :: c2_inc1_xyz(3)   !coeff. for inc.1, xyz(1:3) means propa. direc. of the inc.
-    real(8)             :: c2_inc2_xyz(3)   !coeff. for inc.2, xyz(1:3) means propa. direc. of the inc.
+    real(8)             :: c2_inc1_xyz(3)  !coeff. for inc.1, xyz(1:3) means propa. direc. of the inc.
+    real(8)             :: c2_inc2_xyz(3)  !coeff. for inc.2, xyz(1:3) means propa. direc. of the inc.
     real(8),allocatable :: ex_y(:,:,:),c1_ex_y(:,:,:),c2_ex_y(:,:,:),ex_z(:,:,:),c1_ex_z(:,:,:),c2_ex_z(:,:,:) !e
     real(8),allocatable :: ey_z(:,:,:),c1_ey_z(:,:,:),c2_ey_z(:,:,:),ey_x(:,:,:),c1_ey_x(:,:,:),c2_ey_x(:,:,:) !e
     real(8),allocatable :: ez_x(:,:,:),c1_ez_x(:,:,:),c2_ez_x(:,:,:),ez_y(:,:,:),c1_ez_y(:,:,:),c2_ez_y(:,:,:) !e
@@ -108,7 +117,7 @@ contains
     use salmon_global,   only: nt_em,al_em,dl_em,num_rgrid_em,dt_em,boundary_em,yn_periodic,base_directory,&
                                media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
-                               obs_num_em,obs_loc_em,yn_obs_plane_integral_em,&
+                               obs_num_em,obs_loc_em,obs_plane_ene_em,yn_obs_plane_integral_em,&
                                media_id_pml,media_id_source1,media_id_source2,&
                                wave_input,trans_longi,e_impulse,nenergy,&
                                source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
@@ -219,11 +228,46 @@ contains
     allocate(fe%coo(minval(fs%lg%is(:))-fe%Nd:maxval(fs%lg%ie(:))+fe%Nd,3))
     call set_coo_em(fe%Nd,fe%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fe%coo(:,:),yn_periodic)
     
-    !*** make shape *******************************************************************************************!
+    !*** make or input fdtd shape *****************************************************************************!
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i3d',i3d=fs%imedia)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rmedia)
-    if(yn_make_shape=='y') then
-      call eh_make_shape(fs,fe)
+    if(media_num>0) then
+      if(comm_is_root(nproc_id_global)) write(*,*)
+      if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
+      
+      !make or input
+      if(yn_make_shape=='y') then
+        !make input file
+        call eh_make_shape(fs,fe)
+        if(comm_is_root(nproc_id_global)) then
+          write(*,*) "shape file is made by input keywords."
+        end if
+      elseif(yn_make_shape=='n') then
+        !check file format and input shape file
+        if(index(shape_file,".cube", back=.true.)/=0) then
+          if(comm_is_root(nproc_id_global)) then
+            write(*,*) "shape file is inputed by .cube format."
+          end if
+          call input_shape_em(shape_file,fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
+        elseif(index(shape_file,".mp", back=.true.)/=0) then
+          if(comm_is_root(nproc_id_global)) then
+            write(*,*) "shape file is inputed by .mp format."
+            write(*,*) "This version works for only .cube format.."
+          end if
+          stop
+        else
+          if(comm_is_root(nproc_id_global)) then
+            write(*,*) "shape file must be .cube or .mp formats."
+          end if
+          stop
+        end if
+      end if
+      
+      !send and receive for shape file
+      fe%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
+      call eh_sendrecv(fs,fe,'r')
+      fs%imedia(:,:,:)=int(fe%rmedia(:,:,:)+1d-3)
+      if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
     end if
     
     !*** set and check dt *************************************************************************************!
@@ -296,40 +340,6 @@ contains
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jx)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jy)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jz)
-    
-    !*** input fdtd shape *************************************************************************************!
-    if(media_num>0) then
-      if(comm_is_root(nproc_id_global)) write(*,*)
-      if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
-      if(yn_make_shape=='y') then
-        if(comm_is_root(nproc_id_global)) then
-          write(*,*) "shape file is made by input keywords."
-        end if
-      elseif(yn_make_shape=='n') then
-        !check file format and input shape file
-        if(index(shape_file,".cube", back=.true.)/=0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "shape file is inputed by .cube format."
-          end if
-          call input_shape_em(shape_file,fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
-        elseif(index(shape_file,".mp", back=.true.)/=0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "shape file is inputed by .mp format."
-            write(*,*) "This version works for only .cube format.."
-          end if
-          stop
-        else
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "shape file must be .cube or .mp formats."
-          end if
-          stop
-        end if
-      end if
-      fe%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
-      call eh_sendrecv(fs,fe,'r')
-      fs%imedia(:,:,:)=int(fe%rmedia(:,:,:)+1d-3)
-      if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
-    end if
     
     !*** prepare Lorentz-Drude ********************************************************************************!
     fe%num_ld=0
@@ -556,6 +566,75 @@ contains
                            fe%iobs_po_pe(ii),fe%iobs_li_pe(ii,:),fe%iobs_pl_pe(ii,:),fs%mg%is(:),fs%mg%ie(:),&
                            minval(fs%lg%is)-fe%Nd,maxval(fs%lg%ie)+fe%Nd,fe%coo(:,:))
       end do
+      
+      !prepare for obs_plane_ene_em option(spatial distribution at each energy point)
+      allocate(fe%iobs_num_ene(obs_num_em))
+      fe%iobs_num_ene(:)=0
+      do ii=1,obs_num_em
+        icount = 0
+        do ij=1,size(obs_plane_ene_em,2)
+          if(obs_plane_ene_em(ii,ij)>=0.0d0) then
+            icount = icount + 1
+          end if
+        end do
+        fe%iobs_num_ene(ii) = icount
+      end do
+      if(sum(fe%iobs_num_ene(:))>0) then
+        allocate( fe%obs_ex_xy_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ex_yz_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ex_xz_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ey_xy_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ey_yz_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ey_xz_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ez_xy_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ez_yz_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_ez_xz_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hx_xy_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hx_yz_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hx_xz_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hy_xy_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hy_yz_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hy_xz_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hz_xy_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hz_yz_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2),&
+                  fe%obs_hz_xz_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),&
+                                          obs_num_em,maxval(fe%iobs_num_ene(:)),2) )
+        fe%obs_ex_xy_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ex_yz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ex_xz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ey_xy_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ey_yz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ey_xz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ez_xy_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ez_yz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_ez_xz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hx_xy_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hx_yz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hx_xz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hy_xy_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hy_yz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hy_xz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hz_xy_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hz_yz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+        fe%obs_hz_xz_ene(:,:,:,:,:)=(0.0d0,0.0d0);
+      end if
       
       !write information
       if(comm_is_root(nproc_id_global)) then
@@ -1677,6 +1756,11 @@ contains
                                         dble(iter)*dt_em*utime_from_au,fs%mg%is,fs%mg%ie,fs%hgs,fe%Nd,fe%ifn,ii,     &
                                         fe%ex_s,fe%ey_s,fe%ez_s,fe%hx_s,fe%hy_s,fe%hz_s)
           end if
+          
+          !obs_plane_ene_em option(spatial distribution at each energy point)
+          if(fe%iobs_num_ene(ii)>0) then
+            call eh_calc_plane_ene(fs,fe,ii,iter)
+          end if
         end do
         
         !check maximum
@@ -2181,18 +2265,21 @@ contains
   != finalize eh-FDTD ========================================================================
   subroutine eh_finalize(fs,fe)
     use salmon_global,   only: dt_em,unit_system,yn_periodic,ae_shape1,ae_shape2,e_impulse,sysname, &
-                               nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,yn_obs_plane_em
+                               nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,obs_plane_ene_em,yn_obs_plane_em
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au
-    use parallelization, only: nproc_id_global
-    use communication,   only: comm_is_root
+    use parallelization, only: nproc_id_global,nproc_group_global
+    use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
     use math_constants,  only: pi,zi
     implicit none
     type(s_fdtd_system),intent(in)    :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    integer                           :: ii
+    complex(8),allocatable            :: z_ex1(:,:),z_ey1(:,:),z_ez1(:,:),z_hx1(:,:),z_hy1(:,:),z_hz1(:,:),&
+                                         z_ex2(:,:),z_ey2(:,:),z_ez2(:,:),z_hx2(:,:),z_hy2(:,:),z_hz2(:,:)
+    integer                           :: ii,ij,ik,il,i1,i1s,i2,i2s
     complex(8)                        :: z_tmp(3)
-    character(128)                    :: save_name
+    character(2)                      :: plane_name
+    character(128)                    :: iobs_name,iene_name,wf_name,save_name
     
     !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
     if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
@@ -2402,6 +2489,169 @@ contains
           end do
         end if
       end if
+    end if
+    
+    !output for obs_plane_ene_em option
+    if(obs_num_em>0) then
+      do ii=1,obs_num_em !observation point---------------------------------------------------------------------------!
+        if(fe%iobs_num_ene(ii)>0) then
+          do ij=1,fe%iobs_num_ene(ii) !energy-------------------------------------------------------------------------!
+            do ik=1,3 !plane------------------------------------------------------------------------------------------!
+              !set plane
+              if(ik==1)     then !xy plane
+                i1s=1; i2s=2; plane_name='xy';
+              elseif(ik==2) then !yz plane
+                i1s=2; i2s=3; plane_name='yz';
+              elseif(ik==3) then !xz plane
+                i1s=1; i2s=3; plane_name='xz';
+              end if
+              do il=1,2 !with or without window function--------------------------------------------------------------!
+                !allocation
+                allocate(z_ex1(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_ex2(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_ey1(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_ey2(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_ez1(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_ez2(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_hx1(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_hx2(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_hy1(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_hy2(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_hz1(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)),&
+                         z_hz2(fs%lg%is(i1s):fs%lg%ie(i1s),fs%lg%is(i2s):fs%lg%ie(i2s)) )
+                z_ex1(:,:)=(0.0d0,0.0d0); z_ey1(:,:)=(0.0d0,0.0d0); z_ez1(:,:)=(0.0d0,0.0d0);
+                z_ex2(:,:)=(0.0d0,0.0d0); z_ey2(:,:)=(0.0d0,0.0d0); z_ez2(:,:)=(0.0d0,0.0d0);
+                z_hx1(:,:)=(0.0d0,0.0d0); z_hy1(:,:)=(0.0d0,0.0d0); z_hz1(:,:)=(0.0d0,0.0d0);
+                z_hx2(:,:)=(0.0d0,0.0d0); z_hy2(:,:)=(0.0d0,0.0d0); z_hz2(:,:)=(0.0d0,0.0d0);
+                         
+                !collect lg-data
+                do i2=fs%mg%is(i2s),fs%mg%ie(i2s)
+                do i1=fs%mg%is(i1s),fs%mg%ie(i1s)
+                  if(ik==1)     then !xy plane
+                    z_ex1(i1,i2)=fe%obs_ex_xy_ene(i1,i2,ii,ij,il)
+                    z_ey1(i1,i2)=fe%obs_ey_xy_ene(i1,i2,ii,ij,il)
+                    z_ez1(i1,i2)=fe%obs_ez_xy_ene(i1,i2,ii,ij,il)
+                    z_hx1(i1,i2)=fe%obs_hx_xy_ene(i1,i2,ii,ij,il)                            
+                    z_hy1(i1,i2)=fe%obs_hy_xy_ene(i1,i2,ii,ij,il)
+                    z_hz1(i1,i2)=fe%obs_hz_xy_ene(i1,i2,ii,ij,il)
+                  elseif(ik==2) then !yz plane
+                    z_ex1(i1,i2)=fe%obs_ex_yz_ene(i1,i2,ii,ij,il)
+                    z_ey1(i1,i2)=fe%obs_ey_yz_ene(i1,i2,ii,ij,il)
+                    z_ez1(i1,i2)=fe%obs_ez_yz_ene(i1,i2,ii,ij,il)
+                    z_hx1(i1,i2)=fe%obs_hx_yz_ene(i1,i2,ii,ij,il)                            
+                    z_hy1(i1,i2)=fe%obs_hy_yz_ene(i1,i2,ii,ij,il)
+                    z_hz1(i1,i2)=fe%obs_hz_yz_ene(i1,i2,ii,ij,il)
+                  elseif(ik==3) then !xz plane
+                    z_ex1(i1,i2)=fe%obs_ex_xz_ene(i1,i2,ii,ij,il)
+                    z_ey1(i1,i2)=fe%obs_ey_xz_ene(i1,i2,ii,ij,il)
+                    z_ez1(i1,i2)=fe%obs_ez_xz_ene(i1,i2,ii,ij,il)
+                    z_hx1(i1,i2)=fe%obs_hx_xz_ene(i1,i2,ii,ij,il)                            
+                    z_hy1(i1,i2)=fe%obs_hy_xz_ene(i1,i2,ii,ij,il)
+                    z_hz1(i1,i2)=fe%obs_hz_xz_ene(i1,i2,ii,ij,il)
+                  end if
+                end do
+                end do
+                call comm_summation(z_ex1,z_ex2,fs%lg%num(i1s)*fs%lg%num(i2s),nproc_group_global)
+                call comm_summation(z_ey1,z_ey2,fs%lg%num(i1s)*fs%lg%num(i2s),nproc_group_global)
+                call comm_summation(z_ez1,z_ez2,fs%lg%num(i1s)*fs%lg%num(i2s),nproc_group_global)
+                call comm_summation(z_hx1,z_hx2,fs%lg%num(i1s)*fs%lg%num(i2s),nproc_group_global)
+                call comm_summation(z_hy1,z_hy2,fs%lg%num(i1s)*fs%lg%num(i2s),nproc_group_global)
+                call comm_summation(z_hz1,z_hz2,fs%lg%num(i1s)*fs%lg%num(i2s),nproc_group_global)
+                
+                !output lg-data
+                if(comm_is_root(nproc_id_global)) then
+                  write(iobs_name,*) ii
+                  write(iene_name,*) ij
+                  if(il==1)     then
+                    wf_name='with_wf'
+                  elseif(il==2) then
+                    wf_name='without_wf'
+                  end if
+                  save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(iobs_name))//&
+                            '_ene'//trim(adjustl(iene_name))//'_'//plane_name//'_'//trim(wf_name)//'.data'
+                  open(fe%ifn,file=save_name)
+                  if(il==1)     then
+                    write(fe%ifn,'(A)') "# Fourier-transformed spatial distribution with window function:"
+                  elseif(il==2) then
+                    write(fe%ifn,'(A)') "# Fourier-transformed spatial distribution without window function:"
+                  end if
+                  if(ik==1)     then !xy plane
+                    write(fe%ifn,'(A)') "# ID_1: Grid ID along x axis"
+                    write(fe%ifn,'(A)') "# ID_2: Grid ID along y axis"
+                  elseif(ik==2) then !yz plane
+                    write(fe%ifn,'(A)') "# ID_1: Grid ID along y axis"
+                    write(fe%ifn,'(A)') "# ID_2: Grid ID along z axis"
+                  elseif(ik==3) then !xz plane
+                    write(fe%ifn,'(A)') "# ID_1: Grid ID along x axis"
+                    write(fe%ifn,'(A)') "# ID_2: Grid ID along z axis"
+                  end if
+                  write(fe%ifn,'(A)') "# E: Electric field"
+                  write(fe%ifn,'(A)') "# H: Magnetic field"
+                  select case(unit_system)
+                  case('au','a.u.')
+                    write(fe%ifn,'(A,E23.15E3,A)') "# Sampling energy: ",obs_plane_ene_em(ii,ij),' a.u.'
+                    write(fe%ifn,'("#",99(1X,I0,":",A))') &
+                          1, "ID_1[none]",                &
+                          2, "ID_2[none]",                &
+                          3, "Re(E_x)[a.u.]",             &
+                          4, "Im(E_x)[a.u.]",             &
+                          5, "Re(E_y)[a.u.]",             &
+                          6, "Im(E_y)[a.u.]",             &
+                          7, "Re(E_z)[a.u.]",             &
+                          8, "Im(E_z)[a.u.]",             &
+                          9, "Re(H_x)[a.u.]",             &
+                          10,"Im(H_x)[a.u.]",             &
+                          11,"Re(H_y)[a.u.]",             &
+                          12,"Im(H_y)[a.u.]",             &
+                          13,"Re(H_z)[a.u.]",             &
+                          14,"Im(H_z)[a.u.]"
+                  case('A_eV_fs')
+                    write(fe%ifn,'(A,E23.15E3,A)') "# Sampling energy: ",obs_plane_ene_em(ii,ij)*uenergy_from_au,' eV'
+                    write(fe%ifn,'("#",99(1X,I0,":",A))') &
+                          1, "ID_1[none]",                &
+                          2, "ID_2[none]",                &
+                          3, "Re(E_x)[V/Angstrom*fs]",    &
+                          4, "Im(E_x)[V/Angstrom*fs]",    &
+                          5, "Re(E_y)[V/Angstrom*fs]",    &
+                          6, "Im(E_y)[V/Angstrom*fs]",    &
+                          7, "Re(E_z)[V/Angstrom*fs]",    &
+                          8, "Im(E_z)[V/Angstrom*fs]",    &
+                          9, "Re(H_x)[A/Angstrom*fs]",    &
+                          10,"Im(H_x)[A/Angstrom*fs]",    &
+                          11,"Re(H_y)[A/Angstrom*fs]",    &
+                          12,"Im(H_y)[A/Angstrom*fs]",    &
+                          13,"Re(H_z)[A/Angstrom*fs]",    &
+                          14,"Im(H_z)[A/Angstrom*fs]"
+                  end select
+                  do i2=fs%lg%is(i2s),fs%lg%ie(i2s)
+                  do i1=fs%lg%is(i1s),fs%lg%ie(i1s)
+                    write(fe%ifn,'(I8,I8,99(1X,E23.15E3))')                   &
+                          i1,i2,                                              &
+                          real( z_ex2(i1,i2))*fe%uVperm_from_au*utime_from_au,&
+                          aimag(z_ex2(i1,i2))*fe%uVperm_from_au*utime_from_au,&
+                          real( z_ey2(i1,i2))*fe%uVperm_from_au*utime_from_au,&
+                          aimag(z_ey2(i1,i2))*fe%uVperm_from_au*utime_from_au,&
+                          real( z_ez2(i1,i2))*fe%uVperm_from_au*utime_from_au,&
+                          aimag(z_ez2(i1,i2))*fe%uVperm_from_au*utime_from_au,&
+                          real( z_hx2(i1,i2))*fe%uAperm_from_au*utime_from_au,&
+                          aimag(z_hx2(i1,i2))*fe%uAperm_from_au*utime_from_au,&
+                          real( z_hy2(i1,i2))*fe%uAperm_from_au*utime_from_au,&
+                          aimag(z_hy2(i1,i2))*fe%uAperm_from_au*utime_from_au,&
+                          real( z_hz2(i1,i2))*fe%uAperm_from_au*utime_from_au,&
+                          aimag(z_hz2(i1,i2))*fe%uAperm_from_au*utime_from_au
+                  end do
+                  end do
+                  close(fe%ifn)
+                end if
+                
+                !deallocation
+                deallocate(z_ex1,z_ey1,z_ez1,z_hx1,z_hy1,z_hz1,&
+                           z_ex2,z_ey2,z_ez2,z_hx2,z_hy2,z_hz2)
+              end do !with or without window function-----------------------------------------------------------------!
+            end do !plane---------------------------------------------------------------------------------------------!
+          end do !energy----------------------------------------------------------------------------------------------!
+        end if
+      end do !observation point---------------------------------------------------------------------------------------!
     end if
     
     !make information file for observation
@@ -2933,6 +3183,140 @@ contains
   end subroutine eh_save_plane_integral
   
   !===========================================================================================
+  != calc plane ene data =====================================================================
+  subroutine eh_calc_plane_ene(fs,fe,iobs,iter)
+    use salmon_global,   only: nt_em,dt_em,obs_samp_em,obs_plane_ene_em
+    use structures,      only: s_fdtd_system
+    use math_constants,  only: zi
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh),   intent(inout) :: fe
+    integer,            intent(in)    :: iobs,iter
+    integer    :: ii,ij,i1,i2
+    real(8)    :: t,t_max,wf
+    complex(8) :: f_factor
+    
+    !update time-information, window function
+    t        = dble(iter) *dt_em
+    t_max    = dble(nt_em)*dt_em
+    wf       = 1.0d0 -3.0d0*(t/t_max)**2.0d0 +2.0d0*(t/t_max)**3.0d0
+    
+    !Fourier transformation
+    do ii=1,3
+      if(fe%iobs_pl_pe(iobs,ii)==1) then
+        do ij=1,fe%iobs_num_ene(iobs)
+          !update f_factor
+          f_factor = dt_em*dble(obs_samp_em)*exp(zi*obs_plane_ene_em(iobs,ij)*t)
+          
+          !update time-integration
+          if(ii==1)     then !xy plane
+!$omp parallel
+!$omp do private(i1,i2)
+            do i2=fs%mg%is(2),fs%mg%ie(2)
+            do i1=fs%mg%is(1),fs%mg%ie(1)
+              fe%obs_ex_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ex_xy_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ex_s(i1,i2,fe%iobs_po_id(iobs,3))*wf
+              fe%obs_ex_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ex_xy_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ex_s(i1,i2,fe%iobs_po_id(iobs,3))
+              fe%obs_ey_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ey_xy_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ey_s(i1,i2,fe%iobs_po_id(iobs,3))*wf
+              fe%obs_ey_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ey_xy_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ey_s(i1,i2,fe%iobs_po_id(iobs,3))
+              fe%obs_ez_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ez_xy_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ez_s(i1,i2,fe%iobs_po_id(iobs,3))*wf
+              fe%obs_ez_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ez_xy_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ez_s(i1,i2,fe%iobs_po_id(iobs,3))
+              fe%obs_hx_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hx_xy_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hx_s(i1,i2,fe%iobs_po_id(iobs,3))*wf
+              fe%obs_hx_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hx_xy_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hx_s(i1,i2,fe%iobs_po_id(iobs,3))
+              fe%obs_hy_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hy_xy_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hy_s(i1,i2,fe%iobs_po_id(iobs,3))*wf
+              fe%obs_hy_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hy_xy_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hy_s(i1,i2,fe%iobs_po_id(iobs,3))
+              fe%obs_hz_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hz_xy_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hz_s(i1,i2,fe%iobs_po_id(iobs,3))*wf
+              fe%obs_hz_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hz_xy_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hz_s(i1,i2,fe%iobs_po_id(iobs,3))
+            end do
+            end do
+!$omp end do
+!$omp end parallel
+          elseif(ii==2) then !yz plane
+!$omp parallel
+!$omp do private(i1,i2)
+            do i2=fs%mg%is(3),fs%mg%ie(3)
+            do i1=fs%mg%is(2),fs%mg%ie(2)
+              fe%obs_ex_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ex_yz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ex_s(fe%iobs_po_id(iobs,1),i1,i2)*wf
+              fe%obs_ex_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ex_yz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ex_s(fe%iobs_po_id(iobs,1),i1,i2)
+              fe%obs_ey_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ey_yz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ey_s(fe%iobs_po_id(iobs,1),i1,i2)*wf
+              fe%obs_ey_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ey_yz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ey_s(fe%iobs_po_id(iobs,1),i1,i2)
+              fe%obs_ez_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ez_yz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ez_s(fe%iobs_po_id(iobs,1),i1,i2)*wf
+              fe%obs_ez_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ez_yz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ez_s(fe%iobs_po_id(iobs,1),i1,i2)
+              fe%obs_hx_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hx_yz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hx_s(fe%iobs_po_id(iobs,1),i1,i2)*wf
+              fe%obs_hx_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hx_yz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hx_s(fe%iobs_po_id(iobs,1),i1,i2)
+              fe%obs_hy_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hy_yz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hy_s(fe%iobs_po_id(iobs,1),i1,i2)*wf
+              fe%obs_hy_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hy_yz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hy_s(fe%iobs_po_id(iobs,1),i1,i2)
+              fe%obs_hz_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hz_yz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hz_s(fe%iobs_po_id(iobs,1),i1,i2)*wf
+              fe%obs_hz_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hz_yz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hz_s(fe%iobs_po_id(iobs,1),i1,i2)
+            end do
+            end do
+!$omp end do
+!$omp end parallel
+          elseif(ii==3) then !xz plane
+!$omp parallel
+!$omp do private(i1,i2)
+            do i2=fs%mg%is(3),fs%mg%ie(3)
+            do i1=fs%mg%is(1),fs%mg%ie(1)
+              fe%obs_ex_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ex_xz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ex_s(i1,fe%iobs_po_id(iobs,2),i2)*wf
+              fe%obs_ex_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ex_xz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ex_s(i1,fe%iobs_po_id(iobs,2),i2)
+              fe%obs_ey_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ey_xz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ey_s(i1,fe%iobs_po_id(iobs,2),i2)*wf
+              fe%obs_ey_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ey_xz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ey_s(i1,fe%iobs_po_id(iobs,2),i2)
+              fe%obs_ez_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ez_xz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%ez_s(i1,fe%iobs_po_id(iobs,2),i2)*wf
+              fe%obs_ez_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ez_xz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%ez_s(i1,fe%iobs_po_id(iobs,2),i2)
+              fe%obs_hx_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hx_xz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hx_s(i1,fe%iobs_po_id(iobs,2),i2)*wf
+              fe%obs_hx_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hx_xz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hx_s(i1,fe%iobs_po_id(iobs,2),i2)
+              fe%obs_hy_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hy_xz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hy_s(i1,fe%iobs_po_id(iobs,2),i2)*wf
+              fe%obs_hy_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hy_xz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hy_s(i1,fe%iobs_po_id(iobs,2),i2)
+              fe%obs_hz_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hz_xz_ene(i1,i2,iobs,ij,1) &
+                                                 +f_factor*fe%hz_s(i1,fe%iobs_po_id(iobs,2),i2)*wf
+              fe%obs_hz_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hz_xz_ene(i1,i2,iobs,ij,2) &
+                                                 +f_factor*fe%hz_s(i1,fe%iobs_po_id(iobs,2),i2)
+            end do
+            end do
+!$omp end do
+!$omp end parallel
+          end if
+        end do
+      end if
+    end do
+    
+    return
+  end subroutine eh_calc_plane_ene
+  
+  !===========================================================================================
   != Fourier transformation in eh ============================================================
   subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
     use salmon_global,  only: yn_wf_em
@@ -3330,7 +3714,7 @@ contains
     return
   contains
     
-    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ CONTAINED IN eh_make_shape ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ rotation around x-axis ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     subroutine rotate_x(x_in,y_in,z_in,rot_in,x_out)
       implicit none
@@ -3343,7 +3727,7 @@ contains
       
     end subroutine rotate_x
     
-    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ CONTAINED IN eh_make_shape ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ rotation around y-axis ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     subroutine rotate_y(x_in,y_in,z_in,rot_in,y_out)
       implicit none
@@ -3356,7 +3740,7 @@ contains
       
     end subroutine rotate_y
     
-    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ CONTAINED IN eh_make_shape ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ rotation around z-axis ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     subroutine rotate_z(x_in,y_in,z_in,rot_in,z_out)
       implicit none
