@@ -407,6 +407,7 @@ contains
       & obs_num_em,               &
       & obs_samp_em,              &
       & obs_loc_em,               &
+      & obs_plane_ene_em,         &
       & yn_obs_plane_em,          &
       & yn_obs_plane_integral_em, &
       & yn_wf_em,                 &
@@ -750,6 +751,7 @@ contains
     obs_num_em                  = 0
     obs_samp_em                 = 1
     obs_loc_em(:,:)             = 0d0
+    obs_plane_ene_em(:,:)       = -1d0
     yn_obs_plane_em(:)          = 'n'
     yn_obs_plane_integral_em(:) = 'n'
     yn_wf_em                    = 'y'
@@ -1238,6 +1240,8 @@ contains
     call comm_bcast(obs_samp_em              ,nproc_group_global)
     call comm_bcast(obs_loc_em               ,nproc_group_global)
     obs_loc_em = obs_loc_em * ulength_to_au
+    call comm_bcast(obs_plane_ene_em         ,nproc_group_global)
+    obs_plane_ene_em = obs_plane_ene_em * uenergy_to_au
     call comm_bcast(yn_obs_plane_em          ,nproc_group_global)
     call comm_bcast(yn_obs_plane_integral_em ,nproc_group_global)
     call comm_bcast(yn_wf_em                 ,nproc_group_global)
@@ -2019,12 +2023,19 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
       if(obs_num_em==0) then
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
+        write(fh_variables_log, '("#",4X,A,"=",ES14.5)')  'obs_plane_ene_em', obs_plane_ene_em(1,1)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_integral_em', yn_obs_plane_integral_em(1)
       else
         do i = 1,obs_num_em
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') &
                                   'obs_loc_em(',i,',:)', obs_loc_em(i,:)
+          do j = 1,size(obs_plane_ene_em,2)
+            if( (j==1) .or. (obs_plane_ene_em(i,j)>=0.0d0) ) then
+              write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES14.5)') &
+                                  'obs_plane_ene_em(',i,',',j,')', obs_plane_ene_em(i,j)
+            end if
+          end do
           write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
                                   'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
