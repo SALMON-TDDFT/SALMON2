@@ -139,7 +139,7 @@ contains
     !set density
     allocate(dens(num_jm)); dens(:)=0.0d0;
     do ii=1,num_jm
-      dens(ii) = 1.0d0/(4.0d0*pi/3.0*(rs_bohr_jm(ii)**3.0d0))
+      dens(ii) = 1.0d0/(4.0d0*pi/3.0d0*(rs_bohr_jm(ii)**3.0d0))
     end do
     
     !make rho_jm
