@@ -272,7 +272,7 @@ contains
           u_Vnlr_u(3)= conjg(uVpsi(ib1,ik))*uVpsiz(ib2,ik)
 
           u_rVnl_Vnlr_u_l(:,ib1,ib2,ik) = u_rVnl_Vnlr_u_l(:,ib1,ib2,ik)  &
-          &                               + u_rVnl_u(:) - u_Vnlr_u(:)
+          &                               + ( u_rVnl_u(:) - u_Vnlr_u(:) ) * system%Hvol
        enddo
        enddo
 !$omp end do
