@@ -400,7 +400,7 @@ contains
 !       enddo
 
        !<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
-       write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)"
+       write(fh_tm,*) "# -i* <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)"
        do ik =1,NK
        do ib1=1,NB
        do ib2=1,NB
