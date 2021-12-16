@@ -121,12 +121,9 @@ contains
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
     complex(8),allocatable :: gtpsi(:,:,:,:),gtpsi_l(:,:,:,:)
-    complex(8),allocatable :: uVpsi(:,:),uVpsix(:,:),uVpsiy(:,:),uVpsiz(:,:)
-    complex(8),allocatable :: uVpsixx(:,:),uVpsixy(:,:),uVpsixz(:,:)
-    complex(8),allocatable :: uVpsiyy(:,:),uVpsiyz(:,:),uVpsizz(:,:)
+    complex(8),allocatable :: uVpsi(:),uVpsi_l(:),uVrpsi(:,:),uVrpsi_l(:,:)
     complex(8),allocatable :: u_rVnl_Vnlr_u(:,:,:,:),u_rVnl_Vnlr_u_l(:,:,:,:)
     complex(8) :: u_rVnl_u(3),u_Vnlr_u(3),veik
-    complex(8),allocatable ::  u_rVnlr_Vnlrr_u(:,:,:,:),u_rVnlr_Vnlrr_u_l(:,:,:,:)
 !    complex(8) :: ctmp1,ctmp2
     complex(8) :: wrk(3)
     character(100) :: file_tm_data
@@ -165,9 +162,8 @@ contains
 
     Nlma = ppg%Nlma
 
-    allocate(upu_l(3,NB,NB,NK),upu(3,NB,NB,NK),uVpsi(NB,NK),uVpsix(NB,NK),uVpsiy(NB,NK),uVpsiz(NB,NK), &
-    uVpsixx(NB,NK),uVpsixy(NB,NK),uVpsixz(NB,NK),uVpsiyy(NB,NK),uVpsiyz(NB,NK),uVpsizz(NB,NK), &
-    u_rVnl_Vnlr_u(3,NB,NB,NK),u_rVnl_Vnlr_u_l(3,NB,NB,NK),u_rVnlr_Vnlrr_u(3,3,NB,NK),u_rVnlr_Vnlrr_u_l(3,3,NB,NK))
+    allocate(upu_l(3,NB,NB,NK),upu(3,NB,NB,NK),uVpsi(NB),uVpsi_l(NB),uVrpsi(3,NB),uVrpsi_l(3,NB), &
+    u_rVnl_Vnlr_u(3,NB,NB,NK),u_rVnl_Vnlr_u_l(3,NB,NB,NK))
 
     !calculate <u_nk|p_j|u_mk>  (j=x,y,z)
 
@@ -235,139 +231,53 @@ contains
     endif
     !-------------------------------------------------
 
-    !calculate <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
+    !calculate -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
+    
     u_rVnl_Vnlr_u_l = 0d0
     do ik=ik_s,ik_e
     do ilma=1,Nlma
-       ia=ppg%ia_tbl(ilma)
-       uVpsi=0d0;  uVpsix=0d0;  uVpsiy=0d0;  uVpsiz=0d0
-       do j=1,ppg%Mps(ia)
-          x = ppg%Rxyz(1,j,ia)
-          y = ppg%Rxyz(2,j,ia)
-          z = ppg%Rxyz(3,j,ia)
-          ix = ppg%Jxyz(1,j,ia)
-          iy = ppg%Jxyz(2,j,ia)
-          iz = ppg%Jxyz(3,j,ia)
-          veik = conjg(ppg%zekr_uV(j,ilma,ik))
-          do ib=1,NB
-          uVpsi( ib,ik) =uVpsi( ib,ik)+ veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
-          uVpsix(ib,ik) =uVpsix(ib,ik)+ veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
-          uVpsiy(ib,ik) =uVpsiy(ib,ik)+ veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
-          uVpsiz(ib,ik) =uVpsiz(ib,ik)+ veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
-          enddo
-       end do
-       uVpsi  = uVpsi * ppg%rinv_uvu(ilma)
+      ia=ppg%ia_tbl(ilma)
+      uVpsi_l=0d0;  uVrpsi_l=0d0
+      do j=1,ppg%Mps(ia)
+        x = ppg%Rxyz(1,j,ia)
+        y = ppg%Rxyz(2,j,ia)
+        z = ppg%Rxyz(3,j,ia)
+        ix = ppg%Jxyz(1,j,ia)
+        iy = ppg%Jxyz(2,j,ia)
+        iz = ppg%Jxyz(3,j,ia)
+        veik = conjg(ppg%zekr_uV(j,ilma,ik))
+        do ib=1,NB
+          uVpsi_l(ib)    = uVpsi_l(ib)    + veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
+          uVrpsi_l(1,ib) = uVrpsi_l(1,ib) + veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
+          uVrpsi_l(2,ib) = uVrpsi_l(2,ib) + veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
+          uVrpsi_l(3,ib) = uVrpsi_l(3,ib) + veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
+        enddo
+      end do
+      uVpsi_l  = uVpsi_l * ppg%rinv_uvu(ilma)
+      call comm_summation(uVpsi_l,uVpsi,NB,info%icomm_r)
+      call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_r)
 
 !$omp parallel
 !$omp do private(ib1,ib2,u_rVnl_u,u_Vnlr_u) collapse(2)
-       do ib1=1,NB
-       do ib2=1,NB
-          !<u|e^-ik*r|v><v|e^ik|u>
-          u_rVnl_u(1)= conjg(uVpsix(ib1,ik))*uVpsi(ib2,ik)
-          u_rVnl_u(2)= conjg(uVpsiy(ib1,ik))*uVpsi(ib2,ik)
-          u_rVnl_u(3)= conjg(uVpsiz(ib1,ik))*uVpsi(ib2,ik)
-          !<u|e^-ik|v><v|e^ik*r|u>
-          u_Vnlr_u(1)= conjg(uVpsi(ib1,ik))*uVpsix(ib2,ik)
-          u_Vnlr_u(2)= conjg(uVpsi(ib1,ik))*uVpsiy(ib2,ik)
-          u_Vnlr_u(3)= conjg(uVpsi(ib1,ik))*uVpsiz(ib2,ik)
-
-          u_rVnl_Vnlr_u_l(:,ib1,ib2,ik) = u_rVnl_Vnlr_u_l(:,ib1,ib2,ik)  &
-          &                               - zi * ( u_rVnl_u(:) - u_Vnlr_u(:) ) * system%Hvol
-       enddo
-       enddo
+      do ib1=1,NB
+      do ib2=1,NB
+        !<u|e^{-ik}*r|v><v|e^{ik}|u>
+        u_rVnl_u(1:3) = conjg(uVrpsi(1:3,ib1))*uVpsi(ib2)
+        
+        !<u|e^{-ik}|v><v|e^{ik}*r|u>
+        u_Vnlr_u(1:3) = conjg(uVpsi(ib1))*uVrpsi(1:3,ib2)
+        
+        u_rVnl_Vnlr_u_l(:,ib1,ib2,ik) = u_rVnl_Vnlr_u_l(:,ib1,ib2,ik)  &
+        &                               - zi * ( u_rVnl_u(:) - u_Vnlr_u(:) ) * system%Hvol
+      enddo
+      enddo
 !$omp end do
 !$omp end parallel
     enddo  !ilma
     enddo  !ik
-    call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_rko)
+    call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_ko)
 
-
-!    !calculate <u_nk|[r_j,dVnl^(0)]r|u_nk>  (j=x,y,z)
-!    u_rVnlr_Vnlrr_u_l(:,:,:,:) = 0d0
-!    do ik=ik_s,ik_e
-!    do ilma=1,Nlma
-!       ia=ppg%ia_tbl(ilma)
-!       uVpsi=0d0;  uVpsix=0d0;  uVpsiy=0d0;  uVpsiz=0d0
-!       uVpsixx=0d0;  uVpsixy=0d0;  uVpsixz=0d0
-!                     uVpsiyy=0d0;  uVpsiyz=0d0
-!                                   uVpsizz=0d0
-!       do j=1,ppg%Mps(ia)
-!          x = ppg%Rxyz(1,j,ia)
-!          y = ppg%Rxyz(2,j,ia)
-!          z = ppg%Rxyz(3,j,ia)
-!          ix = ppg%Jxyz(1,j,ia)
-!          iy = ppg%Jxyz(2,j,ia)
-!          iz = ppg%Jxyz(3,j,ia)
-!          veik = conjg(ppg%zekr_uV(j,ilma,ik))
-!          do ib=1,NB
-!          uVpsi(  ib,ik)=uVpsi(  ib,ik)+veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
-!          uVpsix( ib,ik)=uVpsix( ib,ik)+veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
-!          uVpsiy( ib,ik)=uVpsiy( ib,ik)+veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
-!          uVpsiz( ib,ik)=uVpsiz( ib,ik)+veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
-!          uVpsixx(ib,ik)=uVpsixx(ib,ik)+veik*x*x*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xx|u>
-!          uVpsixy(ib,ik)=uVpsixy(ib,ik)+veik*x*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xy|u>
-!          uVpsixz(ib,ik)=uVpsixz(ib,ik)+veik*x*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xz|u>
-!          uVpsiyy(ib,ik)=uVpsiyy(ib,ik)+veik*y*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yy|u>
-!          uVpsiyz(ib,ik)=uVpsiyz(ib,ik)+veik*y*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yz|u>
-!          uVpsizz(ib,ik)=uVpsizz(ib,ik)+veik*z*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*zz|u>
-!          enddo
-!
-!       end do
-!
-!       do ib=1,NB
-!          !xx
-!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsix( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixx(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !xy
-!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiy( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !xz
-!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiz( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !yx
-!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsix( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !yy
-!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiy( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyy(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !yz
-!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiz( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !zx
-!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsix( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !zy
-!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiy( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !zz
-!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiz( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsizz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!
-!       enddo
-!
-!    enddo  !ilma
-!    enddo  !ik
-!    call comm_summation(u_rVnlr_Vnlrr_u_l,u_rVnlr_Vnlrr_u,3*3*NB*NK,info%icomm_rko)
-
-    file_tm_data = trim(sysname)//'_tm.data'!??????
+    file_tm_data = trim(sysname)//'_tm.data'
 
     if (comm_is_root(nproc_id_global)) then
       fh_tm = open_filehandle(file_tm_data, status="replace")
@@ -377,37 +287,27 @@ contains
 
       !Currently, TEST: print format is not decided
 
-       !<u_nk|p_j|u_mk>  (j=x,y,z)
-       write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
-       do ik =1,NK
-       do ib1=1,NB
-       do ib2=1,NB
-          write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
-       enddo
-       enddo
-       enddo
+      !<u_nk|p_j|u_mk>  (j=x,y,z)
+      write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+      do ik =1,NK
+      do ib1=1,NB
+      do ib2=1,NB
+        write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
+      enddo
+      enddo
+      enddo
 !9000     format(3i8,6e18.10)
 9000     format(3i8,6e18.5)
 
-!       !<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)
-!       write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)"
-!       do ik=1,NK
-!       do ib=1,NB
-!          do i=1,3
-!             write(fh_tm,9000) ik,ib,i,(u_rVnlr_Vnlrr_u(i,j,ib,ik),j=1,3)
-!          enddo
-!       enddo
-!       enddo
-
-       !<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
-       write(fh_tm,*) "# -i* <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)"
-       do ik =1,NK
-       do ib1=1,NB
-       do ib2=1,NB
-          write(fh_tm,9000) ik,ib1,ib2,(u_rVnl_Vnlr_u(j,ib1,ib2,ik),j=1,3)
-       enddo
-       enddo
-       enddo
+      ! -i*<u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
+      write(fh_tm,*) "# -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)"
+      do ik =1,NK
+      do ib1=1,NB
+      do ib2=1,NB
+        write(fh_tm,9000) ik,ib1,ib2,(u_rVnl_Vnlr_u(j,ib1,ib2,ik),j=1,3)
+      enddo
+      enddo
+      enddo
 
     end if
 
