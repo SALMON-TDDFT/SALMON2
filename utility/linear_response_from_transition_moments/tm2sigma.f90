@@ -148,9 +148,9 @@ contains
       do ib=1,NB
         do jb=1,NB
           read(fh, *) idummy, idummy, idummy,tmp(1:6)
-          matrix_v(ib, jb, 1, ik) = matrix_p(ib, jb, 1, ik) - zi* dcmplx(tmp(1), tmp(2)) ! <u_ib,k|[r_1,V_nl]|u_jb,k>/i
-          matrix_v(ib, jb, 2, ik) = matrix_p(ib, jb, 2, ik) - zi* dcmplx(tmp(3), tmp(4)) ! <u_ib,k|[r_2,V_nl]|u_jb,k>/i
-          matrix_v(ib, jb, 3, ik) = matrix_p(ib, jb, 3, ik) - zi* dcmplx(tmp(5), tmp(6)) ! <u_ib,k|[r_3,V_nl]|u_jb,k>/i
+          matrix_v(ib, jb, 1, ik) = matrix_p(ib, jb, 1, ik) + dcmplx(tmp(1), tmp(2)) ! <u_ib,k|[r_1,V_nl]|u_jb,k>/i
+          matrix_v(ib, jb, 2, ik) = matrix_p(ib, jb, 2, ik) + dcmplx(tmp(3), tmp(4)) ! <u_ib,k|[r_2,V_nl]|u_jb,k>/i
+          matrix_v(ib, jb, 3, ik) = matrix_p(ib, jb, 3, ik) + dcmplx(tmp(5), tmp(6)) ! <u_ib,k|[r_3,V_nl]|u_jb,k>/i
         enddo
       enddo
     enddo
