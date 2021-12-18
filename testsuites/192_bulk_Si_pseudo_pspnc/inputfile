@@ -36,7 +36,7 @@
 /
 
 &rgrid
-  num_rgrid = 24, 24, 24
+  num_rgrid = 16, 16, 16
 /
 
 &kgrid
@@ -50,7 +50,7 @@
 
 &scf
   ncg = 4
-  nscf = 200
+  nscf = 300
   threshold = 1.d-9
 /
 
