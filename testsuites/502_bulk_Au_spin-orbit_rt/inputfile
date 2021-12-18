@@ -1,0 +1,70 @@
+&calculation
+!  theory='dft'
+  theory='tddft_pulse'
+/
+
+&parallel
+  nproc_k=4
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+
+&control
+  sysname = 'Au'
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec1 = 3.861, 3.861, 0.000
+  al_vec2 = 0.000, 3.861, 3.861
+  al_vec3 = 3.861, 0.000, 3.861
+  nstate = 20
+  nelec = 19
+  nelem = 1
+  natom = 1
+  spin  = 'polarized'
+  yn_spinorbit = 'y'
+/
+
+&pseudo
+  izatom(1) = 79
+  file_pseudo(1) = './Au.upf'
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  num_rgrid = 12, 12, 12
+/
+
+&kgrid
+  num_kgrid = 2, 2, 2
+/
+
+&tgrid
+  nt = 1000
+  dt = 0.01
+/
+
+&emfield
+  ae_shape1 = 'Acos2'
+  I_wcm2_1 = 1d14
+  tw1 = 5.0
+  omega1 = 0.312369 ! 8.5 eV
+  epdir_re1 = 0., 0., 1.
+/
+
+&scf
+  ncg = 4
+  method_mixing='simple_dm'
+  mixrate=0.2
+  nscf = 500
+  threshold = 1.d-8
+/
+
+&atomic_coor
+  'Au'	0.0	0.0	0.0	1
+/
+
