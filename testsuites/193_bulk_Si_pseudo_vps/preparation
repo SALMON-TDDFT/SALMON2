@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON. 
+# if required, this script file can utilized for the preparation of 
+# the input data for the following calculations.
+
+wget https://t-ozaki.issp.u-tokyo.ac.jp/vps_pao2019/Si/Si_CA19.vps
+
