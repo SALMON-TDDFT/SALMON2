@@ -13,16 +13,16 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "JM_eigen.data",
+    "Au_eigen.data",
 ]
 
 # difference of eigen energies for io=1 and io=2 with ik=2"
-reference_value_1 = 15.56457
-permissible_error_1 = 0.01 # [eV]
+reference_value_1 = 5.319051e-03
+permissible_error_1 = 0.00004 # (~0.001eV)
 
-# difference of eigen energies for io=4 and io=5 with ik=2"
-reference_value_2 = 9.99940
-permissible_error_2 = 0.01 # [eV]
+# difference of eigen energies for io=15 and io=16 with ik=2"
+reference_value_2 = 2.464173e-03
+permissible_error_2 = 0.00004 # (~0.001eV)
 
 print("# Checking the existance of outputfile")
 for item in filelist:
@@ -33,18 +33,18 @@ for item in filelist:
 print("# Checking calculated result")
 
 linecount = 0
-for line in open("JM_eigen.data"):
+for line in open("Au_eigen.data"):
     linecount += 1
-    if linecount == 12: # line 12 (io=1, ik=2)
+    if linecount == 38: # line 38 (io=1, ik=2)
        data = line.split()
        v1 = float(data[1])
-    if linecount == 13: # line 13 (io=2, ik=2)
+    if linecount == 39: # line 39 (io=2, ik=2)
        data = line.split()
        v2 = float(data[1])
-    if linecount == 15: # line 15 (io=4, ik=2)
+    if linecount == 53: # line 53 (io=15, ik=2)
        data = line.split()
        v3 = float(data[1])
-    if linecount == 16: # line 16 (io=5, ik=2)
+    if linecount == 54: # line 54 (io=16, ik=2)
        data = line.split()
        v4 = float(data[1])
 

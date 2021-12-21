@@ -20,7 +20,7 @@ enable_testing()
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD          99)
 project(SALMON
-        VERSION   2.0.1
+        VERSION   2.0.2
         LANGUAGES Fortran C
         )
 

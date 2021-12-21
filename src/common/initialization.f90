@@ -368,7 +368,7 @@ end subroutine init_parallel_dft
 
 subroutine init_grid_whole(rsize,hgs,lg)
   use structures, only: s_rgrid
-  use salmon_global, only: iperiodic,dl,num_rgrid,theory,al_em,dl_em
+  use salmon_global, only: iperiodic,dl,num_rgrid,theory,al_em,dl_em,num_rgrid_em
   implicit none
   real(8),intent(in) :: rsize(3),hgs(3)
   type(s_rgrid)      :: lg
@@ -419,7 +419,11 @@ subroutine init_grid_whole(rsize,hgs,lg)
 
   select case(theory)
   case('maxwell')
-    if( maxval(abs((al_em/dl_em)-dble(lg%num))) > 1d-4 ) stop "error: abs((al_em/dl_em)-dble(lg%num)) is too large"
+    if(sum(abs(dl_em)) <= 1d-12) then
+      if( maxval(abs(num_rgrid_em-lg%num)) > 0) stop "error: num_rgrid_em /= lg%num"
+    else
+      if( maxval(abs((al_em/dl_em)-dble(lg%num))) > 1d-4 ) stop "error: abs((al_em/dl_em)-dble(lg%num)) is too large"
+    end if
   case default
     if(sum(abs(dl)) <= 1d-12) then
       if( maxval(abs(num_rgrid-lg%num)) > 0) stop "error: num_rgrid /= lg%num"
