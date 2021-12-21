@@ -150,7 +150,7 @@ module structures
     integer :: icomm_x,id_x,isize_x ! x-axis
     integer :: icomm_y,id_y,isize_y ! y-axis
     integer :: icomm_z,id_z,isize_z ! z-axis
-    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
+    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD (and for FFTW)
   ! for atom index #ia
     integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
     integer :: nion_mg
@@ -180,6 +180,12 @@ module structures
     integer :: icomm_y_isolated_ffte,id_y_isolated_ffte,isize_y_isolated_ffte ! y-axis for isolated_ffte
     integer :: icomm_z_isolated_ffte,id_z_isolated_ffte,isize_z_isolated_ffte ! z-axis for isolated_ffte
     integer :: icomm_o_isolated_ffte,id_o_isolated_ffte,isize_o_isolated_ffte ! o-axis for isolated_ffte
+#ifdef USE_FFTW
+    integer :: iaddress_isolated_fftw(6) ! address of MPI for isolated_ffte (ix,iy,iz,io3,io4,ik)
+    integer,allocatable :: imap_isolated_fftw(:,:,:,:,:,:) ! address map for isolated_fftw 
+    integer :: icomm_z_isolated_fftw,id_z_isolated_fftw,isize_z_isolated_fftw ! z-axis for isolated_fftw
+    integer :: icomm_o_isolated_fftw,id_o_isolated_fftw,isize_o_isolated_fftw ! o-axis for isolated_fftw
+#endif
   end type s_parallel_info
 
   type s_orbital
@@ -361,6 +367,10 @@ module structures
     complex(8),allocatable :: ff3x(:,:,:),ff3y(:,:,:),ff3z(:,:,:),ff4x(:,:,:),ff4y(:,:,:),ff4z(:,:,:) ! for isolated_ffte
   ! for FFTE
     complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)
+#ifdef USE_FFTW
+  ! for FFTW
+    complex(8),allocatable :: fftw1(:,:,:),fftw2(:,:,:)
+#endif
   end type s_poisson
 
   type s_fdtd_system

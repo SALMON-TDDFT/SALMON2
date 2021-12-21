@@ -77,6 +77,9 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
+#ifdef USE_FFTW
+  character(1)   :: yn_fftw
+#endif
   character(1)   :: yn_scalapack
   character(1)   :: yn_eigenexa
   character(1)   :: yn_diagonalization_red_mem

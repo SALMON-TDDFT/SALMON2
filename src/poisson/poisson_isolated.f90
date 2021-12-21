@@ -1034,6 +1034,229 @@ subroutine poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
   return
 end subroutine poisson_isolated_ffte
 
+#ifdef USE_FFTW
+subroutine poisson_isolated_fftw(lg,mg,info,fg,rho,Vh,poisson)
+  use structures
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_summation, comm_bcast
+  use, intrinsic :: iso_c_binding
+  implicit none
+  include 'fftw3-mpi.f03'
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: mg
+  type(s_parallel_info)  ,intent(in) :: info
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_scalar)                     :: Vh
+  type(s_poisson)                    :: poisson
+  !
+  integer :: ix,iy,iz
+  integer :: iiy,iiz,iix
+  integer :: iiy2,iiz2,iix2
+  integer :: nproc_ob
+  real(8) :: inv_lgnum3
+  integer :: ishift_z
+
+  type(C_PTR) :: cdata_1,cdata_2
+  type(C_PTR) :: plan_forward, plan_backward
+  integer(C_INTPTR_T) :: alloc_local, local_N, local_k_offset
+  complex(C_DOUBLE_COMPLEX), pointer :: fdata_1(:,:,:)
+  complex(C_DOUBLE_COMPLEX), pointer :: fdata_2(:,:,:)
+  integer(C_INTPTR_T) :: i, j, k
+  integer(C_INTPTR_T) :: L, M, N
+  integer*8 :: int8_plan_forward, int8_plan_backward
+
+  inv_lgnum3=1.d0/(8*lg%num(1)*lg%num(2)*lg%num(3))
+
+  nproc_ob = info%nporbital
+
+  if(mod(nproc_ob,2)==0)then
+
+    L = 2*lg%num(1)
+    M = 2*lg%num(2)
+    N = 2*lg%num(3)
+
+    poisson%fftw1=0.d0
+    if(info%iaddress_isolated_fftw(4)==0)then
+!$OMP parallel do private(ix,iy,iz,iix,iiy,iiz) collapse(2)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        iiz=iz+mg%is(3)-1
+        iiy=iy+mg%is(2)-1
+        iix=ix+mg%is(1)-1
+        iiz2=iz
+        iiy2=iy+mg%is(2)-lg%is(2)
+        iix2=ix+mg%is(1)-lg%is(1)
+        poisson%fftw1(iix2,iiy2,iiz2) = dcmplx(rho%f(iix,iiy,iiz))
+      end do
+      end do
+      end do
+    end if
+
+    call comm_summation(poisson%fftw1,poisson%fftw2,2*lg%num(1)*2*lg%num(2)*mg%num(3),info%icomm_xy)
+
+!   get local data size and allocate (note dimension reversal)
+    alloc_local = fftw_mpi_local_size_3d(N, M, L, &
+       &                info%icomm_z_isolated_fftw, local_N, local_k_offset)
+    cdata_1 = fftw_alloc_complex(alloc_local)
+    cdata_2 = fftw_alloc_complex(alloc_local)
+    call c_f_pointer(cdata_1, fdata_1, [L, M, local_N])
+    call c_f_pointer(cdata_2, fdata_2, [L, M, local_N])
+
+!   create MPI plan for in-place forward DFT (note dimension reversal)
+    plan_forward = fftw_mpi_plan_dft_3d(N, M, L, fdata_1, fdata_2, &
+     &             info%icomm_z_isolated_fftw, FFTW_FORWARD, FFTW_MEASURE)
+!   create MPI plan for in-place backward DFT (note dimension reversal)
+    plan_backward = fftw_mpi_plan_dft_3d(N, M, L, fdata_2, fdata_1, &
+     &              info%icomm_z_isolated_fftw, FFTW_BACKWARD, FFTW_MEASURE)
+
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, local_N
+    do j = 1, M
+    do i = 1, L
+      fdata_1(i, j, k) = poisson%fftw2(i, j, k)
+    end do
+    end do
+    end do
+
+    call fftw_mpi_execute_dft(plan_forward, fdata_1, fdata_2)
+
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, local_N
+    do j = 1, M
+    do i = 1, L
+      poisson%fftw2(i,j,k) = fdata_2(i,j,k)
+    end do
+    end do
+    end do
+
+    poisson%zrhoG_ele=0d0
+    if(info%iaddress_isolated_fftw(4)==1)then
+      ishift_z = lg%num(3)
+    else
+      ishift_z = 0
+    end if
+
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(iz,iy,ix,iiy,iiz,iix) &
+!$omp             shared(mg,lg,poisson,inv_lgnum3,fg,ishift_z)
+    do iz=1,mg%num(3)
+    do iy=1,2*lg%num(2)
+      iiz=iz+mg%is(3)-lg%is(3)+ishift_z
+      do ix=1,2*lg%num(1)
+        poisson%zrhoG_ele(ix,iy,iiz) = poisson%fftw2(ix,iy,iz)*inv_lgnum3
+      end do
+      do ix=1,2*lg%num(1)
+        poisson%fftw2(ix,iy,iz) = poisson%fftw2(ix,iy,iz) * fg%coef(ix,iy,iiz)*inv_lgnum3
+      end do
+    end do
+    end do
+!$omp end parallel do
+  
+
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, local_N
+    do j = 1, M
+    do i = 1, L
+      fdata_2(i,j,k) = poisson%fftw2(i,j,k)
+    end do
+    end do
+    end do
+
+    call fftw_mpi_execute_dft(plan_backward, fdata_2, fdata_1)
+
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, local_N
+    do j = 1, M
+    do i = 1, L
+      poisson%fftw2(i,j,k) = fdata_1(i,j,k)
+    end do
+    end do
+    end do
+  
+    if(info%iaddress_isolated_fftw(4)==0)then
+!$OMP parallel do private(iiz,iiy) collapse(2)
+      do iz=1+mg%is(3)-lg%is(3),mg%num(3)+mg%is(3)-lg%is(3)
+      do iy=1+mg%is(2)-lg%is(2),mg%num(2)+mg%is(2)-lg%is(2)
+        iiz=iz+lg%is(3)-1
+        iiy=iy+lg%is(2)-1
+        Vh%f(mg%is(1):mg%ie(1),iiy,iiz) = poisson%fftw2(1+mg%is(1)-lg%is(1):mg%num(1)+mg%is(1)-lg%is(1),iy,iz)
+      end do
+      end do
+    end if
+    call comm_bcast(Vh%f,info%icomm_o_isolated_fftw,0)
+
+    call fftw_destroy_plan(plan_forward)
+    call fftw_destroy_plan(plan_backward)
+    call fftw_free(cdata_1)
+    call fftw_free(cdata_2)
+
+  else
+
+    call dfftw_plan_dft_3d(int8_plan_forward,2*lg%num(1),2*lg%num(2),2*lg%num(3),  &
+                           poisson%fftw2,poisson%fftw1,FFTW_FORWARD,FFTW_ESTIMATE)
+
+    poisson%fftw1=0.d0
+!$OMP parallel do collapse(2) private(ix,iy,iz,iix,iiy,iiz,iix2,iiy2,iiz2)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+    do ix=1,mg%num(1)
+      iiz=iz+mg%is(3)-1
+      iiy=iy+mg%is(2)-1
+      iix=ix+mg%is(1)-1
+      iiz2=iz+mg%is(3)-lg%is(3)
+      iiy2=iy+mg%is(2)-lg%is(2)
+      iix2=ix+mg%is(1)-lg%is(1)
+      poisson%fftw1(iix2,iiy2,iiz2)=dcmplx(rho%f(iix,iiy,iiz))
+    end do
+    end do
+    end do
+
+    call comm_summation(poisson%fftw1,poisson%fftw2,8*lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
+
+    call dfftw_execute_dft(int8_plan_forward, poisson%fftw2, poisson%fftw1)
+  
+    call dfftw_destroy_plan(int8_plan_forward)
+
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(iz,iy,ix) &
+!$omp             shared(lg,poisson,inv_lgnum3,fg)
+    do iz=1,2*lg%num(3)
+    do iy=1,2*lg%num(2)
+    do ix=1,2*lg%num(1)
+      poisson%zrhoG_ele(ix,iy,iz) = poisson%fftw1(ix,iy,iz)*inv_lgnum3
+      poisson%fftw1(ix,iy,iz) = poisson%fftw1(ix,iy,iz)*fg%coef(ix,iy,iz)*inv_lgnum3
+    end do
+    end do
+    end do
+
+    call dfftw_plan_dft_3d(int8_plan_backward,2*lg%num(1),2*lg%num(2),2*lg%num(3),  &
+                           poisson%fftw1,poisson%fftw2,FFTW_BACKWARD,FFTW_ESTIMATE)
+
+    call dfftw_execute_dft(int8_plan_backward, poisson%fftw1, poisson%fftw2)
+  
+    call dfftw_destroy_plan(int8_plan_backward)
+
+!$OMP parallel do collapse(2) private(ix,iy,iz,iix,iiy,iiz,iix2,iiy2,iiz2)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+    do ix=1,mg%num(1)
+      iiz=iz+mg%is(3)-1
+      iiy=iy+mg%is(2)-1
+      iix=ix+mg%is(1)-1
+      iiz2=iz+mg%is(3)-lg%is(3)
+      iiy2=iy+mg%is(2)-lg%is(2)
+      iix2=ix+mg%is(1)-lg%is(1)
+      Vh%f(iix,iiy,iiz) = poisson%fftw2(iix2,iiy2,iiz2)
+    end do
+    end do
+    end do
+
+  end if
+  
+end subroutine poisson_isolated_fftw
+#endif
 
 
 end module poisson_isolated
