@@ -2253,6 +2253,9 @@ contains
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_ffte)
+#ifdef USE_FFTW
+    call yn_argument_check(yn_fftw)
+#endif
     call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_eigenexa)
     call yn_argument_check(yn_diagonalization_red_mem)
@@ -2460,6 +2463,12 @@ contains
     case ('cg','ft') ; continue
     case default     ; stop "method_poisson must be 'cg' or 'ft'"
     end select
+
+#ifdef USE_FFTW
+    if(yn_ffte=='y'.and.yn_fftw=='y') then
+      stop "either yn_ffte or yn_fftw can be specified"
+    end if
+#endif
 
   end subroutine check_bad_input
 
