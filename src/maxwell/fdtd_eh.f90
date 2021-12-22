@@ -3566,8 +3566,6 @@ contains
     !make shape
     cal_tmp = 0.0d0
     do ii=1,n_s
-!$omp parallel
-!$omp do private(ix,iy,iz,il,x,y,z,x_o,y_o,z_o,x_tmp,y_tmp,z_tmp,cal_tmp)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3646,8 +3644,6 @@ contains
       end do
       end do
       end do
-!$omp end do
-!$omp end parallel
     end do
     
     !output cube file
