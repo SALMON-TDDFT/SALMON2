@@ -699,6 +699,7 @@ contains
               write(fe%ifn,'(A)') "# Real time calculation:" 
               write(fe%ifn,'(A)') "# IE: Plane integration of electric field" 
               write(fe%ifn,'(A)') "# IH: Plane integration of magnetic field" 
+              write(fe%ifn,'(A)') "# IP: Plane integration of Poynting vector" 
               select case(unit_system)
               case('au','a.u.')
                 write(fe%ifn,'("#",99(1X,I0,":",A))') &
@@ -708,7 +709,10 @@ contains
                       4, "IE_z[a.u.]",                &
                       5, "IH_x[a.u.]",                &
                       6, "IH_y[a.u.]",                &
-                      7, "IH_z[a.u.]"
+                      7, "IH_z[a.u.]",                &
+                      8, "IP_x[a.u.]",                &
+                      9, "IP_y[a.u.]",                &
+                      10,"IP_z[a.u.]"
               case('A_eV_fs')
                 write(fe%ifn,'("#",99(1X,I0,":",A))') &
                       1, "Time[fs]",                  &
@@ -717,7 +721,10 @@ contains
                       4, "IE_z[V*Angstrom]",          &
                       5, "IH_x[A*Angstrom]",          &
                       6, "IH_y[A*Angstrom]",          &
-                      7, "IH_z[A*Angstrom]"
+                      7, "IH_z[A*Angstrom]",          &
+                      8, "IP_x[eV/fs]",               &
+                      9, "IP_y[eV/fs]",               &
+                      10,"IP_z[eV/fs]"
               end select
               close(fe%ifn)
             end do
@@ -2721,7 +2728,7 @@ contains
     !set mpi condition
     info%npk       = nproc_k
     info%nporbital = nproc_ob
-    info%nprgrid    = nproc_rgrid
+    info%nprgrid   = nproc_rgrid
     call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info)
     call init_communicator_dft(nproc_group_global,info)
     
@@ -3074,7 +3081,7 @@ contains
   != save plane data =========================================================================
   subroutine eh_save_plane_integral(id,ipl,conv_e,conv_h,ti,ng_is,ng_ie,dl,Nd,ifn,iobs,ex,ey,ez,hx,hy,hz)
     use salmon_global,   only: base_directory
-    use inputoutput,     only: ulength_from_au
+    use inputoutput,     only: ulength_from_au,uenergy_from_au,utime_from_au
     use parallelization, only: nproc_id_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
     implicit none
@@ -3103,7 +3110,8 @@ contains
                              ng_is(3)-Nd:ng_ie(3)+Nd)
     real(8)          :: ds,&
                         ex_sum1,ex_sum2,ey_sum1,ey_sum2,ez_sum1,ez_sum2,&
-                        hx_sum1,hx_sum2,hy_sum1,hy_sum2,hz_sum1,hz_sum2
+                        hx_sum1,hx_sum2,hy_sum1,hy_sum2,hz_sum1,hz_sum2,&
+                        px_sum1,px_sum2,py_sum1,py_sum2,pz_sum1,pz_sum2
     integer          :: ii,i1,i1s,i2,i2s
     character(2)     :: plane_name
     character(128)   :: save_name
@@ -3122,6 +3130,7 @@ contains
       !prepare integral data
       ex_sum1=0.0d0; ex_sum2=0.0d0; ey_sum1=0.0d0; ey_sum2=0.0d0; ez_sum1=0.0d0; ez_sum2=0.0d0;
       hx_sum1=0.0d0; hx_sum2=0.0d0; hy_sum1=0.0d0; hy_sum2=0.0d0; hz_sum1=0.0d0; hz_sum2=0.0d0;
+      px_sum1=0.0d0; px_sum2=0.0d0; py_sum1=0.0d0; py_sum2=0.0d0; pz_sum1=0.0d0; pz_sum2=0.0d0;
       if(ipl(ii)==1) then
         if(ii==1) then     !xy plane
 !$omp parallel
@@ -3130,6 +3139,9 @@ contains
           do i1=ng_is(i1s),ng_ie(i1s)
             ex_sum1=ex_sum1+ex(i1,i2,id(3)); ey_sum1=ey_sum1+ey(i1,i2,id(3)); ez_sum1=ez_sum1+ez(i1,i2,id(3));
             hx_sum1=hx_sum1+hx(i1,i2,id(3)); hy_sum1=hy_sum1+hy(i1,i2,id(3)); hz_sum1=hz_sum1+hz(i1,i2,id(3));
+            px_sum1=px_sum1+ey(i1,i2,id(3))*hz(i1,i2,id(3));
+            py_sum1=py_sum1+ez(i1,i2,id(3))*hx(i1,i2,id(3));
+            pz_sum1=pz_sum1+ex(i1,i2,id(3))*hy(i1,i2,id(3));
           end do
           end do
 !$omp end do
@@ -3141,6 +3153,9 @@ contains
           do i1=ng_is(i1s),ng_ie(i1s)
             ex_sum1=ex_sum1+ex(id(1),i1,i2); ey_sum1=ey_sum1+ey(id(1),i1,i2); ez_sum1=ez_sum1+ez(id(1),i1,i2);
             hx_sum1=hx_sum1+hx(id(1),i1,i2); hy_sum1=hy_sum1+hy(id(1),i1,i2); hz_sum1=hz_sum1+hz(id(1),i1,i2);
+            px_sum1=px_sum1+ey(id(1),i1,i2)*hz(id(1),i1,i2);
+            py_sum1=py_sum1+ez(id(1),i1,i2)*hx(id(1),i1,i2);
+            pz_sum1=pz_sum1+ex(id(1),i1,i2)*hy(id(1),i1,i2);
           end do
           end do
 !$omp end do
@@ -3152,6 +3167,9 @@ contains
           do i1=ng_is(i1s),ng_ie(i1s)
             ex_sum1=ex_sum1+ex(i1,id(2),i2); ey_sum1=ey_sum1+ey(i1,id(2),i2); ez_sum1=ez_sum1+ez(i1,id(2),i2);
             hx_sum1=hx_sum1+hx(i1,id(2),i2); hy_sum1=hy_sum1+hy(i1,id(2),i2); hz_sum1=hz_sum1+hz(i1,id(2),i2);
+            px_sum1=px_sum1+ey(i1,id(2),i2)*hz(i1,id(2),i2);
+            py_sum1=py_sum1+ez(i1,id(2),i2)*hx(i1,id(2),i2);
+            pz_sum1=pz_sum1+ex(i1,id(2),i2)*hy(i1,id(2),i2);
           end do
           end do
 !$omp end do
@@ -3164,8 +3182,12 @@ contains
       call comm_summation(hx_sum1,hx_sum2,nproc_group_global)
       call comm_summation(hy_sum1,hy_sum2,nproc_group_global)
       call comm_summation(hz_sum1,hz_sum2,nproc_group_global)
+      call comm_summation(px_sum1,px_sum2,nproc_group_global)
+      call comm_summation(py_sum1,py_sum2,nproc_group_global)
+      call comm_summation(pz_sum1,pz_sum2,nproc_group_global)
       ex_sum2=ex_sum2*ds; ey_sum2=ey_sum2*ds; ez_sum2=ez_sum2*ds;
       hx_sum2=hx_sum2*ds; hy_sum2=hy_sum2*ds; hz_sum2=hz_sum2*ds;
+      px_sum2=px_sum2*ds; py_sum2=py_sum2*ds; pz_sum2=pz_sum2*ds;
       
       !save plane integral data
       if(comm_is_root(nproc_id_global)) then
@@ -3174,7 +3196,10 @@ contains
                   '_'//plane_name//'_integral_rt.data'
         open(ifn,file=save_name,status='old',position='append')
         write(ifn,"(F16.8,99(1X,E23.15E3))",advance='no') &
-              ti,ex_sum2*conv_e,ey_sum2*conv_e,ez_sum2*conv_e,hx_sum2*conv_h,hy_sum2*conv_h,hz_sum2*conv_h
+              ti,ex_sum2*conv_e,ey_sum2*conv_e,ez_sum2*conv_e,hx_sum2*conv_h,hy_sum2*conv_h,hz_sum2*conv_h, &
+              px_sum2*(uenergy_from_au/utime_from_au),&
+              py_sum2*(uenergy_from_au/utime_from_au),&
+              pz_sum2*(uenergy_from_au/utime_from_au)
         close(ifn)
       end if
     end do
