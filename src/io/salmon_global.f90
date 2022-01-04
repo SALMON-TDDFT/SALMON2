@@ -220,6 +220,12 @@ module salmon_global
   ! Please use  n(x|y|z)_origin_m to provide the same functionality.
   integer        :: nxvacl_m
   integer        :: nxvacr_m
+  integer        :: nxvac1_m
+  integer        :: nxvac2_m
+  integer        :: nyvac1_m
+  integer        :: nyvac2_m
+  integer        :: nzvac1_m
+  integer        :: nzvac2_m
   integer        :: nx_origin_m
   integer        :: ny_origin_m
   integer        :: nz_origin_m

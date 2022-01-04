@@ -240,13 +240,19 @@ subroutine initialization_ms()
     if (0d0 < hz_m) fs%hgs(3) = hz_m
 
     fw%dt = dt
-    fw%fdtddim = '1d'
-    fs%mg%is(1) = - abs(nxvacl_m)
-    fs%mg%ie(1) = nx_m + abs(nxvacr_m)
-    fs%mg%is(2) = 1
-    fs%mg%ie(2) = ny_m
-    fs%mg%is(3) = 1
-    fs%mg%ie(3) = nz_m
+    fw%fdtddim = trim(fdtddim)
+    
+    ! For compatibility with previous versions 
+    ! (nxvacl_m and nxvacr_m will be removed in future)
+    if ((nxvac1_m == 0) .and. (nxvacl_m /= 0)) nxvac1_m = abs(nxvacl_m) + 1
+    if ((nxvac2_m == 0) .and. (nxvacr_m /= 0)) nxvac2_m = abs(nxvacr_m)
+
+    fs%mg%is(1) = 1 - abs(nxvac1_m)
+    fs%mg%ie(1) = nx_m + abs(nxvac2_m)
+    fs%mg%is(2) = 1 - abs(nyvac1_m)
+    fs%mg%ie(2) = ny_m + abs(nyvac2_m)
+    fs%mg%is(3) = 1 - abs(nzvac1_m)
+    fs%mg%ie(3) = nz_m + abs(nzvac2_m)
     fs%mg%is_overlap(1:3) = fs%mg%is(1:3) - fs%mg%nd
     fs%mg%ie_overlap(1:3) = fs%mg%ie(1:3) + fs%mg%nd
     fs%mg%is_array(1:3) = fs%mg%is_overlap(1:3)

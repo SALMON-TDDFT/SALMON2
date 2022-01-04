@@ -377,6 +377,12 @@ contains
       & nxysplit, &
       & nxvacl_m, &
       & nxvacr_m, &
+      & nxvac1_m, &
+      & nxvac2_m, &
+      & nyvac1_m, &
+      & nyvac2_m, &
+      & nzvac1_m, &
+      & nzvac2_m, &
       & nx_origin_m, &
       & ny_origin_m, &
       & nz_origin_m, &
@@ -732,8 +738,14 @@ contains
     hz_m       = 0d0
     nksplit    = 0
     nxysplit   = 0
-    nxvacl_m   = 1
-    nxvacr_m   = 1
+    nxvacl_m   = 0
+    nxvacr_m   = 0
+    nxvac1_m   = 0
+    nxvac2_m   = 0
+    nyvac1_m   = 0
+    nyvac2_m   = 0
+    nzvac1_m   = 0
+    nzvac2_m   = 0
     nx_origin_m = 1
     ny_origin_m = 1
     nz_origin_m = 1
@@ -1239,6 +1251,12 @@ contains
     call comm_bcast(nxysplit  ,nproc_group_global)
     call comm_bcast(nxvacl_m  ,nproc_group_global)
     call comm_bcast(nxvacr_m  ,nproc_group_global)
+    call comm_bcast(nxvac1_m  ,nproc_group_global)
+    call comm_bcast(nxvac2_m  ,nproc_group_global)
+    call comm_bcast(nyvac1_m  ,nproc_group_global)
+    call comm_bcast(nyvac2_m  ,nproc_group_global)
+    call comm_bcast(nzvac1_m  ,nproc_group_global)
+    call comm_bcast(nzvac2_m  ,nproc_group_global)
     call comm_bcast(nx_origin_m,nproc_group_global)
     call comm_bcast(ny_origin_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
@@ -2021,6 +2039,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacr_m', nxvacr_m
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvac1_m', nxvac1_m
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvac2_m', nxvac2_m
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nyvac1_m', nyvac1_m
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nyvac2_m', nyvac2_m
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nzvac1_m', nzvac1_m
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nzvac2_m', nzvac2_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m

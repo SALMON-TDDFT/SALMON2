@@ -102,13 +102,16 @@ contains
     
         ! Update electromagnetic field
         select case(trim(fw%fdtddim))
-        case('1d', '1D')
+        case('1d')
         call dt_evolve_Ac_1d()
         call calc_vec_h_1d()
-        case('2d', '2D')
+        case('1dz')
+        call dt_evolve_Ac_1dz()
+        call calc_vec_h_1dz()
+        case('2d')
         call dt_evolve_Ac_2d()
         call calc_vec_h_2d()
-        case('3d', '3D')
+        case('3d')
         call dt_evolve_Ac_3d()
         call calc_vec_h_3d()
         ! case('3d_cylindal', '2dc', '2DC')
@@ -186,6 +189,71 @@ contains
         call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_1d
+
+
+        subroutine dt_evolve_Ac_1dz
+            implicit none
+            integer :: i1, i2, i3
+            real(8) :: rot2_Ac(3) ! rot rot Ac
+            real(8) :: r_inv_h(3)
+            real(8) :: Ac_tmp( &
+                & 1:3, &
+                & is(1)-nd:ie(1)+nd, &
+                & is(2)-nd:ie(2)+nd, &
+                & is(3)-nd:ie(3)+nd)
+    
+            call copy_data(fw%vec_j_em%v, fw%vec_j_em_old%v)
+            call copy_data(fw%vec_j_em_new%v, fw%vec_j_em%v)        
+            call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
+            call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
+            
+            i2 = fs%mg%is(2)
+            i3 = fs%mg%is(3)
+            r_inv_h(1) = 1d0 / fs%hgs(1)
+            !$omp parallel do default(shared) private(i1, rot2_Ac)
+            do i1 = fs%mg%is(1), fs%mg%ie(1)
+                rot2_Ac(1:2) = -( &
+                &      + fw%vec_Ac%v(1:2, i1, i2, i3+1) &
+                & -2d0 * fw%vec_Ac%v(1:2, i1, i2, i3  ) &
+                &      + fw%vec_Ac%v(1:2, i1, i2, i3-1) &
+                & ) * r_inv_h(1) ** 2
+                Ac_tmp(:, i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
+                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2) - rot2_Ac(:) * (cspeed_au * fw%dt)**2 )
+                rot2_Ac(3) = 0d0
+            end do
+            !$omp end parallel do
+        
+            ! Impose Boundary Condition (Left end)
+            select case (fs%a_bc(3, 1))
+            case('periodic')
+                Ac_tmp(:, i1, i2, (is(3)-nd):(is(3)-1)) = &
+                    & Ac_tmp(:, i1, i2, (ie(3)-nd+1):ie(3))
+            case('pec')
+                Ac_tmp(:, i1, i2, (is(3)-nd):(is(3)-1)) = &
+                    & fw%vec_Ac%v(:, i1, i2, (is(3)-nd):(is(3)-1))
+            case('abc')
+                Ac_tmp(:, i1, i2, is(3)-1) = fw%vec_Ac%v(:, i1, i2, is(3)) &
+                    & + (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * Ac_tmp(:, i1, i2, is(3)) &
+                    & - (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * fw%vec_Ac%v(:, i1, i2, is(3)-1) &
+                    & + (4d0*fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * (fw%Ac_inc_new(:)-fw%Ac_inc(:))
+            end select
+    
+            ! Impose Boundary Condition (Right end)
+            select case (fs%a_bc(3, 2))
+            case('periodic')
+                Ac_tmp(:, i1, i2, (ie(3)+1):(ie(3)+nd)) = &
+                    & Ac_tmp(:, i1, i2, is(3):(is(3)+nd-1)) 
+            case('pec')
+                Ac_tmp(:, i1, i2, (ie(3)+1):(ie(3)+nd)) = &
+                    & fw%vec_Ac%v(:, i1, i2, (ie(3)+1):(ie(3)+nd)) 
+            case('abc')
+                Ac_tmp(:, i1, i2, ie(3)+1) = fw%vec_Ac%v(:, i1, i2, ie(3)) &
+                    & + (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * Ac_tmp(:, i1, i2, ie(3)) &
+                    & - (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * fw%vec_Ac%v(:, i1, i2, ie(3)+1)    
+            end select
+            call copy_data(Ac_tmp, fw%vec_Ac_new%v)
+            return
+        end subroutine dt_evolve_Ac_1dz
     
     
         subroutine dt_evolve_Ac_2d()
@@ -490,6 +558,26 @@ contains
         !$omp end parallel do
         return
         end subroutine calc_vec_h_1d
+
+
+        subroutine calc_vec_h_1dz()
+            implicit none
+            integer :: i1, i2, i3
+            real(8) :: rot_Ac(3)
+            real(8) :: r_inv_h(3)
+            i2 = fs%mg%is(2)
+            i3 = fs%mg%is(3)
+            r_inv_h(1) = 1d0 / fs%hgs(1)
+            !$omp parallel do default(shared) private(i1, rot_Ac)
+            do i1 = fs%mg%is(1), fs%mg%ie(1)
+                rot_Ac(1) = - (fw%vec_Ac%v(2, i1, i2, i3+1) - fw%vec_Ac%v(2, i1, i2, i3-1)) * (0.5d0 * r_inv_h(1))
+                rot_Ac(2) = + (fw%vec_Ac%v(1, i1, i2, i3+1) - fw%vec_Ac%v(1, i1, i2, i3-1)) * (0.5d0 * r_inv_h(1))
+                rot_Ac(3) = 0.0d0
+                fw%vec_h%v(:, i1, i2, i3) = rot_Ac(:) * cspeed_au
+            end do
+            !$omp end parallel do
+            return
+        end subroutine calc_vec_h_1dz
     
     
         subroutine calc_vec_h_2d()
