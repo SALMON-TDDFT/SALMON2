@@ -383,7 +383,11 @@ contains
       & file_macropoint, &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
-      & nmacro_chunk
+      & nmacro_chunk, &
+      & yn_ms_ld, & ! Experimental implementation
+      & ms_omega_ld, & ! Experimental implementation
+      & ms_alpha_ld, & ! Experimental implementation
+      & ms_gamma_ld ! Experimental implementation
 
     namelist/maxwell/             &
       & al_em,                    &
@@ -1242,6 +1246,10 @@ contains
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
+    call comm_bcast(yn_ms_ld,nproc_group_global) ! Experimental implementation
+    call comm_bcast(ms_omega_ld,nproc_group_global) ! Experimental implementation
+    call comm_bcast(ms_alpha_ld,nproc_group_global) ! Experimental implementation
+    call comm_bcast(ms_gamma_ld,nproc_group_global) ! Experimental implementation
 
 !! == bcast for &maxwell
     call comm_bcast(al_em                    ,nproc_group_global)
@@ -2019,8 +2027,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
-
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ms_ld', trim(yn_ms_ld)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_omega_ld', ms_omega_ld
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_alpha_ld', ms_alpha_ld
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_gamma_ld', ms_gamma_ld
+  
       if(inml_maxwell >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', inml_maxwell
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(1)', al_em(1)

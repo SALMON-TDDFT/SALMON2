@@ -13,7 +13,6 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-
 !=======================================================================
 
 #include "config.h"
@@ -107,7 +106,8 @@ call timer_begin(LOG_RT_ITERATION)
 call print_header()
 
 TE : do itt=Mit+1,nt
-    call time_evolution_step_ms()
+        call time_evolution_step_ms()
+    
 
     is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
     is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -389,7 +389,7 @@ subroutine print_linelog()
             write(*,'(i7,i7,f9.3,3(es11.2e3),f15.8,es11.2e3)') &
                 & itt, iimacro, &
                 & itt * dt * t_unit_time%conv, &
-                & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em_new%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
                 & rNe(iimacro), &
                 & fw%edensity_absorb%f(iix, iiy, iiz) * system%det_a * t_unit_energy%conv
         end do
@@ -405,13 +405,17 @@ subroutine time_evolution_step_ms
     integer :: iimacro, iix, iiy, iiz
     real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro), rNe_tmp(ms%nmacro)
 
-    ! ----------------------------------------
+    real(8) :: c1, c2, c3
+
+        ! ----------------------------------------
     ! Time Evolution of FDTD System
     ! ----------------------------------------
     fw%Ac_inc_new(:) = Ac_inc(:, itt)
     fw%Ac_inc(:) = Ac_inc(:, itt-1)
     call weyl_calc(fs, fw)
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
+    
+    if(yn_ms_ld .ne. 'y') then
 
     ! ----------------------------------------
     ! Time Evolution of TDDFT System
@@ -422,10 +426,10 @@ subroutine time_evolution_step_ms
     nproc_size_global = ms%isize_macropoint
     quiet = .true.
 
-    curr_tmp(:,:) = 0d0
+        curr_tmp(:,:) = 0d0
     rNe_tmp(:) = 0d0
     do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
-        iix = ms%ixyz_tbl(1, iimacro)
+                iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
         rt%Ac_tot(1:3, itt-1) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
@@ -442,27 +446,55 @@ subroutine time_evolution_step_ms
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
-    
-        if (comm_is_root(ms%id_macropoint)) then
+            
+                if (comm_is_root(ms%id_macropoint)) then
             curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
             rNe_tmp(iimacro) = rt%rIe(itt)
-         endif
-    end do
+        endif
+             end do
     ! Override Global Variables (Repair)
     nproc_group_global = ms%icomm_ms_world
     nproc_id_global = ms%id_ms_world
     nproc_size_global = ms%isize_ms_world
     quiet = .false.
-
-    call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
+    
+        call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
     call comm_summation(rNe_tmp, rNe, ms%nmacro, ms%icomm_ms_world)
+    
 
     do iimacro = 1, ms%nmacro
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
+        fw%vec_j_em_new%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
     end do
+
+else
+    ! Lorentz-Drude oscilator
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    c1 = (2.0d0 - (ms_omega_ld * dt) ** 2) / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+    c2 = (1 - ms_gamma_ld * dt * 0.5d0) / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+    c3 = ms_alpha_ld / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+
+    do iimacro = 1, ms%nmacro
+        iix = ms%ixyz_tbl(1, iimacro)
+        iiy = ms%ixyz_tbl(2, iimacro)
+        iiz = ms%ixyz_tbl(3, iimacro)
+
+        fw%vec_j_em%v(1:3, iix, iiy, iiz) &
+            & = c1 * fw%vec_j_em%v(1:3, iix, iiy, iiz) &
+            & - c2 * fw%vec_j_em_old%v(1:3, iix, iiy, iiz) &
+            & - c3 * (fw%vec_Ac_new%v(1:3, iix, iiy, iiz) &
+                & - 2.0d0 * fw%vec_Ac%v(1:3, iix, iiy, iiz) &
+                & + fw%vec_Ac_old%v(1:3, iix, iiy, iiz) &
+                & )
+    end do
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+end if
+
 
     if (mod(itt, out_ms_step) == 0) call print_linelog()
 
@@ -510,12 +542,14 @@ subroutine checkpoint_ms(odir)
 
         call comm_sync_all()
 
+        if (yn_ms_ld .ne. 'y') then
         if (macropoint_in_mygroup(i)) then
             if (mod(itt,2)==1) then
                 call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)
             else
                 call checkpoint_rt(lg,mg,system,info,spsi_in, itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)
             endif
+        end if
         end if
     end do
 
@@ -534,8 +568,16 @@ subroutine checkpoint_ms(odir)
         write(fh_bin) fw%vec_Ac_old%v
         close(fh_bin)
 
+        open(fh_bin,file=trim(idir) // '../vec_j_em_old.bin',form='unformatted')
+        write(fh_bin) fw%vec_j_em_old%v
+        close(fh_bin)
+
         open(fh_bin,file=trim(idir) // '../vec_j_em.bin',form='unformatted')
         write(fh_bin) fw%vec_j_em%v
+        close(fh_bin)
+
+        open(fh_bin,file=trim(idir) // '../vec_j_em_new.bin',form='unformatted')
+        write(fh_bin) fw%vec_j_em_new%v
         close(fh_bin)
     end if
 
@@ -607,9 +649,9 @@ subroutine write_RT_Ac_file()
                 & fw%vec_H%v(1, iix, iiy, iiz), &
                 & fw%vec_H%v(2, iix, iiy, iiz), &
                 & fw%vec_H%v(3, iix, iiy, iiz), &
-                & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
-                & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
-                & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em_new%v(1, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em_new%v(2, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em_new%v(3, iix, iiy, iiz) * t_unit_current%conv, &
                 & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
                 & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
         end do
@@ -656,14 +698,24 @@ subroutine incident()
             read(fh_bin) fw%vec_Ac_old%v
             close(fh_bin)
 
+            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em_new.bin',form='unformatted')
+            read(fh_bin) fw%vec_j_em_new%v
+            close(fh_bin)
+            
             open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em.bin',form='unformatted')
             read(fh_bin) fw%vec_j_em%v
+            close(fh_bin)
+
+            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em_old.bin',form='unformatted')
+            read(fh_bin) fw%vec_j_em_old%v
             close(fh_bin)
         end if
 
         call comm_bcast(fw%vec_Ac_new%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_Ac_old%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_Ac%v, ms%icomm_ms_world)
+        call comm_bcast(fw%vec_j_em_new%v, ms%icomm_ms_world)
+        call comm_bcast(fw%vec_j_em_old%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_j_em%v, ms%icomm_ms_world)
 
     else

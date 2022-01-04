@@ -227,6 +227,10 @@ module salmon_global
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   integer        :: nmacro_chunk
+  character(1)   :: yn_ms_ld ! Experimental implementation
+  real(8)        :: ms_omega_ld ! Experimental implementation
+  real(8)        :: ms_alpha_ld ! Experimental implementation
+  real(8)        :: ms_gamma_ld ! Experimental implementation
 
 !! &maxwell
   real(8)        :: al_em(3)

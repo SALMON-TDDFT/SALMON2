@@ -24,10 +24,16 @@ module fdtd_weyl
     type ls_fdtd_weyl
         real(8) :: dt
         type(s_scalar) :: phi, rho_em
-        type(s_vector) :: vec_e, vec_h, vec_j_em
+        type(s_vector) :: vec_e, vec_h
+        ! (Electromagnetic) Current Density
+        type(s_vector) :: vec_j_em_new  ! itt+1 step
+        type(s_vector) :: vec_j_em      ! itt step
+        type(s_vector) :: vec_j_em_old  ! itt-1 step
+        ! Vector potential
         type(s_vector) :: vec_Ac_new    ! itt+1 step
         type(s_vector) :: vec_Ac        ! itt step
         type(s_vector) :: vec_Ac_old    ! itt-1 step
+        ! Other physical variables
         type(s_scalar) :: edensity_emfield
         type(s_scalar) :: edensity_absorb
         character(16) :: fdtddim
@@ -47,9 +53,11 @@ contains
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac)
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_new)
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_old)
+        call allocate_vector_with_ovlp(fs%mg, fw%vec_j_em)
+        call allocate_vector_with_ovlp(fs%mg, fw%vec_j_em_new)
+        call allocate_vector_with_ovlp(fs%mg, fw%vec_j_em_old)
         call allocate_vector(fs%mg, fw%vec_e)
         call allocate_vector(fs%mg, fw%vec_h)
-        call allocate_vector(fs%mg, fw%vec_j_em)
         call allocate_scalar(fs%mg, fw%edensity_emfield)
         call allocate_scalar(fs%mg, fw%edensity_absorb)
 
@@ -58,7 +66,9 @@ contains
         fw%vec_Ac_old%v = 0d0
         fw%vec_e%v = 0d0
         fw%vec_h%v = 0d0
+        fw%vec_j_em_new%v = 0d0
         fw%vec_j_em%v = 0d0
+        fw%vec_j_em_old%v = 0d0
         fw%edensity_emfield%f = 0d0
         fw%edensity_absorb%f = 0d0
         fw%Ac_inc(:) = 0d0
@@ -124,6 +134,8 @@ contains
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
 
+        call copy_data(fw%vec_j_em%v, fw%vec_j_em_old%v)
+        call copy_data(fw%vec_j_em_new%v, fw%vec_j_em%v)        
         call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
         call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
         
