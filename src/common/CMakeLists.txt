@@ -32,9 +32,13 @@ else ()
   if(USE_OPENACC)
       set(SOURCES ${SOURCES}
           zstencil_core/gpu/seq.f90
-          zpseudo.cu
-          stencil_current.cu
           )
+    if(USE_CUDA)
+        set(SOURCES ${SOURCES}
+            zpseudo.cu
+            stencil_current.cu
+            )
+    endif()
   endif()
 endif ()
 
