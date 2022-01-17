@@ -3134,7 +3134,7 @@ contains
       if(ipl(ii)==1) then
         if(ii==1) then     !xy plane
 !$omp parallel
-!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1,px_sum1,py_sum1,pz_sum1)
           do i2=ng_is(i2s),ng_ie(i2s)
           do i1=ng_is(i1s),ng_ie(i1s)
             ex_sum1=ex_sum1+ex(i1,i2,id(3)); ey_sum1=ey_sum1+ey(i1,i2,id(3)); ez_sum1=ez_sum1+ez(i1,i2,id(3));
@@ -3148,7 +3148,7 @@ contains
 !$omp end parallel
         elseif(ii==2) then !yz plane
 !$omp parallel
-!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1,px_sum1,py_sum1,pz_sum1)
           do i2=ng_is(i2s),ng_ie(i2s)
           do i1=ng_is(i1s),ng_ie(i1s)
             ex_sum1=ex_sum1+ex(id(1),i1,i2); ey_sum1=ey_sum1+ey(id(1),i1,i2); ez_sum1=ez_sum1+ez(id(1),i1,i2);
@@ -3162,7 +3162,7 @@ contains
 !$omp end parallel
         elseif(ii==3) then !xz plane
 !$omp parallel
-!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1,px_sum1,py_sum1,pz_sum1)
           do i2=ng_is(i2s),ng_ie(i2s)
           do i1=ng_is(i1s),ng_ie(i1s)
             ex_sum1=ex_sum1+ex(i1,id(2),i2); ey_sum1=ey_sum1+ey(i1,id(2),i2); ez_sum1=ez_sum1+ez(i1,id(2),i2);
