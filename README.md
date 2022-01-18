@@ -1,3 +1,5 @@
+Jenkins test
+
 # SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience
 
 SALMON is an open-source software based on first-principles time-dependent density functional theory
