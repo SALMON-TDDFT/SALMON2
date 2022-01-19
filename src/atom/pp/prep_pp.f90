@@ -536,7 +536,7 @@ END SUBROUTINE dealloc_init_ps
 
 SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   use structures
-  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte
+  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_spinorbit
 #ifdef USE_FFTW
   use salmon_global,only : yn_fftw
 #endif
@@ -604,6 +604,10 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
 
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
   ppg%zekr_uV(:,:,1) = dcmplx(ppg%uV)
+  if(yn_spinorbit == 'y') then
+    allocate(ppg%zekr_uV_so(ppg%nps,ppg%nlma,1,2,1))
+    ppg%zekr_uV_so(:,:,1,1:2,1) = dcmplx(ppg%uv_so(:,:,1:2,1))
+  end if
 
   if(method_poisson=='ft')then
 #ifdef USE_FFTW

@@ -158,8 +158,8 @@ subroutine init_dft_system(lg,system,stencil)
       else
         system%if_real_orbital = .false.
       end if
-      if ( yn_spinorbit=='y' ) system%if_real_orbital=.false.
     end select
+    if ( yn_spinorbit=='y' ) system%if_real_orbital=.false.
   end if
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital
