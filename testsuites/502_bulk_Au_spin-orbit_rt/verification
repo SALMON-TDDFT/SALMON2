@@ -1,0 +1,66 @@
+#!/usr/bin/env python 
+
+# This verification script file is automatically executed after the SALMON. 
+# If necessary, this script file can used for the verification of the result. 
+# The script MUST indicate a "return-code 0", if the calculation is successful. 
+# If a negative value is returned, it is treated as a test failure. 
+ 
+import sys 
+import os 
+import re 
+
+print("#" * 60) 
+print("# Verification start") 
+
+filelist = [ 
+    "Au_rt.data",
+    "Au_rt_energy.data",
+]
+
+# current density @ it=1000"
+reference_value_1 = 0.273758804993493E-003 + 0.303838348626041E-003
+permissible_error_1 = 0.000001
+
+# excitation energy @ it=1000"
+reference_value_2 = -0.157985728691631E+003
+permissible_error_2 = 0.00004 # (~0.001eV)
+
+print("# Checking the existance of outputfile")
+for item in filelist:
+    if not os.path.exists(item):
+        print("File not found: %s" % item)
+        sys.exit(-1)  # Failure
+
+print("# Checking calculated result")
+
+flag = 0
+
+linecount = 0
+for line in open("Au_rt.data"):
+    linecount += 1
+    if linecount == 1008: # line 1008
+       data = line.split()
+       val1 = float(data[16-1]) + float(data[19-1])
+
+if abs(val1 - reference_value_1) > permissible_error_1:
+        print("Mismatch |%e - %e| > %e (current)" % (val1, reference_value_1, permissible_error_1))
+        flag = flag + 1
+
+linecount = 0
+for line in open("Au_rt_energy.data"):
+    linecount += 1
+    if linecount == 105: # line 105
+       data = line.split()
+       val2 = float(data[2-1])
+
+if abs(val2 - reference_value_2) > permissible_error_2:
+        print("Mismatch |%e - %e| > %e (energy)" % (val2, reference_value_2, permissible_error_2))
+        flag = flag + 1
+
+if flag != 0:
+    sys.exit(-1)  # Failure 
+
+print("# Verification end") 
+print("#" * 60) 
+
+sys.exit(0)  # Success 

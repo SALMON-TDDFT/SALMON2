@@ -266,7 +266,7 @@ real(8) :: rNe0,rNe
     Miter = 0        ! Miter: Iteration counter set to zero
     call init_wf(lg,mg,system,info,spsi)
     select case(method_init_density)
-    case('pp')
+    case('pp','pp_magdir')
       call calc_density_pp(lg,mg,system,info,pp,fg,poisson,rho_s)
     case default
       call calc_density(system,rho_s,spsi,info,mg)

@@ -59,7 +59,7 @@ contains
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
              den_mat(ix,iy,iz,is,js) = den_mat(ix,iy,iz,is,js) + occ &
-                  * conjg( psi%zwf(ix,iy,iz,is,io,ik,im) )*psi%zwf(ix,iy,iz,js,io,ik,im)
+                  * psi%zwf(ix,iy,iz,is,io,ik,im) * conjg( psi%zwf(ix,iy,iz,js,io,ik,im) )
           end do
           end do
           end do

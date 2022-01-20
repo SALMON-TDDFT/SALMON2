@@ -18,11 +18,11 @@ filelist = [
 
 # difference of eigen energies for io=1 and io=2 with ik=2"
 reference_value_1 = 15.56457
-permissible_error_1 = 0.001 # [eV]
+permissible_error_1 = 0.01 # [eV]
 
 # difference of eigen energies for io=4 and io=5 with ik=2"
 reference_value_2 = 9.99940
-permissible_error_2 = 0.001 # [eV]
+permissible_error_2 = 0.01 # [eV]
 
 print("# Checking the existance of outputfile")
 for item in filelist:

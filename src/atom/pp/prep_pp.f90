@@ -536,7 +536,10 @@ END SUBROUTINE dealloc_init_ps
 
 SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   use structures
-  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte
+  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_spinorbit
+#ifdef USE_FFTW
+  use salmon_global,only : yn_fftw
+#endif
   use math_constants,only : pi,zi
   use parallelization, only: nproc_id_global
   use communication, only: comm_summation
@@ -601,27 +604,58 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
 
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
   ppg%zekr_uV(:,:,1) = dcmplx(ppg%uV)
+  if(yn_spinorbit == 'y') then
+    allocate(ppg%zekr_uV_so(ppg%nps,ppg%nlma,1,2,1))
+    ppg%zekr_uV_so(:,:,1,1:2,1) = dcmplx(ppg%uv_so(:,:,1:2,1))
+  end if
 
   if(method_poisson=='ft')then
-    if(yn_ffte=='n')then
-      ifgx_s = (mg%is(1)-lg%is(1))*2+1
-      ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
-      ifgy_s = (mg%is(2)-lg%is(2))*2+1
-      ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
-      ifgz_s = (mg%is(3)-lg%is(3))*2+1
-      ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
-    else
-      if(mod(info%nporbital,4)==0)then
+#ifdef USE_FFTW
+    if(yn_fftw=='n')then
+#endif
+      if(yn_ffte=='n')then
+        ifgx_s = (mg%is(1)-lg%is(1))*2+1
+        ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
+        ifgy_s = (mg%is(2)-lg%is(2))*2+1
+        ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
+        ifgz_s = (mg%is(3)-lg%is(3))*2+1
+        ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
+      else
+        if(mod(info%nporbital,4)==0)then
+          ! start and end point of reciprocal grids for x, y, z
+          ifgx_s = 1
+          ifgx_e = 2*lg%num(1)
+          if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
+            ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
+          else
+            ifgy_s = mg%is(2)-lg%is(2)+1
+          end if
+          ifgy_e = ifgy_s+mg%num(2)-1
+          if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+            ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
+          else
+            ifgz_s = mg%is(3)-lg%is(3)+1
+          end if
+          ifgz_e = ifgz_s+mg%num(3)-1
+        else
+          ! start and end point of reciprocal grids for x, y, z
+          ifgx_s = 1
+          ifgx_e = 2*lg%num(1)
+          ifgy_s = 1
+          ifgy_e = 2*lg%num(2)
+          ifgz_s = 1
+          ifgz_e = 2*lg%num(3)
+        end if
+      end if
+#ifdef USE_FFTW
+    else if(yn_fftw=='y')then
+      if(mod(info%nporbital,2)==0)then
         ! start and end point of reciprocal grids for x, y, z
         ifgx_s = 1
         ifgx_e = 2*lg%num(1)
-        if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
-          ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
-        else
-          ifgy_s = mg%is(2)-lg%is(2)+1
-        end if
-        ifgy_e = ifgy_s+mg%num(2)-1
-        if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+        ifgy_s = 1
+        ifgy_e = 2*lg%num(2)
+        if(info%iaddress_isolated_fftw(4)==1) then
           ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
         else
           ifgz_s = mg%is(3)-lg%is(3)+1
@@ -636,7 +670,8 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
         ifgz_s = 1
         ifgz_e = 2*lg%num(3)
       end if
-    end if
+    endif
+#endif
 
     if( property == 'initial' ) then
       allocate(ppg%zrhoG_ion(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e)  & ! rho_ion(G)
@@ -681,17 +716,26 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
 
     end if
 
-    if(yn_ffte=='n')then
-      allocate(vtmp1((mg%is(1)-lg%is(1))*2+1:(mg%is(1)-lg%is(1))*2+mg%num(1)*2, &
-                     (mg%is(2)-lg%is(2))*2+1:(mg%is(2)-lg%is(2))*2+mg%num(2)*2, &
-                     (mg%is(3)-lg%is(3))*2+1:(mg%is(3)-lg%is(3))*2+mg%num(3)*2 ,1:2))
-      allocate(vtmp2((mg%is(1)-lg%is(1))*2+1:(mg%is(1)-lg%is(1))*2+mg%num(1)*2, &
-                     (mg%is(2)-lg%is(2))*2+1:(mg%is(2)-lg%is(2))*2+mg%num(2)*2, &
-                     (mg%is(3)-lg%is(3))*2+1:(mg%is(3)-lg%is(3))*2+mg%num(3)*2 ,1:2))
-    else
+#ifdef USE_FFTW
+    if(yn_fftw=='n')then
+#endif
+      if(yn_ffte=='y')then
+        allocate(vtmp1(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
+        allocate(vtmp2(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
+      else
+        allocate(vtmp1((mg%is(1)-lg%is(1))*2+1:(mg%is(1)-lg%is(1))*2+mg%num(1)*2, &
+                       (mg%is(2)-lg%is(2))*2+1:(mg%is(2)-lg%is(2))*2+mg%num(2)*2, &
+                       (mg%is(3)-lg%is(3))*2+1:(mg%is(3)-lg%is(3))*2+mg%num(3)*2 ,1:2))
+        allocate(vtmp2((mg%is(1)-lg%is(1))*2+1:(mg%is(1)-lg%is(1))*2+mg%num(1)*2, &
+                       (mg%is(2)-lg%is(2))*2+1:(mg%is(2)-lg%is(2))*2+mg%num(2)*2, &
+                       (mg%is(3)-lg%is(3))*2+1:(mg%is(3)-lg%is(3))*2+mg%num(3)*2 ,1:2))
+      end if
+#ifdef USE_FFTW
+    else if(yn_fftw=='y')then
       allocate(vtmp1(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
       allocate(vtmp2(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
     end if
+#endif
 
 ! vtmp(:,:,:,1)=V_ion(G): local part of the pseudopotential in the G space
     vtmp1 = 0d0
@@ -714,12 +758,20 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
     end do
   !$omp end parallel do
  
-    if(yn_ffte=='n')then
-      call comm_summation(vtmp1,vtmp2,(ifgx_e-ifgx_s+1)*(ifgy_e-ifgy_s+1)*(ifgz_e-ifgz_s+1)*2,info%icomm_ko)
-      ppg%zrhoG_ion = vtmp2(:,:,:,2)
-    else
+#ifdef USE_FFTW
+    if(yn_fftw=='n')then
+#endif
+      if(yn_ffte=='y')then
+        ppg%zrhoG_ion = vtmp1(:,:,:,2)
+      else
+        call comm_summation(vtmp1,vtmp2,(ifgx_e-ifgx_s+1)*(ifgy_e-ifgy_s+1)*(ifgz_e-ifgz_s+1)*2,info%icomm_ko)
+        ppg%zrhoG_ion = vtmp2(:,:,:,2)
+      end if
+#ifdef USE_FFTW
+    else if(yn_fftw=='y')then
       ppg%zrhoG_ion = vtmp1(:,:,:,2)
     end if
+#endif
 
     deallocate(vtmp1,vtmp2)
 

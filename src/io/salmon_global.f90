@@ -77,6 +77,9 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
+#ifdef USE_FFTW
+  character(1)   :: yn_fftw
+#endif
   character(1)   :: yn_scalapack
   character(1)   :: yn_eigenexa
   character(1)   :: yn_diagonalization_red_mem
@@ -162,8 +165,8 @@ module salmon_global
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
-  character(2)   :: method_init_density
-
+  character(16)  :: method_init_density
+  real(8)        :: magdir_atom(100)
 
 !! &emfield
   character(2)   :: trans_longi
@@ -227,6 +230,7 @@ module salmon_global
 !! &maxwell
   real(8)        :: al_em(3)
   real(8)        :: dl_em(3)
+  integer        :: num_rgrid_em(3)
   real(8)        :: dt_em
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)
@@ -249,6 +253,7 @@ module salmon_global
   integer        :: obs_num_em
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
+  real(8)        :: obs_plane_ene_em(200,100)
   character(1)   :: yn_obs_plane_em(200)
   character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
@@ -256,7 +261,19 @@ module salmon_global
   integer        :: media_id_pml(3,2)
   integer        :: media_id_source1
   integer        :: media_id_source2
-
+  character(1)   :: yn_make_shape
+  character(1)   :: yn_output_shape
+  character(1)   :: yn_copy_x
+  character(1)   :: yn_copy_y
+  character(1)   :: yn_copy_z
+  character(6)   :: rot_type
+  integer        :: n_s
+  character(32)  :: typ_s(1000)
+  integer        :: id_s(1000)
+  real(8)        :: inf_s(1000,10)
+  real(8)        :: ori_s(1000,3)
+  real(8)        :: rot_s(1000,3)
+  
 !! &analysis
   character(2)   :: projection_option
   integer        :: nenergy

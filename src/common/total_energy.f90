@@ -25,6 +25,9 @@ CONTAINS
     use structures
     use math_constants,only : pi,zi
     use salmon_global, only: kion, yn_jm, method_poisson, yn_ffte, natom
+#ifdef USE_FFTW
+    use salmon_global,only : yn_fftw
+#endif
     use communication, only: comm_summation
     use timer
     implicit none
@@ -107,25 +110,52 @@ CONTAINS
       end do
 !$omp end parallel do
     case('ft')
-      if(yn_ffte=='n')then
-        ifgx_s = (mg%is(1)-lg%is(1))*2+1
-        ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
-        ifgy_s = (mg%is(2)-lg%is(2))*2+1
-        ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
-        ifgz_s = (mg%is(3)-lg%is(3))*2+1
-        ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
-      else
-        if(mod(info%nporbital,4)==0)then
+#ifdef USE_FFTW
+      if(yn_fftw=='n')then
+#endif
+        if(yn_ffte=='n')then
+          ifgx_s = (mg%is(1)-lg%is(1))*2+1
+          ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
+          ifgy_s = (mg%is(2)-lg%is(2))*2+1
+          ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
+          ifgz_s = (mg%is(3)-lg%is(3))*2+1
+          ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
+        else
+          if(mod(info%nporbital,4)==0)then
+            ! start and end point of reciprocal grids for x, y, z
+            ifgx_s = 1
+            ifgx_e = 2*lg%num(1)
+            if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
+              ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
+            else
+              ifgy_s = mg%is(2)-lg%is(2)+1
+            end if
+            ifgy_e = ifgy_s+mg%num(2)-1
+            if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+              ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
+            else
+              ifgz_s = mg%is(3)-lg%is(3)+1
+            end if
+            ifgz_e = ifgz_s+mg%num(3)-1
+          else
+            ! start and end point of reciprocal grids for x, y, z
+            ifgx_s = 1
+            ifgx_e = 2*lg%num(1)
+            ifgy_s = 1
+            ifgy_e = 2*lg%num(2)
+            ifgz_s = 1
+            ifgz_e = 2*lg%num(3)
+          end if
+        end if
+#ifdef USE_FFTW
+      else if(yn_fftw=='y')then
+        if(mod(info%nporbital,2)==0)then
           ! start and end point of reciprocal grids for x, y, z
           ifgx_s = 1
           ifgx_e = 2*lg%num(1)
-          if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
-            ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
-          else
-            ifgy_s = mg%is(2)-lg%is(2)+1
-          end if
-          ifgy_e = ifgy_s+mg%num(2)-1
-          if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+          ifgy_s = 1
+          ifgy_e = 2*lg%num(2)
+          if(info%iaddress_isolated_fftw(4)==1) then
             ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
           else
             ifgz_s = mg%is(3)-lg%is(3)+1
@@ -141,6 +171,7 @@ CONTAINS
           ifgz_e = 2*lg%num(3)
         end if
       end if
+#endif
 
       etmp = 0d0
       E_wrk = 0d0
@@ -150,6 +181,11 @@ CONTAINS
       if(yn_ffte=='n'.or.(yn_ffte=='y'.and.mod(info%nporbital,4)/=0))then
         ia_s = info%ia_s
         ia_e = info%ia_e
+#ifdef USE_FFTW
+      else if(yn_fftw=='y'.and.mod(info%nporbital,2)/=0)then
+        ia_s = info%ia_s
+        ia_e = info%ia_e
+#endif
       else
         ia_s = 1
         ia_e = natom
@@ -486,7 +522,7 @@ CONTAINS
     !
     integer :: ik,io,ispin,im,nk,no,is(3),ie(3),Nspin
     real(8) :: E_tmp,E_local(2),E_sum(2)
-    real(8),allocatable :: wrk1(:,:),wrk2(:,:)
+    real(8),allocatable :: wrk1(:,:,:),wrk2(:,:,:)
 
     call timer_begin(LOG_EIGEN_ENERGY_CALC)
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
@@ -497,7 +533,7 @@ CONTAINS
     ie = mg%ie
     no = system%no
     nk = system%nk
-    allocate(wrk1(no,nk),wrk2(no,nk))
+    allocate(wrk1(nspin,no,nk),wrk2(nspin,no,nk))
     wrk1 = 0d0
     call timer_end(LOG_EIGEN_ENERGY_CALC)
 
@@ -506,39 +542,40 @@ CONTAINS
     call timer_end(LOG_EIGEN_ENERGY_HPSI)
 
     if(allocated(tpsi%rwf)) then
-      do ispin=1,Nspin
-        call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      if(yn_spinorbit=='y') stop "yn_spinorbit=='y' & real wavefunction"
+      
+      call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      wrk1 = 0d0
 #ifdef USE_OPENACC
-!$acc parallel loop collapse(2) private(ik,io)
+!$acc parallel loop collapse(3) private(ik,io,ispin)
 #else
-!$omp parallel do collapse(2) default(none) &
-!$omp          private(ik,io) &
-!$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
+!$omp parallel do collapse(3) default(none) &
+!$omp          private(ik,io,ispin) &
+!$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,im,nspin)
 #endif
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-          wrk1(io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
-                        * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
-        end do
-        end do
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+      do ispin=1,Nspin
+        wrk1(ispin,io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                      * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+      end do
+      end do
+      end do
 #ifdef USE_OPENACC
 !$acc end parallel
 #else
 !$omp end parallel do
 #endif
-        call timer_end(LOG_EIGEN_ENERGY_CALC)
+      call timer_end(LOG_EIGEN_ENERGY_CALC)
 
-        call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
-        call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
-        energy%esp(:,:,ispin) = wrk2
-        call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
+      call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
+      call comm_summation(wrk1,wrk2,nspin*no*nk,info%icomm_rko)
+      do ispin=1,nspin
+        energy%esp(:,:,ispin) = wrk2(ispin,:,:)
       end do
+      call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
       
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
-      if ( yn_spinorbit=='y' ) then
-        energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
-        energy%esp(:,:,2) = energy%esp(:,:,1)
-      end if
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
@@ -601,41 +638,44 @@ CONTAINS
       E_local(2) = E_tmp
       call timer_end(LOG_EIGEN_ENERGY_CALC)
       
-    else
+    else ! complex wavefunctions
+    
     ! eigen energies (esp)
-      do ispin=1,Nspin
-        call timer_begin(LOG_EIGEN_ENERGY_CALC)
+  
+      call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      wrk1 = 0d0
 #ifdef USE_OPENACC
-!$acc kernels loop collapse(2) private(ik,io) copy(wrk1)
+!$acc kernels loop collapse(3) private(ik,io,ispin) copy(wrk1)
 #else
-!$omp parallel do collapse(2) default(none) &
-!$omp          private(ik,io) &
-!$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
+!$omp parallel do collapse(3) default(none) &
+!$omp          private(ik,io,ispin) &
+!$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,im,nspin)
 #endif
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-          wrk1(io,ik) = sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
-                                 * htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
-        end do
-        end do
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+      do ispin=1,Nspin
+        wrk1(ispin,io,ik) = sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
+                               * htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+      end do
+      end do
+      end do
 #ifdef USE_OPENACC
 !$acc end kernels
 #else
 !$omp end parallel do
 #endif
-        call timer_end(LOG_EIGEN_ENERGY_CALC)
+      call timer_end(LOG_EIGEN_ENERGY_CALC)
 
-        call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
-        call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
-        energy%esp(:,:,ispin) = wrk2
-        call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
+      call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
+      call comm_summation(wrk1,wrk2,nspin*no*nk,info%icomm_rko)
+      do ispin=1,nspin
+        energy%esp(:,:,ispin) = wrk2(ispin,:,:)
       end do
-
-      call timer_begin(LOG_EIGEN_ENERGY_CALC)
       if ( yn_spinorbit=='y' ) then
         energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
         energy%esp(:,:,2) = energy%esp(:,:,1)
       end if
+      call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
@@ -663,46 +703,27 @@ CONTAINS
 #endif
       E_local(1) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
 
+    ! nonlocal part of electron-ion energy (E_ion_nloc)
+    
+      call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      E_tmp=0.0d0
       if ( yn_spinorbit=='y' ) then
         ttpsi%zwf=(0.0d0,0.0d0)
         call pseudo_so( tpsi,ttpsi,info,Nspin,ppg,mg )
-      ! nonlocal part (E_ion_nloc)
-        E_tmp=0.0d0
-        do ispin=1,Nspin
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) * system%hvol &
-            * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
-                  *ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )
-        end do
-        end do
-        end do
-        E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
-      else
-    ! nonlocal part (E_ion_nloc)
-      E_tmp = 0d0
 #ifdef USE_OPENACC
-!$acc kernels loop collapse(3) reduction(+:E_tmp) private(ispin,ik,io)
+!$acc kernels loop collapse(3) private(ispin,ik,io) reduction(+:E_tmp)
 #else
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
-!$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
+!$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
 #endif
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-
-          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) * system%hvol &
-            * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
-              * (htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
-                - (ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
-                   + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
-                   * tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
-                ) &
-              ) &
-            )
-
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) &
+                      * sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
+                                 * ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
       end do
@@ -711,15 +732,40 @@ CONTAINS
 #else
 !$omp end parallel do
 #endif
-      E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
+      else
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(3) reduction(+:E_tmp) private(ispin,ik,io)
+#else
+!$omp parallel do collapse(3) default(none) &
+!$omp          reduction(+:E_tmp) &
+!$omp          private(ispin,ik,io) &
+!$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
+#endif
+        do ispin=1,Nspin
+          do ik=info%ik_s,info%ik_e
+          do io=info%io_s,info%io_e
+            E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) * system%hvol &
+              * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
+                * (htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                  - (ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                     + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
+                     * tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) ) )
+          end do
+          end do
+        end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
+!$omp end parallel do
+#endif
       end if
+      E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
       call timer_end(LOG_EIGEN_ENERGY_CALC)
 
     end if
     
     call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
     call comm_summation(E_local,E_sum,2,info%icomm_rko)
-
     energy%E_kin      = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
