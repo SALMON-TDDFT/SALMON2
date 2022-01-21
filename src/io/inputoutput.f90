@@ -239,6 +239,7 @@ contains
       & yn_fftw, &
 #endif
       & yn_scalapack, &
+      & yn_gramschmidt_blas, &
       & yn_eigenexa, &
       & yn_diagonalization_red_mem, &
       & process_allocation
@@ -592,6 +593,7 @@ contains
     yn_fftw              = 'n'
 #endif
     yn_scalapack         = 'n'
+    yn_gramschmidt_blas  = 'y'
     yn_eigenexa          = 'n'
     yn_diagonalization_red_mem = 'n'
     process_allocation   = 'grid_sequential'
@@ -1011,6 +1013,7 @@ contains
     call comm_bcast(yn_fftw             ,nproc_group_global)
 #endif
     call comm_bcast(yn_scalapack        ,nproc_group_global)
+    call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
     call comm_bcast(yn_diagonalization_red_mem,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
@@ -1794,6 +1797,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
 #endif
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
@@ -2257,6 +2261,7 @@ contains
     call yn_argument_check(yn_fftw)
 #endif
     call yn_argument_check(yn_scalapack)
+    call yn_argument_check(yn_gramschmidt_blas)
     call yn_argument_check(yn_eigenexa)
     call yn_argument_check(yn_diagonalization_red_mem)
     call yn_argument_check(yn_periodic)
