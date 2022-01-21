@@ -64,7 +64,7 @@
   ncg = 4
   method_mixing='simple_dm'
   mixrate=0.01
-  nscf = 10
+  nscf = 20
   threshold = 1.d-8
 /
 
