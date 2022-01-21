@@ -196,6 +196,7 @@ contains
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc = 0d0
 
+#ifndef USE_OPENACC
 !$omp parallel default(none) &
 !$omp   firstprivate(kAc) &
 !$omp   private(ik,io,ispin,rtmp,rtmp2,ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w,dphipsi_lma,dphipsi,Nproj_pairs) &
@@ -206,6 +207,7 @@ contains
 !$omp   shared(dden) &
 !$omp   reduction(+:F_tmp) &
 !$omp   if(force_omp_mode)
+#endif
 
     if (.not. allocated(gtpsi)) then
       allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
@@ -213,7 +215,9 @@ contains
                       ,mg%is_array(3):mg%ie_array(3)))
     end if
 
+#ifndef USE_OPENACC
 !$omp do collapse(2) reduction(+:dden)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
@@ -366,11 +370,15 @@ contains
     end do !ispin
     end do !io
     end do !ik
+#ifndef USE_OPENACC
 !$omp end do
+#endif
 
     if (allocated(gtpsi)) deallocate(gtpsi)
 
+#ifndef USE_OPENACC
 !$omp end parallel
+#endif
     call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     if(yn_periodic=='n') then
