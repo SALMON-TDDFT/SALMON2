@@ -463,6 +463,9 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
+      & yn_out_gs_sgm_eps, &
+      & out_gs_sgm_eps_mu_nu, &
+      & out_gs_sgm_eps_width, &
       & out_ms_step, &
       & format_voxel_data, &
       & nsplit_voxel_data, &
@@ -810,6 +813,10 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
+    yn_out_gs_sgm_eps   = 'n'
+    out_gs_sgm_eps_mu_nu(1) = 3
+    out_gs_sgm_eps_mu_nu(2) = 3
+    out_gs_sgm_eps_width    = 0.015d0/ au_energy_ev * uenergy_from_au
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
@@ -1310,6 +1317,10 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
+    call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
+    call comm_bcast(out_gs_sgm_eps_width,nproc_group_global)
+    out_gs_sgm_eps_width = out_gs_sgm_eps_width * uenergy_to_au
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
@@ -2119,6 +2130,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_gs_sgm_eps_width', out_gs_sgm_eps_width
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
@@ -2278,6 +2293,7 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_gs_sgm_eps)
     call yn_argument_check(yn_set_ini_velocity)
     call yn_argument_check(yn_jm)
     call yn_argument_check(yn_charge_neutral_jm)

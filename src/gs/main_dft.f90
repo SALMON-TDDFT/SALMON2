@@ -215,13 +215,13 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
 end if
 
 ! output transition moment : --> want to put out of the optmization loop in future
-if(yn_out_tm  == 'y') then
+if(yn_out_tm  == 'y'.or.yn_out_gs_sgm_eps=='y') then
    select case(iperiodic)
    case(3)
       call write_k_data(system,stencil)  !need? (probably remove later)
-      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg,energy)
    case(0)
-     write(*,*) "error: yn_out_tm='y' & iperiodic=0"
+     write(*,*) "error: yn_out_tm='y',yn_out_gs_sgm_eps='y' & iperiodic=0"
   end select
 end if
 
