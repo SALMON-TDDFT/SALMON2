@@ -343,7 +343,7 @@ contains
 #else
 !$acc update device(system%vec_Ac)
 
-!$acc kernels present(system,info,mg,stencil,psi) copyin(BT,ispin,im) copy(jx,jy,jz)
+!$acc kernels copyin(BT,ispin,im) copy(jx,jy,jz)
 !$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -362,7 +362,7 @@ contains
 !$acc end kernels
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
-!$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
+!$acc kernels copyin(ispin,im) copy(jx,jy,jz)
 !$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
