@@ -98,15 +98,18 @@ contains
 
 !===================================================================================================================================
 
-  !! export SYSNAME_tm.data file
-  subroutine write_tm_data(tpsi,system,info,mg,stencil,srg,ppg)
+  !! export SYSNAME_tm.data, SYSNAME_sigma.data, SYSNAME_epsilon.data file
+  subroutine write_tm_data(tpsi,system,info,mg,stencil,srg,ppg,energy)
     use structures
     use stencil_sub
     use sendrecv_grid
-    use salmon_global, only: sysname
+    use salmon_global, only: yn_out_tm,yn_out_gs_sgm_eps, &
+                       out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
+                       sysname, de,nenergy,nelec,xc
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
+    use inputoutput, only: t_unit_energy
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -115,21 +118,46 @@ contains
     type(s_sendrecv_grid),intent(inout) :: srg
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)       :: tpsi
+    type(s_dft_energy) :: energy
     !
+    logical :: flag_print_tm, flag_print_eps
     integer :: fh_tm, narray
-    integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,ik_s,ik_e,is(3),ie(3)
+    integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
+    integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
+    complex(8),allocatable :: upu_all(:,:,:,:),upu_all_l(:,:,:,:)
     complex(8),allocatable :: gtpsi(:,:,:,:),gtpsi_l(:,:,:,:)
-    complex(8),allocatable :: uVpsi(:,:),uVpsix(:,:),uVpsiy(:,:),uVpsiz(:,:)
-    complex(8),allocatable :: uVpsixx(:,:),uVpsixy(:,:),uVpsixz(:,:)
-    complex(8),allocatable :: uVpsiyy(:,:),uVpsiyz(:,:),uVpsizz(:,:)
-    complex(8),allocatable :: u_rVnl_Vnlr_u(:,:,:,:),u_rVnl_Vnlr_u_l(:,:,:,:)
+    complex(8),allocatable :: uVpsi(:),uVpsi_l(:),uVrpsi(:,:),uVrpsi_l(:,:)
+    complex(8),allocatable :: u_rVnl_Vnlr_u(:,:,:,:)
+    complex(8),allocatable :: u_rVnl_Vnlr_u_all(:,:,:,:),u_rVnl_Vnlr_u_all_l(:,:,:,:)
     complex(8) :: u_rVnl_u(3),u_Vnlr_u(3),veik
-    complex(8),allocatable ::  u_rVnlr_Vnlrr_u(:,:,:,:),u_rVnlr_Vnlrr_u_l(:,:,:,:)
-!    complex(8) :: ctmp1,ctmp2
     complex(8) :: wrk(3)
     character(100) :: file_tm_data
+    !(for printing dielectric function)
+    integer :: mu,nu,iw,nomega
+    real(8) :: w, omega_max, domega, delta, delta_munu, n_e, V, deigen
+    complex(8),allocatable :: matrix_vij(:,:,:,:), matrix_vji(:,:,:,:)
+    complex(8),allocatable :: mat_l(:,:), mat(:,:)
+    complex(8) :: sigma,eps,sigma_intra,sigma_inter,eps_intra,eps_inter
+    complex(8) :: sigma_l,sigma_intra_l
+    character(256) :: filename
+    integer,parameter :: fh_s=333,fh_e=777
+
+    flag_print_tm = .false.
+    flag_print_eps= .false.
+    if(yn_out_tm=='y') flag_print_tm = .true.
+    if(yn_out_gs_sgm_eps=='y') flag_print_eps= .true.
+
+    !For yn_out_gs_sgm_eps=='y'
+    !following input parameters are used:
+    !   out_gs_sgm_eps_mu_nu(1:2) !=mu,nu (x,y,z)
+    !   out_gs_sgm_eps_width      != delta (width)
+    !   nenergy         != # of eneryg(omega) point
+    !   de              != dw
+
+
+
 
     if(info%im_s/=1 .or. info%im_e/=1) then!??????
       write(*,*) "error @ write_tm_data: im/=1"
@@ -139,17 +167,20 @@ contains
       write(*,*) "error @ write_tm_data: nspin/=1"
       return
     endif
-    if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
-      if (comm_is_root(nproc_id_global)) then
-        write(*,*) "error @ write_tm_data: do not use orbital parallelization"
-        write(*,*) "Only <u|p|u> is printed (pseudopotential terms are not printed)"
-      endif
-     !return
-    endif
+    !if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
+    !  if (comm_is_root(nproc_id_global)) then
+    !    write(*,*) "error @ write_tm_data: do not use orbital parallelization"
+    !    write(*,*) "Only <u|p|u> is printed (pseudopotential terms are not printed)"
+    !  endif
+    ! !return
+    !endif
     if(.not. allocated(tpsi%zwf)) then!??????
       write(*,*) "error @ write_tm_data: do not use real wavefunction (iperiodic=0)"
       return
     endif
+
+    if (comm_is_root(nproc_id_global)) &
+    write(*,*) "  calculating transition moment ....."
 
     im = 1
     ispin = 1
@@ -160,18 +191,26 @@ contains
     ik_s = info%ik_s
     ik_e = info%ik_e
 
+    io_s = info%io_s
+    io_e = info%io_e
+
     is = mg%is
     ie = mg%ie
 
     Nlma = ppg%Nlma
 
-    allocate(upu_l(3,NB,NB,NK),upu(3,NB,NB,NK),uVpsi(NB,NK),uVpsix(NB,NK),uVpsiy(NB,NK),uVpsiz(NB,NK), &
-    uVpsixx(NB,NK),uVpsixy(NB,NK),uVpsixz(NB,NK),uVpsiyy(NB,NK),uVpsiyz(NB,NK),uVpsizz(NB,NK), &
-    u_rVnl_Vnlr_u(3,NB,NB,NK),u_rVnl_Vnlr_u_l(3,NB,NB,NK),u_rVnlr_Vnlrr_u(3,3,NB,NK),u_rVnlr_Vnlrr_u_l(3,3,NB,NK))
-
     !calculate <u_nk|p_j|u_mk>  (j=x,y,z)
 
-    upu_l(:,:,:,:) = 0d0
+    allocate( upu_l(3,io_s:io_e,NB,ik_s:ik_e) )
+    !$omp parallel do private(ik,ib1,ib2) collapse(3)
+    do ik =ik_s,ik_e
+    do ib1=io_s,io_e
+    do ib2=1,NB
+       upu_l(1:3,ib1,ib2,ik) = 0d0
+    enddo
+    enddo
+    enddo
+    !$omp end parallel do
 
     allocate(gtpsi_l(3,mg%is_array(1):mg%ie_array(1) &
                       ,mg%is_array(2):mg%ie_array(2) &
@@ -192,55 +231,73 @@ contains
     do ib2=1,NB
 
       ! gtpsi = (nabla) psi
+      !$omp workshare
       gtpsi_l(:,:,:,:) = 0d0
-      if(ib2.ge.info%io_s .and. ib2.le.info%io_e) &
+      !$omp end workshare
+      if(ib2.ge.io_s .and. ib2.le.io_e) &
         call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi_l,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
       call comm_summation(gtpsi_l,gtpsi,narray,info%icomm_o)
 
-!     do ib1=1,NB
-      do ib1=info%io_s,info%io_e
+      !$omp parallel do private(ib1,i,wrk)
+      do ib1=io_s,io_e
         do i=1,3
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
                             * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
         end do
         upu_l(:,ib1,ib2,ik) = - zI * wrk * system%Hvol
       end do
+      !$omp end parallel do
     end do
     end do
-    call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
-    deallocate(gtpsi)
+    deallocate(gtpsi_l,gtpsi)
 
-    !--(Print only for orbital parallelization: just temporal)
-    if(info%io_s/=1 .or. info%io_e/=system%no) then
 
-       file_tm_data = trim(sysname)//'_tm.data'
-       if (comm_is_root(nproc_id_global)) then
-          fh_tm = open_filehandle(file_tm_data, status="replace")
-          write(fh_tm, '("#",1X,A)') "#Transition Moment between occupied and unocupied orbitals in GS"
-          write(fh_tm, '("#",1X,A)') "# (Separated analysis tool is available)"
+    allocate( upu(3,io_s:io_e,NB,ik_s:ik_e) )
+    call comm_summation(upu_l,upu,3*(io_e-io_s+1)*NB*(ik_e-ik_s+1),info%icomm_r)
+!    call comm_summation(upu_l,upu,3*NB*NB*(ik_e-ik_s+1),info%icomm_ro)
+!    call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
+    deallocate(upu_l)
 
-          !<u_nk|p_j|u_mk>  (j=x,y,z)
-          write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
-          do ik =1,NK
-          do ib1=1,NB
-          do ib2=1,NB
-             write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
-          enddo
-          enddo
-          enddo
-          close(fh_tm)
-       endif
-       return
+
+    if(flag_print_tm) then
+       allocate( upu_all_l(3,NB,NB,NK), upu_all(3,NB,NB,NK) )
+       !$omp parallel do private(ik,ib1,ib2) collapse(3)
+       do ik =1,NK
+       do ib1=1,NB
+       do ib2=1,NB
+          if( (ik .ge.ik_s .and. ik .le.ik_e) .and. &
+              (ib1.ge.io_s .and. ib1.le.io_e) ) then
+             upu_all_l(1:3,ib1,ib2,ik) = upu(1:3,ib1,ib2,ik)
+          else
+             upu_all_l(1:3,ib1,ib2,ik) = 0d0
+          endif
+       enddo
+       enddo
+       enddo
+       !$omp end parallel do
+       call comm_summation(upu_all_l,upu_all,3*NB*NB*NK,info%icomm_ko)
+!       call comm_summation(upu_all_l,upu_all,3*NB*NB*NK,info%icomm_k)
+       deallocate(upu_all_l)
     endif
-    !-------------------------------------------------
 
-    !calculate <u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
-    u_rVnl_Vnlr_u_l = 0d0
+
+    !calculate -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
+
+    allocate( uVpsi(NB)   ,uVpsi_l(NB) )
+    allocate( uVrpsi(3,NB),uVrpsi_l(3,NB) )
+    allocate( u_rVnl_Vnlr_u(3,io_s:io_e,NB,ik_s:ik_e) )
+
+    !$omp workshare
+    u_rVnl_Vnlr_u(:,:,:,:) = 0d0
+    !$omp end workshare
+
     do ik=ik_s,ik_e
     do ilma=1,Nlma
        ia=ppg%ia_tbl(ilma)
-       uVpsi=0d0;  uVpsix=0d0;  uVpsiy=0d0;  uVpsiz=0d0
+       uVpsi_l  = 0d0
+       uVrpsi_l = 0d0
+       !$omp parallel do private(j,x,y,z,ix,iy,iz,veik,ib) reduction(+:uVpsi_l,uVrpsi_l)
        do j=1,ppg%Mps(ia)
           x = ppg%Rxyz(1,j,ia)
           y = ppg%Rxyz(2,j,ia)
@@ -249,176 +306,251 @@ contains
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
           veik = conjg(ppg%zekr_uV(j,ilma,ik))
-          do ib=1,NB
-          uVpsi( ib,ik) =uVpsi( ib,ik)+ veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
-          uVpsix(ib,ik) =uVpsix(ib,ik)+ veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
-          uVpsiy(ib,ik) =uVpsiy(ib,ik)+ veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
-          uVpsiz(ib,ik) =uVpsiz(ib,ik)+ veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
+         !do ib=1,NB
+          do ib=io_s,io_e
+             uVpsi_l(ib)    = uVpsi_l(ib)    + veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
+             uVrpsi_l(1,ib) = uVrpsi_l(1,ib) + veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
+             uVrpsi_l(2,ib) = uVrpsi_l(2,ib) + veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
+             uVrpsi_l(3,ib) = uVrpsi_l(3,ib) + veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
           enddo
        end do
-       uVpsi  = uVpsi * ppg%rinv_uvu(ilma)
+       !$omp end parallel do
+       uVpsi_l  = uVpsi_l * ppg%rinv_uvu(ilma)
+       call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_ro)
+       call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_ro)
+!       call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_r)
+!       call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_r)
 
-!$omp parallel
-!$omp do private(ib1,ib2,u_rVnl_u,u_Vnlr_u) collapse(2)
-       do ib1=1,NB
+       !$omp parallel
+       !$omp do private(ib1,ib2,u_rVnl_u,u_Vnlr_u) collapse(2)
+       do ib1=io_s,io_e
        do ib2=1,NB
-          !<u|e^-ik*r|v><v|e^ik|u>
-          u_rVnl_u(1)= conjg(uVpsix(ib1,ik))*uVpsi(ib2,ik)
-          u_rVnl_u(2)= conjg(uVpsiy(ib1,ik))*uVpsi(ib2,ik)
-          u_rVnl_u(3)= conjg(uVpsiz(ib1,ik))*uVpsi(ib2,ik)
-          !<u|e^-ik|v><v|e^ik*r|u>
-          u_Vnlr_u(1)= conjg(uVpsi(ib1,ik))*uVpsix(ib2,ik)
-          u_Vnlr_u(2)= conjg(uVpsi(ib1,ik))*uVpsiy(ib2,ik)
-          u_Vnlr_u(3)= conjg(uVpsi(ib1,ik))*uVpsiz(ib2,ik)
-
-          u_rVnl_Vnlr_u_l(:,ib1,ib2,ik) = u_rVnl_Vnlr_u_l(:,ib1,ib2,ik)  &
-          &                               + u_rVnl_u(:) - u_Vnlr_u(:)
+          !<u|e^{-ik}*r|v><v|e^{ik}|u>
+          u_rVnl_u(1:3) = conjg(uVrpsi(1:3,ib1))*uVpsi(ib2)
+        
+          !<u|e^{-ik}|v><v|e^{ik}*r|u>
+          u_Vnlr_u(1:3) = conjg(uVpsi(ib1))*uVrpsi(1:3,ib2)
+        
+          u_rVnl_Vnlr_u(:,ib1,ib2,ik) = u_rVnl_Vnlr_u(:,ib1,ib2,ik)  &
+          &                           - zi * ( u_rVnl_u(:) - u_Vnlr_u(:) ) * system%Hvol
        enddo
        enddo
-!$omp end do
-!$omp end parallel
+       !$omp end do
+       !$omp end parallel
     enddo  !ilma
     enddo  !ik
-    call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_rko)
+   !call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*(ik_e-ik_s+1),info%icomm_o)
+   !call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_ko)
 
 
-!    !calculate <u_nk|[r_j,dVnl^(0)]r|u_nk>  (j=x,y,z)
-!    u_rVnlr_Vnlrr_u_l(:,:,:,:) = 0d0
-!    do ik=ik_s,ik_e
-!    do ilma=1,Nlma
-!       ia=ppg%ia_tbl(ilma)
-!       uVpsi=0d0;  uVpsix=0d0;  uVpsiy=0d0;  uVpsiz=0d0
-!       uVpsixx=0d0;  uVpsixy=0d0;  uVpsixz=0d0
-!                     uVpsiyy=0d0;  uVpsiyz=0d0
-!                                   uVpsizz=0d0
-!       do j=1,ppg%Mps(ia)
-!          x = ppg%Rxyz(1,j,ia)
-!          y = ppg%Rxyz(2,j,ia)
-!          z = ppg%Rxyz(3,j,ia)
-!          ix = ppg%Jxyz(1,j,ia)
-!          iy = ppg%Jxyz(2,j,ia)
-!          iz = ppg%Jxyz(3,j,ia)
-!          veik = conjg(ppg%zekr_uV(j,ilma,ik))
-!          do ib=1,NB
-!          uVpsi(  ib,ik)=uVpsi(  ib,ik)+veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
-!          uVpsix( ib,ik)=uVpsix( ib,ik)+veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
-!          uVpsiy( ib,ik)=uVpsiy( ib,ik)+veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
-!          uVpsiz( ib,ik)=uVpsiz( ib,ik)+veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
-!          uVpsixx(ib,ik)=uVpsixx(ib,ik)+veik*x*x*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xx|u>
-!          uVpsixy(ib,ik)=uVpsixy(ib,ik)+veik*x*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xy|u>
-!          uVpsixz(ib,ik)=uVpsixz(ib,ik)+veik*x*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xz|u>
-!          uVpsiyy(ib,ik)=uVpsiyy(ib,ik)+veik*y*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yy|u>
-!          uVpsiyz(ib,ik)=uVpsiyz(ib,ik)+veik*y*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yz|u>
-!          uVpsizz(ib,ik)=uVpsizz(ib,ik)+veik*z*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*zz|u>
-!          enddo
-!
-!       end do
-!
-!       do ib=1,NB
-!          !xx
-!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsix( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixx(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !xy
-!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiy( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !xz
-!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiz( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !yx
-!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsix( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !yy
-!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiy( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyy(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !yz
-!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiz( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !zx
-!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsix( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !zy
-!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiy( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!          !zz
-!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiz( ib,ik)
-!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsizz(ib,ik)
-!          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) = &
-!          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-!
-!       enddo
-!
-!    enddo  !ilma
-!    enddo  !ik
-!    call comm_summation(u_rVnlr_Vnlrr_u_l,u_rVnlr_Vnlrr_u,3*3*NB*NK,info%icomm_rko)
+    !(print tm)
+    if(flag_print_tm) then
 
-    file_tm_data = trim(sysname)//'_tm.data'!??????
+       allocate( u_rVnl_Vnlr_u_all(3,NB,NB,NK), u_rVnl_Vnlr_u_all_l(3,NB,NB,NK) )
 
-    if (comm_is_root(nproc_id_global)) then
-      fh_tm = open_filehandle(file_tm_data, status="replace")
-      write(fh_tm, '("#",1X,A)') "#Transition Moment between occupied and unocupied orbitals in GS"
-      write(fh_tm, '("#",1X,A)') "# (Separated analysis tool is available)"
-
-
-      !Currently, TEST: print format is not decided
-
-       !<u_nk|p_j|u_mk>  (j=x,y,z)
-       write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+       !$omp parallel do private(ik,ib1,ib2) collapse(3)
        do ik =1,NK
        do ib1=1,NB
        do ib2=1,NB
-          write(fh_tm,9000) ik,ib1,ib2,(upu(j,ib1,ib2,ik),j=1,3)
+          if( (ik .ge.ik_s .and. ik .le.ik_e) .and.  &
+              (ib1.ge.io_s .and. ib1.le.io_e) ) then
+             u_rVnl_Vnlr_u_all_l(1:3,ib1,ib2,ik) = u_rVnl_Vnlr_u(1:3,ib1,ib2,ik)
+          else
+             u_rVnl_Vnlr_u_all_l(1:3,ib1,ib2,ik) = 0d0
+          endif
        enddo
        enddo
        enddo
+       !$omp end parallel do
+
+       call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK,info%icomm_ko)
+      !call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK,info%icomm_k)
+
+       deallocate(uVpsi_l, uVrpsi_l)
+       deallocate(u_rVnl_Vnlr_u_all_l)
+
+
+       file_tm_data = trim(sysname)//'_tm.data'
+
+       if (comm_is_root(nproc_id_global)) then
+          write(*,*) "  printing transition moment ....."
+
+          fh_tm = open_filehandle(file_tm_data, status="replace")
+          write(fh_tm, '("#",1X,A)') "#Transition Moment between occupied and unocupied orbitals in GS"
+          write(fh_tm, '("#",1X,A)') "# (Separated analysis tool is available)"
+
+          !Currently, TEST: print format is not decided
+
+          !<u_nk|p_j|u_mk>  (j=x,y,z)
+          write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+          do ik =1,NK
+          do ib1=1,NB
+          do ib2=1,NB
+             write(fh_tm,9000) ik,ib1,ib2,(upu_all(j,ib1,ib2,ik),j=1,3)
+          enddo
+          enddo
+          enddo
 !9000     format(3i8,6e18.10)
 9000     format(3i8,6e18.5)
 
-!       !<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)
-!       write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)"
-!       do ik=1,NK
-!       do ib=1,NB
-!          do i=1,3
-!             write(fh_tm,9000) ik,ib,i,(u_rVnlr_Vnlrr_u(i,j,ib,ik),j=1,3)
-!          enddo
-!       enddo
-!       enddo
+          ! -i*<u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
+          write(fh_tm,*) "# -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)"
+          do ik =1,NK
+          do ib1=1,NB
+          do ib2=1,NB
+             write(fh_tm,9000) ik,ib1,ib2,(u_rVnl_Vnlr_u_all(j,ib1,ib2,ik),j=1,3)
+          enddo
+          enddo
+          enddo
 
-       !<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
-       write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)"
-       do ik =1,NK
-       do ib1=1,NB
+          close(fh_tm)
+       end if
+
+    end if  !flag_print_tm
+
+
+    if (flag_print_eps) then
+       ! taken from tm2sigma.f90 in utility directory
+       if(system%nspin==2) then
+          stop "printing option of dielectric function is available for nspin=1"
+       endif
+       if(xc.ne.'pz' .or. xc.ne.'PZ') then
+          if (comm_is_root(nproc_id_global)) then
+             write(*,*) "Warning for calculating :"
+             write(*,*) "The calculated sigma/epsilon may be wrong except for xc=pz"
+             write(*,*) "(not well verified in the current code)"
+          endif
+       endif
+
+
+       mu = out_gs_sgm_eps_mu_nu(1)
+       nu = out_gs_sgm_eps_mu_nu(2)
+
+       V = system%det_a* dble(NK) ! volume
+       n_e = dble(nelec)/system%det_a ! averaged electron number density
+  
+       if(mu==nu) then
+          delta_munu = 1d0
+       else
+          delta_munu = 0d0
+       end if
+
+       !  
+       delta  = out_gs_sgm_eps_width
+       omega_max = de * nenergy
+       nomega = nenergy
+       domega = de
+       !domega = omega_max/dble(nomega)
+       if (comm_is_root(nproc_id_global)) then
+       if(mu<1 .or. mu>3 .or. nu<1 .or. nu>3) then
+          stop "error: mu & nu must be 1 or 2 or 3 (x,y,z)"
+       end if
+       end if
+
+       allocate(matrix_vij(io_s:io_e,NB,3,ik_s:ik_e))
+
+       !$omp parallel do private(ik,ib1,ib2) collapse(3)
+       do ik=ik_s,ik_e
+       do ib1=io_s,io_e
        do ib2=1,NB
-          write(fh_tm,9000) ik,ib1,ib2,(u_rVnl_Vnlr_u(j,ib1,ib2,ik),j=1,3)
-       enddo
+          ! <u_ib1,k|p_(1:3)|u_ib2,k> + <u_ib1,k|[r_(1:3),V_nl]|u_ib2,k>/i
+          matrix_vij(ib1,ib2,1:3,ik) = upu(1:3,ib1,ib2,ik) + u_rVnl_Vnlr_u(1:3,ib1,ib2,ik)
+       end do
+       end do
+       end do
+       !$omp end parallel do
+       deallocate( upu, u_rVnl_Vnlr_u )
+
+       allocate(matrix_vji(NB,io_s:io_e,3,ik_s:ik_e))
+       allocate(mat_l(NB,3),mat(NB,3))
+
+       do ik=ik_s,ik_e
+       do ib2=1,NB
+
+          mat_l(:,:)=0d0
+          do ib1=io_s,io_e
+             mat_l(ib1,1:3)=matrix_vij(ib1,ib2,1:3,ik)
+          enddo
+
+          call comm_summation(mat_l,mat,NB*3,info%icomm_o)
+
+          if(ib2.ge.io_s .and. ib2.le.io_e) then
+          do ib1=1,NB
+             matrix_vji(ib1,ib2,1:3,ik) = mat(ib1,1:3)
+          enddo
+          endif
+
        enddo
        enddo
 
-    end if
 
-    if (comm_is_root(nproc_id_global)) then
-      close(fh_tm)
-    end if
+       if (comm_is_root(nproc_id_global)) then
+          filename = trim(sysname) // '_sigma.data'
+          open(fh_s, file=filename, status='replace')
+          write(fh_s,'(3a)') "#1:omega[a.u.], 2:Re(sigma)[a.u.], 3:Im(sigma)[a.u.]", &
+                            & ", 4:Re(sigma_intra)[a.u.], 5:Im(sigma_intra)[a.u.]", &
+                            & ", 6:Re(sigma_inter)[a.u.], 7:Im(sigma_inter)[a.u.]"
+                            
+          filename = trim(sysname) // '_epsilon.data'
+          open(fh_e, file=filename, status='replace')
+          write(fh_e,'(3a)') "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
+                            & ", 4:Re(epsilon_intra), 5:Im(epsilon_intra)", &
+                            & ", 6:Re(epsilon_inter), 7:Im(epsilon_inter)"
+       endif
+
+       do iw=1,nomega
+          w = dble(iw)*domega
+          sigma_l = 0d0
+          sigma_intra_l = 0d0
+          !$omp parallel do private(ik,ib1,ib2,deigen) collapse(2) reduction(+:sigma_l,sigma_intra_l)
+          do ik=ik_s,ik_e
+         !do ib1=1,nb
+          do ib1=io_s,io_e
+             if(system%rocc(ib1,ik,ispin)==0d0) cycle
+             do ib2=1,nb
+                if(ib2==ib1) cycle
+                deigen = energy%esp(ib1,ik,ispin) - energy%esp(ib2,ik,ispin)
+                sigma_l = sigma_l + (zi/(w*V))* system%rocc(ib1,ik,ispin)*   &
+                     & ( matrix_vij(ib1,ib2,mu,ik) * matrix_vji(ib2,ib1,nu,ik) / ( w + deigen + zi*delta ) &
+                     & + matrix_vji(ib2,ib1,mu,ik) * matrix_vij(ib1,ib2,nu,ik) / (-w + deigen - zi*delta ) )
+                sigma_intra_l = sigma_intra_l + (zi/(w*V))* system%rocc(ib1,ik,ispin)*   &
+                     & ( matrix_vij(ib1,ib2,mu,ik) * matrix_vji(ib2,ib1,nu,ik) / deigen &
+                     & + matrix_vji(ib2,ib1,mu,ik) * matrix_vij(ib1,ib2,nu,ik) / deigen )
+             end do
+          end do
+          end do
+          !$omp end parallel do
+          call comm_summation(sigma_l,      sigma,       info%icomm_ko)
+          call comm_summation(sigma_intra_l,sigma_intra, info%icomm_ko)
+         !call comm_summation(sigma_l,      sigma,       info%icomm_k)
+         !call comm_summation(sigma_intra_l,sigma_intra, info%icomm_k)
+
+          sigma       = sigma       + (zi*n_e/w)* delta_munu
+          sigma_intra = sigma_intra + (zi*n_e/w)* delta_munu
+          sigma_inter = sigma - sigma_intra
+    
+          eps = cmplx(delta_munu) + (4d0*pi*zi/w)* sigma
+          eps_intra = cmplx(delta_munu) + (4d0*pi*zi/w)* sigma_intra
+          eps_inter = (4d0*pi*zi/w)* sigma_inter
+
+          if (comm_is_root(nproc_id_global)) then    
+             write(fh_s,'(7(1X,E23.15E3))') w*t_unit_energy%conv,dble(sigma),aimag(sigma), &
+                  & dble(sigma_intra),aimag(sigma_intra),dble(sigma_inter),aimag(sigma_inter)
+             write(fh_e,'(7(1X,E23.15E3))') w*t_unit_energy%conv,dble(eps),aimag(eps), &
+                  & dble(eps_intra),aimag(eps_intra),dble(eps_inter),aimag(eps_inter)
+          end if
+       end do
+  
+       close(fh_s)
+       close(fh_e)
+
+    endif
+
     call comm_sync_all
     return
   end subroutine write_tm_data
 
-!===================================================================================================================================
+  !===================================================================================================================================
 
   subroutine write_xyz(comment,action,rvf,system)
   ! Write xyz in xyz format but also velocity and force are printed if necessary
@@ -1971,7 +2103,7 @@ contains
       write(ofl%fh_ovlp,'(i11)') itt
       do ispin=1,nspin_tmp
       do ik=1,nk
-        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)*nk,io=1,no0)
+        write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)/system%wtk(ik),io=1,no0)
       end do
       end do
     end if

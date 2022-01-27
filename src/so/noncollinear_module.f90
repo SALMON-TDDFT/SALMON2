@@ -42,7 +42,12 @@ contains
 
     den_mat=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(3) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
+#else
 !$omp parallel do collapse(3) default(shared) private(im,ik,io,occ,js,is,iz,iy,ix) reduction(+:den_mat)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -54,7 +59,7 @@ contains
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
              den_mat(ix,iy,iz,is,js) = den_mat(ix,iy,iz,is,js) + occ &
-                  * conjg( psi%zwf(ix,iy,iz,is,io,ik,im) )*psi%zwf(ix,iy,iz,js,io,ik,im)
+                  * psi%zwf(ix,iy,iz,is,io,ik,im) * conjg( psi%zwf(ix,iy,iz,js,io,ik,im) )
           end do
           end do
           end do
@@ -63,6 +68,9 @@ contains
     end do !io
     end do !ik
     end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
     ix=size(den_mat,1)
     iy=size(den_mat,2)

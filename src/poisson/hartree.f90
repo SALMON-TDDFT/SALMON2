@@ -26,6 +26,9 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use phys_constants,only: au_aa, au_ev
   use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary, &
                          method_poisson
+#ifdef USE_FFTW
+  use inputoutput, only: yn_fftw
+#endif
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid,  &
                         allocate_scalar, deallocate_scalar
@@ -50,20 +53,38 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     case('cg')
       call poisson_isolated_cg(lg,mg,info,system,poisson,rho%f,Vh%f,srg_scalar,stencil)
     case('ft')
-      select case(yn_ffte)
+#ifdef USE_FFTW
+      select case(yn_fftw)
       case('n')
-        call poisson_isolated_ft(lg,mg,info,fg,rho,Vh,poisson)
+#endif
+        select case(yn_ffte)
+        case('n')
+          call poisson_isolated_ft(lg,mg,info,fg,rho,Vh,poisson)
+        case('y')
+          call poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
+        end select
+#ifdef USE_FFTW
       case('y')
-        call poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
+        call poisson_isolated_fftw(lg,mg,info,fg,rho,Vh,poisson)
       end select
+#endif
     end select
   case(3)
-    select case(yn_ffte)
+#ifdef USE_FFTW
+    select case(yn_fftw)
     case('n')
-      call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
+#endif
+      select case(yn_ffte)
+      case('n')
+        call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
+      case('y')
+        call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+      end select
+#ifdef USE_FFTW
     case('y')
-      call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+      call poisson_fftw(lg,mg,info,fg,rho,Vh,poisson)
     end select
+#endif
   end select
 
   !potentiall wall at the boundary on z direction

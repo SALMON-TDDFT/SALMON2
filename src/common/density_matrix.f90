@@ -75,6 +75,40 @@ contains
       do ispin=1,nspin
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
+#ifdef USE_OPENACC
+        wrk(:,:,:,tid) = 0.d0
+        tid_offset = size(wrk,4)/2
+
+!$acc kernels copyin(is,ie)
+!$acc loop collapse(2) gang worker(256) private(wrk2,ik,io,iz,iy,ix)
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
+        end do
+        end do
+        end do
+        end do
+        end do
+!$acc loop collapse(3) private(tid_offset,iz,iy,ix)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+        do while(tid_offset > 0)
+          if(tid < tid_offset .and. tid + tid_offset < nthreads) then
+            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
+          end if
+          tid_offset = tid_offset/2
+        end do
+        end do
+        end do
+        end do
+!$acc end kernels
+
+#else
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
         wrk(:,:,:,tid) = 0.d0
@@ -104,6 +138,7 @@ contains
         end do
 
 !$omp end parallel
+#endif
         call timer_end(LOG_DENSITY_CALC)
 
         call timer_begin(LOG_DENSITY_COMM_COLL)
@@ -213,7 +248,43 @@ contains
     use sym_vector_sub, only: sym_vector_xyz
     use code_optimization, only: current_omp_mode
     use timer
+    use iso_c_binding
     implicit none
+#if defined(USE_OPENACC)
+    interface
+      subroutine stencil_current_core_gpu(ik_s,ik_e,io_s,io_e,vec_k,vec_Ac,is_array,ie_array &
+                                         ,is,ie,idx,idy,idz,nabt,ispin,im,spin_len,psi,BT,rocc,wtk,jx,jy,jz) bind(c)
+        import
+        ! Input
+        integer(c_int), value :: ik_s
+        integer(c_int), value :: ik_e
+        integer(c_int), value :: io_s
+        integer(c_int), value :: io_e
+        integer(c_int), value :: ispin
+        integer(c_int), value :: im
+        integer(c_int), value :: spin_len
+        ! Output
+        real(c_double), intent(inout) :: jx
+        real(c_double), intent(inout) :: jy
+        real(c_double), intent(inout) :: jz
+        ! Input (ptr)
+        real(c_double), intent(in) :: vec_k(3:ik_e-ik_e+1)
+        real(c_double), intent(in) :: vec_Ac(3)
+        integer(c_int), intent(in) :: is_array(3)
+        integer(c_int), intent(in) :: ie_array(3)
+        integer(c_int), intent(in) :: is(3)
+        integer(c_int), intent(in) :: ie(3)
+        integer(c_int), intent(in) :: idx(is(1)-Nd:ie(1)+Nd)
+        integer(c_int), intent(in) :: idy(is(2)-Nd:ie(2)+Nd)
+        integer(c_int), intent(in) :: idz(is(3)-Nd:ie(3)+Nd)
+        real(c_double), intent(in) :: nabt(Nd,3)
+        complex(c_double_complex), intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_arary(3))
+        real(c_double), intent(in) :: BT(3,3)
+        real(c_double), intent(in) :: rocc(io_e-io_s+1,ik_e-ik_s+1)
+        real(c_double), intent(in) :: wtk(ik_e-ik_s+1)
+      end  subroutine stencil_current_core_gpu
+    end interface
+#endif
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
@@ -260,11 +331,16 @@ contains
     do ispin=1,nspin
       call timer_begin(LOG_CURRENT_CALC)
       wrk4 = 0d0
-#ifdef USE_OPENACC
+#if defined(USE_OPENACC)
       jx = 0d0
       jy = 0d0
       jz = 0d0
-
+      call timer_begin(LOG_CALC_STENCIL_CURRENT)
+#if defined(USE_OPENACC) && defined(USE_CUDA)
+      call stencil_current_core_gpu(info%ik_s,info%ik_e,info%io_s,info%io_e,system%vec_k,system%vec_Ac &
+                                   ,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx(1:),mg%idy(1:),mg%idz(1:) &
+                                   ,stencil%coef_nab,ispin,im,nspin,psi%zwf,BT,system%rocc,system%wtk,jx,jy,jz)
+#else
 !$acc update device(system%vec_Ac)
 
 !$acc kernels present(system,info,mg,stencil,psi) copyin(BT,ispin,im) copy(jx,jy,jz)
@@ -284,7 +360,8 @@ contains
       end do
       end do
 !$acc end kernels
-
+#endif
+      call timer_end(LOG_CALC_STENCIL_CURRENT)
 !$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
 !$acc loop private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto
       do ik=info%ik_s,info%ik_e
