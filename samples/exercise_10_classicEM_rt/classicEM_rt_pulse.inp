@@ -2,7 +2,7 @@
 ! Excercise 10: Pulsed electric field response of a metallic nanosphere                  !
 !               in classical electromagnetism(FDTD simulation)                           !
 !----------------------------------------------------------------------------------------!
-! * The detail of this excercise is expained in our manual(see chapter: 'Exercises').    !
+! * The detail of this excercise is explained in our manual(see chapter: 'Exercises').   !
 !   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
 ! * Input format consists of group of keywords like:                                     !
 !     &group                                                                             !
@@ -61,7 +61,7 @@
   !(phi_cep1 must be 0.25 + 0.5 * n(integer) when ae_shape1 = 'Ecos2')
   phi_cep1 = 0.75d0
   !--- Caution ---------------------------------------------------------!
-  ! Defenition of the incident pulse is wrriten in:                     !
+  ! Definition of the incident pulse is written in:                     !
   ! https://www.sciencedirect.com/science/article/pii/S0010465518303412 !
   !---------------------------------------------------------------------!
 /
