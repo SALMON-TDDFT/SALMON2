@@ -1,7 +1,7 @@
 !########################################################################################!
 ! Excercise 01: Ground state of C2H2 molecule                                            !
 !----------------------------------------------------------------------------------------!
-! * The detail of this excercise is expained in our manual(see chapter: 'Exercises').    !
+! * The detail of this excercise is explained in our manual(see chapter: 'Exercises').   !
 !   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
 ! * Input format consists of group of keywords like:                                     !
 !     &group                                                                             !
