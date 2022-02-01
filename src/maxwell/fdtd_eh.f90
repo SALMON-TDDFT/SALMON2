@@ -748,7 +748,7 @@ contains
       !check source1 and source2
       call eh_check_inc(1,ek_dir1,epdir_re1,epdir_im1,fe%inc_dist1)
       call eh_check_inc(2,ek_dir2,epdir_re2,epdir_im2,fe%inc_dist2)
-    case('point','x-line','y-line','z-line')
+    case('point_hs','point_ss','x-line_hs','x-line_ss','y-line_hs','y-line_ss','z-line_hs','z-line_ss')
       !these selection are for debug
       fe%inc_dist1=wave_input; fe%inc_dist2='none';
       if(comm_is_root(nproc_id_global)) write(*,*) trim(wave_input), " source is used."
@@ -2036,7 +2036,7 @@ contains
 !      tf_r=exp(-0.5d0*(( ((dble(iter)-0.5d0)*dt_em-10.0d0*tw1)/tw1 )**2.0d0) ) !test time factor
       add_inc(:)=amp*(tf_r*ep_r(:)+tf_i*ep_i(:))
       
-      if(typ=='point') then
+      if(typ=='point_hs') then
         if(fe%inc_po_pe(iord)==1) then
           ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3);
           fe%ex_y(ix,iy,iz)=add_inc(1)/2.0d0
@@ -2046,7 +2046,17 @@ contains
           fe%ez_x(ix,iy,iz)=add_inc(3)/2.0d0
           fe%ez_y(ix,iy,iz)=add_inc(3)/2.0d0
         end if
-      elseif(typ=='x-line') then
+      elseif(typ=='point_ss') then
+        if(fe%inc_po_pe(iord)==1) then
+          ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3);
+          fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+add_inc(1)/2.0d0
+          fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+add_inc(1)/2.0d0
+          fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+add_inc(2)/2.0d0
+          fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+add_inc(2)/2.0d0
+          fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+add_inc(3)/2.0d0
+          fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='x-line_hs') then
         if(fe%inc_li_pe(iord,1)==1) then
           iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3);
           fe%ex_y(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)=add_inc(1)/2.0d0
@@ -2056,7 +2066,17 @@ contains
           fe%ez_x(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)=add_inc(3)/2.0d0
           fe%ez_y(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)=add_inc(3)/2.0d0
         end if
-      elseif(typ=='y-line') then
+      elseif(typ=='x-line_ss') then
+        if(fe%inc_li_pe(iord,1)==1) then
+          iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3);
+          fe%ex_y(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)=fe%ex_y(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)+add_inc(1)/2.0d0
+          fe%ex_z(fe%iex_z_is(1):fe%iex_z_ie(1),iy,iz)=fe%ex_z(fe%iex_z_is(1):fe%iex_z_ie(1),iy,iz)+add_inc(1)/2.0d0
+          fe%ey_z(fe%iey_z_is(1):fe%iey_z_ie(1),iy,iz)=fe%ey_z(fe%iey_z_is(1):fe%iey_z_ie(1),iy,iz)+add_inc(2)/2.0d0
+          fe%ey_x(fe%iey_x_is(1):fe%iey_x_ie(1),iy,iz)=fe%ey_x(fe%iey_x_is(1):fe%iey_x_ie(1),iy,iz)+add_inc(2)/2.0d0
+          fe%ez_x(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)=fe%ez_x(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)+add_inc(3)/2.0d0
+          fe%ez_y(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)=fe%ez_y(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='y-line_hs') then
         if(fe%inc_li_pe(iord,2)==1) then
           ix=fe%inc_po_id(iord,1); iz=fe%inc_po_id(iord,3);
           fe%ex_y(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)=add_inc(1)/2.0d0
@@ -2066,7 +2086,17 @@ contains
           fe%ez_x(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)=add_inc(3)/2.0d0
           fe%ez_y(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)=add_inc(3)/2.0d0
         end if
-      elseif(typ=='z-line') then
+      elseif(typ=='y-line_ss') then
+        if(fe%inc_li_pe(iord,2)==1) then
+          ix=fe%inc_po_id(iord,1); iz=fe%inc_po_id(iord,3);
+          fe%ex_y(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)=fe%ex_y(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)+add_inc(1)/2.0d0
+          fe%ex_z(ix,fe%iex_z_is(2):fe%iex_z_ie(2),iz)=fe%ex_z(ix,fe%iex_z_is(2):fe%iex_z_ie(2),iz)+add_inc(1)/2.0d0
+          fe%ey_z(ix,fe%iey_z_is(2):fe%iey_z_ie(2),iz)=fe%ey_z(ix,fe%iey_z_is(2):fe%iey_z_ie(2),iz)+add_inc(2)/2.0d0
+          fe%ey_x(ix,fe%iey_x_is(2):fe%iey_x_ie(2),iz)=fe%ey_x(ix,fe%iey_x_is(2):fe%iey_x_ie(2),iz)+add_inc(2)/2.0d0
+          fe%ez_x(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)=fe%ez_x(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)+add_inc(3)/2.0d0
+          fe%ez_y(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)=fe%ez_y(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='z-line_hs') then
         if(fe%inc_li_pe(iord,3)==1) then
           ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2);
           fe%ex_y(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))=add_inc(1)/2.0d0
@@ -2075,6 +2105,16 @@ contains
           fe%ey_x(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))=add_inc(2)/2.0d0
           fe%ez_x(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))=add_inc(3)/2.0d0
           fe%ez_y(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))=add_inc(3)/2.0d0
+        end if
+      elseif(typ=='z-line_ss') then
+        if(fe%inc_li_pe(iord,3)==1) then
+          ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2);
+          fe%ex_y(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))=fe%ex_y(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))+add_inc(1)/2.0d0
+          fe%ex_z(ix,iy,fe%iex_z_is(3):fe%iex_z_ie(3))=fe%ex_z(ix,iy,fe%iex_z_is(3):fe%iex_z_ie(3))+add_inc(1)/2.0d0
+          fe%ey_z(ix,iy,fe%iey_z_is(3):fe%iey_z_ie(3))=fe%ey_z(ix,iy,fe%iey_z_is(3):fe%iey_z_ie(3))+add_inc(2)/2.0d0
+          fe%ey_x(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))=fe%ey_x(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))+add_inc(2)/2.0d0
+          fe%ez_x(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))=fe%ez_x(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))+add_inc(3)/2.0d0
+          fe%ez_y(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))=fe%ez_y(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))+add_inc(3)/2.0d0
         end if
       elseif(typ=='xy-plane') then !z propagation !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if(fe%inc_pl_pe(iord,1)==1) then
