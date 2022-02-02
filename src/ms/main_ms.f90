@@ -430,6 +430,8 @@ subroutine time_evolution_step_ms
         iiz = ms%ixyz_tbl(3, iimacro)
         rt%Ac_tot(1:3, itt-1) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
         rt%Ac_tot(1:3, itt)   = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
+        rt%Ac_ext(1:3, itt-1) = rt%Ac_tot(1:3, itt-1)
+        rt%Ac_ext(1:3, itt)   = rt%Ac_tot(1:3, itt)
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
