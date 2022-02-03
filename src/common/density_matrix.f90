@@ -344,7 +344,7 @@ contains
 !$acc update device(system%vec_Ac)
 
 !$acc kernels copyin(BT,ispin,im) copy(jx,jy,jz)
-!$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2)
+!$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
@@ -363,7 +363,7 @@ contains
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
 !$acc kernels copyin(ispin,im) copy(jx,jy,jz)
-!$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2)
+!$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
