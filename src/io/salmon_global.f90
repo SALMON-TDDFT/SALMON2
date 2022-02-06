@@ -233,6 +233,8 @@ module salmon_global
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   integer        :: nmacro_chunk
+  real(8)        :: theta_oblique ! Experimental implementation
+  integer        :: nsmooth_oblique ! Experimental implementation
   character(1)   :: yn_ms_ld ! Experimental implementation
   real(8)        :: ms_omega_ld ! Experimental implementation
   real(8)        :: ms_alpha_ld ! Experimental implementation

@@ -106,7 +106,7 @@ call timer_begin(LOG_RT_ITERATION)
 call print_header()
 
 TE : do itt=Mit+1,nt
-        call time_evolution_step_ms()
+    call time_evolution_step_ms()
     
 
     is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
@@ -413,7 +413,7 @@ subroutine time_evolution_step_ms
 
     real(8) :: c1, c2, c3
 
-        ! ----------------------------------------
+    ! ----------------------------------------
     ! Time Evolution of FDTD System
     ! ----------------------------------------
     fw%Ac_inc_new(:) = Ac_inc(:, itt)
@@ -432,10 +432,10 @@ subroutine time_evolution_step_ms
     nproc_size_global = ms%isize_macropoint
     quiet = .true.
 
-        curr_tmp(:,:) = 0d0
+    curr_tmp(:,:) = 0d0
     rNe_tmp(:) = 0d0
     do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
-                iix = ms%ixyz_tbl(1, iimacro)
+        iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
         rt%Ac_tot(1:3, itt-1) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
@@ -453,18 +453,18 @@ subroutine time_evolution_step_ms
             & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
             
-                if (comm_is_root(ms%id_macropoint)) then
+        if (comm_is_root(ms%id_macropoint)) then
             curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
             rNe_tmp(iimacro) = rt%rIe(itt)
         endif
-             end do
+    end do
     ! Override Global Variables (Repair)
     nproc_group_global = ms%icomm_ms_world
     nproc_id_global = ms%id_ms_world
     nproc_size_global = ms%isize_ms_world
     quiet = .false.
     
-        call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
+    call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
     call comm_summation(rNe_tmp, rNe, ms%nmacro, ms%icomm_ms_world)
     
 
@@ -475,21 +475,25 @@ subroutine time_evolution_step_ms
         fw%vec_j_em_new%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
     end do
 
-else
+    if (mod(itt, out_ms_step) == 0) call print_linelog()
+
+    else
     ! Lorentz-Drude oscilator
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    c1 = (2.0d0 - (ms_omega_ld * dt) ** 2) / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
-    c2 = (1 - ms_gamma_ld * dt * 0.5d0) / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
-    c3 = ms_alpha_ld / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+    c1 = (1.0d0 - 0.5d0 * (ms_omega_ld * dt) ** 2) &
+        & / (1.0d0 + 0.5d0 * ms_gamma_ld * dt)
+    c2 = (1.0d0 - 0.5d0 * (ms_gamma_ld * dt)) &
+        & / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
+    c3 = ms_alpha_ld / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
 
     do iimacro = 1, ms%nmacro
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
 
-        fw%vec_j_em%v(1:3, iix, iiy, iiz) &
-            & = c1 * fw%vec_j_em%v(1:3, iix, iiy, iiz) &
+        fw%vec_j_em_new%v(1:3, iix, iiy, iiz) &
+            & = 2.0d0 * c1 * fw%vec_j_em%v(1:3, iix, iiy, iiz) &
             & - c2 * fw%vec_j_em_old%v(1:3, iix, iiy, iiz) &
             & - c3 * (fw%vec_Ac_new%v(1:3, iix, iiy, iiz) &
                 & - 2.0d0 * fw%vec_Ac%v(1:3, iix, iiy, iiz) &
@@ -497,12 +501,13 @@ else
                 & )
     end do
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (comm_is_root(ms%id_ms_world)) then
+        if (mod(itt, out_ms_step) == 0) write(*, *) "# Lorentz-Drude test", itt
+    end if
+
+    end if
 
 
-end if
-
-
-    if (mod(itt, out_ms_step) == 0) call print_linelog()
 
     ! Experimental implementation
     if (comm_is_root(ms%id_ms_world)) then

@@ -390,6 +390,8 @@ contains
       & set_ini_coor_vel,&
       & nmacro_write_group, &
       & nmacro_chunk, &
+      & theta_oblique, & ! Experimental implementation
+      & nsmooth_oblique, & ! Experimental implementation
       & yn_ms_ld, & ! Experimental implementation
       & ms_omega_ld, & ! Experimental implementation
       & ms_alpha_ld, & ! Experimental implementation
@@ -753,6 +755,14 @@ contains
     set_ini_coor_vel= 'n'
     nmacro_write_group= -1
     nmacro_chunk = 20
+
+    theta_oblique = 0.0d0 ! Experimental implementation
+    nsmooth_oblique = 8 ! Experimental implementation
+    yn_ms_ld = 'n' ! Experimental implementation
+    ms_omega_ld = 0.0d0 ! Experimental implementation
+    ms_alpha_ld = 0.0d0 ! Experimental implementation
+    ms_gamma_ld = 0.0d0 ! Experimental implementation
+
 
 !! == default for &maxwell
     al_em(:)                    = 0d0
@@ -1264,6 +1274,8 @@ contains
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
+    call comm_bcast(theta_oblique,nproc_group_global) ! Experimental implementation
+    call comm_bcast(nsmooth_oblique,nproc_group_global) ! Experimental implementation
     call comm_bcast(yn_ms_ld,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_omega_ld,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_alpha_ld,nproc_group_global) ! Experimental implementation
@@ -2051,6 +2063,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'theta_oblique', theta_oblique
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nsmooth_oblique', nsmooth_oblique
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ms_ld', trim(yn_ms_ld)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_omega_ld', ms_omega_ld
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_alpha_ld', ms_alpha_ld
