@@ -241,6 +241,10 @@ subroutine initialization_ms()
 
     fw%dt = dt
     fw%fdtddim = trim(fdtddim)
+
+    ! Experimental implementation for oblique incidence
+    fw%theta = theta_oblique_deg / 180d0 * pi
+    fw%nsmooth = nsmooth_oblique
     
     ! For compatibility with previous versions 
     ! (nxvacl_m and nxvacr_m will be removed in future)
@@ -362,6 +366,14 @@ subroutine initialization_ms()
             call open_wave_data_file()
         end if
     end if
+
+    call calc_weight(fs%mg%is(1), fs%mg%ie(1), &
+        fw%weight(fs%mg%is(1):fs%mg%ie(1)), &
+        nx_m, nsmooth_oblique)
+
+        
+    
+
 
     return    
 end subroutine initialization_ms
@@ -836,6 +848,35 @@ subroutine close_wave_data_file()
 end subroutine close_wave_data_file
     
 
+
+
+subroutine calc_weight(iz_sta, iz_end, w, nz, ns)
+    implicit none
+    integer, intent(in) :: iz_sta
+    integer, intent(in) :: iz_end
+    real(8), intent(inout) :: w(iz_sta:iz_end)
+    integer, intent(in) :: nz
+    integer, intent(in) :: ns
+    integer :: iz
+    w = 0.0d0
+    do iz = 1, nz
+        if (iz < ns) then
+            w(iz) = weight((dble(iz) - dble(0.5)) / dble(ns))
+        else if (nz - ns - 1 < iz) then
+            w(iz) = weight((dble(nz) - dble(iz) - dble(0.5)) / dble(ns))
+        else
+            w(iz) = 1.0d0
+        end if
+    end do
+contains
+    
+    real(8) function weight(tt)
+        implicit none
+        real(8) :: tt
+        weight = -2.0d0 * tt ** 3 + 3.0d0 * tt ** 2
+        return
+    end function weight
+end subroutine
 
 
 end subroutine main_ms
