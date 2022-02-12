@@ -748,7 +748,8 @@ contains
       !check source1 and source2
       call eh_check_inc(1,ek_dir1,epdir_re1,epdir_im1,fe%inc_dist1)
       call eh_check_inc(2,ek_dir2,epdir_re2,epdir_im2,fe%inc_dist2)
-    case('point_hs','point_ss','x-line_hs','x-line_ss','y-line_hs','y-line_ss','z-line_hs','z-line_ss')
+    case('point_hs','point_ss','x-line_hs','x-line_ss','y-line_hs','y-line_ss','z-line_hs','z-line_ss',&
+         'point_ip','x-line_ip','y-line_ip','z-line_ip','xy-plane_ip','yz-plane_ip','xz-plane_ip')
       !these selection are for debug
       fe%inc_dist1=wave_input; fe%inc_dist2='none';
       if(comm_is_root(nproc_id_global)) write(*,*) trim(wave_input), " source is used."
@@ -792,14 +793,22 @@ contains
         call find_point_em(source_loc1(:),fe%inc_po_id(ii,:),&
                            fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%mg%is(:),fs%mg%ie(:),&
                            minval(fs%lg%is(:))-fe%Nd,maxval(fs%lg%ie(:))+fe%Nd,fe%coo(:,:))
-        call eh_check_iw_parameter(ii,phi_cep1,I_wcm2_1,E_amplitude1,ae_shape1)
+        select case(wave_input)
+        case('point_ip','x-line_ip','y-line_ip','z-line_ip','xy-plane_ip','yz-plane_ip','xz-plane_ip')
+        case default
+          call eh_check_iw_parameter(ii,phi_cep1,I_wcm2_1,E_amplitude1,ae_shape1)
+        end select
       end if
       if(fe%inc_dist2/='none') then
         ii=2
         call find_point_em(source_loc2(:),fe%inc_po_id(ii,:),&
                            fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%mg%is(:),fs%mg%ie(:),&
                            minval(fs%lg%is(:))-fe%Nd,maxval(fs%lg%ie(:))+fe%Nd,fe%coo(:,:))
-        call eh_check_iw_parameter(ii,phi_cep2,I_wcm2_2,E_amplitude2,ae_shape2)
+        select case(wave_input)
+        case('point_ip','x-line_ip','y-line_ip','z-line_ip','xy-plane_ip','yz-plane_ip','xz-plane_ip')
+        case default
+          call eh_check_iw_parameter(ii,phi_cep2,I_wcm2_2,E_amplitude2,ae_shape2)
+        end select
       end if
       
       !write information
@@ -824,6 +833,92 @@ contains
         write(*,*) "**************************"
       end if
     end if
+    
+    !*** impulsive source option used for debug ***************************************************************!
+    select case(wave_input)
+    case('point_ip')
+      if(fe%inc_po_pe(1)==1) then
+        ix=fe%inc_po_id(1,1); iy=fe%inc_po_id(1,2); iz=fe%inc_po_id(1,3);
+        fe%ex_y(ix,iy,iz)=epdir_re1(1)/2.0d0
+        fe%ex_z(ix,iy,iz)=epdir_re1(1)/2.0d0
+        fe%ey_z(ix,iy,iz)=epdir_re1(2)/2.0d0
+        fe%ey_x(ix,iy,iz)=epdir_re1(2)/2.0d0
+        fe%ez_x(ix,iy,iz)=epdir_re1(3)/2.0d0
+        fe%ez_y(ix,iy,iz)=epdir_re1(3)/2.0d0
+      end if
+    case('x-line_ip')
+      if(fe%inc_li_pe(1,1)==1) then
+        iy=fe%inc_po_id(1,2); iz=fe%inc_po_id(1,3);
+        fe%ex_y(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)=epdir_re1(1)/2.0d0
+        fe%ex_z(fe%iex_z_is(1):fe%iex_z_ie(1),iy,iz)=epdir_re1(1)/2.0d0
+        fe%ey_z(fe%iey_z_is(1):fe%iey_z_ie(1),iy,iz)=epdir_re1(2)/2.0d0
+        fe%ey_x(fe%iey_x_is(1):fe%iey_x_ie(1),iy,iz)=epdir_re1(2)/2.0d0
+        fe%ez_x(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)=epdir_re1(3)/2.0d0
+        fe%ez_y(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)=epdir_re1(3)/2.0d0
+      end if
+    case('y-line_ip')
+      if(fe%inc_li_pe(1,2)==1) then
+        ix=fe%inc_po_id(1,1); iz=fe%inc_po_id(1,3);
+        fe%ex_y(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)=epdir_re1(1)/2.0d0
+        fe%ex_z(ix,fe%iex_z_is(2):fe%iex_z_ie(2),iz)=epdir_re1(1)/2.0d0
+        fe%ey_z(ix,fe%iey_z_is(2):fe%iey_z_ie(2),iz)=epdir_re1(2)/2.0d0
+        fe%ey_x(ix,fe%iey_x_is(2):fe%iey_x_ie(2),iz)=epdir_re1(2)/2.0d0
+        fe%ez_x(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)=epdir_re1(3)/2.0d0
+        fe%ez_y(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)=epdir_re1(3)/2.0d0
+      end if
+    case('z-line_ip')
+      if(fe%inc_li_pe(1,3)==1) then
+        ix=fe%inc_po_id(1,1); iy=fe%inc_po_id(1,2);
+        fe%ex_y(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))=epdir_re1(1)/2.0d0
+        fe%ex_z(ix,iy,fe%iex_z_is(3):fe%iex_z_ie(3))=epdir_re1(1)/2.0d0
+        fe%ey_z(ix,iy,fe%iey_z_is(3):fe%iey_z_ie(3))=epdir_re1(2)/2.0d0
+        fe%ey_x(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))=epdir_re1(2)/2.0d0
+        fe%ez_x(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))=epdir_re1(3)/2.0d0
+        fe%ez_y(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))=epdir_re1(3)/2.0d0
+      end if
+    case('xy-plane_ip')
+      if(fe%inc_pl_pe(1,1)==1) then
+        iz=fe%inc_po_id(1,3)
+        do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
+        do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
+          fe%ex_z(ix,iy,iz)=epdir_re1(1)
+        end do
+        end do
+        do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
+        do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
+          fe%ey_z(ix,iy,iz)=epdir_re1(2)
+        end do
+        end do
+      end if
+    case('yz-plane_ip')
+      if(fe%inc_pl_pe(1,2)==1) then
+        ix=fe%inc_po_id(1,1)
+        do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
+        do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
+          fe%ey_x(ix,iy,iz)=epdir_re1(2)
+        end do
+        end do
+        do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
+        do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
+          fe%ez_x(ix,iy,iz)=epdir_re1(3)
+        end do
+        end do
+      end if
+    case('xz-plane_ip')
+      if(fe%inc_pl_pe(1,3)==1) then
+        iy=fe%inc_po_id(1,2)
+        do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
+        do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
+          fe%ex_y(ix,iy,iz)=epdir_re1(1)
+        end do
+        end do
+        do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
+        do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
+          fe%ez_y(ix,iy,iz)=epdir_re1(3)
+        end do
+        end do
+      end if
+    end select
     
     !*** prepare linear response ******************************************************************************!
     if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
