@@ -1834,7 +1834,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hubbard_u', hubbard_u
 
       write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0

@@ -21,15 +21,9 @@ module density_matrix
   implicit none
   integer,private,parameter :: Nd = 4
 
-  interface calc_density
-    module procedure calc_density_2d, calc_density_1d
-  end interface
-
-  private :: calc_density_1d, calc_density_2d
-
 contains
 
-  subroutine calc_density_2d(system,rho,psi,info,mg)
+  subroutine calc_density(system,rho,psi,info,mg)
     use structures
     use communication, only: comm_summation
     use parallelization, only: get_thread_id,get_nthreads
@@ -239,137 +233,7 @@ contains
 
     deallocate(wrk)
     return
-  end subroutine calc_density_2d
-
-  subroutine calc_density_1d(system,rho,psi,info,mg)
-    use structures
-    use communication, only: comm_summation
-    use parallelization, only: get_thread_id,get_nthreads
-    use misc_routines, only: ceiling_pow2
-    use timer
-    use sym_rho_sub, only: sym_rho
-    implicit none
-    type(s_dft_system),intent(in) :: system
-    type(s_parallel_info),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: mg
-    type(s_orbital),intent(in) :: psi
-    type(s_scalar) :: rho(system%nspin)
-    !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin,tid,ix,iy,iz,nthreads
-    real(8) :: wrk2
-    real(8),allocatable :: wrk(:,:,:,:)
-
-    call timer_begin(LOG_DENSITY_CALC)
-    nspin = system%nspin
-
-#ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
-!dir$ attributes align : 2097152 :: wrk
-#endif
-
-    im = info%im_s
-    is = mg%is
-    ie = mg%ie
-    nsize = mg%num(1) * mg%num(2) * mg%num(3)
-    nthreads = get_nthreads()
-
-    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(nthreads)-1))
-    call timer_end(LOG_DENSITY_CALC)
-
-    if(allocated(psi%rwf)) then
-
-      !do im=info%im_s,info%im_e
-      do ispin=1,nspin
-        call timer_begin(LOG_DENSITY_CALC)
-        tid = 0
-!$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
-!$      tid = get_thread_id()
-        wrk(:,:,:,tid) = 0.d0
-
-!$omp do collapse(4)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
-        end do
-        end do
-        end do
-        end do
-        end do
-!$omp end do
-
-        ix = size(wrk,4)/2
-        do while(ix > 0)
-          if(tid < ix .and. tid + ix < nthreads) then
-            wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
-          end if
-          ix = ix/2
-!$omp barrier
-        end do
-
-!$omp end parallel
-        call timer_end(LOG_DENSITY_CALC)
-
-        call timer_begin(LOG_DENSITY_COMM_COLL)
-        call comm_summation(wrk(:,:,:,0),rho(ispin)%f(:,:,:),nsize,info%icomm_ko)
-        call timer_end(LOG_DENSITY_COMM_COLL)
-      end do
-      !end do
-
-    else
-
-      !do im=info%im_s,info%im_e
-      do ispin=1,nspin
-        call timer_begin(LOG_DENSITY_CALC)
-        tid = 0
-!$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
-!$      tid = get_thread_id()
-        wrk(:,:,:,tid) = 0.d0
-
-!$omp do collapse(4)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
-        end do
-        end do
-        end do
-        end do
-        end do
-!$omp end do
-
-        ix = size(wrk,4)/2
-        do while(ix > 0)
-          if(tid < ix .and. tid + ix < nthreads) then
-            wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
-          end if
-          ix = ix/2
-!$omp barrier
-        end do
-
-!$omp end parallel
-        call timer_end(LOG_DENSITY_CALC)
-
-        call timer_begin(LOG_DENSITY_COMM_COLL)
-        call comm_summation(wrk(:,:,:,0),rho(ispin)%f(:,:,:),nsize,info%icomm_ko)
-        call timer_end(LOG_DENSITY_COMM_COLL)
-
-        call timer_begin(LOG_DENSITY_CALC)
-        call sym_rho( rho(ispin)%f(:,:,:) )
-        call timer_end(LOG_DENSITY_CALC)
-      end do
-      !end do
-
-    end if
-
-    deallocate(wrk)
-    return
-  end subroutine calc_density_1d
+  end subroutine calc_density
 
 !===================================================================================================================================
 
