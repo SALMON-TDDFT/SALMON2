@@ -15,14 +15,14 @@
 !
 !=======================================================================
 module gram_schmidt_orth
-  use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
-  use pack_unpack, only: copy_data
-  use gram_schmidt_so_sub, only: gram_schmidt_so, SPIN_ORBIT_ON
   implicit none
 
 contains
 
   subroutine gram_schmidt(sys, rg, wfi, wf)
+    use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+    use gram_schmidt_so_sub, only: gram_schmidt_so
+    use salmon_global, only: yn_spinorbit, yn_gramschmidt_blas
     use timer
     implicit none
     type(s_dft_system),   intent(in)    :: sys
@@ -30,7 +30,7 @@ contains
     type(s_parallel_info),intent(in)    :: wfi
     type(s_orbital),      intent(inout) :: wf
 
-    if ( SPIN_ORBIT_ON ) then
+    if ( yn_spinorbit=='y' ) then
       call gram_schmidt_so(sys, rg, wfi, wf)
       return
     end if
@@ -38,11 +38,17 @@ contains
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 
     if (sys%if_real_orbital) then
-      call gram_schmidt_col_rblas(sys, rg, wfi, wf)
-      !call gram_schmidt_col_real8(sys, rg, wfi, wf) !old fashion
+      if(yn_gramschmidt_blas =='y')then
+        call gram_schmidt_col_rblas(sys, rg, wfi, wf)
+      else
+        call gram_schmidt_col_real8(sys, rg, wfi, wf)
+      end if
     else
-      call gram_schmidt_col_cblas(sys, rg, wfi, wf)
-      !call gram_schmidt_col_complex8(sys, rg, wfi, wf) !old fashion
+      if(yn_gramschmidt_blas =='y')then
+        call gram_schmidt_col_cblas(sys, rg, wfi, wf)
+      else
+        call gram_schmidt_col_complex8(sys, rg, wfi, wf)
+      end if
     end if
 
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
@@ -52,6 +58,8 @@ contains
 
   subroutine gram_schmidt_col_real8(sys, rg, wfi, wf)
     ! Only for the colinear L(S)DA:
+    use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+    use pack_unpack, only: copy_data
     use timer
     use communication, only: comm_bcast, comm_summation
     implicit none
@@ -226,6 +234,8 @@ contains
 
   subroutine gram_schmidt_col_cblas(sys, rg, wfi, wf)
     ! Only for the colinear L(S)DA:
+    use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+    use pack_unpack, only: copy_data
     use timer
     use communication, only: comm_bcast, comm_summation
     implicit none
@@ -515,6 +525,8 @@ contains
 
     subroutine gram_schmidt_col_cblas_old(sys, rg, wfi, wf)
       ! Only for the colinear L(S)DA:
+      use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+      use pack_unpack, only: copy_data
       use timer
       use communication, only: comm_bcast, comm_summation
       implicit none
@@ -642,6 +654,8 @@ contains
 
     subroutine gram_schmidt_col_rblas(sys, rg, wfi, wf)
       ! Only for the colinear L(S)DA:
+      use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+      use pack_unpack, only: copy_data
       use timer
       use communication, only: comm_bcast, comm_summation
       implicit none
@@ -926,6 +940,8 @@ contains
 
       subroutine gram_schmidt_col_rblas_old(sys, rg, wfi, wf)
         ! Only for the colinear L(S)DA:
+        use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+        use pack_unpack, only: copy_data
         use timer
         use communication, only: comm_bcast, comm_summation
         implicit none
@@ -1052,6 +1068,8 @@ contains
 
     subroutine gram_schmidt_col_complex8(sys, rg, wfi, wf)
       ! Only for the colinear L(S)DA:
+      use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
+      use pack_unpack, only: copy_data
       use timer
       use communication, only: comm_bcast, comm_summation
       implicit none

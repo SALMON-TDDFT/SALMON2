@@ -235,7 +235,11 @@ contains
       & nproc_ob, &
       & nproc_rgrid, &
       & yn_ffte, &
+#ifdef USE_FFTW
+      & yn_fftw, &
+#endif
       & yn_scalapack, &
+      & yn_gramschmidt_blas, &
       & yn_eigenexa, &
       & yn_diagonalization_red_mem, &
       & process_allocation
@@ -256,7 +260,9 @@ contains
       & file_atom_red_coor, &
       & yn_spinorbit, &
       & yn_symmetry, &
-      & hubbard_u
+      & absorbing_boundary, &
+      & imagnary_potential_w0, &
+      & imagnary_potential_dr
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -320,7 +326,8 @@ contains
       & nscf_init_no_diagonal, &
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero, &
-      & method_init_density
+      & method_init_density, &
+      & magdir_atom
 
     namelist/emfield/ &
       & trans_longi, &
@@ -374,7 +381,6 @@ contains
       & ny_origin_m, &
       & nz_origin_m, &
       & file_macropoint, &
-      & num_macropoint,  &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
       & nmacro_chunk
@@ -382,6 +388,7 @@ contains
     namelist/maxwell/             &
       & al_em,                    &
       & dl_em,                    &
+      & num_rgrid_em,             &
       & dt_em,                    &
       & nt_em,                    &
       & boundary_em,              &
@@ -404,13 +411,27 @@ contains
       & obs_num_em,               &
       & obs_samp_em,              &
       & obs_loc_em,               &
+      & obs_plane_ene_em,         &
       & yn_obs_plane_em,          &
       & yn_obs_plane_integral_em, &
       & yn_wf_em,                 &
       & film_thickness,           &
       & media_id_pml,             &
       & media_id_source1,         &
-      & media_id_source2
+      & media_id_source1,         &
+      & media_id_source2,         &
+      & yn_make_shape,            &
+      & yn_output_shape,          &
+      & yn_copy_x,                &
+      & yn_copy_y,                &
+      & yn_copy_z,                &
+      & rot_type,                 &
+      & n_s,                      &
+      & typ_s,                    &
+      & id_s,                     &
+      & inf_s,                    &
+      & ori_s,                    &
+      & rot_s
 
     namelist/analysis/ &
       & projection_option, &
@@ -443,9 +464,14 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
+      & yn_out_gs_sgm_eps, &
+      & out_gs_sgm_eps_mu_nu, &
+      & out_gs_sgm_eps_width, &
       & out_ms_step, &
       & format_voxel_data, &
       & nsplit_voxel_data, &
+      & yn_lr_w0_correction, &
+      & out_magnetization_step, &
       & yn_out_perflog, &
       & format_perflog
 
@@ -453,7 +479,8 @@ contains
       & layout_multipole, &
       & num_multipole_xyz, &
       & lmax_multipole, &
-      & threshold_cg
+      & threshold_cg, &
+      & method_poisson
 
     namelist/ewald/ &
       & newald, &
@@ -485,7 +512,7 @@ contains
       & shape_file_jm,        &
       & num_jm,               &
       & rs_bohr_jm,           &
-      & sphere_nelec_jm,      &
+      & sphere_nion_jm,       &
       & sphere_loc_jm
 
     namelist/code/ &
@@ -565,7 +592,11 @@ contains
     nproc_ob             = 0
     nproc_rgrid          = 0
     yn_ffte              = 'n'
+#ifdef USE_FFTW
+    yn_fftw              = 'n'
+#endif
     yn_scalapack         = 'n'
+    yn_gramschmidt_blas  = 'y'
     yn_eigenexa          = 'n'
     yn_diagonalization_red_mem = 'n'
     process_allocation   = 'grid_sequential'
@@ -587,7 +618,10 @@ contains
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
     yn_symmetry        = 'n'
-    hubbard_u          = 0.0d0
+    absorbing_boundary = 'none'
+    imagnary_potential_w0 = 0d0
+    imagnary_potential_dr = 0d0
+
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -644,6 +678,7 @@ contains
     nscf_init_mix_zero   = -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
+    magdir_atom          = 0d0
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -704,6 +739,7 @@ contains
 !! == default for &maxwell
     al_em(:)                    = 0d0
     dl_em(:)                    = 0d0
+    num_rgrid_em(:)             = 0
     dt_em                       = 0d0
     nt_em                       = 0
     boundary_em(:,:)            = 'default'
@@ -726,6 +762,7 @@ contains
     obs_num_em                  = 0
     obs_samp_em                 = 1
     obs_loc_em(:,:)             = 0d0
+    obs_plane_ene_em(:,:)       = -1d0
     yn_obs_plane_em(:)          = 'n'
     yn_obs_plane_integral_em(:) = 'n'
     yn_wf_em                    = 'y'
@@ -733,7 +770,19 @@ contains
     media_id_pml(:,:)           = 0
     media_id_source1            = 0
     media_id_source2            = 0
-
+    yn_make_shape               = 'n'
+    yn_output_shape             = 'n'
+    yn_copy_x                   = 'n'
+    yn_copy_y                   = 'n'
+    yn_copy_z                   = 'n'
+    rot_type                    = 'radian'
+    n_s                         = 0
+    typ_s(:)                    = 'none'
+    id_s(:)                     = 0
+    inf_s(:,:)                  = 0d0
+    ori_s(:,:)                  = 0d0
+    rot_s(:,:)                  = 0d0
+    
 !! == default for &analysis
     projection_option   = 'no'
     out_projection_step = 100
@@ -766,9 +815,15 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
+    yn_out_gs_sgm_eps   = 'n'
+    out_gs_sgm_eps_mu_nu(1) = 3
+    out_gs_sgm_eps_mu_nu(2) = 3
+    out_gs_sgm_eps_width    = 0.015d0/ au_energy_ev * uenergy_from_au
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
+    yn_lr_w0_correction = 'n'
+    out_magnetization_step = 100
 
     yn_out_perflog      = 'y'
     format_perflog      = 'stdout'
@@ -778,6 +833,7 @@ contains
     num_multipole_xyz = 0
     lmax_multipole    = 4
     threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
+    method_poisson    = 'cg'
 !! == default for &ewald
     newald = 4
     aewald = 0.5d0
@@ -805,7 +861,7 @@ contains
     shape_file_jm        = 'none'
     num_jm               = 0
     rs_bohr_jm(:)        = 0d0
-    sphere_nelec_jm(:)   = 0
+    sphere_nion_jm(:)    = 0
     sphere_loc_jm(:,:)   = 0d0
 !! == default for code
     yn_want_stencil_hand_vectorization = 'y'
@@ -960,7 +1016,11 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
+#ifdef USE_FFTW
+    call comm_bcast(yn_fftw             ,nproc_group_global)
+#endif
     call comm_bcast(yn_scalapack        ,nproc_group_global)
+    call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
     call comm_bcast(yn_diagonalization_red_mem,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
@@ -989,7 +1049,12 @@ contains
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
     call comm_bcast(yn_symmetry        ,nproc_group_global)
-    call comm_bcast(hubbard_u          ,nproc_group_global)
+    call comm_bcast(absorbing_boundary    ,nproc_group_global)
+    call comm_bcast(imagnary_potential_w0 ,nproc_group_global)
+    call comm_bcast(imagnary_potential_dr ,nproc_group_global)
+    imagnary_potential_w0 = imagnary_potential_w0 * uenergy_to_au
+    imagnary_potential_dr = imagnary_potential_dr * ulength_to_au
+
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1075,6 +1140,7 @@ contains
     call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
     call comm_bcast(method_init_density   ,nproc_group_global)
+    call comm_bcast(magdir_atom ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1154,7 +1220,6 @@ contains
     call comm_bcast(ny_origin_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
     call comm_bcast(file_macropoint, nproc_group_global)
-    call comm_bcast(num_macropoint,  nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
@@ -1164,6 +1229,7 @@ contains
     al_em = al_em * ulength_to_au
     call comm_bcast(dl_em                    ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
+    call comm_bcast(num_rgrid_em             ,nproc_group_global)
     call comm_bcast(dt_em                    ,nproc_group_global)
     dt_em = dt_em * utime_to_au
     call comm_bcast(nt_em                    ,nproc_group_global)
@@ -1193,6 +1259,8 @@ contains
     call comm_bcast(obs_samp_em              ,nproc_group_global)
     call comm_bcast(obs_loc_em               ,nproc_group_global)
     obs_loc_em = obs_loc_em * ulength_to_au
+    call comm_bcast(obs_plane_ene_em         ,nproc_group_global)
+    obs_plane_ene_em = obs_plane_ene_em * uenergy_to_au
     call comm_bcast(yn_obs_plane_em          ,nproc_group_global)
     call comm_bcast(yn_obs_plane_integral_em ,nproc_group_global)
     call comm_bcast(yn_wf_em                 ,nproc_group_global)
@@ -1201,7 +1269,21 @@ contains
     call comm_bcast(media_id_pml             ,nproc_group_global)
     call comm_bcast(media_id_source1         ,nproc_group_global)
     call comm_bcast(media_id_source2         ,nproc_group_global)
-
+    call comm_bcast(yn_make_shape            ,nproc_group_global)
+    call comm_bcast(yn_output_shape          ,nproc_group_global)
+    call comm_bcast(yn_copy_x                ,nproc_group_global)
+    call comm_bcast(yn_copy_y                ,nproc_group_global)
+    call comm_bcast(yn_copy_z                ,nproc_group_global)
+    call comm_bcast(rot_type                 ,nproc_group_global)
+    call comm_bcast(n_s                      ,nproc_group_global)
+    call comm_bcast(typ_s                    ,nproc_group_global)
+    call comm_bcast(id_s                     ,nproc_group_global)
+    call comm_bcast(inf_s                    ,nproc_group_global)
+    inf_s = inf_s * ulength_to_au
+    call comm_bcast(ori_s                    ,nproc_group_global)
+    ori_s = ori_s * ulength_to_au
+    call comm_bcast(rot_s                    ,nproc_group_global)
+    
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
     call comm_bcast(out_projection_step ,nproc_group_global)
@@ -1238,9 +1320,15 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
+    call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
+    call comm_bcast(out_gs_sgm_eps_width,nproc_group_global)
+    out_gs_sgm_eps_width = out_gs_sgm_eps_width * uenergy_to_au
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
+    call comm_bcast(yn_lr_w0_correction ,nproc_group_global)
+    call comm_bcast(out_magnetization_step ,nproc_group_global)
     call comm_bcast(yn_out_perflog      ,nproc_group_global)
     call comm_bcast(format_perflog      ,nproc_group_global)
 
@@ -1250,6 +1338,7 @@ contains
     call comm_bcast(lmax_multipole    ,nproc_group_global)
     call comm_bcast(threshold_cg      ,nproc_group_global)
     threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3
+    call comm_bcast(method_poisson    ,nproc_group_global)
 !! == bcast for &ewald
     call comm_bcast(newald        ,nproc_group_global)
     call comm_bcast(aewald        ,nproc_group_global)
@@ -1281,7 +1370,7 @@ contains
     call comm_bcast(shape_file_jm        ,nproc_group_global)
     call comm_bcast(num_jm               ,nproc_group_global)
     call comm_bcast(rs_bohr_jm           ,nproc_group_global)
-    call comm_bcast(sphere_nelec_jm      ,nproc_group_global)
+    call comm_bcast(sphere_nion_jm       ,nproc_group_global)
     call comm_bcast(sphere_loc_jm        ,nproc_group_global)
     sphere_loc_jm = sphere_loc_jm * ulength_to_au
 !! == bcast for code
@@ -1715,7 +1804,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
+#ifdef USE_FFTW
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
+#endif
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
@@ -1742,6 +1835,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hubbard_u', hubbard_u
+
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_dr', imagnary_potential_dr
+
+
 
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
@@ -1822,6 +1921,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_density', method_init_density
+      if(method_init_density == 'pp_magdir') then
+        write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
+      end if
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
@@ -1894,7 +1996,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_macropoint', num_macropoint
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
@@ -1907,6 +2008,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(1)', dl_em(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(2)', dl_em(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(3)', dl_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
@@ -1947,12 +2051,19 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
       if(obs_num_em==0) then
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
+        write(fh_variables_log, '("#",4X,A,"=",ES14.5)')  'obs_plane_ene_em', obs_plane_ene_em(1,1)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_integral_em', yn_obs_plane_integral_em(1)
       else
         do i = 1,obs_num_em
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') &
                                   'obs_loc_em(',i,',:)', obs_loc_em(i,:)
+          do j = 1,size(obs_plane_ene_em,2)
+            if( (j==1) .or. (obs_plane_ene_em(i,j)>=0.0d0) ) then
+              write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES14.5)') &
+                                  'obs_plane_ene_em(',i,',',j,')', obs_plane_ene_em(i,j)
+            end if
+          end do
           write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
                                   'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
@@ -1969,7 +2080,29 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
-
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_y', yn_copy_y
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
+      if(n_s==0) then
+        write(fh_variables_log, '("#",4X,A,"=",A)')       'typ_s', typ_s(1)
+        write(fh_variables_log, '("#",4X,A,"=",I6)')      'id_s', id_s(1)
+        write(fh_variables_log, '("#",4X,A,"=",10ES14.5)')'inf_s', inf_s(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'ori_s', ori_s(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'rot_s', rot_s(1,:)
+      else
+        do i = 1,n_s
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
+        end do
+      end if
+      
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
@@ -2002,9 +2135,15 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_gs_sgm_eps_width', out_gs_sgm_eps_width
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_magnetization_step', out_magnetization_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
@@ -2016,6 +2155,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_poisson', method_poisson
 
       if(inml_ewald >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', inml_ewald
@@ -2051,13 +2191,13 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
       if(num_jm==0) then
         write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
-        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nelec_jm', sphere_nelec_jm(1)
+        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nion_jm', sphere_nion_jm(1)
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
                                                           sphere_loc_jm(1,1),sphere_loc_jm(1,2),sphere_loc_jm(1,3)
       else
         do i = 1,num_jm
           write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)')  'rs_bohr_jm(',i,')', rs_bohr_jm(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nelec_jm(',i,')', sphere_nelec_jm(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nion_jm(',i,')', sphere_nion_jm(i)
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
         end do
       end if
@@ -2121,6 +2261,7 @@ contains
     implicit none
     integer :: i,round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
+    logical :: if_orthogonal_tmp
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -2132,7 +2273,11 @@ contains
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_ffte)
+#ifdef USE_FFTW
+    call yn_argument_check(yn_fftw)
+#endif
     call yn_argument_check(yn_scalapack)
+    call yn_argument_check(yn_gramschmidt_blas)
     call yn_argument_check(yn_eigenexa)
     call yn_argument_check(yn_diagonalization_red_mem)
     call yn_argument_check(yn_periodic)
@@ -2154,6 +2299,7 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_gs_sgm_eps)
     call yn_argument_check(yn_set_ini_velocity)
     call yn_argument_check(yn_jm)
     call yn_argument_check(yn_charge_neutral_jm)
@@ -2168,10 +2314,26 @@ contains
       end do
     end if
     call yn_argument_check(yn_wf_em)
+    call yn_argument_check(yn_make_shape)
+    call yn_argument_check(yn_output_shape)
+    call yn_argument_check(yn_copy_x)
+    call yn_argument_check(yn_copy_y)
+    call yn_argument_check(yn_copy_z)
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
-    call yn_argument_check(yn_symmetry)
+    call yyynnn_argument_check(yn_symmetry)
+    
+    if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
+      stop "Nk must be 1 when yn_periodic=='n'"
+    end if
+
+    if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+       al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+       if_orthogonal_tmp = .true.
+    else
+       if_orthogonal_tmp = .false.
+    endif
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2210,6 +2372,9 @@ contains
 
     select case(method_init_density)
     case ('wf','pp') ; continue
+    case('pp_magdir')
+      if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
+      if(spin=='unpolarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
     case default     ; stop 'method_init_density must be wf or pp'
     end select
 
@@ -2284,15 +2449,49 @@ contains
        end if
     end if
 
-    select case(method_singlescale)
-    case('3d', '1d', '1d_fourier')
-      if(method_singlescale=='1d_fourier') then
-        if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
-      end if
-    case default
-      stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+    if(theory=='single_scale_maxwell_tddft') then
+      select case(method_singlescale)
+      case('3d', '1d', '1d_fourier')
+        if(method_singlescale=='1d_fourier') then
+          if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
+        end if
+      case default
+        stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+      end select
+    end if
+
+    if(theory=='multi_scale_maxwell_tddft') then
+       if( propagator == 'aetrs' )then
+          stop 'propagator = "aetrs" is not supported in multi-scale calculation'
+       end if
+    endif
+
+    if(absorbing_boundary/='none') then
+       if( absorbing_boundary /= 'z' )then
+          stop 'Only absorbing_boundary = "z" is supported currently'
+       end if
+       if(.not.if_orthogonal_tmp)then
+          stop 'absorbing_boundary is supported for orthogonal cell only'
+       endif
+    endif
+
+    if(yn_lr_w0_correction=='y') then
+       if( yn_periodic=='n' )then
+          stop 'yn_lr_w0_correction="y" is currently for yn_periodic="y"'
+       end if
+    endif
+
+    select case(method_poisson)
+    case ('cg','ft') ; continue
+    case default     ; stop "method_poisson must be 'cg' or 'ft'"
     end select
-    
+
+#ifdef USE_FFTW
+    if(yn_ffte=='y'.and.yn_fftw=='y') then
+      stop "either yn_ffte or yn_fftw can be specified"
+    end if
+#endif
+
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)
@@ -2328,5 +2527,15 @@ contains
       stop
     end if
   end subroutine yn_argument_check
+
+  subroutine yyynnn_argument_check(str)
+    implicit none
+    character(*), intent(inout) :: str
+    integer :: i,n
+    n = len(trim(str))
+    do i = 1, n
+      call yn_argument_check( str(i:i) )
+    end do
+  end subroutine yyynnn_argument_check
 
 end module inputoutput

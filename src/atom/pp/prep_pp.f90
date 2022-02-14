@@ -24,8 +24,8 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic,natom,quiet
-  use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
+  use salmon_global, only: iperiodic,natom,quiet,yn_spinorbit
+  use prep_pp_so_sub, only: calc_uv_so
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
   implicit none
@@ -145,18 +145,18 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call timer_begin(LOG_INIT_PS_LMA_UV)
   call set_lma
   call calc_uv
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call calc_uv_so(pp,ppg,lg%num,hgs,hvol,property)
   end if
   if ( PLUS_U_ON ) then
-!    call calc_uv_plusU( pp, ppg, property )
+    call calc_uv_plusU( pp, ppg, property )
   end if
   call timer_end(LOG_INIT_PS_LMA_UV)
 
   call timer_begin(LOG_INIT_PS_CALC_VPSL)
   select case(iperiodic)
   case(0)
-    call calc_Vpsl_isolated(lg,mg,system,pp,Vpsl,ppg)
+    call calc_Vpsl_isolated(lg,mg,system,info,pp,fg,Vpsl,ppg,property)
   case(3)
     call calc_Vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   end select
@@ -534,20 +534,34 @@ END SUBROUTINE dealloc_init_ps
 
 !===================================================================================================================================
 
-SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
+SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   use structures
-  use salmon_global,only : natom, kion, quiet
+  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_spinorbit
+#ifdef USE_FFTW
+  use salmon_global,only : yn_fftw
+#endif
+  use math_constants,only : pi,zi
   use parallelization, only: nproc_id_global
+  use communication, only: comm_summation
   implicit none
-  type(s_rgrid)     ,intent(in) :: lg,mg
-  type(s_dft_system),intent(in) :: system
-  type(s_pp_info)   ,intent(in) :: pp
-  type(s_scalar)                :: vpsl
-  type(s_pp_grid)               :: ppg
+  type(s_rgrid)          ,intent(in) :: lg,mg
+  type(s_dft_system)     ,intent(in) :: system
+  type(s_parallel_info)  ,intent(in) :: info
+  type(s_pp_info)        ,intent(in) :: pp
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)                     :: vpsl
+  type(s_pp_grid)                    :: ppg
+  character(17)          ,intent(in) :: property
   !
-  integer :: ix,iy,iz,ak
-  integer :: j,a,intr
+  integer :: ix,iy,iz,ak,ik
+  integer :: ia,i,j,a,intr
   real(8) :: ratio1,ratio2,r
+  integer :: ifgx_s,ifgx_e
+  integer :: ifgy_s,ifgy_e
+  integer :: ifgz_s,ifgz_e
+  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
+  complex(8) :: tmp_exp
+  complex(8),allocatable :: vtmp1(:,:,:,:),vtmp2(:,:,:,:)
 
   if(.not.allocated(ppg%Vpsl_ion)) then
     allocate(ppg%Vpsl_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:natom))
@@ -589,7 +603,179 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   end do
 
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
-  ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
+  ppg%zekr_uV(:,:,1) = dcmplx(ppg%uV)
+  if(yn_spinorbit == 'y') then
+    allocate(ppg%zekr_uV_so(ppg%nps,ppg%nlma,1,2,1))
+    ppg%zekr_uV_so(:,:,1,1:2,1) = dcmplx(ppg%uv_so(:,:,1:2,1))
+  end if
+
+  if(method_poisson=='ft')then
+#ifdef USE_FFTW
+    if(yn_fftw=='n')then
+#endif
+      if(yn_ffte=='n')then
+        ifgx_s = (mg%is(1)-lg%is(1))*2+1
+        ifgx_e = (mg%is(1)-lg%is(1))*2+mg%num(1)*2
+        ifgy_s = (mg%is(2)-lg%is(2))*2+1
+        ifgy_e = (mg%is(2)-lg%is(2))*2+mg%num(2)*2
+        ifgz_s = (mg%is(3)-lg%is(3))*2+1
+        ifgz_e = (mg%is(3)-lg%is(3))*2+mg%num(3)*2
+      else
+        if(mod(info%nporbital,4)==0)then
+          ! start and end point of reciprocal grids for x, y, z
+          ifgx_s = 1
+          ifgx_e = 2*lg%num(1)
+          if(info%id_y_isolated_ffte >= info%isize_y_isolated_ffte/2) then
+            ifgy_s = mg%is(2)-lg%is(2)+1+lg%num(2)
+          else
+            ifgy_s = mg%is(2)-lg%is(2)+1
+          end if
+          ifgy_e = ifgy_s+mg%num(2)-1
+          if(info%id_z_isolated_ffte >= info%isize_z_isolated_ffte/2) then
+            ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
+          else
+            ifgz_s = mg%is(3)-lg%is(3)+1
+          end if
+          ifgz_e = ifgz_s+mg%num(3)-1
+        else
+          ! start and end point of reciprocal grids for x, y, z
+          ifgx_s = 1
+          ifgx_e = 2*lg%num(1)
+          ifgy_s = 1
+          ifgy_e = 2*lg%num(2)
+          ifgz_s = 1
+          ifgz_e = 2*lg%num(3)
+        end if
+      end if
+#ifdef USE_FFTW
+    else if(yn_fftw=='y')then
+      if(mod(info%nporbital,2)==0)then
+        ! start and end point of reciprocal grids for x, y, z
+        ifgx_s = 1
+        ifgx_e = 2*lg%num(1)
+        ifgy_s = 1
+        ifgy_e = 2*lg%num(2)
+        if(info%iaddress_isolated_fftw(4)==1) then
+          ifgz_s = mg%is(3)-lg%is(3)+1+lg%num(3)
+        else
+          ifgz_s = mg%is(3)-lg%is(3)+1
+        end if
+        ifgz_e = ifgz_s+mg%num(3)-1
+      else
+        ! start and end point of reciprocal grids for x, y, z
+        ifgx_s = 1
+        ifgx_e = 2*lg%num(1)
+        ifgy_s = 1
+        ifgy_e = 2*lg%num(2)
+        ifgz_s = 1
+        ifgz_e = 2*lg%num(3)
+      end if
+    endif
+#endif
+
+    if( property == 'initial' ) then
+      allocate(ppg%zrhoG_ion(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e)  & ! rho_ion(G)
+            & ,ppg%zVG_ion  (ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,nelem)) ! V_ion(G)
+
+      ppg%zVG_ion = 0d0
+
+
+  !$omp parallel
+  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+      do ik=1,nelem
+        do iz=ifgz_s,ifgz_e
+        do iy=ifgy_s,ifgy_e
+        do ix=ifgx_s,ifgx_e
+          g(1) = fg%vec_G(1,ix,iy,iz)
+          g(2) = fg%vec_G(2,ix,iy,iz)
+          g(3) = fg%vec_G(3,ix,iy,iz)
+          g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
+          s=0.d0
+          if (fg%if_Gzero(ix,iy,iz)) then
+            do i=2,pp%nrloc(ik)
+              r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
+              dr=pp%rad(i,ik)-pp%rad(i-1,ik)
+              vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+              s=s+4d0*pi*(r1**2*vloc_av+r1*pp%zps(ik))*dr
+            end do
+          else
+            do i=2,pp%nrloc(ik)
+              r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
+              dr=pp%rad(i,ik)-pp%rad(i-1,ik)
+              vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+              s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
+            end do
+          end if
+          ppg%zVG_ion(ix,iy,iz,ik) = s
+        end do
+        end do
+        end do
+      end do
+  !$omp end do
+  !$omp end parallel
+
+    end if
+
+#ifdef USE_FFTW
+    if(yn_fftw=='n')then
+#endif
+      if(yn_ffte=='y')then
+        allocate(vtmp1(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
+        allocate(vtmp2(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
+      else
+        allocate(vtmp1((mg%is(1)-lg%is(1))*2+1:(mg%is(1)-lg%is(1))*2+mg%num(1)*2, &
+                       (mg%is(2)-lg%is(2))*2+1:(mg%is(2)-lg%is(2))*2+mg%num(2)*2, &
+                       (mg%is(3)-lg%is(3))*2+1:(mg%is(3)-lg%is(3))*2+mg%num(3)*2 ,1:2))
+        allocate(vtmp2((mg%is(1)-lg%is(1))*2+1:(mg%is(1)-lg%is(1))*2+mg%num(1)*2, &
+                       (mg%is(2)-lg%is(2))*2+1:(mg%is(2)-lg%is(2))*2+mg%num(2)*2, &
+                       (mg%is(3)-lg%is(3))*2+1:(mg%is(3)-lg%is(3))*2+mg%num(3)*2 ,1:2))
+      end if
+#ifdef USE_FFTW
+    else if(yn_fftw=='y')then
+      allocate(vtmp1(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
+      allocate(vtmp2(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,1:2))
+    end if
+#endif
+
+! vtmp(:,:,:,1)=V_ion(G): local part of the pseudopotential in the G space
+    vtmp1 = 0d0
+  !$omp parallel do collapse(2) private(ix,iy,iz,g,ia,ik,gd,tmp_exp)
+    do iz=ifgz_s,ifgz_e
+    do iy=ifgy_s,ifgy_e
+    do ix=ifgx_s,ifgx_e
+      g(1) = fg%vec_G(1,ix,iy,iz)
+      g(2) = fg%vec_G(2,ix,iy,iz)
+      g(3) = fg%vec_G(3,ix,iy,iz)
+      do ia=info%ia_s,info%ia_e
+        ik=kion(ia)
+        gd = g(1)*system%Rion(1,ia) + g(2)*system%Rion(2,ia) + g(3)*system%Rion(3,ia)
+        tmp_exp = exp(-zi*gd)/system%det_A
+        vtmp1(ix,iy,iz,1) = vtmp1(ix,iy,iz,1) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp ! V_ion(G)
+        vtmp1(ix,iy,iz,2) = vtmp1(ix,iy,iz,2) + pp%zps(ik)*tmp_exp ! rho_ion(G)
+      end do
+      end do
+      end do
+    end do
+  !$omp end parallel do
+ 
+#ifdef USE_FFTW
+    if(yn_fftw=='n')then
+#endif
+      if(yn_ffte=='y')then
+        ppg%zrhoG_ion = vtmp1(:,:,:,2)
+      else
+        call comm_summation(vtmp1,vtmp2,(ifgx_e-ifgx_s+1)*(ifgy_e-ifgy_s+1)*(ifgz_e-ifgz_s+1)*2,info%icomm_ko)
+        ppg%zrhoG_ion = vtmp2(:,:,:,2)
+      end if
+#ifdef USE_FFTW
+    else if(yn_fftw=='y')then
+      ppg%zrhoG_ion = vtmp1(:,:,:,2)
+    end if
+#endif
+
+    deallocate(vtmp1,vtmp2)
+
+  end if
 
   return
 END SUBROUTINE calc_Vpsl_isolated
@@ -876,7 +1062,11 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
 
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
+#ifdef USE_OPENACC
+!$acc parallel loop private(ia,ilma)
+#else
 !$omp parallel do private(ia,ilma)
+#endif
   do ia=1,natom
     ppg%ireferred_atom(ia) = (ppg%mps(ia) > 0)
 
@@ -896,12 +1086,20 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
       end if
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 
   call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
   iupdated = .false.
+#ifdef USE_OPENACC
+!$acc parallel loop private(ia,i,t,u)
+#else
 !$omp parallel do private(ia,i,t,u)
+#endif
   do ia=1,natom
     do i=1,isize_r
       t = ppg%ireferred_atom_comm_r(ia,i)
@@ -912,7 +1110,11 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
       end if
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
 
   ppg%ireferred_atom_comm_r = ireferred_atom_comm_r
 
@@ -940,12 +1142,20 @@ subroutine init_uvpsi_table(ppg)
   integer :: ilma,ia,ilocal,ilocal_nlma
 
   ilocal_nlma = 0
+#ifdef USE_OPENACC
+!$acc parallel loop private(ilma,ia) reduction(+:ilocal_nlma)
+#else
 !$omp parallel do private(ilma,ia) reduction(+:ilocal_nlma)
+#endif
   do ilma=1,ppg%nlma
     ia = ppg%ia_tbl(ilma)
     if (ppg%ireferred_atom(ia)) ilocal_nlma = ilocal_nlma + 1
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
   ppg%ilocal_nlma = ilocal_nlma
 
   allocate(ppg%ilocal_nlma2ilma(ppg%ilocal_nlma))

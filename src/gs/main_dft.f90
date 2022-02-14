@@ -215,13 +215,13 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
 end if
 
 ! output transition moment : --> want to put out of the optmization loop in future
-if(yn_out_tm  == 'y') then
+if(yn_out_tm  == 'y'.or.yn_out_gs_sgm_eps=='y') then
    select case(iperiodic)
    case(3)
       call write_k_data(system,stencil)  !need? (probably remove later)
-      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg,energy)
    case(0)
-     write(*,*) "error: yn_out_tm='y' & iperiodic=0"
+     write(*,*) "error: yn_out_tm='y',yn_out_gs_sgm_eps='y' & iperiodic=0"
   end select
 end if
 
@@ -317,10 +317,11 @@ call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 call write_info_data(Miter,system,energy,pp)
 call write_k_data(system,stencil)
+if(yn_spinorbit=='y') call write_gs_magnetization(ofl,system,mg,info,spsi)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,system,rho_s)
+if(yn_out_dns =='y') call write_dns(lg,mg,system,info,rho_s)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
@@ -329,14 +330,35 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
-if(yn_opt=='y') then
-   if(.not.flag_opt_conv) then
-      call comm_sync_all
-      call checkpoint_opt(nopt_max,opt,ofl%dir_out_restart)
-      call comm_sync_all
+if(write_gs_restart_data=="no") then
+   if(comm_is_root(nproc_id_global)) &
+      write(*,'(a)')"  no restart data writing."
+else if(write_gs_restart_data.ne."checkpoint_only") then
+   if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
+   call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
+   call comm_sync_all
+   if(yn_opt=='y') then
+      if(.not.flag_opt_conv) then
+         call comm_sync_all
+         call checkpoint_opt(nopt_max,opt,ofl%dir_out_restart)
+         call comm_sync_all
+      endif
+   endif
+else
+   if(yn_self_checkpoint=='n') then
+      if(comm_is_root(nproc_id_global)) then
+           write(*,'(a)')"  no restart data writing:"
+           write(*,'(a)')"  check input keywords if you need restart data"
+       endif
    endif
 endif
+if(yn_self_checkpoint=='y') then
+   if(comm_is_root(nproc_id_global)) &
+   write(*,'(a)')"  writing restart data in checkpoint format ..."
+   call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
+   call comm_sync_all
+endif
+if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing completed."
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY

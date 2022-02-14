@@ -6,7 +6,6 @@
   use math_constants
   use timer
   use plusU_global, only: read_Hubbard_parameters
-  use spin_orbit_global, only: read_sw_spin_orbit
   use sym_sub, only: read_sw_symmetry
   implicit none
 
@@ -21,7 +20,6 @@
   call set_basic_flag(theory)
 
   call read_Hubbard_parameters  !should move into read_input subroutine!
-  call read_sw_spin_orbit( yn_spinorbit )
   call read_sw_symmetry( yn_symmetry )
 
   call timer_initialize
@@ -36,7 +34,7 @@
   case('tddft_response','tddft_pulse'); call main_tddft
   case('dft_k_expand')                ; call main_dft_k_expand !convert DFT/k-points data to supercell/gammma DFT
   case('single_scale_maxwell_tddft'  ); call main_tddft
-  case('multi_scale_maxwell_tddft'   ); call main_ms    ! experimental
+  case('multi_scale_maxwell_tddft'   ); call main_ms
   case('maxwell')                     ; call main_maxwell
  !case('sbe')                         ; call main_sbe
  !case('maxwell_sbe')                 ; call main_maxwell_sbe
@@ -88,10 +86,6 @@ contains
     print '(A)',         '#'
     print '(A,I1,".",I1,".",I1)', &
     &                    '#                             Version ', SALMON_VER_MAJOR, SALMON_VER_MINOR, SALMON_VER_MICRO
-    if (GIT_FOUND) then 
-      print '(A)',       '#'
-      print '(A,A,A,A)', '#   [Git revision] ', GIT_COMMIT_HASH, ' in ', GIT_BRANCH
-    endif
     print '(A)',         '##############################################################################'
     
     call print_xc_info()    

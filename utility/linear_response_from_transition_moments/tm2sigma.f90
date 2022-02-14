@@ -12,13 +12,13 @@ program main
   !
   character(256) :: sysname
   integer :: num_kgrid(3),nstate,nelec
-  real(8) :: al(3)
+  real(8) :: al(3),al_vec1(3),al_vec2(3),al_vec3(3)
   integer :: mu,nu,nomega
   real(8) :: omega_max,delta
-  namelist/input/sysname,num_kgrid,nstate,nelec,al,mu,nu,nomega,omega_max,delta
+  namelist/input/sysname,num_kgrid,nstate,nelec,al,al_vec1,al_vec2,al_vec3,mu,nu,nomega,omega_max,delta
   !
   integer :: nk,nb
-  real(8) :: n_e,V,delta_munu
+  real(8) :: n_e,V,delta_munu,A(3,3),detA
   real(8),allocatable :: eigen(:,:),occ(:,:)
   complex(8),allocatable :: matrix_p(:,:,:,:),matrix_v(:,:,:,:)
   integer :: ib1,ib2,ik,iw
@@ -30,11 +30,25 @@ program main
 !===================================================================================================================================
 
   read(*,input)
+  
+  if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+     al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+    A = 0d0
+    A(1,1) = al(1)
+    A(2,2) = al(2)
+    A(3,3) = al(3)
+  else
+    A(1:3,1) = al_vec1(1:3)
+    A(1:3,2) = al_vec2(1:3)
+    A(1:3,3) = al_vec3(1:3)
+  end if
+  detA = a(1,1)*a(2,2)*a(3,3)+a(2,1)*a(3,2)*a(1,3)+a(3,1)*a(1,2)*a(2,3) &
+    -a(1,3)*a(2,2)*a(3,1)-a(2,3)*a(3,2)*a(1,1)-a(3,3)*a(1,2)*a(2,1)
 
   nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
   nb = nstate
-  V = al(1)*al(2)*al(3)* dble(nk) ! volume
-  n_e = dble(nelec)/(al(1)*al(2)*al(3)) ! averaged electron number density
+  V = detA* dble(nk) ! volume
+  n_e = dble(nelec)/detA ! averaged electron number density
   
   if(mu==nu) then
     delta_munu = 1d0
@@ -76,11 +90,11 @@ program main
         do ib2=1,nb
           if(ib2==ib1) cycle
           sigma = sigma + (zi/(w*V))* occ(ib1,ik)*   &
-          & ( matrix_v(ib1,ib2,mu,ik) * matrix_p(ib2,ib1,nu,ik) / ( w + eigen(ib1,ik) - eigen(ib2,ik) + zi*delta ) &
-          & + matrix_v(ib2,ib1,mu,ik) * matrix_p(ib1,ib2,nu,ik) / (-w + eigen(ib1,ik) - eigen(ib2,ik) - zi*delta ) )
+          & ( matrix_v(ib1,ib2,mu,ik) * matrix_v(ib2,ib1,nu,ik) / ( w + eigen(ib1,ik) - eigen(ib2,ik) + zi*delta ) &
+          & + matrix_v(ib2,ib1,mu,ik) * matrix_v(ib1,ib2,nu,ik) / (-w + eigen(ib1,ik) - eigen(ib2,ik) - zi*delta ) )
           sigma_intra = sigma_intra + (zi/(w*V))* occ(ib1,ik)*   &
-          & ( matrix_v(ib1,ib2,mu,ik) * matrix_p(ib2,ib1,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) &
-          & + matrix_v(ib2,ib1,mu,ik) * matrix_p(ib1,ib2,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) )
+          & ( matrix_v(ib1,ib2,mu,ik) * matrix_v(ib2,ib1,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) &
+          & + matrix_v(ib2,ib1,mu,ik) * matrix_v(ib1,ib2,nu,ik) / ( eigen(ib1,ik) - eigen(ib2,ik) ) )
         end do
       end do
     end do
@@ -148,9 +162,9 @@ contains
       do ib=1,NB
         do jb=1,NB
           read(fh, *) idummy, idummy, idummy,tmp(1:6)
-          matrix_v(ib, jb, 1, ik) = matrix_p(ib, jb, 1, ik) - zi* dcmplx(tmp(1), tmp(2)) ! <u_ib,k|[r_1,V_nl]|u_jb,k>/i
-          matrix_v(ib, jb, 2, ik) = matrix_p(ib, jb, 2, ik) - zi* dcmplx(tmp(3), tmp(4)) ! <u_ib,k|[r_2,V_nl]|u_jb,k>/i
-          matrix_v(ib, jb, 3, ik) = matrix_p(ib, jb, 3, ik) - zi* dcmplx(tmp(5), tmp(6)) ! <u_ib,k|[r_3,V_nl]|u_jb,k>/i
+          matrix_v(ib, jb, 1, ik) = matrix_p(ib, jb, 1, ik) + dcmplx(tmp(1), tmp(2)) ! <u_ib,k|[r_1,V_nl]|u_jb,k>/i
+          matrix_v(ib, jb, 2, ik) = matrix_p(ib, jb, 2, ik) + dcmplx(tmp(3), tmp(4)) ! <u_ib,k|[r_2,V_nl]|u_jb,k>/i
+          matrix_v(ib, jb, 3, ik) = matrix_p(ib, jb, 3, ik) + dcmplx(tmp(5), tmp(6)) ! <u_ib,k|[r_3,V_nl]|u_jb,k>/i
         enddo
       enddo
     enddo

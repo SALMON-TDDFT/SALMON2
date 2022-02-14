@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#   Copyright 2017-2020 SALMON developers
+#   Copyright 2017-2021 SALMON developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -73,12 +73,8 @@ group = OptionGroup(parser, 'Optimization options for stencil computations')
 group.add_option('--explicit-vec',          action='store_true',  dest='explicit_vec',      help='enable explicit vectorization. it requires --simd-set option to be set.')
 group.add_option('--compiler-vec',          action='store_false', dest='explicit_vec',      help='entrust optimization to a compiler.')
 group.add_option('--simd-set',              action='store',       dest='simd',              help='specifies SIMD instruction set. (e.g. AVX, AVX_512, HPC_ACE2...)')
-group.add_option('--enable-swp',            action='store_true',  dest='swp')
-group.add_option('--disable-swp',           action='store_false', dest='swp',               help='enable/disable software prefetch in the explicit vec.')
 group.add_option('--enable-array-padding',  action='store_true',  dest='padding')
 group.add_option('--disable-array-padding', action='store_false', dest='padding',           help='enable/disable array padding for the cache utilization.')
-group.add_option('--enable-domain-pow2',    action='store_true',  dest='domain_two')
-group.add_option('--disable-domain-pow2',   action='store_false', dest='domain_two',        help='enable/disable whether the optimization assumes that 3-D domain size is power of two.')
 parser.add_option_group(group)
 
 group = OptionGroup(parser, 'Debug options')
@@ -109,10 +105,8 @@ add_option(dict, 'USE_SCALAPACK',       options.scalapack)
 add_option(dict, 'USE_EIGENEXA',        options.eigenexa)
 add_option(dict, 'USE_LIBXC',           options.libxc)
 
-add_option(dict, 'USE_OPT_DOMAIN_IS_POW2',         options.domain_two)
 add_option(dict, 'USE_OPT_ARRAY_PADDING',          options.padding)
 add_option(dict, 'USE_OPT_EXPLICIT_VECTORIZATION', options.explicit_vec)
-add_option(dict, 'USE_OPT_SOFTWARE_PREFETCH',      options.swp)
 
 if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()

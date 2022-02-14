@@ -1,13 +1,18 @@
 !########################################################################################!
 ! Excercise 04: Ground state of crystalline silicon(periodic solids)                     !
 !----------------------------------------------------------------------------------------!
-! * The detail of this excercise is expained in our manual(see chapter: 'Exercises').    !
+! * The detail of this excercise is explained in our manual(see chapter: 'Exercises').   !
 !   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
 ! * Input format consists of group of keywords like:                                     !
 !     &group                                                                             !
 !       input keyword = xxx                                                              !
 !     /                                                                                  !
-!   (see chapter: 'List of all input keywords' in the manual)                            !
+!   (see chapter: 'List of input keywords' in the manual)                                !
+!----------------------------------------------------------------------------------------!
+! * Conversion from unit_system = 'a.u.' to 'A_eV_fs':                                   !
+!   Length: 1 [a.u.] = 0.52917721067    [Angstrom]                                       !
+!   Energy: 1 [a.u.] = 27.21138505      [eV]                                             !
+!   Time  : 1 [a.u.] = 0.02418884326505 [fs]                                             !
 !########################################################################################!
 
 &calculation
@@ -22,7 +27,7 @@
 
 &units
   !units used in input and output files
-  unit_system = 'a.u.'
+  unit_system = 'A_eV_fs'
 /
 
 &system
@@ -30,7 +35,7 @@
   yn_periodic = 'y'
   
   !grid box size(x,y,z)
-  al(1:3) = 10.26d0, 10.26d0, 10.26d0
+  al(1:3) = 5.43d0, 5.43d0, 5.43d0
   
   !number of elements, atoms, electrons and states(bands)
   nelem  = 1

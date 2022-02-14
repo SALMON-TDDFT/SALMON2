@@ -69,7 +69,7 @@ contains
     implicit none
     character(*), intent(in) :: filepath
     logical :: ret
-    integer :: retcode
+    integer(c_int) :: retcode
     call posix_file_exists(adjustl(trim(filepath))//c_null_char, retcode)
     ret = (retcode == 1) ! success
   end function
@@ -81,7 +81,7 @@ contains
     implicit none
     character(*), intent(in) :: dirpath
     logical :: ret
-    integer :: retcode
+    integer(c_int) :: retcode
     call posix_directory_exists(adjustl(trim(dirpath))//c_null_char, retcode)
     ret = (retcode == 1) ! success
   end function
@@ -91,7 +91,7 @@ contains
     implicit none
     character(*), intent(in) :: dirpath
     integer, intent(out), optional :: iret
-    integer :: retcode
+    integer(c_int) :: retcode
     if (.not. directory_exists(dirpath)) then
       call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
       if (present(iret)) then
@@ -108,7 +108,7 @@ contains
   subroutine remove_file(filepath)
     implicit none
     character(*), intent(in) :: filepath
-    integer :: retcode
+    integer(c_int) :: retcode
     if (file_exists(filepath)) then
       call stdio_remove(adjustl(trim(filepath))//c_null_char, retcode)
       if (retcode /= 0) then
@@ -124,7 +124,7 @@ contains
   subroutine remove_directory(dirpath)
     implicit none
     character(*), intent(in) :: dirpath
-    integer :: retcode
+    integer(c_int) :: retcode
     if (directory_exists(dirpath)) then
       call stdio_remove(adjustl(trim(dirpath))//c_null_char, retcode)
       if (retcode /= 0) then
@@ -143,7 +143,7 @@ contains
   subroutine force_remove(entry_path)
     implicit none
     character(*), intent(in) :: entry_path
-    integer :: retcode
+    integer(c_int) :: retcode
     if (file_exists(entry_path)) then
       call remove_file(entry_path)
     else if (directory_exists(entry_path)) then
@@ -167,6 +167,10 @@ contains
     if (comm_is_root(idelegate)) then
       call create_directory(dirpath)
     end if
+
+    ! wait until the root process creates the directory
+    ! to avoid potential conflict between directory_exists() and posix_mkdir()...
+    call comm_sync_all(igroup)
 
     ! busy-wait until all process can read the directory...
     do while(.true.)

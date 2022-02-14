@@ -16,13 +16,10 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module prep_pp_so_sub
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
   private
   public :: calc_uv_so
-  public :: SPIN_ORBIT_ON
 
   integer,allocatable :: lma_tbl_so(:,:,:)
   integer :: Nlma_so
@@ -76,7 +73,7 @@ contains
 
     Nlma_so = lma
 
-    write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
+    !write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
 
     allocate( lma_tbl_so(lm_max,natom,2) ); lma_tbl_so=0
     allocate( ppg%ia_tbl_so(Nlma_so) ); ppg%ia_tbl_so=0
@@ -161,7 +158,6 @@ contains
     use structures,     only : s_pp_info, s_pp_grid
     use salmon_math,    only : spline
     use communication,  only : comm_summation
-    use mpi, only: MPI_COMM_WORLD
     use parallelization, only: nproc_id_global
     implicit none
     type(s_pp_info) :: pp

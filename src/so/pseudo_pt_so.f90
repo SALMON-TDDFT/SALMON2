@@ -15,14 +15,11 @@
 !
 module pseudo_pt_so_sub
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
 
 ! WARNING: We must not call these except for hpsi routine.
 
   private
-  public :: SPIN_ORBIT_ON
   public :: pseudo_so
   public :: calc_uVpsi_so
   public :: calc_force_uVpsi_so
@@ -220,7 +217,12 @@ contains
 
       allocate(uVpsibox1(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox1=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(3) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix,uVpsi)
+#else
 !$omp parallel do collapse(3) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix,uVpsi)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -290,6 +292,9 @@ contains
       end do !io
       end do !ik
       end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
       !write(*,*) "sum(abs(uVpsibox1(:,:,1,1,1)))",sum(abs(uVpsibox1(:,:,1,1,1)))
       !call mpi_finalize(ix); stop 'xxx_serial'

@@ -118,6 +118,13 @@ else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
 end if
 
+!$acc enter data copyin(info)
+!$acc enter data copyin(system)
+!$acc enter data copyin(mg)
+!$acc enter data copyin(stencil)
+!$acc enter data copyin(V_local)
+!$acc enter data copyin(spsi,shpsi,sttpsi) 
+!$acc enter data copyin(ppg)
 
 contains
 
@@ -207,12 +214,6 @@ real(8) :: rNe0,rNe
   case default ; stop 'Specify "cg" for method_min.'
   end select
 
-  select case(method_mixing)
-  case ('simple','broyden','pulay') ; continue
-  case default ; stop 'Specify any one of "simple" or "broyden" or "pulay" for method_mixing.'
-  end select
-
-
   nspin = system%nspin
   spsi%update_zwf_overlap = .false.
 
@@ -224,7 +225,10 @@ real(8) :: rNe0,rNe
      call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
      if(read_gs_restart_data=='wfn') then
         call calc_density(system,rho_s,spsi,info,mg)
-     else 
+     else
+        if(yn_spinorbit=='y') then
+          call calc_density(system,rho_s,spsi,info,mg) ! for initialization of the spin density matrix.
+        end if
         i = mixing%num_rho_stock+1
         !rho%f      => mg (orbital domain allocation)
         !rho_s(j)%f => mg (orbital domain allocation)
@@ -248,21 +252,21 @@ real(8) :: rNe0,rNe
            end do
         endif
 
-        if( read_gs_restart_data=='rho_inout'.or. &
-            read_gs_restart_data=='rho'         )then
+        if( read_gs_restart_data=='rho' .or. &
+            read_gs_restart_data(1:9)=='rho_inout')then
            call init_wf(lg,mg,system,info,spsi)
         endif
      endif
 
      if(yn_reset_step_restart=='y' .or. &
-        (read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout') ) Miter=0
+        (read_gs_restart_data=='rho'.or.read_gs_restart_data(1:9)=='rho_inout')) Miter=0
 
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     call init_wf(lg,mg,system,info,spsi)
     select case(method_init_density)
-    case('pp')
+    case('pp','pp_magdir')
       call calc_density_pp(lg,mg,system,info,pp,fg,poisson,rho_s)
     case default
       call calc_density(system,rho_s,spsi,info,mg)
@@ -321,7 +325,7 @@ real(8) :: rNe0,rNe
   end if
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
   case(3)
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select

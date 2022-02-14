@@ -77,7 +77,11 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
+#ifdef USE_FFTW
+  character(1)   :: yn_fftw
+#endif
   character(1)   :: yn_scalapack
+  character(1)   :: yn_gramschmidt_blas
   character(1)   :: yn_eigenexa
   character(1)   :: yn_diagonalization_red_mem
   character(32)  :: process_allocation
@@ -98,8 +102,10 @@ module salmon_global
   character(256) :: file_atom_coor
   character(256) :: file_atom_red_coor
   character(1)   :: yn_spinorbit
-  character(1)   :: yn_symmetry
-  real(8)        :: hubbard_u
+  character(3)   :: yn_symmetry
+  character(16)  :: absorbing_boundary
+  real(8)        :: imagnary_potential_w0
+  real(8)        :: imagnary_potential_dr
 
 !! &pseudo
   character(256) :: file_pseudo(maxmki)
@@ -144,7 +150,7 @@ module salmon_global
   integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
-  character(8)   :: method_mixing
+  character(16)  :: method_mixing
   real(8)        :: mixrate
   integer        :: nmemory_mb
   real(8)        :: alpha_mb
@@ -160,8 +166,8 @@ module salmon_global
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
-  character(2)   :: method_init_density
-
+  character(16)  :: method_init_density
+  real(8)        :: magdir_atom(100)
 
 !! &emfield
   character(2)   :: trans_longi
@@ -218,15 +224,14 @@ module salmon_global
   integer        :: ny_origin_m
   integer        :: nz_origin_m
   character(100) :: file_macropoint
-  integer        :: num_macropoint
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
-  !! TODO: remove num_macropoint later
   integer        :: nmacro_chunk
 
 !! &maxwell
   real(8)        :: al_em(3)
   real(8)        :: dl_em(3)
+  integer        :: num_rgrid_em(3)
   real(8)        :: dt_em
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)
@@ -249,6 +254,7 @@ module salmon_global
   integer        :: obs_num_em
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
+  real(8)        :: obs_plane_ene_em(200,100)
   character(1)   :: yn_obs_plane_em(200)
   character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
@@ -256,7 +262,19 @@ module salmon_global
   integer        :: media_id_pml(3,2)
   integer        :: media_id_source1
   integer        :: media_id_source2
-
+  character(1)   :: yn_make_shape
+  character(1)   :: yn_output_shape
+  character(1)   :: yn_copy_x
+  character(1)   :: yn_copy_y
+  character(1)   :: yn_copy_z
+  character(6)   :: rot_type
+  integer        :: n_s
+  character(32)  :: typ_s(1000)
+  integer        :: id_s(1000)
+  real(8)        :: inf_s(1000,10)
+  real(8)        :: ori_s(1000,3)
+  real(8)        :: rot_s(1000,3)
+  
 !! &analysis
   character(2)   :: projection_option
   integer        :: nenergy
@@ -287,18 +305,24 @@ module salmon_global
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
   character(1)   :: yn_out_tm
+  character(1)   :: yn_out_gs_sgm_eps
+  integer        :: out_gs_sgm_eps_mu_nu(2)
+  real(8)        :: out_gs_sgm_eps_width
   integer        :: out_projection_step
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
+  character(1)   :: yn_lr_w0_correction
+  integer        :: out_magnetization_step
   character(1)   :: yn_out_perflog
   character(6)   :: format_perflog ! 'stdout','text','csv'
-
+  
 !! &poisson
   integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)
   integer        :: lmax_multipole
   real(8)        :: threshold_cg
+  character(2)   :: method_poisson ! 'cg','ft'
 
 !! &ewald
   integer        :: newald
@@ -330,7 +354,7 @@ module salmon_global
   character(256) :: shape_file_jm
   integer        :: num_jm
   real(8)        :: rs_bohr_jm(200)
-  integer        :: sphere_nelec_jm(200)
+  integer        :: sphere_nion_jm(200)
   real(8)        :: sphere_loc_jm(200,3)
 
 !! &atomic_coor

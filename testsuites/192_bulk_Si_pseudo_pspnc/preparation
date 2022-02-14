@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON. 
+# if required, this script file can utilized for the preparation of 
+# the input data for the following calculations.
+
+wget https://www.abinit.org/sites/default/files/PrevAtomicData/psp-links/LDA_TM.psps/14/14si.pspnc
+

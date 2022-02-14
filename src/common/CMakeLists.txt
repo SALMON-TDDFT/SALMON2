@@ -29,6 +29,13 @@ else ()
       zstencil_microac_core/typical/seq.f90
       zstencil_microac_core/typical/omp.f90
       )
+  if(USE_OPENACC)
+      set(SOURCES ${SOURCES}
+          zstencil_core/gpu/seq.f90
+          zpseudo.cu
+          stencil_current.cu
+          )
+  endif()
 endif ()
 
 if (USE_OPT_EXPLICIT_VECTORIZATION)

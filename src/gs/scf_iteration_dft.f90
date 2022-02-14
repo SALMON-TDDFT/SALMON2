@@ -54,6 +54,7 @@ use hamiltonian
 use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
+use noncollinear_module, only: calc_magnetization
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -91,7 +92,7 @@ integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
 
 real(8),allocatable :: esp_old(:,:,:)
-real(8) :: ene_gap
+real(8) :: ene_gap, magnetization(3)
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
@@ -115,7 +116,7 @@ if(nscf_init_mix_zero.gt.1)then
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
       call get_band_gap(system,energy,ene_gap)
@@ -191,11 +192,14 @@ DFT_Iteration : do iter=Miter+1,nscf
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
    end if
+   if(yn_spinorbit=='y') then
+     call calc_magnetization(system,mg,info,magnetization)
+   end if
    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
    call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
    end if
@@ -320,12 +324,15 @@ DFT_Iteration : do iter=Miter+1,nscf
       case('norm_pot')     ; write(*,203) Miter, sum1*(au_energy_ev)**2/au_length_aa**6
       case('norm_pot_dng') ; write(*,204) Miter, sum1*(au_energy_ev)**2/au_length_aa**6
       end select
-200   format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
-201   format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
-202   format("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
-203   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2             = ",i6,e15.8)
-204   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
+200   format(1x,"iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
+201   format(1x,"iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
+202   format(1x,"iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+203   format(1x,"iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2             = ",i6,e15.8)
+204   format(1x,"iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
 
+      if(yn_spinorbit=='y') then
+        write(*,'(1x,"Magnetization= ",3(e15.8,2x))') magnetization(1:3)
+      end if
    end if !comm_is_root
 
    else if( ilevel_print==2 ) then
@@ -414,17 +421,16 @@ end subroutine scf_iteration_dft
 
 subroutine  get_band_gap(system,energy,gap)
   use structures
-  use salmon_global, only: nelec
+  use salmon_global, only: nelec,yn_spinorbit
   use inputoutput, only: au_energy_ev
   use communication, only: comm_is_root
-  use spin_orbit_global, only: SPIN_ORBIT_ON
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_dft_energy),intent(in) :: energy
   integer :: ik, index_vbm
   real(8) :: gap
   real(8),dimension(system%nk) :: esp_vb_max, esp_cb_min
-  if( SPIN_ORBIT_ON )then
+  if( yn_spinorbit=='y' )then
      index_vbm=nelec
   else
      index_vbm=nelec/2

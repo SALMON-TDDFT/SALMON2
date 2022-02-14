@@ -47,6 +47,7 @@ module structures
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3)
     real(8) :: rmatrix_a(3,3),rmatrix_b(3,3)
+    real(8) :: mu
     real(8),allocatable :: vec_k(:,:)    ! (1:3,1:nk), k-vector
     real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
     real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
@@ -130,6 +131,8 @@ module structures
   ! parallelization of orbital wavefunction
     integer :: iaddress(5) ! address of MPI under orbital wavefunction (ix,iy,iz,io,ik)
     integer,allocatable :: imap(:,:,:,:,:) ! address map
+    integer :: iaddress_isolated_ffte(7) ! address of MPI for isolated_ffte (ix,iy,iz,io1,io2,io3,ik)
+    integer,allocatable :: imap_isolated_ffte(:,:,:,:,:,:,:) ! address map for isolated_ffte 
     logical :: if_divide_rspace
     logical :: if_divide_orbit
     integer :: icomm_r,   id_r,   isize_r   ! communicator, process ID, & # of processes for r-space
@@ -147,7 +150,7 @@ module structures
     integer :: icomm_x,id_x,isize_x ! x-axis
     integer :: icomm_y,id_y,isize_y ! y-axis
     integer :: icomm_z,id_z,isize_z ! z-axis
-    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
+    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD (and for FFTW)
   ! for atom index #ia
     integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
     integer :: nion_mg
@@ -173,12 +176,24 @@ module structures
 #ifdef USE_EIGENEXA
     logical :: flag_eigenexa_init
 #endif
+    integer :: icomm_x_isolated_ffte,id_x_isolated_ffte,isize_x_isolated_ffte ! x-axis for isolated_ffte
+    integer :: icomm_y_isolated_ffte,id_y_isolated_ffte,isize_y_isolated_ffte ! y-axis for isolated_ffte
+    integer :: icomm_z_isolated_ffte,id_z_isolated_ffte,isize_z_isolated_ffte ! z-axis for isolated_ffte
+    integer :: icomm_o_isolated_ffte,id_o_isolated_ffte,isize_o_isolated_ffte ! o-axis for isolated_ffte
+#ifdef USE_FFTW
+    integer :: iaddress_isolated_fftw(6) ! address of MPI for isolated_ffte (ix,iy,iz,io3,io4,ik)
+    integer,allocatable :: imap_isolated_fftw(:,:,:,:,:,:) ! address map for isolated_fftw 
+    integer :: icomm_z_isolated_fftw,id_z_isolated_fftw,isize_z_isolated_fftw ! z-axis for isolated_fftw
+    integer :: icomm_o_isolated_fftw,id_o_isolated_fftw,isize_o_isolated_fftw ! o-axis for isolated_fftw
+#endif
   end type s_parallel_info
 
   type s_orbital
   ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_parallel_info)
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
+    real(8)   ,allocatable :: zwf_real(:,:,:,:,:,:,:) ! OpenACC temporary buffer
+    real(8)   ,allocatable :: zwf_imag(:,:,:,:,:,:,:) ! OpenACC temporary buffer
     logical :: update_zwf_overlap   !flag of update_overlap_complex8 for zwf
   end type s_orbital
 
@@ -335,8 +350,8 @@ module structures
 
 ! Poisson equation
   type s_poisson
-  ! for poisson_cg (conjugate-gradient method)
-    integer :: iterVh                              ! iteration number for poisson_cg
+  ! for poisson_isolated_cg (conjugate-gradient method)
+    integer :: iterVh                              ! iteration number for poisson_isolated_cg
     integer :: npole_partial                       ! number of multipoles calculated in each node
     integer :: npole_total                         ! total number of multipoles
     integer,allocatable :: ipole_tbl(:)            ! table for multipoles
@@ -349,8 +364,14 @@ module structures
     complex(8),allocatable :: zrhoG_ele(:,:,:)     ! rho_ele(G): Fourier transform of the electron density
   ! for discrete Fourier transform (general)
     complex(8),allocatable :: ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
+    complex(8),allocatable :: ff1(:,:,:),ff2(:,:,:) ! for isolated_ffte
+    complex(8),allocatable :: ff3x(:,:,:),ff3y(:,:,:),ff3z(:,:,:),ff4x(:,:,:),ff4y(:,:,:),ff4z(:,:,:) ! for isolated_ffte
   ! for FFTE
     complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)
+#ifdef USE_FFTW
+  ! for FFTW
+    complex(8),allocatable :: fftw1(:,:,:),fftw2(:,:,:)
+#endif
   end type s_poisson
 
   type s_fdtd_system
@@ -384,14 +405,16 @@ module structures
     integer :: fh_response
     integer :: fh_pulse
     integer :: fh_dft_md
-    integer :: fh_proj
+    integer :: fh_ovlp,fh_nex
+    integer :: fh_mag,fh_gs_mag
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
     character(256) :: file_response_data
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
-    character(256) :: file_proj_data
+    character(256) :: file_ovlp,file_nex
+    character(256) :: file_mag, file_gs_mag
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
@@ -446,6 +469,13 @@ module structures
     type(s_scalar),allocatable :: rho0_s(:) ! =rho_s(1:nspin) @ t=0 (GS)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
+    ! for projection_option
+    type(s_dft_system) :: system_gs
+    type(s_parallel_info) :: info_gs
+    type(s_scalar),allocatable :: vloc0(:)  ! =v_local(1:nspin) @ t=0 (GS)
+    type(s_orbital) :: tpsi0,ttpsi0,htpsi0
+    type(s_cg) :: cg
+    real(8) :: E_old
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method
@@ -571,7 +601,11 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(6) private(im,ik,io,is,iz,iy,ix)
+#else
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -600,7 +634,19 @@ contains
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(psi%zwf_real(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(psi%zwf_imag(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(6) private(im,ik,io,is,iz,iy,ix)
+#else
 !$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e

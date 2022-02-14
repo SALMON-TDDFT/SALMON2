@@ -58,6 +58,8 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
+    use salmon_global, only: yn_spinorbit
+    use noncollinear_module, only: rot_vxc_noncollinear
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
@@ -83,7 +85,11 @@ contains
     nspin = system%nspin
 
     if(nspin==1)then
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -91,11 +97,22 @@ contains
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     else if(nspin==2)then
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(3) private(is,iz,iy,ix)
+#else
 !$omp parallel private(is,iz,iy,ix)
+#endif
       do is=1,2
+#ifndef USE_OPENACC
 !$omp do collapse(2)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -103,9 +120,15 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do
+#endif
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel
+#endif
     end if
 
     if(xc_func%use_gradient) then ! meta GGA
@@ -130,9 +153,8 @@ contains
 !$omp end parallel do
 
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
-      call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
-      call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
-      & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )
+      call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
+      call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
       
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,mg%num(3)
@@ -161,7 +183,11 @@ contains
     end if
 
     if(nspin==1)then
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -169,11 +195,22 @@ contains
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     else if(nspin==2)then
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(3) private(is,iz,iy,ix)
+#else
 !$omp parallel private(is,iz,iy,ix)
+#endif
       do is=1,2
+#ifndef USE_OPENACC
 !$omp do collapse(2)
+#endif
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
@@ -181,13 +218,23 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do
+#endif
       end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel
+#endif
     end if
 
     tot_exc=0.d0
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
+#else
 !$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
+#endif
     do iz=1,mg%num(3)
     do iy=1,mg%num(2)
     do ix=1,mg%num(1)
@@ -195,10 +242,18 @@ contains
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+    
+    if(yn_spinorbit=='y') then
+      call rot_vxc_noncollinear( Vxc, system, mg )
+    end if
 
     return
     
@@ -232,7 +287,7 @@ contains
                                ,mg%is_array(2):mg%ie_array(2) &
                                ,mg%is_array(3):mg%ie_array(3) &
                                ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-         spsi%zwf = cmplx(spsi%rwf)
+         spsi%zwf = dcmplx(spsi%rwf)
       else
          if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
       endif

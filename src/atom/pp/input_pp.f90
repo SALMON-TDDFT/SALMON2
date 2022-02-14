@@ -27,7 +27,7 @@ contains
 
 subroutine input_pp(pp,hx,hy,hz)
   use structures,only : s_pp_info
-  use salmon_global,only : file_pseudo, quiet
+  use salmon_global,only : file_pseudo, quiet, method_init_density
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
     & yn_psmask
@@ -48,6 +48,7 @@ subroutine input_pp(pp,hx,hy,hz)
   logical,allocatable :: flag_nlcc_element(:)
 
   allocate(rhor_nlcc(0:pp%nrmax0,0:2))
+  rhor_nlcc=0d0
 
 ! Nonlinear core correction
   allocate(flag_nlcc_element(nelem)); flag_nlcc_element(:) = .false. ; pp%flag_nlcc = .false.
@@ -88,7 +89,12 @@ subroutine input_pp(pp,hx,hy,hz)
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
       end select
 
-      if ( flag_beta_proj_is_given ) flag_potential_is_given=.false.
+      if ( flag_beta_proj_is_given ) then
+        flag_potential_is_given=.false.
+        if(method_init_density/='wf' .and. ps_format(ik)/='UPF') then
+          stop "radial density is not available (method_init_density=pp...)"
+        end if
+      end if
       if ( any(pp%vpp_so/=0.0d0) ) flag_so=.true.
 
       if ( all(pp%nproj(:,ik)==0) ) pp%nproj(0:pp%mlps(ik),ik)=1
@@ -271,6 +277,10 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%inorm_so,nproc_group_global)
   call comm_bcast(pp%udvtbl_so,nproc_group_global)
   call comm_bcast(pp%dudvtbl_so,nproc_group_global)
+  
+  call comm_bcast(pp%rps_ao,nproc_group_global)
+  call comm_bcast(pp%nrps_ao,nproc_group_global)
+  call comm_bcast(pp%upptbl_ao,nproc_group_global)
 
   return
 end subroutine input_pp
@@ -287,7 +297,7 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   character(256),intent(in) :: ps_file
 !local variable
   integer :: l,i,irPC
-  real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps,cl,u
+  real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps
 
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
@@ -321,28 +331,10 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   !  write(100,'(5g15.6)') pp%rad(i+1,ik), (pp%upp(i,l),l=0,pp%mlps(ik) )
   !end do
 
-  loop_l: do l = 0, pp%mlps(ik)
-    do i = pp%mr(ik), 0, -1
-      u = abs( pp%upp(i,l) )
-      if ( u /= 0.0d0 ) then
-        if ( u > 1.0d-1 ) cycle loop_l
-        exit
-      end if
-    end do
-    cl = 2*l+1
-    do i = 0, pp%mr(ik)
-      pp%rho_pp_tbl(i+1,ik) = pp%rho_pp_tbl(i+1,ik) + cl*pp%upp(i,l)**2
-    end do
-  end do loop_l
-
-  !r=0.0d0
-  !do i = 0,pp%mr(ik)
-  !  r = r + pp%rho_pp_tbl(i+1,ik)
-  !end do
-  !write(*,*) 'Int(rho)@read_ps_KY',sum(pp%rho_pp_tbl(:,ik))*step
+  !rewind 100
   !do i = 2, pp%mr(ik)+1
   !  r = pp%rad(i,ik)
-  !  write(110,'(5g15.6)') pp%rad(i,ik), pp%rho_pp_tbl(i,ik)/(4.0d0*acos(-1.0d0)*r*r)
+  !  write(100,'(5g15.6)') pp%rad(i,ik), pp%rho_pp_tbl(i,ik)/(4.0d0*acos(-1.0d0)*r*r)
   !end do
 
   return
@@ -1118,7 +1110,7 @@ end subroutine making_ps_with_masking_so
 !====
 subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   use structures,only : s_pp_info
-  use salmon_global, only: nelem
+  use salmon_global, only: nelem, method_init_density
   use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -1126,18 +1118,27 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   logical,intent(in) :: flag_nlcc_element(nelem)
   real(8),intent(in) :: rhor_nlcc(0:pp%nrmax0,0:2)
   integer :: i,l,l0,ll
-  real(8) :: r1,r2,r3,r4,const
-
-! copy the radial wave functions
-  l0=0
-  do ll=0,pp%mlps(ik)
-  do l=l0,l0+pp%nproj(ll,ik)-1
-    do i=0,pp%mr(ik)-1
-      pp%upptbl_ao(i+1,l,ik) = pp%upp(i,l)
+  real(8) :: r1,r2,r3,r4,const,u
+  
+  if(method_init_density/='wf' .and. (.not. flag_beta_proj_is_given)) then
+    pp%rho_pp_tbl(:,ik) = 0d0
+    u = 0d0
+    loop_l: do l = 0, pp%mlps(ik)
+      loop_i: do i = 1, pp%mr(ik)
+        pp%rho_pp_tbl(i,ik) = pp%rho_pp_tbl(i,ik) + dble(2*l+1)* pp%upp(i,l)**2
+        u = u + dble(2*l+1)* pp%upp(i,l)**2 * (pp%rad(i+1,ik)-pp%rad(i,ik))
+        if( u > pp%zps(ik) ) then
+          exit loop_l
+          exit loop_i
+        end if
+      end do loop_i
+    end do loop_l
+    u = 0d0
+    do i = 1, pp%mr(ik)
+      u = u + pp%rho_pp_tbl(i,ik)*(pp%rad(i+1,ik)-pp%rad(i,ik))
     end do
-  end do
-  l0=l
-  end do
+    write(*,*) "Int(rho)= ",u, " (for method_init_density=pp...)"
+  end if
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
   do l=0,pp%mlps(ik)
@@ -1147,6 +1148,17 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
     pp%upp(0,l)=pp%upp(1,l)
 !    pp%upp(0,l)=2.d0*pp%upp(1,l)-pp%upp(2,l)
   enddo
+  
+! copy the radial wave functions for DFT+U
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
+    do i=0,pp%mr(ik)-1
+      pp%upptbl_ao(i+1,l,ik) = pp%upp(i,l)
+    end do
+  end do
+  l0=l
+  end do
 
   l0=0
   do ll=0,pp%mlps(ik)

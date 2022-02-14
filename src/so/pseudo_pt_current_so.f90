@@ -19,11 +19,8 @@
 
 module pseudo_pt_current_so
 
-  use spin_orbit_global, only: SPIN_ORBIT_ON
-
   implicit none
   private
-  public :: SPIN_ORBIT_ON
   public :: calc_current_nonlocal_so
   public :: calc_current_nonlocal_rdivided_so
 

@@ -29,15 +29,21 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use stencil_sub
   use nonlocal_potential
   use pseudo_pt_plusU_sub, only: pseudo_plusU, PLUS_U_ON
-  use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
-  use nondiagonal_so_sub, only: nondiagonal_so
+  use pseudo_pt_so_sub, only: pseudo_so
+  use noncollinear_module, only: op_xc_noncollinear
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil
+  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil, &
+          absorbing_boundary, yn_spinorbit
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
   use communication, only: comm_summation
   implicit none
-  type(s_dft_system)      ,intent(in) :: system
+
+  external :: zstencil_typical_seq
+  !$acc routine(zstencil_typical_seq) worker
+  external :: zstencil_typical_gpu
+
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(system%Nspin)
@@ -52,6 +58,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   logical :: if_kAc,if_singlescale
   logical :: is_enable_overlapping
   !real(8) :: tmp,tmp1
+  real(8) :: kAc0(3)
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -105,7 +112,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_STENCIL)
 
     ! nonlocal potential
-    if ( SPIN_ORBIT_ON ) then
+    if ( yn_spinorbit=='y' ) then
       ! pseudopotential
       if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
     else
@@ -149,6 +156,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
           if (is_enable_overlapping) then
             call zstencil_overlapped
           else
+#ifdef USE_OPENACC
+            call zstencil_typical_gpu(io_s, io_e, Nspin,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                          ,mg%is,mg%ie &
+                          ,tpsi%zwf(:,:,:,:,:,ik,im),htpsi%zwf(:,:,:,:,:,ik,im) &
+                          ,V_local(:),k_lap0,stencil%coef_lap,k_nabt &
+                          )
+#else
             do io=io_s,io_e
             do ispin=1,Nspin
               call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
@@ -156,6 +170,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
                             ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
             end do
             end do
+#endif
           end if
         end do
         end do
@@ -163,6 +178,27 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       else
       ! OpenMP parallelization: k-point & orbital indices
       
+#ifdef USE_OPENACC
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+          if(if_kAc) then
+            kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+            k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
+            k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
+            k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
+          else
+            k_lap0 = stencil%coef_lap0
+            k_nabt = 0d0
+          end if
+          call zstencil_typical_gpu(io_s, io_e, Nspin,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                          ,mg%is,mg%ie &
+                          ,tpsi%zwf(:,:,:,:,:,ik,im),htpsi%zwf(:,:,:,:,:,ik,im) &
+                          ,V_local(:),k_lap0,stencil%coef_lap,k_nabt &
+                          )
+        end do
+        end do
+#else
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin,kAc,k_lap0,k_nabt) &
 !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
@@ -188,8 +224,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
 !$omp end parallel do
+#endif
         
       end if
+
+      ! absorbing boundary condition
+      if(absorbing_boundary=='z')then
+         call add_imaginary_potential_for_absorbing_boundary_z(system,tpsi,htpsi)
+      endif
       
     else if(stencil%if_orthogonal .and. if_singlescale) then
     ! orthogonal lattice, single-scale Maxwell-TDDFT
@@ -255,12 +297,24 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
       end if
 
+      ! absorbing boundary condition
+      if(absorbing_boundary=='z')then
+         call add_imaginary_potential_for_absorbing_boundary_z(system,tpsi,htpsi)
+      endif
+
+
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
+#ifdef USE_OPENACC
+!$acc update device(system%vec_Ac)
+!$acc parallel present(system,mg,V_local,stencil,tpsi,htpsi)
+!$acc loop collapse(4) private(kAc,kAc0,k_lap0) gang
+#else
 !$omp parallel do collapse(4) default(none) &
 !$omp private(im,ik,io,ispin,kAc,k_lap0) &
 !$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -270,7 +324,15 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         if(if_kAc) then
           kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3) ! Cartesian vector k+A/c
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+#ifdef USE_OPENACC
+          kAc0 = kAc
+          kAc(1) = system%rmatrix_B(1,1) * kAc0(1) + system%rmatrix_B(1,2) * kAc0(2) + system%rmatrix_B(1,3) * kAc0(3)
+          kAc(2) = system%rmatrix_B(2,1) * kAc0(1) + system%rmatrix_B(2,2) * kAc0(2) + system%rmatrix_B(2,3) * kAc0(3)
+          kAc(3) = system%rmatrix_B(3,1) * kAc0(1) + system%rmatrix_B(3,2) * kAc0(2) + system%rmatrix_B(3,3) * kAc0(3)
+#else
           kAc(1:3) = matmul(system%rmatrix_B,kAc) ! B* (k+A/c)
+#endif
+
         end if
           call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
@@ -279,7 +341,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end do
       end do
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
 !$omp end parallel do
+#endif
       
     end if
     call timer_end(LOG_UHPSI_STENCIL)
@@ -310,10 +376,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         !$omp end parallel do
       else
+#ifdef USE_OPENACC
+        !$acc kernels loop private(im,ik,io,ispin,iz,iy,ix) collapse(6) independent
+#else
         !$omp parallel do collapse(6) default(none) &
         !$omp          private(im,ik,io,ispin,iz,iy,ix) &
         !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
         !$omp          shared(ttpsi,htpsi,V_local,tpsi)
+#endif
         do im=im_s,im_e
         do ik=ik_s,ik_e
         do io=io_s,io_e
@@ -330,15 +400,19 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
         end do
+#ifdef USE_OPENACC
+        !$acc end kernels
+#else
         !$omp end parallel do
+#endif
       end if
     end if
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
   ! nonlocal potential
     if(yn_jm=='n') then
-      if ( SPIN_ORBIT_ON ) then
-        call nondiagonal_so(tpsi,htpsi,info,mg)
+      if ( yn_spinorbit=='y' ) then
+        call op_xc_noncollinear( tpsi, htpsi, info, mg )
         call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
       else
       ! pseudopotential
@@ -484,7 +558,9 @@ contains
           ie(2) = ie(2) - 4
       end select
 
+#ifndef USE_OPENACC
 !$omp do collapse(4) schedule(dynamic,1)
+#endif
       do io=io_s,io_e
       do ispin=1,Nspin
       do ibz=ibs(3),ibe(3),nzblk
@@ -509,7 +585,9 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do nowait
+#endif
     end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
@@ -639,7 +717,9 @@ contains
 
       do im=im_s,im_e
       do ik=ik_s,ik_e
+#ifndef USE_OPENACC
 !$omp do collapse(4) schedule(dynamic,1)
+#endif
       do io=io_s,io_e
       do ispin=1,Nspin
       do ibz=ibs(3),ibe(3),nzblk
@@ -656,13 +736,65 @@ contains
       end do
       end do
       end do
+#ifndef USE_OPENACC
 !$omp end do nowait
+#endif
       end do
       end do
     end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
   end subroutine zstencil_microac_overlapped
+
+  subroutine add_imaginary_potential_for_absorbing_boundary_z(system,tpsi,htpsi)
+    use structures, only: s_dft_system,s_orbital
+    use salmon_global, only: al,imagnary_potential_w0,imagnary_potential_dr
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_orbital) :: tpsi,htpsi
+    real(8) :: W0, dr, z,z0,z1,z2
+    complex(8) :: W
+
+    dr = imagnary_potential_dr
+    W0 = imagnary_potential_w0
+
+!    z0 = lg%num(3) * system%hgs(3)   !cell length in z
+    z0 = al(3)   !cell length in z
+    z1 = dr      ! left boundary
+    z2 = z0-dr   ! right boundary
+
+    do im=im_s,im_e
+!$omp parallel do collapse(4) &
+!$omp          private(ik,io,ispin,ix,iy,iz,z,w)
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+       do iz = mg%is(3),mg%ie(3)
+          z  = iz*system%hgs(3)
+          if( z .le. z1 ) then
+             w = dcmplx( 0d0, -w0*(z1-z)/dr )
+          else if( z .ge. z2 ) then
+             w = dcmplx( 0d0, -w0*(z-z2)/dr )
+          else
+             cycle
+          endif
+
+          do iy = mg%is(2),mg%ie(2)
+          do ix = mg%is(1),mg%ie(1)
+             htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = &
+                   htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+                   + w * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          end do
+          end do
+      end do
+    end do
+    end do
+    end do
+!$omp end parallel do
+    end do
+
+  end subroutine add_imaginary_potential_for_absorbing_boundary_z
+
 end subroutine hpsi
 
 !===================================================================================================================================
@@ -679,7 +811,11 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   integer :: is,ix,iy,iz
 
   do is=1,nspin
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ix,iy,iz)
+#else
 !$omp parallel do collapse(2) private(ix,iy,iz)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -687,6 +823,9 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#endif
   end do
 
   return
@@ -697,7 +836,8 @@ end subroutine update_vlocal
 subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use math_constants,only : zi
   use structures
-  use update_kvector_so_sub, only: update_kvector_so, SPIN_ORBIT_ON
+  use salmon_global, only: yn_spinorbit
+  use update_kvector_so_sub, only: update_kvector_so
   use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
   implicit none
   integer           ,intent(in) :: ik_s,ik_e !,n_max
@@ -714,7 +854,7 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
     kAc(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
   end do
   
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call update_kvector_so( ppg, kAc, ik_s, ik_e )
   end if
   if ( PLUS_U_ON ) then
@@ -723,7 +863,12 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+#else
 !$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+#endif
   do ik=ik_s,ik_e
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
@@ -736,7 +881,11 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do  
+#endif
 
   deallocate(kAc)
   return

@@ -166,7 +166,8 @@ contains
     character(2),  intent(in)  :: format
     real(8),allocatable        :: rtmp1d(:)
     integer                    :: inum(3),inum_check(3)
-    integer                    :: ii,ij,ix,iy,iz,iflag_x,iflag_y,iflag_z
+    integer(8)                 :: ii
+    integer                    :: ij,ix,iy,iz,iflag_x,iflag_y,iflag_z
     
     !open file
     open(ifn,file=trim(shape_file), status='old')
@@ -182,7 +183,7 @@ contains
       deallocate(rtmp1d)
       do ii=1,3
         if(inum(ii)/=inum_check(ii)) then
-          if(comm_is_root(nproc_id_global)) write(*,*) "al_em or dl_em does not mutch shape file."
+          if(comm_is_root(nproc_id_global)) write(*,*) "al_em, dl_em or num_rgrid_em do not mutch shape file."
           stop
         end if
       end do

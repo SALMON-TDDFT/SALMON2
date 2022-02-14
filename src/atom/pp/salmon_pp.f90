@@ -376,6 +376,9 @@ module salmon_pp
     real(8) :: Rion_repr(3)
     real(8) :: r, rc, r1, r2, r3, u, v, w
     real(8) :: ratio1, ratio2
+    logical :: flag_cuboid
+    real(8) :: rho_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8) :: tau_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
 
     if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
  
@@ -391,6 +394,9 @@ module salmon_pp
 
     ppn%rho_nlcc = 0d0
     ppn%tau_nlcc = 0d0  
+
+    rho_nlcc_tmp = 0d0
+    tau_nlcc_tmp = 0d0  
   
     if (iperiodic == 0) then
       irepr_min = 0
@@ -404,6 +410,15 @@ module salmon_pp
     
     if (.not. pp%flag_nlcc) return ! Do nothing
   
+    flag_cuboid = .true.
+    if( abs(sys%primitive_a(1,2)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(1,3)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(2,3)).ge.1d-10 )  flag_cuboid=.false.
+
+
+!$omp parallel do &
+!$omp   private(a,ik,rc,i,i1,i2,i3,j1,j2,j3,u,v,w,r1,r2,r3,r,ir,intr,ratio1,ratio2,Rion_repr) &
+!$omp   reduction(+:rho_nlcc_tmp,tau_nlcc_tmp)
     do a=1, sys%nion
       ik = Kion(a)
       rc = 15d0 ! maximum
@@ -416,23 +431,30 @@ module salmon_pp
       end do
   
       do i1 = irepr_min, irepr_max
-      do i2 = irepr_min, irepr_max
-      do i3 = irepr_min, irepr_max
         Rion_repr(1) = sys%Rion(1, a) + i1 * sys%primitive_a(1, 1)
+      do i2 = irepr_min, irepr_max
         Rion_repr(2) = sys%Rion(2, a) + i2 * sys%primitive_a(2, 2)
+      do i3 = irepr_min, irepr_max
         Rion_repr(3) = sys%Rion(3, a) + i3 * sys%primitive_a(3, 3)
+
         do j1 = rg%is(1), rg%ie(1)
+           u = (j1-1) * sys%hgs(1)
         do j2 = rg%is(2), rg%ie(2)
+           v = (j2-1) * sys%hgs(2)
         do j3 = rg%is(3), rg%ie(3)
-!          r1 = (j1-1) * sys%hgs(1) - Rion_repr(1) ! iwata
-!          r2 = (j2-1) * sys%hgs(2) - Rion_repr(2) ! iwata
-!          r3 = (j3-1) * sys%hgs(3) - Rion_repr(3) ! iwata
-          u = (j1-1) * sys%hgs(1)
-          v = (j2-1) * sys%hgs(2)
-          w = (j3-1) * sys%hgs(3)
-          r1 = u*sys%rmatrix_a(1,1) + v*sys%rmatrix_a(1,2) + w*sys%rmatrix_a(1,3) - Rion_repr(1)
-          r2 = u*sys%rmatrix_a(2,1) + v*sys%rmatrix_a(2,2) + w*sys%rmatrix_a(2,3) - Rion_repr(2)
-          r3 = u*sys%rmatrix_a(3,1) + v*sys%rmatrix_a(3,2) + w*sys%rmatrix_a(3,3) - Rion_repr(3)
+           w = (j3-1) * sys%hgs(3)
+          if(flag_cuboid) then
+              r1 = u - Rion_repr(1)
+              r2 = v - Rion_repr(2)
+              r3 = w - Rion_repr(3)
+              !r1 = (j1-1) * sys%hgs(1) - Rion_repr(1) ! iwata
+              !r2 = (j2-1) * sys%hgs(2) - Rion_repr(2) ! iwata
+              !r3 = (j3-1) * sys%hgs(3) - Rion_repr(3) ! iwata
+          else
+              r1 = u*sys%rmatrix_a(1,1) + v*sys%rmatrix_a(1,2) + w*sys%rmatrix_a(1,3) - Rion_repr(1)
+              r2 = u*sys%rmatrix_a(2,1) + v*sys%rmatrix_a(2,2) + w*sys%rmatrix_a(2,3) - Rion_repr(2)
+              r3 = u*sys%rmatrix_a(3,1) + v*sys%rmatrix_a(3,2) + w*sys%rmatrix_a(3,3) - Rion_repr(3)
+          endif
           r = sqrt(r1**2 + r2**2 + r3**2)
           if (r <= rc) then
             do ir = 1, pp%nrmax ! iwata
@@ -442,10 +464,14 @@ module salmon_pp
             if (intr.lt.0.or.intr.ge.pp%NRmax) stop 'bad intr at prep_ps'
             ratio1=(r-pp%rad(intr,ik))/(pp%rad(intr+1,ik)-pp%rad(intr,ik))
             ratio2=1-ratio1
-            ppn%rho_nlcc(j1, j2, j3) = ppn%rho_nlcc(j1, j2, j3) & ! iwata
+            rho_nlcc_tmp(j1, j2, j3) = rho_nlcc_tmp(j1, j2, j3) & ! iwata
               +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
-            ppn%tau_nlcc(j1, j2, j3) = ppn%tau_nlcc(j1, j2, j3) & ! iwata
+            tau_nlcc_tmp(j1, j2, j3) = tau_nlcc_tmp(j1, j2, j3) & ! iwata
               +ratio1*pp%tau_nlcc_tbl(intr+1,ik)+ratio2*pp%tau_nlcc_tbl(intr,ik)
+            !ppn%rho_nlcc(j1, j2, j3) = ppn%rho_nlcc(j1, j2, j3) & ! iwata
+            !  +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
+            !ppn%tau_nlcc(j1, j2, j3) = ppn%tau_nlcc(j1, j2, j3) & ! iwata
+            !  +ratio1*pp%tau_nlcc_tbl(intr+1,ik)+ratio2*pp%tau_nlcc_tbl(intr,ik)
           end if
         end do
         end do
@@ -454,7 +480,11 @@ module salmon_pp
       end do
       end do
     end do
+!$omp end parallel do
   
+    ppn%rho_nlcc = rho_nlcc_tmp
+    ppn%tau_nlcc = tau_nlcc_tmp
+
     return
   end subroutine calc_nlcc
   

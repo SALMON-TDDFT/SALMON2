@@ -14,13 +14,7 @@
 !  limitations under the License.
 !
 module Conjugate_Gradient
-
-  use Conjugate_Gradient_so, only: gscg_rwf_so, gscg_zwf_so, SPIN_ORBIT_ON
-
   implicit none
-  private
-  public :: gscg_rwf
-  public :: gscg_zwf
 
 contains
 
@@ -29,6 +23,8 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
+  use salmon_global, only: yn_spinorbit
+  use Conjugate_Gradient_so, only: gscg_rwf_so
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -47,7 +43,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
-  if ( SPIN_ORBIT_ON ) then
+#ifdef USE_OPENACC
+  real(8),allocatable :: rwf_tmp(:,:,:,:,:,:,:)
+#endif
+
+  if ( yn_spinorbit=='y' ) then
     call gscg_rwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     return
   end if
@@ -70,7 +70,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
   do io=io_s,io_e
   do ispin=1,nspin
   do iz=is(3),ie(3)
@@ -91,7 +95,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   Iteration : do iter=1,Ncg
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -110,7 +118,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     if(iter==1)then
       uk = 0d0
     else
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin)
+#else
 !$omp parallel do private(io,ispin)
+#endif
       do io=io_s,io_e
       do ispin=1,nspin
         if (abs(gkgk(ispin,io)) > 1d-16) then
@@ -122,7 +134,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -138,7 +154,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -153,7 +173,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -174,7 +198,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin)
+#else
 !$omp parallel do private(io,ispin)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
       ev(ispin,io)=0.5d0*((xkHxk(ispin,io)+pkHpk(ispin,io))   &
@@ -190,7 +218,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
@@ -209,6 +241,35 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
+#ifdef USE_OPENACC
+    allocate(rwf_tmp, source=spsi%rwf)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      rwf_tmp(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(xkxk(ispin,io))
+    end do
+    end do
+    end do
+    end do
+
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      if(1d-16 < abs(xkxk(ispin,io)) .and. abs(xkxk(ispin,io)) <= 1d30) then
+        spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = rwf_tmp(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end if
+    end do
+    end do
+    end do
+    end do
+
+    deallocate(rwf_tmp)
+#else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
@@ -222,6 +283,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
     end do
+#endif
 
   end do Iteration
   call timer_end(LOG_GSCG_ISOLATED_CALC)
@@ -310,7 +372,11 @@ subroutine inner_product(mg,system,info,psi1,psi2,rbox)
   nspin = system%nspin
 
   rbox2 = 0.d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(io,ispin,sum0,iz,iy,ix)
+#else
 !$OMP parallel do collapse(2) private(io,ispin,sum0,iz,iy,ix)
+#endif
   do io=info%io_s,info%io_e
   do ispin=1,nspin
     sum0 = 0d0
@@ -342,6 +408,8 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
+  use salmon_global, only: yn_spinorbit
+  use Conjugate_Gradient_so, only: gscg_zwf_so
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -360,7 +428,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
-  if ( SPIN_ORBIT_ON ) then
+  if ( yn_spinorbit=='y' ) then
     call gscg_zwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     return
   end if
@@ -383,9 +451,14 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_complex(nspin,mg,info,cg%gk)
     call allocate_orbital_complex(nspin,mg,info,cg%pko)
     call allocate_orbital_complex(nspin,mg,info,cg%hwf)
+    !$acc enter data copyin(cg)
   end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
   do ik=ik_s,ik_e
   do io=io_s,io_e
   do ispin=1,nspin
@@ -408,7 +481,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   Iteration : do iter=1,Ncg
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -429,7 +506,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     if(iter==1)then
       uk = 0d0
     else
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin) collapse(2)
+#else
 !$omp parallel do private(ik,io,ispin) collapse(2)
+#endif
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,nspin
@@ -443,7 +524,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -461,7 +546,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -478,7 +567,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -501,7 +594,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin) collapse(2)
+#else
 !$omp parallel do private(ik,io,ispin) collapse(2)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -519,7 +616,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -540,7 +641,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
@@ -650,7 +755,11 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   nspin = system%nspin
 
   zbox2(:,:,:) = 0.d0
+#ifdef USE_OPENACC
+!$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+#else
 !$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+#endif
   do ik=info%ik_s,info%ik_e
   do io=info%io_s,info%io_e
   do ispin=1,nspin

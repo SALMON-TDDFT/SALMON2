@@ -30,6 +30,7 @@ contains
 
   subroutine calc_density_matrix_and_energy_plusU( psi, ppg, info, system, E_U )
     use structures, only: s_orbital, s_pp_grid, s_parallel_info, s_dft_system
+    use communication, only: comm_summation
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
@@ -39,9 +40,9 @@ contains
     integer :: Nlma,Nspin
     integer :: im,ik,io,ispin,ilma,jlma,iprj,Nproj_pairs
     integer :: ix,iy,iz,j,ia,io_s,io_e,ik_s,ik_e,im_s,im_e
-    integer :: a,l,n,m1,m2
+    integer :: a,l,n,m1,m2,n_dm
     complex(8) :: phipsi,ztmp,ztmp2
-    complex(8),allocatable :: phipsi_lma(:)
+    complex(8),allocatable :: phipsi_lma(:),dm_tmp(:,:,:,:,:,:)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
 
     Nspin=system%nspin
@@ -75,8 +76,18 @@ contains
       allocate( dm_mms_nla(-l:l,-l:l,Nspin,n,0:l,a) )
     end if
     dm_mms_nla=zero
+    
+    a=maxval( ppg%proj_pairs_info_ao(1,:) )
+    l=maxval( ppg%proj_pairs_info_ao(2,:) )
+    n=maxval( ppg%proj_pairs_info_ao(3,:) )
+    allocate( dm_tmp(-l:l,-l:l,Nspin,n,0:l,a) )
+    dm_tmp=zero
+    
+    n_dm = (2*l+1)**2 * nspin * n * (l+1) * a
 
     allocate( phipsi_lma(Nlma) ); phipsi_lma=zero
+    
+    if ( info%if_divide_rspace ) stop "DFT+U with r-space parallelization is not implimented"
 
     do im=im_s,im_e
     do ik=ik_s,ik_e
@@ -106,14 +117,16 @@ contains
         n = ppg%proj_pairs_info_ao(3,iprj)
         m1= ppg%proj_pairs_info_ao(4,iprj)
         m2= ppg%proj_pairs_info_ao(5,iprj)
-        dm_mms_nla(m1,m2,ispin,n,l,a) = dm_mms_nla(m1,m2,ispin,n,l,a) &
-           + system%rocc(io,ik,ispin) * system%wtk(ik) * phipsi_lma(ilma)*phipsi_lma(jlma)
+        dm_tmp(m1,m2,ispin,n,l,a) = dm_tmp(m1,m2,ispin,n,l,a) &
+           + system%rocc(io,ik,ispin) * system%wtk(ik) * conjg(phipsi_lma(ilma))*phipsi_lma(jlma)
       end do
 
     end do !ispin
     end do !io
     end do !ik
     end do !im
+    
+    call comm_summation(dm_tmp,dm_mms_nla,n_dm,info%icomm_rko)
 
     E_U=0.0d0
     do a=1,size(dm_mms_nla,6)
