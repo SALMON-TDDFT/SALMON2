@@ -177,7 +177,7 @@ contains
     pp%lref(ik) = ubound(pp%vpp,2)
 
     if ( paw%rad(1,ik) == 0.0d0 ) then
-      call stop_program('stop@read_paw_upf(1)')
+      stop 'stop@read_paw_upf(1)'
     else
       pp%mr(ik) = nrr + 1
       do i=2,nrr+1
