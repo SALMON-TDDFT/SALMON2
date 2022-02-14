@@ -2861,10 +2861,13 @@ contains
     integer                           :: ii
     
     !set mpi condition
-    info%npk       = nproc_k
-    info%nporbital = nproc_ob
-    info%nprgrid   = nproc_rgrid
-    call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info)
+    if((nproc_k==0).and.(nproc_ob==0).and.(sum(nproc_rgrid(:))==0)) then
+      call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info)
+    else
+      info%npk       = nproc_k
+      info%nporbital = nproc_ob
+      info%nprgrid   = nproc_rgrid
+    end if
     call init_communicator_dft(nproc_group_global,info)
     
     !initialize r-grid
