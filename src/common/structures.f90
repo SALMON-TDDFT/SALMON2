@@ -216,6 +216,7 @@ module structures
     integer,allocatable :: nrps(:)
     integer,allocatable :: mlps(:)
     integer,allocatable :: nproj(:,:)
+    integer,allocatable :: num_orb(:)
     integer,allocatable :: zps(:)
     integer,allocatable :: nrloc(:)
     real(8),allocatable :: rloc(:)

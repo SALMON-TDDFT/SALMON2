@@ -35,6 +35,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
   use read_ps_upf_module, only: read_ps_upf
+  use read_paw_upf_module, only: read_paw_upf
   implicit none
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
@@ -53,6 +54,8 @@ subroutine input_pp(pp,hx,hy,hz)
   allocate(flag_nlcc_element(nelem)); flag_nlcc_element(:) = .false. ; pp%flag_nlcc = .false.
 
 !      ps_file=trim(base_directory)//trim(pp%atom_symbol(ik))//trim(ps_postfix)
+
+  rrc=0.0d0
 
   if (comm_is_root(nproc_id_global)) then
 
@@ -74,7 +77,13 @@ subroutine input_pp(pp,hx,hy,hz)
       case('ADPACK')
         call read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
       case('UPF')
-        call read_ps_upf(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        if( index(ps_file,'paw')>0 .or. index(ps_file,'PAW')>0 )then
+          open(4,file=ps_file,status='old')
+          call read_paw_upf(4,pp,ik)
+          close(4)
+        else
+          call read_ps_upf(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        end if
         flag_beta_proj_is_given =.true.
 !      case('ATOM')      ; call read_ps_ATOM
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
@@ -99,7 +108,9 @@ subroutine input_pp(pp,hx,hy,hz)
       end if
 
 ! Set meaning domain in the arrays 
-      pp%rps(ik)=maxval(rrc(0:pp%mlps(ik)))
+      if ( any(rrc/=0.0d0) ) then
+        pp%rps(ik)=maxval(rrc(0:pp%mlps(ik)))
+      end if
       do i=1,pp%nrmax
         if(pp%rad(i,ik).gt.pp%rps(ik)) exit
       enddo

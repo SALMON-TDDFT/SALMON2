@@ -66,7 +66,8 @@ module salmon_pp
 
     allocate(pp%atom_symbol(nelem))
     allocate(pp%rmass(nelem))
-    allocate(pp%mr(nelem))
+    allocate(pp%mr(nelem)); pp%mr=0
+    allocate(pp%num_orb(nelem)); pp%num_orb=0
 
     if (comm_is_root(nproc_id_global)) then
   
@@ -98,9 +99,14 @@ module salmon_pp
         else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.vps')then
           ips_type = 0
           ps_format(ik) = 'ADPACK'
-        else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.upf')then
+        else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.upf'.or. &
+                ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.UPF')then
           ips_type = 0
           ps_format(ik) = 'UPF'
+          if( index(ps_file,'paw')>0 .or. index(ps_file,'PAW')>0 )then
+            write(*,*) "PAW potential(UPF)"
+            call read_mr_norb_upf(pp,ik,ps_file)
+          end if
         else
           stop 'Unprepared ps_format is required input_pseudopotential_YS'
         end if
@@ -221,8 +227,8 @@ module salmon_pp
     allocate(pp%lref(1:nelem))
     pp%lref(1:nelem)=lloc_ps(1:nelem)
 
-    allocate(pp%nrps(1:nelem))
-    allocate(pp%rps(1:nelem))
+    allocate(pp%nrps(1:nelem)); pp%nrps=0
+    allocate(pp%rps(1:nelem)); pp%rps=0.0d0
     allocate(pp%mlps(1:nelem))
     allocate(pp%nproj(0:lmax,1:nelem)); pp%nproj=0
     allocate(pp%zps(1:nelem))
@@ -339,6 +345,19 @@ module salmon_pp
     close(4)
     
   end subroutine read_mr_fhi
+
+!======================================================================
+  subroutine read_mr_norb_upf(pp,ik,ps_file)
+    use structures, only: s_pp_info
+    use read_paw_upf_module, only: get_mr_norb_upf
+    implicit none
+    type(s_pp_info),intent(inout) :: pp
+    integer,intent(in) :: ik
+    character(*),intent(in) :: ps_file
+    open(4,file=ps_file,status='old')
+    call get_mr_norb_upf( 4, pp%mr(ik), pp%num_orb(ik) )
+    close(4)
+  end subroutine read_mr_norb_upf
 
 !======================================================================
   subroutine calc_nlcc(pp, sys, rg, ppn)

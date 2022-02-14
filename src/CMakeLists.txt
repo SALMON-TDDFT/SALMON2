@@ -18,6 +18,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/so)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/plusu)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ms)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ttm)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/paw)
 
 # Executable binary
 add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
