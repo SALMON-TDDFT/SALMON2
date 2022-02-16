@@ -192,8 +192,6 @@ module structures
   ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_parallel_info)
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
-    real(8)   ,allocatable :: zwf_real(:,:,:,:,:,:,:) ! OpenACC temporary buffer
-    real(8)   ,allocatable :: zwf_imag(:,:,:,:,:,:,:) ! OpenACC temporary buffer
     logical :: update_zwf_overlap   !flag of update_overlap_complex8 for zwf
   end type s_orbital
 
@@ -307,6 +305,13 @@ module structures
     integer             :: ilocal_nlma         ! number of own nlma
     integer,allocatable :: ilocal_nlma2ilma(:) ! ilocal_nlma to global nlma
     integer,allocatable :: ilocal_nlma2ia(:)   ! ilocal_nlma to atom number (ia_tbl)
+    ! for optimizing OpenACC
+    complex(8),allocatable :: uVpsibox(:,:,:,:,:)
+    integer                :: max_vi
+    integer,allocatable    :: v2nlma(:)
+    integer,allocatable    :: k2ilma(:,:)
+    integer,allocatable    :: k2j(:,:)
+    integer,allocatable    :: v2j(:,:)
     !
     real(8),allocatable :: save_udVtbl_a(:,:,:)
     real(8),allocatable :: save_udVtbl_b(:,:,:)
@@ -631,14 +636,6 @@ contains
     type(s_orbital)                     :: psi
     integer :: im,ik,io,is,iz,iy,ix
     allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                     mg%is_array(2):mg%ie_array(2),  &
-                     mg%is_array(3):mg%ie_array(3),  &
-                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-    allocate(psi%zwf_real(mg%is_array(1):mg%ie_array(1),  &
-                     mg%is_array(2):mg%ie_array(2),  &
-                     mg%is_array(3):mg%ie_array(3),  &
-                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-    allocate(psi%zwf_imag(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))

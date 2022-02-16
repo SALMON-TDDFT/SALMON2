@@ -184,7 +184,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   type(s_orbital) :: htpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
-  integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal
+  integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal,vi,my_nlma,k
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
@@ -278,32 +278,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     deallocate(uVpsibox,uVpsibox2)
 
   else
-#if defined(USE_OPENACC) && !defined(USE_CUDA)
-! copy number from htpsi%zwf complex type to real type 
-! 
-!$acc kernels present(ppg,tpsi,htpsi) 
-!$acc loop collapse(7)
-    do im=im_s,im_e
-    do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,Nspin
-
-      do iz=lbound(htpsi%zwf,3),ubound(htpsi%zwf,3)                                                                                                                                                       
-      do iy=lbound(htpsi%zwf,2),ubound(htpsi%zwf,2)  
-      do ix=lbound(htpsi%zwf,1),ubound(htpsi%zwf,1)                                                                                                                                                       
-          htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) = real(htpsi%zwf(ix,iy,iz,ispin,io,ik,im))
-          htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) = imag(htpsi%zwf(ix,iy,iz,ispin,io,ik,im))
-      end do
-      end do
-      end do
-
-    end do
-    end do
-    end do
-    end do
-!$acc end kernels 
-#endif
-
 #ifdef USE_OPENACC
 #ifdef USE_CUDA
     natom=size(ppg%mps)
@@ -328,35 +302,43 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         tpsi%zwf)
 #else
 !$acc kernels present(ppg,tpsi,htpsi)
-!$acc loop private(ilma,ia,uvpsi,j,ix,iy,iz,wrk) collapse(4) auto
+!$acc loop private(ilocal,ilma,ia,uvpsi,vi,my_nlma,k,j,ix,iy,iz,wrk) collapse(4) gang
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
 
+!$acc loop gang independent
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = 0.d0
-        !$acc loop reduction(+:uVpsi)
+!$acc loop vector reduction(+:uVpsi)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
           uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
-        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        do j=1,ppg%mps(ia)
-          ix = ppg%jxyz(1,j,ia)
-          iy = ppg%jxyz(2,j,ia)
-          iz = ppg%jxyz(3,j,ia)
-          wrk = uVpsi * ppg%zekr_uV(j,ilma,ik)
-          !use real(8) type data
-          !OpenACC compiler can not construe complex type for atomicadd operation.
-          !$acc atomic
-          htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) + real(wrk)
-          !$acc atomic
-          htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) + imag(wrk)
+        ppg%uVpsibox(ilma,ispin,io,ik,im) = uVpsi * ppg%rinv_uvu(ilma)
+      end do
+
+!$acc loop gang vector independent
+      do vi=0,ppg%max_vi-1
+        my_nlma = ppg%v2nlma(vi)
+        if (my_nlma < 1) cycle
+
+        wrk = 0d0
+!$acc loop seq
+        do k=1,my_nlma
+          ilma = ppg%k2ilma(vi,k)
+          j    = ppg%k2j(vi,k)
+          wrk  = wrk + ppg%uVpsibox(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
         end do
+
+        ix = ppg%v2j(1,vi)
+        iy = ppg%v2j(2,vi)
+        iz = ppg%v2j(3,vi)
+        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
       end do
 
     end do
@@ -398,31 +380,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$omp end parallel do
-#endif
-
-#if defined(USE_OPENACC) && !defined(USE_CUDA)
-! copy number from real type to htpsi%zwf complex type
-!
-!$acc kernels present(ppg,tpsi,htpsi) 
-!$acc loop collapse(7)
-    do im=im_s,im_e
-    do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,Nspin
-
-      do iz=lbound(htpsi%zwf,3),ubound(htpsi%zwf,3)                                                                                                                                                       
-      do iy=lbound(htpsi%zwf,2),ubound(htpsi%zwf,2)  
-      do ix=lbound(htpsi%zwf,1),ubound(htpsi%zwf,1)                                                                                                                                                       
-           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf_real(ix,iy,iz,ispin,io,ik,im) + htpsi%zwf_imag(ix,iy,iz,ispin,io,ik,im) * IMAGINARY_UNIT
-      end do
-      end do
-      end do
-
-    end do
-    end do
-    end do
-    end do
-!$acc end kernels 
 #endif
 
   end if
