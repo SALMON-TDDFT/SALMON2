@@ -31,7 +31,10 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 include(cmakefiles/check_build_environments.cmake)
 
 if(USE_OPENACC)
-	enable_language(CUDA)
+  if(USE_CUDA)
+    option(CMAKE_CUDA_ARCHITECTURES "80") # Dummy variable
+    enable_language(CUDA)
+  endif()
 endif()
 
 

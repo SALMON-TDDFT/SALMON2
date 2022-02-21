@@ -343,8 +343,8 @@ contains
 #else
 !$acc update device(system%vec_Ac)
 
-!$acc kernels present(system,info,mg,stencil,psi) copyin(BT,ispin,im) copy(jx,jy,jz)
-!$acc loop private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto 
+!$acc kernels copyin(BT,ispin,im) copy(jx,jy,jz)
+!$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
@@ -362,8 +362,8 @@ contains
 !$acc end kernels
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
-!$acc kernels present(system,info,mg,psi,ppg) copyin(ispin,im) copy(jx,jy,jz)
-!$acc loop private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) auto
+!$acc kernels copyin(ispin,im) copy(jx,jy,jz)
+!$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
@@ -454,7 +454,7 @@ contains
     ytmp = 0d0
     ztmp = 0d0
 #ifdef USE_OPENACC
-!$acc loop worker collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
+!$acc loop vector collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #endif
@@ -520,9 +520,9 @@ contains
     complex(8) :: uVpsi,uVpsi_r(3)
     jw = 0d0
 #ifdef USE_OPENACC
-	jw_1 = 0d0
-	jw_2 = 0d0
-	jw_3 = 0d0
+  jw_1 = 0d0
+  jw_2 = 0d0
+  jw_3 = 0d0
 !$acc loop worker private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw_1, jw_2, jw_3)
 #else
 !$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
@@ -556,9 +556,9 @@ contains
 #endif
     end do
 #ifdef USE_OPENACC
-	jw(1) = jw_1
-	jw(2) = jw_2
-	jw(3) = jw_3
+  jw(1) = jw_1
+  jw(2) = jw_2
+  jw(3) = jw_3
 #else
 !$omp end parallel do
 #endif

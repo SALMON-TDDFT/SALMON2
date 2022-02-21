@@ -167,6 +167,18 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call init_uvpsi_table(ppg)
   call timer_end(LOG_INIT_PS_UVPSI)
 
+#ifdef USE_OPENACC
+  if(info%if_divide_rspace) then
+  else
+    allocate(ppg%uVpsibox(ppg%nlma, &
+                          system%nspin, &
+                          info%io_s:info%io_e, &
+                          info%ik_s:info%ik_e, &
+                          info%im_s:info%im_e))
+    call init_uvpsi_blocking(ppg,mg)
+  end if
+#endif
+
   if(iperiodic==3) then
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
@@ -528,6 +540,7 @@ SUBROUTINE dealloc_init_ps(ppg)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
   if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
   if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
+  if (allocated(ppg%uVpsibox))       deallocate(ppg%uVpsibox)
   
   return
 END SUBROUTINE dealloc_init_ps
@@ -1142,20 +1155,12 @@ subroutine init_uvpsi_table(ppg)
   integer :: ilma,ia,ilocal,ilocal_nlma
 
   ilocal_nlma = 0
-#ifdef USE_OPENACC
-!$acc parallel loop private(ilma,ia) reduction(+:ilocal_nlma)
-#else
 !$omp parallel do private(ilma,ia) reduction(+:ilocal_nlma)
-#endif
   do ilma=1,ppg%nlma
     ia = ppg%ia_tbl(ilma)
     if (ppg%ireferred_atom(ia)) ilocal_nlma = ilocal_nlma + 1
   end do
-#ifdef USE_OPENACC
-!$acc end parallel
-#else
 !$omp end parallel do
-#endif
   ppg%ilocal_nlma = ilocal_nlma
 
   allocate(ppg%ilocal_nlma2ilma(ppg%ilocal_nlma))
@@ -1170,5 +1175,84 @@ subroutine init_uvpsi_table(ppg)
     end if
   end do
 end subroutine init_uvpsi_table
+
+!===================================================================================================================================
+
+subroutine init_uvpsi_blocking(ppg,lg)
+  use structures, only:s_pp_grid,s_rgrid
+  implicit none
+  type(s_pp_grid), intent(inout) :: ppg
+  type(s_rgrid),   intent(in)    :: lg
+
+  integer, allocatable :: v2nlma(:), i2vi(:)
+  integer :: nl,ilma,i,j,ix,iy,iz,max_nlma,vi,n,ia
+
+  nl = product(lg%num)
+  allocate(v2nlma(0:nl-1))
+
+  v2nlma = 0
+  do ilma=1,ppg%nlma
+    ia = ppg%ia_tbl(ilma)
+
+    do j=1,ppg%mps(ia)
+      ix = ppg%jxyz(1,j,ia) - lg%is(1)
+      iy = ppg%jxyz(2,j,ia) - lg%is(2)
+      iz = ppg%jxyz(3,j,ia) - lg%is(3)
+      i  = ix + iy*lg%num(1) + iz*lg%num(1)*lg%num(2)
+      v2nlma(i) = v2nlma(i) + 1
+    end do
+  end do
+
+  allocate(i2vi(0:nl-1))
+  allocate(ppg%v2j(3, 0:nl-1))
+
+  max_nlma = 0
+  vi = 0
+  do iz=0,lg%num(3)-1
+  do iy=0,lg%num(2)-1
+  do ix=0,lg%num(1)-1
+    i = ix + iy*lg%num(1) + iz*lg%num(1)*lg%num(2)
+
+    max_nlma = max(max_nlma, v2nlma(i))
+
+    i2vi(i) = -1
+    if (v2nlma(i) > 0) then
+      ppg%v2j(1,vi) = ix + lg%is(1)
+      ppg%v2j(2,vi) = iy + lg%is(2)
+      ppg%v2j(3,vi) = iz + lg%is(3)
+      i2vi(i)       = vi
+      vi            = vi + 1
+    end if
+  end do
+  end do
+  end do
+  ppg%max_vi = vi
+
+  allocate(ppg%v2nlma(0:ppg%max_vi-1))
+  allocate(ppg%k2ilma(0:ppg%max_vi-1, max_nlma))
+  allocate(ppg%k2j(0:ppg%max_vi-1, max_nlma))
+  
+  ppg%v2nlma = 0
+
+  do ilma=1,ppg%nlma
+    ia = ppg%ia_tbl(ilma)
+
+    do j=1,ppg%mps(ia)
+      ix = ppg%jxyz(1,j,ia) - lg%is(1)
+      iy = ppg%jxyz(2,j,ia) - lg%is(2)
+      iz = ppg%jxyz(3,j,ia) - lg%is(3)
+      i  = ix + iy*lg%num(1) + iz*lg%num(1)*lg%num(2)
+
+      vi = i2vi(i)
+
+      ppg%v2nlma(vi) = ppg%v2nlma(vi) + 1
+      n = ppg%v2nlma(vi)
+
+      ppg%k2ilma(vi,n) = ilma
+      ppg%k2j   (vi,n) = j
+    end do
+  end do
+
+end subroutine init_uvpsi_blocking
 
 end module prep_pp_sub
