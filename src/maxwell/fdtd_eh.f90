@@ -3816,13 +3816,13 @@ contains
         open(fe%ifn,file='./shape.cube')
         write(fe%ifn,'(1X,A)') "An input shape described in a cube file."
         write(fe%ifn,'(1X,A)') "A hydrogen atom is used to set the origin of the model."
-        write(fe%ifn,'(i5,3f12.6)') 1,fe%coo(fs%lg%is(1),1)*ulength_from_au, &
-                                      fe%coo(fs%lg%is(2),2)*ulength_from_au, &
-                                      fe%coo(fs%lg%is(3),3)*ulength_from_au
-        write(fe%ifn,'(i5,3f12.6)') fs%lg%num(1),fs%hgs(1)*ulength_from_au,0.0d0,0.0d0
-        write(fe%ifn,'(i5,3f12.6)') fs%lg%num(2),0.0d0,fs%hgs(2)*ulength_from_au,0.0d0
-        write(fe%ifn,'(i5,3f12.6)') fs%lg%num(3),0.0d0,0.0d0,fs%hgs(3)*ulength_from_au
-        write(fe%ifn,'(i5,4f12.6)') 1,1.0d0,0.0d0,0.0d0,0.0d0
+        write(fe%ifn,'(i5,3f23.15)') 1,fe%coo(fs%lg%is(1),1)*ulength_from_au, &
+                                       fe%coo(fs%lg%is(2),2)*ulength_from_au, &
+                                       fe%coo(fs%lg%is(3),3)*ulength_from_au
+        write(fe%ifn,'(i5,3f23.15)') fs%lg%num(1),fs%hgs(1)*ulength_from_au,0.0d0,0.0d0
+        write(fe%ifn,'(i5,3f23.15)') fs%lg%num(2),0.0d0,fs%hgs(2)*ulength_from_au,0.0d0
+        write(fe%ifn,'(i5,3f23.15)') fs%lg%num(3),0.0d0,0.0d0,fs%hgs(3)*ulength_from_au
+        write(fe%ifn,'(i5,4f23.15)') 1,1.0d0,0.0d0,0.0d0,0.0d0
       end if
       
       !write 3d data
