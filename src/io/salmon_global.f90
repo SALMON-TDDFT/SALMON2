@@ -240,6 +240,7 @@ module salmon_global
   real(8)        :: ms_alpha_ld ! Experimental implementation
   real(8)        :: ms_gamma_ld ! Experimental implementation
   integer        :: nx_sub_m    ! Experimental implementation
+  character(1)   :: ms_sub_side ! Experimental implementation (f:forward, b:backward)
 
 !! &maxwell
   real(8)        :: al_em(3)

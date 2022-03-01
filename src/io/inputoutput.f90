@@ -396,6 +396,7 @@ contains
       & ms_omega_ld, & ! Experimental implementation
       & ms_alpha_ld, & ! Experimental implementation
       & ms_gamma_ld, & ! Experimental implementation
+      & ms_sub_side, & ! Experimental implementation
       & nx_sub_m ! Experimental implementation
 
     namelist/maxwell/             &
@@ -763,6 +764,7 @@ contains
     ms_omega_ld = 0.0d0 ! Experimental implementation
     ms_alpha_ld = 0.0d0 ! Experimental implementation
     ms_gamma_ld = 0.0d0 ! Experimental implementation
+    ms_sub_side = "f" ! Experimental implementation
     nx_sub_m = 0 ! Experimental implementation
 
 
@@ -1282,6 +1284,7 @@ contains
     call comm_bcast(ms_omega_ld,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_alpha_ld,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_gamma_ld,nproc_group_global) ! Experimental implementation
+    call comm_bcast(ms_sub_side,nproc_group_global) ! Experimental implementation
     call comm_bcast(nx_sub_m,nproc_group_global) ! Experimental implementation
 
 !! == bcast for &maxwell
@@ -2072,6 +2075,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_omega_ld', ms_omega_ld
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_alpha_ld', ms_alpha_ld
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_gamma_ld', ms_gamma_ld
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'ms_sub_side', ms_sub_side
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nx_sub_m', nx_sub_m
   
       if(inml_maxwell >0)ierr_nml = ierr_nml +1
