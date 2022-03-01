@@ -392,7 +392,7 @@ contains
       & nmacro_chunk, &
       & theta_oblique_deg, & ! Experimental implementation
       & nsmooth_oblique, & ! Experimental implementation
-      & yn_ms_ld, & ! Experimental implementation
+      & yn_ms_tddft, & ! Experimental implementation
       & ms_omega_ld, & ! Experimental implementation
       & ms_alpha_ld, & ! Experimental implementation
       & ms_gamma_ld ! Experimental implementation
@@ -758,7 +758,7 @@ contains
 
     theta_oblique_deg = 0.0d0 ! Experimental implementation
     nsmooth_oblique = 8 ! Experimental implementation
-    yn_ms_ld = 'n' ! Experimental implementation
+    yn_ms_tddft = 'n' ! Experimental implementation
     ms_omega_ld = 0.0d0 ! Experimental implementation
     ms_alpha_ld = 0.0d0 ! Experimental implementation
     ms_gamma_ld = 0.0d0 ! Experimental implementation
@@ -1276,7 +1276,7 @@ contains
     call comm_bcast(nmacro_chunk,nproc_group_global)
     call comm_bcast(theta_oblique_deg,nproc_group_global) ! Experimental implementation
     call comm_bcast(nsmooth_oblique,nproc_group_global) ! Experimental implementation
-    call comm_bcast(yn_ms_ld,nproc_group_global) ! Experimental implementation
+    call comm_bcast(yn_ms_tddft,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_omega_ld,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_alpha_ld,nproc_group_global) ! Experimental implementation
     call comm_bcast(ms_gamma_ld,nproc_group_global) ! Experimental implementation
@@ -2065,7 +2065,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'theta_oblique_deg', theta_oblique_deg
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nsmooth_oblique', nsmooth_oblique
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ms_ld', trim(yn_ms_ld)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ms_tddft', trim(yn_ms_tddft)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_omega_ld', ms_omega_ld
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_alpha_ld', ms_alpha_ld
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ms_gamma_ld', ms_gamma_ld

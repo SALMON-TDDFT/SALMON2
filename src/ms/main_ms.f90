@@ -433,7 +433,7 @@ subroutine time_evolution_step_ms
     call weyl_calc(fs, fw)
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
     
-    if(yn_ms_ld .ne. 'y') then
+    if(yn_ms_tddft .ne. 'y') then
 
     ! ----------------------------------------
     ! Time Evolution of TDDFT System
@@ -565,7 +565,7 @@ subroutine checkpoint_ms(odir)
 
         call comm_sync_all()
 
-        if (yn_ms_ld .ne. 'y') then
+        if (yn_ms_tddft .ne. 'y') then
         if (macropoint_in_mygroup(i)) then
             if (mod(itt,2)==1) then
                 call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)

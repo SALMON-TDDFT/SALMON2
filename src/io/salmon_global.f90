@@ -235,7 +235,7 @@ module salmon_global
   integer        :: nmacro_chunk
   real(8)        :: theta_oblique_deg ! Experimental implementation
   integer        :: nsmooth_oblique ! Experimental implementation
-  character(1)   :: yn_ms_ld ! Experimental implementation
+  character(1)   :: yn_ms_tddft ! Experimental implementation
   real(8)        :: ms_omega_ld ! Experimental implementation
   real(8)        :: ms_alpha_ld ! Experimental implementation
   real(8)        :: ms_gamma_ld ! Experimental implementation
