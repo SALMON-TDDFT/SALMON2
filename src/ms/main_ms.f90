@@ -85,6 +85,18 @@ logical :: is_checkpoint_iter, is_shutdown_time
 ! Only for 1D calculation outputs:
 integer :: fh_wave
 
+! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+real(8), allocatable :: j_ld_new(:, :) ! itt+1 step
+real(8), allocatable :: j_ld(:, :) ! itt step
+real(8), allocatable :: j_ld_old(:, :) ! itt-1 step
+real(8), allocatable :: w(:) ! weight
+real(8), allocatable :: w_sub(:) ! weight subst        
+
 
 ! character(256) :: file_debug_log
 !! Open logfile for debugging
@@ -244,7 +256,6 @@ subroutine initialization_ms()
 
     ! Experimental implementation for oblique incidence
     fw%theta = theta_oblique_deg / 180d0 * pi
-    fw%nsmooth = nsmooth_oblique
     
     ! For compatibility with previous versions 
     ! (nxvacl_m and nxvacr_m will be removed in future)
@@ -361,19 +372,41 @@ subroutine initialization_ms()
     call incident()
 
     ! Experimental implementation
+    allocate(j_ld_new(1:3, -abs(nxvacl_m):nxvacr_m))
+    allocate(j_ld_old(1:3, -abs(nxvacl_m):nxvacr_m))    
+    allocate(j_ld(1:3, -abs(nxvacl_m):nxvacr_m))
+    j_ld_new(:,:) = 0.0d0
+    j_ld_old(:,:) = 0.0d0
+    j_ld(:,:) = 0.0d0
+    allocate(w(-abs(nxvacl_m):nxvacr_m))
+    allocate(w_sub(-abs(nxvacl_m):nxvacr_m))    
+    
+    w(:) = 0.0d0
+    w_sub(:) = 0.0d0
+    call calc_weight(w, 1, nx_m, nsmooth_oblique)
+    if (nx_sub_m > 0) then
+        if (ms_sub_side == "f") then
+            call calc_weight(w_sub, nsmooth_oblique-nx_sub_m+1, nsmooth_oblique, nsmooth_oblique)
+        else
+            call calc_weight(w_sub, nx_m-nsmooth_oblique+1, nx_m+nx_sub_m, nsmooth_oblique)
+        end if
+    end if
+
+    open(999, file="w.txt", action="write")
+    do ii = -abs(nxvacl_m), nxvacr_m
+        write(999, "(i9,2f12.6)") ii, w(ii), w_sub(ii)
+    end do
+    close(999)
+
+
     if (comm_is_root(ms%id_ms_world)) then
         if (trim(fdtddim) == '1d' .or. trim(fdtddim) == '1D') then
             call open_wave_data_file()
         end if
     end if
 
-    call calc_weight(fs%mg%is(1), fs%mg%ie(1), &
-        fw%weight(fs%mg%is(1):fs%mg%ie(1)), &
-        nx_m, nsmooth_oblique)
 
-        
     
-
 
     return    
 end subroutine initialization_ms
@@ -433,8 +466,6 @@ subroutine time_evolution_step_ms
     call weyl_calc(fs, fw)
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
     
-    if(yn_ms_tddft .ne. 'y') then
-
     ! ----------------------------------------
     ! Time Evolution of TDDFT System
     ! ----------------------------------------
@@ -479,7 +510,6 @@ subroutine time_evolution_step_ms
     call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
     call comm_summation(rNe_tmp, rNe, ms%nmacro, ms%icomm_ms_world)
     
-
     do iimacro = 1, ms%nmacro
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
@@ -489,36 +519,31 @@ subroutine time_evolution_step_ms
 
     if (mod(itt, out_ms_step) == 0) call print_linelog()
 
-    else
-    ! Lorentz-Drude oscilator
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    c1 = (1.0d0 - 0.5d0 * (ms_omega_ld * dt) ** 2) &
-        & / (1.0d0 + 0.5d0 * ms_gamma_ld * dt)
-    c2 = (1.0d0 - 0.5d0 * (ms_gamma_ld * dt)) &
-        & / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
-    c3 = ms_alpha_ld / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
+    
+    ! c1 = (1.0d0 - 0.5d0 * (ms_omega_ld * dt) ** 2) &
+    !     & / (1.0d0 + 0.5d0 * ms_gamma_ld * dt)
+    ! c2 = (1.0d0 - 0.5d0 * (ms_gamma_ld * dt)) &
+    !     & / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
+    ! c3 = ms_alpha_ld / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
 
-    do iimacro = 1, ms%nmacro
-        iix = ms%ixyz_tbl(1, iimacro)
-        iiy = ms%ixyz_tbl(2, iimacro)
-        iiz = ms%ixyz_tbl(3, iimacro)
+    ! do iimacro = 1, ms%nmacro
+    !     iix = ms%ixyz_tbl(1, iimacro)
+    !     iiy = ms%ixyz_tbl(2, iimacro)
+    !     iiz = ms%ixyz_tbl(3, iimacro)
 
-        fw%vec_j_em_new%v(1:3, iix, iiy, iiz) &
-            & = 2.0d0 * c1 * fw%vec_j_em%v(1:3, iix, iiy, iiz) &
-            & - c2 * fw%vec_j_em_old%v(1:3, iix, iiy, iiz) &
-            & - c3 * (fw%vec_Ac_new%v(1:3, iix, iiy, iiz) &
-                & - 2.0d0 * fw%vec_Ac%v(1:3, iix, iiy, iiz) &
-                & + fw%vec_Ac_old%v(1:3, iix, iiy, iiz) &
-                & )
-    end do
+    !     fw%vec_j_em_new%v(1:3, iix, iiy, iiz) &
+    !         & = 2.0d0 * c1 * fw%vec_j_em%v(1:3, iix, iiy, iiz) &
+    !         & - c2 * fw%vec_j_em_old%v(1:3, iix, iiy, iiz) &
+    !         & - c3 * (fw%vec_Ac_new%v(1:3, iix, iiy, iiz) &
+    !             & - 2.0d0 * fw%vec_Ac%v(1:3, iix, iiy, iiz) &
+    !             & + fw%vec_Ac_old%v(1:3, iix, iiy, iiz) &
+    !             & )
+    ! end do
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     if (comm_is_root(ms%id_ms_world)) then
         if (mod(itt, out_ms_step) == 0) write(*, *) "# Lorentz-Drude test", itt
     end if
-
-    end if
-
 
 
     ! Experimental implementation
@@ -849,34 +874,39 @@ end subroutine close_wave_data_file
     
 
 
-
-subroutine calc_weight(iz_sta, iz_end, w, nz, ns)
+real(8) function weight_function(tt)
     implicit none
-    integer, intent(in) :: iz_sta
-    integer, intent(in) :: iz_end
-    real(8), intent(inout) :: w(iz_sta:iz_end)
-    integer, intent(in) :: nz
+    real(8) :: tt
+    weight_function = -2.0d0 * tt ** 3 + 3.0d0 * tt ** 2
+    return
+end function weight_function
+
+
+subroutine calc_weight(ww, imin, imax, ns)
+    implicit none
+    real(8), intent(out) :: ww(-abs(nxvacl_m):nxvacr_m)
+    integer, intent(in) :: imin
+    integer, intent(in) :: imax
     integer, intent(in) :: ns
-    integer :: iz
-    w = 0.0d0
-    do iz = 1, nz
-        if (iz < ns) then
-            w(iz) = weight((dble(iz) - dble(0.5)) / dble(ns))
-        else if (nz - ns - 1 < iz) then
-            w(iz) = weight((dble(nz) - dble(iz) - dble(0.5)) / dble(ns))
-        else
-            w(iz) = 1.0d0
+    integer :: ii
+    real(8) :: tt
+    ww(:) = 0.0d0
+    do ii = -abs(nxvacl_m), nxvacr_m
+        if ((imin <= ii) .and. (ii <= imax)) then
+            if (ii <= (imin + (ns - 1))) then
+                tt = (dble(ii) - (dble(imin) - 0.5d0)) / dble(ns)
+                ww(ii) = weight_function(tt)
+            elseif ((imax - (ns - 1)) <= ii) then
+                tt = ((dble(imax) + 0.5d0) - dble(ii)) / dble(ns)
+                ww(ii) = weight_function(tt)
+            else
+                ww(ii) = 1.0d0
+            end if
         end if
     end do
-contains
-    
-    real(8) function weight(tt)
-        implicit none
-        real(8) :: tt
-        weight = -2.0d0 * tt ** 3 + 3.0d0 * tt ** 2
-        return
-    end function weight
-end subroutine
+    return
+end subroutine calc_weight
+
 
 
 end subroutine main_ms

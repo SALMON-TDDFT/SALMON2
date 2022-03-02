@@ -39,10 +39,9 @@ module fdtd_weyl
         character(16) :: fdtddim
         real(8) :: Ac_inc_new(3)
         real(8) :: Ac_inc(3)
+
         ! Oblique incident problem (experimental)
         real(8) :: theta
-        real(8) :: nsmooth
-        real(8), allocatable :: weight(:)
         ! (Electromagnetic) polarization
         type(s_vector) :: vec_p_em_new  ! itt+1 step
         type(s_vector) :: vec_p_em      ! itt step
@@ -91,8 +90,6 @@ contains
         fw%Ac_inc_new(:) = 0d0
 
 
-        ! Experimental implementation
-        allocate(fw%weight(fs%mg%is(1):fs%mg%ie(1)))
 
         contains
 
@@ -218,7 +215,7 @@ contains
             real(8) :: rot2_Ac(3) ! rot rot Ac
             real(8) :: r_inv_h(3)
 
-            integer :: ix, nsmooth
+            integer :: ix
             real(8) :: delta, theta, dt
             real(8) :: Jcur(1:3, is(1)-nd:ie(1)+nd)
             real(8) :: Pcur(1:3, is(1)-nd:ie(1)+nd)
@@ -239,7 +236,6 @@ contains
             
             delta = fs%hgs(1)
             theta = fw%theta
-            nsmooth = fw%nsmooth
             dt = fw%dt
 
             i2 = fs%mg%is(2)
@@ -255,8 +251,8 @@ contains
             !$omp parallel do default(shared) private(i1, rot2_Ac)
             do ix = fs%mg%is(1), fs%mg%ie(1)
 
-                J_cur(1:3, is(1)-nd:ie(1)+nd) = fw%weight(ix) * fw%vec_j_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)
-                P_cur(1:3, is(1)-nd:ie(1)+nd) = fw%weight(ix) * fw%vec_p_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)    
+                J_cur(1:3, is(1)-nd:ie(1)+nd) = fw%vec_j_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)
+                P_cur(1:3, is(1)-nd:ie(1)+nd) = fw%vec_p_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)    
 
                 Ac_new(1, ix) = Ac_old(1, ix) &
                 & + 2.0d0 * cspeed_au * dt * sin(theta) / (cos(theta) ** 2) * (ac_cur(3, ix+1) - ac_cur(3, ix-1)) / (2.0d0 * delta) &
