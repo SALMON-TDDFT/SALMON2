@@ -760,7 +760,7 @@ contains
 
     theta_oblique_deg = 0.0d0 ! Experimental implementation
     nsmooth_oblique = 8 ! Experimental implementation
-    yn_ms_tddft = 'n' ! Experimental implementation
+    yn_ms_tddft = 'y' ! Experimental implementation
     ms_omega_ld = 0.0d0 ! Experimental implementation
     ms_alpha_ld = 0.0d0 ! Experimental implementation
     ms_gamma_ld = 0.0d0 ! Experimental implementation

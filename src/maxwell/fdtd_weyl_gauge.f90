@@ -24,28 +24,15 @@ module fdtd_weyl
     type ls_fdtd_weyl
         real(8) :: dt
         type(s_scalar) :: phi, rho_em
-        type(s_vector) :: vec_e, vec_h
-        ! (Electromagnetic) Current Density
-        type(s_vector) :: vec_j_em_new  ! itt+1 step
-        type(s_vector) :: vec_j_em      ! itt step
-        type(s_vector) :: vec_j_em_old  ! itt-1 step
-        ! Vector potential
+        type(s_vector) :: vec_e, vec_h, vec_j_em
         type(s_vector) :: vec_Ac_new    ! itt+1 step
         type(s_vector) :: vec_Ac        ! itt step
         type(s_vector) :: vec_Ac_old    ! itt-1 step
-        ! Other physical variables
         type(s_scalar) :: edensity_emfield
         type(s_scalar) :: edensity_absorb
         character(16) :: fdtddim
         real(8) :: Ac_inc_new(3)
         real(8) :: Ac_inc(3)
-
-        ! Oblique incident problem (experimental)
-        real(8) :: theta
-        ! (Electromagnetic) polarization
-        type(s_vector) :: vec_p_em_new  ! itt+1 step
-        type(s_vector) :: vec_p_em      ! itt step
-        type(s_vector) :: vec_p_em_old  ! itt-1 step
     end type ls_fdtd_weyl
 
 
@@ -60,37 +47,22 @@ contains
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac)
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_new)
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_old)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_j_em)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_j_em_new)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_j_em_old)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_p_em)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_p_em_new)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_p_em_old)
         call allocate_vector(fs%mg, fw%vec_e)
         call allocate_vector(fs%mg, fw%vec_h)
+        call allocate_vector(fs%mg, fw%vec_j_em)
         call allocate_scalar(fs%mg, fw%edensity_emfield)
         call allocate_scalar(fs%mg, fw%edensity_absorb)
-
-
 
         fw%vec_Ac_new%v = 0d0
         fw%vec_Ac%v = 0d0
         fw%vec_Ac_old%v = 0d0
         fw%vec_e%v = 0d0
         fw%vec_h%v = 0d0
-        fw%vec_j_em_new%v = 0d0
         fw%vec_j_em%v = 0d0
-        fw%vec_j_em_old%v = 0d0
-        fw%vec_p_em_new%v = 0d0
-        fw%vec_p_em%v = 0d0
-        fw%vec_p_em_old%v = 0d0
         fw%edensity_emfield%f = 0d0
         fw%edensity_absorb%f = 0d0
         fw%Ac_inc(:) = 0d0
         fw%Ac_inc_new(:) = 0d0
-
-
-
         contains
 
         subroutine weyl_allocate
@@ -120,16 +92,13 @@ contains
     
         ! Update electromagnetic field
         select case(trim(fw%fdtddim))
-        case('1d')
+        case('1d', '1D')
         call dt_evolve_Ac_1d()
         call calc_vec_h_1d()
-        case('1dz')
-        call dt_evolve_Ac_1dz()
-        call calc_vec_h_1dz()
-        case('2d')
+        case('2d', '2D')
         call dt_evolve_Ac_2d()
         call calc_vec_h_2d()
-        case('3d')
+        case('3d', '3D')
         call dt_evolve_Ac_3d()
         call calc_vec_h_3d()
         ! case('3d_cylindal', '2dc', '2DC')
@@ -155,8 +124,6 @@ contains
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
 
-        call copy_data(fw%vec_j_em%v, fw%vec_j_em_old%v)
-        call copy_data(fw%vec_j_em_new%v, fw%vec_j_em%v)        
         call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
         call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
         
@@ -207,170 +174,6 @@ contains
         call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_1d
-
-
-        subroutine dt_evolve_Ac_1dx_ob()
-            implicit none
-            integer :: i1, i2, i3
-            real(8) :: rot2_Ac(3) ! rot rot Ac
-            real(8) :: r_inv_h(3)
-
-            integer :: ix
-            real(8) :: delta, theta, dt
-            real(8) :: Jcur(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: Pcur(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: Ac_new(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: Ac_cur(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: Ac_old(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: P_new(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: P_cur(1:3, is(1)-nd:ie(1)+nd)
-            real(8) :: J_cur(1:3, is(1)-nd:ie(1)+nd)
-            
-            ! Move previous calculation results to old data
-            call copy_data(fw%vec_j_em%v, fw%vec_j_em_old%v)
-            call copy_data(fw%vec_j_em_new%v, fw%vec_j_em%v)        
-            call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
-            call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
-            call copy_data(fw%vec_p_em%v, fw%vec_p_em_old%v)
-            call copy_data(fw%vec_p_em_new%v, fw%vec_p_em%v)
-            
-            delta = fs%hgs(1)
-            theta = fw%theta
-            dt = fw%dt
-
-            i2 = fs%mg%is(2)
-            i3 = fs%mg%is(3)
-
-            Ac_old(1:3, is(1)-nd:ie(1)+nd) = fw%vec_Ac_old%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)
-            Ac_cur(1:3, is(1)-nd:ie(1)+nd) = fw%vec_Ac%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)
-
-
-
-            Ac_new = 0.0d0
-
-            !$omp parallel do default(shared) private(i1, rot2_Ac)
-            do ix = fs%mg%is(1), fs%mg%ie(1)
-
-                J_cur(1:3, is(1)-nd:ie(1)+nd) = fw%vec_j_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)
-                P_cur(1:3, is(1)-nd:ie(1)+nd) = fw%vec_p_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3)    
-
-                Ac_new(1, ix) = Ac_old(1, ix) &
-                & + 2.0d0 * cspeed_au * dt * sin(theta) / (cos(theta) ** 2) * (ac_cur(3, ix+1) - ac_cur(3, ix-1)) / (2.0d0 * delta) &
-                & + 4.0d0 * pi * 2.0d0 * dt / (cos(theta) ** 2) * P_cur(1, ix) 
-
-                Ac_new(2, ix) = 2.0d0 * Ac_cur(2, ix) - Ac_old(2, ix) &
-                & + (cspeed_au * dt / cos(theta)) ** 2 * (Ac_cur(2, ix + 1) - 2 * Ac_cur(2, ix) + Ac_cur(2, ix - 1)) / delta ** 2 &
-                & + 4.0 * pi / (cos(theta) ** 2) * J_cur(2, ix) * dt ** 2     
-                
-                Ac_new(3, ix) = 2.0d0 * Ac_cur(3, ix) - Ac_old(3, ix) &
-                & + (cspeed_au * dt / cos(theta)) ** 2 * (Ac_cur(3, ix + 1) - 2 * Ac_cur(3, ix) + Ac_cur(3, ix - 1)) / delta ** 2 &
-                & + 4.0d0 * pi * dt ** 2 * J_cur(3, ix) &
-                & + 4.0d0 * pi * sin(theta) / cos(theta) ** 2 * cspeed_au * dt ** 2 &
-                & * (P_cur(1, ix+1) - P_cur(1, ix-1)) / (2.0d0 * delta)
-            end do
-            !$omp end parallel do
-
-            fw%vec_Ac_new%v(1:3, is(1)-nd:ie(1)+nd, i2, i3) = Ac_new(1:3, is(1)-nd:ie(1)+nd)
-            fw%vec_p_em_new%v(1:3, is(1)-nd:ie(1)+nd, i2, i3) =&
-                & + fw%vec_p_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3) &
-                & + fw%vec_j_em%v(1:3, is(1)-nd:ie(1)+nd, i2, i3) * dt
-            
-            ! Impose Boundary Condition (Left end)
-            ! select case (fs%a_bc(1, 1))
-            ! case('periodic')
-            !     Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
-            !         & Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3)
-            ! case('pec')
-            !     Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
-            !         & fw%vec_Ac%v(:, (is(1)-nd):(is(1)-1), i2, i3)
-            ! case('abc')
-            !     Ac_tmp(:, is(1)-1, i2, i3) = fw%vec_Ac%v(:, is(1), i2, i3) &
-            !         & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, is(1), i2, i3) &
-            !         & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, is(1)-1, i2, i3) &
-            !         & + (4d0*fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * (fw%Ac_inc_new(:)-fw%Ac_inc(:))
-            ! end select
-    
-            ! Impose Boundary Condition (Right end)
-            ! select case (fs%a_bc(1, 2))
-            ! case('periodic')
-            !     Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
-            !         & Ac_tmp(:, is(1):(is(1)+nd-1), i2, i3) 
-            ! case('pec')
-            !     Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
-            !         & fw%vec_Ac%v(:, (ie(1)+1):(ie(1)+nd), i2, i3) 
-            ! case('abc')
-            !     Ac_tmp(:, ie(1)+1, i2, i3) = fw%vec_Ac%v(:, ie(1), i2, i3) &
-            !         & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, ie(1), i2, i3) &
-            !         & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, ie(1)+1, i2, i3)    
-            ! end select
-            ! call copy_data(Ac_tmp, fw%vec_Ac_new%v)
-            ! return
-        end subroutine dt_evolve_Ac_1dx_ob
-
-
-        subroutine dt_evolve_Ac_1dz
-            implicit none
-            integer :: i1, i2, i3
-            real(8) :: rot2_Ac(3) ! rot rot Ac
-            real(8) :: r_inv_h(3)
-            real(8) :: Ac_tmp( &
-                & 1:3, &
-                & is(1)-nd:ie(1)+nd, &
-                & is(2)-nd:ie(2)+nd, &
-                & is(3)-nd:ie(3)+nd)
-    
-            call copy_data(fw%vec_j_em%v, fw%vec_j_em_old%v)
-            call copy_data(fw%vec_j_em_new%v, fw%vec_j_em%v)        
-            call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
-            call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
-            
-            i2 = fs%mg%is(2)
-            i3 = fs%mg%is(3)
-            r_inv_h(1) = 1d0 / fs%hgs(1)
-            !$omp parallel do default(shared) private(i1, rot2_Ac)
-            do i1 = fs%mg%is(1), fs%mg%ie(1)
-                rot2_Ac(1:2) = -( &
-                &      + fw%vec_Ac%v(1:2, i1, i2, i3+1) &
-                & -2d0 * fw%vec_Ac%v(1:2, i1, i2, i3  ) &
-                &      + fw%vec_Ac%v(1:2, i1, i2, i3-1) &
-                & ) * r_inv_h(1) ** 2
-                Ac_tmp(:, i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
-                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2) - rot2_Ac(:) * (cspeed_au * fw%dt)**2 )
-                rot2_Ac(3) = 0d0
-            end do
-            !$omp end parallel do
-        
-            ! Impose Boundary Condition (Left end)
-            select case (fs%a_bc(3, 1))
-            case('periodic')
-                Ac_tmp(:, i1, i2, (is(3)-nd):(is(3)-1)) = &
-                    & Ac_tmp(:, i1, i2, (ie(3)-nd+1):ie(3))
-            case('pec')
-                Ac_tmp(:, i1, i2, (is(3)-nd):(is(3)-1)) = &
-                    & fw%vec_Ac%v(:, i1, i2, (is(3)-nd):(is(3)-1))
-            case('abc')
-                Ac_tmp(:, i1, i2, is(3)-1) = fw%vec_Ac%v(:, i1, i2, is(3)) &
-                    & + (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * Ac_tmp(:, i1, i2, is(3)) &
-                    & - (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * fw%vec_Ac%v(:, i1, i2, is(3)-1) &
-                    & + (4d0*fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * (fw%Ac_inc_new(:)-fw%Ac_inc(:))
-            end select
-    
-            ! Impose Boundary Condition (Right end)
-            select case (fs%a_bc(3, 2))
-            case('periodic')
-                Ac_tmp(:, i1, i2, (ie(3)+1):(ie(3)+nd)) = &
-                    & Ac_tmp(:, i1, i2, is(3):(is(3)+nd-1)) 
-            case('pec')
-                Ac_tmp(:, i1, i2, (ie(3)+1):(ie(3)+nd)) = &
-                    & fw%vec_Ac%v(:, i1, i2, (ie(3)+1):(ie(3)+nd)) 
-            case('abc')
-                Ac_tmp(:, i1, i2, ie(3)+1) = fw%vec_Ac%v(:, i1, i2, ie(3)) &
-                    & + (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * Ac_tmp(:, i1, i2, ie(3)) &
-                    & - (cspeed_au*fw%dt-fs%hgs(3))/(cspeed_au*fw%dt+fs%hgs(3)) * fw%vec_Ac%v(:, i1, i2, ie(3)+1)    
-            end select
-            call copy_data(Ac_tmp, fw%vec_Ac_new%v)
-            return
-        end subroutine dt_evolve_Ac_1dz
     
     
         subroutine dt_evolve_Ac_2d()
@@ -675,26 +478,6 @@ contains
         !$omp end parallel do
         return
         end subroutine calc_vec_h_1d
-
-
-        subroutine calc_vec_h_1dz()
-            implicit none
-            integer :: i1, i2, i3
-            real(8) :: rot_Ac(3)
-            real(8) :: r_inv_h(3)
-            i2 = fs%mg%is(2)
-            i3 = fs%mg%is(3)
-            r_inv_h(1) = 1d0 / fs%hgs(1)
-            !$omp parallel do default(shared) private(i1, rot_Ac)
-            do i1 = fs%mg%is(1), fs%mg%ie(1)
-                rot_Ac(1) = - (fw%vec_Ac%v(2, i1, i2, i3+1) - fw%vec_Ac%v(2, i1, i2, i3-1)) * (0.5d0 * r_inv_h(1))
-                rot_Ac(2) = + (fw%vec_Ac%v(1, i1, i2, i3+1) - fw%vec_Ac%v(1, i1, i2, i3-1)) * (0.5d0 * r_inv_h(1))
-                rot_Ac(3) = 0.0d0
-                fw%vec_h%v(:, i1, i2, i3) = rot_Ac(:) * cspeed_au
-            end do
-            !$omp end parallel do
-            return
-        end subroutine calc_vec_h_1dz
     
     
         subroutine calc_vec_h_2d()

@@ -118,6 +118,9 @@ call timer_begin(LOG_RT_ITERATION)
 call print_header()
 
 TE : do itt=Mit+1,nt
+
+        if (comm_is_root(ms%id_ms_world)) &
+        write(*,*) "##########step", itt
     call time_evolution_step_ms()
     
 
@@ -255,7 +258,7 @@ subroutine initialization_ms()
     fw%fdtddim = trim(fdtddim)
 
     ! Experimental implementation for oblique incidence
-    fw%theta = theta_oblique_deg / 180d0 * pi
+    ! fw%theta = theta_oblique_deg / 180d0 * pi
     
     ! For compatibility with previous versions 
     ! (nxvacl_m and nxvacr_m will be removed in future)
@@ -440,9 +443,15 @@ subroutine print_linelog()
             write(*,'(i7,i7,f9.3,3(es11.2e3),f15.8,es11.2e3)') &
                 & itt, iimacro, &
                 & itt * dt * t_unit_time%conv, &
-                & fw%vec_j_em_new%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
                 & rNe(iimacro), &
                 & fw%edensity_absorb%f(iix, iiy, iiz) * system%det_a * t_unit_energy%conv
+            ! write(*,'(i7,i7,f9.3,3(es11.2e3),f15.8,es11.2e3)') &
+            !     & itt, iimacro, &
+            !     & itt * dt * t_unit_time%conv, &
+            !     & fw%vec_j_em_new%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
+            !     & rNe(iimacro), &
+            !     & fw%edensity_absorb%f(iix, iiy, iiz) * system%det_a * t_unit_energy%conv
         end do
     end if
 end subroutine
@@ -456,7 +465,17 @@ subroutine time_evolution_step_ms
     integer :: iimacro, iix, iiy, iiz
     real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro), rNe_tmp(ms%nmacro)
 
-    real(8) :: c1, c2, c3
+    real(8) :: c1_ld, c2_ld, c3_ld
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! fw%vec_j_em_new%v = 0
+    ! fw%vec_j_em_old%v = 0
+
 
     ! ----------------------------------------
     ! Time Evolution of FDTD System
@@ -466,6 +485,9 @@ subroutine time_evolution_step_ms
     call weyl_calc(fs, fw)
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
     
+
+    fw%vec_j_em%v(:, :, :, :) = 0.0d0
+if (yn_ms_tddft .eq. 'y') then
     ! ----------------------------------------
     ! Time Evolution of TDDFT System
     ! ----------------------------------------
@@ -514,39 +536,47 @@ subroutine time_evolution_step_ms
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        fw%vec_j_em_new%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
+        fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
+
+        if (nsmooth_oblique > 0) &
+            fw%vec_j_em%v(1:3, iix, iiy, iiz) = w(iix) * fw%vec_j_em%v(1:3, iix, iiy, iiz)
+    end do
+    
+    if (mod(itt, out_ms_step) == 0) call print_linelog()
+end if
+
+if (nx_sub_m > 0) then
+    c1_ld = (2.0d0 - (ms_omega_ld * dt) ** 2) / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+    c2_ld = (1 - ms_gamma_ld * dt * 0.5d0) / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+    c3_ld = ms_alpha_ld / (1.0d0 + ms_gamma_ld * dt * 0.5d0)
+
+    ! if (comm_is_root(ms%id_ms_world)) &
+    ! write(*, *) "c1_ld", c1_ld, "c2_ld", c2_ld, "c3_ld", c3_ld
+
+    do iix = -abs(nxvacl_m), nxvacr_m
+        j_ld_new(1:3, iix) = c1_ld * j_ld(1:3, iix) - c2_ld * j_ld_old(1:3, iix) &
+            & - c3_ld * (fw%vec_Ac_new%v(1:3, iix, 1, 1) - 2.0d0 * fw%vec_Ac%v(1:3, iix, 1, 1) + fw%vec_Ac_old%v(1:3, iix, 1, 1))
+        
+        fw%vec_j_em%v(1:3, iix, 1, 1) = fw%vec_j_em%v(1:3, iix, 1, 1) + j_ld_new(1:3, iix) * w_sub(iix)
+        ! write(333, "(6es12.3e3)") j_ld_new(1:3, iix)!, w_sub(iix) * j_ld_new(1:3, iix)
+        ! Pld_new(1:3, iz) = Pld_old(1:3, iz) + 2.0d0 * dt * Jld_cur(1:3, iz)
     end do
 
-    if (mod(itt, out_ms_step) == 0) call print_linelog()
+    ! if (comm_is_root(ms%id_ms_world)) &
+    ! write(*, *) " maxval(j_ld_new(3, :))", maxval(j_ld_new(3, :))
+    ! if (comm_is_root(ms%id_ms_world)) &
+    ! write(*, *) " maxval(fw%vec_j_em%v(1:3, :, 1, 1))", maxval(fw%vec_j_em%v(1:3, :, 1, 1))
 
-
-    
-    ! c1 = (1.0d0 - 0.5d0 * (ms_omega_ld * dt) ** 2) &
-    !     & / (1.0d0 + 0.5d0 * ms_gamma_ld * dt)
-    ! c2 = (1.0d0 - 0.5d0 * (ms_gamma_ld * dt)) &
-    !     & / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
-    ! c3 = ms_alpha_ld / (1.0d0 + 0.5d0 * (ms_gamma_ld * dt))
-
-    ! do iimacro = 1, ms%nmacro
-    !     iix = ms%ixyz_tbl(1, iimacro)
-    !     iiy = ms%ixyz_tbl(2, iimacro)
-    !     iiz = ms%ixyz_tbl(3, iimacro)
-
-    !     fw%vec_j_em_new%v(1:3, iix, iiy, iiz) &
-    !         & = 2.0d0 * c1 * fw%vec_j_em%v(1:3, iix, iiy, iiz) &
-    !         & - c2 * fw%vec_j_em_old%v(1:3, iix, iiy, iiz) &
-    !         & - c3 * (fw%vec_Ac_new%v(1:3, iix, iiy, iiz) &
-    !             & - 2.0d0 * fw%vec_Ac%v(1:3, iix, iiy, iiz) &
-    !             & + fw%vec_Ac_old%v(1:3, iix, iiy, iiz) &
-    !             & )
-    ! end do
+    j_ld_old = j_ld
+    j_ld = j_ld_new
+end if
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
     if (comm_is_root(ms%id_ms_world)) then
         if (mod(itt, out_ms_step) == 0) write(*, *) "# Lorentz-Drude test", itt
     end if
 
-
-    ! Experimental implementation
+    
     if (comm_is_root(ms%id_ms_world)) then
         if (mod(itt, 2) == 0) then
             if (trim(fdtddim) == '1d' .or. trim(fdtddim) == '1D') then
@@ -590,14 +620,12 @@ subroutine checkpoint_ms(odir)
 
         call comm_sync_all()
 
-        if (yn_ms_tddft .ne. 'y') then
         if (macropoint_in_mygroup(i)) then
             if (mod(itt,2)==1) then
                 call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)
             else
                 call checkpoint_rt(lg,mg,system,info,spsi_in, itt,rt,Vh_stock1,Vh_stock2,singlescale,idir)
             endif
-        end if
         end if
     end do
 
@@ -616,17 +644,17 @@ subroutine checkpoint_ms(odir)
         write(fh_bin) fw%vec_Ac_old%v
         close(fh_bin)
 
-        open(fh_bin,file=trim(idir) // '../vec_j_em_old.bin',form='unformatted')
-        write(fh_bin) fw%vec_j_em_old%v
-        close(fh_bin)
+        ! open(fh_bin,file=trim(idir) // '../vec_j_em_old.bin',form='unformatted')
+        ! write(fh_bin) fw%vec_j_em_old%v
+        ! close(fh_bin)
 
         open(fh_bin,file=trim(idir) // '../vec_j_em.bin',form='unformatted')
         write(fh_bin) fw%vec_j_em%v
         close(fh_bin)
 
-        open(fh_bin,file=trim(idir) // '../vec_j_em_new.bin',form='unformatted')
-        write(fh_bin) fw%vec_j_em_new%v
-        close(fh_bin)
+        ! open(fh_bin,file=trim(idir) // '../vec_j_em_new.bin',form='unformatted')
+        ! write(fh_bin) fw%vec_j_em_new%v
+        ! close(fh_bin)
     end if
 
 
@@ -697,11 +725,29 @@ subroutine write_RT_Ac_file()
                 & fw%vec_H%v(1, iix, iiy, iiz), &
                 & fw%vec_H%v(2, iix, iiy, iiz), &
                 & fw%vec_H%v(3, iix, iiy, iiz), &
-                & fw%vec_j_em_new%v(1, iix, iiy, iiz) * t_unit_current%conv, &
-                & fw%vec_j_em_new%v(2, iix, iiy, iiz) * t_unit_current%conv, &
-                & fw%vec_j_em_new%v(3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
                 & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
                 & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
+            ! write(fh_ac_data, '(3(i6, 1x), 14(e23.15e3, 1x))')  &
+            !     & iix, & 
+            !     & iiy, & 
+            !     & iiz, & 
+            !     & fw%vec_Ac_new%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
+            !     & fw%vec_Ac_new%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
+            !     & fw%vec_Ac_new%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
+            !     & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
+            !     & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
+            !     & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
+            !     & fw%vec_H%v(1, iix, iiy, iiz), &
+            !     & fw%vec_H%v(2, iix, iiy, iiz), &
+            !     & fw%vec_H%v(3, iix, iiy, iiz), &
+            !     & fw%vec_j_em_new%v(1, iix, iiy, iiz) * t_unit_current%conv, &
+            !     & fw%vec_j_em_new%v(2, iix, iiy, iiz) * t_unit_current%conv, &
+            !     & fw%vec_j_em_new%v(3, iix, iiy, iiz) * t_unit_current%conv, &
+            !     & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
+            !     & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
         end do
         end do
         end do
@@ -746,24 +792,24 @@ subroutine incident()
             read(fh_bin) fw%vec_Ac_old%v
             close(fh_bin)
 
-            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em_new.bin',form='unformatted')
-            read(fh_bin) fw%vec_j_em_new%v
-            close(fh_bin)
+            ! open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em_new.bin',form='unformatted')
+            ! read(fh_bin) fw%vec_j_em_new%v
+            ! close(fh_bin)
             
             open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em.bin',form='unformatted')
             read(fh_bin) fw%vec_j_em%v
             close(fh_bin)
 
-            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em_old.bin',form='unformatted')
-            read(fh_bin) fw%vec_j_em_old%v
-            close(fh_bin)
+            ! open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em_old.bin',form='unformatted')
+            ! read(fh_bin) fw%vec_j_em_old%v
+            ! close(fh_bin)
         end if
 
         call comm_bcast(fw%vec_Ac_new%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_Ac_old%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_Ac%v, ms%icomm_ms_world)
-        call comm_bcast(fw%vec_j_em_new%v, ms%icomm_ms_world)
-        call comm_bcast(fw%vec_j_em_old%v, ms%icomm_ms_world)
+        ! call comm_bcast(fw%vec_j_em_new%v, ms%icomm_ms_world)
+        ! call comm_bcast(fw%vec_j_em_old%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_j_em%v, ms%icomm_ms_world)
 
     else
