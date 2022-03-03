@@ -119,8 +119,8 @@ call print_header()
 
 TE : do itt=Mit+1,nt
 
-        if (comm_is_root(ms%id_ms_world)) &
-        write(*,*) "##########step", itt
+        ! if (comm_is_root(ms%id_ms_world)) &
+        ! write(*,*) "##########step", itt
     call time_evolution_step_ms()
     
 
@@ -486,11 +486,13 @@ subroutine time_evolution_step_ms
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
     
 
-    fw%vec_j_em%v(:, :, :, :) = 0.0d0
-if (yn_ms_tddft .eq. 'y') then
+
+
     ! ----------------------------------------
     ! Time Evolution of TDDFT System
     ! ----------------------------------------
+    fw%vec_j_em%v(:, :, :, :) = 0.0d0    
+if (yn_ms_tddft .eq. 'y') then
     ! Override Global Variables
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
@@ -569,12 +571,13 @@ if (nx_sub_m > 0) then
 
     j_ld_old = j_ld
     j_ld = j_ld_new
-end if
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     if (comm_is_root(ms%id_ms_world)) then
         if (mod(itt, out_ms_step) == 0) write(*, *) "# Lorentz-Drude test", itt
     end if
+end if
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
     
     if (comm_is_root(ms%id_ms_world)) then
