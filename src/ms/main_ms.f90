@@ -118,9 +118,6 @@ call timer_begin(LOG_RT_ITERATION)
 call print_header()
 
 TE : do itt=Mit+1,nt
-
-        ! if (comm_is_root(ms%id_ms_world)) &
-        ! write(*,*) "##########step", itt
     call time_evolution_step_ms()
     
 
@@ -258,7 +255,7 @@ subroutine initialization_ms()
     fw%fdtddim = trim(fdtddim)
 
     ! Experimental implementation for oblique incidence
-    ! fw%theta = theta_oblique_deg / 180d0 * pi
+    fw%theta = theta_oblique_deg / 180d0 * pi
     
     ! For compatibility with previous versions 
     ! (nxvacl_m and nxvacr_m will be removed in future)
@@ -467,16 +464,6 @@ subroutine time_evolution_step_ms
 
     real(8) :: c1_ld, c2_ld, c3_ld
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! fw%vec_j_em_new%v = 0
-    ! fw%vec_j_em_old%v = 0
-
-
     ! ----------------------------------------
     ! Time Evolution of FDTD System
     ! ----------------------------------------
@@ -554,7 +541,6 @@ if (nx_sub_m > 0) then
 
     ! if (comm_is_root(ms%id_ms_world)) &
     ! write(*, *) "c1_ld", c1_ld, "c2_ld", c2_ld, "c3_ld", c3_ld
-
     do iix = -abs(nxvacl_m), nxvacr_m
         j_ld_new(1:3, iix) = c1_ld * j_ld(1:3, iix) - c2_ld * j_ld_old(1:3, iix) &
             & - c3_ld * (fw%vec_Ac_new%v(1:3, iix, 1, 1) - 2.0d0 * fw%vec_Ac%v(1:3, iix, 1, 1) + fw%vec_Ac_old%v(1:3, iix, 1, 1))

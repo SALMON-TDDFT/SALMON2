@@ -33,6 +33,9 @@ module fdtd_weyl
         character(16) :: fdtddim
         real(8) :: Ac_inc_new(3)
         real(8) :: Ac_inc(3)
+        ! Additional implementation for oblique incidence
+        real(8) :: theta
+        real(8), allocatable :: p_em(:, :)
     end type ls_fdtd_weyl
 
 
@@ -63,6 +66,12 @@ contains
         fw%edensity_absorb%f = 0d0
         fw%Ac_inc(:) = 0d0
         fw%Ac_inc_new(:) = 0d0
+
+        ! Additional implementation for oblique incident
+        if (trim(fw%fdtddim) == "1dx_ob_test") then
+            allocate(fw%p_em(1:3, fs%mg%is(1):fs%mg%ie(1)))
+            fw%p_em = 0.0d0
+        end if
         contains
 
         subroutine weyl_allocate
@@ -101,6 +110,12 @@ contains
         case('3d', '3D')
         call dt_evolve_Ac_3d()
         call calc_vec_h_3d()
+        ! case('3d_cylindal', '2dc', '2DC')
+        !   call dt_evolve_Ac_3d_cylindal()
+        !   call calc_vec_h_3d_cylindal()
+        case('1dx_ob_test')
+        call dt_evolve_Ac_1dx_ob_test
+        ! call calc_vec_h_3d()
         ! case('3d_cylindal', '2dc', '2DC')
         !   call dt_evolve_Ac_3d_cylindal()
         !   call calc_vec_h_3d_cylindal()
@@ -174,6 +189,50 @@ contains
         call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_1d
+
+
+        subroutine dt_evolve_Ac_1dx_ob_test()
+            implicit none
+            integer :: i1, i2, i3
+            real(8) :: rot2_Ac(3) ! rot rot Ac
+            real(8) :: hx
+            real(8) :: Ac_tmp( &
+                & 1:3, &
+                & is(1)-nd:ie(1)+nd, &
+                & is(2)-nd:ie(2)+nd, &
+                & is(3)-nd:ie(3)+nd)
+    
+            call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
+            call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
+            
+            i2 = fs%mg%is(2)
+            i3 = fs%mg%is(3)
+
+            fw%p_em(:, :) = fw%p_em(:, :) + fw%vec_j_em%v(:, :, i2, i3) * fw%dt
+
+            dx = fs%hgs(1)
+            !$omp parallel do default(shared) private(i1)
+            do i1 = fs%mg%is(1), fs%mg%ie(1)
+                Ac_tmp(1, i1, i2, i3) = fw%ac_old%v(1, i1, i2, i3) &
+                & + 2.0d0 * cspeed_au * dt * sin(fw%theta_ob) / (cos(fw%theta_ob) ** 2) * (fw%vec_Ac%v(3, i1+1, i2, i3) - fw%vec_Ac%v(3, i1-1, i2, i3)) / (2.0d0 * dx) &
+                & + 4.0d0 * pi * 2.0d0 * dt / (cos(fw%theta_ob) ** 2) * fw%P_em(1, i1) 
+                
+                Ac_tmp(2, i1, i2, i3) = 2.0d0 * fw%vec_Ac%v(2, i1, i2, i3) - fw%Ac_old%v(2, i1, i2, i3) &
+                & + (cspeed_au * dt / cos(fw%theta_ob)) ** 2 * (fw%vec_Ac%v(2, i1 + 1, i2, i3) - 2 * fw%vec_Ac%v(2, i1, i2, i3) + fw%vec_Ac%v(2, i1 - 1, i2, i3)) / dx ** 2 &
+                & + 4.0 * pi / (cos(fw%theta_ob) ** 2) * fw%vec_j_em%v(2, i1, i2, i3) * dt ** 2
+                
+                Ac_tmp(3, i1, i2, i3) = 2.0d0 * fw%vec_Ac%v(3, i1, i2, i3) - fw%Ac_old%v(3, i1, i2, i3) &
+                & + (cspeed_au * dt / cos(fw%theta_ob)) ** 2 * (fw%vec_Ac%v(3, i1 + 1, i2, i3) - 2 * fw%vec_Ac%v(3, i1, i2, i3) + Ac_cur(3, i1 - 1, i2, i3)) / dx ** 2 &
+                & + 4.0d0 * pi * dt ** 2 * J_cur(3, i1) &
+                & + 4.0d0 * pi * sin(fw%theta_ob) / cos(fw%theta_ob) ** 2 * cspeed_au * dt ** 2 &
+                & * (fw%P_em(1, i1+1) - fw%P_em(1, i1-1)) / (2.0d0 * dx)
+            end do
+            !$omp end parallel do
+        
+            
+            call copy_data(Ac_tmp, fw%vec_Ac_new%v)
+            return
+        end subroutine dt_evolve_Ac_1dx_ob_test
     
     
         subroutine dt_evolve_Ac_2d()
