@@ -262,6 +262,8 @@ module salmon_global
   integer        :: media_id_pml(3,2)
   integer        :: media_id_source1
   integer        :: media_id_source2
+  real(8)        :: bloch_k_em(3)
+  character(4)   :: bloch_real_imag_em(3)
   character(1)   :: yn_make_shape
   character(1)   :: yn_output_shape
   character(1)   :: yn_copy_x

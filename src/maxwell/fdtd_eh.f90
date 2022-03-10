@@ -27,6 +27,12 @@ module fdtd_eh
     integer             :: ipml_l          !pml parameter
     real(8)             :: pml_m           !pml parameter
     real(8)             :: pml_r           !pml parameter
+    real(8),allocatable :: c_ebloch_x(:)   !coeff. of bloch boundary condition used for de/dx
+    real(8),allocatable :: c_ebloch_y(:)   !coeff. of bloch boundary condition used for de/dy 
+    real(8),allocatable :: c_ebloch_z(:)   !coeff. of bloch boundary condition used for de/dz
+    real(8),allocatable :: c_hbloch_x(:)   !coeff. of bloch boundary condition used for dh/dx
+    real(8),allocatable :: c_hbloch_y(:)   !coeff. of bloch boundary condition used for dh/dy
+    real(8),allocatable :: c_hbloch_z(:)   !coeff. of bloch boundary condition used for dh/dz
     real(8)             :: e_max           !maximum e for observation
     real(8)             :: h_max           !maximum e for observation
     real(8)             :: uVperm_from_au  !convert parameter for V/m
@@ -124,7 +130,7 @@ contains
                                phi_cep1,I_wcm2_1,E_amplitude1,&
                                source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
                                phi_cep2,I_wcm2_2,E_amplitude2,&
-                               yn_make_shape
+                               bloch_k_em,bloch_real_imag_em,yn_make_shape
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global
@@ -540,6 +546,88 @@ contains
                                    fe%coo(fs%lg%ie(ii)-fe%ipml_l,ii)*ulength_from_au,' to ',&
                                    fe%coo(fs%lg%ie(ii),ii)*ulength_from_au,'.'
         end do
+        write(*,*) "**************************"
+      end if
+    end if
+    
+    !*** set bloch boundary condition *************************************************************************!
+    allocate( fe%c_ebloch_x(fs%mg%is_array(1):fs%mg%ie_array(1)), &
+              fe%c_ebloch_y(fs%mg%is_array(2):fs%mg%ie_array(2)), &
+              fe%c_ebloch_z(fs%mg%is_array(3):fs%mg%ie_array(3)), &
+              fe%c_hbloch_x(fs%mg%is_array(1):fs%mg%ie_array(1)), &
+              fe%c_hbloch_y(fs%mg%is_array(2):fs%mg%ie_array(2)), &
+              fe%c_hbloch_z(fs%mg%is_array(3):fs%mg%ie_array(3)) )
+    fe%c_ebloch_x(:) = 1.0d0; fe%c_ebloch_y(:) = 1.0d0; fe%c_ebloch_z(:) = 1.0d0;
+    fe%c_hbloch_x(:) = 1.0d0; fe%c_hbloch_y(:) = 1.0d0; fe%c_hbloch_z(:) = 1.0d0;
+    if(sum(abs(bloch_k_em(:)))/=0.0d0) then !--- use bloch boundary condition ---------------------------------!
+      !check yn_periodic
+      if(yn_periodic/='y') then
+        if(comm_is_root(nproc_id_global)) &
+        write(*,*) "When bloch boundary conditions for electromagnetic problem are used by |bloch_k_em| > 0,"
+        write(*,*) "yn_periodic must be y."
+        stop
+      end if
+      
+      !set x direction
+      if(fs%mg%is(1)==fs%lg%is(1)) then !bottom
+        select case(bloch_real_imag_em(1))
+        case('real')
+          fe%c_hbloch_x( fs%mg%is(1) - 1 ) = cos( -bloch_k_em(1)*fs%rlsize(1) );
+        case('imag')
+          fe%c_hbloch_x( fs%mg%is(1) - 1 ) = sin( -bloch_k_em(1)*fs%rlsize(1) );
+        end select
+      end if
+      if(fs%mg%ie(1)==fs%lg%ie(1)) then !top
+        select case(bloch_real_imag_em(1))
+        case('real')
+          fe%c_ebloch_x( fs%mg%ie(1) + 1 ) = cos(  bloch_k_em(1)*fs%rlsize(1) );
+        case('imag')
+          fe%c_ebloch_x( fs%mg%ie(1) + 1 ) = sin(  bloch_k_em(1)*fs%rlsize(1) );
+        end select
+      end if
+      
+      !set y direction
+      if(fs%mg%is(2)==fs%lg%is(2)) then !bottom
+        select case(bloch_real_imag_em(2))
+        case('real')
+          fe%c_hbloch_y( fs%mg%is(2) - 1 ) = cos( -bloch_k_em(2)*fs%rlsize(2) );
+        case('imag')
+          fe%c_hbloch_y( fs%mg%is(2) - 1 ) = sin( -bloch_k_em(2)*fs%rlsize(2) );
+        end select
+      end if
+      if(fs%mg%ie(2)==fs%lg%ie(2)) then !top
+        select case(bloch_real_imag_em(2))
+        case('real')
+          fe%c_ebloch_y( fs%mg%ie(2) + 1 ) = cos(  bloch_k_em(2)*fs%rlsize(2) );
+        case('imag')
+          fe%c_ebloch_y( fs%mg%ie(2) + 1 ) = sin(  bloch_k_em(2)*fs%rlsize(2) );
+        end select
+      end if
+      
+      !set z direction
+      if(fs%mg%is(3)==fs%lg%is(3)) then !bottom
+        select case(bloch_real_imag_em(3))
+        case('real')
+          fe%c_hbloch_z( fs%mg%is(3) - 1 ) = cos( -bloch_k_em(3)*fs%rlsize(3) );
+        case('imag')
+          fe%c_hbloch_z( fs%mg%is(3) - 1 ) = sin( -bloch_k_em(3)*fs%rlsize(3) );
+        end select
+      end if
+      if(fs%mg%ie(3)==fs%lg%ie(3)) then !top
+        select case(bloch_real_imag_em(3))
+        case('real')
+          fe%c_ebloch_z( fs%mg%ie(3) + 1 ) = cos(  bloch_k_em(3)*fs%rlsize(3) );
+        case('imag')
+          fe%c_ebloch_z( fs%mg%ie(3) + 1 ) = sin(  bloch_k_em(3)*fs%rlsize(3) );
+        end select
+      end if
+      
+      !output message
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*)
+        write(*,*) "**************************"
+        write(*,'(A)'        ) ' Bloch boundary conditions for electromagnetic problem have been set:'
+        write(*,'(A,3ES12.5)') ' bloch_k_em =',bloch_k_em(:)/ulength_from_au
         write(*,*) "**************************"
       end if
     end if
@@ -1682,17 +1770,17 @@ contains
       
       !update e
       call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_ex_y,fe%c2_ex_y,fe%ex_y,fe%hz_x,fe%hz_y,      'e','y') !ex_y
+                 fe%c1_ex_y,fe%c2_ex_y,fe%ex_y,fe%hz_x,fe%hz_y,'e','y',cb_y = fe%c_hbloch_y) !ex_y
       call eh_fd(fe%iex_z_is,fe%iex_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_ex_z,fe%c2_ex_z,fe%ex_z,fe%hy_z,fe%hy_x,      'e','z') !ex_z
+                 fe%c1_ex_z,fe%c2_ex_z,fe%ex_z,fe%hy_z,fe%hy_x,'e','z',cb_z = fe%c_hbloch_z) !ex_z
       call eh_fd(fe%iey_z_is,fe%iey_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_ey_z,fe%c2_ey_z,fe%ey_z,fe%hx_y,fe%hx_z,      'e','z') !ey_z
+                 fe%c1_ey_z,fe%c2_ey_z,fe%ey_z,fe%hx_y,fe%hx_z,'e','z',cb_z = fe%c_hbloch_z) !ey_z
       call eh_fd(fe%iey_x_is,fe%iey_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_ey_x,fe%c2_ey_x,fe%ey_x,fe%hz_x,fe%hz_y,      'e','x') !ey_x
+                 fe%c1_ey_x,fe%c2_ey_x,fe%ey_x,fe%hz_x,fe%hz_y,'e','x',cb_x = fe%c_hbloch_x) !ey_x
       call eh_fd(fe%iez_x_is,fe%iez_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_ez_x,fe%c2_ez_x,fe%ez_x,fe%hy_z,fe%hy_x,      'e','x') !ez_x
+                 fe%c1_ez_x,fe%c2_ez_x,fe%ez_x,fe%hy_z,fe%hy_x,'e','x',cb_x = fe%c_hbloch_x) !ez_x
       call eh_fd(fe%iez_y_is,fe%iez_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_ez_y,fe%c2_ez_y,fe%ez_y,fe%hx_y,fe%hx_z,      'e','y') !ez_y
+                 fe%c1_ez_y,fe%c2_ez_y,fe%ez_y,fe%hx_y,fe%hx_z,'e','y',cb_y = fe%c_hbloch_y) !ez_y
       if(fe%inc_num>0) then !add incident current source
         if(fe%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,&
                                                     epdir_re1,epdir_im1,fe%c2_inc1_xyz,ae_shape1,fe%inc_dist1)
@@ -1728,17 +1816,17 @@ contains
       
       !update h
       call eh_fd(fe%ihx_y_is,fe%ihx_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_hx_y,fe%c2_hx_y,fe%hx_y,fe%ez_x,fe%ez_y,      'h','y') !hx_y
+                 fe%c1_hx_y,fe%c2_hx_y,fe%hx_y,fe%ez_x,fe%ez_y,'h','y',cb_y = fe%c_ebloch_y) !hx_y
       call eh_fd(fe%ihx_z_is,fe%ihx_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_hx_z,fe%c2_hx_z,fe%hx_z,fe%ey_z,fe%ey_x,      'h','z') !hx_z
+                 fe%c1_hx_z,fe%c2_hx_z,fe%hx_z,fe%ey_z,fe%ey_x,'h','z',cb_z = fe%c_ebloch_z) !hx_z
       call eh_fd(fe%ihy_z_is,fe%ihy_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_hy_z,fe%c2_hy_z,fe%hy_z,fe%ex_y,fe%ex_z,      'h','z') !hy_z
+                 fe%c1_hy_z,fe%c2_hy_z,fe%hy_z,fe%ex_y,fe%ex_z,'h','z',cb_z = fe%c_ebloch_z) !hy_z
       call eh_fd(fe%ihy_x_is,fe%ihy_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_hy_x,fe%c2_hy_x,fe%hy_x,fe%ez_x,fe%ez_y,      'h','x') !hy_x
+                 fe%c1_hy_x,fe%c2_hy_x,fe%hy_x,fe%ez_x,fe%ez_y,'h','x',cb_x = fe%c_ebloch_x) !hy_x
       call eh_fd(fe%ihz_x_is,fe%ihz_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_hz_x,fe%c2_hz_x,fe%hz_x,fe%ey_z,fe%ey_x,      'h','x') !hz_x
+                 fe%c1_hz_x,fe%c2_hz_x,fe%hz_x,fe%ey_z,fe%ey_x,'h','x',cb_x = fe%c_ebloch_x) !hz_x
       call eh_fd(fe%ihz_y_is,fe%ihz_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-                 fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,      'h','y') !hz_y
+                 fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,'h','y',cb_y = fe%c_ebloch_y) !hz_y
       call eh_sendrecv(fs,fe,'h')
       
       !ttm
@@ -3008,26 +3096,30 @@ contains
   
   !===========================================================================================
   != calculate finite difference in eh =======================================================
-  subroutine eh_fd(ista,iend,ng_is,ng_ie,Nd,c1,c2,f1,f2,f3,var,dir)
+  subroutine eh_fd(ista,iend,ng_is,ng_ie,Nd,c1,c2,f1,f2,f3,var,dir,&
+                   cb_x,cb_y,cb_z)
     implicit none
-    integer,intent(in)      :: ista(3),iend(3),ng_is(3),ng_ie(3)
-    integer,intent(in)      :: Nd
-    real(8),intent(in)      :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                  ng_is(3)-Nd:ng_ie(3)+Nd),&
-                               c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                  ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),intent(inout)   :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                  ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),intent(in)      :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                  ng_is(3)-Nd:ng_ie(3)+Nd),&
-                               f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                  ng_is(3)-Nd:ng_ie(3)+Nd)
-    character(1),intent(in) :: var,dir
+    integer,     intent(in)          :: ista(3),iend(3),ng_is(3),ng_ie(3)
+    integer,     intent(in)          :: Nd
+    real(8),     intent(in)          :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
+                                        c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+                                           ng_is(3)-Nd:ng_ie(3)+Nd)
+    real(8),     intent(inout)       :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+                                           ng_is(3)-Nd:ng_ie(3)+Nd)
+    real(8),     intent(in)          :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
+                                        f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+                                           ng_is(3)-Nd:ng_ie(3)+Nd)
+    character(1),intent(in)          :: var,dir
+    real(8),     intent(in),optional :: cb_x(ng_is(1)-Nd:ng_ie(1)+Nd), &
+                                        cb_y(ng_is(2)-Nd:ng_ie(2)+Nd), &
+                                        cb_z(ng_is(3)-Nd:ng_ie(3)+Nd)
     integer :: ix,iy,iz
     
     if(var=='e') then
@@ -3039,7 +3131,7 @@ contains
         do ix=ista(1),iend(1)
           f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
                        +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz)+f3(ix,iy,iz))-(f2(ix-1,iy,iz)+f3(ix-1,iy,iz)) )
+                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_x(ix-1)*(f2(ix-1,iy,iz)+f3(ix-1,iy,iz)) )
         end do
         end do
         end do
@@ -3053,7 +3145,7 @@ contains
         do ix=ista(1),iend(1)
           f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
                        +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz)+f3(ix,iy,iz))-(f2(ix,iy-1,iz)+f3(ix,iy-1,iz)) )
+                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_y(iy-1)*(f2(ix,iy-1,iz)+f3(ix,iy-1,iz)) )
         end do
         end do
         end do
@@ -3067,7 +3159,7 @@ contains
         do ix=ista(1),iend(1)
           f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
                        +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz)+f3(ix,iy,iz))-(f2(ix,iy,iz-1)+f3(ix,iy,iz-1)) )
+                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_z(iz-1)*(f2(ix,iy,iz-1)+f3(ix,iy,iz-1)) )
         end do
         end do
         end do
@@ -3083,7 +3175,7 @@ contains
         do ix=ista(1),iend(1)
           f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
                        +c2(ix,iy,iz)*( &
-                       (f2(ix+1,iy,iz)+f3(ix+1,iy,iz))-(f2(ix,iy,iz)+f3(ix,iy,iz)) )
+                       cb_x(ix+1)*(f2(ix+1,iy,iz)+f3(ix+1,iy,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
         end do
         end do
         end do
@@ -3097,7 +3189,7 @@ contains
         do ix=ista(1),iend(1)
           f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
                        +c2(ix,iy,iz)*( &
-                       (f2(ix,iy+1,iz)+f3(ix,iy+1,iz))-(f2(ix,iy,iz)+f3(ix,iy,iz)) )
+                       cb_y(iy+1)*(f2(ix,iy+1,iz)+f3(ix,iy+1,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
         end do
         end do
         end do
@@ -3111,7 +3203,7 @@ contains
         do ix=ista(1),iend(1)
           f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
                        +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz+1)+f3(ix,iy,iz+1))-(f2(ix,iy,iz)+f3(ix,iy,iz)) )
+                       cb_z(iz+1)*(f2(ix,iy,iz+1)+f3(ix,iy,iz+1)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
         end do
         end do
         end do
