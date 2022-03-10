@@ -420,6 +420,8 @@ contains
       & media_id_source1,         &
       & media_id_source1,         &
       & media_id_source2,         &
+      & bloch_k_em,               &
+      & bloch_real_imag_em,       &
       & yn_make_shape,            &
       & yn_output_shape,          &
       & yn_copy_x,                &
@@ -770,6 +772,8 @@ contains
     media_id_pml(:,:)           = 0
     media_id_source1            = 0
     media_id_source2            = 0
+    bloch_k_em(:)               = 0d0
+    bloch_real_imag_em(:)       = 'real'
     yn_make_shape               = 'n'
     yn_output_shape             = 'n'
     yn_copy_x                   = 'n'
@@ -975,9 +979,24 @@ contains
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
+    call string_lowercase(boundary_em(1,1))
+    call string_lowercase(boundary_em(1,2))
+    call string_lowercase(boundary_em(2,1))
+    call string_lowercase(boundary_em(2,2))
+    call string_lowercase(boundary_em(3,1))
+    call string_lowercase(boundary_em(3,2))
     do ii = 0,media_num
       call string_lowercase(media_type(ii))
     end do
+    call string_lowercase(wave_input)
+    call string_lowercase(bloch_real_imag_em(1))
+    call string_lowercase(bloch_real_imag_em(2))
+    call string_lowercase(bloch_real_imag_em(3))
+    if(n_s>0) then
+      do ii = 1,n_s
+        call string_lowercase(typ_s(ii))
+      end do
+    end if
     call string_lowercase(lattice)
 
 ! Broad cast
@@ -1269,6 +1288,9 @@ contains
     call comm_bcast(media_id_pml             ,nproc_group_global)
     call comm_bcast(media_id_source1         ,nproc_group_global)
     call comm_bcast(media_id_source2         ,nproc_group_global)
+    call comm_bcast(bloch_k_em               ,nproc_group_global)
+    bloch_k_em = bloch_k_em / ulength_to_au
+    call comm_bcast(bloch_real_imag_em       ,nproc_group_global)
     call comm_bcast(yn_make_shape            ,nproc_group_global)
     call comm_bcast(yn_output_shape          ,nproc_group_global)
     call comm_bcast(yn_copy_x                ,nproc_group_global)
@@ -2079,6 +2101,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(1)', bloch_k_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(2)', bloch_k_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(3)', bloch_k_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(1)', bloch_real_imag_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(2)', bloch_real_imag_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(3)', bloch_real_imag_em(3)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
