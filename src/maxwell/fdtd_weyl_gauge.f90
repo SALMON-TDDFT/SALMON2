@@ -207,11 +207,11 @@ contains
             
             i2 = fs%mg%is(2)
             i3 = fs%mg%is(3)
+            dt = fw%dt
+            dx = fs%hgs(1)
 
             fw%p_em(:, :) = fw%p_em(:, :) + fw%vec_j_em%v(:, :, i2, i3) * fw%dt
 
-            dt = fw%dt
-            dx = fs%hgs(1)
             !$omp parallel do default(shared) private(i1)
             do i1 = fs%mg%is(1), fs%mg%ie(1)
                 Ac_tmp(1, i1, i2, i3) = fw%vec_Ac_old%v(1, i1, i2, i3) &

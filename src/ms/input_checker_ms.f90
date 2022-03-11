@@ -69,7 +69,7 @@ function check_input_variables_ms() result(flag)
             & .and. trim(boundary_em(1,2)) .ne. 'pec' &
             & .and. trim(boundary_em(1,2)) .ne. 'abc') &
                 call raise("ERROR! 'boundary_em(1,2)' unknown boundary condition!")
-    
+
 
     case("1dz")
         if (nx_m /= 1) &
@@ -94,6 +94,8 @@ function check_input_variables_ms() result(flag)
             & .and. trim(boundary_em(3,2)) .ne. 'pec' &
             & .and. trim(boundary_em(3,2)) .ne. 'abc') &
                 call raise("ERROR! 'boundary_em(3,2)' unknown boundary condition!")
+
+    case("1dx_ob_test")
 
     case default
         call raise("ERROR! 'fdtddim' must be '1d', '1dx' or '1dz'!" )

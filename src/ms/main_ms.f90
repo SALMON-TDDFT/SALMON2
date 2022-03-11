@@ -758,9 +758,14 @@ subroutine incident()
     fw%vec_Ac%v = 0d0
     fw%vec_Ac_old%v = 0d0
 
-
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+if (trim(fw%fdtddim) == "1dx_ob_test") then
+    Ac_inc = 0
+else
     call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
         & -1, nt+2, Ac_inc)
+end if
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     if (yn_restart == 'y') then
 
@@ -806,12 +811,24 @@ subroutine incident()
         allocate(Ac_new(1:3, fs%mg%is_overlap(1):0))
         allocate(Ac(1:3, fs%mg%is_overlap(1):0))
         allocate(Ac_old(1:3, fs%mg%is_overlap(1):0)) 
-        call calc_Ac_ext_t((itt)*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac_new)   ! Ac_new = Ac(itt) with itt=-1
-        call calc_Ac_ext_t((itt-1)*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac)       ! Ac = Ac(itt-1) with itt=-1
-        call calc_Ac_ext_t((itt-2)*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac_old)   ! Ac = Ac(itt-2) with itt=-1
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        if (trim(fw%fdtddim) == "1dx_ob_test") then
+            call calc_Ac_ext_t((itt)*fw%dt, -fs%hgs(1) / cspeed_au / cos(fw%theta_ob), &
+                & fs%mg%is_overlap(1), 0, Ac_new)   ! Ac_new = Ac(itt) with itt=-1
+            call calc_Ac_ext_t((itt-1)*fw%dt, -fs%hgs(1) / cspeed_au / cos(fw%theta_ob), &
+                & fs%mg%is_overlap(1), 0, Ac)       ! Ac = Ac(itt-1) with itt=-1
+            call calc_Ac_ext_t((itt-2)*fw%dt, -fs%hgs(1) / cspeed_au / cos(fw%theta_ob), &
+                & fs%mg%is_overlap(1), 0, Ac_old)   ! Ac = Ac(itt-2) with itt=-1
+        else
+            call calc_Ac_ext_t((itt)*fw%dt, -fs%hgs(1) / cspeed_au, &
+                & fs%mg%is_overlap(1), 0, Ac_new)   ! Ac_new = Ac(itt) with itt=-1
+            call calc_Ac_ext_t((itt-1)*fw%dt, -fs%hgs(1) / cspeed_au, &
+                & fs%mg%is_overlap(1), 0, Ac)       ! Ac = Ac(itt-1) with itt=-1
+            call calc_Ac_ext_t((itt-2)*fw%dt, -fs%hgs(1) / cspeed_au, &
+                & fs%mg%is_overlap(1), 0, Ac_old)   ! Ac = Ac(itt-2) with itt=-1
+        end if
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
         do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
             do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
                 fw%vec_Ac_new%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac_new(1:3, fs%mg%is_overlap(1):0)
