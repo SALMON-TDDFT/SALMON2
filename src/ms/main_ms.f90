@@ -255,7 +255,7 @@ subroutine initialization_ms()
     fw%fdtddim = trim(fdtddim)
 
     ! Experimental implementation for oblique incidence
-    fw%theta = theta_oblique_deg / 180d0 * pi
+    fw%theta_ob = theta_oblique_deg / 180d0 * pi
     
     ! For compatibility with previous versions 
     ! (nxvacl_m and nxvacr_m will be removed in future)

@@ -34,7 +34,7 @@ module fdtd_weyl
         real(8) :: Ac_inc_new(3)
         real(8) :: Ac_inc(3)
         ! Additional implementation for oblique incidence
-        real(8) :: theta
+        real(8) :: theta_ob
         real(8), allocatable :: p_em(:, :)
     end type ls_fdtd_weyl
 
@@ -195,7 +195,7 @@ contains
             implicit none
             integer :: i1, i2, i3
             real(8) :: rot2_Ac(3) ! rot rot Ac
-            real(8) :: hx
+            real(8) :: dx, dt
             real(8) :: Ac_tmp( &
                 & 1:3, &
                 & is(1)-nd:ie(1)+nd, &
@@ -210,20 +210,21 @@ contains
 
             fw%p_em(:, :) = fw%p_em(:, :) + fw%vec_j_em%v(:, :, i2, i3) * fw%dt
 
+            dt = fw%dt
             dx = fs%hgs(1)
             !$omp parallel do default(shared) private(i1)
             do i1 = fs%mg%is(1), fs%mg%ie(1)
-                Ac_tmp(1, i1, i2, i3) = fw%ac_old%v(1, i1, i2, i3) &
+                Ac_tmp(1, i1, i2, i3) = fw%vec_Ac_old%v(1, i1, i2, i3) &
                 & + 2.0d0 * cspeed_au * dt * sin(fw%theta_ob) / (cos(fw%theta_ob) ** 2) * (fw%vec_Ac%v(3, i1+1, i2, i3) - fw%vec_Ac%v(3, i1-1, i2, i3)) / (2.0d0 * dx) &
                 & + 4.0d0 * pi * 2.0d0 * dt / (cos(fw%theta_ob) ** 2) * fw%P_em(1, i1) 
                 
-                Ac_tmp(2, i1, i2, i3) = 2.0d0 * fw%vec_Ac%v(2, i1, i2, i3) - fw%Ac_old%v(2, i1, i2, i3) &
+                Ac_tmp(2, i1, i2, i3) = 2.0d0 * fw%vec_Ac%v(2, i1, i2, i3) - fw%vec_Ac_old%v(2, i1, i2, i3) &
                 & + (cspeed_au * dt / cos(fw%theta_ob)) ** 2 * (fw%vec_Ac%v(2, i1 + 1, i2, i3) - 2 * fw%vec_Ac%v(2, i1, i2, i3) + fw%vec_Ac%v(2, i1 - 1, i2, i3)) / dx ** 2 &
                 & + 4.0 * pi / (cos(fw%theta_ob) ** 2) * fw%vec_j_em%v(2, i1, i2, i3) * dt ** 2
                 
-                Ac_tmp(3, i1, i2, i3) = 2.0d0 * fw%vec_Ac%v(3, i1, i2, i3) - fw%Ac_old%v(3, i1, i2, i3) &
-                & + (cspeed_au * dt / cos(fw%theta_ob)) ** 2 * (fw%vec_Ac%v(3, i1 + 1, i2, i3) - 2 * fw%vec_Ac%v(3, i1, i2, i3) + Ac_cur(3, i1 - 1, i2, i3)) / dx ** 2 &
-                & + 4.0d0 * pi * dt ** 2 * J_cur(3, i1) &
+                Ac_tmp(3, i1, i2, i3) = 2.0d0 * fw%vec_Ac%v(3, i1, i2, i3) - fw%vec_Ac_old%v(3, i1, i2, i3) &
+                & + (cspeed_au * dt / cos(fw%theta_ob)) ** 2 * (fw%vec_Ac%v(3, i1 + 1, i2, i3) - 2 * fw%vec_Ac%v(3, i1, i2, i3) + fw%vec_Ac%v(3, i1 - 1, i2, i3)) / dx ** 2 &
+                & + 4.0d0 * pi * dt ** 2 * fw%vec_j_em%v(3, i1, i2, i3) &
                 & + 4.0d0 * pi * sin(fw%theta_ob) / cos(fw%theta_ob) ** 2 * cspeed_au * dt ** 2 &
                 & * (fw%P_em(1, i1+1) - fw%P_em(1, i1-1)) / (2.0d0 * dx)
             end do
