@@ -559,7 +559,10 @@ contains
               fe%c_hbloch_z(fs%mg%is_array(3):fs%mg%ie_array(3)) )
     fe%c_ebloch_x(:) = 1.0d0; fe%c_ebloch_y(:) = 1.0d0; fe%c_ebloch_z(:) = 1.0d0;
     fe%c_hbloch_x(:) = 1.0d0; fe%c_hbloch_y(:) = 1.0d0; fe%c_hbloch_z(:) = 1.0d0;
-    if(sum(abs(bloch_k_em(:)))/=0.0d0) then !--- use bloch boundary condition ---------------------------------!
+    if( (sum(abs(bloch_k_em(:)))/=0.0d0)    &
+        .or.(bloch_real_imag_em(1)=='imag') &
+        .or.(bloch_real_imag_em(2)=='imag') &
+        .or.(bloch_real_imag_em(3)=='imag') ) then !--- use bloch boundary condition --------------------------!
       !check yn_periodic
       if(yn_periodic/='y') then
         if(comm_is_root(nproc_id_global)) &
