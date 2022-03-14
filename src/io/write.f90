@@ -682,7 +682,8 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: open_filehandle
-    use inputoutput, only: yn_md,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    use inputoutput, only: t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    use salmon_global, only: spin,yn_md
     implicit none
     type(s_ofile) :: ofl
     integer, intent(in) :: it
@@ -726,7 +727,7 @@ contains
          & 11, "E_tot_x", trim(t_unit_elec%name), &
          & 12, "E_tot_y", trim(t_unit_elec%name), &
          & 13, "E_tot_z", trim(t_unit_elec%name)
-       if(system%nspin==1) then
+       if(spin=='unpolarized' .or. spin=='noncollinear') then
          write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 14, "Jm_x", trim(t_unit_current%name), &
          & 15, "Jm_y", trim(t_unit_current%name), &
@@ -737,7 +738,7 @@ contains
                  & 18, "Jmi_y", trim(t_unit_current%name), &
                  & 19, "Jmi_z", trim(t_unit_current%name)
          endif
-       else if(system%nspin==2) then
+       else if(spin=='polarized') then
          write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 14, "Jm_u_x", trim(t_unit_current%name), &
          & 15, "Jm_u_y", trim(t_unit_current%name), &
@@ -763,13 +764,16 @@ contains
           & system%vec_E_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
           & system%vec_E(1:3) * t_unit_elec%conv
-       if(system%nspin==1) then
+       if(spin=='unpolarized') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_e(1:3,1) * t_unit_current%conv
-       else if(system%nspin==2) then
+       else if(spin=='polarized') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_e(1:3,1) * t_unit_current%conv, &
           & curr_e(1:3,2) * t_unit_current%conv
+       else if(spin=='noncollinear') then
+          write(uid, "(99(1X,E23.15E3))",advance='no') &
+          & (curr_e(1:3,1)+curr_e(1:3,2)) * t_unit_current%conv
        end if
        if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -2207,11 +2211,11 @@ contains
     call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
   
     if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_mag,'(i11)') itt
-      write(ofl%fh_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
+      write(ofl%fh_rt_mag,'(i11)') itt
+      write(ofl%fh_rt_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
       do ik=1,system%nk
       do io=1,system%no
-        write(ofl%fh_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+        write(ofl%fh_rt_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
       end do
       end do
     end if

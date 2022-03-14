@@ -169,7 +169,7 @@ subroutine init_dft_system(lg,system,stencil)
 
   if(spin=='unpolarized') then
     system%nspin=1
-  else if(spin=='polarized') then
+  else !if(spin=='polarized') then
     system%nspin=2
   end if
 

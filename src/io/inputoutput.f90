@@ -2401,7 +2401,7 @@ contains
     case ('wf','pp') ; continue
     case('pp_magdir')
       if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
-      if(spin=='unpolarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
+      if(spin/='polarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
     case default     ; stop 'method_init_density must be wf or pp'
     end select
 
@@ -2435,8 +2435,15 @@ contains
     select case(spin)
     case('unpolarized','polarized')
       continue
+    case('noncollinear')
+      if(yn_spinorbit=='n') stop "spin=noncollinear with yn_spinorbit=n is not supported"
+#ifdef USE_OPENACC
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'CAUTION: noncollinear spin with OpenACC is under development'
+      endif
+#endif
     case default
-      stop "set spin to 'unpolarized' or 'polarized'"
+      stop "set spin to 'unpolarized', 'polarized', or 'noncollinear'"
     end select
 
   ! for main_tddft
@@ -2471,8 +2478,8 @@ contains
     end select
 
     if( yn_spinorbit == 'y' )then
-       if( spin == 'unpolarized' )then
-          stop 'spin = "polarized" is necessary when spin-orbit calculation is performed'
+       if( spin /= 'noncollinear' ) then
+          stop "spin = 'noncollinear' is necessary when spin-orbit calculation is performed"
        end if
     end if
 
