@@ -2437,6 +2437,11 @@ contains
       continue
     case('noncollinear')
       if(yn_spinorbit=='n') stop "spin=noncollinear with yn_spinorbit=n is not supported"
+#ifdef USE_OPENACC
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'CAUTION: noncollinear spin with OpenACC is under development'
+      endif
+#endif
     case default
       stop "set spin to 'unpolarized', 'polarized', or 'noncollinear'"
     end select
