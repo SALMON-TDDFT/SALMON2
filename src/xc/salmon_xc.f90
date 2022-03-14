@@ -171,7 +171,7 @@ contains
     end if
 
     if (xc_func%use_gradient) then
-      if(nspin==2) stop "error: GGA or metaGGA & spin=='polarized'"
+      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       call calc_xc(xc_func, rho=rho_tmp, grho=delr, rlrho=lrho, tau=tau, rj=j, &
       & eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else
@@ -375,7 +375,7 @@ contains
     
     if(spin=='unpolarized') then
       xc%ispin=0
-    else if(spin=='polarized') then
+    else !if(spin=='polarized') then
       xc%ispin=1
     end if
 

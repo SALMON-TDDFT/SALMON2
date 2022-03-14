@@ -40,7 +40,7 @@ for line in open("Au_rt.data"):
     linecount += 1
     if linecount == 1008: # line 1008
        data = line.split()
-       val1 = float(data[16-1]) + float(data[19-1])
+       val1 = float(data[16-1])
 
 if abs(val1 - reference_value_1) > permissible_error_1:
         print("Mismatch |%e - %e| > %e (current)" % (val1, reference_value_1, permissible_error_1))
