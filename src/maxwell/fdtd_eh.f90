@@ -134,7 +134,7 @@ contains
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global
-    use communication,   only: comm_is_root,comm_bcast
+    use communication,   only: comm_is_root,comm_bcast,comm_sync_all
     use structures,      only: s_fdtd_system
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
@@ -143,10 +143,11 @@ contains
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    integer                           :: ii,ij,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
+    integer                           :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
     real(8)                           :: dt_cfl
     character(1)                      :: dir
     character(2)                      :: plane_name
+    character(16)                     :: tmp_name1,tmp_name2
     character(128)                    :: save_name
     
     !*** set initial parameter and value **********************************************************************!
@@ -427,7 +428,6 @@ contains
     end if !use_ttm
 
     !*** write media information ******************************************************************************!
-    deallocate(fs%imedia); deallocate(fe%rmedia);
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
@@ -435,15 +435,10 @@ contains
       do ii=0,media_num
         write(*,*) "=========================="
         write(*,'(A,I3,A)')      ' id ',ii, ':'
+        call eh_check_media_type(fe%rep(ii),fe%rmu(ii),fe%sig(ij),media_type(ii),tmp_name1)
+        write(*,'(A,A)')         ' media_type  =  ', trim(tmp_name1)
         select case(media_type(ii))
-        case ('vacuum')
-          if(fe%rep(ii)/=1d0 .or. fe%rmu(ii)/=1d0 .or. fe%sig(ii)/=0d0) then
-            write(*,'(A)'  )     ' media_type  =  constant media'
-          else
-            write(*,'(A,A)')     ' media_type  =  ', trim(media_type(ii))
-          end if
         case('lorentz-drude')
-          write(*,'(A,A)')       ' media_type  =  ', trim(media_type(ii))
           write(*,'(A,I6)')      ' pole_num_ld = ', pole_num_ld(ii)
           write(*,'(A,ES12.5)')  ' omega_p_ld  = ', omega_p_ld(ii)*uenergy_from_au
           do ij=1,pole_num_ld(ii)
@@ -467,8 +462,6 @@ contains
               write(*,'(A,ES12.5)')  '               ', omega_ld(ii,ij)*uenergy_from_au
             end if
           end do
-        case default
-          write(*,'(A,A)')     ' media_type  =  ', trim(media_type(ii))
         end select
         write(*,'(A,ES12.5)')  ' epsilon_em  = ', fe%rep(ii)
         write(*,'(A,ES12.5)')  ' mu_em       = ', fe%rmu(ii)
@@ -736,9 +729,45 @@ contains
         else
           write(*,*) "Observation points are placed at"
         end if
-        do ii=1,obs_num_em
+      end if
+      do ii=1,obs_num_em
+        if(fe%iobs_po_pe(ii)==1) then
+          !coordinate
           write(*,'(I3,A,3ES14.5)') ii,":",(fe%coo(fe%iobs_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
-        end do
+          
+          !ex
+          write(*,'(6X,A)') "Ex is averaged from two spatial grids whose material parameters are:"
+          ij = fs%imedia(fe%iobs_po_id(ii,1)  ,fe%iobs_po_id(ii,2)  ,fe%iobs_po_id(ii,3)  )
+          call eh_check_media_type(fe%rep(ij),fe%rmu(ij),fe%sig(ij),media_type(ij),tmp_name1)
+          ik = fs%imedia(fe%iobs_po_id(ii,1)-1,fe%iobs_po_id(ii,2)  ,fe%iobs_po_id(ii,3)  )
+          call eh_check_media_type(fe%rep(ik),fe%rmu(ik),fe%sig(ik),media_type(ik),tmp_name2)
+          write(*,'(9X,A,A,A,A)')           'media_type  =  ', trim(tmp_name1), ', ',trim(tmp_name2)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'epsilon_em  = ', fe%rep(ij)      , ', ',fe%rep(ik)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'mu_em       = ', fe%rmu(ij)      , ', ',fe%rmu(ik)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'sigma_em    = ', fe%sig(ij)      , ', ',fe%sig(ik)
+          
+          !ey
+          write(*,'(6X,A)') "Ey is averaged from two spatial grids whose material parameters are:"
+          ik = fs%imedia(fe%iobs_po_id(ii,1)  ,fe%iobs_po_id(ii,2)-1,fe%iobs_po_id(ii,3)  )
+          call eh_check_media_type(fe%rep(ik),fe%rmu(ik),fe%sig(ik),media_type(ik),tmp_name2)
+          write(*,'(9X,A,A,A,A)')           'media_type  =  ', trim(tmp_name1), ', ',trim(tmp_name2)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'epsilon_em  = ', fe%rep(ij)      , ', ',fe%rep(ik)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'mu_em       = ', fe%rmu(ij)      , ', ',fe%rmu(ik)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'sigma_em    = ', fe%sig(ij)      , ', ',fe%sig(ik)
+          
+          !ez
+          write(*,'(6X,A)') "Ez is averaged from two spatial grids whose material parameters are:"
+          ik = fs%imedia(fe%iobs_po_id(ii,1)  ,fe%iobs_po_id(ii,2)  ,fe%iobs_po_id(ii,3)-1)
+          call eh_check_media_type(fe%rep(ik),fe%rmu(ik),fe%sig(ik),media_type(ik),tmp_name2)
+          write(*,'(9X,A,A,A,A)')           'media_type  =  ', trim(tmp_name1), ', ',trim(tmp_name2)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'epsilon_em  = ', fe%rep(ij)      , ', ',fe%rep(ik)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'mu_em       = ', fe%rmu(ij)      , ', ',fe%rmu(ik)
+          write(*,'(9X,A,ES12.5,A,ES12.5)') 'sigma_em    = ', fe%sig(ij)      , ', ',fe%sig(ik)
+        end if
+        call comm_sync_all
+      end do
+      call comm_sync_all
+      if(comm_is_root(nproc_id_global)) then
         write(*,*) "**************************"
         do ii=1,obs_num_em
           !set header for point data
@@ -1119,6 +1148,9 @@ contains
       end if
     end if
     
+    !*** deallocate unused variables **************************************************************************!
+    deallocate(fs%imedia,fe%rmedia);
+    
     !*** write start ******************************************************************************************!
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
@@ -1406,6 +1438,28 @@ contains
       
       return
     end subroutine eh_coeff
+    
+    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ allocation in eh-FDTD +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_check_media_type(rep,rmu,sig,cm_type,cm_name)
+      implicit none
+      real(8),       intent(in) :: rep,rmu,sig
+      character(16),intent(in)  :: cm_type
+      character(16),intent(out) :: cm_name
+      
+      select case(cm_type)
+      case ('vacuum')
+        if(rep/=1d0 .or. rmu/=1d0 .or. sig/=0d0) then
+          cm_name = 'constant media'
+        else
+          cm_name = cm_type
+        end if
+      case default
+        cm_name = cm_type
+      end select
+      
+      return
+    end subroutine eh_check_media_type
     
     !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ set pml +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
