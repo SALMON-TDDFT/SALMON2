@@ -19,7 +19,7 @@ http://salmon-tddft.jp/
 
 SALMON is available under Apache License version 2.0.
 
-    Copyright 2017-2021 SALMON developers
+    Copyright 2017-2022 SALMON developers
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
