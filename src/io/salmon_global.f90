@@ -249,8 +249,12 @@ module salmon_global
   character(16)  :: wave_input
   real(8)        :: ek_dir1(3)
   real(8)        :: source_loc1(3)
+  real(8)        :: gbeam_sigma_plane1(3)
+  real(8)        :: gbeam_sigma_line1(3)
   real(8)        :: ek_dir2(3)
   real(8)        :: source_loc2(3)
+  real(8)        :: gbeam_sigma_plane2(3)
+  real(8)        :: gbeam_sigma_line2(3)
   integer        :: obs_num_em
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
