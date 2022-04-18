@@ -406,8 +406,12 @@ contains
       & wave_input,               &
       & ek_dir1,                  &
       & source_loc1,              &
+      & gbeam_sigma_plane1,       &
+      & gbeam_sigma_line1,        &
       & ek_dir2,                  &
       & source_loc2,              &
+      & gbeam_sigma_plane2,       &
+      & gbeam_sigma_line2,        &
       & obs_num_em,               &
       & obs_samp_em,              &
       & obs_loc_em,               &
@@ -759,8 +763,12 @@ contains
     wave_input                  = 'none'
     ek_dir1(:)                  = 0d0
     source_loc1(:)              = 0d0
+    gbeam_sigma_plane1(:)       =-1d0
+    gbeam_sigma_line1(:)        =-1d0
     ek_dir2(:)                  = 0d0
     source_loc2(:)              = 0d0
+    gbeam_sigma_plane2(:)       =-1d0
+    gbeam_sigma_line2(:)        =-1d0
     obs_num_em                  = 0
     obs_samp_em                 = 1
     obs_loc_em(:,:)             = 0d0
@@ -1271,9 +1279,17 @@ contains
     call comm_bcast(ek_dir1                  ,nproc_group_global)
     call comm_bcast(source_loc1              ,nproc_group_global)
     source_loc1 = source_loc1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane1       ,nproc_group_global)
+    gbeam_sigma_plane1 = gbeam_sigma_plane1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line1        ,nproc_group_global)
+    gbeam_sigma_line1 = gbeam_sigma_line1 * ulength_to_au
     call comm_bcast(ek_dir2                  ,nproc_group_global)
     call comm_bcast(source_loc2              ,nproc_group_global)
     source_loc2 = source_loc2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane2       ,nproc_group_global)
+    gbeam_sigma_plane2 = gbeam_sigma_plane2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line2        ,nproc_group_global)
+    gbeam_sigma_line2 = gbeam_sigma_line2 * ulength_to_au
     call comm_bcast(obs_num_em               ,nproc_group_global)
     call comm_bcast(obs_samp_em              ,nproc_group_global)
     call comm_bcast(obs_loc_em               ,nproc_group_global)
@@ -2062,12 +2078,24 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(1)', source_loc1(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(2)', source_loc1(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(3)', source_loc1(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(1)', gbeam_sigma_plane1(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(2)', gbeam_sigma_plane1(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(3)', gbeam_sigma_plane1(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(1)', gbeam_sigma_line1(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(2)', gbeam_sigma_line1(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(3)', gbeam_sigma_line1(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(1)', ek_dir2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(2)', ek_dir2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(3)', ek_dir2(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(1)', gbeam_sigma_plane2(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(2)', gbeam_sigma_plane2(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(3)', gbeam_sigma_plane2(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(1)', gbeam_sigma_line2(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(2)', gbeam_sigma_line2(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(3)', gbeam_sigma_line2(3)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
       if(obs_num_em==0) then

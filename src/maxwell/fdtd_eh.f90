@@ -61,6 +61,10 @@ module fdtd_eh
     integer,allocatable :: inc_po_id(:,:)  !id at incident current source point
     character(16)       :: inc_dist1       !spatial distribution type of inc.
     character(16)       :: inc_dist2       !spatial distribution type of inc.
+    real(8),allocatable :: gbeam_width_xy1(:,:),gbeam_width_yz1(:,:),gbeam_width_xz1(:,:),& !2D beam spot of inc.
+                           gbeam_width_xy2(:,:),gbeam_width_yz2(:,:),gbeam_width_xz2(:,:),& !2D beam spot of inc.
+                           gbeam_width_x1(:),   gbeam_width_y1(:),   gbeam_width_z1(:)   ,& !1D beam spot of inc.
+                           gbeam_width_x2(:),   gbeam_width_y2(:),   gbeam_width_z2(:)      !1D beam spot of inc.
     real(8)             :: c2_inc1_xyz(3)  !coeff. for inc.1, xyz(1:3) means propa. direc. of the inc.
     real(8)             :: c2_inc2_xyz(3)  !coeff. for inc.2, xyz(1:3) means propa. direc. of the inc.
     real(8),allocatable :: ex_y(:,:,:),c1_ex_y(:,:,:),c2_ex_y(:,:,:),ex_z(:,:,:),c1_ex_z(:,:,:),c2_ex_z(:,:,:) !e
@@ -121,15 +125,15 @@ contains
   != initialize eh-FDTD ======================================================================
   subroutine eh_init(fs,fe)
     use salmon_global,   only: nt_em,al_em,dl_em,num_rgrid_em,dt_em,boundary_em,yn_periodic,base_directory,&
-                               media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
-                               pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
-                               obs_num_em,obs_loc_em,obs_plane_ene_em,yn_obs_plane_integral_em,&
-                               media_id_pml,media_id_source1,media_id_source2,&
-                               wave_input,trans_longi,e_impulse,nenergy,&
-                               source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
-                               phi_cep1,I_wcm2_1,E_amplitude1,&
-                               source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
-                               phi_cep2,I_wcm2_2,E_amplitude2,&
+                               media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,                  &
+                               pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
+                               obs_num_em,obs_loc_em,obs_plane_ene_em,yn_obs_plane_integral_em,            &
+                               media_id_pml,media_id_source1,media_id_source2,                             &
+                               wave_input,trans_longi,e_impulse,nenergy,                                   &
+                               source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,                          &
+                               phi_cep1,I_wcm2_1,E_amplitude1,gbeam_sigma_plane1,gbeam_sigma_line1,        &
+                               source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,                          &
+                               phi_cep2,I_wcm2_2,E_amplitude2,gbeam_sigma_plane2,gbeam_sigma_line2,        &
                                bloch_k_em,bloch_real_imag_em,yn_make_shape
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
@@ -730,6 +734,7 @@ contains
           write(*,*) "Observation points are placed at"
         end if
       end if
+      call comm_sync_all
       do ii=1,obs_num_em
         if(fe%iobs_po_pe(ii)==1) then
           !coordinate
@@ -930,6 +935,32 @@ contains
           call eh_check_iw_parameter(ii,phi_cep2,I_wcm2_2,E_amplitude2,ae_shape2)
         end select
       end if
+      
+      !set gauss function used for beam spot
+      allocate( fe%gbeam_width_xy1(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2)), &
+                fe%gbeam_width_xy2(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2)), &
+                fe%gbeam_width_yz1(fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3)), &
+                fe%gbeam_width_yz2(fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3)), &
+                fe%gbeam_width_xz1(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(3):fs%mg%ie_array(3)), &
+                fe%gbeam_width_xz2(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(3):fs%mg%ie_array(3)) )
+      allocate( fe%gbeam_width_x1( fs%mg%is_array(1):fs%mg%ie_array(1) ), &
+                fe%gbeam_width_x2( fs%mg%is_array(1):fs%mg%ie_array(1) ), &
+                fe%gbeam_width_y1( fs%mg%is_array(2):fs%mg%ie_array(2) ), &
+                fe%gbeam_width_y2( fs%mg%is_array(2):fs%mg%ie_array(2) ), &
+                fe%gbeam_width_z1( fs%mg%is_array(3):fs%mg%ie_array(3) ), &
+                fe%gbeam_width_z2( fs%mg%is_array(3):fs%mg%ie_array(3) ) )
+      fe%gbeam_width_xy1(:,:) = 1.0d0; fe%gbeam_width_xy2(:,:) = 1.0d0;
+      fe%gbeam_width_yz1(:,:) = 1.0d0; fe%gbeam_width_yz2(:,:) = 1.0d0;
+      fe%gbeam_width_xz1(:,:) = 1.0d0; fe%gbeam_width_xz2(:,:) = 1.0d0;
+      fe%gbeam_width_x1(:)    = 1.0d0; fe%gbeam_width_x2(:)    = 1.0d0; 
+      fe%gbeam_width_y1(:)    = 1.0d0; fe%gbeam_width_y2(:)    = 1.0d0; 
+      fe%gbeam_width_z1(:)    = 1.0d0; fe%gbeam_width_z2(:)    = 1.0d0; 
+      call eh_make_gauss(source_loc1(:),gbeam_sigma_plane1,gbeam_sigma_line1,      &
+                         fe%gbeam_width_xy1,fe%gbeam_width_yz1,fe%gbeam_width_xz1, &
+                         fe%gbeam_width_x1 ,fe%gbeam_width_y1 ,fe%gbeam_width_z1  )
+      call eh_make_gauss(source_loc2(:),gbeam_sigma_plane2,gbeam_sigma_line2,      &
+                         fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
+                         fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2  )
       
       !write information
       if(comm_is_root(nproc_id_global)) then
@@ -1784,6 +1815,74 @@ contains
       return
     end subroutine eh_check_iw_parameter
     
+    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ make gauss function used for beam spot ++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_make_gauss(rloc,s_p,s_l,g_xy,g_yz,g_xz,g_x,g_y,g_z)
+      implicit none
+      real(8), intent(in)  :: rloc(3),s_p(3),s_l(3)
+      real(8), intent(out) :: g_xy(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2)),&
+                              g_yz(fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                              g_xz(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8), intent(out) :: g_x( fs%mg%is_array(1):fs%mg%ie_array(1) ),&
+                              g_y( fs%mg%is_array(2):fs%mg%ie_array(2) ),&
+                              g_z( fs%mg%is_array(3):fs%mg%ie_array(3) )
+      integer :: i1s,i2s,i1,i2
+      real(8) :: rtmp,gtmp
+      
+      !make 2D(plane) gauss function
+      do ii=1,3
+        if    (ii==1) then !xy
+          i1s=1; i2s=2;
+        elseif(ii==2) then !yz
+          i1s=2; i2s=3;
+        elseif(ii==3) then !xz
+          i1s=1; i2s=3;
+        end if
+        if(s_p(ii)>0.0d0) then
+          do i2=fs%mg%is_array(i2s),fs%mg%ie_array(i2s)
+          do i1=fs%mg%is_array(i1s),fs%mg%ie_array(i1s)
+            rtmp = sqrt( (fe%coo(i1,i1s)-rloc(i1s))**2.0d0 &
+                        +(fe%coo(i2,i2s)-rloc(i2s))**2.0d0 )
+            gtmp = exp( -0.5d0*((rtmp/s_p(ii))**2.0d0) )
+            if    (ii==1) then !xy
+              g_xy(i1,i2) = gtmp
+            elseif(ii==2) then !yz
+              g_yz(i1,i2) = gtmp
+            elseif(ii==3) then !xz
+              g_xz(i1,i2) = gtmp
+            end if
+          end do
+          end do
+        end if
+      end do
+      
+      !make 1D(line) gauss function
+      do ii=1,3
+        if    (ii==1) then !x
+          i1s=1;
+        elseif(ii==2) then !y
+          i1s=2;
+        elseif(ii==3) then !z
+          i1s=3;
+        end if
+        if(s_l(ii)>0.0d0) then
+          do i1=fs%mg%is_array(i1s),fs%mg%ie_array(i1s)
+            rtmp = sqrt( (fe%coo(i1,i1s)-rloc(i1s))**2.0d0 )
+            gtmp = exp( -0.5d0*((rtmp/s_l(ii))**2.0d0) )
+            if    (ii==1) then !x
+              g_x(i1) = gtmp
+            elseif(ii==2) then !y
+              g_y(i1) = gtmp
+            elseif(ii==3) then !z
+              g_z(i1) = gtmp
+            end if
+          end do
+        end if
+      end do
+      
+      return
+    end subroutine eh_make_gauss
+    
   end subroutine eh_init
   
   !===========================================================================================
@@ -1839,10 +1938,14 @@ contains
       call eh_fd(fe%iez_y_is,fe%iez_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ez_y,fe%c2_ez_y,fe%ez_y,fe%hx_y,fe%hx_z,'e','y',cb_y = fe%c_hbloch_y) !ez_y
       if(fe%inc_num>0) then !add incident current source
-        if(fe%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,&
-                                                    epdir_re1,epdir_im1,fe%c2_inc1_xyz,ae_shape1,fe%inc_dist1)
-        if(fe%inc_dist2/='none') call eh_add_inc(2,E_amplitude2,tw2,omega2,phi_cep2,&
-                                                    epdir_re2,epdir_im2,fe%c2_inc2_xyz,ae_shape2,fe%inc_dist2)
+        if(fe%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,                       &
+                                                 epdir_re1,epdir_im1,fe%c2_inc1_xyz,ae_shape1,fe%inc_dist1,&
+                                                 fe%gbeam_width_xy1,fe%gbeam_width_yz1,fe%gbeam_width_xz1, &
+                                                 fe%gbeam_width_x1 ,fe%gbeam_width_y1 ,fe%gbeam_width_z1 )
+        if(fe%inc_dist2/='none') call eh_add_inc(2,E_amplitude2,tw2,omega2,phi_cep2,                       &
+                                                 epdir_re2,epdir_im2,fe%c2_inc2_xyz,ae_shape2,fe%inc_dist2,&
+                                                 fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
+                                                 fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
       if(fe%num_ld>0) then
         call eh_add_curr(fe%rjx_sum_ld(:,:,:),fe%rjy_sum_ld(:,:,:),fe%rjz_sum_ld(:,:,:))
@@ -2236,12 +2339,19 @@ contains
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ add incident current source +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine eh_add_inc(iord,amp,tw,omega,cep,ep_r,ep_i,c2_inc_xyz,aes,typ)
+    subroutine eh_add_inc(iord,amp,tw,omega,cep,ep_r,ep_i,c2_inc_xyz,aes,typ,&
+                          g_xy,g_yz,g_xz,g_x,g_y,g_z)
       implicit none
-      integer,intent(in)       :: iord
-      real(8),intent(in)       :: amp,tw,omega,cep
-      real(8),intent(in)       :: ep_r(3),ep_i(3),c2_inc_xyz(3)
+      integer,      intent(in) :: iord
+      real(8),      intent(in) :: amp,tw,omega,cep
+      real(8),      intent(in) :: ep_r(3),ep_i(3),c2_inc_xyz(3)
       character(16),intent(in) :: aes,typ
+      real(8),      intent(in) :: g_xy(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2)),&
+                                  g_yz(fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                                  g_xz(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8),      intent(in) :: g_x( fs%mg%is_array(1):fs%mg%ie_array(1) ),&
+                                  g_y( fs%mg%is_array(2):fs%mg%ie_array(2) ),&
+                                  g_z( fs%mg%is_array(3):fs%mg%ie_array(3) )
       real(8)                  :: t_sta,t,theta1,theta2_r,theta2_i,alpha,beta,gamma,tf_r,tf_i
       real(8)                  :: add_inc(3)
       
@@ -2363,7 +2473,7 @@ contains
 !$omp do private(ix,iy)
           do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
           do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
-            fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(1)
+            fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(1)*g_xy(ix,iy)*g_x(ix)*g_y(iy)
           end do
           end do
 !$omp end do
@@ -2372,7 +2482,7 @@ contains
 !$omp do private(ix,iy)
           do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
           do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
-            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)
+            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)*g_xy(ix,iy)*g_x(ix)*g_y(iy)
           end do
           end do
 !$omp end do
@@ -2385,7 +2495,7 @@ contains
 !$omp do private(iy,iz)
           do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
           do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
-            fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(2)
+            fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(2)*g_yz(iy,iz)*g_y(iy)*g_z(iz)
           end do
           end do
 !$omp end do
@@ -2394,7 +2504,7 @@ contains
 !$omp do private(iy,iz)
           do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
           do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
-            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)
+            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)*g_yz(iy,iz)*g_y(iy)*g_z(iz)
           end do
           end do
 !$omp end do
@@ -2407,7 +2517,7 @@ contains
 !$omp do private(ix,iz)
           do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
           do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
-            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(1)
+            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(1)*g_xz(ix,iz)*g_x(ix)*g_z(iz)
           end do
           end do
 !$omp end do
@@ -2416,7 +2526,7 @@ contains
 !$omp do private(ix,iz)
           do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
           do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
-            fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)
+            fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)*g_xz(ix,iz)*g_x(ix)*g_z(iz)
           end do
           end do
 !$omp end do
