@@ -497,7 +497,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
        call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"new")
        call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
-
+    
+  else if(yn_out_micro_je=='y') then
+  ! not single-scale but output microscopic current rt%j_e
+    call allocate_vector(mg,rt%j_e)
   end if
 
   !-------------------------------------------------- Time evolution
