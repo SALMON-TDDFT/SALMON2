@@ -136,6 +136,8 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,system)
       write(fp,*) "y Component of Static Electric Field"
     else if(phys_quantity=="ezsta")then
       write(fp,*) "z Component of Static Electric Field"
+    else
+      write(fp,*) phys_quantity
     end if
     write(fp,*) "All values here are in a.u."
     write(fp,'(i5,3f12.6)') natom,lg%coordinate(lg%is(1),1),lg%coordinate(lg%is(2),2),lg%coordinate(lg%is(3),3)

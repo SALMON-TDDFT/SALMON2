@@ -457,8 +457,10 @@ contains
       & yn_out_dns, &
       & yn_out_dns_rt, &
       & yn_out_dns_ac_je, &
+      & yn_out_micro_je, &
       & out_dns_rt_step, &
       & out_dns_ac_je_step, &
+      & out_micro_je_step, &
       & out_old_dns, &
       & yn_out_dns_trans, &
       & out_dns_trans_energy, &
@@ -813,8 +815,10 @@ contains
     yn_out_dns          = 'n'
     yn_out_dns_rt       = 'n'
     yn_out_dns_ac_je    = 'n'
+    yn_out_micro_je     = 'n'
     out_dns_rt_step     = 50
     out_dns_ac_je_step  = 50
+    out_micro_je_step   = 50
     out_old_dns         = 'n'
     yn_out_dns_trans    = 'n'
     out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
@@ -1344,8 +1348,10 @@ contains
     call comm_bcast(yn_out_dns          ,nproc_group_global)
     call comm_bcast(yn_out_dns_rt       ,nproc_group_global)
     call comm_bcast(yn_out_dns_ac_je    ,nproc_group_global)
+    call comm_bcast(yn_out_micro_je     ,nproc_group_global)
     call comm_bcast(out_dns_rt_step     ,nproc_group_global)
     call comm_bcast(out_dns_ac_je_step  ,nproc_group_global)
+    call comm_bcast(out_micro_je_step   ,nproc_group_global)
     call comm_bcast(out_old_dns         ,nproc_group_global)
     call comm_bcast(yn_out_dns_trans    ,nproc_group_global)
     call comm_bcast(out_dns_trans_energy,nproc_group_global)
@@ -2177,8 +2183,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_micro_je', yn_out_micro_je
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_ac_je_step', out_dns_ac_je_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_micro_je_step', out_micro_je_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
@@ -2348,6 +2356,7 @@ contains
     call yn_argument_check(yn_out_dns)
     call yn_argument_check(yn_out_dns_rt)
     call yn_argument_check(yn_out_dns_ac_je)
+    call yn_argument_check(yn_out_micro_je)
     call yn_argument_check(yn_out_dns_trans)
     call yn_argument_check(yn_out_elf)
     call yn_argument_check(yn_out_elf_rt)
