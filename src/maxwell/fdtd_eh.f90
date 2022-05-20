@@ -2166,7 +2166,7 @@ contains
       
       !initialize
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2182,7 +2182,7 @@ contains
       do ii=1,fe%num_ld
       do ij=1,pole_num_ld(fe%media_ld(ii))
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2204,7 +2204,7 @@ contains
       do ii=1,fe%num_ld
       do ij=1,pole_num_ld(fe%media_ld(ii))
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2248,7 +2248,7 @@ contains
       if(yn_periodic=='n') then
         !initialize polarization vector
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2262,7 +2262,7 @@ contains
         !add all polarization vector
         if(fe%num_ld>0) then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
           do iz=fs%mg%is(3),fs%mg%ie(3)
           do iy=fs%mg%is(2),fs%mg%ie(2)
           do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2280,7 +2280,7 @@ contains
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
-!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+!$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2298,7 +2298,7 @@ contains
       elseif(yn_periodic=='y') then
         !initialize current density
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2312,7 +2312,7 @@ contains
         !add all current density
         if(fe%num_ld>0) then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
           do iz=fs%mg%is(3),fs%mg%ie(3)
           do iy=fs%mg%is(2),fs%mg%ie(2)
           do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2330,7 +2330,7 @@ contains
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
-!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+!$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2351,7 +2351,7 @@ contains
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
-!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+!$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2591,7 +2591,7 @@ contains
       
       !ex
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
       do iy=fe%iex_y_is(2),fe%iex_y_ie(2)
       do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
@@ -2602,7 +2602,7 @@ contains
 !$omp end do
 !$omp end parallel
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iex_z_is(3),fe%iex_z_ie(3)
       do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
       do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
@@ -2615,7 +2615,7 @@ contains
       
       !ey
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iey_z_is(3),fe%iey_z_ie(3)
       do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
       do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
@@ -2626,7 +2626,7 @@ contains
 !$omp end do
 !$omp end parallel
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
       do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
       do ix=fe%iey_x_is(1),fe%iey_x_ie(1)
@@ -2639,7 +2639,7 @@ contains
       
       !ez
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
       do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
       do ix=fe%iez_x_is(1),fe%iez_x_ie(1)
@@ -2650,7 +2650,7 @@ contains
 !$omp end do
 !$omp end parallel
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
       do iy=fe%iez_y_is(2),fe%iez_y_ie(2)
       do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
@@ -3137,11 +3137,12 @@ contains
   end subroutine eh_finalize
   
   !===========================================================================================
-  != prepare mpi, grid, and sendrecv enviroments==============================================
+  != prepare mpi, grid, and sendrecv enviroments =============================================
   subroutine eh_mpi_grid_sr(fs,fe)
     use salmon_global,     only: nproc_rgrid,nproc_k,nproc_ob
-    use parallelization,   only: nproc_group_global
-    use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
+    use parallelization,   only: nproc_id_global,nproc_group_global
+    use communication,     only: comm_bcast,comm_is_root
+    use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution,check_numcpu
     use init_communicator, only: init_communicator_dft
     use sendrecv_grid,     only: create_sendrecv_neig,init_sendrecv_grid
     use structures,        only: s_fdtd_system, s_parallel_info
@@ -3152,6 +3153,7 @@ contains
     type(s_parallel_info)             :: info
     integer                           :: neig_ng_eh(1:2,1:3)
     integer                           :: ii
+    logical                           :: if_stop
     
     !set mpi condition
     if((nproc_k==0).and.(nproc_ob==0).and.(sum(nproc_rgrid(:))==0)) then
@@ -3160,6 +3162,20 @@ contains
       info%npk       = nproc_k
       info%nporbital = nproc_ob
       info%nprgrid   = nproc_rgrid
+    end if
+    if (comm_is_root(nproc_id_global)) then
+      if_stop = .not. check_numcpu(nproc_group_global,info)
+    end if
+    call comm_bcast(if_stop,nproc_group_global)
+    if (if_stop) stop 'fail: check_numcpu'
+    if(comm_is_root(nproc_id_global)) then
+      write(*,*)
+      write(*,*) "**************************"
+      write(*,*) "Parallelization information:"
+      write(*,*) "nproc_k          =",info%npk
+      write(*,*) "nproc_ob         =",info%nporbital
+      write(*,*) "nproc_rgrid(1:3) =",info%nprgrid(1),info%nprgrid(2),info%nprgrid(3)
+      write(*,*) "**************************"
     end if
     call init_communicator_dft(nproc_group_global,info)
     
@@ -3243,7 +3259,7 @@ contains
       
       !spatially adjust e for save
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3260,7 +3276,7 @@ contains
       
       !spatially adjust h for save
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3278,7 +3294,7 @@ contains
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s)
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3330,7 +3346,7 @@ contains
     if(var=='e') then
       if(dir=='x') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3344,7 +3360,7 @@ contains
 !$omp end parallel
       elseif(dir=='y') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3358,7 +3374,7 @@ contains
 !$omp end parallel
       elseif(dir=='z') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3374,7 +3390,7 @@ contains
     elseif(var=='h') then
       if(dir=='x') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3388,7 +3404,7 @@ contains
 !$omp end parallel
       elseif(dir=='y') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3402,7 +3418,7 @@ contains
 !$omp end parallel
       elseif(dir=='z') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3436,9 +3452,9 @@ contains
                                  ng_is(3)-Nd:ng_ie(3)+Nd)
     character(2),intent(in) :: var
     real(8),allocatable     :: save_pl(:,:),save_pl2(:,:)
-    integer          :: ii,inum,i1,i1s,i2,i2s
-    character(2)     :: plane_name
-    character(256)   :: iobs_name,iter_name,save_name
+    integer                 :: ii,inum,i1,i1s,i2,i2s
+    character(2)            :: plane_name
+    character(256)          :: iobs_name,iter_name,save_name
     
     do ii=1,3
       !allocate
