@@ -84,8 +84,8 @@ module fdtd_eh
     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)                !coeff. for general curr. dens.
     integer             :: num_ld                                                !LD: number of LD media
     integer             :: max_pole_num_ld                                       !LD: maximum of pole_num_ld
-    integer,allocatable :: media_ld(:)                                           !LD: imedia number for drude model
-                                                                                 !    (media id)
+    integer,allocatable :: media_ld(:)                                           !LD: imedia number for LD model
+                                                                                 !    (num_ld)
     integer,allocatable :: idx_ld(:,:,:,:),idy_ld(:,:,:,:),idz_ld(:,:,:,:)       !LD: id for each component
                                                                                  !    (x,y,z,num_ld)
     real(8),allocatable :: rjx_ld(:,:,:,:,:),rjy_ld(:,:,:,:,:),rjz_ld(:,:,:,:,:) !LD: poparization current density J
@@ -134,25 +134,26 @@ contains
                                phi_cep1,I_wcm2_1,E_amplitude1,gbeam_sigma_plane1,gbeam_sigma_line1,        &
                                source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,                          &
                                phi_cep2,I_wcm2_2,E_amplitude2,gbeam_sigma_plane2,gbeam_sigma_line2,        &
-                               bloch_k_em,bloch_real_imag_em,yn_make_shape
+                               bloch_k_em,bloch_real_imag_em,yn_make_shape,yn_output_shape
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global
     use communication,   only: comm_is_root,comm_bcast,comm_sync_all
     use structures,      only: s_fdtd_system
+    use misc_routines,   only: get_wtime
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
-    use common_maxwell,  only: set_coo_em,find_point_em,input_shape_em
-    use ttm           ,  only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
+    use common_maxwell,  only: set_coo_em,find_point_em,make_shape_em,input_i3d_em,output_i3d_em
+    use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
-    real(8)                           :: dt_cfl
+    real(8)                           :: dt_cfl,elapsed_time
     character(1)                      :: dir
     character(2)                      :: plane_name
     character(16)                     :: tmp_name1,tmp_name2
-    character(128)                    :: save_name
+    character(256)                    :: save_name
     
     !*** set initial parameter and value **********************************************************************!
     fe%Nd        = 1
@@ -204,14 +205,16 @@ contains
         fs%a_bc(ii,ij) = 'pml'
         iflag_pml      = 1
       case('pec')
-        if(comm_is_root(nproc_id_global).and.(yn_periodic=='y')) &
-        write(*,*) "For yn_periodic = y, boundary_em must be default or abc."
-        stop
+        if(comm_is_root(nproc_id_global).and.(yn_periodic=='y')) then
+          write(*,*) "For yn_periodic = y, boundary_em must be default, periodic or abc."
+          stop
+        end if
         fs%a_bc(ii,ij) = 'pec'
       case('periodic')
-        if(comm_is_root(nproc_id_global).and.(yn_periodic=='n')) &
-        write(*,*) "For yn_periodic = n, boundary_em must be default, abc, or pec."
-        stop
+        if(comm_is_root(nproc_id_global).and.(yn_periodic=='n')) then
+          write(*,*) "For yn_periodic = n, boundary_em must be default, abc, or pec."
+          stop
+        end if
       end select
     end do
     end do
@@ -221,7 +224,7 @@ contains
       fe%uAperm_from_au=1.0d0
     case('A_eV_fs')
       !see E_amplitude1 or E_amplitude2 in src/io/iunputoutput.f90
-      fe%uVperm_from_au=1/(uenergy_to_au/ulength_to_au/ucharge_to_au)
+      fe%uVperm_from_au=1.0d0/(uenergy_to_au/ulength_to_au/ucharge_to_au)
       fe%uAperm_from_au=fe%uVperm_from_au
     end select
     
@@ -235,49 +238,58 @@ contains
       else
         fe%ioddeven(ii)=2
       end if
-    end do 
+    end do
     allocate(fe%coo(minval(fs%lg%is(:))-fe%Nd:maxval(fs%lg%ie(:))+fe%Nd,3))
     call set_coo_em(fe%Nd,fe%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fe%coo(:,:),yn_periodic)
     
-    !*** make or input fdtd shape *****************************************************************************!
+    !*** make or input shape data *****************************************************************************!
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i3d',i3d=fs%imedia)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rmedia)
     if(media_num>0) then
       if(comm_is_root(nproc_id_global)) write(*,*)
       if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
+      elapsed_time=get_wtime()
       
       !make or input
       if(yn_make_shape=='y') then
-        !make input file
-        call eh_make_shape(fs,fe)
+        !make shape data
         if(comm_is_root(nproc_id_global)) then
-          write(*,*) "shape file is made by input keywords."
+          write(*,*) "shape data is made by input keywords."
+        end if
+        call make_shape_em(fs%mg,fs%lg,fs%rlsize(:),fs%imedia,fe%Nd,fe%coo(:,:))
+        if(yn_output_shape=='y') then
+          save_name = trim(adjustl(base_directory))//'/shape'
+          call output_i3d_em(fs%mg,fs%lg,600,1,fs%imedia,'cu',save_name,fe%Nd,fe%coo(:,:))
         end if
       elseif(yn_make_shape=='n') then
-        !check file format and input shape file
+        !check file format and input shape data
         if(index(shape_file,".cube", back=.true.)/=0) then
           if(comm_is_root(nproc_id_global)) then
-            write(*,*) "shape file is inputed by .cube format."
+            write(*,*) "shape data is inputed by .cube format."
           end if
-          call input_shape_em(shape_file,fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
+          call input_i3d_em(shape_file,fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
         elseif(index(shape_file,".mp", back=.true.)/=0) then
           if(comm_is_root(nproc_id_global)) then
-            write(*,*) "shape file is inputed by .mp format."
+            write(*,*) "shape data is inputed by .mp format."
             write(*,*) "This version works for only .cube format.."
           end if
           stop
         else
           if(comm_is_root(nproc_id_global)) then
-            write(*,*) "shape file must be .cube or .mp formats."
+            write(*,*) "shape data must be .cube or .mp formats."
           end if
           stop
         end if
       end if
       
-      !send and receive for shape file
+      !send and receive for shape data
       fe%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
       call eh_sendrecv(fs,fe,'r')
       fs%imedia(:,:,:)=int(fe%rmedia(:,:,:)+1d-3)
+      elapsed_time=get_wtime()-elapsed_time
+      if(comm_is_root(nproc_id_global)) then
+        write(*,'(A,f16.8)') " elapsed time for making shape data [s] = ", elapsed_time
+      end if
       if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
     end if
     
@@ -285,6 +297,7 @@ contains
     dt_cfl=1.0d0/( &
            cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
            )
+    if(comm_is_root(nproc_id_global)) write(*,*)
     if(dt_em==0.0d0) then
       dt_em=dt_cfl*0.99d0
       if(comm_is_root(nproc_id_global)) then
@@ -300,6 +313,7 @@ contains
         write(*,*) "in the unit system, ",trim(unit_system),"."
         write(*,*) "**************************"
       end if
+      call comm_sync_all
       stop
     else
       if(comm_is_root(nproc_id_global)) then
@@ -379,7 +393,7 @@ contains
         end select
       end do
       
-      !reset counter
+      !reset LD counter
       icount_ld=1
       
       !allocate Lorentz-Drude variables
@@ -413,7 +427,7 @@ contains
     do ii=0,media_num
       call eh_coeff
     end do
-
+    
     !*** check TTM On/Off, and initialization *****************************************************************!
     call init_ttm_parameters( dt_em )
     if( use_ttm )then
@@ -487,32 +501,56 @@ contains
     fe%ihy_x_is(:)=fs%mg%is(:); fe%ihy_x_ie(:)=fs%mg%ie(:);
     fe%ihz_x_is(:)=fs%mg%is(:); fe%ihz_x_ie(:)=fs%mg%ie(:);
     fe%ihz_y_is(:)=fs%mg%is(:); fe%ihz_y_ie(:)=fs%mg%ie(:);
-    if((fs%a_bc(1,1)=='pml').and.(fs%mg%is(1)==fs%lg%is(1))) then !x, bottom
+    if(((fs%a_bc(1,1)=='pml').or.(fs%a_bc(1,1)=='pec')).and.(fs%mg%is(1)==fs%lg%is(1))) then !x, bottom
       fe%iey_x_is(1)=fs%mg%is(1)+1; fe%iez_x_is(1)=fs%mg%is(1)+1;
+      if(fs%a_bc(1,1)=='pec') then
+        fe%iey_z_is(1)=fs%mg%is(1)+1; fe%iez_y_is(1)=fs%mg%is(1)+1;
+        fe%ihx_y_is(1)=fs%mg%is(1)+1; fe%ihx_z_is(1)=fs%mg%is(1)+1;
+      end if
     end if
-    if((fs%a_bc(1,2)=='pml').and.(fs%mg%ie(1)==fs%lg%ie(1))) then !x, top
-      fe%iex_y_ie(1)=fs%mg%ie(1)-1; fe%iex_z_ie(1)=fs%mg%ie(1)-1;
+    if(((fs%a_bc(1,2)=='pml').or.(fs%a_bc(1,2)=='pec')).and.(fs%mg%ie(1)==fs%lg%ie(1))) then !x, top
       fe%iey_x_ie(1)=fs%mg%ie(1)-1; fe%iez_x_ie(1)=fs%mg%ie(1)-1;
+      fe%iex_y_ie(1)=fs%mg%ie(1)-1; fe%iex_z_ie(1)=fs%mg%ie(1)-1;
       fe%ihy_z_ie(1)=fs%mg%ie(1)-1; fe%ihy_x_ie(1)=fs%mg%ie(1)-1;
       fe%ihz_x_ie(1)=fs%mg%ie(1)-1; fe%ihz_y_ie(1)=fs%mg%ie(1)-1;
+      if(fs%a_bc(1,2)=='pec') then
+        fe%iey_z_ie(1)=fs%mg%ie(1)-1; fe%iez_y_ie(1)=fs%mg%ie(1)-1;
+        fe%ihx_y_ie(1)=fs%mg%ie(1)-1; fe%ihx_z_ie(1)=fs%mg%ie(1)-1;
+      end if
     end if
-    if((fs%a_bc(2,1)=='pml').and.(fs%mg%is(2)==fs%lg%is(2))) then !y, bottom
+    if(((fs%a_bc(2,1)=='pml').or.(fs%a_bc(2,1)=='pec')).and.(fs%mg%is(2)==fs%lg%is(2))) then !y, bottom
       fe%iex_y_is(2)=fs%mg%is(2)+1; fe%iez_y_is(2)=fs%mg%is(2)+1;
+      if(fs%a_bc(2,1)=='pec') then
+        fe%iex_z_is(2)=fs%mg%is(2)+1; fe%iez_x_is(2)=fs%mg%is(2)+1;
+        fe%ihy_x_is(2)=fs%mg%is(2)+1; fe%ihy_z_is(2)=fs%mg%is(2)+1;
+      end if
     end if
-    if((fs%a_bc(2,2)=='pml').and.(fs%mg%ie(2)==fs%lg%ie(2))) then !y, top
-      fe%iex_y_ie(2)=fs%mg%ie(2)-1; fe%iey_z_ie(2)=fs%mg%ie(2)-1;
-      fe%iey_x_ie(2)=fs%mg%ie(2)-1; fe%iez_y_ie(2)=fs%mg%ie(2)-1;
+    if(((fs%a_bc(2,2)=='pml').or.(fs%a_bc(2,2)=='pec')).and.(fs%mg%ie(2)==fs%lg%ie(2))) then !y, top
+      fe%iex_y_ie(2)=fs%mg%ie(2)-1; fe%iez_y_ie(2)=fs%mg%ie(2)-1;
+      fe%iey_z_ie(2)=fs%mg%ie(2)-1; fe%iey_x_ie(2)=fs%mg%ie(2)-1;
       fe%ihx_y_ie(2)=fs%mg%ie(2)-1; fe%ihx_z_ie(2)=fs%mg%ie(2)-1;
       fe%ihz_x_ie(2)=fs%mg%ie(2)-1; fe%ihz_y_ie(2)=fs%mg%ie(2)-1;
+      if(fs%a_bc(2,2)=='pec') then
+        fe%iex_z_ie(2)=fs%mg%ie(2)-1; fe%iez_x_ie(2)=fs%mg%ie(2)-1;
+        fe%ihy_x_ie(2)=fs%mg%ie(2)-1; fe%ihy_z_ie(2)=fs%mg%ie(2)-1;
+      end if
     end if
-    if((fs%a_bc(3,1)=='pml').and.(fs%mg%is(3)==fs%lg%is(3))) then !z, bottom
+    if(((fs%a_bc(3,1)=='pml').or.(fs%a_bc(3,1)=='pec')).and.(fs%mg%is(3)==fs%lg%is(3))) then !z, bottom
       fe%iex_z_is(3)=fs%mg%is(3)+1; fe%iey_z_is(3)=fs%mg%is(3)+1;
+      if(fs%a_bc(3,1)=='pec') then
+        fe%iex_y_is(3)=fs%mg%is(3)+1; fe%iey_x_is(3)=fs%mg%is(3)+1;
+        fe%ihz_x_is(3)=fs%mg%is(3)+1; fe%ihz_y_is(3)=fs%mg%is(3)+1;
+      end if
     end if
-    if((fs%a_bc(3,2)=='pml').and.(fs%mg%ie(3)==fs%lg%ie(3))) then !z, top
+    if(((fs%a_bc(3,2)=='pml').or.(fs%a_bc(3,2)=='pec')).and.(fs%mg%ie(3)==fs%lg%ie(3))) then !z, top
       fe%iex_z_ie(3)=fs%mg%ie(3)-1; fe%iey_z_ie(3)=fs%mg%ie(3)-1;
       fe%iez_x_ie(3)=fs%mg%ie(3)-1; fe%iez_y_ie(3)=fs%mg%ie(3)-1;
       fe%ihx_y_ie(3)=fs%mg%ie(3)-1; fe%ihx_z_ie(3)=fs%mg%ie(3)-1;
       fe%ihy_z_ie(3)=fs%mg%ie(3)-1; fe%ihy_x_ie(3)=fs%mg%ie(3)-1;
+      if(fs%a_bc(3,2)=='pec') then
+        fe%iex_y_ie(3)=fs%mg%ie(3)-1; fe%iey_x_ie(3)=fs%mg%ie(3)-1;
+        fe%ihz_x_ie(3)=fs%mg%ie(3)-1; fe%ihz_y_ie(3)=fs%mg%ie(3)-1;
+      end if
     end if
     
     !*** set pml **********************************************************************************************!
@@ -1902,9 +1940,9 @@ contains
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: iter,ii,ij,ix,iy,iz
-    character(128)                    :: save_name
+    character(256)                    :: save_name
     !for ttm
-    integer :: jx,jy,jz,unit1=4000
+    integer             :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
@@ -2128,7 +2166,7 @@ contains
       
       !initialize
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2144,7 +2182,7 @@ contains
       do ii=1,fe%num_ld
       do ij=1,pole_num_ld(fe%media_ld(ii))
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2166,7 +2204,7 @@ contains
       do ii=1,fe%num_ld
       do ij=1,pole_num_ld(fe%media_ld(ii))
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2210,7 +2248,7 @@ contains
       if(yn_periodic=='n') then
         !initialize polarization vector
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2224,7 +2262,7 @@ contains
         !add all polarization vector
         if(fe%num_ld>0) then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
           do iz=fs%mg%is(3),fs%mg%ie(3)
           do iy=fs%mg%is(2),fs%mg%ie(2)
           do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2242,7 +2280,7 @@ contains
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
-!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+!$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2260,7 +2298,7 @@ contains
       elseif(yn_periodic=='y') then
         !initialize current density
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2274,7 +2312,7 @@ contains
         !add all current density
         if(fe%num_ld>0) then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
           do iz=fs%mg%is(3),fs%mg%ie(3)
           do iy=fs%mg%is(2),fs%mg%ie(2)
           do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2292,7 +2330,7 @@ contains
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
-!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+!$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2313,7 +2351,7 @@ contains
         sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
-!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+!$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -2553,7 +2591,7 @@ contains
       
       !ex
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
       do iy=fe%iex_y_is(2),fe%iex_y_ie(2)
       do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
@@ -2564,7 +2602,7 @@ contains
 !$omp end do
 !$omp end parallel
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iex_z_is(3),fe%iex_z_ie(3)
       do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
       do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
@@ -2577,7 +2615,7 @@ contains
       
       !ey
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iey_z_is(3),fe%iey_z_ie(3)
       do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
       do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
@@ -2588,7 +2626,7 @@ contains
 !$omp end do
 !$omp end parallel
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
       do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
       do ix=fe%iey_x_is(1),fe%iey_x_ie(1)
@@ -2601,7 +2639,7 @@ contains
       
       !ez
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
       do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
       do ix=fe%iez_x_is(1),fe%iez_x_ie(1)
@@ -2612,7 +2650,7 @@ contains
 !$omp end do
 !$omp end parallel
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
       do iy=fe%iez_y_is(2),fe%iez_y_ie(2)
       do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
@@ -2676,7 +2714,7 @@ contains
     integer                           :: ii,ij,ik,il,i1,i1s,i2,i2s
     complex(8)                        :: z_tmp(3)
     character(2)                      :: plane_name
-    character(128)                    :: iobs_name,iene_name,wf_name,save_name
+    character(256)                    :: iobs_name,iene_name,wf_name,save_name
     
     !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
     if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
@@ -3099,11 +3137,12 @@ contains
   end subroutine eh_finalize
   
   !===========================================================================================
-  != prepare mpi, grid, and sendrecv enviroments==============================================
+  != prepare mpi, grid, and sendrecv enviroments =============================================
   subroutine eh_mpi_grid_sr(fs,fe)
     use salmon_global,     only: nproc_rgrid,nproc_k,nproc_ob
-    use parallelization,   only: nproc_group_global
-    use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
+    use parallelization,   only: nproc_id_global,nproc_group_global
+    use communication,     only: comm_bcast,comm_is_root
+    use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution,check_numcpu
     use init_communicator, only: init_communicator_dft
     use sendrecv_grid,     only: create_sendrecv_neig,init_sendrecv_grid
     use structures,        only: s_fdtd_system, s_parallel_info
@@ -3114,6 +3153,7 @@ contains
     type(s_parallel_info)             :: info
     integer                           :: neig_ng_eh(1:2,1:3)
     integer                           :: ii
+    logical                           :: if_stop
     
     !set mpi condition
     if((nproc_k==0).and.(nproc_ob==0).and.(sum(nproc_rgrid(:))==0)) then
@@ -3122,6 +3162,20 @@ contains
       info%npk       = nproc_k
       info%nporbital = nproc_ob
       info%nprgrid   = nproc_rgrid
+    end if
+    if (comm_is_root(nproc_id_global)) then
+      if_stop = .not. check_numcpu(nproc_group_global,info)
+    end if
+    call comm_bcast(if_stop,nproc_group_global)
+    if (if_stop) stop 'fail: check_numcpu'
+    if(comm_is_root(nproc_id_global)) then
+      write(*,*)
+      write(*,*) "**************************"
+      write(*,*) "Parallelization information:"
+      write(*,*) "nproc_k          =",info%npk
+      write(*,*) "nproc_ob         =",info%nporbital
+      write(*,*) "nproc_rgrid(1:3) =",info%nprgrid(1),info%nprgrid(2),info%nprgrid(3)
+      write(*,*) "**************************"
     end if
     call init_communicator_dft(nproc_group_global,info)
     
@@ -3205,7 +3259,7 @@ contains
       
       !spatially adjust e for save
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3222,7 +3276,7 @@ contains
       
       !spatially adjust h for save
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3240,7 +3294,7 @@ contains
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s)
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
@@ -3292,7 +3346,7 @@ contains
     if(var=='e') then
       if(dir=='x') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3306,7 +3360,7 @@ contains
 !$omp end parallel
       elseif(dir=='y') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3320,7 +3374,7 @@ contains
 !$omp end parallel
       elseif(dir=='z') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3336,7 +3390,7 @@ contains
     elseif(var=='h') then
       if(dir=='x') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3350,7 +3404,7 @@ contains
 !$omp end parallel
       elseif(dir=='y') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3364,7 +3418,7 @@ contains
 !$omp end parallel
       elseif(dir=='z') then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=ista(3),iend(3)
         do iy=ista(2),iend(2)
         do ix=ista(1),iend(1)
@@ -3398,9 +3452,9 @@ contains
                                  ng_is(3)-Nd:ng_ie(3)+Nd)
     character(2),intent(in) :: var
     real(8),allocatable     :: save_pl(:,:),save_pl2(:,:)
-    integer          :: ii,inum,i1,i1s,i2,i2s
-    character(2)     :: plane_name
-    character(128)   :: iobs_name,iter_name,save_name
+    integer                 :: ii,inum,i1,i1s,i2,i2s
+    character(2)            :: plane_name
+    character(256)          :: iobs_name,iter_name,save_name
     
     do ii=1,3
       !allocate
@@ -3511,7 +3565,7 @@ contains
                         px_sum1,px_sum2,py_sum1,py_sum2,pz_sum1,pz_sum2
     integer          :: ii,i1,i1s,i2,i2s
     character(2)     :: plane_name
-    character(128)   :: save_name
+    character(256)   :: save_name
     
     do ii=1,3
       !set plane
@@ -3914,262 +3968,4 @@ contains
 !$omp end parallel
   end subroutine calc_poynting_vector_div
   
-  !===========================================================================================
-  != make shape ==============================================================================
-  subroutine eh_make_shape(fs,fe)
-    use salmon_global,   only: yn_output_shape,n_s,typ_s,id_s,inf_s,ori_s,rot_s,&
-                               yn_copy_x,yn_copy_y,yn_copy_z,rot_type
-    use inputoutput,     only: ulength_from_au
-    use parallelization, only: nproc_id_global,nproc_group_global
-    use communication,   only: comm_is_root,comm_summation
-    use structures,      only: s_fdtd_system
-    use math_constants,  only: pi
-    implicit none
-    type(s_fdtd_system),intent(inout) :: fs
-    type(ls_fdtd_eh),   intent(inout) :: fe
-    integer             :: icopy_num(3),i1d_tmp1(6),i1d_tmp2(6)
-    real(8)             :: rot_s_d(1000,3)
-    real(8),allocatable :: rmove_x(:,:),rmove_y(:,:),rmove_z(:,:)
-    integer(8) :: ii
-    integer    :: ij,ik,ix,iy,iz,ip_x,ip_y,ip_z,il,l_max
-    real(8)    :: x,y,z,x_o,y_o,z_o,x_tmp,y_tmp,z_tmp,adj_err,cal_tmp
-    
-    !convert from degree to radian or keep radian
-    if(trim(rot_type)=='degree') then
-      rot_s_d(:,:) = (rot_s(:,:)/360.0d0) * (2.0d0*pi)
-    else
-      rot_s_d(:,:) = rot_s(:,:)
-    end if
-    
-    !make icopy_num and l_max
-    if    (yn_copy_x=='y') then
-      icopy_num(1) = 3
-    elseif(yn_copy_x=='n') then
-      icopy_num(1) = 1     
-    end if
-    if    (yn_copy_y=='y') then
-      icopy_num(2) = 3
-    elseif(yn_copy_y=='n') then
-      icopy_num(2) = 1     
-    end if
-    if    (yn_copy_z=='y') then
-      icopy_num(3) = 3
-    elseif(yn_copy_z=='n') then
-      icopy_num(3) = 1     
-    end if
-    l_max = icopy_num(1)*icopy_num(2)*icopy_num(3)
-    
-    !make move matrix
-    allocate(rmove_x(n_s,l_max),rmove_y(n_s,l_max),rmove_z(n_s,l_max))
-    do ii=1,n_s
-      il = 1
-      do iz=1,icopy_num(3)
-      do iy=1,icopy_num(2)
-      do ix=1,icopy_num(1)
-        ip_x = ix-1; ip_y = iy-1; ip_z = iz-1;
-        if(yn_copy_x=='y') ip_x = ip_x-1;
-        if(yn_copy_y=='y') ip_y = ip_y-1;
-        if(yn_copy_z=='y') ip_z = ip_z-1;
-        x_tmp = fs%rlsize(1) * dble(ip_x)
-        y_tmp = fs%rlsize(2) * dble(ip_y)
-        z_tmp = fs%rlsize(3) * dble(ip_z)
-        call rotate_x(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),rmove_x(ii,il))
-        call rotate_y(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),rmove_y(ii,il))
-        call rotate_z(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),rmove_z(ii,il))
-        il = il+1
-      end do
-      end do
-      end do
-    end do
-    
-    !set adjust parameter
-    adj_err = 1.0d-6
-    
-    !make shape
-    cal_tmp = 0.0d0
-    do ii=1,n_s
-      do iz=fs%mg%is(3),fs%mg%ie(3)
-      do iy=fs%mg%is(2),fs%mg%ie(2)
-      do ix=fs%mg%is(1),fs%mg%ie(1)
-        !move origin
-        x_tmp = fe%coo(ix,1) - ori_s(ii,1)
-        y_tmp = fe%coo(iy,2) - ori_s(ii,2)
-        z_tmp = fe%coo(iz,3) - ori_s(ii,3)
-        
-        !rotation
-        call rotate_x(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),x_o)
-        call rotate_y(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),y_o)
-        call rotate_z(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),z_o)
-        
-        !copy loop
-        do il=1,l_max
-          !determine point
-          x = x_o + rmove_x(ii,il)
-          y = y_o + rmove_y(ii,il)
-          z = z_o + rmove_z(ii,il)
-          
-          !determine shape
-          if    (trim(typ_s(ii))=='ellipsoid')            then
-            cal_tmp = (x/(inf_s(ii,1)/2.0d0))**2.0d0 + (y/(inf_s(ii,2)/2.0d0))**2.0d0 + (z/(inf_s(ii,3)/2.0d0))**2.0d0
-            if(cal_tmp<=1.0d0) fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='half-ellipsoid')       then
-            cal_tmp = (x/(inf_s(ii,1)/2.0d0))**2.0d0 + (y/(inf_s(ii,2)/2.0d0))**2.0d0 + (z/(inf_s(ii,3)      ))**2.0d0
-            if((cal_tmp<=1.0d0).and.(z>=-adj_err)) fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='elliptic-cylinder')    then
-            cal_tmp = (x/(inf_s(ii,1)/2.0d0))**2.0d0 + (y/(inf_s(ii,2)/2.0d0))**2.0d0
-            if((cal_tmp<=1.0d0).and.(z>=-inf_s(ii,3)/2.0d0).and.(z<=inf_s(ii,3)/2.0d0)) fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='triangular-cylinder')  then
-            if( (x>= -inf_s(ii,1)/2.0d0).and.(x<=inf_s(ii,1)/2.0d0).and.                  &
-                (y>= -inf_s(ii,2)/3.0d0).and.                                             &
-                (y<=( inf_s(ii,2)/(inf_s(ii,1)/2.0d0)*x + inf_s(ii,2)*2.0d0/3.0d0 )).and. &
-                (y<=(-inf_s(ii,2)/(inf_s(ii,1)/2.0d0)*x + inf_s(ii,2)*2.0d0/3.0d0 )).and. &
-                (z>= -inf_s(ii,3)/2.0d0).and.(z<=inf_s(ii,3)/2.0d0) )                     &
-              fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='rectangular-cylinder') then
-            if( (x>=-inf_s(ii,1)/2.0d0).and.(x<=inf_s(ii,1)/2.0d0).and. &
-                (y>=-inf_s(ii,2)/2.0d0).and.(y<=inf_s(ii,2)/2.0d0).and. &
-                (z>=-inf_s(ii,3)/2.0d0).and.(z<=inf_s(ii,3)/2.0d0) )    &
-              fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='elliptic-cone')        then
-            if(inf_s(ii,3)-z/=0.0d0) then 
-              cal_tmp= (x/( inf_s(ii,1)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3) ))**2.0d0 &
-                     + (y/( inf_s(ii,2)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3) ))**2.0d0
-            else
-              cal_tmp=10
-            end if
-            if( (cal_tmp<=1.0d0).and.(z>=-adj_err).and.(z<=inf_s(ii,3)) ) fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='triangular-cone')      then
-            if( (x>= -inf_s(ii,1)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3))        .and. &
-                (x<=  inf_s(ii,1)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3))        .and. &
-                (y>= -inf_s(ii,2)/3.0d0*(inf_s(ii,3)-z)/inf_s(ii,3))        .and. &
-                (y<=( inf_s(ii,2)/(inf_s(ii,1)/2.0d0)*x                           &
-                     +inf_s(ii,2)*2.0d0/3.0d0*(inf_s(ii,3)-z)/inf_s(ii,3) )).and. &
-                (y<=(-inf_s(ii,2)/(inf_s(ii,1)/2.0d0)*x                           &
-                     +inf_s(ii,2)*2.0d0/3.0d0*(inf_s(ii,3)-z)/inf_s(ii,3) )).and. &
-                (z>=-adj_err).and.(z<=inf_s(ii,3)) )                               &
-              fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='rectangular-cone')     then
-            if( (x>= -inf_s(ii,1)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3)).and. &
-                (x<=  inf_s(ii,1)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3)).and. &
-                (y>= -inf_s(ii,2)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3)).and. &
-                (y<=  inf_s(ii,2)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3)).and. &
-                (z>=-adj_err).and.(z<=inf_s(ii,3)) )                      &
-              fs%imedia(ix,iy,iz) = id_s(ii)
-          elseif(trim(typ_s(ii))=='elliptic-ring')        then
-            cal_tmp=(x/(inf_s(ii,1)/2.0d0))**2.0d0 + (y/(inf_s(ii,2)/2.0d0))**2.0d0
-            if((cal_tmp<=1.0d0).and.(z>=-inf_s(ii,3)/2.0d0).and.(z<=inf_s(ii,3)/2.0d0)) then
-              cal_tmp=(x/(inf_s(ii,4)/2.0d0))**2.0d0 + (y/(inf_s(ii,5)/2.0d0))**2.0d0
-              if(cal_tmp>=1.0d0) fs%imedia(ix,iy,iz) = id_s(ii)
-            end if
-          end if
-        end do
-      end do
-      end do
-      end do
-    end do
-    
-    !output cube file
-    if(yn_output_shape=='y') then
-      !open cube file and write basic information
-      if(comm_is_root(nproc_id_global)) then
-        open(fe%ifn,file='./shape.cube')
-        write(fe%ifn,'(1X,A)') "An input shape described in a cube file."
-        write(fe%ifn,'(1X,A)') "A hydrogen atom is used to set the origin of the model."
-        write(fe%ifn,'(i5,3f23.15)') 1,fe%coo(fs%lg%is(1),1)*ulength_from_au, &
-                                       fe%coo(fs%lg%is(2),2)*ulength_from_au, &
-                                       fe%coo(fs%lg%is(3),3)*ulength_from_au
-        write(fe%ifn,'(i5,3f23.15)') fs%lg%num(1),fs%hgs(1)*ulength_from_au,0.0d0,0.0d0
-        write(fe%ifn,'(i5,3f23.15)') fs%lg%num(2),0.0d0,fs%hgs(2)*ulength_from_au,0.0d0
-        write(fe%ifn,'(i5,3f23.15)') fs%lg%num(3),0.0d0,0.0d0,fs%hgs(3)*ulength_from_au
-        write(fe%ifn,'(i5,4f23.15)') 1,1.0d0,0.0d0,0.0d0,0.0d0
-      end if
-      
-      !write 3d data
-      ix=fs%lg%is(1); iy=fs%lg%is(2); iz=fs%lg%is(3);
-      ij=1; i1d_tmp1(:)=0; i1d_tmp2(:)=0;
-      do ii=1,fs%lg%num(1)*fs%lg%num(2)*fs%lg%num(3)
-        !collect data
-        if( fs%mg%is(1)<=ix .and. ix<=fs%mg%ie(1) .and. &
-            fs%mg%is(2)<=iy .and. iy<=fs%mg%ie(2) .and. &
-            fs%mg%is(3)<=iz .and. iz<=fs%mg%ie(3) ) then
-          i1d_tmp1(ij)=fs%imedia(ix,iy,iz)
-        end if
-        
-        !(write data and reset i1d & ij) or (update ij)
-        if(mod(ij,6)==0) then
-          call comm_summation(i1d_tmp1(:),i1d_tmp2(:),6,nproc_group_global)
-          if(comm_is_root(nproc_id_global)) write(fe%ifn,'(6(1X,I2))', advance="yes") i1d_tmp2(:)
-          i1d_tmp1(:)=0; i1d_tmp2(:)=0;
-          ij=1;
-        else
-          ij=ij+1;
-        end if
-        
-        !update iz
-        iz=iz+1;
-        if(iz>fs%lg%ie(3)) iz=fs%lg%is(3);
-        
-        !update iy
-        if(iz==fs%lg%is(3)) iy=iy+1;
-        if(iy>fs%lg%ie(2)) iy=fs%lg%is(2);
-        
-        !update ix
-        if(iz==fs%lg%is(3) .and. iy==fs%lg%is(2)) ix=ix+1;
-        
-        !final output for special case
-        if(ii==fs%lg%num(1)*fs%lg%num(2)*fs%lg%num(3) .and. ij>1) then
-          call comm_summation(i1d_tmp1(:),i1d_tmp2(:),6,nproc_group_global)
-          do ik=1,(ij-1)
-            if(comm_is_root(nproc_id_global)) write(fe%ifn,'(1X,I2)', advance="no") i1d_tmp2(ik)
-          end do
-        end if
-      end do
-      
-      !close file
-      if(comm_is_root(nproc_id_global)) close(fe%ifn)
-    end if
-    
-    return
-  contains
-    
-    !+ CONTAINED IN eh_make_shape ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    !+ rotation around x-axis ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine rotate_x(x_in,y_in,z_in,rot_in,x_out)
-      implicit none
-      real(8),intent(in)  :: x_in,y_in,z_in
-      real(8),intent(in)  :: rot_in(3)
-      real(8),intent(out) :: x_out
-      
-      x_out = cos(rot_in(3))*( cos(rot_in(2))*x_in - sin(rot_in(2))*(cos(rot_in(1))*z_in - sin(rot_in(1))*y_in) ) &
-             +sin(rot_in(3))*( sin(rot_in(1))*z_in + cos(rot_in(1))*y_in )
-      
-    end subroutine rotate_x
-    
-    !+ CONTAINED IN eh_make_shape ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    !+ rotation around y-axis ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine rotate_y(x_in,y_in,z_in,rot_in,y_out)
-      implicit none
-      real(8),intent(in)  :: x_in,y_in,z_in
-      real(8),intent(in)  :: rot_in(3)
-      real(8),intent(out) :: y_out
-      
-      y_out = -sin(rot_in(3))*( cos(rot_in(2))*x_in - sin(rot_in(2))*( cos(rot_in(1))*z_in - sin(rot_in(1))*y_in) ) &
-              +cos(rot_in(3))*( sin(rot_in(1))*z_in + cos(rot_in(1))*y_in )
-      
-    end subroutine rotate_y
-    
-    !+ CONTAINED IN eh_make_shape ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    !+ rotation around z-axis ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine rotate_z(x_in,y_in,z_in,rot_in,z_out)
-      implicit none
-      real(8),intent(in)  :: x_in,y_in,z_in
-      real(8),intent(in)  :: rot_in(3)
-      real(8),intent(out) :: z_out
-      
-      z_out = sin(rot_in(2))*x_in + cos(rot_in(2))*( cos(rot_in(1))*z_in - sin(rot_in(1))*y_in )
-      
-    end subroutine rotate_z
-    
-  end subroutine eh_make_shape
-    
 end module fdtd_eh
