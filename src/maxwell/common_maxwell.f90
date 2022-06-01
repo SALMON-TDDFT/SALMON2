@@ -26,10 +26,12 @@ module common_maxwell
   end type ls_fdtd_work
   
   public :: set_coo_em
-  public :: find_point_em
+  public :: find_point_line_plane_em
+  public :: find_point_id_only_em
   public :: make_shape_em
   public :: input_i3d_em
   public :: output_i3d_em
+  public :: stop_em
   
 contains
   
@@ -69,7 +71,7 @@ contains
   
   !=========================================================================================
   != find point, line, and plane in fdtd ===================================================
-  subroutine find_point_em(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
+  subroutine find_point_line_plane_em(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
     use parallelization, only: nproc_id_global,nproc_size_global,nproc_group_global
     use communication,   only: comm_summation
     implicit none
@@ -155,7 +157,34 @@ contains
     end do
     
     return
-  end subroutine find_point_em
+  end subroutine find_point_line_plane_em
+  
+  !=========================================================================================
+  != find point only in fdtd ===============================================================
+  subroutine find_point_id_only_em(lg,id,Nd,coo,rloc)
+    use structures, only: s_rgrid
+    implicit none
+    type(s_rgrid), intent(in)  :: lg
+    integer,       intent(out) :: id(3)
+    integer,       intent(in)  :: Nd
+    real(8),       intent(in)  :: coo(minval(lg%is(:))-Nd:maxval(lg%ie(:))+Nd,3)
+    real(8),       intent(in)  :: rloc(3)
+    integer :: ii,ij
+    real(8) :: err
+    
+    !find point id
+    do ii=1,3
+      err=1d10
+      do ij=lg%is(ii),lg%ie(ii)
+        if( err > abs(rloc(ii)-coo(ij,ii)) ) then
+          err    = abs(rloc(ii)-coo(ij,ii))
+          id(ii) = ij
+        end if
+      end do
+    end do
+    
+    return
+  end subroutine find_point_id_only_em
   
   !=========================================================================================
   != make shape ============================================================================
@@ -550,5 +579,31 @@ contains
     
     return
   end subroutine output_i3d_em
+  
+  !=========================================================================================
+  != stop EM-analys ========================================================================
+  subroutine stop_em(c1,c2,c3,c4,c5,c6)
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root,comm_sync_all
+    implicit none
+    character(*),intent(in)          :: c1
+    character(*),intent(in),optional :: c2,c3,c4,c5,c6
+    
+    if(comm_is_root(nproc_id_global)) then
+      write(*,*) 
+      write(*,*) "XXXXXX WARNING XXXXXX"
+      write(*,*) c1
+      if( present(c2) ) write(*,*) c2
+      if( present(c3) ) write(*,*) c3
+      if( present(c4) ) write(*,*) c4
+      if( present(c5) ) write(*,*) c5
+      if( present(c6) ) write(*,*) c6
+      write(*,*) "XXXXXXXXXXXXXXXXXXXXX"
+    end if
+    call comm_sync_all
+    stop
+    
+    return
+  end subroutine stop_em
   
 end module common_maxwell

@@ -63,6 +63,7 @@ contains
        if( DISPLAY )then
           write(*,*) "No TTM file ("//ttm_file//")."
           write(*,*) "Two-Temperature Model is not used."
+          write(*,'(a60)') repeat("-",33)//" init_ttm_parameters(end  )"
        end if
        return
     else
