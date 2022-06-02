@@ -290,6 +290,33 @@ contains
     allocate(fe%coo(minval(fs%lg%is(:))-fe%Nd:maxval(fs%lg%ie(:))+fe%Nd,3))
     call set_coo_em(fe%Nd,fe%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fe%coo(:,:),yn_periodic)
     
+    !*** set and check dt *************************************************************************************!
+    dt_cfl=1.0d0/( &
+           cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
+           )
+    if(comm_is_root(nproc_id_global)) write(*,*)
+    if(dt_em==0.0d0) then
+      dt_em=dt_cfl*0.99d0
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*) "**************************"
+        write(*,*) "From CFL condition, dt_em is determined by", dt_em*utime_from_au
+        write(*,*) "in the unit system, ",trim(unit_system),"."
+        write(*,*) "**************************"
+      end if
+    elseif(dt_em>=dt_cfl) then
+      write(tmp_c(1),*) 'To sufficient CFL condition, dt_em must be set smaller than', dt_cfl*utime_from_au
+      write(tmp_c(2),*) 'in the unit system, ',trim(unit_system),'.'
+      call stop_em(trim(adjustl(tmp_c(1))),c2=trim(adjustl(tmp_c(2))))
+    else
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*) "**************************"
+        write(*,*) "dt_em =", dt_em*utime_from_au
+        write(*,*) "in the unit system, ",trim(unit_system),"."
+        write(*,*) "**************************"
+      end if
+    end if
+    call comm_bcast(dt_em,nproc_group_global)
+    
     !*** make or input shape data *****************************************************************************!
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i3d',i3d=fs%imedia)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rmedia)
@@ -334,33 +361,6 @@ contains
       end if
       if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
     end if
-    
-    !*** set and check dt *************************************************************************************!
-    dt_cfl=1.0d0/( &
-           cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
-           )
-    if(comm_is_root(nproc_id_global)) write(*,*)
-    if(dt_em==0.0d0) then
-      dt_em=dt_cfl*0.99d0
-      if(comm_is_root(nproc_id_global)) then
-        write(*,*) "**************************"
-        write(*,*) "From CFL condition, dt_em is determined by", dt_em*utime_from_au
-        write(*,*) "in the unit system, ",trim(unit_system),"."
-        write(*,*) "**************************"
-      end if
-    elseif(dt_em>=dt_cfl) then
-      write(tmp_c(1),*) 'To sufficient CFL condition, dt_em must be set smaller than', dt_cfl*utime_from_au
-      write(tmp_c(2),*) 'in the unit system, ',trim(unit_system),'.'
-      call stop_em(trim(adjustl(tmp_c(1))),c2=trim(adjustl(tmp_c(2))))
-    else
-      if(comm_is_root(nproc_id_global)) then
-        write(*,*) "**************************"
-        write(*,*) "dt_em =", dt_em*utime_from_au
-        write(*,*) "in the unit system, ",trim(unit_system),"."
-        write(*,*) "**************************"
-      end if
-    end if
-    call comm_bcast(dt_em,nproc_group_global)
     
     !*** basic allocation in eh-FDTD **************************************************************************!
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_y)
@@ -956,7 +956,8 @@ contains
       end if
     end if
     
-    !*** check incident current source condition **************************************************************!
+    !*** check and incident current source ********************************************************************!
+    !check condition
     select case(wave_input)
     case('source')
       !check linear response
@@ -982,7 +983,7 @@ contains
       end if
     end select
     
-    !*** prepare incident current source **********************************************************************!
+    !prepare incident current source
     if((fe%inc_dist1=='none').and.(fe%inc_dist2=='none')) then
       fe%inc_num=0
     else
@@ -1277,6 +1278,7 @@ contains
       if(sum(ek_dir2(:))         >0.0d0 ) call stop_em('When ase_num_em > 0, only pulse1 can be used.'    )
       if(trim(ae_shape2)        /='none') call stop_em('When ase_num_em > 0, only pulse1 can be used.'    )
       if(yn_periodic            =='y'   ) call stop_em('When ase_num_em > 0, yn_periodic must be n.'      )
+      if(fe%sig(0)>0.0d0                ) call stop_em('When ase_num_em > 0, sigma_em(0) must be 0.0d0.'  )
       if(ae_shape1=='impulse') then
         call stop_em('When ase_num_em > 0, impulse can not be used.')
       end if
@@ -2995,6 +2997,9 @@ contains
         call eh_calc_polarization_inc(epdir_re1,epdir_im1,e_inc_r,e_inc_i,   &
                                       ex_inc_pa(ii),ey_inc_pa(ii),ez_inc_pa(ii),&
                                       hx_inc_pa(ii),hy_inc_pa(ii),hz_inc_pa(ii),p_axis)
+        hx_inc_pa(ii) = hx_inc_pa(ii)*sqrt(fe%rep(0)/fe%rmu(0))
+        hy_inc_pa(ii) = hy_inc_pa(ii)*sqrt(fe%rep(0)/fe%rmu(0))
+        hz_inc_pa(ii) = hz_inc_pa(ii)*sqrt(fe%rep(0)/fe%rmu(0))
       end do
       
       !calculate incident field on bottom and top
@@ -3004,6 +3009,9 @@ contains
         call eh_calc_polarization_inc(epdir_re1,epdir_im1,e_inc_r,e_inc_i,   &
                                       ex_inc_bt(ibt),ey_inc_bt(ibt),ez_inc_bt(ibt),&
                                       hx_inc_bt(ibt),hy_inc_bt(ibt),hz_inc_bt(ibt),p_axis)
+        hx_inc_bt(ibt) = hx_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+        hy_inc_bt(ibt) = hy_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+        hz_inc_bt(ibt) = hz_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
       end do
       
       !Fourier transformation for incident field
