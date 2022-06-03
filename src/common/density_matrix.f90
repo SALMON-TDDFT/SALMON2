@@ -618,7 +618,7 @@ contains
     type(s_vector)                      :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin,ix,iy,iz
-    real(8) :: kAc(3)
+    real(8) :: k(3)
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
 
     call timer_begin(LOG_MCURRENT_CALC)
@@ -638,9 +638,9 @@ contains
     do io=info%io_s,info%io_e
     do ispin=1,nspin
 
-      kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      k(1:3) = system%vec_k(1:3,ik)
       call micro_current(mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz, &
-      & stencil%coef_nab,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
+      & stencil%coef_nab,k,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
 
 !$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=is(3),ie(3)
@@ -674,11 +674,11 @@ contains
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,tpsi,jw)
+    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,k,tpsi,jw)
       implicit none
       integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3), &
                              & idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
-      real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
+      real(8)   ,intent(in) :: nabt(Nd,3),k(3)
       complex(8),intent(in) :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
@@ -695,7 +695,7 @@ contains
                + nabt(2,1) * ( tpsi(DX(2)) - tpsi(DX(-2)) ) &
                + nabt(3,1) * ( tpsi(DX(3)) - tpsi(DX(-3)) ) &
                + nabt(4,1) * ( tpsi(DX(4)) - tpsi(DX(-4)) )
-          jw(1,ix,iy,iz) = aimag(px*xtmp) + kAc(1) * abs(px)**2
+          jw(1,ix,iy,iz) = aimag(px*xtmp) + k(1) * abs(px)**2
         end do
 
 !OCL swp
@@ -705,7 +705,7 @@ contains
                + nabt(2,2) * ( tpsi(DY(2)) - tpsi(DY(-2)) ) &
                + nabt(3,2) * ( tpsi(DY(3)) - tpsi(DY(-3)) ) &
                + nabt(4,2) * ( tpsi(DY(4)) - tpsi(DY(-4)) )
-          jw(2,ix,iy,iz) = aimag(py*ytmp) + kAc(2) * abs(py)**2
+          jw(2,ix,iy,iz) = aimag(py*ytmp) + k(2) * abs(py)**2
         end do
 
 !OCL swp
@@ -715,7 +715,7 @@ contains
                + nabt(2,3) * ( tpsi(DZ(2)) - tpsi(DZ(-2)) ) &
                + nabt(3,3) * ( tpsi(DZ(3)) - tpsi(DZ(-3)) ) &
                + nabt(4,3) * ( tpsi(DZ(4)) - tpsi(DZ(-4)) )
-          jw(3,ix,iy,iz) = aimag(pz*ztmp) + kAc(3) * abs(pz)**2
+          jw(3,ix,iy,iz) = aimag(pz*ztmp) + k(3) * abs(pz)**2
         end do
 
       end do
@@ -723,72 +723,6 @@ contains
 !$omp end parallel do
       return
     end subroutine micro_current
-
-    subroutine kvec_part(is_array,ie_array,is,ie,k,psi,jw)
-      implicit none
-      integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
-      real(8)   ,intent(in) :: k(3)
-      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-      real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
-      !
-      integer :: ik,io,ix,iy,iz
-!$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-      do ix=is(1),ie(1)
-        jw(:,ix,iy,iz) = k(:) * abs(psi(ix,iy,iz))**2
-      end do
-      end do
-      end do
-!$omp end parallel do
-      return
-    end subroutine kvec_part
-
-    subroutine stencil_current(jw,zdm,nabt,is,ie,ndir)
-      implicit none
-      integer   ,intent(in) :: is(3),ie(3),ndir
-      real(8)   ,intent(in) :: nabt(Nd,3)
-      complex(8),intent(in) :: zdm(Nd,ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
-      real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
-      !
-      integer :: ix,iy,iz
-      complex(8) :: xtmp,ytmp,ztmp
-!$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp)
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-
-!OCL swp
-        do ix=is(1),ie(1)
-          xtmp = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,ix-1,iy,iz)) ) & 
-               + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,ix-2,iy,iz)) ) &
-               + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,ix-3,iy,iz)) ) &
-               + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,ix-4,iy,iz)) )
-          jw(1,ix,iy,iz) = aimag(xtmp)
-        end do
-
-!OCL swp
-        do ix=is(1),ie(1)
-          ytmp = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,iy-1,iz)) ) &
-               + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,iy-2,iz)) ) &
-               + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,iy-3,iz)) ) &
-               + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,iy-4,iz)) )
-          jw(2,ix,iy,iz) = aimag(ytmp)
-        end do
-
-!OCL swp
-        do ix=is(1),ie(1)
-          ztmp = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,iz-1)) ) &
-               + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,iz-2)) ) &
-               + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,iz-3)) ) &
-               + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,iz-4)) )
-          jw(3,ix,iy,iz) = aimag(ztmp)
-        end do
-
-      end do
-      end do
-!$omp end parallel do
-      return
-    end subroutine stencil_current
 
   end subroutine calc_microscopic_current
 
