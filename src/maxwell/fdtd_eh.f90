@@ -18,6 +18,9 @@ module fdtd_eh
   implicit none
   
   type ls_fdtd_eh
+    logical             :: flag_pml        !pml option: work for a_bc = 'pml'
+    logical             :: flag_ld         !LD  option: work for num_ld > 0
+    logical             :: flag_lr         !LR  option: work for ae_shape1=='impulse'.or.ae_shape2=='impulse'
     logical             :: flag_ase        !ase option: work for ase_num_em > 0
     integer             :: Nd              !number of additional grid in mpi
     integer             :: iter_sta        !start of time-iteration
@@ -189,7 +192,7 @@ contains
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    integer                           :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml,iroot1,iroot2
+    integer                           :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iroot1,iroot2
     integer                           :: itmp(3)
     real(8)                           :: dt_cfl,elapsed_time,tmp_min,tmp_max
     character(1)                      :: dir
@@ -200,12 +203,39 @@ contains
     logical                           :: flag_stop
     
     !*** set flag *********************************************************************************************!
-    if(ase_num_em>0) then !ase option: calculate absorption-, scattering-, and extinction-cross-sections
+    !pml option: use absorbing baundary condition(PML)
+    fe%flag_pml = .false.
+    
+    !LD option: calculate Lorentz-Drude model
+    fe%num_ld=0
+    do ii=0,media_num
+      select case(media_type(ii))
+      case('lorentz-drude')
+        fe%num_ld=fe%num_ld+1
+      end select
+    end do
+    if(fe%num_ld>0) then
+      fe%flag_ld = .true.
+    else
+      fe%flag_ld = .false.
+    end if
+    
+    !LR option: execute linear response calculation under the dipole approximation
+    if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
+      fe%flag_lr = .true.
+    else
+      fe%flag_lr = .false.
+    end if
+    
+    !ase option: calculate absorption-, scattering-, and extinction-cross-sections
+    if(ase_num_em>0) then
       fe%flag_ase = .true.
     else
       fe%flag_ase = .false.
     end if
-    flag_stop = .false. !temporarily used flag for stop
+    
+    !temporarily used flag for stop
+    flag_stop = .false.
     
     !*** set initial parameter and value **********************************************************************!
     fe%Nd        = 1
@@ -247,13 +277,13 @@ contains
       case('default')
         if(yn_periodic=='n') then
           fs%a_bc(ii,ij) = 'pml'
-          iflag_pml      = 1
+          fe%flag_pml    = .true.
         elseif(yn_periodic=='y') then
           fs%a_bc(ii,ij) = 'periodic'
         end if
       case('abc')
         fs%a_bc(ii,ij) = 'pml'
-        iflag_pml      = 1
+        fe%flag_pml    = .true.
       case('pec')
         if(yn_periodic=='y') then
           call stop_em('For yn_periodic = y, boundary_em must be default, periodic or abc.')
@@ -404,15 +434,8 @@ contains
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jz)
     
     !*** prepare Lorentz-Drude ********************************************************************************!
-    fe%num_ld=0
-    do ii=0,media_num
-      select case(media_type(ii))
-      case('lorentz-drude')
-        fe%num_ld=fe%num_ld+1
-      end select
-    end do
-    if(fe%num_ld>0) then
-      !set counter, make media_ld, make max_pole_num_ld, and check pole_num_ld condition
+    if(fe%flag_ld) then
+      !set counter, make media_ld, make max_pole_num_ld, and check pole_num_ld & other conditions
       icount_ld=1; fe%max_pole_num_ld=0;
       allocate(fe%media_ld(fe%num_ld))
       fe%media_ld(:)=0;
@@ -424,6 +447,10 @@ contains
           if(fe%max_pole_num_ld<pole_num_ld(ii)) fe%max_pole_num_ld=pole_num_ld(ii)
           if(pole_num_ld(ii)<=0) then
             call stop_em('For media_type = lorentz-drude, pole_num_ld must be equal to or larger than 1.')
+          end if
+          if((epsilon_em(ii)/=1.0d0).or.(mu_em(ii)/=1.0d0).or.(sigma_em(ii)/=0.0d0)) then
+            call stop_em(   'For media_type = lorentz-drude,', &
+                         c2='epsilon_em(ii) = 1.0d0, mu_em(ii) = 1.0d0, and sigma_em(ii) = 0.0d0 must be set.')
           end if
         end select
       end do
@@ -597,7 +624,7 @@ contains
                       fe%c1_hz_y,fe%c2_hz_y,fe%c1_hx_y,fe%c2_hx_y) !y direction
     call eh_set_pml(3,fe%c1_ex_z,fe%c2_ex_z,fe%c1_ey_z,fe%c2_ey_z,&
                       fe%c1_hx_z,fe%c2_hx_z,fe%c1_hy_z,fe%c2_hy_z) !z direction
-    if(iflag_pml==1) then
+    if(fe%flag_pml) then
       if(comm_is_root(nproc_id_global)) then
         write(*,*)
         write(*,*) "**************************"
@@ -835,7 +862,8 @@ contains
         call eh_check_media_type(fe%rep(ij),fe%rmu(ij),fe%sig(ij),media_type(ij),tmp_name1)
         call eh_check_media_type(fe%rep(ik),fe%rmu(ik),fe%sig(ik),media_type(ik),tmp_name2)
         if(comm_is_root(nproc_id_global)) then
-          write(*,'(6X,A)') "Ex is averaged from two spatial grids whose material parameters are:"
+          write(*,'(6X,A)') "Ex is averaged from two spatial grids whose parameters are:"
+          write(*,'(9X,A,I6,A,I6)')         'media ID    = ', ij              , ', ',ik
           write(*,'(9X,A,A,A,A)')           'media_type  =  ', trim(tmp_name1), ', ',trim(tmp_name2)
           write(*,'(9X,A,ES12.5,A,ES12.5)') 'epsilon_em  = ', fe%rep(ij)      , ', ',fe%rep(ik)
           write(*,'(9X,A,ES12.5,A,ES12.5)') 'mu_em       = ', fe%rmu(ij)      , ', ',fe%rmu(ik)
@@ -849,7 +877,8 @@ contains
         call comm_bcast(ik,nproc_group_global,iroot2)
         call eh_check_media_type(fe%rep(ik),fe%rmu(ik),fe%sig(ik),media_type(ik),tmp_name2)
         if(comm_is_root(nproc_id_global)) then
-          write(*,'(6X,A)') "Ey is averaged from two spatial grids whose material parameters are:"
+          write(*,'(6X,A)') "Ey is averaged from two spatial grids whose parameters are:"
+          write(*,'(9X,A,I6,A,I6)')         'media ID    = ', ij              , ', ',ik
           write(*,'(9X,A,A,A,A)')           'media_type  =  ', trim(tmp_name1), ', ',trim(tmp_name2)
           write(*,'(9X,A,ES12.5,A,ES12.5)') 'epsilon_em  = ', fe%rep(ij)      , ', ',fe%rep(ik)
           write(*,'(9X,A,ES12.5,A,ES12.5)') 'mu_em       = ', fe%rmu(ij)      , ', ',fe%rmu(ik)
@@ -863,7 +892,8 @@ contains
         call comm_bcast(ik,nproc_group_global,iroot2)
         call eh_check_media_type(fe%rep(ik),fe%rmu(ik),fe%sig(ik),media_type(ik),tmp_name2)
         if(comm_is_root(nproc_id_global)) then
-          write(*,'(6X,A)') "Ez is averaged from two spatial grids whose material parameters are:"
+          write(*,'(6X,A)') "Ez is averaged from two spatial grids whose parameters are:"
+          write(*,'(9X,A,I6,A,I6)')         'media ID    = ', ij              , ', ',ik
           write(*,'(9X,A,A,A,A)')           'media_type  =  ', trim(tmp_name1), ', ',trim(tmp_name2)
           write(*,'(9X,A,ES12.5,A,ES12.5)') 'epsilon_em  = ', fe%rep(ij)      , ', ',fe%rep(ik)
           write(*,'(9X,A,ES12.5,A,ES12.5)') 'mu_em       = ', fe%rmu(ij)      , ', ',fe%rmu(ik)
@@ -1167,29 +1197,28 @@ contains
     end select
     
     !*** prepare linear response ******************************************************************************!
-    if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
+    if(fe%flag_lr) then
       !check condition
-      iflag_lr=0
-      if(yn_periodic=='y'.and.trans_longi/='tr') iflag_lr=1
+      if(yn_periodic=='y'.and.trans_longi/='tr') flag_stop = .true.
       do ii=0,media_num
-        if(fe%rep(ii)/=1.0d0.or.fe%rmu(ii)/=1.0d0.or.fe%sig(ii)/=0.0d0) iflag_lr=1
+        if(fe%rep(ii)/=1.0d0.or.fe%rmu(ii)/=1.0d0.or.fe%sig(ii)/=0.0d0) flag_stop = .true.
         if(ii==0) then
           select case(media_type(ii))
           case('vacuum')
             continue
           case default
-            iflag_lr=1
+            flag_stop = .true.
           end select
         else
           select case(media_type(ii))
           case('lorentz-drude')
             continue
           case default
-            iflag_lr=1
+            flag_stop = .true.
           end select
         end if
       end do
-      if(iflag_lr==1) then
+      if(flag_stop) then
         call stop_em(   'Invalid input keywords:',&
                      c2='When ae_shape1=impulse and/or ae_shape2=impulse,',&
                      c3='epsilon_em and mu_em must be 1.0d0.',&
@@ -1425,6 +1454,8 @@ contains
       fe%iase_mask_xy(:,:) = 0; fe%iase_mask_yz(:,:) = 0; fe%iase_mask_xz(:,:) = 0;
       
       !set mask function
+!$omp parallel
+!$omp do private(ix,iy)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
         if( (abs(fe%coo(ix,1)-ase_box_cent_em(1))<=(ase_box_size_em(1)/2.0d0)).and.&
@@ -1433,6 +1464,10 @@ contains
         end if
       end do
       end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(iy,iz)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
         if( (abs(fe%coo(iy,2)-ase_box_cent_em(2))<=(ase_box_size_em(2)/2.0d0)).and.&
@@ -1441,6 +1476,10 @@ contains
         end if
       end do
       end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iz)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do ix=fs%mg%is(1),fs%mg%ie(1)
         if( (abs(fe%coo(ix,1)-ase_box_cent_em(1))<=(ase_box_size_em(1)/2.0d0)).and.&
@@ -1449,6 +1488,8 @@ contains
         end if
       end do
       end do
+!$omp end do
+!$omp end parallel
       
       !set id on closed surface[box shape]
       !--- ix on yz plane ----!
@@ -1487,6 +1528,8 @@ contains
       
       !check media ID on closed surface[box shape](that must be 0)
       ii=0; ij=0;
+!$omp parallel
+!$omp do private(ix,iy,ik)
       do iy=fs%mg%is(2),fs%mg%ie(2)
       do ix=fs%mg%is(1),fs%mg%ie(1)
         if(fe%iase_mask_xy(ix,iy)==1) then
@@ -1498,6 +1541,10 @@ contains
         end if
       end do
       end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(iy,iz,ik)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)
         if(fe%iase_mask_yz(iy,iz)==1) then
@@ -1509,6 +1556,10 @@ contains
         end if
       end do
       end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iz,ik)
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do ix=fs%mg%is(1),fs%mg%ie(1)
         if(fe%iase_mask_xz(ix,iz)==1) then
@@ -1520,6 +1571,8 @@ contains
         end if
       end do
       end do
+!$omp end do
+!$omp end parallel
       call comm_summation(ii,ij,nproc_group_global)
       if(ij>0) then
         call stop_em(   'When ase_num_em > 0, media ID on closed surface[box shape] must be 0.', &
@@ -2262,9 +2315,7 @@ contains
       end if
       
       !update lorentz-drude
-      if(fe%num_ld>0) then
-        call eh_update_ld
-      end if
+      if(fe%flag_ld) call eh_update_ld
       
       !update e
       call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
@@ -2289,15 +2340,11 @@ contains
                                                  fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
-      if(fe%num_ld>0) then
-        call eh_add_curr(fe%rjx_sum_ld(:,:,:),fe%rjy_sum_ld(:,:,:),fe%rjz_sum_ld(:,:,:))
-      end if
+      if(fe%flag_ld) call eh_add_curr(fe%rjx_sum_ld(:,:,:),fe%rjy_sum_ld(:,:,:),fe%rjz_sum_ld(:,:,:))
       call eh_sendrecv(fs,fe,'e')
       
       !calculate linear response
-      if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
-        call eh_calc_lr
-      end if
+      if(fe%flag_lr) call eh_calc_lr
       
       !store old h
       if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
@@ -2450,15 +2497,11 @@ contains
           end if
           
           !obs_plane_ene_em option(spatial distribution at each energy point)
-          if(fe%iobs_num_ene(ii)>0) then
-            call eh_calc_plane_ene(fs,fe,ii,iter)
-          end if
+          if(fe%iobs_num_ene(ii)>0) call eh_calc_plane_ene(fs,fe,ii,iter)
         end do
         
         !ase option(calculate incident and scattering field on closed surface[box shape])
-        if(fe%flag_ase) then
-          call eh_calc_inc_sca_ase
-        end if
+        if(fe%flag_ase) call eh_calc_inc_sca_ase
         
         !check maximum
         call eh_update_max
@@ -3221,8 +3264,8 @@ contains
   !===========================================================================================
   != finalize eh-FDTD ========================================================================
   subroutine eh_finalize(fs,fe)
-    use salmon_global,   only: dt_em,unit_system,yn_periodic,ae_shape1,ae_shape2,e_impulse,sysname, &
-                               nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,              &
+    use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,       &
+                               nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,&
                                obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ek_dir1
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_group_global
@@ -3248,7 +3291,7 @@ contains
     character(256)         :: iobs_name,iene_name,wf_name,save_name
     
     !*** output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr) ******!
-    if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
+    if(fe%flag_lr) then
       if(yn_periodic=='n') then
         !output time-dependent dipole data
         if(comm_is_root(nproc_id_global)) then
@@ -3856,6 +3899,7 @@ contains
     use communication,     only: comm_bcast,comm_is_root
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution,check_numcpu
     use init_communicator, only: init_communicator_dft
+    use common_maxwell,    only: stop_em
     use sendrecv_grid,     only: create_sendrecv_neig,init_sendrecv_grid
     use structures,        only: s_fdtd_system, s_parallel_info
     use initialization_sub
@@ -3871,6 +3915,7 @@ contains
     if((nproc_k==0).and.(nproc_ob==0).and.(sum(nproc_rgrid(:))==0)) then
       call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info)
     else
+      if((nproc_k>1).or.(nproc_ob>1)) call stop_em('For theory = maxwell, nproc_k and nproc_ob must be 1.')
       info%npk       = nproc_k
       info%nporbital = nproc_ob
       info%nprgrid   = nproc_rgrid
@@ -3894,14 +3939,14 @@ contains
     !initialize r-grid
     call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
     call init_grid_parallel(info,fs%lg,fs%mg) ! lg --> mg
-    !### This process about ng is temporal. #####################!
-    !### With modifying set_ng to be applied to arbitrary Nd, ###!
-    !### this process will be removed.###########################!
+    !### This process about mg is temporal. #################################!
+    !### With modifying init_grid_parallel to be applied to arbitrary Nd, ###!
+    !### this process will be removed.#######################################!
     fs%mg%is_overlap(1:3)=fs%mg%is(1:3)-fe%Nd
     fs%mg%ie_overlap(1:3)=fs%mg%ie(1:3)+fe%Nd
     fs%mg%is_array(1:3)  =fs%mg%is(1:3)-fe%Nd
     fs%mg%ie_array(1:3)  =fs%mg%ie(1:3)+fe%Nd
-    !############################################################!
+    !########################################################################!
     
     !prepare for setting sendrecv environment
     if(allocated(fs%mg%idx)) deallocate(fs%mg%idx)
