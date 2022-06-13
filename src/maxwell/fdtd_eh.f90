@@ -18,10 +18,12 @@ module fdtd_eh
   implicit none
   
   type ls_fdtd_eh
-    logical             :: flag_pml        !pml option: work for a_bc = 'pml'
-    logical             :: flag_ld         !LD  option: work for num_ld > 0
-    logical             :: flag_lr         !LR  option: work for ae_shape1=='impulse'.or.ae_shape2=='impulse'
-    logical             :: flag_ase        !ase option: work for ase_num_em > 0
+    logical             :: flag_pml        !pml  option: work for a_bc = 'pml'
+    logical             :: flag_ld         !LD   option: work for num_ld > 0
+    logical             :: flag_lr         !LR   option: work for ae_shape1 = 'impulse'.or.ae_shape2 = 'impulse'
+    logical             :: flag_ase        !ase  option: work for ase_num_em > 0
+    logical             :: flag_art        !art  option: work for art_num_em > 0
+    logical             :: flag_save       !save option: work for obs_num_em > 0 .or. flag_ase .or. flag_art
     integer             :: Nd              !number of additional grid in mpi
     integer             :: iter_sta        !start of time-iteration
     integer             :: iter_end        !end of time-iteration
@@ -139,6 +141,14 @@ module fdtd_eh
                               ase_hx_xy_sca_ene(:,:,:,:,:),ase_hx_xz_sca_ene(:,:,:,:,:), &
                               ase_hy_xy_sca_ene(:,:,:,:,:),ase_hy_yz_sca_ene(:,:,:,:,:), &
                               ase_hz_yz_sca_ene(:,:,:,:,:),ase_hz_xz_sca_ene(:,:,:,:,:)
+    real(8),allocatable :: art_ene(:)                                !art: sampling energy axis(art_num_em)
+    integer             :: id_on_plane(2)                            !art: id on plane(1:bottom and 2:top)
+    !art: inc. ex-z and hx-z on bottom or top(art_num_em,1:bottom and 2:top,w/ or w/o window function)
+    complex(8),allocatable :: art_ex_inc_bt_ene(:,:,:),art_ey_inc_bt_ene(:,:,:),art_ez_inc_bt_ene(:,:,:), &
+                              art_hx_inc_bt_ene(:,:,:),art_hy_inc_bt_ene(:,:,:),art_hz_inc_bt_ene(:,:,:)
+    !art: tot. ex-z and hx-z on bottom or top plane(i1,i2,art_num_em,1:bottom and 2:top,w/ or w/o window function)
+    complex(8),allocatable :: art_ex_tot_bt_ene(:,:,:,:,:),art_ey_tot_bt_ene(:,:,:,:,:),art_ez_tot_bt_ene(:,:,:,:,:), &
+                              art_hx_tot_bt_ene(:,:,:,:,:),art_hy_tot_bt_ene(:,:,:,:,:),art_hz_tot_bt_ene(:,:,:,:,:)
   end type ls_fdtd_eh
   
   public  :: eh_init
@@ -168,7 +178,7 @@ contains
     use salmon_global,   only: nt_em,al_em,dl_em,num_rgrid_em,dt_em,boundary_em,yn_periodic,base_directory,&
                                media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,                  &
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
-                               obs_num_em,obs_loc_em,obs_plane_ene_em,yn_obs_plane_integral_em,            &
+                               obs_num_em,obs_loc_em,obs_plane_ene_em,yn_obs_plane_integral_em,obs_samp_em,&
                                media_id_pml,media_id_source1,media_id_source2,                             &
                                wave_input,trans_longi,e_impulse,nenergy,                                   &
                                source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,                          &
@@ -177,7 +187,9 @@ contains
                                phi_cep2,I_wcm2_2,E_amplitude2,gbeam_sigma_plane2,gbeam_sigma_line2,        &
                                bloch_k_em,bloch_real_imag_em,yn_make_shape,yn_output_shape,                &
                                ase_num_em,ase_ene_min_em,ase_ene_max_em,ase_wav_min_em,ase_wav_max_em,     &
-                               ase_box_cent_em,ase_box_size_em
+                               ase_box_cent_em,ase_box_size_em,                                            &
+                               art_num_em,art_ene_min_em,art_ene_max_em,art_wav_min_em,art_wav_max_em,     &
+                               art_plane_bot_em,art_plane_top_em
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global
@@ -193,7 +205,7 @@ contains
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iroot1,iroot2
-    integer                           :: itmp(3)
+    integer                           :: itmp1(3),itmp2(3)
     real(8)                           :: dt_cfl,elapsed_time,tmp_min,tmp_max
     character(1)                      :: dir
     character(2)                      :: plane_name
@@ -203,7 +215,7 @@ contains
     logical                           :: flag_stop
     
     !*** set flag *********************************************************************************************!
-    !pml option: use absorbing baundary condition(PML)
+    !pml option: use absorbing baundary(PML) condition(this flag would be updated later)
     fe%flag_pml = .false.
     
     !LD option: calculate Lorentz-Drude model
@@ -234,7 +246,21 @@ contains
       fe%flag_ase = .false.
     end if
     
-    !temporarily used flag for stop
+    !art option: calculate absorption-, reflection-, and transmission-rates
+    if(art_num_em>0) then
+      fe%flag_art = .true.
+    else
+      fe%flag_art = .false.
+    end if
+    
+    !save option: calculate variables used for save(typically, ex-z_s and hx-z_s)
+    if((obs_num_em>0) .or. fe%flag_ase .or. fe%flag_art) then
+      fe%flag_save = .true.
+    else
+      fe%flag_save = .false.
+    end if
+    
+    !temporarily used flag for stop(this flag would be updated later)
     flag_stop = .false.
     
     !*** set initial parameter and value **********************************************************************!
@@ -432,6 +458,14 @@ contains
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jx)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jy)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jz)
+    if(fe%flag_save) then
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_s)
+    end if
     
     !*** prepare Lorentz-Drude ********************************************************************************!
     if(fe%flag_ld) then
@@ -735,12 +769,6 @@ contains
     !*** prepare observation **********************************************************************************!
     if(obs_num_em>0) then
       !set initial
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_s)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_s)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_s)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_s)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_s)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_s)
       allocate(fe%iobs_po_id(obs_num_em,3)) !1:x,        2:y,        3:z
       allocate(fe%iobs_po_pe(obs_num_em))
       allocate(fe%iobs_li_pe(obs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
@@ -986,7 +1014,7 @@ contains
       end if
     end if
     
-    !*** check and incident current source ********************************************************************!
+    !*** check and prepare incident current source ************************************************************!
     !check condition
     select case(wave_input)
     case('source')
@@ -1307,15 +1335,17 @@ contains
       if(sum(ek_dir2(:))         >0.0d0 ) call stop_em('When ase_num_em > 0, only pulse1 can be used.'    )
       if(trim(ae_shape2)        /='none') call stop_em('When ase_num_em > 0, only pulse1 can be used.'    )
       if(yn_periodic            =='y'   ) call stop_em('When ase_num_em > 0, yn_periodic must be n.'      )
-      if(fe%sig(0)>0.0d0                ) call stop_em('When ase_num_em > 0, sigma_em(0) must be 0.0d0.'  )
+      if(fe%sig(0)               >0.0d0 ) call stop_em('When ase_num_em > 0, sigma_em(0) must be 0.0d0.'  )
       if(ae_shape1=='impulse') then
         call stop_em('When ase_num_em > 0, impulse can not be used.')
       end if
-      if( (sum(gbeam_sigma_plane1(:))>0.0d0).or.(sum(gbeam_sigma_plane2(:))>0.0d0).or.&
-          (sum(gbeam_sigma_line1(:) )>0.0d0).or.(sum(gbeam_sigma_line2(:) )>0.0d0) ) then
+      if( (gbeam_sigma_plane1(1)>0.0d0).or.(gbeam_sigma_plane1(2)>0.0d0).or.(gbeam_sigma_plane1(3)>0.0d0).or. &
+          (gbeam_sigma_plane2(1)>0.0d0).or.(gbeam_sigma_plane2(2)>0.0d0).or.(gbeam_sigma_plane2(3)>0.0d0).or. &
+          (gbeam_sigma_line1(1) >0.0d0).or.(gbeam_sigma_line1(2) >0.0d0).or.(gbeam_sigma_line1(3) >0.0d0).or. &
+          (gbeam_sigma_line2(1) >0.0d0).or.(gbeam_sigma_line2(2) >0.0d0).or.(gbeam_sigma_line2(3) >0.0d0) ) then
         call stop_em(   'When ase_num_em > 0,',      &
                      c2='gauss beam cannot be used.',&
-                     c3='gbeam_sigma_plane1/2 and gbeam_sigma_line1/2 must be < 0.')
+                     c3='gbeam_sigma_plane1/2 and gbeam_sigma_line1/2 must be <= 0.0d0')
       end if
       if    ((ase_ene_min_em <0.0d0).and.(ase_ene_max_em <0.0d0).and.&
              (ase_wav_min_em <0.0d0).and.(ase_wav_max_em <0.0d0))         then
@@ -1324,6 +1354,10 @@ contains
              (ase_wav_min_em>=0.0d0).and.(ase_wav_max_em>=0.0d0))         then
         flag_stop = .true.
       elseif((ase_ene_min_em>=0.0d0).and.(ase_wav_min_em>=0.0d0))         then
+        flag_stop = .true.
+      elseif((ase_ene_min_em>=0.0d0).and.(ase_wav_max_em>=0.0d0)) then
+        flag_stop = .true.
+      elseif((ase_wav_min_em>=0.0d0).and.(ase_ene_max_em>=0.0d0)) then
         flag_stop = .true.
       elseif((ase_ene_min_em>=0.0d0).and.(ase_ene_max_em<ase_ene_min_em)) then
         flag_stop = .true.
@@ -1340,29 +1374,29 @@ contains
       if    (ek_dir1(1)==1.0d0) then
         if( fe%coo(fe%inc_po_id(1,1),1) >= (-fs%rlsize(1)/4.0d0) ) then
           call stop_em(   'When ase_num_em > 0 with incident pulse propagating to x-axis,', &
-                       c2='source_loc1(1) must be set < -al_em(1)/4.0d0 ')
+                       c2='source_loc1(1) must be set < -al_em(1)/4.0d0.')
         end if
         if( fe%coo(fe%inc_po_id(1,1),1) >= (ase_box_cent_em(1)-(ase_box_size_em(1)/2.0d0)) ) then
           call stop_em(   'When ase_num_em > 0 with incident pulse propagating to x-axis,', &
-                       c2='source_loc1(1) must be set < ase_box_cent_em(1)-(ase_box_size_em(1)/2.0d0) ')
+                       c2='source_loc1(1) must be set < ase_box_cent_em(1)-(ase_box_size_em(1)/2.0d0).')
         end if
       elseif(ek_dir1(2)==1.0d0) then
         if( fe%coo(fe%inc_po_id(1,2),2) >= (-fs%rlsize(2)/4.0d0) ) then
           call stop_em(   'When ase_num_em > 0 with incident pulse propagating to y-axis,', &
-                       c2='source_loc1(2) must be set < -al_em(2)/4.0d0 ')
+                       c2='source_loc1(2) must be set < -al_em(2)/4.0d0.')
         end if
         if( fe%coo(fe%inc_po_id(1,2),2) >= (ase_box_cent_em(2)-(ase_box_size_em(2)/2.0d0)) ) then
           call stop_em(   'When ase_num_em > 0 with incident pulse propagating to y-axis,', &
-                       c2='source_loc1(2) must be set < ase_box_cent_em(2)-(ase_box_size_em(2)/2.0d0) ')
+                       c2='source_loc1(2) must be set < ase_box_cent_em(2)-(ase_box_size_em(2)/2.0d0).')
         end if
       elseif(ek_dir1(3)==1.0d0) then
         if( fe%coo(fe%inc_po_id(1,3),3) >= (-fs%rlsize(3)/4.0d0) ) then
           call stop_em(   'When ase_num_em > 0 with incident pulse propagating to z-axis,', &
-                       c2='source_loc1(3) must be set < -al_em(3)/4.0d0 ')
+                       c2='source_loc1(3) must be set < -al_em(3)/4.0d0.')
         end if
         if( fe%coo(fe%inc_po_id(1,3),3) >= (ase_box_cent_em(3)-(ase_box_size_em(3)/2.0d0)) ) then
           call stop_em(   'When ase_num_em > 0 with incident pulse propagating to z-axis,', &
-                       c2='source_loc1(3) must be set < ase_box_cent_em(3)-(ase_box_size_em(3)/2.0d0) ')
+                       c2='source_loc1(3) must be set < ase_box_cent_em(3)-(ase_box_size_em(3)/2.0d0).')
         end if
       end if
       
@@ -1381,7 +1415,7 @@ contains
         end if
       end do
       
-      !specify propagation axis and allocate incident ex-z
+      !specify propagation axis and allocate incident ex-z and hx-z
       if    (ek_dir1(1)==1.0d0) then
         allocate( fe%ase_ex_inc_pa_ene(fs%mg%is(1):fs%mg%ie(1),ase_num_em,2),&
                   fe%ase_ey_inc_pa_ene(fs%mg%is(1):fs%mg%ie(1),ase_num_em,2),&
@@ -1493,38 +1527,38 @@ contains
       
       !set id on closed surface[box shape]
       !--- ix on yz plane ----!
-      call find_point_id_only_em(fs%lg,itmp,fe%Nd,fe%coo(:,:),                       &
+      call find_point_id_only_em(fs%lg,itmp1,fe%Nd,fe%coo(:,:),                      &
                                  (/ ase_box_cent_em(1)-(ase_box_size_em(1)/2.0d0),   &
                                     ase_box_cent_em(2),                              &
                                     ase_box_cent_em(3) /) )
-      fe%id_on_box_surf(1,1) = itmp(1) !bottom
-      call find_point_id_only_em(fs%lg,itmp,fe%Nd,fe%coo(:,:),                       &
+      call find_point_id_only_em(fs%lg,itmp2,fe%Nd,fe%coo(:,:),                      &
                                  (/ ase_box_cent_em(1)+(ase_box_size_em(1)/2.0d0),   &
                                     ase_box_cent_em(2),                              &
                                     ase_box_cent_em(3) /) )
-      fe%id_on_box_surf(1,2) = itmp(1) !top
+      fe%id_on_box_surf(1,1) = itmp1(1) !bottom
+      fe%id_on_box_surf(1,2) = itmp2(1) !top
       !--- iy on xz plane ----!
-      call find_point_id_only_em(fs%lg,itmp,fe%Nd,fe%coo(:,:),                       &
+      call find_point_id_only_em(fs%lg,itmp1,fe%Nd,fe%coo(:,:),                      &
                                  (/ ase_box_cent_em(1),                              &
                                     ase_box_cent_em(2)-(ase_box_size_em(2)/2.0d0),   &
                                     ase_box_cent_em(3) /) )
-      fe%id_on_box_surf(2,1) = itmp(2) !bottom
-      call find_point_id_only_em(fs%lg,itmp,fe%Nd,fe%coo(:,:),                       &
+      call find_point_id_only_em(fs%lg,itmp2,fe%Nd,fe%coo(:,:),                      &
                                  (/ ase_box_cent_em(1),                              &
                                     ase_box_cent_em(2)+(ase_box_size_em(2)/2.0d0),   &
                                     ase_box_cent_em(3) /) )
-      fe%id_on_box_surf(2,2) = itmp(2) !top
+      fe%id_on_box_surf(2,1) = itmp1(2) !bottom
+      fe%id_on_box_surf(2,2) = itmp2(2) !top
       !--- iz on xy plane ----!
-      call find_point_id_only_em(fs%lg,itmp,fe%Nd,fe%coo(:,:),                       &
+      call find_point_id_only_em(fs%lg,itmp1,fe%Nd,fe%coo(:,:),                      &
                                  (/ ase_box_cent_em(1),                              &
                                     ase_box_cent_em(2),                              &
                                     ase_box_cent_em(3)-(ase_box_size_em(3)/2.0d0) /) )
-      fe%id_on_box_surf(3,1) = itmp(3) !bottom
-      call find_point_id_only_em(fs%lg,itmp,fe%Nd,fe%coo(:,:),                       &
+      call find_point_id_only_em(fs%lg,itmp2,fe%Nd,fe%coo(:,:),                      &
                                  (/ ase_box_cent_em(1),                              &
                                     ase_box_cent_em(2),                              &
                                     ase_box_cent_em(3)+(ase_box_size_em(3)/2.0d0) /) )
-      fe%id_on_box_surf(3,2) = itmp(3) !top
+      fe%id_on_box_surf(3,1) = itmp1(3) !bottom
+      fe%id_on_box_surf(3,2) = itmp2(3) !top
       
       !check media ID on closed surface[box shape](that must be 0)
       ii=0; ij=0;
@@ -1585,7 +1619,8 @@ contains
         write(*,*) "**************************"
         write(*,*) "ase_num_em > 0:"
         write(*,*) "Absorption-, Scattering-, and Extinction-cross-sections"
-        write(*,*) "have been outputed at the end of calculation."
+        write(*,*) "will be outputed at the end of calculation."
+        write(*,*) "NOTE: Those are normalized by the spectral distribution of the incident pulse."
         write(*,*)
         write(*,*) "Closed surface(box shape) ranges from"
         write(*,'(A,ES12.5,A,ES12.5)') " x = ",fe%coo(fe%id_on_box_surf(1,1),1)*ulength_from_au,&
@@ -1595,6 +1630,248 @@ contains
         write(*,'(A,ES12.5,A,ES12.5)') " z = ",fe%coo(fe%id_on_box_surf(3,1),3)*ulength_from_au,&
                                        " to " ,fe%coo(fe%id_on_box_surf(3,2),3)*ulength_from_au
         write(*,*) "in the unit system, ",trim(unit_system),"."
+        if(obs_samp_em==1) then
+          write(*,*)
+          write(*, '(A)') " --- CAUTION ---"
+          write(*, '(A)') " In this calculation, obs_samp_em is set to 1."
+          write(*,'(2A)') " It is strongly recommended to increase obs_samp_em",&
+                          " as far as your intending sampling period allows"
+          write(*, '(A)') " because the calculation cost of this ase-option can be reduced with larger obs_samp_em."
+        end if
+        write(*,*) "**************************"
+      end if
+    end if
+    
+    !*** prepare art option ***********************************************************************************!
+    if(fe%flag_art) then
+      !check condition
+      if(sum(ek_dir2(:))  >0.0d0 ) call stop_em('When art_num_em > 0, only pulse1 can be used.'  )
+      if(trim(ae_shape2) /='none') call stop_em('When art_num_em > 0, only pulse1 can be used.'  )
+      if(yn_periodic     =='n'   ) call stop_em('When art_num_em > 0, yn_periodic must be y.'    )
+      if(fe%sig(0)        >0.0d0 ) call stop_em('When art_num_em > 0, sigma_em(0) must be 0.0d0.')
+      if(ae_shape1=='impulse') then
+        call stop_em('When art_num_em > 0, impulse can not be used.')
+      end if
+      if( (gbeam_sigma_plane1(1)>0.0d0).or.(gbeam_sigma_plane1(2)>0.0d0).or.(gbeam_sigma_plane1(3)>0.0d0).or. &
+          (gbeam_sigma_plane2(1)>0.0d0).or.(gbeam_sigma_plane2(2)>0.0d0).or.(gbeam_sigma_plane2(3)>0.0d0).or. &
+          (gbeam_sigma_line1(1) >0.0d0).or.(gbeam_sigma_line1(2) >0.0d0).or.(gbeam_sigma_line1(3) >0.0d0).or. &
+          (gbeam_sigma_line2(1) >0.0d0).or.(gbeam_sigma_line2(2) >0.0d0).or.(gbeam_sigma_line2(3) >0.0d0) ) then
+        call stop_em(   'When art_num_em > 0,',      &
+                     c2='gauss beam cannot be used.',&
+                     c3='gbeam_sigma_plane1/2 and gbeam_sigma_line1/2 must be <= 0.0d0.')
+      end if
+      if    ((art_ene_min_em <0.0d0).and.(art_ene_max_em <0.0d0).and.&
+             (art_wav_min_em <0.0d0).and.(art_wav_max_em <0.0d0))         then
+        flag_stop = .true.
+      elseif((art_ene_min_em>=0.0d0).and.(art_ene_max_em>=0.0d0).and.&
+             (art_wav_min_em>=0.0d0).and.(art_wav_max_em>=0.0d0))         then
+        flag_stop = .true.
+      elseif((art_ene_min_em>=0.0d0).and.(art_wav_min_em>=0.0d0))         then
+        flag_stop = .true.
+      elseif((art_ene_min_em>=0.0d0).and.(art_wav_max_em>=0.0d0)) then
+        flag_stop = .true.
+      elseif((art_wav_min_em>=0.0d0).and.(art_ene_max_em>=0.0d0)) then
+        flag_stop = .true.
+      elseif((art_ene_min_em>=0.0d0).and.(art_ene_max_em<art_ene_min_em)) then
+        flag_stop = .true.
+      elseif((art_wav_min_em>=0.0d0).and.(art_wav_max_em<art_wav_min_em)) then
+        flag_stop = .true.
+      end if
+      if(flag_stop) then
+        call stop_em(   'When art_num_em > 0, you must set either',     &
+                     c2='[art_ene_min_em and art_ene_min_em >= 0.0d0]', &
+                     c3='or',                                           &
+                     c4='[art_wav_min_em and art_wav_min_em >= 0.0d0].',&
+                     c5='art_ene/wav_max_em must be larger than art_ene/wav_min_em.')
+      end if
+      if    (ek_dir1(1)==1.0d0) then
+        if( fe%coo(fe%inc_po_id(1,1),1) >= (fs%rlsize(1)/4.0d0) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to x-axis,', &
+                       c2='source_loc1(1) must be set < al_em(1)/4.0d0.')
+        end if
+        if( fe%coo(fe%inc_po_id(1,1),1) >= art_plane_bot_em(1) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to x-axis,', &
+                       c2='source_loc1(1) must be set < art_plane_bot_em(1).')
+        end if
+        if( art_plane_top_em(1) <= art_plane_bot_em(1) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to x-axis,', &
+                       c2='art_plane_top_em(1) must be set > art_plane_bot_em(1).')
+        end if
+      elseif(ek_dir1(2)==1.0d0) then
+        if( fe%coo(fe%inc_po_id(1,2),2) >= (fs%rlsize(2)/4.0d0) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to y-axis,', &
+                       c2='source_loc1(2) must be set < al_em(2)/4.0d0.')
+        end if
+        if( fe%coo(fe%inc_po_id(1,2),2) >= art_plane_bot_em(2) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to y-axis,', &
+                       c2='source_loc1(2) must be set < art_plane_bot_em(2).')
+        end if
+        if( art_plane_top_em(2) <= art_plane_bot_em(2) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to x-axis,', &
+                       c2='art_plane_top_em(2) must be set > art_plane_bot_em(2).')
+        end if
+      elseif(ek_dir1(3)==1.0d0) then
+        if( fe%coo(fe%inc_po_id(1,3),3) >= (fs%rlsize(3)/4.0d0) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to z-axis,', &
+                       c2='source_loc1(3) must be set < al_em(3)/4.0d0.')
+        end if
+        if( fe%coo(fe%inc_po_id(1,3),3) >= art_plane_bot_em(3) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to z-axis,', &
+                       c2='source_loc1(3) must be set < art_plane_bot_em(3).')
+        end if
+        if( art_plane_top_em(3) <= art_plane_bot_em(3) ) then
+          call stop_em(   'When art_num_em > 0 with incident pulse propagating to x-axis,', &
+                       c2='art_plane_top_em(3) must be set > art_plane_bot_em(3).')
+        end if
+      end if
+      
+      !make sampling energy axis
+      if    (art_ene_min_em>=0.0d0) then
+        tmp_min = art_ene_min_em; tmp_max = art_ene_max_em;
+      elseif(art_wav_min_em>=0.0d0) then
+        tmp_min = art_wav_min_em; tmp_max = art_wav_max_em;
+      end if
+      allocate(fe%art_ene(art_num_em)); fe%art_ene(:)=0.0d0;
+      do ii=1,art_num_em
+        fe%art_ene(ii) = tmp_min + ( (tmp_max-tmp_min)/(art_num_em-1) )*(dble(ii)-1)
+        if(art_wav_min_em>=0.0d0) then
+          !convert from wavelength to energy
+          fe%art_ene(ii) = 2.0d0*pi*cspeed_au/fe%art_ene(ii)
+        end if
+      end do
+      
+      !allocate incident ex-z and hx-z
+      allocate( fe%art_ex_inc_bt_ene(art_num_em,2,2),&
+                fe%art_ey_inc_bt_ene(art_num_em,2,2),&
+                fe%art_ez_inc_bt_ene(art_num_em,2,2),&
+                fe%art_hx_inc_bt_ene(art_num_em,2,2),&
+                fe%art_hy_inc_bt_ene(art_num_em,2,2),&
+                fe%art_hz_inc_bt_ene(art_num_em,2,2) )
+      fe%art_ex_inc_bt_ene(:,:,:) = (0.0d0,0.0d0);
+      fe%art_ey_inc_bt_ene(:,:,:) = (0.0d0,0.0d0);
+      fe%art_ez_inc_bt_ene(:,:,:) = (0.0d0,0.0d0);
+      fe%art_hx_inc_bt_ene(:,:,:) = (0.0d0,0.0d0);
+      fe%art_hy_inc_bt_ene(:,:,:) = (0.0d0,0.0d0);
+      fe%art_hz_inc_bt_ene(:,:,:) = (0.0d0,0.0d0);
+      
+      !set id on plane and allocate total e and h fields
+      call find_point_id_only_em(fs%lg,itmp1,fe%Nd,fe%coo(:,:),art_plane_bot_em(:))
+      call find_point_id_only_em(fs%lg,itmp2,fe%Nd,fe%coo(:,:),art_plane_top_em(:))
+      if    (ek_dir1(1)==1.0d0) then !x-direction propagation, yz-plane----------------------!
+        fe%id_on_plane(1) = itmp1(1) !bottom
+        fe%id_on_plane(2) = itmp2(1) !top
+        allocate( fe%art_ey_tot_bt_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2),&
+                  fe%art_ez_tot_bt_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2),&
+                  fe%art_hy_tot_bt_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2),&
+                  fe%art_hz_tot_bt_ene(fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2) )
+        fe%art_ey_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_ez_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_hy_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_hz_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+      elseif(ek_dir1(2)==1.0d0) then !y-direction propagation, xz-plane----------------------!
+        fe%id_on_plane(1) = itmp1(2) !bottom
+        fe%id_on_plane(2) = itmp2(2) !top
+        allocate( fe%art_ex_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2),&
+                  fe%art_ez_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2),&
+                  fe%art_hx_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2),&
+                  fe%art_hz_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(3):fs%mg%ie(3),art_num_em,2,2) )
+        fe%art_ex_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_ez_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_hx_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_hz_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+      elseif(ek_dir1(3)==1.0d0) then !z-direction propagation, xy-plane----------------------!
+        fe%id_on_plane(1) = itmp1(3) !bottom
+        fe%id_on_plane(2) = itmp2(3) !top
+        allocate( fe%art_ex_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),art_num_em,2,2),&
+                  fe%art_ey_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),art_num_em,2,2),&
+                  fe%art_hx_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),art_num_em,2,2),&
+                  fe%art_hy_tot_bt_ene(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),art_num_em,2,2) )
+        fe%art_ex_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_ey_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_hx_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+        fe%art_hy_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
+      end if
+      
+      !check media ID on plane(that must be 0)
+      ii=0; ij=0;
+      if    (ek_dir1(1)==1.0d0) then !x-propagatin, yz-plane
+!$omp parallel
+!$omp do private(iy,iz,ik)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+          do ik=1,2
+            if((fs%mg%is(1)<=fe%id_on_plane(ik)).and.fe%id_on_plane(ik)<=fs%mg%ie(1)) then
+              if(fs%imedia(fe%id_on_plane(ik),iy,iz)/=0) ii=1
+            end if
+          end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      elseif(ek_dir1(2)==1.0d0) then !y-propagatin, xz-plane
+!$omp parallel
+!$omp do private(ix,iz,ik)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          do ik=1,2
+            if((fs%mg%is(2)<=fe%id_on_plane(ik)).and.fe%id_on_plane(ik)<=fs%mg%ie(2)) then
+              if(fs%imedia(ix,fe%id_on_plane(ik),iz)/=0) ii=1
+            end if
+          end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      elseif(ek_dir1(3)==1.0d0) then !z-propagatin, xy-plane
+!$omp parallel
+!$omp do private(ix,iy,ik)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          do ik=1,2
+            if((fs%mg%is(3)<=fe%id_on_plane(ik)).and.fe%id_on_plane(ik)<=fs%mg%ie(3)) then
+              if(fs%imedia(ix,iy,fe%id_on_plane(ik))/=0) ii=1
+            end if
+          end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      end if
+      call comm_summation(ii,ij,nproc_group_global)
+      if(ij>0) then
+        call stop_em(   'When art_num_em > 0, media ID on planes[bottom and top] must be 0.', &
+                     c2='art_plane_bot_em and/or art_plane_top_em must be reconsidered.')
+      end if
+      
+      !write information
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*)
+        write(*,*) "**************************"
+        write(*,*) "art_num_em > 0:"
+        write(*,*) "Absorption-, Reflection-, and Transmission-ratas"
+        write(*,*) "will be outputed at the end of calculation."
+        write(*,*) "NOTE: Those are normalized by the spectral distribution of the incident pulse."
+        write(*,*)
+        write(*,*) "Bottom and top planes are set at"
+        if    (ek_dir1(1)==1.0d0) then !x-propagatin, yz-plane
+          write(*,'(A,ES12.5,A,ES12.5)') " x = ",fe%coo(fe%id_on_plane(1),1)*ulength_from_au,&
+                                         " and ",fe%coo(fe%id_on_plane(2),1)*ulength_from_au
+        elseif(ek_dir1(2)==1.0d0) then !y-propagatin, xz-plane
+          write(*,'(A,ES12.5,A,ES12.5)') " y = ",fe%coo(fe%id_on_plane(1),2)*ulength_from_au,&
+                                         " and ",fe%coo(fe%id_on_plane(2),2)*ulength_from_au
+        elseif(ek_dir1(3)==1.0d0) then !z-propagatin, xy-plane
+          write(*,'(A,ES12.5,A,ES12.5)') " z = ",fe%coo(fe%id_on_plane(1),3)*ulength_from_au,&
+                                         " and ",fe%coo(fe%id_on_plane(2),3)*ulength_from_au
+        end if
+        write(*,*) "in the unit system, ",trim(unit_system),"."
+        if(obs_samp_em==1) then
+          write(*,*)
+          write(*, '(A)') " --- CAUTION ---"
+          write(*, '(A)') " In this calculation, obs_samp_em is set to 1."
+          write(*,'(2A)') " It is strongly recommended to increase obs_samp_em",&
+                          " as far as your intending sampling period allows"
+          write(*, '(A)') " because the calculation cost of this art-option can be reduced with larger obs_samp_em."
+        end if
         write(*,*) "**************************"
       end if
     end if
@@ -2310,8 +2587,8 @@ contains
     do iter=fe%iter_sta,fe%iter_end
       !update iter_now
       fe%iter_now=iter
-      if(comm_is_root(nproc_id_global))then
-        write(*,*) fe%iter_now
+      if( comm_is_root(nproc_id_global) .and. mod(iter,10)==0 )then
+        write(*,'(I12)') fe%iter_now
       end if
       
       !update lorentz-drude
@@ -2347,7 +2624,7 @@ contains
       if(fe%flag_lr) call eh_calc_lr
       
       !store old h
-      if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
+      if( fe%flag_save .and. mod(iter,obs_samp_em)==0 )then
 !$omp parallel
 !$omp do private(ix,iy,iz)
         do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
@@ -2434,8 +2711,8 @@ contains
         end if
       end if !use_ttm
 
-      !observation
-      if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
+      !output
+      if( fe%flag_save .and. mod(iter,obs_samp_em)==0 )then
         !prepare e and h for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
@@ -2455,56 +2732,61 @@ contains
 !$omp end parallel
         call eh_sendrecv(fs,fe,'s')
         
-        !save data
-        do ii=1,obs_num_em
-          !point
-          if(fe%iobs_po_pe(ii)==1) then
-            write(save_name,*) ii
-            save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
-            open(fe%ifn,file=save_name,status='old',position='append')
-            write(fe%ifn,"(F16.8,99(1X,E23.15E3))",advance='no')                                          &
-                  dble(iter)*dt_em*utime_from_au,                                                         &
-                  fe%ex_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
-                  fe%ey_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
-                  fe%ez_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
-                  fe%hx_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au, &
-                  fe%hy_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au, &
-                  fe%hz_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au
-            close(fe%ifn)
-          end if
+        !observation point and plane data
+        if(obs_num_em>0) then
+          do ii=1,obs_num_em
+            !point
+            if(fe%iobs_po_pe(ii)==1) then
+              write(save_name,*) ii
+              save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
+              open(fe%ifn,file=save_name,status='old',position='append')
+              write(fe%ifn,"(F16.8,99(1X,E23.15E3))",advance='no')                                          &
+                    dble(iter)*dt_em*utime_from_au,                                                         &
+                    fe%ex_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
+                    fe%ey_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
+                    fe%ez_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
+                    fe%hx_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au, &
+                    fe%hy_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au, &
+                    fe%hz_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au
+              close(fe%ifn)
+            end if
+            
+            !plane
+            if(yn_obs_plane_em(ii)=='y') then
+              call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
+                                 fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ex_s,'ex')
+              call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
+                                 fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ey_s,'ey')
+              call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
+                                 fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ez_s,'ez')
+              call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
+                                 fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hx_s,'hx')
+              call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
+                                 fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hy_s,'hy')
+              call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
+                                 fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hz_s,'hz')
+            end if
+            
+            !plane integral
+            if(yn_obs_plane_integral_em(ii)=='y') then
+              call eh_save_plane_integral(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,fe%uAperm_from_au, &
+                                          dble(iter)*dt_em*utime_from_au,fs%mg%is,fs%mg%ie,fs%hgs,fe%Nd,fe%ifn,ii,     &
+                                          fe%ex_s,fe%ey_s,fe%ez_s,fe%hx_s,fe%hy_s,fe%hz_s)
+            end if
+            
+            !obs_plane_ene_em option(spatial distribution at each energy point)
+            if(fe%iobs_num_ene(ii)>0) call eh_calc_plane_ene(fs,fe,ii,iter)
+          end do
           
-          !plane
-          if(yn_obs_plane_em(ii)=='y') then
-            call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
-                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ex_s,'ex')
-            call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
-                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ey_s,'ey')
-            call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
-                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ez_s,'ez')
-            call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
-                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hx_s,'hx')
-            call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
-                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hy_s,'hy')
-            call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
-                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hz_s,'hz')
-          end if
-          
-          !plane integral
-          if(yn_obs_plane_integral_em(ii)=='y') then
-            call eh_save_plane_integral(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,fe%uAperm_from_au, &
-                                        dble(iter)*dt_em*utime_from_au,fs%mg%is,fs%mg%ie,fs%hgs,fe%Nd,fe%ifn,ii,     &
-                                        fe%ex_s,fe%ey_s,fe%ez_s,fe%hx_s,fe%hy_s,fe%hz_s)
-          end if
-          
-          !obs_plane_ene_em option(spatial distribution at each energy point)
-          if(fe%iobs_num_ene(ii)>0) call eh_calc_plane_ene(fs,fe,ii,iter)
-        end do
+          !check maximum
+          call eh_update_max
+        end if
         
-        !ase option(calculate incident and scattering field on closed surface[box shape])
+        !ase option(calculate incident and scattering fields on closed surface[box shape])
         if(fe%flag_ase) call eh_calc_inc_sca_ase
         
-        !check maximum
-        call eh_update_max
+        !art option(calculate incident and total fields on plane)
+        if(fe%flag_art) call eh_calc_inc_tot_art
       end if
     end do
     
@@ -2997,7 +3279,7 @@ contains
     end subroutine eh_add_curr
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    !+ calculate incident and scattering field for ase option ++++++++++++++++++++++++++++++++
+    !+ calculate incident and scattering fields for ase option +++++++++++++++++++++++++++++++
     subroutine eh_calc_inc_sca_ase
       use salmon_global,  only: nt_em,ek_dir1,epdir_re1,epdir_im1,ae_shape1,phi_cep1,E_amplitude1,ase_num_em
       use math_constants, only: zi
@@ -3230,6 +3512,169 @@ contains
     end subroutine eh_calc_inc_sca_ase
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ calculate incident and total fields for art option ++++++++++++++++++++++++++++++++++++
+    subroutine eh_calc_inc_tot_art
+      use salmon_global,  only: nt_em,ek_dir1,epdir_re1,epdir_im1,ae_shape1,phi_cep1,E_amplitude1,art_num_em
+      use math_constants, only: zi
+      implicit none
+      real(8)             :: ex_inc_bt(2),ey_inc_bt(2),ez_inc_bt(2),hx_inc_bt(2),hy_inc_bt(2),hz_inc_bt(2)
+      integer             :: ip,ibt,ie
+      real(8)             :: t,t_ori,t_inc,wf,e_inc_r,e_inc_i
+      complex(8)          :: f_factor
+      character(1)        :: p_axis
+      
+      !set time information and calcularate window function
+      t     = dble(iter)*dt_em
+      t_ori = t - t1_start
+      call eh_calc_wf(t,dble(nt_em)*dt_em,wf)
+      
+      !speciy propagation axis
+      if    (ek_dir1(1)==1.0d0) then
+        p_axis = 'x'; ip = 1;
+      elseif(ek_dir1(2)==1.0d0) then
+        p_axis = 'y'; ip = 2;
+      elseif(ek_dir1(3)==1.0d0) then
+        p_axis = 'z'; ip = 3;
+      end if
+      
+      !calculate incident field on plane
+      do ibt = 1,2
+        t_inc = t_ori - abs( fe%coo(fe%id_on_plane(ibt),ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_mi0
+        call eh_calc_e_inc(E_amplitude1,t_inc,tw1,omega1,phi_cep1,ae_shape1,e_inc_r,e_inc_i)
+        call eh_calc_polarization_inc(epdir_re1,epdir_im1,e_inc_r,e_inc_i,   &
+                                      ex_inc_bt(ibt),ey_inc_bt(ibt),ez_inc_bt(ibt),&
+                                      hx_inc_bt(ibt),hy_inc_bt(ibt),hz_inc_bt(ibt),p_axis)
+        hx_inc_bt(ibt) = hx_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+        hy_inc_bt(ibt) = hy_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+        hz_inc_bt(ibt) = hz_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+      end do
+      
+      !Fourier transformation for incident field on plane
+!$omp parallel
+!$omp do private(ibt,ii,ie,f_factor) collapse(1)
+      do ie = 1,art_num_em
+        f_factor = dt_em*dble(obs_samp_em)*exp(zi*fe%art_ene(ie)*t)
+        do ibt = 1,2
+          fe%art_ex_inc_bt_ene(ie,ibt,1) = fe%art_ex_inc_bt_ene(ie,ibt,1) + f_factor*ex_inc_bt(ibt)*wf
+          fe%art_ex_inc_bt_ene(ie,ibt,2) = fe%art_ex_inc_bt_ene(ie,ibt,2) + f_factor*ex_inc_bt(ibt)
+          fe%art_ey_inc_bt_ene(ie,ibt,1) = fe%art_ey_inc_bt_ene(ie,ibt,1) + f_factor*ey_inc_bt(ibt)*wf
+          fe%art_ey_inc_bt_ene(ie,ibt,2) = fe%art_ey_inc_bt_ene(ie,ibt,2) + f_factor*ey_inc_bt(ibt)
+          fe%art_ez_inc_bt_ene(ie,ibt,1) = fe%art_ez_inc_bt_ene(ie,ibt,1) + f_factor*ez_inc_bt(ibt)*wf
+          fe%art_ez_inc_bt_ene(ie,ibt,2) = fe%art_ez_inc_bt_ene(ie,ibt,2) + f_factor*ez_inc_bt(ibt)
+          fe%art_hx_inc_bt_ene(ie,ibt,1) = fe%art_hx_inc_bt_ene(ie,ibt,1) + f_factor*hx_inc_bt(ibt)*wf
+          fe%art_hx_inc_bt_ene(ie,ibt,2) = fe%art_hx_inc_bt_ene(ie,ibt,2) + f_factor*hx_inc_bt(ibt)
+          fe%art_hy_inc_bt_ene(ie,ibt,1) = fe%art_hy_inc_bt_ene(ie,ibt,1) + f_factor*hy_inc_bt(ibt)*wf
+          fe%art_hy_inc_bt_ene(ie,ibt,2) = fe%art_hy_inc_bt_ene(ie,ibt,2) + f_factor*hy_inc_bt(ibt)
+          fe%art_hz_inc_bt_ene(ie,ibt,1) = fe%art_hz_inc_bt_ene(ie,ibt,1) + f_factor*hz_inc_bt(ibt)*wf
+          fe%art_hz_inc_bt_ene(ie,ibt,2) = fe%art_hz_inc_bt_ene(ie,ibt,2) + f_factor*hz_inc_bt(ibt)
+        end do
+      end do
+!$omp end do
+!$omp end parallel
+      
+      !Fourier transformation for total field on plane
+      if    (ek_dir1(1)==1.0d0) then !x-direction propagation, yz-plane----------------------!
+!$omp parallel
+!$omp do private(ibt,iy,iz,ie,f_factor) collapse(3)
+        do ie  = 1,art_num_em
+        do iz  = fs%mg%is(3),fs%mg%ie(3)
+        do iy  = fs%mg%is(2),fs%mg%ie(2)
+        do ibt = 1,2
+          if((fs%mg%is(1)<=fe%id_on_plane(ibt)).and.(fe%id_on_plane(ibt)<=fs%mg%ie(1))) then
+            f_factor                             = dt_em*dble(obs_samp_em)*exp(zi*fe%art_ene(ie)*t)
+            fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,1) = fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,1) &
+                                                  +f_factor*fe%ey_s(fe%id_on_plane(ibt),iy,iz)*wf
+            fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,2) = fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,2) &
+                                                  +f_factor*fe%ey_s(fe%id_on_plane(ibt),iy,iz)
+            fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,1) = fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,1) &
+                                                  +f_factor*fe%ez_s(fe%id_on_plane(ibt),iy,iz)*wf
+            fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,2) = fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,2) &
+                                                  +f_factor*fe%ez_s(fe%id_on_plane(ibt),iy,iz)
+            fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,1) = fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,1) &
+                                                  +f_factor*fe%hy_s(fe%id_on_plane(ibt),iy,iz)*wf
+            fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,2) = fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,2) &
+                                                  +f_factor*fe%hy_s(fe%id_on_plane(ibt),iy,iz)
+            fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,1) = fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,1) &
+                                                  +f_factor*fe%hz_s(fe%id_on_plane(ibt),iy,iz)*wf
+            fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,2) = fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,2) &
+                                                  +f_factor*fe%hz_s(fe%id_on_plane(ibt),iy,iz)
+          end if
+        end do
+        end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      elseif(ek_dir1(2)==1.0d0) then !y-direction propagation, xz-plane----------------------!
+!$omp parallel
+!$omp do private(ibt,ix,iz,ie,f_factor) collapse(3)
+        do ie  = 1,art_num_em
+        do iz  = fs%mg%is(3),fs%mg%ie(3)
+        do ix  = fs%mg%is(1),fs%mg%ie(1)
+        do ibt = 1,2
+          if((fs%mg%is(2)<=fe%id_on_plane(ibt)).and.(fe%id_on_plane(ibt)<=fs%mg%ie(2))) then
+            f_factor                             = dt_em*dble(obs_samp_em)*exp(zi*fe%art_ene(ie)*t)
+            fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,1) = fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,1) &
+                                                  +f_factor*fe%ex_s(ix,fe%id_on_plane(ibt),iz)*wf
+            fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,2) = fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,2) &
+                                                  +f_factor*fe%ex_s(ix,fe%id_on_plane(ibt),iz)
+            fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,1) = fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,1) &
+                                                  +f_factor*fe%ez_s(ix,fe%id_on_plane(ibt),iz)*wf
+            fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,2) = fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,2) &
+                                                  +f_factor*fe%ez_s(ix,fe%id_on_plane(ibt),iz)
+            fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,1) = fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,1) &
+                                                  +f_factor*fe%hx_s(ix,fe%id_on_plane(ibt),iz)*wf
+            fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,2) = fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,2) &
+                                                  +f_factor*fe%hx_s(ix,fe%id_on_plane(ibt),iz)
+            fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,1) = fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,1) &
+                                                  +f_factor*fe%hz_s(ix,fe%id_on_plane(ibt),iz)*wf
+            fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,2) = fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,2) &
+                                                  +f_factor*fe%hz_s(ix,fe%id_on_plane(ibt),iz)
+          end if
+        end do
+        end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      elseif(ek_dir1(3)==1.0d0) then !z-direction propagation, xy-plane----------------------!
+!$omp parallel
+!$omp do private(ibt,ix,iy,ie,f_factor) collapse(3)
+        do ie  = 1,art_num_em
+        do iy  = fs%mg%is(2),fs%mg%ie(2)
+        do ix  = fs%mg%is(1),fs%mg%ie(1)
+        do ibt = 1,2
+          if((fs%mg%is(3)<=fe%id_on_plane(ibt)).and.(fe%id_on_plane(ibt)<=fs%mg%ie(3))) then
+            f_factor                             = dt_em*dble(obs_samp_em)*exp(zi*fe%art_ene(ie)*t)
+            fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,1) = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,1) &
+                                                  +f_factor*fe%ex_s(ix,iy,fe%id_on_plane(ibt))*wf
+            fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,2) = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,2) &
+                                                  +f_factor*fe%ex_s(ix,iy,fe%id_on_plane(ibt))
+            fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,1) = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,1) &
+                                                  +f_factor*fe%ey_s(ix,iy,fe%id_on_plane(ibt))*wf
+            fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,2) = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,2) &
+                                                  +f_factor*fe%ey_s(ix,iy,fe%id_on_plane(ibt))
+            fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,1) = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,1) &
+                                                  +f_factor*fe%hx_s(ix,iy,fe%id_on_plane(ibt))*wf
+            fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,2) = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,2) &
+                                                  +f_factor*fe%hx_s(ix,iy,fe%id_on_plane(ibt))
+            fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,1) = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,1) &
+                                                  +f_factor*fe%hy_s(ix,iy,fe%id_on_plane(ibt))*wf
+            fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,2) = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,2) &
+                                                  +f_factor*fe%hy_s(ix,iy,fe%id_on_plane(ibt))
+          end if
+        end do
+        end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      end if
+      
+      return
+    end subroutine eh_calc_inc_tot_art
+    
+    !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ check and update maximum of e and h +++++++++++++++++++++++++++++++++++++++++++++++++++
     subroutine eh_update_max
       implicit none
@@ -3264,13 +3709,15 @@ contains
   !===========================================================================================
   != finalize eh-FDTD ========================================================================
   subroutine eh_finalize(fs,fe)
-    use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,       &
-                               nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,&
-                               obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ek_dir1
+    use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,                          &
+                               nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,                   &
+                               obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ase_ene_min_em,ase_wav_min_em,&
+                               art_num_em,art_ene_min_em,art_wav_min_em,ek_dir1
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
+    use phys_constants,  only: cspeed_au
     use math_constants,  only: pi,zi
     implicit none
     type(s_fdtd_system),intent(in)    :: fs
@@ -3279,14 +3726,16 @@ contains
                               z_ex2(:,:),z_ey2(:,:),z_ez2(:,:),z_hx2(:,:),z_hy2(:,:),z_hz2(:,:)
     integer                :: ii,ij,ik,il,i1,i1s,i2,i2s,ix,iy,iz,ie,ibt
     real(8)                :: rn_vec(2)
-    real(8)                :: ss_ds(3,2),se_ds(3,2),s_inc,ss_sum1,ss_sum2,se_sum1,se_sum2
-                              !ase: integrated pointing vector for sca.- and ext.-cross-section
+    real(8)                :: ss_ds(3,2),se_ds(3,2),ss_sum1,ss_sum2,se_sum1,se_sum2,s_inc
+                              !ase: integrated pointing vector for sca.- and ext.-cross-sections
                               !     === 1st index ===   === 2nd index ===
                               !     1:ix on yz plane  | 1:bottom and 2:top
                               !     2:iy on xz plane  |
                               !     3:iz on xy plane  |
+    real(8)                :: si_sum1(2),si_sum2(2),& !art: 1:bottom and 2:top
+                              sr_sum1,sr_sum2,st_sum1,st_sum2
     complex(8)             :: z_tmp(3)
-    complex(8)             :: zex_inc,zey_inc,zez_inc,zhx_inc,zhy_inc,zhz_inc
+    complex(8)             :: zex_inc,zey_inc,zez_inc,zhx_inc,zhy_inc,zhz_inc,zex,zey,zez,zhx,zhy,zhz
     character(2)           :: plane_name
     character(256)         :: iobs_name,iene_name,wf_name,save_name
     
@@ -3500,7 +3949,7 @@ contains
       end if
     end if
     
-    !output for obs_plane_ene_em option
+    !*** output for obs_plane_ene_em option *******************************************************************!
     if(obs_num_em>0) then
       do ii=1,obs_num_em !observation point---------------------------------------------------------------------------!
         if(fe%iobs_num_ene(ii)>0) then
@@ -3680,23 +4129,48 @@ contains
           end if
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_ase_'//trim(wf_name)//'.data'
           open( fe%ifn+il,file=save_name)
-          write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections with window function:" 
-          write(fe%ifn+il,'(A)') "# s_a: Absorption cross-section"
-          write(fe%ifn+il,'(A)') "# s_s: Scattering cross-section"
-          write(fe%ifn+il,'(A)') "# s_e: Extinction cross-section"
+          if    (il==1) then
+            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections with window function:" 
+          elseif(il==2) then
+            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections without window function:" 
+          end if
+          write(fe%ifn+il,'(A)') "# sigma_a: Absorption cross-section normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# sigma_s: Scattering cross-section normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# sigma_e: Extinction cross-section normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# S: Pointing vector of incident pulse along propagation direction"
           select case(unit_system)
           case('au','a.u.')
-            write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
-                  1, "Energy[a.u.]",                 &
-                  2, "s_a[a.u.]",                    &
-                  3, "s_s[a.u.]",                    &
-                  4, "s_e[a.u.]"
+            if    (ase_ene_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Energy[a.u.]",                 &
+                    2, "sigma_a[a.u.]",                &
+                    3, "sigma_s[a.u.]",                &
+                    4, "sigma_e[a.u.]",                &
+                    5, "S[a.u.]"
+            elseif(ase_wav_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Wavelength[a.u.]",             &
+                    2, "sigma_a[a.u.]",                &
+                    3, "sigma_s[a.u.]",                &
+                    4, "sigma_e[a.u.]",                &
+                    5, "S[a.u.]"
+            end if
           case('A_eV_fs')
-            write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
-                  1, "Energy[eV]",                   &
-                  2, "s_a[Angstrom^2]",              &
-                  3, "s_s[Angstrom^2]",              &
-                  4, "s_e[Angstrom^2]"
+            if    (ase_ene_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Energy[eV]",                   &
+                    2, "sigma_a[Angstrom^2]",          &
+                    3, "sigma_s[Angstrom^2]",          &
+                    4, "sigma_e[Angstrom^2]",          &
+                    5, "S[VA/Angstrom^2*fs^2]"
+            elseif(ase_wav_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Wavelength[Angstrom]",         &
+                    2, "sigma_a[Angstrom^2]",          &
+                    3, "sigma_s[Angstrom^2]",          &
+                    4, "sigma_e[Angstrom^2]",          &
+                    5, "S[VA/Angstrom^2*fs^2]"
+            end if
           end select
         end if
         
@@ -3829,11 +4303,244 @@ contains
         call comm_summation(ss_sum1,ss_sum2,nproc_group_global)
         call comm_summation(se_sum1,se_sum2,nproc_group_global)
         if(comm_is_root(nproc_id_global)) then
-          write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")        &
-                fe%ase_ene(ie)   *uenergy_from_au,          &
-                (se_sum2-ss_sum2)*(ulength_from_au**2.0d0), &
-                ss_sum2          *(ulength_from_au**2.0d0), &
-                se_sum2          *(ulength_from_au**2.0d0)
+          if    (ek_dir1(1)==1.0d0) then !x-direction propagation--------------------------------!
+            s_inc = 0.5d0*real( fe%ase_ey_inc_bt_ene(ie,1,il)*conjg(fe%ase_hz_inc_bt_ene(ie,1,il)) &
+                               -fe%ase_ez_inc_bt_ene(ie,1,il)*conjg(fe%ase_hy_inc_bt_ene(ie,1,il)) )
+          elseif(ek_dir1(2)==1.0d0) then !y-direction propagation--------------------------------!
+            s_inc = 0.5d0*real( fe%ase_ez_inc_bt_ene(ie,1,il)*conjg(fe%ase_hx_inc_bt_ene(ie,1,il)) &
+                               -fe%ase_ex_inc_bt_ene(ie,1,il)*conjg(fe%ase_hz_inc_bt_ene(ie,1,il)) )
+          elseif(ek_dir1(3)==1.0d0) then !z-direction propagation--------------------------------!
+            s_inc = 0.5d0*real( fe%ase_ex_inc_bt_ene(ie,1,il)*conjg(fe%ase_hy_inc_bt_ene(ie,1,il)) &
+                               -fe%ase_ey_inc_bt_ene(ie,1,il)*conjg(fe%ase_hx_inc_bt_ene(ie,1,il)) )
+          end if
+          if    (ase_ene_min_em>=0.0d0) then
+            write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")        &
+                  fe%ase_ene(ie)   *uenergy_from_au,          &
+                  (se_sum2-ss_sum2)*(ulength_from_au**2.0d0), &
+                  ss_sum2          *(ulength_from_au**2.0d0), &
+                  se_sum2          *(ulength_from_au**2.0d0), &
+                  s_inc            *fe%uVperm_from_au*fe%uAperm_from_au*(utime_from_au**2.0d0)
+          elseif(ase_wav_min_em>=0.0d0) then
+            write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")                        &
+                  2.0d0*pi*cspeed_au/fe%ase_ene(ie)*ulength_from_au,          &
+                  (se_sum2-ss_sum2)                *(ulength_from_au**2.0d0), &
+                  ss_sum2                          *(ulength_from_au**2.0d0), &
+                  se_sum2                          *(ulength_from_au**2.0d0), &
+                  s_inc                            *fe%uVperm_from_au*fe%uAperm_from_au*(utime_from_au**2.0d0)
+          end if
+        end if
+        
+        !close file
+        if((comm_is_root(nproc_id_global)).and.(ie==ase_num_em)) then
+          close(fe%ifn+il)
+        end if
+      end do
+      end do
+    end if
+    
+    !*** art option *******************************************************************************************!
+    if(fe%flag_art) then
+      !set normal vector for bottom and top
+      rn_vec(1) = -1.0d0; rn_vec(2) = 1.0d0;
+      
+      !calculate and output absorption-, reflection-, and transmission-rates
+      do ie = 1,art_num_em
+      do il = 1,2
+        !open file and write header
+        if((comm_is_root(nproc_id_global)).and.(ie==1)) then
+          if    (il==1) then
+            wf_name = 'with_wf'
+          elseif(il==2) then
+            wf_name = 'without_wf'
+          end if
+          save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_art_'//trim(wf_name)//'.data'
+          open( fe%ifn+il,file=save_name)
+          if    (il==1) then
+            write(fe%ifn+il,'(A)') "# Absorption-, reflection-, and transmission-rates with window function:" 
+          elseif(il==2) then
+            write(fe%ifn+il,'(A)') "# Absorption-, reflection-, and transmission-rates without window function:" 
+          end if
+          write(fe%ifn+il,'(A)') "# A: Absorption rate normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# R: Reflection rate normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# T: Transmission rate normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# S: Pointing vector of incident pulse along propagation direction"
+          select case(unit_system)
+          case('au','a.u.')
+            if    (art_ene_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Energy[a.u.]",                 &
+                    2, "A %",                          &
+                    3, "R %",                          &
+                    4, "T %",                          &
+                    5, "S[a.u.]"
+            elseif(art_wav_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Wavelength[a.u.]",             &
+                    2, "A %",                          &
+                    3, "R %",                          &
+                    4, "T %",                          &
+                    5, "S[a.u.]"
+            end if
+          case('A_eV_fs')
+            if    (art_ene_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Energy[eV]",                   &
+                    2, "A %",                          &
+                    3, "R %",                          &
+                    4, "T %",                          &
+                    5, "S[VA/Angstrom^2*fs^2]"
+            elseif(art_wav_min_em>=0.0d0) then
+              write(fe%ifn+il,'("#",99(1X,I0,":",A))') &
+                    1, "Wavelength[Angstrom]",         &
+                    2, "A %",                          &
+                    3, "R %",                          &
+                    4, "T %",                          &
+                    5, "S[VA/Angstrom^2*fs^2]"
+            end if
+          end select
+        end if
+        
+        !initialize
+        si_sum1(:) = 0.0d0; sr_sum1 = 0.0d0; st_sum1 = 0.0d0;
+        si_sum2(:) = 0.0d0; sr_sum2 = 0.0d0; st_sum2 = 0.0d0;
+        
+        !integration
+        if    (ek_dir1(1)==1.0d0) then !x-direction propagation, yz-plane----------------------!
+!$omp parallel
+!$omp do private(ibt,ix,iy,zey_inc,zez_inc,zhy_inc,zhz_inc,zey,zez,zhy,zhz) &
+!$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
+          do iz  = fs%mg%is(3),fs%mg%ie(3)
+          do iy  = fs%mg%is(2),fs%mg%ie(2)
+          do ibt = 1,2
+            if((fs%mg%is(1)<=fe%id_on_plane(ibt)).and.(fe%id_on_plane(ibt)<=fs%mg%ie(1))) then
+              zey_inc = fe%art_ey_inc_bt_ene(ie,ibt,il); zez_inc = fe%art_ez_inc_bt_ene(ie,ibt,il);
+              zhy_inc = fe%art_hy_inc_bt_ene(ie,ibt,il); zhz_inc = fe%art_hz_inc_bt_ene(ie,ibt,il);
+              si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zey_inc*conjg(zhz_inc)-zez_inc*conjg(zhy_inc) )
+              if    (ibt==1) then
+                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il) - zey_inc
+                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il) - zez_inc
+                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il) - zhy_inc
+                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il) - zhz_inc
+                sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zey*conjg(zhz)-zez*conjg(zhy) )
+              elseif(ibt==2) then
+                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il)
+                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il)
+                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il)
+                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il)
+                st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zey*conjg(zhz)-zez*conjg(zhy) )
+              end if
+            end if
+          end do
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+          si_sum1(:) = si_sum1(:)*fs%hgs(2)*fs%hgs(3)
+          sr_sum1    = sr_sum1   *fs%hgs(2)*fs%hgs(3)
+          st_sum1    = st_sum1   *fs%hgs(2)*fs%hgs(3)
+        elseif(ek_dir1(2)==1.0d0) then !y-direction propagation, xz-plane----------------------!
+!$omp parallel
+!$omp do private(ibt,ix,iy,zex_inc,zez_inc,zhx_inc,zhz_inc,zex,zez,zhx,zhz) &
+!$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
+          do iz  = fs%mg%is(3),fs%mg%ie(3)
+          do ix  = fs%mg%is(1),fs%mg%ie(1)
+          do ibt = 1,2
+            if((fs%mg%is(2)<=fe%id_on_plane(ibt)).and.(fe%id_on_plane(ibt)<=fs%mg%ie(2))) then
+              zex_inc = fe%art_ex_inc_bt_ene(ie,ibt,il); zez_inc = fe%art_ez_inc_bt_ene(ie,ibt,il);
+              zhx_inc = fe%art_hx_inc_bt_ene(ie,ibt,il); zhz_inc = fe%art_hz_inc_bt_ene(ie,ibt,il);
+              si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zez_inc*conjg(zhx_inc)-zex_inc*conjg(zhz_inc) )
+              if    (ibt==1) then
+                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il) - zex_inc
+                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il) - zez_inc
+                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il) - zhx_inc
+                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il) - zhz_inc
+                sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zez*conjg(zhx)-zex*conjg(zhz) )
+              elseif(ibt==2) then
+                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il)
+                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il)
+                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il)
+                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il)
+                st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zez*conjg(zhx)-zex*conjg(zhz) )
+              end if
+            end if
+          end do
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+          si_sum1(:) = si_sum1(:)*fs%hgs(1)*fs%hgs(3)
+          sr_sum1    = sr_sum1   *fs%hgs(1)*fs%hgs(3)
+          st_sum1    = st_sum1   *fs%hgs(1)*fs%hgs(3)
+        elseif(ek_dir1(3)==1.0d0) then !z-direction propagation, xy-plane----------------------!
+!$omp parallel
+!$omp do private(ibt,ix,iy,zex_inc,zey_inc,zhx_inc,zhy_inc,zex,zey,zhx,zhy) &
+!$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
+          do iy  = fs%mg%is(2),fs%mg%ie(2)
+          do ix  = fs%mg%is(1),fs%mg%ie(1)
+          do ibt = 1,2
+            if((fs%mg%is(3)<=fe%id_on_plane(ibt)).and.(fe%id_on_plane(ibt)<=fs%mg%ie(3))) then
+              zex_inc = fe%art_ex_inc_bt_ene(ie,ibt,il); zey_inc = fe%art_ey_inc_bt_ene(ie,ibt,il);
+              zhx_inc = fe%art_hx_inc_bt_ene(ie,ibt,il); zhy_inc = fe%art_hy_inc_bt_ene(ie,ibt,il);
+              si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zex_inc*conjg(zhy_inc)-zey_inc*conjg(zhx_inc) )
+              if    (ibt==1) then
+                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il) - zex_inc
+                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il) - zey_inc
+                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il) - zhx_inc
+                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il) - zhy_inc
+                sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zex*conjg(zhy)-zey*conjg(zhx) )
+              elseif(ibt==2) then
+                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il)
+                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il)
+                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il)
+                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il)
+                st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zex*conjg(zhy)-zey*conjg(zhx) )
+              end if
+            end if
+          end do
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+          si_sum1(:) = si_sum1(:)*fs%hgs(1)*fs%hgs(2)
+          sr_sum1    = sr_sum1   *fs%hgs(1)*fs%hgs(2)
+          st_sum1    = st_sum1   *fs%hgs(1)*fs%hgs(2)
+        end if
+        
+        !output
+        call comm_summation(si_sum1(:),si_sum2(:),2,nproc_group_global)
+        call comm_summation(sr_sum1   ,sr_sum2   ,  nproc_group_global)
+        call comm_summation(st_sum1   ,st_sum2   ,  nproc_group_global)
+        sr_sum2 = sr_sum2 / si_sum2(1)
+        st_sum2 = st_sum2 / si_sum2(2)
+        if(comm_is_root(nproc_id_global)) then
+          if    (ek_dir1(1)==1.0d0) then !x-direction propagation--------------------------------!
+            s_inc = 0.5d0*real( fe%art_ey_inc_bt_ene(ie,1,il)*conjg(fe%art_hz_inc_bt_ene(ie,1,il)) &
+                               -fe%art_ez_inc_bt_ene(ie,1,il)*conjg(fe%art_hy_inc_bt_ene(ie,1,il)) )
+          elseif(ek_dir1(2)==1.0d0) then !y-direction propagation--------------------------------!
+            s_inc = 0.5d0*real( fe%art_ez_inc_bt_ene(ie,1,il)*conjg(fe%art_hx_inc_bt_ene(ie,1,il)) &
+                               -fe%art_ex_inc_bt_ene(ie,1,il)*conjg(fe%art_hz_inc_bt_ene(ie,1,il)) )
+          elseif(ek_dir1(3)==1.0d0) then !z-direction propagation--------------------------------!
+            s_inc = 0.5d0*real( fe%art_ex_inc_bt_ene(ie,1,il)*conjg(fe%art_hy_inc_bt_ene(ie,1,il)) &
+                               -fe%art_ey_inc_bt_ene(ie,1,il)*conjg(fe%art_hx_inc_bt_ene(ie,1,il)) )
+          end if
+
+          if    (art_ene_min_em>=0.0d0) then
+            write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")    &
+                  fe%art_ene(ie)         *uenergy_from_au,&
+                  (1.0d0-sr_sum2-st_sum2)*100.0d0,        &
+                  sr_sum2                *100.0d0,        &
+                  st_sum2                *100.0d0,        &
+                  s_inc                  *fe%uVperm_from_au*fe%uAperm_from_au*(utime_from_au**2.0d0)
+          elseif(art_wav_min_em>=0.0d0) then
+            write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")              &
+                  2.0d0*pi*cspeed_au/fe%art_ene(ie)*ulength_from_au,&
+                  (1.0d0-sr_sum2-st_sum2)          *100.0d0,        &
+                  sr_sum2                          *100.0d0,        &
+                  st_sum2                          *100.0d0,        &
+                  s_inc                            *fe%uVperm_from_au*fe%uAperm_from_au*(utime_from_au**2.0d0)
+          end if
+
+
         end if
         
         !close file
@@ -3879,6 +4586,7 @@ contains
                fe%hx_y,fe%c1_hx_y,fe%c2_hx_y,fe%hx_z,fe%c1_hx_z,fe%c2_hx_z,&
                fe%hy_z,fe%c1_hy_z,fe%c2_hy_z,fe%hy_x,fe%c1_hy_x,fe%c2_hy_x,&
                fe%hz_x,fe%c1_hz_x,fe%c2_hz_x,fe%hz_y,fe%c1_hz_y,fe%c2_hz_y)
+    if(fe%flag_save) deallocate(fe%ex_s,fe%ey_s,fe%ez_s,fe%hx_s,fe%hy_s,fe%hz_s)
     
     !*** write end ********************************************************************************************!
     if(comm_is_root(nproc_id_global)) then
