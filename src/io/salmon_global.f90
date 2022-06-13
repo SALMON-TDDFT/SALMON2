@@ -275,6 +275,13 @@ module salmon_global
   real(8)        :: ase_wav_max_em
   real(8)        :: ase_box_cent_em(3)
   real(8)        :: ase_box_size_em(3)
+  integer        :: art_num_em
+  real(8)        :: art_ene_min_em
+  real(8)        :: art_ene_max_em
+  real(8)        :: art_wav_min_em
+  real(8)        :: art_wav_max_em
+  real(8)        :: art_plane_bot_em(3)
+  real(8)        :: art_plane_top_em(3)
   character(1)   :: yn_make_shape
   character(1)   :: yn_output_shape
   character(1)   :: yn_copy_x

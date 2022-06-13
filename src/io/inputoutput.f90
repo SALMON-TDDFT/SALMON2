@@ -433,6 +433,13 @@ contains
       & ase_wav_max_em,           &
       & ase_box_cent_em,          &
       & ase_box_size_em,          &
+      & art_num_em,               &
+      & art_ene_min_em,           &
+      & art_ene_max_em,           &
+      & art_wav_min_em,           &
+      & art_wav_max_em,           &
+      & art_plane_top_em,         &
+      & art_plane_bot_em,         &
       & yn_make_shape,            &
       & yn_output_shape,          &
       & yn_copy_x,                &
@@ -798,6 +805,13 @@ contains
     ase_wav_max_em              = -1.0d0
     ase_box_cent_em(:)          = 0.0d0
     ase_box_size_em(:)          = -1.0d0
+    art_num_em                  = 0
+    art_ene_min_em              = -1.0d0
+    art_ene_max_em              = -1.0d0
+    art_wav_min_em              = -1.0d0
+    art_wav_max_em              = -1.0d0
+    art_plane_bot_em(:)         = 0.0d0
+    art_plane_top_em(:)         = 0.0d0
     yn_make_shape               = 'n'
     yn_output_shape             = 'n'
     yn_copy_x                   = 'n'
@@ -1338,6 +1352,19 @@ contains
     ase_box_cent_em = ase_box_cent_em * ulength_to_au
     call comm_bcast(ase_box_size_em          ,nproc_group_global)
     ase_box_size_em = ase_box_size_em * ulength_to_au
+    call comm_bcast(art_num_em               ,nproc_group_global)
+    call comm_bcast(art_ene_min_em           ,nproc_group_global)
+    art_ene_min_em = art_ene_min_em * uenergy_to_au
+    call comm_bcast(art_ene_max_em           ,nproc_group_global)
+    art_ene_max_em = art_ene_max_em * uenergy_to_au
+    call comm_bcast(art_wav_min_em           ,nproc_group_global)
+    art_wav_min_em = art_wav_min_em * ulength_to_au
+    call comm_bcast(art_wav_max_em           ,nproc_group_global)
+    art_wav_max_em = art_wav_max_em * ulength_to_au
+    call comm_bcast(art_plane_bot_em          ,nproc_group_global)
+    art_plane_bot_em = art_plane_bot_em * ulength_to_au
+    call comm_bcast(art_plane_top_em          ,nproc_group_global)
+    art_plane_top_em = art_plane_top_em * ulength_to_au
     call comm_bcast(yn_make_shape            ,nproc_group_global)
     call comm_bcast(yn_output_shape          ,nproc_group_global)
     call comm_bcast(yn_copy_x                ,nproc_group_global)
@@ -2179,6 +2206,17 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(1)', ase_box_size_em(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(2)', ase_box_size_em(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(3)', ase_box_size_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_num_em', art_num_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_min_em', art_ene_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(1)', art_plane_top_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(2)', art_plane_top_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(3)', art_plane_top_em(3)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
