@@ -4407,7 +4407,7 @@ contains
         !integration
         if    (ek_dir1(1)==1.0d0) then !x-direction propagation, yz-plane----------------------!
 !$omp parallel
-!$omp do private(ibt,ix,iy,zey_inc,zez_inc,zhy_inc,zhz_inc,zey,zez,zhy,zhz) &
+!$omp do private(ibt,iy,iz,zey_inc,zez_inc,zhy_inc,zhz_inc,zey,zez,zhy,zhz) &
 !$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
           do iz  = fs%mg%is(3),fs%mg%ie(3)
           do iy  = fs%mg%is(2),fs%mg%ie(2)
@@ -4417,16 +4417,16 @@ contains
               zhy_inc = fe%art_hy_inc_bt_ene(ie,ibt,il); zhz_inc = fe%art_hz_inc_bt_ene(ie,ibt,il);
               si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zey_inc*conjg(zhz_inc)-zez_inc*conjg(zhy_inc) )
               if    (ibt==1) then
-                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il) - zey_inc
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il) - zez_inc
-                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il) - zhy_inc
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il) - zhz_inc
+                zey = fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,il) - zey_inc
+                zez = fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,il) - zez_inc
+                zhy = fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,il) - zhy_inc
+                zhz = fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,il) - zhz_inc
                 sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zey*conjg(zhz)-zez*conjg(zhy) )
               elseif(ibt==2) then
-                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il)
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il)
+                zey = fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,il)
+                zez = fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,il)
+                zhy = fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,il)
+                zhz = fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,il)
                 st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zey*conjg(zhz)-zez*conjg(zhy) )
               end if
             end if
@@ -4440,7 +4440,7 @@ contains
           st_sum1    = st_sum1   *fs%hgs(2)*fs%hgs(3)
         elseif(ek_dir1(2)==1.0d0) then !y-direction propagation, xz-plane----------------------!
 !$omp parallel
-!$omp do private(ibt,ix,iy,zex_inc,zez_inc,zhx_inc,zhz_inc,zex,zez,zhx,zhz) &
+!$omp do private(ibt,ix,iz,zex_inc,zez_inc,zhx_inc,zhz_inc,zex,zez,zhx,zhz) &
 !$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
           do iz  = fs%mg%is(3),fs%mg%ie(3)
           do ix  = fs%mg%is(1),fs%mg%ie(1)
@@ -4450,16 +4450,16 @@ contains
               zhx_inc = fe%art_hx_inc_bt_ene(ie,ibt,il); zhz_inc = fe%art_hz_inc_bt_ene(ie,ibt,il);
               si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zez_inc*conjg(zhx_inc)-zex_inc*conjg(zhz_inc) )
               if    (ibt==1) then
-                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il) - zex_inc
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il) - zez_inc
-                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il) - zhx_inc
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il) - zhz_inc
+                zex = fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,il) - zex_inc
+                zez = fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,il) - zez_inc
+                zhx = fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,il) - zhx_inc
+                zhz = fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,il) - zhz_inc
                 sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zez*conjg(zhx)-zex*conjg(zhz) )
               elseif(ibt==2) then
-                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il)
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il)
+                zex = fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,il)
+                zez = fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,il)
+                zhx = fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,il)
+                zhz = fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,il)
                 st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zez*conjg(zhx)-zex*conjg(zhz) )
               end if
             end if
@@ -4523,7 +4523,6 @@ contains
             s_inc = 0.5d0*real( fe%art_ex_inc_bt_ene(ie,1,il)*conjg(fe%art_hy_inc_bt_ene(ie,1,il)) &
                                -fe%art_ey_inc_bt_ene(ie,1,il)*conjg(fe%art_hx_inc_bt_ene(ie,1,il)) )
           end if
-
           if    (art_ene_min_em>=0.0d0) then
             write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")    &
                   fe%art_ene(ie)         *uenergy_from_au,&
@@ -4539,8 +4538,6 @@ contains
                   st_sum2                          *100.0d0,        &
                   s_inc                            *fe%uVperm_from_au*fe%uAperm_from_au*(utime_from_au**2.0d0)
           end if
-
-
         end if
         
         !close file
