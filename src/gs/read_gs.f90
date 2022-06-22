@@ -49,7 +49,9 @@ subroutine read_dns(lg,mg,rho)
     end do
     do ix=lg%is(1),lg%ie(1)
     do iy=lg%is(2),lg%ie(2)
-      read(fp,*) (tmp(ix,iy,iz),iz=lg%is(3),lg%ie(3))
+    do iz=lg%is(3),lg%ie(3)
+      read(fp,*) tmp(ix,iy,iz)
+    end do
     end do
     end do
     close(fp)
