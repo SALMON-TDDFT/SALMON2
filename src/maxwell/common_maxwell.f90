@@ -261,6 +261,8 @@ contains
     !make shape
     cal_tmp = 0.0d0
     do ii=1,n_s
+!$omp parallel
+!$omp do private(ix,iy,iz,il,x_tmp,y_tmp,z_tmp,x_o,y_o,z_o,x,y,z,cal_tmp) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
@@ -270,9 +272,13 @@ contains
         z_tmp = coo(iz,3) - ori_s(ii,3)
         
         !rotation
-        call rotate_x(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),x_o)
-        call rotate_y(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),y_o)
-        call rotate_z(x_tmp,y_tmp,z_tmp,rot_s_d(ii,:),z_o)
+        x_o =  cos(rot_s_d(ii,3))*( cos(rot_s_d(ii,2))*x_tmp                               &
+              -sin(rot_s_d(ii,2))*( cos(rot_s_d(ii,1))*z_tmp - sin(rot_s_d(ii,1))*y_tmp) ) &
+              +sin(rot_s_d(ii,3))*( sin(rot_s_d(ii,1))*z_tmp + cos(rot_s_d(ii,1))*y_tmp )
+        y_o = -sin(rot_s_d(ii,3))*( cos(rot_s_d(ii,2))*x_tmp                               &
+              -sin(rot_s_d(ii,2))*( cos(rot_s_d(ii,1))*z_tmp - sin(rot_s_d(ii,1))*y_tmp) ) &
+              +cos(rot_s_d(ii,3))*( sin(rot_s_d(ii,1))*z_tmp + cos(rot_s_d(ii,1))*y_tmp )
+        z_o =  sin(rot_s_d(ii,2))*x_tmp + cos(rot_s_d(ii,2))*( cos(rot_s_d(ii,1))*z_tmp - sin(rot_s_d(ii,1))*y_tmp )
         
         !copy loop
         do il=1,l_max
@@ -308,7 +314,7 @@ contains
               cal_tmp= (x/( inf_s(ii,1)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3) ))**2.0d0 &
                      + (y/( inf_s(ii,2)/2.0d0*(inf_s(ii,3)-z)/inf_s(ii,3) ))**2.0d0
             else
-              cal_tmp=10
+              cal_tmp=10.0d0
             end if
             if( (cal_tmp<=1.0d0).and.(z>=-adj_err).and.(z<=inf_s(ii,3)) ) imat(ix,iy,iz) = id_s(ii)
           elseif(trim(typ_s(ii))=='triangular-cone')      then
@@ -339,6 +345,8 @@ contains
       end do
       end do
       end do
+!$omp end do
+!$omp end parallel
     end do
     
     return

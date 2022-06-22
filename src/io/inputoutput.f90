@@ -389,6 +389,7 @@ contains
       & al_em,                    &
       & dl_em,                    &
       & num_rgrid_em,             &
+      & at_em,                    &
       & dt_em,                    &
       & nt_em,                    &
       & boundary_em,              &
@@ -762,6 +763,7 @@ contains
     al_em(:)                    = 0d0
     dl_em(:)                    = 0d0
     num_rgrid_em(:)             = 0
+    at_em                       = 0d0
     dt_em                       = 0d0
     nt_em                       = 0
     boundary_em(:,:)            = 'default'
@@ -786,7 +788,7 @@ contains
     gbeam_sigma_plane2(:)       =-1d0
     gbeam_sigma_line2(:)        =-1d0
     obs_num_em                  = 0
-    obs_samp_em                 = 1
+    obs_samp_em                 = 0
     obs_loc_em(:,:)             = 0d0
     obs_plane_ene_em(:,:)       = -1d0
     yn_obs_plane_em(:)          = 'n'
@@ -1289,6 +1291,8 @@ contains
     call comm_bcast(dl_em                    ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
     call comm_bcast(num_rgrid_em             ,nproc_group_global)
+    call comm_bcast(at_em                    ,nproc_group_global)
+    at_em = at_em * utime_to_au
     call comm_bcast(dt_em                    ,nproc_group_global)
     dt_em = dt_em * utime_to_au
     call comm_bcast(nt_em                    ,nproc_group_global)
@@ -2108,6 +2112,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'at_em', at_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
