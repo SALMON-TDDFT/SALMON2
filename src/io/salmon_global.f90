@@ -232,6 +232,7 @@ module salmon_global
   real(8)        :: al_em(3)
   real(8)        :: dl_em(3)
   integer        :: num_rgrid_em(3)
+  real(8)        :: at_em
   real(8)        :: dt_em
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)

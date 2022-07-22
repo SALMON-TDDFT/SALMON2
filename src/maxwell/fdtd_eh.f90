@@ -175,15 +175,15 @@ contains
   !===========================================================================================
   != initialize eh-FDTD ======================================================================
   subroutine eh_init(fs,fe)
-    use salmon_global,   only: nt_em,al_em,dl_em,num_rgrid_em,dt_em,boundary_em,yn_periodic,base_directory,&
-                               media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,                  &
+    use salmon_global,   only: al_em,dl_em,num_rgrid_em,at_em,dt_em,nt_em,boundary_em,yn_periodic,         &
+                               base_directory,media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,   &
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
                                obs_num_em,obs_loc_em,obs_plane_ene_em,yn_obs_plane_integral_em,obs_samp_em,&
                                media_id_pml,media_id_source1,media_id_source2,                             &
                                wave_input,trans_longi,e_impulse,nenergy,                                   &
-                               source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,                          &
+                               source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,omega1,                   &
                                phi_cep1,I_wcm2_1,E_amplitude1,gbeam_sigma_plane1,gbeam_sigma_line1,        &
-                               source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,                          &
+                               source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,omega2,                   &
                                phi_cep2,I_wcm2_2,E_amplitude2,gbeam_sigma_plane2,gbeam_sigma_line2,        &
                                bloch_k_em,bloch_real_imag_em,yn_make_shape,yn_output_shape,                &
                                ase_num_em,ase_ene_min_em,ase_ene_max_em,ase_wav_min_em,ase_wav_max_em,     &
@@ -265,8 +265,6 @@ contains
     
     !*** set initial parameter and value **********************************************************************!
     fe%Nd        = 1
-    fe%iter_sta  = 1
-    fe%iter_end  = nt_em
     fe%ifn       = 600
     fe%ipml_l    = 8
     fe%pml_m     = 4.0d0
@@ -346,32 +344,104 @@ contains
     allocate(fe%coo(minval(fs%lg%is(:))-fe%Nd:maxval(fs%lg%ie(:))+fe%Nd,3))
     call set_coo_em(fe%Nd,fe%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fe%coo(:,:),yn_periodic)
     
-    !*** set and check dt *************************************************************************************!
+    !*** check and set time information ***********************************************************************!
+    !set maximum dt in CFL condition
     dt_cfl=1.0d0/( &
-           cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
-           )
+           cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) )
+    
+    !check and set at_em, dt_em, and nt_em
     if(comm_is_root(nproc_id_global)) write(*,*)
-    if(dt_em==0.0d0) then
-      dt_em=dt_cfl*0.99d0
-      if(comm_is_root(nproc_id_global)) then
-        write(*,*) "**************************"
-        write(*,*) "From CFL condition, dt_em is determined by", dt_em*utime_from_au
-        write(*,*) "in the unit system, ",trim(unit_system),"."
-        write(*,*) "**************************"
+    if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
+    if( ( (at_em >0.0d0) .and. (dt_em >0.0d0) .and. (nt_em>0) ) &
+        .or.                                                    &
+        ( (at_em==0.0d0) .and. (nt_em==0)                     ) ) then
+      call stop_em(   'Two of at_em, dt_em, and nt_em must be set.',                    &
+                   c2='Otherwise, both at_em and nt_em or either of those must be set.',&
+                   c3='(then, dt_em is automatically determined)')
+    elseif(dt_em==0.0d0) then
+      if( (at_em>0.0d0) .and. (nt_em>0) ) then
+        dt_em = at_em/dble(nt_em)
+        if(comm_is_root(nproc_id_global)) then
+          write(*,*) "From at_em and nt_em, dt_em is determined as", dt_em*utime_from_au
+          write(*,*) "in the unit system, ",trim(unit_system),"."
+        end if
+      else
+        dt_em=dt_cfl*0.999d0
+        if(comm_is_root(nproc_id_global)) then
+          write(*,*) "From CFL condition, dt_em is determined as", dt_em*utime_from_au
+          write(*,*) "in the unit system, ",trim(unit_system),"."
+        end if
       end if
-    elseif(dt_em>=dt_cfl) then
-      write(tmp_c(1),*) 'To sufficient CFL condition, dt_em must be set smaller than', dt_cfl*utime_from_au
-      write(tmp_c(2),*) 'in the unit system, ',trim(unit_system),'.'
-      call stop_em(trim(adjustl(tmp_c(1))),c2=trim(adjustl(tmp_c(2))))
     else
       if(comm_is_root(nproc_id_global)) then
-        write(*,*) "**************************"
         write(*,*) "dt_em =", dt_em*utime_from_au
         write(*,*) "in the unit system, ",trim(unit_system),"."
-        write(*,*) "**************************"
       end if
     end if
     call comm_bcast(dt_em,nproc_group_global)
+    if(dt_em>=dt_cfl) then
+      write(tmp_c(1),*) dt_cfl*utime_from_au
+      write(tmp_c(2),*) 'in the unit system, ',trim(unit_system),'.'
+      call stop_em('To sufficient CFL condition, dt_em must be set smaller than',&
+                   c2=trim(adjustl(tmp_c(1))), c3=trim(adjustl(tmp_c(2))) )
+    end if
+    if    (at_em==0.0d0) then
+      at_em = dt_em * dble(nt_em)
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*) "From dt_em and nt_em, at_em is determined as", at_em*utime_from_au
+        write(*,*) "in the unit system, ",trim(unit_system),"."
+      end if
+    elseif(nt_em==0    ) then
+      nt_em = nint(at_em/dt_em)
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*) "From at_em and dt_em, nt_em is determined as", nt_em
+      end if
+    end if
+    
+    !check and set obs_samp_em
+    if(obs_samp_em==0) then
+      if    (fe%flag_ase) then
+        if     (ase_ene_max_em>0.0d0) then
+          obs_samp_em = nint( ((2*pi/ase_ene_max_em)/20.0d0) / dt_em )
+          if(obs_samp_em<1) obs_samp_em=1
+          if(comm_is_root(nproc_id_global)) write(*,*) "From ase_ene_max_em, obs_samp_em is determined as", obs_samp_em
+        else if(ase_wav_min_em>0.0d0) then
+          obs_samp_em = nint( ((ase_wav_min_em/cspeed_au)/20.0d0) / dt_em )
+          if(obs_samp_em<1) obs_samp_em=1
+          if(comm_is_root(nproc_id_global)) write(*,*) "From ase_wav_min_em, obs_samp_em is determined as", obs_samp_em
+        end if
+      elseif(fe%flag_art) then
+        if     (art_ene_max_em>0.0d0) then
+          obs_samp_em = nint( ((2*pi/art_ene_max_em)/20.0d0) / dt_em )
+          if(obs_samp_em<1) obs_samp_em=1
+          if(comm_is_root(nproc_id_global)) write(*,*) "From art_ene_max_em, obs_samp_em is determined as", obs_samp_em
+        else if(art_wav_min_em>0.0d0) then
+          obs_samp_em = nint( ((art_wav_min_em/cspeed_au)/20.0d0) / dt_em )
+          if(obs_samp_em<1) obs_samp_em=1
+          if(comm_is_root(nproc_id_global)) write(*,*) "From art_wav_min_em, obs_samp_em is determined as", obs_samp_em
+        end if
+      elseif(omega1>0.0d0) then
+        obs_samp_em = nint( ((2*pi/omega1)/20.0d0) / dt_em )
+        if(obs_samp_em<1) obs_samp_em=1
+        if(comm_is_root(nproc_id_global)) write(*,*) "From omega1, obs_samp_em is determined as", obs_samp_em
+      elseif(omega2>0.0d0) then
+        obs_samp_em = nint( ((2*pi/omega2)/20.0d0) / dt_em )
+        if(obs_samp_em<1) obs_samp_em=1
+        if(comm_is_root(nproc_id_global)) write(*,*) "From omega2, obs_samp_em is determined as", obs_samp_em
+      else
+        obs_samp_em=1
+        if(comm_is_root(nproc_id_global)) write(*,*) "obs_samp_em is determined as", obs_samp_em
+      end if
+    else
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*) "obs_samp_em =", obs_samp_em
+      end if
+    end if
+    if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
+    
+    !set time-step(start and end)
+    fe%iter_sta  = 1
+    fe%iter_end  = nt_em
     
     !*** make or input shape data *****************************************************************************!
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i3d',i3d=fs%imedia)
@@ -1792,57 +1862,6 @@ contains
         fe%art_hy_tot_bt_ene(:,:,:,:,:) = (0.0d0,0.0d0);
       end if
       
-      !check media ID on plane(that must be 0)
-      ii=0; ij=0;
-      if    (ek_dir1(1)==1.0d0) then !x-propagatin, yz-plane
-!$omp parallel
-!$omp do private(iy,iz,ik)
-        do iz=fs%mg%is(3),fs%mg%ie(3)
-        do iy=fs%mg%is(2),fs%mg%ie(2)
-          do ik=1,2
-            if((fs%mg%is(1)<=fe%id_on_plane(ik)).and.fe%id_on_plane(ik)<=fs%mg%ie(1)) then
-              if(fs%imedia(fe%id_on_plane(ik),iy,iz)/=0) ii=1
-            end if
-          end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      elseif(ek_dir1(2)==1.0d0) then !y-propagatin, xz-plane
-!$omp parallel
-!$omp do private(ix,iz,ik)
-        do iz=fs%mg%is(3),fs%mg%ie(3)
-        do ix=fs%mg%is(1),fs%mg%ie(1)
-          do ik=1,2
-            if((fs%mg%is(2)<=fe%id_on_plane(ik)).and.fe%id_on_plane(ik)<=fs%mg%ie(2)) then
-              if(fs%imedia(ix,fe%id_on_plane(ik),iz)/=0) ii=1
-            end if
-          end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      elseif(ek_dir1(3)==1.0d0) then !z-propagatin, xy-plane
-!$omp parallel
-!$omp do private(ix,iy,ik)
-        do iy=fs%mg%is(2),fs%mg%ie(2)
-        do ix=fs%mg%is(1),fs%mg%ie(1)
-          do ik=1,2
-            if((fs%mg%is(3)<=fe%id_on_plane(ik)).and.fe%id_on_plane(ik)<=fs%mg%ie(3)) then
-              if(fs%imedia(ix,iy,fe%id_on_plane(ik))/=0) ii=1
-            end if
-          end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      end if
-      call comm_summation(ii,ij,nproc_group_global)
-      if(ij>0) then
-        call stop_em(   'When art_num_em > 0, media ID on planes[bottom and top] must be 0.', &
-                     c2='art_plane_bot_em and/or art_plane_top_em must be reconsidered.')
-      end if
-      
       !write information
       if(comm_is_root(nproc_id_global)) then
         write(*,*)
@@ -2626,7 +2645,7 @@ contains
       !store old h
       if( fe%flag_save .and. mod(iter,obs_samp_em)==0 )then
 !$omp parallel
-!$omp do private(ix,iy,iz)
+!$omp do private(ix,iy,iz) collapse(2)
         do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
         do iy=(fs%mg%is_array(2)),(fs%mg%ie_array(2))
         do ix=(fs%mg%is_array(1)),(fs%mg%ie_array(1))
@@ -4407,7 +4426,7 @@ contains
         !integration
         if    (ek_dir1(1)==1.0d0) then !x-direction propagation, yz-plane----------------------!
 !$omp parallel
-!$omp do private(ibt,ix,iy,zey_inc,zez_inc,zhy_inc,zhz_inc,zey,zez,zhy,zhz) &
+!$omp do private(ibt,iy,iz,zey_inc,zez_inc,zhy_inc,zhz_inc,zey,zez,zhy,zhz) &
 !$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
           do iz  = fs%mg%is(3),fs%mg%ie(3)
           do iy  = fs%mg%is(2),fs%mg%ie(2)
@@ -4417,16 +4436,16 @@ contains
               zhy_inc = fe%art_hy_inc_bt_ene(ie,ibt,il); zhz_inc = fe%art_hz_inc_bt_ene(ie,ibt,il);
               si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zey_inc*conjg(zhz_inc)-zez_inc*conjg(zhy_inc) )
               if    (ibt==1) then
-                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il) - zey_inc
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il) - zez_inc
-                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il) - zhy_inc
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il) - zhz_inc
+                zey = fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,il) - zey_inc
+                zez = fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,il) - zez_inc
+                zhy = fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,il) - zhy_inc
+                zhz = fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,il) - zhz_inc
                 sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zey*conjg(zhz)-zez*conjg(zhy) )
               elseif(ibt==2) then
-                zey = fe%art_ey_tot_bt_ene(ix,iy,ie,ibt,il)
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhy = fe%art_hy_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il)
+                zey = fe%art_ey_tot_bt_ene(iy,iz,ie,ibt,il)
+                zez = fe%art_ez_tot_bt_ene(iy,iz,ie,ibt,il)
+                zhy = fe%art_hy_tot_bt_ene(iy,iz,ie,ibt,il)
+                zhz = fe%art_hz_tot_bt_ene(iy,iz,ie,ibt,il)
                 st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zey*conjg(zhz)-zez*conjg(zhy) )
               end if
             end if
@@ -4440,7 +4459,7 @@ contains
           st_sum1    = st_sum1   *fs%hgs(2)*fs%hgs(3)
         elseif(ek_dir1(2)==1.0d0) then !y-direction propagation, xz-plane----------------------!
 !$omp parallel
-!$omp do private(ibt,ix,iy,zex_inc,zez_inc,zhx_inc,zhz_inc,zex,zez,zhx,zhz) &
+!$omp do private(ibt,ix,iz,zex_inc,zez_inc,zhx_inc,zhz_inc,zex,zez,zhx,zhz) &
 !$omp reduction(+:si_sum1,sr_sum1,st_sum1) collapse(2)
           do iz  = fs%mg%is(3),fs%mg%ie(3)
           do ix  = fs%mg%is(1),fs%mg%ie(1)
@@ -4450,16 +4469,16 @@ contains
               zhx_inc = fe%art_hx_inc_bt_ene(ie,ibt,il); zhz_inc = fe%art_hz_inc_bt_ene(ie,ibt,il);
               si_sum1(ibt) = si_sum1(ibt) + rn_vec(2)*0.5d0*real( zez_inc*conjg(zhx_inc)-zex_inc*conjg(zhz_inc) )
               if    (ibt==1) then
-                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il) - zex_inc
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il) - zez_inc
-                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il) - zhx_inc
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il) - zhz_inc
+                zex = fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,il) - zex_inc
+                zez = fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,il) - zez_inc
+                zhx = fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,il) - zhx_inc
+                zhz = fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,il) - zhz_inc
                 sr_sum1 = sr_sum1 + rn_vec(ibt)*0.5d0*real( zez*conjg(zhx)-zex*conjg(zhz) )
               elseif(ibt==2) then
-                zex = fe%art_ex_tot_bt_ene(ix,iy,ie,ibt,il)
-                zez = fe%art_ez_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhx = fe%art_hx_tot_bt_ene(ix,iy,ie,ibt,il)
-                zhz = fe%art_hz_tot_bt_ene(ix,iy,ie,ibt,il)
+                zex = fe%art_ex_tot_bt_ene(ix,iz,ie,ibt,il)
+                zez = fe%art_ez_tot_bt_ene(ix,iz,ie,ibt,il)
+                zhx = fe%art_hx_tot_bt_ene(ix,iz,ie,ibt,il)
+                zhz = fe%art_hz_tot_bt_ene(ix,iz,ie,ibt,il)
                 st_sum1 = st_sum1 + rn_vec(ibt)*0.5d0*real( zez*conjg(zhx)-zex*conjg(zhz) )
               end if
             end if
@@ -4523,7 +4542,6 @@ contains
             s_inc = 0.5d0*real( fe%art_ex_inc_bt_ene(ie,1,il)*conjg(fe%art_hy_inc_bt_ene(ie,1,il)) &
                                -fe%art_ey_inc_bt_ene(ie,1,il)*conjg(fe%art_hx_inc_bt_ene(ie,1,il)) )
           end if
-
           if    (art_ene_min_em>=0.0d0) then
             write(fe%ifn+il,"(F16.8,99(1X,E23.15E3))")    &
                   fe%art_ene(ie)         *uenergy_from_au,&
@@ -4539,8 +4557,6 @@ contains
                   st_sum2                          *100.0d0,        &
                   s_inc                            *fe%uVperm_from_au*fe%uAperm_from_au*(utime_from_au**2.0d0)
           end if
-
-
         end if
         
         !close file
