@@ -278,7 +278,7 @@ subroutine write_micro_je(lg,mg,system,info,itt,rho,j_e)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    wrk1(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,ix) + rho%f(ix,iy,iz) * system%vec_Ac(1:3)
+    wrk1(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * system%vec_Ac(1:3)
   end do
   end do
   end do
