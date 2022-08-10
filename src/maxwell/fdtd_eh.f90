@@ -4921,6 +4921,13 @@ contains
 !$omp end parallel
       fe%hx_s(:,:,:)=f1(:,:,:); fe%hy_s(:,:,:)=f2(:,:,:); fe%hz_s(:,:,:)=f3(:,:,:);
       
+      !for obs_plane_ene_em option
+      if(sum(fe%iobs_num_ene(:))>0) then
+        call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_s)
+        call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s)
+        call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s)
+      end if
+      
       !deallocate temporary variable
       deallocate(f1,f2,f3)
     end if
@@ -5380,22 +5387,19 @@ contains
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer,            intent(in)    :: iobs,iter
     integer    :: ii,ij,i1,i2,ix,iy,iz
-    real(8)    :: t,wf,t_j,wf_j,rtmp_x,rtmp_y,rtmp_z
-    complex(8) :: f_factor,f_factor_j
+    real(8)    :: t,wf,rtmp_x,rtmp_y,rtmp_z
+    complex(8) :: f_factor
     
     !update time-information and window function
-    t   =  dble(iter)        * dt_em
-    t_j = (dble(iter)+0.5d0) * dt_em
-    call eh_calc_wf(t  ,dble(nt_em)*dt_em,wf  )
-    call eh_calc_wf(t_j,dble(nt_em)*dt_em,wf_j)
+    t = dble(iter) * dt_em
+    call eh_calc_wf(t,dble(nt_em)*dt_em,wf)
     
     !Fourier transformation
     do ii=1,3
       if(fe%iobs_pl_pe(iobs,ii)==1) then
         do ij=1,fe%iobs_num_ene(iobs)
           !update f_factor
-          f_factor   = dt_em*dble(obs_samp_em)*exp(zi*obs_plane_ene_em(iobs,ij)*t  )
-          f_factor_j = dt_em*dble(obs_samp_em)*exp(zi*obs_plane_ene_em(iobs,ij)*t_j)
+          f_factor = dt_em*dble(obs_samp_em)*exp(zi*obs_plane_ene_em(iobs,ij)*t)
           
           !update time-integration
           if    (ii==1) then !xy plane
@@ -5404,48 +5408,30 @@ contains
             do i2=fs%mg%is(2),fs%mg%ie(2)
             do i1=fs%mg%is(1),fs%mg%ie(1)
               ix = i1; iy = i2; iz = fe%iobs_po_id(iobs,3);
-              rtmp_x = 0.5d0*( ( fe%hz_x(ix  ,iy  ,iz  ) + fe%hz_y(ix  ,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix  ,iy-1,iz  ) + fe%hz_y(ix  ,iy-1,iz  ) ) )/fs%hgs(2) &
-                      +0.5d0*( ( fe%hz_x(ix-1,iy  ,iz  ) + fe%hz_y(ix-1,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy-1,iz  ) + fe%hz_y(ix-1,iy-1,iz  ) ) )/fs%hgs(2) &
-                      -0.5d0*( ( fe%hy_z(ix  ,iy  ,iz  ) + fe%hy_x(ix  ,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix  ,iy  ,iz-1) + fe%hy_x(ix  ,iy  ,iz-1) ) )/fs%hgs(3) &
-                      -0.5d0*( ( fe%hy_z(ix-1,iy  ,iz  ) + fe%hy_x(ix-1,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz-1) + fe%hy_x(ix-1,iy  ,iz-1) ) )/fs%hgs(3)
-              rtmp_y = 0.5d0*( ( fe%hx_y(ix  ,iy  ,iz  ) + fe%hx_z(ix  ,iy  ,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy  ,iz-1) + fe%hx_z(ix  ,iy  ,iz-1) ) )/fs%hgs(3) &
-                      +0.5d0*( ( fe%hx_y(ix  ,iy-1,iz  ) + fe%hx_z(ix  ,iy-1,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz-1) + fe%hx_z(ix  ,iy-1,iz-1) ) )/fs%hgs(3) &
-                      -0.5d0*( ( fe%hz_x(ix  ,iy  ,iz  ) + fe%hz_y(ix  ,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy  ,iz  ) + fe%hz_y(ix-1,iy  ,iz  ) ) )/fs%hgs(1) &
-                      -0.5d0*( ( fe%hz_x(ix  ,iy-1,iz  ) + fe%hz_y(ix  ,iy-1,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy-1,iz  ) + fe%hz_y(ix-1,iy-1,iz  ) ) )/fs%hgs(1)
-              rtmp_z = 0.5d0*( ( fe%hy_z(ix  ,iy  ,iz  ) + fe%hy_x(ix  ,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz  ) + fe%hy_x(ix-1,iy  ,iz  ) ) )/fs%hgs(1) &
-                      +0.5d0*( ( fe%hy_z(ix  ,iy  ,iz-1) + fe%hy_x(ix  ,iy  ,iz-1) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz-1) + fe%hy_x(ix-1,iy  ,iz-1) ) )/fs%hgs(1) &
-                      -0.5d0*( ( fe%hx_y(ix  ,iy  ,iz  ) + fe%hx_z(ix  ,iy  ,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz  ) + fe%hx_z(ix  ,iy-1,iz  ) ) )/fs%hgs(2) &
-                      -0.5d0*( ( fe%hx_y(ix  ,iy  ,iz-1) + fe%hx_z(ix  ,iy  ,iz-1) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz-1) + fe%hx_z(ix  ,iy-1,iz-1) ) )/fs%hgs(2)
-              fe%obs_ex_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ex_xy_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ex_s(ix,iy,iz)*wf
-              fe%obs_ex_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ex_xy_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ex_s(ix,iy,iz)
-              fe%obs_ey_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ey_xy_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ey_s(ix,iy,iz)*wf
-              fe%obs_ey_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ey_xy_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ey_s(ix,iy,iz)
-              fe%obs_ez_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ez_xy_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ez_s(ix,iy,iz)*wf
-              fe%obs_ez_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ez_xy_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ez_s(ix,iy,iz)
-              fe%obs_hx_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hx_xy_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hx_s(ix,iy,iz)*wf
-              fe%obs_hx_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hx_xy_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hx_s(ix,iy,iz)
-              fe%obs_hy_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hy_xy_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hy_s(ix,iy,iz)*wf
-              fe%obs_hy_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hy_xy_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hy_s(ix,iy,iz)
-              fe%obs_hz_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hz_xy_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hz_s(ix,iy,iz)*wf
-              fe%obs_hz_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hz_xy_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hz_s(ix,iy,iz)
-              fe%obs_jx_xy_ene(i1,i2,iobs,ij,1) = fe%obs_jx_xy_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_x*wf_j
-              fe%obs_jx_xy_ene(i1,i2,iobs,ij,2) = fe%obs_jx_xy_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_x
-              fe%obs_jy_xy_ene(i1,i2,iobs,ij,1) = fe%obs_jy_xy_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_y*wf_j
-              fe%obs_jy_xy_ene(i1,i2,iobs,ij,2) = fe%obs_jy_xy_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_y
-              fe%obs_jz_xy_ene(i1,i2,iobs,ij,1) = fe%obs_jz_xy_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_z*wf_j
-              fe%obs_jz_xy_ene(i1,i2,iobs,ij,2) = fe%obs_jz_xy_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_z
+              rtmp_x = ( fe%hz_s(ix  ,iy+1,iz  ) - fe%hz_s(ix  ,iy-1,iz  ) ) / (fs%hgs(2)*2.0d0) &
+                      -( fe%hy_s(ix  ,iy  ,iz+1) - fe%hy_s(ix  ,iy  ,iz-1) ) / (fs%hgs(3)*2.0d0)
+              rtmp_y = ( fe%hx_s(ix  ,iy  ,iz+1) - fe%hx_s(ix  ,iy  ,iz-1) ) / (fs%hgs(3)*2.0d0) &
+                      -( fe%hz_s(ix+1,iy  ,iz  ) - fe%hz_s(ix-1,iy  ,iz  ) ) / (fs%hgs(1)*2.0d0)
+              rtmp_z = ( fe%hy_s(ix+1,iy  ,iz  ) - fe%hy_s(ix-1,iy  ,iz  ) ) / (fs%hgs(1)*2.0d0) &
+                      -( fe%hx_s(ix  ,iy+1,iz  ) - fe%hx_s(ix  ,iy-1,iz  ) ) / (fs%hgs(2)*2.0d0)
+              fe%obs_ex_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ex_xy_ene(i1,i2,iobs,ij,1) + f_factor*fe%ex_s(ix,iy,iz)*wf
+              fe%obs_ex_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ex_xy_ene(i1,i2,iobs,ij,2) + f_factor*fe%ex_s(ix,iy,iz)
+              fe%obs_ey_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ey_xy_ene(i1,i2,iobs,ij,1) + f_factor*fe%ey_s(ix,iy,iz)*wf
+              fe%obs_ey_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ey_xy_ene(i1,i2,iobs,ij,2) + f_factor*fe%ey_s(ix,iy,iz)
+              fe%obs_ez_xy_ene(i1,i2,iobs,ij,1) = fe%obs_ez_xy_ene(i1,i2,iobs,ij,1) + f_factor*fe%ez_s(ix,iy,iz)*wf
+              fe%obs_ez_xy_ene(i1,i2,iobs,ij,2) = fe%obs_ez_xy_ene(i1,i2,iobs,ij,2) + f_factor*fe%ez_s(ix,iy,iz)
+              fe%obs_hx_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hx_xy_ene(i1,i2,iobs,ij,1) + f_factor*fe%hx_s(ix,iy,iz)*wf
+              fe%obs_hx_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hx_xy_ene(i1,i2,iobs,ij,2) + f_factor*fe%hx_s(ix,iy,iz)
+              fe%obs_hy_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hy_xy_ene(i1,i2,iobs,ij,1) + f_factor*fe%hy_s(ix,iy,iz)*wf
+              fe%obs_hy_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hy_xy_ene(i1,i2,iobs,ij,2) + f_factor*fe%hy_s(ix,iy,iz)
+              fe%obs_hz_xy_ene(i1,i2,iobs,ij,1) = fe%obs_hz_xy_ene(i1,i2,iobs,ij,1) + f_factor*fe%hz_s(ix,iy,iz)*wf
+              fe%obs_hz_xy_ene(i1,i2,iobs,ij,2) = fe%obs_hz_xy_ene(i1,i2,iobs,ij,2) + f_factor*fe%hz_s(ix,iy,iz)
+              fe%obs_jx_xy_ene(i1,i2,iobs,ij,1) = fe%obs_jx_xy_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_x*wf
+              fe%obs_jx_xy_ene(i1,i2,iobs,ij,2) = fe%obs_jx_xy_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_x
+              fe%obs_jy_xy_ene(i1,i2,iobs,ij,1) = fe%obs_jy_xy_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_y*wf
+              fe%obs_jy_xy_ene(i1,i2,iobs,ij,2) = fe%obs_jy_xy_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_y
+              fe%obs_jz_xy_ene(i1,i2,iobs,ij,1) = fe%obs_jz_xy_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_z*wf
+              fe%obs_jz_xy_ene(i1,i2,iobs,ij,2) = fe%obs_jz_xy_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_z
             end do
             end do
 !$omp end do
@@ -5456,48 +5442,30 @@ contains
             do i2=fs%mg%is(3),fs%mg%ie(3)
             do i1=fs%mg%is(2),fs%mg%ie(2)
               ix = fe%iobs_po_id(iobs,1); iy = i1; iz = i2;
-              rtmp_x = 0.5d0*( ( fe%hz_x(ix  ,iy  ,iz  ) + fe%hz_y(ix  ,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix  ,iy-1,iz  ) + fe%hz_y(ix  ,iy-1,iz  ) ) )/fs%hgs(2) &
-                      +0.5d0*( ( fe%hz_x(ix-1,iy  ,iz  ) + fe%hz_y(ix-1,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy-1,iz  ) + fe%hz_y(ix-1,iy-1,iz  ) ) )/fs%hgs(2) &
-                      -0.5d0*( ( fe%hy_z(ix  ,iy  ,iz  ) + fe%hy_x(ix  ,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix  ,iy  ,iz-1) + fe%hy_x(ix  ,iy  ,iz-1) ) )/fs%hgs(3) &
-                      -0.5d0*( ( fe%hy_z(ix-1,iy  ,iz  ) + fe%hy_x(ix-1,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz-1) + fe%hy_x(ix-1,iy  ,iz-1) ) )/fs%hgs(3)
-              rtmp_y = 0.5d0*( ( fe%hx_y(ix  ,iy  ,iz  ) + fe%hx_z(ix  ,iy  ,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy  ,iz-1) + fe%hx_z(ix  ,iy  ,iz-1) ) )/fs%hgs(3) &
-                      +0.5d0*( ( fe%hx_y(ix  ,iy-1,iz  ) + fe%hx_z(ix  ,iy-1,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz-1) + fe%hx_z(ix  ,iy-1,iz-1) ) )/fs%hgs(3) &
-                      -0.5d0*( ( fe%hz_x(ix  ,iy  ,iz  ) + fe%hz_y(ix  ,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy  ,iz  ) + fe%hz_y(ix-1,iy  ,iz  ) ) )/fs%hgs(1) &
-                      -0.5d0*( ( fe%hz_x(ix  ,iy-1,iz  ) + fe%hz_y(ix  ,iy-1,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy-1,iz  ) + fe%hz_y(ix-1,iy-1,iz  ) ) )/fs%hgs(1)
-              rtmp_z = 0.5d0*( ( fe%hy_z(ix  ,iy  ,iz  ) + fe%hy_x(ix  ,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz  ) + fe%hy_x(ix-1,iy  ,iz  ) ) )/fs%hgs(1) &
-                      +0.5d0*( ( fe%hy_z(ix  ,iy  ,iz-1) + fe%hy_x(ix  ,iy  ,iz-1) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz-1) + fe%hy_x(ix-1,iy  ,iz-1) ) )/fs%hgs(1) &
-                      -0.5d0*( ( fe%hx_y(ix  ,iy  ,iz  ) + fe%hx_z(ix  ,iy  ,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz  ) + fe%hx_z(ix  ,iy-1,iz  ) ) )/fs%hgs(2) &
-                      -0.5d0*( ( fe%hx_y(ix  ,iy  ,iz-1) + fe%hx_z(ix  ,iy  ,iz-1) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz-1) + fe%hx_z(ix  ,iy-1,iz-1) ) )/fs%hgs(2)
-              fe%obs_ex_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ex_yz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ex_s(ix,iy,iz)*wf
-              fe%obs_ex_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ex_yz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ex_s(ix,iy,iz)
-              fe%obs_ey_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ey_yz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ey_s(ix,iy,iz)*wf
-              fe%obs_ey_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ey_yz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ey_s(ix,iy,iz)
-              fe%obs_ez_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ez_yz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ez_s(ix,iy,iz)*wf
-              fe%obs_ez_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ez_yz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ez_s(ix,iy,iz)
-              fe%obs_hx_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hx_yz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hx_s(ix,iy,iz)*wf
-              fe%obs_hx_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hx_yz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hx_s(ix,iy,iz)
-              fe%obs_hy_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hy_yz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hy_s(ix,iy,iz)*wf
-              fe%obs_hy_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hy_yz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hy_s(ix,iy,iz)
-              fe%obs_hz_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hz_yz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hz_s(ix,iy,iz)*wf
-              fe%obs_hz_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hz_yz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hz_s(ix,iy,iz)
-              fe%obs_jx_yz_ene(i1,i2,iobs,ij,1) = fe%obs_jx_yz_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_x*wf_j
-              fe%obs_jx_yz_ene(i1,i2,iobs,ij,2) = fe%obs_jx_yz_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_x
-              fe%obs_jy_yz_ene(i1,i2,iobs,ij,1) = fe%obs_jy_yz_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_y*wf_j
-              fe%obs_jy_yz_ene(i1,i2,iobs,ij,2) = fe%obs_jy_yz_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_y
-              fe%obs_jz_yz_ene(i1,i2,iobs,ij,1) = fe%obs_jz_yz_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_z*wf_j
-              fe%obs_jz_yz_ene(i1,i2,iobs,ij,2) = fe%obs_jz_yz_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_z
+              rtmp_x = ( fe%hz_s(ix  ,iy+1,iz  ) - fe%hz_s(ix  ,iy-1,iz  ) ) / (fs%hgs(2)*2.0d0) &
+                      -( fe%hy_s(ix  ,iy  ,iz+1) - fe%hy_s(ix  ,iy  ,iz-1) ) / (fs%hgs(3)*2.0d0)
+              rtmp_y = ( fe%hx_s(ix  ,iy  ,iz+1) - fe%hx_s(ix  ,iy  ,iz-1) ) / (fs%hgs(3)*2.0d0) &
+                      -( fe%hz_s(ix+1,iy  ,iz  ) - fe%hz_s(ix-1,iy  ,iz  ) ) / (fs%hgs(1)*2.0d0)
+              rtmp_z = ( fe%hy_s(ix+1,iy  ,iz  ) - fe%hy_s(ix-1,iy  ,iz  ) ) / (fs%hgs(1)*2.0d0) &
+                      -( fe%hx_s(ix  ,iy+1,iz  ) - fe%hx_s(ix  ,iy-1,iz  ) ) / (fs%hgs(2)*2.0d0)
+              fe%obs_ex_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ex_yz_ene(i1,i2,iobs,ij,1) + f_factor*fe%ex_s(ix,iy,iz)*wf
+              fe%obs_ex_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ex_yz_ene(i1,i2,iobs,ij,2) + f_factor*fe%ex_s(ix,iy,iz)
+              fe%obs_ey_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ey_yz_ene(i1,i2,iobs,ij,1) + f_factor*fe%ey_s(ix,iy,iz)*wf
+              fe%obs_ey_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ey_yz_ene(i1,i2,iobs,ij,2) + f_factor*fe%ey_s(ix,iy,iz)
+              fe%obs_ez_yz_ene(i1,i2,iobs,ij,1) = fe%obs_ez_yz_ene(i1,i2,iobs,ij,1) + f_factor*fe%ez_s(ix,iy,iz)*wf
+              fe%obs_ez_yz_ene(i1,i2,iobs,ij,2) = fe%obs_ez_yz_ene(i1,i2,iobs,ij,2) + f_factor*fe%ez_s(ix,iy,iz)
+              fe%obs_hx_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hx_yz_ene(i1,i2,iobs,ij,1) + f_factor*fe%hx_s(ix,iy,iz)*wf
+              fe%obs_hx_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hx_yz_ene(i1,i2,iobs,ij,2) + f_factor*fe%hx_s(ix,iy,iz)
+              fe%obs_hy_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hy_yz_ene(i1,i2,iobs,ij,1) + f_factor*fe%hy_s(ix,iy,iz)*wf
+              fe%obs_hy_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hy_yz_ene(i1,i2,iobs,ij,2) + f_factor*fe%hy_s(ix,iy,iz)
+              fe%obs_hz_yz_ene(i1,i2,iobs,ij,1) = fe%obs_hz_yz_ene(i1,i2,iobs,ij,1) + f_factor*fe%hz_s(ix,iy,iz)*wf
+              fe%obs_hz_yz_ene(i1,i2,iobs,ij,2) = fe%obs_hz_yz_ene(i1,i2,iobs,ij,2) + f_factor*fe%hz_s(ix,iy,iz)
+              fe%obs_jx_yz_ene(i1,i2,iobs,ij,1) = fe%obs_jx_yz_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_x*wf
+              fe%obs_jx_yz_ene(i1,i2,iobs,ij,2) = fe%obs_jx_yz_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_x
+              fe%obs_jy_yz_ene(i1,i2,iobs,ij,1) = fe%obs_jy_yz_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_y*wf
+              fe%obs_jy_yz_ene(i1,i2,iobs,ij,2) = fe%obs_jy_yz_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_y
+              fe%obs_jz_yz_ene(i1,i2,iobs,ij,1) = fe%obs_jz_yz_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_z*wf
+              fe%obs_jz_yz_ene(i1,i2,iobs,ij,2) = fe%obs_jz_yz_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_z
             end do
             end do
 !$omp end do
@@ -5508,48 +5476,30 @@ contains
             do i2=fs%mg%is(3),fs%mg%ie(3)
             do i1=fs%mg%is(1),fs%mg%ie(1)
               ix = i1; iy = fe%iobs_po_id(iobs,2); iz = i2;
-              rtmp_x = 0.5d0*( ( fe%hz_x(ix  ,iy  ,iz  ) + fe%hz_y(ix  ,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix  ,iy-1,iz  ) + fe%hz_y(ix  ,iy-1,iz  ) ) )/fs%hgs(2) &
-                      +0.5d0*( ( fe%hz_x(ix-1,iy  ,iz  ) + fe%hz_y(ix-1,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy-1,iz  ) + fe%hz_y(ix-1,iy-1,iz  ) ) )/fs%hgs(2) &
-                      -0.5d0*( ( fe%hy_z(ix  ,iy  ,iz  ) + fe%hy_x(ix  ,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix  ,iy  ,iz-1) + fe%hy_x(ix  ,iy  ,iz-1) ) )/fs%hgs(3) &
-                      -0.5d0*( ( fe%hy_z(ix-1,iy  ,iz  ) + fe%hy_x(ix-1,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz-1) + fe%hy_x(ix-1,iy  ,iz-1) ) )/fs%hgs(3)
-              rtmp_y = 0.5d0*( ( fe%hx_y(ix  ,iy  ,iz  ) + fe%hx_z(ix  ,iy  ,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy  ,iz-1) + fe%hx_z(ix  ,iy  ,iz-1) ) )/fs%hgs(3) &
-                      +0.5d0*( ( fe%hx_y(ix  ,iy-1,iz  ) + fe%hx_z(ix  ,iy-1,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz-1) + fe%hx_z(ix  ,iy-1,iz-1) ) )/fs%hgs(3) &
-                      -0.5d0*( ( fe%hz_x(ix  ,iy  ,iz  ) + fe%hz_y(ix  ,iy  ,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy  ,iz  ) + fe%hz_y(ix-1,iy  ,iz  ) ) )/fs%hgs(1) &
-                      -0.5d0*( ( fe%hz_x(ix  ,iy-1,iz  ) + fe%hz_y(ix  ,iy-1,iz  ) )             &
-                              -( fe%hz_x(ix-1,iy-1,iz  ) + fe%hz_y(ix-1,iy-1,iz  ) ) )/fs%hgs(1)
-              rtmp_z = 0.5d0*( ( fe%hy_z(ix  ,iy  ,iz  ) + fe%hy_x(ix  ,iy  ,iz  ) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz  ) + fe%hy_x(ix-1,iy  ,iz  ) ) )/fs%hgs(1) &
-                      +0.5d0*( ( fe%hy_z(ix  ,iy  ,iz-1) + fe%hy_x(ix  ,iy  ,iz-1) )             &
-                              -( fe%hy_z(ix-1,iy  ,iz-1) + fe%hy_x(ix-1,iy  ,iz-1) ) )/fs%hgs(1) &
-                      -0.5d0*( ( fe%hx_y(ix  ,iy  ,iz  ) + fe%hx_z(ix  ,iy  ,iz  ) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz  ) + fe%hx_z(ix  ,iy-1,iz  ) ) )/fs%hgs(2) &
-                      -0.5d0*( ( fe%hx_y(ix  ,iy  ,iz-1) + fe%hx_z(ix  ,iy  ,iz-1) )             &
-                              -( fe%hx_y(ix  ,iy-1,iz-1) + fe%hx_z(ix  ,iy-1,iz-1) ) )/fs%hgs(2)
-              fe%obs_ex_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ex_xz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ex_s(ix,iy,iz)*wf
-              fe%obs_ex_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ex_xz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ex_s(ix,iy,iz)
-              fe%obs_ey_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ey_xz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ey_s(ix,iy,iz)*wf
-              fe%obs_ey_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ey_xz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ey_s(ix,iy,iz)
-              fe%obs_ez_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ez_xz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%ez_s(ix,iy,iz)*wf
-              fe%obs_ez_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ez_xz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%ez_s(ix,iy,iz)
-              fe%obs_hx_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hx_xz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hx_s(ix,iy,iz)*wf
-              fe%obs_hx_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hx_xz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hx_s(ix,iy,iz)
-              fe%obs_hy_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hy_xz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hy_s(ix,iy,iz)*wf
-              fe%obs_hy_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hy_xz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hy_s(ix,iy,iz)
-              fe%obs_hz_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hz_xz_ene(i1,i2,iobs,ij,1) + f_factor  *fe%hz_s(ix,iy,iz)*wf
-              fe%obs_hz_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hz_xz_ene(i1,i2,iobs,ij,2) + f_factor  *fe%hz_s(ix,iy,iz)
-              fe%obs_jx_xz_ene(i1,i2,iobs,ij,1) = fe%obs_jx_xz_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_x*wf_j
-              fe%obs_jx_xz_ene(i1,i2,iobs,ij,2) = fe%obs_jx_xz_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_x
-              fe%obs_jy_xz_ene(i1,i2,iobs,ij,1) = fe%obs_jy_xz_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_y*wf_j
-              fe%obs_jy_xz_ene(i1,i2,iobs,ij,2) = fe%obs_jy_xz_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_y
-              fe%obs_jz_xz_ene(i1,i2,iobs,ij,1) = fe%obs_jz_xz_ene(i1,i2,iobs,ij,1) + f_factor_j*rtmp_z*wf_j
-              fe%obs_jz_xz_ene(i1,i2,iobs,ij,2) = fe%obs_jz_xz_ene(i1,i2,iobs,ij,2) + f_factor_j*rtmp_z
+              rtmp_x = ( fe%hz_s(ix  ,iy+1,iz  ) - fe%hz_s(ix  ,iy-1,iz  ) ) / (fs%hgs(2)*2.0d0) &
+                      -( fe%hy_s(ix  ,iy  ,iz+1) - fe%hy_s(ix  ,iy  ,iz-1) ) / (fs%hgs(3)*2.0d0)
+              rtmp_y = ( fe%hx_s(ix  ,iy  ,iz+1) - fe%hx_s(ix  ,iy  ,iz-1) ) / (fs%hgs(3)*2.0d0) &
+                      -( fe%hz_s(ix+1,iy  ,iz  ) - fe%hz_s(ix-1,iy  ,iz  ) ) / (fs%hgs(1)*2.0d0)
+              rtmp_z = ( fe%hy_s(ix+1,iy  ,iz  ) - fe%hy_s(ix-1,iy  ,iz  ) ) / (fs%hgs(1)*2.0d0) &
+                      -( fe%hx_s(ix  ,iy+1,iz  ) - fe%hx_s(ix  ,iy-1,iz  ) ) / (fs%hgs(2)*2.0d0)
+              fe%obs_ex_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ex_xz_ene(i1,i2,iobs,ij,1) + f_factor*fe%ex_s(ix,iy,iz)*wf
+              fe%obs_ex_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ex_xz_ene(i1,i2,iobs,ij,2) + f_factor*fe%ex_s(ix,iy,iz)
+              fe%obs_ey_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ey_xz_ene(i1,i2,iobs,ij,1) + f_factor*fe%ey_s(ix,iy,iz)*wf
+              fe%obs_ey_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ey_xz_ene(i1,i2,iobs,ij,2) + f_factor*fe%ey_s(ix,iy,iz)
+              fe%obs_ez_xz_ene(i1,i2,iobs,ij,1) = fe%obs_ez_xz_ene(i1,i2,iobs,ij,1) + f_factor*fe%ez_s(ix,iy,iz)*wf
+              fe%obs_ez_xz_ene(i1,i2,iobs,ij,2) = fe%obs_ez_xz_ene(i1,i2,iobs,ij,2) + f_factor*fe%ez_s(ix,iy,iz)
+              fe%obs_hx_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hx_xz_ene(i1,i2,iobs,ij,1) + f_factor*fe%hx_s(ix,iy,iz)*wf
+              fe%obs_hx_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hx_xz_ene(i1,i2,iobs,ij,2) + f_factor*fe%hx_s(ix,iy,iz)
+              fe%obs_hy_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hy_xz_ene(i1,i2,iobs,ij,1) + f_factor*fe%hy_s(ix,iy,iz)*wf
+              fe%obs_hy_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hy_xz_ene(i1,i2,iobs,ij,2) + f_factor*fe%hy_s(ix,iy,iz)
+              fe%obs_hz_xz_ene(i1,i2,iobs,ij,1) = fe%obs_hz_xz_ene(i1,i2,iobs,ij,1) + f_factor*fe%hz_s(ix,iy,iz)*wf
+              fe%obs_hz_xz_ene(i1,i2,iobs,ij,2) = fe%obs_hz_xz_ene(i1,i2,iobs,ij,2) + f_factor*fe%hz_s(ix,iy,iz)
+              fe%obs_jx_xz_ene(i1,i2,iobs,ij,1) = fe%obs_jx_xz_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_x*wf
+              fe%obs_jx_xz_ene(i1,i2,iobs,ij,2) = fe%obs_jx_xz_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_x
+              fe%obs_jy_xz_ene(i1,i2,iobs,ij,1) = fe%obs_jy_xz_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_y*wf
+              fe%obs_jy_xz_ene(i1,i2,iobs,ij,2) = fe%obs_jy_xz_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_y
+              fe%obs_jz_xz_ene(i1,i2,iobs,ij,1) = fe%obs_jz_xz_ene(i1,i2,iobs,ij,1) + f_factor*rtmp_z*wf
+              fe%obs_jz_xz_ene(i1,i2,iobs,ij,2) = fe%obs_jz_xz_ene(i1,i2,iobs,ij,2) + f_factor*rtmp_z
             end do
             end do
 !$omp end do
