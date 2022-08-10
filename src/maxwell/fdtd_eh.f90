@@ -4254,8 +4254,8 @@ contains
                 end if
                 
                 !deallocation
-                deallocate(z_ex1,z_ey1,z_ez1,z_hx1,z_hy1,z_hz1,&
-                           z_ex2,z_ey2,z_ez2,z_hx2,z_hy2,z_hz2)
+                deallocate(z_ex1,z_ey1,z_ez1,z_hx1,z_hy1,z_hz1,z_jx1,z_jy1,z_jz1,&
+                           z_ex2,z_ey2,z_ez2,z_hx2,z_hy2,z_hz2,z_jx2,z_jy2,z_jz2)
               end do !with or without window function-----------------------------------------------------------------!
             end do !plane---------------------------------------------------------------------------------------------!
           end do !energy----------------------------------------------------------------------------------------------!
