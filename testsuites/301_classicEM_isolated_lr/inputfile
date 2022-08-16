@@ -34,6 +34,7 @@
   
   !media information
   yn_make_shape = 'y'
+  n_s           = 1
   typ_s(1)      = 'ellipsoid'
   id_s(1)       = 1
   inf_s(1,1)    = 30.0d0

@@ -79,11 +79,11 @@
   !*** SHAPE INFORMATION(START) ****************************************!
   yn_make_shape   = 'y'
   yn_output_shape = 'y'
-  n_s             = 1
-  typ_s(1)        = 'ellipsoid'
-  id_s(1)         = 1
-  inf_s(1,1:3)    = 200.0d1, 200.0d1, 200.0d1
-  ori_s(1,1:3)    = 0.000d1, 0.000d1, 0.000d1
+  n_s          = 1
+  typ_s(1)     = 'ellipsoid'
+  id_s(1)      = 1
+  inf_s(1,1:3) = 200.0d1, 200.0d1, 200.0d1
+  ori_s(1,1:3) = 0.000d1, 0.000d1, 0.000d1
   !*** SHAPE INFORMATION(END) ******************************************!
   
   !name of input shape file and number of media in the file
