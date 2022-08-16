@@ -1,6 +1,6 @@
 !########################################################################################!
-! Excercise 10: Pulsed electric field response of a metallic nanosphere                  !
-!               in classical electromagnetism(FDTD simulation)                           !
+! Excercise 10: Absorption-, Scattering-, and Extinction-cross-sections                  !
+!               of a metallic nanosphere in classical electromagnetism(FDTD simulation)  !
 !----------------------------------------------------------------------------------------!
 ! * The detail of this excercise is explained in our manual(see chapter: 'Exercises').   !
 !   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
@@ -74,6 +74,12 @@
   !time step size and number of time grids(steps)
   dt_em = 2.30d-4
   nt_em = 20000
+  
+typ_s(1)   = 'ellipsoid'
+id_s(1)    = 1
+inf_s(1,1) = 30.0d0
+inf_s(1,2) = 30.0d0
+inf_s(1,3) = 30.0d0
   
   !name of input shape file and number of media in the file
   shape_file = './shape.cube'

@@ -6,6 +6,5 @@
 # if required, this script file can utilized for the preparation of 
 # the input data for the following calculations.
 
-cp ../../samples/exercise_10_classicEM_rt/shape.cube ./
 cp ../../example/ttm.inp_ttm ./
 
