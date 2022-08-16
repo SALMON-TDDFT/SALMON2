@@ -43,16 +43,16 @@
   ae_shape1 = 'Ecos2'
   
   !peak intensity(W/cm^2) of the incident pulse
-  I_wcm2_1 = 1.00d8
+  I_wcm2_1 = 1.00d6
   
   !duration of the incident pulse
-  tw1 = 4.60d0
+  tw1 = 7.50d0
   
   !mean photon energy(average frequency multiplied by the Planck constant) of the incident pulse
-  omega1 = 5.49d0
+  omega1 = 2.30d0
   
   !polarization unit vector(real part) for the incident pulse(x,y,z)
-  epdir_re1(1:3) = 0.00d0, 0.00d0, 1.00d0
+  epdir_re1(1:3) = 1.00d0, 0.00d0, 0.00d0
   
   !carrier emvelope phase of the incident pulse
   !(phi_cep1 must be 0.25 + 0.5 * n(integer) when ae_shape1 = 'Ecos2')
@@ -64,22 +64,29 @@
 /
 
 &maxwell
-  !box size and spacing of spatial grid(x,y,z)
-  al_em(1:3) = 120d0, 120d0, 120d0
-  dl_em(1:3) = 1.2d0, 1.2d0, 1.2d0
+  !grid box size(x,y,z) and number of spatial grids(x,y,z)
+  al_em(1:3)        = 600.0d1, 600.0d1, 600.0d1
+  num_rgrid_em(1:3) = 100, 100, 100
   
-  !time step size and number of time grids(steps)
-  dt_em = 2.30d-4
-  nt_em = 20000
+  !total time for electromagnetic analysis
+  at_em(1:3) = 100.0d0
+  !--- Caution ---------------------------------------------------------!
+  ! Two of at_em, dt_em, and nt_em must be set.                         !
+  ! Otherwise, both at_em and nt_em or either of those must be set.     !
+  ! The latter automatically determines dt_em from CFL condition.       !
+  !---------------------------------------------------------------------!
   
-typ_s(1)   = 'ellipsoid'
-id_s(1)    = 1
-inf_s(1,1) = 30.0d0
-inf_s(1,2) = 30.0d0
-inf_s(1,3) = 30.0d0
+  !*** SHAPE INFORMATION(START) ****************************************!
+  yn_make_shape   = 'y'
+  yn_output_shape = 'y'
+  n_s             = 1
+  typ_s(1)        = 'ellipsoid'
+  id_s(1)         = 1
+  inf_s(1,1:3)    = 200.0d1, 200.0d1, 200.0d1
+  ori_s(1,1:3)    = 0.000d1, 0.000d1, 0.000d1
+  !*** SHAPE INFORMATION(END) ******************************************!
   
   !name of input shape file and number of media in the file
-  shape_file = './shape.cube'
   media_num  = 1
   
   !*** MEDIA INFORMATION(START) **************************************!

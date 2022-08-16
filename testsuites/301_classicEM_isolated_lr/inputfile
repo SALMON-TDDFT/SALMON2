@@ -33,13 +33,14 @@
   dt_em = 2.30d-4
   
   !media information
-  typ_s(1)   = 'ellipsoid'
-  id_s(1)    = 1
-  inf_s(1,1) = 30.0d0
-  inf_s(1,2) = 30.0d0
-  inf_s(1,3) = 30.0d0
-  ori_s(1,:) = 0.0d0, 0.0d0, 0.0d0
-  media_num  = 1
+  yn_make_shape = 'y'
+  typ_s(1)      = 'ellipsoid'
+  id_s(1)       = 1
+  inf_s(1,1)    = 30.0d0
+  inf_s(1,2)    = 30.0d0
+  inf_s(1,3)    = 30.0d0
+  ori_s(1,:)    = 0.0d0, 0.0d0, 0.0d0
+  media_num     = 1
   !--- Au described by Lorentz-Drude model ---!
   ! The parameters are determined by refering the following paper:
   ! https://www.osapublishing.org/ao/abstract.cfm?uri=ao-37-22-5271
