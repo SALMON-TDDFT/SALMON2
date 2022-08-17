@@ -173,7 +173,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
   call timer_end(LOG_CALC_RHO)
   
-  if(singlescale%flag_use) then
+  if(singlescale%flag_use .or. yn_out_micro_je=='y') then
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, spsi_out%zwf)
     end if
@@ -321,6 +321,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      !call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
       call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
+  end if
+  if(yn_out_micro_je=='y' .and. mod(itt,out_micro_je_step)==0) then
+    call write_micro_je(lg,mg,system,info,itt,rho,rt%j_e)
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then

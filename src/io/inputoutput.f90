@@ -389,6 +389,7 @@ contains
       & al_em,                    &
       & dl_em,                    &
       & num_rgrid_em,             &
+      & at_em,                    &
       & dt_em,                    &
       & nt_em,                    &
       & boundary_em,              &
@@ -406,8 +407,12 @@ contains
       & wave_input,               &
       & ek_dir1,                  &
       & source_loc1,              &
+      & gbeam_sigma_plane1,       &
+      & gbeam_sigma_line1,        &
       & ek_dir2,                  &
       & source_loc2,              &
+      & gbeam_sigma_plane2,       &
+      & gbeam_sigma_line2,        &
       & obs_num_em,               &
       & obs_samp_em,              &
       & obs_loc_em,               &
@@ -422,6 +427,20 @@ contains
       & media_id_source2,         &
       & bloch_k_em,               &
       & bloch_real_imag_em,       &
+      & ase_num_em,               &
+      & ase_ene_min_em,           &
+      & ase_ene_max_em,           &
+      & ase_wav_min_em,           &
+      & ase_wav_max_em,           &
+      & ase_box_cent_em,          &
+      & ase_box_size_em,          &
+      & art_num_em,               &
+      & art_ene_min_em,           &
+      & art_ene_max_em,           &
+      & art_wav_min_em,           &
+      & art_wav_max_em,           &
+      & art_plane_top_em,         &
+      & art_plane_bot_em,         &
       & yn_make_shape,            &
       & yn_output_shape,          &
       & yn_copy_x,                &
@@ -453,8 +472,10 @@ contains
       & yn_out_dns, &
       & yn_out_dns_rt, &
       & yn_out_dns_ac_je, &
+      & yn_out_micro_je, &
       & out_dns_rt_step, &
       & out_dns_ac_je_step, &
+      & out_micro_je_step, &
       & out_old_dns, &
       & yn_out_dns_trans, &
       & out_dns_trans_energy, &
@@ -742,6 +763,7 @@ contains
     al_em(:)                    = 0d0
     dl_em(:)                    = 0d0
     num_rgrid_em(:)             = 0
+    at_em                       = 0d0
     dt_em                       = 0d0
     nt_em                       = 0
     boundary_em(:,:)            = 'default'
@@ -759,10 +781,14 @@ contains
     wave_input                  = 'none'
     ek_dir1(:)                  = 0d0
     source_loc1(:)              = 0d0
+    gbeam_sigma_plane1(:)       =-1d0
+    gbeam_sigma_line1(:)        =-1d0
     ek_dir2(:)                  = 0d0
     source_loc2(:)              = 0d0
+    gbeam_sigma_plane2(:)       =-1d0
+    gbeam_sigma_line2(:)        =-1d0
     obs_num_em                  = 0
-    obs_samp_em                 = 1
+    obs_samp_em                 = 0
     obs_loc_em(:,:)             = 0d0
     obs_plane_ene_em(:,:)       = -1d0
     yn_obs_plane_em(:)          = 'n'
@@ -774,6 +800,20 @@ contains
     media_id_source2            = 0
     bloch_k_em(:)               = 0d0
     bloch_real_imag_em(:)       = 'real'
+    ase_num_em                  = 0
+    ase_ene_min_em              = -1.0d0
+    ase_ene_max_em              = -1.0d0
+    ase_wav_min_em              = -1.0d0
+    ase_wav_max_em              = -1.0d0
+    ase_box_cent_em(:)          = 0.0d0
+    ase_box_size_em(:)          = -1.0d0
+    art_num_em                  = 0
+    art_ene_min_em              = -1.0d0
+    art_ene_max_em              = -1.0d0
+    art_wav_min_em              = -1.0d0
+    art_wav_max_em              = -1.0d0
+    art_plane_bot_em(:)         = 0.0d0
+    art_plane_top_em(:)         = 0.0d0
     yn_make_shape               = 'n'
     yn_output_shape             = 'n'
     yn_copy_x                   = 'n'
@@ -805,8 +845,10 @@ contains
     yn_out_dns          = 'n'
     yn_out_dns_rt       = 'n'
     yn_out_dns_ac_je    = 'n'
+    yn_out_micro_je     = 'n'
     out_dns_rt_step     = 50
     out_dns_ac_je_step  = 50
+    out_micro_je_step   = 50
     out_old_dns         = 'n'
     yn_out_dns_trans    = 'n'
     out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
@@ -1249,6 +1291,8 @@ contains
     call comm_bcast(dl_em                    ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
     call comm_bcast(num_rgrid_em             ,nproc_group_global)
+    call comm_bcast(at_em                    ,nproc_group_global)
+    at_em = at_em * utime_to_au
     call comm_bcast(dt_em                    ,nproc_group_global)
     dt_em = dt_em * utime_to_au
     call comm_bcast(nt_em                    ,nproc_group_global)
@@ -1271,9 +1315,17 @@ contains
     call comm_bcast(ek_dir1                  ,nproc_group_global)
     call comm_bcast(source_loc1              ,nproc_group_global)
     source_loc1 = source_loc1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane1       ,nproc_group_global)
+    gbeam_sigma_plane1 = gbeam_sigma_plane1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line1        ,nproc_group_global)
+    gbeam_sigma_line1 = gbeam_sigma_line1 * ulength_to_au
     call comm_bcast(ek_dir2                  ,nproc_group_global)
     call comm_bcast(source_loc2              ,nproc_group_global)
     source_loc2 = source_loc2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane2       ,nproc_group_global)
+    gbeam_sigma_plane2 = gbeam_sigma_plane2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line2        ,nproc_group_global)
+    gbeam_sigma_line2 = gbeam_sigma_line2 * ulength_to_au
     call comm_bcast(obs_num_em               ,nproc_group_global)
     call comm_bcast(obs_samp_em              ,nproc_group_global)
     call comm_bcast(obs_loc_em               ,nproc_group_global)
@@ -1291,6 +1343,32 @@ contains
     call comm_bcast(bloch_k_em               ,nproc_group_global)
     bloch_k_em = bloch_k_em / ulength_to_au
     call comm_bcast(bloch_real_imag_em       ,nproc_group_global)
+    call comm_bcast(ase_num_em               ,nproc_group_global)
+    call comm_bcast(ase_ene_min_em           ,nproc_group_global)
+    ase_ene_min_em = ase_ene_min_em * uenergy_to_au
+    call comm_bcast(ase_ene_max_em           ,nproc_group_global)
+    ase_ene_max_em = ase_ene_max_em * uenergy_to_au
+    call comm_bcast(ase_wav_min_em           ,nproc_group_global)
+    ase_wav_min_em = ase_wav_min_em * ulength_to_au
+    call comm_bcast(ase_wav_max_em           ,nproc_group_global)
+    ase_wav_max_em = ase_wav_max_em * ulength_to_au
+    call comm_bcast(ase_box_cent_em          ,nproc_group_global)
+    ase_box_cent_em = ase_box_cent_em * ulength_to_au
+    call comm_bcast(ase_box_size_em          ,nproc_group_global)
+    ase_box_size_em = ase_box_size_em * ulength_to_au
+    call comm_bcast(art_num_em               ,nproc_group_global)
+    call comm_bcast(art_ene_min_em           ,nproc_group_global)
+    art_ene_min_em = art_ene_min_em * uenergy_to_au
+    call comm_bcast(art_ene_max_em           ,nproc_group_global)
+    art_ene_max_em = art_ene_max_em * uenergy_to_au
+    call comm_bcast(art_wav_min_em           ,nproc_group_global)
+    art_wav_min_em = art_wav_min_em * ulength_to_au
+    call comm_bcast(art_wav_max_em           ,nproc_group_global)
+    art_wav_max_em = art_wav_max_em * ulength_to_au
+    call comm_bcast(art_plane_bot_em          ,nproc_group_global)
+    art_plane_bot_em = art_plane_bot_em * ulength_to_au
+    call comm_bcast(art_plane_top_em          ,nproc_group_global)
+    art_plane_top_em = art_plane_top_em * ulength_to_au
     call comm_bcast(yn_make_shape            ,nproc_group_global)
     call comm_bcast(yn_output_shape          ,nproc_group_global)
     call comm_bcast(yn_copy_x                ,nproc_group_global)
@@ -1328,8 +1406,10 @@ contains
     call comm_bcast(yn_out_dns          ,nproc_group_global)
     call comm_bcast(yn_out_dns_rt       ,nproc_group_global)
     call comm_bcast(yn_out_dns_ac_je    ,nproc_group_global)
+    call comm_bcast(yn_out_micro_je     ,nproc_group_global)
     call comm_bcast(out_dns_rt_step     ,nproc_group_global)
     call comm_bcast(out_dns_ac_je_step  ,nproc_group_global)
+    call comm_bcast(out_micro_je_step   ,nproc_group_global)
     call comm_bcast(out_old_dns         ,nproc_group_global)
     call comm_bcast(yn_out_dns_trans    ,nproc_group_global)
     call comm_bcast(out_dns_trans_energy,nproc_group_global)
@@ -2032,6 +2112,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'at_em', at_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
@@ -2062,12 +2143,24 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(1)', source_loc1(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(2)', source_loc1(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(3)', source_loc1(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(1)', gbeam_sigma_plane1(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(2)', gbeam_sigma_plane1(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(3)', gbeam_sigma_plane1(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(1)', gbeam_sigma_line1(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(2)', gbeam_sigma_line1(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(3)', gbeam_sigma_line1(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(1)', ek_dir2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(2)', ek_dir2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(3)', ek_dir2(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(1)', gbeam_sigma_plane2(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(2)', gbeam_sigma_plane2(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(3)', gbeam_sigma_plane2(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(1)', gbeam_sigma_line2(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(2)', gbeam_sigma_line2(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(3)', gbeam_sigma_line2(3)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
       if(obs_num_em==0) then
@@ -2107,6 +2200,28 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(1)', bloch_real_imag_em(1)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(2)', bloch_real_imag_em(2)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(3)', bloch_real_imag_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'ase_num_em', ase_num_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_min_em', ase_ene_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_max_em', ase_ene_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_min_em', ase_wav_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_max_em', ase_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(1)', ase_box_cent_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(2)', ase_box_cent_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(3)', ase_box_cent_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(1)', ase_box_size_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(2)', ase_box_size_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(3)', ase_box_size_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_num_em', art_num_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_min_em', art_ene_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(1)', art_plane_top_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(2)', art_plane_top_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(3)', art_plane_top_em(3)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
@@ -2149,8 +2264,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_micro_je', yn_out_micro_je
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_ac_je_step', out_dns_ac_je_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_micro_je_step', out_micro_je_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
@@ -2320,6 +2437,7 @@ contains
     call yn_argument_check(yn_out_dns)
     call yn_argument_check(yn_out_dns_rt)
     call yn_argument_check(yn_out_dns_ac_je)
+    call yn_argument_check(yn_out_micro_je)
     call yn_argument_check(yn_out_dns_trans)
     call yn_argument_check(yn_out_elf)
     call yn_argument_check(yn_out_elf_rt)

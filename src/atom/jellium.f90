@@ -120,7 +120,7 @@ contains
     use structures,      only: s_rgrid, s_dft_system, s_parallel_info, s_scalar, allocate_scalar
     use parallelization, only: nproc_id_global, nproc_group_global
     use communication,   only: comm_is_root, comm_summation
-    use common_maxwell,  only: input_shape_em
+    use common_maxwell,  only: input_i3d_em
     use write_file3d,    only: write_cube
     use math_constants,  only: pi
     implicit none
@@ -182,7 +182,7 @@ contains
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "shape file is inputed by .cube format."
         end if
-        call input_shape_em(shape_file_jm,600,mg%is,mg%ie,lg%is,lg%ie,0,imedia,'cu')
+        call input_i3d_em(shape_file_jm,600,mg%is,mg%ie,lg%is,lg%ie,0,imedia,'cu')
       elseif(index(shape_file_jm,".mp", back=.true.)/=0) then
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "shape file is inputed by .mp format."
@@ -246,7 +246,7 @@ contains
       end do
       end do
       end do
-      call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+      call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
       suffix = "dns_jellium"; phys_quantity = "pbcd";
       call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
     end if

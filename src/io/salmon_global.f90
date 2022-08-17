@@ -232,6 +232,7 @@ module salmon_global
   real(8)        :: al_em(3)
   real(8)        :: dl_em(3)
   integer        :: num_rgrid_em(3)
+  real(8)        :: at_em
   real(8)        :: dt_em
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)
@@ -249,8 +250,12 @@ module salmon_global
   character(16)  :: wave_input
   real(8)        :: ek_dir1(3)
   real(8)        :: source_loc1(3)
+  real(8)        :: gbeam_sigma_plane1(3)
+  real(8)        :: gbeam_sigma_line1(3)
   real(8)        :: ek_dir2(3)
   real(8)        :: source_loc2(3)
+  real(8)        :: gbeam_sigma_plane2(3)
+  real(8)        :: gbeam_sigma_line2(3)
   integer        :: obs_num_em
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
@@ -264,6 +269,20 @@ module salmon_global
   integer        :: media_id_source2
   real(8)        :: bloch_k_em(3)
   character(4)   :: bloch_real_imag_em(3)
+  integer        :: ase_num_em
+  real(8)        :: ase_ene_min_em
+  real(8)        :: ase_ene_max_em
+  real(8)        :: ase_wav_min_em
+  real(8)        :: ase_wav_max_em
+  real(8)        :: ase_box_cent_em(3)
+  real(8)        :: ase_box_size_em(3)
+  integer        :: art_num_em
+  real(8)        :: art_ene_min_em
+  real(8)        :: art_ene_max_em
+  real(8)        :: art_wav_min_em
+  real(8)        :: art_wav_max_em
+  real(8)        :: art_plane_bot_em(3)
+  real(8)        :: art_plane_top_em(3)
   character(1)   :: yn_make_shape
   character(1)   :: yn_output_shape
   character(1)   :: yn_copy_x
@@ -294,8 +313,10 @@ module salmon_global
   character(1)   :: yn_out_dns
   character(1)   :: yn_out_dns_rt
   character(1)   :: yn_out_dns_ac_je
+  character(1)   :: yn_out_micro_je
   integer        :: out_dns_rt_step
   integer        :: out_dns_ac_je_step
+  integer        :: out_micro_je_step
   character(1)   :: out_old_dns
   character(1)   :: yn_out_dns_trans
   real(8)        :: out_dns_trans_energy

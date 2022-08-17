@@ -248,6 +248,61 @@ end subroutine write_dns_ac_je
 
 !===================================================================================================================================
 
+subroutine write_micro_je(lg,mg,system,info,itt,rho,j_e)
+  use inputoutput, only: au_length_aa
+  use salmon_global, only: format_voxel_data,theory
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root,comm_summation
+  use write_file3d, only: write_avs, write_cube, write_vtk
+  use structures
+  implicit none
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: mg
+  type(s_dft_system)     ,intent(in) :: system
+  type(s_parallel_info)  ,intent(in) :: info
+  integer                ,intent(in) :: itt
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_vector)         ,intent(in) :: j_e
+  !
+  integer :: i,ix,iy,iz
+  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),3) :: wrk1,wrk2
+  character(10) :: filenum
+  character(60) :: suffix
+  character(20) :: header_unit
+  character(1)  :: xyz(1:3) = (/"x","y","z"/)
+  character(30) :: phys_quantity="microscopic current density"
+  
+  write(filenum, '(i6.6)') itt
+  
+  wrk1 = 0.d0
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    wrk1(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * system%vec_Ac(1:3)
+  end do
+  end do
+  end do
+  if(format_voxel_data=='avs')then
+    wrk1 = wrk1 /(au_length_aa**3)
+  end if
+  call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*3,info%icomm_r)
+    
+  do i=1,3
+    suffix = "je_micro_"//adjustl(xyz(i))//"_"//adjustl(filenum)
+    if(format_voxel_data=='avs')then
+      header_unit='A**(-3)'
+      call write_avs(lg,222,suffix,header_unit,wrk2(:,:,:,i))
+    else if(format_voxel_data=='cube')then
+      call write_cube(lg,222,suffix,phys_quantity,wrk2(:,:,:,i),system)
+    else if(format_voxel_data=='vtk')then
+      call write_vtk(lg,222,suffix,wrk2(:,:,:,i),system%hgs)
+    end if
+  end do
+  
+end subroutine write_micro_je
+
+!===================================================================================================================================
+
 subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
   use salmon_global       ,only: format_voxel_data,theory
   use structures
