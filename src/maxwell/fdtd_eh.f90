@@ -4281,9 +4281,13 @@ contains
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_ase_'//trim(wf_name)//'.data'
           open( fe%ifn+il,file=save_name)
           if    (il==1) then
-            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections with window function:" 
+            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections"     //&
+                                   " normalized by the spectral distribution of the incident pulse"//&
+                                   " (with window function):"
           elseif(il==2) then
-            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections without window function:" 
+            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections"     //&
+                                   " normalized by the spectral distribution of the incident pulse"//&
+                                   " (without window function):"
           end if
           write(fe%ifn+il,'(A)') "# sigma_a: Absorption cross-section normalized by incident pulse"
           write(fe%ifn+il,'(A)') "# sigma_s: Scattering cross-section normalized by incident pulse"
