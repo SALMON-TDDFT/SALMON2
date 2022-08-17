@@ -151,6 +151,7 @@
   !*** ASE INFORMATION(START) ******************************************!
   !number of wavelength grid points
   !for Absorption-, Scattering-, and Extinction-cross-sections(ASE)
+  !normalized by the spectral distribution of the incident pulse
   ase_num_em = 100
   
   !minimum and maximum values of wavelength for ASE

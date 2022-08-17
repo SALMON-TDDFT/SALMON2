@@ -155,6 +155,7 @@
   !*** ART INFORMATION(START) ******************************************!
   !number of wavelength grid points
   !for Absorption-, Reflection-, and Transmission-rates(ART)
+  !normalized by the spectral distribution of the incident pulse
   art_num_em = 100
   
   !minimum and maximum values of wavelength for ART

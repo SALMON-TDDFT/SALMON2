@@ -4281,13 +4281,17 @@ contains
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_ase_'//trim(wf_name)//'.data'
           open( fe%ifn+il,file=save_name)
           if    (il==1) then
-            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections with window function:" 
+            write(fe%ifn+il,'(A)') "# Absorption-, Scattering-, and Extinction-cross-sections"     //&
+                                   " normalized by the spectral distribution of the incident pulse"//&
+                                   " (with window function):"
           elseif(il==2) then
-            write(fe%ifn+il,'(A)') "# Absorption-, scattering-, and extinction-cross-sections without window function:" 
+            write(fe%ifn+il,'(A)') "# Absorption-, Scattering-, and Extinction-cross-sections"     //&
+                                   " normalized by the spectral distribution of the incident pulse"//&
+                                   " (without window function):"
           end if
-          write(fe%ifn+il,'(A)') "# sigma_a: Absorption cross-section normalized by incident pulse"
-          write(fe%ifn+il,'(A)') "# sigma_s: Scattering cross-section normalized by incident pulse"
-          write(fe%ifn+il,'(A)') "# sigma_e: Extinction cross-section normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# sigma_a: Absorption cross-section"
+          write(fe%ifn+il,'(A)') "# sigma_s: Scattering cross-section"
+          write(fe%ifn+il,'(A)') "# sigma_e: Extinction cross-section"
           write(fe%ifn+il,'(A)') "# S: Pointing vector of incident pulse along propagation direction"
           select case(unit_system)
           case('au','a.u.')
@@ -4507,13 +4511,17 @@ contains
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_art_'//trim(wf_name)//'.data'
           open( fe%ifn+il,file=save_name)
           if    (il==1) then
-            write(fe%ifn+il,'(A)') "# Absorption-, reflection-, and transmission-rates with window function:" 
+            write(fe%ifn+il,'(A)') "# Absorption-, Reflection-, and Transmission-rates"            //&
+                                   " normalized by the spectral distribution of the incident pulse"//&
+                                   " (with window function):"
           elseif(il==2) then
-            write(fe%ifn+il,'(A)') "# Absorption-, reflection-, and transmission-rates without window function:" 
+            write(fe%ifn+il,'(A)') "# Absorption-, Reflection-, and Transmission-rates"            //&
+                                   " normalized by the spectral distribution of the incident pulse"//&
+                                   " (without window function):"
           end if
-          write(fe%ifn+il,'(A)') "# A: Absorption rate normalized by incident pulse"
-          write(fe%ifn+il,'(A)') "# R: Reflection rate normalized by incident pulse"
-          write(fe%ifn+il,'(A)') "# T: Transmission rate normalized by incident pulse"
+          write(fe%ifn+il,'(A)') "# A: Absorption rate"
+          write(fe%ifn+il,'(A)') "# R: Reflection rate"
+          write(fe%ifn+il,'(A)') "# T: Transmission rate"
           write(fe%ifn+il,'(A)') "# S: Pointing vector of incident pulse along propagation direction"
           select case(unit_system)
           case('au','a.u.')
