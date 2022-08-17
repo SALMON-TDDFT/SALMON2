@@ -531,11 +531,11 @@ contains
           conv = 1.0d0
         end if
         write(ifn,'(1X,A)') "All values here are in a.u. and A hydrogen atom is used to set the origin of the model."
-        write(ifn,'(i5,3f12.6)') 1,coo(lg%is(1),1)*conv,coo(lg%is(2),2)*conv,coo(lg%is(3),3)*conv
-        write(ifn,'(i5,3f12.6)') lg%num(1),dx*conv,0.0d0,0.0d0
-        write(ifn,'(i5,3f12.6)') lg%num(2),0.0d0,dy*conv,0.0d0
-        write(ifn,'(i5,3f12.6)') lg%num(3),0.0d0,0.0d0,dz*conv
-        write(ifn,'(i5,4f12.6)') 1,1.0d0,0.0d0,0.0d0,0.0d0
+        write(ifn,'(I8,3(1X,E23.15E3))') 1,coo(lg%is(1),1)*conv,coo(lg%is(2),2)*conv,coo(lg%is(3),3)*conv
+        write(ifn,'(I8,3(1X,E23.15E3))') lg%num(1),dx*conv,0.0d0,0.0d0
+        write(ifn,'(I8,3(1X,E23.15E3))') lg%num(2),0.0d0,dy*conv,0.0d0
+        write(ifn,'(I8,3(1X,E23.15E3))') lg%num(3),0.0d0,0.0d0,dz*conv
+        write(ifn,'(I8,4(1X,E23.15E3))') 1,1.0d0,0.0d0,0.0d0,0.0d0
       end if
       
       !write 3d data
