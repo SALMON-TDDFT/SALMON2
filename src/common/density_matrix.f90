@@ -362,18 +362,42 @@ contains
 !$acc end kernels
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
+      
+      if ( yn_jm == 'n' ) then
+        if ( yn_spinorbit=='y' ) then
+          call timer_begin(LOG_CURRENT_SO_NONLOCAL)
 !$acc kernels copyin(ispin,im) copy(jx,jy,jz)
 !$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
-        wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
-        jx = jx + wrk4(1)
-        jy = jy + wrk4(2)
-        jz = jz + wrk4(3)
-      end do
-      end do
+          do ik=info%ik_s,info%ik_e
+          do io=info%io_s,info%io_e
+            call calc_current_nonlocal_so &
+                 ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+            wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+            jx = jx + wrk4(1)
+            jy = jy + wrk4(2)
+            jz = jz + wrk4(3)
+          end do
+          end do
 !$acc end kernels
+          call timer_end(LOG_CURRENT_SO_NONLOCAL)
+        else
+!$acc kernels copyin(ispin,im) copy(jx,jy,jz)
+!$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
+          do ik=info%ik_s,info%ik_e
+          do io=info%io_s,info%io_e
+            call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+            wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+            jx = jx + wrk4(1)
+            jy = jy + wrk4(2)
+            jz = jz + wrk4(3)
+          end do
+          end do
+!$acc end kernels
+        end if
+      else
+        wrk3=0.d0
+      end if
+
       wrk4(1) = jx
       wrk4(2) = jy
       wrk4(3) = jz
