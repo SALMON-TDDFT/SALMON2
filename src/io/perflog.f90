@@ -263,7 +263,8 @@ contains
     call set_sub(10, LOG_MCURRENT_CALC,                'micro-current calc.')
     call set_sub(11, LOG_MCURRENT_COMM_COLL,           'micro-current comm. coll.')
     call set_sub(12, LOG_CALC_STENCIL_CURRENT,           'calc stencil current')
-    call write_loadbalance(fd, 12, tsrc, headers, mode)
+    call set_sub(13, LOG_CURRENT_SO_NONLOCAL,          'current_so_nl calc.')
+    call write_loadbalance(fd, 13, tsrc, headers, mode)
 
     call set(0, 0, 'conjugate_gradient module')
     call set_sub(1, LOG_GSCG_ISOLATED_CALC,      'isolated calc.')
