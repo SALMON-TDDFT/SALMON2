@@ -654,17 +654,15 @@ contains
   
   !=========================================================================================
   != input restart binary file =============================================================
-  subroutine input_r_bin_em(ifn,is,ie,nsg_p,is_p,ie_p,ipara_level,read_mode,in_name,&
-                            r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d)
+  subroutine input_r_bin_em(ifn,is,ie,nsg_p,flag_same,read_mode,in_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d)
     use salmon_global,   only: directory_read_data
-    use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
+    use parallelization, only: nproc_id_global,nproc_group_global
     use communication,   only: comm_is_root,comm_bcast,comm_summation
     implicit none
     integer,     intent(in)           :: ifn
     integer,     intent(in)           :: is(5),ie(5)
     integer,     intent(in)           :: nsg_p
-    integer,     intent(in)           :: is_p(1:3,0:(nsg_p-1)),ie_p(1:3,0:(nsg_p-1))
-    integer,     intent(in)           :: ipara_level
+    logical,     intent(in)           :: flag_same
     character(*),intent(in)           :: read_mode,in_name
     real(8),     intent(out),optional :: r1d(is(1):ie(1))
     real(8),     intent(out),optional :: r2d(is(1):ie(1),is(2):ie(2))
@@ -676,8 +674,8 @@ contains
     complex(8),  intent(out),optional :: c3d(is(1):ie(1),is(2):ie(2),is(3):ie(3))
     complex(8),  intent(out),optional :: c4d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4))
     complex(8),  intent(out),optional :: c5d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4),is(5):ie(5))
-    logical                :: flag_same_parallel
-    integer                :: ip,ii,ij,ix,iy,iz
+    integer                :: ii,i1,i2,i3,i4,i5
+    integer                :: is_p(5),ie_p(5)
     character(16)          :: id_name
     real(8),   allocatable :: r1d_p(:)
     real(8),   allocatable :: r2d_p(:,:)
@@ -720,26 +718,8 @@ contains
       elseif(present(c5d)) then; call comm_bcast(c5d(:,:,:,:,:),nproc_group_global);
       end if
     case('all')
-      !set flag
-      if(nproc_size_global==nsg_p.and.ipara_level>0) then
-        ii=0; ij=0;
-        do ip=1,ipara_level
-          if(is(ip)/=is_p(ip,nproc_id_global).or.ie(ip)/=ie_p(ip,nproc_id_global)) then
-            ii=ii+1
-          end if
-        end do
-        call comm_summation(ii,ij,nproc_group_global)
-        if(ij==0) then
-          flag_same_parallel = .true.
-        else
-          flag_same_parallel = .false.
-        end if
-      else
-        flag_same_parallel = .false.
-      end if
-      
       !read and input
-      if(flag_same_parallel) then
+      if(flag_same) then
         ii = nproc_id_global; write(id_name,*) ii;
         open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
              status='old',form='unformatted',access='stream')
@@ -757,27 +737,37 @@ contains
         close(ifn+ii)
       else
         do ii=0,(nsg_p-1)
+          !read array size
+          if(comm_is_root(nproc_id_global)) then
+            write(id_name,*) ii;
+            open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_size.bin',&
+                 status='old',form='unformatted',access='stream')
+            read(ifn) is_p; read(ifn) ie_p; close(ifn);
+          end if
+          call comm_bcast(is_p,nproc_group_global);
+          call comm_bcast(ie_p,nproc_group_global);
+          
           !allocate array used in the previous calculation
           if    (present(r1d)) then
-            allocate(r1d_p(is_p(1,ii):ie_p(1,ii)))
+            allocate(r1d_p(is_p(1):ie_p(1)))
           elseif(present(r2d)) then
-            allocate(r2d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii)))
+            allocate(r2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)))
           elseif(present(r3d)) then
-            allocate(r3d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii),is_p(3,ii):ie_p(3,ii)))
+            allocate(r3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)))
           elseif(present(r4d)) then
-            allocate(r4d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii),is_p(3,ii):ie_p(3,ii),is(4):ie(4)))
+            allocate(r4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is(4):ie(4)))
           elseif(present(r5d)) then
-            allocate(r5d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii),is_p(3,ii):ie_p(3,ii),is(4):ie(4),is(5):ie(5)))
+            allocate(r5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is(4):ie(4),is(5):ie(5)))
           elseif(present(c1d)) then
-            allocate(c1d_p(is_p(1,ii):ie_p(1,ii)))
+            allocate(c1d_p(is_p(1):ie_p(1)))
           elseif(present(c2d)) then
-            allocate(c2d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii)))
+            allocate(c2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)))
           elseif(present(c3d)) then
-            allocate(c3d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii),is_p(3,ii):ie_p(3,ii)))
+            allocate(c3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)))
           elseif(present(c4d)) then
-            allocate(c4d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii),is_p(3,ii):ie_p(3,ii),is(4):ie(4)))
+            allocate(c4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is(4):ie(4)))
           elseif(present(c5d)) then
-            allocate(c5d_p(is_p(1,ii):ie_p(1,ii),is_p(2,ii):ie_p(2,ii),is_p(3,ii):ie_p(3,ii),is(4):ie(4),is(5):ie(5)))
+            allocate(c5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is(4):ie(4),is(5):ie(5)))
           end if
           
           !read and share
@@ -810,51 +800,92 @@ contains
           elseif(present(c5d)) then; call comm_bcast(c5d_p(:,:,:,:,:),nproc_group_global);
           end if
           
-          !input data to corresponding process
-          if    (present(r1d) .or. present(c1d)) then
+          !input
+          if    (present(r1d).or.present(c1d)) then
 !$omp parallel
-!$omp do private(ix)
-            do ix=is_p(1,ii),ie_p(1,ii)
-              if(is(1)<=ix.and.ix<=ie(1)) then
-                if    (present(r1d)) then; r1d(ix)=r1d_p(ix);
-                elseif(present(c1d)) then; c1d(ix)=c1d_p(ix);
+!$omp do private(i1)
+            do i1=is_p(1),ie_p(1)
+              if(is(1)<=i1.and.i1<=ie(1)) then
+                if    (present(r1d)) then; r1d(i1)=r1d_p(i1);
+                elseif(present(c1d)) then; c1d(i1)=c1d_p(i1);
                 end if
               end if  
             end do
 !$omp end do
 !$omp end parallel
-          elseif(present(r2d) .or. present(c2d)) then
+          elseif(present(r2d).or.present(c2d)) then
 !$omp parallel
-!$omp do private(ix,iy) collapse(1)
-            do iy=is_p(2,ii),ie_p(2,ii)
-            do ix=is_p(1,ii),ie_p(1,ii)
-              if( (is(1)<=ix.and.ix<=ie(1)) .and. &
-                  (is(2)<=iy.and.iy<=ie(2)) ) then
-                if    (present(r2d)) then; r2d(ix,iy)=r2d_p(ix,iy);
-                elseif(present(c2d)) then; c2d(ix,iy)=c2d_p(ix,iy);
+!$omp do private(i1,i2) collapse(1)
+            do i2=is_p(2),ie_p(2)
+            do i1=is_p(1),ie_p(1)
+              if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                  (is(2)<=i2.and.i2<=ie(2)) ) then
+                if    (present(r2d)) then; r2d(i1,i2)=r2d_p(i1,i2);
+                elseif(present(c2d)) then; c2d(i1,i2)=c2d_p(i1,i2);
                 end if
               end if  
             end do
             end do
 !$omp end do
 !$omp end parallel
-          else
+          elseif(present(r3d).or.present(c3d)) then
 !$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-            do iz=is_p(3,ii),ie_p(3,ii)
-            do iy=is_p(2,ii),ie_p(2,ii)
-            do ix=is_p(1,ii),ie_p(1,ii)
-              if( (is(1)<=ix.and.ix<=ie(1)) .and. &
-                  (is(2)<=iy.and.iy<=ie(2)) .and. &
-                  (is(3)<=iz.and.iz<=ie(3)) ) then
-                if    (present(r3d)) then; r3d(ix,iy,iz)     = r3d_p(ix,iy,iz)    ;
-                elseif(present(r4d)) then; r4d(ix,iy,iz,:)   = r4d_p(ix,iy,iz,:)  ;
-                elseif(present(r5d)) then; r5d(ix,iy,iz,:,:) = r5d_p(ix,iy,iz,:,:);
-                elseif(present(c3d)) then; c3d(ix,iy,iz)     = c3d_p(ix,iy,iz)    ;
-                elseif(present(c4d)) then; c4d(ix,iy,iz,:)   = c4d_p(ix,iy,iz,:)  ;
-                elseif(present(c5d)) then; c5d(ix,iy,iz,:,:) = c5d_p(ix,iy,iz,:,:);
+!$omp do private(i1,i2,i3) collapse(2)
+            do i3=is_p(3),ie_p(3)
+            do i2=is_p(2),ie_p(2)
+            do i1=is_p(1),ie_p(1)
+              if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                  (is(2)<=i2.and.i2<=ie(2)) .and. &
+                  (is(3)<=i3.and.i3<=ie(3)) ) then
+                if    (present(r3d)) then; r3d(i1,i2,i3)=r3d_p(i1,i2,i3);
+                elseif(present(c3d)) then; c3d(i1,i2,i3)=c3d_p(i1,i2,i3);
                 end if
               end if  
+            end do
+            end do
+            end do
+!$omp end do
+!$omp end parallel
+          elseif(present(r4d).or.present(c4d)) then
+!$omp parallel
+!$omp do private(i1,i2,i3,i4) collapse(3)
+            do i4=is_p(4),ie_p(4)
+            do i3=is_p(3),ie_p(3)
+            do i2=is_p(2),ie_p(2)
+            do i1=is_p(1),ie_p(1)
+              if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                  (is(2)<=i2.and.i2<=ie(2)) .and. &
+                  (is(3)<=i3.and.i3<=ie(3)) .and. &
+                  (is(4)<=i4.and.i4<=ie(4)) ) then
+                if    (present(r4d)) then; r4d(i1,i2,i3,i4)=r4d_p(i1,i2,i3,i4);
+                elseif(present(c4d)) then; c4d(i1,i2,i3,i4)=c4d_p(i1,i2,i3,i4);
+                end if
+              end if  
+            end do
+            end do
+            end do
+            end do
+!$omp end do
+!$omp end parallel
+          elseif(present(r5d).or.present(c5d)) then
+!$omp parallel
+!$omp do private(i1,i2,i3,i4,i5) collapse(4)
+            do i5=is_p(5),ie_p(5)
+            do i4=is_p(4),ie_p(4)
+            do i3=is_p(3),ie_p(3)
+            do i2=is_p(2),ie_p(2)
+            do i1=is_p(1),ie_p(1)
+              if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                  (is(2)<=i2.and.i2<=ie(2)) .and. &
+                  (is(3)<=i3.and.i3<=ie(3)) .and. &
+                  (is(4)<=i4.and.i4<=ie(4)) .and. &
+                  (is(5)<=i5.and.i5<=ie(5)) ) then
+                if    (present(r5d)) then; r5d(i1,i2,i3,i4,i5)=r5d_p(i1,i2,i3,i4,i5);
+                elseif(present(c5d)) then; c5d(i1,i2,i3,i4,i5)=c5d_p(i1,i2,i3,i4,i5);
+                end if
+              end if  
+            end do
+            end do
             end do
             end do
             end do
@@ -962,6 +993,7 @@ contains
         close(ifn)
       end if
     case('all')
+      !output date
       ii = nproc_id_global; write(id_name,*) ii;
       open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin',status='replace',&
            form='unformatted',access='stream')
@@ -977,6 +1009,11 @@ contains
       elseif(present(c5d)) then; write(ifn+ii) c5d(:,:,:,:,:);
       end if
       close(ifn+ii)
+      
+      !output array size
+      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_size.bin',status='replace',&
+           form='unformatted',access='stream')
+      write(ifn+ii) is(:); write(ifn+ii) ie(:); close(ifn+ii);
     end select
     
     return

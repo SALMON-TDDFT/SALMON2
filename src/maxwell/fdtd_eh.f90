@@ -224,6 +224,7 @@ contains
     integer,allocatable :: ie_p(:,:)   !yn_restart='y': mg%ie             used in the previous calc.
     integer,allocatable :: is_a_p(:,:) !yn_restart='y': mg%is_array       used in the previous calc.
     integer,allocatable :: ie_a_p(:,:) !yn_restart='y': mg%ie_array       used in the previous calc.
+    logical             :: flag_same_p !yn_restart='y': same parallel condition compared with the previous calc.
     integer             :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iroot1,iroot2
     integer             :: itmp1(3),itmp2(3)
     integer             :: is5(5),ie5(5)
@@ -296,6 +297,9 @@ contains
     else
       fe%flag_o_restart = .false.
     end if
+    
+    !same parallel condition compared with the previous calc.(this flag will be updated later for yn_restart='y')
+    flag_same_p = .true.
     
     !temporarily used flag for stop(this flag would be updated later)
     flag_stop = .false.
@@ -520,6 +524,24 @@ contains
         tmp_name2 = 'mg_ie_array_'//trim(adjustl(tmp_name1))
         call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_a_p(:,ii))
       end do
+      
+      !set flag
+      if(nproc_size_global==nsg_p) then
+        ii=0; ij=0;
+        if( fs%mg%is(1)/=is_p(1,nproc_id_global).or.fs%mg%ie(1)/=ie_p(1,nproc_id_global).or.&
+            fs%mg%is(2)/=is_p(2,nproc_id_global).or.fs%mg%ie(2)/=ie_p(2,nproc_id_global).or.&
+            fs%mg%is(3)/=is_p(3,nproc_id_global).or.fs%mg%ie(3)/=ie_p(3,nproc_id_global) ) then
+          ii=1
+        end if
+        call comm_summation(ii,ij,nproc_group_global)
+        if(ij==0) then
+          flag_same_p = .true.
+        else
+          flag_same_p = .false.
+        end if
+      else
+        flag_same_p = .false.
+      end if
     end if
     
     !*** prepare to store restart date ************************************************************************!
@@ -2093,39 +2115,61 @@ contains
       call input_r_txt_em(fe%ifn,1,1,'h_max',   r0d=fe%h_max   );
       
       !input binary data
-      is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
-      is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
-      is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
-      is5(4) = 1;                 ie5(4) = 1;
-      is5(5) = 1;                 ie5(5) = 1;
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ex_y',r3d=fe%ex_y)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ex_z',r3d=fe%ex_z)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ey_z',r3d=fe%ey_z)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ey_x',r3d=fe%ey_x)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ez_x',r3d=fe%ez_x)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ez_y',r3d=fe%ez_y)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hx_y',r3d=fe%hx_y)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hx_z',r3d=fe%hx_z)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hy_z',r3d=fe%hy_z)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hy_x',r3d=fe%hy_x)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hz_x',r3d=fe%hz_x)
-      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hz_y',r3d=fe%hz_y)
+      is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+      is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+      is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3);
+      is5(4) = 1          ; ie5(4) = 1          ;
+      is5(5) = 1          ; ie5(5) = 1          ;
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ex_y',&
+                          r3d=fe%ex_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ex_z',&
+                          r3d=fe%ex_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ey_z',&
+                          r3d=fe%ey_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ey_x',&
+                          r3d=fe%ey_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ez_x',&
+                          r3d=fe%ez_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ez_y',&
+                          r3d=fe%ez_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hx_y',&
+                          r3d=fe%hx_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hx_z',&
+                          r3d=fe%hx_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hy_z',&
+                          r3d=fe%hy_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hy_x',&
+                          r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_x',&
+                          r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_y',&
+                          r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+      call eh_sendrecv(fs,fe,'e'); call eh_sendrecv(fs,fe,'h');
       if(fe%flag_ld) then                     
-        is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
-        is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
-        is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
-        is5(4) = 1;                 ie5(4) = fe%max_pole_num_ld;
-        is5(5) = 1;                 ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjx_ld'     ,r4d=fe%rjx_ld     )
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjy_ld'     ,r4d=fe%rjy_ld     )
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjz_ld'     ,r4d=fe%rjz_ld     )
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','px_ld'      ,r4d=fe%px_ld      )
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','py_ld'      ,r4d=fe%py_ld      )
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','pz_ld'      ,r4d=fe%pz_ld      )
-        is5(4) = 1;                 ie5(4) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjx_fdtd_ld',r3d=fe%rjx_fdtd_ld)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjy_fdtd_ld',r3d=fe%rjy_fdtd_ld)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjz_fdtd_ld',r3d=fe%rjz_fdtd_ld)
+        is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
+        is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)       ;
+        is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3)       ;
+        is5(4) = 1          ; ie5(4) = fe%max_pole_num_ld;
+        is5(5) = 1          ; ie5(5) = 1                 ;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_ld',&
+                            r4d=fe%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_ld',&
+                            r4d=fe%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_ld',&
+                            r4d=fe%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','px_ld' ,&
+                            r4d= fe%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','py_ld' ,&
+                            r4d= fe%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','pz_ld' ,&
+                            r4d= fe%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+        is5(4) = 1; ie5(4) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_fdtd_ld',&
+                            r3d=fe%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_fdtd_ld',&
+                            r3d=fe%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_fdtd_ld',&
+                            r3d=fe%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
       end if
       if(fe%flag_lr) then
         is5(1) = 1; ie5(1) = nt_em;
@@ -2133,13 +2177,13 @@ contains
         is5(3) = 1; ie5(3) = 1;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','time_lr',r3d=fe%time_lr)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','time_lr',r3d=fe%time_lr)
         is5(2) = 1; ie5(2) = 3;
         if(yn_periodic=='n') then
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','dip_lr' ,r3d=fe%dip_lr )
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','dip_lr' ,r3d=fe%dip_lr )
         elseif(yn_periodic=='y') then
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','curr_lr',r3d=fe%curr_lr)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','e_lr'   ,r3d=fe%e_lr   )
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','curr_lr',r3d=fe%curr_lr)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','e_lr'   ,r3d=fe%e_lr   )
         end if
       end if
       if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
@@ -2148,37 +2192,37 @@ contains
         is5(3) = 1;           ie5(3) = obs_num_em;
         is5(4) = 1;           ie5(4) = maxval(fe%iobs_num_ene(:));
         is5(5) = 1;           ie5(5) = 2;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ex_xy_ene',c5d=fe%obs_ex_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ey_xy_ene',c5d=fe%obs_ey_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ez_xy_ene',c5d=fe%obs_ez_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hx_xy_ene',c5d=fe%obs_hx_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hy_xy_ene',c5d=fe%obs_hy_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hz_xy_ene',c5d=fe%obs_hz_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jx_xy_ene',c5d=fe%obs_jx_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jy_xy_ene',c5d=fe%obs_jy_xy_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jz_xy_ene',c5d=fe%obs_jz_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ex_xy_ene',c5d=fe%obs_ex_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ey_xy_ene',c5d=fe%obs_ey_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ez_xy_ene',c5d=fe%obs_ez_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hx_xy_ene',c5d=fe%obs_hx_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hy_xy_ene',c5d=fe%obs_hy_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hz_xy_ene',c5d=fe%obs_hz_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jx_xy_ene',c5d=fe%obs_jx_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jy_xy_ene',c5d=fe%obs_jy_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_xy_ene',c5d=fe%obs_jz_xy_ene)
         is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ex_yz_ene',c5d=fe%obs_ex_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ey_yz_ene',c5d=fe%obs_ey_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ez_yz_ene',c5d=fe%obs_ez_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hx_yz_ene',c5d=fe%obs_hx_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hy_yz_ene',c5d=fe%obs_hy_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hz_yz_ene',c5d=fe%obs_hz_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jx_yz_ene',c5d=fe%obs_jx_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jy_yz_ene',c5d=fe%obs_jy_yz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jz_yz_ene',c5d=fe%obs_jz_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ex_yz_ene',c5d=fe%obs_ex_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ey_yz_ene',c5d=fe%obs_ey_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ez_yz_ene',c5d=fe%obs_ez_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hx_yz_ene',c5d=fe%obs_hx_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hy_yz_ene',c5d=fe%obs_hy_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hz_yz_ene',c5d=fe%obs_hz_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jx_yz_ene',c5d=fe%obs_jx_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jy_yz_ene',c5d=fe%obs_jy_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_yz_ene',c5d=fe%obs_jz_yz_ene)
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ex_xz_ene',c5d=fe%obs_ex_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ey_xz_ene',c5d=fe%obs_ey_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ez_xz_ene',c5d=fe%obs_ez_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hx_xz_ene',c5d=fe%obs_hx_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hy_xz_ene',c5d=fe%obs_hy_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hz_xz_ene',c5d=fe%obs_hz_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jx_xz_ene',c5d=fe%obs_jx_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jy_xz_ene',c5d=fe%obs_jy_xz_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jz_xz_ene',c5d=fe%obs_jz_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ex_xz_ene',c5d=fe%obs_ex_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ey_xz_ene',c5d=fe%obs_ey_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ez_xz_ene',c5d=fe%obs_ez_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hx_xz_ene',c5d=fe%obs_hx_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hy_xz_ene',c5d=fe%obs_hy_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hz_xz_ene',c5d=fe%obs_hz_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jx_xz_ene',c5d=fe%obs_jx_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jy_xz_ene',c5d=fe%obs_jy_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_xz_ene',c5d=fe%obs_jz_xz_ene)
       end if
       if(fe%flag_ase) then
         if    (ek_dir1(1)==1.0d0) then
@@ -2192,44 +2236,44 @@ contains
         is5(3) = 1; ie5(3) = 2;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_hx_inc_pa_ene',c3d=fe%ase_hx_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_inc_pa_ene',c3d=fe%ase_hx_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene)
         is5(1) = 1; ie5(1) = ase_num_em;
         is5(2) = 1; ie5(2) = 2;
         is5(3) = 1; ie5(3) = 2;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_hx_inc_bt_ene',c3d=fe%ase_hx_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_hy_inc_bt_ene',c3d=fe%ase_hy_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hx_inc_bt_ene',c3d=fe%ase_hx_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hy_inc_bt_ene',c3d=fe%ase_hy_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene)
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
         is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
         is5(3) = 1;           ie5(3) = ase_num_em;
         is5(4) = 1;           ie5(4) = 2;
         is5(5) = 1;           ie5(5) = 2;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ex_xy_sca_ene',c5d=fe%ase_ex_xy_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ey_xy_sca_ene',c5d=fe%ase_ey_xy_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hx_xy_sca_ene',c5d=fe%ase_hx_xy_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hy_xy_sca_ene',c5d=fe%ase_hy_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_xy_sca_ene',c5d=fe%ase_ex_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_xy_sca_ene',c5d=fe%ase_ey_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_xy_sca_ene',c5d=fe%ase_hx_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_xy_sca_ene',c5d=fe%ase_hy_xy_sca_ene)
         is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ey_yz_sca_ene',c5d=fe%ase_ey_yz_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ez_yz_sca_ene',c5d=fe%ase_ez_yz_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hy_yz_sca_ene',c5d=fe%ase_hy_yz_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hz_yz_sca_ene',c5d=fe%ase_hz_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_yz_sca_ene',c5d=fe%ase_ey_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_yz_sca_ene',c5d=fe%ase_ez_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_yz_sca_ene',c5d=fe%ase_hy_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_yz_sca_ene',c5d=fe%ase_hz_yz_sca_ene)
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ex_xz_sca_ene',c5d=fe%ase_ex_xz_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ez_xz_sca_ene',c5d=fe%ase_ez_xz_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hx_xz_sca_ene',c5d=fe%ase_hx_xz_sca_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hz_xz_sca_ene',c5d=fe%ase_hz_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_xz_sca_ene',c5d=fe%ase_ex_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_xz_sca_ene',c5d=fe%ase_ez_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_xz_sca_ene',c5d=fe%ase_hx_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_xz_sca_ene',c5d=fe%ase_hz_xz_sca_ene)
       end if
       if(fe%flag_art) then
         is5(1) = 1; ie5(1) = art_num_em;
@@ -2237,42 +2281,42 @@ contains
         is5(3) = 1; ie5(3) = 2;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_hx_inc_bt_ene',c3d=fe%art_hx_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_hy_inc_bt_ene',c3d=fe%art_hy_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_hz_inc_bt_ene',c3d=fe%art_hz_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hx_inc_bt_ene',c3d=fe%art_hx_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hy_inc_bt_ene',c3d=fe%art_hy_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hz_inc_bt_ene',c3d=fe%art_hz_inc_bt_ene)
         if    (ek_dir1(1)==1.0d0) then
           is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
           is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
           is5(3) = 1;           ie5(3) = art_num_em;
           is5(4) = 1;           ie5(4) = 2;
           is5(5) = 1;           ie5(5) = 2;
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
         elseif(ek_dir1(2)==1.0d0) then
           is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
           is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
           is5(3) = 1;           ie5(3) = art_num_em;
           is5(4) = 1;           ie5(4) = 2;
           is5(5) = 1;           ie5(5) = 2;
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
         elseif(ek_dir1(3)==1.0d0) then
           is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
           is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
           is5(3) = 1;           ie5(3) = art_num_em;
           is5(4) = 1;           ie5(4) = 2;
           is5(5) = 1;           ie5(5) = 2;
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
         end if            
       end if
       
@@ -3250,48 +3294,57 @@ contains
           call output_r_txt_em(fe%ifn,1,1,'single',   'h_max',r0d=fe%h_max   )
           
           !bin data
-          is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
-          is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
-          is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
-          is5(4) = 1;                 ie5(4) = 1;
-          is5(5) = 1;                 ie5(5) = 1;
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','ex_y',r3d=fe%ex_y)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','ex_z',r3d=fe%ex_z)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','ey_z',r3d=fe%ey_z)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','ey_x',r3d=fe%ey_x)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','ez_x',r3d=fe%ez_x)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','ez_y',r3d=fe%ez_y)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','hx_y',r3d=fe%hx_y)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','hx_z',r3d=fe%hx_z)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_z',r3d=fe%hy_z)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_x',r3d=fe%hy_x)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_x',r3d=fe%hz_x)
-          call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_y',r3d=fe%hz_y)
+          is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+          is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+          is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3);
+          is5(4) = 1          ; ie5(4) = 1          ;
+          is5(5) = 1          ; ie5(5) = 1          ;
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ex_y',r3d=fe%ex_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ex_z',r3d=fe%ex_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ey_z',r3d=fe%ey_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ey_x',r3d=fe%ey_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ez_x',r3d=fe%ez_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ez_y',r3d=fe%ez_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hx_y',r3d=fe%hx_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hx_z',r3d=fe%hx_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_z',r3d=fe%hy_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_x',r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_x',r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_y',r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
           if(fe%flag_ld) then                     
-            is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
-            is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
-            is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
-            is5(4) = 1;                 ie5(4) = fe%max_pole_num_ld;
-            is5(5) = 1;                 ie5(5) = 1;
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_ld'     ,r4d=fe%rjx_ld     )
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_ld'     ,r4d=fe%rjy_ld     )
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_ld'     ,r4d=fe%rjz_ld     )
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','px_ld'      ,r4d=fe%px_ld      )
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','py_ld'      ,r4d=fe%py_ld      )
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','pz_ld'      ,r4d=fe%pz_ld      )
-            is5(4) = 1;                 ie5(4) = 1;
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_fdtd_ld',r3d=fe%rjx_fdtd_ld)
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_fdtd_ld',r3d=fe%rjy_fdtd_ld)
-            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_fdtd_ld',r3d=fe%rjz_fdtd_ld)
+            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
+            is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)       ;
+            is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3)       ;
+            is5(4) = 1          ; ie5(4) = fe%max_pole_num_ld;
+            is5(5) = 1          ; ie5(5) = 1                 ;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_ld',&
+                                 r4d=fe%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_ld',&
+                                 r4d=fe%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_ld',&
+                                 r4d=fe%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','px_ld' ,&
+                                 r4d= fe%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','py_ld' ,&
+                                 r4d= fe%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','pz_ld' ,&
+                                 r4d= fe%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+            is5(4) = 1; ie5(4) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_fdtd_ld',&
+                                 r3d=fe%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_fdtd_ld',&
+                                 r3d=fe%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_fdtd_ld',&
+                                 r3d=fe%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
           end if
           if(fe%flag_lr) then
             is5(1) = 1; ie5(1) = nt_em;
-            is5(2) = 1; ie5(2) = 1;
-            is5(3) = 1; ie5(3) = 1;
-            is5(4) = 1; ie5(4) = 1;
-            is5(5) = 1; ie5(5) = 1;
+            is5(2) = 1; ie5(2) = 1    ;
+            is5(3) = 1; ie5(3) = 1    ;
+            is5(4) = 1; ie5(4) = 1    ;
+            is5(5) = 1; ie5(5) = 1    ;
             call output_r_bin_em(fe%ifn,is5,ie5,'single','time_lr',r1d=fe%time_lr)
-            is5(2) = 1; ie5(2) = 3;
+            is5(2) = 1; ie5(2) = 3    ;
             if(yn_periodic=='n') then
               call output_r_bin_em(fe%ifn,is5,ie5,'single','dip_lr' ,r2d=fe%dip_lr )
             elseif(yn_periodic=='y') then
@@ -3300,11 +3353,11 @@ contains
             end if
           end if
           if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
-            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
-            is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
-            is5(3) = 1;           ie5(3) = obs_num_em;
-            is5(4) = 1;           ie5(4) = maxval(fe%iobs_num_ene(:));
-            is5(5) = 1;           ie5(5) = 2;
+            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)               ;
+            is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)               ;
+            is5(3) = 1          ; ie5(3) = obs_num_em                ;
+            is5(4) = 1          ; ie5(4) = maxval(fe%iobs_num_ene(:));
+            is5(5) = 1          ; ie5(5) = 2                         ;
             call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ex_xy_ene',c5d=fe%obs_ex_xy_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ey_xy_ene',c5d=fe%obs_ey_xy_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ez_xy_ene',c5d=fe%obs_ez_xy_ene)
@@ -3346,9 +3399,9 @@ contains
               is5(1) = fs%mg%is(3); ie5(1) = fs%mg%ie(3);
             end if
             is5(2) = 1; ie5(2) = ase_num_em;
-            is5(3) = 1; ie5(3) = 2;
-            is5(4) = 1; ie5(4) = 1;
-            is5(5) = 1; ie5(5) = 1;
+            is5(3) = 1; ie5(3) = 2         ;
+            is5(4) = 1; ie5(4) = 1         ;
+            is5(5) = 1; ie5(5) = 1         ;
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene)
@@ -3356,10 +3409,10 @@ contains
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene)
             is5(1) = 1; ie5(1) = ase_num_em;
-            is5(2) = 1; ie5(2) = 2;
-            is5(3) = 1; ie5(3) = 2;
-            is5(4) = 1; ie5(4) = 1;
-            is5(5) = 1; ie5(5) = 1;
+            is5(2) = 1; ie5(2) = 2         ;
+            is5(3) = 1; ie5(3) = 2         ;
+            is5(4) = 1; ie5(4) = 1         ;
+            is5(5) = 1; ie5(5) = 1         ;
             call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene)
@@ -3368,9 +3421,9 @@ contains
             call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene)
             is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
             is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
-            is5(3) = 1;           ie5(3) = ase_num_em;
-            is5(4) = 1;           ie5(4) = 2;
-            is5(5) = 1;           ie5(5) = 2;
+            is5(3) = 1          ; ie5(3) = ase_num_em ;
+            is5(4) = 1          ; ie5(4) = 2          ;
+            is5(5) = 1          ; ie5(5) = 2          ;
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ex_xy_sca_ene',c5d=fe%ase_ex_xy_sca_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ey_xy_sca_ene',c5d=fe%ase_ey_xy_sca_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hx_xy_sca_ene',c5d=fe%ase_hx_xy_sca_ene)
@@ -3390,10 +3443,10 @@ contains
           end if
           if(fe%flag_art) then
             is5(1) = 1; ie5(1) = art_num_em;
-            is5(2) = 1; ie5(2) = 2;
-            is5(3) = 1; ie5(3) = 2;
-            is5(4) = 1; ie5(4) = 1;
-            is5(5) = 1; ie5(5) = 1;
+            is5(2) = 1; ie5(2) = 2         ;
+            is5(3) = 1; ie5(3) = 2         ;
+            is5(4) = 1; ie5(4) = 1         ;
+            is5(5) = 1; ie5(5) = 1         ;
             call output_r_bin_em(fe%ifn,is5,ie5,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene)
             call output_r_bin_em(fe%ifn,is5,ie5,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene)
@@ -3403,9 +3456,9 @@ contains
             if    (ek_dir1(1)==1.0d0) then
               is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
               is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
-              is5(3) = 1;           ie5(3) = art_num_em;
-              is5(4) = 1;           ie5(4) = 2;
-              is5(5) = 1;           ie5(5) = 2;
+              is5(3) = 1          ; ie5(3) = art_num_em ;
+              is5(4) = 1          ; ie5(4) = 2          ;
+              is5(5) = 1          ; ie5(5) = 2          ;
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
@@ -3413,9 +3466,9 @@ contains
             elseif(ek_dir1(2)==1.0d0) then
               is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
               is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
-              is5(3) = 1;           ie5(3) = art_num_em;
-              is5(4) = 1;           ie5(4) = 2;
-              is5(5) = 1;           ie5(5) = 2;
+              is5(3) = 1          ; ie5(3) = art_num_em ;
+              is5(4) = 1          ; ie5(4) = 2          ;
+              is5(5) = 1          ; ie5(5) = 2          ;
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
@@ -3423,9 +3476,9 @@ contains
             elseif(ek_dir1(3)==1.0d0) then
               is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
               is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
-              is5(3) = 1;           ie5(3) = art_num_em;
-              is5(4) = 1;           ie5(4) = 2;
-              is5(5) = 1;           ie5(5) = 2;
+              is5(3) = 1          ; ie5(3) = art_num_em ;
+              is5(4) = 1          ; ie5(4) = 2          ;
+              is5(5) = 1          ; ie5(5) = 2          ;
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
               call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
@@ -4177,7 +4230,7 @@ contains
       
       !Fourier transformation for incident field on plane
 !$omp parallel
-!$omp do private(ibt,ii,ie,f_factor) collapse(1)
+!$omp do private(ibt,ie,f_factor) collapse(1)
       do ie = 1,art_num_em
         f_factor = dt_em*dble(obs_samp_em)*exp(zi*fe%art_ene(ie)*t)
         do ibt = 1,2
