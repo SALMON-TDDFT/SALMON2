@@ -790,7 +790,7 @@ contains
       do ii=0,media_num
         write(*,*) "=========================="
         write(*,'(A,I3,A)')      ' id ',ii, ':'
-        call eh_check_media_type(fe%rep(ii),fe%rmu(ii),fe%sig(ij),media_type(ii),tmp_name1)
+        call eh_check_media_type(fe%rep(ii),fe%rmu(ii),fe%sig(ii),media_type(ii),tmp_name1)
         write(*,'(A,A)')         ' media_type  =  ', trim(tmp_name1)
         select case(media_type(ii))
         case('lorentz-drude')
@@ -2177,13 +2177,13 @@ contains
         is5(3) = 1; ie5(3) = 1;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','time_lr',r3d=fe%time_lr)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','time_lr',r1d=fe%time_lr)
         is5(2) = 1; ie5(2) = 3;
         if(yn_periodic=='n') then
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','dip_lr' ,r3d=fe%dip_lr )
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','dip_lr' ,r2d=fe%dip_lr )
         elseif(yn_periodic=='y') then
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','curr_lr',r3d=fe%curr_lr)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','e_lr'   ,r3d=fe%e_lr   )
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','curr_lr',r2d=fe%curr_lr)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','e_lr'   ,r2d=fe%e_lr   )
         end if
       end if
       if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
