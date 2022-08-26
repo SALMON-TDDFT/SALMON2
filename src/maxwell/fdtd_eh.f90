@@ -20,11 +20,12 @@ module fdtd_eh
   type ls_fdtd_eh
     logical             :: flag_pml        !pml  option: work for a_bc = 'pml'
     logical             :: flag_ld         !LD   option: work for num_ld > 0
-    logical             :: flag_lr         !LR   option: work for ae_shape1 = 'impulse'.or.ae_shape2 = 'impulse'
+    logical             :: flag_lr         !LR   option: work for ae_shape1 = 'impulse'or ae_shape2 = 'impulse'
     logical             :: flag_obs        !obs. option: work for obs_num_em > 0
     logical             :: flag_ase        !ase  option: work for ase_num_em > 0
     logical             :: flag_art        !art  option: work for art_num_em > 0
-    logical             :: flag_save       !save option: work for flag_obs .or. flag_ase .or. flag_art
+    logical             :: flag_save       !save option: work for flag_obs or flag_ase or flag_art
+    logical             :: flag_o_restart  !output data_for_restart: work for checkpoint_interval > 0
     integer             :: Nd              !number of additional grid in mpi
     integer             :: iter_sta        !start of time-iteration
     integer             :: iter_end        !end of time-iteration
@@ -96,12 +97,12 @@ module fdtd_eh
     integer             :: num_ld                                    !LD: number of LD media
     integer             :: max_pole_num_ld                           !LD: maximum of pole_num_ld
     integer,allocatable :: media_ld(:)                               !LD: imedia number for LD model(num_ld)
-    real(8),allocatable ::  rjx_ld(:,:,:,:),rjx_old_ld(:,:,:,:),&    !LD: poparization current density J
-                            rjy_ld(:,:,:,:),rjy_old_ld(:,:,:,:),&    !    and its stock
-                            rjz_ld(:,:,:,:),rjz_old_ld(:,:,:,:)      !    (x,y,z,max_pole_num_ld)
-    real(8),allocatable ::   px_ld(:,:,:,:), px_old_ld(:,:,:,:),&    !LD: poparization vector P
-                             py_ld(:,:,:,:), py_old_ld(:,:,:,:),&    !    and its stock
-                             pz_ld(:,:,:,:), pz_old_ld(:,:,:,:)      !    (x,y,z,max_pole_num_ld)
+    real(8),allocatable ::   rjx_ld(:,:,:,:),rjx_old_ld(:,:,:,:),&   !LD: poparization current density J
+                             rjy_ld(:,:,:,:),rjy_old_ld(:,:,:,:),&   !    and its stock
+                             rjz_ld(:,:,:,:),rjz_old_ld(:,:,:,:)     !    (x,y,z,max_pole_num_ld)
+    real(8),allocatable ::    px_ld(:,:,:,:),&                       !LD: poparization vector P
+                              py_ld(:,:,:,:),&                       !    (x,y,z,max_pole_num_ld)
+                              pz_ld(:,:,:,:)                         !
     real(8),allocatable :: c1_jx_ld(:,:,:,:),&                       !LD: coefficient for Jx
                            c2_jx_ld(:,:,:,:),&                       !    (x,y,z,max_pole_num_ld)
                            c3_jx_ld(:,:,:,:)                         !
@@ -119,7 +120,6 @@ module fdtd_eh
                            ez_old_ld(:,:,:)                          !
     real(8),allocatable :: rmedia(:,:,:)                             !Material information for tmp.
     real(8),allocatable :: time_lr(:)                                !LR: time
-    integer             :: iter_lr                                   !LR: time iteration for save
     real(8),allocatable :: fr_lr(:,:)                                !LR: Re[f]
     real(8),allocatable :: fi_lr(:,:)                                !LR: Im[f]
     real(8),allocatable :: dip_lr(:,:)                               !LR: dipolemoment
@@ -199,32 +199,43 @@ contains
                                ase_num_em,ase_ene_min_em,ase_ene_max_em,ase_wav_min_em,ase_wav_max_em,     &
                                ase_box_cent_em,ase_box_size_em,                                            &
                                art_num_em,art_ene_min_em,art_ene_max_em,art_wav_min_em,art_wav_max_em,     &
-                               art_plane_bot_em,art_plane_top_em
+                               art_plane_bot_em,art_plane_top_em,                                          &
+                               yn_restart,directory_read_data,checkpoint_interval
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
-    use parallelization, only: nproc_id_global,nproc_group_global
-    use communication,   only: comm_is_root,comm_bcast,comm_summation
+    use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
+    use communication,   only: comm_is_root,comm_bcast,comm_summation,comm_sync_all
     use structures,      only: s_fdtd_system
+    use filesystem,      only: create_directory
     use misc_routines,   only: get_wtime
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     use common_maxwell,  only: set_coo_em,find_point_line_plane_em,find_point_id_only_em,make_shape_em,&
-                               input_i3d_em,output_i3d_em,stop_em
+                               input_i3d_em,output_i3d_em,stop_em,input_r_txt_em,output_r_txt_em,input_r_bin_em
     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    integer                           :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iroot1,iroot2
-    integer                           :: itmp1(3),itmp2(3)
-    real(8)                           :: dt_cfl,elapsed_time,tmp_min,tmp_max,tmp_x1,tmp_x2,tmp_y1,tmp_y2,tmp_z1,tmp_z2
-    real(8),allocatable               :: tmp_c0_ld(:,:),tmp_c1_ld(:,:),tmp_c2_ld(:,:),tmp_c3_ld(:,:)
-    real(8),allocatable               :: tmp_c4_ld(  :),tmp_c5_ld(  :)
-    character(1)                      :: dir
-    character(2)                      :: plane_name
-    character(16)                     :: tmp_name1,tmp_name2
-    character(256)                    :: save_name
-    character(256)                    :: tmp_c(2)
-    logical                           :: flag_stop
+    procedure(integer)  :: access,system
+    integer             :: istatus
+    integer             :: nsg_p       !yn_restart='y': nproc_size_global used in the previous calc.
+    integer             :: nt_em_p     !yn_restart='y': nt_em             used in the previous calc.
+    integer,allocatable :: is_p(:,:)   !yn_restart='y': mg%is             used in the previous calc.
+    integer,allocatable :: ie_p(:,:)   !yn_restart='y': mg%ie             used in the previous calc.
+    integer,allocatable :: is_a_p(:,:) !yn_restart='y': mg%is_array       used in the previous calc.
+    integer,allocatable :: ie_a_p(:,:) !yn_restart='y': mg%ie_array       used in the previous calc.
+    integer             :: ii,ij,ik,ix,iy,iz,icount,icount_ld,iroot1,iroot2
+    integer             :: itmp1(3),itmp2(3)
+    integer             :: is5(5),ie5(5)
+    real(8)             :: dt_cfl,elapsed_time,tmp_min,tmp_max,tmp_x1,tmp_x2,tmp_y1,tmp_y2,tmp_z1,tmp_z2
+    real(8),allocatable :: tmp_c0_ld(:,:),tmp_c1_ld(:,:),tmp_c2_ld(:,:),tmp_c3_ld(:,:)
+    real(8),allocatable :: tmp_c4_ld(  :),tmp_c5_ld(  :)
+    character(1)        :: dir
+    character(2)        :: plane_name
+    character(16)       :: tmp_name1,tmp_name2
+    character(256)      :: save_name
+    character(256)      :: tmp_c(2)
+    logical             :: flag_stop
     
     !*** set flag *********************************************************************************************!
     !pml option: use absorbing baundary(PML) condition(this flag would be updated later)
@@ -277,6 +288,13 @@ contains
       fe%flag_save = .true.
     else
       fe%flag_save = .false.
+    end if
+    
+    !output data_for_restart
+    if(checkpoint_interval>0) then
+      fe%flag_o_restart = .true.
+    else
+      fe%flag_o_restart = .false.
     end if
     
     !temporarily used flag for stop(this flag would be updated later)
@@ -462,6 +480,86 @@ contains
     fe%iter_sta = 1
     fe%iter_end = nt_em
     
+    !*** check and partially input restart date ***************************************************************!
+    if(yn_restart=='y') then
+      !check restart date
+      if(access(directory_read_data," ")==0) then
+        if(comm_is_root(nproc_id_global)) then
+          write(*,*)
+          write(*,*) "**************************"
+          write(*,*) "yn_restart='y':"
+          write(*,*) "restart data is loaded from ",trim(adjustl(directory_read_data))
+          write(*,'(A)') " --- CAUTION ---"
+          write(*,'(A)') " All input keywords except yn_restart, directory_read_data, and checkpoint_interval"
+          write(*,'(A)') " are recomended to be same with those used in the previous calculation."
+          write(*,'(A)') " Otherwise, unexpected errors would appear."
+          write(*,*) "**************************"
+        end if
+      else
+        call stop_em('Invalid directory_read_data:',c2=trim(adjustl(directory_read_data)),c3='is not found.')
+      end if
+      
+      !input nproc_size_global and nt_em used in the previous calculation
+      call input_r_txt_em(fe%ifn,1,1,'nproc_size_global',i0d=nsg_p  )
+      call input_r_txt_em(fe%ifn,1,1,'nt_em'            ,i0d=nt_em_p)
+      if(nt_em/=nt_em_p) then
+        call stop_em('When yn_restart="y",',c2='nt_em must be same with that used in the previous calculation.')
+      end if
+      
+      !input array size
+      allocate(  is_p(1:3,0:(nsg_p-1)),  ie_p(1:3,0:(nsg_p-1)),&
+               is_a_p(1:3,0:(nsg_p-1)),ie_a_p(1:3,0:(nsg_p-1)) )
+      do ii=0,(nsg_p-1)
+        write(tmp_name1,*) ii
+        tmp_name2 = 'mg_is_'//trim(adjustl(tmp_name1))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=is_p(:,ii))
+        tmp_name2 = 'mg_ie_'//trim(adjustl(tmp_name1));
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_p(:,ii))
+        tmp_name2 = 'mg_is_array_'//trim(adjustl(tmp_name1))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=is_a_p(:,ii))
+        tmp_name2 = 'mg_ie_array_'//trim(adjustl(tmp_name1))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_a_p(:,ii))
+      end do
+    end if
+    
+    !*** prepare to store restart date ************************************************************************!
+    if(fe%flag_o_restart) then
+      !check, modify, and write checkpoint_interval
+      if(comm_is_root(nproc_id_global)) write(*,*)
+      if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
+      if(checkpoint_interval>0) then
+        if(checkpoint_interval<obs_samp_em) then
+          call stop_em('checkpoint_interval must be larger than obs_samp_em.')
+        elseif(mod(checkpoint_interval,obs_samp_em)/=0) then
+          checkpoint_interval = nint(dble(checkpoint_interval)/dble(obs_samp_em))*obs_samp_em
+          if(comm_is_root(nproc_id_global)) then
+            write(*,*) "checkpoint_interval must be a multiple of obs_samp_em."
+            write(*,*) "Therefore, checkpoint_interval is modified as",checkpoint_interval
+          end if
+        else
+          if(comm_is_root(nproc_id_global)) write(*,*) "checkpoint_interval =",checkpoint_interval
+        end if
+      end if
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*) "data_for_restart will be outputed."
+        write(*,*) "**************************"
+      end if
+      
+      !make directory
+      if(comm_is_root(nproc_id_global)) call create_directory('data_for_restart/')
+      call comm_sync_all
+      
+      !output nproc_size_global and nt_em
+      call output_r_txt_em(fe%ifn,1,1,'single','nproc_size_global',i0d=nproc_size_global)
+      call output_r_txt_em(fe%ifn,1,1,'single','nt_em',            i0d=nt_em            )
+      
+      !output array size
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_is'      ,i1d=fs%mg%is      )
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_ie'      ,i1d=fs%mg%ie      )
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_is_array',i1d=fs%mg%is_array)
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_ie_array',i1d=fs%mg%ie_array)
+    end if
+    
     !*** make or input shape data *****************************************************************************!
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i3d',i3d=fs%imedia)
     call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rmedia)
@@ -503,8 +601,8 @@ contains
       elapsed_time=get_wtime()-elapsed_time
       if(comm_is_root(nproc_id_global)) then
         write(*,'(A,f16.8)') " elapsed time for making shape data [s] = ", elapsed_time
+        write(*,*) "**************************"
       end if
-      if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
     end if
     
     !*** basic allocation in eh-FDTD **************************************************************************!
@@ -616,9 +714,6 @@ contains
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%px_ld      )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%py_ld      )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%pz_ld      )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%px_old_ld  )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%py_old_ld  )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%pz_old_ld  )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jx_ld   )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jx_ld   )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jx_ld   )
@@ -1474,7 +1569,6 @@ contains
       !initialize and allocate
       allocate(fe%time_lr(nt_em))
       fe%time_lr(:)=0.0d0
-      fe%iter_lr=1
       allocate(fe%fr_lr(nenergy,3),fe%fi_lr(nenergy,3))
       fe%fr_lr(:,:)=0.0d0; fe%fi_lr(:,:)=0.0d0;
       if(yn_periodic=='n') then
@@ -1987,6 +2081,218 @@ contains
     
     !*** deallocate unused variables **************************************************************************!
     deallocate(fs%imedia,fe%rmedia);
+    
+    !*** completely input restart date ************************************************************************!
+    if(yn_restart=='y') then
+      !start to calculate elapsed_time
+      elapsed_time = get_wtime()
+      
+      !input iter_now(substituted to iter_sta with +1), e_max and h_max
+      call input_r_txt_em(fe%ifn,1,1,'iter_now',i0d=fe%iter_sta); fe%iter_sta = fe%iter_sta + 1;
+      call input_r_txt_em(fe%ifn,1,1,'e_max',   r0d=fe%e_max   );
+      call input_r_txt_em(fe%ifn,1,1,'h_max',   r0d=fe%h_max   );
+      
+      !input binary data
+      is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
+      is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
+      is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
+      is5(4) = 1;                 ie5(4) = 1;
+      is5(5) = 1;                 ie5(5) = 1;
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ex_y',r3d=fe%ex_y)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ex_z',r3d=fe%ex_z)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ey_z',r3d=fe%ey_z)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ey_x',r3d=fe%ey_x)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ez_x',r3d=fe%ez_x)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','ez_y',r3d=fe%ez_y)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hx_y',r3d=fe%hx_y)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hx_z',r3d=fe%hx_z)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hy_z',r3d=fe%hy_z)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hy_x',r3d=fe%hy_x)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hz_x',r3d=fe%hz_x)
+      call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','hz_y',r3d=fe%hz_y)
+      if(fe%flag_ld) then                     
+        is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
+        is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
+        is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
+        is5(4) = 1;                 ie5(4) = fe%max_pole_num_ld;
+        is5(5) = 1;                 ie5(5) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjx_ld'     ,r4d=fe%rjx_ld     )
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjy_ld'     ,r4d=fe%rjy_ld     )
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjz_ld'     ,r4d=fe%rjz_ld     )
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','px_ld'      ,r4d=fe%px_ld      )
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','py_ld'      ,r4d=fe%py_ld      )
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','pz_ld'      ,r4d=fe%pz_ld      )
+        is5(4) = 1;                 ie5(4) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjx_fdtd_ld',r3d=fe%rjx_fdtd_ld)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjy_fdtd_ld',r3d=fe%rjy_fdtd_ld)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_a_p,ie_a_p,3,'all','rjz_fdtd_ld',r3d=fe%rjz_fdtd_ld)
+      end if
+      if(fe%flag_lr) then
+        is5(1) = 1; ie5(1) = nt_em;
+        is5(2) = 1; ie5(2) = 1;
+        is5(3) = 1; ie5(3) = 1;
+        is5(4) = 1; ie5(4) = 1;
+        is5(5) = 1; ie5(5) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','time_lr',r3d=fe%time_lr)
+        is5(2) = 1; ie5(2) = 3;
+        if(yn_periodic=='n') then
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','dip_lr' ,r3d=fe%dip_lr )
+        elseif(yn_periodic=='y') then
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','curr_lr',r3d=fe%curr_lr)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','e_lr'   ,r3d=fe%e_lr   )
+        end if
+      end if
+      if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
+        is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+        is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+        is5(3) = 1;           ie5(3) = obs_num_em;
+        is5(4) = 1;           ie5(4) = maxval(fe%iobs_num_ene(:));
+        is5(5) = 1;           ie5(5) = 2;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ex_xy_ene',c5d=fe%obs_ex_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ey_xy_ene',c5d=fe%obs_ey_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ez_xy_ene',c5d=fe%obs_ez_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hx_xy_ene',c5d=fe%obs_hx_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hy_xy_ene',c5d=fe%obs_hy_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hz_xy_ene',c5d=fe%obs_hz_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jx_xy_ene',c5d=fe%obs_jx_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jy_xy_ene',c5d=fe%obs_jy_xy_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jz_xy_ene',c5d=fe%obs_jz_xy_ene)
+        is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+        is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ex_yz_ene',c5d=fe%obs_ex_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ey_yz_ene',c5d=fe%obs_ey_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ez_yz_ene',c5d=fe%obs_ez_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hx_yz_ene',c5d=fe%obs_hx_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hy_yz_ene',c5d=fe%obs_hy_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hz_yz_ene',c5d=fe%obs_hz_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jx_yz_ene',c5d=fe%obs_jx_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jy_yz_ene',c5d=fe%obs_jy_yz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jz_yz_ene',c5d=fe%obs_jz_yz_ene)
+        is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+        is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ex_xz_ene',c5d=fe%obs_ex_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ey_xz_ene',c5d=fe%obs_ey_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_ez_xz_ene',c5d=fe%obs_ez_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hx_xz_ene',c5d=fe%obs_hx_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hy_xz_ene',c5d=fe%obs_hy_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_hz_xz_ene',c5d=fe%obs_hz_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jx_xz_ene',c5d=fe%obs_jx_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jy_xz_ene',c5d=fe%obs_jy_xz_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','obs_jz_xz_ene',c5d=fe%obs_jz_xz_ene)
+      end if
+      if(fe%flag_ase) then
+        if    (ek_dir1(1)==1.0d0) then
+          is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+        elseif(ek_dir1(2)==1.0d0) then
+          is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+        elseif(ek_dir1(3)==1.0d0) then
+          is5(1) = fs%mg%is(3); ie5(1) = fs%mg%ie(3);
+        end if
+        is5(2) = 1; ie5(2) = ase_num_em;
+        is5(3) = 1; ie5(3) = 2;
+        is5(4) = 1; ie5(4) = 1;
+        is5(5) = 1; ie5(5) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_hx_inc_pa_ene',c3d=fe%ase_hx_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene)
+        is5(1) = 1; ie5(1) = ase_num_em;
+        is5(2) = 1; ie5(2) = 2;
+        is5(3) = 1; ie5(3) = 2;
+        is5(4) = 1; ie5(4) = 1;
+        is5(5) = 1; ie5(5) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_hx_inc_bt_ene',c3d=fe%ase_hx_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_hy_inc_bt_ene',c3d=fe%ase_hy_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene)
+        is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+        is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+        is5(3) = 1;           ie5(3) = ase_num_em;
+        is5(4) = 1;           ie5(4) = 2;
+        is5(5) = 1;           ie5(5) = 2;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ex_xy_sca_ene',c5d=fe%ase_ex_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ey_xy_sca_ene',c5d=fe%ase_ey_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hx_xy_sca_ene',c5d=fe%ase_hx_xy_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hy_xy_sca_ene',c5d=fe%ase_hy_xy_sca_ene)
+        is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+        is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ey_yz_sca_ene',c5d=fe%ase_ey_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ez_yz_sca_ene',c5d=fe%ase_ez_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hy_yz_sca_ene',c5d=fe%ase_hy_yz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hz_yz_sca_ene',c5d=fe%ase_hz_yz_sca_ene)
+        is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+        is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ex_xz_sca_ene',c5d=fe%ase_ex_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_ez_xz_sca_ene',c5d=fe%ase_ez_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hx_xz_sca_ene',c5d=fe%ase_hx_xz_sca_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','ase_hz_xz_sca_ene',c5d=fe%ase_hz_xz_sca_ene)
+      end if
+      if(fe%flag_art) then
+        is5(1) = 1; ie5(1) = art_num_em;
+        is5(2) = 1; ie5(2) = 2;
+        is5(3) = 1; ie5(3) = 2;
+        is5(4) = 1; ie5(4) = 1;
+        is5(5) = 1; ie5(5) = 1;
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_hx_inc_bt_ene',c3d=fe%art_hx_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_hy_inc_bt_ene',c3d=fe%art_hy_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,0,'single','art_hz_inc_bt_ene',c3d=fe%art_hz_inc_bt_ene)
+        if    (ek_dir1(1)==1.0d0) then
+          is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+          is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+          is5(3) = 1;           ie5(3) = art_num_em;
+          is5(4) = 1;           ie5(4) = 2;
+          is5(5) = 1;           ie5(5) = 2;
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
+        elseif(ek_dir1(2)==1.0d0) then
+          is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+          is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+          is5(3) = 1;           ie5(3) = art_num_em;
+          is5(4) = 1;           ie5(4) = 2;
+          is5(5) = 1;           ie5(5) = 2;
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
+        elseif(ek_dir1(3)==1.0d0) then
+          is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+          is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+          is5(3) = 1;           ie5(3) = art_num_em;
+          is5(4) = 1;           ie5(4) = 2;
+          is5(5) = 1;           ie5(5) = 2;
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,is_p,ie_p,2,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
+        end if            
+      end if
+      
+      !copy obsx_at_point_rt.data
+      if(fe%flag_obs .and. comm_is_root(nproc_id_global)) then
+        do ii=1,obs_num_em
+          write(tmp_c(2),*) ii
+          tmp_c(1) = trim(adjustl(base_directory))     //'/obs'//trim(adjustl(tmp_c(2)))//'_at_point_rt.data'
+          tmp_c(2) = trim(adjustl(directory_read_data))//'/obs'//trim(adjustl(tmp_c(2)))//'_at_point_rt.data'
+          istatus  = system( "\cp -f "//trim(adjustl(tmp_c(2)))//" "//trim(adjustl(tmp_c(1))) )
+        end do
+      end if
+      
+      !write elapsed time
+      elapsed_time = get_wtime() - elapsed_time
+      if(comm_is_root(nproc_id_global)) then
+        write(*,*)
+        write(*,'(A,f16.8)') " elapsed time for inputing restart data [s] = ", elapsed_time
+      end if
+    end if
     
     !*** write start ******************************************************************************************!
     if(comm_is_root(nproc_id_global)) then
@@ -2697,19 +3003,26 @@ contains
   != calculate eh-FDTD =======================================================================
   subroutine eh_calc(fs,fe)
     use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
-                               base_directory,t1_t2,t1_start,                                        &
+                               base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
-                               E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
+                               E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2,       &
+                               checkpoint_interval,ase_num_em,art_num_em
     use inputoutput,     only: utime_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_size_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
+    use misc_routines,   only: get_wtime
+    use common_maxwell,  only: output_r_txt_em,output_r_bin_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    integer                           :: iter,ii,ix,iy,iz
-    character(256)                    :: save_name
+    procedure(integer) :: system
+    integer            :: istatus
+    integer            :: iter,ii,ix,iy,iz
+    integer            :: is5(5),ie5(5)
+    real(8)            :: elapsed_time
+    character(256)     :: save_name,tmp_name
     !for ttm
     integer             :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
@@ -2925,6 +3238,217 @@ contains
         
         !art option(calculate incident and total fields on plane)
         if(fe%flag_art) call eh_calc_inc_tot_art
+        
+        !output data_for_restart
+        if(fe%flag_o_restart .and. mod(iter,checkpoint_interval)==0) then
+          !start to calculate elapsed_time
+          elapsed_time = get_wtime()
+          
+          !iter_now, e_max and h_max
+          call output_r_txt_em(fe%ifn,1,1,'single','iter_now',i0d=fe%iter_now)
+          call output_r_txt_em(fe%ifn,1,1,'single',   'e_max',r0d=fe%e_max   )
+          call output_r_txt_em(fe%ifn,1,1,'single',   'h_max',r0d=fe%h_max   )
+          
+          !bin data
+          is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
+          is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
+          is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
+          is5(4) = 1;                 ie5(4) = 1;
+          is5(5) = 1;                 ie5(5) = 1;
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ex_y',r3d=fe%ex_y)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ex_z',r3d=fe%ex_z)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ey_z',r3d=fe%ey_z)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ey_x',r3d=fe%ey_x)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ez_x',r3d=fe%ez_x)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','ez_y',r3d=fe%ez_y)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hx_y',r3d=fe%hx_y)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hx_z',r3d=fe%hx_z)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_z',r3d=fe%hy_z)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_x',r3d=fe%hy_x)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_x',r3d=fe%hz_x)
+          call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_y',r3d=fe%hz_y)
+          if(fe%flag_ld) then                     
+            is5(1) = fs%mg%is_array(1); ie5(1) = fs%mg%ie_array(1);
+            is5(2) = fs%mg%is_array(2); ie5(2) = fs%mg%ie_array(2);
+            is5(3) = fs%mg%is_array(3); ie5(3) = fs%mg%ie_array(3);
+            is5(4) = 1;                 ie5(4) = fe%max_pole_num_ld;
+            is5(5) = 1;                 ie5(5) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_ld'     ,r4d=fe%rjx_ld     )
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_ld'     ,r4d=fe%rjy_ld     )
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_ld'     ,r4d=fe%rjz_ld     )
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','px_ld'      ,r4d=fe%px_ld      )
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','py_ld'      ,r4d=fe%py_ld      )
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','pz_ld'      ,r4d=fe%pz_ld      )
+            is5(4) = 1;                 ie5(4) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_fdtd_ld',r3d=fe%rjx_fdtd_ld)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_fdtd_ld',r3d=fe%rjy_fdtd_ld)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_fdtd_ld',r3d=fe%rjz_fdtd_ld)
+          end if
+          if(fe%flag_lr) then
+            is5(1) = 1; ie5(1) = nt_em;
+            is5(2) = 1; ie5(2) = 1;
+            is5(3) = 1; ie5(3) = 1;
+            is5(4) = 1; ie5(4) = 1;
+            is5(5) = 1; ie5(5) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','time_lr',r1d=fe%time_lr)
+            is5(2) = 1; ie5(2) = 3;
+            if(yn_periodic=='n') then
+              call output_r_bin_em(fe%ifn,is5,ie5,'single','dip_lr' ,r2d=fe%dip_lr )
+            elseif(yn_periodic=='y') then
+              call output_r_bin_em(fe%ifn,is5,ie5,'single','curr_lr',r2d=fe%curr_lr)
+              call output_r_bin_em(fe%ifn,is5,ie5,'single','e_lr'   ,r2d=fe%e_lr   )
+            end if
+          end if
+          if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
+            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+            is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+            is5(3) = 1;           ie5(3) = obs_num_em;
+            is5(4) = 1;           ie5(4) = maxval(fe%iobs_num_ene(:));
+            is5(5) = 1;           ie5(5) = 2;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ex_xy_ene',c5d=fe%obs_ex_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ey_xy_ene',c5d=fe%obs_ey_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ez_xy_ene',c5d=fe%obs_ez_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hx_xy_ene',c5d=fe%obs_hx_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hy_xy_ene',c5d=fe%obs_hy_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hz_xy_ene',c5d=fe%obs_hz_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jx_xy_ene',c5d=fe%obs_jx_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jy_xy_ene',c5d=fe%obs_jy_xy_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jz_xy_ene',c5d=fe%obs_jz_xy_ene)
+            is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+            is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ex_yz_ene',c5d=fe%obs_ex_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ey_yz_ene',c5d=fe%obs_ey_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ez_yz_ene',c5d=fe%obs_ez_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hx_yz_ene',c5d=fe%obs_hx_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hy_yz_ene',c5d=fe%obs_hy_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hz_yz_ene',c5d=fe%obs_hz_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jx_yz_ene',c5d=fe%obs_jx_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jy_yz_ene',c5d=fe%obs_jy_yz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jz_yz_ene',c5d=fe%obs_jz_yz_ene)
+            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+            is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ex_xz_ene',c5d=fe%obs_ex_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ey_xz_ene',c5d=fe%obs_ey_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_ez_xz_ene',c5d=fe%obs_ez_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hx_xz_ene',c5d=fe%obs_hx_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hy_xz_ene',c5d=fe%obs_hy_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_hz_xz_ene',c5d=fe%obs_hz_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jx_xz_ene',c5d=fe%obs_jx_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jy_xz_ene',c5d=fe%obs_jy_xz_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jz_xz_ene',c5d=fe%obs_jz_xz_ene)
+          end if
+          if(fe%flag_ase) then
+            if    (ek_dir1(1)==1.0d0) then
+              is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+            elseif(ek_dir1(2)==1.0d0) then
+              is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+            elseif(ek_dir1(3)==1.0d0) then
+              is5(1) = fs%mg%is(3); ie5(1) = fs%mg%ie(3);
+            end if
+            is5(2) = 1; ie5(2) = ase_num_em;
+            is5(3) = 1; ie5(3) = 2;
+            is5(4) = 1; ie5(4) = 1;
+            is5(5) = 1; ie5(5) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hx_inc_pa_ene',c3d=fe%ase_hx_inc_pa_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene)
+            is5(1) = 1; ie5(1) = ase_num_em;
+            is5(2) = 1; ie5(2) = 2;
+            is5(3) = 1; ie5(3) = 2;
+            is5(4) = 1; ie5(4) = 1;
+            is5(5) = 1; ie5(5) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_hx_inc_bt_ene',c3d=fe%ase_hx_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_hy_inc_bt_ene',c3d=fe%ase_hy_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene)
+            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+            is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+            is5(3) = 1;           ie5(3) = ase_num_em;
+            is5(4) = 1;           ie5(4) = 2;
+            is5(5) = 1;           ie5(5) = 2;
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ex_xy_sca_ene',c5d=fe%ase_ex_xy_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ey_xy_sca_ene',c5d=fe%ase_ey_xy_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hx_xy_sca_ene',c5d=fe%ase_hx_xy_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hy_xy_sca_ene',c5d=fe%ase_hy_xy_sca_ene)
+            is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+            is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ey_yz_sca_ene',c5d=fe%ase_ey_yz_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ez_yz_sca_ene',c5d=fe%ase_ez_yz_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hy_yz_sca_ene',c5d=fe%ase_hy_yz_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hz_yz_sca_ene',c5d=fe%ase_hz_yz_sca_ene)
+            is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+            is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ex_xz_sca_ene',c5d=fe%ase_ex_xz_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_ez_xz_sca_ene',c5d=fe%ase_ez_xz_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hx_xz_sca_ene',c5d=fe%ase_hx_xz_sca_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'all','ase_hz_xz_sca_ene',c5d=fe%ase_hz_xz_sca_ene)
+          end if
+          if(fe%flag_art) then
+            is5(1) = 1; ie5(1) = art_num_em;
+            is5(2) = 1; ie5(2) = 2;
+            is5(3) = 1; ie5(3) = 2;
+            is5(4) = 1; ie5(4) = 1;
+            is5(5) = 1; ie5(5) = 1;
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','art_hx_inc_bt_ene',c3d=fe%art_hx_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','art_hy_inc_bt_ene',c3d=fe%art_hy_inc_bt_ene)
+            call output_r_bin_em(fe%ifn,is5,ie5,'single','art_hz_inc_bt_ene',c3d=fe%art_hz_inc_bt_ene)
+            if    (ek_dir1(1)==1.0d0) then
+              is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
+              is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+              is5(3) = 1;           ie5(3) = art_num_em;
+              is5(4) = 1;           ie5(4) = 2;
+              is5(5) = 1;           ie5(5) = 2;
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
+            elseif(ek_dir1(2)==1.0d0) then
+              is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+              is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
+              is5(3) = 1;           ie5(3) = art_num_em;
+              is5(4) = 1;           ie5(4) = 2;
+              is5(5) = 1;           ie5(5) = 2;
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ez_tot_bt_ene',c5d=fe%art_ez_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hz_tot_bt_ene',c5d=fe%art_hz_tot_bt_ene)
+            elseif(ek_dir1(3)==1.0d0) then
+              is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
+              is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
+              is5(3) = 1;           ie5(3) = art_num_em;
+              is5(4) = 1;           ie5(4) = 2;
+              is5(5) = 1;           ie5(5) = 2;
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ex_tot_bt_ene',c5d=fe%art_ex_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_ey_tot_bt_ene',c5d=fe%art_ey_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hx_tot_bt_ene',c5d=fe%art_hx_tot_bt_ene)
+              call output_r_bin_em(fe%ifn,is5,ie5,'all','art_hy_tot_bt_ene',c5d=fe%art_hy_tot_bt_ene)
+            end if            
+          end if
+          
+          !copy obsx_at_point_rt.data
+          if(fe%flag_obs .and. comm_is_root(nproc_id_global)) then
+            do ii=1,obs_num_em
+              write(tmp_name,*) ii
+              save_name = trim(adjustl(base_directory))//'/obs'//trim(adjustl(tmp_name))//'_at_point_rt.data'
+              tmp_name  =                'data_for_restart/obs'//trim(adjustl(tmp_name))//'_at_point_rt.data'
+              istatus   = system( "\cp -f "//trim(adjustl(save_name))//" "//trim(adjustl(tmp_name)) )
+            end do
+          end if
+          
+          !write elapsed time
+          elapsed_time = get_wtime() - elapsed_time
+          if(comm_is_root(nproc_id_global)) then
+            write(*,'(A,f16.8)') " elapsed time for outputing restart data [s] = ", elapsed_time
+          end if
+        end if
       end if
     end do
     
@@ -3040,7 +3564,7 @@ contains
       real(8) :: sum_lr(3),sum_lr2(3)
       
       !update time
-      fe%time_lr(fe%iter_lr)=dble(fe%iter_lr)*dt_em
+      fe%time_lr(iter)=dble(iter)*dt_em
       
       if(yn_periodic=='n') then
         !calculate dipolemoment
@@ -3063,7 +3587,7 @@ contains
           end do
         end if
         call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
-        fe%dip_lr(fe%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
+        fe%dip_lr(iter,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
       elseif(yn_periodic=='y') then
         !calculate average current density
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
@@ -3085,8 +3609,8 @@ contains
           end do
         end if
         call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
-        fe%curr_lr(fe%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
-                                 /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
+        fe%curr_lr(iter,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
+                           /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
         
         !calculate average electric field
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
@@ -3104,12 +3628,9 @@ contains
 !$omp end do
 !$omp end parallel
         call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
-        fe%e_lr(fe%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
-                              /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
+        fe%e_lr(iter,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
+                        /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
       end if
-      
-      !update time iteration
-      fe%iter_lr=fe%iter_lr+1
       
       return
     end subroutine eh_calc_lr
@@ -4700,21 +5221,21 @@ contains
         end if
         
         !close file
-        if((comm_is_root(nproc_id_global)).and.(ie==ase_num_em)) then
+        if((comm_is_root(nproc_id_global)).and.(ie==art_num_em)) then
           close(fe%ifn+il)
         end if
       end do
       end do
     end if
     
-    !*** make information file for observation ****************************************************************!
+    !*** make information file used for animation *************************************************************!
     if(fe%flag_obs) then
       if(comm_is_root(nproc_id_global)) then
         open(fe%ifn,file=trim(base_directory)//"/obs0_info.data")
         write(fe%ifn,'(A,A23)')         'unit_system          =',trim(unit_system)
         write(fe%ifn,'(A,A23)')         'yn_periodic          =',yn_periodic
         write(fe%ifn,'(A,E23.15E3)')    'dt_em                =',dt_em*utime_from_au
-        write(fe%ifn,'(A,I23)')         'nt_em                =',(fe%iter_end-fe%iter_sta+1)
+        write(fe%ifn,'(A,I23)')         'nt_em                =',nt_em
         write(fe%ifn,'(3(A,E23.15E3))') 'al_em                =',fs%rlsize(1)*ulength_from_au,', ',&
                                                                  fs%rlsize(2)*ulength_from_au,', ',&
                                                                  fs%rlsize(3)*ulength_from_au
