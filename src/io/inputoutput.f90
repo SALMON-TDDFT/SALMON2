@@ -383,7 +383,8 @@ contains
       & file_macropoint, &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
-      & nmacro_chunk
+      & nmacro_chunk, &
+      & rmat_ms
 
     namelist/maxwell/             &
       & al_em,                    &
@@ -758,6 +759,9 @@ contains
     set_ini_coor_vel= 'n'
     nmacro_write_group= -1
     nmacro_chunk = 20
+    rmat_ms(1, 1:3) = (/ 1.0d0, 0.0d0, 0.0d0 /)
+    rmat_ms(2, 1:3) = (/ 0.0d0, 1.0d0, 0.0d0 /)
+    rmat_ms(3, 1:3) = (/ 0.0d0, 0.0d0, 1.0d0 /)
 
 !! == default for &maxwell
     al_em(:)                    = 0d0
@@ -1284,6 +1288,7 @@ contains
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
+    call comm_bcast(rmat_ms,nproc_group_global)
 
 !! == bcast for &maxwell
     call comm_bcast(al_em                    ,nproc_group_global)
@@ -2100,6 +2105,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,1)', rmat_ms(1:3,1)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,2)', rmat_ms(1:3,2)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,3)', rmat_ms(1:3,3)
 
       if(inml_maxwell >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', inml_maxwell

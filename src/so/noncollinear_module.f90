@@ -113,7 +113,12 @@ contains
 
     a=1
     b=2
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(2) private(iz,iy,ix,phi,theta)
+#else
 !$omp parallel do collapse(2) default(shared) private(iz,iy,ix,phi,theta)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -139,6 +144,9 @@ contains
     end do !ix
     end do !iy
     end do !iz
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
     !write(*,*) "size(rho%f)",(size(rho(1)%f,ix),ix=1,3)
     !tmp=sum(rho(1)%f+rho(2)%f)*system%hvol
@@ -167,7 +175,12 @@ contains
     end if
     vxc_mat=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(2) private(iz,iy,ix,phi,theta,vxc_0,vxc_1)
+#else
 !$omp parallel do collapse(2) default(shared) private(iz,iy,ix,phi,theta,vxc_0,vxc_1)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -186,6 +199,9 @@ contains
     end do !ix
     end do !iy
     end do !iz
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
     Vxc(1)%f=0.0d0
     Vxc(2)%f=0.0d0
@@ -202,7 +218,12 @@ contains
     type(s_parallel_info),intent(in) :: info
     integer :: ix,iy,iz,im,ik,io
     if ( .not.allocated(vxc_mat) ) return
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(5) private(im,ik,io,iz,iy,ix)
+#else
 !$omp parallel do collapse(5) default(shared) private(im,ik,io,iz,iy,ix)
+#endif
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -221,6 +242,9 @@ contains
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
   end subroutine op_xc_noncollinear
 
 
@@ -238,7 +262,12 @@ contains
     complex(8) :: zmat(2,2)
     
     zmat = zero
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(2) private(ix,iy,iz) reduction(+:zmat)
+#else
 !$omp parallel do collapse(2) private(ix,iy,iz) reduction(+:zmat)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -246,6 +275,9 @@ contains
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
     
     m_tmp(1) = 0.5d0* dble( zmat(1,2) + zmat(2,1) )
     m_tmp(2) = 0.5d0* dble( -zi* zmat(1,2) + zi* zmat(2,1) )
@@ -271,7 +303,12 @@ contains
     complex(8) :: zmat(2,2)
     
     m_tmp = zero
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(2) private(ik,io,is,js,ix,iy,iz,zmat)
+#else
 !$omp parallel do collapse(2) private(ik,io,is,js,ix,iy,iz,zmat)
+#endif
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
       zmat = zero
@@ -292,6 +329,9 @@ contains
       m_tmp(3,io,ik) = 0.5d0* dble( zmat(1,1) - zmat(2,2) )
     end do !io
     end do !ik
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
     
     call comm_summation( m_tmp, mag_orb, 3*system%no*system%nk, info%icomm_rko )
     return
