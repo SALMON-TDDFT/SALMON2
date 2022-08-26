@@ -2140,17 +2140,6 @@ contains
               end select
             elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
               select case(media_type(fs%imedia(ix+1,iy,iz)))
-              case('default')
-                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em)
-                c2_e_y_mid = (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                            /fs%hgs(2)
-                c2_e_z_mid = (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                            /fs%hgs(3)
-                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em)
               case('pec')
                 c1_e_mid=0.0d0; c2_e_y_mid=0.0d0; c2_e_z_mid=0.0d0; c2_j_mid=0.0d0;
               case('lorentz-drude')
@@ -2168,6 +2157,17 @@ contains
                   fe%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
                   fe%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
                 end do
+              case default
+                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em)
+                c2_e_y_mid = (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                            /fs%hgs(2)
+                c2_e_z_mid = (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                            /fs%hgs(3)
+                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em)
               end select
               fe%c1_ex_y(ix,iy,iz) =  c1_e_mid; fe%c2_ex_y(ix,iy,iz) =  c2_e_y_mid;
               fe%c1_ex_z(ix,iy,iz) =  c1_e_mid; fe%c2_ex_z(ix,iy,iz) = -c2_e_z_mid;
@@ -2191,17 +2191,6 @@ contains
               end select
             elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
               select case(media_type(fs%imedia(ix,iy+1,iz)))
-              case('default')
-                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em)
-                c2_e_z_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-                            /fs%hgs(3)
-                c2_e_x_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-                            /fs%hgs(1)
-                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em)
               case('pec')
                 c1_e_mid=0.0d0; c2_e_z_mid=0.0d0; c2_e_x_mid=0.0d0; c2_j_mid=0.0d0;
               case('lorentz-drude')
@@ -2219,6 +2208,17 @@ contains
                   fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
                   fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
                 end do
+              case default
+                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em)
+                c2_e_z_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                            /fs%hgs(3)
+                c2_e_x_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                            /fs%hgs(1)
+                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em)
               end select
               fe%c1_ey_z(ix,iy,iz) =  c1_e_mid; fe%c2_ey_z(ix,iy,iz) =  c2_e_z_mid;
               fe%c1_ey_x(ix,iy,iz) =  c1_e_mid; fe%c2_ey_x(ix,iy,iz) = -c2_e_x_mid;
@@ -2242,17 +2242,6 @@ contains
               end select
             elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
               select case(media_type(fs%imedia(ix,iy,iz+1)))
-              case('default')
-                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
-                c2_e_x_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-                            /fs%hgs(1)
-                c2_e_y_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-                            /fs%hgs(2)
-                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
               case('pec')
                 c1_e_mid=0.0d0; c2_e_x_mid=0.0d0; c2_e_y_mid=0.0d0; c2_j_mid=0.0d0;
               case('lorentz-drude')
@@ -2270,6 +2259,17 @@ contains
                   fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
                   fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
                 end do
+              case default
+                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
+                c2_e_x_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                            /fs%hgs(1)
+                c2_e_y_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                            /fs%hgs(2)
+                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
               end select
               fe%c1_ez_x(ix,iy,iz) =  c1_e_mid; fe%c2_ez_x(ix,iy,iz) =  c2_e_x_mid;
               fe%c1_ez_y(ix,iy,iz) =  c1_e_mid; fe%c2_ez_y(ix,iy,iz) = -c2_e_y_mid;
