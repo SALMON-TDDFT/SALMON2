@@ -202,6 +202,7 @@ module communication
     ! 1-D array
     module procedure comm_bcast_array1d_integer
     module procedure comm_bcast_array1d_double
+    module procedure comm_bcast_array1d_dcomplex
     module procedure comm_bcast_array1d_character
 
     ! 2-D array
@@ -1361,6 +1362,21 @@ contains
       rank = 0
     end if
     MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_bcast_array1d_dcomplex(val, ngroup, root)
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(inout)     :: val(:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    integer :: rank, ierr
+    if (present(root)) then
+      rank = root
+    else
+      rank = 0
+    end if
+    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_COMPLEX, rank, ngroup, ierr))
   end subroutine
 
   subroutine comm_bcast_array2d_dcomplex(val, ngroup, root)

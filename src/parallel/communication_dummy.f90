@@ -204,11 +204,13 @@ module communication
     ! 1-D array
     module procedure comm_bcast_array1d_integer
     module procedure comm_bcast_array1d_double
+    module procedure comm_bcast_array1d_dcomplex
     module procedure comm_bcast_array1d_character
 
     ! 2-D array
     module procedure comm_bcast_array2d_integer
     module procedure comm_bcast_array2d_double
+    module procedure comm_bcast_array2d_dcomplex
     module procedure comm_bcast_array2d_character
 
     ! 3-D array
@@ -1141,6 +1143,28 @@ contains
     UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
     !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array5d_double")
+  end subroutine
+
+  subroutine comm_bcast_array1d_dcomplex(val, ngroup, root)
+    implicit none
+    complex(8), intent(inout)     :: val(:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
+    UNUSED_VARIABLE(root)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array1d_dcomplex")
+  end subroutine
+
+  subroutine comm_bcast_array2d_dcomplex(val, ngroup, root)
+    implicit none
+    complex(8), intent(inout)     :: val(:,:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
+    UNUSED_VARIABLE(root)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array2d_dcomplex")
   end subroutine
 
   subroutine comm_bcast_array3d_dcomplex(val, ngroup, root)
