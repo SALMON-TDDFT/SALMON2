@@ -112,7 +112,12 @@ contains
       allocate(uVpsibox1(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox1=zero
       allocate(uVpsibox2(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox2=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(4) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix)
+#else
 !$omp parallel do collapse(4) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -164,6 +169,9 @@ contains
       end do !io
       end do !ik
       end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
       call timer_end(LOG_UHPSI_PSEUDO)
 
@@ -176,7 +184,12 @@ contains
       !write(*,*) "sum(abs(uVpsibox2(:,:,1,1,1)))",sum(abs(uVpsibox2(:,:,1,1,1)))
       !call mpi_finalize(ix); stop 'xxx'
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(3) private(im,ik,io,ilma,ia,uVpsi,wrk,j,iz,iy,ix)
+#else
 !$omp parallel do collapse(3) default(shared) private(im,ik,io,ilma,ia,uVpsi,wrk,j,iz,iy,ix)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -209,6 +222,9 @@ contains
       end do !io
       end do !ik
       end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
       deallocate( uVpsibox2 )
       deallocate( uVpsibox1 )
@@ -343,7 +359,12 @@ contains
 
       allocate(uVpsibox1(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox1=zero
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(4) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix)
+#else
 !$omp parallel do collapse(4) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -370,6 +391,9 @@ contains
       end do !io
       end do !ik
       end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
       call timer_end(LOG_UHPSI_PSEUDO)
 
@@ -383,7 +407,12 @@ contains
 
     else !if ( .not. info%if_divide_rspace ) then
 
+#ifdef USE_OPENACC
+!$acc kernels
+!#acc loop collapse(4) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix,uVpsi)
+#else
 !$omp parallel do collapse(4) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix,uVpsi)
+#endif
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -414,6 +443,9 @@ contains
       end do !io
       end do !ik
       end do !im
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
 
     end if
 
