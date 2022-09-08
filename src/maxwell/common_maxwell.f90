@@ -719,23 +719,42 @@ contains
       elseif(present(c5d)) then; call comm_bcast(c5d(:,:,:,:,:),nproc_group_global);
       end if
     case('all')
-      !read and input
       if(flag_same) then
+        !read information
         ii = nproc_id_global; write(id_name,*) ii;
-        open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
+        open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin',&
              status='old',form='unformatted',access='stream')
-        if    (present(r1d)) then; read(ifn+ii) r1d(:)        ;
-        elseif(present(r2d)) then; read(ifn+ii) r2d(:,:)      ;
-        elseif(present(r3d)) then; read(ifn+ii) r3d(:,:,:)    ;
-        elseif(present(r4d)) then; read(ifn+ii) r4d(:,:,:,:)  ;
-        elseif(present(r5d)) then; read(ifn+ii) r5d(:,:,:,:,:);
-        elseif(present(c1d)) then; read(ifn+ii) c1d(:)        ;
-        elseif(present(c2d)) then; read(ifn+ii) c2d(:,:)      ;
-        elseif(present(c3d)) then; read(ifn+ii) c3d(:,:,:)    ;
-        elseif(present(c4d)) then; read(ifn+ii) c4d(:,:,:,:)  ;
-        elseif(present(c5d)) then; read(ifn+ii) c5d(:,:,:,:,:);
+        read(ifn+ii) is_p; read(ifn+ii) ie_p; read(ifn+ii) i_inf; close(ifn+ii);
+        
+        !read and input
+        if(i_inf==1) then
+          open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
+               status='old',form='unformatted',access='stream')
+          if    (present(r1d)) then; read(ifn+ii) r1d(:)        ;
+          elseif(present(r2d)) then; read(ifn+ii) r2d(:,:)      ;
+          elseif(present(r3d)) then; read(ifn+ii) r3d(:,:,:)    ;
+          elseif(present(r4d)) then; read(ifn+ii) r4d(:,:,:,:)  ;
+          elseif(present(r5d)) then; read(ifn+ii) r5d(:,:,:,:,:);
+          elseif(present(c1d)) then; read(ifn+ii) c1d(:)        ;
+          elseif(present(c2d)) then; read(ifn+ii) c2d(:,:)      ;
+          elseif(present(c3d)) then; read(ifn+ii) c3d(:,:,:)    ;
+          elseif(present(c4d)) then; read(ifn+ii) c4d(:,:,:,:)  ;
+          elseif(present(c5d)) then; read(ifn+ii) c5d(:,:,:,:,:);
+          end if
+          close(ifn+ii)
+        else
+          if    (present(r1d)) then; r1d(:)         = 0.0d0;
+          elseif(present(r2d)) then; r2d(:,:)       = 0.0d0;
+          elseif(present(r3d)) then; r3d(:,:,:)     = 0.0d0;
+          elseif(present(r4d)) then; r4d(:,:,:,:)   = 0.0d0;
+          elseif(present(r5d)) then; r5d(:,:,:,:,:) = 0.0d0;
+          elseif(present(c1d)) then; c1d(:)         = (0.0d0,0.0d0);
+          elseif(present(c2d)) then; c2d(:,:)       = (0.0d0,0.0d0);
+          elseif(present(c3d)) then; c3d(:,:,:)     = (0.0d0,0.0d0);
+          elseif(present(c4d)) then; c4d(:,:,:,:)   = (0.0d0,0.0d0);
+          elseif(present(c5d)) then; c5d(:,:,:,:,:) = (0.0d0,0.0d0);
+          end if
         end if
-        close(ifn+ii)
       else
         do ii=0,(nsg_p-1)
           !read information
@@ -1015,29 +1034,33 @@ contains
         close(ifn)
       end if
     case('all')
-      !output date
-      ii = nproc_id_global; write(id_name,*) ii;
-      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin',status='replace',&
-           form='unformatted',access='stream')
-      if    (present(r1d)) then; write(ifn+ii) r1d(:)        ;
-      elseif(present(r2d)) then; write(ifn+ii) r2d(:,:)      ;
-      elseif(present(r3d)) then; write(ifn+ii) r3d(:,:,:)    ;
-      elseif(present(r4d)) then; write(ifn+ii) r4d(:,:,:,:)  ;
-      elseif(present(r5d)) then; write(ifn+ii) r5d(:,:,:,:,:);
-      elseif(present(c1d)) then; write(ifn+ii) c1d(:)        ;
-      elseif(present(c2d)) then; write(ifn+ii) c2d(:,:)      ;
-      elseif(present(c3d)) then; write(ifn+ii) c3d(:,:,:)    ;
-      elseif(present(c4d)) then; write(ifn+ii) c4d(:,:,:,:)  ;
-      elseif(present(c5d)) then; write(ifn+ii) c5d(:,:,:,:,:);
-      end if
-      close(ifn+ii)
-      
-      !output information
+      !set i_inf
       if(present(ipe)) then
         i_inf=ipe
       else
         i_inf=1
       end if
+      
+      !output date
+      ii = nproc_id_global; write(id_name,*) ii;
+      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin',status='replace',&
+           form='unformatted',access='stream')
+      if(i_inf==1) then
+        if    (present(r1d)) then; write(ifn+ii) r1d(:)        ;
+        elseif(present(r2d)) then; write(ifn+ii) r2d(:,:)      ;
+        elseif(present(r3d)) then; write(ifn+ii) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; write(ifn+ii) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; write(ifn+ii) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; write(ifn+ii) c1d(:)        ;
+        elseif(present(c2d)) then; write(ifn+ii) c2d(:,:)      ;
+        elseif(present(c3d)) then; write(ifn+ii) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; write(ifn+ii) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; write(ifn+ii) c5d(:,:,:,:,:);
+        end if
+      end if
+      close(ifn+ii)
+      
+      !output information
       open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_inf.bin',status='replace',&
            form='unformatted',access='stream')
       write(ifn+ii) is(:); write(ifn+ii) ie(:); write(ifn+ii) i_inf; close(ifn+ii);
