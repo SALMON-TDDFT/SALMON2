@@ -175,9 +175,17 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%Ac_ind = 0d0
   rt%Ac_tot = 0d0
   
-  if(yn_periodic=='y') then
-    call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:,0:nt+1))
-    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
+  call calc_Ac_ext_t(0d0, dt, 0, nt+1, Ac_tmp(:,0:nt+1))
+  if (yn_periodic=='y') then
+    rt%Ac_ext = Ac_ext_tmp
+    rt%Ac_tot = Ac_ext_tmp
+  else ! yn_periodic=='n'
+    do it = 0, nt
+      rt%E_ext(:, it) = -(Ac_ext_tmp(:, it+1) - Ac_ext_tmp(:, it)) / dt
+      rt%E_tot(:, it) = -(Ac_ext_tmp(:, it+1) - Ac_ext_tmp(:, it)) / dt
+    end do
+    rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
+    rt%E_tot(:, nt+1) = rt%E_tot(:, nt) 
   end if
   
   if (yn_restart == 'n') Mit=0
