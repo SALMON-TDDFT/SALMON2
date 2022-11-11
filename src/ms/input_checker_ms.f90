@@ -80,6 +80,9 @@ function check_input_variables_ms() result(flag)
     if (nmacro_chunk < 1) &
         call raise("ERROR! 'nmacro_chunk' must not larger than 1!")
 
+    if (.not. is_ortho(rmat_ms)) &
+        call raise("ERROR! 'rmat_ms' must be orthogonal matrix!")
+
     return
 
     contains
@@ -92,6 +95,19 @@ function check_input_variables_ms() result(flag)
         end if
         flag = .false.
     end subroutine raise
+
+    logical function is_ortho(rmat)
+        implicit none
+        real(8), intent(in) :: rmat(3, 3)
+        real(8) :: rtmp(3, 3)
+        rtmp = matmul(transpose(rmat), rmat)
+        rtmp(1, 1) = rtmp(1, 1) - 1.0d0
+        rtmp(2, 2) = rtmp(2, 2) - 1.0d0
+        rtmp(3, 3) = rtmp(3, 3) - 1.0d0
+        is_ortho = (maxval(abs(rtmp)) < 1d-2)
+        return
+    end function is_ortho
+        
 
 end function check_input_variables_ms
 end module input_checker_ms

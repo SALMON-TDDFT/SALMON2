@@ -118,7 +118,7 @@ contains
                                yn_charge_neutral_jm, yn_output_dns_jm, yn_periodic, nelec, unit_system
     use inputoutput,     only: ulength_from_au
     use structures,      only: s_rgrid, s_dft_system, s_parallel_info, s_scalar, allocate_scalar
-    use parallelization, only: nproc_id_global, nproc_group_global
+    use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root, comm_summation
     use common_maxwell,  only: input_i3d_em
     use write_file3d,    only: write_cube

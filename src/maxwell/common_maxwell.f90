@@ -32,6 +32,10 @@ module common_maxwell
   public :: input_i3d_em
   public :: output_i3d_em
   public :: stop_em
+  public :: input_r_txt_em
+  public :: input_r_bin_em
+  public :: output_r_txt_em
+  public :: output_r_bin_em
   
 contains
   
@@ -600,12 +604,12 @@ contains
     if(comm_is_root(nproc_id_global)) then
       write(*,*) 
       write(*,*) "XXXXXX WARNING XXXXXX"
-      write(*,*) c1
-      if( present(c2) ) write(*,*) c2
-      if( present(c3) ) write(*,*) c3
-      if( present(c4) ) write(*,*) c4
-      if( present(c5) ) write(*,*) c5
-      if( present(c6) ) write(*,*) c6
+      write(*,'(1X,A)') c1
+      if( present(c2) ) write(*,'(1X,A)') c2
+      if( present(c3) ) write(*,'(1X,A)') c3
+      if( present(c4) ) write(*,'(1X,A)') c4
+      if( present(c5) ) write(*,'(1X,A)') c5
+      if( present(c6) ) write(*,'(1X,A)') c6
       write(*,*) "XXXXXXXXXXXXXXXXXXXXX"
     end if
     call comm_sync_all
@@ -613,5 +617,456 @@ contains
     
     return
   end subroutine stop_em
+  
+  !=========================================================================================
+  != input restart txt file ================================================================
+  subroutine input_r_txt_em(ifn,is,ie,in_name,i0d,i1d,r0d,r1d)
+    use salmon_global,   only: directory_read_data
+    use communication,   only: comm_is_root,comm_bcast
+    use parallelization, only: nproc_id_global,nproc_group_global
+    use communication,   only: comm_is_root
+    implicit none
+    integer,     intent(in)           :: ifn
+    integer,     intent(in)           :: is,ie
+    character(*),intent(in)           :: in_name
+    integer,     intent(out),optional :: i0d
+    integer,     intent(out),optional :: i1d(is:ie)
+    real(8),     intent(out),optional :: r0d
+    real(8),     intent(out),optional :: r1d(is:ie)
+    
+    if(comm_is_root(nproc_id_global)) then
+      open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'.data',status='old')
+      if    (present(i0d)) then; read(ifn,*) i0d   ;
+      elseif(present(i1d)) then; read(ifn,*) i1d(:);
+      elseif(present(r0d)) then; read(ifn,*) r0d   ;
+      elseif(present(r1d)) then; read(ifn,*) r1d(:);
+      end if
+      close(ifn)
+    end if
+    if    (present(i0d)) then; call comm_bcast(i0d   ,nproc_group_global);
+    elseif(present(i1d)) then; call comm_bcast(i1d(:),nproc_group_global);
+    elseif(present(r0d)) then; call comm_bcast(r0d   ,nproc_group_global);
+    elseif(present(r1d)) then; call comm_bcast(r1d(:),nproc_group_global);
+    end if
+    
+    return
+  end subroutine input_r_txt_em
+  
+  !=========================================================================================
+  != input restart binary file =============================================================
+  subroutine input_r_bin_em(ifn,is,ie,nsg_p,flag_same,read_mode,in_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d,ipe)
+    use salmon_global,   only: directory_read_data
+    use parallelization, only: nproc_id_global,nproc_group_global
+    use communication,   only: comm_is_root,comm_bcast,comm_summation
+    implicit none
+    integer,     intent(in)           :: ifn
+    integer,     intent(in)           :: is(5),ie(5)
+    integer,     intent(in)           :: nsg_p
+    logical,     intent(in)           :: flag_same
+    character(*),intent(in)           :: read_mode,in_name
+    real(8),     intent(out),optional :: r1d(is(1):ie(1))
+    real(8),     intent(out),optional :: r2d(is(1):ie(1),is(2):ie(2))
+    real(8),     intent(out),optional :: r3d(is(1):ie(1),is(2):ie(2),is(3):ie(3))
+    real(8),     intent(out),optional :: r4d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4))
+    real(8),     intent(out),optional :: r5d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4),is(5):ie(5))
+    complex(8),  intent(out),optional :: c1d(is(1):ie(1))
+    complex(8),  intent(out),optional :: c2d(is(1):ie(1),is(2):ie(2))
+    complex(8),  intent(out),optional :: c3d(is(1):ie(1),is(2):ie(2),is(3):ie(3))
+    complex(8),  intent(out),optional :: c4d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4))
+    complex(8),  intent(out),optional :: c5d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4),is(5):ie(5))
+    integer,     intent(in), optional :: ipe
+    integer                :: ii,i_inf,i1,i2,i3,i4,i5
+    integer                :: is_p(5),ie_p(5)
+    character(16)          :: id_name
+    real(8),   allocatable :: r1d_p(:)
+    real(8),   allocatable :: r2d_p(:,:)
+    real(8),   allocatable :: r3d_p(:,:,:)
+    real(8),   allocatable :: r4d_p(:,:,:,:)
+    real(8),   allocatable :: r5d_p(:,:,:,:,:)
+    complex(8),allocatable :: c1d_p(:)
+    complex(8),allocatable :: c2d_p(:,:)
+    complex(8),allocatable :: c3d_p(:,:,:)
+    complex(8),allocatable :: c4d_p(:,:,:,:)
+    complex(8),allocatable :: c5d_p(:,:,:,:,:)
+    
+    select case(read_mode)
+    case('single')
+      if(comm_is_root(nproc_id_global)) then
+        open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name// '.bin',&
+             status='old',form='unformatted',access='stream')
+        if    (present(r1d)) then; read(ifn) r1d(:)        ;
+        elseif(present(r2d)) then; read(ifn) r2d(:,:)      ;
+        elseif(present(r3d)) then; read(ifn) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; read(ifn) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; read(ifn) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; read(ifn) c1d(:)        ;
+        elseif(present(c2d)) then; read(ifn) c2d(:,:)      ;
+        elseif(present(c3d)) then; read(ifn) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; read(ifn) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; read(ifn) c5d(:,:,:,:,:);
+        end if
+        close(ifn)
+      end if
+      if    (present(r1d)) then; call comm_bcast(r1d(:)        ,nproc_group_global);
+      elseif(present(r2d)) then; call comm_bcast(r2d(:,:)      ,nproc_group_global);
+      elseif(present(r3d)) then; call comm_bcast(r3d(:,:,:)    ,nproc_group_global);
+      elseif(present(r4d)) then; call comm_bcast(r4d(:,:,:,:)  ,nproc_group_global);
+      elseif(present(r5d)) then; call comm_bcast(r5d(:,:,:,:,:),nproc_group_global);
+      elseif(present(c1d)) then; call comm_bcast(c1d(:)        ,nproc_group_global);
+      elseif(present(c2d)) then; call comm_bcast(c2d(:,:)      ,nproc_group_global);
+      elseif(present(c3d)) then; call comm_bcast(c3d(:,:,:)    ,nproc_group_global);
+      elseif(present(c4d)) then; call comm_bcast(c4d(:,:,:,:)  ,nproc_group_global);
+      elseif(present(c5d)) then; call comm_bcast(c5d(:,:,:,:,:),nproc_group_global);
+      end if
+    case('all')
+      if(flag_same) then
+        !read information
+        ii = nproc_id_global; write(id_name,*) ii;
+        open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin',&
+             status='old',form='unformatted',access='stream')
+        read(ifn+ii) is_p; read(ifn+ii) ie_p; read(ifn+ii) i_inf; close(ifn+ii);
+        
+        !read and input
+        if(i_inf==1) then
+          open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
+               status='old',form='unformatted',access='stream')
+          if    (present(r1d)) then; read(ifn+ii) r1d(:)        ;
+          elseif(present(r2d)) then; read(ifn+ii) r2d(:,:)      ;
+          elseif(present(r3d)) then; read(ifn+ii) r3d(:,:,:)    ;
+          elseif(present(r4d)) then; read(ifn+ii) r4d(:,:,:,:)  ;
+          elseif(present(r5d)) then; read(ifn+ii) r5d(:,:,:,:,:);
+          elseif(present(c1d)) then; read(ifn+ii) c1d(:)        ;
+          elseif(present(c2d)) then; read(ifn+ii) c2d(:,:)      ;
+          elseif(present(c3d)) then; read(ifn+ii) c3d(:,:,:)    ;
+          elseif(present(c4d)) then; read(ifn+ii) c4d(:,:,:,:)  ;
+          elseif(present(c5d)) then; read(ifn+ii) c5d(:,:,:,:,:);
+          end if
+          close(ifn+ii)
+        else
+          if    (present(r1d)) then; r1d(:)         = 0.0d0;
+          elseif(present(r2d)) then; r2d(:,:)       = 0.0d0;
+          elseif(present(r3d)) then; r3d(:,:,:)     = 0.0d0;
+          elseif(present(r4d)) then; r4d(:,:,:,:)   = 0.0d0;
+          elseif(present(r5d)) then; r5d(:,:,:,:,:) = 0.0d0;
+          elseif(present(c1d)) then; c1d(:)         = (0.0d0,0.0d0);
+          elseif(present(c2d)) then; c2d(:,:)       = (0.0d0,0.0d0);
+          elseif(present(c3d)) then; c3d(:,:,:)     = (0.0d0,0.0d0);
+          elseif(present(c4d)) then; c4d(:,:,:,:)   = (0.0d0,0.0d0);
+          elseif(present(c5d)) then; c5d(:,:,:,:,:) = (0.0d0,0.0d0);
+          end if
+        end if
+      else
+        do ii=0,(nsg_p-1)
+          !read information
+          if(comm_is_root(nproc_id_global)) then
+            write(id_name,*) ii;
+            open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin',&
+                 status='old',form='unformatted',access='stream')
+            read(ifn) is_p; read(ifn) ie_p; read(ifn) i_inf; close(ifn);
+          end if
+          call comm_bcast( is_p,nproc_group_global);
+          call comm_bcast( ie_p,nproc_group_global);
+          call comm_bcast(i_inf,nproc_group_global);
+          
+          if(i_inf==1) then
+            !allocate array used in the previous calculation
+            if    (present(r1d)) then
+              allocate(r1d_p(is_p(1):ie_p(1)))
+            elseif(present(r2d)) then
+              allocate(r2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)))
+            elseif(present(r3d)) then
+              allocate(r3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)))
+            elseif(present(r4d)) then
+              allocate(r4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4)))
+            elseif(present(r5d)) then
+              allocate(r5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4),is_p(5):ie_p(5)))
+            elseif(present(c1d)) then
+              allocate(c1d_p(is_p(1):ie_p(1)))
+            elseif(present(c2d)) then
+              allocate(c2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)))
+            elseif(present(c3d)) then
+              allocate(c3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)))
+            elseif(present(c4d)) then
+              allocate(c4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4)))
+            elseif(present(c5d)) then
+              allocate(c5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4),is_p(5):ie_p(5)))
+            end if
+            
+            !read and share
+            if(comm_is_root(nproc_id_global)) then
+              write(id_name,*) ii;
+              open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
+                   status='old',form='unformatted',access='stream')
+              if    (present(r1d)) then; read(ifn) r1d_p(:)        ;
+              elseif(present(r2d)) then; read(ifn) r2d_p(:,:)      ;
+              elseif(present(r3d)) then; read(ifn) r3d_p(:,:,:)    ;
+              elseif(present(r4d)) then; read(ifn) r4d_p(:,:,:,:)  ;
+              elseif(present(r5d)) then; read(ifn) r5d_p(:,:,:,:,:);
+              elseif(present(c1d)) then; read(ifn) c1d_p(:)        ;
+              elseif(present(c2d)) then; read(ifn) c2d_p(:,:)      ;
+              elseif(present(c3d)) then; read(ifn) c3d_p(:,:,:)    ;
+              elseif(present(c4d)) then; read(ifn) c4d_p(:,:,:,:)  ;
+              elseif(present(c5d)) then; read(ifn) c5d_p(:,:,:,:,:);
+              end if
+              close(ifn)
+            end if
+            if    (present(r1d)) then; call comm_bcast(r1d_p(:)        ,nproc_group_global);
+            elseif(present(r2d)) then; call comm_bcast(r2d_p(:,:)      ,nproc_group_global);
+            elseif(present(r3d)) then; call comm_bcast(r3d_p(:,:,:)    ,nproc_group_global);
+            elseif(present(r4d)) then; call comm_bcast(r4d_p(:,:,:,:)  ,nproc_group_global);
+            elseif(present(r5d)) then; call comm_bcast(r5d_p(:,:,:,:,:),nproc_group_global);
+            elseif(present(c1d)) then; call comm_bcast(c1d_p(:)        ,nproc_group_global);
+            elseif(present(c2d)) then; call comm_bcast(c2d_p(:,:)      ,nproc_group_global);
+            elseif(present(c3d)) then; call comm_bcast(c3d_p(:,:,:)    ,nproc_group_global);
+            elseif(present(c4d)) then; call comm_bcast(c4d_p(:,:,:,:)  ,nproc_group_global);
+            elseif(present(c5d)) then; call comm_bcast(c5d_p(:,:,:,:,:),nproc_group_global);
+            end if
+            
+            !input
+            if    (present(r1d).or.present(c1d)) then
+!$omp parallel
+!$omp do private(i1)
+              do i1=is_p(1),ie_p(1)
+                if(is(1)<=i1.and.i1<=ie(1)) then
+                  if    (present(r1d)) then; r1d(i1)=r1d_p(i1);
+                  elseif(present(c1d)) then; c1d(i1)=c1d_p(i1);
+                  end if
+                end if  
+              end do
+!$omp end do
+!$omp end parallel
+            elseif(present(r2d).or.present(c2d)) then
+!$omp parallel
+!$omp do private(i1,i2) collapse(1)
+              do i2=is_p(2),ie_p(2)
+              do i1=is_p(1),ie_p(1)
+                if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                    (is(2)<=i2.and.i2<=ie(2)) ) then
+                  if    (present(r2d)) then; r2d(i1,i2)=r2d_p(i1,i2);
+                  elseif(present(c2d)) then; c2d(i1,i2)=c2d_p(i1,i2);
+                  end if
+                end if  
+              end do
+              end do
+!$omp end do
+!$omp end parallel
+            elseif(present(r3d).or.present(c3d)) then
+!$omp parallel
+!$omp do private(i1,i2,i3) collapse(2)
+              do i3=is_p(3),ie_p(3)
+              do i2=is_p(2),ie_p(2)
+              do i1=is_p(1),ie_p(1)
+                if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                    (is(2)<=i2.and.i2<=ie(2)) .and. &
+                    (is(3)<=i3.and.i3<=ie(3)) ) then
+                  if    (present(r3d)) then; r3d(i1,i2,i3)=r3d_p(i1,i2,i3);
+                  elseif(present(c3d)) then; c3d(i1,i2,i3)=c3d_p(i1,i2,i3);
+                  end if
+                end if  
+              end do
+              end do
+              end do
+!$omp end do
+!$omp end parallel
+            elseif(present(r4d).or.present(c4d)) then
+!$omp parallel
+!$omp do private(i1,i2,i3,i4) collapse(3)
+              do i4=is_p(4),ie_p(4)
+              do i3=is_p(3),ie_p(3)
+              do i2=is_p(2),ie_p(2)
+              do i1=is_p(1),ie_p(1)
+                if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                    (is(2)<=i2.and.i2<=ie(2)) .and. &
+                    (is(3)<=i3.and.i3<=ie(3)) .and. &
+                    (is(4)<=i4.and.i4<=ie(4)) ) then
+                  if    (present(r4d)) then; r4d(i1,i2,i3,i4)=r4d_p(i1,i2,i3,i4);
+                  elseif(present(c4d)) then; c4d(i1,i2,i3,i4)=c4d_p(i1,i2,i3,i4);
+                  end if
+                end if  
+              end do
+              end do
+              end do
+              end do
+!$omp end do
+!$omp end parallel
+            elseif(present(r5d).or.present(c5d)) then
+!$omp parallel
+!$omp do private(i1,i2,i3,i4,i5) collapse(4)
+              do i5=is_p(5),ie_p(5)
+              do i4=is_p(4),ie_p(4)
+              do i3=is_p(3),ie_p(3)
+              do i2=is_p(2),ie_p(2)
+              do i1=is_p(1),ie_p(1)
+                if( (is(1)<=i1.and.i1<=ie(1)) .and. &
+                    (is(2)<=i2.and.i2<=ie(2)) .and. &
+                    (is(3)<=i3.and.i3<=ie(3)) .and. &
+                    (is(4)<=i4.and.i4<=ie(4)) .and. &
+                    (is(5)<=i5.and.i5<=ie(5)) ) then
+                  if    (present(r5d)) then; r5d(i1,i2,i3,i4,i5)=r5d_p(i1,i2,i3,i4,i5);
+                  elseif(present(c5d)) then; c5d(i1,i2,i3,i4,i5)=c5d_p(i1,i2,i3,i4,i5);
+                  end if
+                end if  
+              end do
+              end do
+              end do
+              end do
+              end do
+!$omp end do
+!$omp end parallel
+            end if
+            
+            !remove unused data
+            if(present(ipe)) then
+              if(ipe==0) then
+                if    (present(r1d)) then; r1d(:)         = 0.0d0;
+                elseif(present(r2d)) then; r2d(:,:)       = 0.0d0;
+                elseif(present(r3d)) then; r3d(:,:,:)     = 0.0d0;
+                elseif(present(r4d)) then; r4d(:,:,:,:)   = 0.0d0;
+                elseif(present(r5d)) then; r5d(:,:,:,:,:) = 0.0d0;
+                elseif(present(c1d)) then; c1d(:)         = (0.0d0,0.0d0);
+                elseif(present(c2d)) then; c2d(:,:)       = (0.0d0,0.0d0);
+                elseif(present(c3d)) then; c3d(:,:,:)     = (0.0d0,0.0d0);
+                elseif(present(c4d)) then; c4d(:,:,:,:)   = (0.0d0,0.0d0);
+                elseif(present(c5d)) then; c5d(:,:,:,:,:) = (0.0d0,0.0d0);
+                end if
+              end if
+            end if
+            
+            !deallocate array
+            if    (present(r1d)) then; deallocate(r1d_p);
+            elseif(present(r2d)) then; deallocate(r2d_p);
+            elseif(present(r3d)) then; deallocate(r3d_p);
+            elseif(present(r4d)) then; deallocate(r4d_p);
+            elseif(present(r5d)) then; deallocate(r5d_p);
+            elseif(present(c1d)) then; deallocate(c1d_p);
+            elseif(present(c2d)) then; deallocate(c2d_p);
+            elseif(present(c3d)) then; deallocate(c3d_p);
+            elseif(present(c4d)) then; deallocate(c4d_p);
+            elseif(present(c5d)) then; deallocate(c5d_p);
+            end if
+          end if
+        end do
+      end if
+    end select
+    
+    return
+  end subroutine input_r_bin_em
+  
+  !=========================================================================================
+  != output restart txt file ===============================================================
+  subroutine output_r_txt_em(ifn,is,ie,write_mode,out_name,i0d,i1d,r0d,r1d)
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root
+    implicit none
+    integer,     intent(in)          :: ifn
+    integer,     intent(in)          :: is,ie
+    character(*),intent(in)          :: write_mode,out_name
+    integer,     intent(in),optional :: i0d
+    integer,     intent(in),optional :: i1d(is:ie)
+    real(8),     intent(in),optional :: r0d
+    real(8),     intent(in),optional :: r1d(is:ie)
+    integer       :: ii
+    character(16) :: id_name
+    
+    select case(write_mode)
+    case('single')
+      if(comm_is_root(nproc_id_global)) then
+        open(ifn,file='data_for_restart/'//out_name// '.data',status='replace')
+        if    (present(i0d)) then; write(ifn,*) i0d   ;
+        elseif(present(i1d)) then; write(ifn,*) i1d(:);
+        elseif(present(r0d)) then; write(ifn,*) r0d   ;
+        elseif(present(r1d)) then; write(ifn,*) r1d(:);
+        end if
+        close(ifn)
+      end if
+    case('all')
+      ii = nproc_id_global; write(id_name,*) ii;
+      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.data',status='replace')
+      if    (present(i0d)) then; write(ifn+ii,*) i0d   ;
+      elseif(present(i1d)) then; write(ifn+ii,*) i1d(:);
+      elseif(present(r0d)) then; write(ifn+ii,*) r0d   ;
+      elseif(present(r1d)) then; write(ifn+ii,*) r1d(:);
+      end if
+      close(ifn+ii)
+    end select
+    
+    return
+  end subroutine output_r_txt_em
+  
+  !=========================================================================================
+  != output restart binary file ============================================================
+  subroutine output_r_bin_em(ifn,is,ie,write_mode,out_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d,ipe)
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root
+    implicit none
+    integer,     intent(in)          :: ifn
+    integer,     intent(in)          :: is(5),ie(5)
+    character(*),intent(in)          :: write_mode,out_name
+    real(8),     intent(in),optional :: r1d(is(1):ie(1))
+    real(8),     intent(in),optional :: r2d(is(1):ie(1),is(2):ie(2))
+    real(8),     intent(in),optional :: r3d(is(1):ie(1),is(2):ie(2),is(3):ie(3))
+    real(8),     intent(in),optional :: r4d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4))
+    real(8),     intent(in),optional :: r5d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4),is(5):ie(5))
+    complex(8),  intent(in),optional :: c1d(is(1):ie(1))
+    complex(8),  intent(in),optional :: c2d(is(1):ie(1),is(2):ie(2))
+    complex(8),  intent(in),optional :: c3d(is(1):ie(1),is(2):ie(2),is(3):ie(3))
+    complex(8),  intent(in),optional :: c4d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4))
+    complex(8),  intent(in),optional :: c5d(is(1):ie(1),is(2):ie(2),is(3):ie(3),is(4):ie(4),is(5):ie(5))
+    integer,     intent(in),optional :: ipe
+    integer       :: ii,i_inf
+    character(16) :: id_name
+    
+    select case(write_mode)
+    case('single')
+      if(comm_is_root(nproc_id_global)) then
+        open(ifn,file='data_for_restart/'//out_name// '.bin',status='replace',form='unformatted',access='stream')
+        if    (present(r1d)) then; write(ifn) r1d(:)        ;
+        elseif(present(r2d)) then; write(ifn) r2d(:,:)      ;
+        elseif(present(r3d)) then; write(ifn) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; write(ifn) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; write(ifn) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; write(ifn) c1d(:)        ;
+        elseif(present(c2d)) then; write(ifn) c2d(:,:)      ;
+        elseif(present(c3d)) then; write(ifn) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; write(ifn) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; write(ifn) c5d(:,:,:,:,:);
+        end if
+        close(ifn)
+      end if
+    case('all')
+      !set i_inf
+      if(present(ipe)) then
+        i_inf=ipe
+      else
+        i_inf=1
+      end if
+      
+      !output date
+      ii = nproc_id_global; write(id_name,*) ii;
+      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin',status='replace',&
+           form='unformatted',access='stream')
+      if(i_inf==1) then
+        if    (present(r1d)) then; write(ifn+ii) r1d(:)        ;
+        elseif(present(r2d)) then; write(ifn+ii) r2d(:,:)      ;
+        elseif(present(r3d)) then; write(ifn+ii) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; write(ifn+ii) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; write(ifn+ii) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; write(ifn+ii) c1d(:)        ;
+        elseif(present(c2d)) then; write(ifn+ii) c2d(:,:)      ;
+        elseif(present(c3d)) then; write(ifn+ii) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; write(ifn+ii) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; write(ifn+ii) c5d(:,:,:,:,:);
+        end if
+      end if
+      close(ifn+ii)
+      
+      !output information
+      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_inf.bin',status='replace',&
+           form='unformatted',access='stream')
+      write(ifn+ii) is(:); write(ifn+ii) ie(:); write(ifn+ii) i_inf; close(ifn+ii);
+    end select
+    
+    return
+  end subroutine output_r_bin_em
   
 end module common_maxwell

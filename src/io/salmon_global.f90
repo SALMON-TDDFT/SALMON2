@@ -227,6 +227,7 @@ module salmon_global
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   integer        :: nmacro_chunk
+  real(8)        :: rmat_ms(3, 3)
 
 !! &maxwell
   real(8)        :: al_em(3)
