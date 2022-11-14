@@ -175,18 +175,15 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%Ac_ind = 0d0
   rt%Ac_tot = 0d0
   
-  call calc_Ac_ext_t(0d0, dt, 0, nt+1, Ac_tmp(:,0:nt+1))
-  if (yn_periodic=='y') then
-    rt%Ac_ext = Ac_ext_tmp
-    rt%Ac_tot = Ac_ext_tmp
-  else ! yn_periodic=='n'
-    do it = 0, nt
-      rt%E_ext(:, it) = -(Ac_ext_tmp(:, it+1) - Ac_ext_tmp(:, it)) / dt
-      rt%E_tot(:, it) = -(Ac_ext_tmp(:, it+1) - Ac_ext_tmp(:, it)) / dt
-    end do
-    rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
-    rt%E_tot(:, nt+1) = rt%E_tot(:, nt) 
-  end if
+  call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:, 0:nt+1))
+
+  do itt = 0, nt
+    rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
+  end do
+  rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
+  
+  rt%Ac_tot(1:3, 0:nt+1) = rt%Ac_ext(1:3, 0:nt+1)
+  rt%E_tot(1:3, 0:nt+1) = rt%E_ext(1:3, 0:nt+1) 
   
   if (yn_restart == 'n') Mit=0
   call timer_end(LOG_READ_RT_DATA)
