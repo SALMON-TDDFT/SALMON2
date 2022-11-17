@@ -10,7 +10,7 @@ set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_C_COMPILER            "mpiicc")
 
 set(General_FLAGS               "-qopt-ra-region-strategy=block -ansi-alias -fno-alias -qopt-report=5 -qopt-report-phase=openmp,loop,vec -DUSE_FFTW -lfftw3_mpi -lfftw3")
-set(General_Fortran_FLAGS       "-nogen-interface -std03 -warn all -diag-disable 6477,7025 ${General_FLAGS}")
+set(General_Fortran_FLAGS       "-nogen-interface -std03 -warn all -diag-disable 6477,7025 -qoverride-limits ${General_FLAGS}")
 set(General_C_FLAGS             "-Wall -diag-disable=10388 -restrict ${General_FLAGS}")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")
