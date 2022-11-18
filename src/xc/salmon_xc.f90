@@ -27,6 +27,7 @@ module salmon_xc
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
   use builtin_tbmbj, only: exc_cor_tbmbj
+  use builtin_pw, only: exc_cor_pw
 
 #ifdef USE_LIBXC
 #if XC_MAJOR_VERSION <= 4 
@@ -45,6 +46,7 @@ module salmon_xc
   integer, parameter :: salmon_xctype_tbmbj = 4
   integer, parameter :: salmon_xctype_tpss  = 5
   integer, parameter :: salmon_xctype_vs98  = 6
+  integer, parameter :: salmon_xctype_pw    = 7
 #ifdef USE_LIBXC
   integer, parameter :: salmon_xctype_libxc = 101
 #endif
@@ -428,6 +430,10 @@ contains
       case ('pzm')
         xc%xctype(1) = salmon_xctype_pzm
         return
+        
+      case ('pw')
+        xc%xctype(1) = salmon_xctype_pw
+        return
 
       case ('pbe')
       
@@ -490,6 +496,13 @@ contains
         xc%xctype(3) = salmon_xctype_libxc
         call init_libxc('LDA_X', 2)
         call init_libxc('LDA_C_PZ_MOD', 3)
+        return
+        
+      case('libxc_pw')
+        xc%xctype(2) = salmon_xctype_libxc
+        xc%xctype(3) = salmon_xctype_libxc
+        call init_libxc('LDA_X', 2)
+        call init_libxc('LDA_C_PW', 3)
         return
 
       case('libxc_pbe')
@@ -720,6 +733,8 @@ contains
       call exec_builtin_pz()
     case(salmon_xctype_pzm)
       call exec_builtin_pzm()
+    case(salmon_xctype_pw)
+      call exec_builtin_pw()
     case(salmon_xctype_tbmbj)
       call exec_builtin_tbmbj()
 #ifdef USE_LIBXC
@@ -836,6 +851,61 @@ contains
 
       return
     end subroutine exec_builtin_pzm
+    
+    
+    
+    subroutine exec_builtin_pw()
+      implicit none
+      real(8) :: rho_s_1d(nl)
+      real(8) :: rho_s_sp_1d(nl,2)
+      real(8) :: exc_1d(nl)
+      real(8) :: eexc_1d(nl)
+      real(8) :: vexc_1d(nl)
+      real(8) :: vexc_sp_1d(nl,2)
+
+      if (xc%ispin == 0) then
+        rho_s_1d = reshape(rho, (/nl/)) * 0.5
+      else if (xc%ispin == 1) then
+        rho_s_sp_1d = reshape(rho_s, (/nl,2/))
+      end if
+
+#ifndef SALMON_DEBUG_NEGLECT_NLCC
+      if (present(rho_nlcc)) then
+        if ( xc%ispin == 0 ) then
+          rho_s_1d = rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
+        else if ( xc%ispin == 1 ) then
+          rho_s_sp_1d(:,1) = rho_s_sp_1d(:,1) + reshape(rho_nlcc, (/nl/)) * 0.5
+          rho_s_sp_1d(:,2) = rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
+        end if
+      endif
+#endif
+
+      if (xc%ispin == 0) then
+        call exc_cor_pw(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d)
+      else if (xc%ispin == 1) then
+        stop "PW for spin-polarized system is not supported."
+      end if
+
+      if (xc%ispin == 0) then
+        if (present(vxc)) then
+           vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
+        endif
+      else if(xc%ispin == 1) then
+        if (present(vxc_s)) then
+           vxc_s = vxc_s + reshape(vexc_sp_1d, (/nx, ny, nz,2/))
+        endif
+      end if
+
+      if (present(exc)) then
+         exc = exc + reshape(exc_1d, (/nx, ny, nz/))
+      endif
+
+      if (present(eexc)) then
+         eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
+      endif
+
+      return
+    end subroutine exec_builtin_pw
     
 
     subroutine exec_builtin_tbmbj()
