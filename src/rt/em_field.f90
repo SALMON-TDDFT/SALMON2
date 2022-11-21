@@ -434,6 +434,7 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
   real(8) :: env_trigon_1,env_trigon_2
+  real(8) :: E_ext(3)
   integer,parameter :: Nd = 4
 
   if(iperiodic==0)then
@@ -468,53 +469,52 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   system%vec_E_ext(1:3)=0.d0
    
   if(iperiodic==0)then
-    if(ae_shape1 == 'impulse')then
-      continue
-    else
-        if(dt*dble(itt_t) <= tw1)then
-          ipulse=1
-          call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_1,'y')
+    ! if(ae_shape1 == 'impulse')then
+    !   continue
+    ! else
+        ! if(dt*dble(itt_t) <= tw1)then
+        !   ipulse=1
+          ! call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_1,'y')
+          E_ext(1:3) = rt%E_ext(1:3,itt_t)
         !$OMP parallel do collapse(2) private(ix,iy,iz)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
             Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)  &
-                             +( epdir_re1(1)*lg%coordinate(ix,1)   &
-                               +epdir_re1(2)*lg%coordinate(iy,2)   &
-                               +epdir_re1(3)*lg%coordinate(iz,3) )*env_trigon_1  &
-                             +( epdir_im1(1)*lg%coordinate(ix,1)   &
-                               +epdir_im1(2)*lg%coordinate(iy,2)   &
-                               +epdir_im1(3)*lg%coordinate(iz,3) )*env_trigon_1
+                             +( E_ext(1)*lg%coordinate(ix,1)   &
+                               +E_ext(2)*lg%coordinate(iy,2)   &
+                               +E_ext(3)*lg%coordinate(iz,3) )
           end do
           end do
           end do
-          system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+epdir_re1(1:3)*env_trigon_1   &
-                                                     +epdir_im1(1:3)*env_trigon_1
-        end if
-        if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
-          ipulse=2
-          call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_2,'y')
-          !$OMP parallel do collapse(2) private(ix,iy,iz)
-          do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
-          do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
-          do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)   &
-                             +( epdir_re2(1)*lg%coordinate(ix,1)   &
-                               +epdir_re2(2)*lg%coordinate(iy,2)   &
-                               +epdir_re2(3)*lg%coordinate(iz,3) )*env_trigon_2  &
-                             +( epdir_im2(1)*lg%coordinate(ix,1)   &
-                               +epdir_im2(2)*lg%coordinate(iy,2)   &
-                               +epdir_im2(3)*lg%coordinate(iz,3) )*env_trigon_2
-          end do
-          end do
-          end do
-          system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+epdir_re2(1:3)*env_trigon_2   &
-                                                     +epdir_im2(1:3)*env_trigon_2
-        end if
-    end if
+          ! system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+epdir_re1(1:3)*env_trigon_1   &
+          !                                            +epdir_im1(1:3)*env_trigon_1
+        ! end if
+        ! if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
+        !   ipulse=2
+          ! call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_2,'y')
+          ! !$OMP parallel do collapse(2) private(ix,iy,iz)
+          ! do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
+          ! do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
+          ! do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
+          !   Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)   &
+          !                    +( epdir_re2(1)*lg%coordinate(ix,1)   &
+          !                      +epdir_re2(2)*lg%coordinate(iy,2)   &
+          !                      +epdir_re2(3)*lg%coordinate(iz,3) )*env_trigon_2  &
+          !                    +( epdir_im2(1)*lg%coordinate(ix,1)   &
+          !                      +epdir_im2(2)*lg%coordinate(iy,2)   &
+          !                      +epdir_im2(3)*lg%coordinate(iz,3) )*env_trigon_2
+          ! end do
+          ! end do
+          ! end do
+          ! system%vec_E_ext(1:3)=E_ext(1:3)
+          ! system%vec_E_ext(1:3)=system%vec_E_ext(1:3)+epdir_re2(1:3)*env_trigon_2   &
+          !                                            +epdir_im2(1:3)*env_trigon_2
+        ! end if
+    ! end if
   end if
-  system%vec_E(1:3)=system%vec_E_ext(1:3) 
-  system%vec_Ac(1:3)=system%vec_Ac(1:3)-system%vec_E(1:3)*dt
+  system%vec_E(1:3)=rt%E_ext(1:3,itt_t)!system%vec_E_ext(1:3) 
+  system%vec_Ac(1:3)=rt%Ac_ext(1:3,itt_t)!system%vec_Ac(1:3)-system%vec_E(1:3)*dt
   system%vec_Ac_ext(1:3)=system%vec_Ac(1:3) 
    
   if(num_dipole_source>=1)then
