@@ -4743,9 +4743,9 @@ contains
           case('A_eV_fs')
             write(fe%ifn,'("#",99(1X,I0,":",A))') &
                   1, "Time[fs]",                  &
-                  2, "Jm_x[1/fs*Angstrom^2]",     &
-                  3, "Jm_y[1/fs*Angstrom^2]",     &
-                  4, "Jm_z[1/fs*Angstrom^2]"
+                  2, "Jm_x[1/(fs*Angstrom^2)]",     &
+                  3, "Jm_y[1/(fs*Angstrom^2)]",     &
+                  4, "Jm_z[1/(fs*Angstrom^2)]"
           end select
           do ii=1,nt_em
             write(fe%ifn,"(F16.8,99(1X,E23.15E3))",advance='no') &
@@ -5002,50 +5002,50 @@ contains
                           20,"Im(J_z)[a.u.]"
                   case('A_eV_fs')
                     write(fe%ifn,'(A,E23.15E3,A)') "# Sampling energy: ",obs_plane_ene_em(ii,ij)*uenergy_from_au,' eV'
-                    write(fe%ifn,'("#",99(1X,I0,":",A))') &
-                          1, "ID_1[none]",                &
-                          2, "ID_2[none]",                &
-                          3, "Re(E_x)[V/Angstrom*fs]",    &
-                          4, "Im(E_x)[V/Angstrom*fs]",    &
-                          5, "Re(E_y)[V/Angstrom*fs]",    &
-                          6, "Im(E_y)[V/Angstrom*fs]",    &
-                          7, "Re(E_z)[V/Angstrom*fs]",    &
-                          8, "Im(E_z)[V/Angstrom*fs]",    &
-                          9, "Re(H_x)[A/Angstrom*fs]",    &
-                          10,"Im(H_x)[A/Angstrom*fs]",    &
-                          11,"Re(H_y)[A/Angstrom*fs]",    &
-                          12,"Im(H_y)[A/Angstrom*fs]",    &
-                          13,"Re(H_z)[A/Angstrom*fs]",    &
-                          14,"Im(H_z)[A/Angstrom*fs]",    &
-                          15,"Re(J_x)[A/Angstrom^2*fs]",  &
-                          16,"Im(J_x)[A/Angstrom^2*fs]",  &
-                          17,"Re(J_y)[A/Angstrom^2*fs]",  &
-                          18,"Im(J_y)[A/Angstrom^2*fs]",  &
-                          19,"Re(J_z)[A/Angstrom^2*fs]",  &
-                          20,"Im(J_z)[A/Angstrom^2*fs]"
+                    write(fe%ifn,'("#",99(1X,I0,":",A))')    &
+                          1, "ID_1[none]",                   &
+                          2, "ID_2[none]",                   &
+                          3, "Re(E_x)[V/Angstrom*fs]",       &
+                          4, "Im(E_x)[V/Angstrom*fs]",       &
+                          5, "Re(E_y)[V/Angstrom*fs]",       &
+                          6, "Im(E_y)[V/Angstrom*fs]",       &
+                          7, "Re(E_z)[V/Angstrom*fs]",       &
+                          8, "Im(E_z)[V/Angstrom*fs]",       &
+                          9, "Re(H_x)[A/Angstrom*fs]",       &
+                          10,"Im(H_x)[A/Angstrom*fs]",       &
+                          11,"Re(H_y)[A/Angstrom*fs]",       &
+                          12,"Im(H_y)[A/Angstrom*fs]",       &
+                          13,"Re(H_z)[A/Angstrom*fs]",       &
+                          14,"Im(H_z)[A/Angstrom*fs]",       &
+                          15,"Re(J_x)[1/(fs*Angstrom^2)*fs]",  &
+                          16,"Im(J_x)[1/(fs*Angstrom^2)*fs]",  &
+                          17,"Re(J_y)[1/(fs*Angstrom^2)*fs]",  &
+                          18,"Im(J_y)[1/(fs*Angstrom^2)*fs]",  &
+                          19,"Re(J_z)[1/(fs*Angstrom^2)*fs]",  &
+                          20,"Im(J_z)[1/(fs*Angstrom^2)*fs]"
                   end select
                   do i2=fs%lg%is(i2s),fs%lg%ie(i2s)
                   do i1=fs%lg%is(i1s),fs%lg%ie(i1s)
-                    write(fe%ifn,'(I8,I8,99(1X,E23.15E3))')                                   &
-                          i1,i2,                                                              &
-                          real( z_ex2(i1,i2))*fe%uVperm_from_au*utime_from_au,                &
-                          aimag(z_ex2(i1,i2))*fe%uVperm_from_au*utime_from_au,                &
-                          real( z_ey2(i1,i2))*fe%uVperm_from_au*utime_from_au,                &
-                          aimag(z_ey2(i1,i2))*fe%uVperm_from_au*utime_from_au,                &
-                          real( z_ez2(i1,i2))*fe%uVperm_from_au*utime_from_au,                &
-                          aimag(z_ez2(i1,i2))*fe%uVperm_from_au*utime_from_au,                &
-                          real( z_hx2(i1,i2))*fe%uAperm_from_au*utime_from_au,                &
-                          aimag(z_hx2(i1,i2))*fe%uAperm_from_au*utime_from_au,                &
-                          real( z_hy2(i1,i2))*fe%uAperm_from_au*utime_from_au,                &
-                          aimag(z_hy2(i1,i2))*fe%uAperm_from_au*utime_from_au,                &
-                          real( z_hz2(i1,i2))*fe%uAperm_from_au*utime_from_au,                &
-                          aimag(z_hz2(i1,i2))*fe%uAperm_from_au*utime_from_au,                &
-                          real( z_jx2(i1,i2))*fe%uAperm_from_au*utime_from_au/ulength_from_au,&
-                          aimag(z_jx2(i1,i2))*fe%uAperm_from_au*utime_from_au/ulength_from_au,&
-                          real( z_jy2(i1,i2))*fe%uAperm_from_au*utime_from_au/ulength_from_au,&
-                          aimag(z_jy2(i1,i2))*fe%uAperm_from_au*utime_from_au/ulength_from_au,&
-                          real( z_jz2(i1,i2))*fe%uAperm_from_au*utime_from_au/ulength_from_au,&
-                          aimag(z_jz2(i1,i2))*fe%uAperm_from_au*utime_from_au/ulength_from_au
+                    write(fe%ifn,'(I8,I8,99(1X,E23.15E3))')                    &
+                          i1,i2,                                               &
+                          real( z_ex2(i1,i2))*fe%uVperm_from_au*utime_from_au, &
+                          aimag(z_ex2(i1,i2))*fe%uVperm_from_au*utime_from_au, &
+                          real( z_ey2(i1,i2))*fe%uVperm_from_au*utime_from_au, &
+                          aimag(z_ey2(i1,i2))*fe%uVperm_from_au*utime_from_au, &
+                          real( z_ez2(i1,i2))*fe%uVperm_from_au*utime_from_au, &
+                          aimag(z_ez2(i1,i2))*fe%uVperm_from_au*utime_from_au, &
+                          real( z_hx2(i1,i2))*fe%uAperm_from_au*utime_from_au, &
+                          aimag(z_hx2(i1,i2))*fe%uAperm_from_au*utime_from_au, &
+                          real( z_hy2(i1,i2))*fe%uAperm_from_au*utime_from_au, &
+                          aimag(z_hy2(i1,i2))*fe%uAperm_from_au*utime_from_au, &
+                          real( z_hz2(i1,i2))*fe%uAperm_from_au*utime_from_au, &
+                          aimag(z_hz2(i1,i2))*fe%uAperm_from_au*utime_from_au, &
+                          real( z_jx2(i1,i2))*(1.0d0/(ulength_from_au**2)),    &
+                          aimag(z_jx2(i1,i2))*(1.0d0/(ulength_from_au**2)),    &
+                          real( z_jy2(i1,i2))*(1.0d0/(ulength_from_au**2)),    &
+                          aimag(z_jy2(i1,i2))*(1.0d0/(ulength_from_au**2)),    &
+                          real( z_jz2(i1,i2))*(1.0d0/(ulength_from_au**2)),    &
+                          aimag(z_jz2(i1,i2))*(1.0d0/(ulength_from_au**2))
                   end do
                   end do
                   close(fe%ifn)
@@ -5908,9 +5908,9 @@ contains
     
     !---------!
     ! CAUTION !
-    !---------------------------------------------------------------------------------!
-    ! hx-z calculated here assumes an incident pulse propagated from bottom direction !
-    !---------------------------------------------------------------------------------!
+    !----------------------------------------------------------------------------------------!
+    ! hx-z calculated here assumes an incident pulse propagated from bottom to top direction !
+    !----------------------------------------------------------------------------------------!
     
     !set initial value
     ex=0.0d0; ey=0.0d0; ez=0.0d0; hx=0.0d0; hy=0.0d0; hz=0.0d0; 
