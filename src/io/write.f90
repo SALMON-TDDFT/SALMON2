@@ -1808,6 +1808,7 @@ contains
       index_vbm=nelec
     else
       index_vbm=nelec/2
+      if(mod(nelec,2)==1) index_vbm = index_vbm + 1
     end if
     if(comm_is_root(nproc_id_global) .and. index_vbm<system%no) then
       do ik=1,system%nk

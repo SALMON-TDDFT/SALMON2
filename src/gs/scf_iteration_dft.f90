@@ -434,6 +434,7 @@ subroutine  get_band_gap(system,energy,gap)
      index_vbm=nelec
   else
      index_vbm=nelec/2
+     if(mod(nelec,2)==1) index_vbm = index_vbm + 1
   end if
   if( index_vbm >= system%no )then
      gap = 1d99
