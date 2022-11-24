@@ -211,6 +211,7 @@ subroutine init_dft_system(lg,system,stencil)
     select case(system%nspin)
     case(1)
       system%rocc(1:nelec/2,:,1) = 2d0
+      if(mod(nelec,2)==1) system%rocc(nelec/2+1,:,1) = 1d0
     case(2)
       if ( nelec > 0 ) then
         if ( mod(nelec,2) == 0 ) then
