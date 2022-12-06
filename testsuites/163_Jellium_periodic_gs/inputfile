@@ -43,8 +43,8 @@
 
 &scf
   !maximum number of scf iteration and threshold of convergence
-  nscf      = 500
-  threshold = 1.0d-7
+  nscf      = 750
+  threshold = 1.0d-8
 /
 
 &jellium
