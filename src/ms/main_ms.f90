@@ -238,15 +238,18 @@ subroutine initialization_ms()
     if (0d0 < hx_m) fs%hgs(1) = hx_m
     if (0d0 < hy_m) fs%hgs(2) = hy_m
     if (0d0 < hz_m) fs%hgs(3) = hz_m
+    ! for old nxvacl_m, nxvacr_m variables:
+    if (abs(nxvacl_m) > 0) nxvac_m(1) = abs(nxvacl_m) + 1
+    if (abs(nxvacr_m) > 0) nxvac_m(2) = abs(nxvacr_m)
 
     fw%dt = dt
     fw%fdtddim = '1d'
-    fs%mg%is(1) = - abs(nxvacl_m)
-    fs%mg%ie(1) = nx_m + abs(nxvacr_m)
-    fs%mg%is(2) = 1
-    fs%mg%ie(2) = ny_m
-    fs%mg%is(3) = 1
-    fs%mg%ie(3) = nz_m
+    fs%mg%is(1) = 1 - nxvac_m(1)
+    fs%mg%ie(1) = nx_m + nxvac_m(2)
+    fs%mg%is(2) = 1 - nyvac_m(1)
+    fs%mg%ie(2) = ny_m + nyvac_m(2)
+    fs%mg%is(3) = 1 - nzvac_m(1)
+    fs%mg%ie(3) = nz_m + nzvac_m(2)
     fs%mg%is_overlap(1:3) = fs%mg%is(1:3) - fs%mg%nd
     fs%mg%ie_overlap(1:3) = fs%mg%ie(1:3) + fs%mg%nd
     fs%mg%is_array(1:3) = fs%mg%is_overlap(1:3)

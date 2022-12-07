@@ -377,6 +377,9 @@ contains
       & nxysplit, &
       & nxvacl_m, &
       & nxvacr_m, &
+      & nxvac_m, &
+      & nyvac_m, &
+      & nzvac_m, &
       & nx_origin_m, &
       & ny_origin_m, &
       & nz_origin_m, &
@@ -750,8 +753,11 @@ contains
     hz_m       = 0d0
     nksplit    = 0
     nxysplit   = 0
-    nxvacl_m   = 1
-    nxvacr_m   = 1
+    nxvacl_m     = 0
+    nxvacr_m     = 0
+    nxvac_m(1:2) = 1
+    nyvac_m(1:2) = 0
+    nzvac_m(1:2) = 0
     nx_origin_m = 1
     ny_origin_m = 1
     nz_origin_m = 1
@@ -1281,6 +1287,9 @@ contains
     call comm_bcast(nxysplit  ,nproc_group_global)
     call comm_bcast(nxvacl_m  ,nproc_group_global)
     call comm_bcast(nxvacr_m  ,nproc_group_global)
+    call comm_bcast(nxvac_m  ,nproc_group_global)
+    call comm_bcast(nyvac_m  ,nproc_group_global)
+    call comm_bcast(nzvac_m  ,nproc_group_global)
     call comm_bcast(nx_origin_m,nproc_group_global)
     call comm_bcast(ny_origin_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
@@ -2098,6 +2107,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacr_m', nxvacr_m
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nxvac_m', nxvac_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nyvac_m', nyvac_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nzvac_m', nzvac_m(1:2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
