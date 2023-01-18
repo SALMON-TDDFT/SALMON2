@@ -340,6 +340,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call write_magnetization(itt,ofl,system,mg,info,spsi_out)
   end if
   
+  if(yn_out_current_decomposed=='y' &
+  & .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_current_decomposed_step)==0)) then
+    call write_current_decomposed(itt,ofl,mg,system,info,stencil,srg,spsi_out,ppg)
+  end if
+  
   call timer_end(LOG_WRITE_RT_INFOS)
 
   return
