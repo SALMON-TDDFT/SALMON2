@@ -626,6 +626,100 @@ contains
     jw = jw * 2d0
     return
   end subroutine calc_current_nonlocal_rdivided
+  
+!===================================================================================================================================
+  
+! curr(ispin) = \sum_{ik,io} [ system%rocc(io,ik,ispin)*system%wtk(ik)* curr_decomp(ispin,io,ik) ]
+! curr: the current density
+! curr_decomp: decomposition of the current density
+  subroutine calc_current_decomposed(system,mg,stencil,info,srg,psi,ppg,curr_decomp)
+    use structures
+    use salmon_global, only: yn_jm,yn_spinorbit
+    use sendrecv_grid, only: update_overlap_complex8
+    use communication, only: comm_summation
+    use nonlocal_potential, only: calc_uVpsi_rdivided
+    use pseudo_pt_current_so, only: calc_current_nonlocal_so,calc_current_nonlocal_rdivided_so
+    implicit none
+    type(s_dft_system)   ,intent(in) :: system
+    type(s_rgrid)        ,intent(in) :: mg
+    type(s_stencil)      ,intent(in) :: stencil
+    type(s_parallel_info),intent(in) :: info
+    type(s_sendrecv_grid)            :: srg
+    type(s_orbital)                  :: psi
+    type(s_pp_grid)      ,intent(in) :: ppg
+    real(8)                          :: curr_decomp(3,system%nspin,system%no,system%nk)
+    !
+    integer :: ispin,im,ik,io,nspin,ngrid
+    real(8),dimension(3) :: wrk1,wrk2,wrk3
+    real(8) :: BT(3,3),kAc(3)
+    real(8) :: curr_wrk(3,system%nspin,system%no,system%nk)
+    complex(8),allocatable :: uVpsibox (:,:,:,:,:)
+    complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+    complex(8),allocatable :: uVpsi(:)
+    real(8) :: jx,jy,jz
+
+    im = 1
+    nspin = system%nspin
+    ngrid = system%ngrid
+
+    BT = transpose(system%rmatrix_B)
+
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
+      call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+      allocate(uVpsi(ppg%Nlma))
+    end if
+
+  ! overlap region communication
+    if(info%if_divide_rspace) then
+      call update_overlap_complex8(srg, mg, psi%zwf)
+    end if
+
+    curr_wrk = 0d0
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    
+      do ispin=1,nspin
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
+                            ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
+        wrk2 = matmul(BT,wrk2)
+        if ( yn_jm == 'n' ) then
+          if ( yn_spinorbit=='y' ) then
+            if ( info%if_divide_rspace ) then
+              call calc_current_nonlocal_rdivided_so &
+                   ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,info%icomm_r )
+            else
+              call calc_current_nonlocal_so &
+                   ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+            end if
+          else
+            if ( info%if_divide_rspace)then
+              uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+              call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+            else
+              call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+            end if
+          end if
+        else
+          wrk3=0d0
+        end if
+        curr_wrk(:,ispin,io,ik) = (wrk1 + wrk2 + wrk3) / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      end do ! ispin
+      
+      if ( yn_spinorbit=='y' ) then
+        curr_wrk(:,1,io,ik) = curr_wrk(:,1,io,ik) + curr_wrk(:,2,io,ik)
+        curr_wrk(:,2,io,ik) = curr_wrk(:,1,io,ik)
+      end if
+      
+    end do ! io
+    end do ! ik
+    
+    call comm_summation(curr_wrk,curr_decomp,3*nspin*system%no*system%nk,info%icomm_rko)
+
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
+
+    return
+  end subroutine calc_current_decomposed
 
 !===================================================================================================================================
 
@@ -634,12 +728,12 @@ contains
     use communication, only: comm_summation
     use timer
     implicit none
-    type(s_dft_system)      ,intent(in) :: system
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_stencil)         ,intent(in) :: stencil
+    type(s_dft_system)   ,intent(in) :: system
+    type(s_rgrid)        ,intent(in) :: mg
+    type(s_stencil)      ,intent(in) :: stencil
     type(s_parallel_info),intent(in) :: info
-    type(s_orbital)         ,intent(in) :: psi
-    type(s_vector)                      :: curr ! electron number current density (without rho*A/c)
+    type(s_orbital)      ,intent(in) :: psi
+    type(s_vector)                   :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin,ix,iy,iz
     real(8) :: k(3)

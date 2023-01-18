@@ -38,7 +38,7 @@ flag = 0
 linecount = 0
 for line in open("Au_rt.data"):
     linecount += 1
-    if linecount == 1008: # line 1008
+    if linecount == 1007: # line 1007
        data = line.split()
        val1 = float(data[16-1])
 
