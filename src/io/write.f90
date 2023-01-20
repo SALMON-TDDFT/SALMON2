@@ -2052,7 +2052,7 @@ contains
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current
+    use salmon_global, only: ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current,threshold_projection
     use inputoutput, only: t_unit_time
     use subspace_diagonalization, only: ssdg
     use gram_schmidt_orth, only: gram_schmidt
@@ -2127,7 +2127,7 @@ contains
         & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
         dE = energy%E_kin - rt%E_old
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
-        if(abs(dE) < 1e-6) exit
+        if(abs(dE) < threshold_projection) exit
         rt%E_old = energy%E_kin
       end do
     end if

@@ -461,6 +461,7 @@ contains
     namelist/analysis/ &
       & projection_option, &
       & out_projection_step, &
+      & threshold_projection, &
       & nenergy, &
       & de, &
       & out_rt_energy_step, &
@@ -843,6 +844,7 @@ contains
 !! == default for &analysis
     projection_option   = 'no'
     out_projection_step = 100
+    threshold_projection = 1d-6
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
     out_rt_energy_step  = 10
@@ -1118,6 +1120,7 @@ contains
     call comm_bcast(nelec              ,nproc_group_global)
     call comm_bcast(nelec_spin         ,nproc_group_global)
     call comm_bcast(temperature        ,nproc_group_global)
+    if(temperature>=0d0) temperature = temperature * uenergy_to_au
     call comm_bcast(temperature_k      ,nproc_group_global)
     if(temperature_k>=0d0) temperature = temperature_k * kB_au ! Kelvin --> atomic units
     call comm_bcast(nelem              ,nproc_group_global)
@@ -1407,6 +1410,7 @@ contains
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
     call comm_bcast(out_projection_step ,nproc_group_global)
+    call comm_bcast(threshold_projection,nproc_group_global)
     call comm_bcast(nenergy             ,nproc_group_global)
     call comm_bcast(de                  ,nproc_group_global)
     de = de * uenergy_to_au
@@ -2278,6 +2282,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_projection', threshold_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
