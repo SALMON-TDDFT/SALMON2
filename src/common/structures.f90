@@ -371,6 +371,8 @@ module structures
     complex(8),allocatable :: ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
     complex(8),allocatable :: ff1(:,:,:),ff2(:,:,:) ! for isolated_ffte
     complex(8),allocatable :: ff3x(:,:,:),ff3y(:,:,:),ff3z(:,:,:),ff4x(:,:,:),ff4y(:,:,:),ff4z(:,:,:) ! for isolated_ffte
+  ! for dirichlet boundary condition
+    real(8),allocatable :: dgf(:,:,:)
   ! for FFTE
     complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)
 #ifdef USE_FFTW
