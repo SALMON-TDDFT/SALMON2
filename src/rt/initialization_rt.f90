@@ -39,7 +39,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
-                       init_projection
+                       init_projection,write_magnetization,write_current_decomposed
   use code_optimization
   use initialization_sub
   use prep_pp_sub
@@ -295,7 +295,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   allocate(energy%esp(system%no,system%nk,system%nspin))
   
   if(projection_option/='no') then
-    call init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt)
+    call init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt,ofl)
   end if
   
   call timer_end(LOG_READ_GS_DATA)
@@ -346,64 +346,25 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call comm_bcast(ofl%file_response_data, nproc_group_global)
   call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
   
-  !(write header)
-  if(comm_is_root(nproc_id_global))then
+ ! write file header
   
-    !(header of SYSname_rt.data)
-    select case(iperiodic)
-    case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
-    case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
-    end select
+  !(header of SYSname_rt.data)
+  select case(iperiodic)
+  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
+  case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
+  end select
+
+  !(header of SYSname_rt_energy.data)
+  call write_rt_energy_data(-1,ofl,dt,energy,md)
   
-    !(header of SYSname_rt_energy.data)
-    call write_rt_energy_data(-1,ofl,dt,energy,md)
+  if(yn_spinorbit=='y') then
+  !(header in SYSname_rt_mag.data)
+    call write_magnetization(-1,ofl,system,mg,info,spsi_in)
+  end if
   
-    if(projection_option/='no')then
-    !(header in SYSname_ovlp.data)
-      write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
-      open(ofl%fh_ovlp,file=ofl%file_ovlp)
-      write(ofl%fh_ovlp, '("#",1X,A)') "Projection"
-      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ovlp_occup", "Occupation"
-      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "NB", "Number of bands"
-      write(ofl%fh_ovlp, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-      & 1, "ik", "none", &
-      & 2, "ovlp_occup(NB)", "none"
-    !(header in SYSname_nex.data)
-      write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_nex = open_filehandle(ofl%file_nex)
-      open(ofl%fh_nex,file=ofl%file_nex)
-      write(ofl%fh_nex, '("#",1X,A)') "Excitation"
-      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nelec", "Number of excited electrons"
-      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nhole", "Number of excited holes"
-      write(ofl%fh_nex, '("#",99(1X,I0,":",A,"[",A,"]"))')  &
-      &           1, "time", trim(t_unit_time%name), &
-      &           2, "nelec", "none", &
-      &           3, "nhole", "none"
-    end if
-    
-    if(yn_spinorbit=='y') then
-    !(header in mag.data)
-      write(ofl%file_rt_mag,"(2A,'_rt_mag.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_rt_mag = open_filehandle(ofl%file_rt_mag)
-      open(ofl%fh_rt_mag,file=ofl%file_rt_mag)
-      write(ofl%fh_rt_mag, '("#",1X,A)') "Magnetization"
-      write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
-      write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
-      write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
-      write(ofl%fh_rt_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-      & 1, "mag(1)", "none", &
-      & 2, "mag(2)", "none", &
-      & 3, "mag(3)", "none"
-      write(ofl%fh_rt_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-      & 1, "ik", "none", &
-      & 2, "io", "none", &
-      & 3, "mag_orb(1)", "none", &
-      & 4, "mag_orb(2)", "none", &
-      & 5, "mag_orb(3)", "none"
-    end if
+  if(yn_out_current_decomposed == 'y') then
+  !(header in SYSname_current_decomposed.data)
+    call write_current_decomposed(-1,ofl,mg,system,info,stencil,srg,spsi_in,ppg)
   end if
   
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
