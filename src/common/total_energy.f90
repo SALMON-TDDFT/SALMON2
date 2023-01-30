@@ -92,7 +92,7 @@ CONTAINS
 !$omp end parallel do
 
     select case(method_poisson)
-    case('cg')
+    case('cg','dirichlet')
       sum1 = 0d0
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:sum1) &

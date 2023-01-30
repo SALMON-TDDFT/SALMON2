@@ -35,6 +35,7 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use communication, only: comm_is_root
   use poisson_isolated
   use poisson_periodic
+  use poisson_dirichlet, only: jones
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: mg
@@ -68,6 +69,8 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
         call poisson_isolated_fftw(lg,mg,info,fg,rho,Vh,poisson)
       end select
 #endif
+    case('dirichlet')
+      call jones(lg,mg,info,system,rho,Vh,poisson)
     end select
   case(3)
 #ifdef USE_FFTW

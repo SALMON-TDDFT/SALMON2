@@ -353,7 +353,7 @@ module salmon_global
   integer        :: num_multipole_xyz(3)
   integer        :: lmax_multipole
   real(8)        :: threshold_cg
-  character(2)   :: method_poisson ! 'cg','ft'
+  character(9)   :: method_poisson ! 'cg','ft','dirichlet'
 
 !! &ewald
   integer        :: newald

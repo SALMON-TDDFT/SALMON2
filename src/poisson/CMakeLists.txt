@@ -1,6 +1,7 @@
 set(SOURCES
     hartree.f90
     init_poisson.f90
+    poisson_dirichlet.f90
     poisson_isolated.f90
     poisson_periodic.f90
    )

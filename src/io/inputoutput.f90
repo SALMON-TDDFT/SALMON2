@@ -2673,8 +2673,8 @@ contains
     endif
 
     select case(method_poisson)
-    case ('cg','ft') ; continue
-    case default     ; stop "method_poisson must be 'cg' or 'ft'"
+    case ('cg','ft','dirichlet') ; continue
+    case default                 ; stop "method_poisson must be 'cg', 'ft' or 'dirichlet'"
     end select
 
 #ifdef USE_FFTW

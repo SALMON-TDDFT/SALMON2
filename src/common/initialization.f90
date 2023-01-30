@@ -79,6 +79,9 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
     if(method_poisson=='ft') then
       call init_reciprocal_grid_isolated_ft(lg,mg,fg,system,info,poisson)
     end if
+    if(method_poisson=='dirichlet') then
+      call prep_dgf(lg,mg,system,info,poisson)
+    end if
   case(3)
     call init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   end select
@@ -1054,6 +1057,36 @@ subroutine init_reciprocal_grid_isolated_ft(lg,mg,fg,system,info,poisson)
 
   return
 end subroutine init_reciprocal_grid_isolated_ft
+
+!===================================================================================================================================
+
+subroutine prep_dgf(lg,mg,system,info,poisson)
+  use structures
+  use communication, only: comm_is_root, comm_bcast
+  use parallelization, only: nproc_id_global, nproc_group_global
+  use poisson_dirichlet, only: calc_dgf
+  implicit none
+  type(s_rgrid)          ,intent(in)    :: lg
+  type(s_rgrid)          ,intent(in)    :: mg
+  type(s_dft_system)     ,intent(in)    :: system
+  type(s_parallel_info)  ,intent(in)    :: info
+  type(s_poisson)        ,intent(inout) :: poisson
+  integer :: lx,ly,lz
+
+  lx=lg%num(1)
+  ly=lg%num(2)
+  lz=lg%num(3)
+
+  allocate(poisson%dgf(-lx:lx+2,-ly:ly+2,-lz:lz+2))
+
+  if(comm_is_root(nproc_id_global))then
+    call calc_dgf(lg,mg,system,info,poisson)
+  end if
+
+  call comm_bcast(poisson%dgf,nproc_group_global)
+
+  return
+end subroutine prep_dgf
 
 !===================================================================================================================================
 
