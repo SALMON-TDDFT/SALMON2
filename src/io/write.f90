@@ -2027,7 +2027,7 @@ contains
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current,threshold_projection
+    use salmon_global, only: projection_option,ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current,threshold_projection
     use inputoutput, only: t_unit_time
     use subspace_diagonalization, only: ssdg
     use gram_schmidt_orth, only: gram_schmidt
@@ -2101,7 +2101,7 @@ contains
 !
 ! projection_option=='gs':
 !   | w_{n,k}(t) > = the eigenorbitals for the ground-state Hamiltonian whose k-point is shifted by A(t).
-!   i.e. | w_{n,k}(t) > = |u^{GS}_{n,k+A(t)/c}
+!   i.e. | w_{n,k}(t) > = | u^{GS}_{n,k+A(t)/c} >
 !   a.k.a the Houston functions
 !
 ! projection_option=='td':
