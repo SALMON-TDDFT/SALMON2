@@ -302,6 +302,7 @@ module salmon_global
   
 !! &analysis
   character(2)   :: projection_option
+  real(8)        :: threshold_projection
   integer        :: nenergy
   real(8)        :: de
   integer        :: out_rt_energy_step
