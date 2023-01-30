@@ -1915,12 +1915,14 @@ contains
     end if
     call read_bin(wdir,lg,mg,rt%system_gs,rt%info_gs,rt%tpsi0,iter,is_self_checkpoint=iself)
 
-  ! V_local @ GS
+  ! V_local
     allocate(rt%vloc0(system%nspin))
     do jspin=1,system%nspin
       call allocate_scalar(mg,rt%vloc0(jspin))
     end do
-    call calc_vloc0
+    if(projection_option=='gs') then
+      call calc_vloc0 ! V_local for GS
+    end if
     
   contains
   
@@ -1941,7 +1943,7 @@ contains
         write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "NB", "Number of bands"
         write(ofl%fh_ovlp, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "ik", "none", &
-        & 2, "ovlp_occup(NB)", "none"
+        & 2, "ovlp_occup(1:NB)", "none"
         
       !(header in SYSname_nex.data)
         write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
@@ -2021,34 +2023,7 @@ contains
 
   end subroutine init_projection
 
-  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
-    use structures
-    use salmon_global, only: projection_option
-    implicit none
-    integer                 ,intent(in) :: itt
-    type(s_ofile)           ,intent(in) :: ofl
-    real(8)                 ,intent(in) :: dt
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_dft_system)      ,intent(in) :: system
-    type(s_parallel_info)   ,intent(in) :: info
-    type(s_stencil)         ,intent(in) :: stencil
-    type(s_pp_grid)         ,intent(in) :: ppg
-    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_sendrecv_grid)               :: srg
-    type(s_dft_energy)                  :: energy
-    type(s_rt)                          :: rt
-
-    select case(projection_option)
-    case('gs')
-      call  projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
-    case default
-      stop "invalid projection_option"
-    end select
-
-    return
-  end subroutine projection
-
-  subroutine projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
+  subroutine projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,psi_t,srg,energy,rt)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -2066,6 +2041,7 @@ contains
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
     type(s_stencil)         ,intent(in) :: stencil
+    type(s_scalar)          ,intent(in) :: V_local(system%nspin)
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
     type(s_sendrecv_grid)               :: srg
@@ -2111,8 +2087,28 @@ contains
     else
       niter = nscf
     end if
-    
-  ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
+
+    if(projection_option=='td') then
+      do ispin=1,nspin
+        rt%vloc0(ispin)%f = V_local(ispin)%f ! the local potential for the time-dependent Hamiltonian
+      end do
+    end if
+
+!
+! psi_t    = | u_{n,k}(t) >, TDDFT orbitals
+!
+! rt%tpsi0 = | w_{n,k}(t) >, projection orbitals
+!
+! projection_option=='gs':
+!   | w_{n,k}(t) > = the eigenorbitals for the ground-state Hamiltonian whose k-point is shifted by A(t).
+!   i.e. | w_{n,k}(t) > = |u^{GS}_{n,k+A(t)/c}
+!   a.k.a the Houston functions
+!
+! projection_option=='td':
+!   | w_{n,k}(t) > = the instantaneous eigenorbitals for the time-dependent Hamiltonian.
+!
+
+
     call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
     & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
     dE = energy%E_kin - rt%E_old
@@ -2132,7 +2128,7 @@ contains
       end do
     end if
     
-    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
+    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < w_{n,k)(t) | u_{m,k}(t) >
 
     if(yn_spinorbit=='y') then
       mat(1:no0,1:no,1,1:nk) = mat(1:no0,1:no,1,1:nk) + mat(1:no0,1:no,2,1:nk)
@@ -2285,7 +2281,7 @@ contains
       end if
     end subroutine write_intraband_current
     
-  end subroutine projection_gs
+  end subroutine projection
 
 !===================================================================================================================================
 

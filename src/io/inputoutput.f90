@@ -2677,6 +2677,11 @@ contains
     case default                 ; stop "method_poisson must be 'cg', 'ft' or 'dirichlet'"
     end select
 
+    select case(projection_option)
+    case ('no','gs','td') ; continue
+    case default          ; stop "projection_option must be 'no','gs', or 'td'"
+    end select
+
 #ifdef USE_FFTW
     if(yn_ffte=='y'.and.yn_fftw=='y') then
       stop "either yn_ffte or yn_fftw can be specified"
