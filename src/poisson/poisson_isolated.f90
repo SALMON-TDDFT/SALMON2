@@ -660,31 +660,31 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
           rrrr=(xp2+yp2+zp2)**2
 
           ylm2(1)=1.d0
-          ylm2(2)=yy
+          ylm2(2)=-yy
           ylm2(3)=zz
-          ylm2(4)=xx
+          ylm2(4)=-xx
           ylm2(5)=sqrt(3.d0)*xy                      ! lm=5  (2 -2)
-          ylm2(6)=sqrt(3.d0)*yz                      ! lm=6  (2 -1)
+          ylm2(6)=-sqrt(3.d0)*yz                      ! lm=6  (2 -1)
           ylm2(7)=(2*zp2-xp2-yp2)/2.d0               ! lm=7  (2 0)
-          ylm2(8)=sqrt(3.d0)*xz                      ! lm=8  (2 1)
+          ylm2(8)=-sqrt(3.d0)*xz                      ! lm=8  (2 1)
           ylm2(9)=sqrt(3.d0/4.d0)*(xp2-yp2)          ! lm=9  (2 2)
-          ylm2(10)=sqrt(5.d0/8.d0)*yy*(3*xp2-yp2)    ! lm=10 (3 -3)
+          ylm2(10)=-sqrt(5.d0/8.d0)*yy*(3*xp2-yp2)    ! lm=10 (3 -3)
           ylm2(11)=sqrt(15.d0)*xx*yy*zz               ! lm=11 (3 -2)
-          ylm2(12)=sqrt(3.d0/8.d0)*yy*(4*zp2-xp2-yp2)  ! lm=12 (3 -1)
+          ylm2(12)=-sqrt(3.d0/8.d0)*yy*(4*zp2-xp2-yp2)  ! lm=12 (3 -1)
           ylm2(13)=zz*(2*zp2-3*xp2-3*yp2)/2.d0         ! lm=13 (3 0)
-          ylm2(14)=sqrt(3.d0/8.d0)*xx*(4*zp2-xp2-yp2)  ! lm=14 (3 1)
+          ylm2(14)=-sqrt(3.d0/8.d0)*xx*(4*zp2-xp2-yp2)  ! lm=14 (3 1)
           ylm2(15)=sqrt(15.d0/4.d0)*zz*(xp2-yp2)       ! lm=15 (3 2)
-          ylm2(16)=sqrt(5.d0/8.d0)*xx*(xp2-3*yp2)      ! lm=16 (3 3)
+          ylm2(16)=-sqrt(5.d0/8.d0)*xx*(xp2-3*yp2)      ! lm=16 (3 3)
 
-          ylm2(17)=rrrr*sqrt(35.d0)/2.d0*xy*(xp2-yp2)
-          ylm2(18)=rrrr*sqrt(35.d0/8.d0)*yz*(3*xp2-yp2)
-          ylm2(19)=rrrr*sqrt(5.d0)/2.d0*xy*(7*zp2-1.d0)
-          ylm2(20)=rrrr*sqrt(5.d0/8.d0)*yz*(7*zp2-3.d0)
-          ylm2(21)=rrrr*(35*zp2**2-30*zp2+3.d0)/8.d0
-          ylm2(22)=rrrr*sqrt(5.d0/8.d0)*xz*(7*zp2-3.d0)
-          ylm2(23)=rrrr*sqrt(5.d0)/4.d0*(7*zp2-1)*(xp2-yp2)
-          ylm2(24)=rrrr*sqrt(35.d0/8.d0)*xz*(xp2-3*yp2)
-          ylm2(25)=rrrr*sqrt(35.d0)/8.d0*(xp2**2+yp2**2-6*xp2*yp2)
+          ylm2(17)=sqrt(35.d0)/2.d0*xy*(xp2-yp2)
+          ylm2(18)=-sqrt(35.d0/8.d0)*yz*(3*xp2-yp2)
+          ylm2(19)=sqrt(5.d0)/2.d0*xy*(7*zp2-(xp2+yp2+zp2))
+          ylm2(20)=-sqrt(5.d0/8.d0)*yz*(7*zp2-3.d0*(xp2+yp2+zp2))
+          ylm2(21)=(35*zp2**2-30*zp2*(xp2+yp2+zp2)+3.d0*rrrr)/8.d0
+          ylm2(22)=-sqrt(5.d0/8.d0)*xz*(7*zp2-3.d0*(xp2+yp2+zp2))
+          ylm2(23)=sqrt(5.d0)/4.d0*(7*zp2-(xp2+yp2+zp2))*(xp2-yp2)
+          ylm2(24)=-sqrt(35.d0/8.d0)*xz*(xp2-3*yp2)
+          ylm2(25)=sqrt(35.d0)/8.d0*(xp2**2+yp2**2-6*xp2*yp2)
 
           deno(1)=rinv
           rbox=rinv*rinv
