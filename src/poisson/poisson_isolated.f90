@@ -289,8 +289,6 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   integer :: icount
   integer,allocatable :: itrho(:)
   integer :: num_center
-  real(8) :: ylm2(25)
-  integer :: l2(25)
   real(8) :: xx,yy,zz,rr,sum1,xxxx,yyyy,zzzz,rrrr
   real(8),allocatable :: rholm(:,:),rholm2(:,:) !,rholm3(:,:)
  !integer :: tid
@@ -298,9 +296,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   real(8),allocatable :: center_trho(:,:)
   real(8),allocatable :: center_trho_nume_deno(:,:)
   real(8),allocatable :: center_trho_nume_deno2(:,:)
-  real(8) :: xp2,yp2,zp2,xy,yz,xz
-  real(8) :: deno(25)
-  real(8) :: rinv, rbox, hvol
+  real(8) :: rinv, hvol
   real(8),allocatable :: Rion2(:,:)
   integer,allocatable :: ig_num(:)
   integer,allocatable :: ig(:,:,:)
@@ -631,75 +627,27 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       iend(ii)=(ii+1)*icount/nproc_xyz(k)
     end do
 
-    do ll=0,lmax_multipole
-      do lm=ll**2+1,(ll+1)**2
-        l2(lm)=ll
-      end do
-    end do
-
   !$OMP parallel do &
-  !$OMP private(xx,yy,zz,rr,xxxx,yyyy,zzzz,lm,ll,sum1,ylm2,rrrr,xp2,yp2,zp2,xy,yz,xz,rinv,rbox,deno,icen)
+  !$OMP private(jj,icen,xx,yy,zz,rinv,xxxx,yyyy,zzzz,sum1,ll,m,lm)
     do jj=istart(myrank_xyz(k)),iend(myrank_xyz(k))
       do icen=1,num_center
         if(itrho(icen)==1)then
-          xx=coordinate(poisson%ig_bound(1,jj,k),1)-center_trho(1,icen)
-          yy=coordinate(poisson%ig_bound(2,jj,k),2)-center_trho(2,icen)
-          zz=coordinate(poisson%ig_bound(3,jj,k),3)-center_trho(3,icen)
-          rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
-          rinv=1.d0/rr
-  !        xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-          xx=xx*rinv ; yy=yy*rinv ; zz=zz*rinv
-
-          xp2=xx**2
-          yp2=yy**2
-          zp2=zz**2
-          xy=xx*yy
-          yz=yy*zz
-          xz=xx*zz
-
-          rrrr=(xp2+yp2+zp2)**2
-
-          ylm2(1)=1.d0
-          ylm2(2)=-yy
-          ylm2(3)=zz
-          ylm2(4)=-xx
-          ylm2(5)=sqrt(3.d0)*xy                      ! lm=5  (2 -2)
-          ylm2(6)=-sqrt(3.d0)*yz                      ! lm=6  (2 -1)
-          ylm2(7)=(2*zp2-xp2-yp2)/2.d0               ! lm=7  (2 0)
-          ylm2(8)=-sqrt(3.d0)*xz                      ! lm=8  (2 1)
-          ylm2(9)=sqrt(3.d0/4.d0)*(xp2-yp2)          ! lm=9  (2 2)
-          ylm2(10)=-sqrt(5.d0/8.d0)*yy*(3*xp2-yp2)    ! lm=10 (3 -3)
-          ylm2(11)=sqrt(15.d0)*xx*yy*zz               ! lm=11 (3 -2)
-          ylm2(12)=-sqrt(3.d0/8.d0)*yy*(4*zp2-xp2-yp2)  ! lm=12 (3 -1)
-          ylm2(13)=zz*(2*zp2-3*xp2-3*yp2)/2.d0         ! lm=13 (3 0)
-          ylm2(14)=-sqrt(3.d0/8.d0)*xx*(4*zp2-xp2-yp2)  ! lm=14 (3 1)
-          ylm2(15)=sqrt(15.d0/4.d0)*zz*(xp2-yp2)       ! lm=15 (3 2)
-          ylm2(16)=-sqrt(5.d0/8.d0)*xx*(xp2-3*yp2)      ! lm=16 (3 3)
-
-          ylm2(17)=sqrt(35.d0)/2.d0*xy*(xp2-yp2)
-          ylm2(18)=-sqrt(35.d0/8.d0)*yz*(3*xp2-yp2)
-          ylm2(19)=sqrt(5.d0)/2.d0*xy*(7*zp2-(xp2+yp2+zp2))
-          ylm2(20)=-sqrt(5.d0/8.d0)*yz*(7*zp2-3.d0*(xp2+yp2+zp2))
-          ylm2(21)=(35*zp2**2-30*zp2*(xp2+yp2+zp2)+3.d0*rrrr)/8.d0
-          ylm2(22)=-sqrt(5.d0/8.d0)*xz*(7*zp2-3.d0*(xp2+yp2+zp2))
-          ylm2(23)=sqrt(5.d0)/4.d0*(7*zp2-(xp2+yp2+zp2))*(xp2-yp2)
-          ylm2(24)=-sqrt(35.d0/8.d0)*xz*(xp2-3*yp2)
-          ylm2(25)=sqrt(35.d0)/8.d0*(xp2**2+yp2**2-6*xp2*yp2)
-
-          deno(1)=rinv
-          rbox=rinv*rinv
-          deno(2:4)=rbox
-          rbox=rbox*rinv
-          deno(5:9)=rbox
-          rbox=rbox*rinv
-          deno(10:16)=rbox
-          rbox=rbox*rinv
-          deno(17:25)=rbox
-
-          sum1=0.d0
-          do lm=1,(lmax_multipole+1)**2
-            sum1=sum1+ylm2(lm)*deno(lm)*rholm(lm,icen)
+          xx   = coordinate(poisson%ig_bound(1,jj,k),1)-center_trho(1,icen)
+          yy   = coordinate(poisson%ig_bound(2,jj,k),2)-center_trho(2,icen)
+          zz   = coordinate(poisson%ig_bound(3,jj,k),3)-center_trho(3,icen)
+          rinv = 1.d0/(sqrt(xx**2+yy**2+zz**2)+1.d-50)
+          xxxx = xx*rinv
+          yyyy = yy*rinv
+          zzzz = zz*rinv
+          
+          sum1 = 0.d0
+          do ll=0,lmax_multipole
+          do m=-ll,ll
+            lm   = ll*ll+ll+1+m
+            sum1 = sum1+ylm(xxxx,yyyy,zzzz,ll,m)*(rinv**(ll+1))*rholm(lm,icen)
           end do
+          end do
+          
           poisson%wkbound2(jj) = poisson%wkbound2(jj) + sum1
         end if
       end do
