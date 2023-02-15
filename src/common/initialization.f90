@@ -1065,7 +1065,15 @@ subroutine prep_dgf(lg,mg,system,info,poisson)
   use communication, only: comm_is_root, comm_bcast
   use parallelization, only: nproc_id_global, nproc_group_global
   use poisson_dirichlet, only: calc_dgf
+#ifdef USE_FFTW
+  use salmon_global, only: yn_fftw
+  use, intrinsic :: iso_c_binding
+  use mpi
+#endif
   implicit none
+#ifdef USE_FFTW
+  include 'fftw3-mpi.f03'
+#endif
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: mg
   type(s_dft_system)     ,intent(in)    :: system
@@ -1084,6 +1092,12 @@ subroutine prep_dgf(lg,mg,system,info,poisson)
   end if
 
   call comm_bcast(poisson%dgf,nproc_group_global)
+
+#ifdef USE_FFTW
+  if(yn_fftw=='y') then
+    call fftw_mpi_init()
+  end if
+#ENDIF
 
   return
 end subroutine prep_dgf

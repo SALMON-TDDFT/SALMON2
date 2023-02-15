@@ -254,6 +254,9 @@ subroutine calc_interior_potential(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,  &
   use communication, only: comm_summation
   use pack_unpack, only: copy_data
   use math_constants, only : pi
+#ifdef USE_FFTW
+  use salmon_global, only: yn_fftw
+#endif
   implicit none
   integer, intent(in)               :: lx_s,lx_e
   integer, intent(in)               :: ly_s,ly_e
@@ -270,16 +273,12 @@ subroutine calc_interior_potential(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,  &
   integer                           :: mx,my,mz
   integer                           :: ix,iy,iz
   integer                           :: kx,ky,kz
-  real(8)                           :: xil(lx_s:lx_e,lx_s:lx_e)
-  real(8)                           :: yjm(ly_s:ly_e,ly_s:ly_e)
-  real(8)                           :: zkn(lz_s:lz_e,lz_s:lz_e)
   real(8)                           :: rlambda_x(lx_s:lx_e)
   real(8)                           :: rlambda_y(ly_s:ly_e)
   real(8)                           :: rlambda_z(lz_s:lz_e)
   real(8)                           :: ff1x(lx_s:lx_e,my_s:my_e,mz_s:mz_e)
   real(8)                           :: ff2x(lx_s:lx_e,my_s:my_e,mz_s:mz_e)
   real(8)                           :: ff1y(mx_s:mx_e,ly_s:ly_e,mz_s:mz_e)
-  real(8)                           :: ff2y(mx_s:mx_e,ly_s:ly_e,mz_s:mz_e)
   real(8)                           :: ff1z(mx_s:mx_e,my_s:my_e,lz_s:lz_e)
   real(8)                           :: ff2z(mx_s:mx_e,my_s:my_e,lz_s:lz_e)
   real(8)                           :: phi_tilde_lmn(mx_s:mx_e,my_s:my_e,mz_s:mz_e)
@@ -290,25 +289,6 @@ subroutine calc_interior_potential(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,  &
   mx=mx_e-mx_s+1
   my=my_e-my_s+1
   mz=mz_e-mz_s+1
-
-!$OMP parallel do private(kx,ix)
-  do kx=lx_s,lx_e
-    do ix=lx_s,lx_e
-      xil(ix,kx)=sin(pi*dble(ix-lx_s+1)*dble(kx-lx_s+1)/dble(lx+1))
-    end do
-  end do
-!$OMP parallel do private(ky,iy)
-  do ky=ly_s,ly_e
-    do iy=ly_s,ly_e
-      yjm(iy,ky)=sin(pi*dble(iy-ly_s+1)*dble(ky-ly_s+1)/dble(ly+1))
-    end do
-  end do
-!$OMP parallel do private(kz,iz)
-  do kz=lz_s,lz_e
-    do iz=lz_s,lz_e
-      zkn(iz,kz)=sin(pi*dble(iz-lz_s+1)*dble(kz-lz_s+1)/dble(lz+1))
-    end do
-  end do
 
 !$OMP parallel do private(kx)
   do kx=lx_s,lx_e
@@ -341,47 +321,19 @@ subroutine calc_interior_potential(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,  &
     call comm_summation(ff1z,ff2z,mx*my*lz,info%icomm_z)
   end if
 
-!$OMP parallel do private(kz,iy,ix)
-  do kz = mz_s,mz_e
-  do iy = my_s,my_e
-  do ix = mx_s,mx_e
-    ff1y(ix,iy,kz) = sum(ff2z(ix,iy,:)*zkn(:,kz))
-  end do
-  end do
-  end do
-  if(yn_discrete_green=='y')then
-    call copy_data(ff1y,ff2y)
-  else
-    call comm_summation(ff1y,ff2y,mx*ly*mz,info%icomm_y)
-  end if
 
-!$OMP parallel do private(kz,ky,ix)
-  do kz = mz_s,mz_e
-  do ky = my_s,my_e
-  do ix = mx_s,mx_e
-    ff1x(ix,ky,kz) = sum(ff2y(ix,:,kz)*yjm(:,ky))
-  end do
-  end do
-  end do
-  if(yn_discrete_green=='y')then
-    call copy_data(ff1x,ff2x)
+#ifdef USE_FFTW
+  if(yn_fftw=='y')then
+    call fourier_real_odd_fftw(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
+                               mx_s,mx_e,my_s,my_e,mz_s,mz_e,ff2z,ff2x,yn_discrete_green,info)
   else
-    call comm_summation(ff1x,ff2x,lx*my*mz,info%icomm_x)
+#endif
+    call fourier_real_odd_3d(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
+                             mx_s,mx_e,my_s,my_e,mz_s,mz_e,ff2z,ff2x,yn_discrete_green,info)
+#ifdef USE_FFTW
   end if
+#endif
 
-!$OMP parallel do private(kz,ky,kx)
-  do kz = mz_s,mz_e
-  do ky = my_s,my_e
-  do kx = mx_s,mx_e
-    ff1x(kx,ky,kz) = sum(ff2x(:,ky,kz)*xil(:,kx))
-  end do
-  end do
-  end do
-  if(yn_discrete_green=='y')then
-    call copy_data(ff1x,ff2x)
-  else
-    call comm_summation(ff1x,ff2x,lx*my*mz,info%icomm_x)
-  end if
 
   phi_tilde_lmn=0.d0
 !$OMP parallel do private(kz,ky,kx)
@@ -407,47 +359,18 @@ subroutine calc_interior_potential(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,  &
     call comm_summation(ff1z,ff2z,mx*my*lz,info%icomm_z)
   end if
 
-!$OMP parallel do private(iz,ky,kx)
-  do iz = mz_s,mz_e
-  do ky = my_s,my_e
-  do kx = mx_s,mx_e
-    ff1y(kx,ky,iz) = sum(ff2z(kx,ky,:)*zkn(iz,:))
-  end do
-  end do
-  end do
-  if(yn_discrete_green=='y')then
-    call copy_data(ff1y,ff2y)
-  else
-    call comm_summation(ff1y,ff2y,mx*ly*mz,info%icomm_y)
-  end if
 
-!$OMP parallel do private(iz,iy,kx)
-  do iz = mz_s,mz_e
-  do iy = my_s,my_e
-  do kx = mx_s,mx_e
-    ff1x(kx,iy,iz) = sum(ff2y(kx,:,iz)*yjm(iy,:))
-  end do
-  end do
-  end do
-  if(yn_discrete_green=='y')then
-    call copy_data(ff1x,ff2x)
+#ifdef USE_FFTW
+  if(yn_fftw=='y')then
+    call fourier_real_odd_fftw(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
+                               mx_s,mx_e,my_s,my_e,mz_s,mz_e,ff2z,ff2x,yn_discrete_green,info)
   else
-    call comm_summation(ff1x,ff2x,lx*my*mz,info%icomm_x)
+#endif
+    call fourier_real_odd_3d(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
+                             mx_s,mx_e,my_s,my_e,mz_s,mz_e,ff2z,ff2x,yn_discrete_green,info)
+#ifdef USE_FFTW
   end if
-
-!$OMP parallel do private(iz,iy,ix)
-  do iz = mz_s,mz_e
-  do iy = my_s,my_e
-  do ix = mx_s,mx_e
-    ff1x(ix,iy,iz) = sum(ff2x(:,iy,iz)*xil(ix,:))
-  end do
-  end do
-  end do
-  if(yn_discrete_green=='y')then
-    call copy_data(ff1x,ff2x)
-  else
-    call comm_summation(ff1x,ff2x,lx*my*mz,info%icomm_x)
-  end if
+#endif
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=mz_s,mz_e
@@ -464,6 +387,241 @@ end subroutine calc_interior_potential
 
 !==================================================================================================
 
+subroutine fourier_real_odd_3d(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
+                               mx_s,mx_e,my_s,my_e,mz_s,mz_e,ff2z,ff2x,yn_discrete_green,info)
+  ! Forward transform and backward transform are same formula.
+  use structures, only: s_parallel_info
+  use communication, only: comm_summation
+  use pack_unpack, only: copy_data
+  use math_constants, only : pi
+  implicit none
+  integer, intent(in)               :: lx_s,lx_e
+  integer, intent(in)               :: ly_s,ly_e
+  integer, intent(in)               :: lz_s,lz_e
+  integer, intent(in)               :: mx_s,mx_e
+  integer, intent(in)               :: my_s,my_e
+  integer, intent(in)               :: mz_s,mz_e
+  real(8), intent(in)               :: ff2z(mx_s:mx_e,my_s:my_e,lz_s:lz_e)
+  real(8), intent(out)              :: ff2x(lx_s:lx_e,my_s:my_e,mz_s:mz_e)
+  character(1), intent(in)          :: yn_discrete_green
+  type(s_parallel_info) ,intent(in) :: info
+  integer                           :: lx,ly,lz
+  integer                           :: mx,my,mz
+  integer                           :: ix,iy,iz
+  integer                           :: kx,ky,kz
+  real(8)                           :: xil(lx_s:lx_e,lx_s:lx_e)
+  real(8)                           :: yjm(ly_s:ly_e,ly_s:ly_e)
+  real(8)                           :: zkn(lz_s:lz_e,lz_s:lz_e)
+  real(8)                           :: ff1x(lx_s:lx_e,my_s:my_e,mz_s:mz_e)
+  real(8)                           :: ff1y(mx_s:mx_e,ly_s:ly_e,mz_s:mz_e)
+  real(8)                           :: ff2y(mx_s:mx_e,ly_s:ly_e,mz_s:mz_e)
+
+  lx=lx_e-lx_s+1
+  ly=ly_e-ly_s+1
+  lz=lz_e-lz_s+1
+  mx=mx_e-mx_s+1
+  my=my_e-my_s+1
+  mz=mz_e-mz_s+1
+
+!$OMP parallel do private(kx,ix)
+  do kx=lx_s,lx_e
+    do ix=lx_s,lx_e
+      xil(ix,kx)=sin(pi*dble(ix-lx_s+1)*dble(kx-lx_s+1)/dble(lx+1))
+    end do
+  end do
+!$OMP parallel do private(ky,iy)
+  do ky=ly_s,ly_e
+    do iy=ly_s,ly_e
+      yjm(iy,ky)=sin(pi*dble(iy-ly_s+1)*dble(ky-ly_s+1)/dble(ly+1))
+    end do
+  end do
+!$OMP parallel do private(kz,iz)
+  do kz=lz_s,lz_e
+    do iz=lz_s,lz_e
+      zkn(iz,kz)=sin(pi*dble(iz-lz_s+1)*dble(kz-lz_s+1)/dble(lz+1))
+    end do
+  end do
+
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+  do iz = mz_s,mz_e
+  do iy = ly_s,ly_e
+  do ix = mx_s,mx_e
+    ff1y(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+  do iz = mz_s,mz_e
+  do iy = my_s,my_e
+  do ix = lx_s,lx_e
+    ff1x(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+
+!$OMP parallel do private(kz,iy,ix) collapse(2)
+  do kz = mz_s,mz_e
+  do iy = my_s,my_e
+  do ix = mx_s,mx_e
+    ff1y(ix,iy,kz) = sum(ff2z(ix,iy,:)*zkn(:,kz))
+  end do
+  end do
+  end do
+  if(yn_discrete_green=='y')then
+    call copy_data(ff1y,ff2y)
+  else
+    call comm_summation(ff1y,ff2y,mx*ly*mz,info%icomm_y)
+  end if
+
+!$OMP parallel do private(kz,ky,ix) collapse(2)
+  do kz = mz_s,mz_e
+  do ky = my_s,my_e
+  do ix = mx_s,mx_e
+    ff1x(ix,ky,kz) = sum(ff2y(ix,:,kz)*yjm(:,ky))
+  end do
+  end do
+  end do
+  if(yn_discrete_green=='y')then
+    call copy_data(ff1x,ff2x)
+  else
+    call comm_summation(ff1x,ff2x,lx*my*mz,info%icomm_x)
+  end if
+
+!$OMP parallel do private(kz,ky,kx) collapse(2)
+  do kz = mz_s,mz_e
+  do ky = my_s,my_e
+  do kx = mx_s,mx_e
+    ff1x(kx,ky,kz) = sum(ff2x(:,ky,kz)*xil(:,kx))
+  end do
+  end do
+  end do
+  if(yn_discrete_green=='y')then
+    call copy_data(ff1x,ff2x)
+  else
+    call comm_summation(ff1x,ff2x,lx*my*mz,info%icomm_x)
+  end if
+
+  return
+
+end subroutine fourier_real_odd_3d
+
+!==================================================================================================
+#ifdef USE_FFTW
+
+subroutine fourier_real_odd_fftw(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
+                                 mx_s,mx_e,my_s,my_e,mz_s,mz_e,ff2z,ff2x,yn_discrete_green,info)
+  ! Forward transform and backward transform are same formula.
+  use structures, only: s_parallel_info
+  use communication, only: comm_summation
+  use pack_unpack, only: copy_data
+  use, intrinsic :: iso_c_binding
+  implicit none
+  include 'fftw3-mpi.f03'
+  integer, intent(in)               :: lx_s,lx_e
+  integer, intent(in)               :: ly_s,ly_e
+  integer, intent(in)               :: lz_s,lz_e
+  integer, intent(in)               :: mx_s,mx_e
+  integer, intent(in)               :: my_s,my_e
+  integer, intent(in)               :: mz_s,mz_e
+  real(8), intent(in)               :: ff2z(mx_s:mx_e,my_s:my_e,lz_s:lz_e)
+  real(8), intent(out)              :: ff2x(lx_s:lx_e,my_s:my_e,mz_s:mz_e)
+  character(1), intent(in)          :: yn_discrete_green
+  type(s_parallel_info) ,intent(in) :: info
+  integer                           :: lx,ly,lz
+  integer(C_INTPTR_T) :: alloc_local, local_N, local_k_offset
+  integer :: int_local_N
+  !real(C_DOUBLE),allocatable :: fdata_1(1:lx_e-lx_s+1,1:ly_e-ly_s+1,1:lz_e-lz_s+1)
+  !real(C_DOUBLE),allocatable :: fdata_2(1:lx_e-lx_s+1,1:ly_e-ly_s+1,1:lz_e-lz_s+1)
+  real(C_DOUBLE),allocatable :: fdata_1(:,:,:)
+  real(C_DOUBLE),allocatable :: fdata_2(:,:,:)
+  integer :: i, j, k
+  integer(C_INTPTR_T) :: L, M, N
+  type(C_PTR) :: plan
+
+  lx=lx_e-lx_s+1
+  ly=ly_e-ly_s+1
+  lz=lz_e-lz_s+1
+
+  if(yn_discrete_green=='y')then
+    allocate(fdata_1(lx,ly,lz))
+    allocate(fdata_2(lx,ly,lz))
+
+    plan = fftw_plan_r2r_3d(lz, ly, lx, fdata_1, fdata_2, &
+                            FFTW_RODFT00, FFTW_RODFT00, FFTW_RODFT00, FFTW_ESTIMATE)
+
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, lz
+    do j = 1, ly
+    do i = 1, lx
+      fdata_1(i, j, k) = ff2z(i+lx_s-1, j+ly_s-1, k+lz_s-1)
+    end do
+    end do
+    end do
+
+    call fftw_execute_r2r(plan, fdata_1, fdata_2)
+
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, lz
+    do j = 1, ly
+    do i = 1, lx
+      ff2x(i+lx_s-1,j+ly_s-1,k+lz_s-1) = fdata_2(i,j,k)/8.d0
+    end do
+    end do
+    end do
+
+    call fftw_destroy_plan(plan)
+    deallocate(fdata_1,fdata_2)
+
+  else
+    L = lx
+    M = ly
+    N = lz
+
+!   get local data size and allocate (note dimension reversal)
+    alloc_local = fftw_mpi_local_size_3d(N, M, L, &
+       &                info%icomm_z, local_N, local_k_offset)
+
+    int_local_N = local_N
+
+    allocate(fdata_1(lx,ly,int_local_N))
+    allocate(fdata_2(lx,ly,int_local_N))
+
+    fdata_1=0.d0
+
+    plan = fftw_mpi_plan_r2r_3d(N, M, L, fdata_1, fdata_2, &
+                                info%icomm_z, FFTW_RODFT00, FFTW_RODFT00, FFTW_RODFT00, FFTW_ESTIMATE)
+!
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, int_local_N
+    do j = 1, ly
+    do i = 1, lx
+      fdata_1(i,j,k) = ff2z(i+lx_s-1,j+ly_s-1,k+mz_s-1)
+    end do
+    end do
+    end do
+
+    call fftw_mpi_execute_r2r(plan, fdata_1, fdata_2)
+!
+!$OMP parallel do private(i,j,k) collapse(2)
+    do k = 1, int_local_N
+    do j = 1, ly
+    do i = 1, lx
+      ff2x(i+lx_s-1,j+ly_s-1,k+mz_s-1) = fdata_2(i,j,k)/8.d0
+    end do
+    end do
+    end do
+
+    call fftw_destroy_plan(plan)
+    deallocate(fdata_1,fdata_2)
+  end if
+
+  return
+
+end subroutine fourier_real_odd_fftw
+
+#endif
+!==================================================================================================
+
 subroutine calc_theta(lx,ly,lz,ix,iy,iz,dx,dy,dz,dgf,sigma,theta)
   implicit none
   integer, intent(in)    :: lx,ly,lz
@@ -474,7 +632,6 @@ subroutine calc_theta(lx,ly,lz,ix,iy,iz,dx,dy,dz,dgf,sigma,theta)
   real(8), intent(inout) :: theta(0:lx+1,0:ly+1,0:lz+1)
   integer                :: kx,ky,kz
   real(8)                :: tmp
-
 
   tmp=0.d0
 !$OMP parallel do reduction(+:tmp) private(ky,kz)
