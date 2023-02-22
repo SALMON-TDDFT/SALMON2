@@ -213,20 +213,20 @@ module salmon_global
   real(8)        :: hx_m
   real(8)        :: hy_m
   real(8)        :: hz_m
-  integer        :: nksplit !! TODO: remove this variable
-  integer        :: nxysplit !! TODO: remove this variable
-  ! The input variables nxvac(l|r)_m do not recommend to use,
-  ! However I tempolary remain them for the reason of the compatibility.
-  ! Please use  n(x|y|z)_origin_m to provide the same functionality.
-  integer        :: nxvacl_m
-  integer        :: nxvacr_m
+  integer        :: nksplit ! this parameter will be deprecated in a future release
+  integer        :: nxysplit ! this parameter will be deprecated in a future release
+  integer        :: nxvacl_m ! this parameter will be deprecated in a future release
+  integer        :: nxvacr_m ! this parameter will be deprecated in a future release
   integer        :: nxvac_m(1:2)
   integer        :: nyvac_m(1:2)
   integer        :: nzvac_m(1:2)
   integer        :: nx_origin_m
   integer        :: ny_origin_m
   integer        :: nz_origin_m
-  character(100) :: file_macropoint
+  integer        :: out_ms_region_ix_m(1:2)
+  integer        :: out_ms_region_iy_m(1:2)
+  integer        :: out_ms_region_iz_m(1:2)
+  character(256) :: file_macropoint
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   integer        :: nmacro_chunk
