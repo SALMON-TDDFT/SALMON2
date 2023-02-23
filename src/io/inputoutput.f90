@@ -373,16 +373,19 @@ contains
       & hx_m, &
       & hy_m, &
       & hz_m, &
-      & nksplit, &
-      & nxysplit, &
-      & nxvacl_m, &
-      & nxvacr_m, &
+      & nksplit, & 
+      & nxysplit, & 
+      & nxvacl_m, & 
+      & nxvacr_m, & 
       & nxvac_m, &
       & nyvac_m, &
       & nzvac_m, &
       & nx_origin_m, &
       & ny_origin_m, &
       & nz_origin_m, &
+      & out_ms_region_ix_m, &
+      & out_ms_region_iy_m, &
+      & out_ms_region_iz_m, &
       & file_macropoint, &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
@@ -765,6 +768,12 @@ contains
     nx_origin_m = 1
     ny_origin_m = 1
     nz_origin_m = 1
+    out_ms_region_ix_m(1) = -999999
+    out_ms_region_ix_m(2) = +999999
+    out_ms_region_iy_m(1) = -999999
+    out_ms_region_iy_m(2) = +999999
+    out_ms_region_iz_m(1) = -999999
+    out_ms_region_iz_m(2) = +999999
     file_macropoint = ''
     set_ini_coor_vel= 'n'
     nmacro_write_group= -1
@@ -1292,15 +1301,18 @@ contains
     hy_m = hy_m * ulength_to_au
     call comm_bcast(hz_m      ,nproc_group_global)
     hz_m = hz_m * ulength_to_au
-    call comm_bcast(nksplit   ,nproc_group_global)
-    call comm_bcast(nxysplit  ,nproc_group_global)
-    call comm_bcast(nxvacl_m  ,nproc_group_global)
-    call comm_bcast(nxvacr_m  ,nproc_group_global)
+    call comm_bcast(nksplit   ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxysplit  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvacl_m  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvacr_m  ,nproc_group_global) ! this parameter will be depricated in a future release
     call comm_bcast(nxvac_m  ,nproc_group_global)
     call comm_bcast(nyvac_m  ,nproc_group_global)
     call comm_bcast(nzvac_m  ,nproc_group_global)
     call comm_bcast(nx_origin_m,nproc_group_global)
     call comm_bcast(ny_origin_m,nproc_group_global)
+    call comm_bcast(out_ms_region_ix_m,nproc_group_global)
+    call comm_bcast(out_ms_region_iy_m,nproc_group_global)
+    call comm_bcast(out_ms_region_iz_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
     call comm_bcast(file_macropoint, nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
@@ -2126,6 +2138,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_ix_m', out_ms_region_ix_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iy_m', out_ms_region_iy_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iz_m', out_ms_region_iz_m(1:2)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
