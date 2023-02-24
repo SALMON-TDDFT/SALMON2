@@ -29,7 +29,7 @@ subroutine main_multiscale_ssbe(icomm)
     integer, allocatable :: itbl_macro_coord(:, :)
     integer :: nmacro, nmacro_max
     integer :: imacro_min, imacro_max
-    integer :: ix, iy, iz, mt, imacro, iobs
+    integer :: ix, iy, iz, mt, imacro, iobs, ii, jj
     real(8) :: jmat(3)
 
     type(s_fdtd_system) :: fs
@@ -58,6 +58,18 @@ subroutine main_multiscale_ssbe(icomm)
     fs%mg%ie_array(1:3) = fs%mg%ie(1:3) + fs%mg%nd
     fs%hgs(1:3) = (/ hx_m, hy_m, hz_m /)
     fw%dt = dt
+    fw%fdtddim = trim(fdtddim)
+    fs%rlsize(1) = 1d0
+    fs%rlsize(2) = 1d0
+    fs%rlsize(3) = 1d0
+    fs%origin(1) = 0d0
+    fs%origin(2) = 0d0
+    fs%origin(3) = 0d0
+    do ii = 1, 3
+        do jj = 1, 2
+            fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
+        end do
+    end do
     call weyl_init(fs, fw)
 
     flag_1d_model = ((ny_m == 1) .and. (nz_m == 1))
@@ -77,6 +89,7 @@ subroutine main_multiscale_ssbe(icomm)
     end if
     call comm_bcast(itbl_macro_coord, icomm, 0)
     call comm_bcast(nmacro, icomm, 0)
+    fw%epsilon%f(:, :, :) = 1.0d0
 
     if (nmacro > 0) then
         if (0.0d0 < al(1)) al_vec1(1:3) = (/ al(1), 0.0d0, 0.0d0 /)
@@ -383,11 +396,17 @@ subroutine set_incident_field(mt, Ac, fs, fw)
                     w = r_it - it
                     fw%vec_Ac_new%v(:, ix, iy, iz) = w * Ac(:, it+1) + (1.0d0-w) * Ac(:, it)
                 end if
-                r_it = r_it - 1
+                r_it = r_it - 1.0d0
                 it = int(r_it)
                 if ((0 <= it) .and. (it < mt)) then
                     w = r_it - it
                     fw%vec_Ac%v(:, ix, iy, iz) = w * Ac(:, it+1) + (1.0d0-w) * Ac(:, it)
+                end if
+                r_it = r_it - 1.0d0
+                it = int(r_it)
+                if ((0 <= it) .and. (it < mt)) then
+                    w = r_it - it
+                    fw%vec_Ac_old%v(:, ix, iy, iz) = w * Ac(:, it+1) + (1.0d0-w) * Ac(:, it)
                 end if
             end do
         end do
@@ -470,7 +489,7 @@ subroutine write_wave_data_file(fh, iit, fs, fw)
     integer :: iiy, iiz
     iiy = fs%mg%is(2)
     iiz = fs%mg%is(3)
-    ! dt = fw%dt
+
     ! Left side boundary:
     dx_Ac(:) = (fw%vec_Ac%v(:,0,iiy,iiz) - fw%vec_Ac%v(:,-1,iiy,iiz)) / fs%hgs(1)
     dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,0,iiy,iiz) + fw%vec_Ac_new%v(:,-1,iiy,iiz)) & 

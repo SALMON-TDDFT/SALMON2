@@ -266,8 +266,7 @@ contains
         return
         end subroutine dt_evolve_Ac_2d
     
-    
-        subroutine dt_evolve_Ac_3d()
+    subroutine dt_evolve_Ac_3d()
         implicit none
         integer :: i1, i2, i3
         real(8) :: rot2_Ac(3) ! rot rot Ac
@@ -275,7 +274,7 @@ contains
     
         call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
         call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)
-    
+        
         r_inv_h(:) = 1.00 / fs%hgs(:)
     
         !$omp parallel do collapse(2) default(shared) private(i1,i2,i3,rot2_Ac)
@@ -284,44 +283,45 @@ contains
             do i1 = fs%mg%is(1), fs%mg%ie(1)
                 ! Calculate Rot Rot A
                 rot2_Ac(1) = - (r_inv_h(2)**2) * fw%vec_Ac%v(1, i1+0, i2-1, i3+0) &
-                & - (r_inv_h(3)**2) * fw%vec_Ac%v(1, i1+0, i2+0, i3-1) &
-                & + (2d0* (r_inv_h(2)**2 + r_inv_h(3)**2)) * fw%vec_Ac%v(1, i1+0, i2+0, i3+0) &
-                & - (r_inv_h(3)**2) * fw%vec_Ac%v(1, i1+0, i2+0, i3+1) &
-                & - (r_inv_h(2)**2) * fw%vec_Ac%v(1, i1+0, i2+1, i3+0) &
-                & + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1-1, i2-1, i3+0) &
-                & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1-1, i2+1, i3+0) &
-                & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1+1, i2-1, i3+0) &
-                & + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1+1, i2+1, i3+0) &
-                & + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1-1, i2+0, i3-1) &
-                & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1-1, i2+0, i3+1) &
-                & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+1, i2+0, i3-1) &
-                & + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+1, i2+0, i3+1)
+                    & - (r_inv_h(3)**2) * fw%vec_Ac%v(1, i1+0, i2+0, i3-1) &
+                    & + (2d0* (r_inv_h(2)**2 + r_inv_h(3)**2)) * fw%vec_Ac%v(1, i1+0, i2+0, i3+0) &
+                    & - (r_inv_h(3)**2) * fw%vec_Ac%v(1, i1+0, i2+0, i3+1) &
+                    & - (r_inv_h(2)**2) * fw%vec_Ac%v(1, i1+0, i2+1, i3+0) &
+                    & + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1-1, i2-1, i3+0) &
+                    & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1-1, i2+1, i3+0) &
+                    & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1+1, i2-1, i3+0) &
+                    & + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(2, i1+1, i2+1, i3+0) &
+                    & + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1-1, i2+0, i3-1) &
+                    & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1-1, i2+0, i3+1) &
+                    & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+1, i2+0, i3-1) &
+                    & + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+1, i2+0, i3+1)
                 rot2_Ac(2) = + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1-1, i2-1, i3+0) &
-                & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1-1, i2+1, i3+0) &
-                & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2-1, i3+0) &
-                & + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2+1, i3+0) &
-                & - (r_inv_h(1)**2) * fw%vec_Ac%v(2, i1-1, i2+0, i3+0) &
-                & - (r_inv_h(3)**2) * fw%vec_Ac%v(2, i1+0, i2+0, i3-1) &
-                & + (2d0* (r_inv_h(1)**2 + r_inv_h(3)**2)) * fw%vec_Ac%v(2, i1+0, i2+0, i3+0) &
-                & - (r_inv_h(3)**2) * fw%vec_Ac%v(2, i1+0, i2+0, i3+1) &
-                & - (r_inv_h(1)**2) * fw%vec_Ac%v(2, i1+1, i2+0, i3+0) &
-                & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2-1, i3-1) &
-                & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2-1, i3+1) &
-                & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2+1, i3-1) &
-                & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2+1, i3+1)
+                    & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1-1, i2+1, i3+0) &
+                    & - (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2-1, i3+0) &
+                    & + (r_inv_h(1) * r_inv_h(2) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2+1, i3+0) &
+                    & - (r_inv_h(1)**2) * fw%vec_Ac%v(2, i1-1, i2+0, i3+0) &
+                    & - (r_inv_h(3)**2) * fw%vec_Ac%v(2, i1+0, i2+0, i3-1) &
+                    & + (2d0* (r_inv_h(1)**2 + r_inv_h(3)**2)) * fw%vec_Ac%v(2, i1+0, i2+0, i3+0) &
+                    & - (r_inv_h(3)**2) * fw%vec_Ac%v(2, i1+0, i2+0, i3+1) &
+                    & - (r_inv_h(1)**2) * fw%vec_Ac%v(2, i1+1, i2+0, i3+0) &
+                    & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2-1, i3-1) &
+                    & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2-1, i3+1) &
+                    & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2+1, i3-1) &
+                    & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(3, i1+0, i2+1, i3+1)
                 rot2_Ac(3) = + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1-1, i2+0, i3-1) &
-                & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1-1, i2+0, i3+1) &
-                & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2+0, i3-1) &
-                & + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2+0, i3+1) &
-                & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2-1, i3-1) &
-                & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2-1, i3+1) &
-                & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2+1, i3-1) &
-                & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2+1, i3+1) &
-                & - (r_inv_h(1)**2) * fw%vec_Ac%v(3, i1-1, i2+0, i3+0) &
-                & - (r_inv_h(2)**2) * fw%vec_Ac%v(3, i1+0, i2-1, i3+0) &
-                & + (2d0 * (r_inv_h(1)**2 + r_inv_h(2)**2)) * fw%vec_Ac%v(3, i1+0, i2+0, i3+0) &
-                & - (r_inv_h(2)**2) * fw%vec_Ac%v(3, i1+0, i2+1, i3+0) &
-                & - (r_inv_h(1)**2) * fw%vec_Ac%v(3, i1+1, i2+0, i3+0)
+                    & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1-1, i2+0, i3+1) &
+                    & - (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2+0, i3-1) &
+                    & + (r_inv_h(1) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(1, i1+1, i2+0, i3+1) &
+                    & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2-1, i3-1) &
+                    & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2-1, i3+1) &
+                    & - (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2+1, i3-1) &
+                    & + (r_inv_h(2) * r_inv_h(3) * 0.25d0) * fw%vec_Ac%v(2, i1+0, i2+1, i3+1) &
+                    & - (r_inv_h(1)**2) * fw%vec_Ac%v(3, i1-1, i2+0, i3+0) &
+                    & - (r_inv_h(2)**2) * fw%vec_Ac%v(3, i1+0, i2-1, i3+0) &
+                    & + (2d0 * (r_inv_h(1)**2 + r_inv_h(2)**2)) * fw%vec_Ac%v(3, i1+0, i2+0, i3+0) &
+                    & - (r_inv_h(2)**2) * fw%vec_Ac%v(3, i1+0, i2+1, i3+0) &
+                    & - (r_inv_h(1)**2) * fw%vec_Ac%v(3, i1+1, i2+0, i3+0)
+
                 fw%vec_Ac_new%v(:,i1, i2, i3) = &
                 & + 2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
                 & +  4.0 * pi * (fw%dt**2) * fw%vec_j_em%v(:,i1, i2, i3) / fw%epsilon%f(i1, i2, i3) &
@@ -332,66 +332,67 @@ contains
         !$omp end parallel do
     
         ! impose boundary condition for x-lower side
-        select case (fs%a_bc(1, 1))
-        case('periodic')
+        ! select case (fs%a_bc(1, 1))
+        ! case('periodic')
             call copy_data(fw%vec_Ac_new%v(:, ie(1)-nd+1:ie(1), :, :), fw%vec_Ac_new%v(:, is(1)-nd:is(1)-1, :, :))
-        case('pec')
-            call copy_data( &
-            & fw%vec_Ac%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)), &
-            & fw%vec_Ac_new%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)))
-        end select
-    
+        ! case('pec')
+        !     call copy_data( &
+        !     & fw%vec_Ac%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)), &
+        !     & fw%vec_Ac_new%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)))
+        ! end select
+
         ! impose boundary condition for x-upper side
-        select case (fs%a_bc(1, 2))
-        case('periodic')
+        ! select case (fs%a_bc(1, 2))
+        ! case('periodic')
             call copy_data(fw%vec_Ac_new%v(:, is(1):is(1)+nd-1, :, :), fw%vec_Ac_new%v(:, ie(1)+1:ie(1)+nd, :, :))
-        case('pec')
-            call copy_data( &
-            & fw%vec_Ac%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)), &
-            & fw%vec_Ac_new%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)))
-        end select
+        ! case('pec')
+        !     call copy_data( &
+        !     & fw%vec_Ac%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)), &
+        !     & fw%vec_Ac_new%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)))
+        ! end select
     
         ! impose boundary condition for y-lower side
-        select case (fs%a_bc(2, 1))
-        case('periodic')
+        ! select case (fs%a_bc(2, 1))
+        ! case('periodic')
             call copy_data(fw%vec_Ac_new%v(:, :, ie(2)-nd+1:ie(2), :), fw%vec_Ac_new%v(:, :, is(2)-nd:is(2)-1, :))
-        case('pec')
-            call copy_data( &
-            & fw%vec_Ac%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)), &
-            & fw%vec_Ac_new%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)))
-        end select
+        ! case('pec')
+        !     call copy_data( &
+        !     & fw%vec_Ac%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)), &
+        !     & fw%vec_Ac_new%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)))
+        ! end select
     
         ! impose boundary condition for y-upper side
-        select case (fs%a_bc(2, 2))
-        case('periodic')
+        ! select case (fs%a_bc(2, 2))
+        ! case('periodic')
             call copy_data(fw%vec_Ac_new%v(:, :, is(2):is(2)+nd-1, :), fw%vec_Ac_new%v(:, :, ie(2)+1:ie(2)+nd, :))
-        case('pec')
-            call copy_data( &
-            & fw%vec_Ac%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)), &
-            & fw%vec_Ac_new%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)))
-        end select
+        ! case('pec')
+        !     call copy_data( &
+        !     & fw%vec_Ac%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)), &
+        !     & fw%vec_Ac_new%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)))
+        ! end select
     
         ! impose boundary condition for z-lower side
-        select case (fs%a_bc(3, 1))
-        case('periodic')
+        ! select case (fs%a_bc(3, 1))
+        ! case('periodic')
             call copy_data(fw%vec_Ac_new%v(:, :, :, ie(3)-nd+1:ie(3)), fw%vec_Ac_new%v(:, :, :, is(3)-nd:is(3)-1))
-        case('pec')
-            call copy_data( &
-            & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1), &
-            & fw%vec_Ac_new%v(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1))
-        end select
+        ! case('pec')
+        !     call copy_data( &
+        !     & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1), &
+        !     & fw%vec_Ac_new%v(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1))
+        ! end select
     
         ! impose boundary condition for z-upper side
-        select case (fs%a_bc(3, 2))
-        case('periodic')
+        ! select case (fs%a_bc(3, 2))
+        ! case('periodic')
             call copy_data(fw%vec_Ac_new%v(:, :, :, is(3):is(3)+nd-1), fw%vec_Ac_new%v(:, :, :, ie(3)+1:ie(3)+nd))
-        case('pec')
-            call copy_data( &
-            & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd), &
-            & fw%vec_Ac_new%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
-        end select
-        return
+        ! case('pec')
+        !     call copy_data( &
+        !     & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd), &
+        !     & fw%vec_Ac_new%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
+        ! end select
+        ! return
         end subroutine dt_evolve_Ac_3d
+    
     
         subroutine dt_evolve_Ac_3d_cylindal()
         implicit none
