@@ -8,12 +8,14 @@ subroutine main_ssbe(icomm)
     implicit none
     integer, intent(in) :: icomm
 
-    select case (trim(theory))
+    select case(trim(theory))
     case ("sbe")
-        call realtime_main_ssbe(icomm)
+        call main_realtime_ssbe(icomm)
     case ("maxwell_sbe")
-        call multiscale_main_ssbe(icomm)
+        call main_multiscale_ssbe(icomm)
     end select
 
-    stop "Bye!"
+    call comm_sync_all(icomm)
+
+    return
 end subroutine main_ssbe 

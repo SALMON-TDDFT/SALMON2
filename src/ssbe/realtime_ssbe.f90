@@ -1,12 +1,15 @@
 module realtime_ssbe
     implicit none
 contains
-subroutine realtime_main_ssbe(icomm)
+
+subroutine main_realtime_ssbe(icomm)
     use salmon_global
     use communication
     use gs_info_ssbe
     use bloch_solver_ssbe
     use em_field
+    use datafile_ssbe
+    use filesystem, only: get_filehandle
     implicit none
     integer, intent(in) :: icomm
 
@@ -15,10 +18,9 @@ subroutine realtime_main_ssbe(icomm)
     real(8) :: t,  E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
     integer :: it, i
-    real(8) :: energy0, energy
-    real(8) :: tr_all, tr_vb
+    real(8) :: energy0, energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
-    integer :: nthread
+    integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
     integer :: nstate_sbe
 
     call comm_get_groupinfo(icomm, irank, nproc)
@@ -41,67 +43,76 @@ subroutine realtime_main_ssbe(icomm)
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
     call calc_Ac_ext_t(0.0d0, dt, 0, nt, Ac_ext_t)
-
+    ! Initial energy
     energy0 = calc_energy(sbe, gs, Ac_ext_t(:, 0), icomm)
+    E(:) = 0.0d0; Jmat(:) = 0.0d0;
 
-    ! Realtime calculation
     if (irank == 0) then
-        open(unit=100, file=trim(base_directory)//trim(sysname)//"_sbe_rt.data")
-
-        write(100, '(a)') "# Real time calculation:"
-        write(100, '(a)') "# Ac_ext: External vector potential field"
-        write(100, '(a)') "# E_ext: External electric field"
-        write(100, '(a)') "# Ac_tot: Total vector potential field"
-        write(100, '(a)') "# E_tot: Total electric field"
-        write(100, '(a)') "# Jm: Matter current density (electrons)"
-        write(100, '(4a)') "# 1:Time[a.u.] 2:Ac_ext_x[a.u.] 3:Ac_ext_y[a.u.] 4:Ac_ext_z[a.u.] ", &
-            & "5:E_ext_x[a.u.] 6:E_ext_y[a.u.] 7:E_ext_z[a.u.] 8:Ac_tot_x[a.u.] ", &
-            & "9:Ac_tot_y[a.u.] 10:Ac_tot_z[a.u.] 11:E_tot_x[a.u.] 12:E_tot_y[a.u.] ", &
-            & "13:E_tot_z[a.u.]  14:Jm_x[a.u.] 15:Jm_y[a.u.] 16:Jm_z[a.u.]"
-
-        open(unit=101, file=trim(base_directory)//trim(sysname)//"_sbe_rt_energy.data")
-        write(101, '(a)') "# 1:Time[a.u.] 2:Eall[a.u.] 3:Eall-Eall0[a.u.]"
-        write(101, '(f12.6,2(es24.15e3))') 0.0d0, energy0, 0.0d0
-
-        open(unit=102, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data")
-        write(102, '(a)') "# 1:Time[a.u.] 2:nelec[a.u.] 3:nhole[a.u.]"
-
+        write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
+        write(*, "(a)") "---------------------------------------------------------------------------------------"
+        ! SYSNAME_sbe_rt.data
+        fh_sbe_rt = get_filehandle()
+        open(unit=fh_sbe_rt, file=trim(base_directory)//trim(sysname)//"_sbe_rt.data", action="write")
+        call write_sbe_rt_header(fh_sbe_rt)
+        ! SYSNAME_sbe_rt_energy.data
+        fh_sbe_rt_energy = get_filehandle()
+        open(unit=fh_sbe_rt_energy, file=trim(base_directory)//trim(sysname)//"_sbe_rt_energy.data", action="write")
+        call write_sbe_rt_energy_header(fh_sbe_rt_energy)
+        ! SYSNAME_sbe_nex.data
+        fh_sbe_nex = get_filehandle()
+        open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
+        call write_sbe_nex_header(fh_sbe_nex)
     end if
-    
 
+    call comm_sync_all(icomm)
+    
+    ! Realtime calculation
     do it = 1, nt
         t = dt * it
+        E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
         call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
+        call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
+        
+        if (irank == 0) then
+            call write_sbe_rt_line(fh_sbe_rt, &
+                & t, Ac_ext_t(1:3, it), E(1:3), Ac_ext_t(1:3, it), E(1:3), Jmat(1:3))
+        end if
 
-        ! if (mod(it, 1) == 0) then
-            E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
-            call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
-            energy = calc_energy(sbe, gs, Ac_ext_t(:, it), icomm)
+        if (mod(it, 10) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
-            tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)
-            
+            energy = calc_energy(sbe, gs, Ac_ext_t(:, it), icomm)
             if (irank == 0) then
-                write(100, '(f12.6,15(es24.15e3))') t, Ac_ext_t(:, it), E(:), Ac_ext_t(:, it), E(:), Jmat(:)
+                call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy-energy0)
+                write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
             end if
-        ! end if
-
-        if (mod(it, 100) == 0) then
+        end if
+        
+        if (mod(it, out_projection_step) == 0) then
+            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
+            tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)    
             if (irank == 0) then
-                write(101, '(f12.6,2(es24.15e3))') t, energy, energy-energy0
-                write(102, '(f12.6,2(es24.15e3))') t, tr_all - tr_vb, nelec - tr_vb 
-                write(*, '(i6,f12.6,es24.15e3)') it, t, tr_all
+                call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)
             end if
         end if
 
+        if (mod(it, 500) == 0) then
+            if (irank == 0) then
+                flush(fh_sbe_rt)
+                flush(fh_sbe_rt_energy)
+                flush(fh_sbe_nex)
+            end if
+        end if
     end do
+    
+    call comm_sync_all(icomm)
 
     if (irank == 0) then
-        close(100)
-        close(101)
-        close(102)
+        close(fh_sbe_rt)
+        close(fh_sbe_rt_energy)
+        close(fh_sbe_nex)
     end if
 
     return
-end subroutine realtime_main_ssbe
+end subroutine main_realtime_ssbe
 
 end module realtime_ssbe
