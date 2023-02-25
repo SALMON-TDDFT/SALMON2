@@ -1081,14 +1081,6 @@ subroutine prep_dgf(lg,mg,system,info,poisson)
   type(s_poisson)        ,intent(inout) :: poisson
   integer :: lx,ly,lz
 
-#ifdef USE_FFTW
-  if(yn_fftw=='y') then
-    if(info%nprgrid(1)>=2.or.info%nprgrid(2)>=2)then
-      stop "info%nprgrid(1) and info%nprgrid(2) must be 1 when method_poisson='dirichlet' and yn_fftw='y'."
-    end if
-  end if
-#ENDIF
-
   lx=lg%num(1)
   ly=lg%num(2)
   lz=lg%num(3)
