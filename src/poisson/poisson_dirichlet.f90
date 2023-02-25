@@ -528,19 +528,22 @@ subroutine fourier_real_odd_fftw(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
   character(1), intent(in)          :: yn_discrete_green
   type(s_parallel_info) ,intent(in) :: info
   integer                           :: lx,ly,lz
+  integer                           :: mx,my,mz
   integer(C_INTPTR_T) :: alloc_local, local_N, local_k_offset
   integer :: int_local_N
-  !real(C_DOUBLE),allocatable :: fdata_1(1:lx_e-lx_s+1,1:ly_e-ly_s+1,1:lz_e-lz_s+1)
-  !real(C_DOUBLE),allocatable :: fdata_2(1:lx_e-lx_s+1,1:ly_e-ly_s+1,1:lz_e-lz_s+1)
   real(C_DOUBLE),allocatable :: fdata_1(:,:,:)
   real(C_DOUBLE),allocatable :: fdata_2(:,:,:)
   integer :: i, j, k
   integer(C_INTPTR_T) :: L, M, N
   type(C_PTR) :: plan
+  real(8),allocatable :: work1(:,:,:),work2(:,:,:)
 
   lx=lx_e-lx_s+1
   ly=ly_e-ly_s+1
   lz=lz_e-lz_s+1
+  mx=mx_e-mx_s+1
+  my=my_e-my_s+1
+  mz=mz_e-mz_s+1
 
   if(yn_discrete_green=='y')then
     allocate(fdata_1(lx,ly,lz))
@@ -591,22 +594,46 @@ subroutine fourier_real_odd_fftw(lx_s,lx_e,ly_s,ly_e,lz_s,lz_e,                &
     plan = fftw_mpi_plan_r2r_3d(N, M, L, fdata_1, fdata_2, &
                                 info%icomm_z, FFTW_RODFT00, FFTW_RODFT00, FFTW_RODFT00, FFTW_ESTIMATE)
 !
+    if(info%nprgrid(1)==1.and.info%nprgrid(2)==1)then
 !$OMP parallel do private(i,j,k) collapse(2)
-    do k = 1, int_local_N
-    do j = 1, ly
-    do i = 1, lx
-      fdata_1(i,j,k) = ff2z(i+lx_s-1,j+ly_s-1,k+mz_s-1)
-    end do
-    end do
-    end do
+      do k = 1, int_local_N
+      do j = 1, ly
+      do i = 1, lx
+        fdata_1(i,j,k) = ff2z(i+lx_s-1,j+ly_s-1,k+mz_s-1)
+      end do
+      end do
+      end do
+    else
+      allocate(work1(lx,ly,int_local_N))
+      allocate(work2(lx,ly,int_local_N))
+      work1=0.d0
+!$OMP parallel do private(i,j,k) collapse(2)
+      do k = 1, int_local_N
+      do j = 1, my
+      do i = 1, mx
+        work1(i+mx_s-lx_s,j+my_s-ly_s,k) = ff2z(i+mx_s-1,j+my_s-1,k+mz_s-1)
+      end do
+      end do
+      end do
+      call comm_summation(work1,work2,lx*ly*int_local_N,info%icomm_xy)
+!$OMP parallel do private(i,j,k) collapse(2)
+      do k = 1, int_local_N
+      do j = 1, ly
+      do i = 1, lx
+        fdata_1(i,j,k) = work2(i,j,k)
+      end do
+      end do
+      end do
+      deallocate(work1,work2)
+    end if
 
     call fftw_mpi_execute_r2r(plan, fdata_1, fdata_2)
 !
 !$OMP parallel do private(i,j,k) collapse(2)
     do k = 1, int_local_N
-    do j = 1, ly
-    do i = 1, lx
-      ff2x(i+lx_s-1,j+ly_s-1,k+mz_s-1) = fdata_2(i,j,k)/8.d0
+    do j = 1, my
+    do i = 1, mx
+      ff2x(i+mx_s-1,j+my_s-1,k+mz_s-1) = fdata_2(i+mx_s-lx_s,j+my_s-ly_s,k)/8.d0
     end do
     end do
     end do
