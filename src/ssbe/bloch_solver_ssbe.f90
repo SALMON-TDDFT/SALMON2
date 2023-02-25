@@ -43,7 +43,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     sbe%ik_max = itbl_max(irank)
 
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
-    
+
     sbe%rho(:, :, :) = 0d0
     do ik = sbe%ik_min, sbe%ik_max
         do ib = 1, sbe%nb
@@ -71,7 +71,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
             do ib = 1, sbe%nb
                 do jb = 1, sbe%nb
                     tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
-                        & gs%p_matrix(ib, jb, idir, ik) & !+ zI * gs%rvnl_matrix(ib, jb, idir, ik) &
+                        & gs%p_mod_matrix(ib, jb, idir, ik) &
                         & )
                 end do
             end do
@@ -81,7 +81,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     call comm_summation(tmp1, tmp, 3, icomm)
 
     jmat(:) = (real(tmp(1:3)) / sum(gs%kweight(:)) &
-        & + Ac * calc_trace(sbe, gs, sbe%nb, icomm)) / gs%volume    
+        & + Ac * calc_trace(sbe, gs, sbe%nb, icomm)) / gs%volume
 
     return
 end subroutine calc_current_bloch
@@ -132,22 +132,22 @@ contains
         hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
         do idir=1, 3 !1:x, 2:y, 3:z
             ! hrho(1:nb, 1:nb, ik) = hrho(1:nb, 1:nb, ik) + Ac(idir) * (&
-            ! & + matmul(gs%p_matrix(1:nb, 1:nb, idir, ik), rho(1:nb, 1:nb, ik)) &
-            ! & - matmul(rho(1:nb, 1:nb, ik), gs%p_matrix(1:nb, 1:nb, idir, ik)) &
+            ! & + matmul(gs%p_mod_matrix(1:nb, 1:nb, idir, ik), rho(1:nb, 1:nb, ik)) &
+            ! & - matmul(rho(1:nb, 1:nb, ik), gs%p_mod_matrix(1:nb, 1:nb, idir, ik)) &
             ! & )
 
             call ZGEMM("N","N", sbe%nb, sbe%nb, sbe%nb, &
                 dcmplx(+Ac(idir), 0d0), &
-                gs%p_matrix(:, :, idir, ik),sbe%nb, &
+                gs%p_mod_matrix(:, :, idir, ik),sbe%nb, &
                 rho_k(:, :), sbe%nb, &
                 dcmplx(1d0, 0d0), hrho_k(:, :),sbe%nb)
 
             call ZGEMM("N","N", sbe%nb, sbe%nb, sbe%nb, &
                 dcmplx(-Ac(idir), 0d0), &
                 rho_k(:, :), sbe%nb, &
-                gs%p_matrix(:, :, idir, ik),sbe%nb, &
+                gs%p_mod_matrix(:, :, idir, ik),sbe%nb, &
                 dcmplx(1d0, 0d0), hrho_k(:, :), sbe%nb)
-                    
+
         end do !idir
         return
     end subroutine calc_hrho_bloch_k
@@ -164,9 +164,9 @@ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
 
     integer :: ik, ib
     real(8) :: tmp, tmp1
-    
+
     tmp1 = 0d0
-    !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2) 
+    !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2)
     do ik = sbe%ik_min, sbe%ik_max
         do ib = 1, nb_max
             tmp1 = tmp1 + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
@@ -175,7 +175,7 @@ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
     !$omp end parallel do
     call comm_summation(tmp1, tmp, icomm)
     tr = tmp / sum(gs%kweight)
-    
+
     return
 end function calc_trace
 
@@ -196,7 +196,7 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
             do idir = 1, 3
                 do jb = 1, sbe%nb
                     tmp1 = tmp1 &
-                        & + Ac(idir) * real(sbe%rho(ib, jb, ik) * gs%p_matrix(jb, ib, idir, ik)) * gs%kweight(ik)
+                        & + Ac(idir) * real(sbe%rho(ib, jb, ik) * gs%p_mod_matrix(jb, ib, idir, ik)) * gs%kweight(ik)
                 end do
             end do
             tmp1 = tmp1 &
@@ -211,7 +211,7 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
     call comm_summation(tmp1, tmp, icomm)
     energy = tmp / sum(gs%kweight)
 
-    return 
+    return
 end function calc_energy
 
 

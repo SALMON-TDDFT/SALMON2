@@ -139,7 +139,8 @@ contains
             &      + fw%vec_Ac%v(2:3, i1-1, i2, i3) &
             & ) * r_inv_h(1) ** 2
             Ac_tmp(:, i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
-            & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2) - rot2_Ac(:) * (cspeed_au * fw%dt)**2 )
+                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2)  / fw%epsilon%f(i1, i2, i3) &
+                & - rot2_Ac(:) * (cspeed_au * fw%dt)**2)  / fw%epsilon%f(i1, i2, i3)
         end do
         !$omp end parallel do
 

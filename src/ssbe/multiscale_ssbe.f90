@@ -78,7 +78,7 @@ subroutine main_multiscale_ssbe(icomm)
     ! Prepare external pulse
     mt = max(nt, int(abs(nxvac_m(1)) * fs%hgs(1) / cspeed_au / dt))
     allocate(Ac_ext_t(1:3, -1:mt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, mt, Ac_ext_t)    
+    call calc_Ac_ext_t(0.0d0, dt, 0, mt, Ac_ext_t)
     call set_incident_field(mt, Ac_ext_t, fs, fw)
 
     ! Macropoint and media setup
@@ -101,16 +101,16 @@ subroutine main_multiscale_ssbe(icomm)
             & num_kgrid, nstate, nelec, &
             & al_vec1, al_vec2, al_vec3, &
             & .false., icomm)
-        
+
         ! Distribute
         call distribute_macropoints(irank, nmacro, nproc, imacro_min, imacro_max)
         icomm_macro = comm_create_group(icomm, imacro_min, 0)
-        call comm_get_groupinfo(icomm_macro, irank_macro, nproc_macro) 
+        call comm_get_groupinfo(icomm_macro, irank_macro, nproc_macro)
         allocate(Ac_macro(1:3, nmacro))
         allocate(E_macro(1:3, nmacro))
         allocate(Jmat_macro_tmp(1:3, nmacro))
         allocate(Jmat_macro(1:3, nmacro))
-        allocate(sbe(imacro_min:imacro_max))    
+        allocate(sbe(imacro_min:imacro_max))
 
         ! Initialization of SBE solver and density matrix:
         do i = imacro_min, imacro_max
@@ -179,7 +179,7 @@ subroutine main_multiscale_ssbe(icomm)
             end if
             call comm_bcast(Ac_macro, icomm, 0)
             call comm_bcast(E_macro, icomm, 0)
-            
+
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
                 call dt_evolve_bloch(sbe(imacro), gs, Ac_macro(1:3, imacro), dt)
@@ -213,7 +213,7 @@ subroutine main_multiscale_ssbe(icomm)
                     iz = int(obs_loc_em(iobs, 3) / fs%hgs(3))
                     call write_sbe_obs_line(fh_sbe_obs(iobs), it * dt, &
                         &  -(fw%vec_Ac_new%v(:, ix, iy, iz) - fw%vec_Ac_old%v(:, ix, iy, iz)) / (2 * dt))
-                end do            
+                end do
             end if
             if (mod(it, 500) == 0) then
                 flush(fh_sbe_wave)
@@ -228,7 +228,7 @@ subroutine main_multiscale_ssbe(icomm)
                 do imacro = imacro_min, imacro_max
                     call write_sbe_rt_line(fh_sbe_rt(imacro), t, &
                         & Ac_macro(1:3, imacro), E_macro(1:3, imacro), &
-                        & Ac_macro(1:3, imacro), E_macro(1:3, imacro), & 
+                        & Ac_macro(1:3, imacro), E_macro(1:3, imacro), &
                         & Jmat_macro(1:3, imacro))
                 end do
                 if (mod(it, 500) == 0) then
@@ -283,7 +283,7 @@ subroutine distribute_macropoints(irank, nmacro, nproc, imacro_min, imacro_max)
     if (nproc <= nmacro) then
         call split_range(1, nmacro, nproc, itbl_macro_min, itbl_macro_max)
         imacro_min = itbl_macro_min(irank)
-        imacro_max = itbl_macro_max(irank)    
+        imacro_max = itbl_macro_max(irank)
     else
         call split_range(0, nproc-1, nmacro, itbl_rank_min, itbl_rank_max)
         do i = 1, nmacro
@@ -328,7 +328,7 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
                 fw%epsilon%f(ix, iy, iz) = 1.0d0
             else
                 imacro = imacro + 1
-                if (imacro > nmacro_max) stop "Error: number of macropoints is too large!" 
+                if (imacro > nmacro_max) stop "Error: number of macropoints is too large!"
                 itbl_macro_coord(1:3, imacro) = (/ ix, iy, iz /)
             end if
         end do
@@ -338,14 +338,14 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
         do iy = 1, ny_m
         do ix = 1, nx_m
             imacro = imacro + 1
-            if (imacro > nmacro_max) stop "Error: number of macropoints is too large!" 
+            if (imacro > nmacro_max) stop "Error: number of macropoints is too large!"
             itbl_macro_coord(1:3, imacro) = (/ ix, iy, iz /)
         end do
         end do
         end do
     end if
     nmacro = imacro
-end subroutine 
+end subroutine
 
 
 ! subroutine read_shape_info(fs, fw)
@@ -370,7 +370,7 @@ end subroutine
 !         end select
 !     end do
 ! end subroutine read_shape_info
-        
+
 
 subroutine set_incident_field(mt, Ac, fs, fw)
     use fdtd_weyl, only: s_fdtd_system, ls_fdtd_weyl
@@ -491,13 +491,13 @@ subroutine write_wave_data_file(fh, iit, fs, fw)
 
     ! Left side boundary:
     dx_Ac(:) = (fw%vec_Ac%v(:,0,iiy,iiz) - fw%vec_Ac%v(:,-1,iiy,iiz)) / fs%hgs(1)
-    dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,0,iiy,iiz) + fw%vec_Ac_new%v(:,-1,iiy,iiz)) & 
+    dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,0,iiy,iiz) + fw%vec_Ac_new%v(:,-1,iiy,iiz)) &
         & - 0.5d0 * (fw%vec_Ac_old%v(:,0,iiy,iiz) + fw%vec_Ac_old%v(:,-1,iiy,iiz))) / (2 * dt)
     e_inc(:) = -0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
     e_ref(:) = -0.5d0 * (dt_Ac + cspeed_au * dx_Ac)
     ! Right side boundary:
     dx_Ac(:) = (fw%vec_Ac%v(:,nx_m+2,iiy,iiz) - fw%vec_Ac%v(:,nx_m+1,iiy,iiz)) / fs%hgs(1)
-    dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_new%v(:,nx_m+1,iiy,iiz)) & 
+    dt_Ac(:) = (0.5d0 * (fw%vec_Ac_new%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_new%v(:,nx_m+1,iiy,iiz)) &
         & - 0.5d0 * (fw%vec_Ac_old%v(:,nx_m+2,iiy,iiz) + fw%vec_Ac_old%v(:,nx_m+1,iiy,iiz))) / (2 * dt)
     e_tra(:) = -0.5d0 * (dt_Ac - cspeed_au * dx_Ac)
     call write_sbe_wave_line(fh, iit * dt, e_inc, e_ref, e_tra)

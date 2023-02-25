@@ -65,6 +65,18 @@ subroutine main_realtime_ssbe(icomm)
     end if
 
     call comm_sync_all(icomm)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (irank == 0) then
+        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 1, real(gs%rvnl_matrix(1,1,1,1)), aimag(gs%rvnl_matrix(1,1,1,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 2, 1, 1, real(gs%rvnl_matrix(2,1,1,1)), aimag(gs%rvnl_matrix(2,1,1,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 1, 2, 1, real(gs%rvnl_matrix(1,2,1,1)), aimag(gs%rvnl_matrix(1,2,1,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 1, real(gs%rvnl_matrix(2,2,1,1)), aimag(gs%rvnl_matrix(2,2,1,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 2, real(gs%rvnl_matrix(1,1,2,1)), aimag(gs%rvnl_matrix(1,1,2,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 2, 1, 2, real(gs%rvnl_matrix(2,1,2,1)), aimag(gs%rvnl_matrix(2,1,2,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 1, 2, 2, real(gs%rvnl_matrix(1,2,2,1)), aimag(gs%rvnl_matrix(1,2,2,1))
+        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 2, real(gs%rvnl_matrix(2,2,2,1)), aimag(gs%rvnl_matrix(2,2,2,1))
+    end if
     
     ! Realtime calculation
     do it = 1, nt
