@@ -89,7 +89,6 @@ subroutine main_multiscale_ssbe(icomm)
     end if
     call comm_bcast(itbl_macro_coord, icomm, 0)
     call comm_bcast(nmacro, icomm, 0)
-    fw%epsilon%f(:, :, :) = 1.0d0
 
     if (nmacro > 0) then
         if (0.0d0 < al(1)) al_vec1(1:3) = (/ al(1), 0.0d0, 0.0d0 /)
