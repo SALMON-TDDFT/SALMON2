@@ -18,7 +18,7 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: t,  E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
     integer :: it, i
-    real(8) :: energy0, energy, tr_all, tr_vb
+    real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
     integer :: nstate_sbe
@@ -42,9 +42,9 @@ subroutine main_realtime_ssbe(icomm)
 
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, nt, Ac_ext_t)
+    call calc_Ac_ext_t(0.0d0, dt, 0, nt+1, Ac_ext_t)
     ! Initial energy
-    energy0 = calc_energy(sbe, gs, Ac_ext_t(:, 0), icomm)
+    energy = 0.0d0
     E(:) = 0.0d0; Jmat(:) = 0.0d0;
 
     if (irank == 0) then
@@ -81,9 +81,10 @@ subroutine main_realtime_ssbe(icomm)
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
-        E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
         call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
         call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
+        E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
+        energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
         
         if (irank == 0) then
             call write_sbe_rt_line(fh_sbe_rt, &
@@ -92,9 +93,9 @@ subroutine main_realtime_ssbe(icomm)
 
         if (mod(it, 10) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
-            energy = calc_energy(sbe, gs, Ac_ext_t(:, it), icomm)
+            ! energy = calc_energy(sbe, gs, Ac_ext_t(:, it), icomm)
             if (irank == 0) then
-                call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy-energy0)
+                call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
             end if
         end if
