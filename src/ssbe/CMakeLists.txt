@@ -1,6 +1,7 @@
 set(SOURCES
     util_ssbe.f90
     datafile_ssbe.f90
+    input_checker_sbe.f90
     gs_info_ssbe.f90
     bloch_solver_ssbe.f90
     multiscale_ssbe.f90

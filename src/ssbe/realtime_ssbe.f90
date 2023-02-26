@@ -9,6 +9,7 @@ subroutine main_realtime_ssbe(icomm)
     use bloch_solver_ssbe
     use em_field
     use datafile_ssbe
+    use input_checker_sbe
     use filesystem, only: get_filehandle
     implicit none
     integer, intent(in) :: icomm
@@ -21,15 +22,10 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
-    integer :: nstate_sbe
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
-    if (0.0d0 < al(1)) al_vec1(1:3) = (/ al(1), 0.0d0, 0.0d0 /)
-    if (0.0d0 < al(2)) al_vec2(1:3) = (/ 0.0d0, al(2), 0.0d0 /)
-    if (0.0d0 < al(3)) al_vec3(1:3) = (/ 0.0d0, 0.0d0, al(3) /)
-    ! if (nstate_sbe < 1) nstate_sbe = nstate
-    nstate_sbe = nstate
+    if (.not. check_input_variables_sbe()) return
 
     ! Read ground state electronic system:
     call init_sbe_gs_info(gs, sysname, base_directory, &
@@ -38,7 +34,7 @@ subroutine main_realtime_ssbe(icomm)
         & .false., icomm)        
     
     ! Initialization of SBE solver and density matrix:
-    call init_sbe_bloch_solver(sbe, gs, nstate_sbe, icomm)
+    call init_sbe_bloch_solver(sbe, gs, nstate, icomm)
 
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
@@ -48,8 +44,6 @@ subroutine main_realtime_ssbe(icomm)
     E(:) = 0.0d0; Jmat(:) = 0.0d0;
 
     if (irank == 0) then
-        write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
-        write(*, "(a)") "---------------------------------------------------------------------------------------"
         ! SYSNAME_sbe_rt.data
         fh_sbe_rt = get_filehandle()
         open(unit=fh_sbe_rt, file=trim(base_directory)//trim(sysname)//"_sbe_rt.data", action="write")
@@ -62,22 +56,13 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
+        ! Stdout logs:
+        write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
+        write(*, "(a)") "---------------------------------------------------------------------------------------"
     end if
 
     call comm_sync_all(icomm)
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (irank == 0) then
-        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 1, real(gs%rvnl_matrix(1,1,1,1)), aimag(gs%rvnl_matrix(1,1,1,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 2, 1, 1, real(gs%rvnl_matrix(2,1,1,1)), aimag(gs%rvnl_matrix(2,1,1,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 1, 2, 1, real(gs%rvnl_matrix(1,2,1,1)), aimag(gs%rvnl_matrix(1,2,1,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 1, real(gs%rvnl_matrix(2,2,1,1)), aimag(gs%rvnl_matrix(2,2,1,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 2, real(gs%rvnl_matrix(1,1,2,1)), aimag(gs%rvnl_matrix(1,1,2,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 2, 1, 2, real(gs%rvnl_matrix(2,1,2,1)), aimag(gs%rvnl_matrix(2,1,2,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 1, 2, 2, real(gs%rvnl_matrix(1,2,2,1)), aimag(gs%rvnl_matrix(1,2,2,1))
-        write(1234, "(i9,i9,i9,2es12.3)") 1, 1, 2, real(gs%rvnl_matrix(2,2,2,1)), aimag(gs%rvnl_matrix(2,2,2,1))
-    end if
-    
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
@@ -92,8 +77,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
 
         if (mod(it, 10) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
-            ! energy = calc_energy(sbe, gs, Ac_ext_t(:, it), icomm)
+            tr_all = calc_trace(sbe, gs, nstate, icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
@@ -101,7 +85,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
         
         if (mod(it, out_projection_step) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
+            tr_all = calc_trace(sbe, gs, nstate, icomm)
             tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)    
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)

@@ -15,6 +15,7 @@ subroutine main_multiscale_ssbe(icomm)
     use salmon_global
     use filesystem, only: get_filehandle
     use datafile_ssbe
+    use input_checker_sbe
     implicit none
     integer, intent(in) :: icomm
 
@@ -38,13 +39,14 @@ subroutine main_multiscale_ssbe(icomm)
 
     logical :: flag_1d_model
 
-    integer :: nstate_sbe
 
     integer :: fh_sbe_wave
     integer, allocatable :: fh_sbe_obs(:)
     integer, allocatable :: fh_sbe_rt(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
+
+    if (.not. check_input_variables_sbe()) return
 
     ! FDTD setup
     fs%mg%nd = 1
@@ -73,7 +75,6 @@ subroutine main_multiscale_ssbe(icomm)
     call weyl_init(fs, fw)
 
     flag_1d_model = ((ny_m == 1) .and. (nz_m == 1))
-    nstate_sbe = nstate
 
     ! Prepare external pulse
     mt = max(nt, int(abs(nxvac_m(1)) * fs%hgs(1) / cspeed_au / dt))
@@ -91,10 +92,6 @@ subroutine main_multiscale_ssbe(icomm)
     call comm_bcast(nmacro, icomm, 0)
 
     if (nmacro > 0) then
-        if (0.0d0 < al(1)) al_vec1(1:3) = (/ al(1), 0.0d0, 0.0d0 /)
-        if (0.0d0 < al(2)) al_vec2(1:3) = (/ 0.0d0, al(2), 0.0d0 /)
-        if (0.0d0 < al(3)) al_vec3(1:3) = (/ 0.0d0, 0.0d0, al(3) /)
-        if (nstate_sbe < 1) nstate_sbe = nstate
 
         ! Read ground state electronic system:
         call init_sbe_gs_info(gs, sysname, base_directory, &
@@ -114,7 +111,7 @@ subroutine main_multiscale_ssbe(icomm)
 
         ! Initialization of SBE solver and density matrix:
         do i = imacro_min, imacro_max
-            call init_sbe_bloch_solver(sbe(i), gs, nstate_sbe, icomm_macro)
+            call init_sbe_bloch_solver(sbe(i), gs, nstate, icomm_macro)
         end do
     end if
 
