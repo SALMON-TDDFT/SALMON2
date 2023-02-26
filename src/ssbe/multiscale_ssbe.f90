@@ -298,6 +298,7 @@ end subroutine distribute_macropoints
 subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
     use fdtd_weyl, only: ls_fdtd_weyl
     use salmon_global
+    use shaper_ssbe
     implicit none
     integer, intent(in) :: nmacro_max
     integer, intent(out) :: itbl_macro_coord(1:3, nmacro_max)
@@ -308,6 +309,12 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
 
     fw%epsilon%f(:, :, :) = 1.0d0
     imacro = 0
+    if (n_s > 0) then
+        file_macropoint = ".shape.txt"
+        open(99, file=trim(file_macropoint), action="write")
+        call generate_macropoint(99)
+        close(99)
+    end if
     if (len_trim(file_macropoint) > 0) then
         open(99, file=trim(file_macropoint), action="read")
         read(99, *) n
@@ -343,30 +350,6 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
     end if
     nmacro = imacro
 end subroutine
-
-
-! subroutine read_shape_info(fs, fw)
-!     use input_parameter, only: file_macropoint, epsilon_em, nx_m, ny_m, nz_m
-!     use fdtd_weyl, only: ls_fdtd_weyl
-!     implicit none
-!     integer, intent(in) :: nmacro_max
-!     integer, intent(out) :: itbl_macro_coord(1:3, nmacro_max)
-!     integer, intent(out) :: nmacro
-!     type(s_fdtd_system), intent(in) :: fs
-!     type(ls_fdtd_weyl), intent(inout) :: fw
-
-!     integer :: itbl_media( &
-!         & fw%mg%is(1):fw%mg%ie(1), &
-!         & fw%mg%is(2):fw%mg%ie(2), &
-!         & fw%mg%is(3):fw%mg%ie(3), &
-!         & )
-
-!     do i = 1, n_s
-!         select case trim(typ_s(i))
-!         case "ellipsoid"
-!         end select
-!     end do
-! end subroutine read_shape_info
 
 
 subroutine set_incident_field(mt, Ac, fs, fw)

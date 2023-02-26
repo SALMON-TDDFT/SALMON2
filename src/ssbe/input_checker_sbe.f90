@@ -66,7 +66,7 @@ function check_input_variables_sbe() result(flag)
         call raise("ERROR! 'hy_m' or 'dl_em(2)' must be specified!")
     if ((hz_m <= 0) .and. (dl_em(3) <= 0)) &
         call raise("ERROR! 'hz_m' or 'dl_em(1)' must be specified!")
-    
+        
     select case(trim(fdtddim))
     case("1d", "1D")
     case("3d", "3D")
