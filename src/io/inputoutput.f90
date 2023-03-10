@@ -956,7 +956,7 @@ contains
     kpt(:,:) = 0.0d0
     kpt_label(:) = ''
 !! == default for &sbe
-    yn_vnl_correction = 'y'
+    yn_vnl_correction = 'n'
     nstate_sbe = -1
 
     if (comm_is_root(nproc_id_global)) then

@@ -112,6 +112,7 @@ subroutine main_multiscale_ssbe(icomm)
         ! Initialization of SBE solver and density matrix:
         do i = imacro_min, imacro_max
             call init_sbe_bloch_solver(sbe(i), gs, nstate_sbe, icomm_macro)
+            sbe(i)%flag_vnl_correction = (yn_vnl_correction == 'y')
         end do
     end if
 

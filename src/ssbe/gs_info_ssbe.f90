@@ -16,10 +16,11 @@ module gs_info_ssbe
         real(8), allocatable :: eigen(:, :)
         real(8), allocatable :: occup(:, :)
         real(8), allocatable :: delta_omega(:, :, :)
-        complex(8), allocatable :: p_tm_matrix(:, :, :, :)
         complex(8), allocatable :: p_mod_matrix(:, :, :, :)
-        complex(8), allocatable :: rvnl_matrix(:, :, :, :)
-        ! complex(8), allocatable :: prod_dk(:, :, :, :, :, :)
+        ! p_tm_matrix = <u|p|u>
+        complex(8), allocatable :: p_tm_matrix(:, :, :, :)
+        ! rvnl_tm_matrix = <u|-i[r, Vnl]|u>
+        complex(8), allocatable :: rvnl_tm_matrix(:, :, :, :)
         complex(8), allocatable :: d_matrix(:, :, :, :)
 
         !k-space grid and geometry information
@@ -66,7 +67,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, num_kgrid, nb, ne, a1, a2
     allocate(gs%p_mod_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%d_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%p_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
-    allocate(gs%rvnl_matrix(1:nb, 1:nb, 1:3, 1:nk))
+    allocate(gs%rvnl_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
 
     if (irank == 0) then
         if (read_bin) then
@@ -94,7 +95,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, num_kgrid, nb, ne, a1, a2
     call comm_bcast(gs%eigen, icomm, 0)
     call comm_bcast(gs%occup, icomm, 0)
     call comm_bcast(gs%p_tm_matrix, icomm, 0)
-    call comm_bcast(gs%rvnl_matrix, icomm, 0)
+    call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
 
     !Calculate omega and d_matrix (neglecting diagonal part):
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
@@ -221,9 +222,9 @@ contains
                     if (ik .ne. iik) stop "ik mismatch"
                     if (ib .ne. iib) stop "ib mismatch"
                     if (jb .ne. jjb) stop "jb mismatch"
-                    gs%rvnl_matrix(ib, jb, 1, ik) = dcmplx(tmp(1), tmp(2))
-                    gs%rvnl_matrix(ib, jb, 2, ik) = dcmplx(tmp(3), tmp(4))
-                    gs%rvnl_matrix(ib, jb, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    gs%rvnl_tm_matrix(ib, jb, 1, ik) = dcmplx(tmp(1), tmp(2))
+                    gs%rvnl_tm_matrix(ib, jb, 2, ik) = dcmplx(tmp(3), tmp(4))
+                    gs%rvnl_tm_matrix(ib, jb, 3, ik) = dcmplx(tmp(5), tmp(6))
                 end do
             end do
         end do
@@ -242,7 +243,7 @@ contains
         ! read(fh) gs%kweight
         ! read(fh) gs%eigen
         ! read(fh) gs%p_mod_matrix
-        ! read(fh) gs%rvnl_matrix
+        ! read(fh) gs%rvnl_tm_matrix
         ! ! read(fh) gs%prod_dk
         ! close(fh)
         ! return
@@ -258,7 +259,7 @@ contains
         ! write(fh) gs%kweight
         ! write(fh) gs%eigen
         ! write(fh) gs%p_mod_matrix
-        ! write(fh) gs%rvnl_matrix
+        ! write(fh) gs%rvnl_tm_matrix
         ! ! write(fh) gs%prod_dk
         ! close(fh)
         ! return
@@ -272,7 +273,7 @@ contains
         integer :: ik, ib, jb
         real(8), parameter :: omega_eps = 1d-9
 
-        gs%p_mod_matrix = gs%p_tm_matrix - zI * gs%rvnl_matrix
+        gs%p_mod_matrix = gs%p_tm_matrix + gs%rvnl_tm_matrix
 
         do ik=1, nk
             do ib=1, nb
@@ -280,10 +281,10 @@ contains
                     gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
                     if (omega_eps < abs(gs%delta_omega(ib, jb, ik))) then
                         ! gs%d_matrix(ib, jb, 1:3, ik) = &
-                        !     & (zi * gs%p_mod_matrix(ib, jb, 1:3, ik) - gs%rvnl_matrix(ib, jb, 1:3, ik)) &
+                        !     & (zi * gs%p_mod_matrix(ib, jb, 1:3, ik) - gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
                         !     & / gs%delta_omega(ib, jb, ik)
                         ! gs%d_matrix(ib, jb, 1:3, ik) = &
-                        !     & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik) +  gs%rvnl_matrix(ib, jb, 1:3, ik)) &
+                        !     & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik) +  gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
                         !     & / gs%delta_omega(ib, jb, ik)
                         gs%d_matrix(ib, jb, 1:3, ik) = &
                             & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &

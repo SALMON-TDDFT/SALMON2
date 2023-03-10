@@ -73,16 +73,14 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
         do idir = 1, 3
             do ib = 1, sbe%nb
                 do jb = 1, sbe%nb
-                    if (sbe%flag_vnl_correction) then
                     tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
-                        & gs%p_mod_matrix(ib, jb, idir, ik) &
-                        & )
-                    else
-                        tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
                         & gs%p_tm_matrix(ib, jb, idir, ik) &
+                    & )
+                    if (sbe%flag_vnl_correction) then
+                        tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
+                            & gs%rvnl_tm_matrix(ib, jb, idir, ik) &
                         & )
                     endif
-
                 end do
             end do
         end do
@@ -120,7 +118,7 @@ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
         p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
         if (sbe%flag_vnl_correction) then
             p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) =  p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) &
-                & - zI * gs%rvnl_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
+                & + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
         end if
 
         call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
