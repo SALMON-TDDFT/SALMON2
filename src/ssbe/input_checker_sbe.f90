@@ -40,6 +40,11 @@ function check_input_variables_sbe() result(flag)
         end if
     end if
 
+    if (nstate_sbe <= 0) nstate_sbe = nstate
+    if (nstate_sbe > nstate) then
+        call raise("ERROR! 'nstate_sbe' must be smaller than 'nstate'!")
+    end if
+
     if (trim(theory) .ne. "maxwell_sbe") return
 
     if (nx_m < 1) &

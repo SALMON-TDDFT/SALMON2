@@ -75,16 +75,16 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, num_kgrid, nb, ne, a1, a2
             call read_sbe_gs_bin()
         else
             !Retrieve eigenenergies from 'SYSNAME_eigen.data':
-            write(*,*) "# read_eigen_data"
+            write(*, '(a)') "# read_eigen_data"
             call read_eigen_data()
             !Retrieve k-points from 'SYSNAME_k.data':
-            write(*,*) "# read_k_data"
+            write(*, '(a)') "# read_k_data"
             call read_k_data()
             !Retrieve transition matrix from 'SYSNAME_tm.data':
-            write(*,*) "# read_tm_data"
+            write(*, '(a)') "# read_tm_data"
             call read_tm_data()
             !Export all data from binray
-            write(*,*) "# save_sbe_gs_bin"
+            write(*, '(a)') "# save_sbe_gs_bin"
             call save_sbe_gs_bin()
         end if
     end if
@@ -97,7 +97,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, num_kgrid, nb, ne, a1, a2
     call comm_bcast(gs%rvnl_matrix, icomm, 0)
 
     !Calculate omega and d_matrix (neglecting diagonal part):
-    if (irank == 0) write(*,*) "# prepare_matrix"
+    if (irank == 0) write(*,"(a)") "# prepare_matrix"
 
     call prepare_matrix()
     call comm_bcast(gs%p_mod_matrix, icomm, 0)

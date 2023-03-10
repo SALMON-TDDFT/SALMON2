@@ -411,5 +411,9 @@ character(256),allocatable :: atom_name(:)
   integer :: ndiv_segment(max_num_of_segments)
   real(8) :: kpt(3,max_num_of_segments+1)
   character(1) :: kpt_label(max_num_of_segments+1)
+  
+  !! &sbe 
+  character(1)   :: yn_vnl_correction
+  integer        :: nstate_sbe
 
 end module salmon_global

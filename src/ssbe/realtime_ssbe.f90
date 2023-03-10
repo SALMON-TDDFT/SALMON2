@@ -34,7 +34,8 @@ subroutine main_realtime_ssbe(icomm)
         & .false., icomm)        
     
     ! Initialization of SBE solver and density matrix:
-    call init_sbe_bloch_solver(sbe, gs, nstate, icomm)
+    call init_sbe_bloch_solver(sbe, gs, nstate_sbe, icomm)
+    sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
@@ -77,7 +78,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
 
         if (mod(it, 10) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate, icomm)
+            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
@@ -85,7 +86,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
         
         if (mod(it, out_projection_step) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate, icomm)
+            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
             tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)    
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)
