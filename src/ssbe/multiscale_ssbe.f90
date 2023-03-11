@@ -306,7 +306,7 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
     integer, intent(out) :: nmacro
     type(ls_fdtd_weyl), intent(inout) :: fw
 
-    integer :: i, imacro, n, ix, iy, iz, itype
+    integer :: i, ii, imacro, n, ix, iy, iz, itype
 
     fw%epsilon%f(:, :, :) = 1.0d0
     imacro = 0
@@ -320,7 +320,8 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
         open(99, file=trim(file_macropoint), action="read")
         read(99, *) n
         do i = 1, n
-            read(99, *) ix, iy, iz, itype
+            read(99, *) ii, ix, iy, iz, itype
+            if (ii .ne. i) stop "Error: line index mismatch"
             if (ix < 1) stop "Error: invalid range!"
             if (iy < 1) stop "Error: invalid range!"
             if (iz < 1) stop "Error: invalid range!"
