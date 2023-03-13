@@ -59,6 +59,7 @@ module inputoutput
   integer :: inml_jellium
   integer :: inml_code
   integer :: inml_band
+  integer :: inml_sbe
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -564,6 +565,10 @@ contains
       & ndiv_segment, &
       & kpt, &
       & kpt_label
+      
+    namelist/sbe/ &
+      & yn_vnl_correction, &
+      & nstate_sbe
 
 !! == default for &unit ==
     unit_system='au'
@@ -930,7 +935,7 @@ contains
 !! == default for &jellium
     yn_jm                = 'n'
     yn_charge_neutral_jm = 'y'
-    yn_output_dns_jm     = 'y'
+    yn_output_dns_jm     = 'yf'
     shape_file_jm        = 'none'
     num_jm               = 0
     rs_bohr_jm(:)        = 0d0
@@ -950,6 +955,9 @@ contains
     ndiv_segment(:) = 0
     kpt(:,:) = 0.0d0
     kpt_label(:) = ''
+!! == default for &sbe
+    yn_vnl_correction = 'n'
+    nstate_sbe = -1
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1022,6 +1030,9 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=band, iostat=inml_band)
+      rewind(fh_namelist)
+
+      read(fh_namelist, nml=sbe, iostat=inml_sbe)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1528,6 +1539,9 @@ contains
     call comm_bcast(ndiv_segment    ,nproc_group_global)
     call comm_bcast(kpt             ,nproc_group_global)
     call comm_bcast(kpt_label       ,nproc_group_global)
+!! == bcast for sbe
+    call comm_bcast(yn_vnl_correction,nproc_group_global)
+    call comm_bcast(nstate_sbe,      nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2428,12 +2442,16 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', ndiv_segment(1:num_of_segments)
       do i = 1, num_of_segments+1
-      write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
       end do 
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
+      
+      if(inml_sbe >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nstate_sbe', nstate_sbe
 
       close(fh_variables_log)
-
     end if
 
     call comm_bcast(ierr_nml,nproc_group_global)
