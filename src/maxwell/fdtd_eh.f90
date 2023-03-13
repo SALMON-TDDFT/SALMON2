@@ -1698,7 +1698,11 @@ contains
       end if
       allocate(fe%ase_ene(ase_num_em)); fe%ase_ene(:)=0.0d0;
       do ii=1,ase_num_em
-        fe%ase_ene(ii) = tmp_min + ( (tmp_max-tmp_min)/(ase_num_em-1) )*(dble(ii)-1)
+        if (ase_num_em==1) then
+          fe%ase_ene(ii) = tmp_min
+        else
+          fe%ase_ene(ii) = tmp_min + ( (tmp_max-tmp_min)/(ase_num_em-1) )*(dble(ii)-1)
+        end if
         if(ase_wav_min_em>=0.0d0) then
           !convert from wavelength to energy
           fe%ase_ene(ii) = 2.0d0*pi*cspeed_au/fe%ase_ene(ii)
@@ -2034,7 +2038,11 @@ contains
       end if
       allocate(fe%art_ene(art_num_em)); fe%art_ene(:)=0.0d0;
       do ii=1,art_num_em
-        fe%art_ene(ii) = tmp_min + ( (tmp_max-tmp_min)/(art_num_em-1) )*(dble(ii)-1)
+        if (art_num_em==1) then
+          fe%art_ene(ii) = tmp_min
+        else
+          fe%art_ene(ii) = tmp_min + ( (tmp_max-tmp_min)/(art_num_em-1) )*(dble(ii)-1)
+        end if
         if(art_wav_min_em>=0.0d0) then
           !convert from wavelength to energy
           fe%art_ene(ii) = 2.0d0*pi*cspeed_au/fe%art_ene(ii)
