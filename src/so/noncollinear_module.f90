@@ -317,7 +317,7 @@ contains
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          zmat(is,js) = zmat(is,js) + conjg( psi%zwf(ix,iy,iz,is,io,ik,im) ) * psi%zwf(ix,iy,iz,js,io,ik,im)
+          zmat(is,js) = zmat(is,js) + psi%zwf(ix,iy,iz,is,io,ik,im) * conjg( psi%zwf(ix,iy,iz,js,io,ik,im) )
         end do
         end do
         end do
