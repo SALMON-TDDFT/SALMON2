@@ -48,7 +48,6 @@ module fdtd_eh
     real(8),allocatable :: rep(:)          !relative permittivity(non-dispersion)
     real(8),allocatable :: rmu(:)          !relative permeability(non-dispersion)
     real(8),allocatable :: sig(:)          !conductivity(non-dispersion)
-    real(8)             :: cspeed_mi0      !light speed for media ID = 0
     real(8),allocatable :: coo(:,:)        !grid coordinate
     integer,allocatable :: iobs_po_pe(:)   !processor element at observation point
     integer,allocatable :: iobs_li_pe(:,:) !processor element at observation line
@@ -128,6 +127,7 @@ module fdtd_eh
     real(8),allocatable :: er_lr(:,:)                              !LR: Re[e_lr]
     real(8),allocatable :: ei_lr(:,:)                              !LR: Im[e_lr]
     real(8),allocatable :: ase_ene(:)                              !ase: sampling energy axis(ase_num_em)
+    real(8)             :: cspeed_smedia_ase                       !ase: light speed for surrounding media
     integer,allocatable :: iase_mask_xy(:,:)                       !ase: mask on xy plane(x,y)
     integer,allocatable :: iase_mask_yz(:,:)                       !ase: mask on yz plane(y,z)
     integer,allocatable :: iase_mask_xz(:,:)                       !ase: mask on xz plane(x,z)
@@ -158,9 +158,10 @@ module fdtd_eh
                               ase_hx_xy_sca_ene(:,:,:,:,:),ase_hx_xz_sca_ene(:,:,:,:,:), &
                               ase_hy_xy_sca_ene(:,:,:,:,:),ase_hy_yz_sca_ene(:,:,:,:,:), &
                               ase_hz_yz_sca_ene(:,:,:,:,:),ase_hz_xz_sca_ene(:,:,:,:,:)
-    real(8),allocatable :: art_ene(:)      !art: sampling energy axis(art_num_em)
-    integer             :: id_on_plane(2)  !art: id on plane(1:bottom and 2:top)
-    integer             :: ipe_on_plane(2) !art: processor element on plane(1:bottom and 2:top)
+    real(8),allocatable :: art_ene(:)        !art: sampling energy axis(art_num_em)
+    real(8)             :: cspeed_smedia_art !art: light speed for surrounding media
+    integer             :: id_on_plane(2)    !art: id on plane(1:bottom and 2:top)
+    integer             :: ipe_on_plane(2)   !art: processor element on plane(1:bottom and 2:top)
     !art: inc. ex-z and hx-z on bottom or top(art_num_em,1:bottom and 2:top,w/ or w/o window function)
     complex(8),allocatable :: art_ex_inc_bt_ene(:,:,:),art_ey_inc_bt_ene(:,:,:),art_ez_inc_bt_ene(:,:,:), &
                               art_hx_inc_bt_ene(:,:,:),art_hy_inc_bt_ene(:,:,:),art_hz_inc_bt_ene(:,:,:)
@@ -205,9 +206,9 @@ contains
                                phi_cep2,I_wcm2_2,E_amplitude2,gbeam_sigma_plane2,gbeam_sigma_line2,        &
                                bloch_k_em,bloch_real_imag_em,yn_make_shape,yn_output_shape,                &
                                ase_num_em,ase_ene_min_em,ase_ene_max_em,ase_wav_min_em,ase_wav_max_em,     &
-                               ase_box_cent_em,ase_box_size_em,                                            &
+                               ase_smedia_id_em,ase_box_cent_em,ase_box_size_em,                           &
                                art_num_em,art_ene_min_em,art_ene_max_em,art_wav_min_em,art_wav_max_em,     &
-                               art_plane_bot_em,art_plane_top_em,                                          &
+                               art_smedia_id_em,art_plane_bot_em,art_plane_top_em,                         &
                                yn_restart,directory_read_data,checkpoint_interval
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
@@ -776,7 +777,6 @@ contains
     do ii=0,media_num
       call eh_coeff
     end do
-    fe%cspeed_mi0 = cspeed_au / sqrt(fe%rep(0)*fe%rmu(0))
     
     !*** check TTM On/Off, and initialization *****************************************************************!
     if(comm_is_root(nproc_id_global)) write(*,*)
@@ -1625,7 +1625,12 @@ contains
       if(sum(ek_dir2(:))         >0.0d0 ) call stop_em('When ase_num_em > 0, only pulse1 can be used.'    )
       if(trim(ae_shape2)        /='none') call stop_em('When ase_num_em > 0, only pulse1 can be used.'    )
       if(yn_periodic            =='y'   ) call stop_em('When ase_num_em > 0, yn_periodic must be n.'      )
-      if(fe%sig(0)               >0.0d0 ) call stop_em('When ase_num_em > 0, sigma_em(0) must be 0.0d0.'  )
+      if(ase_smedia_id_em/=media_id_source1) then
+        call stop_em('When ase_num_em > 0, ase_smedia_id_em and media_id_source1 must be same.')
+      end if
+      if(fe%sig(ase_smedia_id_em)>0.0d0) then
+        call stop_em('When ase_num_em > 0, sigma_em(ase_smedia_id_em) must be 0.0d0.'  )
+      end if
       if(ae_shape1=='impulse') then
         call stop_em('When ase_num_em > 0, impulse can not be used.')
       end if
@@ -1689,6 +1694,9 @@ contains
                        c2='source_loc1(3) must be set < ase_box_cent_em(3)-(ase_box_size_em(3)/2.0d0).')
         end if
       end if
+      
+      !set light speed for surrounding media
+      fe%cspeed_smedia_ase = cspeed_au / sqrt(fe%rep(ase_smedia_id_em)*fe%rmu(ase_smedia_id_em))
       
       !make sampling energy axis
       if    (ase_ene_min_em>=0.0d0) then
@@ -1874,7 +1882,7 @@ contains
         if(fe%iase_mask_xy(ix,iy)==1) then
           do ik=1,2
             if((fs%mg%is(3)<=fe%id_on_box_surf(3,ik)).and.fe%id_on_box_surf(3,ik)<=fs%mg%ie(3)) then
-              if(fs%imedia(ix,iy,fe%id_on_box_surf(3,ik))/=0) ii=1
+              if(fs%imedia(ix,iy,fe%id_on_box_surf(3,ik))/=ase_smedia_id_em) ii=1
             end if
           end do
         end if
@@ -1889,7 +1897,7 @@ contains
         if(fe%iase_mask_yz(iy,iz)==1) then
           do ik=1,2
             if((fs%mg%is(1)<=fe%id_on_box_surf(1,ik)).and.fe%id_on_box_surf(1,ik)<=fs%mg%ie(1)) then
-              if(fs%imedia(fe%id_on_box_surf(1,ik),iy,iz)/=0) ii=1
+              if(fs%imedia(fe%id_on_box_surf(1,ik),iy,iz)/=ase_smedia_id_em) ii=1
             end if
           end do
         end if
@@ -1904,7 +1912,7 @@ contains
         if(fe%iase_mask_xz(ix,iz)==1) then
           do ik=1,2
             if((fs%mg%is(2)<=fe%id_on_box_surf(2,ik)).and.fe%id_on_box_surf(2,ik)<=fs%mg%ie(2)) then
-              if(fs%imedia(ix,fe%id_on_box_surf(2,ik),iz)/=0) ii=1
+              if(fs%imedia(ix,fe%id_on_box_surf(2,ik),iz)/=ase_smedia_id_em) ii=1
             end if
           end do
         end if
@@ -1914,7 +1922,7 @@ contains
 !$omp end parallel
       call comm_summation(ii,ij,nproc_group_global)
       if(ij>0) then
-        call stop_em(   'When ase_num_em > 0, media ID on closed surface[box shape] must be 0.', &
+        call stop_em(   'When ase_num_em > 0, media ID on closed surface[box shape] must be ase_smedia_id_em.', &
                      c2='ase_box_cent_em and/or ase_box_size_em must be reconsidered.')
       end if
       
@@ -1953,7 +1961,12 @@ contains
       if(sum(ek_dir2(:))  >0.0d0 ) call stop_em('When art_num_em > 0, only pulse1 can be used.'  )
       if(trim(ae_shape2) /='none') call stop_em('When art_num_em > 0, only pulse1 can be used.'  )
       if(yn_periodic     =='n'   ) call stop_em('When art_num_em > 0, yn_periodic must be y.'    )
-      if(fe%sig(0)        >0.0d0 ) call stop_em('When art_num_em > 0, sigma_em(0) must be 0.0d0.')
+      if(art_smedia_id_em/=media_id_source1) then
+        call stop_em('When art_num_em > 0, art_smedia_id_em and media_id_source1 must be same.')
+      end if
+      if(fe%sig(art_smedia_id_em)>0.0d0 ) then
+        call stop_em('When art_num_em > 0, sigma_em(art_smedia_id_em) must be 0.0d0.')
+      end if
       if(ae_shape1=='impulse') then
         call stop_em('When art_num_em > 0, impulse can not be used.')
       end if
@@ -2029,6 +2042,9 @@ contains
                        c2='art_plane_top_em(3) must be set > art_plane_bot_em(3).')
         end if
       end if
+      
+      !set light speed for surrounding media
+      fe%cspeed_smedia_art = cspeed_au / sqrt(fe%rep(art_smedia_id_em)*fe%rmu(art_smedia_id_em))
       
       !make sampling energy axis
       if    (art_ene_min_em>=0.0d0) then
@@ -4192,7 +4208,8 @@ contains
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ calculate incident and scattering fields for ase option +++++++++++++++++++++++++++++++
     subroutine eh_calc_inc_sca_ase
-      use salmon_global,  only: nt_em,ek_dir1,epdir_re1,epdir_im1,ae_shape1,phi_cep1,E_amplitude1,ase_num_em
+      use salmon_global,  only: nt_em,ek_dir1,epdir_re1,epdir_im1,ae_shape1,phi_cep1,E_amplitude1,&
+                                ase_num_em,ase_smedia_id_em
       use math_constants, only: zi
       implicit none
       real(8),allocatable :: ex_inc_pa(:),ey_inc_pa(:),ez_inc_pa(:),hx_inc_pa(:),hy_inc_pa(:),hz_inc_pa(:)
@@ -4228,26 +4245,26 @@ contains
       
       !calculate incident field on propagation axis
       do ii = fs%mg%is(ip),fs%mg%ie(ip)
-        t_inc = t_ori - abs( fe%coo(ii,ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_mi0
+        t_inc = t_ori - abs( fe%coo(ii,ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_smedia_ase
         call eh_calc_e_inc(E_amplitude1,t_inc,tw1,omega1,phi_cep1,ae_shape1,e_inc_r,e_inc_i)
         call eh_calc_polarization_inc(epdir_re1,epdir_im1,e_inc_r,e_inc_i,   &
                                       ex_inc_pa(ii),ey_inc_pa(ii),ez_inc_pa(ii),&
                                       hx_inc_pa(ii),hy_inc_pa(ii),hz_inc_pa(ii),p_axis)
-        hx_inc_pa(ii) = hx_inc_pa(ii)*sqrt(fe%rep(0)/fe%rmu(0))
-        hy_inc_pa(ii) = hy_inc_pa(ii)*sqrt(fe%rep(0)/fe%rmu(0))
-        hz_inc_pa(ii) = hz_inc_pa(ii)*sqrt(fe%rep(0)/fe%rmu(0))
+        hx_inc_pa(ii) = hx_inc_pa(ii)*sqrt(fe%rep(ase_smedia_id_em)/fe%rmu(ase_smedia_id_em))
+        hy_inc_pa(ii) = hy_inc_pa(ii)*sqrt(fe%rep(ase_smedia_id_em)/fe%rmu(ase_smedia_id_em))
+        hz_inc_pa(ii) = hz_inc_pa(ii)*sqrt(fe%rep(ase_smedia_id_em)/fe%rmu(ase_smedia_id_em))
       end do
       
       !calculate incident field on bottom and top
       do ibt = 1,2
-        t_inc = t_ori - abs( fe%coo(fe%id_on_box_surf(ip,ibt),ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_mi0
+        t_inc = t_ori - abs( fe%coo(fe%id_on_box_surf(ip,ibt),ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_smedia_ase
         call eh_calc_e_inc(E_amplitude1,t_inc,tw1,omega1,phi_cep1,ae_shape1,e_inc_r,e_inc_i)
         call eh_calc_polarization_inc(epdir_re1,epdir_im1,e_inc_r,e_inc_i,   &
                                       ex_inc_bt(ibt),ey_inc_bt(ibt),ez_inc_bt(ibt),&
                                       hx_inc_bt(ibt),hy_inc_bt(ibt),hz_inc_bt(ibt),p_axis)
-        hx_inc_bt(ibt) = hx_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
-        hy_inc_bt(ibt) = hy_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
-        hz_inc_bt(ibt) = hz_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+        hx_inc_bt(ibt) = hx_inc_bt(ibt)*sqrt(fe%rep(ase_smedia_id_em)/fe%rmu(ase_smedia_id_em))
+        hy_inc_bt(ibt) = hy_inc_bt(ibt)*sqrt(fe%rep(ase_smedia_id_em)/fe%rmu(ase_smedia_id_em))
+        hz_inc_bt(ibt) = hz_inc_bt(ibt)*sqrt(fe%rep(ase_smedia_id_em)/fe%rmu(ase_smedia_id_em))
       end do
       
       !Fourier transformation for incident field
@@ -4425,7 +4442,8 @@ contains
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ calculate incident and total fields for art option ++++++++++++++++++++++++++++++++++++
     subroutine eh_calc_inc_tot_art
-      use salmon_global,  only: nt_em,ek_dir1,epdir_re1,epdir_im1,ae_shape1,phi_cep1,E_amplitude1,art_num_em
+      use salmon_global,  only: nt_em,ek_dir1,epdir_re1,epdir_im1,ae_shape1,phi_cep1,E_amplitude1,&
+                                art_num_em,art_smedia_id_em
       use math_constants, only: zi
       implicit none
       real(8)             :: ex_inc_bt(2),ey_inc_bt(2),ez_inc_bt(2),hx_inc_bt(2),hy_inc_bt(2),hz_inc_bt(2)
@@ -4450,14 +4468,14 @@ contains
       
       !calculate incident field on plane
       do ibt = 1,2
-        t_inc = t_ori - abs( fe%coo(fe%id_on_plane(ibt),ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_mi0
+        t_inc = t_ori - abs( fe%coo(fe%id_on_plane(ibt),ip) - fe%coo(fe%inc_po_id(1,ip),ip) )/fe%cspeed_smedia_art
         call eh_calc_e_inc(E_amplitude1,t_inc,tw1,omega1,phi_cep1,ae_shape1,e_inc_r,e_inc_i)
         call eh_calc_polarization_inc(epdir_re1,epdir_im1,e_inc_r,e_inc_i,   &
                                       ex_inc_bt(ibt),ey_inc_bt(ibt),ez_inc_bt(ibt),&
                                       hx_inc_bt(ibt),hy_inc_bt(ibt),hz_inc_bt(ibt),p_axis)
-        hx_inc_bt(ibt) = hx_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
-        hy_inc_bt(ibt) = hy_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
-        hz_inc_bt(ibt) = hz_inc_bt(ibt)*sqrt(fe%rep(0)/fe%rmu(0))
+        hx_inc_bt(ibt) = hx_inc_bt(ibt)*sqrt(fe%rep(art_smedia_id_em)/fe%rmu(art_smedia_id_em))
+        hy_inc_bt(ibt) = hy_inc_bt(ibt)*sqrt(fe%rep(art_smedia_id_em)/fe%rmu(art_smedia_id_em))
+        hz_inc_bt(ibt) = hz_inc_bt(ibt)*sqrt(fe%rep(art_smedia_id_em)/fe%rmu(art_smedia_id_em))
       end do
       
       !Fourier transformation for incident field on plane
