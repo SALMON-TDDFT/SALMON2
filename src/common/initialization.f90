@@ -116,10 +116,15 @@ subroutine init_dft_system(lg,system,stencil)
      al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
     stencil%if_orthogonal = .true.
     if(al(1)*al(2)*al(3)==0d0) then
-      if(num_rgrid(1)*num_rgrid(2)*num_rgrid(3)==0 .or. dl(1)*dl(2)*dl(3)==0d0) then
+      if(al_vec1(1)*al_vec2(2)*al_vec3(3)/=0d0) then
+        al(1) = al_vec1(1)
+        al(2) = al_vec2(2)
+        al(3) = al_vec3(3)
+      else if(num_rgrid(1)*num_rgrid(2)*num_rgrid(3)/=0 .and. dl(1)*dl(2)*dl(3)/=0d0) then
+        al = dl * dble(num_rgrid)
+      else
         stop "error: invalid cell"
       end if
-      al = dl * dble(num_rgrid)
     end if
     system%primitive_a = 0d0
     system%primitive_a(1,1) = al(1)
