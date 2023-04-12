@@ -2712,9 +2712,16 @@ contains
     case default          ; stop "projection_option must be 'no','gs', or 'td'"
     end select
 
-    if(yn_ffte=='y'.and.yn_fftw=='y') then
+    if(yn_ffte=='y'.and. yn_fftw=='y') then
       stop "either yn_ffte or yn_fftw can be specified"
     end if
+
+#ifdef USE_FFTW
+#else
+    if(yn_fftw=='y') then
+      stop "yn_fftw='y': Recompile with --enable-fftw"
+    end if
+#endif
 
   end subroutine check_bad_input
 

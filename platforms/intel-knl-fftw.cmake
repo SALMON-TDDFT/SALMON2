@@ -5,10 +5,11 @@ set(OPENMP_FLAGS                "-qopenmp")
 set(LAPACK_VENDOR_FLAGS         "-mkl=parallel")
 set(ScaLAPACK_VENDOR_FLAGS      "-mkl=cluster")
 set(Fortran_PP_FLAGS            "-fpp")
-set(FFTW_FLAGS                  "-lfftw3_mpi -lfftw3")
 
 set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_C_COMPILER            "mpiicc")
+
+set(FFTW_FLAGS                  "-lfftw3_mpi -lfftw3")
 
 set(General_FLAGS               "-qopt-ra-region-strategy=block -ansi-alias -fno-alias -qopt-report=5 -qopt-report-phase=openmp,loop,vec")
 set(General_Fortran_FLAGS       "-nogen-interface -std03 -warn all -diag-disable 6477,7025 -qoverride-limits ${FFTW_FLAGS} ${General_FLAGS}")
