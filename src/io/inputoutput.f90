@@ -236,9 +236,7 @@ contains
       & nproc_ob, &
       & nproc_rgrid, &
       & yn_ffte, &
-#ifdef USE_FFTW
       & yn_fftw, &
-#endif
       & yn_scalapack, &
       & yn_gramschmidt_blas, &
       & yn_eigenexa, &
@@ -632,9 +630,7 @@ contains
     nproc_ob             = 0
     nproc_rgrid          = 0
     yn_ffte              = 'n'
-#ifdef USE_FFTW
     yn_fftw              = 'n'
-#endif
     yn_scalapack         = 'n'
     yn_gramschmidt_blas  = 'y'
     yn_eigenexa          = 'n'
@@ -1118,9 +1114,7 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
-#ifdef USE_FFTW
     call comm_bcast(yn_fftw             ,nproc_group_global)
-#endif
     call comm_bcast(yn_scalapack        ,nproc_group_global)
     call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
@@ -1964,9 +1958,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
-#ifdef USE_FFTW
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
-#endif
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
@@ -2494,9 +2486,7 @@ contains
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_ffte)
-#ifdef USE_FFTW
     call yn_argument_check(yn_fftw)
-#endif
     call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_gramschmidt_blas)
     call yn_argument_check(yn_eigenexa)
@@ -2722,9 +2712,14 @@ contains
     case default          ; stop "projection_option must be 'no','gs', or 'td'"
     end select
 
-#ifdef USE_FFTW
-    if(yn_ffte=='y'.and.yn_fftw=='y') then
+    if(yn_ffte=='y'.and. yn_fftw=='y') then
       stop "either yn_ffte or yn_fftw can be specified"
+    end if
+
+#ifdef USE_FFTW
+#else
+    if(yn_fftw=='y') then
+      stop "yn_fftw='y': Recompile with --enable-fftw"
     end if
 #endif
 
