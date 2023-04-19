@@ -59,6 +59,7 @@ module inputoutput
   integer :: inml_jellium
   integer :: inml_code
   integer :: inml_band
+  integer :: inml_sbe
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -235,9 +236,7 @@ contains
       & nproc_ob, &
       & nproc_rgrid, &
       & yn_ffte, &
-#ifdef USE_FFTW
       & yn_fftw, &
-#endif
       & yn_scalapack, &
       & yn_gramschmidt_blas, &
       & yn_eigenexa, &
@@ -430,7 +429,6 @@ contains
       & film_thickness,           &
       & media_id_pml,             &
       & media_id_source1,         &
-      & media_id_source1,         &
       & media_id_source2,         &
       & bloch_k_em,               &
       & bloch_real_imag_em,       &
@@ -439,6 +437,7 @@ contains
       & ase_ene_max_em,           &
       & ase_wav_min_em,           &
       & ase_wav_max_em,           &
+      & ase_smedia_id_em,         &
       & ase_box_cent_em,          &
       & ase_box_size_em,          &
       & art_num_em,               &
@@ -446,6 +445,7 @@ contains
       & art_ene_max_em,           &
       & art_wav_min_em,           &
       & art_wav_max_em,           &
+      & art_smedia_id_em,         &
       & art_plane_top_em,         &
       & art_plane_bot_em,         &
       & yn_make_shape,            &
@@ -564,6 +564,10 @@ contains
       & ndiv_segment, &
       & kpt, &
       & kpt_label
+      
+    namelist/sbe/ &
+      & yn_vnl_correction, &
+      & nstate_sbe
 
 !! == default for &unit ==
     unit_system='au'
@@ -626,9 +630,7 @@ contains
     nproc_ob             = 0
     nproc_rgrid          = 0
     yn_ffte              = 'n'
-#ifdef USE_FFTW
     yn_fftw              = 'n'
-#endif
     yn_scalapack         = 'n'
     yn_gramschmidt_blas  = 'y'
     yn_eigenexa          = 'n'
@@ -828,6 +830,7 @@ contains
     ase_ene_max_em              = -1.0d0
     ase_wav_min_em              = -1.0d0
     ase_wav_max_em              = -1.0d0
+    ase_smedia_id_em            = 0
     ase_box_cent_em(:)          = 0.0d0
     ase_box_size_em(:)          = -1.0d0
     art_num_em                  = 0
@@ -835,6 +838,7 @@ contains
     art_ene_max_em              = -1.0d0
     art_wav_min_em              = -1.0d0
     art_wav_max_em              = -1.0d0
+    art_smedia_id_em            = 0
     art_plane_bot_em(:)         = 0.0d0
     art_plane_top_em(:)         = 0.0d0
     yn_make_shape               = 'n'
@@ -930,7 +934,7 @@ contains
 !! == default for &jellium
     yn_jm                = 'n'
     yn_charge_neutral_jm = 'y'
-    yn_output_dns_jm     = 'y'
+    yn_output_dns_jm     = 'yf'
     shape_file_jm        = 'none'
     num_jm               = 0
     rs_bohr_jm(:)        = 0d0
@@ -950,6 +954,9 @@ contains
     ndiv_segment(:) = 0
     kpt(:,:) = 0.0d0
     kpt_label(:) = ''
+!! == default for &sbe
+    yn_vnl_correction = 'n'
+    nstate_sbe = -1
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1022,6 +1029,9 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=band, iostat=inml_band)
+      rewind(fh_namelist)
+
+      read(fh_namelist, nml=sbe, iostat=inml_sbe)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1104,9 +1114,7 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
-#ifdef USE_FFTW
     call comm_bcast(yn_fftw             ,nproc_group_global)
-#endif
     call comm_bcast(yn_scalapack        ,nproc_group_global)
     call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
@@ -1387,6 +1395,7 @@ contains
     ase_wav_min_em = ase_wav_min_em * ulength_to_au
     call comm_bcast(ase_wav_max_em           ,nproc_group_global)
     ase_wav_max_em = ase_wav_max_em * ulength_to_au
+    call comm_bcast(ase_smedia_id_em         ,nproc_group_global)
     call comm_bcast(ase_box_cent_em          ,nproc_group_global)
     ase_box_cent_em = ase_box_cent_em * ulength_to_au
     call comm_bcast(ase_box_size_em          ,nproc_group_global)
@@ -1400,9 +1409,10 @@ contains
     art_wav_min_em = art_wav_min_em * ulength_to_au
     call comm_bcast(art_wav_max_em           ,nproc_group_global)
     art_wav_max_em = art_wav_max_em * ulength_to_au
-    call comm_bcast(art_plane_bot_em          ,nproc_group_global)
+    call comm_bcast(art_smedia_id_em         ,nproc_group_global)
+    call comm_bcast(art_plane_bot_em         ,nproc_group_global)
     art_plane_bot_em = art_plane_bot_em * ulength_to_au
-    call comm_bcast(art_plane_top_em          ,nproc_group_global)
+    call comm_bcast(art_plane_top_em         ,nproc_group_global)
     art_plane_top_em = art_plane_top_em * ulength_to_au
     call comm_bcast(yn_make_shape            ,nproc_group_global)
     call comm_bcast(yn_output_shape          ,nproc_group_global)
@@ -1528,6 +1538,9 @@ contains
     call comm_bcast(ndiv_segment    ,nproc_group_global)
     call comm_bcast(kpt             ,nproc_group_global)
     call comm_bcast(kpt_label       ,nproc_group_global)
+!! == bcast for sbe
+    call comm_bcast(yn_vnl_correction,nproc_group_global)
+    call comm_bcast(nstate_sbe,      nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -1945,9 +1958,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
-#ifdef USE_FFTW
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
-#endif
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
@@ -2253,6 +2264,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_max_em', ase_ene_max_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_min_em', ase_wav_min_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_max_em', ase_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'ase_smedia_id_em', ase_smedia_id_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(1)', ase_box_cent_em(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(2)', ase_box_cent_em(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(3)', ase_box_cent_em(3)
@@ -2264,6 +2276,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_smedia_id_em', art_smedia_id_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
@@ -2428,12 +2441,16 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', ndiv_segment(1:num_of_segments)
       do i = 1, num_of_segments+1
-      write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
       end do 
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
+      
+      if(inml_sbe >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nstate_sbe', nstate_sbe
 
       close(fh_variables_log)
-
     end if
 
     call comm_bcast(ierr_nml,nproc_group_global)
@@ -2469,9 +2486,7 @@ contains
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_ffte)
-#ifdef USE_FFTW
     call yn_argument_check(yn_fftw)
-#endif
     call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_gramschmidt_blas)
     call yn_argument_check(yn_eigenexa)
@@ -2697,9 +2712,14 @@ contains
     case default          ; stop "projection_option must be 'no','gs', or 'td'"
     end select
 
-#ifdef USE_FFTW
-    if(yn_ffte=='y'.and.yn_fftw=='y') then
+    if(yn_ffte=='y'.and. yn_fftw=='y') then
       stop "either yn_ffte or yn_fftw can be specified"
+    end if
+
+#ifdef USE_FFTW
+#else
+    if(yn_fftw=='y') then
+      stop "yn_fftw='y': Recompile with --enable-fftw"
     end if
 #endif
 

@@ -77,9 +77,7 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
-#ifdef USE_FFTW
   character(1)   :: yn_fftw
-#endif
   character(1)   :: yn_scalapack
   character(1)   :: yn_gramschmidt_blas
   character(1)   :: yn_eigenexa
@@ -278,6 +276,7 @@ module salmon_global
   real(8)        :: ase_ene_max_em
   real(8)        :: ase_wav_min_em
   real(8)        :: ase_wav_max_em
+  integer        :: ase_smedia_id_em
   real(8)        :: ase_box_cent_em(3)
   real(8)        :: ase_box_size_em(3)
   integer        :: art_num_em
@@ -285,6 +284,7 @@ module salmon_global
   real(8)        :: art_ene_max_em
   real(8)        :: art_wav_min_em
   real(8)        :: art_wav_max_em
+  integer        :: art_smedia_id_em
   real(8)        :: art_plane_bot_em(3)
   real(8)        :: art_plane_top_em(3)
   character(1)   :: yn_make_shape
@@ -411,5 +411,9 @@ character(256),allocatable :: atom_name(:)
   integer :: ndiv_segment(max_num_of_segments)
   real(8) :: kpt(3,max_num_of_segments+1)
   character(1) :: kpt_label(max_num_of_segments+1)
+  
+  !! &sbe 
+  character(1)   :: yn_vnl_correction
+  integer        :: nstate_sbe
 
 end module salmon_global

@@ -227,6 +227,8 @@ contains
       call set_sub(23, LOG_RT_ANALYSIS          , 'analysis calc.')
       call set_sub(24, LOG_RT_MISC              , 'misc.')
       call write_loadbalance(fd, 24, tsrc, headers, mode)
+    case('sbe', 'maxwell_sbe')
+      ! nothing ...
     case default
       stop 'invalid theory @ perflog'
     end select

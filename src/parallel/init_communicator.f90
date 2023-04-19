@@ -225,7 +225,7 @@ subroutine init_communicator_dft(comm,info)
   info%icomm_z = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_z, info%id_z, info%isize_z)
 
-! xy-dir summation (for singlescale FDTD)
+! xy-dir summation (for singlescale FDTD and for FFTW)
   iz = info%iaddress(3)
   nl = 0
   do iy=0,nproc_d_o(2)-1
