@@ -1,0 +1,119 @@
+!########################################################################################!
+! Excercise x2: multiscale calculation for 2D silicon cylinder system                        !
+!----------------------------------------------------------------------------------------!
+! * The detail of this excercise is explained in our manual(see chapter: 'Exercises').   !
+!   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
+! * Input format consists of group of keywords like:                                     !
+!     &group                                                                             !
+!       input keyword = xxx                                                              !
+!     /                                                                                  !
+!   (see chapter: 'List of input keywords' in the manual)                                !
+!----------------------------------------------------------------------------------------!
+! * Conversion from unit_system = 'a.u.' to 'A_eV_fs':                                   !
+!   Length: 1 [a.u.] = 0.52917721067    [Angstrom]                                       !
+!   Energy: 1 [a.u.] = 27.21138505      [eV]                                             !
+!   Time  : 1 [a.u.] = 0.02418884326505 [fs]                                             !
+!########################################################################################!
+
+&calculation
+    theory = 'maxwell_sbe'
+/
+
+&control
+    sysname = 'Si'
+/
+
+! &parallel
+!     nproc_k = 64
+!     nproc_ob = 1
+!     nproc_rgrid(1) = 1
+!     nproc_rgrid(2) = 1
+!     nproc_rgrid(3) = 1
+! /
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.26d0, 10.26d0, 10.26d0
+    nelem = 1
+    natom = 8
+    nelec = 32
+    nstate = 32
+/
+
+&pseudo
+    file_pseudo(1) = './Si_rps.dat'
+    izatom(1) = 14
+    lloc_ps(1) = 2
+/
+
+&functional
+    xc = 'PZ'
+/
+
+&rgrid
+    num_rgrid(1:3) = 16, 16, 16
+/
+
+&kgrid
+    num_kgrid(1:3) = 8, 8, 8
+/
+
+&tgrid
+    dt = 0.05d0
+    nt = 24000
+/
+
+&emfield
+    ae_shape1 = "Acos2"
+    epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+    I_wcm2_1 = 1.0d+12
+    tw1 = 1000.0d0
+    omega1 = 0.056d0
+/
+
+&multiscale
+    fdtddim = "3d"   
+    hx_m = 189.0 ! 5nm
+    hy_m = 189.0 ! 5nm
+    hz_m = 189.0 ! 5nm
+    nx_m = 80
+    ny_m = 80
+    nz_m = 1
+    nxvac_m(1) = 2000
+    nxvac_m(2) = 2000
+    out_ms_region_ix_m(1:2) = -100, 200
+/
+
+&maxwell
+    ! Media 1
+    ! Media 2
+    media_type(1) = "multiscale"
+    ! Shaper
+    n_s = 1
+    ! Object 1
+    id_s(1) = 1
+    typ_s(1) = "ellipsoid"
+    ori_s(1,1:3) = 7561.43, 7561.43, 94.52
+    inf_s(1,1:3) =  7561.43,  7561.43, 10000.0
+    ! 
+    obs_num_em=3
+    obs_loc_em(1, 1:3) = 7561.43, 7561.43, 94.52
+    obs_loc_em(2, 1:3) = 11342.145, 7561.43, 94.52
+    obs_loc_em(3, 1:3) = 15122.86, 7561.43, 94.52
+/
+
+&atomic_red_coor
+    'Si'  .0      .0      .0      1
+    'Si'  .25     .25     .25     1
+    'Si'  .5      .0      .5      1
+    'Si'  .0      .5      .5      1
+    'Si'  .5      .5      .0      1
+    'Si'  .75     .25     .75     1
+    'Si'  .25     .75     .75     1
+    'Si'  .75     .75     .25     1
+/
+
