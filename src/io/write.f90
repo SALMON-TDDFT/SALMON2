@@ -963,8 +963,8 @@ contains
                                              *(1-3*(t2/tt)**2+2*(t2/tt)**3)
         end do
 
-        zalpha(:)=zalpha(:)/e_impulse*dt
-        sf(:)=-2*hw/pi*aimag(zalpha(:))
+        zalpha(:)=zalpha(:)/(-e_impulse)*dt
+        sf(:)=2*hw/pi*aimag(zalpha(:))
 
         write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
              &,(real(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
