@@ -506,6 +506,8 @@ contains
       & yn_out_intraband_current, &
       & yn_out_current_decomposed, &
       & out_current_decomposed_step, &
+      & yn_out_spin_current, &
+      & out_spin_current_step, &
       & yn_out_perflog, &
       & format_perflog
 
@@ -901,6 +903,8 @@ contains
     yn_out_intraband_current = 'n'
     yn_out_current_decomposed = 'n'
     out_current_decomposed_step = 100
+    yn_out_spin_current = 'n'
+    out_spin_current_step = 100
 
     yn_out_perflog      = 'y'
     format_perflog      = 'stdout'
@@ -1480,6 +1484,8 @@ contains
     call comm_bcast(yn_out_intraband_current   ,nproc_group_global)
     call comm_bcast(yn_out_current_decomposed  ,nproc_group_global)
     call comm_bcast(out_current_decomposed_step,nproc_group_global)
+    call comm_bcast(yn_out_spin_current        ,nproc_group_global)
+    call comm_bcast(out_spin_current_step,nproc_group_global)
     call comm_bcast(yn_out_perflog      ,nproc_group_global)
     call comm_bcast(format_perflog      ,nproc_group_global)
 
@@ -2353,6 +2359,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_intraband_current', yn_out_intraband_current
       write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_current_decomposed', yn_out_current_decomposed
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_current_decomposed_step', out_current_decomposed_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current', yn_out_spin_current
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_spin_current_step', out_spin_current_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
@@ -2513,6 +2521,7 @@ contains
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
+    call yn_argument_check(yn_out_spin_current)
     call yn_argument_check(yn_out_gs_sgm_eps)
     call yn_argument_check(yn_set_ini_velocity)
     call yn_argument_check(yn_jm)
@@ -2668,6 +2677,12 @@ contains
        if( spin /= 'noncollinear' ) then
           stop "spin = 'noncollinear' is necessary when spin-orbit calculation is performed"
        end if
+    end if
+    
+    if(yn_out_spin_current=='y') then
+      if( spin /= 'noncollinear' ) then
+        stop "spin = 'noncollinear' is necessary when yn_out_spin_current='y'"
+      end if
     end if
 
     if(theory=='single_scale_maxwell_tddft') then

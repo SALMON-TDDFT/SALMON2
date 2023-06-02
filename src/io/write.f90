@@ -2354,6 +2354,72 @@ contains
 
 !===================================================================================================================================
 
+  subroutine write_spin_current(itt,ofl,mg,system,info,stencil,psi,ppg)
+    use structures
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global
+    use salmon_global, only: base_directory,SYSname
+    use inputoutput, only: t_unit_current
+    use filesystem, only: open_filehandle
+    use noncollinear_module, only:calc_spin_current
+    implicit none
+    integer                 ,intent(in) :: itt
+    type(s_ofile)                       :: ofl
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_parallel_info)   ,intent(in) :: info
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_orbital)         ,intent(in) :: psi
+    !
+    integer :: ik,io,i
+    real(8) :: spin_curr_micro(3,0:3, &
+                & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    real(8) :: spin_curr_band(3,0:3,system%no,system%nk)
+    
+    !(header in SYSname_spin_current_band.data)
+    if(itt < 0) then
+      if(comm_is_root(nproc_id_global))then
+        write(ofl%file_spin_current_band,"(2A,'_spin_current_band.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_spin_current_band = open_filehandle(ofl%file_spin_current_band)
+        open(ofl%fh_spin_current_band,file=ofl%file_spin_current_band)
+        write(ofl%fh_spin_current_band, '("#",1X,A)') "band decomposition of the spin current density"
+        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "it", "time step index"
+        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "ib", "band index"
+        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "i", "index of the Pauli matrices (0,x,y,z)"
+        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "spin_curr_[xyz]", "decomposed elements the spin current density"
+        write(ofl%fh_spin_current_band, '("#",1X,A)') "------------------------------------------------"
+        write(ofl%fh_spin_current_band, '("#",1X,A)') "it"
+        write(ofl%fh_spin_current_band, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+          & 1, "ik", "none", &
+          & 2, "ib", "none", &
+          & 3, "i", "none", &
+          & 4, "spin_curr_x", trim(t_unit_current%name), &
+          & 5, "spin_curr_y", trim(t_unit_current%name), &
+          & 6, "spin_curr_z", trim(t_unit_current%name)
+      end if
+      return
+    end if
+    
+    call calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
+    
+    if(comm_is_root(nproc_id_global))then
+      write(ofl%fh_spin_current_band,'(i11)') itt
+      do ik=1,system%nk
+      do io=1,system%no
+      do i=0,3
+        write(ofl%fh_spin_current_band,'(3(1X,i6),3(1X,E23.15E3))') &
+        & ik,io,i, spin_curr_band(1:3,i,io,ik)* (system%rocc(io,ik,1)*system%wtk(ik)) * t_unit_current%conv
+      end do
+      end do
+      end do
+    end if
+    
+  end subroutine write_spin_current
+
+!===================================================================================================================================
+
   subroutine write_magnetization(itt,ofl,system,mg,info,psi)
     use structures
     use communication, only: comm_is_root
