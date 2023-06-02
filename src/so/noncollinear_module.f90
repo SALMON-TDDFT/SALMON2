@@ -10,6 +10,7 @@ module noncollinear_module
   public :: calc_magnetization
   public :: calc_magnetization_decomposed
   public :: simple_mixing_so
+  public :: calc_spin_current
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -379,5 +380,85 @@ contains
     !$omp end workshare
   
   end subroutine simple_mixing_so
+  
+  
+! spin current density
+! cf. N. Tancogne-Dejean et al, npj Computational Materials 8, 145 (2022).
+  subroutine calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
+    use structures
+    use communication, only: comm_summation
+    use pseudo_pt_current_so, only: calc_spin_current_nonlocal
+    implicit none
+    type(s_dft_system)   ,intent(in) :: system
+    type(s_rgrid)        ,intent(in) :: mg
+    type(s_stencil)      ,intent(in) :: stencil
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital)      ,intent(in) :: psi
+    type(s_pp_grid)      ,intent(in) :: ppg
+    real(8)                          :: spin_curr_micro(3,0:3, &
+                                        & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    real(8)                          :: spin_curr_band(3,0:3,system%no,system%nk)
+    !
+    integer,parameter :: im = 1
+    integer :: ispin,ik,io,ix,iy,iz,i
+    real(8),dimension(3,0:3) :: jspin_l,jspin_nl
+    real(8) :: kAc(3)
+    complex(8) :: p(2),g(3,2),sig(3,0:3)
+    real(8) :: wrk_micro(3,0:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    real(8) :: wrk_band(3,0:3,system%no,system%nk)
+    complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1) &
+                       & ,mg%is_array(2):mg%ie_array(2) &
+                       & ,mg%is_array(3):mg%ie_array(3),2)
+
+    if(info%if_divide_rspace) then
+    !!!! future work
+      stop("calc_spin_current_density: r-space parallelization for spin-noncollinear systems is not implemented")
+    end if
+
+    wrk_micro = 0d0
+    wrk_band = 0d0
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+ 
+      ! gtpsi = (nabla) psi
+      do ispin=1,2
+        call calc_gradient_psi(psi%zwf(:,:,:,ispin,io,ik,im),gtpsi(:,:,:,:,ispin) &
+        &    ,mg%is_array,mg%ie_array,mg%is,mg%ie &
+        &    ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+      end do
+      
+      jspin_l = 0d0
+      !$omp parallel do collapse(2) private(iz,iy,ix,p,g,sig) reduction(+:jspin_l)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        p(:) = psi%zwf(ix,iy,iz,:,io,ik,im)
+        g(:,1) = - zi* gtpsi(:,ix,iy,iz,1) + kAc(:) * p(1)
+        g(:,2) = - zi* gtpsi(:,ix,iy,iz,2) + kAc(:) * p(2)
+
+        sig(:,0) = conjg(p(1)) * g(:,1) + conjg(p(2)) * g(:,2)
+        sig(:,1) = conjg(p(1)) * g(:,2) + conjg(p(2)) * g(:,1)
+        sig(:,2) = -zi* ( conjg(p(1)) * g(:,2) - conjg(p(2)) * g(:,1) )
+        sig(:,3) = conjg(p(1)) * g(:,1) - conjg(p(2)) * g(:,2)
+        
+        wrk_micro(:,:,ix,iy,iz) = wrk_micro(:,:,ix,iy,iz) &
+        & + dble(sig) * system%rocc(io,ik,1)*system%wtk(ik)
+        jspin_l = jspin_l + dble(sig)
+      end do
+      end do
+      end do
+      
+      call calc_spin_current_nonlocal(jspin_nl,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+      wrk_band(:,:,io,ik) = ( jspin_l + jspin_nl ) / dble(system%ngrid)
+      
+    end do ! io
+    end do ! ik
+    
+    call comm_summation(wrk_micro,spin_curr_micro,3*4*mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+    call comm_summation(wrk_band,spin_curr_band,3*4*system%no*system%nk,info%icomm_rko)
+    
+    return
+  end subroutine calc_spin_current
 
 end module noncollinear_module

@@ -345,6 +345,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call write_current_decomposed(itt,ofl,mg,system,info,stencil,srg,spsi_out,ppg)
   end if
   
+  if(yn_out_spin_current=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_spin_current_step)==0)) then
+    call write_spin_current(itt,ofl,mg,system,info,stencil,spsi_out,ppg)
+  end if
+  
   call timer_end(LOG_WRITE_RT_INFOS)
 
   return

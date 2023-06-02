@@ -39,7 +39,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
-                       init_projection,write_magnetization,write_current_decomposed
+                       init_projection,write_magnetization,write_current_decomposed,write_spin_current
   use code_optimization
   use initialization_sub
   use prep_pp_sub
@@ -365,6 +365,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   if(yn_out_current_decomposed == 'y') then
   !(header in SYSname_current_decomposed.data)
     call write_current_decomposed(-1,ofl,mg,system,info,stencil,srg,spsi_in,ppg)
+  end if
+  
+  if(yn_out_spin_current=='y') then
+  !(header in SYSname_spin_current_band.data)
+    call write_spin_current(-1,ofl,mg,system,info,stencil,spsi_in,ppg)
   end if
   
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then

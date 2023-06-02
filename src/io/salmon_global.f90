@@ -345,6 +345,8 @@ module salmon_global
   character(1)   :: yn_out_intraband_current
   character(1)   :: yn_out_current_decomposed
   integer        :: out_current_decomposed_step
+  character(1)   :: yn_out_spin_current
+  integer        :: out_spin_current_step
   character(1)   :: yn_out_perflog
   character(6)   :: format_perflog ! 'stdout','text','csv'
   
