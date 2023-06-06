@@ -2356,7 +2356,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine write_rt_spin(itt,ofl,system,mg,info,stencil,ppg,psi)
+  subroutine write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,psi)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -2365,11 +2365,12 @@ contains
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_current,t_unit_time
     use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed,calc_spin_current
+    use writefield, only: write_spin_current_micro
     implicit none
     integer                 ,intent(in) :: itt
     type(s_ofile)                       :: ofl
     type(s_dft_system)      ,intent(in) :: system
-    type(s_rgrid)           ,intent(in) :: mg
+    type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_parallel_info)   ,intent(in) :: info
     type(s_stencil)         ,intent(in) :: stencil
     type(s_pp_grid)         ,intent(in) :: ppg
@@ -2428,6 +2429,10 @@ contains
         end do
       end if
       
+    end if
+    
+    if(yn_out_spin_current_micro=='y') then
+      call write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
     end if
     
   contains

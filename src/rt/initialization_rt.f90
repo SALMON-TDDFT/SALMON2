@@ -359,7 +359,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   if(yn_spinorbit=='y') then
   !(header in SYSname_rt_spin.data)
-    call write_rt_spin(-1,ofl,system,mg,info,stencil,ppg,spsi_in)
+    call write_rt_spin(-1,ofl,system,lg,mg,info,stencil,ppg,spsi_in)
   end if
   
   if(yn_out_current_decomposed == 'y') then

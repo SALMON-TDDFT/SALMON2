@@ -337,7 +337,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   
   if(yn_spinorbit=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_rt_spin_step)==0)) then
-    call write_rt_spin(itt,ofl,system,mg,info,stencil,ppg,spsi_out)
+    call write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,spsi_out)
   end if
   
   if(yn_out_current_decomposed=='y' &
