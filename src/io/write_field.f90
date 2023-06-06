@@ -325,7 +325,7 @@ subroutine write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
   character(60) :: suffix
   character(20) :: header_unit
   character(1)  :: xyz(1:3) = (/"x","y","z"/)
-  character(30) :: phys_quantity="microscopic spin-current density"
+  character(64) :: phys_quantity="micro. spin-current density"
   
   write(filenum, '(i6.6)') itt
   
