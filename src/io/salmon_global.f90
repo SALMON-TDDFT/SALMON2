@@ -341,12 +341,13 @@ module salmon_global
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
   character(1)   :: yn_lr_w0_correction
-  integer        :: out_magnetization_step
   character(1)   :: yn_out_intraband_current
   character(1)   :: yn_out_current_decomposed
   integer        :: out_current_decomposed_step
-  character(1)   :: yn_out_spin_current
-  integer        :: out_spin_current_step
+  integer        :: out_rt_spin_step
+  character(1)   :: yn_out_mag_decomposed_rt
+  character(1)   :: yn_out_spin_current_decomposed
+  character(1)   :: yn_out_spin_current_micro
   character(1)   :: yn_out_perflog
   character(6)   :: format_perflog ! 'stdout','text','csv'
   
