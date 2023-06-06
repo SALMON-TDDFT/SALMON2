@@ -320,11 +320,11 @@ subroutine write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
                          & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   !
   integer :: i,j,ix,iy,iz
-  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),3,3) :: wrk1,wrk2
+  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),3,0:3) :: wrk1,wrk2
   character(10) :: filenum
   character(60) :: suffix
   character(20) :: header_unit
-  character(1)  :: xyz(1:3) = (/"x","y","z"/)
+  character(1)  :: xyz(0:3) = (/"0","x","y","z"/)
   character(64) :: phys_quantity="micro. spin-current density"
   
   write(filenum, '(i6.6)') itt
@@ -333,16 +333,16 @@ subroutine write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    wrk1(ix,iy,iz,1:3,1:3) = spin_curr_micro(1:3,1:3,ix,iy,iz)
+    wrk1(ix,iy,iz,:,:) = spin_curr_micro(:,:,ix,iy,iz)
   end do
   end do
   end do
   if(format_voxel_data=='avs')then
     wrk1 = wrk1 /(au_length_aa**3)
   end if
-  call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*3*3,info%icomm_r)
+  call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*3*4,info%icomm_r)
     
-  do i=1,3 ! Pauli matrix sigma_i
+  do i=0,3 ! Pauli matrix sigma_i
   do j=1,3 ! r-space direction
     suffix = "spin_curr_micro_"//adjustl(xyz(i))//"_"//adjustl(xyz(j))//"_"//adjustl(filenum)
     if(format_voxel_data=='avs')then
