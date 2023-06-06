@@ -2402,7 +2402,10 @@ contains
     if(comm_is_root(nproc_id_global))then
     
       write(ofl%fh_rt_spin,'(1000(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv,m(1),m(2),m(3), &
-      & spin_curr(1:3,0),spin_curr(1:3,1),spin_curr(1:3,2),spin_curr(1:3,3)
+      & spin_curr(1:3,0) * t_unit_current%conv, &
+      & spin_curr(1:3,1) * t_unit_current%conv, &
+      & spin_curr(1:3,2) * t_unit_current%conv, &
+      & spin_curr(1:3,3) * t_unit_current%conv
       
       if(yn_out_mag_decomposed_rt=='y') then
         write(ofl%fh_mag_decomposed_rt,'(i11)') itt
@@ -2440,7 +2443,7 @@ contains
         ofl%fh_rt_spin = open_filehandle(filename)
         fh = ofl%fh_rt_spin
         open(fh,file=filename)
-        write(fh, '("#",1X,A)') "spin magnetization & spin current density"
+        write(fh, '("#",1X,A)') "Spin magnetization & Spin current density"
         write(fh, '("#",1X,A,":",1X,A)') "mag_[xyz]", "Total magnetization"
         write(fh, '("#",1X,A,":",1X,A)') "spin_curr_i_[xyz]", "Spin current density with the Pauli matrix sigma_i (i=0,x,y,z)"
         write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
@@ -2467,7 +2470,7 @@ contains
           ofl%fh_mag_decomposed_rt = open_filehandle(filename)
           fh = ofl%fh_mag_decomposed_rt
           open(fh,file=filename)
-          write(fh, '("#",1X,A)') "band decomposition of the spin magnetization"
+          write(fh, '("#",1X,A)') "band decomposition of the time-dependent spin magnetization"
           write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
           write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
           write(fh, '("#",1X,A,":",1X,A)') "ib", "band index"
@@ -2488,7 +2491,7 @@ contains
           ofl%fh_spin_current_decomposed = open_filehandle(filename)
           fh = ofl%fh_spin_current_decomposed
           open(fh,file=filename)
-          write(fh, '("#",1X,A)') "band decomposition of the spin current density"
+          write(fh, '("#",1X,A)') "Band decomposition of the spin current density"
           write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
           write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
           write(fh, '("#",1X,A,":",1X,A)') "ib", "band index"
@@ -2538,11 +2541,11 @@ contains
       write(file_gs_mag,"(2A,'_mag_decomposed_gs.data')") trim(base_directory),trim(SYSname)
       fh_gs_mag = open_filehandle(file_gs_mag)
       open(fh_gs_mag,file=file_gs_mag)
-      write(fh_gs_mag, '("#",1X,A)') "Magnetization of the ground state"
+      write(fh_gs_mag, '("#",1X,A)') "Band decomposition of the spin magnetization @ the ground state"
       write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ib", "band index"
       write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
-      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "decomposed elements of the magnetization"
       write(fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
       & 1, "mag(1)", "none", &
       & 2, "mag(2)", "none", &
