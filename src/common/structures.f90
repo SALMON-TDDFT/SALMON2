@@ -413,9 +413,9 @@ module structures
     integer :: fh_pulse
     integer :: fh_dft_md
     integer :: fh_ovlp,fh_nex
-    integer :: fh_rt_mag,fh_gs_mag
     integer :: fh_current_decomposed, fh_intra_current
-    integer :: fh_spin_current_band
+    integer :: fh_rt_spin
+    integer :: fh_mag_decomposed_rt,fh_spin_current_decomposed
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
@@ -423,9 +423,6 @@ module structures
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
     character(256) :: file_ovlp,file_nex
-    character(256) :: file_rt_mag, file_gs_mag
-    character(256) :: file_current_decomposed, file_intra_current
-    character(256) :: file_spin_current_band
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile

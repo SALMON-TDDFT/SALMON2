@@ -303,6 +303,63 @@ end subroutine write_micro_je
 
 !===================================================================================================================================
 
+subroutine write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
+  use inputoutput, only: au_length_aa
+  use salmon_global, only: format_voxel_data,theory
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root,comm_summation
+  use write_file3d, only: write_avs, write_cube, write_vtk
+  use structures
+  implicit none
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: mg
+  type(s_dft_system)     ,intent(in) :: system
+  type(s_parallel_info)  ,intent(in) :: info
+  integer                ,intent(in) :: itt
+  real(8)                ,intent(in) :: spin_curr_micro(3,0:3, &
+                         & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  !
+  integer :: i,j,ix,iy,iz
+  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),3,3) :: wrk1,wrk2
+  character(10) :: filenum
+  character(60) :: suffix
+  character(20) :: header_unit
+  character(1)  :: xyz(1:3) = (/"x","y","z"/)
+  character(64) :: phys_quantity="micro. spin-current density"
+  
+  write(filenum, '(i6.6)') itt
+  
+  wrk1 = 0.d0
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    wrk1(ix,iy,iz,1:3,1:3) = spin_curr_micro(1:3,1:3,ix,iy,iz)
+  end do
+  end do
+  end do
+  if(format_voxel_data=='avs')then
+    wrk1 = wrk1 /(au_length_aa**3)
+  end if
+  call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*3*3,info%icomm_r)
+    
+  do i=1,3 ! Pauli matrix sigma_i
+  do j=1,3 ! r-space direction
+    suffix = "spin_curr_micro_"//adjustl(xyz(i))//"_"//adjustl(xyz(j))//"_"//adjustl(filenum)
+    if(format_voxel_data=='avs')then
+      header_unit='A**(-3)'
+      call write_avs(lg,222,suffix,header_unit,wrk2(:,:,:,j,i))
+    else if(format_voxel_data=='cube')then
+      call write_cube(lg,222,suffix,phys_quantity,wrk2(:,:,:,j,i),system)
+    else if(format_voxel_data=='vtk')then
+      call write_vtk(lg,222,suffix,wrk2(:,:,:,j,i),system%hgs)
+    end if
+  end do
+  end do
+  
+end subroutine write_spin_current_micro
+
+!===================================================================================================================================
+
 subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
   use salmon_global       ,only: format_voxel_data,theory
   use structures

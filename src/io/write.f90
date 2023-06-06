@@ -1931,6 +1931,7 @@ contains
       use inputoutput, only: t_unit_time,t_unit_current
       use filesystem, only: open_filehandle
       implicit none
+      character(256) :: file_intra_current
       if(comm_is_root(nproc_id_global)) then
       
       !(header in SYSname_ovlp.data)
@@ -1959,9 +1960,9 @@ contains
         
         if(yn_out_intraband_current=='y') then
         !(header in SYSname_intra_current.data)
-          write(ofl%file_intra_current,"(2A,'_intra_current.data')") trim(base_directory),trim(SYSname)
-          ofl%fh_intra_current = open_filehandle(ofl%file_intra_current)
-          open(ofl%fh_intra_current,file=ofl%file_intra_current)
+          write(file_intra_current,"(2A,'_intra_current.data')") trim(base_directory),trim(SYSname)
+          ofl%fh_intra_current = open_filehandle(file_intra_current)
+          open(ofl%fh_intra_current,file=file_intra_current)
           write(ofl%fh_intra_current, '("#",1X,A)') "Intra-band current density [T. Otobe, Phys. Rev. B 94, 235152 (2016).]"
           write(ofl%fh_intra_current, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no')  &
           &  1, "Time", trim(t_unit_time%name)
@@ -2304,14 +2305,15 @@ contains
     type(s_orbital)                     :: psi
     type(s_sendrecv_grid)               :: srg
     integer :: ik,io,ispin,nspin_tmp
+    character(256) :: file_current_decomposed
     real(8) :: curr_decomp(3,system%nspin,system%no,system%nk)
     
     !(header in SYSname_current_decomposed.data)
     if(itt < 0) then
       if(comm_is_root(nproc_id_global))then
-        write(ofl%file_current_decomposed,"(2A,'_current_decomposed.data')") trim(base_directory),trim(SYSname)
-        ofl%fh_current_decomposed = open_filehandle(ofl%file_current_decomposed)
-        open(ofl%fh_current_decomposed,file=ofl%file_current_decomposed)
+        write(file_current_decomposed,"(2A,'_current_decomposed.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_current_decomposed = open_filehandle(file_current_decomposed)
+        open(ofl%fh_current_decomposed,file=file_current_decomposed)
         write(ofl%fh_current_decomposed, '("#",1X,A)') "decomposition of the current density"
         write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "it", "time step index"
         write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "ik", "k-point index"
@@ -2354,133 +2356,170 @@ contains
 
 !===================================================================================================================================
 
-  subroutine write_spin_current(itt,ofl,mg,system,info,stencil,psi,ppg)
+  subroutine write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,psi)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: base_directory,SYSname
-    use inputoutput, only: t_unit_current
+    use salmon_global, only: dt,yn_spinorbit,base_directory,SYSname, &
+    & yn_out_mag_decomposed_rt,yn_out_spin_current_decomposed,yn_out_spin_current_micro
     use filesystem, only: open_filehandle
-    use noncollinear_module, only:calc_spin_current
+    use inputoutput, only: t_unit_current,t_unit_time
+    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed,calc_spin_current
+    use writefield, only: write_spin_current_micro
     implicit none
     integer                 ,intent(in) :: itt
     type(s_ofile)                       :: ofl
-    type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
+    type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_parallel_info)   ,intent(in) :: info
     type(s_stencil)         ,intent(in) :: stencil
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi
     !
-    integer :: ik,io,i
+    integer ik,io,i
+    real(8) :: m(3),mag_orb(3,system%no,system%nk),spin_curr(3,0:3)
     real(8) :: spin_curr_micro(3,0:3, &
                 & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8) :: spin_curr_band(3,0:3,system%no,system%nk)
     
-    !(header in SYSname_spin_current_band.data)
+    if(yn_spinorbit=='n') stop "error: write_rt_spin with yn_spinorbit=n"
+    
     if(itt < 0) then
+      call file_header
+      return
+    end if
+    
+    call calc_magnetization(system,mg,info,m)
+    if(yn_out_mag_decomposed_rt=='y') call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+    call calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
+    
+    spin_curr = 0d0
+    do ik=1,system%nk
+    do io=1,system%no
+      spin_curr = spin_curr + spin_curr_band(:,:,io,ik)* system%rocc(io,ik,1)*system%wtk(ik)
+    end do
+    end do
+  
+    if(comm_is_root(nproc_id_global))then
+    
+      write(ofl%fh_rt_spin,'(1000(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv,m(1),m(2),m(3), &
+      & spin_curr(1:3,0) * t_unit_current%conv, &
+      & spin_curr(1:3,1) * t_unit_current%conv, &
+      & spin_curr(1:3,2) * t_unit_current%conv, &
+      & spin_curr(1:3,3) * t_unit_current%conv
+      
+      if(yn_out_mag_decomposed_rt=='y') then
+        write(ofl%fh_mag_decomposed_rt,'(i11)') itt
+        do ik=1,system%nk
+        do io=1,system%no
+          write(ofl%fh_mag_decomposed_rt,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+        end do
+        end do
+      end if
+
+      if(yn_out_spin_current_decomposed=='y') then
+        write(ofl%fh_spin_current_decomposed,'(i11)') itt
+        do ik=1,system%nk
+        do io=1,system%no
+        do i=0,3
+          write(ofl%fh_spin_current_decomposed,'(3(1X,i6),3(1X,E23.15E3))') &
+          & ik,io,i, spin_curr_band(1:3,i,io,ik)* (system%rocc(io,ik,1)*system%wtk(ik)) * t_unit_current%conv
+        end do
+        end do
+        end do
+      end if
+      
+    end if
+    
+    if(yn_out_spin_current_micro=='y') then
+      call write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
+    end if
+    
+  contains
+  
+    subroutine file_header
+      implicit none
+      integer :: fh
+      character(256) :: filename
+      !
       if(comm_is_root(nproc_id_global))then
-        write(ofl%file_spin_current_band,"(2A,'_spin_current_band.data')") trim(base_directory),trim(SYSname)
-        ofl%fh_spin_current_band = open_filehandle(ofl%file_spin_current_band)
-        open(ofl%fh_spin_current_band,file=ofl%file_spin_current_band)
-        write(ofl%fh_spin_current_band, '("#",1X,A)') "band decomposition of the spin current density"
-        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "it", "time step index"
-        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "ib", "band index"
-        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "i", "index of the Pauli matrices (0,x,y,z)"
-        write(ofl%fh_spin_current_band, '("#",1X,A,":",1X,A)') "spin_curr_[xyz]", "decomposed elements the spin current density"
-        write(ofl%fh_spin_current_band, '("#",1X,A)') "------------------------------------------------"
-        write(ofl%fh_spin_current_band, '("#",1X,A)') "it"
-        write(ofl%fh_spin_current_band, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        !(header in SYSname_rt_spin.data)
+        write(filename,"(2A,'_rt_spin.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_rt_spin = open_filehandle(filename)
+        fh = ofl%fh_rt_spin
+        open(fh,file=filename)
+        write(fh, '("#",1X,A)') "Spin magnetization & Spin current density"
+        write(fh, '("#",1X,A,":",1X,A)') "mag_[xyz]", "Total magnetization"
+        write(fh, '("#",1X,A,":",1X,A)') "spin_curr_i_[xyz]", "Spin current density with the Pauli matrix sigma_i (i=0,x,y,z)"
+        write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1,  "Time", trim(t_unit_time%name), &
+        & 2,  "mag_x", "none", &
+        & 3,  "mag_y", "none", &
+        & 4,  "mag_z", "none", &
+        & 5,  "spin_curr_0_x", trim(t_unit_current%name), &
+        & 6,  "spin_curr_0_y", trim(t_unit_current%name), &
+        & 7,  "spin_curr_0_z", trim(t_unit_current%name), &
+        & 8,  "spin_curr_x_x", trim(t_unit_current%name), &
+        & 9,  "spin_curr_x_y", trim(t_unit_current%name), &
+        & 10, "spin_curr_x_z", trim(t_unit_current%name), &
+        & 11, "spin_curr_y_x", trim(t_unit_current%name), &
+        & 12, "spin_curr_y_y", trim(t_unit_current%name), &
+        & 13, "spin_curr_y_z", trim(t_unit_current%name), &
+        & 14, "spin_curr_z_x", trim(t_unit_current%name), &
+        & 15, "spin_curr_z_y", trim(t_unit_current%name), &
+        & 16, "spin_curr_z_z", trim(t_unit_current%name)
+          
+        !(header in SYSname_mag_decomposed_rt.data)
+        if(yn_out_mag_decomposed_rt=='y') then
+          write(filename,"(2A,'_mag_decomposed_rt.data')") trim(base_directory),trim(SYSname)
+          ofl%fh_mag_decomposed_rt = open_filehandle(filename)
+          fh = ofl%fh_mag_decomposed_rt
+          open(fh,file=filename)
+          write(fh, '("#",1X,A)') "band decomposition of the time-dependent spin magnetization"
+          write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
+          write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+          write(fh, '("#",1X,A,":",1X,A)') "ib", "band index"
+          write(fh, '("#",1X,A,":",1X,A)') "mag_orb_[xyz]", "decomposed elements of the magnetization"
+          write(fh, '("#",1X,A)') "------------------------------------------------"
+          write(fh, '("#",1X,A)') "it"
+          write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+          & 1, "ik", "none", &
+          & 2, "ib", "none", &
+          & 3, "mag_orb_x", "none", &
+          & 4, "mag_orb_y", "none", &
+          & 5, "mag_orb_z", "none"
+        end if
+        
+        !(header in SYSname_spin_current_decomposed.data)
+        if(yn_out_spin_current_decomposed=='y') then
+          write(filename,"(2A,'_spin_current_decomposed.data')") trim(base_directory),trim(SYSname)
+          ofl%fh_spin_current_decomposed = open_filehandle(filename)
+          fh = ofl%fh_spin_current_decomposed
+          open(fh,file=filename)
+          write(fh, '("#",1X,A)') "Band decomposition of the spin current density"
+          write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
+          write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+          write(fh, '("#",1X,A,":",1X,A)') "ib", "band index"
+          write(fh, '("#",1X,A,":",1X,A)') "i", "index of the Pauli matrices (0,x,y,z)"
+          write(fh, '("#",1X,A,":",1X,A)') "spin_curr_[xyz]", "decomposed elements of the spin current density"
+          write(fh, '("#",1X,A)') "------------------------------------------------"
+          write(fh, '("#",1X,A)') "it"
+          write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
           & 1, "ik", "none", &
           & 2, "ib", "none", &
           & 3, "i", "none", &
           & 4, "spin_curr_x", trim(t_unit_current%name), &
           & 5, "spin_curr_y", trim(t_unit_current%name), &
           & 6, "spin_curr_z", trim(t_unit_current%name)
+        end if
+        
       end if
-      return
-    end if
     
-    call calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
+    end subroutine file_header
     
-    if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_spin_current_band,'(i11)') itt
-      do ik=1,system%nk
-      do io=1,system%no
-      do i=0,3
-        write(ofl%fh_spin_current_band,'(3(1X,i6),3(1X,E23.15E3))') &
-        & ik,io,i, spin_curr_band(1:3,i,io,ik)* (system%rocc(io,ik,1)*system%wtk(ik)) * t_unit_current%conv
-      end do
-      end do
-      end do
-    end if
-    
-  end subroutine write_spin_current
-
-!===================================================================================================================================
-
-  subroutine write_magnetization(itt,ofl,system,mg,info,psi)
-    use structures
-    use communication, only: comm_is_root
-    use parallelization, only: nproc_id_global
-    use salmon_global, only: yn_spinorbit,base_directory,SYSname
-    use filesystem, only: open_filehandle
-    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed
-    implicit none
-    integer                 ,intent(in) :: itt
-    type(s_ofile)                       :: ofl
-    type(s_dft_system)      ,intent(in) :: system
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_parallel_info)   ,intent(in) :: info
-    type(s_orbital)         ,intent(in) :: psi
-    !
-    integer ik,io
-    real(8) :: m(3),mag_orb(3,system%no,system%nk)
-    
-    if(yn_spinorbit=='n') stop "error: write_magnetization with yn_spinorbit=n"
-    
-    !(header in SYSname_rt_mag.data)
-    if(itt < 0) then
-      if(comm_is_root(nproc_id_global))then
-        write(ofl%file_rt_mag,"(2A,'_rt_mag.data')") trim(base_directory),trim(SYSname)
-        ofl%fh_rt_mag = open_filehandle(ofl%file_rt_mag)
-        open(ofl%fh_rt_mag,file=ofl%file_rt_mag)
-        write(ofl%fh_rt_mag, '("#",1X,A)') "Magnetization"
-        write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-        write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
-        write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
-        write(ofl%fh_rt_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
-        write(ofl%fh_rt_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "mag(1)", "none", &
-        & 2, "mag(2)", "none", &
-        & 3, "mag(3)", "none"
-        write(ofl%fh_rt_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "ik", "none", &
-        & 2, "io", "none", &
-        & 3, "mag_orb(1)", "none", &
-        & 4, "mag_orb(2)", "none", &
-        & 5, "mag_orb(3)", "none"
-      end if
-      return
-    end if
-    
-    call calc_magnetization(system,mg,info,m)
-    call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+  end subroutine write_rt_spin
   
-    if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_rt_mag,'(i11)') itt
-      write(ofl%fh_rt_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
-      do ik=1,system%nk
-      do io=1,system%no
-        write(ofl%fh_rt_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
-      end do
-      end do
-    end if
-    
-  end subroutine write_magnetization
-  
-  subroutine write_gs_magnetization(ofl,system,mg,info,psi)
+  subroutine write_mag_decomposed_gs(system,mg,info,psi)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -2488,50 +2527,50 @@ contains
     use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed
     use filesystem, only: open_filehandle
     implicit none
-    type(s_ofile)                       :: ofl
     type(s_dft_system)      ,intent(in) :: system
     type(s_rgrid)           ,intent(in) :: mg
     type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)         ,intent(in) :: psi
     !
-    integer ik,io
+    integer ik,io,fh_gs_mag
+    character(256) :: file_gs_mag
     real(8) :: m(3),mag_orb(3,system%no,system%nk)
     
-    if(yn_spinorbit=='n') stop "error: write_magnetization with yn_spinorbit=n"
+    if(yn_spinorbit=='n') stop "error: write_mag_decomposed_gs with yn_spinorbit=n"
     
     call calc_magnetization(system,mg,info,m)
     call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
     
     if(comm_is_root(nproc_id_global))then
       !(header in gs_mag.data)
-      write(ofl%file_gs_mag,"(2A,'_gs_mag.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_gs_mag = open_filehandle(ofl%file_gs_mag)
-      open(ofl%fh_gs_mag,file=ofl%file_gs_mag)
-      write(ofl%fh_gs_mag, '("#",1X,A)') "Magnetization of the ground state"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
-      write(ofl%fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      write(file_gs_mag,"(2A,'_mag_decomposed_gs.data')") trim(base_directory),trim(SYSname)
+      fh_gs_mag = open_filehandle(file_gs_mag)
+      open(fh_gs_mag,file=file_gs_mag)
+      write(fh_gs_mag, '("#",1X,A)') "Band decomposition of the spin magnetization @ the ground state"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ib", "band index"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "decomposed elements of the magnetization"
+      write(fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
       & 1, "mag(1)", "none", &
       & 2, "mag(2)", "none", &
       & 3, "mag(3)", "none"
-      write(ofl%fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      write(fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
       & 1, "ik", "none", &
       & 2, "io", "none", &
       & 3, "mag_orb(1)", "none", &
       & 4, "mag_orb(2)", "none", &
       & 5, "mag_orb(3)", "none"
-      write(ofl%fh_gs_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
+      write(fh_gs_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
       do ik=1,system%nk
       do io=1,system%no
-        write(ofl%fh_gs_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+        write(fh_gs_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
       end do
       end do
-      close(ofl%fh_gs_mag)
+      close(fh_gs_mag)
     end if
     
-  end subroutine write_gs_magnetization
+  end subroutine write_mag_decomposed_gs
 
 !===================================================================================================================================
 
