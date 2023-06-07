@@ -346,6 +346,7 @@ module salmon_global
   integer        :: out_current_decomposed_step
   integer        :: out_rt_spin_step
   character(1)   :: yn_out_mag_decomposed_rt
+  character(1)   :: yn_out_mag_micro_rt
   character(1)   :: yn_out_spin_current_decomposed
   character(1)   :: yn_out_spin_current_micro
   character(1)   :: yn_out_perflog

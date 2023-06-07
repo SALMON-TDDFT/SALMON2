@@ -2361,11 +2361,12 @@ contains
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
     use salmon_global, only: dt,yn_spinorbit,base_directory,SYSname, &
-    & yn_out_mag_decomposed_rt,yn_out_spin_current_decomposed,yn_out_spin_current_micro
+    & yn_out_mag_decomposed_rt, yn_out_mag_micro_rt, &
+    & yn_out_spin_current_decomposed,yn_out_spin_current_micro
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_current,t_unit_time
-    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed,calc_spin_current
-    use writefield, only: write_spin_current_micro
+    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed,calc_spin_current,calc_magnetization_micro
+    use writefield, only: write_spin_current_micro,write_magnetization_micro
     implicit none
     integer                 ,intent(in) :: itt
     type(s_ofile)                       :: ofl
@@ -2378,6 +2379,7 @@ contains
     !
     integer ik,io,i
     real(8) :: m(3),mag_orb(3,system%no,system%nk),spin_curr(3,0:3)
+    real(8) :: m_micro(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
     real(8) :: spin_curr_micro(3,0:3, &
                 & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8) :: spin_curr_band(3,0:3,system%no,system%nk)
@@ -2391,6 +2393,8 @@ contains
     
     call calc_magnetization(system,mg,info,m)
     if(yn_out_mag_decomposed_rt=='y') call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+    if(yn_out_mag_micro_rt=='y') call calc_magnetization_micro(mg,m_micro)
+
     call calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
     
     spin_curr = 0d0
@@ -2429,6 +2433,10 @@ contains
         end do
       end if
       
+    end if
+  
+    if(yn_out_mag_micro_rt=='y') then
+      call write_magnetization_micro(lg,mg,system,info,itt,m_micro)
     end if
     
     if(yn_out_spin_current_micro=='y') then
