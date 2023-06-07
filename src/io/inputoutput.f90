@@ -507,6 +507,7 @@ contains
       & out_current_decomposed_step, &
       & out_rt_spin_step, &
       & yn_out_mag_decomposed_rt, &
+      & yn_out_mag_micro_rt, &
       & yn_out_spin_current_decomposed, &
       & yn_out_spin_current_micro, &
       & yn_out_perflog, &
@@ -905,6 +906,7 @@ contains
     out_current_decomposed_step = 100
     out_rt_spin_step = 100
     yn_out_mag_decomposed_rt = 'n'
+    yn_out_mag_micro_rt = 'n'
     yn_out_spin_current_decomposed = 'n'
     yn_out_spin_current_micro = 'n'
 
@@ -1487,6 +1489,7 @@ contains
     call comm_bcast(out_current_decomposed_step,nproc_group_global)
     call comm_bcast(out_rt_spin_step ,nproc_group_global)
     call comm_bcast(yn_out_mag_decomposed_rt   ,nproc_group_global)
+    call comm_bcast(yn_out_mag_micro_rt   ,nproc_group_global)
     call comm_bcast(yn_out_spin_current_decomposed,nproc_group_global)
     call comm_bcast(yn_out_spin_current_micro  ,nproc_group_global)
     call comm_bcast(yn_out_perflog      ,nproc_group_global)
@@ -2363,6 +2366,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_current_decomposed_step', out_current_decomposed_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_spin_step', out_rt_spin_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_decomposed_rt',yn_out_mag_decomposed_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_micro_rt',yn_out_mag_micro_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_decomposed', yn_out_spin_current_decomposed
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_micro',yn_out_spin_current_micro
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
@@ -2527,6 +2531,7 @@ contains
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)
     call yn_argument_check(yn_out_mag_decomposed_rt)
+    call yn_argument_check(yn_out_mag_micro_rt)
     call yn_argument_check(yn_out_spin_current_micro)
     call yn_argument_check(yn_out_gs_sgm_eps)
     call yn_argument_check(yn_set_ini_velocity)
@@ -2686,7 +2691,8 @@ contains
     end if
         
     if( spin /= 'noncollinear' ) then
-      if(yn_out_spin_current_decomposed=='y' .or. yn_out_spin_current_micro=='y' .or. yn_out_mag_decomposed_rt=='y') then
+      if(yn_out_spin_current_decomposed=='y' .or. yn_out_spin_current_micro=='y' &
+      & .or. yn_out_mag_decomposed_rt=='y' .or. yn_out_mag_micro_rt=='y') then
         stop "Specify spin = 'noncollinear'"
       end if
     end if

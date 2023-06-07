@@ -8,9 +8,10 @@ module noncollinear_module
   public :: rot_vxc_noncollinear
   public :: op_xc_noncollinear
   public :: calc_magnetization
+  public :: calc_magnetization_micro
   public :: calc_magnetization_decomposed
-  public :: simple_mixing_so
   public :: calc_spin_current
+  public :: simple_mixing_so
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -248,6 +249,48 @@ contains
 #endif
   end subroutine op_xc_noncollinear
 
+! for GS calculation
+  subroutine simple_mixing_so(mg,system,c1,c2,rho_s,mixing)
+    use structures
+    implicit none
+    type(s_rgrid)     ,intent(in) :: mg
+    type(s_dft_system),intent(in) :: system
+    real(8)           ,intent(in) :: c1,c2
+    type(s_scalar)                :: rho_s(system%nspin)
+    type(s_mixing)                :: mixing
+    !
+    integer ix,iy,iz,m1,m2,m3,n1,n2,n3
+    
+    if ( .not.allocated(dmat_old) ) then
+       m1=mg%is(1); n1=mg%ie(1)
+       m2=mg%is(2); n2=mg%ie(2)
+       m3=mg%is(3); n3=mg%ie(3)
+       allocate( dmat_old(m1:n1,m2:n2,m3:n3,2,2) )
+       !$omp workshare
+       dmat_old = den_mat
+       !$omp end workshare
+    end if
+  
+  ! rho = c1*rho + c2*matmul( psi**2, occ )
+
+    !$omp workshare
+    den_mat = c1*dmat_old + c2*den_mat
+    dmat_old = den_mat
+    !$omp end workshare
+
+  ! calculate the rotation matrix
+  
+    call rot_dm_noncollinear( rho_s, system, mg )
+    
+  ! update the density from the diagonal components
+  
+    !$omp workshare
+    rho_s(1)%f = dble(den_mat(:,:,:,1,1))
+    rho_s(2)%f = dble(den_mat(:,:,:,2,2))
+    !$omp end workshare
+  
+  end subroutine simple_mixing_so
+
 
   subroutine calc_magnetization(system,mg,info,m)
     use structures
@@ -286,6 +329,19 @@ contains
     call comm_summation( m_tmp, m, 3, info%icomm_r )
     return
   end subroutine calc_magnetization
+
+
+  subroutine calc_magnetization_micro(mg,m)
+    use structures
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    real(8)                   :: m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
+    !
+    m(:,:,:,1) = 0.5d0* dble( den_mat(:,:,:,1,2) + den_mat(:,:,:,2,1) )
+    m(:,:,:,2) = 0.5d0* dble( -zi* den_mat(:,:,:,1,2) + zi* den_mat(:,:,:,2,1) )
+    m(:,:,:,3) = 0.5d0* dble( den_mat(:,:,:,1,1) - den_mat(:,:,:,2,2) )
+    return
+  end subroutine calc_magnetization_micro
   
   
   subroutine calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
@@ -337,50 +393,7 @@ contains
     call comm_summation( m_tmp, mag_orb, 3*system%no*system%nk, info%icomm_rko )
     return
   end subroutine calc_magnetization_decomposed
-  
-  
-! for GS calculation
-  subroutine simple_mixing_so(mg,system,c1,c2,rho_s,mixing)
-    use structures
-    implicit none
-    type(s_rgrid)     ,intent(in) :: mg
-    type(s_dft_system),intent(in) :: system
-    real(8)           ,intent(in) :: c1,c2
-    type(s_scalar)                :: rho_s(system%nspin)
-    type(s_mixing)                :: mixing
-    !
-    integer ix,iy,iz,m1,m2,m3,n1,n2,n3
-    
-    if ( .not.allocated(dmat_old) ) then
-       m1=mg%is(1); n1=mg%ie(1)
-       m2=mg%is(2); n2=mg%ie(2)
-       m3=mg%is(3); n3=mg%ie(3)
-       allocate( dmat_old(m1:n1,m2:n2,m3:n3,2,2) )
-       !$omp workshare
-       dmat_old = den_mat
-       !$omp end workshare
-    end if
-  
-  ! rho = c1*rho + c2*matmul( psi**2, occ )
 
-    !$omp workshare
-    den_mat = c1*dmat_old + c2*den_mat
-    dmat_old = den_mat
-    !$omp end workshare
-
-  ! calculate the rotation matrix
-  
-    call rot_dm_noncollinear( rho_s, system, mg )
-    
-  ! update the density from the diagonal components
-  
-    !$omp workshare
-    rho_s(1)%f = dble(den_mat(:,:,:,1,1))
-    rho_s(2)%f = dble(den_mat(:,:,:,2,2))
-    !$omp end workshare
-  
-  end subroutine simple_mixing_so
-  
   
 ! spin current density
 ! cf. N. Tancogne-Dejean et al, npj Computational Materials 8, 145 (2022).
