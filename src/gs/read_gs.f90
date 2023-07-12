@@ -32,7 +32,7 @@ subroutine read_dns_cube(lg,mg,rho)
   integer,parameter :: fp=103
   integer :: num(3),iatom,ix,iy,iz,n,nn
   real(8) :: wrk(6)
-  real(8),allocatable :: tmp(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  real(8) :: tmp(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   character*1000 :: linebuf
   
   if(comm_is_root(nproc_id_global))then
