@@ -19,7 +19,7 @@ module read_gs
 
 contains
 
-subroutine read_dns(lg,mg,rho)
+subroutine read_dns_cube(lg,mg,rho)
   use structures
   use salmon_global, only: natom
   use parallelization
@@ -30,28 +30,41 @@ subroutine read_dns(lg,mg,rho)
   !
   character(8),parameter :: filename="dns.cube"
   integer,parameter :: fp=103
-  integer :: num(3),iatom,ix,iy,iz
+  integer :: num(3),iatom,ix,iy,iz,n,nn
+  real(8) :: wrk(6)
   real(8),allocatable :: tmp(:,:,:)
   allocate(tmp(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  character*1000 :: linebuf
+  
   if(comm_is_root(nproc_id_global))then
-    write(*,*) "read GS density dns.cube"
-    open(fp,file=filename)
+    write(*,*) "!!! method_init_density=read_dns_cube: read density from dns.cube"
+    open(fp,file=filename,status='old')
     read(fp,*)
     read(fp,*)
     read(fp,*) iatom
-    if(iatom/=natom) stop "error @ read_rho: natom"
+    if(iatom/=natom) stop "error @ read_dns_cube: natom"
     read(fp,*) num(1)
     read(fp,*) num(2)
     read(fp,*) num(3)
-    if(num(1)/=lg%num(1) .or. num(2)/=lg%num(2) .or. num(3)/=lg%num(3)) stop "error @ read_rho: lg"
+    if(num(1)/=lg%num(1) .or. num(2)/=lg%num(2) .or. num(3)/=lg%num(3)) stop "error @ read_dns_cube: lg"
     do iatom=1,natom
       read(fp,'(i5,4f12.6)')
     end do
     do ix=lg%is(1),lg%ie(1)
     do iy=lg%is(2),lg%ie(2)
-    do iz=lg%is(3),lg%ie(3)
-      read(fp,*) tmp(ix,iy,iz)
-    end do
+      iz = lg%is(3)
+      do n=1,ceiling(dble(num(3))/6d0)
+        read(fp,'(a)') linebuf
+        read(linebuf,*,end=999) wrk(1:6)
+999     continue
+        do nn=1,6
+          if( iz <= lg%ie(3) ) tmp(ix,iy,iz) = wrk(nn)
+          iz = iz + 1
+        end do
+      end do
+!    do iz=lg%is(3),lg%ie(3)
+!      read(fp,*) tmp(ix,iy,iz)
+!    end do
     end do
     end do
     close(fp)
@@ -65,8 +78,9 @@ subroutine read_dns(lg,mg,rho)
   enddo
   enddo
   deallocate(tmp)
+
   return
-end subroutine read_dns
+end subroutine read_dns_cube
 
 subroutine read_wfn(lg,mg,psi,info,system)
   use structures

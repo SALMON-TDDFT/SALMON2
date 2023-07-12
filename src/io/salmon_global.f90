@@ -61,7 +61,6 @@ module salmon_global
   character(20)  :: method_wf_distributor
   integer        :: nblock_wf_distribute
   !remove later
-  character(1)   :: read_gs_dns_cube
   character(1)   :: write_gs_wfn_k
   character(1)   :: write_rt_wfn_k
 
