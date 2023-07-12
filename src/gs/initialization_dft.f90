@@ -268,6 +268,22 @@ real(8) :: rNe0,rNe
     select case(method_init_density)
     case('pp','pp_magdir')
       call calc_density_pp(lg,mg,system,info,pp,fg,poisson,rho_s)
+    case('read_dns_cube')
+      call read_dns_cube(lg,mg,rho_s(1)%f) ! cube file only
+      rNe0 = 0d0
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rNe0 = rNe0 + rho_s(1)%f(ix,iy,iz) *system%Hvol
+      end do
+      end do
+      end do
+      call comm_summation(rNe0,rNe,info%icomm_r)
+      rho_s(1)%f = rho_s(1)%f *(dble(nelec)/rNe)
+      if(system%nspin==2) then
+        rho_s(1)%f = rho_s(1)%f/2d0
+        rho_s(2)%f = rho_s(1)%f
+      end if
     case default
       call calc_density(system,rho_s,spsi,info,mg)
     end select
@@ -277,26 +293,6 @@ real(8) :: rNe0,rNe
   do jspin=1,nspin
      rho%f = rho%f + rho_s(jspin)%f
   end do
-  
-  if(read_gs_dns_cube == 'y') then
-    call read_dns(lg,mg,rho%f) ! cube file only
-    rNe0 = 0d0
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rNe0 = rNe0 + rho%f(ix,iy,iz) *system%Hvol
-    end do
-    end do
-    end do
-    call comm_summation(rNe0,rNe,info%icomm_r)
-    rho%f = rho%f *(dble(nelec)/rNe)
-    if(system%nspin==1) then
-      rho_s(1)%f = rho%f
-    else if(system%nspin==2) then
-      rho_s(1)%f = rho%f/2d0
-      rho_s(2)%f = rho%f/2d0
-    end if
-  end if
 
   !make positive back ground charge density for using jellium model
   if(yn_jm=='y') then

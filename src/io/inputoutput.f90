@@ -224,7 +224,6 @@ contains
       & time_shutdown,         &
       & method_wf_distributor, &
       & nblock_wf_distribute,  &
-      & read_gs_dns_cube,  &  !remove later (but this is used currently)
       & write_gs_wfn_k,    &  !remove later (but this is used currently)
       & write_rt_wfn_k        !remove later (but this is used currently)
 
@@ -626,7 +625,6 @@ contains
     method_wf_distributor = 'single'
     nblock_wf_distribute = 16
     !remove later
-    read_gs_dns_cube = 'n'
     write_gs_wfn_k   = 'n'
     write_rt_wfn_k   = 'n'
 !! == default for &parallel
@@ -1113,7 +1111,6 @@ contains
     call comm_bcast(time_shutdown         ,nproc_group_global)
     call comm_bcast(method_wf_distributor ,nproc_group_global)
     call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
-    call comm_bcast(read_gs_dns_cube,nproc_group_global)
     call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
     call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
 
@@ -1953,7 +1950,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
 
@@ -2606,10 +2602,17 @@ contains
 
     select case(method_init_density)
     case ('wf','pp') ; continue
+    case ('read_dns_cube')
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'SALMON will read dns.cube (method_init_density=read_dns_cube)'
+        if(yn_out_dns=='y' .and. format_voxel_data=='cube') then
+          write(*,*) '!!! Warning: SALMON will rewrite dns.cube (yn_out_dns=y)'
+        endif
+      end if
     case('pp_magdir')
       if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
       if(spin/='polarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
-    case default     ; stop 'method_init_density must be wf or pp'
+    case default     ; stop 'method_init_density must be wf, pp, or read_dns_cube'
     end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
@@ -2617,7 +2620,7 @@ contains
       case("gaussian","lorentzian")
         continue
       case default
-        stop 'set out_dos_meshotd to "gaussian" or "lorentzian"'
+        stop 'set out_dos_function to "gaussian" or "lorentzian"'
       end select
     end if
 
