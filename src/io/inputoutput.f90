@@ -2602,7 +2602,13 @@ contains
 
     select case(method_init_density)
     case ('wf','pp') ; continue
-    case ('read_dns_cube') ; continue
+    case ('read_dns_cube')
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'SALMON will read dns.cube (method_init_density=read_dns_cube)'
+        if(yn_out_dns=='y' .and. format_voxel_data=='cube') then
+          write(*,*) '!!! Warning: SALMON will rewrite dns.cube (yn_out_dns=y)'
+        endif
+      end if
     case('pp_magdir')
       if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
       if(spin/='polarized') stop 'spin must be polarized (method_init_density=pp_magdir)'

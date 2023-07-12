@@ -37,7 +37,7 @@ subroutine read_dns_cube(lg,mg,rho)
   character*1000 :: linebuf
   
   if(comm_is_root(nproc_id_global))then
-    write(*,*) "!!! method_init_density=read_dns_cube: read density from dns.cube"
+    write(*,*) "method_init_density=read_dns_cube: read density from dns.cube"
     open(fp,file=filename,status='old')
     read(fp,*)
     read(fp,*)
