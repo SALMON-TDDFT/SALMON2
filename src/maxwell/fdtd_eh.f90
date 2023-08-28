@@ -2250,7 +2250,8 @@ contains
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','e_lr'   ,r2d=fe%e_lr   )
         end if
       end if
-      if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
+      if(fe%flag_obs) then
+      if(sum(fe%iobs_num_ene(:))>0) then
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)               ;
         is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)               ;
         is5(3) = 1          ; ie5(3) = 1                         ;
@@ -2323,6 +2324,7 @@ contains
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_xz_ene_iobs'//trim(adjustl(save_name)),&
                               c5d=fe%obs_jz_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
         end do
+      end if
       end if
       if(fe%flag_ase) then
         if    (ek_dir1(1)==1.0d0) then
@@ -3508,7 +3510,8 @@ contains
               call output_r_bin_em(fe%ifn,is5,ie5,'single','e_lr'   ,r2d=fe%e_lr   )
             end if
           end if
-          if(fe%flag_obs .and. sum(fe%iobs_num_ene(:))>0) then
+          if(fe%flag_obs) then
+          if(sum(fe%iobs_num_ene(:))>0) then
             is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)               ;
             is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)               ;
             is5(3) = 1          ; ie5(3) = 1                         ;
@@ -3581,6 +3584,7 @@ contains
               call output_r_bin_em(fe%ifn,is5,ie5,'all','obs_jz_xz_ene_iobs'//trim(adjustl(save_name)),&
                                    c5d=fe%obs_jz_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
             end do
+          end if
           end if
           if(fe%flag_ase) then
             if    (ek_dir1(1)==1.0d0) then
@@ -5754,10 +5758,12 @@ contains
       fe%hx_s(:,:,:)=f1(:,:,:); fe%hy_s(:,:,:)=f2(:,:,:); fe%hz_s(:,:,:)=f3(:,:,:);
       
       !for obs_plane_ene_em option
+      if(fe%flag_obs) then
       if(sum(fe%iobs_num_ene(:))>0) then
         call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_s)
         call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s)
         call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s)
+      end if
       end if
       
       !deallocate temporary variable
