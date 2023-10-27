@@ -478,8 +478,9 @@ module structures
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
     ! for projection_option
-    type(s_dft_system) :: system_gs
-    type(s_parallel_info) :: info_gs
+    type(s_dft_system) :: system_proj
+    type(s_parallel_info) :: info_proj
+    type(s_sendrecv_grid) :: srg_proj
     type(s_scalar),allocatable :: vloc0(:)  ! =v_local(1:nspin) @ t=0 (GS)
     type(s_orbital) :: tpsi0,ttpsi0,htpsi0
     type(s_cg) :: cg
