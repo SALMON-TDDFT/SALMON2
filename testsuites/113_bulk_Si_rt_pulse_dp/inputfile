@@ -57,6 +57,10 @@
   epdir_re1 = 0., 0., 1.
 /
 
+&analysis
+  projection_option='gs'
+/
+
 &atomic_coor
   'Si'	.0	.0	.0	1
   'Si'	2.565	2.565	2.565	1
