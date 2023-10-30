@@ -1860,13 +1860,14 @@ contains
   end subroutine write_band_information
   
 !===================================================================================================================================
-  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt,ofl)
+  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,rt,ofl)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
     use salmon_global, only: projection_option,nstate,directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: read_bin,generate_restart_directory_name
     use initialization_sub, only: init_parallel_dft
+    use sendrecv_grid, only: create_sendrecv_neig, init_sendrecv_grid
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1877,13 +1878,14 @@ contains
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_reciprocal_grid) ,intent(in) :: fg
     type(s_poisson)                     :: poisson
-    type(s_sendrecv_grid)               :: srg_scalar, srg
+    type(s_sendrecv_grid)               :: srg_scalar
     type(s_rt)                          :: rt
     type(s_ofile)                       :: ofl
     !
     character(256) :: wdir,gdir,dir_gs
     logical :: iself
     integer :: iter,jspin
+    integer,dimension(2,3) :: neig
     
     call file_header
     
@@ -1894,18 +1896,22 @@ contains
       if(comm_is_root(nproc_id_global)) write(*,*) " projection_option: read GS data from directory ./restart/"
     end if
     
-    rt%system_gs = system
-    rt%system_gs%no = nstate ! # of orbitals for GS ! future work: nstate --> nstate_proj
-    deallocate(rt%system_gs%rocc)
-    allocate(rt%system_gs%rocc(rt%system_gs%no,system%nk,system%nspin))
+    rt%system_proj = system
+    rt%system_proj%no = nstate ! # of orbitals for GS ! future work: nstate --> nstate_proj
+    deallocate(rt%system_proj%rocc)
+    allocate(rt%system_proj%rocc(rt%system_proj%no,system%nk,system%nspin)) ! this will be filled by read_bin
     
-    rt%info_gs = info
-    deallocate(rt%info_gs%io_s_all,rt%info_gs%io_e_all,rt%info_gs%numo_all,rt%info_gs%irank_io)
-    call init_parallel_dft(rt%system_gs,rt%info_gs)
+    rt%info_proj = info
+    deallocate(rt%info_proj%io_s_all,rt%info_proj%io_e_all,rt%info_proj%numo_all,rt%info_proj%irank_io)
+    call init_parallel_dft(rt%system_proj,rt%info_proj)
+    
+    call create_sendrecv_neig(neig, rt%info_proj)
+    call init_sendrecv_grid(rt%srg_proj, mg, &
+    & rt%info_proj%numo*rt%info_proj%numk*rt%system_proj%nspin, rt%info_proj%icomm_rko, neig)
 
-    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%tpsi0)
-    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%ttpsi0)
-    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%htpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%tpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%ttpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%htpsi0)
     
   ! wavefunctions @ GS
     call generate_restart_directory_name(dir_gs,gdir,wdir)
@@ -1913,7 +1919,7 @@ contains
     if (.not. iself) then
       wdir = gdir
     end if
-    call read_bin(wdir,lg,mg,rt%system_gs,rt%info_gs,rt%tpsi0,iter,is_self_checkpoint=iself)
+    call read_bin(wdir,lg,mg,rt%system_proj,rt%info_proj,rt%tpsi0,iter,is_self_checkpoint=iself)
 
   ! V_local
     allocate(rt%vloc0(system%nspin))
@@ -2003,14 +2009,14 @@ contains
         call allocate_scalar(mg,Vxc(jspin))
       end do
       
-      call calc_density(rt%system_gs,rho_s,rt%tpsi0,rt%info_gs,mg)
+      call calc_density(rt%system_proj,rho_s,rt%tpsi0,rt%info_proj,mg)
       rho%f = 0d0
       do jspin=1,system%nspin
         rho%f = rho%f + rho_s(jspin)%f
       end do
-      call hartree(lg,mg,rt%info_gs,rt%system_gs,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(rt%system_gs,xc_func,mg,srg_scalar,srg,rho_s &
-      & ,ppn,rt%info_gs,rt%tpsi0,stencil,Vxc,E_xc)
+      call hartree(lg,mg,rt%info_proj,rt%system_proj,fg,poisson,srg_scalar,stencil,rho,Vh)
+      call exchange_correlation(rt%system_proj,xc_func,mg,srg_scalar,rt%srg_proj,rho_s &
+      & ,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
       
       call deallocate_scalar(rho)
@@ -2024,7 +2030,7 @@ contains
 
   end subroutine init_projection
 
-  subroutine projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,psi_t,srg,energy,rt)
+  subroutine projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,psi_t,energy,rt)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -2045,22 +2051,21 @@ contains
     type(s_scalar)          ,intent(in) :: V_local(system%nspin)
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_sendrecv_grid)               :: srg
     type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
     !
     integer :: nspin,nspin_tmp,no,no0,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
-    complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat
-    real(8) :: coef(rt%system_gs%no,system%nk,system%nspin)
+    complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat
+    real(8) :: coef(rt%system_proj%no,system%nk,system%nspin)
     real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
     
-    rt%system_gs%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
+    rt%system_proj%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
 
-    no0 = rt%system_gs%no ! # of orbitals @ GS
+    no0 = rt%system_proj%no ! # of orbitals @ GS
     
     nspin = system%nspin
     no = system%no
@@ -2111,17 +2116,17 @@ contains
 
 
     call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
-    & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
+    & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
     dE = energy%E_kin - rt%E_old
-    if(abs(dE) < 1e-12) then
+    if(abs(dE) < min(threshold_projection,1e-12)) then
       if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
     else
       do iter_GS=1,niter
-        call ssdg(mg,rt%system_gs,rt%info_gs,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,srg)
-        call gscg_zwf(ncg,mg,rt%system_gs,rt%info_gs,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
-        call gram_schmidt(rt%system_gs, mg, rt%info_gs, rt%tpsi0)
+        call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
+        call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg,rt%vloc0,rt%srg_proj,rt%tpsi0,rt%cg)
+        call gram_schmidt(rt%system_proj, mg, rt%info_proj, rt%tpsi0)
         call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
-        & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
+        & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
         dE = energy%E_kin - rt%E_old
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
         if(abs(dE) < threshold_projection) exit
@@ -2154,8 +2159,8 @@ contains
     do ik=1,nk
     do io=1,no0
     ! /wspin: for canceling double counting of 2 in rocc.
-      nee = nee + ((wspin-rt%system_gs%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
-      neh = neh - (rt%system_gs%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
+      nee = nee + ((wspin-rt%system_proj%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
+      neh = neh - (rt%system_proj%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
     end do
     end do
     end do
@@ -2190,9 +2195,9 @@ contains
       use pack_unpack, only: copy_data
       implicit none
       type(s_orbital), intent(in) :: psi1,psi2
-      complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat
+      complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat
       !
-      complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat1
+      complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat1
       complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1) &
                         & ,mg%is_array(2):mg%ie_array(2) &
                         & ,mg%is_array(3):mg%ie_array(3))
@@ -2202,10 +2207,10 @@ contains
         do ik=ik_s,ik_e
         do ispin = 1, nspin
           do io1 = 1, no0
-            if (rt%info_gs%io_s<= io1 .and. io1 <= rt%info_gs%io_e) then
+            if (rt%info_proj%io_s<= io1 .and. io1 <= rt%info_proj%io_e) then
               call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
             end if
-            call comm_bcast(wf_io1, rt%info_gs%icomm_o, rt%info_gs%irank_io(io1))
+            call comm_bcast(wf_io1, rt%info_proj%icomm_o, rt%info_proj%irank_io(io1))
             do io2 = 1, no
               if (io_s<= io2 .and. io2 <= io_e) then
                 cbox = 0d0
@@ -2255,7 +2260,7 @@ contains
       real(8) :: curr_intra(3,nspin)
       real(8) :: curr_decomp(3,nspin,no0,nk)
       
-      call calc_current_decomposed(rt%system_gs,mg,stencil,rt%info_gs,srg,rt%tpsi0,ppg,curr_decomp)
+      call calc_current_decomposed(rt%system_proj,mg,stencil,rt%info_proj,rt%srg_proj,rt%tpsi0,ppg,curr_decomp)
       
       curr_intra = 0d0
       do ispin=1,nspin_tmp
