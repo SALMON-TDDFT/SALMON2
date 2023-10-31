@@ -396,7 +396,7 @@ contains
     ppg%ia_tbl=0
     ppg%rinv_uvu=0.0d0
     
-    allocate(ppg%uv(ppg%nps,ppg%nlma),ppg%duv(ppg%nps,ppg%nlma,3))
+    allocate(ppg%uv(ppg%nps,ppg%nlma))
 
     lma=0
     do ia=1,natom
@@ -533,7 +533,7 @@ SUBROUTINE dealloc_init_ps(ppg)
   implicit none
   type(s_pp_grid) :: ppg
 
-  deallocate(ppg%jxyz, ppg%rxyz, ppg%uv, ppg%duv)
+  deallocate(ppg%jxyz, ppg%rxyz, ppg%uv)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
