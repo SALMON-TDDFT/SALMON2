@@ -86,7 +86,6 @@ contains
     call set_lma_tbl( lma_tbl_so, ppg%ia_tbl_so, ppg%rinv_uvu_so, pp, hvol )
 
     allocate( ppg%uv_so(ppg%nps,Nlma_so,2,1) ); ppg%uv_so=(0.0d0,0.0d0)
-    allocate( ppg%duv_so(ppg%nps,Nlma_so,3,2,1) ); ppg%duv_so=(0.0d0,0.0d0)
 
     !call mpi_finalize(lm); stop 'set_nlma_so'
 

@@ -256,7 +256,6 @@ module structures
     integer,allocatable :: jxyz(:,:,:)
     real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
-    real(8),allocatable :: duv(:,:,:)
     integer :: nlma
     integer,allocatable :: lma_tbl(:,:)
     integer,allocatable :: ia_tbl(:)
@@ -269,7 +268,6 @@ module structures
     integer,allocatable :: ia_tbl_so(:)
     real(8),allocatable :: rinv_uvu_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
-    complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
     !
     real(8),allocatable :: Rion_old(:,:) ! old position
@@ -731,13 +729,11 @@ contains
     DEAL(ppg%mps)
     DEAL(ppg%jxyz)
     DEAL(ppg%uv)
-    DEAL(ppg%duv)
     DEAL(ppg%lma_tbl)
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
     DEAL(ppg%uv_so)
-    DEAL(ppg%duv_so)
   end subroutine deallocate_pp_grid
 
   subroutine deallocate_scalar(x)
