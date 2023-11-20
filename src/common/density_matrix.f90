@@ -554,9 +554,7 @@ contains
     do ilma=1,ppg%Nlma
       ia=ppg%ia_tbl(ilma)
       uVpsi = 0d0
-      uVpsi_r(1) = 0d0
-      uVpsi_r(2) = 0d0
-      uVpsi_r(3) = 0d0
+      uVpsi_r(:) = 0d0
 
       do j=1,ppg%Mps(ia)
         x = ppg%Rxyz(1,j,ia)
