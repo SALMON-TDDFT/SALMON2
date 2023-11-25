@@ -991,12 +991,12 @@ contains
         tau_1d = reshape(tau, (/nl/))
       end if
 
+      np = nl
 #if XC_MAJOR_VERSION <= 4
       select case (xc_f90_info_family(xc%info(ii)))
 #else
       select case (xc_f90_func_info_get_family(xc%info(ii)))
 #endif
-      np = nl
 
       case(XC_FAMILY_LDA)
         call xc_f90_lda_exc_vxc( &
