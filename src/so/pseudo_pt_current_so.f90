@@ -65,8 +65,14 @@ contains
 
        ia=ppg%ia_tbl_so(ilma)
 
-       uVpsi0(:)=zero
-       uVpsi_r(:,:)=zero
+       uVpsi0(1)=zero
+       uVpsi0(2)=zero
+       uVpsi_r(1,1)=zero
+       uVpsi_r(2,1)=zero
+       uVpsi_r(3,1)=zero
+       uVpsi_r(1,2)=zero
+       uVpsi_r(2,2)=zero
+       uVpsi_r(3,2)=zero
 
        ! To avoid the compiler problem of GPGPU, cases of ispin=1 and ispin=2 are written redundantly.
        ! start 
@@ -287,7 +293,18 @@ contains
        ia=ppg%ia_tbl_so(ilma)
 
        uVpsi0 = zero
-       uVpsi_r(:,:) = zero
+       uVpsi_r(1,0) = zero
+       uVpsi_r(2,0) = zero
+       uVpsi_r(3,0) = zero
+       uVpsi_r(1,1) = zero
+       uVpsi_r(2,1) = zero
+       uVpsi_r(3,1) = zero
+       uVpsi_r(1,2) = zero
+       uVpsi_r(2,2) = zero
+       uVpsi_r(3,2) = zero
+       uVpsi_r(1,3) = zero
+       uVpsi_r(2,3) = zero
+       uVpsi_r(3,3) = zero
 
        do j=1,ppg%mps(ia)
           x = ppg%rxyz(1,j,ia)
