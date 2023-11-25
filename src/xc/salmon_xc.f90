@@ -955,6 +955,9 @@ contains
 
 #ifdef USE_LIBXC
     subroutine exec_libxc(ii)
+#if XC_MAJOR_VERSION >= 5
+      use, intrinsic :: iso_c_binding
+#endif
       implicit none
       integer, intent(in) :: ii
       ! character(256) :: name
@@ -963,6 +966,11 @@ contains
       real(8) :: sigma_1d(nl), rlrho_1d(nl), tau_1d(nl)
       real(8) :: exc_tmp_1d(nl), vxc_tmp_1d(nl)
       real(8) :: gvxc_tmp_1d(nl), lvxc_tmp_1d(nl), tvxc_tmp_1d(nl)
+#if XC_MAJOR_VERSION <= 4
+      integer :: np
+#else
+      integer(c_size_t) :: np
+#endif
       
       rho_1d = reshape(rho, (/nl/))
       if (present(rho_nlcc)) then
@@ -983,26 +991,28 @@ contains
         tau_1d = reshape(tau, (/nl/))
       end if
 
+      np = nl
 #if XC_MAJOR_VERSION <= 4
       select case (xc_f90_info_family(xc%info(ii)))
 #else
       select case (xc_f90_func_info_get_family(xc%info(ii)))
 #endif
+
       case(XC_FAMILY_LDA)
         call xc_f90_lda_exc_vxc( &
-          & xc%func(ii), nl, rho_1d(1), &
+          & xc%func(ii), np, rho_1d(1), &
           & exc_tmp_1d(1), vxc_tmp_1d(1) &
           & )
 
       case(XC_FAMILY_GGA)
         call xc_f90_gga_exc_vxc( &
-          & xc%func(ii), nl, rho_1d(1), sigma_1d(1), &
+          & xc%func(ii), np, rho_1d(1), sigma_1d(1), &
           & exc_tmp_1d(1), vxc_tmp_1d(1), gvxc_tmp_1d(1) &
           & )
 
       case(XC_FAMILY_MGGA)
         call xc_f90_mgga_exc_vxc( &
-          & xc%func(ii), nl, rho_1d(1), sigma_1d(1), rlrho_1d(1), tau_1d(1), &
+          & xc%func(ii), np, rho_1d(1), sigma_1d(1), rlrho_1d(1), tau_1d(1), &
           & exc_tmp_1d(1), vxc_tmp_1d(1), &
           & gvxc_tmp_1d(1), lvxc_tmp_1d(1), tvxc_tmp_1d(1))
       end select
