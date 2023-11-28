@@ -50,6 +50,8 @@ option_set(USE_FFTW      "Use FFTW library"        OFF)
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
 option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
 
+## test option
+option_set(CPU_TEST      "Use CPU_TEST"            ON) # ON: CPU TEST, OFF: GPU TEST
 
 # variables
 set(TARGET_NAME "salmon")

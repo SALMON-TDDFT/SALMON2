@@ -14,6 +14,7 @@ set(CMAKE_C_FLAGS_RELEASE       "-O3 ${General_C_FLAGS} ${OpenACC_FLAGS}")
 
 set(USE_MPI_DEFAULT             ON)
 set(USE_OPENACC                 ON)
+set(CPU_TEST                    OFF)
 
 ########
 # CMake Platform-specific variables
