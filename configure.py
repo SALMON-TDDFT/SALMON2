@@ -68,8 +68,6 @@ group.add_option('--enable-fftw',        action='store_true',  dest='fftw')
 group.add_option('--disable-fftw',       action='store_false', dest='fftw', help='enable/disable computations FFTW library.')
 group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
 group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
-group.add_option('--enable-cputest',    action='store_true',  dest='cpu_test')
-group.add_option('--disable-cputest',   action='store_false', dest='cpu_test') # gpu_test
 
 parser.add_option_group(group)
 
@@ -112,8 +110,6 @@ add_option(dict, 'USE_FFTW',            options.fftw)
 
 add_option(dict, 'USE_OPT_ARRAY_PADDING',          options.padding)
 add_option(dict, 'USE_OPT_EXPLICIT_VECTORIZATION', options.explicit_vec)
-
-add_option(dict, 'CPU_TEST',            options.cpu_test)
 
 if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()
