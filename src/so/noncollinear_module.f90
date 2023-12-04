@@ -221,7 +221,16 @@ contains
     integer :: ix,iy,iz,im,ik,io
     if ( .not.allocated(vxc_mat) ) return
 #ifdef USE_OPENACC
-!$acc kernels
+!$acc kernels copyin(tpsi,  &
+!$acc                tpsi%zwf(:,mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2,  &
+!$acc                         info%io_s:info%io_e,  &
+!$acc                         info%ik_s:info%ik_e,  &
+!$acc                         info%im_s:info%im_e))  &
+!$acc         copy(hpsi,  &
+!$acc              hpsi%zwf(:,mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2,  &
+!$acc                       info%io_s:info%io_e,  &
+!$acc                       info%ik_s:info%ik_e,  &
+!$acc                       info%im_s:info%im_e))
 !#acc loop collapse(5) private(im,ik,io,iz,iy,ix)
 #else
 !$omp parallel do collapse(5) default(shared) private(im,ik,io,iz,iy,ix)

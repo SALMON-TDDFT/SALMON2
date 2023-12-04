@@ -234,7 +234,12 @@ contains
       allocate(uVpsibox1(Nspin,Nlma,io_s:io_e,ik_s:ik_e,im_s:im_e)); uVpsibox1=zero
 
 #ifdef USE_OPENACC
-!$acc kernels
+!$acc kernels copyin(tpsi,  &
+!$acc                tpsi%zwf(:,mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2,  &
+!$acc                         io_s:io_e,ik_s:ik_e,im_s:im_e))  &
+!$acc         copy(htpsi,  &
+!$acc              htpsi%zwf(:,mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2,  &
+!$acc                        io_s:io_e,ik_s:ik_e,im_s:im_e)) 
 !$acc loop collapse(3) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix,uVpsi)
 #else
 !$omp parallel do collapse(3) default(shared) private(im,ik,io,ilma,ia,ispin,wrk,j,iz,iy,ix,uVpsi)
