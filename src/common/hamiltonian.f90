@@ -319,7 +319,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 !$acc                        mg%is_array(3):mg%ie_array(3),  &
 !$acc                        1:Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
 !$acc parallel present(system,mg,V_local,stencil,tpsi,htpsi)
-!$acc loop collapse(3) private(kAc,kAc0,k_lap0)
+!$acc loop collapse(3) private(kAc,kAc0,k_lap0) gang
 #else
 !$omp parallel do collapse(4) default(none) &
 !$omp private(im,ik,io,ispin,kAc,k_lap0) &
