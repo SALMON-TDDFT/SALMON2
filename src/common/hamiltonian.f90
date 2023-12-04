@@ -308,8 +308,18 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     
 #ifdef USE_OPENACC
 !$acc update device(system%vec_Ac)
+!$acc data copyin(tpsi,  &
+!$acc             tpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+!$acc                      mg%is_array(2):mg%ie_array(2),  &
+!$acc                      mg%is_array(3):mg%ie_array(3),  &
+!$acc                      1:Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))  &
+!$acc      copyout(htpsi,  &
+!$acc              htpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+!$acc                        mg%is_array(2):mg%ie_array(2),  &
+!$acc                        mg%is_array(3):mg%ie_array(3),  &
+!$acc                        1:Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
 !$acc parallel present(system,mg,V_local,stencil,tpsi,htpsi)
-!$acc loop collapse(4) private(kAc,kAc0,k_lap0) gang
+!$acc loop collapse(3) private(kAc,kAc0,k_lap0)
 #else
 !$omp parallel do collapse(4) default(none) &
 !$omp private(im,ik,io,ispin,kAc,k_lap0) &
@@ -343,6 +353,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end do
 #ifdef USE_OPENACC
 !$acc end parallel
+!$acc end data
 #else
 !$omp end parallel do
 #endif
