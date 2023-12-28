@@ -1102,7 +1102,7 @@ subroutine prep_dgf(lg,mg,system,info,poisson)
   if(yn_fftw=='y') then
     call fftw_mpi_init()
   end if
-#ENDIF
+#endif
 
   return
 end subroutine prep_dgf
