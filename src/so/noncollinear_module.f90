@@ -434,7 +434,7 @@ contains
 
     if(info%if_divide_rspace) then
     !!!! future work
-      stop("calc_spin_current_density: r-space parallelization for spin-noncollinear systems is not implemented")
+      stop ("calc_spin_current_density: r-space parallelization for spin-noncollinear systems is not implemented")
     end if
 
     wrk_micro = 0d0
