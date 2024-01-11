@@ -215,18 +215,17 @@ contains
     use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
     use communication,   only: comm_is_root,comm_bcast,comm_summation,comm_sync_all
     use structures,      only: s_fdtd_system
-    use filesystem,      only: create_directory
+    use filesystem,      only: create_directory,directory_exists
     use misc_routines,   only: get_wtime
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
-    use common_maxwell,  only: set_coo_em,find_point_line_plane_em,find_point_id_only_em,make_shape_em,&
-                               input_i3d_em,output_i3d_em,stop_em,input_r_txt_em,output_r_txt_em,input_r_bin_em
+    use common_maxwell,  only: set_coo_em,find_point_line_plane_em,find_point_id_only_em,make_shape_em,          &
+                               input_i3d_em,output_i3d_em,stop_em,input_r_txt_em,output_r_txt_em,input_r_bin_em, &
+                               txtfile_copy_em
     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    procedure(integer)  :: access,system
-    integer             :: istatus
     integer             :: nsg_p          !yn_restart='y': nproc_size_global used in the previous calc.
     integer             :: nt_em_p        !yn_restart='y': nt_em             used in the previous calc.
     integer             :: iobs_samp_em_p !yn_restart='y': obs_samp_em       used in the previous calc.
@@ -497,7 +496,7 @@ contains
     !*** check and partially input restart date ***************************************************************!
     if(yn_restart=='y') then
       !check restart date
-      if(access(directory_read_data," ")==0) then
+      if(directory_exists(directory_read_data)) then
         if(comm_is_root(nproc_id_global)) then
           write(*,*)
           write(*,*) "**************************"
@@ -2470,20 +2469,20 @@ contains
           write(tmp_c(2),*) ii
           tmp_c(1) = trim(adjustl(base_directory))     //'/obs'//trim(adjustl(tmp_c(2)))//'_at_point_rt.data'
           tmp_c(2) = trim(adjustl(directory_read_data))//'/obs'//trim(adjustl(tmp_c(2)))//'_at_point_rt.data'
-          istatus  = system( "\cp -f "//trim(adjustl(tmp_c(2)))//" "//trim(adjustl(tmp_c(1))) )
+          call txtfile_copy_em(trim(adjustl(tmp_c(2))),trim(adjustl(tmp_c(1))))
           if(yn_obs_plane_integral_em(ii)=='y') then
             write(tmp_c(2),*) ii
             tmp_c(1) = trim(adjustl(base_directory))     //'/obs'//trim(adjustl(tmp_c(2)))//'_xy_integral_rt.data'
             tmp_c(2) = trim(adjustl(directory_read_data))//'/obs'//trim(adjustl(tmp_c(2)))//'_xy_integral_rt.data'
-            istatus  = system( "\cp -f "//trim(adjustl(tmp_c(2)))//" "//trim(adjustl(tmp_c(1))) )
+            call txtfile_copy_em(trim(adjustl(tmp_c(2))),trim(adjustl(tmp_c(1))))
             write(tmp_c(2),*) ii
             tmp_c(1) = trim(adjustl(base_directory))     //'/obs'//trim(adjustl(tmp_c(2)))//'_yz_integral_rt.data'
             tmp_c(2) = trim(adjustl(directory_read_data))//'/obs'//trim(adjustl(tmp_c(2)))//'_yz_integral_rt.data'
-            istatus  = system( "\cp -f "//trim(adjustl(tmp_c(2)))//" "//trim(adjustl(tmp_c(1))) )
+            call txtfile_copy_em(trim(adjustl(tmp_c(2))),trim(adjustl(tmp_c(1))))
             write(tmp_c(2),*) ii
             tmp_c(1) = trim(adjustl(base_directory))     //'/obs'//trim(adjustl(tmp_c(2)))//'_xz_integral_rt.data'
             tmp_c(2) = trim(adjustl(directory_read_data))//'/obs'//trim(adjustl(tmp_c(2)))//'_xz_integral_rt.data'
-            istatus  = system( "\cp -f "//trim(adjustl(tmp_c(2)))//" "//trim(adjustl(tmp_c(1))) )
+            call txtfile_copy_em(trim(adjustl(tmp_c(2))),trim(adjustl(tmp_c(1))))
           end if
         end do
       end if
@@ -3214,13 +3213,11 @@ contains
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
     use misc_routines,   only: get_wtime
-    use common_maxwell,  only: output_r_txt_em,output_r_bin_em
+    use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    procedure(integer) :: system
-    integer            :: istatus
     integer            :: iter,ii,ix,iy,iz
     integer            :: is5(5),ie5(5)
     real(8)            :: elapsed_time
@@ -3730,20 +3727,20 @@ contains
               write(tmp_name,*) ii
               save_name = trim(adjustl(base_directory))//'/obs'//trim(adjustl(tmp_name))//'_at_point_rt.data'
               tmp_name  =                'data_for_restart/obs'//trim(adjustl(tmp_name))//'_at_point_rt.data'
-              istatus   = system( "\cp -f "//trim(adjustl(save_name))//" "//trim(adjustl(tmp_name)) )
+              call txtfile_copy_em(trim(adjustl(save_name)),trim(adjustl(tmp_name)))
               if(yn_obs_plane_integral_em(ii)=='y') then
                 write(tmp_name,*) ii
                 save_name = trim(adjustl(base_directory))//'/obs'//trim(adjustl(tmp_name))//'_xy_integral_rt.data'
                 tmp_name  =                'data_for_restart/obs'//trim(adjustl(tmp_name))//'_xy_integral_rt.data'
-                istatus   = system( "\cp -f "//trim(adjustl(save_name))//" "//trim(adjustl(tmp_name)) )
+                call txtfile_copy_em(trim(adjustl(save_name)),trim(adjustl(tmp_name)))
                 write(tmp_name,*) ii
                 save_name = trim(adjustl(base_directory))//'/obs'//trim(adjustl(tmp_name))//'_yz_integral_rt.data'
                 tmp_name  =                'data_for_restart/obs'//trim(adjustl(tmp_name))//'_yz_integral_rt.data'
-                istatus   = system( "\cp -f "//trim(adjustl(save_name))//" "//trim(adjustl(tmp_name)) )
+                call txtfile_copy_em(trim(adjustl(save_name)),trim(adjustl(tmp_name)))
                 write(tmp_name,*) ii
                 save_name = trim(adjustl(base_directory))//'/obs'//trim(adjustl(tmp_name))//'_xz_integral_rt.data'
                 tmp_name  =                'data_for_restart/obs'//trim(adjustl(tmp_name))//'_xz_integral_rt.data'
-                istatus   = system( "\cp -f "//trim(adjustl(save_name))//" "//trim(adjustl(tmp_name)) )
+                call txtfile_copy_em(trim(adjustl(save_name)),trim(adjustl(tmp_name)))
               end if
             end do
           end if
