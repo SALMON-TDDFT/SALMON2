@@ -36,6 +36,7 @@ module common_maxwell
   public :: input_r_bin_em
   public :: output_r_txt_em
   public :: output_r_bin_em
+  public :: txtfile_copy_em
   
 contains
   
@@ -1068,5 +1069,40 @@ contains
     
     return
   end subroutine output_r_bin_em
+  
+  !=========================================================================================
+  != copy text file in fdtd ================================================================
+  subroutine txtfile_copy_em(file_inp,file_out)
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root
+    implicit none
+    character(*),intent(in) :: file_inp,file_out
+    integer             :: iun_inp, iun_out, istat_io
+    character(len=1024) :: copy_txt
+    
+    if(comm_is_root(nproc_id_global)) then
+      !set unit number for input and output & I/O status
+      iun_inp  = 700
+      iun_out  = 701
+      istat_io = 0
+  
+      !open input and output files
+      open(iun_inp, file=file_inp, status='old'    , action='read' , iostat=istat_io)
+      open(iun_out, file=file_out, status='replace', action='write', iostat=istat_io)
+  
+      !copy
+      do
+          read(iun_inp, '(A)', iostat=istat_io) copy_txt
+          if (istat_io /= 0) exit
+          write(iun_out, '(A)') trim(copy_txt)
+      end do
+  
+      !close
+      close(iun_inp)
+      close(iun_out)
+    end if
+
+    return
+  end subroutine txtfile_copy_em
   
 end module common_maxwell
