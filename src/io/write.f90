@@ -1860,7 +1860,7 @@ contains
   end subroutine write_band_information
   
 !===================================================================================================================================
-  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,rt,ofl)
+  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,rt,energy,ofl)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -1880,6 +1880,7 @@ contains
     type(s_poisson)                     :: poisson
     type(s_sendrecv_grid)               :: srg_scalar
     type(s_rt)                          :: rt
+    type(s_dft_energy)                  :: energy
     type(s_ofile)                       :: ofl
     !
     character(256) :: wdir,gdir,dir_gs
@@ -1912,6 +1913,9 @@ contains
     call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%tpsi0)
     call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%ttpsi0)
     call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%htpsi0)
+
+    deallocate(energy%esp)
+    allocate(energy%esp(rt%system_proj%no,system%nk,system%nspin))
     
   ! wavefunctions @ GS
     call generate_restart_directory_name(dir_gs,gdir,wdir)
