@@ -66,6 +66,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%hxk)
     call allocate_orbital_real(nspin,mg,info,cg%pk)
     call allocate_orbital_real(nspin,mg,info,cg%gk)
+    call allocate_orbital_real(nspin,mg,info,cg%pre_gk)
     call allocate_orbital_real(nspin,mg,info,cg%pko)
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
@@ -449,6 +450,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_complex(nspin,mg,info,cg%hxk)
     call allocate_orbital_complex(nspin,mg,info,cg%pk)
     call allocate_orbital_complex(nspin,mg,info,cg%gk)
+    call allocate_orbital_complex(nspin,mg,info,cg%pre_gk)
     call allocate_orbital_complex(nspin,mg,info,cg%pko)
     call allocate_orbital_complex(nspin,mg,info,cg%hwf)
     !$acc enter data copyin(cg)
@@ -500,8 +502,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
+    call preconditioning_zgk(mg,system,info,cg%gk,cg%pre_gk)
+    !call preconditioning_zgk(mg,system,info,cg%gk)
+
 !    call orthogonalization(mg,system,info,spsi,cg%gk)
-    call inner_product(mg,system,info,cg%gk,cg%gk,sum)
+    call inner_product(mg,system,info,cg%pre_gk,cg%gk,sum)
 
     if(iter==1)then
       uk = 0d0
@@ -535,7 +540,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
       cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-      & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & cg%pre_gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
       & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
     end do
     end do
@@ -783,6 +788,82 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
 
   call timer_begin(LOG_GSCG_PERIODIC_CALC)
 end subroutine inner_product
+
+subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
+  !$ use omp_lib
+  use structures
+  use sendrecv_grid, only: update_overlap_complex8
+  use salmon_global, only: yn_want_communication_overlapping
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_orbital),intent(inout) :: gk
+  type(s_orbital),intent(inout) :: pre_gk
+  !
+  integer :: io,ik,ispin,nspin
+  integer :: ix,iy,iz
+  real(8) :: alpha
+  integer :: is(3),ie(3)
+  logical :: is_enable_overlapping
+  complex(8) :: v
+  nspin = system%nspin
+
+  alpha=0.5d0
+
+  is_enable_overlapping = (yn_want_communication_overlapping == 'y') .and. &
+                          stencil%if_orthogonal .and. &
+                          info%if_divide_rspace
+
+  if(info%if_divide_rspace .and. .not. is_enable_overlapping) then
+    call update_overlap_complex8(srg, mg, gk%zwf)
+  end if
+
+!!$omp do collapse(2)
+  do ik=info%ik_s,info%ik_e
+  do io=info%io_s,info%io_e
+  do ispin=1,nspin
+    call zstencil_preconditioning(mg%is_array,mg%ie_array,mg%is,  &
+                                  mg%ie,mg%idx,mg%idy,mg%idz, &
+                                  gk%zwf(:,:,:,ispin,io,ik,1), &
+                                  pre_gk%zwf(:,:,:,ispin,io,ik,1),alpha)
+  end do
+  end do
+  end do
+
+end subroutine preconditioning_zgk
+
+subroutine zstencil_preconditioning(is_array,ie_array,is,ie,idx,idy,idz &
+                                   ,tpsi,htpsi,alpha)
+  implicit none
+
+  integer   ,intent(in)    :: is_array(3),ie_array(3),is(3),ie(3) &
+                             ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  complex(8),intent(in)    :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  complex(8),intent(inout) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  real(8)   ,intent(in)    :: alpha
+  !
+  integer :: ix,iy,iz
+  complex(8) :: v
+
+! low-pass filter precondtioning
+! N. Tancogne-Dejean et al., J. Chem. Phys. 152, 124119 (2020). equation (76)
+
+# define DX(dt) idx(ix+(dt)),iy,iz
+# define DY(dt) ix,idy(iy+(dt)),iz
+# define DZ(dt) ix,iy,idz(iz+(dt))
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+    v =   (tpsi(DX(1)) + tpsi(DX(-1))) &
+        + (tpsi(DY(1)) + tpsi(DY(-1))) &
+        + (tpsi(DZ(1)) + tpsi(DZ(-1))) 
+    htpsi(ix,iy,iz) = alpha * tpsi(ix,iy,iz) + (1.d0 - alpha) * v
+  end do
+  end do
+  end do
+
+end subroutine zstencil_preconditioning
 
 end subroutine gscg_zwf
 
