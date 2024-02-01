@@ -115,7 +115,7 @@ call initialization2_dft( Miter, nspin, rion_update,  &
 
 Miopt = 0
 nopt_max = 1
-if(yn_opt=='y') call initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max)
+if(yn_opt=='y') call initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max,ofl)
 
 call timer_end(LOG_INIT_GS)
 
@@ -255,7 +255,7 @@ if(yn_opt=='y') then
    !!Rion(:,:) = system%Rion(:,:)
 
    write(comment_line,10) iopt
-   call write_xyz(comment_line,"add","r  ",system)
+   call write_xyz(comment_line,"add","r  ",system,ofl)
 10 format("#opt iteration step=",i5)
 
    if(comm_is_root(nproc_id_global))then

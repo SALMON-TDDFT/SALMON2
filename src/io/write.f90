@@ -552,32 +552,37 @@ contains
 
   !===================================================================================================================================
 
-  subroutine write_xyz(comment,action,rvf,system)
+  subroutine write_xyz(comment,action,rvf,system,ofl)
   ! Write xyz in xyz format but also velocity and force are printed if necessary
   ! (these can be used for restart of opt and md)
-    use structures, only: s_dft_system
+    use structures, only: s_dft_system,s_ofile
     use inputoutput, only: au_length_aa
-    use salmon_global, only: SYSname,atom_name
+    use salmon_global, only: SYSname,atom_name,base_directory
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
+    use filesystem, only: open_filehandle
     implicit none
 
     type(s_dft_system),intent(in) :: system
 
-    integer :: ia,unit_xyz=200
+    integer :: ia,unit_xyz
     character(3) :: action,rvf
     character(1024) :: file_trj
     character(*) :: comment
+    type(s_ofile) :: ofl
 
     if(.not. comm_is_root(nproc_id_global)) return
 
     if(action=='new') then
-
-       file_trj=trim(SYSname)//'_trj.xyz'
+        
+       file_trj=trim(base_directory)//trim(SYSname)//'_trj.xyz'
+       unit_xyz = open_filehandle(file_trj)
+       ofl%fh_trj = unit_xyz
        open(unit_xyz,file=trim(file_trj),status="unknown")
 
     else if(action=='add') then
 
+       unit_xyz = ofl%fh_trj
        write(unit_xyz,*) system%nion
        write(unit_xyz,*) trim(comment)
        do ia=1,system%nion
@@ -591,6 +596,7 @@ contains
        enddo
 
     else if(action=='end') then
+       unit_xyz = ofl%fh_trj
        close(unit_xyz)
     endif
 
