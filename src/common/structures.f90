@@ -414,6 +414,7 @@ module structures
     integer :: fh_current_decomposed, fh_intra_current
     integer :: fh_rt_spin
     integer :: fh_mag_decomposed_rt,fh_spin_current_decomposed
+    integer :: fh_trj
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data

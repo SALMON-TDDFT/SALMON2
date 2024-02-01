@@ -122,7 +122,7 @@ call timer_end(LOG_INIT_GS)
 call write_dft_md_data(0,ofl,md)
 
 write(comment_line,10) 0
-call write_xyz(comment_line,"new","r  ",system)
+call write_xyz(comment_line,"new","r  ",system,ofl)
 10 format("#Adiabatic-MD time step=",i5)
 
 dt_h       = dt*0.5d0
@@ -212,7 +212,7 @@ MD_Loop : do it=1,nt
       if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
            write(comment_line,112) trim(comment_line), md%xi_nh
 112   format(a,"  xi_nh=",e18.10)
-      call write_xyz(comment_line,"add","rvf",system)
+      call write_xyz(comment_line,"add","rvf",system,ofl)
    endif
 
    ! Export electronic density (cube or vtk)

@@ -368,7 +368,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end if
   
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call write_xyz(comment_line,"new","rvf",system)
+     call write_xyz(comment_line,"new","rvf",system,ofl)
   endif
   
   !---------------------------- time-evolution
@@ -479,7 +479,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      write(comment_line,10) -1, 0.0d0
      if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
-     call write_xyz(comment_line,"add","rvf",system)
+     call write_xyz(comment_line,"add","rvf",system,ofl)
   10 format("#rt   step=",i8,"   time",e16.6)
   12 format(a,"  xi_nh=",e18.10)
   end if

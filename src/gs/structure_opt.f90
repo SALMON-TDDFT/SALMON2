@@ -18,8 +18,8 @@ module structure_opt_sub
 contains
 
   !==============================================================initilize
-  subroutine  initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max)
-    use structures, only: s_opt,s_dft_system
+  subroutine  initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max,ofl)
+    use structures, only: s_opt,s_dft_system,s_ofile
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_global, only: natom,nopt,yn_restart
@@ -30,6 +30,7 @@ contains
     type(s_dft_system) :: system
     integer :: nopt_max,Miopt,NA3
     logical :: flag_opt_conv
+    type(s_ofile) :: ofl
     character(100) :: comment_line
 
     flag_opt_conv = .false.
@@ -54,7 +55,7 @@ contains
     end if
 
     write(comment_line,10) 0
-    call write_xyz(comment_line,"new","r  ",system)
+    call write_xyz(comment_line,"new","r  ",system,ofl)
 10  format("#opt iteration step=",i5)
 
   end subroutine  initialization_opt
