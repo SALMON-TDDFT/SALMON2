@@ -392,6 +392,10 @@ module structures
   type s_opt
      real(8),allocatable :: a_dRion(:), dFion(:)
      real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
+     real(8),allocatable :: v_fire(:)
+     real(8)             :: step_fire
+     integer             :: p_times
+     real(8)             :: alpha_fire
   end type s_opt
 
   type s_md
