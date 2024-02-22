@@ -369,6 +369,9 @@ module salmon_global
   integer        :: nopt
   real(8)        :: max_step_len_adjust
   real(8)        :: convrg_opt_fmax
+  character(5)   :: method_opt ! 'bfgs','steep','fire'
+  real(8)        :: step_steep
+  real(8)        :: step_fire
 
 !! &md
   character(10)  :: ensemble

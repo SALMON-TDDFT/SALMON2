@@ -108,7 +108,9 @@ contains
   !===========================================================optimization
   subroutine structure_opt(opt,iopt,system)
     use structures, only: s_dft_system, s_opt
-    use salmon_global, only: natom, flag_opt_atom, max_step_len_adjust
+    use salmon_global, only: natom, flag_opt_atom, max_step_len_adjust, &
+                             method_opt, step_steep, step_fire, Kion
+    use const, only: umass
     use communication, only: comm_bcast
     implicit none
     type(s_dft_system),intent(inout) :: system
@@ -122,8 +124,10 @@ contains
     real(8) :: dRion(3,natom), dRabs(natom), dRabs_max
     real(8) :: force_1d(3*natom),dRion_1d(3*natom),optmat_1d(3*natom)
     real(8) :: optmat1_2d(3*natom,3*natom),optmat2_2d(3*natom,3*natom),optmat3_2d(3*natom,3*natom)
-
-    alpha = 1.0d0
+    real(8) :: f_inc,f_dec,alpha_start,f_alpha,dt_max
+    integer :: n_min
+    real(8) :: p_value,f_norm,v_norm
+    real(8) :: mass_au
 
     NA3 = 3*natom
 
@@ -134,112 +138,237 @@ contains
        icount = icount+1
     end do
     end do
+    
+    select case(method_opt)
+    case('bfgs')
 
-    if(iopt==1)then
-      !update opt%Hess_mat
-      do ii=1,NA3
-      do ij=1,NA3
-         if(ii==ij)then
-            opt%Hess_mat(ii,ij) = 1d0
-         else
-            opt%Hess_mat(ii,ij) = 0d0
-         end if
-         opt%Hess_mat_last(ii,ij) = opt%Hess_mat(ii,ij)
+      alpha = 1.0d0
+
+      if(iopt==1)then
+        !update opt%Hess_mat
+        do ii=1,NA3
+        do ij=1,NA3
+           if(ii==ij)then
+              opt%Hess_mat(ii,ij) = 1d0
+           else
+              opt%Hess_mat(ii,ij) = 0d0
+           end if
+           opt%Hess_mat_last(ii,ij) = opt%Hess_mat(ii,ij)
+        end do
+        end do
+      else
+        !update opt%dFion
+        opt%dFion=-(force_1d-opt%dFion)
+        !prepare const and matrix
+        call dgemm('n','n',1,1,NA3,1.0d0,opt%a_dRion,1,opt%dFion,NA3,0d0,const1,1)
+        call dgemm('n','n',NA3,1,NA3,1d0,opt%Hess_mat,NA3,opt%dFion,NA3,0d0,optmat_1d,NA3)
+        call dgemm('n','n',1,1,NA3,1d0,opt%dFion,1,optmat_1d,NA3,0d0,const2,1)
+        call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,opt%a_dRion,1,0d0,optmat1_2d,NA3)
+        !update opt%Hess_mat
+        rtmp = (const1+theta_opt*const2)/(const1**2d0)
+        !$omp parallel do collapse(2) private(ii,jj)
+        do ii=1,NA3
+        do jj=1,NA3
+           opt%Hess_mat(ii,jj) = opt%Hess_mat_last(ii,jj) + rtmp * optmat1_2d(ii,jj)
+        enddo
+        enddo
+        !$omp end parallel do
+        if(theta_opt==0.0d0)then
+          !theta_opt=0.0d0:DFP
+          call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,optmat_1d,1,0d0,optmat2_2d,NA3)
+          !$omp parallel do collapse(2) private(ii,jj)
+          do ii=1,NA3
+          do jj=1,NA3
+             opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)-(1d0/const2)*optmat2_2d(ii,jj)
+          enddo
+          enddo
+          !$omp end parallel do
+        elseif(theta_opt==1.0d0)then
+          !theta_opt=1.0d0:BFGS
+          call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,opt%a_dRion,1,0d0,optmat2_2d,NA3)
+          call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
+          rtmp = theta_opt/const1
+          !$omp parallel do collapse(2) private(ii,jj)
+          do ii=1,NA3
+          do jj=1,NA3
+             opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)- rtmp *(optmat2_2d(ii,jj)+optmat3_2d(ii,jj))
+          enddo
+          enddo
+          !$omp end parallel do
+        endif
+        !update opt%Hess_mat_last
+        !$omp parallel do collapse(2) private(ii,jj)
+        do ii=1,NA3
+        do jj=1,NA3
+           opt%Hess_mat_last(ii,jj) = opt%Hess_mat(ii,jj)
+        enddo
+        enddo
+        !$omp end parallel do
+      end if
+  
+      !update dRion_1d and dRion
+      dRion_1d(:) = 0d0
+      call dgemm('n','n',NA3,1,NA3,1d0,opt%Hess_mat,NA3,force_1d,NA3,0d0,dRion_1d,NA3)
+      !$omp parallel do collapse(2) private(iatom,ixyz)
+      do iatom=1,natom
+      do ixyz=1,3
+         dRion(ixyz,iatom) = dRion_1d(ixyz+3*(iatom-1))       
+  !      dRion(1:3,iatom) = dRion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
       end do
       end do
-    else
-      !update opt%dFion
-      opt%dFion=-(force_1d-opt%dFion)
-      !prepare const and matrix
-      call dgemm('n','n',1,1,NA3,1.0d0,opt%a_dRion,1,opt%dFion,NA3,0d0,const1,1)
-      call dgemm('n','n',NA3,1,NA3,1d0,opt%Hess_mat,NA3,opt%dFion,NA3,0d0,optmat_1d,NA3)
-      call dgemm('n','n',1,1,NA3,1d0,opt%dFion,1,optmat_1d,NA3,0d0,const2,1)
-      call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,opt%a_dRion,1,0d0,optmat1_2d,NA3)
-      !update opt%Hess_mat
-      rtmp = (const1+theta_opt*const2)/(const1**2d0)
-      !$omp parallel do collapse(2) private(ii,jj)
-      do ii=1,NA3
-      do jj=1,NA3
-         opt%Hess_mat(ii,jj) = opt%Hess_mat_last(ii,jj) + rtmp * optmat1_2d(ii,jj)
-      enddo
-      enddo
       !$omp end parallel do
-      if(theta_opt==0.0d0)then
-        !theta_opt=0.0d0:DFP
-        call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,optmat_1d,1,0d0,optmat2_2d,NA3)
-        !$omp parallel do collapse(2) private(ii,jj)
-        do ii=1,NA3
-        do jj=1,NA3
-           opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)-(1d0/const2)*optmat2_2d(ii,jj)
-        enddo
-        enddo
-        !$omp end parallel do
-      elseif(theta_opt==1.0d0)then
-        !theta_opt=1.0d0:BFGS
-        call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,opt%a_dRion,1,0d0,optmat2_2d,NA3)
-        call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
-        rtmp = theta_opt/const1
-        !$omp parallel do collapse(2) private(ii,jj)
-        do ii=1,NA3
-        do jj=1,NA3
-           opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)- rtmp *(optmat2_2d(ii,jj)+optmat3_2d(ii,jj))
-        enddo
-        enddo
-        !$omp end parallel do
+  
+      !adjust alpha if required from input
+      if(max_step_len_adjust .gt. 0d0) then
+         !$omp parallel do private(iatom)
+         do iatom=1,natom
+            if(flag_opt_atom(iatom)=='y') then
+                 dRabs(iatom) = sqrt( sum(dRion(:,iatom)**2d0) )
+            else
+                 dRabs(iatom) = 0d0
+            endif
+         enddo
+         !$omp end parallel do
+         dRabs_max = maxval(dRabs(:))
+         alpha = max_step_len_adjust / dRabs_max
       endif
-      !update opt%Hess_mat_last
-      !$omp parallel do collapse(2) private(ii,jj)
+  
+      !update opt%a_dRion,opt%dFion
+      !$omp parallel do private(ii)
       do ii=1,NA3
-      do jj=1,NA3
-         opt%Hess_mat_last(ii,jj) = opt%Hess_mat(ii,jj)
-      enddo
+         opt%a_dRion(ii) = alpha * dRion_1d(ii)
+         opt%dFion(ii)   = force_1d(ii)
       enddo
       !$omp end parallel do
-    end if
 
-    !update dRion_1d and dRion
-    dRion_1d(:) = 0d0
-    call dgemm('n','n',NA3,1,NA3,1d0,opt%Hess_mat,NA3,force_1d,NA3,0d0,dRion_1d,NA3)
-    !$omp parallel do collapse(2) private(iatom,ixyz)
-    do iatom=1,natom
-    do ixyz=1,3
-       dRion(ixyz,iatom) = dRion_1d(ixyz+3*(iatom-1))       
-!      dRion(1:3,iatom) = dRion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
-    end do
-    end do
-    !$omp end parallel do
+      !update Rion
+      !$omp parallel do private(iatom)
+      do iatom=1,natom
+         if(flag_opt_atom(iatom)=='y') &
+            system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*dRion(1:3,iatom)
+      end do
+      !$omp end parallel do
 
-    !adjust alpha if required from input
-    if(max_step_len_adjust .gt. 0d0) then
-       !$omp parallel do private(iatom)
-       do iatom=1,natom
-          if(flag_opt_atom(iatom)=='y') then
-               dRabs(iatom) = sqrt( sum(dRion(:,iatom)**2d0) )
-          else
-               dRabs(iatom) = 0d0
-          endif
-       enddo
-       !$omp end parallel do
-       dRabs_max = maxval(dRabs(:))
-       alpha = max_step_len_adjust / dRabs_max
-    endif
+    case('steep')
+      
+      alpha = step_steep
 
-    !update opt%a_dRion,opt%dFion
-    !$omp parallel do private(ii)
-    do ii=1,NA3
-       opt%a_dRion(ii) = alpha * dRion_1d(ii)
-       opt%dFion(ii)   = force_1d(ii)
-    enddo
-    !$omp end parallel do
+      !update dRion_1d and dRion
+      !$omp parallel do private(ii)
+      do ii=1,NA3
+        dRion_1d(ii) = force_1d(ii)
+      enddo
+      !$omp end parallel do
+      !$omp parallel do collapse(2) private(iatom,ixyz)
+      do iatom=1,natom
+      do ixyz=1,3
+         dRion(ixyz,iatom) = dRion_1d(ixyz+3*(iatom-1))
+      end do
+      end do
+      !$omp end parallel do
 
-    !update Rion
-    !$omp parallel do private(iatom)
-    do iatom=1,natom
-       if(flag_opt_atom(iatom)=='y') &
-          system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*dRion(1:3,iatom)
-    end do
-    !$omp end parallel do
+      !adjust alpha if required from input
+      if(max_step_len_adjust .gt. 0d0) then
+         !$omp parallel do private(iatom)
+         do iatom=1,natom
+            if(flag_opt_atom(iatom)=='y') then
+                 dRabs(iatom) = sqrt( sum(dRion(:,iatom)**2d0) )
+            else
+                 dRabs(iatom) = 0d0
+            endif
+         enddo
+         !$omp end parallel do
+         dRabs_max = maxval(dRabs(:))
+         alpha = max_step_len_adjust / dRabs_max * 0.1d0
+      endif
 
+      !update opt%a_dRion,opt%dFion
+      !$omp parallel do private(ii)
+      do ii=1,NA3
+         opt%a_dRion(ii) = alpha * 10.d0 * dRion_1d(ii)
+         opt%dFion(ii)   = force_1d(ii)
+      enddo
+      !$omp end parallel do
+  
+      !update Rion
+      !$omp parallel do private(iatom)
+      do iatom=1,natom
+         if(flag_opt_atom(iatom)=='y') &
+            system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*10.d0*dRion(1:3,iatom)
+      end do
+      !$omp end parallel do
+
+    case('fire')
+      f_inc = 1.1d0
+      f_dec = 0.5d0
+      alpha_start = 0.1d0
+      f_alpha = 0.99d0
+      n_min = 5
+      dt_max = 1.d0/0.024188843d0
+  
+      if(iopt==1)then
+        opt%v_fire(:) = 0.d0
+        opt%alpha_fire = alpha_start
+        opt%step_fire = step_fire
+        opt%p_times = 0
+      end if
+
+      p_value = 0.d0
+      !$omp parallel do reduction(+:p_value) private(ii)
+      do ii=1,NA3
+        p_value = p_value + force_1d(ii)*opt%v_fire(ii)
+      end do
+      !$omp end parallel do
+  
+      f_norm = 0.d0
+      !$omp parallel do reduction(+:f_norm) private(ii)
+      do ii=1,NA3
+        f_norm = f_norm + force_1d(ii)**2
+      end do
+      !$omp end parallel do
+      f_norm = sqrt(f_norm)
+  
+      v_norm = 0.d0
+      !$omp parallel do reduction(+:v_norm) private(ii)
+      do ii=1,NA3
+        v_norm = v_norm + opt%v_fire(ii)**2
+      end do
+      !$omp end parallel do
+      v_norm = sqrt(v_norm)
+
+      !$omp parallel do private(ii)
+      do ii=1,NA3
+        opt%v_fire(ii) = (1.d0-opt%alpha_fire)*opt%v_fire(ii) &
+                         + opt%alpha_fire*force_1d(ii)/f_norm*v_norm
+      end do
+      !$omp end parallel do
+  
+      if(p_value > 0.d0)then
+        opt%p_times = opt%p_times + 1
+        if(opt%p_times > n_min)then
+          opt%step_fire = min(opt%step_fire*f_inc,dt_max)
+          opt%alpha_fire = f_alpha*opt%alpha_fire
+        end if
+      else
+        opt%p_times = 0
+        opt%step_fire = f_dec * opt%step_fire
+        opt%v_fire(:) = 0.d0
+        opt%alpha_fire = alpha_start
+      end if
+
+      ! Euler method
+      do iatom=1,natom
+        if(flag_opt_atom(iatom)=='y') then
+          mass_au = umass * system%Mass(Kion(iatom))
+          do ixyz=1,3
+            opt%v_fire(ixyz+3*(iatom-1)) = opt%v_fire(ixyz+3*(iatom-1)) &
+                                         + force_1d(ixyz+3*(iatom-1))*opt%step_fire/mass_au
+              system%Rion(ixyz,iatom) = system%Rion(ixyz,iatom) + opt%v_fire(ixyz+3*(iatom-1))*opt%step_fire
+          end do
+        end if
+      end do
+    end select
+  
   end subroutine structure_opt
 
   !===============================================================finilize
