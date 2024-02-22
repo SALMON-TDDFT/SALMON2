@@ -39,6 +39,7 @@ contains
     NA3 = 3*natom
     allocate( opt%a_dRion(NA3), opt%dFion(NA3) )
     allocate( opt%Hess_mat(NA3,NA3), opt%Hess_mat_last(NA3,NA3) )
+    allocate( opt%v_fire(NA3) )
 
     if(yn_restart == 'y') then
        call restart_opt(Miopt,opt)
@@ -380,6 +381,7 @@ contains
     type(s_opt) :: opt
     deallocate(opt%a_dRion,opt%dFion)
     deallocate(opt%Hess_mat,opt%Hess_mat_last)
+    deallocate(opt%v_fire)
     if(comm_is_root(nproc_id_global)) write(*,*) "Optimization Converged"
   end subroutine structure_opt_fin
 
