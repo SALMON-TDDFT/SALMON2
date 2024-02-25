@@ -325,7 +325,9 @@ contains
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero, &
       & method_init_density, &
-      & magdir_atom
+      & magdir_atom, &
+      & yn_preconditioning, &
+      & alpha_pre
 
     namelist/emfield/ &
       & trans_longi, &
@@ -717,6 +719,8 @@ contains
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
     magdir_atom          = 0d0
+    yn_preconditioning   = 'y'
+    alpha_pre            = 0.6d0
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -1243,6 +1247,8 @@ contains
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
     call comm_bcast(method_init_density   ,nproc_group_global)
     call comm_bcast(magdir_atom ,nproc_group_global)
+    call comm_bcast(yn_preconditioning    ,nproc_group_global)
+    call comm_bcast(alpha_pre             ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -2083,6 +2089,8 @@ contains
       if(method_init_density == 'pp_magdir') then
         write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
       end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
