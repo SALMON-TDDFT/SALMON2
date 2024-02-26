@@ -165,6 +165,8 @@ module salmon_global
   real(8)        :: conv_gap_mix_zero
   character(16)  :: method_init_density
   real(8)        :: magdir_atom(100)
+  character(1)   :: yn_preconditioning
+  real(8)        :: alpha_pre
 
 !! &emfield
   character(2)   :: trans_longi
