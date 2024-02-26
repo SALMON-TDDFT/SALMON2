@@ -393,6 +393,10 @@ module structures
   type s_opt
      real(8),allocatable :: a_dRion(:), dFion(:)
      real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
+     real(8),allocatable :: v_fire(:)
+     real(8)             :: step_fire
+     integer             :: p_times
+     real(8)             :: alpha_fire
   end type s_opt
 
   type s_md
@@ -415,6 +419,7 @@ module structures
     integer :: fh_current_decomposed, fh_intra_current
     integer :: fh_rt_spin
     integer :: fh_mag_decomposed_rt,fh_spin_current_decomposed
+    integer :: fh_trj
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data

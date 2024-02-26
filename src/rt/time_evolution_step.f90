@@ -292,7 +292,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      if(yn_md=='y' .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
 12   format(a,"  xi_nh=",e18.10)
-     call write_xyz(comment_line,"add","rvf",system)
+     call write_xyz(comment_line,"add","rvf",system,ofl)
   endif
 
 
