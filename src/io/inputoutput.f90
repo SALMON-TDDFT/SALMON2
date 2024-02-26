@@ -719,7 +719,7 @@ contains
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
     magdir_atom          = 0d0
-    yn_preconditioning   = 'y'
+    yn_preconditioning   = 'n'
     alpha_pre            = 0.6d0
 
 !! == default for &emfield

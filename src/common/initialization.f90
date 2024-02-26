@@ -254,6 +254,19 @@ subroutine init_dft_system(lg,system,stencil)
     end do
   end do
 
+  if(stencil%if_orthogonal) then
+    stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+  else
+    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
+      stop "error: nonorthogonal lattice and r-space parallelization"
+    stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*  &
+                      & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+  end if
+  do jj=1,3
+    stencil%coef_lap_nd1(1,jj) = cnmat(1,1)/hgs(jj)**2
+    stencil%coef_nab_nd1(1,jj) = bnmat(1,1)/hgs(jj)
+  end do
+
   call set_gridcoordinate(lg,system)
 
   system%vec_Ac = 0d0 ! initial value
