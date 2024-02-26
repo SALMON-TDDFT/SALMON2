@@ -570,7 +570,13 @@ contains
       
     namelist/sbe/ &
       & yn_vnl_correction, &
-      & nstate_sbe
+      & num_sbe, &
+      & sysname_sbe, &
+      & nk_sbe, &
+      & nstate_sbe, &
+      & nelec_sbe, &
+      & al_sbe, &
+      & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe
 
 !! == default for &unit ==
     unit_system='au'
@@ -766,7 +772,7 @@ contains
     nxysplit   = 0
     nxvacl_m     = 0
     nxvacr_m     = 0
-    nxvac_m(1:2) = 1
+    nxvac_m(1:2) = 0
     nyvac_m(1:2) = 0
     nzvac_m(1:2) = 0
     nx_origin_m = 1
@@ -962,7 +968,15 @@ contains
     kpt_label(:) = ''
 !! == default for &sbe
     yn_vnl_correction = 'n'
-    nstate_sbe = -1
+    num_sbe = 1
+    sysname_sbe(:) = 'default'
+    nk_sbe(:) = -1
+    nstate_sbe(:) = -1
+    nelec_sbe(:) = -1
+    al_sbe(:,:) = 0.d0
+    al_vec1_sbe(:,:) = 0.d0
+    al_vec2_sbe(:,:) = 0.d0
+    al_vec3_sbe(:,:) = 0.d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1549,7 +1563,19 @@ contains
     call comm_bcast(kpt_label       ,nproc_group_global)
 !! == bcast for sbe
     call comm_bcast(yn_vnl_correction,nproc_group_global)
-    call comm_bcast(nstate_sbe,      nproc_group_global)
+    call comm_bcast(num_sbe          ,nproc_group_global)
+    call comm_bcast(sysname_sbe      ,nproc_group_global)
+    call comm_bcast(nk_sbe           ,nproc_group_global)
+    call comm_bcast(nstate_sbe       ,nproc_group_global)
+    call comm_bcast(nelec_sbe        ,nproc_group_global)
+    call comm_bcast(al_sbe           ,nproc_group_global)
+    al_sbe = al_sbe * ulength_to_au
+    call comm_bcast(al_vec1_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec2_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec3_sbe      ,nproc_group_global)
+    al_vec1_sbe = al_vec1_sbe * ulength_to_au
+    al_vec2_sbe = al_vec2_sbe * ulength_to_au
+    al_vec3_sbe = al_vec3_sbe * ulength_to_au
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2460,8 +2486,29 @@ contains
       if(inml_sbe >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nstate_sbe', nstate_sbe
-
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)') 'sysname_sbe(',i,')', sysname_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nk_sbe(',i,')', nk_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nstate_sbe(',i,')', nstate_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nelec_sbe(',i,')', nelec_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(1',i,')', al_sbe(1,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(2',i,')', al_sbe(2,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(3',i,')', al_sbe(3,i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec1_sbe(1:3',i,')', al_vec1_sbe(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
+      end do
       close(fh_variables_log)
     end if
 

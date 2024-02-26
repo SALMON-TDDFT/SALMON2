@@ -17,7 +17,7 @@ subroutine generate_macropoint(fh)
     do ishape = 1, n_s
         select case (trim(media_type(id_s(ishape))))
         case ("multiscale", "ms")
-            m_id = -1
+            m_id = -id_s(ishape)
         case ("vacuum")
             m_id = 0
         case ("constant media")

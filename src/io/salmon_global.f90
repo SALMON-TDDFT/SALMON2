@@ -417,6 +417,12 @@ character(256),allocatable :: atom_name(:)
   
   !! &sbe 
   character(1)   :: yn_vnl_correction
-  integer        :: nstate_sbe
+  integer        :: num_sbe
+  character(256) :: sysname_sbe(1:200)
+  integer        :: nk_sbe(1:200)
+  integer        :: nstate_sbe(1:200)
+  integer        :: nelec_sbe(1:200)
+  real(8)        :: al_sbe(3,200)
+  real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
 
 end module salmon_global

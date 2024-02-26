@@ -1,0 +1,119 @@
+&calculation
+    theory = 'maxwell_sbe'
+/
+
+&control
+    sysname = 'Si'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.26d0, 10.26d0, 10.26d0
+    nelem = 1
+    natom = 8
+    nelec = 32
+    nstate = 32
+/
+
+! &pseudo
+!     file_pseudo(1) = './Si_rps.dat'
+!     izatom(1) = 14
+!     lloc_ps(1) = 2
+! /
+
+! &functional
+!     xc = 'PZ'
+! /
+
+! &rgrid
+!     num_rgrid(1:3) = 16, 16, 16
+! /
+
+&kgrid
+    num_kgrid(1:3) = 8, 8, 8
+/
+
+&tgrid
+    dt = 0.05d0
+    nt = 4000
+/
+
+&emfield
+    ae_shape1 = "Acos2"
+    epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+    I_wcm2_1 = 1.0d+12
+    tw1 = 1000.0d0
+    omega1 = 0.056d0
+/
+
+&multiscale
+    nx_m = 20
+    ny_m = 1
+    nz_m = 1
+    hx_m = 94.52 ! 5nm
+    hy_m = 94.52 ! 5nm
+    hz_m = 94.52 ! 5nm
+    nxvac_m(1) = 2000
+    nxvac_m(2) = 2000
+/
+
+&maxwell
+    n_s = 2
+    media_num = 2
+    id_s(1) = 1
+    id_s(2) = 2
+    media_type(1) = "multiscale"
+    media_type(2) = "multiscale"
+    inf_s(1,1) = 945.2d0
+    inf_s(1,2) = 94.52d0
+    inf_s(1,3) = 94.52d0
+    inf_s(2,1) = 945.2d0
+    inf_s(2,2) = 94.52d0
+    inf_s(2,3) = 94.52d0
+    ori_s(1,1) = 519.86d0
+    ori_s(1,2) = 94.52d0
+    ori_s(1,3) = 94.52d0
+    ori_s(2,1) = 1465.06d0
+    ori_s(2,2) = 94.52d0
+    ori_s(2,3) = 94.52d0
+    typ_s(1) = 'rectangular-cylinder'
+    typ_s(2) = 'rectangular-cylinder'
+    boundary_em(1,1) = 'abc'
+    boundary_em(1,2) = 'abc'
+/
+&atomic_red_coor
+     'Si'  .0      .0      .0      1
+     'Si'  .25     .25     .25     1
+     'Si'  .5      .0      .5      1
+     'Si'  .0      .5      .5      1
+     'Si'  .5      .5      .0      1
+     'Si'  .75     .25     .75     1
+     'Si'  .25     .75     .75     1
+     'Si'  .75     .75     .25     1
+/
+
+&parallel
+    nproc_k = 4
+    nproc_ob = 1
+    nproc_rgrid(1) = 1
+    nproc_rgrid(2) = 1
+    nproc_rgrid(3) = 1
+/
+
+&sbe
+    num_sbe = 2
+    sysname_sbe(1) = 'Si'
+    sysname_sbe(2) = 'diamond'
+    nk_sbe(1) = 64
+    nk_sbe(2) = 64
+    nstate_sbe(1) = 32
+    nstate_sbe(2) = 32
+    nelec_sbe(1) = 32
+    nelec_sbe(2) = 32
+    al_sbe(1:3,1) = 10.26d0, 10.26d0, 10.26d0
+    al_sbe(1:3,2) = 6.74d0, 6.74d0, 6.74d0
+/
