@@ -198,6 +198,7 @@ module structures
   type s_stencil
     logical :: if_orthogonal
     real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
+    real(8) :: coef_lap0_nd1,coef_lap_nd1(1,3),coef_nab_nd1(1,3)
     real(8) :: coef_f(6) ! for non-orthogonal lattice
   end type s_stencil
 
@@ -392,6 +393,10 @@ module structures
   type s_opt
      real(8),allocatable :: a_dRion(:), dFion(:)
      real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
+     real(8),allocatable :: v_fire(:)
+     real(8)             :: step_fire
+     integer             :: p_times
+     real(8)             :: alpha_fire
   end type s_opt
 
   type s_md
@@ -431,7 +436,7 @@ module structures
 ! +-----------------------------------+
 
   type s_cg
-    type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
+    type(s_orbital) :: xk,hxk,gk,pre_gk,pk,pko,hwf
   end type s_cg
 
   type s_mixing

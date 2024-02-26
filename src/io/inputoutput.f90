@@ -325,7 +325,9 @@ contains
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero, &
       & method_init_density, &
-      & magdir_atom
+      & magdir_atom, &
+      & yn_preconditioning, &
+      & alpha_pre
 
     namelist/emfield/ &
       & trans_longi, &
@@ -529,7 +531,10 @@ contains
     namelist/opt/ &
       & nopt, &
       & max_step_len_adjust, &
-      & convrg_opt_fmax
+      & convrg_opt_fmax, &
+      & method_opt, &
+      & step_steep, &
+      & step_fire
 
     namelist/md/ &
       & ensemble, &
@@ -723,6 +728,8 @@ contains
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
     magdir_atom          = 0d0
+    yn_preconditioning   = 'n'
+    alpha_pre            = 0.6d0
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -933,6 +940,9 @@ contains
     nopt                = 100
     max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
     convrg_opt_fmax     =  1d-3
+    method_opt          =  'bfgs'
+    step_steep          =  0.5d0
+    step_fire           =  4.134d0/utime_to_au  !=0.1[fs]
 !! == default for &md
     ensemble              = 'nve'
     thermostat            = 'nose-hoover'
@@ -1257,6 +1267,8 @@ contains
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
     call comm_bcast(method_init_density   ,nproc_group_global)
     call comm_bcast(magdir_atom ,nproc_group_global)
+    call comm_bcast(yn_preconditioning    ,nproc_group_global)
+    call comm_bcast(alpha_pre             ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1526,6 +1538,10 @@ contains
     call comm_bcast(nopt                ,nproc_group_global)
     call comm_bcast(max_step_len_adjust ,nproc_group_global)
     call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
+    call comm_bcast(method_opt          ,nproc_group_global)
+    call comm_bcast(step_steep          ,nproc_group_global)
+    call comm_bcast(step_fire           ,nproc_group_global)
+    step_fire     = step_fire * utime_to_au
 !! == bcast for &md
     call comm_bcast(ensemble               ,nproc_group_global)
     call comm_bcast(thermostat             ,nproc_group_global)
@@ -2109,6 +2125,8 @@ contains
       if(method_init_density == 'pp_magdir') then
         write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
       end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
@@ -2417,6 +2435,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_opt', method_opt
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_steep', step_steep
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_fire', step_fire
+
       if(inml_md >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', inml_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
@@ -2778,6 +2800,11 @@ contains
           stop 'yn_lr_w0_correction="y" is currently for yn_periodic="y"'
        end if
     endif
+
+    select case(method_opt)
+    case ('bfgs','steep','fire') ; continue
+    case default            ; stop 'method_opt must be "bfgs", "steep" or "fire"'
+    end select
 
     select case(method_poisson)
     case ('cg','ft','dirichlet') ; continue
