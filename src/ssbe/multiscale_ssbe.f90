@@ -19,7 +19,7 @@ subroutine main_multiscale_ssbe(icomm)
     implicit none
     integer, intent(in) :: icomm
 
-    type(s_sbe_gs_info) :: gs
+    type(s_sbe_gs_info) :: gs(num_sbe)
     type(s_sbe_bloch_solver), allocatable :: sbe(:)
     real(8) :: t
     real(8), allocatable :: Ac_ext_t(:, :)
@@ -28,6 +28,7 @@ subroutine main_multiscale_ssbe(icomm)
     real(8), allocatable :: Ac_macro(:, :), E_macro(:, :)
     real(8), allocatable :: Jmat_macro_tmp(:, :), Jmat_macro(:, :)
     integer, allocatable :: itbl_macro_coord(:, :)
+    integer, allocatable :: itbl_macro_itype_sbe(:)
     integer :: nmacro, nmacro_max
     integer :: imacro_min, imacro_max
     integer :: ix, iy, iz, mt, imacro, iobs, ii, jj
@@ -85,19 +86,23 @@ subroutine main_multiscale_ssbe(icomm)
     ! Macropoint and media setup
     nmacro_max = nx_m * ny_m * nz_m
     allocate(itbl_macro_coord(3, nmacro_max))
+    allocate(itbl_macro_itype_sbe(nmacro_max))
     if (irank == 0) then
-        call read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
+        call read_media_info(nmacro_max, itbl_macro_coord, itbl_macro_itype_sbe, nmacro, fw)
     end if
     call comm_bcast(itbl_macro_coord, icomm, 0)
+    call comm_bcast(itbl_macro_itype_sbe, icomm, 0)
     call comm_bcast(nmacro, icomm, 0)
 
     if (nmacro > 0) then
 
         ! Read ground state electronic system:
-        call init_sbe_gs_info(gs, sysname, base_directory, &
-            & num_kgrid, nstate, nelec, &
-            & al_vec1, al_vec2, al_vec3, &
-            & .false., icomm)
+        do i = 1, num_sbe
+          call init_sbe_gs_info(gs(i), sysname_sbe(i), base_directory, &
+              & nk_sbe(i), nstate_sbe(i), nelec_sbe(i), &
+              & al_vec1_sbe(:,i), al_vec2_sbe(:,i), al_vec3_sbe(:,i), &
+              & .false., icomm)
+        end do
 
         ! Distribute
         call distribute_macropoints(irank, nmacro, nproc, imacro_min, imacro_max)
@@ -111,7 +116,8 @@ subroutine main_multiscale_ssbe(icomm)
 
         ! Initialization of SBE solver and density matrix:
         do i = imacro_min, imacro_max
-            call init_sbe_bloch_solver(sbe(i), gs, nstate_sbe, icomm_macro)
+            call init_sbe_bloch_solver(sbe(i), gs(itbl_macro_itype_sbe(i)), &
+                                       nstate_sbe(itbl_macro_itype_sbe(i)), icomm_macro)
             sbe(i)%flag_vnl_correction = (yn_vnl_correction == 'y')
         end do
     end if
@@ -180,8 +186,8 @@ subroutine main_multiscale_ssbe(icomm)
 
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
-                call dt_evolve_bloch(sbe(imacro), gs, Ac_macro(1:3, imacro), dt)
-                call calc_current_bloch(sbe(imacro), gs, Ac_macro(1:3, imacro), jmat, icomm_macro)
+                call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), dt)
+                call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
                 if (irank_macro == 0) then
                     Jmat_macro_tmp(1:3, imacro) = jmat(1:3)
                 end if
@@ -296,13 +302,14 @@ subroutine distribute_macropoints(irank, nmacro, nproc, imacro_min, imacro_max)
 end subroutine distribute_macropoints
 
 
-subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
+subroutine read_media_info(nmacro_max, itbl_macro_coord, itbl_macro_itype_sbe, nmacro, fw)
     use fdtd_weyl, only: ls_fdtd_weyl
     use salmon_global
     use shaper_ssbe
     implicit none
     integer, intent(in) :: nmacro_max
     integer, intent(out) :: itbl_macro_coord(1:3, nmacro_max)
+    integer, intent(out) :: itbl_macro_itype_sbe(nmacro_max)
     integer, intent(out) :: nmacro
     type(ls_fdtd_weyl), intent(inout) :: fw
 
@@ -336,6 +343,7 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
                 imacro = imacro + 1
                 if (imacro > nmacro_max) stop "Error: number of macropoints is too large!"
                 itbl_macro_coord(1:3, imacro) = (/ ix, iy, iz /)
+                itbl_macro_itype_sbe(imacro) = abs(itype)
             end if
         end do
         close(99)
@@ -346,6 +354,7 @@ subroutine read_media_info(nmacro_max, itbl_macro_coord, nmacro, fw)
             imacro = imacro + 1
             if (imacro > nmacro_max) stop "Error: number of macropoints is too large!"
             itbl_macro_coord(1:3, imacro) = (/ ix, iy, iz /)
+            itbl_macro_itype_sbe(imacro) = 1
         end do
         end do
         end do
