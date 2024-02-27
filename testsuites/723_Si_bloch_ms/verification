@@ -34,7 +34,7 @@ for item in filelist:
 print("# Checking calculated result")
 result = {}
 linecount = 0
-for line in open("Si_sbe_RT_Ac/Si_Ac_004000.data"):
+for line in open("Si_sbe_RT_Ac/Si_Ac_002000.data"):
     linecount += 1
     if linecount == 2027: # corresponds to line 2027
         data = line.split()
