@@ -39,7 +39,7 @@
 
 &tgrid
     dt = 0.05d0
-    nt = 4000
+    nt = 2000
 /
 
 &emfield

@@ -13,15 +13,15 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "Si_sbe_RT_Ac/Si_Ac_004000.data",
+    "Si_sbe_RT_Ac/Si_Ac_002000.data",
 ] 
 
 checklist = { 
     # Ac
     "Ac": [
         -100, # Temporary value for result
-        -0.0003444058007719149,  # Reference value
-        3.e-4,  # Permissible error 
+        -0.00008373077038244222,  # Reference value
+        3.e-5,  # Permissible error 
     ],
 } 
 
