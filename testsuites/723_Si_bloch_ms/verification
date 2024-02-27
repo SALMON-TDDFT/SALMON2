@@ -13,15 +13,15 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "Si_sbe_RT_Ac/Si_Ac_002000.data",
+    "Si_sbe_RT_Ac/Si_Ac_000200.data",
 ] 
 
 checklist = { 
     # Ac
     "Ac": [
         -100, # Temporary value for result
-        0.0003105954861679118,  # Reference value
-        3.e-5,  # Permissible error 
+        -4.033131221549635E-008,  # Reference value
+        1.e-7,  # Permissible error 
     ],
 } 
 
@@ -34,7 +34,7 @@ for item in filelist:
 print("# Checking calculated result")
 result = {}
 linecount = 0
-for line in open("Si_sbe_RT_Ac/Si_Ac_002000.data"):
+for line in open("Si_sbe_RT_Ac/Si_Ac_000200.data"):
     linecount += 1
     if linecount == 2027: # corresponds to line 2027
         data = line.split()
