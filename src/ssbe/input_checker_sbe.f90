@@ -27,8 +27,24 @@ contains
 function check_input_variables_sbe() result(flag)
     implicit none
     logical :: flag
+    integer :: i
 
     flag = .true.
+
+    if(num_sbe>=2)then
+        if (nstate_sbe(2) <= 0) call raise("ERROR! nstate_sbe must be specified when num_sbe>=2!")
+        if (nk_sbe(2) <= 0) call raise("ERROR! nk_sbe must be specified when num_sbe>=2!")
+        if (nelec_sbe(2) <= 0) call raise("ERROR! nelec_sbe must be specified when num_sbe>=2!")
+        if ((norm2(al_vec1_sbe(:,2)) <= 1d-9) .and. &
+            (norm2(al_vec2_sbe(:,2)) <= 1d-9) .and. &
+            (norm2(al_vec3_sbe(:,2)) <= 1d-9) .and. &
+            (norm2(al_sbe(:,2)) <= 1d-9)) then
+            call raise("ERROR! 'al_sbe' or 'al_vec1..3_sbe' must be specified when num_sbe>=2!")
+        end if
+        if(nx_m*ny_m*nz_m < nproc_size_global) then
+            call raise("ERROR! Number of macro points must be larger than or equal to nproc_size_global when num_sbe>=2!")
+        end if
+    end if
 
     if ((norm2(al_vec1) <= 1d-9) .and. (norm2(al_vec2) <= 1d-9) .and. (norm2(al_vec3) <= 1d-9)) then
         if (norm2(al) > 1d-9) then
@@ -36,14 +52,47 @@ function check_input_variables_sbe() result(flag)
             al_vec2(1:3) = (/ 0.0d0, al(2), 0.0d0 /)
             al_vec3(1:3) = (/ 0.0d0, 0.0d0, al(3) /)
         else
-            call raise("ERROR! 'al' or 'al_vec1..3' must be specified!")
+            if ((norm2(al_vec1_sbe(:,1)) <= 1d-9) .and. &
+                (norm2(al_vec2_sbe(:,1)) <= 1d-9) .and. &
+                (norm2(al_vec3_sbe(:,1)) <= 1d-9) .and. &
+                (norm2(al_sbe(:,1)) <= 1d-9)) then
+                call raise("ERROR! Either one of 'al', 'al_vec1..3', 'al_sbe' or 'al_vec1..3_sbe' must be specified!")
+            end if
         end if
     end if
 
-    if (nstate_sbe <= 0) nstate_sbe = nstate
-    if (nstate_sbe > nstate) then
+    if ((norm2(al_vec1_sbe(:,1)) <= 1d-9) .and. &
+        (norm2(al_vec2_sbe(:,1)) <= 1d-9) .and. &
+        (norm2(al_vec3_sbe(:,1)) <= 1d-9)) then
+        if(norm2(al_sbe(:,1)) > 1d-9) then
+            al_vec1_sbe(1:3,1) = (/ al_sbe(1,1), 0.0d0, 0.0d0 /)
+            al_vec2_sbe(1:3,1) = (/ 0.0d0, al_sbe(2,1), 0.0d0 /)
+            al_vec3_sbe(1:3,1) = (/ 0.0d0, 0.0d0, al_sbe(3,1) /)
+        else
+            al_vec1_sbe(1:3,1) = al_vec1(1:3)
+            al_vec2_sbe(1:3,1) = al_vec2(1:3)
+            al_vec3_sbe(1:3,1) = al_vec3(1:3)
+        end if
+    end if
+
+    do i=2,num_sbe
+      if ((norm2(al_vec1_sbe(:,i)) <= 1d-9) .and. &
+          (norm2(al_vec2_sbe(:,i)) <= 1d-9) .and. &
+          (norm2(al_vec3_sbe(:,i)) <= 1d-9)) then
+          al_vec1_sbe(1:3,i) = (/ al_sbe(1,i), 0.0d0, 0.0d0 /)
+          al_vec2_sbe(1:3,i) = (/ 0.0d0, al_sbe(2,i), 0.0d0 /)
+          al_vec3_sbe(1:3,i) = (/ 0.0d0, 0.0d0, al_sbe(3,i) /)
+      end if
+    end do
+
+    if (nstate_sbe(1) <= 0) nstate_sbe(1) = nstate
+    if (nstate_sbe(1) > nstate) then
         call raise("ERROR! 'nstate_sbe' must be smaller than 'nstate'!")
     end if
+
+    if (sysname_sbe(1) == "default") sysname_sbe(1) = sysname
+    if (nk_sbe(1) <= 0) nk_sbe(1) = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+    if (nelec_sbe(1) <= 0) nelec_sbe(1) = nelec
 
     if (trim(theory) .ne. "maxwell_sbe") return
 
