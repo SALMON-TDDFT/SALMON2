@@ -22,19 +22,21 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
+    integer :: nk
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
     if (.not. check_input_variables_sbe()) return
 
     ! Read ground state electronic system:
+    nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
     call init_sbe_gs_info(gs, sysname, base_directory, &
-        & num_kgrid, nstate, nelec, &
+        & nk, nstate, nelec, &
         & al_vec1, al_vec2, al_vec3, &
         & .false., icomm)        
     
     ! Initialization of SBE solver and density matrix:
-    call init_sbe_bloch_solver(sbe, gs, nstate_sbe, icomm)
+    call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
     ! Prepare external pulse
@@ -78,7 +80,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
 
         if (mod(it, 10) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
+            tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
@@ -86,7 +88,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
         
         if (mod(it, out_projection_step) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate_sbe, icomm)
+            tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)    
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)

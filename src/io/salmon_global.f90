@@ -165,6 +165,8 @@ module salmon_global
   real(8)        :: conv_gap_mix_zero
   character(16)  :: method_init_density
   real(8)        :: magdir_atom(100)
+  character(1)   :: yn_preconditioning
+  real(8)        :: alpha_pre
 
 !! &emfield
   character(2)   :: trans_longi
@@ -369,6 +371,9 @@ module salmon_global
   integer        :: nopt
   real(8)        :: max_step_len_adjust
   real(8)        :: convrg_opt_fmax
+  character(5)   :: method_opt ! 'bfgs','steep','fire'
+  real(8)        :: step_steep
+  real(8)        :: step_fire
 
 !! &md
   character(10)  :: ensemble
@@ -417,6 +422,12 @@ character(256),allocatable :: atom_name(:)
   
   !! &sbe 
   character(1)   :: yn_vnl_correction
-  integer        :: nstate_sbe
+  integer        :: num_sbe
+  character(256) :: sysname_sbe(1:200)
+  integer        :: nk_sbe(1:200)
+  integer        :: nstate_sbe(1:200)
+  integer        :: nelec_sbe(1:200)
+  real(8)        :: al_sbe(3,200)
+  real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
 
 end module salmon_global

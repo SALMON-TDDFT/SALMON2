@@ -325,7 +325,9 @@ contains
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero, &
       & method_init_density, &
-      & magdir_atom
+      & magdir_atom, &
+      & yn_preconditioning, &
+      & alpha_pre
 
     namelist/emfield/ &
       & trans_longi, &
@@ -529,7 +531,10 @@ contains
     namelist/opt/ &
       & nopt, &
       & max_step_len_adjust, &
-      & convrg_opt_fmax
+      & convrg_opt_fmax, &
+      & method_opt, &
+      & step_steep, &
+      & step_fire
 
     namelist/md/ &
       & ensemble, &
@@ -570,7 +575,13 @@ contains
       
     namelist/sbe/ &
       & yn_vnl_correction, &
-      & nstate_sbe
+      & num_sbe, &
+      & sysname_sbe, &
+      & nk_sbe, &
+      & nstate_sbe, &
+      & nelec_sbe, &
+      & al_sbe, &
+      & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe
 
 !! == default for &unit ==
     unit_system='au'
@@ -717,6 +728,8 @@ contains
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
     magdir_atom          = 0d0
+    yn_preconditioning   = 'n'
+    alpha_pre            = 0.6d0
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -766,7 +779,7 @@ contains
     nxysplit   = 0
     nxvacl_m     = 0
     nxvacr_m     = 0
-    nxvac_m(1:2) = 1
+    nxvac_m(1:2) = 0
     nyvac_m(1:2) = 0
     nzvac_m(1:2) = 0
     nx_origin_m = 1
@@ -927,6 +940,9 @@ contains
     nopt                = 100
     max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
     convrg_opt_fmax     =  1d-3
+    method_opt          =  'bfgs'
+    step_steep          =  0.5d0
+    step_fire           =  4.134d0/utime_to_au  !=0.1[fs]
 !! == default for &md
     ensemble              = 'nve'
     thermostat            = 'nose-hoover'
@@ -962,7 +978,15 @@ contains
     kpt_label(:) = ''
 !! == default for &sbe
     yn_vnl_correction = 'n'
-    nstate_sbe = -1
+    num_sbe = 1
+    sysname_sbe(:) = 'default'
+    nk_sbe(:) = -1
+    nstate_sbe(:) = -1
+    nelec_sbe(:) = -1
+    al_sbe(:,:) = 0.d0
+    al_vec1_sbe(:,:) = 0.d0
+    al_vec2_sbe(:,:) = 0.d0
+    al_vec3_sbe(:,:) = 0.d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1243,6 +1267,8 @@ contains
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
     call comm_bcast(method_init_density   ,nproc_group_global)
     call comm_bcast(magdir_atom ,nproc_group_global)
+    call comm_bcast(yn_preconditioning    ,nproc_group_global)
+    call comm_bcast(alpha_pre             ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1512,6 +1538,10 @@ contains
     call comm_bcast(nopt                ,nproc_group_global)
     call comm_bcast(max_step_len_adjust ,nproc_group_global)
     call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
+    call comm_bcast(method_opt          ,nproc_group_global)
+    call comm_bcast(step_steep          ,nproc_group_global)
+    call comm_bcast(step_fire           ,nproc_group_global)
+    step_fire     = step_fire * utime_to_au
 !! == bcast for &md
     call comm_bcast(ensemble               ,nproc_group_global)
     call comm_bcast(thermostat             ,nproc_group_global)
@@ -1549,7 +1579,19 @@ contains
     call comm_bcast(kpt_label       ,nproc_group_global)
 !! == bcast for sbe
     call comm_bcast(yn_vnl_correction,nproc_group_global)
-    call comm_bcast(nstate_sbe,      nproc_group_global)
+    call comm_bcast(num_sbe          ,nproc_group_global)
+    call comm_bcast(sysname_sbe      ,nproc_group_global)
+    call comm_bcast(nk_sbe           ,nproc_group_global)
+    call comm_bcast(nstate_sbe       ,nproc_group_global)
+    call comm_bcast(nelec_sbe        ,nproc_group_global)
+    call comm_bcast(al_sbe           ,nproc_group_global)
+    al_sbe = al_sbe * ulength_to_au
+    call comm_bcast(al_vec1_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec2_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec3_sbe      ,nproc_group_global)
+    al_vec1_sbe = al_vec1_sbe * ulength_to_au
+    al_vec2_sbe = al_vec2_sbe * ulength_to_au
+    al_vec3_sbe = al_vec3_sbe * ulength_to_au
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2083,6 +2125,8 @@ contains
       if(method_init_density == 'pp_magdir') then
         write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
       end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
@@ -2391,6 +2435,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_opt', method_opt
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_steep', step_steep
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_fire', step_fire
+
       if(inml_md >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', inml_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
@@ -2460,8 +2508,29 @@ contains
       if(inml_sbe >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nstate_sbe', nstate_sbe
-
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)') 'sysname_sbe(',i,')', sysname_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nk_sbe(',i,')', nk_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nstate_sbe(',i,')', nstate_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nelec_sbe(',i,')', nelec_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(1',i,')', al_sbe(1,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(2',i,')', al_sbe(2,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(3',i,')', al_sbe(3,i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec1_sbe(1:3',i,')', al_vec1_sbe(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
+      end do
       close(fh_variables_log)
     end if
 
@@ -2731,6 +2800,11 @@ contains
           stop 'yn_lr_w0_correction="y" is currently for yn_periodic="y"'
        end if
     endif
+
+    select case(method_opt)
+    case ('bfgs','steep','fire') ; continue
+    case default            ; stop 'method_opt must be "bfgs", "steep" or "fire"'
+    end select
 
     select case(method_poisson)
     case ('cg','ft','dirichlet') ; continue
