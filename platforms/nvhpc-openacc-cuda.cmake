@@ -6,7 +6,7 @@ set(General_Fortran_FLAGS       "-Wall -fstrict-aliasing")
 set(General_C_FLAGS             "-Wall -alias=ansi")
 
 # OpenACC and CUDA
-set(OpenACC_FLAGS               "-acc=strict -ta=tesla,cc70,cc80,managed,ptxinfo -Mcudalib=cublas -Mcuda -Minfo=accel -DUSE_OPENACC -DUSE_CUDA")
+set(OpenACC_FLAGS               "-acc=strict -gpu=cc70,cc80,managed,ptxinfo -Minfo=accel -DUSE_OPENACC -DUSE_CUDA")
 set(CMAKE_CUDA_FLAGS            "${CUDA_NVCC_FLAGS} -std=c++14 -rdc=false")
 foreach(arch 70 80)
 	set(CMAKE_CUDA_FLAGS          "${CMAKE_CUDA_FLAGS} -gencode arch=compute_${arch},code=sm_${arch}")
