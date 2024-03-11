@@ -472,7 +472,7 @@ contains
     call timer_end(LOG_GSCG_PERIODIC_HPSI)
 
     call timer_begin(LOG_GSCG_PERIODIC_CALC)
-    call inner_product_gpu(mg,system,info,cg%xk,cg%hxk,xkHxk)
+    call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
 
     Iteration : do iter=1,Ncg
 
@@ -501,9 +501,9 @@ contains
       !call orthogonalization(mg,system,info,spsi,cg%gk)
       if(yn_preconditioning=='y')then
         call preconditioning_zgk(mg,system,info,cg%gk,cg%pre_gk)
-        call inner_product_gpu(mg,system,info,cg%pre_gk,cg%gk,summ)
+        call inner_product(mg,system,info,cg%pre_gk,cg%gk,summ)
       else
-        call inner_product_gpu(mg,system,info,cg%gk,cg%gk,summ)
+        call inner_product(mg,system,info,cg%gk,cg%gk,summ)
       end if
 
       if(iter==1)then
@@ -577,7 +577,7 @@ contains
       end if
 
       gkgk = summ
-      call inner_product_gpu(mg,system,info,cg%xk,cg%pk,zs)
+      call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
 #ifdef USE_OPENACC
       !$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
@@ -601,7 +601,7 @@ contains
       !$acc end parallel
 #endif
 
-      call inner_product_gpu(mg,system,info,cg%pko,cg%pko,summ)
+      call inner_product(mg,system,info,cg%pko,cg%pko,summ)
 
 #ifdef USE_OPENACC
       !$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
@@ -631,8 +631,8 @@ contains
       call timer_end(LOG_GSCG_PERIODIC_HPSI)
 
       call timer_begin(LOG_GSCG_PERIODIC_CALC)
-      call inner_product_gpu(mg,system,info,cg%xk,cg%hwf,xkHpk)
-      call inner_product_gpu(mg,system,info,cg%pko,cg%hwf,pkHpk)
+      call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
+      call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
 #ifdef USE_OPENACC
       !$acc parallel loop private(ik,io,ispin) collapse(2)
@@ -684,8 +684,8 @@ contains
       !$acc end parallel
 #endif
 
-      call inner_product_gpu(mg,system,info,cg%xk,cg%hxk,xkHxk)
-      call inner_product_gpu(mg,system,info,cg%xk,cg%xk,xkxk)
+      call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
+      call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
 #ifdef USE_OPENACC
       !$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
@@ -808,48 +808,6 @@ contains
       nspin = system%nspin
 
       zbox2(:,:,:) = 0.d0
-      !$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        sum0 = 0d0
-        do ispin=1,nspin
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          sum0 = sum0 + conjg(psi1%zwf(ix,iy,iz,ispin,io,ik,1))*psi2%zwf(ix,iy,iz,ispin,io,ik,1)
-        end do
-        end do
-        end do
-        end do
-        zbox2(1,io,ik) = sum0 * system%hvol
-        zbox2(2,io,ik) = zbox2(1,io,ik)
-      end do
-      end do
-      call timer_end(LOG_GSCG_PERIODIC_CALC)
-
-      call timer_begin(LOG_GSCG_PERIODIC_COMM_COLL)
-      call comm_summation(zbox2,zbox,nspin*system%no*system%nk,info%icomm_r)
-      call timer_end(LOG_GSCG_PERIODIC_COMM_COLL)
-
-      call timer_begin(LOG_GSCG_PERIODIC_CALC)
-    end subroutine inner_product
-
-    subroutine inner_product_gpu(mg,system,info,psi1,psi2,zbox)
-      !$ use omp_lib
-      implicit none
-      type(s_rgrid),intent(in) :: mg
-      type(s_dft_system),intent(in) :: system
-      type(s_parallel_info),intent(in) :: info
-      type(s_orbital),intent(in) :: psi1,psi2
-      complex(8),intent(out) :: zbox(system%nspin,system%no,system%nk)
-      !
-      integer :: io,ik,ispin,nspin
-      integer :: ix,iy,iz
-      complex(8) :: zbox2(system%nspin,system%no,system%nk)
-      complex(8) :: sum0
-      nspin = system%nspin
-
-      zbox2(:,:,:) = 0.d0
 #ifdef USE_OPENACC
       !$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
 #else
@@ -878,7 +836,7 @@ contains
       call timer_end(LOG_GSCG_PERIODIC_COMM_COLL)
 
       call timer_begin(LOG_GSCG_PERIODIC_CALC)
-    end subroutine inner_product_gpu
+    end subroutine inner_product
 
     subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
       !$ use omp_lib
