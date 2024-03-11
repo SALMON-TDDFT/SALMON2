@@ -5,7 +5,7 @@ set(OPENMP_FLAGS                "-Mnoopenmp")
 set(General_Fortran_FLAGS       "-Wall -fstrict-aliasing")
 set(General_C_FLAGS             "-Wall -alias=ansi")
 
-set(OpenACC_FLAGS               "-acc=strict -gpu=cc70,cc80,managed,ptxinfo -Minfo=accel -DUSE_OPENACC")
+set(OpenACC_FLAGS               "-acc=strict -ta=tesla,cc70,cc80,managed,ptxinfo -Mcudalib=cublas -Mcuda -Minfo=accel -DUSE_OPENACC")
 
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g -traceback ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g -traceback ${General_C_FLAGS} ${OpenACC_FLAGS}")

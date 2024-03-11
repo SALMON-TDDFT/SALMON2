@@ -69,6 +69,9 @@ contains
     use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
     use pack_unpack, only: copy_data
     use communication, only: comm_bcast, comm_summation
+#ifdef USE_OPENACC
+    use cublas, only: cublaszgemm
+#endif
     implicit none
     type(s_dft_system),   intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
@@ -237,21 +240,39 @@ contains
                     umat_tmp = 0.d0
                     wf_block_send(:,:,:,:,1:numo3_0) = wf_block(:,:,:,:,io2_s:io2_s-1+numo3_0)
                     wf_block1(:,:,:,:,1:numo3_1) = wf_block(:,:,:,:,io2_s+numo3_0:io2_e)
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send, wf_block1) copyout(umat_tmp)
+                    call cublaszgemm(TRANSA, TRANSB, numo3_0, numo3_1, nsize_rg_so,  &
+                        &  one*sys%hvol, wf_block_send, nsize_rg_so,  &
+                        &                wf_block1, nsize_rg_so,  &
+                        &          zero, umat_tmp, wfi%numo_max)
+!$acc end data
+#else
                     call zgemm(TRANSA, TRANSB, numo3_0, numo3_1, nsize_rg_so,  &
                         &  one*sys%hvol, wf_block_send, nsize_rg_so,  &
                         &                wf_block1, nsize_rg_so,  &
                         &          zero, umat_tmp, wfi%numo_max)
+#endif
 
-                   if(wfi%if_divide_rspace) then
+                    if(wfi%if_divide_rspace) then
                       call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
                     else
                       umat = umat_tmp
                     end if
 
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send, umat) copyout(wf_block1)
+                    call cublaszgemm(TRANSB, TRANSB, nsize_rg_so, numo3_1, numo3_0,  &
+                      &         - one, wf_block_send, nsize_rg_so,  &
+                      &                umat, wfi%numo_max,  &
+                      &           one, wf_block1, nsize_rg_so)
+!$acc end data
+#else
                     call zgemm(TRANSB, TRANSB, nsize_rg_so, numo3_1, numo3_0,  &
                       &         - one, wf_block_send, nsize_rg_so,  &
                       &                umat, wfi%numo_max,  &
                       &           one, wf_block1, nsize_rg_so)
+#endif
                     wf_block(:,:,:,:,io2_s+numo3_0:io2_e) = wf_block1(:,:,:,:,1:numo3_1)
                   end if ! idiv3 == 0
 
@@ -262,10 +283,19 @@ contains
                   umat_tmp = 0.d0
                   wf_block_send(:,:,:,:,1:numo2_0) = wf_block(:,:,:,:,io1_s:io1_s-1+numo2_0)
                   wf_block1(:,:,:,:,1:numo2_1) = wf_block(:,:,:,:,io1_s+numo2_0:io1_e)
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send, wf_block1) copyout(umat_tmp)
+                  call cublaszgemm(TRANSA, TRANSB, numo2_0, numo2_1, nsize_rg_so,  &
+                      &  one*sys%hvol, wf_block_send, nsize_rg_so,  &
+                      &                wf_block1, nsize_rg_so,  &
+                      &          zero, umat_tmp, wfi%numo_max)
+!$acc end data
+#else
                   call zgemm(TRANSA, TRANSB, numo2_0, numo2_1, nsize_rg_so,  &
                       &  one*sys%hvol, wf_block_send, nsize_rg_so,  &
                       &                wf_block1, nsize_rg_so,  &
                       &          zero, umat_tmp, wfi%numo_max)
+#endif
 
                   if(wfi%if_divide_rspace) then
                     call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
@@ -273,10 +303,19 @@ contains
                     umat = umat_tmp
                   end if
 
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send, umat) copyout(wf_block1)
+                  call cublaszgemm(TRANSB, TRANSB, nsize_rg_so, numo2_1, numo2_0,  &
+                    &         - one, wf_block_send, nsize_rg_so,  &
+                    &                umat, wfi%numo_max,  &
+                    &           one, wf_block1, nsize_rg_so)
+!$acc end data
+#else
                   call zgemm(TRANSB, TRANSB, nsize_rg_so, numo2_1, numo2_0,  &
                     &         - one, wf_block_send, nsize_rg_so,  &
                     &                umat, wfi%numo_max,  &
                     &           one, wf_block1, nsize_rg_so)
+#endif
 
                   wf_block(:,:,:,:,io1_s+numo2_0:io1_e) = wf_block1(:,:,:,:,1:numo2_1)
                 end if ! idiv2 == 0
@@ -289,10 +328,19 @@ contains
                 wf_block_send(:,:,:,:,1:numo1_0) = wf_block(:,:,:,:,io0_s:io0_s-1+numo1_0)
                 wf_block1(:,:,:,:,1:numo1_1) = wf_block(:,:,:,:,io0_s+numo1_0:io0_e)
 
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send, wf_block1) copyout(umat_tmp)
+                call cublaszgemm(TRANSA, TRANSB, numo1_0, numo1_1, nsize_rg_so,  &
+                    &  one*sys%hvol, wf_block_send, nsize_rg_so,  &
+                    &                wf_block1, nsize_rg_so,  &
+                    &          zero, umat_tmp, wfi%numo_max)
+!$acc end data
+#else
                 call zgemm(TRANSA, TRANSB, numo1_0, numo1_1, nsize_rg_so,  &
                     &  one*sys%hvol, wf_block_send, nsize_rg_so,  &
                     &                wf_block1, nsize_rg_so,  &
                     &          zero, umat_tmp, wfi%numo_max)
+#endif
 
                 if(wfi%if_divide_rspace) then
                   call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
@@ -300,10 +348,19 @@ contains
                   umat = umat_tmp
                 end if
 
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send, umat) copyout(wf_block1)
+                call cublaszgemm(TRANSB, TRANSB, nsize_rg_so, numo1_1, numo1_0,  &
+                  &         - one, wf_block_send, nsize_rg_so,  &
+                  &                umat, wfi%numo_max,  &
+                  &           one, wf_block1, nsize_rg_so)
+!$acc end data
+#else
                 call zgemm(TRANSB, TRANSB, nsize_rg_so, numo1_1, numo1_0,  &
                   &         - one, wf_block_send, nsize_rg_so,  &
                   &                umat, wfi%numo_max,  &
                   &           one, wf_block1, nsize_rg_so)
+#endif
                 wf_block(:,:,:,:,io0_s+numo1_0:io0_e) = wf_block1(:,:,:,:,1:numo1_1)
               end if ! idiv1 == 0
 
@@ -320,10 +377,19 @@ contains
 
           umat_tmp=0.d0
           if( wfi%id_o > m )then
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send(:,:,:,:,1),wf_block(:,:,:,:,1)) copyout(umat_tmp)
+            call cublaszgemm(TRANSA, TRANSB, wfi%numo_max, wfi%numo, nsize_rg_so,  &
+              &   one*sys%hvol, wf_block_send(:,:,:,:,1), nsize_rg_so,  &
+              &                wf_block(:,:,:,:,1), nsize_rg_so,  &
+              &          zero, umat_tmp, wfi%numo_max )
+!$acc end data
+#else
             call zgemm(TRANSA, TRANSB, wfi%numo_max, wfi%numo, nsize_rg_so,  &
               &   one*sys%hvol, wf_block_send(:,:,:,:,1), nsize_rg_so,  &
               &                wf_block(:,:,:,:,1), nsize_rg_so,  &
               &          zero, umat_tmp, wfi%numo_max )
+#endif
 
             if(wfi%if_divide_rspace) then
               call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
@@ -331,10 +397,19 @@ contains
               umat = umat_tmp
             end if
 
+#ifdef USE_OPENACC
+!$acc data copyin(wf_block_send(:,:,:,:,1),umat) copyout(wf_block(:,:,:,:,1))
+            call cublaszgemm(TRANSB, TRANSB, nsize_rg_so, wfi%numo, wfi%numo_max,  &
+              &         - one, wf_block_send(:,:,:,:,1), nsize_rg_so,  &
+              &                umat, wfi%numo_max,  &
+              &           one, wf_block(:,:,:,:,1), nsize_rg_so)
+!$acc end data
+#else
             call zgemm(TRANSB, TRANSB, nsize_rg_so, wfi%numo, wfi%numo_max,  &
               &         - one, wf_block_send(:,:,:,:,1), nsize_rg_so,  &
               &                umat, wfi%numo_max,  &
               &           one, wf_block(:,:,:,:,1), nsize_rg_so)
+#endif
           end if
         end if ! wfi%if_divide_orbit
 
