@@ -55,7 +55,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, ppn, info, spsi, stencil, Vxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, ppn, info, spsi, stencil, Vxc, E_xc, E_c)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -74,12 +74,15 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
+    real(8)                             :: E_c
     !
     integer :: ix,iy,iz,is,nspin
     real(8) :: tot_exc
+    real(8) :: tot_ec
     real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    real(8) :: eec_tmp(mg%num(1), mg%num(2), mg%num(3))
     real(8) :: vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
     real(8) :: vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:), grho(:,:,:,:), lrho(:,:,:), j(:,:,:,:), tau(:,:,:)
@@ -178,7 +181,7 @@ contains
       & eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else
       if(nspin==1)then
-        call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+        call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, eec=eec_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
       else if(nspin==2)then
         call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
@@ -252,6 +255,28 @@ contains
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+
+    tot_ec=0.d0
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(2) reduction(+:tot_ec) private(iz,iy,ix)
+#else
+!$omp parallel do collapse(2) reduction(+:tot_ec) private(iz,iy,ix)
+#endif
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+    do ix=1,mg%num(1)
+      tot_ec=tot_ec+eec_tmp(ix,iy,iz)
+    end do
+    end do
+    end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
+!$omp end parallel do
+#endif
+    tot_ec = tot_ec*system%hvol
+
+    call comm_summation(tot_ec,E_c,info%icomm_r)
     
     if(yn_spinorbit=='y') then
       call rot_vxc_noncollinear( Vxc, system, mg )
@@ -664,7 +689,7 @@ contains
 
 
 
-  subroutine calc_xc(xc, rho, rho_s, exc, eexc, vxc, vxc_s, &
+  subroutine calc_xc(xc, rho, rho_s, exc, eec, eexc, vxc, vxc_s, &
       & grho, grho_s, rlrho, rlrho_s, tau, tau_s, rj, rj_s, &
       & rho_nlcc, &
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
@@ -674,6 +699,7 @@ contains
     real(8), intent(in), optional :: rho(:, :, :) ! ispin = 0
     real(8), intent(in), optional :: rho_s(:, :, :, :) ! ispin = 1
     real(8), intent(out), optional :: exc(:, :, :) ! epsilon_xc[rho]
+    real(8), intent(out), optional :: eec(:, :, :) ! rho * epsilon_c[rho]
     real(8), intent(out), optional :: eexc(:, :, :) ! rho * epsilon_xc[rho]
     real(8), intent(out), optional :: vxc(:, :, :) ! v_xc[rho] for ispin=0
     real(8), intent(out), optional :: vxc_s(:, :, :, :) ! v_xc[rho] ispin=1
@@ -770,6 +796,7 @@ contains
       real(8) :: rho_s_1d(nl)
       real(8) :: rho_s_sp_1d(nl,2)
       real(8) :: exc_1d(nl)
+      real(8) :: eec_1d(nl)
       real(8) :: eexc_1d(nl)
       real(8) :: vexc_1d(nl)
       real(8) :: vexc_sp_1d(nl,2)
@@ -792,7 +819,7 @@ contains
 #endif
 
       if (xc%ispin == 0) then
-        call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d)
+        call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d, eec_1d)
       else if (xc%ispin == 1) then
         call exc_cor_pz_sp(nl, rho_s_sp_1d, exc_1d, eexc_1d, vexc_sp_1d)
       end if
@@ -809,6 +836,10 @@ contains
 
       if (present(exc)) then
          exc = exc + reshape(exc_1d, (/nx, ny, nz/))
+      endif
+
+      if (present(eec)) then
+         eec = eec + reshape(eec_1d, (/nx, ny, nz/))
       endif
 
       if (present(eexc)) then

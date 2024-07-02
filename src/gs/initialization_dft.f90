@@ -301,7 +301,7 @@ real(8) :: rNe0,rNe
   end if
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc,energy%E_c)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)

@@ -2044,6 +2044,7 @@ contains
       use hamiltonian, only: update_vlocal
       implicit none
       real(8) :: E_xc
+      real(8) :: E_c
       type(s_scalar) :: rho,Vh
       type(s_scalar),allocatable :: rho_s(:),Vxc(:)
       
@@ -2062,7 +2063,7 @@ contains
       end do
       call hartree(lg,mg,rt%info_proj,rt%system_proj,fg,poisson,srg_scalar,stencil,rho,Vh)
       call exchange_correlation(rt%system_proj,xc_func,mg,srg_scalar,rt%srg_proj,rho_s &
-      & ,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc)
+      & ,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc,E_c)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
       
       call deallocate_scalar(rho)
