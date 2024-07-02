@@ -396,7 +396,7 @@ contains
     
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc,,energy%E_c)
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc,energy%E_c)
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
