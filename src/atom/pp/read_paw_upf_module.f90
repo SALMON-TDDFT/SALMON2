@@ -27,7 +27,7 @@ contains
     integer :: nwfc
     real(8),allocatable :: work(:),qij(:)
     real(8),allocatable :: vh(:),vxc(:)
-    real(8) :: tmp,exc,trho,pi4,tmp2,tmp1
+    real(8) :: tmp,exc,trho,pi4,tmp2,tmp1,tmp3
 
     nrr=maxval( pp%mr )
     norb=maxval( pp%num_orb )
@@ -334,7 +334,7 @@ contains
     do i=1,nrr
 !       trho=paw%rhops(i,ik)/pp%rad(i,ik)**2/pi4 +paw%rhocps(i,ik)
        trho=paw%rhocae(i,ik)
-       call PZxc( trho, tmp, tmp2 )
+       call PZxc( trho, tmp, tmp2, tmp3 )
        exc=exc+tmp*trho*paw%rab(i,ik)*pp%rad(i,ik)**2*pi4
        vxc(i)=tmp+trho*tmp2
     end do
