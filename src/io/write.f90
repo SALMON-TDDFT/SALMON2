@@ -825,6 +825,7 @@ contains
          write(uid,10) "E_ion", "Electron-ion energy"
          write(uid,10) "E_xc", "Exchange-correlation energy"
          write(uid,10) "E_ion_ion", "Ion-ion energy"
+         write(uid,10) "E_c", "Correlation energy"
        end if
        if(yn_md=='y') then
        write(uid,10) "Tion", "Kinetic energy of ions"
@@ -856,8 +857,9 @@ contains
          & icolumn+2, "E_h", trim(t_unit_energy%name), &
          & icolumn+3, "E_ion", trim(t_unit_energy%name), &
          & icolumn+4, "E_xc", trim(t_unit_energy%name), &
-         & icolumn+5, "E_ion_ion", trim(t_unit_energy%name)
-         icolumn = icolumn + 5
+         & icolumn+5, "E_ion_ion", trim(t_unit_energy%name), &
+         & icolumn+6, "E_c", trim(t_unit_energy%name)
+         icolumn = icolumn + 6
        end if
 
        if(yn_md=='y') then
@@ -892,7 +894,8 @@ contains
          & energy%E_h * t_unit_energy%conv, &
          & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
          & energy%E_xc * t_unit_energy%conv, &
-         & energy%E_ion_ion * t_unit_energy%conv
+         & energy%E_ion_ion * t_unit_energy%conv, &
+         & energy%E_c * t_unit_energy%conv
        end if
        if(yn_md=='y') then
          write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -924,7 +927,8 @@ contains
             & energy%E_h * t_unit_energy%conv, &
             & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
             & energy%E_xc * t_unit_energy%conv, &
-            & energy%E_ion_ion * t_unit_energy%conv
+            & energy%E_ion_ion * t_unit_energy%conv, &
+            & energy%E_c * t_unit_energy%conv
           end if
           if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
