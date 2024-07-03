@@ -20,30 +20,32 @@ module builtin_pz
 contains
   
   
-  subroutine exc_cor_pz(nl, rho_s, exc, eexc, vexc, eec)
+  subroutine exc_cor_pz(nl, rho_s, exc, eexc, vexc, eec, vec)
     implicit none
     integer, intent(in) :: nl
     real(8), intent(in) :: rho_s(nl)
-    real(8), intent(out) :: exc(nl), eexc(nl), vexc(nl), eec(nl)
+    real(8), intent(out) :: exc(nl), eexc(nl), vexc(nl), eec(nl), vec(nl)
     integer :: i
-    real(8) :: trho, e_xc, de_xc_drho, e_c
+    real(8) :: trho, e_xc, de_xc_drho, de_c_drho, e_c, v_c
 
     ! call rho_j_tau(gs_rt, rho_s, tau_s, j_s, grho_s, lrho_s)
     ! rho_s=rho*0.5d0
     ! if(flag_nlcc)rho_s = rho_s + 0.5d0*rho_nlcc
     
 #ifdef USE_OPENACC
-!$acc kernels loop private(i,trho,e_xc,de_xc_drho,e_c)
+!$acc kernels loop private(i,trho,e_xc,de_xc_drho,de_c_drho,e_c)
 #else
-!$omp parallel do private(i,trho,e_xc,de_xc_drho,e_c)
+!$omp parallel do private(i,trho,e_xc,de_xc_drho,de_c_drho,e_c)
 #endif
     do i=1,NL
       trho=2*rho_s(i)
-      call PZxc(trho,e_xc,de_xc_drho,e_c)
+      call PZxc(trho,e_xc,de_xc_drho,de_c_drho,e_c)
       exc(i)=e_xc
       Eexc(i)=e_xc*trho
       Vexc(i)=e_xc+trho*de_xc_drho
       eec(i)=e_c*trho
+      vec(i)=e_c+trho*de_c_drho
+      vec(i)=vec(i)*trho
     enddo
 #ifdef USE_OPENACC
 !$acc end kernels
@@ -53,7 +55,7 @@ contains
 
 
 
-  Subroutine PZxc(trho,exc,dexc_drho,ec)
+  Subroutine PZxc(trho,exc,dexc_drho,dec_drho,ec)
     !$acc routine seq
     implicit none
     real(8),parameter :: Pi=3.141592653589793d0
@@ -65,6 +67,7 @@ contains
     real(8),intent(in) :: trho
     real(8),intent(out) :: exc
     real(8),intent(out) :: dexc_drho
+    real(8),intent(out) :: dec_drho
     real(8),intent(out) :: ec
 
 
@@ -77,11 +80,13 @@ contains
       exc=exc+gammaU/(1d0+beta1U*rssq+beta2U*rs)
       dexc_drho=dexc_drho+gammaU*(0.5d0*beta1U*rssq+beta2U*rs)/(3*ttrho)/(1+beta1U*rssq+beta2U*rs)**2
       ec=gammaU/(1d0+beta1U*rssq+beta2U*rs)
+      dec_drho=gammaU*(0.5d0*beta1U*rssq+beta2U*rs)/(3*ttrho)/(1+beta1U*rssq+beta2U*rs)**2
     else
       rsln=log(rs)
       exc=exc+AU*rsln+BU+CU*rs*rsln+DU*rs
       dexc_drho=dexc_drho-rs/(3*ttrho)*(AU/rs+CU*(rsln+1)+DU)
       ec=AU*rsln+BU+CU*rs*rsln+DU*rs
+      dec_drho=-rs/(3*ttrho)*(AU/rs+CU*(rsln+1)+DU)
     endif
     return
   End Subroutine PZxc

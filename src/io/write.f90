@@ -826,6 +826,7 @@ contains
          write(uid,10) "E_xc", "Exchange-correlation energy"
          write(uid,10) "E_ion_ion", "Ion-ion energy"
          write(uid,10) "E_c", "Correlation energy"
+         write(uid,10) "V_c", "Correlation potential"
        end if
        if(yn_md=='y') then
        write(uid,10) "Tion", "Kinetic energy of ions"
@@ -858,8 +859,9 @@ contains
          & icolumn+3, "E_ion", trim(t_unit_energy%name), &
          & icolumn+4, "E_xc", trim(t_unit_energy%name), &
          & icolumn+5, "E_ion_ion", trim(t_unit_energy%name), &
-         & icolumn+6, "E_c", trim(t_unit_energy%name)
-         icolumn = icolumn + 6
+         & icolumn+6, "E_c", trim(t_unit_energy%name), &
+         & icolumn+7, "V_c", trim(t_unit_energy%name)
+         icolumn = icolumn + 7
        end if
 
        if(yn_md=='y') then
@@ -895,7 +897,8 @@ contains
          & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
          & energy%E_xc * t_unit_energy%conv, &
          & energy%E_ion_ion * t_unit_energy%conv, &
-         & energy%E_c * t_unit_energy%conv
+         & energy%E_c * t_unit_energy%conv, &
+         & energy%V_c * t_unit_energy%conv
        end if
        if(yn_md=='y') then
          write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -928,7 +931,8 @@ contains
             & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
             & energy%E_xc * t_unit_energy%conv, &
             & energy%E_ion_ion * t_unit_energy%conv, &
-            & energy%E_c * t_unit_energy%conv
+            & energy%E_c * t_unit_energy%conv, &
+            & energy%V_c * t_unit_energy%conv
           end if
           if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -2049,6 +2053,7 @@ contains
       implicit none
       real(8) :: E_xc
       real(8) :: E_c
+      real(8) :: V_c
       type(s_scalar) :: rho,Vh
       type(s_scalar),allocatable :: rho_s(:),Vxc(:)
       
@@ -2067,7 +2072,7 @@ contains
       end do
       call hartree(lg,mg,rt%info_proj,rt%system_proj,fg,poisson,srg_scalar,stencil,rho,Vh)
       call exchange_correlation(rt%system_proj,xc_func,mg,srg_scalar,rt%srg_proj,rho_s &
-      & ,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc,E_c)
+      & ,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc,E_c,V_c)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
       
       call deallocate_scalar(rho)
