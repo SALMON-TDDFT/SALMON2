@@ -20,15 +20,18 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE init_lattice(system,stencil)
+  SUBROUTINE init_lattice(system,stencil)
+  use salmon_global, only: quiet
   use math_constants,only : pi
   use structures
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
   implicit none
   type(s_dft_system) :: system
   type(s_stencil)    :: stencil
   !
   real(8),dimension(3,3) :: A,B,F,wrk
-  real(8) :: a1(3),a2(3),a3(3),detA,normA(3),f_uu,f_vv,f_ww,f_uv,f_uw,f_vw
+  real(8) :: a1(3),a2(3),a3(3),detA,normA(3),f_uu,f_vv,f_ww,f_uv,f_uw,f_vw,vol
 
 ! al = [ a1, a2, a3 ]
   A = system%primitive_a ! primitive lattice vectors
@@ -37,6 +40,13 @@ SUBROUTINE init_lattice(system,stencil)
   a3 = A(1:3,3)
   call calc_inverse(A,wrk,detA)
   system%det_a = detA
+  if(comm_is_root(nproc_id_global))then
+     if (.not. quiet) then
+        vol = ( a1(2)*a2(3)-a1(3)*a2(2) ) * a3(1) + ( a2(3)*a1(1)-a1(3)*a2(1) ) * a3(2) + ( a1(1)*a2(2)-a1(2)*a2(1) ) * a3(3)
+        vol = abs(vol)
+        write(*,*) 'Cell volume [a.u.]', vol
+     end if
+   endif
   system%Hvol = detA/dble(system%ngrid)
   system%primitive_b = 2d0*pi* transpose(wrk) ! reciprocal primitive lattice vectors
   ! [ b1 b2 b3 ]^{T} = 2*pi* [ a1 a2 a3 ]^{-1}
