@@ -130,6 +130,7 @@ module salmon_global
 !! &kgrid
   integer        :: num_kgrid(3)
   character(256) :: file_kw
+  real(8)        :: dk_shift(3)
 
 !! &tgrid
   integer        :: nt

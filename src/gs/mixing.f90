@@ -83,6 +83,81 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   return
   
 end subroutine simple_mixing
+!===================================================================================================================================
+subroutine simple_mixing_potential(mg,system,c1,c2,Vh,Vxc,mixing)
+  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing  
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
+  real(8),intent(in) :: c1,c2
+  type(s_scalar),intent(inout) :: Vh,Vxc(system%nspin)
+  type(s_mixing),intent(inout) :: mixing
+  
+  integer :: ix,iy,iz
+  
+
+  if(system%nspin == 1)then
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      mixing%Vh_out(mixing%num_rho_stock)%f(ix,iy,iz)=Vh%f(ix,iy,iz)
+      mixing%Vxc_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=Vxc(1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      Vh%f(ix,iy,iz) = c1*mixing%Vh_in(mixing%num_rho_stock)%f(ix,iy,iz) &
+                      +c2*mixing%Vh_out(mixing%num_rho_stock)%f(ix,iy,iz)
+      Vxc(1)%f(ix,iy,iz)= &
+          c1*mixing%Vxc_in(mixing%num_rho_stock,1)%f(ix,iy,iz) &
+         +c2*mixing%Vxc_out(mixing%num_rho_stock,1)%f(ix,iy,iz)
+
+      mixing%Vh_in(mixing%num_rho_stock)%f(ix,iy,iz)=Vh%f(ix,iy,iz)
+      mixing%Vxc_in(mixing%num_rho_stock,1)%f(ix,iy,iz)=Vxc(1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+
+  else if(system%nspin == 2)then  
+
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      mixing%Vh_out(mixing%num_rho_stock)%f(ix,iy,iz)=Vh%f(ix,iy,iz)
+      mixing%Vxc_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=Vxc(1)%f(ix,iy,iz)
+      mixing%Vxc_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=Vxc(2)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      Vh%f(ix,iy,iz) = c1*mixing%Vh_in(mixing%num_rho_stock)%f(ix,iy,iz) &
+                      +c2*mixing%Vh_out(mixing%num_rho_stock)%f(ix,iy,iz)
+      Vxc(1)%f(ix,iy,iz)= &
+          c1*mixing%Vxc_in(mixing%num_rho_stock,1)%f(ix,iy,iz) &
+         +c2*mixing%Vxc_out(mixing%num_rho_stock,1)%f(ix,iy,iz)
+      Vxc(2)%f(ix,iy,iz)= &
+          c1*mixing%Vxc_in(mixing%num_rho_stock,2)%f(ix,iy,iz) &
+         +c2*mixing%Vxc_out(mixing%num_rho_stock,2)%f(ix,iy,iz)
+
+      mixing%Vh_in(mixing%num_rho_stock)%f(ix,iy,iz)=Vh%f(ix,iy,iz)
+      mixing%Vxc_in(mixing%num_rho_stock,1)%f(ix,iy,iz)=Vxc(1)%f(ix,iy,iz)
+      mixing%Vxc_in(mixing%num_rho_stock,2)%f(ix,iy,iz)=Vxc(2)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+
+  end if
+end subroutine simple_mixing_potential
 
 !===================================================================================================================================
 
@@ -443,6 +518,26 @@ subroutine init_mixing(nspin,mg,mixing)
       end do
     end do
   end if
+
+! allocate arrays for potential mixing
+  allocate(mixing%Vh_in(1:mixing%num_rho_stock+1))
+  allocate(mixing%Vh_out(1:mixing%num_rho_stock+1))
+  allocate(mixing%Vxc_in(1:mixing%num_rho_stock+1,nspin))
+  allocate(mixing%Vxc_out(1:mixing%num_rho_stock+1,nspin))
+
+  do i=1,mixing%num_rho_stock+1
+    allocate(mixing%Vh_in(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(mixing%Vh_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    mixing%Vh_in(i)%f(:,:,:)=0d0
+    mixing%Vh_out(i)%f(:,:,:)=0d0
+    do j = 1,nspin
+      allocate(mixing%Vxc_in(i,j)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(mixing%Vxc_out(i,j)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      mixing%Vxc_in(i,j)%f(:,:,:)=0d0
+      mixing%Vxc_out(i,j)%f(:,:,:)=0d0
+    end do
+  end do
+
 
   mixing%flag_mix_zero=.false.
 

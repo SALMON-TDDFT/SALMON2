@@ -443,6 +443,7 @@ module structures
     logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
+    type(s_scalar),allocatable :: Vh_in(:), Vh_out(:), Vxc_in(:,:), Vxc_out(:,:)
     real(8) :: mixrate, alpha_mb, beta_p
     real(8) :: convergence_value_prev
   end type s_mixing
