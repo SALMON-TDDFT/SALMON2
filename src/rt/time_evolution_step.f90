@@ -199,7 +199,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc,energy%E_c,energy%V_c)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,&
+         & info,spsi_out,stencil,Vxc,energy%E_xc,energy%E_c,energy%V_c)
     call timer_end(LOG_CALC_EXC_COR)
     
   end if
