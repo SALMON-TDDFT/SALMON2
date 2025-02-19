@@ -410,6 +410,7 @@ contains
     use structures
     use communication, only: comm_summation
     use pseudo_pt_current_so, only: calc_spin_current_nonlocal
+    use stencil_sub, only: calc_gradient_psi
     implicit none
     type(s_dft_system)   ,intent(in) :: system
     type(s_rgrid)        ,intent(in) :: mg
