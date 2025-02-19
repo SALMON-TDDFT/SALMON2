@@ -420,6 +420,7 @@ contains
     subroutine calc_tau
       use sendrecv_grid, only: update_overlap_complex8
       use math_constants,only : zi
+      use stencil_sub, only: calc_gradient_psi
       implicit none
       integer :: im,ik,io,ispin
       real(8) :: k(3),occ
