@@ -23,6 +23,7 @@ module salmon_pp
     use salmon_global, only: iperiodic,nelem
     use input_pp_sub, only: input_pp
     use structures
+    use nvtx
     implicit none
     type(s_dft_system) :: system
     type(s_pp_info)    :: pp
@@ -30,7 +31,8 @@ module salmon_pp
     integer :: nrmax
     integer,parameter :: Lmax=8
     logical :: flag_nlcc = .false.
-
+    call nvtxStartRange('read_pslfile', __LINE__)
+    
     if(iperiodic==0)then
       nrmax=20000
     else if(iperiodic==3)then
@@ -42,6 +44,7 @@ module salmon_pp
 
     system%mass(1:nelem) = pp%rmass(1:nelem)
 
+    call nvtxEndRange
   end subroutine read_pslfile
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -363,6 +366,7 @@ module salmon_pp
   subroutine calc_nlcc(pp, sys, rg, ppn)
     use salmon_global,only : kion,iperiodic
     use structures, only : s_dft_system, s_pp_info, s_pp_nlcc, s_rgrid
+    use nvtx
     implicit none
     
     type(s_dft_system), intent(in) :: sys
@@ -379,7 +383,8 @@ module salmon_pp
     logical :: flag_cuboid
     real(8) :: rho_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
     real(8) :: tau_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
-
+    call nvtxStartRange('calc_nlcc', __LINE__)
+    
     if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
  
     ! Allocate
@@ -408,8 +413,11 @@ module salmon_pp
       stop "Sorry, not implemented (calc_nlcc@prep_pp.f90)"
     endif
     
-    if (.not. pp%flag_nlcc) return ! Do nothing
-  
+    if (.not. pp%flag_nlcc) then
+      call nvtxEndRange
+      return ! Do nothing
+    end if
+
     flag_cuboid = .true.
     if( abs(sys%primitive_a(1,2)).ge.1d-10 .or.  &
         abs(sys%primitive_a(1,3)).ge.1d-10 .or.  &
@@ -485,6 +493,7 @@ module salmon_pp
     ppn%rho_nlcc = rho_nlcc_tmp
     ppn%tau_nlcc = tau_nlcc_tmp
 
+    call nvtxEndRange
     return
   end subroutine calc_nlcc
   

@@ -15,7 +15,7 @@
 !
 module communication
   use mpi, only: MPI_COMM_NULL,MPI_PROC_NULL
-
+  use nvtx
   implicit none
 
   integer, public, parameter :: COMM_GROUP_NULL = MPI_COMM_NULL
@@ -774,17 +774,25 @@ contains
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
     if(nprocs == 1) then
+      call nvtxStartRange('comm_summation_dcomplex', __LINE__)
 !$acc kernels
       outvalue = invalue
 !$acc end kernels
+      call nvtxEndRange
       return
     endif
 #endif
+    call nvtxStartRange('comm_summation_dcomplex', __LINE__)
     if (present(dest)) then
+      call nvtxStartRange('MPI_Reduce', 0)
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
+      call nvtxEndRange
     else
+      call nvtxStartRange('MPI_Allreduce', 0)
       MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
+      call nvtxEndRange
     end if
+    call nvtxEndRange
   end subroutine
 
   subroutine comm_summation_array1d_integer(invalue, outvalue, N, ngroup, dest)
@@ -849,17 +857,25 @@ contains
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
     if(nprocs == 1) then
+      call nvtxStartRange('comm_summation_array1d_dcomplex', __LINE__)
 !$acc kernels
       outvalue = invalue
 !$acc end kernels
+      call nvtxEndRange
       return
     endif
 #endif
+    call nvtxStartRange('comm_summation_array1d_dcomplex', __LINE__)
     if (present(dest)) then
+      call nvtxStartRange('MPI_Reduce', 0)
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
+      call nvtxEndRange
     else
+      call nvtxStartRange('MPI_Allreduce', 0)
       MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
+      call nvtxEndRange
     end if
+    call nvtxEndRange
   end subroutine
 
   subroutine comm_summation_array2d_integer(invalue, outvalue, N, ngroup, dest)
@@ -924,17 +940,25 @@ contains
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
     if(nprocs == 1) then
+      call nvtxStartRange('comm_summation_array2d_dcomplex', __LINE__)
 !$acc kernels
       outvalue = invalue
 !$acc end kernels
+      call nvtxEndRange
       return
     endif
 #endif
+    call nvtxStartRange('comm_summation_array2d_dcomplex', __LINE__)
     if (present(dest)) then
+      call nvtxStartRange('MPI_Reduce', 0)
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
+      call nvtxEndRange
     else
+      call nvtxStartRange('MPI_Allreduce', 0)
       MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
+      call nvtxEndRange
     end if
+    call nvtxEndRange
   end subroutine
 
   subroutine comm_summation_array3d_integer(invalue, outvalue, N, ngroup, dest)
@@ -964,17 +988,25 @@ contains
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
     if(nprocs == 1) then
+      call nvtxStartRange('comm_summation_array3d_double', __LINE__)
 !$acc kernels
       outvalue = invalue
 !$acc end kernels
+      call nvtxEndRange
       return
     endif
 #endif
+    call nvtxStartRange('comm_summation_array3d_double', __LINE__)
     if (present(dest)) then
+      call nvtxStartRange('MPI_Reduce', 0)
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
+      call nvtxEndRange
     else
+      call nvtxStartRange('MPI_Alldeduce', 0)
       MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
+      call nvtxEndRange
     end if
+    call nvtxEndRange
   end subroutine
 
   subroutine comm_summation_array3d_dcomplex(invalue, outvalue, N, ngroup, dest)
@@ -989,17 +1021,25 @@ contains
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
     if(nprocs == 1) then
+      call nvtxStartRange('comm_summation_array3d_dcomplex', __LINE__)
 !$acc kernels
       outvalue = invalue
 !$acc end kernels
+      call nvtxEndRange
       return
     endif
 #endif
+    call nvtxStartRange('comm_summation_array3d_dcomplex', __LINE__)
     if (present(dest)) then
+      call nvtxStartRange('MPI_Reduce', 0)
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
+      call nvtxEndRange
     else
+      call nvtxStartRange('MPI_Allreduce', 0)
       MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
+      call nvtxEndRange
     end if
+    call nvtxEndRange
   end subroutine
 
   subroutine comm_summation_array4d_double(invalue, outvalue, N, ngroup, dest)

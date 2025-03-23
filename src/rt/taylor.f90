@@ -24,6 +24,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   use structures
   use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
+  use nvtx
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
@@ -38,6 +39,8 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   type(s_rt),     intent(in) :: rt
   integer :: nn,ix,iy,iz
   integer :: ik,io,is,nspin
+  call nvtxStartRange('taylor', __LINE__)
+
   nspin = system%nspin
 
   do nn=1,n_hamil
@@ -46,7 +49,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
       if (nn==1) then
 #ifdef USE_OPENACC
 !$acc kernels
-!$acc loop collapse(6) private(ik,io,is,iz,iy,ix) gang vector
+!$acc loop collapse(6) private(ik,io,is,iz,iy,ix)
 #else
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
 #endif
@@ -69,7 +72,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
 #endif
       else
 #ifdef USE_OPENACC
-!$acc parallel loop collapse(5) private(ik,io,is,iz,iy,ix)
+!$acc parallel loop collapse(6) private(ik,io,is,iz,iy,ix)
 #else
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
 #endif
@@ -94,7 +97,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
     else
       call hpsi(sshtpsi,tspsi_in,info,mg,V_local,system,stencil,srg,ppg)
 #ifdef USE_OPENACC
-!$acc parallel loop collapse(5) private(ik,io,is,iz,iy,ix)
+!$acc parallel loop collapse(6) private(ik,io,is,iz,iy,ix)
 #else
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
 #endif
@@ -118,6 +121,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
     end if
   end do
 
+  call nvtxEndRange
 end subroutine taylor
 
 end module taylor_sub

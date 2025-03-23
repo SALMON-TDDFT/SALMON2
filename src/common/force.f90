@@ -495,7 +495,7 @@ contains
 
          F_tmp_l = 0d0
 #ifdef USE_OPENACC
-!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) copyin(ewald, pp)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #endif

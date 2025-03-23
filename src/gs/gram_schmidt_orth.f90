@@ -24,12 +24,14 @@ contains
     use gram_schmidt_so_sub, only: gram_schmidt_so
     use salmon_global, only: yn_spinorbit, yn_gramschmidt_blas
     use timer
+    use nvtx
     implicit none
     type(s_dft_system),   intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
     type(s_parallel_info),intent(in)    :: wfi
     type(s_orbital),      intent(inout) :: wf
-
+    call nvtxStartRange('gram_schmidt', __LINE__)
+    
     if ( yn_spinorbit=='y' ) then
       call gram_schmidt_so(sys, rg, wfi, wf)
       return
@@ -52,7 +54,7 @@ contains
     end if
 
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
-
+    call nvtxEndRange
     return
   end subroutine
 

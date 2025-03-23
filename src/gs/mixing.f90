@@ -177,6 +177,10 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
   real(8) :: vecr_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),mixing%num_rho_stock+1)
   real(8) :: vecr_out(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),mixing%num_rho_stock+1)
 
+#ifdef USE_OPENACC
+!$acc data copyin(mixing)
+#endif
+
   if(system%nspin==1)then
 
 #ifdef USE_OPENACC
@@ -292,6 +296,10 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
     end do
 
   end if
+
+#ifdef USE_OPENACC
+!$acc end data
+#endif
 
 end subroutine wrapper_broyden
 
@@ -557,6 +565,10 @@ subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
   integer :: is
   integer :: ix,iy,iz
 
+#ifdef USE_OPENACC
+!$acc data copyin(mixing)
+#endif
+
   if(Miter==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
@@ -634,6 +646,10 @@ subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
       end do
     end do
   end if
+
+#ifdef USE_OPENACC
+!$acc end data
+#endif
 
 end subroutine copy_density
 

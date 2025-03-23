@@ -51,6 +51,21 @@ module salmon_xc
   integer, parameter :: salmon_xctype_libxc = 101
 #endif
 
+  ! workspace used in exchange_correlation
+  real(8),allocatable :: rho_tmp(:,:,:)
+  real(8),allocatable :: rho_s_tmp(:,:,:,:)
+  real(8),allocatable :: eexc_tmp(:,:,:)
+  real(8),allocatable :: vxc_tmp(:,:,:)
+  real(8),allocatable :: vxc_s_tmp(:,:,:,:)
+
+  ! workspace used in exec_builtin_pz
+  real(8),allocatable :: rho_s_1d(:)
+  real(8),allocatable :: rho_s_sp_1d(:,:)
+  real(8),allocatable :: exc_1d(:)
+  real(8),allocatable :: eexc_1d(:)
+  real(8),allocatable :: vexc_1d(:)
+  real(8),allocatable :: vexc_sp_1d(:,:)
+
 contains
 
 
@@ -62,6 +77,7 @@ contains
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
     use salmon_global, only: yn_spinorbit
     use noncollinear_module, only: rot_vxc_noncollinear
+    use nvtx
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
@@ -78,21 +94,32 @@ contains
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
-    real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
-    real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
-    real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
-    real(8) :: vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
-    real(8) :: vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
+    ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
+    ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
+    ! real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    ! real(8) :: vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    ! real(8) :: vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:), grho(:,:,:,:), lrho(:,:,:), j(:,:,:,:), tau(:,:,:)
     real(8),allocatable :: rdedd_tmp(:,:,:,:),rdedd(:,:,:),drdedd_tmp(:,:,:,:),drdedd(:,:,:)
     real(8),allocatable :: delr_s(:,:,:,:,:),j_s(:,:,:,:,:),tau_s(:,:,:,:)
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
-
+    
+    call nvtxStartRange('exchange_correlation', __LINE__)
+    
     nspin = system%nspin
+
+    if (nspin==1) then
+      if (.not.allocated(rho_tmp)) allocate(rho_tmp(mg%num(1), mg%num(2), mg%num(3)))
+      if (.not.allocated(vxc_tmp)) allocate(vxc_tmp(mg%num(1), mg%num(2), mg%num(3)))
+    else if(nspin==2)then
+      if (.not.allocated(rho_s_tmp)) allocate(rho_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
+      if (.not.allocated(vxc_s_tmp)) allocate(vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
+    endif
+    if (.not.allocated(eexc_tmp)) allocate(eexc_tmp(mg%num(1), mg%num(2), mg%num(3)))
 
     if(nspin==1)then
 #ifdef USE_OPENACC
-!$acc kernels loop collapse(2) private(iz,iy,ix)
+!$acc kernels loop collapse(3) private(iz,iy,ix)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
@@ -111,7 +138,7 @@ contains
     else if(nspin==2)then
 #ifdef USE_OPENACC
 !$acc kernels
-!$acc loop collapse(3) private(is,iz,iy,ix)
+!$acc loop collapse(4) private(is,iz,iy,ix)
 #else
 !$omp parallel private(is,iz,iy,ix)
 #endif
@@ -138,11 +165,13 @@ contains
     end if
 
     if(xc_func%use_gradient) then ! meta GGA
-       allocate (rhd (mg%is_array(1):mg%ie_array(1), &
-                      mg%is_array(2):mg%ie_array(2), &
-                      mg%is_array(3):mg%ie_array(3)))
-       allocate (grho(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
-               & lrho(mg%num(1), mg%num(2), mg%num(3)) )
+
+      allocate (rhd (mg%is_array(1):mg%ie_array(1), &
+                     mg%is_array(2):mg%ie_array(2), &
+                     mg%is_array(3):mg%ie_array(3)))
+      allocate (grho(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
+              & lrho(mg%num(1), mg%num(2), mg%num(3)) )
+
        allocate (rdedd(mg%is_array(1):mg%ie_array(1), &
                          mg%is_array(2):mg%ie_array(2), &
                          mg%is_array(3):mg%ie_array(3)))
@@ -332,7 +361,7 @@ contains
 
     if(nspin==1)then
 #ifdef USE_OPENACC
-!$acc kernels loop collapse(2) private(iz,iy,ix)
+!$acc kernels loop collapse(3) private(iz,iy,ix)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
@@ -356,7 +385,7 @@ contains
     else if(nspin==2)then
 #ifdef USE_OPENACC
 !$acc kernels
-!$acc loop collapse(3) private(is,iz,iy,ix)
+!$acc loop collapse(4) private(is,iz,iy,ix)
 #else
 !$omp parallel private(is,iz,iy,ix)
 #endif
@@ -389,7 +418,7 @@ contains
 
     tot_exc=0.d0
 #ifdef USE_OPENACC
-!$acc kernels loop collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
+!$acc kernels loop collapse(3) reduction(+:tot_exc) private(iz,iy,ix)
 #else
 !$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
 #endif
@@ -413,6 +442,7 @@ contains
       call rot_vxc_noncollinear( Vxc, system, mg )
     end if
 
+    call nvtxEndRange
     return
     
   contains
@@ -837,6 +867,7 @@ contains
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     use structures, only: s_pp_info
+    use nvtx
     implicit none
     type(s_xc_functional), intent(in) :: xc
     type(s_pp_info),       intent(in) :: pp
@@ -879,6 +910,7 @@ contains
     !===============================================================
 
     integer :: nx, ny, nz, nl
+    call nvtxStartRange('calc_xc', __LINE__)
 
     ! Detect size of 3-dimensional grid
     if (xc%ispin == 0) then
@@ -895,12 +927,45 @@ contains
 !    print *, nx,ny,nz,xc%ispin
 
     ! Initialize output variables
+#ifdef USE_OPENACC
+    if (present(exc)) then
+!$acc kernels
+      exc = 0d0
+!$acc end kernels
+    end if
+    if (present(eexc)) then
+!$acc kernels
+      eexc = 0d0
+!$acc end kernels
+    end if
+    if (present(vxc)) then
+!$acc kernels
+      vxc = 0d0
+!$acc end kernels
+    end if
+    if (present(vxc_s)) then
+!$acc kernels
+      vxc_s = 0d0
+!$acc end kernels
+    end if
+    if (present(rdedd)) then
+!$acc kernels
+      rdedd = 0.d0
+!$acc end kernels
+    end if
+    if (present(rdedd_s)) then
+!$acc kernels
+      rdedd_s = 0.d0
+!$acc end kernels
+    end if
+#else
     if (present(exc)) exc = 0d0
     if (present(eexc)) eexc = 0d0
     if (present(vxc)) vxc = 0d0
     if (present(vxc_s)) vxc_s = 0d0
     if (present(rdedd)) rdedd = 0.d0
     if (present(rdedd_s)) rdedd_s = 0.d0
+#endif
 
     ! Exchange-Correlation
     select case (xc%xctype(1))
@@ -946,35 +1011,79 @@ contains
 #endif
     end select
 
+    call nvtxEndRange
     return
 
   contains
 
+    subroutine exec_builtin_calc_ax(y, alpha, x, n)
+      implicit none
+      integer                :: n
+      real(8), intent(inout) :: y(n)
+      real(8)                :: alpha
+      real(8), intent(in)    :: x(n)
+!$acc kernels
+      y(:) = alpha * x(:)
+!$acc end kernels
+    end subroutine exec_builtin_calc_ax
 
+    subroutine exec_builtin_calc_axpy(y, alpha, x, n)
+      implicit none
+      integer                :: n
+      real(8), intent(inout) :: y(n)
+      real(8)                :: alpha
+      real(8), intent(in)    :: x(n)
+!$acc kernels
+      y(:) = alpha * x(:) + y(:)
+!$acc end kernels
+    end subroutine exec_builtin_calc_axpy
 
     subroutine exec_builtin_pz()
+      use nvtx
       implicit none
-      real(8) :: rho_s_1d(nl)
-      real(8) :: rho_s_sp_1d(nl,2)
-      real(8) :: exc_1d(nl)
-      real(8) :: eexc_1d(nl)
-      real(8) :: vexc_1d(nl)
-      real(8) :: vexc_sp_1d(nl,2)
+      call nvtxStartRange('exec_builtin_pz', __LINE__)
 
+      if (xc%ispin == 0) then
+        if (.not.allocated(rho_s_1d)) allocate(rho_s_1d(nl))
+        if (.not.allocated(vexc_1d)) allocate(vexc_1d(nl))
+      else
+        if (.not.allocated(rho_s_sp_1d)) allocate(rho_s_sp_1d(nl,2))
+        if (.not.allocated(vexc_sp_1d)) allocate(vexc_sp_1d(nl,2))
+      endif
+      if (.not.allocated(exc_1d)) allocate(exc_1d(nl))
+      if (.not.allocated(eexc_1d)) allocate(eexc_1d(nl))
+
+#ifdef USE_OPENACC
+      if (xc%ispin == 0) then
+        call exec_builtin_calc_ax(rho_s_1d, 0.5d0, rho, nl)
+      else if (xc%ispin == 1) then
+        call exec_builtin_calc_ax(rho_s_sp_1d, 1.0d0, rho_s, nl*2)
+      end if
+#else
       if (xc%ispin == 0) then
         rho_s_1d = reshape(rho, (/nl/)) * 0.5
       else if (xc%ispin == 1) then
         rho_s_sp_1d = reshape(rho_s, (/nl,2/))
       end if
+#endif
 
 #ifndef SALMON_DEBUG_NEGLECT_NLCC
       if (present(rho_nlcc)) then
+#ifdef USE_OPENACC
+        if ( xc%ispin == 0 ) then
+          call exec_builtin_calc_axpy(rho_s_1d, 0.5d0, rho_nlcc, nl)
+        else if ( xc%ispin == 1 ) then
+          call exec_builtin_calc_axpy(rho_s_sp_1d(:,1), 0.5d0, rho_nlcc, nl)
+          call exec_builtin_calc_axpy(rho_s_sp_1d(:,2), 0.5d0, rho_nlcc, nl)
+        end if
+#else
         if ( xc%ispin == 0 ) then
           rho_s_1d = rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
         else if ( xc%ispin == 1 ) then
           rho_s_sp_1d(:,1) = rho_s_sp_1d(:,1) + reshape(rho_nlcc, (/nl/)) * 0.5
           rho_s_sp_1d(:,2) = rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
         end if
+#endif
       endif
 #endif
 
@@ -986,33 +1095,52 @@ contains
 
       if (xc%ispin == 0) then
         if (present(vxc)) then
-           vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
+#ifdef USE_OPENACC
+          call exec_builtin_calc_axpy(vxc, 1.0d0, vexc_1d, nl)
+#else
+          vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
+#endif
         endif
       else if(xc%ispin == 1) then
         if (present(vxc_s)) then
-           vxc_s = vxc_s + reshape(vexc_sp_1d, (/nx, ny, nz,2/))
+#ifdef USE_OPENACC
+          call exec_builtin_calc_axpy(vxc_s, 1.0d0, vexc_sp_1d, nl*2)
+#else
+          vxc_s = vxc_s + reshape(vexc_sp_1d, (/nx, ny, nz,2/))
+#endif
         endif
       end if
 
       if (present(exc)) then
-         exc = exc + reshape(exc_1d, (/nx, ny, nz/))
+#ifdef USE_OPENACC
+        call exec_builtin_calc_axpy(exc, 1.0d0, exc_1d, nl)
+#else
+        exc = exc + reshape(exc_1d, (/nx, ny, nz/))
+#endif
       endif
 
       if (present(eexc)) then
+#ifdef USE_OPENACC
+        call exec_builtin_calc_axpy(eexc, 1.0d0, eexc_1d, nl)
+#else
          eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
+#endif
       endif
 
+      call nvtxEndRange
       return
     end subroutine exec_builtin_pz
 
 
 
     subroutine exec_builtin_pzm()
+      use nvtx
       implicit none
       real(8) :: rho_s_1d(nl)
       real(8) :: exc_1d(nl)
       real(8) :: eexc_1d(nl)
       real(8) :: vexc_1d(nl)
+      call nvtxStartRange('exec_builtin_pzm', __LINE__)
 
       rho_s_1d = reshape(rho, (/nl/)) * 0.5
 
@@ -1036,6 +1164,7 @@ contains
          eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
       endif
 
+      call nvtxEndRange
       return
     end subroutine exec_builtin_pzm
     
@@ -1096,6 +1225,7 @@ contains
     
 
     subroutine exec_builtin_tbmbj()
+      use nvtx
       implicit none
       real(8) :: rho_1d(nl)
       real(8) :: rho_s_1d(nl)
@@ -1105,6 +1235,7 @@ contains
       real(8) :: j_s_1d(nl, 3)
       real(8) :: eexc_1d(nl)
       real(8) :: vexc_1d(nl)
+      call nvtxStartRange('exec_builtin_tbmbj', __LINE__)
 
       rho_1d = reshape(rho, (/nl/))
       rho_s_1d = rho_1d * 0.5
@@ -1135,6 +1266,7 @@ contains
         eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
       endif
 
+      call nvtxEndRange
       return
     end subroutine exec_builtin_tbmbj
 
@@ -1145,6 +1277,7 @@ contains
 #if XC_MAJOR_VERSION >= 5
       use, intrinsic :: iso_c_binding
 #endif
+      use nvtx
       implicit none
       integer, intent(in) :: ii
       integer :: ix,iy,iz,idir
@@ -1161,6 +1294,7 @@ contains
       integer(c_size_t) :: np
 #endif
 
+      call nvtxStartRange('exec_libxc', __LINE__)
 
       rho_1d = reshape(rho, (/nl/))
       if (present(rho_nlcc)) then
@@ -1233,7 +1367,9 @@ contains
         enddo
         deallocate(gvxc_tmp)
       endif
-
+      
+      call nvtxEndRange
+      
       return
     end subroutine exec_libxc
 #endif

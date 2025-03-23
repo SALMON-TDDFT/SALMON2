@@ -16,7 +16,7 @@
 !=======================================================================
 !===================================================================================================================================
 module initialization_rt_sub
-
+  use nvtx
   implicit none
 
 contains
@@ -101,7 +101,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
   logical :: rion_update
-  
+
+  call nvtxStartRange('initialization_rt', __LINE__)
+
   call timer_begin(LOG_INIT_RT)
 
   call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
@@ -190,7 +192,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_READ_RT_DATA)
   
   call timer_begin(LOG_READ_GS_DATA)
-  
+  call nvtxStartRange('READ_GS_DATA', __LINE__)
   
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
@@ -304,6 +306,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,pp,ppn,fg,poisson,srg_scalar,rt,energy,ofl)
   end if
   
+  call nvtxEndRange
   call timer_end(LOG_READ_GS_DATA)
 
 
@@ -518,12 +521,15 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   call timer_end(LOG_INIT_RT)
 
+  call nvtxEndRange
+
 contains
 
 subroutine init_code_optimization
   implicit none
   integer :: ignum(3)
-
+  call nvtxStartRange('init_code_optimization', __LINE__)
+  
   call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
 
@@ -537,6 +543,7 @@ subroutine init_code_optimization
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      call optimization_log(info)
   end if
+  call nvtxEndRange
 end subroutine init_code_optimization
 
 end subroutine initialization_rt

@@ -30,8 +30,8 @@ use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pu
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
+use nvtx
 use parallelization, only: nproc_id_global
-
 implicit none
 
 type(s_rgrid) :: lg
@@ -83,10 +83,21 @@ call fapp_start('time_evol',1,0) ! performance profiling
 
 call print_header()
 
+#ifdef USE_OPENACC
+!$acc enter data copyin(rt, rt%zc)
+!$acc enter data copyin(mg, mg%is, mg%ie)
+!$acc enter data copyin(poisson)
+!$acc enter data copyin(fg)
+!$acc enter data copyin(lg)
+!$acc enter data copyin(Vh, Vxc, Vpsl)
+!$acc enter data copyin(ewald, pp, ppg)
+#endif
+
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,nt
+  call nvtxStartRange('main loop', itt)
 
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
@@ -98,14 +109,15 @@ TE : do itt=Mit+1,nt
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
 
-
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
   is_checkpoint = is_checkpoint_iter .or. is_shutdown_time
+  call nvtxStartRange('comm_bcast', __LINE__)
   call comm_bcast(is_checkpoint,nproc_group_global)
+  call nvtxEndRange
 
-
+  call nvtxEndRange
   if(is_checkpoint) then
     if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
       print *, 'shutdown the calculation, iter =', itt

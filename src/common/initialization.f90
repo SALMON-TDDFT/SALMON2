@@ -33,6 +33,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   use init_poisson_sub
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
+  use nvtx
   implicit none
   integer      ,intent(in) :: comm
   type(s_parallel_info)    :: info
@@ -45,6 +46,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   type(s_ofile)            :: ofile
   !
   integer,dimension(2,3) :: neig
+  call nvtxStartRange('init_dft', __LINE__)
 
 ! electron system
   call init_dft_system(lg,system,stencil)
@@ -91,6 +93,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
 
   call init_dir_out_restart(ofile)
 
+  call nvtxEndRange
 end subroutine init_dft
 
 !===================================================================================================================================

@@ -2,7 +2,8 @@ module sym_rho_sub
 
   use sym_sub, only: SymMatA, SymMatB, use_symmetry
   use communication
-
+  use nvtx
+  
   implicit none
 
   private
@@ -182,11 +183,14 @@ write(*,*) "sym_rho(1)"
     real(8) :: t1,t2,t3,r1,r2,r3,d1,d2,d3,fac
     real(8),allocatable :: work(:,:,:),wtmp(:,:,:)
     if ( .not.use_symmetry ) return
+    call nvtxStartRange('sym_rho', __LINE__)
 !
     allocate( work(0:num(1)-1,0:num(2)-1,0:num(3)-1) ); work=0.0d0
     allocate( wtmp(0:num(1)-1,0:num(2)-1,0:num(3)-1) ); wtmp=0.0d0
     wtmp(is(1):ie(1),is(2):ie(2),is(3):ie(3))=rho(:,:,:)
+    call nvtxStartRange('comm_summation', __LINE__)
     call comm_summation( wtmp, work, size(work), icomm_r )
+    call nvtxEndRange
     rho=0.0d0
 !
     is1=is(1)-1
@@ -227,6 +231,7 @@ write(*,*) "sym_rho(1)"
     end do
 !$omp end parallel do
     deallocate( work )
+    call nvtxEndRange
   end subroutine sym_rho
 #endif
 

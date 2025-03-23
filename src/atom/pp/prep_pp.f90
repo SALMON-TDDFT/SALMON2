@@ -28,6 +28,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use prep_pp_so_sub, only: calc_uv_so
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
+  use nvtx
   implicit none
   type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
@@ -45,6 +46,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   real(8) :: Rion_min(3), Rion_max(3), rps_max
   integer :: nc(3), ixyz, n
 
+  call nvtxStartRange('init_ps', __LINE__)
   call timer_begin(LOG_INIT_PS_TOTAL)
 
   if(allocated(ppg%save_udVtbl_a)) then
@@ -186,6 +188,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   if(comm_is_root(nproc_id_global) .and. property=='initial' .and. (.not. quiet)) write(*,*)'end init_ps'
 
   call timer_end(LOG_INIT_PS_TOTAL)
+  call nvtxEndRange
   return
   
 contains
@@ -1076,7 +1079,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
 #ifdef USE_OPENACC
-!$acc parallel loop private(ia,ilma)
+!$acc parallel loop private(ia,ilma) copyin(ppg)
 #else
 !$omp parallel do private(ia,ilma)
 #endif
