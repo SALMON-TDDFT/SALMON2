@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module em_field
+  use nvtx
   implicit none
 
 contains
@@ -34,6 +35,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   integer :: j
   real(8) :: n1,n2
   integer,parameter :: m=100
+  call nvtxStartRange('calc_emfield', __LINE__)
   
 ! electric field
   rt%E_ext(:,itt) = -( rt%Ac_ext(:,itt) - rt%Ac_ext(:,itt-1) )/dt
@@ -67,6 +69,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   end if
   rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
 
+  call nvtxEndRange
 end subroutine calc_emfields
 
 !===================================================================================================================================

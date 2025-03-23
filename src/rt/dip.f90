@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module dip
+  use nvtx
   implicit none
 
 contains
@@ -43,6 +44,7 @@ subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
   real(8) :: rbox_array2(4)
   real(8) :: rbox1
   real(8) :: time, Hvol,Hgs(3)
+  call nvtxStartRange('subdip', __LINE__)
   
   rbox1 = 0d0 !what's it? (no value causes crush)
   
@@ -108,7 +110,7 @@ subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
      end if
   end if
 
-
+  call nvtxEndRange
 end subroutine subdip
 
 subroutine calc_dip(comm,lg,mg,system,rho_s,rbox_array2)
@@ -123,9 +125,44 @@ subroutine calc_dip(comm,lg,mg,system,rho_s,rbox_array2)
   integer :: is,ix,iy,iz
   real(8) :: rbox_array(4),rbox_array2(4)
   real(8) :: rbox
+#ifdef USE_OPENACC
+  real(8) :: diff_ix, diff_iy, diff_iz, rbox1, rbox2, rbox3, rbox4
+#endif
+  call nvtxStartRange('calc_dip', __LINE__)
 
   rbox_array=0d0
-  
+
+#ifdef USE_OPENACC
+  diff_ix = 0.0d0
+  diff_iy = 0.0d0
+  diff_iz = 0.0d0
+  if (mod(lg%num(1),2) == 0) diff_ix = 0.5d0
+  if (mod(lg%num(2),2) == 0) diff_iy = 0.5d0
+  if (mod(lg%num(3),2) == 0) diff_iz = 0.5d0
+  rbox1 = 0.0d0
+  rbox2 = 0.0d0
+  rbox3 = 0.0d0
+  rbox4 = 0.0d0
+!$acc kernels
+!$acc loop collapse(4)
+  do is=1,system%nspin
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    rbox1 = rbox1 + (dble(ix)-diff_ix) * rho_s(is)%f(ix,iy,iz)
+    rbox2 = rbox2 + (dble(iy)-diff_iy) * rho_s(is)%f(ix,iy,iz)
+    rbox3 = rbox3 + (dble(iz)-diff_iz) * rho_s(is)%f(ix,iy,iz)
+    rbox4 = rbox4 +                      rho_s(is)%f(ix,iy,iz)
+  end do
+  end do
+  end do
+  end do
+!$acc end kernels
+  rbox_array(1)=rbox1
+  rbox_array(2)=rbox2
+  rbox_array(3)=rbox3
+  rbox_array(4)=rbox4
+#else
   rbox=0.d0
   select case(mod(lg%num(1),2))
   case(1)
@@ -219,9 +256,11 @@ subroutine calc_dip(comm,lg,mg,system,rho_s,rbox_array2)
   end do
   end do
   rbox_array(4)=rbox
+#endif
 
   call comm_summation(rbox_array,rbox_array2,4,comm)
 
+  call nvtxEndRange
 end subroutine calc_dip
 
 end module dip

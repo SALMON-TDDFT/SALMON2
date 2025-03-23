@@ -35,11 +35,13 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
   real(8),   intent(in)  :: lapt(12), nabt(12)
 
   complex(8), parameter :: zI=(0.d0,1.d0)
+  complex(8), parameter :: z0=(0.d0,0.d0)
 
   integer    :: ix,iy,iz,io,ispin
   complex(8) :: v,w
   !complex(8) :: t(8)
   complex(8) :: t_0,t_1
+  integer    :: i
 
 #ifdef __INTEL_COMPILER
 #if defined(__KNC__) || defined(__AVX512F__)
@@ -58,88 +60,70 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
 #define DX(dt) idx(ix+(dt)),iy,iz
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
-!$acc parallel copyin(V_local, tpsi, htpsi)
+!$acc kernels copyin(V_local, tpsi) copy(htpsi)
 !$acc loop collapse(5)
   do io=io_s,io_e
   do ispin=1,Nspin
-
   do iz=igs(3),ige(3)
   do iy=igs(2),ige(2)
-
 ! !dir$ assume_aligned V_local(is(1),iy,iz):MEM_ALIGN
 ! !dir$ assume_aligned tpsi(is_array(1),iy,iz)   :MEM_ALIGN
 ! !dir$ assume_aligned htpsi(is_array(1),iy,iz)  :MEM_ALIGN
-
   do ix=igs(1),ige(1)
-    t_0 = tpsi(DX( 1), ispin, io)
-    t_1 = tpsi(DX(-1), ispin, io)
-    v=lapt(1)*(t_0+t_1)
-    w=nabt(1)*(t_0-t_1)
-
-    t_0 = tpsi(DX( 2), ispin, io)
-    t_1 = tpsi(DX(-2), ispin, io)
-    v=lapt(2)*(t_0+t_1) + v
-    w=nabt(2)*(t_0-t_1) + w
-
-    t_0 = tpsi(DX( 3), ispin, io)
-    t_1 = tpsi(DX(-3), ispin, io)
-    v=lapt(3)*(t_0+t_1) + v
-    w=nabt(3)*(t_0-t_1) + w
-
-    t_0 = tpsi(DX( 4), ispin, io)
-    t_1 = tpsi(DX(-4), ispin, io)
-    v=lapt(4)*(t_0+t_1) + v
-    w=nabt(4)*(t_0-t_1) + w
-
-    t_0 = tpsi(DY( 1), ispin, io)
-    t_1 = tpsi(DY(-1), ispin, io)
-    v=lapt(5)*(t_0+t_1) + v
-    w=nabt(5)*(t_0-t_1) + w
-
-    t_0 = tpsi(DY( 2), ispin, io)
-    t_1 = tpsi(DY(-2), ispin, io)
-    v=lapt(6)*(t_0+t_1) + v
-    w=nabt(6)*(t_0-t_1) + w
-    
-    t_0 = tpsi(DY( 3), ispin, io)
-    t_1 = tpsi(DY(-3), ispin, io)
-    v=lapt(7)*(t_0+t_1) + v
-    w=nabt(7)*(t_0-t_1) + w
-
-    t_0 = tpsi(DY( 4), ispin, io)
-    t_1 = tpsi(DY(-4), ispin, io)
-    v=lapt(8)*(t_0+t_1) + v
-    w=nabt(8)*(t_0-t_1) + w
-
-    t_0 = tpsi(DZ( 1), ispin, io)
-    t_1 = tpsi(DZ(-1), ispin, io)
-    v=lapt( 9)*(t_0+t_1) + v
-    w=nabt( 9)*(t_0-t_1) + w
-
-    t_0 = tpsi(DZ( 2), ispin, io)
-    t_1 = tpsi(DZ(-2), ispin, io)
-    v=lapt(10)*(t_0+t_1) + v
-    w=nabt(10)*(t_0-t_1) + w
-
-    t_0 = tpsi(DZ( 3), ispin, io)
-    t_1 = tpsi(DZ(-3), ispin, io)
-    v=lapt(11)*(t_0+t_1) + v
-    w=nabt(11)*(t_0-t_1) + w
-
-    t_0 = tpsi(DZ( 4), ispin, io)
-    t_1 = tpsi(DZ(-4), ispin, io)
-    v=lapt(12)*(t_0+t_1) + v
-    w=nabt(12)*(t_0-t_1) + w
-
+    v = z0
+    w = z0
+    !$acc loop seq
+    do i = 1,4
+      t_0 = tpsi(DX( i), ispin, io)
+      t_1 = tpsi(DX(-i), ispin, io)
+      v=lapt(i)*(t_0+t_1) + v
+      w=nabt(i)*(t_0-t_1) + w
+    end do
+#ifdef USE_OPENACC
     htpsi(ix,iy,iz,ispin,io) = V_local(ispin)%f(ix,iy,iz)*tpsi(ix,iy,iz,ispin,io) &
                     + lap0*tpsi(ix,iy,iz,ispin,io) &
                     - 0.5d0 * v - zI * w
   end do
-
+  end do
+  end do
   end do
   end do
 
+!$acc loop collapse(5)
+  do io=io_s,io_e
+  do ispin=1,Nspin
+  do iz=igs(3),ige(3)
+  do iy=igs(2),ige(2)
+  do ix=igs(1),ige(1)
+    v = z0
+    w = z0
+#endif
+    !$acc loop seq
+    do i = 1,4
+      t_0 = tpsi(DY( i), ispin, io)
+      t_1 = tpsi(DY(-i), ispin, io)
+      v=lapt(i+4)*(t_0+t_1) + v
+      w=nabt(i+4)*(t_0-t_1) + w
+    end do
+    !$acc loop seq
+    do i = 1,4
+      t_0 = tpsi(DZ( i), ispin, io)
+      t_1 = tpsi(DZ(-i), ispin, io)
+      v=lapt(i+8)*(t_0+t_1) + v
+      w=nabt(i+8)*(t_0-t_1) + w
+    end do
+#ifdef USE_OPENACC
+    htpsi(ix,iy,iz,ispin,io) = htpsi(ix,iy,iz,ispin,io) &
+                    - 0.5d0 * v - zI * w
+#else
+    htpsi(ix,iy,iz,ispin,io) = V_local(ispin)%f(ix,iy,iz)*tpsi(ix,iy,iz,ispin,io) &
+                    + lap0*tpsi(ix,iy,iz,ispin,io) &
+                    - 0.5d0 * v - zI * w
+#endif
   end do
   end do
-!$acc end parallel
+  end do
+  end do
+  end do
+!$acc end kernels
 end subroutine

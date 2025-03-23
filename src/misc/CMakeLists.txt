@@ -3,6 +3,7 @@ set(SOURCES
     misc_routines.f90
     backup_routines.f90
     unusedvar.f90
+    nvtx.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

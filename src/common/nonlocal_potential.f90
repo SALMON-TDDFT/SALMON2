@@ -302,17 +302,15 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         tpsi%zwf)
 #else
 !$acc kernels present(ppg,tpsi,htpsi)
-!$acc loop private(ilocal,ilma,ia,uvpsi,vi,my_nlma,k,j,ix,iy,iz,wrk) collapse(4) gang
+!$acc loop collapse(5) independent gang private(ilocal,ilma,ia,uvpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-
-!$acc loop gang independent
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = 0.d0
-!$acc loop vector reduction(+:uVpsi)
+!$acc loop vector(32) reduction(+:uVpsi)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -321,8 +319,17 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         end do
         ppg%uVpsibox(ilma,ispin,io,ik,im) = uVpsi * ppg%rinv_uvu(ilma)
       end do
-
-!$acc loop gang vector independent
+#ifdef USE_OPENACC
+    end do
+    end do
+    end do
+    end do
+!$acc loop collapse(5) independent private(ilocal,ilma,ia,uvpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+#endif
       do vi=0,ppg%max_vi-1
         my_nlma = ppg%v2nlma(vi)
         if (my_nlma < 1) cycle
@@ -340,7 +347,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         iz = ppg%v2j(3,vi)
         htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
       end do
-
     end do
     end do
     end do

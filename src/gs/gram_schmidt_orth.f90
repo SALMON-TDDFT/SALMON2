@@ -15,6 +15,7 @@
 !
 !=======================================================================
 module gram_schmidt_orth
+  use nvtx
   implicit none
 
 contains
@@ -29,7 +30,8 @@ contains
     type(s_rgrid),        intent(in)    :: rg
     type(s_parallel_info),intent(in)    :: wfi
     type(s_orbital),      intent(inout) :: wf
-
+    call nvtxStartRange('gram_schmidt', __LINE__)
+    
     if ( yn_spinorbit=='y' ) then
       call gram_schmidt_so(sys, rg, wfi, wf)
       return
@@ -52,7 +54,7 @@ contains
     end if
 
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
-
+    call nvtxEndRange
     return
   end subroutine
 

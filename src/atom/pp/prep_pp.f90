@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module prep_pp_sub
+  use nvtx
   implicit none
 
 contains
@@ -45,6 +46,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   real(8) :: Rion_min(3), Rion_max(3), rps_max
   integer :: nc(3), ixyz, n
 
+  call nvtxStartRange('init_ps', __LINE__)
   call timer_begin(LOG_INIT_PS_TOTAL)
 
   if(allocated(ppg%save_udVtbl_a)) then
@@ -186,6 +188,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   if(comm_is_root(nproc_id_global) .and. property=='initial' .and. (.not. quiet)) write(*,*)'end init_ps'
 
   call timer_end(LOG_INIT_PS_TOTAL)
+  call nvtxEndRange
   return
   
 contains
@@ -1076,7 +1079,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
 #ifdef USE_OPENACC
-!$acc parallel loop private(ia,ilma)
+!$acc parallel loop private(ia,ilma) copyin(ppg)
 #else
 !$omp parallel do private(ia,ilma)
 #endif

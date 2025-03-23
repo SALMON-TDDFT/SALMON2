@@ -18,6 +18,7 @@
 #include "config.h"
 
 module checkpoint_restart_sub
+  use nvtx
   implicit none
 
   integer,parameter,private :: write_mode = 1
@@ -288,7 +289,8 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
 
   character(256) :: gdir,wdir
   logical :: iself
-
+  call nvtxStartRange('restart_rt', __LINE__)
+  
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'
@@ -303,6 +305,7 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
   end if
   
+  call nvtxEndRange
 end subroutine restart_rt
 
 !===================================================================================================================================
@@ -421,6 +424,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   character(256) :: dir_file_in
   integer :: comm,itt,nprocs
   logical :: iself,if_real_orbital
+  call nvtxStartRange('read_bin', __LINE__)
 
   flag_GS = (theory=='dft'.or.theory=='dft_md'.or.theory=='dft_band'.or.calc_mode=='GS')
   flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
@@ -531,6 +535,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
     end if
   end if
 
+  call nvtxEndRange
 end subroutine read_bin
 
 
@@ -742,7 +747,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
 
     do i=1,mixing%num_rho_stock+1
 #ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy,ix)
+!$acc parallel loop private(iz,iy,ix) copyin(mixing)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
@@ -761,7 +766,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
 
     do i=1,mixing%num_rho_stock
 #ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy,ix)
+!$acc parallel loop private(iz,iy,ix) copyin(mixing)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
@@ -1973,6 +1978,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   integer,parameter :: iunit = 333
   integer :: ierr,comm,i1,i2
   character(256) :: tdir,filename
+  call nvtxStartRange('read_rtdata', __LINE__)
   
   comm = info%icomm_rko
   
@@ -1990,6 +1996,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
     call comm_bcast(rt%Ac_ind,comm)
   end if
 
+  call nvtxEndRange
 end subroutine read_rtdata
 
 !===================================================================================================================================

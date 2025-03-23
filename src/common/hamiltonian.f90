@@ -17,6 +17,7 @@
 #include "config.h"
 
 module hamiltonian
+  use nvtx
   implicit none
   integer,private,parameter :: Nd = 4
 
@@ -377,7 +378,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         !$omp end parallel do
       else
 #ifdef USE_OPENACC
-        !$acc kernels loop private(im,ik,io,ispin,iz,iy,ix) collapse(6) independent
+        !$acc kernels loop private(im,ik,io,ispin,iz,iy,ix) collapse(7) independent
 #else
         !$omp parallel do collapse(6) default(none) &
         !$omp          private(im,ik,io,ispin,iz,iy,ix) &
@@ -809,10 +810,11 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   type(s_scalar)            :: Vlocal(nspin)
   !
   integer :: is,ix,iy,iz
+  call nvtxStartRange('update_vlocal', __LINE__)
 
   do is=1,nspin
 #ifdef USE_OPENACC
-!$acc parallel loop collapse(2) private(ix,iy,iz)
+!$acc parallel loop collapse(3) private(ix,iy,iz) copyin(vpsl, vh, vxc)
 #else
 !$omp parallel do collapse(2) private(ix,iy,iz)
 #endif
@@ -828,6 +830,7 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
 #endif
   end do
 
+  call nvtxEndRange
   return
 end subroutine update_vlocal
 
@@ -864,14 +867,15 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
 
 #ifdef USE_OPENACC
-!$acc kernels
-!$acc loop collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
+!$acc kernels copyin(ppg)
+!$acc loop collapse(2) gang private(ik,ilma,iatom,j,x,y,z,ekr)
 #else
 !$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
 #endif
   do ik=ik_s,ik_e
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
+!$acc loop vector(128)
       do j=1,ppg%mps(iatom)
         x = ppg%rxyz(1,j,iatom)
         y = ppg%rxyz(2,j,iatom)

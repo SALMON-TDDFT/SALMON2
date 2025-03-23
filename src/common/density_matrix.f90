@@ -18,6 +18,7 @@
 #include "config.h"
 
 module density_matrix
+  use nvtx
   implicit none
   integer,private,parameter :: Nd = 4
 
@@ -42,10 +43,7 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
-#ifdef USE_OPENACC
-    integer :: tid_offset
-#endif
-
+    call nvtxStartRange('calc_density', __LINE__)
     call timer_begin(LOG_DENSITY_CALC)
     
     if(yn_spinorbit=='y') then
@@ -76,32 +74,18 @@ contains
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
 #ifdef USE_OPENACC
-        wrk(:,:,:,tid) = 0.d0
-        tid_offset = size(wrk,4)/2
-
 !$acc kernels copyin(is,ie)
-!$acc loop collapse(2) gang worker(256) private(wrk2,ik,io,iz,iy,ix)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
+        wrk(:,:,:,tid) = 0.d0
+
+!$acc loop collapse(3) gang vector private(wrk2,ik,io,iz,iy,ix)
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
           wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
           wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
         end do
-        end do
-        end do
-        end do
-        end do
-!$acc loop collapse(3) private(tid_offset,iz,iy,ix)
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-        do while(tid_offset > 0)
-          if(tid < tid_offset .and. tid + tid_offset < nthreads) then
-            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
-          end if
-          tid_offset = tid_offset/2
         end do
         end do
         end do
@@ -154,32 +138,18 @@ contains
         call timer_begin(LOG_DENSITY_CALC)
         tid = 0
 #ifdef USE_OPENACC
-        wrk(:,:,:,tid) = 0.d0
-        tid_offset = size(wrk,4)/2
-
 !$acc kernels copyin(is,ie)
-!$acc loop collapse(2) gang worker(256) private(wrk2,ik,io,iz,iy,ix)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
+        wrk(:,:,:,tid) = 0.d0
+
+!$acc loop collapse(3) gang vector private(wrk2,ik,io,iz,iy,ix)
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
           wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
           wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
         end do
-        end do
-        end do
-        end do
-        end do
-!$acc loop collapse(3) private(tid_offset,iz,iy,ix)
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-        do while(tid_offset > 0)
-          if(tid < tid_offset .and. tid + tid_offset < nthreads) then
-            wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk(ix,iy,iz,tid + tid_offset)
-          end if
-          tid_offset = tid_offset/2
         end do
         end do
         end do
@@ -232,6 +202,7 @@ contains
     end if
 
     deallocate(wrk)
+    call nvtxEndRange
     return
   end subroutine calc_density
 
@@ -301,7 +272,7 @@ contains
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
     real(8) :: jx,jy,jz
-
+    call nvtxStartRange('calc_current', __LINE__)
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
@@ -340,10 +311,12 @@ contains
       call stencil_current_core_gpu(info%ik_s,info%ik_e,info%io_s,info%io_e,system%vec_k,system%vec_Ac &
                                    ,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx(1:),mg%idy(1:),mg%idz(1:) &
                                    ,stencil%coef_nab,ispin,im,nspin,psi%zwf,BT,system%rocc,system%wtk,jx,jy,jz)
+!$acc enter data copyin(jx,jy,jz)
 #else
+!$acc enter data copyin(jx,jy,jz)
 !$acc update device(system%vec_Ac)
 
-!$acc kernels copyin(BT,ispin,im) copy(jx,jy,jz)
+!$acc kernels copyin(BT,ispin,im)
 !$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -362,7 +335,7 @@ contains
 !$acc end kernels
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
-!$acc kernels copyin(ispin,im) copy(jx,jy,jz)
+!$acc kernels copyin(ispin,im)
 !$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -374,6 +347,7 @@ contains
       end do
       end do
 !$acc end kernels
+!$acc exit data copyout(jx,jy,jz)
       wrk4(1) = jx
       wrk4(2) = jy
       wrk4(3) = jz
@@ -434,12 +408,13 @@ contains
 
     if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
+    call nvtxEndRange
     return
 
   end subroutine calc_current
 
   subroutine stencil_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,psi,j1,j2)
-    !$acc routine worker
+    !$acc routine vector
     integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3) &
                             ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
     real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
@@ -454,7 +429,7 @@ contains
     ytmp = 0d0
     ztmp = 0d0
 #ifdef USE_OPENACC
-!$acc loop vector collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
+!$acc loop vector collapse(3) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
 #endif
@@ -464,28 +439,34 @@ contains
 !OCL swp
     do ix=is(1),ie(1)
       rtmp = rtmp + abs(psi(ix,iy,iz))**2
+#ifndef USE_OPENACC
     end do
 
 !OCL swp
     do ix=is(1),ie(1)
+#endif
       cpsi = conjg(psi(ix,iy,iz))
       xtmp = xtmp + nabt(1,1) * cpsi * psi(idx(ix+1),iy,iz) &
                   + nabt(2,1) * cpsi * psi(idx(ix+2),iy,iz) &
                   + nabt(3,1) * cpsi * psi(idx(ix+3),iy,iz) &
                   + nabt(4,1) * cpsi * psi(idx(ix+4),iy,iz)
+#ifndef USE_OPENACC
     end do
 
 !OCL swp
     do ix=is(1),ie(1)
+#endif
       cpsi = conjg(psi(ix,iy,iz))
       ytmp = ytmp + nabt(1,2) * cpsi * psi(ix,idy(iy+1),iz) &
                   + nabt(2,2) * cpsi * psi(ix,idy(iy+2),iz) &
                   + nabt(3,2) * cpsi * psi(ix,idy(iy+3),iz) &
                   + nabt(4,2) * cpsi * psi(ix,idy(iy+4),iz)
+#ifndef USE_OPENACC
     end do
 
 !OCL swp
     do ix=is(1),ie(1)
+#endif
       cpsi = conjg(psi(ix,iy,iz))
       ztmp = ztmp + nabt(1,3) * cpsi * psi(ix,iy,idz(iz+1)) &
                   + nabt(2,3) * cpsi * psi(ix,iy,idz(iz+2)) &
@@ -498,7 +479,10 @@ contains
 #ifndef USE_OPENACC
 !$omp end parallel do
 #endif
-    j1 = kAc(:) * rtmp
+    ! j1 = kAc(:) * rtmp
+    j1(1) = kAc(1) * rtmp
+    j1(2) = kAc(2) * rtmp
+    j1(3) = kAc(3) * rtmp
     j2(1) = aimag(xtmp * 2d0)
     j2(2) = aimag(ytmp * 2d0)
     j2(3) = aimag(ztmp * 2d0)
@@ -506,7 +490,7 @@ contains
   end subroutine stencil_current
 
   subroutine calc_current_nonlocal(jw,psi,ppg,is_array,ie_array,ik)
-    !$acc routine worker
+    !$acc routine vector
     use structures
     implicit none
     integer   ,intent(in) :: is_array(3),ie_array(3),ik
@@ -518,13 +502,13 @@ contains
     integer    :: ilma,ia,j,ix,iy,iz
     real(8)    :: x,y,z
     complex(8) :: uVpsi,uVpsi_r(3)
-    jw = 0d0
 #ifdef USE_OPENACC
-  jw_1 = 0d0
-  jw_2 = 0d0
-  jw_3 = 0d0
-!$acc loop worker private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw_1, jw_2, jw_3)
+    jw_1 = 0d0
+    jw_2 = 0d0
+    jw_3 = 0d0
+!$acc loop vector private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw_1, jw_2, jw_3)
 #else
+    jw = 0d0
 !$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
 #endif
     do ilma=1,ppg%Nlma
@@ -556,13 +540,13 @@ contains
 #endif
     end do
 #ifdef USE_OPENACC
-  jw(1) = jw_1
-  jw(2) = jw_2
-  jw(3) = jw_3
+    jw(1) = jw_1 * 2d0
+    jw(2) = jw_2 * 2d0
+    jw(3) = jw_3 * 2d0
 #else
 !$omp end parallel do
-#endif
     jw = jw * 2d0
+#endif
     return
   end subroutine calc_current_nonlocal
 

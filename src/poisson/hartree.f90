@@ -16,6 +16,7 @@
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
 module hartree_sub
+  use nvtx
   implicit none
 
 contains
@@ -46,7 +47,8 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   type(s_stencil)        ,intent(in)    :: stencil
   type(s_scalar)         ,intent(in)    :: rho
   type(s_scalar)         ,intent(inout) :: Vh
-
+  call nvtxStartRange('hartree', __LINE__)
+  
   select case(iperiodic)
   case(0)
     select case(method_poisson)
@@ -89,6 +91,8 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
 
   !potentiall wall at the boundary on z direction
   if(yn_put_wall_z_boundary=='y') call add_potential_wall
+
+  call nvtxEndRange
 
   contains
 
