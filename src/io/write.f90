@@ -25,7 +25,7 @@ contains
   !! export SYSNAME_k.data file
   subroutine write_k_data(system,stencil)
     use structures
-    use salmon_global, only: sysname,yn_periodic
+    use salmon_global, only: base_directory,sysname,yn_periodic
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -42,7 +42,7 @@ contains
     end if
 
     NK = system%nk
-    file_k_data = trim(sysname)//'_k.data'
+    file_k_data = trim(base_directory)//trim(sysname)//'_k.data'
 
     if (comm_is_root(nproc_id_global)) then
       fh_k = open_filehandle(file_k_data, status="replace")
@@ -105,7 +105,7 @@ contains
     use sendrecv_grid
     use salmon_global, only: yn_out_tm,yn_out_gs_sgm_eps, &
                        out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
-                       sysname, de,nenergy,nelec,xc
+                       base_directory,sysname, de,nenergy,nelec,xc
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
@@ -370,7 +370,7 @@ contains
        deallocate(u_rVnl_Vnlr_u_all_l)
 
 
-       file_tm_data = trim(sysname)//'_tm.data'
+       file_tm_data = trim(base_directory)//trim(sysname)//'_tm.data'
 
        if (comm_is_root(nproc_id_global)) then
           write(*,*) "  printing transition moment ....."
@@ -485,13 +485,13 @@ contains
 
 
        if (comm_is_root(nproc_id_global)) then
-          filename = trim(sysname) // '_sigma.data'
+          filename = trim(base_directory)//trim(sysname) // '_sigma.data'
           open(fh_s, file=filename, status='replace')
           write(fh_s,'(3a)') "#1:omega[a.u.], 2:Re(sigma)[a.u.], 3:Im(sigma)[a.u.]", &
                             & ", 4:Re(sigma_intra)[a.u.], 5:Im(sigma_intra)[a.u.]", &
                             & ", 6:Re(sigma_inter)[a.u.], 7:Im(sigma_inter)[a.u.]"
                             
-          filename = trim(sysname) // '_epsilon.data'
+          filename = trim(base_directory)//trim(sysname) // '_epsilon.data'
           open(fh_e, file=filename, status='replace')
           write(fh_e,'(3a)') "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
                             & ", 4:Re(epsilon_intra), 5:Im(epsilon_intra)", &
@@ -552,32 +552,37 @@ contains
 
   !===================================================================================================================================
 
-  subroutine write_xyz(comment,action,rvf,system)
+  subroutine write_xyz(comment,action,rvf,system,ofl)
   ! Write xyz in xyz format but also velocity and force are printed if necessary
   ! (these can be used for restart of opt and md)
-    use structures, only: s_dft_system
+    use structures, only: s_dft_system,s_ofile
     use inputoutput, only: au_length_aa
-    use salmon_global, only: SYSname,atom_name
+    use salmon_global, only: base_directory,SYSname,atom_name,base_directory
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
+    use filesystem, only: open_filehandle
     implicit none
 
     type(s_dft_system),intent(in) :: system
 
-    integer :: ia,unit_xyz=200
+    integer :: ia,unit_xyz
     character(3) :: action,rvf
     character(1024) :: file_trj
     character(*) :: comment
+    type(s_ofile) :: ofl
 
     if(.not. comm_is_root(nproc_id_global)) return
 
     if(action=='new') then
-
-       file_trj=trim(SYSname)//'_trj.xyz'
+        
+       file_trj=trim(base_directory)//trim(SYSname)//'_trj.xyz'
+       unit_xyz = open_filehandle(file_trj)
+       ofl%fh_trj = unit_xyz
        open(unit_xyz,file=trim(file_trj),status="unknown")
 
     else if(action=='add') then
 
+       unit_xyz = ofl%fh_trj
        write(unit_xyz,*) system%nion
        write(unit_xyz,*) trim(comment)
        do ia=1,system%nion
@@ -591,6 +596,7 @@ contains
        enddo
 
     else if(action=='end') then
+       unit_xyz = ofl%fh_trj
        close(unit_xyz)
     endif
 
@@ -682,7 +688,8 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: open_filehandle
-    use inputoutput, only: yn_md,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    use inputoutput, only: t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    use salmon_global, only: spin,yn_md
     implicit none
     type(s_ofile) :: ofl
     integer, intent(in) :: it
@@ -703,9 +710,9 @@ contains
        write(uid,10) "E_ext", "External electric field"
        write(uid,10) "Ac_tot", "Total vector potential field"
        write(uid,10) "E_tot", "Total electric field"
-       if(system%nspin==1) then
+       if(spin=='unpolarized' .or. spin=='noncollinear') then
          write(uid,10) "Jm", "Matter current density (electrons)"
-       else if(system%nspin==2) then
+       else if(spin=='polarized') then
          write(uid,10) "Jm_u", "Matter current density for spin-up electrons"
          write(uid,10) "Jm_d", "Matter current density for spin-down electrons"
        end if
@@ -726,7 +733,7 @@ contains
          & 11, "E_tot_x", trim(t_unit_elec%name), &
          & 12, "E_tot_y", trim(t_unit_elec%name), &
          & 13, "E_tot_z", trim(t_unit_elec%name)
-       if(system%nspin==1) then
+       if(spin=='unpolarized' .or. spin=='noncollinear') then
          write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 14, "Jm_x", trim(t_unit_current%name), &
          & 15, "Jm_y", trim(t_unit_current%name), &
@@ -737,7 +744,7 @@ contains
                  & 18, "Jmi_y", trim(t_unit_current%name), &
                  & 19, "Jmi_z", trim(t_unit_current%name)
          endif
-       else if(system%nspin==2) then
+       else if(spin=='polarized') then
          write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 14, "Jm_u_x", trim(t_unit_current%name), &
          & 15, "Jm_u_y", trim(t_unit_current%name), &
@@ -763,13 +770,16 @@ contains
           & system%vec_E_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
           & system%vec_E(1:3) * t_unit_elec%conv
-       if(system%nspin==1) then
+       if(spin=='unpolarized') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_e(1:3,1) * t_unit_current%conv
-       else if(system%nspin==2) then
+       else if(spin=='polarized') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_e(1:3,1) * t_unit_current%conv, &
           & curr_e(1:3,2) * t_unit_current%conv
+       else if(spin=='noncollinear') then
+          write(uid, "(99(1X,E23.15E3))",advance='no') &
+          & (curr_e(1:3,1)+curr_e(1:3,2)) * t_unit_current%conv
        end if
        if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -787,7 +797,8 @@ contains
     use structures, only: s_ofile,s_dft_energy,s_md
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_global, only: ensemble, thermostat, out_rt_energy_step, yn_periodic, yn_jm
+    use salmon_global, only: ensemble, thermostat, out_rt_energy_step, yn_periodic, yn_jm, yn_fix_func &
+    &   ,yn_out_rt_energy_components
     use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
@@ -795,7 +806,7 @@ contains
     type(s_md) :: md
     type(s_ofile) :: ofl
     integer, intent(in) :: it
-    integer :: uid
+    integer :: uid,icolumn
     real(8) :: dt
 
     if(comm_is_root(nproc_id_global)) then
@@ -807,7 +818,14 @@ contains
 10     format("#",1X,A,":",1X,A)
        write(uid,10) "Real time calculation",""
        write(uid,10) "Eall", "Total energy"
-       write(uid,10) "Eall0", "Initial energy"
+       write(uid,10) "Eall0", "Initial total energy"
+       if(yn_out_rt_energy_components=='y') then
+         write(uid,10) "E_kin", "Kinetic energy"
+         write(uid,10) "E_h", "Hartree energy"
+         write(uid,10) "E_ion", "Electron-ion energy"
+         write(uid,10) "E_xc", "Exchange-correlation energy"
+         write(uid,10) "E_ion_ion", "Ion-ion energy"
+       end if
        if(yn_md=='y') then
        write(uid,10) "Tion", "Kinetic energy of ions"
        write(uid,10) "Temperature_ion", "Temperature of ions"
@@ -819,34 +837,46 @@ contains
        endif
        endif
 
-       if(yn_periodic=='y' .and. yn_jm=='y') then
+       if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then
          write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
           & 1, "Time", trim(t_unit_time%name), &
           & 2, "Eall-Eall0", trim(t_unit_energy%name)
+         icolumn=2
        else
          write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
           & 1, "Time", trim(t_unit_time%name), &
           & 2, "Eall", trim(t_unit_energy%name), &
           & 3, "Eall-Eall0", trim(t_unit_energy%name)
+         icolumn=3
+       end if
+
+       if(yn_out_rt_energy_components=='y') then
+         write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+         & icolumn+1, "E_kin", trim(t_unit_energy%name), &
+         & icolumn+2, "E_h", trim(t_unit_energy%name), &
+         & icolumn+3, "E_ion", trim(t_unit_energy%name), &
+         & icolumn+4, "E_xc", trim(t_unit_energy%name), &
+         & icolumn+5, "E_ion_ion", trim(t_unit_energy%name)
+         icolumn = icolumn + 5
        end if
 
        if(yn_md=='y') then
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-        & 4, "Tion", trim(t_unit_energy%name), &
-        & 5, "Temperature_ion", "K", &
-        & 6, "E_work", trim(t_unit_energy%name)
+        & icolumn+1, "Tion", trim(t_unit_energy%name), &
+        & icolumn+2, "Temperature_ion", "K", &
+        & icolumn+3, "E_work", trim(t_unit_energy%name)
        if(ensemble=="NVT".and.thermostat=="nose-hoover")then
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-        & 7, "Enh",  trim(t_unit_energy%name), &
-        & 8, "Hnvt", trim(t_unit_energy%name), &
-        & 9, "Hnvt'",trim(t_unit_energy%name)
+        & icolumn+4, "Enh",  trim(t_unit_energy%name), &
+        & icolumn+5, "Hnvt", trim(t_unit_energy%name), &
+        & icolumn+6, "Hnvt'",trim(t_unit_energy%name)
        endif
        endif
 
        write(uid,*)
        flush(uid)
        
-       if(yn_periodic=='y' .and. yn_jm=='y') then
+       if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then
          write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
              & 0d0,        &
              & 0d0
@@ -855,6 +885,14 @@ contains
              & 0d0,        &
              & energy%E_tot0 * t_unit_energy%conv, &
              & 0d0
+       end if
+       if(yn_out_rt_energy_components=='y') then
+         write(uid, "(99(1X,E23.15E3))",advance='no') &
+         & energy%E_kin * t_unit_energy%conv, &
+         & energy%E_h * t_unit_energy%conv, &
+         & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
+         & energy%E_xc * t_unit_energy%conv, &
+         & energy%E_ion_ion * t_unit_energy%conv
        end if
        if(yn_md=='y') then
          write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -870,7 +908,7 @@ contains
        if(mod(it,out_rt_energy_step)==0)then
           uid = ofl%fh_rt_energy
    
-          if(yn_periodic=='y' .and. yn_jm=='y') then
+          if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then
             write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
                & it * dt * t_unit_time%conv,        &
                & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
@@ -879,6 +917,14 @@ contains
                & it * dt * t_unit_time%conv,        &
                & energy%E_tot * t_unit_energy%conv, &
                & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
+          end if
+          if(yn_out_rt_energy_components=='y') then
+            write(uid, "(99(1X,E23.15E3))",advance='no') &
+            & energy%E_kin * t_unit_energy%conv, &
+            & energy%E_h * t_unit_energy%conv, &
+            & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
+            & energy%E_xc * t_unit_energy%conv, &
+            & energy%E_ion_ion * t_unit_energy%conv
           end if
           if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -959,8 +1005,8 @@ contains
                                              *(1-3*(t2/tt)**2+2*(t2/tt)**3)
         end do
 
-        zalpha(:)=zalpha(:)/e_impulse*dt
-        sf(:)=-2*hw/pi*aimag(zalpha(:))
+        zalpha(:)=zalpha(:)/(-e_impulse)*dt
+        sf(:)=2*hw/pi*aimag(zalpha(:))
 
         write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
              &,(real(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
@@ -1074,7 +1120,7 @@ contains
   subroutine write_dft_md_data(it,ofl,md)
     use structures, only: s_md, s_ofile
     use inputoutput, only: t_unit_time,t_unit_energy
-    use salmon_global, only: dt,nt,sysname
+    use salmon_global, only: dt,nt,base_directory,sysname
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -1084,7 +1130,7 @@ contains
     integer :: uid, it
 
     if(it==0 .and. comm_is_root(nproc_id_global)) then
-       ofl%file_dft_md = trim(sysname)//'_dft_md.data'
+       ofl%file_dft_md = trim(base_directory)//trim(sysname)//'_dft_md.data'
        ofl%fh_dft_md   = open_filehandle(ofl%file_dft_md)
        uid = ofl%fh_dft_md
        open(uid,file=trim(ofl%file_dft_md),status="unknown")
@@ -1373,7 +1419,7 @@ contains
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
-                                   yn_jm, yn_periodic
+                                   yn_jm, yn_periodic, base_directory
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1387,7 +1433,7 @@ contains
     integer :: fh,is,p1,p2,p5,iob,jj,ik,ikoa,iatom,ix
     character(100) :: file_gs_info
 
-    file_gs_info = trim(sysname)//"_info.data"
+    file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
 
     if(comm_is_root(nproc_id_global)) then
@@ -1476,7 +1522,7 @@ contains
     use structures, only: s_ofile, s_dft_system, s_dft_energy
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname
+    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname,base_directory
     use filesystem, only: open_filehandle
     implicit none
     type(s_ofile),intent(inout) :: ofl
@@ -1485,7 +1531,7 @@ contains
     integer :: iob,iik,is, uid
 
     if(comm_is_root(nproc_id_global))then
-       ofl%file_eigen_data=trim(sysname)//"_eigen.data"
+       ofl%file_eigen_data=trim(base_directory)//trim(sysname)//"_eigen.data"
        ofl%fh_eigen = open_filehandle(trim(ofl%file_eigen_data))
        uid = ofl%fh_eigen
        open(uid,file=ofl%file_eigen_data)
@@ -1522,7 +1568,7 @@ contains
     use inputoutput, only: uenergy_from_au
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
                            out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
-                           nelec,nstate,temperature,yn_spinorbit
+                           nelec,nstate,temperature,yn_spinorbit, base_directory,sysname
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1532,6 +1578,7 @@ contains
     real(8) :: fk,ww,dw
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
+    character(100) :: filename
 
     ene_min = minval(energy%esp)
     ene_max = maxval(energy%esp)
@@ -1577,7 +1624,8 @@ contains
     end do
 
     if(comm_is_root(nproc_id_global))then
-      open(101,file="dos.data")
+      filename=trim(base_directory)//trim(sysname)//"_dos.data"
+      open(101,file=filename)
       write(101,'("# Density of States")')
       select case(unit_energy)
       case('au','a.u.')
@@ -1605,7 +1653,8 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit
+                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit, &
+                                   base_directory,sysname
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
     implicit none
@@ -1732,7 +1781,7 @@ contains
       do iatom=1,natom
         ikoa=Kion(iatom)
         write(fileNumber, '(i8)') iatom
-        OutFile = "pdos"//trim(adjustl(fileNumber))//".data"
+        OutFile = trim(base_directory)//trim(sysname)//"_pdos"//trim(adjustl(fileNumber))//".data"
         open(101,file=OutFile)
         write(101,'("# Projected Density of States")')
         select case(unit_energy)
@@ -1804,6 +1853,7 @@ contains
       index_vbm=nelec
     else
       index_vbm=nelec/2
+      if(mod(nelec,2)==1) index_vbm = index_vbm + 1
     end if
     if(comm_is_root(nproc_id_global) .and. index_vbm<system%no) then
       do ik=1,system%nk
@@ -1855,13 +1905,14 @@ contains
   end subroutine write_band_information
   
 !===================================================================================================================================
-  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt)
+  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,pp,ppn,fg,poisson,srg_scalar,rt,energy,ofl)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
     use salmon_global, only: projection_option,nstate,directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: read_bin,generate_restart_directory_name
     use initialization_sub, only: init_parallel_dft
+    use sendrecv_grid, only: create_sendrecv_neig, init_sendrecv_grid
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1869,15 +1920,21 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)          ,intent(in) :: Vpsl
     type(s_xc_functional)   ,intent(in) :: xc_func
+    type(s_pp_info)         ,intent(in) :: pp
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_reciprocal_grid) ,intent(in) :: fg
     type(s_poisson)                     :: poisson
-    type(s_sendrecv_grid)               :: srg_scalar, srg
+    type(s_sendrecv_grid)               :: srg_scalar
     type(s_rt)                          :: rt
+    type(s_dft_energy)                  :: energy
+    type(s_ofile)                       :: ofl
     !
     character(256) :: wdir,gdir,dir_gs
     logical :: iself
     integer :: iter,jspin
+    integer,dimension(2,3) :: neig
+    
+    call file_header
     
     if(yn_restart=='n') then
       dir_gs = directory_read_data
@@ -1886,18 +1943,25 @@ contains
       if(comm_is_root(nproc_id_global)) write(*,*) " projection_option: read GS data from directory ./restart/"
     end if
     
-    rt%system_gs = system
-    rt%system_gs%no = nstate ! # of orbitals for GS ! future work: nstate --> nstate_proj
-    deallocate(rt%system_gs%rocc)
-    allocate(rt%system_gs%rocc(rt%system_gs%no,system%nk,system%nspin))
+    rt%system_proj = system
+    rt%system_proj%no = nstate ! # of orbitals for GS ! future work: nstate --> nstate_proj
+    deallocate(rt%system_proj%rocc)
+    allocate(rt%system_proj%rocc(rt%system_proj%no,system%nk,system%nspin)) ! this will be filled by read_bin
     
-    rt%info_gs = info
-    deallocate(rt%info_gs%io_s_all,rt%info_gs%io_e_all,rt%info_gs%numo_all,rt%info_gs%irank_io)
-    call init_parallel_dft(rt%system_gs,rt%info_gs)
+    rt%info_proj = info
+    deallocate(rt%info_proj%io_s_all,rt%info_proj%io_e_all,rt%info_proj%numo_all,rt%info_proj%irank_io)
+    call init_parallel_dft(rt%system_proj,rt%info_proj)
+    
+    call create_sendrecv_neig(neig, rt%info_proj)
+    call init_sendrecv_grid(rt%srg_proj, mg, &
+    & rt%info_proj%numo*rt%info_proj%numk*rt%system_proj%nspin, rt%info_proj%icomm_rko, neig)
 
-    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%tpsi0)
-    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%ttpsi0)
-    call allocate_orbital_complex(system%nspin,mg,rt%info_gs,rt%htpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%tpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%ttpsi0)
+    call allocate_orbital_complex(system%nspin,mg,rt%info_proj,rt%htpsi0)
+
+    deallocate(energy%esp)
+    allocate(energy%esp(rt%system_proj%no,system%nk,system%nspin))
     
   ! wavefunctions @ GS
     call generate_restart_directory_name(dir_gs,gdir,wdir)
@@ -1905,16 +1969,77 @@ contains
     if (.not. iself) then
       wdir = gdir
     end if
-    call read_bin(wdir,lg,mg,rt%system_gs,rt%info_gs,rt%tpsi0,iter,is_self_checkpoint=iself)
+    call read_bin(wdir,lg,mg,rt%system_proj,rt%info_proj,rt%tpsi0,iter,is_self_checkpoint=iself)
 
-  ! V_local @ GS
+  ! V_local
     allocate(rt%vloc0(system%nspin))
     do jspin=1,system%nspin
       call allocate_scalar(mg,rt%vloc0(jspin))
     end do
-    call calc_vloc0
+    if(projection_option=='gs') then
+      call calc_vloc0 ! V_local for GS
+    end if
     
   contains
+  
+    subroutine file_header
+      use salmon_global, only: base_directory,SYSname,yn_out_intraband_current,spin
+      use inputoutput, only: t_unit_time,t_unit_current
+      use filesystem, only: open_filehandle
+      implicit none
+      character(256) :: file_intra_current
+      if(comm_is_root(nproc_id_global)) then
+      
+      !(header in SYSname_ovlp.data)
+        write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
+        open(ofl%fh_ovlp,file=ofl%file_ovlp)
+        write(ofl%fh_ovlp, '("#",1X,A)') "Projection"
+        write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+        write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ovlp_occup", "Occupation"
+        write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "NB", "Number of bands"
+        write(ofl%fh_ovlp, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "ik", "none", &
+        & 2, "ovlp_occup(1:NB)", "none"
+        
+      !(header in SYSname_nex.data)
+        write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_nex = open_filehandle(ofl%file_nex)
+        open(ofl%fh_nex,file=ofl%file_nex)
+        write(ofl%fh_nex, '("#",1X,A)') "Excitation"
+        write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nelec", "Number of excited electrons"
+        write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nhole", "Number of excited holes"
+        write(ofl%fh_nex, '("#",99(1X,I0,":",A,"[",A,"]"))')  &
+        &           1, "time", trim(t_unit_time%name), &
+        &           2, "nelec", "none", &
+        &           3, "nhole", "none"
+        
+        if(yn_out_intraband_current=='y') then
+        !(header in SYSname_intra_current.data)
+          write(file_intra_current,"(2A,'_intra_current.data')") trim(base_directory),trim(SYSname)
+          ofl%fh_intra_current = open_filehandle(file_intra_current)
+          open(ofl%fh_intra_current,file=file_intra_current)
+          write(ofl%fh_intra_current, '("#",1X,A)') "Intra-band current density [T. Otobe, Phys. Rev. B 94, 235152 (2016).]"
+          write(ofl%fh_intra_current, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no')  &
+          &  1, "Time", trim(t_unit_time%name)
+          if(spin=='unpolarized' .or. spin=='noncollinear') then
+            write(ofl%fh_intra_current, '(99(1X,I0,":",A,"[",A,"]"))') &
+            & 2, "Jm_intra_x", trim(t_unit_current%name), &
+            & 3, "Jm_intra_y", trim(t_unit_current%name), &
+            & 4, "Jm_intra_z", trim(t_unit_current%name)
+          else if(spin=='polarized') then
+            write(ofl%fh_intra_current, '(99(1X,I0,":",A,"[",A,"]"))') &
+            & 2, "Jm_intra_u_x", trim(t_unit_current%name), &
+            & 3, "Jm_intra_u_y", trim(t_unit_current%name), &
+            & 4, "Jm_intra_u_z", trim(t_unit_current%name), &
+            & 5, "Jm_intra_d_x", trim(t_unit_current%name), &
+            & 6, "Jm_intra_d_y", trim(t_unit_current%name), &
+            & 7, "Jm_intra_d_z", trim(t_unit_current%name)
+          end if
+        end if
+        
+      end if
+    end subroutine file_header
   
     subroutine calc_vloc0
       use density_matrix, only: calc_density
@@ -1934,14 +2059,14 @@ contains
         call allocate_scalar(mg,Vxc(jspin))
       end do
       
-      call calc_density(rt%system_gs,rho_s,rt%tpsi0,rt%info_gs,mg)
+      call calc_density(rt%system_proj,rho_s,rt%tpsi0,rt%info_proj,mg)
       rho%f = 0d0
       do jspin=1,system%nspin
         rho%f = rho%f + rho_s(jspin)%f
       end do
-      call hartree(lg,mg,rt%info_gs,rt%system_gs,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(rt%system_gs,xc_func,mg,srg_scalar,srg,rho_s &
-      & ,ppn,rt%info_gs,rt%tpsi0,stencil,Vxc,E_xc)
+      call hartree(lg,mg,rt%info_proj,rt%system_proj,fg,poisson,srg_scalar,stencil,rho,Vh)
+      call exchange_correlation(rt%system_proj,xc_func,mg,srg_scalar,rt%srg_proj,rho_s &
+      & ,pp,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
       
       call deallocate_scalar(rho)
@@ -1955,38 +2080,11 @@ contains
 
   end subroutine init_projection
 
-  subroutine projection(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
-    use structures
-    use salmon_global, only: projection_option
-    implicit none
-    integer                 ,intent(in) :: itt
-    type(s_ofile)           ,intent(in) :: ofl
-    real(8)                 ,intent(in) :: dt
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_dft_system)      ,intent(in) :: system
-    type(s_parallel_info)   ,intent(in) :: info
-    type(s_stencil)         ,intent(in) :: stencil
-    type(s_pp_grid)         ,intent(in) :: ppg
-    type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_sendrecv_grid)               :: srg
-    type(s_dft_energy)                  :: energy
-    type(s_rt)                          :: rt
-
-    select case(projection_option)
-    case('gs')
-      call  projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
-    case default
-      stop "invalid projection_option"
-    end select
-
-    return
-  end subroutine projection
-
-  subroutine projection_gs(itt,ofl,dt,mg,system,info,stencil,ppg,psi_t,srg,energy,rt)
+  subroutine projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,psi_t,energy,rt)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: ncg,nelec,yn_spinorbit,nscf
+    use salmon_global, only: projection_option,ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current,threshold_projection
     use inputoutput, only: t_unit_time
     use subspace_diagonalization, only: ssdg
     use gram_schmidt_orth, only: gram_schmidt
@@ -2000,24 +2098,24 @@ contains
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
     type(s_stencil)         ,intent(in) :: stencil
+    type(s_scalar)          ,intent(in) :: V_local(system%nspin)
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi_t ! | u_{n,k}(t) >
-    type(s_sendrecv_grid)               :: srg
     type(s_dft_energy)                  :: energy
     type(s_rt)                          :: rt
     !
     integer :: nspin,nspin_tmp,no,no0,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
-    complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat
-    real(8) :: coef(rt%system_gs%no,system%nk,system%nspin)
+    complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat
+    real(8) :: coef(rt%system_proj%no,system%nk,system%nspin)
     real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
       
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
     
-    rt%system_gs%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
+    rt%system_proj%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
 
-    no0 = rt%system_gs%no ! # of orbitals @ GS
+    no0 = rt%system_proj%no ! # of orbitals @ GS
     
     nspin = system%nspin
     no = system%no
@@ -2045,28 +2143,48 @@ contains
     else
       niter = nscf
     end if
-    
-  ! rt%tpsi0 = | u_{n,k+A(t)/c} >, the ground-state wavefunction whose k-point is shifted by A(t).
+
+    if(projection_option=='td') then
+      do ispin=1,nspin
+        rt%vloc0(ispin)%f = V_local(ispin)%f ! the local potential for the time-dependent Hamiltonian
+      end do
+    end if
+
+!
+! psi_t    = | u_{n,k}(t) >, TDDFT orbitals
+!
+! rt%tpsi0 = | w_{n,k}(t) >, projection orbitals
+!
+! projection_option=='gs':
+!   | w_{n,k}(t) > = the eigenorbitals for the ground-state Hamiltonian whose k-point is shifted by A(t).
+!   i.e. | w_{n,k}(t) > = | u^{GS}_{n,k+A(t)/c} >
+!   a.k.a the Houston functions
+!
+! projection_option=='td':
+!   | w_{n,k}(t) > = the instantaneous eigenorbitals for the time-dependent Hamiltonian.
+!
+
+
     call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
-    & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
+    & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
     dE = energy%E_kin - rt%E_old
-    if(abs(dE) < 1e-12) then
+    if(abs(dE) < min(threshold_projection,1e-12)) then
       if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
     else
       do iter_GS=1,niter
-        call ssdg(mg,rt%system_gs,rt%info_gs,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,srg)
-        call gscg_zwf(ncg,mg,rt%system_gs,rt%info_gs,stencil,ppg,rt%vloc0,srg,rt%tpsi0,rt%cg)
-        call gram_schmidt(rt%system_gs, mg, rt%info_gs, rt%tpsi0)
+        call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
+        call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg,rt%vloc0,rt%srg_proj,rt%tpsi0,rt%cg)
+        call gram_schmidt(rt%system_proj, mg, rt%info_proj, rt%tpsi0)
         call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
-        & ,rt%system_gs,rt%info_gs,mg,rt%vloc0,stencil,srg,ppg)
+        & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
         dE = energy%E_kin - rt%E_old
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
-        if(abs(dE) < 1e-6) exit
+        if(abs(dE) < threshold_projection) exit
         rt%E_old = energy%E_kin
       end do
     end if
     
-    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < u_{n,k+A(t)/c} | u_{m,k}(t) >
+    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < w_{n,k)(t) | u_{m,k}(t) >
 
     if(yn_spinorbit=='y') then
       mat(1:no0,1:no,1,1:nk) = mat(1:no0,1:no,1,1:nk) + mat(1:no0,1:no,2,1:nk)
@@ -2091,8 +2209,8 @@ contains
     do ik=1,nk
     do io=1,no0
     ! /wspin: for canceling double counting of 2 in rocc.
-      nee = nee + ((wspin-rt%system_gs%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
-      neh = neh - (rt%system_gs%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
+      nee = nee + ((wspin-rt%system_proj%rocc(io,ik,ispin))/wspin) * coef(io,ik,ispin)
+      neh = neh - (rt%system_proj%rocc(io,ik,ispin)/wspin) * coef(io,ik,ispin)
     end do
     end do
     end do
@@ -2106,6 +2224,10 @@ contains
         write(ofl%fh_ovlp,'(i6,1000(1X,E23.15E3))') ik,(coef(io,ik,ispin)/system%wtk(ik),io=1,no0)
       end do
       end do
+    end if
+    
+    if(yn_out_intraband_current=='y') then
+      call write_intraband_current
     end if
     
 !        if(action=="proj_last ") then
@@ -2123,9 +2245,9 @@ contains
       use pack_unpack, only: copy_data
       implicit none
       type(s_orbital), intent(in) :: psi1,psi2
-      complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat
+      complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat
       !
-      complex(8),dimension(rt%system_gs%no,system%no,system%nspin,system%nk) :: mat1
+      complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat1
       complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1) &
                         & ,mg%is_array(2):mg%ie_array(2) &
                         & ,mg%is_array(3):mg%ie_array(3))
@@ -2135,10 +2257,10 @@ contains
         do ik=ik_s,ik_e
         do ispin = 1, nspin
           do io1 = 1, no0
-            if (rt%info_gs%io_s<= io1 .and. io1 <= rt%info_gs%io_e) then
+            if (rt%info_proj%io_s<= io1 .and. io1 <= rt%info_proj%io_e) then
               call copy_data(psi1%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
             end if
-            call comm_bcast(wf_io1, rt%info_gs%icomm_o, rt%info_gs%irank_io(io1))
+            call comm_bcast(wf_io1, rt%info_proj%icomm_o, rt%info_proj%irank_io(io1))
             do io2 = 1, no
               if (io_s<= io2 .and. io2 <= io_e) then
                 cbox = 0d0
@@ -2180,45 +2302,287 @@ contains
       call comm_summation(mat1,mat,no0*no*nspin*nk,info%icomm_rko)
 
     end subroutine inner_product
-  end subroutine projection_gs
+    
+    subroutine write_intraband_current
+      use density_matrix, only:calc_current_decomposed
+      use inputoutput, only: t_unit_current
+      implicit none
+      real(8) :: curr_intra(3,nspin)
+      real(8) :: curr_decomp(3,nspin,no0,nk)
+      
+      call calc_current_decomposed(rt%system_proj,mg,stencil,rt%info_proj,rt%srg_proj,rt%tpsi0,ppg,curr_decomp)
+      
+      curr_intra = 0d0
+      do ispin=1,nspin_tmp
+        do ik=1,nk
+          do io1=1,no0
+            do io2=1,no
+              curr_intra(1:3,ispin) = curr_intra(1:3,ispin) + system%rocc(io2,ik,ispin)*system%wtk(ik) &
+              & * abs(mat(io1,io2,ispin,ik))**2 * curr_decomp(1:3,ispin,io1,ik)
+            end do
+          end do
+        end do
+      end do
+      
+      if(comm_is_root(nproc_id_global))then
+        write(ofl%fh_intra_current, "(F16.8)",advance='no') itt * dt * t_unit_time%conv
+        if(nspin_tmp==1) then
+          write(ofl%fh_intra_current, "(99(1X,E23.15E3))") &
+          & curr_intra(1:3,1) * t_unit_current%conv
+        else if(nspin_tmp==2) then
+          write(ofl%fh_intra_current, "(99(1X,E23.15E3))") &
+          & curr_intra(1:3,1) * t_unit_current%conv, &
+          & curr_intra(1:3,2) * t_unit_current%conv
+        end if
+      end if
+    end subroutine write_intraband_current
+    
+  end subroutine projection
 
 !===================================================================================================================================
 
-  subroutine write_magnetization(itt,ofl,system,mg,info,psi)
+  subroutine write_current_decomposed(itt,ofl,mg,system,info,stencil,srg,psi,ppg)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use salmon_global, only: yn_spinorbit
-    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed
+    use salmon_global, only: yn_spinorbit,base_directory,SYSname
+    use inputoutput, only: t_unit_current
+    use filesystem, only: open_filehandle
+    use density_matrix, only:calc_current_decomposed
     implicit none
     integer                 ,intent(in) :: itt
-    type(s_ofile)           ,intent(in) :: ofl
-    type(s_dft_system)      ,intent(in) :: system
+    type(s_ofile)                       :: ofl
     type(s_rgrid)           ,intent(in) :: mg
+    type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
-    type(s_orbital)         ,intent(in) :: psi
-    !
-    integer ik,io
-    real(8) :: m(3),mag_orb(3,system%no,system%nk)
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_orbital)                     :: psi
+    type(s_sendrecv_grid)               :: srg
+    integer :: ik,io,ispin,nspin_tmp
+    character(256) :: file_current_decomposed
+    real(8) :: curr_decomp(3,system%nspin,system%no,system%nk)
     
-    if(yn_spinorbit=='n') stop "error: write_magnetization with yn_spinorbit=n"
+    !(header in SYSname_current_decomposed.data)
+    if(itt < 0) then
+      if(comm_is_root(nproc_id_global))then
+        write(file_current_decomposed,"(2A,'_current_decomposed.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_current_decomposed = open_filehandle(file_current_decomposed)
+        open(ofl%fh_current_decomposed,file=file_current_decomposed)
+        write(ofl%fh_current_decomposed, '("#",1X,A)') "decomposition of the current density"
+        write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "it", "time step index"
+        write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+        write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "ib", "band index"
+        write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "is", "spin index"
+        write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "curr_decomp_[xyz]", "decomposed elements the current density"
+        write(ofl%fh_current_decomposed, '("#",1X,A)') "------------------------------------------------"
+        write(ofl%fh_current_decomposed, '("#",1X,A)') "it"
+        write(ofl%fh_current_decomposed, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+          & 1, "ik", "none", &
+          & 2, "ib", "none", &
+          & 3, "is", "none", &
+          & 4, "curr_decomp_x", trim(t_unit_current%name), &
+          & 5, "curr_decomp_y", trim(t_unit_current%name), &
+          & 6, "curr_decomp_z", trim(t_unit_current%name)
+      end if
+      return
+    end if
     
-    call calc_magnetization(system,mg,info,m)
-    call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
-  
+    nspin_tmp = system%nspin
+    if(yn_spinorbit=='y') then
+      nspin_tmp = 1
+    end if
+    
+    call calc_current_decomposed(system,mg,stencil,info,srg,psi,ppg,curr_decomp)
+    
     if(comm_is_root(nproc_id_global))then
-      write(ofl%fh_mag,'(i11)') itt
-      write(ofl%fh_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
+      write(ofl%fh_current_decomposed,'(i11)') itt
       do ik=1,system%nk
       do io=1,system%no
-        write(ofl%fh_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+      do ispin=1,nspin_tmp
+        write(ofl%fh_current_decomposed,'(3(1X,i6),3(1X,E23.15E3))') &
+        & ik,io,ispin, curr_decomp(1:3,ispin,io,ik)* (system%rocc(io,ik,ispin)*system%wtk(ik)) * t_unit_current%conv
+      end do
       end do
       end do
     end if
     
-  end subroutine write_magnetization
+  end subroutine write_current_decomposed
+
+!===================================================================================================================================
+
+  subroutine write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,psi)
+    use structures
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global
+    use salmon_global, only: dt,yn_spinorbit,base_directory,SYSname, &
+    & yn_out_mag_decomposed_rt, yn_out_mag_micro_rt, &
+    & yn_out_spin_current_decomposed,yn_out_spin_current_micro
+    use filesystem, only: open_filehandle
+    use inputoutput, only: t_unit_current,t_unit_time
+    use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed,calc_spin_current,calc_magnetization_micro
+    use writefield, only: write_spin_current_micro,write_magnetization_micro
+    implicit none
+    integer                 ,intent(in) :: itt
+    type(s_ofile)                       :: ofl
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_rgrid)           ,intent(in) :: lg,mg
+    type(s_parallel_info)   ,intent(in) :: info
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_pp_grid)         ,intent(in) :: ppg
+    type(s_orbital)         ,intent(in) :: psi
+    !
+    integer ik,io,i
+    real(8) :: m(3),mag_orb(3,system%no,system%nk),spin_curr(3,0:3)
+    real(8) :: m_micro(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
+    real(8) :: spin_curr_micro(3,0:3, &
+                & mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    real(8) :: spin_curr_band(3,0:3,system%no,system%nk)
+    
+    if(yn_spinorbit=='n') stop "error: write_rt_spin with yn_spinorbit=n"
+    
+    if(itt < 0) then
+      call file_header
+      return
+    end if
+    
+    call calc_magnetization(system,mg,info,m)
+    if(yn_out_mag_decomposed_rt=='y') call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
+    if(yn_out_mag_micro_rt=='y') call calc_magnetization_micro(mg,m_micro)
+
+    call calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
+    
+    spin_curr = 0d0
+    do ik=1,system%nk
+    do io=1,system%no
+      spin_curr = spin_curr + spin_curr_band(:,:,io,ik)* system%rocc(io,ik,1)*system%wtk(ik)
+    end do
+    end do
   
-  subroutine write_gs_magnetization(ofl,system,mg,info,psi)
+    if(comm_is_root(nproc_id_global))then
+    
+      write(ofl%fh_rt_spin,'(1000(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv,m(1),m(2),m(3), &
+      & spin_curr(1:3,0) * t_unit_current%conv, &
+      & spin_curr(1:3,1) * t_unit_current%conv, &
+      & spin_curr(1:3,2) * t_unit_current%conv, &
+      & spin_curr(1:3,3) * t_unit_current%conv
+      
+      if(yn_out_mag_decomposed_rt=='y') then
+        write(ofl%fh_mag_decomposed_rt,'(i11)') itt
+        do ik=1,system%nk
+        do io=1,system%no
+          write(ofl%fh_mag_decomposed_rt,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+        end do
+        end do
+      end if
+
+      if(yn_out_spin_current_decomposed=='y') then
+        write(ofl%fh_spin_current_decomposed,'(i11)') itt
+        do ik=1,system%nk
+        do io=1,system%no
+        do i=0,3
+          write(ofl%fh_spin_current_decomposed,'(3(1X,i6),3(1X,E23.15E3))') &
+          & ik,io,i, spin_curr_band(1:3,i,io,ik)* (system%rocc(io,ik,1)*system%wtk(ik)) * t_unit_current%conv
+        end do
+        end do
+        end do
+      end if
+      
+    end if
+  
+    if(yn_out_mag_micro_rt=='y') then
+      call write_magnetization_micro(lg,mg,system,info,itt,m_micro)
+    end if
+    
+    if(yn_out_spin_current_micro=='y') then
+      call write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
+    end if
+    
+  contains
+  
+    subroutine file_header
+      implicit none
+      integer :: fh
+      character(256) :: filename
+      !
+      if(comm_is_root(nproc_id_global))then
+        !(header in SYSname_rt_spin.data)
+        write(filename,"(2A,'_rt_spin.data')") trim(base_directory),trim(SYSname)
+        ofl%fh_rt_spin = open_filehandle(filename)
+        fh = ofl%fh_rt_spin
+        open(fh,file=filename)
+        write(fh, '("#",1X,A)') "Spin magnetization & Spin current density"
+        write(fh, '("#",1X,A,":",1X,A)') "mag_[xyz]", "Total magnetization"
+        write(fh, '("#",1X,A,":",1X,A)') "spin_curr_i_[xyz]", "Spin current density with the Pauli matrix sigma_i (i=0,x,y,z)"
+        write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1,  "Time", trim(t_unit_time%name), &
+        & 2,  "mag_x", "none", &
+        & 3,  "mag_y", "none", &
+        & 4,  "mag_z", "none", &
+        & 5,  "spin_curr_0_x", trim(t_unit_current%name), &
+        & 6,  "spin_curr_0_y", trim(t_unit_current%name), &
+        & 7,  "spin_curr_0_z", trim(t_unit_current%name), &
+        & 8,  "spin_curr_x_x", trim(t_unit_current%name), &
+        & 9,  "spin_curr_x_y", trim(t_unit_current%name), &
+        & 10, "spin_curr_x_z", trim(t_unit_current%name), &
+        & 11, "spin_curr_y_x", trim(t_unit_current%name), &
+        & 12, "spin_curr_y_y", trim(t_unit_current%name), &
+        & 13, "spin_curr_y_z", trim(t_unit_current%name), &
+        & 14, "spin_curr_z_x", trim(t_unit_current%name), &
+        & 15, "spin_curr_z_y", trim(t_unit_current%name), &
+        & 16, "spin_curr_z_z", trim(t_unit_current%name)
+          
+        !(header in SYSname_mag_decomposed_rt.data)
+        if(yn_out_mag_decomposed_rt=='y') then
+          write(filename,"(2A,'_mag_decomposed_rt.data')") trim(base_directory),trim(SYSname)
+          ofl%fh_mag_decomposed_rt = open_filehandle(filename)
+          fh = ofl%fh_mag_decomposed_rt
+          open(fh,file=filename)
+          write(fh, '("#",1X,A)') "band decomposition of the time-dependent spin magnetization"
+          write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
+          write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+          write(fh, '("#",1X,A,":",1X,A)') "ib", "band index"
+          write(fh, '("#",1X,A,":",1X,A)') "mag_orb_[xyz]", "decomposed elements of the magnetization"
+          write(fh, '("#",1X,A)') "------------------------------------------------"
+          write(fh, '("#",1X,A)') "it"
+          write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+          & 1, "ik", "none", &
+          & 2, "ib", "none", &
+          & 3, "mag_orb_x", "none", &
+          & 4, "mag_orb_y", "none", &
+          & 5, "mag_orb_z", "none"
+        end if
+        
+        !(header in SYSname_spin_current_decomposed.data)
+        if(yn_out_spin_current_decomposed=='y') then
+          write(filename,"(2A,'_spin_current_decomposed.data')") trim(base_directory),trim(SYSname)
+          ofl%fh_spin_current_decomposed = open_filehandle(filename)
+          fh = ofl%fh_spin_current_decomposed
+          open(fh,file=filename)
+          write(fh, '("#",1X,A)') "Band decomposition of the spin current density"
+          write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
+          write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+          write(fh, '("#",1X,A,":",1X,A)') "ib", "band index"
+          write(fh, '("#",1X,A,":",1X,A)') "i", "index of the Pauli matrices (0,x,y,z)"
+          write(fh, '("#",1X,A,":",1X,A)') "spin_curr_[xyz]", "decomposed elements of the spin current density"
+          write(fh, '("#",1X,A)') "------------------------------------------------"
+          write(fh, '("#",1X,A)') "it"
+          write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+          & 1, "ik", "none", &
+          & 2, "ib", "none", &
+          & 3, "i", "none", &
+          & 4, "spin_curr_x", trim(t_unit_current%name), &
+          & 5, "spin_curr_y", trim(t_unit_current%name), &
+          & 6, "spin_curr_z", trim(t_unit_current%name)
+        end if
+        
+      end if
+    
+    end subroutine file_header
+    
+  end subroutine write_rt_spin
+  
+  subroutine write_mag_decomposed_gs(system,mg,info,psi)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -2226,50 +2590,50 @@ contains
     use noncollinear_module, only: calc_magnetization,calc_magnetization_decomposed
     use filesystem, only: open_filehandle
     implicit none
-    type(s_ofile)                       :: ofl
     type(s_dft_system)      ,intent(in) :: system
     type(s_rgrid)           ,intent(in) :: mg
     type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)         ,intent(in) :: psi
     !
-    integer ik,io
+    integer ik,io,fh_gs_mag
+    character(256) :: file_gs_mag
     real(8) :: m(3),mag_orb(3,system%no,system%nk)
     
-    if(yn_spinorbit=='n') stop "error: write_magnetization with yn_spinorbit=n"
+    if(yn_spinorbit=='n') stop "error: write_mag_decomposed_gs with yn_spinorbit=n"
     
     call calc_magnetization(system,mg,info,m)
     call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
     
     if(comm_is_root(nproc_id_global))then
       !(header in gs_mag.data)
-      write(ofl%file_gs_mag,"(2A,'_gs_mag.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_gs_mag = open_filehandle(ofl%file_gs_mag)
-      open(ofl%fh_gs_mag,file=ofl%file_gs_mag)
-      write(ofl%fh_gs_mag, '("#",1X,A)') "Magnetization of the ground state"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
-      write(ofl%fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
-      write(ofl%fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      write(file_gs_mag,"(2A,'_mag_decomposed_gs.data')") trim(base_directory),trim(SYSname)
+      fh_gs_mag = open_filehandle(file_gs_mag)
+      open(fh_gs_mag,file=file_gs_mag)
+      write(fh_gs_mag, '("#",1X,A)') "Band decomposition of the spin magnetization @ the ground state"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ib", "band index"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
+      write(fh_gs_mag, '("#",1X,A,":",1X,A)') "mag_orb", "decomposed elements of the magnetization"
+      write(fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
       & 1, "mag(1)", "none", &
       & 2, "mag(2)", "none", &
       & 3, "mag(3)", "none"
-      write(ofl%fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      write(fh_gs_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
       & 1, "ik", "none", &
       & 2, "io", "none", &
       & 3, "mag_orb(1)", "none", &
       & 4, "mag_orb(2)", "none", &
       & 5, "mag_orb(3)", "none"
-      write(ofl%fh_gs_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
+      write(fh_gs_mag,'(1000(1X,E23.15E3))') m(1),m(2),m(3)
       do ik=1,system%nk
       do io=1,system%no
-        write(ofl%fh_gs_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
+        write(fh_gs_mag,'(i6,1X,i6,1000(1X,E23.15E3))') ik,io,mag_orb(1,io,ik),mag_orb(2,io,ik),mag_orb(3,io,ik)
       end do
       end do
-      close(ofl%fh_gs_mag)
+      close(fh_gs_mag)
     end if
     
-  end subroutine write_gs_magnetization
+  end subroutine write_mag_decomposed_gs
 
 !===================================================================================================================================
 

@@ -39,7 +39,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
-                       init_projection
+                       init_projection,write_rt_spin,write_current_decomposed
   use code_optimization
   use initialization_sub
   use prep_pp_sub
@@ -60,6 +60,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
+  use lcfo, only: init_conventional_from_dcdft
   implicit none
   integer,parameter :: Nd = 4
 
@@ -177,10 +178,15 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%Ac_ind = 0d0
   rt%Ac_tot = 0d0
   
-  if(yn_periodic=='y') then
-    call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:,0:nt+1))
-    rt%Ac_tot = rt%Ac_ext + rt%Ac_ind
-  end if
+  call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:, 0:nt+1))
+
+  do itt = 0, nt
+    rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
+  end do
+  rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
+  
+  rt%Ac_tot(1:3, 0:nt+1) = rt%Ac_ext(1:3, 0:nt+1)
+  rt%E_tot(1:3, 0:nt+1) = rt%E_ext(1:3, 0:nt+1) 
   
   if (yn_restart == 'n') Mit=0
   call timer_end(LOG_READ_RT_DATA)
@@ -238,7 +244,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
+  if(yn_conventional_from_dcdft=='n') then
+    call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
+  else
+  ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data
+    call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
+  end if
   if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
@@ -273,7 +284,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
@@ -292,7 +303,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   allocate(energy%esp(system%no,system%nk,system%nspin))
   
   if(projection_option/='no') then
-    call init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,srg,rt)
+    call init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,pp,ppn,fg,poisson,srg_scalar,rt,energy,ofl)
   end if
   
   call nvtxEndRange
@@ -344,68 +355,29 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call comm_bcast(ofl%file_response_data, nproc_group_global)
   call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
   
-  !(write header)
-  if(comm_is_root(nproc_id_global))then
+ ! write file header
   
-    !(header of SYSname_rt.data)
-    select case(iperiodic)
-    case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
-    case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
-    end select
+  !(header of SYSname_rt.data)
+  select case(iperiodic)
+  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
+  case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
+  end select
+
+  !(header of SYSname_rt_energy.data)
+  call write_rt_energy_data(-1,ofl,dt,energy,md)
   
-    !(header of SYSname_rt_energy.data)
-    call write_rt_energy_data(-1,ofl,dt,energy,md)
+  if(yn_spinorbit=='y') then
+  !(header in SYSname_rt_spin.data)
+    call write_rt_spin(-1,ofl,system,lg,mg,info,stencil,ppg,spsi_in)
+  end if
   
-    if(projection_option/='no')then
-    !(header in SYSname_ovlp.data)
-      write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
-      open(ofl%fh_ovlp,file=ofl%file_ovlp)
-      write(ofl%fh_ovlp, '("#",1X,A)') "Projection"
-      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ovlp_occup", "Occupation"
-      write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "NB", "Number of bands"
-      write(ofl%fh_ovlp, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-      & 1, "ik", "none", &
-      & 2, "ovlp_occup(NB)", "none"
-    !(header in SYSname_nex.data)
-      write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_nex = open_filehandle(ofl%file_nex)
-      open(ofl%fh_nex,file=ofl%file_nex)
-      write(ofl%fh_nex, '("#",1X,A)') "Excitation"
-      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nelec", "Number of excited electrons"
-      write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nhole", "Number of excited holes"
-      write(ofl%fh_nex, '("#",99(1X,I0,":",A,"[",A,"]"))')  &
-      &           1, "time", trim(t_unit_time%name), &
-      &           2, "nelec", "none", &
-      &           3, "nhole", "none"
-    end if
-    
-    if(yn_spinorbit=='y') then
-    !(header in mag.data)
-      write(ofl%file_mag,"(2A,'_mag.data')") trim(base_directory),trim(SYSname)
-      ofl%fh_mag = open_filehandle(ofl%file_mag)
-      open(ofl%fh_mag,file=ofl%file_mag)
-      write(ofl%fh_mag, '("#",1X,A)') "Magnetization"
-      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "io", "Orbital index"
-      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "mag", "Total magnetization"
-      write(ofl%fh_mag, '("#",1X,A,":",1X,A)') "mag_orb", "Magnetization for each orbital"
-      write(ofl%fh_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-      & 1, "mag(1)", "none", &
-      & 2, "mag(2)", "none", &
-      & 3, "mag(3)", "none"
-      write(ofl%fh_mag, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-      & 1, "ik", "none", &
-      & 2, "io", "none", &
-      & 3, "mag_orb(1)", "none", &
-      & 4, "mag_orb(2)", "none", &
-      & 5, "mag_orb(3)", "none"
-    end if
+  if(yn_out_current_decomposed == 'y') then
+  !(header in SYSname_current_decomposed.data)
+    call write_current_decomposed(-1,ofl,mg,system,info,stencil,srg,spsi_in,ppg)
   end if
   
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call write_xyz(comment_line,"new","rvf",system)
+     call write_xyz(comment_line,"new","rvf",system,ofl)
   endif
   
   !---------------------------- time-evolution
@@ -500,7 +472,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
        call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"new")
        call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
-
+    
+  else if(yn_out_micro_je=='y') then
+  ! not single-scale but output microscopic current rt%j_e
+    call allocate_vector(mg,rt%j_e)
   end if
 
   !-------------------------------------------------- Time evolution
@@ -513,7 +488,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      write(comment_line,10) -1, 0.0d0
      if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
-     call write_xyz(comment_line,"add","rvf",system)
+     call write_xyz(comment_line,"add","rvf",system,ofl)
   10 format("#rt   step=",i8,"   time",e16.6)
   12 format(a,"  xi_nh=",e18.10)
   end if

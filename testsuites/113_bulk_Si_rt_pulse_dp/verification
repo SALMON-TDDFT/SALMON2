@@ -13,7 +13,8 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "Si_rt.data", 
+    "Si_rt.data",
+    "Si_nex.data",
 ] 
 
 checklist = { 
@@ -22,7 +23,13 @@ checklist = {
         -100, # Temporary value for result
         0.000651045729817,  # Reference value
         1.e-8,  # Permissible error 
-    ], 
+    ],
+    # Nex
+    "Nex": [
+        -100, # Temporary value for result
+        0.932216356193054E-001,  # Reference value
+        1.e-4,  # Permissible error
+    ],
 } 
 
 print("# Checking the existance of outputfile") 
@@ -37,10 +44,17 @@ linecount = 0
 for line in open("Si_rt.data"):
     linecount += 1
     if linecount == 257: # corresponds to line 257
-        for name, [resval, refval, error] in checklist.items(): 
-            data = line.split()
-            result[name] = float(data[15])
-            print(result[name])
+        data = line.split()
+        result["Current"] = float(data[15])
+        print(result["Current"])
+
+linecount = 0
+for line in open("Si_nex.data"):
+    linecount += 1
+    if linecount == 8: # corresponds to line 8
+        data = line.split()
+        result["Nex"] = float(data[2]) # column 3
+        print(result["Nex"])
 
 for name, [resval, refval, error] in checklist.items():
     if name not in result: 

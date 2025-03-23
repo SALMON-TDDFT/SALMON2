@@ -1,3 +1,10 @@
+!
+!  Note: Limitations for reading CIF format:
+!     1) order of keywords is important (refer sample cif file)
+!     2) single quatation is necessary in rotation/translation part
+!     3) cif keywords except for given 11 names in this program are ignored
+!     .....
+!
 module cif_format_module
 
   use atomic_number_module, only: get_atomic_number, get_element_name
@@ -113,7 +120,19 @@ contains
 !   a)  1 'x, y, z'
 !   b)  'x, y, z'
 ! following treatment absorbs the both types
-!
+
+          !(check if there are quatations)
+          if(len_trim(cbuf)==0) cycle
+          if ( cbuf /= "loop_" ) then
+             if(index(cbuf,"'",back=.true.).le.6 .and.  &
+                index(cbuf,'"',back=.true.).le.6 ) then
+                write(*,*) "Error: quatation is necessary "
+                write(*,*) "  Please use single quatations for e.x.  x+1/2,-y,z"
+                write(*,*) "  -->  'x+1/2,-y,z'" 
+                stop
+             endif
+          endif
+          
           read(cbuf,*,END=22) cbuf1,cbuf2
           cbuf1=cbuf2
 22        continue
@@ -278,10 +297,10 @@ contains
 
     end if ! flag
 
-    deallocate( zn_atom )
-    deallocate( md_atom )
-    deallocate( ki_atom )
-    deallocate( aa_atom )
+    if(allocated(zn_atom)) deallocate( zn_atom )
+    if(allocated(md_atom)) deallocate( md_atom )
+    if(allocated(ki_atom)) deallocate( ki_atom )
+    if(allocated(aa_atom)) deallocate( aa_atom )
 
   end subroutine read_atom_cif
 
@@ -318,6 +337,14 @@ contains
     R=0.0d0
     j=1
     f=1.0d0
+    if(  index(trim(cbuf),'x')==0 .or. &
+         index(trim(cbuf),'y')==0 .or. &
+         index(trim(cbuf),'z')==0 )then
+       write(*,*) "Error in format of cif file:"
+       write(*,*) "  Please use single quatations for e.x.  x+1/2,-y,z"
+       write(*,*) "  -->  'x+1/2,-y,z'" 
+       stop
+    endif
     do i=1,len_trim(cbuf)
        if ( cbuf(i:i) == "-" ) then
           f=-1.0d0
@@ -334,6 +361,7 @@ contains
           R(j,3) = f
           f=1.0d0
        end if
+       !ASCII code:  47->'/', 48-57->0-9
        if ( 49 <= iachar(cbuf(i:i)) .and. iachar(cbuf(i:i)) <= 57 ) then
           if ( R(j,4) == 0.0d0 ) then
              R(j,4) = f*(iachar(cbuf(i:i))-48)

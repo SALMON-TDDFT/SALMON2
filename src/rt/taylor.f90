@@ -14,7 +14,6 @@
 !  limitations under the License.
 !
 module taylor_sub
-  use nvtx
   implicit none
 
 contains
@@ -25,6 +24,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   use structures
   use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
+  use nvtx
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system

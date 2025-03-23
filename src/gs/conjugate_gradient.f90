@@ -23,7 +23,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
-  use salmon_global, only: yn_spinorbit
+  use salmon_global, only: yn_spinorbit,yn_preconditioning
   use Conjugate_Gradient_so, only: gscg_rwf_so
   !$ use omp_lib
   implicit none
@@ -66,6 +66,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%hxk)
     call allocate_orbital_real(nspin,mg,info,cg%pk)
     call allocate_orbital_real(nspin,mg,info,cg%gk)
+    call allocate_orbital_real(nspin,mg,info,cg%pre_gk)
     call allocate_orbital_real(nspin,mg,info,cg%pko)
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
@@ -113,7 +114,12 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
 
 !    call orthogonalization(mg,system,info,spsi,cg%gk)
-    call inner_product(mg,system,info,cg%gk,cg%gk,sum)
+    if(yn_preconditioning=='y')then
+      call preconditioning_rgk(mg,system,info,cg%gk,cg%pre_gk)
+      call inner_product(mg,system,info,cg%pre_gk,cg%gk,sum)
+    else
+      call inner_product(mg,system,info,cg%gk,cg%gk,sum)
+    end if
 
     if(iter==1)then
       uk = 0d0
@@ -134,22 +140,41 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+    if(yn_preconditioning=='y')then
 #ifdef USE_OPENACC
 !$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-      & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-    end do
-    end do
-    end do
-    end do
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end do
+      end do
+      end do
+      end do
+    else
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
+!$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end do
+      end do
+      end do
+      end do
+    end if
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
@@ -399,6 +424,45 @@ subroutine inner_product(mg,system,info,psi1,psi2,rbox)
   call timer_begin(LOG_GSCG_ISOLATED_CALC)
 end subroutine inner_product
 
+subroutine preconditioning_rgk(mg,system,info,gk,pre_gk)
+  !$ use omp_lib
+  use preconditioning_sub, only: dstencil_preconditioning
+  use structures
+  use sendrecv_grid, only: update_overlap_real8
+  use salmon_global, only: alpha_pre
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_orbital),intent(inout) :: gk
+  type(s_orbital),intent(inout) :: pre_gk
+  !
+  integer :: io,ik,ispin,nspin
+  integer :: ix,iy,iz
+  real(8) :: alpha
+  integer :: is(3),ie(3)
+  logical :: is_enable_overlapping
+  nspin = system%nspin
+
+  alpha = alpha_pre
+
+  if(info%if_divide_rspace) then
+    call update_overlap_real8(srg, mg, gk%rwf)
+  end if
+
+  do ik=info%ik_s,info%ik_e
+  do io=info%io_s,info%io_e
+  do ispin=1,nspin
+    call dstencil_preconditioning(mg%is_array,mg%ie_array,mg%is,  &
+                                  mg%ie,mg%idx,mg%idy,mg%idz,system%hgs, &
+                                  gk%rwf(:,:,:,ispin,io,ik,1), &
+                                  pre_gk%rwf(:,:,:,ispin,io,ik,1),alpha)
+  end do
+  end do
+  end do
+
+end subroutine preconditioning_rgk
+
 end subroutine gscg_rwf
 
 !===================================================================================================================================
@@ -408,7 +472,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
-  use salmon_global, only: yn_spinorbit
+  use salmon_global, only: yn_spinorbit,yn_preconditioning
   use Conjugate_Gradient_so, only: gscg_zwf_so
   !$ use omp_lib
   implicit none
@@ -449,6 +513,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_complex(nspin,mg,info,cg%hxk)
     call allocate_orbital_complex(nspin,mg,info,cg%pk)
     call allocate_orbital_complex(nspin,mg,info,cg%gk)
+    call allocate_orbital_complex(nspin,mg,info,cg%pre_gk)
     call allocate_orbital_complex(nspin,mg,info,cg%pko)
     call allocate_orbital_complex(nspin,mg,info,cg%hwf)
     !$acc enter data copyin(cg)
@@ -501,7 +566,12 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
 
 !    call orthogonalization(mg,system,info,spsi,cg%gk)
-    call inner_product(mg,system,info,cg%gk,cg%gk,sum)
+    if(yn_preconditioning=='y')then
+      call preconditioning_zgk(mg,system,info,cg%gk,cg%pre_gk)
+      call inner_product(mg,system,info,cg%pre_gk,cg%gk,sum)
+    else
+      call inner_product(mg,system,info,cg%gk,cg%gk,sum)
+    end if
 
     if(iter==1)then
       uk = 0d0
@@ -524,24 +594,40 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       end do
     end if
 
+    if(yn_preconditioning=='y')then
 #ifdef USE_OPENACC
 !$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
 #else
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
 #endif
-    do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-      & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-      & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-    end do
-    end do
-    end do
-    end do
-    end do
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+        & cg%pre_gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+        & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+      end do
+    else
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+        & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+        & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+      end do
+    end if
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
@@ -783,6 +869,64 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
 
   call timer_begin(LOG_GSCG_PERIODIC_CALC)
 end subroutine inner_product
+
+subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
+  !$ use omp_lib
+  use preconditioning_sub, only: zstencil_preconditioning,zstencil_nonorthogonal_preconditioning
+  use structures
+  use sendrecv_grid, only: update_overlap_complex8
+  use salmon_global, only: yn_want_communication_overlapping,alpha_pre
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_orbital),intent(inout) :: gk
+  type(s_orbital),intent(inout) :: pre_gk
+  !
+  integer :: io,ik,ispin,nspin
+  real(8) :: alpha
+  integer :: is(3),ie(3)
+  logical :: is_enable_overlapping
+  nspin = system%nspin
+
+  alpha = alpha_pre
+
+  is_enable_overlapping = (yn_want_communication_overlapping == 'y') .and. &
+                          stencil%if_orthogonal .and. &
+                          info%if_divide_rspace
+
+  if(info%if_divide_rspace .and. .not. is_enable_overlapping) then
+    call update_overlap_complex8(srg, mg, gk%zwf)
+  end if
+
+  if(stencil%if_orthogonal) then
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,nspin
+      call zstencil_preconditioning(mg%is_array,mg%ie_array,mg%is,  &
+                                    mg%ie,mg%idx,mg%idy,mg%idz,system%hgs, &
+                                    gk%zwf(:,:,:,ispin,io,ik,1), &
+                                    pre_gk%zwf(:,:,:,ispin,io,ik,1),alpha)
+    end do
+    end do
+    end do
+  else
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,nspin
+      call zstencil_nonorthogonal_preconditioning(mg%is_array,mg%ie_array,mg%is,  &
+                                    mg%ie,mg%idx,mg%idy,mg%idz, &
+                                    gk%zwf(:,:,:,ispin,io,ik,1), &
+                                    pre_gk%zwf(:,:,:,ispin,io,ik,1), &
+                                    stencil%coef_lap0_nd1, &
+                                    stencil%coef_lap_nd1,stencil%coef_nab_nd1, &
+                                    stencil%coef_F,alpha)
+    end do
+    end do
+    end do
+  end if
+
+end subroutine preconditioning_zgk
 
 end subroutine gscg_zwf
 

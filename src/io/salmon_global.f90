@@ -47,6 +47,8 @@ module salmon_global
   character(32)  :: theory
   character(1)   :: yn_md
   character(1)   :: yn_opt
+  character(1)   :: yn_dc
+  character(1)   :: yn_conventional_from_dcdft
 !! &control
   character(256) :: sysname
   character(256) :: base_directory
@@ -61,7 +63,6 @@ module salmon_global
   character(20)  :: method_wf_distributor
   integer        :: nblock_wf_distribute
   !remove later
-  character(1)   :: read_gs_dns_cube
   character(1)   :: write_gs_wfn_k
   character(1)   :: write_rt_wfn_k
 
@@ -77,9 +78,7 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
-#ifdef USE_FFTW
   character(1)   :: yn_fftw
-#endif
   character(1)   :: yn_scalapack
   character(1)   :: yn_gramschmidt_blas
   character(1)   :: yn_eigenexa
@@ -133,6 +132,7 @@ module salmon_global
 !! &kgrid
   integer        :: num_kgrid(3)
   character(256) :: file_kw
+  real(8)        :: dk_shift(3)
 
 !! &tgrid
   integer        :: nt
@@ -168,6 +168,8 @@ module salmon_global
   real(8)        :: conv_gap_mix_zero
   character(16)  :: method_init_density
   real(8)        :: magdir_atom(100)
+  character(1)   :: yn_preconditioning
+  real(8)        :: alpha_pre
 
 !! &emfield
   character(2)   :: trans_longi
@@ -213,25 +215,30 @@ module salmon_global
   real(8)        :: hx_m
   real(8)        :: hy_m
   real(8)        :: hz_m
-  integer        :: nksplit !! TODO: remove this variable
-  integer        :: nxysplit !! TODO: remove this variable
-  ! The input variables nxvac(l|r)_m do not recommend to use,
-  ! However I tempolary remain them for the reason of the compatibility.
-  ! Please use  n(x|y|z)_origin_m to provide the same functionality.
-  integer        :: nxvacl_m
-  integer        :: nxvacr_m
+  integer        :: nksplit ! this parameter will be deprecated in a future release
+  integer        :: nxysplit ! this parameter will be deprecated in a future release
+  integer        :: nxvacl_m ! this parameter will be deprecated in a future release
+  integer        :: nxvacr_m ! this parameter will be deprecated in a future release
+  integer        :: nxvac_m(1:2)
+  integer        :: nyvac_m(1:2)
+  integer        :: nzvac_m(1:2)
   integer        :: nx_origin_m
   integer        :: ny_origin_m
   integer        :: nz_origin_m
-  character(100) :: file_macropoint
+  integer        :: out_ms_region_ix_m(1:2)
+  integer        :: out_ms_region_iy_m(1:2)
+  integer        :: out_ms_region_iz_m(1:2)
+  character(256) :: file_macropoint
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   integer        :: nmacro_chunk
+  real(8)        :: rmat_ms(3, 3)
 
 !! &maxwell
   real(8)        :: al_em(3)
   real(8)        :: dl_em(3)
   integer        :: num_rgrid_em(3)
+  real(8)        :: at_em
   real(8)        :: dt_em
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)
@@ -249,8 +256,12 @@ module salmon_global
   character(16)  :: wave_input
   real(8)        :: ek_dir1(3)
   real(8)        :: source_loc1(3)
+  real(8)        :: gbeam_sigma_plane1(3)
+  real(8)        :: gbeam_sigma_line1(3)
   real(8)        :: ek_dir2(3)
   real(8)        :: source_loc2(3)
+  real(8)        :: gbeam_sigma_plane2(3)
+  real(8)        :: gbeam_sigma_line2(3)
   integer        :: obs_num_em
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
@@ -262,6 +273,24 @@ module salmon_global
   integer        :: media_id_pml(3,2)
   integer        :: media_id_source1
   integer        :: media_id_source2
+  real(8)        :: bloch_k_em(3)
+  character(4)   :: bloch_real_imag_em(3)
+  integer        :: ase_num_em
+  real(8)        :: ase_ene_min_em
+  real(8)        :: ase_ene_max_em
+  real(8)        :: ase_wav_min_em
+  real(8)        :: ase_wav_max_em
+  integer        :: ase_smedia_id_em
+  real(8)        :: ase_box_cent_em(3)
+  real(8)        :: ase_box_size_em(3)
+  integer        :: art_num_em
+  real(8)        :: art_ene_min_em
+  real(8)        :: art_ene_max_em
+  real(8)        :: art_wav_min_em
+  real(8)        :: art_wav_max_em
+  integer        :: art_smedia_id_em
+  real(8)        :: art_plane_bot_em(3)
+  real(8)        :: art_plane_top_em(3)
   character(1)   :: yn_make_shape
   character(1)   :: yn_output_shape
   character(1)   :: yn_copy_x
@@ -277,6 +306,7 @@ module salmon_global
   
 !! &analysis
   character(2)   :: projection_option
+  real(8)        :: threshold_projection
   integer        :: nenergy
   real(8)        :: de
   integer        :: out_rt_energy_step
@@ -292,8 +322,10 @@ module salmon_global
   character(1)   :: yn_out_dns
   character(1)   :: yn_out_dns_rt
   character(1)   :: yn_out_dns_ac_je
+  character(1)   :: yn_out_micro_je
   integer        :: out_dns_rt_step
   integer        :: out_dns_ac_je_step
+  integer        :: out_micro_je_step
   character(1)   :: out_old_dns
   character(1)   :: yn_out_dns_trans
   real(8)        :: out_dns_trans_energy
@@ -313,7 +345,15 @@ module salmon_global
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
   character(1)   :: yn_lr_w0_correction
-  integer        :: out_magnetization_step
+  character(1)   :: yn_out_intraband_current
+  character(1)   :: yn_out_current_decomposed
+  integer        :: out_current_decomposed_step
+  integer        :: out_rt_spin_step
+  character(1)   :: yn_out_mag_decomposed_rt
+  character(1)   :: yn_out_mag_micro_rt
+  character(1)   :: yn_out_spin_current_decomposed
+  character(1)   :: yn_out_spin_current_micro
+  character(1)   :: yn_out_rt_energy_components
   character(1)   :: yn_out_perflog
   character(6)   :: format_perflog ! 'stdout','text','csv'
   
@@ -322,7 +362,7 @@ module salmon_global
   integer        :: num_multipole_xyz(3)
   integer        :: lmax_multipole
   real(8)        :: threshold_cg
-  character(2)   :: method_poisson ! 'cg','ft'
+  character(9)   :: method_poisson ! 'cg','ft','dirichlet'
 
 !! &ewald
   integer        :: newald
@@ -335,6 +375,9 @@ module salmon_global
   integer        :: nopt
   real(8)        :: max_step_len_adjust
   real(8)        :: convrg_opt_fmax
+  character(5)   :: method_opt ! 'bfgs','steep','fire'
+  real(8)        :: step_steep
+  real(8)        :: step_fire
 
 !! &md
   character(10)  :: ensemble
@@ -380,5 +423,26 @@ character(256),allocatable :: atom_name(:)
   integer :: ndiv_segment(max_num_of_segments)
   real(8) :: kpt(3,max_num_of_segments+1)
   character(1) :: kpt_label(max_num_of_segments+1)
+  
+  !! &sbe 
+  character(1)   :: yn_vnl_correction
+  integer        :: num_sbe
+  character(256) :: sysname_sbe(1:200)
+  integer        :: nk_sbe(1:200)
+  integer        :: nstate_sbe(1:200)
+  integer        :: nelec_sbe(1:200)
+  real(8)        :: al_sbe(3,200)
+  real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
+  integer        :: norder_correction
+
+  !! &dc
+  integer        :: num_fragment(3)
+  integer        :: num_rgrid_buffer(3)
+  integer        :: nproc_rgrid_tot(3)
+  character(1)   :: yn_dc_lcfo
+  character(1)   :: yn_dc_lcfo_diag
+  integer        :: nstate_frag
+  real(8)        :: energy_cut
+  real(8)        :: lambda_cut
 
 end module salmon_global

@@ -112,6 +112,7 @@ module timer
   integer,public,parameter :: LOG_CURRENT_COMM_HALO           = 218
   integer,public,parameter :: LOG_MCURRENT_CALC               = 219
   integer,public,parameter :: LOG_MCURRENT_COMM_COLL          = 220
+  integer,public,parameter :: LOG_CURRENT_SO_NONLOCAL         = 249
 
   ! conjugate_gradient module
   integer,public,parameter :: LOG_GSCG_ISOLATED_CALC      = 221

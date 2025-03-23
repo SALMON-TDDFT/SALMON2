@@ -9,7 +9,7 @@ set(Fortran_PP_FLAGS            "-fpp")
 set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_C_COMPILER            "mpiicc")
 
-set(General_Fortran_FLAGS       "-nogen-interface -std03 -warn all -diag-disable 6477,7025 -ansi-alias -fno-alias")
+set(General_Fortran_FLAGS       "-nogen-interface -std03 -warn all -diag-disable 6477,7025 -ansi-alias -fno-alias -qoverride-limits")
 set(General_C_FLAGS             "-Wall -diag-disable=10388 -restrict -ansi-alias -fno-alias")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")

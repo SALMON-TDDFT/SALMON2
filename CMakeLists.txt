@@ -20,7 +20,7 @@ enable_testing()
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD          99)
 project(SALMON
-        VERSION   2.0.2
+        VERSION   2.2.1
         LANGUAGES Fortran C
         )
 
@@ -44,6 +44,7 @@ option_set(USE_MPI       "Use MPI parallelization" OFF)
 option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
+option_set(USE_FFTW      "Use FFTW library"        OFF)
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)

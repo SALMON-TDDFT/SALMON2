@@ -178,6 +178,10 @@ contains
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
     real(8) :: upp(0:2*pp%lmax+1)
     real(8) :: r,x,y,z, xx
+
+    allocate(ppg%jxyz_ao(3,ppg%nps,natom))
+    allocate(ppg%rxyz_ao(3,ppg%nps,natom))
+    allocate(ppg%mps_ao(natom))
     
     ppg%nps_ao = ppg%nps
     ppg%jxyz_ao = ppg%jxyz

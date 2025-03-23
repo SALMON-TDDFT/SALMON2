@@ -14,7 +14,6 @@
 !  limitations under the License.
 !
 module md_sub
-  use nvtx
   implicit none
 
 contains
@@ -277,6 +276,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
   use timer
+  use nvtx
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
@@ -350,6 +350,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   use salmon_pp, only: calc_nlcc
   use prep_pp_sub, only: init_ps,dealloc_init_ps
   use timer
+  use nvtx
   implicit none
   type(s_parallel_info) :: info
   type(s_dft_system) :: system
@@ -385,6 +386,7 @@ subroutine time_evolution_step_md_part2(system,md)
   use salmon_global, only: natom,Kion,dt,yn_stop_system_momt,ensemble,thermostat
   use const, only: umass,hartree2J,kB
   use timer
+  use nvtx
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md

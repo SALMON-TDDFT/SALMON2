@@ -15,7 +15,6 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module prep_pp_sub
-  use nvtx
   implicit none
 
 contains
@@ -29,6 +28,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use prep_pp_so_sub, only: calc_uv_so
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
+  use nvtx
   implicit none
   type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
@@ -399,7 +399,7 @@ contains
     ppg%ia_tbl=0
     ppg%rinv_uvu=0.0d0
     
-    allocate(ppg%uv(ppg%nps,ppg%nlma),ppg%duv(ppg%nps,ppg%nlma,3))
+    allocate(ppg%uv(ppg%nps,ppg%nlma))
 
     lma=0
     do ia=1,natom
@@ -536,7 +536,7 @@ SUBROUTINE dealloc_init_ps(ppg)
   implicit none
   type(s_pp_grid) :: ppg
 
-  deallocate(ppg%jxyz, ppg%rxyz, ppg%uv, ppg%duv)
+  deallocate(ppg%jxyz, ppg%rxyz, ppg%uv)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
@@ -621,7 +621,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
   ppg%zekr_uV(:,:,1) = dcmplx(ppg%uV)
   if(yn_spinorbit == 'y') then
-    allocate(ppg%zekr_uV_so(ppg%nps,ppg%nlma,1,2,1))
+    allocate(ppg%zekr_uV_so(ppg%nps,size(ppg%ia_tbl_so),1,2,1))
     ppg%zekr_uV_so(:,:,1,1:2,1) = dcmplx(ppg%uv_so(:,:,1:2,1))
   end if
 

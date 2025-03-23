@@ -53,6 +53,7 @@
 /
 
 &scf
+  method_init_wf='random'
   ncg = 4
   nscf = 120
   threshold = 1.d-9

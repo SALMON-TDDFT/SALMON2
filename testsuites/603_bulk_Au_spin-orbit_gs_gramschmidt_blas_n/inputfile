@@ -23,7 +23,7 @@
   nelec = 19
   nelem = 1
   natom = 1
-  spin  = 'polarized'
+  spin  = 'noncollinear'
   yn_spinorbit = 'y'
 /
 

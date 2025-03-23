@@ -17,7 +17,6 @@
 #include "config.h"
 
 module initialization_sub
-  use nvtx
   implicit none
   integer,parameter,private :: Nd=4
 
@@ -34,6 +33,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   use init_poisson_sub
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
+  use nvtx
   implicit none
   integer      ,intent(in) :: comm
   type(s_parallel_info)    :: info
@@ -81,6 +81,9 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
     if(method_poisson=='ft') then
       call init_reciprocal_grid_isolated_ft(lg,mg,fg,system,info,poisson)
     end if
+    if(method_poisson=='dirichlet') then
+      call prep_dgf(lg,mg,system,info,poisson)
+    end if
   case(3)
     call init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   end select
@@ -99,7 +102,7 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
+  & nproc_rgrid,Rion,Rion_red,kion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
   & iflag_atom_coor,ntype_atom_coor_reduced,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
@@ -116,10 +119,15 @@ subroutine init_dft_system(lg,system,stencil)
      al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
     stencil%if_orthogonal = .true.
     if(al(1)*al(2)*al(3)==0d0) then
-      if(num_rgrid(1)*num_rgrid(2)*num_rgrid(3)==0 .or. dl(1)*dl(2)*dl(3)==0d0) then
+      if(al_vec1(1)*al_vec2(2)*al_vec3(3)/=0d0) then
+        al(1) = al_vec1(1)
+        al(2) = al_vec2(2)
+        al(3) = al_vec3(3)
+      else if(num_rgrid(1)*num_rgrid(2)*num_rgrid(3)/=0 .and. dl(1)*dl(2)*dl(3)/=0d0) then
+        al = dl * dble(num_rgrid)
+      else
         stop "error: invalid cell"
       end if
-      al = dl * dble(num_rgrid)
     end if
     system%primitive_a = 0d0
     system%primitive_a(1,1) = al(1)
@@ -172,7 +180,7 @@ subroutine init_dft_system(lg,system,stencil)
 
   if(spin=='unpolarized') then
     system%nspin=1
-  else if(spin=='polarized') then
+  else !if(spin=='polarized') then
     system%nspin=2
   end if
 
@@ -197,14 +205,17 @@ subroutine init_dft_system(lg,system,stencil)
   if ( allocated(system%rocc) ) deallocate(system%rocc)
   if ( allocated(system%Velocity) ) deallocate(system%Velocity)
   if ( allocated(system%Force) ) deallocate(system%Force)
+  if ( allocated(system%kion)) deallocate(system%kion)
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
+  allocate(system%kion(system%nion))
   system%Velocity(:,:) =0d0
 
   if(iflag_atom_coor==ntype_atom_coor_reduced) then
     Rion = matmul(system%primitive_a,Rion_red) ! [ a1, a2, a3 ] * R_ion
   end if
   system%Rion = Rion
+  system%kion = kion
 
 ! initial value of occupation
   system%rocc = 0d0
@@ -214,6 +225,7 @@ subroutine init_dft_system(lg,system,stencil)
     select case(system%nspin)
     case(1)
       system%rocc(1:nelec/2,:,1) = 2d0
+      if(mod(nelec,2)==1) system%rocc(nelec/2+1,:,1) = 1d0
     case(2)
       if ( nelec > 0 ) then
         if ( mod(nelec,2) == 0 ) then
@@ -246,6 +258,19 @@ subroutine init_dft_system(lg,system,stencil)
       stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
       stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
     end do
+  end do
+
+  if(stencil%if_orthogonal) then
+    stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+  else
+    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
+      stop "error: nonorthogonal lattice and r-space parallelization"
+    stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*  &
+                      & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+  end if
+  do jj=1,3
+    stencil%coef_lap_nd1(1,jj) = cnmat(1,1)/hgs(jj)**2
+    stencil%coef_nab_nd1(1,jj) = bnmat(1,1)/hgs(jj)
   end do
 
   call set_gridcoordinate(lg,system)
@@ -1056,6 +1081,50 @@ subroutine init_reciprocal_grid_isolated_ft(lg,mg,fg,system,info,poisson)
 
   return
 end subroutine init_reciprocal_grid_isolated_ft
+
+!===================================================================================================================================
+
+subroutine prep_dgf(lg,mg,system,info,poisson)
+  use structures
+  use communication, only: comm_is_root, comm_bcast
+  use parallelization, only: nproc_id_global, nproc_group_global
+  use poisson_dirichlet, only: calc_dgf
+#ifdef USE_FFTW
+  use salmon_global, only: yn_fftw
+  use, intrinsic :: iso_c_binding
+  use mpi
+#endif
+  implicit none
+#ifdef USE_FFTW
+  include 'fftw3-mpi.f03'
+#endif
+  type(s_rgrid)          ,intent(in)    :: lg
+  type(s_rgrid)          ,intent(in)    :: mg
+  type(s_dft_system)     ,intent(in)    :: system
+  type(s_parallel_info)  ,intent(in)    :: info
+  type(s_poisson)        ,intent(inout) :: poisson
+  integer :: lx,ly,lz
+
+  lx=lg%num(1)
+  ly=lg%num(2)
+  lz=lg%num(3)
+
+  allocate(poisson%dgf(-lx:lx+2,-ly:ly+2,-lz:lz+2))
+
+  if(comm_is_root(nproc_id_global))then
+    call calc_dgf(lg,mg,system,info,poisson)
+  end if
+
+  call comm_bcast(poisson%dgf,nproc_group_global)
+
+#ifdef USE_FFTW
+  if(yn_fftw=='y') then
+    call fftw_mpi_init()
+  end if
+#endif
+
+  return
+end subroutine prep_dgf
 
 !===================================================================================================================================
 

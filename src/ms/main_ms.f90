@@ -238,15 +238,18 @@ subroutine initialization_ms()
     if (0d0 < hx_m) fs%hgs(1) = hx_m
     if (0d0 < hy_m) fs%hgs(2) = hy_m
     if (0d0 < hz_m) fs%hgs(3) = hz_m
+    ! for old nxvacl_m, nxvacr_m variables:
+    if (abs(nxvacl_m) > 0) nxvac_m(1) = abs(nxvacl_m) + 1
+    if (abs(nxvacr_m) > 0) nxvac_m(2) = abs(nxvacr_m)
 
     fw%dt = dt
     fw%fdtddim = '1d'
-    fs%mg%is(1) = - abs(nxvacl_m)
-    fs%mg%ie(1) = nx_m + abs(nxvacr_m)
-    fs%mg%is(2) = 1
-    fs%mg%ie(2) = ny_m
-    fs%mg%is(3) = 1
-    fs%mg%ie(3) = nz_m
+    fs%mg%is(1) = 1 - nxvac_m(1)
+    fs%mg%ie(1) = nx_m + nxvac_m(2)
+    fs%mg%is(2) = 1 - nyvac_m(1)
+    fs%mg%ie(2) = ny_m + nyvac_m(2)
+    fs%mg%is(3) = 1 - nzvac_m(1)
+    fs%mg%ie(3) = nz_m + nzvac_m(2)
     fs%mg%is_overlap(1:3) = fs%mg%is(1:3) - fs%mg%nd
     fs%mg%ie_overlap(1:3) = fs%mg%ie(1:3) + fs%mg%nd
     fs%mg%is_array(1:3) = fs%mg%is_overlap(1:3)
@@ -428,10 +431,10 @@ subroutine time_evolution_step_ms
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        rt%Ac_tot(1:3, itt-1) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
-        rt%Ac_tot(1:3, itt)   = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
-        rt%Ac_ext(1:3, itt-1) = rt%Ac_tot(1:3, itt-1)
-        rt%Ac_ext(1:3, itt)   = rt%Ac_tot(1:3, itt)
+        rt%Ac_tot(1:3, itt-1) = matmul(rmat_ms, fw%vec_Ac%v(1:3, iix, iiy, iiz))
+        rt%Ac_tot(1:3, itt)   = matmul(rmat_ms, fw%vec_Ac_new%v(1:3, iix, iiy, iiz))
+        rt%Ac_ext(1:3, itt-1) = matmul(rmat_ms, rt%Ac_tot(1:3, itt-1))
+        rt%Ac_ext(1:3, itt)   = matmul(rmat_ms, rt%Ac_tot(1:3, itt))
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
@@ -461,7 +464,8 @@ subroutine time_evolution_step_ms
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
+        fw%vec_j_em%v(1:3, iix, iiy, iiz) &
+            & = matmul(transpose(rmat_ms), -1.0d0 * curr(1:3, iimacro))
     end do
 
     if (mod(itt, out_ms_step) == 0) call print_linelog()

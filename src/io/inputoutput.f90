@@ -59,6 +59,8 @@ module inputoutput
   integer :: inml_jellium
   integer :: inml_code
   integer :: inml_band
+  integer :: inml_sbe
+  integer :: inml_dc
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -208,7 +210,9 @@ contains
     namelist/calculation/ &
       & theory, &
       & yn_md,  &
-      & yn_opt
+      & yn_opt, &
+      & yn_dc, &
+      & yn_conventional_from_dcdft
 
     namelist/control/ &
       & sysname, &
@@ -223,7 +227,6 @@ contains
       & time_shutdown,         &
       & method_wf_distributor, &
       & nblock_wf_distribute,  &
-      & read_gs_dns_cube,  &  !remove later (but this is used currently)
       & write_gs_wfn_k,    &  !remove later (but this is used currently)
       & write_rt_wfn_k        !remove later (but this is used currently)
 
@@ -235,9 +238,7 @@ contains
       & nproc_ob, &
       & nproc_rgrid, &
       & yn_ffte, &
-#ifdef USE_FFTW
       & yn_fftw, &
-#endif
       & yn_scalapack, &
       & yn_gramschmidt_blas, &
       & yn_eigenexa, &
@@ -291,7 +292,8 @@ contains
 
     namelist/kgrid/ &
       & num_kgrid, &
-      & file_kw
+      & file_kw, &
+      & dk_shift
 
     namelist/tgrid/ &
       & nt, &
@@ -327,7 +329,9 @@ contains
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero, &
       & method_init_density, &
-      & magdir_atom
+      & magdir_atom, &
+      & yn_preconditioning, &
+      & alpha_pre
 
     namelist/emfield/ &
       & trans_longi, &
@@ -373,22 +377,30 @@ contains
       & hx_m, &
       & hy_m, &
       & hz_m, &
-      & nksplit, &
-      & nxysplit, &
-      & nxvacl_m, &
-      & nxvacr_m, &
+      & nksplit, & 
+      & nxysplit, & 
+      & nxvacl_m, & 
+      & nxvacr_m, & 
+      & nxvac_m, &
+      & nyvac_m, &
+      & nzvac_m, &
       & nx_origin_m, &
       & ny_origin_m, &
       & nz_origin_m, &
+      & out_ms_region_ix_m, &
+      & out_ms_region_iy_m, &
+      & out_ms_region_iz_m, &
       & file_macropoint, &
       & set_ini_coor_vel,&
       & nmacro_write_group, &
-      & nmacro_chunk
+      & nmacro_chunk, &
+      & rmat_ms
 
     namelist/maxwell/             &
       & al_em,                    &
       & dl_em,                    &
       & num_rgrid_em,             &
+      & at_em,                    &
       & dt_em,                    &
       & nt_em,                    &
       & boundary_em,              &
@@ -406,8 +418,12 @@ contains
       & wave_input,               &
       & ek_dir1,                  &
       & source_loc1,              &
+      & gbeam_sigma_plane1,       &
+      & gbeam_sigma_line1,        &
       & ek_dir2,                  &
       & source_loc2,              &
+      & gbeam_sigma_plane2,       &
+      & gbeam_sigma_line2,        &
       & obs_num_em,               &
       & obs_samp_em,              &
       & obs_loc_em,               &
@@ -418,8 +434,25 @@ contains
       & film_thickness,           &
       & media_id_pml,             &
       & media_id_source1,         &
-      & media_id_source1,         &
       & media_id_source2,         &
+      & bloch_k_em,               &
+      & bloch_real_imag_em,       &
+      & ase_num_em,               &
+      & ase_ene_min_em,           &
+      & ase_ene_max_em,           &
+      & ase_wav_min_em,           &
+      & ase_wav_max_em,           &
+      & ase_smedia_id_em,         &
+      & ase_box_cent_em,          &
+      & ase_box_size_em,          &
+      & art_num_em,               &
+      & art_ene_min_em,           &
+      & art_ene_max_em,           &
+      & art_wav_min_em,           &
+      & art_wav_max_em,           &
+      & art_smedia_id_em,         &
+      & art_plane_top_em,         &
+      & art_plane_bot_em,         &
       & yn_make_shape,            &
       & yn_output_shape,          &
       & yn_copy_x,                &
@@ -436,6 +469,7 @@ contains
     namelist/analysis/ &
       & projection_option, &
       & out_projection_step, &
+      & threshold_projection, &
       & nenergy, &
       & de, &
       & out_rt_energy_step, &
@@ -451,8 +485,10 @@ contains
       & yn_out_dns, &
       & yn_out_dns_rt, &
       & yn_out_dns_ac_je, &
+      & yn_out_micro_je, &
       & out_dns_rt_step, &
       & out_dns_ac_je_step, &
+      & out_micro_je_step, &
       & out_old_dns, &
       & yn_out_dns_trans, &
       & out_dns_trans_energy, &
@@ -471,7 +507,15 @@ contains
       & format_voxel_data, &
       & nsplit_voxel_data, &
       & yn_lr_w0_correction, &
-      & out_magnetization_step, &
+      & yn_out_intraband_current, &
+      & yn_out_current_decomposed, &
+      & out_current_decomposed_step, &
+      & out_rt_spin_step, &
+      & yn_out_mag_decomposed_rt, &
+      & yn_out_mag_micro_rt, &
+      & yn_out_spin_current_decomposed, &
+      & yn_out_spin_current_micro, &
+      & yn_out_rt_energy_components, &
       & yn_out_perflog, &
       & format_perflog
 
@@ -492,7 +536,10 @@ contains
     namelist/opt/ &
       & nopt, &
       & max_step_len_adjust, &
-      & convrg_opt_fmax
+      & convrg_opt_fmax, &
+      & method_opt, &
+      & step_steep, &
+      & step_fire
 
     namelist/md/ &
       & ensemble, &
@@ -530,6 +577,27 @@ contains
       & ndiv_segment, &
       & kpt, &
       & kpt_label
+      
+    namelist/sbe/ &
+      & yn_vnl_correction, &
+      & num_sbe, &
+      & sysname_sbe, &
+      & nk_sbe, &
+      & nstate_sbe, &
+      & nelec_sbe, &
+      & al_sbe, &
+      & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
+      & norder_correction
+      
+    namelist/dc/ &
+      & num_fragment, &
+      & num_rgrid_buffer, &
+      & nproc_rgrid_tot, &
+      & yn_dc_lcfo, &
+      & yn_dc_lcfo_diag, &
+      & nstate_frag, &
+      & energy_cut, &
+      & lambda_cut
 
 !! == default for &unit ==
     unit_system='au'
@@ -570,6 +638,8 @@ contains
     theory              = 'tddft'
     yn_md               = 'n'
     yn_opt              = 'n'
+    yn_dc               = 'n'
+    yn_conventional_from_dcdft = 'n'
 !! == default for &control
     sysname               = 'default'
     base_directory        = './'
@@ -584,7 +654,6 @@ contains
     method_wf_distributor = 'single'
     nblock_wf_distribute = 16
     !remove later
-    read_gs_dns_cube = 'n'
     write_gs_wfn_k   = 'n'
     write_rt_wfn_k   = 'n'
 !! == default for &parallel
@@ -592,9 +661,7 @@ contains
     nproc_ob             = 0
     nproc_rgrid          = 0
     yn_ffte              = 'n'
-#ifdef USE_FFTW
     yn_fftw              = 'n'
-#endif
     yn_scalapack         = 'n'
     yn_gramschmidt_blas  = 'y'
     yn_eigenexa          = 'n'
@@ -646,6 +713,7 @@ contains
 !! == default for &kgrid
     num_kgrid = 1
     file_kw   = 'none'
+    dk_shift = 0d0
 !! == default for &tgrid
     nt = 0
     dt = 0
@@ -679,6 +747,8 @@ contains
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
     method_init_density  = 'wf'
     magdir_atom          = 0d0
+    yn_preconditioning   = 'n'
+    alpha_pre            = 0.6d0
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -726,20 +796,33 @@ contains
     hz_m       = 0d0
     nksplit    = 0
     nxysplit   = 0
-    nxvacl_m   = 1
-    nxvacr_m   = 1
+    nxvacl_m     = 0
+    nxvacr_m     = 0
+    nxvac_m(1:2) = 0
+    nyvac_m(1:2) = 0
+    nzvac_m(1:2) = 0
     nx_origin_m = 1
     ny_origin_m = 1
     nz_origin_m = 1
+    out_ms_region_ix_m(1) = -999999
+    out_ms_region_ix_m(2) = +999999
+    out_ms_region_iy_m(1) = -999999
+    out_ms_region_iy_m(2) = +999999
+    out_ms_region_iz_m(1) = -999999
+    out_ms_region_iz_m(2) = +999999
     file_macropoint = ''
     set_ini_coor_vel= 'n'
     nmacro_write_group= -1
     nmacro_chunk = 20
+    rmat_ms(1, 1:3) = (/ 1.0d0, 0.0d0, 0.0d0 /)
+    rmat_ms(2, 1:3) = (/ 0.0d0, 1.0d0, 0.0d0 /)
+    rmat_ms(3, 1:3) = (/ 0.0d0, 0.0d0, 1.0d0 /)
 
 !! == default for &maxwell
     al_em(:)                    = 0d0
     dl_em(:)                    = 0d0
     num_rgrid_em(:)             = 0
+    at_em                       = 0d0
     dt_em                       = 0d0
     nt_em                       = 0
     boundary_em(:,:)            = 'default'
@@ -757,10 +840,14 @@ contains
     wave_input                  = 'none'
     ek_dir1(:)                  = 0d0
     source_loc1(:)              = 0d0
+    gbeam_sigma_plane1(:)       =-1d0
+    gbeam_sigma_line1(:)        =-1d0
     ek_dir2(:)                  = 0d0
     source_loc2(:)              = 0d0
+    gbeam_sigma_plane2(:)       =-1d0
+    gbeam_sigma_line2(:)        =-1d0
     obs_num_em                  = 0
-    obs_samp_em                 = 1
+    obs_samp_em                 = 0
     obs_loc_em(:,:)             = 0d0
     obs_plane_ene_em(:,:)       = -1d0
     yn_obs_plane_em(:)          = 'n'
@@ -770,6 +857,24 @@ contains
     media_id_pml(:,:)           = 0
     media_id_source1            = 0
     media_id_source2            = 0
+    bloch_k_em(:)               = 0d0
+    bloch_real_imag_em(:)       = 'real'
+    ase_num_em                  = 0
+    ase_ene_min_em              = -1.0d0
+    ase_ene_max_em              = -1.0d0
+    ase_wav_min_em              = -1.0d0
+    ase_wav_max_em              = -1.0d0
+    ase_smedia_id_em            = 0
+    ase_box_cent_em(:)          = 0.0d0
+    ase_box_size_em(:)          = -1.0d0
+    art_num_em                  = 0
+    art_ene_min_em              = -1.0d0
+    art_ene_max_em              = -1.0d0
+    art_wav_min_em              = -1.0d0
+    art_wav_max_em              = -1.0d0
+    art_smedia_id_em            = 0
+    art_plane_bot_em(:)         = 0.0d0
+    art_plane_top_em(:)         = 0.0d0
     yn_make_shape               = 'n'
     yn_output_shape             = 'n'
     yn_copy_x                   = 'n'
@@ -786,6 +891,7 @@ contains
 !! == default for &analysis
     projection_option   = 'no'
     out_projection_step = 100
+    threshold_projection = 1d-6
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
     out_rt_energy_step  = 10
@@ -801,8 +907,10 @@ contains
     yn_out_dns          = 'n'
     yn_out_dns_rt       = 'n'
     yn_out_dns_ac_je    = 'n'
+    yn_out_micro_je     = 'n'
     out_dns_rt_step     = 50
     out_dns_ac_je_step  = 50
+    out_micro_je_step   = 50
     out_old_dns         = 'n'
     yn_out_dns_trans    = 'n'
     out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
@@ -823,7 +931,15 @@ contains
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
     yn_lr_w0_correction = 'n'
-    out_magnetization_step = 100
+    yn_out_intraband_current = 'n'
+    yn_out_current_decomposed = 'n'
+    out_current_decomposed_step = 100
+    out_rt_spin_step = 100
+    yn_out_mag_decomposed_rt = 'n'
+    yn_out_mag_micro_rt = 'n'
+    yn_out_spin_current_decomposed = 'n'
+    yn_out_spin_current_micro = 'n'
+    yn_out_rt_energy_components = 'n'
 
     yn_out_perflog      = 'y'
     format_perflog      = 'stdout'
@@ -844,6 +960,9 @@ contains
     nopt                = 100
     max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
     convrg_opt_fmax     =  1d-3
+    method_opt          =  'bfgs'
+    step_steep          =  0.5d0
+    step_fire           =  4.134d0/utime_to_au  !=0.1[fs]
 !! == default for &md
     ensemble              = 'nve'
     thermostat            = 'nose-hoover'
@@ -857,7 +976,7 @@ contains
 !! == default for &jellium
     yn_jm                = 'n'
     yn_charge_neutral_jm = 'y'
-    yn_output_dns_jm     = 'y'
+    yn_output_dns_jm     = 'yf'
     shape_file_jm        = 'none'
     num_jm               = 0
     rs_bohr_jm(:)        = 0d0
@@ -877,6 +996,27 @@ contains
     ndiv_segment(:) = 0
     kpt(:,:) = 0.0d0
     kpt_label(:) = ''
+!! == default for &sbe
+    yn_vnl_correction = 'n'
+    num_sbe = 1
+    sysname_sbe(:) = 'default'
+    nk_sbe(:) = -1
+    nstate_sbe(:) = -1
+    nelec_sbe(:) = -1
+    al_sbe(:,:) = 0.d0
+    al_vec1_sbe(:,:) = 0.d0
+    al_vec2_sbe(:,:) = 0.d0
+    al_vec3_sbe(:,:) = 0.d0
+    norder_correction = 0
+!! == default for &dc
+    num_fragment = 0
+    num_rgrid_buffer = 0
+    nproc_rgrid_tot = 1
+    yn_dc_lcfo = 'y'
+    yn_dc_lcfo_diag = 'y'
+    nstate_frag = 0
+    energy_cut = 0d0
+    lambda_cut = 1d-3
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -951,6 +1091,12 @@ contains
       read(fh_namelist, nml=band, iostat=inml_band)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=sbe, iostat=inml_sbe)
+      rewind(fh_namelist)
+      
+      read(fh_namelist, nml=dc, iostat=inml_dc)
+      rewind(fh_namelist)
+
       close(fh_namelist)
     end if
 
@@ -975,9 +1121,24 @@ contains
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
+    call string_lowercase(boundary_em(1,1))
+    call string_lowercase(boundary_em(1,2))
+    call string_lowercase(boundary_em(2,1))
+    call string_lowercase(boundary_em(2,2))
+    call string_lowercase(boundary_em(3,1))
+    call string_lowercase(boundary_em(3,2))
     do ii = 0,media_num
       call string_lowercase(media_type(ii))
     end do
+    call string_lowercase(wave_input)
+    call string_lowercase(bloch_real_imag_em(1))
+    call string_lowercase(bloch_real_imag_em(2))
+    call string_lowercase(bloch_real_imag_em(3))
+    if(n_s>0) then
+      do ii = 1,n_s
+        call string_lowercase(typ_s(ii))
+      end do
+    end if
     call string_lowercase(lattice)
 
 ! Broad cast
@@ -985,6 +1146,8 @@ contains
     call comm_bcast(theory             ,nproc_group_global)
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
+    call comm_bcast(yn_dc              ,nproc_group_global)
+    call comm_bcast(yn_conventional_from_dcdft,nproc_group_global)
 
 !! == bcast for &control
     call comm_bcast(sysname         ,nproc_group_global)
@@ -1007,7 +1170,6 @@ contains
     call comm_bcast(time_shutdown         ,nproc_group_global)
     call comm_bcast(method_wf_distributor ,nproc_group_global)
     call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
-    call comm_bcast(read_gs_dns_cube,nproc_group_global)
     call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
     call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
 
@@ -1016,9 +1178,7 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
-#ifdef USE_FFTW
     call comm_bcast(yn_fftw             ,nproc_group_global)
-#endif
     call comm_bcast(yn_scalapack        ,nproc_group_global)
     call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
@@ -1041,6 +1201,7 @@ contains
     call comm_bcast(nelec              ,nproc_group_global)
     call comm_bcast(nelec_spin         ,nproc_group_global)
     call comm_bcast(temperature        ,nproc_group_global)
+    if(temperature>=0d0) temperature = temperature * uenergy_to_au
     call comm_bcast(temperature_k      ,nproc_group_global)
     if(temperature_k>=0d0) temperature = temperature_k * kB_au ! Kelvin --> atomic units
     call comm_bcast(nelem              ,nproc_group_global)
@@ -1087,6 +1248,7 @@ contains
 !! == bcast for &kgrid
     call comm_bcast(num_kgrid,nproc_group_global)
     call comm_bcast(file_kw  ,nproc_group_global)
+    call comm_bcast(dk_shift ,nproc_group_global)
 !! == bcast for &tgrid
     call comm_bcast(nt,nproc_group_global)
     call comm_bcast(dt,nproc_group_global)
@@ -1141,6 +1303,8 @@ contains
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
     call comm_bcast(method_init_density   ,nproc_group_global)
     call comm_bcast(magdir_atom ,nproc_group_global)
+    call comm_bcast(yn_preconditioning    ,nproc_group_global)
+    call comm_bcast(alpha_pre             ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1212,17 +1376,24 @@ contains
     hy_m = hy_m * ulength_to_au
     call comm_bcast(hz_m      ,nproc_group_global)
     hz_m = hz_m * ulength_to_au
-    call comm_bcast(nksplit   ,nproc_group_global)
-    call comm_bcast(nxysplit  ,nproc_group_global)
-    call comm_bcast(nxvacl_m  ,nproc_group_global)
-    call comm_bcast(nxvacr_m  ,nproc_group_global)
+    call comm_bcast(nksplit   ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxysplit  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvacl_m  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvacr_m  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvac_m  ,nproc_group_global)
+    call comm_bcast(nyvac_m  ,nproc_group_global)
+    call comm_bcast(nzvac_m  ,nproc_group_global)
     call comm_bcast(nx_origin_m,nproc_group_global)
     call comm_bcast(ny_origin_m,nproc_group_global)
+    call comm_bcast(out_ms_region_ix_m,nproc_group_global)
+    call comm_bcast(out_ms_region_iy_m,nproc_group_global)
+    call comm_bcast(out_ms_region_iz_m,nproc_group_global)
     call comm_bcast(nz_origin_m,nproc_group_global)
     call comm_bcast(file_macropoint, nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
     call comm_bcast(nmacro_chunk,nproc_group_global)
+    call comm_bcast(rmat_ms,nproc_group_global)
 
 !! == bcast for &maxwell
     call comm_bcast(al_em                    ,nproc_group_global)
@@ -1230,6 +1401,8 @@ contains
     call comm_bcast(dl_em                    ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
     call comm_bcast(num_rgrid_em             ,nproc_group_global)
+    call comm_bcast(at_em                    ,nproc_group_global)
+    at_em = at_em * utime_to_au
     call comm_bcast(dt_em                    ,nproc_group_global)
     dt_em = dt_em * utime_to_au
     call comm_bcast(nt_em                    ,nproc_group_global)
@@ -1252,9 +1425,17 @@ contains
     call comm_bcast(ek_dir1                  ,nproc_group_global)
     call comm_bcast(source_loc1              ,nproc_group_global)
     source_loc1 = source_loc1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane1       ,nproc_group_global)
+    gbeam_sigma_plane1 = gbeam_sigma_plane1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line1        ,nproc_group_global)
+    gbeam_sigma_line1 = gbeam_sigma_line1 * ulength_to_au
     call comm_bcast(ek_dir2                  ,nproc_group_global)
     call comm_bcast(source_loc2              ,nproc_group_global)
     source_loc2 = source_loc2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane2       ,nproc_group_global)
+    gbeam_sigma_plane2 = gbeam_sigma_plane2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line2        ,nproc_group_global)
+    gbeam_sigma_line2 = gbeam_sigma_line2 * ulength_to_au
     call comm_bcast(obs_num_em               ,nproc_group_global)
     call comm_bcast(obs_samp_em              ,nproc_group_global)
     call comm_bcast(obs_loc_em               ,nproc_group_global)
@@ -1269,6 +1450,37 @@ contains
     call comm_bcast(media_id_pml             ,nproc_group_global)
     call comm_bcast(media_id_source1         ,nproc_group_global)
     call comm_bcast(media_id_source2         ,nproc_group_global)
+    call comm_bcast(bloch_k_em               ,nproc_group_global)
+    bloch_k_em = bloch_k_em / ulength_to_au
+    call comm_bcast(bloch_real_imag_em       ,nproc_group_global)
+    call comm_bcast(ase_num_em               ,nproc_group_global)
+    call comm_bcast(ase_ene_min_em           ,nproc_group_global)
+    ase_ene_min_em = ase_ene_min_em * uenergy_to_au
+    call comm_bcast(ase_ene_max_em           ,nproc_group_global)
+    ase_ene_max_em = ase_ene_max_em * uenergy_to_au
+    call comm_bcast(ase_wav_min_em           ,nproc_group_global)
+    ase_wav_min_em = ase_wav_min_em * ulength_to_au
+    call comm_bcast(ase_wav_max_em           ,nproc_group_global)
+    ase_wav_max_em = ase_wav_max_em * ulength_to_au
+    call comm_bcast(ase_smedia_id_em         ,nproc_group_global)
+    call comm_bcast(ase_box_cent_em          ,nproc_group_global)
+    ase_box_cent_em = ase_box_cent_em * ulength_to_au
+    call comm_bcast(ase_box_size_em          ,nproc_group_global)
+    ase_box_size_em = ase_box_size_em * ulength_to_au
+    call comm_bcast(art_num_em               ,nproc_group_global)
+    call comm_bcast(art_ene_min_em           ,nproc_group_global)
+    art_ene_min_em = art_ene_min_em * uenergy_to_au
+    call comm_bcast(art_ene_max_em           ,nproc_group_global)
+    art_ene_max_em = art_ene_max_em * uenergy_to_au
+    call comm_bcast(art_wav_min_em           ,nproc_group_global)
+    art_wav_min_em = art_wav_min_em * ulength_to_au
+    call comm_bcast(art_wav_max_em           ,nproc_group_global)
+    art_wav_max_em = art_wav_max_em * ulength_to_au
+    call comm_bcast(art_smedia_id_em         ,nproc_group_global)
+    call comm_bcast(art_plane_bot_em         ,nproc_group_global)
+    art_plane_bot_em = art_plane_bot_em * ulength_to_au
+    call comm_bcast(art_plane_top_em         ,nproc_group_global)
+    art_plane_top_em = art_plane_top_em * ulength_to_au
     call comm_bcast(yn_make_shape            ,nproc_group_global)
     call comm_bcast(yn_output_shape          ,nproc_group_global)
     call comm_bcast(yn_copy_x                ,nproc_group_global)
@@ -1287,6 +1499,7 @@ contains
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
     call comm_bcast(out_projection_step ,nproc_group_global)
+    call comm_bcast(threshold_projection,nproc_group_global)
     call comm_bcast(nenergy             ,nproc_group_global)
     call comm_bcast(de                  ,nproc_group_global)
     de = de * uenergy_to_au
@@ -1306,8 +1519,10 @@ contains
     call comm_bcast(yn_out_dns          ,nproc_group_global)
     call comm_bcast(yn_out_dns_rt       ,nproc_group_global)
     call comm_bcast(yn_out_dns_ac_je    ,nproc_group_global)
+    call comm_bcast(yn_out_micro_je     ,nproc_group_global)
     call comm_bcast(out_dns_rt_step     ,nproc_group_global)
     call comm_bcast(out_dns_ac_je_step  ,nproc_group_global)
+    call comm_bcast(out_micro_je_step   ,nproc_group_global)
     call comm_bcast(out_old_dns         ,nproc_group_global)
     call comm_bcast(yn_out_dns_trans    ,nproc_group_global)
     call comm_bcast(out_dns_trans_energy,nproc_group_global)
@@ -1328,7 +1543,15 @@ contains
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
     call comm_bcast(yn_lr_w0_correction ,nproc_group_global)
-    call comm_bcast(out_magnetization_step ,nproc_group_global)
+    call comm_bcast(yn_out_intraband_current   ,nproc_group_global)
+    call comm_bcast(yn_out_current_decomposed  ,nproc_group_global)
+    call comm_bcast(out_current_decomposed_step,nproc_group_global)
+    call comm_bcast(out_rt_spin_step ,nproc_group_global)
+    call comm_bcast(yn_out_mag_decomposed_rt   ,nproc_group_global)
+    call comm_bcast(yn_out_mag_micro_rt   ,nproc_group_global)
+    call comm_bcast(yn_out_spin_current_decomposed,nproc_group_global)
+    call comm_bcast(yn_out_spin_current_micro  ,nproc_group_global)
+    call comm_bcast(yn_out_rt_energy_components ,nproc_group_global)
     call comm_bcast(yn_out_perflog      ,nproc_group_global)
     call comm_bcast(format_perflog      ,nproc_group_global)
 
@@ -1352,6 +1575,10 @@ contains
     call comm_bcast(nopt                ,nproc_group_global)
     call comm_bcast(max_step_len_adjust ,nproc_group_global)
     call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
+    call comm_bcast(method_opt          ,nproc_group_global)
+    call comm_bcast(step_steep          ,nproc_group_global)
+    call comm_bcast(step_fire           ,nproc_group_global)
+    step_fire     = step_fire * utime_to_au
 !! == bcast for &md
     call comm_bcast(ensemble               ,nproc_group_global)
     call comm_bcast(thermostat             ,nproc_group_global)
@@ -1387,6 +1614,32 @@ contains
     call comm_bcast(ndiv_segment    ,nproc_group_global)
     call comm_bcast(kpt             ,nproc_group_global)
     call comm_bcast(kpt_label       ,nproc_group_global)
+!! == bcast for sbe
+    call comm_bcast(yn_vnl_correction,nproc_group_global)
+    call comm_bcast(num_sbe          ,nproc_group_global)
+    call comm_bcast(sysname_sbe      ,nproc_group_global)
+    call comm_bcast(nk_sbe           ,nproc_group_global)
+    call comm_bcast(nstate_sbe       ,nproc_group_global)
+    call comm_bcast(nelec_sbe        ,nproc_group_global)
+    call comm_bcast(al_sbe           ,nproc_group_global)
+    al_sbe = al_sbe * ulength_to_au
+    call comm_bcast(al_vec1_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec2_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec3_sbe      ,nproc_group_global)
+    al_vec1_sbe = al_vec1_sbe * ulength_to_au
+    al_vec2_sbe = al_vec2_sbe * ulength_to_au
+    al_vec3_sbe = al_vec3_sbe * ulength_to_au
+    call comm_bcast(norder_correction,nproc_group_global)
+!! == bcast for dc
+    call comm_bcast(num_fragment ,nproc_group_global)
+    call comm_bcast(num_rgrid_buffer, nproc_group_global)
+    call comm_bcast(nproc_rgrid_tot, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(nstate_frag, nproc_group_global)
+    call comm_bcast(energy_cut, nproc_group_global)
+    energy_cut = energy_cut * uenergy_to_au
+    call comm_bcast(lambda_cut, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -1772,6 +2025,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc', yn_dc
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_conventional_from_dcdft', yn_conventional_from_dcdft
 
       if(inml_control >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
@@ -1787,7 +2042,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
 
@@ -1804,9 +2058,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
-#ifdef USE_FFTW
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
-#endif
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
@@ -1882,6 +2134,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(2)', num_kgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(3)', num_kgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_kw', trim(file_kw)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
 
       if(inml_tgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
@@ -1923,6 +2178,8 @@ contains
       if(method_init_density == 'pp_magdir') then
         write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
       end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
@@ -1991,13 +2248,22 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacr_m', nxvacr_m
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nxvac_m', nxvac_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nyvac_m', nyvac_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nzvac_m', nzvac_m(1:2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_ix_m', out_ms_region_ix_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iy_m', out_ms_region_iy_m(1:2)
+      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iz_m', out_ms_region_iz_m(1:2)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,1)', rmat_ms(1:3,1)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,2)', rmat_ms(1:3,2)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,3)', rmat_ms(1:3,3)
 
       if(inml_maxwell >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', inml_maxwell
@@ -2010,6 +2276,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'at_em', at_em
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
@@ -2040,12 +2307,24 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(1)', source_loc1(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(2)', source_loc1(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(3)', source_loc1(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(1)', gbeam_sigma_plane1(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(2)', gbeam_sigma_plane1(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(3)', gbeam_sigma_plane1(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(1)', gbeam_sigma_line1(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(2)', gbeam_sigma_line1(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(3)', gbeam_sigma_line1(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(1)', ek_dir2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(2)', ek_dir2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(3)', ek_dir2(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(1)', gbeam_sigma_plane2(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(2)', gbeam_sigma_plane2(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(3)', gbeam_sigma_plane2(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(1)', gbeam_sigma_line2(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(2)', gbeam_sigma_line2(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(3)', gbeam_sigma_line2(3)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
       if(obs_num_em==0) then
@@ -2079,6 +2358,36 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(1)', bloch_k_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(2)', bloch_k_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(3)', bloch_k_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(1)', bloch_real_imag_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(2)', bloch_real_imag_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(3)', bloch_real_imag_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'ase_num_em', ase_num_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_min_em', ase_ene_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_max_em', ase_ene_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_min_em', ase_wav_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_max_em', ase_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'ase_smedia_id_em', ase_smedia_id_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(1)', ase_box_cent_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(2)', ase_box_cent_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(3)', ase_box_cent_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(1)', ase_box_size_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(2)', ase_box_size_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(3)', ase_box_size_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_num_em', art_num_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_min_em', art_ene_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_smedia_id_em', art_smedia_id_em
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(1)', art_plane_top_em(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(2)', art_plane_top_em(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(3)', art_plane_top_em(3)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
@@ -2106,6 +2415,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_projection', threshold_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
@@ -2121,8 +2431,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_micro_je', yn_out_micro_je
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_ac_je_step', out_dns_ac_je_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_micro_je_step', out_micro_je_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
@@ -2142,7 +2454,15 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_magnetization_step', out_magnetization_step
+      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_intraband_current', yn_out_intraband_current
+      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_current_decomposed', yn_out_current_decomposed
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_current_decomposed_step', out_current_decomposed_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_spin_step', out_rt_spin_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_decomposed_rt',yn_out_mag_decomposed_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_micro_rt',yn_out_mag_micro_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_decomposed', yn_out_spin_current_decomposed
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_micro',yn_out_spin_current_micro
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rt_energy_components',yn_out_rt_energy_components
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
@@ -2169,6 +2489,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_opt', method_opt
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_steep', step_steep
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_fire', step_fire
+
       if(inml_md >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', inml_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
@@ -2231,12 +2555,50 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', ndiv_segment(1:num_of_segments)
       do i = 1, num_of_segments+1
-      write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
       end do 
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
-
+      
+      if(inml_sbe >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)') 'sysname_sbe(',i,')', sysname_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nk_sbe(',i,')', nk_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nstate_sbe(',i,')', nstate_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nelec_sbe(',i,')', nelec_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(1',i,')', al_sbe(1,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(2',i,')', al_sbe(2,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(3',i,')', al_sbe(3,i)
+      end do
+      do i = 1,num_sbe
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec1_sbe(1:3',i,')', al_vec1_sbe(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
+      end do
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      
+      if(inml_dc >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+      
       close(fh_variables_log)
-
     end if
 
     call comm_bcast(ierr_nml,nproc_group_global)
@@ -2268,13 +2630,13 @@ contains
     ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
     call yn_argument_check(yn_md)
     call yn_argument_check(yn_opt)
+    call yn_argument_check(yn_dc)
+    call yn_argument_check(yn_conventional_from_dcdft)
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_ffte)
-#ifdef USE_FFTW
     call yn_argument_check(yn_fftw)
-#endif
     call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_gramschmidt_blas)
     call yn_argument_check(yn_eigenexa)
@@ -2292,12 +2654,20 @@ contains
     call yn_argument_check(yn_out_dns)
     call yn_argument_check(yn_out_dns_rt)
     call yn_argument_check(yn_out_dns_ac_je)
+    call yn_argument_check(yn_out_micro_je)
     call yn_argument_check(yn_out_dns_trans)
     call yn_argument_check(yn_out_elf)
     call yn_argument_check(yn_out_elf_rt)
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_intraband_current)
+    call yn_argument_check(yn_out_current_decomposed)
+    call yn_argument_check(yn_out_spin_current_decomposed)
+    call yn_argument_check(yn_out_mag_decomposed_rt)
+    call yn_argument_check(yn_out_mag_micro_rt)
+    call yn_argument_check(yn_out_spin_current_micro)
+    call yn_argument_check(yn_out_rt_energy_components)
     call yn_argument_check(yn_out_gs_sgm_eps)
     call yn_argument_check(yn_set_ini_velocity)
     call yn_argument_check(yn_jm)
@@ -2322,6 +2692,8 @@ contains
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
     call yyynnn_argument_check(yn_symmetry)
+    call yn_argument_check(yn_dc_lcfo)
+    call yn_argument_check(yn_dc_lcfo_diag)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
@@ -2371,10 +2743,17 @@ contains
 
     select case(method_init_density)
     case ('wf','pp') ; continue
+    case ('read_dns_cube')
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'SALMON will read dns.cube (method_init_density=read_dns_cube)'
+        if(yn_out_dns=='y' .and. format_voxel_data=='cube') then
+          write(*,*) '!!! Warning: SALMON will rewrite dns.cube (yn_out_dns=y)'
+        endif
+      end if
     case('pp_magdir')
       if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
-      if(spin=='unpolarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
-    case default     ; stop 'method_init_density must be wf or pp'
+      if(spin/='polarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
+    case default     ; stop 'method_init_density must be wf, pp, or read_dns_cube'
     end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
@@ -2382,7 +2761,7 @@ contains
       case("gaussian","lorentzian")
         continue
       case default
-        stop 'set out_dos_meshotd to "gaussian" or "lorentzian"'
+        stop 'set out_dos_function to "gaussian" or "lorentzian"'
       end select
     end if
 
@@ -2407,8 +2786,15 @@ contains
     select case(spin)
     case('unpolarized','polarized')
       continue
+    case('noncollinear')
+      if(yn_spinorbit=='n') stop "spin=noncollinear with yn_spinorbit=n is not supported"
+#ifdef USE_OPENACC
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'CAUTION: noncollinear spin with OpenACC is under development'
+      endif
+#endif
     case default
-      stop "set spin to 'unpolarized' or 'polarized'"
+      stop "set spin to 'unpolarized', 'polarized', or 'noncollinear'"
     end select
 
   ! for main_tddft
@@ -2443,9 +2829,16 @@ contains
     end select
 
     if( yn_spinorbit == 'y' )then
-       if( spin == 'unpolarized' )then
-          stop 'spin = "polarized" is necessary when spin-orbit calculation is performed'
+       if( spin /= 'noncollinear' ) then
+          stop "spin = 'noncollinear' is necessary when spin-orbit calculation is performed"
        end if
+    end if
+        
+    if( spin /= 'noncollinear' ) then
+      if(yn_out_spin_current_decomposed=='y' .or. yn_out_spin_current_micro=='y' &
+      & .or. yn_out_mag_decomposed_rt=='y' .or. yn_out_mag_micro_rt=='y') then
+        stop "Specify spin = 'noncollinear'"
+      end if
     end if
 
     if(theory=='single_scale_maxwell_tddft') then
@@ -2480,14 +2873,52 @@ contains
        end if
     endif
 
-    select case(method_poisson)
-    case ('cg','ft') ; continue
-    case default     ; stop "method_poisson must be 'cg' or 'ft'"
+    select case(method_opt)
+    case ('bfgs','steep','fire') ; continue
+    case default            ; stop 'method_opt must be "bfgs", "steep" or "fire"'
     end select
 
-#ifdef USE_FFTW
-    if(yn_ffte=='y'.and.yn_fftw=='y') then
+    select case(method_poisson)
+    case ('cg','ft','dirichlet') ; continue
+    case default                 ; stop "method_poisson must be 'cg', 'ft' or 'dirichlet'"
+    end select
+
+    select case(projection_option)
+    case ('no','gs','td') ; continue
+    case default          ; stop "projection_option must be 'no','gs', or 'td'"
+    end select
+
+    if(yn_ffte=='y'.and. yn_fftw=='y') then
       stop "either yn_ffte or yn_fftw can be specified"
+    end if
+
+    if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
+      stop "yn_out_rt_energy_components=y is supported for periodic systems only"
+    end if
+    
+    if(yn_dc=='y') then
+      if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
+      if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
+      !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
+      if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
+      & stop "DC method (yn_dc=y): num_fragment must be specified."
+      if(yn_periodic=='n') stop "DC method (yn_dc=y): yn_periodic=y must be specified."
+      if(.not.if_orthogonal_tmp) stop "DC method (yn_dc=y): use orthogonal coordinate."
+      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
+      & stop "DC method (yn_dc=y): # of k-points must be 1."
+      if(dl(1)*dl(2)*dl(3)/=0) stop "DC method (yn_dc=y): use al & num_rgrid."
+      if(yn_restart=='y') stop "DC method (yn_dc=y): yn_restart=y is not supported."
+      if(nscf_init_mix_zero.gt.1) stop "DC method (yn_dc=y): nscf_init_mix_zero is not supported."
+      if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
+      if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
+      if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
+    end if
+
+#ifdef USE_FFTW
+#else
+    if(yn_fftw=='y') then
+      stop "yn_fftw='y': Recompile with --enable-fftw"
     end if
 #endif
 

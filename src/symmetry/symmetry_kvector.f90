@@ -9,14 +9,15 @@ module sym_kvector
 
 contains
 
-  subroutine init_sym_kvector( kvec_io, weight, nkvec, blatvec )
+  subroutine init_sym_kvector( kvec_io, weight_io, nkvec, blatvec )
+    use salmon_global, only: file_kw
     implicit none
-    real(8),intent(inout) :: kvec_io(:,:), weight(:)
+    real(8),intent(inout) :: kvec_io(:,:), weight_io(:)
     integer,intent(inout) :: nkvec
     real(8),optional,intent(in) :: blatvec(3,3)
-    real(8),allocatable :: kvec(:,:), k_list(:,:), Skvec(:,:)
+    real(8),allocatable :: kvec(:,:), k_list(:,:), Skvec(:,:), weight(:)
     real(8) :: blatinv(3,3)
-    integer :: isym, nsym, ik, n_k_list,i_list_0,i
+    integer :: isym, nsym, ik, n_k_list,i_list_0,i,jk
     integer,allocatable :: i_list(:)
 
     if ( .not.use_symmetry ) return
@@ -24,6 +25,7 @@ contains
     if ( DISPLAY ) write(*,'(a60)') repeat("-",36)//" init_sym_kvector(start)"
 
     allocate( kvec(3,nkvec) ); kvec=0.0d0
+    allocate( weight(nkvec) )
 
     if ( present(blatvec) ) then
        call get_inverse_lattice( blatvec, blatinv )
@@ -31,6 +33,7 @@ contains
     else
        kvec=kvec_io
     end if
+    weight = weight_io
 
     nsym=size(SymMatB,3)
 
@@ -44,11 +47,11 @@ contains
           Skvec(:,isym)=matmul( SymMatB(:,1:3,isym), kvec(:,ik) )
           call shift_vec_into_bz( Skvec(:,isym) )
        end do ! isym
-       call check_k_list( n_k_list, k_list, i_list, Skvec )
+       call check_k_list( n_k_list, k_list, i_list, Skvec, weight, weight_io(ik) )
     end do ! ik
 
     kvec_io=0.0d0
-    weight=0.0d0
+    weight_io=0.0d0
 
     i_list_0=0
     i=0
@@ -61,22 +64,31 @@ contains
           else
              kvec_io(:,i)=k_list(:,i_list_0)
           end if
-          weight(i)=dble(count(i_list==i_list_0))/dble(nkvec)
+          if(file_kw /= 'none') then
+             do jk=1,n_k_list
+                if(i_list(jk)==i_list_0) &
+                     weight_io(i)=weight_io(i) + weight(i_list_0)
+             enddo
+          else
+             !assuming equal weight 
+             weight_io(i)=dble(count(i_list==i_list_0))/dble(nkvec)
+          endif
        end if
     end do
     nkvec=i
 
     if ( DISPLAY ) then
        do i=1,nkvec
-          write(*,'(i4,f10.5,2x,3f10.5)') i, weight(i), kvec_io(:,i)
+          write(*,'(i4,f10.5,2x,3f10.5)') i, weight_io(i), kvec_io(:,i)
        end do
-       write(*,*) "sum(weight)=",sum(weight)
+       write(*,*) "sum(weight)=",sum(weight_io)
     end if
 
     deallocate( i_list )
     deallocate( k_list )
     deallocate( Skvec )
     deallocate( kvec )
+    deallocate( weight )
 
     if ( DISPLAY ) write(*,'(a60)') repeat("-",38)//" init_sym_kvector(end)"
 
@@ -119,12 +131,12 @@ contains
     end do
   end subroutine shift_vec_into_bz
 
-  subroutine check_k_list( n_k_list, k_list, i_list, kvec )
+  subroutine check_k_list( n_k_list, k_list, i_list, kvec, wgt, wgt_io )
     implicit none
     integer,intent(inout) :: n_k_list
-    real(8),intent(inout) :: k_list(:,:)
+    real(8),intent(inout) :: k_list(:,:), wgt(:)
     integer,intent(inout) :: i_list(:)
-    real(8),intent(in) :: kvec(:,:)
+    real(8),intent(in) :: kvec(:,:), wgt_io
     real(8) :: d
     integer :: i,isym,i_k_list
 
@@ -137,8 +149,8 @@ contains
     i_k_list = n_k_list
 
     k_list(:,n_k_list) = kvec(:,1)
-
     i_list(n_k_list)   = i_k_list
+    wgt(n_k_list) = wgt_io
 
     do isym=2,size(kvec,2)
        do i=1,n_k_list
@@ -148,7 +160,8 @@ contains
        if ( i > n_k_list ) then
           n_k_list = n_k_list + 1
           k_list(:,n_k_list) = kvec(:,isym)
-          i_list(n_k_list) = i_k_list
+          i_list(n_k_list)   = i_k_list
+          wgt(n_k_list) = wgt_io
        end if
     end do ! isym
 

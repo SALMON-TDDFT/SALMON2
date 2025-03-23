@@ -56,6 +56,7 @@ module structures
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
     real(8),allocatable :: Force(:,:)    ! (1:3,1:nion), force on atom
+    integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field
     real(8) :: vec_Ac(3) ! A/c (spatially averaged), A: vector potential, c: speed of light
     type(s_vector) :: Ac_micro ! A/c (microscopic)      ! for single-scale Maxwell-TDDFT
@@ -198,6 +199,7 @@ module structures
   type s_stencil
     logical :: if_orthogonal
     real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
+    real(8) :: coef_lap0_nd1,coef_lap_nd1(1,3),coef_nab_nd1(1,3)
     real(8) :: coef_f(6) ! for non-orthogonal lattice
   end type s_stencil
 
@@ -256,7 +258,6 @@ module structures
     integer,allocatable :: jxyz(:,:,:)
     real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
-    real(8),allocatable :: duv(:,:,:)
     integer :: nlma
     integer,allocatable :: lma_tbl(:,:)
     integer,allocatable :: ia_tbl(:)
@@ -269,7 +270,6 @@ module structures
     integer,allocatable :: ia_tbl_so(:)
     real(8),allocatable :: rinv_uvu_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
-    complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
     !
     real(8),allocatable :: Rion_old(:,:) ! old position
@@ -371,6 +371,8 @@ module structures
     complex(8),allocatable :: ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
     complex(8),allocatable :: ff1(:,:,:),ff2(:,:,:) ! for isolated_ffte
     complex(8),allocatable :: ff3x(:,:,:),ff3y(:,:,:),ff3z(:,:,:),ff4x(:,:,:),ff4y(:,:,:),ff4z(:,:,:) ! for isolated_ffte
+  ! for dirichlet boundary condition
+    real(8),allocatable :: dgf(:,:,:)
   ! for FFTE
     complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)
 #ifdef USE_FFTW
@@ -392,6 +394,10 @@ module structures
   type s_opt
      real(8),allocatable :: a_dRion(:), dFion(:)
      real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
+     real(8),allocatable :: v_fire(:)
+     real(8)             :: step_fire
+     integer             :: p_times
+     real(8)             :: alpha_fire
   end type s_opt
 
   type s_md
@@ -411,7 +417,10 @@ module structures
     integer :: fh_pulse
     integer :: fh_dft_md
     integer :: fh_ovlp,fh_nex
-    integer :: fh_mag,fh_gs_mag
+    integer :: fh_current_decomposed, fh_intra_current
+    integer :: fh_rt_spin
+    integer :: fh_mag_decomposed_rt,fh_spin_current_decomposed
+    integer :: fh_trj
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
@@ -419,7 +428,6 @@ module structures
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
     character(256) :: file_ovlp,file_nex
-    character(256) :: file_mag, file_gs_mag
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
@@ -429,13 +437,14 @@ module structures
 ! +-----------------------------------+
 
   type s_cg
-    type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
+    type(s_orbital) :: xk,hxk,gk,pre_gk,pk,pko,hwf
   end type s_cg
 
   type s_mixing
     logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
+    type(s_scalar),allocatable :: Vh_in(:), Vh_out(:), Vxc_in(:,:), Vxc_out(:,:)
     real(8) :: mixrate, alpha_mb, beta_p
     real(8) :: convergence_value_prev
   end type s_mixing
@@ -457,6 +466,35 @@ module structures
      real(8) :: al(3)
      integer,allocatable :: myrank(:), iaddress(:,:), iaddress_new(:,:)
   end type s_k_expand
+  
+! Divide-and-Conquer method
+  type s_dcdft
+  ! summation
+    integer :: n_frag ! # of fragments (subsystems)
+    integer :: nxyz_domain(3) ! # of r-grid points for the core domain
+    integer :: nxyz_buffer(3) ! # of r-grid points for the buffer region
+    integer,allocatable :: ixyz_frag(:,:) ! r-grid index of the fragment origin
+    real(8),allocatable :: rxyz_frag(:,:) ! position of the fragment origin
+  ! total system
+    integer :: icomm_tot, id_tot, isize_tot ! MPI communicator, process ID, & # of processes
+    character(256) :: base_directory
+    integer :: nstate_tot ! nstate for the total system
+    real(8) :: elec_num_tot ! total electron number
+    type(s_dft_system)      :: system_tot
+    type(s_parallel_info)   :: info_tot
+    type(s_rgrid)           :: lg_tot,mg_tot
+    type(s_pp_grid)         :: ppg_tot
+    type(s_reciprocal_grid) :: fg_tot
+    type(s_poisson)         :: poisson_tot
+    type(s_sendrecv_grid)   :: srg_scalar_tot
+    type(s_scalar) :: vpsl_tot,vh_tot,rho_tot
+    type(s_scalar),allocatable :: rho_tot_s(:),vloc_tot(:),vxc_tot(:)
+  ! own fragment
+    integer :: i_frag       ! fragment index
+    integer :: icomm_frag, id_frag, isize_frag ! MPI communicator, process ID, & # of processes
+    integer :: nstate_frag  ! nstate for the fragment
+    integer,allocatable :: jxyz_tot(:,:)  ! r-grid (fragment) --> r-grid (total)
+  end type s_dcdft
 
 ! +----------------------------------+
 ! | for TDDFT real-time calculations |
@@ -475,8 +513,9 @@ module structures
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
     ! for projection_option
-    type(s_dft_system) :: system_gs
-    type(s_parallel_info) :: info_gs
+    type(s_dft_system) :: system_proj
+    type(s_parallel_info) :: info_proj
+    type(s_sendrecv_grid) :: srg_proj
     type(s_scalar),allocatable :: vloc0(:)  ! =v_local(1:nspin) @ t=0 (GS)
     type(s_orbital) :: tpsi0,ttpsi0,htpsi0
     type(s_cg) :: cg
@@ -727,13 +766,11 @@ contains
     DEAL(ppg%mps)
     DEAL(ppg%jxyz)
     DEAL(ppg%uv)
-    DEAL(ppg%duv)
     DEAL(ppg%lma_tbl)
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
     DEAL(ppg%uv_so)
-    DEAL(ppg%duv_so)
   end subroutine deallocate_pp_grid
 
   subroutine deallocate_scalar(x)

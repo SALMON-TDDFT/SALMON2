@@ -31,6 +31,7 @@ use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
 use nvtx
+use parallelization, only: nproc_id_global
 implicit none
 
 type(s_rgrid) :: lg
@@ -154,7 +155,7 @@ close(030) ! laser
 
 !------------ Writing part -----------
 
-! write RT: 
+
 call timer_begin(LOG_WRITE_RT_RESULTS)
 
 !
@@ -172,6 +173,10 @@ case(3)
     call write_pulse_3d(ofl,rt)
   end if
 end select
+
+if(comm_is_root(nproc_id_global))then
+  close(ofl%fh_rt)  ! Close _rt.data file
+end if
 
 call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)

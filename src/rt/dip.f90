@@ -15,7 +15,6 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module dip
-  use nvtx
   implicit none
 
 contains
@@ -28,6 +27,7 @@ subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
   use inputoutput, only: au_length_aa, au_energy_ev, natom, au_time_fs
   use salmon_global
   use inputoutput, only: yn_md
+  use nvtx
   implicit none
   integer,intent(in) :: comm
   integer,intent(in) :: itt
@@ -116,6 +116,7 @@ end subroutine subdip
 subroutine calc_dip(comm,lg,mg,system,rho_s,rbox_array2)
   use structures, only: s_rgrid,s_dft_system,s_scalar
   use communication, only: comm_summation
+  use nvtx
   implicit none
   integer,           intent(in) :: comm
   type(s_rgrid) ,    intent(in) :: lg

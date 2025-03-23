@@ -18,7 +18,6 @@
 #include "config.h"
 
 module density_matrix
-  use nvtx
   implicit none
   integer,private,parameter :: Nd = 4
 
@@ -33,6 +32,7 @@ contains
     use sym_rho_sub, only: sym_rho
     use salmon_global, only: yn_spinorbit
     use noncollinear_module, only: calc_dm_noncollinear, rot_dm_noncollinear
+    use nvtx
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -220,6 +220,7 @@ contains
     use code_optimization, only: current_omp_mode
     use timer
     use iso_c_binding
+    use nvtx
     implicit none
 #if defined(USE_OPENACC)
     interface
@@ -335,19 +336,44 @@ contains
 !$acc end kernels
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
-!$acc kernels copyin(ispin,im)
+      
+      if ( yn_jm == 'n' ) then
+        if ( yn_spinorbit=='y' ) then
+          call timer_begin(LOG_CURRENT_SO_NONLOCAL)
+!$acc kernels copyin(ispin,im) copy(jx,jy,jz)
 !$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
-        wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
-        jx = jx + wrk4(1)
-        jy = jy + wrk4(2)
-        jz = jz + wrk4(3)
-      end do
-      end do
+          do ik=info%ik_s,info%ik_e
+          do io=info%io_s,info%io_e
+            call calc_current_nonlocal_so &
+                 ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+            wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+            jx = jx + wrk4(1)
+            jy = jy + wrk4(2)
+            jz = jz + wrk4(3)
+          end do
+          end do
 !$acc end kernels
 !$acc exit data copyout(jx,jy,jz)
+          call timer_end(LOG_CURRENT_SO_NONLOCAL)
+        else ! yn_spinorbit=='y'
+!$acc kernels copyin(ispin,im)
+!$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
+          do ik=info%ik_s,info%ik_e
+          do io=info%io_s,info%io_e
+            call calc_current_nonlocal(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+            wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+            jx = jx + wrk4(1)
+            jy = jy + wrk4(2)
+            jz = jz + wrk4(3)
+          end do
+          end do
+!$acc end kernels
+!$acc exit data copyout(jx,jy,jz)
+        end if ! yn_spinorbit=='y'
+      else ! yn_jm == 'n'
+        wrk3=0.d0
+      end if ! yn_jm == 'n'
+
       wrk4(1) = jx
       wrk4(2) = jy
       wrk4(3) = jz
@@ -586,6 +612,100 @@ contains
     jw = jw * 2d0
     return
   end subroutine calc_current_nonlocal_rdivided
+  
+!===================================================================================================================================
+  
+! curr(ispin) = \sum_{ik,io} [ system%rocc(io,ik,ispin)*system%wtk(ik)* curr_decomp(ispin,io,ik) ]
+! curr: the current density
+! curr_decomp: decomposition of the current density
+  subroutine calc_current_decomposed(system,mg,stencil,info,srg,psi,ppg,curr_decomp)
+    use structures
+    use salmon_global, only: yn_jm,yn_spinorbit
+    use sendrecv_grid, only: update_overlap_complex8
+    use communication, only: comm_summation
+    use nonlocal_potential, only: calc_uVpsi_rdivided
+    use pseudo_pt_current_so, only: calc_current_nonlocal_so,calc_current_nonlocal_rdivided_so
+    implicit none
+    type(s_dft_system)   ,intent(in) :: system
+    type(s_rgrid)        ,intent(in) :: mg
+    type(s_stencil)      ,intent(in) :: stencil
+    type(s_parallel_info),intent(in) :: info
+    type(s_sendrecv_grid)            :: srg
+    type(s_orbital)                  :: psi
+    type(s_pp_grid)      ,intent(in) :: ppg
+    real(8)                          :: curr_decomp(3,system%nspin,system%no,system%nk)
+    !
+    integer :: ispin,im,ik,io,nspin,ngrid
+    real(8),dimension(3) :: wrk1,wrk2,wrk3
+    real(8) :: BT(3,3),kAc(3)
+    real(8) :: curr_wrk(3,system%nspin,system%no,system%nk)
+    complex(8),allocatable :: uVpsibox (:,:,:,:,:)
+    complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+    complex(8),allocatable :: uVpsi(:)
+    real(8) :: jx,jy,jz
+
+    im = 1
+    nspin = system%nspin
+    ngrid = system%ngrid
+
+    BT = transpose(system%rmatrix_B)
+
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
+      call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+      allocate(uVpsi(ppg%Nlma))
+    end if
+
+  ! overlap region communication
+    if(info%if_divide_rspace) then
+      call update_overlap_complex8(srg, mg, psi%zwf)
+    end if
+
+    curr_wrk = 0d0
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    
+      do ispin=1,nspin
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
+                            ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
+        wrk2 = matmul(BT,wrk2)
+        if ( yn_jm == 'n' ) then
+          if ( yn_spinorbit=='y' ) then
+            if ( info%if_divide_rspace ) then
+              call calc_current_nonlocal_rdivided_so &
+                   ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,info%icomm_r )
+            else
+              call calc_current_nonlocal_so &
+                   ( wrk3,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+            end if
+          else
+            if ( info%if_divide_rspace)then
+              uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+              call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
+            else
+              call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+            end if
+          end if
+        else
+          wrk3=0d0
+        end if
+        curr_wrk(:,ispin,io,ik) = (wrk1 + wrk2 + wrk3) / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      end do ! ispin
+      
+      if ( yn_spinorbit=='y' ) then
+        curr_wrk(:,1,io,ik) = curr_wrk(:,1,io,ik) + curr_wrk(:,2,io,ik)
+        curr_wrk(:,2,io,ik) = curr_wrk(:,1,io,ik)
+      end if
+      
+    end do ! io
+    end do ! ik
+    
+    call comm_summation(curr_wrk,curr_decomp,3*nspin*system%no*system%nk,info%icomm_rko)
+
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
+
+    return
+  end subroutine calc_current_decomposed
 
 !===================================================================================================================================
 
@@ -594,15 +714,15 @@ contains
     use communication, only: comm_summation
     use timer
     implicit none
-    type(s_dft_system)      ,intent(in) :: system
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_stencil)         ,intent(in) :: stencil
+    type(s_dft_system)   ,intent(in) :: system
+    type(s_rgrid)        ,intent(in) :: mg
+    type(s_stencil)      ,intent(in) :: stencil
     type(s_parallel_info),intent(in) :: info
-    type(s_orbital)         ,intent(in) :: psi
-    type(s_vector)                      :: curr ! electron number current density (without rho*A/c)
+    type(s_orbital)      ,intent(in) :: psi
+    type(s_vector)                   :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin,ix,iy,iz
-    real(8) :: kAc(3)
+    real(8) :: k(3)
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
 
     call timer_begin(LOG_MCURRENT_CALC)
@@ -622,9 +742,9 @@ contains
     do io=info%io_s,info%io_e
     do ispin=1,nspin
 
-      kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      k(1:3) = system%vec_k(1:3,ik)
       call micro_current(mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz, &
-      & stencil%coef_nab,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
+      & stencil%coef_nab,k,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
 
 !$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=is(3),ie(3)
@@ -658,11 +778,11 @@ contains
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,tpsi,jw)
+    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,k,tpsi,jw)
       implicit none
       integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3), &
                              & idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
-      real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
+      real(8)   ,intent(in) :: nabt(Nd,3),k(3)
       complex(8),intent(in) :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
@@ -679,7 +799,7 @@ contains
                + nabt(2,1) * ( tpsi(DX(2)) - tpsi(DX(-2)) ) &
                + nabt(3,1) * ( tpsi(DX(3)) - tpsi(DX(-3)) ) &
                + nabt(4,1) * ( tpsi(DX(4)) - tpsi(DX(-4)) )
-          jw(1,ix,iy,iz) = aimag(px*xtmp) + kAc(1) * abs(px)**2
+          jw(1,ix,iy,iz) = aimag(px*xtmp) + k(1) * abs(px)**2
         end do
 
 !OCL swp
@@ -689,7 +809,7 @@ contains
                + nabt(2,2) * ( tpsi(DY(2)) - tpsi(DY(-2)) ) &
                + nabt(3,2) * ( tpsi(DY(3)) - tpsi(DY(-3)) ) &
                + nabt(4,2) * ( tpsi(DY(4)) - tpsi(DY(-4)) )
-          jw(2,ix,iy,iz) = aimag(py*ytmp) + kAc(2) * abs(py)**2
+          jw(2,ix,iy,iz) = aimag(py*ytmp) + k(2) * abs(py)**2
         end do
 
 !OCL swp
@@ -699,7 +819,7 @@ contains
                + nabt(2,3) * ( tpsi(DZ(2)) - tpsi(DZ(-2)) ) &
                + nabt(3,3) * ( tpsi(DZ(3)) - tpsi(DZ(-3)) ) &
                + nabt(4,3) * ( tpsi(DZ(4)) - tpsi(DZ(-4)) )
-          jw(3,ix,iy,iz) = aimag(pz*ztmp) + kAc(3) * abs(pz)**2
+          jw(3,ix,iy,iz) = aimag(pz*ztmp) + k(3) * abs(pz)**2
         end do
 
       end do
@@ -707,72 +827,6 @@ contains
 !$omp end parallel do
       return
     end subroutine micro_current
-
-    subroutine kvec_part(is_array,ie_array,is,ie,k,psi,jw)
-      implicit none
-      integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
-      real(8)   ,intent(in) :: k(3)
-      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-      real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
-      !
-      integer :: ik,io,ix,iy,iz
-!$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-      do ix=is(1),ie(1)
-        jw(:,ix,iy,iz) = k(:) * abs(psi(ix,iy,iz))**2
-      end do
-      end do
-      end do
-!$omp end parallel do
-      return
-    end subroutine kvec_part
-
-    subroutine stencil_current(jw,zdm,nabt,is,ie,ndir)
-      implicit none
-      integer   ,intent(in) :: is(3),ie(3),ndir
-      real(8)   ,intent(in) :: nabt(Nd,3)
-      complex(8),intent(in) :: zdm(Nd,ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
-      real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
-      !
-      integer :: ix,iy,iz
-      complex(8) :: xtmp,ytmp,ztmp
-!$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp)
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-
-!OCL swp
-        do ix=is(1),ie(1)
-          xtmp = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,ix-1,iy,iz)) ) & 
-               + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,ix-2,iy,iz)) ) &
-               + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,ix-3,iy,iz)) ) &
-               + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,ix-4,iy,iz)) )
-          jw(1,ix,iy,iz) = aimag(xtmp)
-        end do
-
-!OCL swp
-        do ix=is(1),ie(1)
-          ytmp = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,iy-1,iz)) ) &
-               + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,iy-2,iz)) ) &
-               + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,iy-3,iz)) ) &
-               + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,iy-4,iz)) )
-          jw(2,ix,iy,iz) = aimag(ytmp)
-        end do
-
-!OCL swp
-        do ix=is(1),ie(1)
-          ztmp = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,iz-1)) ) &
-               + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,iz-2)) ) &
-               + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,iz-3)) ) &
-               + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,iz-4)) )
-          jw(3,ix,iy,iz) = aimag(ztmp)
-        end do
-
-      end do
-      end do
-!$omp end parallel do
-      return
-    end subroutine stencil_current
 
   end subroutine calc_microscopic_current
 

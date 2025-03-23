@@ -2,21 +2,24 @@ set(SOURCES
     band.f90
     band_dft.f90
     conjugate_gradient.f90
+    eigen_subdiag.f90
+    eigen_subdiag_lapack.f90
     gram_schmidt_orth.f90
     init_gs.f90
     initialization_dft.f90
     main_dft.f90
     main_dft_md.f90
     mixing.f90
+    preconditioning.f90
     scf_iteration_dft.f90
     scf_iteration.f90
     structure_opt.f90
     subspace_diagonalization.f90
     read_gs.f90
     occupation.f90
-    eigen_subdiag.f90
-    eigen_subdiag_lapack.f90
    )
+   
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dc)
 
 if (USE_SCALAPACK)
   set(SOURCES ${SOURCES}

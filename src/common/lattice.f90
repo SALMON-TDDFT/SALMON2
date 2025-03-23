@@ -103,7 +103,7 @@ SUBROUTINE init_kvector(num_kgrid,system)
   use sym_kvector, only: init_sym_kvector
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
-  use salmon_global, only: file_kw
+  use salmon_global, only: file_kw, dk_shift
   implicit none
   integer            :: num_kgrid(3)
   type(s_dft_system) :: system
@@ -145,9 +145,9 @@ SUBROUTINE init_kvector(num_kgrid,system)
         ix=mod(ik-1,num_kgrid(1))+1
         iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
         iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
-        k(1,ik) = (dble(ix)-shift_k(1))/dble(num_kgrid(1))-0.5d0
-        k(2,ik) = (dble(iy)-shift_k(2))/dble(num_kgrid(2))-0.5d0
-        k(3,ik) = (dble(iz)-shift_k(3))/dble(num_kgrid(3))-0.5d0
+        k(1,ik) = (dble(ix)-shift_k(1)+dk_shift(1))/dble(num_kgrid(1))-0.5d0
+        k(2,ik) = (dble(iy)-shift_k(2)+dk_shift(2))/dble(num_kgrid(2))-0.5d0
+        k(3,ik) = (dble(iz)-shift_k(3)+dk_shift(3))/dble(num_kgrid(3))-0.5d0
      end do
      wtk(:)  = 1d0/dble(nk)
 

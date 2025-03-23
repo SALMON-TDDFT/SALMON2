@@ -203,7 +203,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
   call timer_end(LOG_CALC_RHO)
   
-  if(singlescale%flag_use) then
+  if(singlescale%flag_use .or. yn_out_micro_je=='y') then
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, spsi_out%zwf)
     end if
@@ -233,7 +233,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
     
   end if
@@ -244,7 +244,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
-    call projection(itt,ofl,dt,mg,system,info,stencil,ppg,spsi_out,srg,energy,rt)
+    call projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -325,7 +325,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      if(yn_md=='y' .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
 12   format(a,"  xi_nh=",e18.10)
-     call write_xyz(comment_line,"add","rvf",system)
+     call write_xyz(comment_line,"add","rvf",system,ofl)
   endif
 
 
@@ -355,6 +355,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call write_dns_ac_je(info,mg,system,rho%f,singlescale,itt,"bin")
     end if
   end if
+  if(yn_out_micro_je=='y' .and. mod(itt,out_micro_je_step)==0) then
+    call write_micro_je(lg,mg,system,info,itt,rho,rt%j_e)
+  end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
@@ -366,8 +369,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   end if
   
-  if(yn_spinorbit=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_magnetization_step)==0)) then
-    call write_magnetization(itt,ofl,system,mg,info,spsi_out)
+  if(yn_spinorbit=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_rt_spin_step)==0)) then
+    call write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,spsi_out)
+  end if
+  
+  if(yn_out_current_decomposed=='y' &
+  & .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_current_decomposed_step)==0)) then
+    call write_current_decomposed(itt,ofl,mg,system,info,stencil,srg,spsi_out,ppg)
   end if
   
   call timer_end(LOG_WRITE_RT_INFOS)
@@ -423,7 +431,7 @@ contains
     
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
