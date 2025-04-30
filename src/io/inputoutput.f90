@@ -60,6 +60,7 @@ module inputoutput
   integer :: inml_code
   integer :: inml_band
   integer :: inml_sbe
+  integer :: inml_dc
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -209,7 +210,9 @@ contains
     namelist/calculation/ &
       & theory, &
       & yn_md,  &
-      & yn_opt
+      & yn_opt, &
+      & yn_dc, &
+      & yn_conventional_from_dcdft
 
     namelist/control/ &
       & sysname, &
@@ -289,7 +292,8 @@ contains
 
     namelist/kgrid/ &
       & num_kgrid, &
-      & file_kw
+      & file_kw, &
+      & dk_shift
 
     namelist/tgrid/ &
       & nt, &
@@ -582,7 +586,18 @@ contains
       & nstate_sbe, &
       & nelec_sbe, &
       & al_sbe, &
-      & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe
+      & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
+      & norder_correction
+      
+    namelist/dc/ &
+      & num_fragment, &
+      & num_rgrid_buffer, &
+      & nproc_rgrid_tot, &
+      & yn_dc_lcfo, &
+      & yn_dc_lcfo_diag, &
+      & nstate_frag, &
+      & energy_cut, &
+      & lambda_cut
 
 !! == default for &unit ==
     unit_system='au'
@@ -623,6 +638,8 @@ contains
     theory              = 'tddft'
     yn_md               = 'n'
     yn_opt              = 'n'
+    yn_dc               = 'n'
+    yn_conventional_from_dcdft = 'n'
 !! == default for &control
     sysname               = 'default'
     base_directory        = './'
@@ -696,6 +713,7 @@ contains
 !! == default for &kgrid
     num_kgrid = 1
     file_kw   = 'none'
+    dk_shift = 0d0
 !! == default for &tgrid
     nt = 0
     dt = 0
@@ -989,6 +1007,16 @@ contains
     al_vec1_sbe(:,:) = 0.d0
     al_vec2_sbe(:,:) = 0.d0
     al_vec3_sbe(:,:) = 0.d0
+    norder_correction = 0
+!! == default for &dc
+    num_fragment = 0
+    num_rgrid_buffer = 0
+    nproc_rgrid_tot = 1
+    yn_dc_lcfo = 'y'
+    yn_dc_lcfo_diag = 'y'
+    nstate_frag = 0
+    energy_cut = 0d0
+    lambda_cut = 1d-3
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1065,6 +1093,9 @@ contains
 
       read(fh_namelist, nml=sbe, iostat=inml_sbe)
       rewind(fh_namelist)
+      
+      read(fh_namelist, nml=dc, iostat=inml_dc)
+      rewind(fh_namelist)
 
       close(fh_namelist)
     end if
@@ -1115,6 +1146,8 @@ contains
     call comm_bcast(theory             ,nproc_group_global)
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
+    call comm_bcast(yn_dc              ,nproc_group_global)
+    call comm_bcast(yn_conventional_from_dcdft,nproc_group_global)
 
 !! == bcast for &control
     call comm_bcast(sysname         ,nproc_group_global)
@@ -1215,6 +1248,7 @@ contains
 !! == bcast for &kgrid
     call comm_bcast(num_kgrid,nproc_group_global)
     call comm_bcast(file_kw  ,nproc_group_global)
+    call comm_bcast(dk_shift ,nproc_group_global)
 !! == bcast for &tgrid
     call comm_bcast(nt,nproc_group_global)
     call comm_bcast(dt,nproc_group_global)
@@ -1595,6 +1629,17 @@ contains
     al_vec1_sbe = al_vec1_sbe * ulength_to_au
     al_vec2_sbe = al_vec2_sbe * ulength_to_au
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
+    call comm_bcast(norder_correction,nproc_group_global)
+!! == bcast for dc
+    call comm_bcast(num_fragment ,nproc_group_global)
+    call comm_bcast(num_rgrid_buffer, nproc_group_global)
+    call comm_bcast(nproc_rgrid_tot, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(nstate_frag, nproc_group_global)
+    call comm_bcast(energy_cut, nproc_group_global)
+    energy_cut = energy_cut * uenergy_to_au
+    call comm_bcast(lambda_cut, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -1980,6 +2025,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc', yn_dc
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_conventional_from_dcdft', yn_conventional_from_dcdft
 
       if(inml_control >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
@@ -2087,6 +2134,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(2)', num_kgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(3)', num_kgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_kw', trim(file_kw)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
 
       if(inml_tgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
@@ -2535,6 +2585,19 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      
+      if(inml_dc >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+      
       close(fh_variables_log)
     end if
 
@@ -2567,6 +2630,8 @@ contains
     ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
     call yn_argument_check(yn_md)
     call yn_argument_check(yn_opt)
+    call yn_argument_check(yn_dc)
+    call yn_argument_check(yn_conventional_from_dcdft)
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
@@ -2627,6 +2692,8 @@ contains
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
     call yyynnn_argument_check(yn_symmetry)
+    call yn_argument_check(yn_dc_lcfo)
+    call yn_argument_check(yn_dc_lcfo_diag)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
@@ -2827,6 +2894,25 @@ contains
 
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
+    end if
+    
+    if(yn_dc=='y') then
+      if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
+      if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
+      !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
+      if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
+      & stop "DC method (yn_dc=y): num_fragment must be specified."
+      if(yn_periodic=='n') stop "DC method (yn_dc=y): yn_periodic=y must be specified."
+      if(.not.if_orthogonal_tmp) stop "DC method (yn_dc=y): use orthogonal coordinate."
+      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
+      & stop "DC method (yn_dc=y): # of k-points must be 1."
+      if(dl(1)*dl(2)*dl(3)/=0) stop "DC method (yn_dc=y): use al & num_rgrid."
+      if(yn_restart=='y') stop "DC method (yn_dc=y): yn_restart=y is not supported."
+      if(nscf_init_mix_zero.gt.1) stop "DC method (yn_dc=y): nscf_init_mix_zero is not supported."
+      if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
+      if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
+      if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
     end if
 
 #ifdef USE_FFTW

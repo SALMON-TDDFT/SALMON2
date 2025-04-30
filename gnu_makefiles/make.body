@@ -30,7 +30,6 @@ F90_SRCS = \
 ./math/math_constants.f90 \
 ./math/phys_constants.f90 \
 ./math/salmon_math.f90 \
-./common/calc_gradient_psi.f90 \
 ./common/const.f90 \
 ./common/pack_unpack.f90 \
 ./common/structures.f90 \

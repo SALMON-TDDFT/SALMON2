@@ -11,7 +11,7 @@ else ()
     set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${LAPACK_LINKER_FLAGS} ${LAPACK_LIBRARIES})
   else ()
     # NOTE: LAPACK 3.7.0 and later version can't build by GCC 4.8.5, which RHEL7 provided compiler.
-    set(LAPACK_VERSION "3.6.1")
+    set(LAPACK_VERSION "3.12.1")
     message(STATUS "Build Netlib LAPACK library version ${LAPACK_VERSION}")
 
     ExternalProject_Add(lapack-project

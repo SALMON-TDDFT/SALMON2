@@ -6,5 +6,5 @@
 # if required, this script file can utilized for the preparation of 
 # the input data for the following calculations.
 
-wget http://www.pseudo-dojo.org/pseudos/nc-fr-04_pbe_standard/Au.upf.gz
+wget --no-check-certificate http://www.pseudo-dojo.org/pseudos/nc-fr-04_pbe_standard/Au.upf.gz
 gunzip Au.upf.gz 

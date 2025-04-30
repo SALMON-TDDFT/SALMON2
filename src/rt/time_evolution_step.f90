@@ -41,6 +41,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
+  use nvtx
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -76,6 +77,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
+  call nvtxStartRange('time_evolution_step', __LINE__)
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
@@ -159,15 +161,43 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call calc_density(system,rho_s,spsi_out,info,mg)
 
+  call nvtxStartRange('time_evolution_step (1)', __LINE__)
   if(nspin==1)then
+#ifdef USE_OPENACC
+!$acc kernels copyin(mg, rho, rho_s)
+!$acc loop independent collapse(3)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho%f(ix,iy,iz) = rho_s(1)%f(ix,iy,iz)
+    enddo
+    enddo
+    enddo
+!$acc end kernels
+#else
     !$omp workshare
     rho%f = rho_s(1)%f
     !$omp end workshare
+#endif
   else if(nspin==2)then
+#ifdef USE_OPENACC
+!$acc kernels copyin(mg, rho, rho_s)
+!$acc loop independent collapse(3)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho%f(ix,iy,iz) = rho_s(1)%f(ix,iy,iz) + rho_s(2)%f(ix,iy,iz)
+    enddo
+    enddo
+    enddo
+!$acc end kernels
+#else
     !$omp workshare
     rho%f = rho_s(1)%f + rho_s(2)%f
     !$omp end workshare
+#endif
   end if
+  call nvtxEndRange
   
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
   
@@ -185,8 +215,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
     call timer_begin(LOG_CALC_HARTREE)
     if(iperiodic==0 .and. itt/=1)then
+      call nvtxStartRange('time_evolution_step (2)', __LINE__)
       Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
       Vh_stock2%f = Vh_stock1%f
+      call nvtxEndRange
     end if
     if(singlescale%flag_use .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
       call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
@@ -194,12 +226,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     end if
     if(iperiodic==0 .and. itt/=1)then
+      call nvtxStartRange('time_evolution_step (3)', __LINE__)
       Vh_stock1%f = Vh%f
+      call nvtxEndRange
     end if
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
     
   end if
@@ -266,7 +300,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
-
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_out,ewald)
 
      !force on ion directly from field --- should put in calc_force?
@@ -347,6 +380,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
   call timer_end(LOG_WRITE_RT_INFOS)
 
+  call nvtxEndRange
   return
   
 contains
@@ -358,6 +392,7 @@ contains
                         & mg%is_array(2):mg%ie_array(2), &
                         & mg%is_array(3):mg%ie_array(3), &
                         & 1:system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e)
+    call nvtxStartRange('predictor_corrector', __LINE__)
 
     !$omp workshare
     V_tmp(:,:,:,1) = V_local(1)%f
@@ -396,7 +431,7 @@ contains
     
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
@@ -419,10 +454,12 @@ contains
 !    tjr2=0.5d0*(tjr2+tjr2_t)
 !  end if
     
+    call nvtxEndRange
     return
   end subroutine predictor_corrector
 
   subroutine time_evolution_half_step_etrs
+    call nvtxStartRange('time_evolution_half_step_etrs', __LINE__)
 
     if(info%numo.ge.1)then
       ! spsi_in --> spsi_out (tpsi = working array)
@@ -472,6 +509,7 @@ contains
 
 ! self-consistent loop will be implemented for ETRS propagator
 
+    call nvtxEndRange
   end subroutine time_evolution_half_step_etrs
 
 END SUBROUTINE time_evolution_step
@@ -479,12 +517,14 @@ END SUBROUTINE time_evolution_step
 subroutine calc_current_ion(lg,system,pp,curr_i)
   use structures
   use salmon_global, only: natom,Kion
+  use nvtx
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
   type(s_pp_info) :: pp
   integer :: ia
   real(8) :: curr_i(3)
+  call nvtxStartRange('calc_current_ion', __LINE__)
 
   !AY memo
   !current of ion: defined by positive charge-->pulse sign
@@ -499,5 +539,6 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
   enddo
   curr_i(:) = curr_i(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*system%Hvol)
 
+  call nvtxEndRange
 end subroutine calc_current_ion
 

@@ -56,6 +56,7 @@ module structures
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
     real(8),allocatable :: Force(:,:)    ! (1:3,1:nion), force on atom
+    integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field
     real(8) :: vec_Ac(3) ! A/c (spatially averaged), A: vector potential, c: speed of light
     type(s_vector) :: Ac_micro ! A/c (microscopic)      ! for single-scale Maxwell-TDDFT
@@ -443,6 +444,7 @@ module structures
     logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
+    type(s_scalar),allocatable :: Vh_in(:), Vh_out(:), Vxc_in(:,:), Vxc_out(:,:)
     real(8) :: mixrate, alpha_mb, beta_p
     real(8) :: convergence_value_prev
   end type s_mixing
@@ -464,6 +466,35 @@ module structures
      real(8) :: al(3)
      integer,allocatable :: myrank(:), iaddress(:,:), iaddress_new(:,:)
   end type s_k_expand
+  
+! Divide-and-Conquer method
+  type s_dcdft
+  ! summation
+    integer :: n_frag ! # of fragments (subsystems)
+    integer :: nxyz_domain(3) ! # of r-grid points for the core domain
+    integer :: nxyz_buffer(3) ! # of r-grid points for the buffer region
+    integer,allocatable :: ixyz_frag(:,:) ! r-grid index of the fragment origin
+    real(8),allocatable :: rxyz_frag(:,:) ! position of the fragment origin
+  ! total system
+    integer :: icomm_tot, id_tot, isize_tot ! MPI communicator, process ID, & # of processes
+    character(256) :: base_directory
+    integer :: nstate_tot ! nstate for the total system
+    real(8) :: elec_num_tot ! total electron number
+    type(s_dft_system)      :: system_tot
+    type(s_parallel_info)   :: info_tot
+    type(s_rgrid)           :: lg_tot,mg_tot
+    type(s_pp_grid)         :: ppg_tot
+    type(s_reciprocal_grid) :: fg_tot
+    type(s_poisson)         :: poisson_tot
+    type(s_sendrecv_grid)   :: srg_scalar_tot
+    type(s_scalar) :: vpsl_tot,vh_tot,rho_tot
+    type(s_scalar),allocatable :: rho_tot_s(:),vloc_tot(:),vxc_tot(:)
+  ! own fragment
+    integer :: i_frag       ! fragment index
+    integer :: icomm_frag, id_frag, isize_frag ! MPI communicator, process ID, & # of processes
+    integer :: nstate_frag  ! nstate for the fragment
+    integer,allocatable :: jxyz_tot(:,:)  ! r-grid (fragment) --> r-grid (total)
+  end type s_dcdft
 
 ! +----------------------------------+
 ! | for TDDFT real-time calculations |

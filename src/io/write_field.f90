@@ -23,7 +23,7 @@ contains
 
 subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
   use inputoutput, only: au_length_aa
-  use salmon_global, only: format_voxel_data,theory
+  use salmon_global, only: format_voxel_data,theory,base_directory,sysname
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use structures
@@ -49,14 +49,14 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
 
   select case(theory)
   case('dft','dft_band') 
-    suffix = "dns"
-    suffix_u = "dns_u"
-    suffix_d = "dns_d"
+    suffix =   trim(base_directory)//trim(sysname)//"_dns"
+    suffix_u = trim(base_directory)//trim(sysname)//"_dns_u"
+    suffix_d = trim(base_directory)//trim(sysname)//"_dns_d"
   case('dft_md','tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
-    suffix = "dns_"//adjustl(filenum)
-    suffix_u = "dns_u_"//adjustl(filenum)
-    suffix_d = "dns_d_"//adjustl(filenum)
+    suffix =   trim(base_directory)//trim(sysname)//"_dns_"//adjustl(filenum)
+    suffix_u = trim(base_directory)//trim(sysname)//"_dns_u_"//adjustl(filenum)
+    suffix_d = trim(base_directory)//trim(sysname)//"_dns_d_"//adjustl(filenum)
   case default
     stop 'invalid theory @ write_dns'
   end select
@@ -88,9 +88,9 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
     !$omp end workshare
 
     write(filenum, '(i6.6)') itt
-    suffix = "dnsdiff_"//adjustl(filenum)
-    suffix_u = "dnsdiff_u_"//adjustl(filenum)
-    suffix_d = "dnsdiff_d_"//adjustl(filenum)
+    suffix   = trim(base_directory)//trim(sysname)//"_dnsdiff_"//adjustl(filenum)
+    suffix_u = trim(base_directory)//trim(sysname)//"_dnsdiff_u_"//adjustl(filenum)
+    suffix_d = trim(base_directory)//trim(sysname)//"_dnsdiff_d_"//adjustl(filenum)
     phys_quantity = "dnsdiff"
     
     if(system%nspin==1) then
@@ -165,7 +165,7 @@ subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
   use structures, only: s_dft_system,s_parallel_info,s_rgrid,s_scalar,allocate_scalar,deallocate_scalar,s_singlescale  !,s_vector
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: kion,izatom
+  use salmon_global, only: kion,izatom,base_directory,sysname
   use filesystem, only: create_directory
   implicit none
   type(s_parallel_info),intent(in) :: info
@@ -181,8 +181,8 @@ subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
   character(10) :: filenum1, filenum2
   character(256):: wdir1, wdir2, ofile
 
-  wdir1 = "output_ion/"
-  wdir2 = "output_dns_ac_je"
+  wdir1 = trim(base_directory)//trim(sysname)//"_output_ion/"
+  wdir2 = trim(base_directory)//trim(sysname)//"_output_dns_ac_je"
   if(comm_is_root(info%id_ko)) then
      write(filenum2,'(i6.6)') info%id_r
      wdir2 = "output_dns_ac_je_idr"//trim(filenum2)//"/"
@@ -250,7 +250,7 @@ end subroutine write_dns_ac_je
 
 subroutine write_micro_je(lg,mg,system,info,itt,rho,j_e)
   use inputoutput, only: au_length_aa
-  use salmon_global, only: format_voxel_data,theory
+  use salmon_global, only: format_voxel_data,theory,base_directory,sysname
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root,comm_summation
   use write_file3d, only: write_avs, write_cube, write_vtk
@@ -288,7 +288,7 @@ subroutine write_micro_je(lg,mg,system,info,itt,rho,j_e)
   call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*3,info%icomm_r)
     
   do i=1,3
-    suffix = "je_micro_"//adjustl(xyz(i))//"_"//adjustl(filenum)
+    suffix = trim(base_directory)//trim(sysname)//"_je_micro_"//adjustl(xyz(i))//"_"//adjustl(filenum)
     if(format_voxel_data=='avs')then
       header_unit='A**(-3)'
       call write_avs(lg,222,suffix,header_unit,wrk2(:,:,:,i))
@@ -305,7 +305,7 @@ end subroutine write_micro_je
 
 subroutine write_magnetization_micro(lg,mg,system,info,itt,m_micro)
   use inputoutput, only: au_length_aa
-  use salmon_global, only: format_voxel_data,theory
+  use salmon_global, only: format_voxel_data,theory,base_directory,sysname
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root,comm_summation
   use write_file3d, only: write_avs, write_cube, write_vtk
@@ -344,7 +344,7 @@ subroutine write_magnetization_micro(lg,mg,system,info,itt,m_micro)
   call comm_summation(wrk1,wrk2,lg%num(1)*lg%num(2)*lg%num(3)*3,info%icomm_r)
     
   do i=1,3 ! r-space direction
-    suffix = "mag_micro_"//adjustl(xyz(i))//"_"//adjustl(filenum)
+    suffix = trim(base_directory)//trim(sysname)//"_mag_micro_"//adjustl(xyz(i))//"_"//adjustl(filenum)
     if(format_voxel_data=='avs')then
       header_unit='A**(-3)'
       call write_avs(lg,222,suffix,header_unit,wrk2(:,:,:,i))
@@ -361,7 +361,7 @@ end subroutine write_magnetization_micro
 
 subroutine write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
   use inputoutput, only: au_length_aa
-  use salmon_global, only: format_voxel_data,theory
+  use salmon_global, only: format_voxel_data,theory,base_directory,sysname
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root,comm_summation
   use write_file3d, only: write_avs, write_cube, write_vtk
@@ -400,7 +400,8 @@ subroutine write_spin_current_micro(lg,mg,system,info,itt,spin_curr_micro)
     
   do i=0,3 ! Pauli matrix sigma_i
   do j=1,3 ! r-space direction
-    suffix = "spin_curr_micro_"//adjustl(xyz(i))//"_"//adjustl(xyz(j))//"_"//adjustl(filenum)
+    suffix = trim(base_directory)//trim(sysname)// &
+    & "_spin_curr_micro_"//adjustl(xyz(i))//"_"//adjustl(xyz(j))//"_"//adjustl(filenum)
     if(format_voxel_data=='avs')then
       header_unit='A**(-3)'
       call write_avs(lg,222,suffix,header_unit,wrk2(:,:,:,j,i))
@@ -417,13 +418,13 @@ end subroutine write_spin_current_micro
 !===================================================================================================================================
 
 subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
-  use salmon_global       ,only: format_voxel_data,theory
+  use salmon_global       ,only: format_voxel_data,theory,base_directory,sysname
   use structures
   use math_constants      ,only: pi
   use communication       ,only: comm_summation
   use misc_routines       ,only: get_wtime
   use sendrecv_grid       ,only: update_overlap_complex8,update_overlap_real8
-  use stencil_sub         ,only: calc_gradient_field
+  use stencil_sub         ,only: calc_gradient_field,calc_gradient_psi
   use write_file3d
   implicit none
   integer                 ,intent(in) :: itt
@@ -603,10 +604,10 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
   
   select case(theory)
   case('dft','dft_band','dft_md') 
-    suffix = "elf"
+    suffix = trim(base_directory)//trim(sysname)//"_elf"
   case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
-    suffix = "elf_"//adjustl(filenum)
+    suffix = trim(base_directory)//trim(sysname)//"_elf_"//adjustl(filenum)
   case default
     stop 'invalid theory'
   end select
@@ -626,7 +627,7 @@ end subroutine write_elf
 !===================================================================================================================================
 
 subroutine write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
-  use salmon_global, only: format_voxel_data
+  use salmon_global, only: format_voxel_data,base_directory,sysname
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -681,13 +682,13 @@ subroutine write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
   
     write(filenum, '(i6.6)') itt
     if(jj==1)then
-      suffix = "Exsta_"//adjustl(filenum)
+      suffix = trim(base_directory)//trim(sysname)//"_Exsta_"//adjustl(filenum)
       phys_quantity = "exsta"
     else if(jj==2)then
-      suffix = "Eysta_"//adjustl(filenum)
+      suffix = trim(base_directory)//trim(sysname)//"_Eysta_"//adjustl(filenum)
       phys_quantity = "eysta"
     else if(jj==3)then
-      suffix = "Ezsta_"//adjustl(filenum)
+      suffix = trim(base_directory)//trim(sysname)//"_Ezsta_"//adjustl(filenum)
       phys_quantity = "ezsta"
     end if
 
@@ -709,7 +710,7 @@ end subroutine write_estatic
 subroutine write_psi(lg,mg,system,info,spsi)
   use inputoutput   ,only: au_length_aa
   use structures
-  use salmon_global ,only: format_voxel_data
+  use salmon_global ,only: format_voxel_data,base_directory,sysname
   use communication ,only: comm_summation
   use write_file3d
   implicit none
@@ -766,7 +767,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
       phys_quantity = "psi"
       if(allocated(spsi%rwf)) then
         write(fileid_ob, '(i8)') io
-        suffix_re = "psi_ob"//trim(adjustl(fileid_ob))
+        suffix_re = trim(base_directory)//trim(sysname)//"_psi_ob"//trim(adjustl(fileid_ob))
         if(format_voxel_data=='avs')then
           header_unit = "A**(-3/2)"
           call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
@@ -777,11 +778,13 @@ subroutine write_psi(lg,mg,system,info,spsi)
         write(fileid_k,    '(i8)') ik
         write(fileid_ob,   '(i8)') io
         write(fileid_spin, '(i8)') ispin
-        suffix_re = "psi_k"//trim(adjustl(fileid_k))   // &
+        suffix_re = trim(base_directory)//trim(sysname)// &
+                    "_psi_k"//trim(adjustl(fileid_k))   // &
                     "_ob"  //trim(adjustl(fileid_ob))  // &
                     "_spin"//trim(adjustl(fileid_spin))// &
                     "_real" 
-        suffix_im = "psi_k"//trim(adjustl(fileid_k))   // &
+        suffix_im = trim(base_directory)//trim(sysname)// &
+                    "_psi_k"//trim(adjustl(fileid_k))   // &
                     "_ob"  //trim(adjustl(fileid_ob))  // &
                     "_spin"//trim(adjustl(fileid_spin))// &
                     "_imag" 

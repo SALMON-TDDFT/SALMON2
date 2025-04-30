@@ -280,6 +280,7 @@ CONTAINS
     use salmon_global, only: kion,aEwald, cutoff_r, yn_jm, yn_fix_func, theory
     use communication, only: comm_summation,comm_is_root
     use timer
+    use nvtx
     implicit none
     type(s_rgrid)           ,intent(in) :: mg
     type(s_ewald_ion_ion)   ,intent(in) :: ewald
@@ -297,7 +298,7 @@ CONTAINS
     real(8) :: E_wrk_local_1,E_wrk_local_2
     real(8) :: etmp
     complex(8) :: rho_e,rho_i
-
+    call nvtxStartRange('calc_Total_Energy_periodic', __LINE__)
     call timer_begin(LOG_TE_PERIODIC_CALC)
 
     if(yn_fix_func=='y' .and. theory(1:3)/='dft') then
@@ -323,7 +324,7 @@ CONTAINS
       if(ewald%yn_bookkeep=='y') then
 
 #ifdef USE_OPENACC
-!$acc kernels
+!$acc kernels copyin(ewald)
 !$acc loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
@@ -368,7 +369,7 @@ CONTAINS
       endif
 
 #ifdef USE_OPENACC
-!$acc kernels
+!$acc kernels copyin(fg)
 !$acc loop collapse(2) reduction(+:E_tmp_l) private(ix,iy,iz,rho_i)
 #else
 !$omp parallel do collapse(2) default(none) &
@@ -469,7 +470,7 @@ CONTAINS
       zps1 = 0
       zps2 = 0
 #ifdef USE_OPENACC
-!$acc kernels
+!$acc kernels copyin(pp)
 !$acc loop private(ia) reduction(+:zps1,zps2)
 #else
 !$omp parallel do default(none) private(ia) shared(system,pp,Kion) reduction(+:zps1,zps2)
@@ -510,7 +511,7 @@ CONTAINS
 !    end if
 
     call timer_end(LOG_TE_PERIODIC_COMM_COLL)
-
+    call nvtxEndRange
     return
   end SUBROUTINE calc_Total_Energy_periodic
 
@@ -524,6 +525,7 @@ CONTAINS
     use pseudo_pt_so_sub, only: pseudo_so
     use salmon_global, only: yn_spinorbit
     use timer
+    use nvtx
     implicit none
     type(s_dft_energy)                     :: energy
     type(s_orbital)                        :: tpsi,htpsi,ttpsi
@@ -538,7 +540,7 @@ CONTAINS
     integer :: ik,io,ispin,im,nk,no,is(3),ie(3),Nspin
     real(8) :: E_tmp,E_local(2),E_sum(2)
     real(8),allocatable :: wrk1(:,:,:),wrk2(:,:,:)
-
+    call nvtxStartRange('calc_eigen_energy', __LINE__)
     call timer_begin(LOG_EIGEN_ENERGY_CALC)
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
     im = 1
@@ -786,6 +788,7 @@ CONTAINS
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
     deallocate(wrk1,wrk2)
+    call nvtxEndRange
     return
   End Subroutine calc_eigen_energy
   
@@ -895,7 +898,7 @@ CONTAINS
       endif
 
 #ifdef USE_OPENACC
-!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) copyin(ewald)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #endif

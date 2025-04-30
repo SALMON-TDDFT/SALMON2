@@ -25,7 +25,7 @@ contains
   !! export SYSNAME_k.data file
   subroutine write_k_data(system,stencil)
     use structures
-    use salmon_global, only: sysname,yn_periodic
+    use salmon_global, only: base_directory,sysname,yn_periodic
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -42,7 +42,7 @@ contains
     end if
 
     NK = system%nk
-    file_k_data = trim(sysname)//'_k.data'
+    file_k_data = trim(base_directory)//trim(sysname)//'_k.data'
 
     if (comm_is_root(nproc_id_global)) then
       fh_k = open_filehandle(file_k_data, status="replace")
@@ -105,7 +105,7 @@ contains
     use sendrecv_grid
     use salmon_global, only: yn_out_tm,yn_out_gs_sgm_eps, &
                        out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
-                       sysname, de,nenergy,nelec,xc
+                       base_directory,sysname, de,nenergy,nelec,xc
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
@@ -370,7 +370,7 @@ contains
        deallocate(u_rVnl_Vnlr_u_all_l)
 
 
-       file_tm_data = trim(sysname)//'_tm.data'
+       file_tm_data = trim(base_directory)//trim(sysname)//'_tm.data'
 
        if (comm_is_root(nproc_id_global)) then
           write(*,*) "  printing transition moment ....."
@@ -485,13 +485,13 @@ contains
 
 
        if (comm_is_root(nproc_id_global)) then
-          filename = trim(sysname) // '_sigma.data'
+          filename = trim(base_directory)//trim(sysname) // '_sigma.data'
           open(fh_s, file=filename, status='replace')
           write(fh_s,'(3a)') "#1:omega[a.u.], 2:Re(sigma)[a.u.], 3:Im(sigma)[a.u.]", &
                             & ", 4:Re(sigma_intra)[a.u.], 5:Im(sigma_intra)[a.u.]", &
                             & ", 6:Re(sigma_inter)[a.u.], 7:Im(sigma_inter)[a.u.]"
                             
-          filename = trim(sysname) // '_epsilon.data'
+          filename = trim(base_directory)//trim(sysname) // '_epsilon.data'
           open(fh_e, file=filename, status='replace')
           write(fh_e,'(3a)') "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
                             & ", 4:Re(epsilon_intra), 5:Im(epsilon_intra)", &
@@ -557,7 +557,7 @@ contains
   ! (these can be used for restart of opt and md)
     use structures, only: s_dft_system,s_ofile
     use inputoutput, only: au_length_aa
-    use salmon_global, only: SYSname,atom_name,base_directory
+    use salmon_global, only: base_directory,SYSname,atom_name,base_directory
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: open_filehandle
@@ -1120,7 +1120,7 @@ contains
   subroutine write_dft_md_data(it,ofl,md)
     use structures, only: s_md, s_ofile
     use inputoutput, only: t_unit_time,t_unit_energy
-    use salmon_global, only: dt,nt,sysname
+    use salmon_global, only: dt,nt,base_directory,sysname
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use filesystem, only: open_filehandle
@@ -1130,7 +1130,7 @@ contains
     integer :: uid, it
 
     if(it==0 .and. comm_is_root(nproc_id_global)) then
-       ofl%file_dft_md = trim(sysname)//'_dft_md.data'
+       ofl%file_dft_md = trim(base_directory)//trim(sysname)//'_dft_md.data'
        ofl%fh_dft_md   = open_filehandle(ofl%file_dft_md)
        uid = ofl%fh_dft_md
        open(uid,file=trim(ofl%file_dft_md),status="unknown")
@@ -1419,7 +1419,7 @@ contains
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
-                                   yn_jm, yn_periodic
+                                   yn_jm, yn_periodic, base_directory
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1433,7 +1433,7 @@ contains
     integer :: fh,is,p1,p2,p5,iob,jj,ik,ikoa,iatom,ix
     character(100) :: file_gs_info
 
-    file_gs_info = trim(sysname)//"_info.data"
+    file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
 
     if(comm_is_root(nproc_id_global)) then
@@ -1522,7 +1522,7 @@ contains
     use structures, only: s_ofile, s_dft_system, s_dft_energy
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname
+    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname,base_directory
     use filesystem, only: open_filehandle
     implicit none
     type(s_ofile),intent(inout) :: ofl
@@ -1531,7 +1531,7 @@ contains
     integer :: iob,iik,is, uid
 
     if(comm_is_root(nproc_id_global))then
-       ofl%file_eigen_data=trim(sysname)//"_eigen.data"
+       ofl%file_eigen_data=trim(base_directory)//trim(sysname)//"_eigen.data"
        ofl%fh_eigen = open_filehandle(trim(ofl%file_eigen_data))
        uid = ofl%fh_eigen
        open(uid,file=ofl%file_eigen_data)
@@ -1568,7 +1568,7 @@ contains
     use inputoutput, only: uenergy_from_au
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
                            out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, unit_energy, &
-                           nelec,nstate,temperature,yn_spinorbit
+                           nelec,nstate,temperature,yn_spinorbit, base_directory,sysname
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
@@ -1578,6 +1578,7 @@ contains
     real(8) :: fk,ww,dw
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
+    character(100) :: filename
 
     ene_min = minval(energy%esp)
     ene_max = maxval(energy%esp)
@@ -1623,7 +1624,8 @@ contains
     end do
 
     if(comm_is_root(nproc_id_global))then
-      open(101,file="dos.data")
+      filename=trim(base_directory)//trim(sysname)//"_dos.data"
+      open(101,file=filename)
       write(101,'("# Density of States")')
       select case(unit_energy)
       case('au','a.u.')
@@ -1651,7 +1653,8 @@ contains
     use communication       ,only: comm_is_root, comm_summation
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
-                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit
+                                   nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit, &
+                                   base_directory,sysname
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
     implicit none
@@ -1778,7 +1781,7 @@ contains
       do iatom=1,natom
         ikoa=Kion(iatom)
         write(fileNumber, '(i8)') iatom
-        OutFile = "pdos"//trim(adjustl(fileNumber))//".data"
+        OutFile = trim(base_directory)//trim(sysname)//"_pdos"//trim(adjustl(fileNumber))//".data"
         open(101,file=OutFile)
         write(101,'("# Projected Density of States")')
         select case(unit_energy)
@@ -1902,7 +1905,7 @@ contains
   end subroutine write_band_information
   
 !===================================================================================================================================
-  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,ppn,fg,poisson,srg_scalar,rt,energy,ofl)
+  subroutine init_projection(system,lg,mg,info,stencil,Vpsl,xc_func,pp,ppn,fg,poisson,srg_scalar,rt,energy,ofl)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -1917,6 +1920,7 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)          ,intent(in) :: Vpsl
     type(s_xc_functional)   ,intent(in) :: xc_func
+    type(s_pp_info)         ,intent(in) :: pp
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_reciprocal_grid) ,intent(in) :: fg
     type(s_poisson)                     :: poisson
@@ -2062,7 +2066,7 @@ contains
       end do
       call hartree(lg,mg,rt%info_proj,rt%system_proj,fg,poisson,srg_scalar,stencil,rho,Vh)
       call exchange_correlation(rt%system_proj,xc_func,mg,srg_scalar,rt%srg_proj,rho_s &
-      & ,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc)
+      & ,pp,ppn,rt%info_proj,rt%tpsi0,stencil,Vxc,E_xc)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,rt%vloc0)
       
       call deallocate_scalar(rho)

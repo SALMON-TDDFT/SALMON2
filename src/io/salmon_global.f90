@@ -47,6 +47,8 @@ module salmon_global
   character(32)  :: theory
   character(1)   :: yn_md
   character(1)   :: yn_opt
+  character(1)   :: yn_dc
+  character(1)   :: yn_conventional_from_dcdft
 !! &control
   character(256) :: sysname
   character(256) :: base_directory
@@ -130,6 +132,7 @@ module salmon_global
 !! &kgrid
   integer        :: num_kgrid(3)
   character(256) :: file_kw
+  real(8)        :: dk_shift(3)
 
 !! &tgrid
   integer        :: nt
@@ -430,5 +433,16 @@ character(256),allocatable :: atom_name(:)
   integer        :: nelec_sbe(1:200)
   real(8)        :: al_sbe(3,200)
   real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
+  integer        :: norder_correction
+
+  !! &dc
+  integer        :: num_fragment(3)
+  integer        :: num_rgrid_buffer(3)
+  integer        :: nproc_rgrid_tot(3)
+  character(1)   :: yn_dc_lcfo
+  character(1)   :: yn_dc_lcfo_diag
+  integer        :: nstate_frag
+  real(8)        :: energy_cut
+  real(8)        :: lambda_cut
 
 end module salmon_global

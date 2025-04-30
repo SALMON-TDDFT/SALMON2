@@ -463,7 +463,7 @@ subroutine init_communicator_dft(comm,info)
 contains
   subroutine tofu_network_oriented_mapping(iret)
     use mpi_ext
-    use salmon_global, only: nx_m,ny_m,nz_m, theory
+    use salmon_global, only: nx_m,ny_m,nz_m, theory,yn_dc, num_fragment
     implicit none
     integer,intent(out) :: iret
     integer,parameter :: maxppn = 16
@@ -492,6 +492,10 @@ contains
        nprocs_per_node = info%isize_rko *nx_m*ny_m*nz_m / product(tofu_shape(1:tofu_dim))
       if (mod(info%isize_rko*nx_m*ny_m*nz_m, product(tofu_shape(1:tofu_dim))) /= 0) &
           stop 'logical error (ms): calcluate # of process/node'
+    else if(yn_dc=='y' .and. theory=='dft') then
+      nprocs_per_node = info%isize_rko * product(num_fragment) / product(tofu_shape(1:tofu_dim))
+      if (mod(info%isize_rko*product(num_fragment), product(tofu_shape(1:tofu_dim))) /= 0) &
+          stop 'logical error (dc): calcluate # of process/node'
     else
        nprocs_per_node = info%isize_rko / product(tofu_shape(1:tofu_dim))
       if (mod(info%isize_rko, product(tofu_shape(1:tofu_dim))) /= 0) &

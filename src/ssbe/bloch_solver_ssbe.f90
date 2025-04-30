@@ -57,14 +57,22 @@ end subroutine
 
 
 subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
+    use salmon_global, only: norder_correction
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
     real(8), intent(in) :: Ac(1:3)
     real(8), intent(out) :: jmat(1:3)
     integer, intent(in) :: icomm
-    integer :: ik, idir, ib, jb, ierr
+    integer :: ik, idir, ib, jb, kb, nb, ierr
     complex(8) :: tmp1(1:3), tmp(1:3)
+    complex(8) :: sum1(1:3)
+    complex(8) :: pnn(1:3),pni(1:3),pin(1:3)
+    complex(8) :: pnj(1:3),pjn(1:3),pnk(1:3),pkn(1:3)
+    complex(8) :: pij(1:3),pji(1:3),pik(1:3),pki(1:3),pjk(1:3),pkj(1:3)
+    complex(8) :: pnn_Ac,pni_Ac,pin_Ac
+    complex(8) :: pnj_Ac,pjn_Ac,pnk_Ac,pkn_Ac
+    complex(8) :: pij_Ac,pji_Ac,pik_Ac,pki_Ac,pjk_Ac,pkj_Ac
 
     tmp1(1:3) = 0d0
 
@@ -86,6 +94,217 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
         end do
     end do
     !$omp end parallel do
+
+    if(norder_correction>=1)then
+        do ik = sbe%ik_min, sbe%ik_max
+            do idir = 1, 3
+                do nb = 1, gs%ne/2
+                    do ib = 1, sbe%nb
+                        pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
+                        pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+                                 gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+                                 gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+                        if(nb /= ib) then
+                            if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
+                                tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+                                    2.d0 * sbe%rho(nb, nb, ik) * &
+                                    dble(pni_Ac*pin(idir)) / gs%delta_omega(ib, nb, ik) 
+                            end if
+                        end if
+                    end do
+                end do
+            end do
+        end do
+    end if
+
+    if(norder_correction>=2)then
+        do ik = sbe%ik_min, sbe%ik_max
+            do idir = 1, 3
+                do nb = 1, sbe%nb
+                    pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
+                    pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
+                             gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
+                             gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
+                    do ib = 1, sbe%nb
+                        pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
+                        pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+                                 gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+                                 gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+                        pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
+                                 gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
+                                 gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
+                        do jb = 1, sbe%nb
+                            pjn(idir) = gs%p_tm_matrix(jb, nb, idir, ik)
+                            pij(idir) = gs%p_tm_matrix(ib, jb, idir, ik)
+                            pij_Ac = gs%p_tm_matrix(ib, jb, 1, ik) * Ac(1) + &
+                                     gs%p_tm_matrix(ib, jb, 2, ik) * Ac(2) + &
+                                     gs%p_tm_matrix(ib, jb, 3, ik) * Ac(3)
+                            pjn_Ac = gs%p_tm_matrix(jb, nb, 1, ik) * Ac(1) + &
+                                     gs%p_tm_matrix(jb, nb, 2, ik) * Ac(2) + &
+                                     gs%p_tm_matrix(jb, nb, 3, ik) * Ac(3)
+                            if(nb /= ib .and. nb /= jb) then
+                                if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
+                                   abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
+                                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+                                        sbe%rho(nb, nb, ik) / &
+                                        gs%delta_omega(ib, nb, ik) / &
+                                        gs%delta_omega(jb, nb, ik) * &
+                                        (pjn(idir) * pij_Ac * pni_Ac &
+                                       + pjn_Ac * (pij(idir) * pni_Ac  + pni(idir) * pij_Ac))
+                                end if
+                            end if
+                        end do
+                        if(nb /= ib) then
+                            if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
+                                tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+                                    sbe%rho(nb, nb, ik) * &
+                                    (2.d0 * pnn_Ac * dble(pni(idir) * pin_Ac) + &
+                                    pnn(idir)*abs(pni_Ac)**2) / &
+                                    gs%delta_omega(ib, nb, ik)**2
+                            end if
+                        end if
+                    end do
+                end do
+            end do
+        end do
+    end if
+
+    if(norder_correction>=3)then
+      do ik = sbe%ik_min, sbe%ik_max
+        do idir = 1, 3
+          do nb = 1, sbe%nb
+            pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
+            pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
+                     gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
+                     gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
+            do ib = 1, sbe%nb
+              pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
+              pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
+              pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+                       gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+                       gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+              pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
+                       gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
+                       gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
+              do jb = 1, sbe%nb
+                pnj(idir) = gs%p_tm_matrix(nb, jb, idir, ik)
+                pjn(idir) = gs%p_tm_matrix(jb, nb, idir, ik)
+                pij(idir) = gs%p_tm_matrix(ib, jb, idir, ik)
+                pji(idir) = gs%p_tm_matrix(jb, ib, idir, ik)
+                pnj_Ac = gs%p_tm_matrix(nb, jb, 1, ik) * Ac(1) + &
+                         gs%p_tm_matrix(nb, jb, 2, ik) * Ac(2) + &
+                         gs%p_tm_matrix(nb, jb, 3, ik) * Ac(3)
+                pjn_Ac = gs%p_tm_matrix(jb, nb, 1, ik) * Ac(1) + &
+                         gs%p_tm_matrix(jb, nb, 2, ik) * Ac(2) + &
+                         gs%p_tm_matrix(jb, nb, 3, ik) * Ac(3)
+                pij_Ac = gs%p_tm_matrix(ib, jb, 1, ik) * Ac(1) + &
+                         gs%p_tm_matrix(ib, jb, 2, ik) * Ac(2) + &
+                         gs%p_tm_matrix(ib, jb, 3, ik) * Ac(3)
+                pji_Ac = gs%p_tm_matrix(jb, ib, 1, ik) * Ac(1) + &
+                         gs%p_tm_matrix(jb, ib, 2, ik) * Ac(2) + &
+                         gs%p_tm_matrix(jb, ib, 3, ik) * Ac(3)
+                do kb = 1, sbe%nb
+                  pnk(idir) = gs%p_tm_matrix(nb, kb, idir, ik)
+                  pkn(idir) = gs%p_tm_matrix(kb, nb, idir, ik)
+                  pik(idir) = gs%p_tm_matrix(ib, kb, idir, ik)
+                  pki(idir) = gs%p_tm_matrix(kb, ib, idir, ik)
+                  pjk(idir) = gs%p_tm_matrix(jb, kb, idir, ik)
+                  pkj(idir) = gs%p_tm_matrix(kb, jb, idir, ik)
+                  pnk_Ac = gs%p_tm_matrix(nb, kb, 1, ik) * Ac(1) + &
+                           gs%p_tm_matrix(nb, kb, 2, ik) * Ac(2) + &
+                           gs%p_tm_matrix(nb, kb, 3, ik) * Ac(3)
+                  pkn_Ac = gs%p_tm_matrix(kb, nb, 1, ik) * Ac(1) + &
+                           gs%p_tm_matrix(kb, nb, 2, ik) * Ac(2) + &
+                           gs%p_tm_matrix(kb, nb, 3, ik) * Ac(3)
+                  pik_Ac = gs%p_tm_matrix(ib, kb, 1, ik) * Ac(1) + &
+                           gs%p_tm_matrix(ib, kb, 2, ik) * Ac(2) + &
+                           gs%p_tm_matrix(ib, kb, 3, ik) * Ac(3)
+                  pki_Ac = gs%p_tm_matrix(kb, ib, 1, ik) * Ac(1) + &
+                           gs%p_tm_matrix(kb, ib, 2, ik) * Ac(2) + &
+                           gs%p_tm_matrix(kb, ib, 3, ik) * Ac(3)
+                  pjk_Ac = gs%p_tm_matrix(jb, kb, 1, ik) * Ac(1) + &
+                           gs%p_tm_matrix(jb, kb, 2, ik) * Ac(2) + &
+                           gs%p_tm_matrix(jb, kb, 3, ik) * Ac(3)
+                  pkj_Ac = gs%p_tm_matrix(kb, jb, 1, ik) * Ac(1) + &
+                           gs%p_tm_matrix(kb, jb, 2, ik) * Ac(2) + &
+                           gs%p_tm_matrix(kb, jb, 3, ik) * Ac(3)
+                  if(nb /= ib .and. nb /= jb .and. nb /= kb) then
+                    if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
+                       abs(gs%delta_omega(jb, nb, ik))> 1.d-3 .and. &
+                       abs(gs%delta_omega(kb, nb, ik))> 1.d-3)then
+                      tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+                                   sbe%rho(nb, nb, ik) / &
+                                   gs%delta_omega(ib, nb, ik) / &
+                                   gs%delta_omega(jb, nb, ik) / &
+                                   gs%delta_omega(kb, nb, ik) * &
+                                   dble(pji_Ac * ( pnk_Ac * ( pin(idir) * pkj_Ac + &
+                                                              pkj(idir) * pin_Ac ) + &
+                                                   pnk(idir) * pin_Ac * pkj_Ac ) + &
+                                        pji(idir) * pin_Ac * pkj_Ac * pnk_Ac)
+                    end if
+                  end if
+                end do
+                if(nb /= ib .and. nb /= jb) then
+                  if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
+                     abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
+                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+                                 sbe%rho(nb, nb, ik) * &
+                                 (gs%delta_omega(ib, nb, ik) + gs%delta_omega(jb, nb, ik)) / &
+                                 2.d0 / &
+                                 gs%delta_omega(ib, nb, ik)**2 / &
+                                 gs%delta_omega(jb, nb, ik)**2 * &
+                                 (pji(idir) * pnn_Ac * pin_Ac * pnj_Ac + &
+                                  pjn(idir) * pni_Ac * (pin_Ac * pnj_Ac + &
+                                                        pnn_Ac * pij_Ac) + &
+                                  pji_Ac * (pnn_Ac * (pin(idir) * pnj_Ac + &
+                                                      pnj(idir) * pin_Ac) + &
+                                            pnn(idir) * pin_Ac * pnj_Ac) + &
+                                  pjn_Ac * (pni(idir) * ( pin_Ac * pnj_Ac + &
+                                                          pnn_Ac * pij_Ac ) + &
+                                            pni_Ac * (pij(idir) * pnn_Ac + &
+                                                      pin(idir) * pnj_Ac + &
+                                                      pnj(idir) * pin_Ac + &
+                                                      pnn(idir) * pij_Ac)))
+                  end if
+                end if
+              end do
+            end do
+          end do
+        end do
+      end do
+      do ik = sbe%ik_min, sbe%ik_max
+        do idir = 1, 3
+          do nb = 1, sbe%nb
+            pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
+            pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
+                     gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
+                     gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
+            sum1 = 0.d0
+            do ib = 1, sbe%nb
+              pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
+              pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
+              pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+                       gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+                       gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+              pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
+                       gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
+                       gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
+              if(nb /= ib) then
+                if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
+                  sum1(idir) = sum1(idir) + &
+                          (pni(idir) * pnn_Ac * pin_Ac + &
+                           pni_Ac * (pin(idir) * pnn_Ac + &
+                                    2.d0 * pnn(idir) * pin_Ac)) / &
+                           gs%delta_omega(ib, nb, ik)**3
+                end if
+              end if
+            end do
+            tmp1(idir) = tmp1(idir) - gs%kweight(ik) * sbe%rho(nb, nb, ik) * pnn_Ac * sum1(idir)
+          end do
+        end do
+      end do
+    end if
+
     call comm_summation(tmp1, tmp, 3, icomm)
 
     jmat(:) = (real(tmp(1:3)) / sum(gs%kweight(:)) &

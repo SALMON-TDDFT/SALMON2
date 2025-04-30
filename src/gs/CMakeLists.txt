@@ -18,6 +18,8 @@ set(SOURCES
     read_gs.f90
     occupation.f90
    )
+   
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dc)
 
 if (USE_SCALAPACK)
   set(SOURCES ${SOURCES}

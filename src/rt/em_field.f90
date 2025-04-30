@@ -26,6 +26,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
   use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em
+  use nvtx
   implicit none
   integer   ,intent(in)    :: itt,nspin
   real(8)   ,intent(in)    :: curr_in(3,nspin)
@@ -34,6 +35,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   integer :: j
   real(8) :: n1,n2
   integer,parameter :: m=100
+  call nvtxStartRange('calc_emfield', __LINE__)
   
 ! electric field
   rt%E_ext(:,itt) = -( rt%Ac_ext(:,itt) - rt%Ac_ext(:,itt-1) )/dt
@@ -67,6 +69,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   end if
   rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
 
+  call nvtxEndRange
 end subroutine calc_emfields
 
 !===================================================================================================================================

@@ -33,6 +33,7 @@ contains
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit
     use code_optimization, only: force_omp_mode
+    use stencil_sub, only: calc_gradient_psi
     use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
@@ -494,7 +495,7 @@ contains
 
          F_tmp_l = 0d0
 #ifdef USE_OPENACC
-!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) copyin(ewald, pp)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #endif

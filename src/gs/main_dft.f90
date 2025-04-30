@@ -21,7 +21,7 @@ subroutine main_dft
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use parallelization, only: nproc_id_global,nproc_group_global,adjust_elapse_time
+use parallelization, only: nproc_id_global,nproc_group_global,adjust_elapse_time,nproc_size_global
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
@@ -46,6 +46,8 @@ use band_dft_sub
 use init_gs, only: init_wf
 use initialization_dft
 use jellium, only: check_condition_jm
+use dcdft
+use lcfo
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -61,7 +63,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl
 type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
@@ -74,14 +76,23 @@ type(s_mixing) :: mixing
 type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 type(s_opt) :: opt
+type(s_dcdft) :: dc
 
 logical :: rion_update
 logical :: flag_opt_conv
 integer :: Miopt, iopt,nopt_max,i
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
+integer :: ilevel_print
 
 if(theory=='dft_band'.and.iperiodic/=3) return
+
+if(yn_dc=='y') then
+  call init_dcdft(dc,pp,mixing,ewald)
+  ilevel_print = 0
+else
+  ilevel_print = 3
+end if
 
 !check condition for using jellium model
 if(yn_jm=='y') call check_condition_jm
@@ -90,6 +101,7 @@ call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
+
 
 ! please move folloings into initialization_dft
 call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
@@ -161,21 +173,6 @@ end if
 
 call timer_begin(LOG_INIT_GS_ITERATION)
 
-if(allocated(rho_old%f))    deallocate(rho_old%f)
-if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
-call allocate_scalar(mg,rho_old)
-call allocate_scalar(mg,Vlocal_old)
-
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg%is(3),mg%ie(3)
-do iy=mg%is(2),mg%ie(2)
-do ix=mg%is(1),mg%ie(1)
-   rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
-   Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
-end do
-end do
-end do
-
 call timer_end(LOG_INIT_GS_ITERATION)
 
 
@@ -194,8 +191,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         rho,rho_jm,rho_s,  &
                         V_local,Vh,Vxc,Vpsl,xc_func,  &
                         pp,ppg,ppn,  &
-                        rho_old,Vlocal_old,  &
-                        band, 3)
+                        band, ilevel_print, dc)
 
 
 if(theory=='dft_band')then
@@ -226,7 +222,7 @@ if(yn_out_tm  == 'y'.or.yn_out_gs_sgm_eps=='y') then
 end if
 
    ! force
-   if(yn_jm=='n')then
+   if(yn_jm=='n' .and. yn_dc=="n")then
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
      if(comm_is_root(nproc_id_global))then
         write(*,*) "===== force ====="
@@ -312,8 +308,13 @@ call fipp_stop ! performance profiling
 !------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
+if(yn_dc=='y') then
+  if(yn_dc_lcfo == 'y') call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+  call write_total_dcdft(system,dc)
+end if
+
 ! write GS: basic data
-call write_band_information(system,energy)
+if(yn_dc=='n') call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 call write_info_data(Miter,system,energy,pp)
 call write_k_data(system,stencil)
@@ -365,6 +366,14 @@ call timer_end(LOG_WRITE_GS_DATA)
 !call timer_end(LOG_WRITE_GS_INFO)
 
 call finalize_xc(xc_func)
+
+if(yn_dc=='y') then
+! override (restore)
+  nproc_group_global = dc%icomm_tot
+  nproc_id_global = dc%id_tot
+  nproc_size_global = dc%isize_tot
+  call comm_sync_all
+end if
 
 call timer_end(LOG_TOTAL)
 

@@ -27,8 +27,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               rho,rho_jm,rho_s,  &
                               V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
-                              rho_old,Vlocal_old,  &
-                              band,ilevel_print )
+                              band,ilevel_print,dc)
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -39,8 +38,6 @@ use timer
 use scf_iteration_sub
 use density_matrix, only: calc_density
 use writefield
-use salmon_pp, only: calc_nlcc
-use hartree_sub, only: hartree
 use force_sub
 use write_sub
 use read_gs
@@ -48,13 +45,13 @@ use code_optimization
 use initialization_sub
 use occupation
 use prep_pp_sub
-use mixing_sub
+use mixing_sub, only: check_mixing_half, copy_density
 use checkpoint_restart_sub
-use hamiltonian
 use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 use noncollinear_module, only: calc_magnetization
+use dcdft
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -62,7 +59,7 @@ integer :: ilevel_print !=3:print-all
                         !=1:print-minimum
                         !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
-real(8) :: sum0,sum1
+real(8) :: sum1
 real(8) :: rNebox1,rNebox2
 
 type(s_rgrid) :: lg
@@ -74,7 +71,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
@@ -86,13 +83,18 @@ type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
+type(s_dcdft),optional :: dc
 
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
+type(s_scalar) :: rho_old,Vlocal_old
+real(8) :: rNe
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
+
+call init_convergence_check
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
@@ -101,18 +103,10 @@ endif
 
 if(nscf_init_mix_zero.gt.1)then
    icnt_conv_nomix = 0
-   mixing%flag_mix_zero = .true.
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
-      call copy_density(iter,system%nspin,mg,rho_s,mixing)
-      call scf_iteration_step(lg,mg,system,info,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,rho,rho_jm,rho_s,  &
-                     cg,ppg,V_local,  &
-                     iter,  &
-                     nscf_init_no_diagonal, mixing, iter,  &
-                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
-      call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
@@ -147,7 +141,6 @@ if(nscf_init_mix_zero.gt.1)then
       endif
 
    end do DFT_NoMix_Iteration
-   mixing%flag_mix_zero = .false.
 endif
 
 flag_conv = .false.
@@ -176,18 +169,42 @@ DFT_Iteration : do iter=Miter+1,nscf
       ! for calc_total_energy_periodic
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
   
-      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
+      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution .and. yn_dc=='n') then
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
-   call copy_density(Miter,system%nspin,mg,rho_s,mixing)
-   call scf_iteration_step(lg,mg,system,info,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,rho,rho_jm,rho_s,  &
-                     cg,ppg,V_local,  &
-                     Miter,  &
-                     nscf_init_no_diagonal, mixing, iter,  &
-                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
-   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
+   if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
+     call copy_density(Miter,system%nspin,mg,rho_s,mixing)
+     call timer_begin(LOG_CALC_RHO)
+     call calc_density(system,rho_s,spsi,info,mg)
+     call timer_end(LOG_CALC_RHO)
+     call update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
+               spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,v_local,mixing,energy)
+   else if(yn_dc=='y') then
+   ! Divide-and-Conquer method
+     call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
+     ! occupation
+     if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
+       call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
+     end if
+     ! rho_s for fragments
+     call timer_begin(LOG_CALC_RHO)
+     call calc_density(system,rho_s,spsi,info,mg)
+     call timer_end(LOG_CALC_RHO)
+     ! rho_s (fragment) --> dc%rho_tot_s (total system)
+     call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
+     ! mixing & local KS potential (total system)
+     call update_density_and_potential(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot, &
+     & stencil,xc_func,pp,ppn,iter, &
+     & spsi,srg,srg_scalar, & ! dummy
+     & dc%poisson_tot,dc%fg_tot,dc%rho_tot,dc%rho_tot_s, &
+     & rho_jm, & ! dummy
+     & dc%Vpsl_tot,dc%Vh_tot,dc%Vxc_tot,dc%vloc_tot, &
+     mixing,energy)
+     ! dc%vloc_tot (total system) --> v_local (fragment)
+     call calc_vlocal_fragment_dcdft(system%nspin,mg,v_local,dc)
+   end if
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
@@ -197,11 +214,14 @@ DFT_Iteration : do iter=Miter+1,nscf
    end if
    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
    call get_band_gap(system,energy,ene_gap)
-   if(calc_mode/='DFT_BAND')then
+   if(calc_mode/='DFT_BAND' .and. yn_dc=='n')then
       select case(iperiodic)
       case(0); call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
+   else if(yn_dc=='y') then
+   ! Divide-and-Conquer method
+     call calc_total_energy_dcdft(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
    if(calc_mode=='DFT_BAND')then
@@ -233,56 +253,16 @@ DFT_Iteration : do iter=Miter+1,nscf
    if( calc_mode/='DFT_BAND' )then
    call timer_begin(LOG_WRITE_GS_RESULTS)
 
-   select case(convergence)
-   case('rho_dne')
-      sum0=0d0
-!$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3) 
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-         sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
-      end do
-      end do
-      end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      if(system%nspin==1)then
-         sum1 = sum1*system%Hvol/dble(nelec)
-      else if(system%nspin==2)then
-         if(sum(nelec_spin(:))>0)then
-            sum1 = sum1*system%Hvol/dble(sum(nelec_spin(:)))
-         else 
-            sum1 = sum1*system%Hvol/dble(nelec)
-         end if
-      end if
-   case('norm_rho','norm_rho_dng')
-      sum0=0.d0
-!$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3) 
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-         sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
-      end do
-      end do
-      end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      if(convergence=='norm_rho_dng')then
-         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
-      end if
-   case('norm_pot','norm_pot_dng')
-      sum0=0.d0
-!$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3) 
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-         sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
-      end do
-      end do
-      end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      if(convergence=='norm_pot_dng')then
-         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
-      end if
-   end select
+   if(yn_dc=='n') then
+     call convergence_check(lg,mg,system,info,rho,V_local)
+   else
+   ! DC method
+     call convergence_check(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot,dc%rho_tot,dc%vloc_tot)
+     if(comm_is_root(dc%id_tot)) then
+       write(*,'(a, i6 ,3x , a, e15.8, 3x, a, e15.8)') &
+       & "DC #SCF = ",Miter,"Total Energy = ",energy%E_tot*au_energy_ev,"diff = ",sum1
+     end if
+   end if
    
    if( ilevel_print.ge.3 ) then
    if(comm_is_root(nproc_id_global)) then
@@ -376,15 +356,27 @@ DFT_Iteration : do iter=Miter+1,nscf
    end if
    end if
    call timer_end(LOG_WRITE_GS_RESULTS)
+   if(yn_dc=='n') then
 !$OMP parallel do private(iz,iy,ix)
-   do iz=mg%is(3),mg%ie(3)
-   do iy=mg%is(2),mg%ie(2)
-   do ix=mg%is(1),mg%ie(1)
-      rho_old%f(ix,iy,iz)    = rho%f(ix,iy,iz)
-      Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
-   end do
-   end do
-   end do
+     do iz=mg%is(3),mg%ie(3)
+     do iy=mg%is(2),mg%ie(2)
+     do ix=mg%is(1),mg%ie(1)
+        rho_old%f(ix,iy,iz)    = rho%f(ix,iy,iz)
+        Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
+     end do
+     end do
+     end do
+   else
+   ! DC method
+!$OMP parallel do private(iz,iy,ix)
+     do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+     do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+     do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+        rho_old%f(ix,iy,iz)    = dc%rho_tot%f(ix,iy,iz)
+     end do
+     end do
+     end do
+   end if
 
    end if !calc_mode/=DFT_BAND
 
@@ -416,6 +408,96 @@ if(.not.flag_conv) then
    endif
 endif
 endif
+
+contains
+
+  subroutine init_convergence_check()
+    implicit none
+    
+    if(system%nspin==1) then
+      rNe = dble(nelec)
+    else if(system%nspin==2)then
+      if(sum(nelec_spin(:))>0)then
+        rNe = dble(sum(nelec_spin(:)))
+      else
+        rNe = dble(nelec)
+      end if
+    end if
+    
+    call allocate_scalar(mg,rho_old)
+    call allocate_scalar(mg,Vlocal_old)
+
+    !$OMP parallel do private(iz,iy,ix)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+       rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
+       Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    
+    if(yn_dc=='y') then
+      rNe = dc%elec_num_tot
+      deallocate(rho_old%f)
+      call allocate_scalar(dc%mg_tot,rho_old)
+      rho_old%f = dc%rho_tot%f
+    end if
+    
+  end subroutine init_convergence_check
+
+  subroutine convergence_check(lg,mg,system,info,rho,V_local)
+    implicit none
+    type(s_rgrid),        intent(in) :: lg,mg
+    type(s_dft_system),   intent(in) :: system
+    type(s_parallel_info),intent(in) :: info
+    type(s_scalar)       ,intent(in) :: rho,V_local(system%nspin)
+    !
+    real(8) :: sum0
+    
+    select case(convergence)
+    case('rho_dne')
+      sum0=0d0
+      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+      sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      end do
+      end do
+      end do
+      call comm_summation(sum0,sum1,info%icomm_r)
+      sum1 = sum1*system%Hvol/rNe
+    case('norm_rho','norm_rho_dng')
+      sum0=0.d0
+      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+      sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
+      end do
+      end do
+      end do
+      call comm_summation(sum0,sum1,info%icomm_r)
+      if(convergence=='norm_rho_dng')then
+        sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+      end if
+    case('norm_pot','norm_pot_dng')
+      sum0=0.d0
+      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+      sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
+      end do
+      end do
+      end do
+      call comm_summation(sum0,sum1,info%icomm_r)
+      if(convergence=='norm_pot_dng')then
+        sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+      end if
+    end select
+  end subroutine convergence_check
 
 end subroutine scf_iteration_dft
 

@@ -276,12 +276,13 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
   use timer
+  use nvtx
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
   integer :: itt,iatom
   real(8) :: mass_au, dt_h
-
+  call nvtxStartRange('time_evolution_step_md_part1', __LINE__)
   call timer_begin(LOG_MD_TEVOL_PART1)
 
   dt_h = dt*0.5d0
@@ -338,6 +339,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   endif
 
   call timer_end(LOG_MD_TEVOL_PART1)
+  call nvtxEndRange
 end subroutine 
 
 subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
@@ -348,6 +350,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   use salmon_pp, only: calc_nlcc
   use prep_pp_sub, only: init_ps,dealloc_init_ps
   use timer
+  use nvtx
   implicit none
   type(s_parallel_info) :: info
   type(s_dft_system) :: system
@@ -359,7 +362,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   type(s_pp_grid) :: ppg
   type(s_scalar) :: Vpsl
   integer :: itt
-
+  call nvtxStartRange('update_pseudo_rt', __LINE__)
   call timer_begin(LOG_MD_UPDATE_PSEUDO_PT)
 
   !update pseudopotential
@@ -375,6 +378,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   endif
 
   call timer_end(LOG_MD_UPDATE_PSEUDO_PT)
+  call nvtxEndRange
 end subroutine 
 
 subroutine time_evolution_step_md_part2(system,md)
@@ -382,12 +386,13 @@ subroutine time_evolution_step_md_part2(system,md)
   use salmon_global, only: natom,Kion,dt,yn_stop_system_momt,ensemble,thermostat
   use const, only: umass,hartree2J,kB
   use timer
+  use nvtx
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
   integer :: iatom
   real(8) :: mass_au,dt_h, aforce(3,natom), dR(3,natom), Ework_tmp
-
+  call nvtxStartRange('time_evolution_step_md_part2', __LINE__)
   call timer_begin(LOG_MD_TEVOL_PART2)
 
   dt_h = dt*0.5d0
@@ -416,6 +421,7 @@ subroutine time_evolution_step_md_part2(system,md)
   call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
 
   call timer_end(LOG_MD_TEVOL_PART2)
+  call nvtxEndRange
 end subroutine 
 
 subroutine apply_velocity_scaling_ion(Temp_ion,system)

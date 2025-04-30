@@ -55,7 +55,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl
 type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
@@ -152,21 +152,6 @@ MD_Loop : do it=1,nt
 
    call update_pseudo_rt(it,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
 
-   if(allocated(rho_old%f))    deallocate(rho_old%f)
-   if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
-   call allocate_scalar(mg,rho_old)
-   call allocate_scalar(mg,Vlocal_old)
-
-!$OMP parallel do private(iz,iy,ix)
-   do iz=mg%is(3),mg%ie(3)
-   do iy=mg%is(2),mg%ie(2)
-   do ix=mg%is(1),mg%ie(1)
-      rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
-      Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
-   end do
-   end do
-   end do
-
    !-------------- SCF Iteration ----------------
    !Iteration loop for SCF (DFT_Iteration)
    Miter=0
@@ -182,7 +167,6 @@ MD_Loop : do it=1,nt
                            rho,rho_jm,rho_s,  &
                            V_local,Vh,Vxc,Vpsl,xc_func,  &
                            pp,ppg,ppn,  &
-                           rho_old,Vlocal_old,  &
                            band,2 )
 
    ! force

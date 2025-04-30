@@ -6,5 +6,4 @@
 # if required, this script file can utilized for the preparation of 
 # the input data for the following calculations.
 
-wget https://www.abinit.org/sites/default/files/PrevAtomicData/psp-links/LDA_TM.psps/14/14si.pspnc
-
+wget --no-check-certificate https://abinit.github.io/abinit_web/ATOMICDATA/14si.pspnc

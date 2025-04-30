@@ -91,7 +91,7 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,Vxc(jspin))
 end do
 if(yn_jm=='n') then
-  call read_pslfile(system,pp)
+  if(yn_dc=='n') call read_pslfile(system,pp)
   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
@@ -184,6 +184,7 @@ use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 use jellium, only: make_rho_jm
+use lcfo, only: init_conventional_from_dcdft
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -218,7 +219,7 @@ real(8) :: rNe0,rNe
   spsi%update_zwf_overlap = .false.
 
   mixing%num_rho_stock = 21
-  call init_mixing(nspin,mg,mixing)
+  if(yn_dc=='n') call init_mixing(nspin,mg,mixing)
 
   ! restart from binary
   if (yn_restart == 'y') then
@@ -264,25 +265,18 @@ real(8) :: rNe0,rNe
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
-    call init_wf(lg,mg,system,info,spsi)
+    if(yn_conventional_from_dcdft=='n') then
+      call init_wf(lg,mg,system,info,spsi)
+    else
+    ! conventional DFT but wavefunctions are reconstructed from DC-LCFO data
+      call init_conventional_from_dcdft(lg,mg,system,info,spsi)
+    end if
     select case(method_init_density)
     case('pp','pp_magdir')
       call calc_density_pp(lg,mg,system,info,pp,fg,poisson,rho_s)
     case('read_dns_cube')
-      call read_dns_cube(lg,mg,rho_s(1)%f) ! cube file only
-      rNe0 = 0d0
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        rNe0 = rNe0 + rho_s(1)%f(ix,iy,iz) *system%Hvol
-      end do
-      end do
-      end do
-      call comm_summation(rNe0,rNe,info%icomm_r)
-      rho_s(1)%f = rho_s(1)%f *(dble(nelec)/rNe)
-      if(system%nspin==2) then
-        rho_s(1)%f = rho_s(1)%f/2d0
-        rho_s(2)%f = rho_s(1)%f
+      if(yn_dc=='n') then
+        call read_dns_cube(lg,mg,system,info,rho,rho_s)
       end if
     case default
       call calc_density(system,rho_s,spsi,info,mg)
@@ -301,7 +295,7 @@ real(8) :: rNe0,rNe
   end if
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)
@@ -309,9 +303,11 @@ real(8) :: rNe0,rNe
      ewald%yn_bookkeep='n'  !to be input keyword??
   case(3)
      ewald%yn_bookkeep='y'
-     call  init_nion_div(system,lg,mg,info)
+     if(yn_dc=='n') then
+       call init_nion_div(system,lg,mg,info)
+       call init_ewald(system,info,ewald)
+     end if
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
   if(yn_jm=='n') then
@@ -319,12 +315,14 @@ real(8) :: rNe0,rNe
   else
     rion_update = .false.
   end if
+  if(yn_dc=='n') then
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(system,info,lg,mg,pp,ppg,fg,poisson,rho_s,Vh,Vxc,rion_update,energy)
   case(3)
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
+  end if
 
 
 end subroutine initialization2_dft
@@ -375,7 +373,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
-  type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
+  type(s_scalar) :: rho,rho_jm,Vh,Vpsl
   type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
@@ -393,21 +391,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
 
   call init_md(system,md)
 
-  if(allocated(rho_old%f))    deallocate(rho_old%f)
-  if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
-  call allocate_scalar(mg,rho_old)
-  call allocate_scalar(mg,Vlocal_old)
-
-!$OMP parallel do private(iz,iy,ix)
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
-  do ix=mg%is(1),mg%ie(1)
-     rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
-     Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
-  end do
-  end do
-  end do
-
   !-------------- SCF Iteration ----------------
   !Iteration loop for SCF (DFT_Iteration)
   Miter=0
@@ -423,7 +406,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           rho,rho_jm,rho_s,  &
                           V_local,Vh,Vxc,Vpsl,xc_func,  &
                           pp,ppg,ppn,  &
-                          rho_old,Vlocal_old,  &
                           band, 2 )
 
   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)

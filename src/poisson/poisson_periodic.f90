@@ -24,6 +24,7 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   use structures
   use communication, only: comm_summation
   use math_constants, only : pi
+  use nvtx
   implicit none
   type(s_rgrid)          ,intent(in) :: lg
   type(s_rgrid)          ,intent(in) :: mg
@@ -34,23 +35,33 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   type(s_poisson)                    :: poisson
   !
   integer :: ix,iy,iz,kx,ky,kz
+  call nvtxStartRange('poission_ft', __LINE__)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc data copyin(poisson, fg, rho, mg, lg, vh)
+#endif
+
+#ifdef USE_OPENACC
+!$acc kernels
+!$acc loop collapse(3) private(iz,iy,ix)
+  do iz=lg%is(3),lg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    if (iz < mg%is(3) .or. iz > mg%ie(3)) then
+      poisson%ff1z(ix,iy,iz) = 0d0
+    else
+      poisson%ff1z(ix,iy,iz) = dcmplx(rho%f(ix,iy,iz))
+    end if
+  end do
+  end do
+  end do
+!$acc end kernels
 #else
 !$omp workshare
-#endif
   poisson%ff1z = 0d0
-#ifndef USE_OPENACC
 !$omp end workshare
-#endif
 
-
-#ifdef USE_OPENACC
-!$acc loop private(iz,iy,ix)
-#else
 !$OMP parallel do private(iz,iy,ix)
-#endif
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
@@ -58,27 +69,31 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
   end do
-#ifdef USE_OPENACC
-!$acc end kernels
 #endif
 
   call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info%icomm_z)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
+!$acc loop collapse(3) private(kz,iy,ix)
+  do kz = mg%is(3),mg%ie(3)
+  do iy = lg%is(2),lg%ie(2)
+  do ix = mg%is(1),mg%ie(1)
+    if (iy < mg%is(2) .or. iy > mg%ie(2)) then
+      poisson%ff1y(ix,iy,kz) = 0d0
+    else
+      poisson%ff1y(ix,iy,kz) = sum(fg%egzc(kz,:)*poisson%ff2z(ix,iy,:))
+    endif
+  end do
+  end do
+  end do
+!$acc end kernels
 #else
 !$omp workshare
-#endif
   poisson%ff1y = 0d0
-#ifndef USE_OPENACC
 !$omp end workshare
-#endif
 
-#ifdef USE_OPENACC
-!$acc loop private(kz,iy,ix)
-#else
 !$OMP parallel do private(kz,iy,ix)
-#endif
   do kz = mg%is(3),mg%ie(3)
   do iy = mg%is(2),mg%ie(2)
   do ix = mg%is(1),mg%ie(1)
@@ -86,26 +101,31 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
   end do
-#ifdef USE_OPENACC
-!$acc end kernels
 #endif
+
   call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*lg%num(2)*mg%num(3),info%icomm_y)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
+!$acc loop collapse(3) private(kz,ky,ix)
+  do kz = mg%is(3),mg%ie(3)
+  do ky = mg%is(2),mg%ie(2)
+  do ix = lg%is(1),lg%ie(1)
+    if (ix < mg%is(1) .or. ix > mg%ie(1)) then
+      poisson%ff1x(ix,ky,kz) = 0d0
+    else
+      poisson%ff1x(ix,ky,kz) = sum(fg%egyc(ky,:)*poisson%ff2y(ix,:,kz))
+    endif
+  end do
+  end do
+  end do
+!$acc end kernels
 #else
 !$omp workshare
-#endif
   poisson%ff1x = 0.d0
-#ifndef USE_OPENACC
 !$omp end workshare
-#endif
 
-#ifdef USE_OPENACC
-!$acc loop private(kz,ky,ix)
-#else
 !$OMP parallel do private(kz,ky,ix)
-#endif
   do kz = mg%is(3),mg%ie(3)
   do ky = mg%is(2),mg%ie(2)
   do ix = mg%is(1),mg%ie(1)
@@ -113,14 +133,12 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
   end do
-#ifdef USE_OPENACC
-!$acc end kernels
 #endif
 
   call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*mg%num(2)*mg%num(3),info%icomm_x)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
 !$acc loop private(kz,ky,kx)
 #else
 !$OMP parallel do private(kz,ky,kx)
@@ -139,20 +157,27 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*mg%num(2)*mg%num(3),info%icomm_x)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
+!$acc loop collapse(3) private(kz,ky,kx)
+  do kz = lg%is(3),lg%ie(3)
+  do ky = mg%is(2),mg%ie(2)
+  do kx = mg%is(1),mg%ie(1)
+    if (kz < mg%is(3) .or. kz > mg%ie(3)) then
+      poisson%ff1z(kx,ky,kz) = 0.d0
+    else
+      poisson%zrhoG_ele(kx,ky,kz) = poisson%ff2x(kx,ky,kz)
+      poisson%ff1z(kx,ky,kz) = fg%coef(kx,ky,kz)*poisson%ff2x(kx,ky,kz)
+    end if
+  end do
+  end do
+  end do
+!$acc end kernels
 #else
 !$omp workshare
-#endif
   poisson%ff1z = 0.d0
-#ifndef USE_OPENACC
 !$omp end workshare
-#endif
 
-#ifdef USE_OPENACC
-!$acc loop private(kz,ky,kx)
-#else
 !$OMP parallel do private(kz,ky,kx)
-#endif
   do kz = mg%is(3),mg%ie(3)
   do ky = mg%is(2),mg%ie(2)
   do kx = mg%is(1),mg%ie(1)
@@ -161,27 +186,31 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
   end do
-#ifdef USE_OPENACC
-!$acc end kernels
 #endif
 
   call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info%icomm_z)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
+!$acc loop collapse(3) private(iz,ky,kx)
+  do iz = mg%is(3),mg%ie(3)
+  do ky = lg%is(2),lg%ie(2)
+  do kx = mg%is(1),mg%ie(1)
+    if (ky < mg%is(2) .or. ky > mg%ie(2)) then
+      poisson%ff1y(kx,ky,iz) = 0.d0
+    else
+      poisson%ff1y(kx,ky,iz) = sum(fg%egz(:,iz)*poisson%ff2z(kx,ky,:))
+    end if
+  end do
+  end do
+  end do
+!$acc end kernels
 #else
 !$omp workshare
-#endif
   poisson%ff1y = 0.d0
-#ifndef USE_OPENACC
 !$omp end workshare
-#endif
 
-#ifdef USE_OPENACC
-!$acc loop private(iz,ky,kx)
-#else
 !$OMP parallel do private(iz,ky,kx)
-#endif
   do iz = mg%is(3),mg%ie(3)
   do ky = mg%is(2),mg%ie(2)
   do kx = mg%is(1),mg%ie(1)
@@ -189,26 +218,31 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
   end do
-#ifdef USE_OPENACC
-!$acc end kernels
 #endif
+
   call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*lg%num(2)*mg%num(3),info%icomm_y)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
+!$acc loop collapse(3) private(iz,iy,kx)
+  do iz = mg%is(3),mg%ie(3)
+  do iy = mg%is(2),mg%ie(2)
+  do kx = lg%is(1),lg%ie(1)
+    if (kx < mg%is(1) .or. kx > mg%ie(1)) then
+      poisson%ff1x(kx,iy,iz) = 0.d0
+    else
+      poisson%ff1x(kx,iy,iz) = sum(fg%egy(:,iy)*poisson%ff2y(kx,:,iz))
+    endif
+  end do
+  end do
+  end do
+!$acc end kernels
 #else
 !$omp workshare
-#endif
   poisson%ff1x = 0.d0
-#ifndef USE_OPENACC
 !$omp end workshare
-#endif
 
-#ifdef USE_OPENACC
-!$acc loop private(iz,iy,kx)
-#else
 !$OMP parallel do private(iz,iy,kx)
-#endif
   do iz = mg%is(3),mg%ie(3)
   do iy = mg%is(2),mg%ie(2)
   do kx = mg%is(1),mg%ie(1)
@@ -216,13 +250,12 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   end do
   end do
   end do
-#ifdef USE_OPENACC
-!$acc end kernels
 #endif
+
   call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*mg%num(2)*mg%num(3),info%icomm_x)
 
 #ifdef USE_OPENACC
-!$acc kernels copyin(poisson)
+!$acc kernels
 !$acc loop private(iz,iy,ix)
 #else
 !$OMP parallel do private(iz,iy,ix)
@@ -238,6 +271,10 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
 !$acc end kernels
 #endif
 
+#ifdef USE_OPENACC
+!$acc end data
+#endif
+  call nvtxEndRange
   return
 end subroutine poisson_ft
 

@@ -30,27 +30,27 @@ contains
 subroutine init_dir_out_restart(ofl)
   use structures,  only: s_ofile
   use filesystem,  only: atomic_create_directory
-  use salmon_global,   only: theory,write_rt_wfn_k
+  use salmon_global,   only: theory,write_rt_wfn_k,base_directory
   use parallelization, only: nproc_id_global,nproc_group_global
   implicit none
   type(s_ofile), intent(inout) :: ofl
 
   select case(theory)
     case('dft','dft_md','dft_band')
-      ofl%dir_out_restart = 'data_for_restart/'
+      ofl%dir_out_restart = trim(base_directory)//'data_for_restart/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
     case('tddft_response','tddft_pulse','single_scale_maxwell_tddft')
       if (write_rt_wfn_k == 'y') then
-        ofl%dir_out_restart = 'data_for_restart_rt/'
+        ofl%dir_out_restart = trim(base_directory)//'data_for_restart_rt/'
         call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
     case('multi_scale_maxwell_tddft')
       if (write_rt_wfn_k == 'y') then
-        ofl%dir_out_restart = 'data_for_restart_ms'
+        ofl%dir_out_restart = trim(base_directory)//'data_for_restart_ms'
         call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
     case('dft2tddft')
-      ofl%dir_out_restart = 'data_for_restart_rt/'
+      ofl%dir_out_restart = trim(base_directory)//'data_for_restart_rt/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
   end select
 
@@ -59,6 +59,7 @@ end subroutine init_dir_out_restart
 
 subroutine generate_checkpoint_directory_name(header,iter,gdir,pdir)
   use parallelization, only: nproc_id_global
+  use salmon_global,   only: base_directory
   implicit none
   character(*),  intent(in)  :: header
   integer,       intent(in)  :: iter
@@ -66,7 +67,7 @@ subroutine generate_checkpoint_directory_name(header,iter,gdir,pdir)
   character(256),intent(out) :: pdir
 
   ! global directory
-  write(gdir,'(A,A,A,I6.6,A)') "checkpoint_",trim(header),"_",iter,"/"
+  write(gdir,'(A,A,A,I6.6,A)') trim(base_directory)//"checkpoint_",trim(header),"_",iter,"/"
   ! process private directory
   write(pdir,'(A,A,I6.6,A)')   trim(gdir),'rank_',nproc_id_global,'/'
 end subroutine generate_checkpoint_directory_name
@@ -277,6 +278,7 @@ end subroutine checkpoint_rt
 subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar, s_rt
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  use nvtx
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg, mg
   type(s_dft_system)     ,intent(inout) :: system
@@ -288,7 +290,8 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
 
   character(256) :: gdir,wdir
   logical :: iself
-
+  call nvtxStartRange('restart_rt', __LINE__)
+  
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'
@@ -303,6 +306,7 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
   end if
   
+  call nvtxEndRange
 end subroutine restart_rt
 
 !===================================================================================================================================
@@ -402,6 +406,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data, yn_reset_step_restart
+  use nvtx
   implicit none
   character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg
@@ -421,6 +426,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   character(256) :: dir_file_in
   integer :: comm,itt,nprocs
   logical :: iself,if_real_orbital
+  call nvtxStartRange('read_bin', __LINE__)
 
   flag_GS = (theory=='dft'.or.theory=='dft_md'.or.theory=='dft_band'.or.calc_mode=='GS')
   flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
@@ -531,6 +537,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
     end if
   end if
 
+  call nvtxEndRange
 end subroutine read_bin
 
 
@@ -742,7 +749,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
 
     do i=1,mixing%num_rho_stock+1
 #ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy,ix)
+!$acc parallel loop private(iz,iy,ix) copyin(mixing)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
@@ -761,7 +768,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
 
     do i=1,mixing%num_rho_stock
 #ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy,ix)
+!$acc parallel loop private(iz,iy,ix) copyin(mixing)
 #else
 !$omp parallel do collapse(2) private(iz,iy,ix)
 #endif
@@ -1961,6 +1968,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: trans_longi
+  use nvtx
   implicit none
   character(*),            intent(in) :: wdir
   integer,                 intent(in) :: itt
@@ -1973,6 +1981,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   integer,parameter :: iunit = 333
   integer :: ierr,comm,i1,i2
   character(256) :: tdir,filename
+  call nvtxStartRange('read_rtdata', __LINE__)
   
   comm = info%icomm_rko
   
@@ -1990,6 +1999,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
     call comm_bcast(rt%Ac_ind,comm)
   end if
 
+  call nvtxEndRange
 end subroutine read_rtdata
 
 !===================================================================================================================================
