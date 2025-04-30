@@ -91,7 +91,7 @@ subroutine input_pp(pp,hx,hy,hz)
 
       if ( flag_beta_proj_is_given ) then
         flag_potential_is_given=.false.
-        if(method_init_density/='wf' .and. ps_format(ik)/='UPF') then
+        if(method_init_density/='read_dns_cube' .and. method_init_density/='wf' .and. ps_format(ik)/='UPF') then
           stop "radial density is not available (method_init_density=pp...)"
         end if
       end if
