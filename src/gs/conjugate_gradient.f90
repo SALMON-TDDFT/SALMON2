@@ -69,6 +69,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%gk)
     call allocate_orbital_real(nspin,mg,info,cg%pre_gk) ! hwf==hpk
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
+    !$acc enter data copyin(cg)
   end if
   
   allocate(sb(system%nspin,system%no))
@@ -276,71 +277,6 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   return
 contains
-
-subroutine orthogonalization(mg,system,info,psi,gk)
-  implicit none
-  type(s_rgrid),intent(in) :: mg
-  type(s_dft_system),intent(in) :: system
-  type(s_parallel_info),intent(in) :: info
-  type(s_orbital),intent(in) :: psi
-  type(s_orbital)            :: gk
-  !
-  integer :: nspin,no,ispin,io_s,io_e,is(3),ie(3),ix,iy,iz,io1,io2
-  complex(8) :: sum0
-  complex(8),dimension(system%no,system%no,system%nspin) :: sum_obmat0,sum_obmat1
-
-  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ gscg"
-
-  nspin = system%nspin
-  no = system%no
-  is = mg%is
-  ie = mg%ie
-  io_s = info%io_s
-  io_e = info%io_e
-
-  sum_obmat0 = 0.d0
-!$omp parallel do private(ispin,io1,io2,sum0,iz,iy,ix) collapse(2)
-  do ispin=1,nspin
-    do io1=io_s,io_e
-      do io2=io_s,io1-1
-        sum0 = 0.d0
-! speed? !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          sum0=sum0+psi%rwf(ix,iy,iz,ispin,io2,1,1)*gk%rwf(ix,iy,iz,ispin,io1,1,1)
-        end do
-        end do
-        end do
-        sum_obmat0(io1,io2,ispin) = sum0*system%hvol
-      end do
-    end do
-  end do
-  call timer_end(LOG_GSCG_ISOLATED_CALC)
-
-  call timer_begin(LOG_GSCG_ISOLATED_COMM_COLL)
-  call comm_summation(sum_obmat0,sum_obmat1,no**2*nspin,info%icomm_rko)
-  call timer_end(LOG_GSCG_ISOLATED_COMM_COLL)
-
-  call timer_begin(LOG_GSCG_ISOLATED_CALC)
-!$omp parallel do private(ispin,io1,io2,iz,iy,ix) collapse(2)
-  do ispin=1,nspin
-    do io1=io_s,io_e
-      do io2=io_s,io1-1
-! speed? !$omp parallel do private(iz,iy,ix) collapse(2)
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          gk%rwf(ix,iy,iz,ispin,io1,1,1) = gk%rwf(ix,iy,iz,ispin,io1,1,1) &
-          & -sum_obmat1(io1,io2,ispin) * psi%rwf(ix,iy,iz,ispin,io2,1,1)
-        end do
-        end do
-        end do
-      end do
-    end do
-  end do
-
-end subroutine orthogonalization
 
 subroutine inner_product(mg,system,info,psi1,psi2,rbox)
   !$ use omp_lib
