@@ -11,11 +11,12 @@ else ()
     set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${LAPACK_LINKER_FLAGS} ${LAPACK_LIBRARIES})
   else ()
     # NOTE: LAPACK 3.7.0 and later version can't build by GCC 4.8.5, which RHEL7 provided compiler.
-    set(LAPACK_VERSION "3.6.1")
+    set(LAPACK_VERSION "3.12.1")
     message(STATUS "Build Netlib LAPACK library version ${LAPACK_VERSION}")
 
+    # old URL "http://www.netlib.org/lapack/lapack-${LAPACK_VERSION}.tgz"
     ExternalProject_Add(lapack-project
-      URL              "http://www.netlib.org/lapack/lapack-${LAPACK_VERSION}.tgz"
+      URL              "https://github.com/Reference-LAPACK/lapack/archive/refs/tags/v${LAPACK_VERSION}.tar.gz"
       PREFIX           "${CMAKE_BINARY_DIR}/lapack"
       CMAKE_ARGS       -D BUILD_SHARED_LIBS=off -D BUILD_TESTING=off
                        -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}

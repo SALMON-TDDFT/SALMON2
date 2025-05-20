@@ -204,7 +204,7 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    case(3)
       call write_wfn(lg,mg,spsi,info,system)
       ! Experimental Implementation of Inner-Product Outputs:
-      call write_prod_dk_data(lg, mg, system, info, spsi)
+      ! call write_prod_dk_data(lg, mg, system, info, spsi)
    case(0)
       write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
    end select
