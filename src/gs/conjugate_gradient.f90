@@ -40,12 +40,14 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   !
   integer,parameter :: nd=4
   integer :: nspin,io,ispin,io_s,io_e,is(3),ie(3),iy,iz
-  integer :: iter
-  real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
-
-#ifdef USE_OPENACC
-  real(8),allocatable :: rwf_tmp(:,:,:,:,:,:,:)
-#endif
+  integer :: ierr,icg
+  real(8),parameter :: ep0=0.0d0
+  real(8),parameter :: ep1=1.0d-15
+  real(8),parameter :: c1  = 2.0d0
+  real(8) :: rwork(9),W(2),c
+  real(8),allocatable :: sb(:,:),rb(:,:),E(:,:),E1(:,:),gkgk(:,:),bk(:,:),res(:,:)
+  real(8),allocatable :: utmp3(:,:,:),wtmp2(:,:,:)
+  real(8) :: utmp2(2,2),btmp2(2,2)
 
   if ( yn_spinorbit=='y' ) then
     call gscg_rwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
@@ -61,15 +63,36 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   io_s = info%io_s
   io_e = info%io_e
 
-  if(.not. allocated(cg%xk%rwf)) then
-    call allocate_orbital_real(nspin,mg,info,cg%xk)
+  if(.not. allocated(cg%hxk%rwf)) then
     call allocate_orbital_real(nspin,mg,info,cg%hxk)
     call allocate_orbital_real(nspin,mg,info,cg%pk)
     call allocate_orbital_real(nspin,mg,info,cg%gk)
-    call allocate_orbital_real(nspin,mg,info,cg%pre_gk)
-    call allocate_orbital_real(nspin,mg,info,cg%pko)
+    call allocate_orbital_real(nspin,mg,info,cg%pre_gk) ! hwf==hpk
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
+  
+  allocate(sb(system%nspin,system%no))
+  allocate(rb(system%nspin,system%no))
+  allocate(E (system%nspin,system%no))
+  allocate(E1(system%nspin,system%no))
+  allocate(gkgk(system%nspin,system%no))
+  allocate(bk(system%nspin,system%no))
+  allocate(wtmp2(6,system%nspin,system%no))
+  allocate(utmp3(2,system%nspin,system%no))
+  allocate(res(system%nspin,system%no))
+  res = 0.0d0
+  
+  call timer_end(LOG_GSCG_ISOLATED_CALC)
+
+  call timer_begin(LOG_GSCG_ISOLATED_HPSI)
+  call hpsi(spsi,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_GSCG_ISOLATED_HPSI)
+
+  call timer_begin(LOG_GSCG_ISOLATED_CALC)
+
+  E1=1.0d10
+
+  call inner_product(mg,system,info,spsi,cg%hxk,E)
 
 #ifdef USE_OPENACC
 !$acc parallel loop private(io,ispin,iz,iy) collapse(4)
@@ -80,21 +103,15 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   do ispin=1,nspin
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
-    cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+    cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+    & - E(ispin,io)*spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) )
   end do
   end do
   end do
   end do
-  call timer_end(LOG_GSCG_ISOLATED_CALC)
+  call inner_product(mg,system,info,cg%gk,cg%gk,rb)
 
-  call timer_begin(LOG_GSCG_ISOLATED_HPSI)
-  call hpsi(cg%xk,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
-  call timer_end(LOG_GSCG_ISOLATED_HPSI)
-
-  call timer_begin(LOG_GSCG_ISOLATED_CALC)
-  call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
-
-  Iteration : do iter=1,Ncg
+  do icg=1,Ncg+1
 
 #ifdef USE_OPENACC
 !$acc parallel loop private(io,ispin,iz,iy) collapse(4)
@@ -105,42 +122,34 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-      & - xkHxk(ispin,io) * cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ! pre_gk==Pgk
     end do
     end do
     end do
     end do
 
-!    call orthogonalization(mg,system,info,spsi,cg%gk)
+    res = rb /c1**2
+
+! --- Convergence check ---
+
+    if ( all(rb < ep0) ) exit
+    if ( all(abs(E-E1)<ep1) ) exit
+    if ( icg==Ncg+1 ) exit
+
+! --- Preconditioning ---
+
     if(yn_preconditioning=='y')then
       call preconditioning_rgk(mg,system,info,cg%gk,cg%pre_gk)
-      call inner_product(mg,system,info,cg%pre_gk,cg%gk,sum)
-    else
-      call inner_product(mg,system,info,cg%gk,cg%gk,sum)
     end if
 
-    if(iter==1)then
-      uk = 0d0
-    else
-#ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin)
-#else
-!$omp parallel do private(io,ispin)
-#endif
-      do io=io_s,io_e
-      do ispin=1,nspin
-        if (abs(gkgk(ispin,io)) > 1d-16) then
-          uk(ispin,io) = sum(ispin,io) / gkgk(ispin,io)
-        else
-          uk(ispin,io) = 0d0
-        end if
-      end do
-      end do
-    end if
+! --- orthogonalization
+    !call gram_schmidt
 
-    if(yn_preconditioning=='y')then
+! ---
+
+    call inner_product(mg,system,info,cg%pre_gk,cg%gk,rb) ! pre_gk==Pgk
+
+    if ( icg==1 ) then
 #ifdef USE_OPENACC
 !$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
@@ -150,14 +159,13 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       do ispin=1,nspin
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
-        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-        & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ! pre_gk==Pgk
       end do
       end do
       end do
-      end do
+      end do        
     else
+      bk = rb/gkgk
 #ifdef USE_OPENACC
 !$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
@@ -167,150 +175,103 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
       do ispin=1,nspin
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
-        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-        & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & + bk(ispin,io)*cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
       end do
       end do
       end do
       end do
     end if
-
-    gkgk = sum
-    call inner_product(mg,system,info,cg%xk,cg%pk,zs)
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
-#else
-!$omp parallel do private(io,ispin,iz,iy) collapse(4)
-#endif
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-      & - zs(ispin,io) * cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-    end do
-    end do
-    end do
-    end do
-
-    call inner_product(mg,system,info,cg%pko,cg%pko,sum)
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
-#else
-!$omp parallel do private(io,ispin,iz,iy) collapse(4)
-#endif
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(sum(ispin,io))
-    end do
-    end do
-    end do
-    end do
+    gkgk = rb
     call timer_end(LOG_GSCG_ISOLATED_CALC)
 
     call timer_begin(LOG_GSCG_ISOLATED_HPSI)
-    call hpsi(cg%pko,cg%hwf,info,mg,vlocal,system,stencil,srg,ppg)
+    call hpsi(cg%pk,cg%hwf,info,mg,vlocal,system,stencil,srg,ppg) ! hwf==hpk
     call timer_end(LOG_GSCG_ISOLATED_HPSI)
 
     call timer_begin(LOG_GSCG_ISOLATED_CALC)
-    call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
-    call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
+    call inner_product(mg,system,info,spsi ,spsi ,wtmp2(1,:,:))
+    call inner_product(mg,system,info,cg%pk,spsi ,wtmp2(2,:,:))
+    call inner_product(mg,system,info,cg%pk,cg%pk,wtmp2(3,:,:))
+    call inner_product(mg,system,info,spsi ,cg%hxk,wtmp2(4,:,:))
+    call inner_product(mg,system,info,cg%pk,cg%hxk,wtmp2(5,:,:))
+    call inner_product(mg,system,info,cg%pk,cg%hwf,wtmp2(6,:,:)) ! hwf==hpk
+
+    do io=io_s,io_e
+    do ispin=1,nspin
+      btmp2(1,1)=wtmp2(1,ispin,io)
+      btmp2(2,1)=wtmp2(2,ispin,io)
+      btmp2(1,2)=wtmp2(2,ispin,io)
+      btmp2(2,2)=wtmp2(3,ispin,io)
+      utmp2(1,1)=wtmp2(4,ispin,io)
+      utmp2(2,1)=wtmp2(5,ispin,io)
+      utmp2(1,2)=wtmp2(5,ispin,io)
+      utmp2(2,2)=wtmp2(6,ispin,io)
+      call dsygv(1,'V','U',2,utmp2,2,btmp2,2,W,rwork,9,ierr)
+      if ( abs(W(1)-E(ispin,io))>1.d-1 .and. abs(W(2)-E(ispin,io))<=1.d-1 ) then
+        utmp2(1,1)=utmp2(1,2)
+        utmp2(2,1)=utmp2(2,2)
+        W(1)=W(2)
+      end if
+      
+      !- Fix the phase -
+      c=utmp2(1,1)
+      if( c<0.0d0 ) then
+        utmp2(1,1)=-utmp2(1,1)
+        utmp2(2,1)=-utmp2(2,1)
+      end if
+      utmp3(1:2,ispin,io) = utmp2(1:2,1)
+      E1(ispin,io)=E(ispin,io)
+      E(ispin,io) =W(1)
 
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin)
+!$acc parallel loop private(iz,iy) collapse(2)
 #else
-!$omp parallel do private(io,ispin)
+!$omp parallel do private(iz,iy) collapse(2)
+#endif
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+          & utmp2(1,1)* cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+          & + utmp2(2,1)* cg%hwf%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ! hwf==hpk
+        cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( &
+          & cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+          & - W(1)*(utmp2(1,1) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+          &  + utmp2(2,1) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ) )
+      end do
+      end do
+
+    end do ! ispin
+    end do ! io
+
+    call inner_product(mg,system,info,cg%gk,cg%gk,rb)
+
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy)
+#else
+!$omp parallel do private(io,ispin,iz,iy)
 #endif
     do io=io_s,io_e
     do ispin=1,nspin
-      ev(ispin,io)=0.5d0*((xkHxk(ispin,io)+pkHpk(ispin,io))   &
-                     -sqrt((xkHxk(ispin,io)-pkHpk(ispin,io))**2+4.d0*abs(xkHpk(ispin,io))**2))
-      if (abs(ev(ispin,io) - xkHxk(ispin,io)) > 1d-16) then
-        cx(ispin,io)=xkHpk(ispin,io)/(ev(ispin,io)-xkHxk(ispin,io))
-        cp(ispin,io)=1.d0/sqrt(1.d0+abs(cx(ispin,io))**2)
-        cx(ispin,io)=cx(ispin,io)*cp(ispin,io)
-      else
-        cx(ispin,io) = 1d0
-        cp(ispin,io) = 0d0
+      if ( rb(ispin,io)/res(ispin,io)>1.0d8 ) then
+        E(ispin,io)=E1(ispin,io)
+        cycle
       end if
-    end do
-    end do
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
-#else
-!$omp parallel do private(io,ispin,iz,iy) collapse(4)
-#endif
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cx(ispin,io)* cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-      & + cp(ispin,io) * cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-      cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cx(ispin,io)* cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-      & + cp(ispin,io) * cg%hwf%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-    end do
-    end do
-    end do
-    end do
-
-    call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
-    call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
-
-#ifdef USE_OPENACC
-    allocate(rwf_tmp, source=spsi%rwf)
-!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      rwf_tmp(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(xkxk(ispin,io))
-    end do
-    end do
-    end do
-    end do
-
-!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      if(1d-16 < abs(xkxk(ispin,io)) .and. abs(xkxk(ispin,io)) <= 1d30) then
-        spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = rwf_tmp(is(1):ie(1),iy,iz,ispin,io,1,1)
-      end if
-    end do
-    end do
-    end do
-    end do
-
-    deallocate(rwf_tmp)
-#else
-!$omp parallel do private(io,ispin,iz,iy) collapse(4)
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      if(1d-16 < abs(xkxk(ispin,io)) .and. abs(xkxk(ispin,io)) <= 1d30) then
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
         spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(xkxk(ispin,io))
-      end if
+        & utmp3(1,ispin,io) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & + utmp3(2,ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end do
+      end do
     end do
     end do
-    end do
-    end do
-#endif
 
-  end do Iteration
+  end do ! icg
+  
+  deallocate( utmp3,wtmp2 )
+  deallocate( bk,gkgk,E1,E,rb,sb,res )
+
   call timer_end(LOG_GSCG_ISOLATED_CALC)
 
   return
