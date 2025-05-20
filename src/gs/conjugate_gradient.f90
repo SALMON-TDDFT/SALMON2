@@ -697,9 +697,9 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
     end do
   else
 #ifdef USE_OPENACC
-      !$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+!$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
 #else
-      !$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+!$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
 #endif
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
