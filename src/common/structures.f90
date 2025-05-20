@@ -437,7 +437,8 @@ module structures
 ! +-----------------------------------+
 
   type s_cg
-    type(s_orbital) :: xk,hxk,gk,pre_gk,pk,pko,hwf
+    type(s_orbital) :: hxk,gk,pre_gk,pk,hpk
+    type(s_orbital) :: xk,pko,hwf
   end type s_cg
 
   type s_mixing
