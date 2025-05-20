@@ -5,7 +5,6 @@ set(SOURCES
     pseudo_pt_so.f90
     subspace_diagonalization_so.f90
     update_kvector_so.f90
-    conjugate_gradient_so.f90
     pseudo_pt_current_so.f90
    )
 

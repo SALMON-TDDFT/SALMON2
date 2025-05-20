@@ -23,8 +23,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
-  use salmon_global, only: yn_spinorbit,yn_preconditioning
-  use Conjugate_Gradient_so, only: gscg_rwf_so
+  use salmon_global, only: yn_preconditioning
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -48,11 +47,6 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   real(8),allocatable :: rb(:,:),E(:,:),E1(:,:),gkgk(:,:),bk(:,:),res(:,:)
   real(8),allocatable :: utmp3(:,:,:),wtmp2(:,:,:)
   real(8) :: utmp2(2,2),btmp2(2,2)
-
-  if ( yn_spinorbit=='y' ) then
-    call gscg_rwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-    return
-  end if
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
@@ -369,7 +363,6 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
   use salmon_global, only: yn_spinorbit,yn_preconditioning
-  use Conjugate_Gradient_so, only: gscg_zwf_so
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -394,11 +387,6 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   complex(8),allocatable :: utmp3(:,:,:,:),wtmp2(:,:,:,:),zb(:,:,:)
   complex(8) :: utmp2(2,2),btmp2(2,2)
   complex(8) :: work(9),zphase,ztmp
-
-  if ( yn_spinorbit=='y' ) then
-    call gscg_zwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-    return
-  end if
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
@@ -685,26 +673,51 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   nspin = system%nspin
 
   zbox2(:,:,:) = 0.d0
+  
+  if(yn_spinorbit=='n') then
 #ifdef USE_OPENACC
 !$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
 #else
 !$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
 #endif
-  do ik=info%ik_s,info%ik_e
-  do io=info%io_s,info%io_e
-  do ispin=1,nspin
-    sum0 = 0d0
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + conjg(psi1%zwf(ix,iy,iz,ispin,io,ik,1))*psi2%zwf(ix,iy,iz,ispin,io,ik,1)
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,nspin
+      sum0 = 0d0
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        sum0 = sum0 + conjg(psi1%zwf(ix,iy,iz,ispin,io,ik,1))*psi2%zwf(ix,iy,iz,ispin,io,ik,1)
+      end do
+      end do
+      end do
+      zbox2(ispin,io,ik) = sum0 * system%hvol
     end do
     end do
     end do
-    zbox2(ispin,io,ik) = sum0 * system%hvol
-  end do
-  end do
-  end do
+  else
+#ifdef USE_OPENACC
+      !$acc parallel loop collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+#else
+      !$OMP parallel do collapse(2) private(ik,io,ispin,sum0,iz,iy,ix)
+#endif
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      sum0 = 0d0
+      do ispin=1,nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        sum0 = sum0 + conjg(psi1%zwf(ix,iy,iz,ispin,io,ik,1))*psi2%zwf(ix,iy,iz,ispin,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+      zbox2(1,io,ik) = sum0 * system%hvol
+      zbox2(2,io,ik) = zbox2(1,io,ik)
+    end do
+    end do
+  end if
   call timer_end(LOG_GSCG_PERIODIC_CALC)
 
   call timer_begin(LOG_GSCG_PERIODIC_COMM_COLL)
