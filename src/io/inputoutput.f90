@@ -729,7 +729,7 @@ contains
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
-    method_mixing = 'simple'
+    method_mixing = 'broyden'
     mixrate       = 0.5d0
     nmemory_mb    = 8
     alpha_mb      = 0.75d0

@@ -56,8 +56,6 @@
   method_init_wf='random'
   ncg = 4
   nscf = 120
-  mixrate=0.3
-  threshold = 1.d-9
 /
 
 &emfield
