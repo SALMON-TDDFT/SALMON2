@@ -215,49 +215,60 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
         utmp2(2,1)=-utmp2(2,1)
       end if
       utmp3(1:2,ispin,io) = utmp2(1:2,1)
-      E1(ispin,io)=E(ispin,io)
-      E(ispin,io) =W(1)
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy) collapse(2)
-#else
-!$omp parallel do private(iz,iy) collapse(2)
-#endif
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-          & utmp2(1,1)* cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-          & + utmp2(2,1)* cg%hpk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-        cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( &
-          & cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-          & - W(1)*(utmp2(1,1) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-          &  + utmp2(2,1) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ) )
-      end do
-      end do
-
+      E1(ispin,io) = E(ispin,io)
+      E(ispin,io)  = W(1)
     end do ! ispin
     end do ! io
-
-    call inner_product(mg,system,info,cg%gk,cg%gk,rb)
-
+    
 #ifdef USE_OPENACC
-!$acc parallel loop private(io,ispin,iz,iy)
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
 #else
-!$omp parallel do private(io,ispin,iz,iy)
+!$omp parallel do private(io,ispin,iz,iy) collapse(4)
 #endif
     do io=io_s,io_e
     do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        &   utmp3(1,ispin,io)* cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & + utmp3(2,ispin,io)* cg%hpk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( &
+        & cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & - E(ispin,io)*( utmp3(1,ispin,io) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        &               + utmp3(2,ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ) )
+    end do
+    end do
+    end do
+    end do
+
+    call inner_product(mg,system,info,cg%gk,cg%gk,rb)
+
+    bk = -1d0
+    do io=io_s,io_e
+    do ispin=1,nspin
       if ( rb(ispin,io)/res(ispin,io)>1.0d8 ) then
-        E(ispin,io)=E1(ispin,io)
-        cycle
+        E(ispin,io) = E1(ispin,io)
+        bk(ispin,io) = 1d0
       end if
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
+    end do
+    end do
+
+#ifdef USE_OPENACC
+!$acc parallel loop private(io,ispin,iz,iy) collapse(4)
+#else
+!$omp parallel do private(io,ispin,iz,iy) collapse(4)
+#endif
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      if ( bk(ispin,io) < 0d0 ) then
         spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & utmp3(1,ispin,io) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        &   utmp3(1,ispin,io) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
         & + utmp3(2,ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-      end do
-      end do
+      end if
+    end do
+    end do
     end do
     end do
 
@@ -454,7 +465,6 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
   do icg=1,Ncg+1
 
-    !Pgk(n1:n2,n)=gk(n1:n2,n)
 #ifdef USE_OPENACC
 !$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
 #else
@@ -589,59 +599,64 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
       E1(ispin,io,ik) = E(ispin,io,ik)
       E (ispin,io,ik) = W(1)
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy) collapse(2)
-#else
-!$omp parallel do private(iz,iy) collapse(2)
-#endif
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-        & utmp2(1,1) * cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-        & + utmp2(2,1) * cg%hpk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-      end do
-      end do
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(iz,iy) collapse(2)
-#else
-!$omp parallel do private(iz,iy) collapse(2)
-#endif
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = - cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-        & + W(1)*( utmp2(1,1) * spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-        & + utmp2(2,1) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) )
-      end do
-      end do
-
     end do ! ispin
     end do ! io
     end do ! ik
     
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
+!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      &   utmp3(1,ispin,io,ik) * cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + utmp3(2,ispin,io,ik) * cg%hpk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = - cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + E(ispin,io,ik)*( utmp3(1,ispin,io,ik) * spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      &                  + utmp3(2,ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) )
+    end do
+    end do
+    end do
+    end do
+    end do
+    
     call inner_product(mg,system,info,cg%gk,cg%gk,zb)
     rb = dble(zb)
-
-#ifdef USE_OPENACC
-!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(2)
-#else
-!$omp parallel do private(ik,io,ispin,iz,iy) collapse(2)
-#endif
+    
+    bk = -1d0
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
       if ( rb(ispin,io,ik)/res(ispin,io,ik)>1.0d8 ) then
         E(ispin,io,ik) = E1(ispin,io,ik)
-        cycle
+        bk(ispin,io,ik) = 1d0
       end if
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
+    end do
+    end do
+    end do
+
+#ifdef USE_OPENACC
+!$acc parallel loop private(ik,io,ispin,iz,iy) collapse(5)
+#else
+!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+#endif
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      if ( bk(ispin,io,ik) < 0d0 ) then
         spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
         & utmp3(1,ispin,io,ik) * spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
         & + utmp3(2,ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-      end do
-      end do
+      end if
+    end do
+    end do
     end do
     end do
     end do
