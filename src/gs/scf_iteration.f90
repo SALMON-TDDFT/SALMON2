@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  &
+subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
             &   miter,nscf_init_no_diagonal)
   use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
   use structures
@@ -32,7 +32,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
   type(s_dft_system),     intent(in)    :: system
   type(s_parallel_info),  intent(in)    :: info
   type(s_stencil),        intent(in)    :: stencil
-  type(s_orbital),        intent(inout) :: spsi,shpsi
+  type(s_orbital),        intent(inout) :: spsi,shpsi,sttpsi
   type(s_sendrecv_grid),  intent(inout) :: srg
   type(s_pp_grid),        intent(in)    :: ppg
   type(s_cg),             intent(inout) :: cg
@@ -60,9 +60,9 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
 ! conjugate gradient method
   call timer_begin(LOG_CALC_MINIMIZATION)
   if(system%if_real_orbital) then
-    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   else
-    call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+    call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
 
