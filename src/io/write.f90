@@ -2173,7 +2173,8 @@ contains
     else
       do iter_GS=1,niter
         call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
-        call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg,rt%vloc0,rt%srg_proj,rt%tpsi0,rt%cg)
+        call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg, &
+        & rt%vloc0,rt%srg_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0,rt%cg)
         call gram_schmidt(rt%system_proj, mg, rt%info_proj, rt%tpsi0)
         call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
         & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)

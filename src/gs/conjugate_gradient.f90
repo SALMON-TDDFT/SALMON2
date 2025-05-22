@@ -18,7 +18,7 @@ module Conjugate_Gradient
 
 contains
 
-subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
@@ -33,7 +33,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   type(s_stencil)   ,intent(in) :: stencil
   type(s_pp_grid)   ,intent(in) :: ppg
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
-  type(s_orbital)               :: spsi
+  type(s_orbital)               :: xk,hxk,gk
   type(s_sendrecv_grid)         :: srg
   type(s_cg)                    :: cg
   !
@@ -57,10 +57,8 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   io_s = info%io_s
   io_e = info%io_e
 
-  if(.not. allocated(cg%hxk%rwf)) then
-    call allocate_orbital_real(nspin,mg,info,cg%hxk)
+  if(.not. allocated(cg%pk%rwf)) then
     call allocate_orbital_real(nspin,mg,info,cg%pk)
-    call allocate_orbital_real(nspin,mg,info,cg%gk)
     call allocate_orbital_real(nspin,mg,info,cg%pre_gk)
     call allocate_orbital_real(nspin,mg,info,cg%hpk)
     !$acc enter data copyin(cg)
@@ -79,14 +77,14 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   call timer_end(LOG_GSCG_ISOLATED_CALC)
 
   call timer_begin(LOG_GSCG_ISOLATED_HPSI)
-  call hpsi(spsi,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
+  call hpsi(xk,hxk,info,mg,vlocal,system,stencil,srg,ppg)
   call timer_end(LOG_GSCG_ISOLATED_HPSI)
 
   call timer_begin(LOG_GSCG_ISOLATED_CALC)
 
   E1=1.0d10
 
-  call inner_product(mg,system,info,spsi,cg%hxk,E)
+  call inner_product(mg,system,info,xk,hxk,E)
 
 #ifdef USE_OPENACC
 !$acc parallel loop private(io,ispin,iz,iy) collapse(4)
@@ -97,13 +95,13 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   do ispin=1,nspin
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
-    cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-    & - E(ispin,io)*spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) )
+    gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+    & - E(ispin,io)* xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) )
   end do
   end do
   end do
   end do
-  call inner_product(mg,system,info,cg%gk,cg%gk,rb)
+  call inner_product(mg,system,info,gk,gk,rb)
 
   do icg=1,Ncg+1
 
@@ -116,7 +114,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ! pre_gk==Pgk
+      cg%pre_gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ! pre_gk==Pgk
     end do
     end do
     end do
@@ -133,15 +131,14 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 ! --- Preconditioning ---
 
     if(yn_preconditioning=='y')then
-      call preconditioning_rgk(mg,system,info,cg%gk,cg%pre_gk)
+      call preconditioning_rgk(mg,system,info,gk,cg%pre_gk)
     end if
 
 ! --- orthogonalization
-    !call gram_schmidt
 
 ! ---
 
-    call inner_product(mg,system,info,cg%pre_gk,cg%gk,rb) ! pre_gk==Pgk
+    call inner_product(mg,system,info,cg%pre_gk,gk,rb) ! pre_gk==Pgk
 
     if ( icg==1 ) then
 #ifdef USE_OPENACC
@@ -184,11 +181,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call timer_end(LOG_GSCG_ISOLATED_HPSI)
 
     call timer_begin(LOG_GSCG_ISOLATED_CALC)
-    call inner_product(mg,system,info,spsi ,spsi ,wtmp2(1,:,:))
-    call inner_product(mg,system,info,cg%pk,spsi ,wtmp2(2,:,:))
-    call inner_product(mg,system,info,cg%pk,cg%pk,wtmp2(3,:,:))
-    call inner_product(mg,system,info,spsi ,cg%hxk,wtmp2(4,:,:))
-    call inner_product(mg,system,info,cg%pk,cg%hxk,wtmp2(5,:,:))
+    call inner_product(mg,system,info,xk   ,xk    ,wtmp2(1,:,:))
+    call inner_product(mg,system,info,cg%pk,xk    ,wtmp2(2,:,:))
+    call inner_product(mg,system,info,cg%pk,cg%pk ,wtmp2(3,:,:))
+    call inner_product(mg,system,info,xk   ,hxk   ,wtmp2(4,:,:))
+    call inner_product(mg,system,info,cg%pk,hxk   ,wtmp2(5,:,:))
     call inner_product(mg,system,info,cg%pk,cg%hpk,wtmp2(6,:,:))
 
     do io=io_s,io_e
@@ -229,19 +226,19 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        &   utmp3(1,ispin,io)* cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        &   utmp3(1,ispin,io)* hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
         & + utmp3(2,ispin,io)* cg%hpk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-      cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( &
-        & cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-        & - E(ispin,io)*( utmp3(1,ispin,io) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = -2.0d0*( &
+        & hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & - E(ispin,io)*( utmp3(1,ispin,io) * xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
         &               + utmp3(2,ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) ) )
     end do
     end do
     end do
     end do
 
-    call inner_product(mg,system,info,cg%gk,cg%gk,rb)
+    call inner_product(mg,system,info,gk,gk,rb)
 
     bk = -1d0
     do io=io_s,io_e
@@ -263,8 +260,8 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
       if ( bk(ispin,io) < 0d0 ) then
-        spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        &   utmp3(1,ispin,io) * spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        &   utmp3(1,ispin,io) * xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
         & + utmp3(2,ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
       end if
     end do
@@ -368,7 +365,7 @@ end subroutine gscg_rwf
 
 !===================================================================================================================================
 
-subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
@@ -383,7 +380,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   type(s_stencil)   ,intent(in) :: stencil
   type(s_pp_grid)   ,intent(in) :: ppg
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
-  type(s_orbital)               :: spsi
+  type(s_orbital)               :: xk,hxk,gk
   type(s_sendrecv_grid)         :: srg
   type(s_cg)                    :: cg
   !
@@ -410,10 +407,8 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   io_s = info%io_s
   io_e = info%io_e
 
-  if(.not. allocated(cg%hxk%zwf)) then
-    call allocate_orbital_complex(nspin,mg,info,cg%hxk)
+  if(.not. allocated(cg%pk%zwf)) then
     call allocate_orbital_complex(nspin,mg,info,cg%pk)
-    call allocate_orbital_complex(nspin,mg,info,cg%gk)
     call allocate_orbital_complex(nspin,mg,info,cg%pre_gk)
     call allocate_orbital_complex(nspin,mg,info,cg%hpk)
     !$acc enter data copyin(cg)
@@ -435,11 +430,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   call timer_end(LOG_GSCG_PERIODIC_CALC)
 
   call timer_begin(LOG_GSCG_PERIODIC_HPSI)
-  call hpsi(spsi,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
+  call hpsi(xk,hxk,info,mg,vlocal,system,stencil,srg,ppg)
   call timer_end(LOG_GSCG_PERIODIC_HPSI)
 
   call timer_begin(LOG_GSCG_PERIODIC_CALC)
-  call inner_product(mg,system,info,spsi,cg%hxk,zb)
+  call inner_product(mg,system,info,xk,hxk,zb)
   E = dble(zb)
  
 #ifdef USE_OPENACC
@@ -452,15 +447,15 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   do ispin=1,nspin
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
-    cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = -cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-    & + E(ispin,io,ik) * spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+    gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = -hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+    & + E(ispin,io,ik) * xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
   end do
   end do
   end do
   end do
   end do
 
-  call inner_product(mg,system,info,cg%gk,cg%gk,zb)
+  call inner_product(mg,system,info,gk,gk,zb)
   rb = dble(zb)
 
   do icg=1,Ncg+1
@@ -475,7 +470,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      cg%pre_gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      cg%pre_gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
     end do
     end do
     end do
@@ -493,14 +488,14 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 ! --- Preconditioning ---
 
     if(yn_preconditioning=='y')then
-      call preconditioning_zgk(mg,system,info,cg%gk,cg%pre_gk)
+      call preconditioning_zgk(mg,system,info,gk,cg%pre_gk)
     end if
 
 ! --- orthogonalization
 
 ! ---
 
-    call inner_product(mg,system,info,cg%pre_gk,cg%gk,zb)
+    call inner_product(mg,system,info,cg%pre_gk,gk,zb)
     rb = dble(zb)
 
     if ( icg==1 ) then
@@ -556,11 +551,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call timer_begin(LOG_GSCG_PERIODIC_CALC)
 
-    call inner_product(mg,system,info,spsi,  spsi, wtmp2(1,:,:,:))
-    call inner_product(mg,system,info,cg%pk, spsi, wtmp2(2,:,:,:))
+    call inner_product(mg,system,info,xk,   xk,    wtmp2(1,:,:,:))
+    call inner_product(mg,system,info,cg%pk,xk,    wtmp2(2,:,:,:))
     call inner_product(mg,system,info,cg%pk,cg%pk, wtmp2(3,:,:,:))
-    call inner_product(mg,system,info,spsi, cg%hxk,wtmp2(4,:,:,:))
-    call inner_product(mg,system,info,cg%pk,cg%hxk,wtmp2(5,:,:,:))
+    call inner_product(mg,system,info,xk,   hxk,   wtmp2(4,:,:,:))
+    call inner_product(mg,system,info,cg%pk,hxk,   wtmp2(5,:,:,:))
     call inner_product(mg,system,info,cg%pk,cg%hpk,wtmp2(6,:,:,:))
 
     do ik=ik_s,ik_e
@@ -613,11 +608,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-      &   utmp3(1,ispin,io,ik) * cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      &   utmp3(1,ispin,io,ik) * hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
       & + utmp3(2,ispin,io,ik) * cg%hpk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-      cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = - cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-      & + E(ispin,io,ik)*( utmp3(1,ispin,io,ik) * spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = - hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + E(ispin,io,ik)*( utmp3(1,ispin,io,ik) * xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
       &                  + utmp3(2,ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) )
     end do
     end do
@@ -625,7 +620,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
     
-    call inner_product(mg,system,info,cg%gk,cg%gk,zb)
+    call inner_product(mg,system,info,gk,gk,zb)
     rb = dble(zb)
     
     bk = -1d0
@@ -651,8 +646,8 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
       if ( bk(ispin,io,ik) < 0d0 ) then
-        spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-        & utmp3(1,ispin,io,ik) * spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+        xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+        & utmp3(1,ispin,io,ik) * xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
         & + utmp3(2,ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
       end if
     end do
