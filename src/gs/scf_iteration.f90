@@ -47,8 +47,17 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
   else
     nncg = ncg
   end if
+  
+! subspace diagonalization
+  call timer_begin(LOG_CALC_SUBSPACE_DIAG)
+  if(yn_subspace_diagonalization == 'y')then
+    if(miter > nscf_init_no_diagonal)then
+      call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    end if
+  end if
+  call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
-! solve Kohn-Sham equation by minimization techniques
+! conjugate gradient method
   call timer_begin(LOG_CALC_MINIMIZATION)
   if(system%if_real_orbital) then
     call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
@@ -59,15 +68,6 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
 
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
-
-! subspace diagonalization
-  call timer_begin(LOG_CALC_SUBSPACE_DIAG)
-  if(yn_subspace_diagonalization == 'y')then
-    if(miter > nscf_init_no_diagonal)then
-      call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    end if
-  end if
-  call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
 end subroutine solve_orbitals
 
