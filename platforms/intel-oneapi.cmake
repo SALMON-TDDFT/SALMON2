@@ -1,6 +1,4 @@
-### Intel Compiler for AVX-512 processors (since Skylake-SP)
-set(ARCH_FLAGS                  "-xCORE-AVX512")
-set(SIMD_SET                    "avx512")
+### Intel Compiler
 set(OPENMP_FLAGS                "-qopenmp")
 set(LAPACK_VENDOR_FLAGS         "-qmkl=parallel")
 set(ScaLAPACK_VENDOR_FLAGS      "-qmkl=cluster")
@@ -16,12 +14,15 @@ set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")
 set(CMAKE_Fortran_FLAGS_RELEASE "-O3 ${General_Fortran_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE       "-O3 ${General_C_FLAGS}")
 
-set(USE_MPI_DEFAULT                        ON)
-#set(USE_OPT_EXPLICIT_VECTORIZATION_DEFAULT ON)
-
+set(USE_MPI_DEFAULT             ON)
 
 ########
 # CMake Platform-specific variables
 ########
-set(CMAKE_SYSTEM_NAME "Linux" CACHE STRING "Cross-compiling for Intel AVX-512 processors")
-set(CMAKE_SYSTEM_PROCESSOR "skylake")
+
+### Example: Intel Compiler for AVX-512 processors (since Skylake-SP)
+#set(CMAKE_SYSTEM_NAME "Linux" CACHE STRING "Cross-compiling for Intel AVX-512 processors")
+#set(CMAKE_SYSTEM_PROCESSOR "skylake")
+#set(ARCH_FLAGS                  "-xCORE-AVX512")
+#set(SIMD_SET                    "avx512")
+#set(USE_OPT_EXPLICIT_VECTORIZATION_DEFAULT ON)
