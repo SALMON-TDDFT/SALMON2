@@ -2,12 +2,12 @@
 set(ARCH_FLAGS                  "-xCORE-AVX512")
 set(SIMD_SET                    "avx512")
 set(OPENMP_FLAGS                "-qopenmp")
-set(LAPACK_VENDOR_FLAGS         "-mkl=parallel")
-set(ScaLAPACK_VENDOR_FLAGS      "-mkl=cluster")
+set(LAPACK_VENDOR_FLAGS         "-qmkl=parallel")
+set(ScaLAPACK_VENDOR_FLAGS      "-qmkl=cluster")
 set(Fortran_PP_FLAGS            "-fpp")
 
-set(CMAKE_Fortran_COMPILER      "mpiifort")
-set(CMAKE_C_COMPILER            "mpiicc")
+set(CMAKE_Fortran_COMPILER      "mpiifx")
+set(CMAKE_C_COMPILER            "mpiicx")
 
 set(General_Fortran_FLAGS       "-nogen-interface -std03 -warn all -diag-disable 6477,7025 -ansi-alias -fno-alias -qoverride-limits")
 set(General_C_FLAGS             "-Wall -diag-disable=10388 -restrict -ansi-alias -fno-alias")
