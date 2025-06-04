@@ -475,7 +475,7 @@ contains
            if(pp%radnl(ir,ik).gt.r) exit
          enddo
          intr=ir-1
-         if(intr.lt.0.or.intr.ge.pp%nrps(ik)) stop 'bad intr at prep_ps'
+         if(intr.lt.1.or.intr.ge.pp%nrps(ik)) stop 'bad intr at prep_ps'
          xx = r - pp%radnl(intr,ik)
 
          l0=0
