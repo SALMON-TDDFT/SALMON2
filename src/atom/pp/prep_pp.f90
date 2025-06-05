@@ -475,7 +475,8 @@ contains
            if(pp%radnl(ir,ik).gt.r) exit
          enddo
          intr=ir-1
-         if( intr <= 0 .or. pp%nrps(ik) <= intr ) stop 'Invalid r-grid sampling: The atomic positions should be shifted slightly by parallel translation.'
+         if( intr <= 0 .or. pp%nrps(ik) <= intr ) stop &
+         & 'Invalid r-grid sampling: The atomic positions should be shifted slightly by parallel translation.'
          xx = r - pp%radnl(intr,ik)
 
          l0=0
