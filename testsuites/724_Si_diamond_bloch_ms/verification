@@ -13,14 +13,20 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "Si_sbe_RT_Ac/Si_Ac_000200.data",
+    "Si_sbe_wave.data",
 ] 
 
-checklist = { 
-    # Ac
-    "Ac": [
+checklist = {
+    # 7:E_ref_z[a.u.]
+    "Er": [
         -100, # Temporary value for result
-        -2.098278831528730E-007,  # Reference value
+        -0.371825267127976E-002,  # Reference value
+        1.e-7,  # Permissible error 
+    ],
+    # 10:E_tra_z[a.u.]
+    "Et": [
+        -100, # Temporary value for result
+        -0.271313839577218E-004,  # Reference value
         1.e-7,  # Permissible error 
     ],
 } 
@@ -34,12 +40,14 @@ for item in filelist:
 print("# Checking calculated result")
 result = {}
 linecount = 0
-for line in open("Si_sbe_RT_Ac/Si_Ac_000200.data"):
+for line in open("Si_sbe_wave.data"):
     linecount += 1
-    if linecount == 2027: # corresponds to line 2027
+    if linecount == 202: # corresponds to line 202
         data = line.split()
-        result["Ac"] = float(data[5]) # column 6
-        print(result["Ac"])
+        result["Er"] = float(data[6]) # column 7
+        print(result["Er"])
+        result["Et"] = float(data[9]) # column 10
+        print(result["Et"])
 
 for name, [resval, refval, error] in checklist.items():
     if name not in result: 
