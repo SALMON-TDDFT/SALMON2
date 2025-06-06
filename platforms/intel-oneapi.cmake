@@ -17,12 +17,13 @@ set(CMAKE_C_FLAGS_RELEASE       "-O3 ${General_C_FLAGS}")
 set(USE_MPI_DEFAULT             ON)
 
 ########
-# CMake Platform-specific variables
+# Platform-specific variables
 ########
 
 ### Example: Intel Compiler for AVX-512 processors (since Skylake-SP)
 #set(CMAKE_SYSTEM_NAME "Linux" CACHE STRING "Cross-compiling for Intel AVX-512 processors")
 #set(CMAKE_SYSTEM_PROCESSOR "skylake")
+
 #set(ARCH_FLAGS                  "-xCORE-AVX512")
 #set(SIMD_SET                    "avx512")
 #set(USE_OPT_EXPLICIT_VECTORIZATION_DEFAULT ON)
