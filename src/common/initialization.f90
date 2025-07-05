@@ -114,6 +114,7 @@ subroutine init_dft_system(lg,system,stencil)
   !
   integer :: ii,jj
   real(8) :: rsize(3),hgs(3),cnmat(0:12,12),bnmat(4,4)
+  real(8) :: bsize(3),hgsg(3)
 
   if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
      al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
@@ -156,6 +157,11 @@ subroutine init_dft_system(lg,system,stencil)
   call init_lattice(system,stencil)
   call init_sym_sub( system%primitive_a, system%primitive_b )
   call init_kvector(num_kgrid,system)
+
+  bsize(1) = sqrt(sum(system%primitive_b(1,:)**2))
+  bsize(2) = sqrt(sum(system%primitive_b(2,:)**2))
+  bsize(3) = sqrt(sum(system%primitive_b(3,:)**2))
+  hgsg(1:3) = bsize(1:3)
 
   if(calc_mode=='RT') then
     system%if_real_orbital = .false.
@@ -257,6 +263,7 @@ subroutine init_dft_system(lg,system,stencil)
     do ii=1,4
       stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
       stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
+      stencil%coef_nabg(ii,jj) = bnmat(ii,4)/hgsg(jj)
     end do
   end do
 

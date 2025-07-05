@@ -45,7 +45,7 @@ module structures
   type s_dft_system
     logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
-    real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3)
+    real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3),dvinv
     real(8) :: rmatrix_a(3,3),rmatrix_b(3,3)
     real(8) :: mu
     real(8),allocatable :: vec_k(:,:)    ! (1:3,1:nk), k-vector
@@ -68,10 +68,14 @@ module structures
 
   type s_dft_energy
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
-    real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
+    real(8) :: E_tot,E_kin,E_h,E_xc,E_c,V_c,E_ion_ion,E_ion_loc,E_ion_nloc
     real(8) :: E_U
     real(8) :: E_tot0 ! total energy @ t=0
   end type s_dft_energy
+
+  type s_dft_virial
+     real(8) :: P_tot,P_kin,P_kin_c,P_h,P_xc,P_ion_ion,P_ion_loc,P_ion_nloc
+  end type s_dft_virial
 
   type s_ewald_ion_ion
     integer :: nmax_pair_bk
@@ -198,7 +202,7 @@ module structures
 
   type s_stencil
     logical :: if_orthogonal
-    real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
+    real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3),coef_nabg(4,3) ! (4,3) --> (Nd,3) (future work)
     real(8) :: coef_lap0_nd1,coef_lap_nd1(1,3),coef_nab_nd1(1,3)
     real(8) :: coef_f(6) ! for non-orthogonal lattice
   end type s_stencil
@@ -265,6 +269,7 @@ module structures
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     !
     complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential in G-space
+    complex(8),allocatable :: div_GzVG_ion(:,:,:,:) !div G(1:3)*V_ion(G)
     real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)

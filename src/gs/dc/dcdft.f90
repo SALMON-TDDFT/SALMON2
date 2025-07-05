@@ -105,7 +105,7 @@ contains
       
     ! Vpsl
       call read_pslfile(dc%system_tot,pp)
-      call init_ps(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot,dc%fg_tot,dc%poisson_tot, &
+      call init_ps(dc%lg_tot,dc%mg_tot,dc%system_tot,stencil_dummy,dc%info_tot,dc%fg_tot,dc%poisson_tot, &
       & pp,dc%ppg_tot,dc%vpsl_tot)
       
       if(method_init_density=='read_dns_cube') then

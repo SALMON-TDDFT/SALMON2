@@ -567,6 +567,49 @@ subroutine calc_laplacian_field(mg,stencil,box,lap)
   end if
 end subroutine calc_laplacian_field
 
+subroutine calc_divergence_field(mg,nabt,matrix_B,box,div)
+  use structures
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  real(8),intent(in) :: nabt(4,3),matrix_B(3,3)
+  complex(8),intent(in) :: box(3,mg%is_array(1):mg%ie_array(1), &
+                               mg%is_array(2):mg%ie_array(2), &
+                               mg%is_array(3):mg%ie_array(3))
+  complex(8) :: div(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  !
+  integer :: ix,iy,iz
+  real(8) :: Bt(3,3)
+  complex(8) :: w(3)
+  Bt = transpose(matrix_B)
+!$OMP parallel
+!$OMP do private(iz,iy,ix,w)
+  do iz = mg%is(3), mg%ie(3)
+  do iy = mg%is(2), mg%ie(2)
+  do ix = mg%is(1), mg%ie(1)
+    w(1) =  nabt(1,1)*(box(1,DDX(1)) - box(1,DDX(-1))) &
+         & +nabt(2,1)*(box(1,DDX(2)) - box(1,DDX(-2))) &
+         & +nabt(3,1)*(box(1,DDX(3)) - box(1,DDX(-3))) &
+         & +nabt(4,1)*(box(1,DDX(4)) - box(1,DDX(-4)))
+    w(2) =  nabt(1,2)*(box(2,DDY(1)) - box(2,DDY(-1))) &
+         & +nabt(2,2)*(box(2,DDY(2)) - box(2,DDY(-2))) &
+         & +nabt(3,2)*(box(2,DDY(3)) - box(2,DDY(-3))) &
+         & +nabt(4,2)*(box(2,DDY(4)) - box(2,DDY(-4)))
+    w(3) =  nabt(1,3)*(box(3,DDZ(1)) - box(3,DDZ(-1))) &
+         & +nabt(2,3)*(box(3,DDZ(2)) - box(3,DDZ(-2))) &
+         & +nabt(3,3)*(box(3,DDZ(3)) - box(3,DDZ(-3))) &
+         & +nabt(4,3)*(box(3,DDZ(4)) - box(3,DDZ(-4)))
+
+    ! divergence = Tr(B^T * grad) = dot_product of w and matrix_B
+    div(ix,iy,iz) = dot_product(matrix_B(:,1),w) + &
+                    dot_product(matrix_B(:,2),w) + &
+                    dot_product(matrix_B(:,3),w)
+  end do
+  end do
+  end do
+!$OMP end do
+!$OMP end parallel
+end subroutine calc_divergence_field
+
 !===================================================================================================================================
 
 subroutine calc_gradient_psi(tpsi,gtpsi,is_array,ie_array,is,ie,idx,idy,idz,nabt,matrix_B)

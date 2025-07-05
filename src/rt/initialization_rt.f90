@@ -213,7 +213,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end do
   if(yn_jm=='n') then
     call read_pslfile(system,pp)
-    call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+    call init_ps(lg,mg,system,stencil,info,fg,poisson,pp,ppg,Vpsl)
   else
     !make positive back ground charge density for using jellium model
     call allocate_scalar(mg,rho_jm)

@@ -19,7 +19,7 @@ module prep_pp_sub
 
 contains
 
-subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+subroutine init_ps(lg,mg,system,stencil,info,fg,poisson,pp,ppg,Vpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
@@ -38,6 +38,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   type(s_pp_info)         ,intent(in) :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: Vpsl
+  type(s_stencil)         ,intent(in) :: stencil
   !
   character(17) :: property
   real(8) :: matrix_a(3,3),al(3,3),rshift(3),hvol,hgs(3)
@@ -160,7 +161,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   case(0)
     call calc_Vpsl_isolated(lg,mg,system,info,pp,fg,Vpsl,ppg,property)
   case(3)
-    call calc_Vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
+    call calc_Vpsl_periodic(lg,mg,system,stencil,info,pp,fg,poisson,Vpsl,ppg,property)
   end select
   call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -799,11 +800,12 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !===================================================================================================================================
 
-subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
+subroutine calc_vpsl_periodic(lg,mg,system,stencil,info,pp,fg,poisson,Vpsl,ppg,property)
   use salmon_global,only : nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
+  use stencil_sub, only: calc_divergence_field
   implicit none
   type(s_rgrid)          ,intent(in) :: lg,mg
   type(s_dft_system)     ,intent(in) :: system
@@ -813,6 +815,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   type(s_poisson)                    :: poisson
   type(s_scalar)                     :: Vpsl
   type(s_pp_grid)                    :: ppg
+  type(s_stencil)                    :: stencil
   character(17)          ,intent(in) :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
@@ -820,11 +823,14 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   complex(8) :: tmp_exp
   complex(8) :: vtmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
   complex(8) :: vtmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
+  complex(8) :: vtmp3(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)
+  complex(8) :: vtmp4(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)
 
   if( property == 'initial' ) then
   
     allocate(ppg%zrhoG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) & ! rho_ion(G)
-          & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) ! V_ion(G)
+         & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom)) ! V_ion(G)
+    allocate(ppg%div_GzVG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom)) ! div G_V_ion(G)
 
     ppg%zVG_ion = 0d0
   !$omp parallel
@@ -863,8 +869,9 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
 
   endif
 
-! vtmp(:,:,:,1)=V_ion(G): local part of the pseudopotential in the G space
+! vtmp(:,:,:,1)=V_ion(G): local part of the pseudopotential in the G space  
   vtmp1 = 0d0
+  vtmp3 = 0d0
   !$omp parallel do collapse(2) private(ix,iy,iz,g,ia,ik,gd,tmp_exp)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
@@ -878,6 +885,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
       tmp_exp = exp(-zi*gd)/system%det_A
       vtmp1(ix,iy,iz,1) = vtmp1(ix,iy,iz,1) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp ! V_ion(G)
       vtmp1(ix,iy,iz,2) = vtmp1(ix,iy,iz,2) + pp%zps(ik)*tmp_exp ! rho_ion(G)
+      vtmp3(1:3,ix,iy,iz,ik) = vtmp3(1:3,ix,iy,iz,ik) + g(1:3) * ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp ! G*V_ion(G)
     end do
     end do
     end do
@@ -886,6 +894,12 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   
   call comm_summation(vtmp1,vtmp2,mg%num(1)*mg%num(2)*mg%num(3)*2,info%icomm_ko)
   ppg%zrhoG_ion = vtmp2(:,:,:,2)
+
+  call comm_summation(vtmp3,vtmp4,mg%num(1)*mg%num(2)*mg%num(3)*3*nelem,info%icomm_ko)
+  !==== div(GzVG_ion) =====
+  do ik=1,nelem
+    call calc_divergence_field(mg, stencil%coef_nabg, system%rmatrix_a, vtmp4(:,:,:,:,ik), ppg%div_GzVG_ion(:,:,:,ik))
+  end do
 
 ! Vpsl=V_ion(r): local part of the pseudopotential in the r space
 

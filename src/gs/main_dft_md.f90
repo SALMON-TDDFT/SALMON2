@@ -150,7 +150,7 @@ MD_Loop : do it=1,nt
 
    call time_evolution_step_md_part1(it,system,md)
 
-   call update_pseudo_rt(it,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
+   call update_pseudo_rt(it,info,system,stencil,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
 
    !-------------- SCF Iteration ----------------
    !Iteration loop for SCF (DFT_Iteration)

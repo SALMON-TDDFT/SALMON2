@@ -92,7 +92,7 @@ do jspin=1,system%nspin
 end do
 if(yn_jm=='n') then
   if(yn_dc=='n') call read_pslfile(system,pp)
-  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+  call init_ps(lg,mg,system,stencil,info,fg,poisson,pp,ppg,Vpsl)
   call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
     write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)

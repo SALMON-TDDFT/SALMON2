@@ -342,9 +342,9 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   call nvtxEndRange
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
+subroutine update_pseudo_rt(itt,info,system,stencil,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   use structures, only: s_dft_system,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
-    s_parallel_info, s_scalar, s_pp_info
+    s_parallel_info, s_scalar, s_pp_info, s_stencil
   use salmon_global, only: step_update_ps !,step_update_ps2
   use const, only: umass,hartree2J,kB
   use salmon_pp, only: calc_nlcc
@@ -361,6 +361,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   type(s_pp_nlcc) :: ppn
   type(s_pp_grid) :: ppg
   type(s_scalar) :: Vpsl
+  type(s_stencil) :: stencil
   integer :: itt
   call nvtxStartRange('update_pseudo_rt', __LINE__)
   call timer_begin(LOG_MD_UPDATE_PSEUDO_PT)
@@ -369,7 +370,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   if (mod(itt,step_update_ps)==0 ) then
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+     call init_ps(lg,mg,system,stencil,info,fg,poisson,pp,ppg,Vpsl)
   !else if (mod(itt,step_update_ps2)==0 ) then
   !   !xxxxxxx this option is not yet made xxxxxx
   !   call dealloc_init_ps(ppg)
