@@ -1455,7 +1455,8 @@ contains
           write(fh,*) "--Virial--"
           write(fh,*) "P (GPa) = ", virial%P_tot*au_pressure_gpa
           write(fh,*) "P_kin, P_h, P_ion_loc, P_ion_nloc, P_xc, P_ion_ion  (GPa)"
-          write(fh,*) virial%P_kin*au_pressure_gpa, virial%P_h*au_pressure_gpa, virial%P_ion_loc*au_pressure_gpa, virial%P_ion_nloc*au_pressure_gpa, virial%P_xc*au_pressure_gpa, virial%P_ion_ion*au_pressure_gpa
+          write(fh,*) virial%P_kin*au_pressure_gpa, virial%P_h*au_pressure_gpa, virial%P_ion_loc*au_pressure_gpa&
+               , virial%P_ion_nloc*au_pressure_gpa, virial%P_xc*au_pressure_gpa, virial%P_ion_ion*au_pressure_gpa
           write(fh,*) "P_kin_c (GPa) = ", virial%P_kin_c*au_pressure_gpa
           write(fh,*) "----------"
        end if
