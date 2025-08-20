@@ -1,8 +1,8 @@
-module realtime_ssbe
+module realtime_vg_ssbe
     implicit none
 contains
 
-subroutine main_realtime_ssbe(icomm)
+subroutine main_realtime_vg_ssbe(icomm)
     use salmon_global
     use communication
     use gs_info_ssbe
@@ -113,6 +113,6 @@ subroutine main_realtime_ssbe(icomm)
     end if
 
     return
-end subroutine main_realtime_ssbe
+end subroutine main_realtime_vg_ssbe
 
-end module realtime_ssbe
+end module realtime_vg_ssbe

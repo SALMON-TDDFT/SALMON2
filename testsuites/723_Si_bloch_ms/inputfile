@@ -1,5 +1,5 @@
 &calculation
-    theory = 'maxwell_sbe'
+    theory = 'maxwell_vg_sbe'
 /
 
 &control

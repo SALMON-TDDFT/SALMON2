@@ -1,8 +1,8 @@
-module multiscale_ssbe
+module multiscale_vg_ssbe
     implicit none
 contains
 
-subroutine main_multiscale_ssbe(icomm)
+subroutine main_multiscale_vg_ssbe(icomm)
     use omp_lib
     use communication
     use gs_info_ssbe
@@ -264,7 +264,7 @@ subroutine main_multiscale_ssbe(icomm)
     call comm_sync_all(icomm)
 
     return
-end subroutine main_multiscale_ssbe
+end subroutine main_multiscale_vg_ssbe
 
 
 subroutine distribute_macropoints(irank, nmacro, nproc, imacro_min, imacro_max)
@@ -497,4 +497,4 @@ end subroutine write_wave_data_file
 
 
 
-end module multiscale_ssbe
+end module multiscale_vg_ssbe

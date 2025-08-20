@@ -1,5 +1,5 @@
 &calculation
-  theory = 'sbe'
+  theory = 'vg_sbe'
 /
 
 &control
