@@ -587,7 +587,9 @@ contains
       & nelec_sbe, &
       & al_sbe, &
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
-      & norder_correction
+      & norder_correction, &
+      & t_2, &
+      & am_s
       
     namelist/dc/ &
       & num_fragment, &
@@ -1008,6 +1010,8 @@ contains
     al_vec2_sbe(:,:) = 0.d0
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
+    t_2 = -1.d0
+    am_s = 4
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1630,6 +1634,9 @@ contains
     al_vec2_sbe = al_vec2_sbe * ulength_to_au
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
+    call comm_bcast(t_2              ,nproc_group_global)
+    t_2 = t_2 * utime_to_au
+    call comm_bcast(am_s             ,nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2586,6 +2593,8 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
@@ -2914,6 +2923,13 @@ contains
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
     end if
+
+    ! for length gauge SBE
+    select case(theory)
+    case('lg_sbe','maxwell_lg_sbe')
+      if(t_2 <= 0.d0) stop "t_2 must be positive."
+      if(am_s /= 4 .and. am_s /= 8) stop "Supported only when am_s is 4 or 8."
+    end select
 
 #ifdef USE_FFTW
 #else

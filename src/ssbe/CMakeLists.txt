@@ -6,8 +6,10 @@ set(SOURCES
     common_ssbe.f90
     bloch_solver_ssbe.f90
     realtime_vg_ssbe.f90
+    realtime_lg_ssbe.f90
     shaper_ssbe.f90
     multiscale_vg_ssbe.f90
+    multiscale_lg_ssbe.f90
     main_ssbe.f90
    )
 
