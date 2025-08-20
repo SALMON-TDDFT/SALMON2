@@ -22,6 +22,7 @@ module gs_info_ssbe
         ! rvnl_tm_matrix = <u|-i[r, Vnl]|u>
         complex(8), allocatable :: rvnl_tm_matrix(:, :, :, :)
         complex(8), allocatable :: d_matrix(:, :, :, :)
+        real(8), allocatable :: grad_k_eigen(:, :, :)
 
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
@@ -35,6 +36,7 @@ contains
 subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, read_bin, icomm)
     use communication
     use filesystem, only: open_filehandle, get_filehandle
+    use common_ssbe, only: grad_k_array_nb1d_double
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -66,6 +68,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     allocate(gs%d_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%p_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%rvnl_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
+    allocate(gs%grad_k_eigen(1:nb, 1:3, 1:nk))
 
     if (irank == 0) then
         if (read_bin) then
@@ -102,6 +105,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%p_mod_matrix, icomm, 0)
     call comm_bcast(gs%delta_omega, icomm, 0)
     call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+
+    call grad_k_array_nb1d_double(gs%nb, gs%nk, gs%b_matrix,  &
+                              &   gs%eigen, gs%grad_k_eigen)
 
     !Initial Occupation Number
     gs%occup(:,:) = 0d0 !!Experimental!!
