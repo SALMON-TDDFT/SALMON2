@@ -2924,13 +2924,6 @@ contains
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
     end if
 
-    ! for length gauge SBE
-    select case(theory)
-    case('lg_sbe','maxwell_lg_sbe')
-      if(t_2 <= 0.d0) stop "t_2 must be positive."
-      if(am_s /= 4 .and. am_s /= 8) stop "Supported only when am_s is 4 or 8."
-    end select
-
 #ifdef USE_FFTW
 #else
     if(yn_fftw=='y') then
