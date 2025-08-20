@@ -3,6 +3,7 @@ set(SOURCES
     datafile_ssbe.f90
     input_checker_sbe.f90
     gs_info_ssbe.f90
+    common_ssbe.f90
     bloch_solver_ssbe.f90
     realtime_vg_ssbe.f90
     shaper_ssbe.f90
