@@ -227,7 +227,7 @@ contains
       call set_sub(23, LOG_RT_ANALYSIS          , 'analysis calc.')
       call set_sub(24, LOG_RT_MISC              , 'misc.')
       call write_loadbalance(fd, 24, tsrc, headers, mode)
-    case('vg_sbe', 'maxwell_vg_sbe')
+    case('vg_sbe', 'lg_sbe', 'maxwell_vg_sbe', 'maxwell_lg_sbe')
       ! nothing ...
     case default
       stop 'invalid theory @ perflog'
