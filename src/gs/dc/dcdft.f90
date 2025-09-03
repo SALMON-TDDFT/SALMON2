@@ -313,6 +313,7 @@ contains
   ! rho_s (fragment) --> dc%rho_tot_s (total system)
   subroutine calc_rho_total_dcdft(nspin,lg,mg,info,rho_s,dc)
     use structures
+    use salmon_global, only: xi_dc
     use communication, only: comm_summation
     implicit none
     integer,              intent(in) :: nspin
@@ -365,14 +366,47 @@ contains
     if(dc%id_tot==0) then
       write(*,*) "integral(rho_tot)=",sum(tot)*dc%system_tot%hvol," Ne=",dc%elec_num_tot
     end if
+
+    if(xi_dc > 0d0) then
+      call calc_vboundary
+    end if
+    
+  contains
+  
+    subroutine calc_vboundary
+      implicit none
+      real(8) :: coef
+      coef = 1d0/xi_dc
+      
+      if(.not. allocated(dc%vboundary_s)) then
+        allocate(dc%vboundary_s(nspin))
+        do ispin=1,nspin
+          call allocate_scalar(mg,dc%vboundary_s(nspin))
+        end do
+      end if
+      
+      do ispin=1,nspin
+      do iz=mg%is(3),mg%ie(3) ; iz_tot = dc%jxyz_tot(iz,3)
+      do iy=mg%is(2),mg%ie(2) ; iy_tot = dc%jxyz_tot(iy,2)
+      do ix=mg%is(1),mg%ie(1) ; ix_tot = dc%jxyz_tot(ix,1)
+        dc%vboundary_s(ispin)%f(ix,iy,iz) =  &
+        & + coef* ( rho_s(ispin)%f(ix,iy,iz) - tot(ix_tot,iy_tot,iz_tot,ispin) )
+      end do
+      end do
+      end do
+      end do
+    
+    end subroutine calc_vboundary
     
   end subroutine calc_rho_total_dcdft
   
 !===================================================================================================================================
   
   ! dc%vloc_tot (total system) --> v_local (fragment)
+  ! future work: v_local (fragment) = vh (total) + vpsl (total) + vxc (fragment) + v_boundary (fragment)
   subroutine calc_vlocal_fragment_dcdft(nspin,mg,vloc,dc)
     use structures
+    use salmon_global, only: xi_dc
     use communication, only: comm_summation
     implicit none
     integer,      intent(in) :: nspin
@@ -406,6 +440,19 @@ contains
     end do
     end do
     end do
+    
+    if(xi_dc > 0d0) then
+    ! vloc (fragment) <-- vloc (fragment) + vboundary
+      do ispin=1,nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        vloc(ispin)%f(ix,iy,iz) = vloc(ispin)%f(ix,iy,iz) + dc%vboundary_s(ispin)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+      end do
+    end if
     
   end subroutine calc_vlocal_fragment_dcdft
   
