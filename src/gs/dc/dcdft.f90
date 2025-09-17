@@ -313,7 +313,6 @@ contains
   ! rho_s (fragment) --> dc%rho_tot_s (total system)
   subroutine calc_rho_total_dcdft(nspin,lg,mg,info,rho_s,dc)
     use structures
-    use salmon_global, only: xi_dc
     use communication, only: comm_summation
     implicit none
     integer,              intent(in) :: nspin
@@ -366,37 +365,6 @@ contains
     if(dc%id_tot==0) then
       write(*,*) "integral(rho_tot)=",sum(tot)*dc%system_tot%hvol," Ne=",dc%elec_num_tot
     end if
-
-    if(xi_dc > 0d0) then
-      call calc_vboundary
-    end if
-    
-  contains
-  
-    subroutine calc_vboundary
-      implicit none
-      real(8) :: coef
-      coef = 1d0/xi_dc
-      
-      if(.not. allocated(dc%vboundary_s)) then
-        allocate(dc%vboundary_s(nspin))
-        do ispin=1,nspin
-          call allocate_scalar(mg,dc%vboundary_s(nspin))
-        end do
-      end if
-      
-      do ispin=1,nspin
-      do iz=mg%is(3),mg%ie(3) ; iz_tot = dc%jxyz_tot(iz,3)
-      do iy=mg%is(2),mg%ie(2) ; iy_tot = dc%jxyz_tot(iy,2)
-      do ix=mg%is(1),mg%ie(1) ; ix_tot = dc%jxyz_tot(ix,1)
-        dc%vboundary_s(ispin)%f(ix,iy,iz) =  &
-        & + coef* ( rho_s(ispin)%f(ix,iy,iz) - tot(ix_tot,iy_tot,iz_tot,ispin) )
-      end do
-      end do
-      end do
-      end do
-    
-    end subroutine calc_vboundary
     
   end subroutine calc_rho_total_dcdft
   
@@ -472,16 +440,37 @@ contains
     
     if(xi_dc > 0d0) then
     ! v_local (fragment) <-- v_local (fragment) + vboundary
-      do ispin=1,system%nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        v_local(ispin)%f(ix,iy,iz) = v_local(ispin)%f(ix,iy,iz) + dc%vboundary_s(ispin)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-      end do
+      call add_vboundary
     end if
+    
+  contains
+
+    subroutine add_vboundary
+      implicit none
+      real(8) :: coef
+      coef = 1d0/xi_dc
+      
+      do ispin=1,system%nspin
+        tot_tmp = 0d0
+        do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+        do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+        do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+          tot_tmp(ix,iy,iz) = dc%rho_tot_s(ispin)%f(ix,iy,iz) ! after mixing
+        end do
+        end do
+        end do
+        call comm_summation(tot_tmp,tot,dc%lg_tot%num(1)*dc%lg_tot%num(2)*dc%lg_tot%num(3),dc%icomm_tot)
+        do iz=mg%is(3),mg%ie(3) ; iz_tot = dc%jxyz_tot(iz,3)
+        do iy=mg%is(2),mg%ie(2) ; iy_tot = dc%jxyz_tot(iy,2)
+        do ix=mg%is(1),mg%ie(1) ; ix_tot = dc%jxyz_tot(ix,1)
+          v_local(ispin)%f(ix,iy,iz) = v_local(ispin)%f(ix,iy,iz) + &
+          & coef* ( rho_s(ispin)%f(ix,iy,iz) - tot(ix_tot,iy_tot,iz_tot) ) ! vboundary
+        end do
+        end do
+        end do
+      end do
+    
+    end subroutine add_vboundary
     
   end subroutine calc_vlocal_fragment_dcdft
   
