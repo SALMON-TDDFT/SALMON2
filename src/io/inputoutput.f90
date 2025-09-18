@@ -25,7 +25,7 @@ module inputoutput
   real(8),parameter :: au_time_fs = 0.02418884326505d0
   real(8),parameter :: au_energy_ev = 27.21138505d0
   real(8),parameter :: au_length_aa = 0.52917721067d0
-
+  real(8),parameter :: au_pressure_gpa = 29421.388d0
 
   integer :: fh_variables_log
   integer :: fh_namelist

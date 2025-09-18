@@ -1416,19 +1416,20 @@ contains
 !===================================================================================================================================
 
   !! export SYSNAME_info.data file (GS info)
-  subroutine write_info_data(Miter,system,energy,pp)
+  subroutine write_info_data(Miter,system,energy,virial,pp)
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
                                    yn_jm, yn_periodic, base_directory
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
-    use inputoutput,         only: au_length_aa,au_energy_ev
+    use inputoutput,         only: au_length_aa,au_energy_ev,au_pressure_gpa
     implicit none
     integer           ,intent(in) :: Miter
     type(s_dft_energy),intent(in) :: energy
     type(s_dft_system),intent(in) :: system
     type(s_pp_info)   ,intent(in) :: pp
+    type(s_dft_virial),intent(in) :: virial
     !
     integer :: fh,is,p1,p2,p5,iob,jj,ik,ikoa,iatom,ix
     character(100) :: file_gs_info
@@ -1451,6 +1452,13 @@ contains
          write(fh,*) "For yn_jm = y and yn_periodic=y, this version still cannot output Total Energy."
        else
          write(fh,*) "Total energy (eV) = ", energy%E_tot*au_energy_ev
+         write(fh,*) "--Virial--"
+         write(fh,*) "P (GPa) = ", virial%P_tot*au_pressure_gpa
+         write(fh,*) "P_kin, P_h, P_ion_loc, P_ion_nloc, P_xc, P_ion_ion  (GPa)"
+         write(fh,*) virial%P_kin*au_pressure_gpa, virial%P_h*au_pressure_gpa, virial%P_ion_loc*au_pressure_gpa&
+              , virial%P_ion_nloc*au_pressure_gpa, virial%P_xc*au_pressure_gpa, virial%P_ion_ion*au_pressure_gpa
+         write(fh,*) "P_kin_c (GPa) = ", virial%P_kin_c*au_pressure_gpa
+         write(fh,*) "----------" 
        end if
        write(fh,*) "1-particle energies (eV)"
        select case (system%nspin)

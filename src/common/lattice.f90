@@ -38,6 +38,7 @@ SUBROUTINE init_lattice(system,stencil)
   call calc_inverse(A,wrk,detA)
   system%det_a = detA
   system%Hvol = detA/dble(system%ngrid)
+  system%dvinv = -1d0/(system%det_a*3d0)
   system%primitive_b = 2d0*pi* transpose(wrk) ! reciprocal primitive lattice vectors
   ! [ b1 b2 b3 ]^{T} = 2*pi* [ a1 a2 a3 ]^{-1}
 

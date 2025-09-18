@@ -48,6 +48,7 @@ use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
 use lcfo
+use virial_sub
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -77,6 +78,7 @@ type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 type(s_opt) :: opt
 type(s_dcdft) :: dc
+type(s_dft_virial) :: virial
 
 logical :: rion_update
 logical :: flag_opt_conv
@@ -224,6 +226,7 @@ end if
    ! force
    if(yn_jm=='n' .and. yn_dc=="n")then
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+     call calc_virial(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald,energy,virial) 
      if(comm_is_root(nproc_id_global))then
         write(*,*) "===== force ====="
         do iatom=1,natom
@@ -316,7 +319,7 @@ end if
 ! write GS: basic data
 if(yn_dc=='n') call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
-call write_info_data(Miter,system,energy,pp)
+call write_info_data(Miter,system,energy,virial,pp)
 call write_k_data(system,stencil)
 if(yn_spinorbit=='y') call write_mag_decomposed_gs(system,mg,info,spsi)
 
