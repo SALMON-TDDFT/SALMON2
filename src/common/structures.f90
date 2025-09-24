@@ -269,6 +269,7 @@ module structures
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     !
     complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential in G-space
+    complex(8),allocatable :: zrVG_ion(:,:,:,:) ! local part contribution to virial
     real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)

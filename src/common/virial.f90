@@ -34,7 +34,7 @@ contains
     integer :: ix, iy, iz, ia, ik, io, ispin
     integer :: ilocal, j, ilma
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
-    real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd
+    real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, ptmp, P_wrk(2), P_sum(2)
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -53,11 +53,48 @@ contains
     virial%P_ion_ion  = energy%E_ion_ion*system%dvinv
 
     ! Fourier
-    !P_tmp_loc   = 0d0
-    !select case(yn_periodic)
-    !case('y')
+    P_tmp_loc   = 0d0
+    select case(yn_periodic)
+    case('y')
+      ptmp = 0d0
+      P_wrk = 0d0
+      !E_wrk_local_1 =0d0
+      !E_wrk_local_2 =0d0
+#ifdef USE_OPENACC
+#else
+!$omp parallel do collapse(2) default(none) &
+!$omp          reduction(+:P_wrk,ptmp) &
+!$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
+!$omp          shared(mg,fg,system,sysvol,kion,poisson,ppg,info,yn_jm)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        g(1) = fg%vec_G(1,ix,iy,iz)
+        g(2) = fg%vec_G(2,ix,iy,iz)
+        g(3) = fg%vec_G(3,ix,iy,iz)
 
-    !end select
+        rho_e = poisson%zrhoG_ele(ix,iy,iz)
+
+        if (yn_jm=='n') then
+	  rho_i = ppg%zrhoG_ion(ix,iy,iz)
+          P_wrk(1) = P_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
+
+          do ia=info%ia_s,info%ia_e
+            r = system%Rion(1:3,ia)
+            Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+            ptmp = ptmp + conjg(rho_e)*ppg%zrVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+          end do
+        end if
+      end do
+      end do
+      end do
+!$omp end parallel do
+#endif
+      call comm_summation(ptmp,P_wrk(2),info%icomm_ko)
+      call comm_summation(P_wrk,P_sum,2,info%icomm_r)
+      ! electron-ion pressure (local part)
+      virial%P_ion_loc = -1d0 * ( P_sum(1) + P_sum(2) ) * system%dvinv
+    end select
 
     !call comm_summation(P_tmp_loc,P_tmp_loc_sum,1,info%icomm_rko)
     !virial%P_ion_loc = P_tmp_loc_sum *system%dvinv
@@ -147,7 +184,8 @@ contains
 
     call comm_summation(P_tmp_nloc,P_tmp_nloc_sum,1,info%icomm_rko)
 
-    virial%P_ion_nloc = ( P_tmp_nloc_sum +  energy%E_ion_nloc ) *system%dvinv
+    !virial%P_ion_nloc = ( P_tmp_nloc_sum +  energy%E_ion_nloc ) *system%dvinv
+    virial%P_ion_nloc = P_tmp_nloc_sum*system%dvinv
 
     if(allocated(uVpsibox)) deallocate(uVpsibox)
 

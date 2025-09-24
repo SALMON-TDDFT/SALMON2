@@ -696,7 +696,6 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
 
       ppg%zVG_ion = 0d0
 
-
   !$omp parallel
   !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
       do ik=1,nelem
@@ -708,6 +707,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
           g(3) = fg%vec_G(3,ix,iy,iz)
           g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
           s=0.d0
+          s2=0.d0
           if (fg%if_Gzero(ix,iy,iz)) then
             do i=2,pp%nrloc(ik)
               r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
@@ -816,7 +816,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   character(17)          ,intent(in) :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
-  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
+  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av,s2
   complex(8) :: tmp_exp
   complex(8) :: vtmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
   complex(8) :: vtmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
@@ -825,8 +825,10 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   
     allocate(ppg%zrhoG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) & ! rho_ion(G)
           & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) ! V_ion(G)
+    allocate(ppg%zrVG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) !div G*V_ion(G)
 
     ppg%zVG_ion = 0d0
+    ppg%zrVG_ion = 0d0
   !$omp parallel
   !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
     do ik=1,nelem
@@ -838,6 +840,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
         g(3) = fg%vec_G(3,ix,iy,iz)
         g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
         s=0.d0
+        s2=0.d0
         if (fg%if_Gzero(ix,iy,iz)) then
           do i=2,pp%nrloc(ik)
             r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
@@ -851,9 +854,11 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
             dr=pp%rad(i,ik)-pp%rad(i-1,ik)
             vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
             s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
+            s2=s2+4d0*pi*r1*sin(g2sq*r1)*(r1*vloc_av+pp%zps(ik))*dr !virial
           end do
         end if
         ppg%zVG_ion(ix,iy,iz,ik) = s
+        ppg%zrVG_ion(ix,iy,iz,ik) = s2
       end do
       end do
       end do
