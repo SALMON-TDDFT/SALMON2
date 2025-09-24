@@ -9,7 +9,7 @@ contains
     use structures
     use salmon_math
     use math_constants,only: pi,zI
-    use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit!, aEwald, cutoff_r, yn_jm, yn_fix_func, theory
+    use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit, yn_jm!, aEwald, cutoff_r, yn_jm, yn_fix_func, theory
     use communication, only: comm_summation!,comm_is_root
     use sendrecv_grid, only: update_overlap_complex8
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
@@ -34,7 +34,7 @@ contains
     integer :: ix, iy, iz, ia, ik, io, ispin
     integer :: ilocal, j, ilma
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
-    real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, ptmp, P_wrk(2), P_sum(2)
+    real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, ptmp, P_wrk(2), P_sum(2), sysvol
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -48,6 +48,7 @@ contains
     io_e = info%io_e
     Norb = system%Nspin*info%numo*info%numk
     Nlma = ppg%Nlma
+    sysvol = system%det_a
 
     ! Ewald
     virial%P_ion_ion  = energy%E_ion_ion*system%dvinv
