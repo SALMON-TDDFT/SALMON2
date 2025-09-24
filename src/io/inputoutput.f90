@@ -593,6 +593,7 @@ contains
       & num_fragment, &
       & num_rgrid_buffer, &
       & nproc_rgrid_tot, &
+      & xi_dc, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
       & nstate_frag, &
@@ -1012,6 +1013,7 @@ contains
     num_fragment = 0
     num_rgrid_buffer = 0
     nproc_rgrid_tot = 1
+    xi_dc = -1d0
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
     nstate_frag = 0
@@ -1634,6 +1636,7 @@ contains
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
+    call comm_bcast(xi_dc, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
@@ -2592,6 +2595,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
@@ -2899,7 +2903,6 @@ contains
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
-      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
       !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
       if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
       & stop "DC method (yn_dc=y): num_fragment must be specified."
