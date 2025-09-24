@@ -707,7 +707,6 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
           g(3) = fg%vec_G(3,ix,iy,iz)
           g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
           s=0.d0
-          s2=0.d0
           if (fg%if_Gzero(ix,iy,iz)) then
             do i=2,pp%nrloc(ik)
               r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
