@@ -51,7 +51,7 @@ contains
     sysvol = system%det_a
 
     ! Ewald
-    virial%P_ion_ion  = energy%E_ion_ion*system%dvinv
+    virial%P_ion_ion  = energy%E_ion_ion
 
     ! Fourier
     P_tmp_loc   = 0d0
@@ -94,7 +94,7 @@ contains
       call comm_summation(ptmp,P_wrk(2),info%icomm_ko)
       call comm_summation(P_wrk,P_sum,2,info%icomm_r)
       ! electron-ion pressure (local part)
-      virial%P_ion_loc = -1d0 * ( P_sum(1) + P_sum(2) ) * system%dvinv
+      virial%P_ion_loc = -1d0 * ( P_sum(1) + P_sum(2) )
     end select
 
     !call comm_summation(P_tmp_loc,P_tmp_loc_sum,1,info%icomm_rko)
@@ -135,8 +135,8 @@ contains
        ! nonlocal part
        !call timer_begin(LOG_CALC_FORCE_NONLOCAL)
        if(yn_periodic=='y') kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-       !rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-       rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+       !rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
        if( yn_spinorbit=='y' )then
           !to be written
@@ -186,26 +186,35 @@ contains
 
     call comm_summation(P_tmp_nloc,P_tmp_nloc_sum,1,info%icomm_rko)
 
-    virial%P_ion_nloc = ( P_tmp_nloc_sum +  1.5d0 * energy%E_ion_nloc ) *system%dvinv
+    virial%P_ion_nloc = P_tmp_nloc_sum +  1.5d0 * energy%E_ion_nloc
     !virial%P_ion_nloc = P_tmp_nloc_sum*system%dvinv
 
     if(allocated(uVpsibox)) deallocate(uVpsibox)
 
     ! kinetic virial (correlation part)
-    virial%P_kin_c   = energy%T_c*system%dvinv
+    virial%P_kin_c   = energy%T_c
 
     ! XC virial
-    virial%P_xc       = energy%E_xc*system%dvinv - virial%P_kin_c
+    virial%P_xc       = energy%E_xc - energy%T_c
 
     ! kinetic virial
-    virial%P_kin      = ( energy%E_kin*system%dvinv + virial%P_kin_c )*2d0
+    virial%P_kin      = ( energy%E_kin + energy%T_c )*2d0
 
     ! Hartree virial
-    virial%P_h = energy%E_h*system%dvinv
+    virial%P_h = energy%E_h
 
-     ! total virial
+    ! total virial
     virial%P_tot = virial%P_kin + virial%P_h + virial%P_ion_loc &
          + virial%P_ion_nloc + virial%P_xc + virial%P_ion_ion
+
+    !1/3V
+    virial%P_tot = virial%P_tot*system%dvinv
+    virial%P_kin = virial%P_kin*system%dvinv
+    virial%P_h = virial%P_h*system%dvinv
+    virial%P_ion_loc = virial%P_ion_loc*system%dvinv
+    virial%P_ion_nloc = virial%P_ion_nloc*system%dvinv
+    virial%P_xc = virial%P_xc*system%dvinv
+    virial%P_ion_ion = virial%P_ion_ion*system%dvinv
 
     return    
   end subroutine calc_virial
