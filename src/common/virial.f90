@@ -135,7 +135,8 @@ contains
        ! nonlocal part
        !call timer_begin(LOG_CALC_FORCE_NONLOCAL)
        if(yn_periodic=='y') kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+       !rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+       rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
        if( yn_spinorbit=='y' )then
           !to be written
@@ -185,8 +186,8 @@ contains
 
     call comm_summation(P_tmp_nloc,P_tmp_nloc_sum,1,info%icomm_rko)
 
-    !virial%P_ion_nloc = ( P_tmp_nloc_sum +  energy%E_ion_nloc ) *system%dvinv
-    virial%P_ion_nloc = P_tmp_nloc_sum*system%dvinv
+    virial%P_ion_nloc = ( P_tmp_nloc_sum +  1.5d0 * energy%E_ion_nloc ) *system%dvinv
+    !virial%P_ion_nloc = P_tmp_nloc_sum*system%dvinv
 
     if(allocated(uVpsibox)) deallocate(uVpsibox)
 
