@@ -401,7 +401,7 @@ contains
     
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s, &
-    & pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,v_local(1)) ! v_local(1)%f (working array) := eexc
+    & pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,energy%T_c,v_local(1)) ! v_local(1)%f (working array) := eexc
     sum_exc = 0d0
     do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3)) ! core region only
     do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2)) ! core region only

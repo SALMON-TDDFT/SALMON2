@@ -57,6 +57,8 @@ module salmon_xc
   real(8),allocatable :: eexc_tmp(:,:,:)
   real(8),allocatable :: vxc_tmp(:,:,:)
   real(8),allocatable :: vxc_s_tmp(:,:,:,:)
+  real(8),allocatable :: eec_tmp(:,:,:)
+  real(8),allocatable :: vec_tmp(:,:,:)
 
   ! workspace used in exec_builtin_pz
   real(8),allocatable :: rho_s_1d(:)
@@ -64,13 +66,15 @@ module salmon_xc
   real(8),allocatable :: exc_1d(:)
   real(8),allocatable :: eexc_1d(:)
   real(8),allocatable :: vexc_1d(:)
+  real(8),allocatable :: eec_1d(:)
+  real(8),allocatable :: vec_1d(:)
   real(8),allocatable :: vexc_sp_1d(:,:)
 
 contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, T_c, eexc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -91,10 +95,13 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
+    real(8)                             :: E_c
+    real(8)                             :: V_c
+    real(8)                             :: T_c
     type(s_scalar)          ,optional   :: eexc
     !
     integer :: ix,iy,iz,is,nspin,idir
-    real(8) :: tot_exc
+    real(8) :: tot_exc,tot_ec,tot_vc
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     ! real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
@@ -112,6 +119,8 @@ contains
     if (nspin==1) then
       if (.not.allocated(rho_tmp)) allocate(rho_tmp(mg%num(1), mg%num(2), mg%num(3)))
       if (.not.allocated(vxc_tmp)) allocate(vxc_tmp(mg%num(1), mg%num(2), mg%num(3)))
+      if (.not.allocated(eec_tmp)) allocate(eec_tmp(mg%num(1), mg%num(2), mg%num(3)))
+      if (.not.allocated(vec_tmp)) allocate(vec_tmp(mg%num(1), mg%num(2), mg%num(3)))
     else if(nspin==2)then
       if (.not.allocated(rho_s_tmp)) allocate(rho_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
       if (.not.allocated(vxc_s_tmp)) allocate(vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
@@ -300,7 +309,7 @@ contains
       endif 
     else
       if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc, eec=eec_tmp, vec=vec_tmp)
       else if(nspin==2)then
         call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
@@ -418,15 +427,19 @@ contains
     end if
 
     tot_exc=0.d0
+    tot_ec=0.d0
+    tot_vc=0.d0
 #ifdef USE_OPENACC
-!$acc kernels loop collapse(3) reduction(+:tot_exc) private(iz,iy,ix)
+!$acc kernels loop collapse(3) reduction(+:tot_exc,tot_ec,tot_vc) private(iz,iy,ix)
 #else
-!$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
+!$omp parallel do collapse(2) reduction(+:tot_exc,tot_ec,tot_vc) private(iz,iy,ix)
 #endif
     do iz=1,mg%num(3)
     do iy=1,mg%num(2)
     do ix=1,mg%num(1)
       tot_exc=tot_exc+eexc_tmp(ix,iy,iz)
+      tot_ec=tot_ec+eec_tmp(ix,iy,iz)
+      tot_vc=tot_vc+vec_tmp(ix,iy,iz)
     end do
     end do
     end do
@@ -436,8 +449,13 @@ contains
 !$omp end parallel do
 #endif
     tot_exc = tot_exc*system%hvol
+    tot_ec = tot_ec*system%hvol
+    tot_vc = tot_vc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+    call comm_summation(tot_ec,E_c,info%icomm_r)
+    call comm_summation(tot_vc,V_c,info%icomm_r)
+    T_c = -4.d0*E_c + 3.d0*V_c
     
     if(present(eexc)) then
       do iz=1,mg%num(3)
@@ -874,7 +892,7 @@ contains
 
   subroutine calc_xc(xc, pp, rho, rho_s, exc, eexc, vxc, vxc_s, rdedd, rdedd_s, &
       & grho, grho_s, rlrho, rlrho_s, tau, tau_s, rj, rj_s, &
-      & rho_nlcc, &
+      & rho_nlcc, eec, vec,&
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     use structures, only: s_pp_info
@@ -885,8 +903,10 @@ contains
     real(8), intent(in), optional :: rho(:, :, :) ! ispin = 0
     real(8), intent(in), optional :: rho_s(:, :, :, :) ! ispin = 1
     real(8), intent(out), optional :: exc(:, :, :) ! epsilon_xc[rho]
+    real(8), intent(out), optional :: eec(:, :, :) ! epsilon_c[rho]
     real(8), intent(out), optional :: eexc(:, :, :) ! rho * epsilon_xc[rho]
     real(8), intent(out), optional :: vxc(:, :, :) ! v_xc[rho] for ispin=0
+    real(8), intent(out), optional :: vec(:, :, :) ! v_c[rho] for ispin=0
     real(8), intent(out), optional :: vxc_s(:, :, :, :) ! v_xc[rho] ispin=1
     !real(8), intent(out), optional :: gvxc(:, :, :) ! v_xc[rho] for ispin=0
     !real(8), intent(out), optional :: gvxc_s(:, :, :, :) ! v_xc[rho] ispin=1
@@ -954,6 +974,16 @@ contains
       vxc = 0d0
 !$acc end kernels
     end if
+    if (present(eec)) then
+!$acc kernels
+      eec = 0d0
+!$acc end kernels
+    end if
+    if (present(vec)) then
+!$acc kernels
+      vec = 0d0
+!$acc end kernels
+    end if
     if (present(vxc_s)) then
 !$acc kernels
       vxc_s = 0d0
@@ -973,6 +1003,8 @@ contains
     if (present(exc)) exc = 0d0
     if (present(eexc)) eexc = 0d0
     if (present(vxc)) vxc = 0d0
+    if (present(eec)) eec = 0d0
+    if (present(vec)) vec = 0d0
     if (present(vxc_s)) vxc_s = 0d0
     if (present(rdedd)) rdedd = 0.d0
     if (present(rdedd_s)) rdedd_s = 0.d0
@@ -1063,6 +1095,8 @@ contains
       endif
       if (.not.allocated(exc_1d)) allocate(exc_1d(nl))
       if (.not.allocated(eexc_1d)) allocate(eexc_1d(nl))
+      if (.not.allocated(eec_1d)) allocate(eec_1d(nl))
+      if (.not.allocated(vec_1d)) allocate(vec_1d(nl))
 
 #ifdef USE_OPENACC
       if (xc%ispin == 0) then
@@ -1099,7 +1133,7 @@ contains
 #endif
 
       if (xc%ispin == 0) then
-        call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d)
+        call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d, eec_1d, vec_1d)
       else if (xc%ispin == 1) then
         call exc_cor_pz_sp(nl, rho_s_sp_1d, exc_1d, eexc_1d, vexc_sp_1d)
       end if
@@ -1135,6 +1169,22 @@ contains
         call exec_builtin_calc_axpy(eexc, 1.0d0, eexc_1d, nl)
 #else
          eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
+#endif
+      endif
+
+      if (present(eec)) then
+#ifdef USE_OPENACC
+        call exec_builtin_calc_axpy(eec, 1.0d0, eec_1d, nl)
+#else
+         eec = eec + reshape(eec_1d, (/nx, ny, nz/))
+#endif
+      endif
+
+      if (present(vec)) then
+#ifdef USE_OPENACC
+        call exec_builtin_calc_axpy(vec, 1.0d0, vec_1d, nl)
+#else
+         vec = vec + reshape(vec_1d, (/nx, ny, nz/))
 #endif
       endif
 

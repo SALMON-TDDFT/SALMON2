@@ -233,7 +233,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,&
+         & info,spsi_out,stencil,Vxc,energy%T_c,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
     
   end if
@@ -431,7 +432,8 @@ contains
     
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,&
+           & info,spsi_out,stencil,Vxc,energy%T_c,energy%E_xc)
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     

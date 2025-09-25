@@ -192,7 +192,7 @@ contains
     if(allocated(uVpsibox)) deallocate(uVpsibox)
 
     ! kinetic virial (correlation part)
-    virial%P_kin_c   = (-4d0*energy%E_c + 3d0*energy%V_c)*system%dvinv
+    virial%P_kin_c   = energy%T_c*system%dvinv
 
     ! XC virial
     virial%P_xc       = energy%E_xc*system%dvinv - virial%P_kin_c

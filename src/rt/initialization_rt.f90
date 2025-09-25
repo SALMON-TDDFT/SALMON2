@@ -284,7 +284,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%T_c,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
