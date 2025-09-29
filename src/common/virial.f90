@@ -97,11 +97,6 @@ contains
       virial%P_ion_loc = -1d0 * ( P_sum(1) + P_sum(2) )
     end select
 
-    !call comm_summation(P_tmp_loc,P_tmp_loc_sum,1,info%icomm_rko)
-    !virial%P_ion_loc = P_tmp_loc_sum *system%dvinv
-
-    !write(*,*) 'debug',info%ia_s,info%ia_e,virial%P_ion_loc,P_tmp_loc_sum,P_tmp_loc
-
     !Nonlocal part
     if( yn_spinorbit=='y' )then
       !call calc_uVpsi_so(nspin,info,ppg,tpsi,uVpsibox2)
@@ -132,11 +127,9 @@ contains
        ! gtpsi = (nabla) psi
        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-       ! nonlocal part
        !call timer_begin(LOG_CALC_FORCE_NONLOCAL)
        if(yn_periodic=='y') kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-       !rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
        if( yn_spinorbit=='y' )then
           !to be written
@@ -168,9 +161,9 @@ contains
                 duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * rz * w(3) ! < uV | exp(ikr) (nabla) | psi >
              end do
              P_tmp_nloc = P_tmp_nloc &
-                  - rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) ) &
-                  - rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) ) &
-                  - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
+                  + rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) ) &
+                  + rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) ) &
+                  + rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
           end do
 #ifndef __NVCOMPILER_LLVM__
 ! FIXME: NVIDIA compiler crashes with nested omp parallel clause.
@@ -186,8 +179,7 @@ contains
 
     call comm_summation(P_tmp_nloc,P_tmp_nloc_sum,1,info%icomm_rko)
 
-    virial%P_ion_nloc = P_tmp_nloc_sum +  1.5d0 * energy%E_ion_nloc
-    !virial%P_ion_nloc = P_tmp_nloc_sum*system%dvinv
+    virial%P_ion_nloc = P_tmp_nloc_sum +  3.d0 * energy%E_ion_nloc
 
     if(allocated(uVpsibox)) deallocate(uVpsibox)
 
@@ -214,6 +206,7 @@ contains
     virial%P_ion_loc = virial%P_ion_loc*system%dvinv
     virial%P_ion_nloc = virial%P_ion_nloc*system%dvinv
     virial%P_xc = virial%P_xc*system%dvinv
+    virial%P_kin_c = virial%P_kin_c*system%dvinv
     virial%P_ion_ion = virial%P_ion_ion*system%dvinv
 
     return    
