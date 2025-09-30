@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy,virial, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -66,6 +66,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
+  type(s_dft_virial) :: virial
   type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
@@ -234,7 +235,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,&
-         & info,spsi_out,stencil,Vxc,energy%T_c,energy%E_xc)
+         & info,spsi_out,stencil,Vxc,energy%T_c,virial%P_xc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
     
   end if
@@ -433,7 +434,7 @@ contains
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,&
-           & info,spsi_out,stencil,Vxc,energy%T_c,energy%E_xc)
+           & info,spsi_out,stencil,Vxc,energy%T_c,virial%P_xc,energy%E_xc)
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     

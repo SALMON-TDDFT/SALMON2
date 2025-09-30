@@ -203,6 +203,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
+type(s_dft_virial) :: virial
 type(s_ewald_ion_ion) :: ewald
 type(s_mixing) :: mixing
 
@@ -296,7 +297,7 @@ real(8) :: rNe0,rNe
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,&
-       & ppn,info,spsi,stencil,Vxc,energy%T_c,energy%E_xc)
+       & ppn,info,spsi,stencil,Vxc,energy%T_c,virial%P_xc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)

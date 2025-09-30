@@ -21,7 +21,7 @@ module initialization_rt_sub
 
 contains
 
-subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+subroutine initialization_rt( Mit, system, energy, virial, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, info,  &
@@ -76,6 +76,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_xc_functional) :: xc_func
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
+  type(s_dft_virial) :: virial
   type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
@@ -284,7 +285,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%T_c,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%T_c,virial%P_xc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f

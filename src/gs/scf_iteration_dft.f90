@@ -16,7 +16,7 @@
 !=======================================================================
 
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
-                              system,energy,ewald,  &
+                              system,energy,virial,ewald,  &
                               lg,mg,  &
                               info,  &
                               poisson,fg,  &
@@ -79,6 +79,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
+type(s_dft_virial) :: virial
 type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
@@ -180,7 +181,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_density(system,rho_s,spsi,info,mg)
      call timer_end(LOG_CALC_RHO)
      call update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
-               spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,v_local,mixing,energy)
+               spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,v_local,mixing,energy,virial)
    else if(yn_dc=='y') then
    ! Divide-and-Conquer method
      call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
@@ -201,10 +202,10 @@ DFT_Iteration : do iter=Miter+1,nscf
      & dc%poisson_tot,dc%fg_tot,dc%rho_tot,dc%rho_tot_s, &
      & rho_jm, & ! dummy
      & dc%Vpsl_tot,dc%Vh_tot,dc%Vxc_tot,dc%vloc_tot, &
-     mixing,energy)
+     mixing,energy,virial)
      ! v_local (fragment) = vh (total) + vpsl (total) + vxc (fragment) + v_boundary (fragment)
      call calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
-  & pp,ppn,spsi,Vxc,energy,dc,v_local)
+  & pp,ppn,spsi,Vxc,energy,virial,dc,v_local)
    end if
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then

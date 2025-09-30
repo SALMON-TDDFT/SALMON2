@@ -72,7 +72,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
 end subroutine solve_orbitals
 
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
-               spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
+               spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy,virial )
   use structures
   use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc
   use timer
@@ -99,6 +99,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   type(s_scalar),         intent(inout) :: Vh,Vxc(system%nspin),vlocal(system%nspin)
   type(s_mixing),         intent(inout) :: mixing
   type(s_dft_energy),     intent(inout) :: energy
+  type(s_dft_virial),     intent(inout) :: virial
   !
   integer :: j
 
@@ -133,7 +134,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,&
-         & info,spsi,stencil,Vxc,energy%T_c,energy%E_xc)
+         & info,spsi,stencil,Vxc,energy%T_c,virial%P_xc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
     if(method_mixing=='simple_potential')then

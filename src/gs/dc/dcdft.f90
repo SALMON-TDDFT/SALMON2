@@ -372,7 +372,7 @@ contains
   
   ! v_local (fragment) = vh (total) + vpsl (total) + vxc (fragment) + v_boundary (fragment)
   subroutine calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
-  & pp,ppn,spsi,Vxc,energy,dc,v_local)
+  & pp,ppn,spsi,Vxc,energy,virial,dc,v_local)
     use structures
     use timer
     use salmon_global, only: xi_dc
@@ -391,6 +391,7 @@ contains
     type(s_scalar),       intent(in)    :: rho_s(system%nspin)
     type(s_scalar),       intent(inout) :: Vxc(system%nspin)
     type(s_dft_energy),   intent(inout) :: energy
+    type(s_dft_virial),   intent(inout) :: virial
     type(s_dcdft),        intent(in)    :: dc
     type(s_scalar)                      :: v_local(system%nspin)
 
@@ -401,7 +402,7 @@ contains
     
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s, &
-    & pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,energy%T_c,v_local(1)) ! v_local(1)%f (working array) := eexc
+    & pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,energy%T_c,virial%P_xc,v_local(1)) ! v_local(1)%f (working array) := eexc
     sum_exc = 0d0
     do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3)) ! core region only
     do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2)) ! core region only

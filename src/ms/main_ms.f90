@@ -53,6 +53,7 @@ type(s_xc_functional) :: xc_func
 type(s_reciprocal_grid) :: fg
 type(s_ewald_ion_ion) :: ewald
 type(s_dft_energy) :: energy
+type(s_dft_virial) :: virial
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: Vpsl
@@ -326,7 +327,7 @@ subroutine initialization_ms()
                 end if
                 
                 ! Initializa TDKS system
-                call initialization_rt( Mit, system, energy, ewald, rt, md, &
+                call initialization_rt( Mit, system, energy, virial, ewald, rt, md, &
                                         singlescale,  &
                                         stencil, fg, poisson,  &
                                         lg, mg,   &

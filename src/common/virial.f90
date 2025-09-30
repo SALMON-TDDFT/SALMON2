@@ -187,7 +187,7 @@ contains
     virial%P_kin_c   = energy%T_c
 
     ! XC virial
-    virial%P_xc       = energy%E_xc - energy%T_c
+    virial%P_xc       = virial%P_xc - energy%T_c
 
     ! kinetic virial
     virial%P_kin      = ( energy%E_kin + energy%T_c )*2d0
