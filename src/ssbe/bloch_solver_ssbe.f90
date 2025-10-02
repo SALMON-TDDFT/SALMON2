@@ -13,6 +13,12 @@ module bloch_solver_ssbe
         integer :: ik_max, ik_min
         complex(8), allocatable :: rho(:, :, :)
         logical :: flag_vnl_correction
+        complex(8), allocatable :: qnm(:, :, :)
+        complex(8), allocatable :: grad_qnm(:, :, :, :)
+        complex(8), allocatable :: qnm_new(:, :, :)
+        complex(8), allocatable :: dqnm_stock(:, :, :, :)
+        real(8), allocatable    :: abs_dnm(:, :, :)
+        complex(8), allocatable :: exp_iphi(:, :, :)
     end type
 
 
@@ -53,6 +59,111 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end do
 
     sbe%flag_vnl_correction = .false.
+end subroutine
+
+
+subroutine prepare_qnm(sbe, gs, icomm)
+    use salmon_global, only: epdir_re1, am_s
+    use communication
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    integer, intent(in) :: icomm
+    complex(8) :: dnm(sbe%nb, sbe%nb, sbe%nk)
+    complex(8) :: qnm_new_tmp(sbe%nb, sbe%nb, sbe%nk)
+    integer :: ib, jb, jj, ik, ii
+    integer :: nb, nk
+    complex(8) :: rho_tmp1(sbe%nb, sbe%nb, sbe%nk)
+    complex(8) :: rho_tmp2(sbe%nb, sbe%nb, sbe%nk)
+
+    nk = sbe%nk
+    nb = sbe%nb
+
+    allocate(sbe%qnm(sbe%nb, sbe%nb, sbe%nk))
+    allocate(sbe%grad_qnm(sbe%nb, sbe%nb, 1:3, sbe%nk))
+    allocate(sbe%qnm_new(sbe%nb, sbe%nb, sbe%nk))
+    allocate(sbe%dqnm_stock(sbe%nb, sbe%nb, sbe%nk, am_s))
+    allocate(sbe%abs_dnm(sbe%nb, sbe%nb, sbe%nk))
+    allocate(sbe%exp_iphi(sbe%nb, sbe%nb, sbe%nk))
+
+    do ik=1,nk
+    do ib=1,nb
+    do jb=1,nb
+        sbe%qnm(ib, jb, ik) = 0.d0
+        sbe%qnm_new(ib, jb, ik) = 0.d0
+        qnm_new_tmp(ib, jb, ik) = 0.d0
+    end do
+    end do
+    end do
+
+    do ii=1,am_s
+    do ik=1,nk
+    do ib=1,nb
+    do jb=1,nb
+        sbe%dqnm_stock(ib, jb, ik, ii) = 0.d0
+    end do
+    end do
+    end do
+    end do
+
+    do ik=1,nk
+    do ib=1,nb
+    do jb=1,nb
+        dnm(ib, jb, ik)=0.d0
+        sbe%abs_dnm(ib, jb, ik)=0.d0
+        sbe%exp_iphi(ib, jb, ik)=0.d0
+        qnm_new_tmp(ib, jb, ik)=0.d0
+        rho_tmp1(ib, jb, ik)=0.d0
+        rho_tmp2(ib, jb, ik)=0.d0
+    end do
+    end do
+    end do
+
+    do ik=sbe%ik_min,sbe%ik_max
+    do ib=1,nb
+    do jb=1,nb
+        rho_tmp1(ib, jb, ik) = sbe%rho(ib, jb, ik)
+    end do
+    end do
+    end do
+    call comm_summation(rho_tmp1, rho_tmp2, nb*nb*nk, icomm)
+
+
+    do jj=1,3
+    do ik=1,nk
+    do ib=1,nb
+    do jb=1,nb
+        dnm(ib, jb, ik) = dnm(ib, jb, ik) + epdir_re1(jj) * gs%d_matrix(ib, jb, jj, ik)
+    end do
+    end do
+    end do
+    end do
+
+    do ik=1,nk
+    do ib=1,nb
+    do jb=1,nb
+        sbe%abs_dnm(ib, jb, ik) = abs(dnm(ib, jb, ik))
+    end do
+    end do
+    end do
+
+    !do ik=sbe%ik_min,sbe%ik_max
+    do ik=1,nk
+    do ib=1,nb
+    do jb=1,nb
+        if(ib == jb) then
+            sbe%qnm_new(ib, ib, ik) = rho_tmp2(ib, ib, ik)
+        else
+            if(sbe%abs_dnm(ib, jb, ik) >= 1.d-10) then
+                sbe%exp_iphi(ib, jb, ik) = dnm(ib, jb, ik)/sbe%abs_dnm(ib, jb, ik)
+            end if
+            sbe%qnm_new(ib, jb, ik) = conjg(sbe%exp_iphi(ib, jb, ik)) *  &
+                                   &  rho_tmp2(ib, jb, ik)
+        end if
+    end do
+    end do
+    end do
+
 end subroutine
 
 
@@ -449,6 +560,176 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
     return
 end function calc_energy
 
+
+subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt)
+    use salmon_global, only: am_s, t_2
+    use common_ssbe, only: grad_k_array_nb2d_dcomplex
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info), intent(inout) :: gs
+    real(8), intent(in) :: E(1:3)
+    real(8), intent(in) :: bj_am(8,8)
+    real(8), intent(in) :: dt
+    integer :: ib, jb, lb, ik, ii, jj
+    integer :: nb, nk
+    real(8) :: abs_E
+    complex(8) :: shift_vector(3)
+    complex(8),parameter :: zi=(0.d0,1.d0)
+
+    
+    nb = sbe%nb 
+    nk = sbe%nk
+
+    shift_vector = 0.d0 ! shift_vector is set to be 0
+
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        sbe%qnm(ib, jb, ik) = sbe%qnm_new(ib, jb, ik)
+    end do
+    end do
+    end do
+
+    do ii = 1,am_s-1
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        sbe%dqnm_stock(ib, jb, ik, ii) = sbe%dqnm_stock(ib, jb, ik, ii+1)
+    end do
+    end do
+    end do
+    end do
+
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        sbe%dqnm_stock(ib, jb, ik, am_s) = 0.d0
+    end do
+    end do
+    end do
+
+    call grad_k_array_nb2d_dcomplex(nb,nk,gs%b_matrix,sbe%qnm,sbe%grad_qnm)
+
+    abs_E = sqrt(E(1)**2+E(2)**2+E(3)**2)
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        if(ib == jb) then
+        ! qnn (diagonal part)
+            if(abs_E >= 1.d-10) then
+                do jj = 1,3
+                    sbe%dqnm_stock(ib, ib, ik, am_s) = &
+                      & sbe%dqnm_stock(ib, ib, ik, am_s) + &
+                      & E(jj) * sbe%grad_qnm(ib, ib, jj, ik)
+                end do
+                do lb = 1,nb
+                    sbe%dqnm_stock(ib, ib, ik, am_s) = &
+                      & sbe%dqnm_stock(ib, ib, ik, am_s) + &
+                      & 2.d0 * abs_E * sbe%abs_dnm(ib, lb, ik) * &
+                      &        aimag(sbe%qnm(lb, ib, ik))
+                end do
+            end if
+        else
+        ! qnm (off-diagonal part)
+            sbe%dqnm_stock(ib, jb, ik, am_s) = &
+              & sbe%dqnm_stock(ib, jb, ik, am_s) - &
+              & sbe%qnm(ib, jb, ik)/t_2
+            if(abs_E >= 1.d-10) then
+                do jj = 1,3
+                    sbe%dqnm_stock(ib, jb, ik, am_s) = &
+                      & sbe%dqnm_stock(ib, jb, ik, am_s) + &
+                      & E(jj) * sbe%grad_qnm(ib, jb, jj, ik)
+                end do
+                sbe%dqnm_stock(ib, jb, ik, am_s) = &
+                  & sbe%dqnm_stock(ib, jb, ik, am_s) + &
+                  & zi * abs_E * gs%delta_omega(ib, jb, ik) * sbe%qnm(ib, jb, ik)
+                do jj = 1,3
+                    sbe%dqnm_stock(ib, jb, ik, am_s) = &
+                      & sbe%dqnm_stock(ib, jb, ik, am_s) - &
+                      & zi * E(jj) * shift_vector(jj) * sbe%qnm(ib, jb, ik)
+                end do
+                sbe%dqnm_stock(ib, jb, ik, am_s) = &
+                  & sbe%dqnm_stock(ib, jb, ik, am_s) + &
+                  & zi * abs_E * sbe%abs_dnm(ib, jb, ik) * &
+                  &     (sbe%qnm(ib, ib, ik) - sbe%qnm(jb, jb, ik))
+                do lb = 1,nb
+                    if(lb /= ib .and. lb /= jb) then
+                        sbe%dqnm_stock(ib, jb, ik, am_s) = &
+                           & sbe%dqnm_stock(ib, jb, ik, am_s) - &
+                           & zi * abs_E * &
+                           &     (sbe%abs_dnm(ib, lb, ik) * &
+                           &      sbe%qnm(lb, jb, ik) - &
+                           &      sbe%abs_dnm(lb, jb, ik) * &
+                           &      sbe%qnm(ib, lb, ik)) * &
+                           &      sbe%exp_iphi(ib, lb, ik) * &
+                           &      sbe%exp_iphi(lb, jb, ik) * &
+                           &      conjg(sbe%exp_iphi(ib, jb, ik))
+                    end if
+                end do
+            end if
+        end if
+    end do
+    end do
+    end do
+
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        sbe%qnm_new(ib, jb, ik) = sbe%qnm(ib, jb, ik)
+    end do
+    end do
+    end do
+
+    do ii = 1,am_s
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        sbe%qnm_new(ib, jb, ik) = sbe%qnm_new(ib, jb, ik) + &
+         &  bj_am(am_s+1-ii, am_s) * sbe%dqnm_stock(ib, jb, ik, ii) * dt
+    end do
+    end do
+    end do
+    end do
+
+    return
+end subroutine
+
+
+subroutine calc_current_bloch_lg(sbe, gs, jmat)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(out) :: jmat(1:3)
+    integer :: ik, ib, jb, jj
+    integer :: nk, nb
+
+    nk = sbe%nk
+    nb = sbe%nb
+
+    jmat(:) = 0.d0
+
+    !do jj = 1,3
+    do jj = 3,3
+    do ik = 1,nk
+    do ib = 1,nb
+    do jb = 1,nb
+        if(ib == jb) then
+            jmat(jj) = jmat(jj) + gs%grad_k_eigen(ib, jj, ik) *  &
+                               &  sbe%qnm_new(ib, ib, ik)
+        else
+            jmat(jj) = jmat(jj) +  &
+                               & gs%delta_omega(ib, jb, ik) * &
+                               & sbe%abs_dnm(ib, jb, ik) * &
+                               & sbe%qnm_new(jb, ib, ik)
+        end if
+    end do
+    end do
+    end do
+    end do
+
+    jmat(:) = -1.d0/4.d0*jmat(:)/sum(gs%kweight(:))
+
+end subroutine calc_current_bloch_lg
 
 end module
 
