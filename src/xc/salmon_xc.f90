@@ -435,7 +435,7 @@ contains
     do iy=1,mg%num(2)
     do ix=1,mg%num(1)
       tot_exc=tot_exc+eexc_tmp(ix,iy,iz)
-      tot_tc=tot_exc+tec_tmp(ix,iy,iz)
+      tot_tc=tot_tc+tec_tmp(ix,iy,iz)
       tot_pxc=tot_pxc+pexc_tmp(ix,iy,iz)
     end do
     end do
@@ -974,6 +974,7 @@ contains
 !$acc kernels
       pexc = 0d0
 !$acc end kernels
+    end if
     if (present(vxc)) then
 !$acc kernels
       vxc = 0d0

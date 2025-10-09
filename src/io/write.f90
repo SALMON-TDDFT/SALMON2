@@ -1451,7 +1451,12 @@ contains
        if(yn_jm=='y'.and.yn_periodic=='y') then
          write(fh,*) "For yn_jm = y and yn_periodic=y, this version still cannot output Total Energy."
        else
+         write(fh,*) "--Energy--"
          write(fh,*) "Total energy (eV) = ", energy%E_tot*au_energy_ev
+         write(fh,*) "E_kin, E_h, E_ion_loc, E_ion_nloc, E_xc, E_ion_ion  (eV)"
+         write(fh,*) energy%E_kin*au_energy_ev, energy%E_h*au_energy_ev, energy%E_ion_loc*au_energy_ev&
+              , energy%E_ion_nloc*au_energy_ev, energy%E_xc*au_energy_ev, energy%E_ion_ion*au_energy_ev
+         write(fh,*) "----------"
          write(fh,*) "--Virial--"
          write(fh,*) "External pressure (GPa) = ", virial%P_tot*au_pressure_gpa
          write(fh,*) "P_kin, P_h, P_ion_loc, P_ion_nloc, P_xc, P_ion_ion  (GPa)"
