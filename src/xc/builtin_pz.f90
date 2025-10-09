@@ -26,16 +26,16 @@ contains
     real(8), intent(in) :: rho_s(nl)
     real(8), intent(out) :: exc(nl), eexc(nl), vexc(nl), tec(nl), pexc(nl)
     integer :: i
-    real(8) :: trho, e_xc, de_xc_drho, de_c_drho, e_c, t_c, p_xc
+    real(8) :: trho, e_xc, de_xc_drho, de_c_drho, e_c, v_c, t_c, p_xc
 
     ! call rho_j_tau(gs_rt, rho_s, tau_s, j_s, grho_s, lrho_s)
     ! rho_s=rho*0.5d0
     ! if(flag_nlcc)rho_s = rho_s + 0.5d0*rho_nlcc
     
 #ifdef USE_OPENACC
-!$acc kernels loop private(i,trho,e_xc,de_xc_drho,de_c_drho,e_c)
+!$acc kernels loop private(i,trho,e_xc,de_xc_drho,de_c_drho,e_c,t_c,v_c,p_xc)
 #else
-!$omp parallel do private(i,trho,e_xc,de_xc_drho,de_c_drho,e_c)
+!$omp parallel do private(i,trho,e_xc,de_xc_drho,de_c_drho,e_c,t_c,v_c,p_xc)
 #endif
     do i=1,NL
       trho=2*rho_s(i)
@@ -43,9 +43,10 @@ contains
       exc(i)=e_xc
       Eexc(i)=e_xc*trho
       Vexc(i)=e_xc+trho*de_xc_drho
-      t_c=-4d0*e_c+3.d0*de_c_drho
+      v_c=e_c+trho*de_c_drho
+      t_c=-4d0*e_c+3.d0*v_c
       Tec(i)=t_c*trho
-      p_xc=3.d0*(e_xc-de_xc_drho)
+      p_xc=3.d0*trho*de_xc_drho
       Pexc(i)=p_xc*trho
     enddo
 #ifdef USE_OPENACC
