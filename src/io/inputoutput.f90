@@ -593,6 +593,7 @@ contains
       & num_fragment, &
       & num_rgrid_buffer, &
       & nproc_rgrid_tot, &
+      & file_atom_coor_frag, &
       & xi_dc, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
@@ -1013,6 +1014,7 @@ contains
     num_fragment = 0
     num_rgrid_buffer = 0
     nproc_rgrid_tot = 1
+    file_atom_coor_frag = 'none'
     xi_dc = -1d0
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
@@ -1636,6 +1638,7 @@ contains
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
+    call comm_bcast(file_atom_coor_frag, nproc_group_global)
     call comm_bcast(xi_dc, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
@@ -2595,6 +2598,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag

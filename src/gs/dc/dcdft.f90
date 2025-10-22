@@ -168,7 +168,7 @@ contains
     end subroutine init_comm_frag
     
     subroutine init_fragment
-      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment
+      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment, file_atom_coor_frag
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag
@@ -273,6 +273,8 @@ contains
         end do
       end do
       
+      if(file_atom_coor_frag /= 'none') call read_atom_frag ! read & override natom, rion, kion (fragment)
+      
     ! dc%jxyz_tot: r-grid (fragment) --> r-grid (total)
       allocate(dc%jxyz_tot(maxval(num_rgrid),3))
       do n=1,3 ! x,y,z
@@ -305,6 +307,48 @@ contains
         r_periodic = r_periodic - a
       end do
     end function r_periodic
+    
+    subroutine read_atom_frag
+      use salmon_global, only: natom, kion, Rion, file_atom_coor_frag, base_directory
+      use inputoutput, only: ulength_to_au
+      use communication, only: comm_is_root, comm_bcast
+      implicit none
+      integer :: iu=123, ia, counter
+      character(256) :: filename,cbuf
+      
+      filename = trim(base_directory)//trim(file_atom_coor_frag)
+      
+      if(comm_is_root(dc%id_frag)) then
+        open(iu, file=filename, status="old")
+        counter = 0
+        do
+          read(iu,'()',end=100)
+          counter = counter + 1
+        end do
+100 close(iu)
+        natom = counter
+      end if
+      call comm_bcast(natom,dc%icomm_frag)
+
+      deallocate(rion,kion)
+      allocate(rion(3,natom),kion(natom))
+      
+      if(comm_is_root(dc%id_frag)) then
+        open(iu, file=filename, status="old")
+        rewind(iu)
+        do ia = 1,natom
+          read(iu,*) cbuf, Rion(1:3,ia), kion(ia)
+          rion(1:3,ia) = rion(1:3,ia)* ulength_to_au
+        enddo
+        close(iu)
+        rion = rion * ulength_to_au
+        write(*,*) "read atomic coordinates from ",filename
+      end if
+
+      call comm_bcast(Rion,dc%icomm_frag)
+      call comm_bcast(kion,dc%icomm_frag)
+      
+    end subroutine read_atom_frag
 
   end subroutine init_dcdft
   
