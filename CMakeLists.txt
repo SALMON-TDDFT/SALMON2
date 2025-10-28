@@ -30,13 +30,8 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 include(cmakefiles/check_build_environments.cmake)
 
-if(USE_OPENACC)
-  if(USE_CUDA)
-    option(CMAKE_CUDA_ARCHITECTURES "80") # Dummy variable
-    enable_language(CUDA)
-  endif()
-endif()
-
+# Defining options
+include(CMakeDependentOption)
 
 # Bulid options
 ## For third party libraries
@@ -45,6 +40,15 @@ option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
+option_set(USE_OPENACC   "Use OpenACC for performance portability" OFF)
+
+if(USE_OPENACC)
+  option(USE_CUDA        "Use CUDA for OpenACC"    OFF)
+  if(USE_CUDA)
+    option(CMAKE_CUDA_ARCHITECTURES "CUDA architecture, should be only a number (not 'sm_')" 80)
+    enable_language(CUDA)
+  endif()
+endif()
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
