@@ -1674,7 +1674,7 @@ contains
       if(file_atom_red_coor /= 'none')then
         icount = icount + 1
         if_cartesian = .false.
-        filename_tmp = trim(file_atom_coor)
+        filename_tmp = trim(file_atom_red_coor)
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
