@@ -46,6 +46,8 @@ subroutine grad_k_array_nb1d_double(nb,nk,b_matrix,  &
         nabt(j,3) = bnmat(j,4)/(b_matrix(3,3)/num_kgrid(3))
     end do 
 
+    !$omp parallel do default(shared) &
+    !$omp private(ib,kx,ky,kz,iik,work,w,grad_k_work)
     do ib=1,nb
         do kz=1,num_kgrid(3)
         do ky=1,num_kgrid(2)
@@ -134,6 +136,8 @@ subroutine grad_k_array_nb2d_dcomplex(nb,nk,b_matrix,  &
         nabt(j,3) = bnmat(j,4)/(b_matrix(3,3)/num_kgrid(3))
     end do 
 
+    !$omp parallel do default(shared) &
+    !$omp private(ib,jb,kx,ky,kz,iik,work,w,grad_k_work) collapse(2)
     do ib=1,nb
         do jb=1,nb
             do kz=1,num_kgrid(3)
