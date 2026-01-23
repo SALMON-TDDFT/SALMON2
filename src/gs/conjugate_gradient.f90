@@ -680,6 +680,9 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   integer :: ix,iy,iz
   complex(8) :: zbox2(system%nspin,system%no,system%nk)
   complex(8) :: sum0
+
+  call timer_begin(LOG_GSCG_PERIODIC_CALC)
+
   nspin = system%nspin
 
   zbox2(:,:,:) = 0.d0
@@ -733,8 +736,6 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   call timer_begin(LOG_GSCG_PERIODIC_COMM_COLL)
   call comm_summation(zbox2,zbox,nspin*system%no*system%nk,info%icomm_r)
   call timer_end(LOG_GSCG_PERIODIC_COMM_COLL)
-
-  call timer_begin(LOG_GSCG_PERIODIC_CALC)
 end subroutine inner_product
 
 subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
