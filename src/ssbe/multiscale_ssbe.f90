@@ -195,11 +195,15 @@ subroutine main_multiscale_ssbe(icomm)
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
                 if (trim(theory) == "maxwell_vg_sbe") then
-                    call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), dt)
-                    call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
+                    call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                         Ac_macro(1:3, imacro), dt)
+                    call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                            Ac_macro(1:3, imacro), jmat, icomm_macro)
                 else ! trim(theory) == "maxwell_lg_sbe")
-                    call dt_evolve_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), E_macro(1:3, imacro), bj_am, dt, icomm_macro)
-                    call calc_current_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), jmat, icomm_macro)
+                    call dt_evolve_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                            E_macro(1:3, imacro), bj_am, dt, icomm_macro)
+                    call calc_current_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                               jmat, icomm_macro)
                 end if
                 if (irank_macro == 0) then
                     Jmat_macro_tmp(1:3, imacro) = jmat(1:3)
