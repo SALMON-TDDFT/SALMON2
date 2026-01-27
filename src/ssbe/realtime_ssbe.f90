@@ -1,8 +1,8 @@
-module realtime_vg_ssbe
+module realtime_ssbe
     implicit none
 contains
 
-subroutine main_realtime_vg_ssbe(icomm)
+subroutine main_realtime_ssbe(icomm)
     use salmon_global
     use communication
     use gs_info_ssbe
@@ -23,6 +23,7 @@ subroutine main_realtime_vg_ssbe(icomm)
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
     integer :: nk
+    real(8) :: bj_am(8,8)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -39,9 +40,15 @@ subroutine main_realtime_vg_ssbe(icomm)
     call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
+    if (trim(theory) == "lg_sbe") then
+        ! Prepare qnm
+        call prepare_qnm(sbe, gs, icomm)
+        call adams_moulton_coefs(bj_am)
+    end if
+
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, nt+1, Ac_ext_t)
+    call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
     ! Initial energy
     energy = 0.0d0
     E(:) = 0.0d0; Jmat(:) = 0.0d0;
@@ -69,9 +76,14 @@ subroutine main_realtime_vg_ssbe(icomm)
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
-        call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
-        call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
         E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
+        if (trim(theory) == "vg_sbe") then
+            call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
+            call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
+        else ! trim(theory) == "lg_sbe")
+            call dt_evolve_bloch_lg(sbe, gs, E(:), bj_am, dt, icomm)
+            call calc_current_bloch_lg(sbe, gs, Jmat, icomm)
+        end if
         energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
         
         if (irank == 0) then
@@ -113,6 +125,6 @@ subroutine main_realtime_vg_ssbe(icomm)
     end if
 
     return
-end subroutine main_realtime_vg_ssbe
+end subroutine main_realtime_ssbe
 
-end module realtime_vg_ssbe
+end module realtime_ssbe

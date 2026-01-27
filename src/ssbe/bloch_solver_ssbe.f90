@@ -741,5 +741,56 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
 
 end subroutine calc_current_bloch_lg
 
+subroutine adams_moulton_coefs(bj_am)
+  implicit none
+  real(8) :: bj_am(8,8)
+
+  bj_am(1,1) = 1.d0
+
+  !bj_am(1,2) = 3.d0/2.d0
+  !bj_am(2,2) = -1.d0/2.d0
+
+  !bj_am(1,3) = 23.d0/12.d0
+  !bj_am(2,3) = -4.d0/3.d0
+  !bj_am(3,3) = 5.d0/12.d0
+
+  bj_am(1,4) = 55.d0/24.d0
+  bj_am(2,4) = -59.d0/24.d0
+  bj_am(3,4) = 37.d0/24.d0
+  bj_am(4,4) = -3.d0/8.d0
+
+  !bj_am(1,5) = 1901.d0/720.d0
+  !bj_am(2,5) = -1387.d0/360.d0
+  !bj_am(3,5) = 109.d0/30.d0
+  !bj_am(4,5) = -637.d0/360.d0
+  !bj_am(5,5) = 251.d0/720.d0
+
+  !bj_am(1,6) = 4277.d0/1440.d0
+  !bj_am(2,6) = -2641.d0/480.d0
+  !bj_am(3,6) = 4991.d0/720.d0
+  !bj_am(4,6) = -3649.d0/720.d0
+  !bj_am(5,6) = 959.d0/480.d0
+  !bj_am(6,6) = -95.d0/288.d0
+
+  !bj_am(1,7) = 198721.d0/60480.d0
+  !bj_am(2,7) = -18637.d0/2520.d0
+  !bj_am(3,7) = 235183.d0/20160.d0
+  !bj_am(4,7) = -10754.d0/945.d0
+  !bj_am(5,7) = 135713.d0/20160.d0
+  !bj_am(6,7) = -5603.d0/2520.d0
+  !bj_am(7,7) = 19087.d0/60480.d0
+
+  bj_am(1,8) = 16083.d0/4480.d0
+  bj_am(2,8) = -1152169.d0/120960.d0
+  bj_am(3,8) = 242653.d0/13440.d0
+  bj_am(4,8) = -296053.d0/13440.d0
+  bj_am(5,8) = 2102243.d0/120960.d0
+  bj_am(6,8) = -115747.d0/13440.d0
+  bj_am(7,8) = 32863.d0/13440.d0
+  bj_am(8,8) = -5257.d0/17280.d0
+
+end subroutine adams_moulton_coefs
+
+
 end module
 

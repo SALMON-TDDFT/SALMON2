@@ -1,8 +1,8 @@
-module multiscale_vg_ssbe
+module multiscale_ssbe
     implicit none
 contains
 
-subroutine main_multiscale_vg_ssbe(icomm)
+subroutine main_multiscale_ssbe(icomm)
     use omp_lib
     use communication
     use gs_info_ssbe
@@ -33,6 +33,7 @@ subroutine main_multiscale_vg_ssbe(icomm)
     integer :: imacro_min, imacro_max
     integer :: ix, iy, iz, mt, imacro, iobs, ii, jj
     real(8) :: jmat(3)
+    real(8) :: bj_am(8,8)
 
     type(s_fdtd_system) :: fs
     type(ls_fdtd_weyl) :: fw
@@ -80,7 +81,7 @@ subroutine main_multiscale_vg_ssbe(icomm)
     ! Prepare external pulse
     mt = max(nt, int(abs(nxvac_m(1)) * fs%hgs(1) / cspeed_au / dt))
     allocate(Ac_ext_t(1:3, -1:mt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, mt, Ac_ext_t)
+    call calc_Ac_ext_t(0.0d0, dt, -1, mt+1, Ac_ext_t)
     call set_incident_field(mt, Ac_ext_t, fs, fw)
 
     ! Macropoint and media setup
@@ -119,7 +120,14 @@ subroutine main_multiscale_vg_ssbe(icomm)
             call init_sbe_bloch_solver(sbe(i), gs(itbl_macro_itype_sbe(i)), &
                                        nstate_sbe(itbl_macro_itype_sbe(i)), icomm_macro)
             sbe(i)%flag_vnl_correction = (yn_vnl_correction == 'y')
+            if (trim(theory) == "maxwell_lg_sbe") then
+                ! Prepare qnm
+                call prepare_qnm(sbe(i), gs(itbl_macro_itype_sbe(i)), icomm)
+            end if
         end do
+    end if
+    if (trim(theory) == "maxwell_lg_sbe") then
+        call adams_moulton_coefs(bj_am)
     end if
 
     call comm_sync_all(icomm)
@@ -186,8 +194,13 @@ subroutine main_multiscale_vg_ssbe(icomm)
 
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
-                call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), dt)
-                call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
+                if (trim(theory) == "maxwell_vg_sbe") then
+                    call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), dt)
+                    call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
+                else ! trim(theory) == "maxwell_lg_sbe")
+                    call dt_evolve_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), E_macro(1:3, imacro), bj_am, dt, icomm_macro)
+                    call calc_current_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), jmat, icomm_macro)
+                end if
                 if (irank_macro == 0) then
                     Jmat_macro_tmp(1:3, imacro) = jmat(1:3)
                 end if
@@ -264,7 +277,7 @@ subroutine main_multiscale_vg_ssbe(icomm)
     call comm_sync_all(icomm)
 
     return
-end subroutine main_multiscale_vg_ssbe
+end subroutine main_multiscale_ssbe
 
 
 subroutine distribute_macropoints(irank, nmacro, nproc, imacro_min, imacro_max)
@@ -497,4 +510,4 @@ end subroutine write_wave_data_file
 
 
 
-end module multiscale_vg_ssbe
+end module multiscale_ssbe
