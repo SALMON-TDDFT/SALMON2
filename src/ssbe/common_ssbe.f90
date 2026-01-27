@@ -29,6 +29,11 @@ subroutine grad_k_array_nb1d_double(nb,nk,b_matrix,  &
     real(8) :: nabt(4,3)
     real(8) :: w
 
+    if (nk /= num_kgrid(1)*num_kgrid(2)*num_kgrid(3)) then
+        write(*,*) "ERROR: nk mismatch", nk, num_kgrid, num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+        stop
+    end if
+    
     do j=-3,num_kgrid(1)+4
         kdx(j) = mod(j+num_kgrid(1)-1,num_kgrid(1))+1
     end do
