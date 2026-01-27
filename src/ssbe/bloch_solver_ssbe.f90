@@ -397,6 +397,7 @@ end subroutine
 
 function calc_trace(sbe, gs, nb_max, icomm) result(tr)
     use communication
+    use salmon_global
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -408,13 +409,24 @@ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
     real(8) :: tmp, tmp1
 
     tmp1 = 0d0
-    !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2)
-    do ik = sbe%ik_min, sbe%ik_max
-        do ib = 1, nb_max
-            tmp1 = tmp1 + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
+    select case(trim(theory))
+    case ("vg_sbe", "maxwell_vg_sbe")
+        !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2)
+        do ik = sbe%ik_min, sbe%ik_max
+            do ib = 1, nb_max
+                tmp1 = tmp1 + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
+            end do
         end do
-    end do
-    !$omp end parallel do
+        !$omp end parallel do
+    case ("lg_sbe", "maxwell_lg_sbe")
+        !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2)
+        do ik = sbe%ik_min, sbe%ik_max
+            do ib = 1, nb_max
+                tmp1 = tmp1 + real(sbe%qnm_new(ib, ib, ik)) * gs%kweight(ik)
+            end do
+        end do
+        !$omp end parallel do
+    end select
     call comm_summation(tmp1, tmp, icomm)
     tr = tmp / sum(gs%kweight)
 
