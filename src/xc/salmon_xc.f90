@@ -70,7 +70,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -91,6 +91,7 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
+    type(s_scalar)          ,optional   :: eexc
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
@@ -437,6 +438,16 @@ contains
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+    
+    if(present(eexc)) then
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        eexc%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1) = eexc_tmp(ix,iy,iz)
+      end do
+      end do
+      end do    
+    end if
     
     if(yn_spinorbit=='y') then
       call rot_vxc_noncollinear( Vxc, system, mg )

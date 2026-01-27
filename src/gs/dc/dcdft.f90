@@ -168,7 +168,7 @@ contains
     end subroutine init_comm_frag
     
     subroutine init_fragment
-      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment
+      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment, file_atom_coor_frag
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag
@@ -273,6 +273,8 @@ contains
         end do
       end do
       
+      if(file_atom_coor_frag /= 'none') call read_atom_frag ! read & override natom, rion, kion (fragment)
+      
     ! dc%jxyz_tot: r-grid (fragment) --> r-grid (total)
       allocate(dc%jxyz_tot(maxval(num_rgrid),3))
       do n=1,3 ! x,y,z
@@ -305,6 +307,48 @@ contains
         r_periodic = r_periodic - a
       end do
     end function r_periodic
+    
+    subroutine read_atom_frag
+      use salmon_global, only: natom, kion, Rion, file_atom_coor_frag, base_directory
+      use inputoutput, only: ulength_to_au
+      use communication, only: comm_is_root, comm_bcast
+      implicit none
+      integer :: iu=123, ia, counter
+      character(256) :: filename,cbuf
+      
+      filename = trim(base_directory)//trim(file_atom_coor_frag)
+      
+      if(comm_is_root(dc%id_frag)) then
+        open(iu, file=filename, status="old")
+        counter = 0
+        do
+          read(iu,'()',end=100)
+          counter = counter + 1
+        end do
+100 close(iu)
+        natom = counter
+      end if
+      call comm_bcast(natom,dc%icomm_frag)
+
+      deallocate(rion,kion)
+      allocate(rion(3,natom),kion(natom))
+      
+      if(comm_is_root(dc%id_frag)) then
+        open(iu, file=filename, status="old")
+        rewind(iu)
+        do ia = 1,natom
+          read(iu,*) cbuf, Rion(1:3,ia), kion(ia)
+          rion(1:3,ia) = rion(1:3,ia)* ulength_to_au
+        enddo
+        close(iu)
+        rion = rion * ulength_to_au
+        write(*,*) "read atomic coordinates from ",filename
+      end if
+
+      call comm_bcast(Rion,dc%icomm_frag)
+      call comm_bcast(kion,dc%icomm_frag)
+      
+    end subroutine read_atom_frag
 
   end subroutine init_dcdft
   
@@ -370,42 +414,107 @@ contains
   
 !===================================================================================================================================
   
-  ! dc%vloc_tot (total system) --> v_local (fragment)
-  subroutine calc_vlocal_fragment_dcdft(nspin,mg,vloc,dc)
+  ! v_local (fragment) = vh (total) + vpsl (total) + vxc (fragment) + v_boundary (fragment)
+  subroutine calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
+  & pp,ppn,spsi,Vxc,energy,dc,v_local)
     use structures
+    use timer
+    use salmon_global, only: xi_dc
     use communication, only: comm_summation
+    use salmon_xc, only: exchange_correlation
     implicit none
-    integer,      intent(in) :: nspin
-    type(s_rgrid),intent(in) :: mg
-    type(s_scalar)           :: vloc(nspin)
-    type(s_dcdft)            :: dc
+    type(s_dft_system),   intent(in)    :: system
+    type(s_rgrid),        intent(in)    :: mg
+    type(s_parallel_info),intent(in)    :: info
+    type(s_stencil),      intent(in)    :: stencil
+    type(s_xc_functional),intent(in)    :: xc_func
+    type(s_pp_info),      intent(in)    :: pp
+    type(s_pp_nlcc),      intent(in)    :: ppn
+    type(s_orbital),      intent(inout) :: spsi
+    type(s_sendrecv_grid),intent(inout) :: srg,srg_scalar
+    type(s_scalar),       intent(in)    :: rho_s(system%nspin)
+    type(s_scalar),       intent(inout) :: Vxc(system%nspin)
+    type(s_dft_energy),   intent(inout) :: energy
+    type(s_dcdft),        intent(in)    :: dc
+    type(s_scalar)                      :: v_local(system%nspin)
+
     !
     integer :: ix,iy,iz,ispin,ix_tot,iy_tot,iz_tot
-    real(8),dimension(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),nspin) :: tot_tmp,tot
+    real(8) :: sum_exc
+    real(8),dimension(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3)) :: tot_tmp,tot
     
-  ! vloc (total)
+    call timer_begin(LOG_CALC_EXC_COR)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s, &
+    & pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,v_local(1)) ! v_local(1)%f (working array) := eexc
+    sum_exc = 0d0
+    do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3)) ! core region only
+    do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2)) ! core region only
+    do ix=mg%is(1),min(mg%ie(1),dc%nxyz_domain(1)) ! core region only
+      sum_exc = sum_exc + v_local(1)%f(ix,iy,iz) * system%hvol
+    end do
+    end do
+    end do
+    call comm_summation(sum_exc,energy%E_xc,info%icomm_r) ! within fragment
+    sum_exc = 0d0
+    if(info%id_rko==0) sum_exc = energy%E_xc ! info%id_rko == 0 : representative process of each fragment
+    call comm_summation(sum_exc,energy%E_xc,dc%icomm_tot) ! total system
+    call timer_end(LOG_CALC_EXC_COR)
+    
+  ! v_h + v_psl (total)
     tot_tmp = 0d0
-    do ispin=1,nspin
     do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
     do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
     do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-      tot_tmp(ix,iy,iz,ispin) = dc%vloc_tot(ispin)%f(ix,iy,iz)
+      tot_tmp(ix,iy,iz) = dc%vh_tot%f(ix,iy,iz) + dc%vpsl_tot%f(ix,iy,iz)
     end do
     end do
     end do
-    end do
-    call comm_summation(tot_tmp,tot,dc%lg_tot%num(1)*dc%lg_tot%num(2)*dc%lg_tot%num(3)*nspin,dc%icomm_tot)
+    call comm_summation(tot_tmp,tot,dc%lg_tot%num(1)*dc%lg_tot%num(2)*dc%lg_tot%num(3),dc%icomm_tot)
     
-  ! vloc (fragment)
-    do ispin=1,nspin
+  ! v_local (fragment)
+    do ispin=1,system%nspin
     do iz=mg%is(3),mg%ie(3) ; iz_tot = dc%jxyz_tot(iz,3)
     do iy=mg%is(2),mg%ie(2) ; iy_tot = dc%jxyz_tot(iy,2)
     do ix=mg%is(1),mg%ie(1) ; ix_tot = dc%jxyz_tot(ix,1)
-      vloc(ispin)%f(ix,iy,iz) = tot(ix_tot,iy_tot,iz_tot,ispin)
+      v_local(ispin)%f(ix,iy,iz) = tot(ix_tot,iy_tot,iz_tot) + Vxc(ispin)%f(ix,iy,iz)
     end do
     end do
     end do
     end do
+    
+    if(xi_dc > 0d0) then
+    ! v_local (fragment) <-- v_local (fragment) + vboundary
+      call add_vboundary
+    end if
+    
+  contains
+
+    subroutine add_vboundary
+      implicit none
+      real(8) :: coef
+      coef = 1d0/xi_dc
+      
+      do ispin=1,system%nspin
+        tot_tmp = 0d0
+        do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+        do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+        do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+          tot_tmp(ix,iy,iz) = dc%rho_tot_s(ispin)%f(ix,iy,iz) ! after mixing
+        end do
+        end do
+        end do
+        call comm_summation(tot_tmp,tot,dc%lg_tot%num(1)*dc%lg_tot%num(2)*dc%lg_tot%num(3),dc%icomm_tot)
+        do iz=mg%is(3),mg%ie(3) ; iz_tot = dc%jxyz_tot(iz,3)
+        do iy=mg%is(2),mg%ie(2) ; iy_tot = dc%jxyz_tot(iy,2)
+        do ix=mg%is(1),mg%ie(1) ; ix_tot = dc%jxyz_tot(ix,1)
+          v_local(ispin)%f(ix,iy,iz) = v_local(ispin)%f(ix,iy,iz) + &
+          & coef* ( rho_s(ispin)%f(ix,iy,iz) - tot(ix_tot,iy_tot,iz_tot) ) ! vboundary
+        end do
+        end do
+        end do
+      end do
+    
+    end subroutine add_vboundary
     
   end subroutine calc_vlocal_fragment_dcdft
   

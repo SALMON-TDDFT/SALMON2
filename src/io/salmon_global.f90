@@ -441,6 +441,8 @@ character(256),allocatable :: atom_name(:)
   integer        :: num_fragment(3)
   integer        :: num_rgrid_buffer(3)
   integer        :: nproc_rgrid_tot(3)
+  character(256) :: file_atom_coor_frag
+  real(8)        :: xi_dc
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag
   integer        :: nstate_frag
