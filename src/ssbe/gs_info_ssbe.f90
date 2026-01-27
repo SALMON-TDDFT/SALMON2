@@ -37,6 +37,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
+    use salmon_global, only: theory
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -106,8 +107,11 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%delta_omega, icomm, 0)
     call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
 
-    call grad_k_array_nb1d_double(gs%nb, gs%nk, gs%b_matrix,  &
-                              &   gs%eigen, gs%grad_k_eigen)
+    select case(trim(theory))
+    case ("lg_sbe", "maxwell_lg_sbe")
+        call grad_k_array_nb1d_double(gs%nb, gs%nk, gs%b_matrix,  &
+                                  &   gs%eigen, gs%grad_k_eigen)
+    end select
 
     !Initial Occupation Number
     gs%occup(:,:) = 0d0 !!Experimental!!
