@@ -67,8 +67,8 @@ subroutine main_realtime_ssbe(icomm)
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
         ! Stdout logs:
-        write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
-        write(*, "(a)") "---------------------------------------------------------------------------------------"
+        write(*, "(a)") "  time-step  time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
+        write(*, "(a)") "-----------------------------------------------------------------------------------------"
     end if
 
     call comm_sync_all(icomm)
@@ -95,7 +95,7 @@ subroutine main_realtime_ssbe(icomm)
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
-                write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
+                write(*, "(i8,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
             end if
         end if
         
