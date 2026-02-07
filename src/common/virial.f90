@@ -37,9 +37,7 @@ contains
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
     real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, sysvol
     real(8) :: P_tot_raw, S1_loc, S2_loc
-    real(8) :: dbg_P_kin, dbg_P_h, dbg_P_ion_loc, dbg_P_ion_nloc_tmp, dbg_3E_ion_nloc
-    real(8) :: dbg_P_xc, dbg_P_ion_ion, dbg_P_tot_raw, dbg_P_tot_scaled
-    real(8) :: dbg_P_tot_raw_new, dbg_P_tot_scaled_new
+    real(8) :: P_tot_raw_new, P_tot_scaled_new
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3), ptmp_z, P_wrk_z(2), P_sum_z(2), ztmp
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -217,32 +215,24 @@ contains
          + virial%P_ion_nloc + virial%P_xc + virial%P_ion_ion
     virial%P_tot = P_tot_raw
 
-    call comm_summation(virial%P_kin,      dbg_P_kin,         info%icomm_rko)
-    call comm_summation(virial%P_h,        dbg_P_h,           info%icomm_rko)
-    call comm_summation(virial%P_ion_loc,  dbg_P_ion_loc,     info%icomm_rko)
-    call comm_summation(P_tmp_nloc_sum,    dbg_P_ion_nloc_tmp,info%icomm_rko)
-    call comm_summation(3.d0*energy%E_ion_nloc, dbg_3E_ion_nloc, info%icomm_rko)
-    call comm_summation(virial%P_xc,       dbg_P_xc,          info%icomm_rko)
-    call comm_summation(virial%P_ion_ion,  dbg_P_ion_ion,     info%icomm_rko)
-    call comm_summation(P_tot_raw,         dbg_P_tot_raw,     info%icomm_rko)
-    dbg_P_tot_raw_new = dbg_P_tot_raw - dbg_P_xc + xc_debug_last_pxc_alt_rko
-    dbg_P_tot_scaled_new = dbg_P_tot_raw_new * system%dvinv
+    P_tot_raw_new = P_tot_raw - virial%P_xc + xc_debug_last_pxc_alt_rko
+    P_tot_scaled_new = P_tot_raw_new * system%dvinv
 
     if (comm_is_root(info%id_rko)) then
       write(*,'(A)') '===== virial debug (before 1/3V) ====='
-      write(*,'(A,ES24.16)') 'P_kin         = ', dbg_P_kin
-      write(*,'(A,ES24.16)') 'P_h           = ', dbg_P_h
-      write(*,'(A,ES24.16)') 'P_ion_loc     = ', dbg_P_ion_loc
-      write(*,'(A,ES24.16)') 'P_ion_nloc_tmp= ', dbg_P_ion_nloc_tmp
-      write(*,'(A,ES24.16)') '3E_ion_nloc   = ', dbg_3E_ion_nloc
-      write(*,'(A,ES24.16)') 'P_xc          = ', dbg_P_xc
-      write(*,'(A,ES24.16)') 'P_ion_ion     = ', dbg_P_ion_ion
+      write(*,'(A,ES24.16)') 'P_kin         = ', virial%P_kin
+      write(*,'(A,ES24.16)') 'P_h           = ', virial%P_h
+      write(*,'(A,ES24.16)') 'P_ion_loc     = ', virial%P_ion_loc
+      write(*,'(A,ES24.16)') 'P_ion_nloc_tmp= ', P_tmp_nloc_sum
+      write(*,'(A,ES24.16)') '3E_ion_nloc   = ', 3.d0*energy%E_ion_nloc
+      write(*,'(A,ES24.16)') 'P_xc          = ', virial%P_xc
+      write(*,'(A,ES24.16)') 'P_ion_ion     = ', virial%P_ion_ion
       write(*,'(A,ES24.16)') 'V(det_a)      = ', system%det_a
       write(*,'(A,ES24.16)') 'dvinv(1/3V)   = ', system%dvinv
-      write(*,'(A,ES24.16)') 'P_xc_old      = ', dbg_P_xc
+      write(*,'(A,ES24.16)') 'P_xc_old      = ', virial%P_xc
       write(*,'(A,ES24.16)') 'P_xc_alt      = ', xc_debug_last_pxc_alt_rko
-      write(*,'(A,ES24.16)') 'P_tot_raw     = ', dbg_P_tot_raw
-      write(*,'(A,ES24.16)') 'P_tot_raw_new = ', dbg_P_tot_raw_new
+      write(*,'(A,ES24.16)') 'P_tot_raw     = ', P_tot_raw
+      write(*,'(A,ES24.16)') 'P_tot_raw_new = ', P_tot_raw_new
     end if
 
     !1/3V
@@ -255,10 +245,9 @@ contains
     virial%P_kin_c = virial%P_kin_c*system%dvinv
     virial%P_ion_ion = virial%P_ion_ion*system%dvinv
 
-    call comm_summation(virial%P_tot, dbg_P_tot_scaled, info%icomm_rko)
     if (comm_is_root(info%id_rko)) then
-      write(*,'(A,ES24.16)') 'P_tot_scaled  = ', dbg_P_tot_scaled
-      write(*,'(A,ES24.16)') 'P_tot_scaled_new = ', dbg_P_tot_scaled_new
+      write(*,'(A,ES24.16)') 'P_tot_scaled  = ', virial%P_tot
+      write(*,'(A,ES24.16)') 'P_tot_scaled_new = ', P_tot_scaled_new
       write(*,'(A)') '======================================'
     end if
 

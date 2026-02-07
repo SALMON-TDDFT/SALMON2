@@ -105,7 +105,6 @@ contains
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc,tot_tc,tot_pxc,tot_nvxc,I_nvxc,P_xc_alt
-    real(8) :: dbg_E_xc,dbg_I_nvxc,dbg_P_xc,dbg_P_xc_alt
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     ! real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
@@ -476,21 +475,17 @@ contains
     call comm_summation(tot_nvxc,I_nvxc,info%icomm_r)
     P_xc_alt = -3.d0 * (E_xc - I_nvxc)
 
-    call comm_summation(tot_exc,  dbg_E_xc,   info%icomm_rko)
-    call comm_summation(tot_nvxc, dbg_I_nvxc, info%icomm_rko)
-    call comm_summation(tot_pxc,  dbg_P_xc,   info%icomm_rko)
-    dbg_P_xc_alt = -3.d0 * (dbg_E_xc - dbg_I_nvxc)
-    xc_debug_last_exc_rko = dbg_E_xc
-    xc_debug_last_invxc_rko = dbg_I_nvxc
-    xc_debug_last_pxc_rko = dbg_P_xc
-    xc_debug_last_pxc_alt_rko = dbg_P_xc_alt
+    xc_debug_last_exc_rko = E_xc
+    xc_debug_last_invxc_rko = I_nvxc
+    xc_debug_last_pxc_rko = P_xc
+    xc_debug_last_pxc_alt_rko = P_xc_alt
 
     if (comm_is_root(info%id_rko)) then
       write(*,'(A)') '===== xc virial debug ====='
-      write(*,'(A,ES24.16)') 'E_xc      = ', dbg_E_xc
-      write(*,'(A,ES24.16)') 'I_nvxc    = ', dbg_I_nvxc
-      write(*,'(A,ES24.16)') 'P_xc_alt  = ', dbg_P_xc_alt
-      write(*,'(A,ES24.16)') 'energy%P_xc= ', dbg_P_xc
+      write(*,'(A,ES24.16)') 'E_xc      = ', E_xc
+      write(*,'(A,ES24.16)') 'I_nvxc    = ', I_nvxc
+      write(*,'(A,ES24.16)') 'P_xc_alt  = ', P_xc_alt
+      write(*,'(A,ES24.16)') 'energy%P_xc= ', P_xc
       write(*,'(A)') '==========================='
     end if
     
