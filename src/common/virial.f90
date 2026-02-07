@@ -34,9 +34,9 @@ contains
     integer :: ix, iy, iz, ia, ik, io, ispin
     integer :: ilocal, j, ilma
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
-    real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, ptmp, P_wrk(2), P_sum(2), sysvol
+    real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, sysvol
     complex(8) :: rho_i, rho_e, eGd, VG
-    complex(8) :: w(3),duVpsi(3)
+    complex(8) :: w(3),duVpsi(3), ptmp_z, P_wrk_z(2), P_sum_z(2), ztmp
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_virial_periodic"
@@ -57,14 +57,14 @@ contains
     P_tmp_loc   = 0d0
     select case(yn_periodic)
     case('y')
-      ptmp = 0d0
-      P_wrk = 0d0
+      ptmp_z = (0d0,0d0)
+      P_wrk_z = (0d0,0d0)
       !E_wrk_local_1 =0d0
       !E_wrk_local_2 =0d0
 #ifdef USE_OPENACC
 #else
 !$omp parallel do collapse(2) default(none) &
-!$omp          reduction(+:P_wrk,ptmp) &
+!$omp          reduction(+:P_wrk_z,ptmp_z) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
 !$omp          shared(mg,fg,system,sysvol,kion,poisson,ppg,info,yn_jm)
       do iz=mg%is(3),mg%ie(3)
@@ -78,12 +78,12 @@ contains
 
         if (yn_jm=='n') then
 	  rho_i = ppg%zrhoG_ion(ix,iy,iz)
-          P_wrk(1) = P_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
+          P_wrk_z(1) = P_wrk_z(1) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
 
           do ia=info%ia_s,info%ia_e
             r = system%Rion(1:3,ia)
             Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-            ptmp = ptmp + conjg(rho_e)*ppg%zrVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+            ptmp_z = ptmp_z + conjg(rho_e)*ppg%zrVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
           end do
         end if
       end do
@@ -91,10 +91,10 @@ contains
       end do
 !$omp end parallel do
 #endif
-      call comm_summation(ptmp,P_wrk(2),info%icomm_ko)
-      call comm_summation(P_wrk,P_sum,2,info%icomm_r)
+      call comm_summation(ptmp_z,P_wrk_z(2),info%icomm_ko)
+      call comm_summation(P_wrk_z,P_sum_z,2,info%icomm_r)
       ! electron-ion pressure (local part)
-      virial%P_ion_loc = -1d0 * ( P_sum(1) + P_sum(2) )
+      virial%P_ion_loc = -1d0 * dble(P_sum_z(1) + P_sum_z(2))
     end select
 
     !Nonlocal part
@@ -160,10 +160,10 @@ contains
                 duVpsi(2) = duVpsi(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * ry * w(2) ! < uV | exp(ikr) (nabla) | psi >
                 duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * rz * w(3) ! < uV | exp(ikr) (nabla) | psi >
              end do
-             P_tmp_nloc = P_tmp_nloc &
-                  + rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) ) &
-                  + rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) ) &
-                  + rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
+                ztmp = conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) &
+                     + conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) &
+                     + conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma)
+                P_tmp_nloc = P_tmp_nloc + rtmp * dble(ztmp)
           end do
 #ifndef __NVCOMPILER_LLVM__
 ! FIXME: NVIDIA compiler crashes with nested omp parallel clause.
