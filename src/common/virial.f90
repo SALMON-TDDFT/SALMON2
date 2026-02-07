@@ -10,7 +10,7 @@ contains
     use salmon_math
     use math_constants,only: pi,zI
     use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit, yn_jm!, aEwald, cutoff_r, yn_jm, yn_fix_func, theory
-    use communication, only: comm_summation!,comm_is_root
+    use communication, only: comm_summation,comm_is_root
     use sendrecv_grid, only: update_overlap_complex8
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
     use stencil_sub, only: calc_gradient_psi
@@ -35,6 +35,7 @@ contains
     integer :: ilocal, j, ilma
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
     real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, sysvol
+    real(8) :: P_tot_raw
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3), ptmp_z, P_wrk_z(2), P_sum_z(2), ztmp
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -198,8 +199,23 @@ contains
     virial%P_h = energy%E_h
 
     ! total virial
-    virial%P_tot = virial%P_kin + virial%P_h + virial%P_ion_loc &
+    P_tot_raw = virial%P_kin + virial%P_h + virial%P_ion_loc &
          + virial%P_ion_nloc + virial%P_xc + virial%P_ion_ion
+    virial%P_tot = P_tot_raw
+
+    if (comm_is_root(info%id_rko)) then
+      write(*,'(A)') '===== virial debug (before 1/3V) ====='
+      write(*,'(A,ES24.16)') 'P_kin         = ', virial%P_kin
+      write(*,'(A,ES24.16)') 'P_h           = ', virial%P_h
+      write(*,'(A,ES24.16)') 'P_ion_loc     = ', virial%P_ion_loc
+      write(*,'(A,ES24.16)') 'P_ion_nloc_tmp= ', P_tmp_nloc_sum
+      write(*,'(A,ES24.16)') '3E_ion_nloc   = ', 3.d0 * energy%E_ion_nloc
+      write(*,'(A,ES24.16)') 'P_xc          = ', virial%P_xc
+      write(*,'(A,ES24.16)') 'P_ion_ion     = ', virial%P_ion_ion
+      write(*,'(A,ES24.16)') 'V(det_a)      = ', system%det_a
+      write(*,'(A,ES24.16)') 'dvinv(1/3V)   = ', system%dvinv
+      write(*,'(A,ES24.16)') 'P_tot_raw     = ', P_tot_raw
+    end if
 
     !1/3V
     virial%P_tot = virial%P_tot*system%dvinv
@@ -210,6 +226,11 @@ contains
     virial%P_xc = virial%P_xc*system%dvinv
     virial%P_kin_c = virial%P_kin_c*system%dvinv
     virial%P_ion_ion = virial%P_ion_ion*system%dvinv
+
+    if (comm_is_root(info%id_rko)) then
+      write(*,'(A,ES24.16)') 'P_tot_scaled  = ', virial%P_tot
+      write(*,'(A)') '======================================'
+    end if
 
     return    
   end subroutine calc_virial
