@@ -11,7 +11,7 @@ contains
     use math_constants,only: pi,zI
     use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit, yn_jm!, aEwald, cutoff_r, yn_jm, yn_fix_func, theory
     use communication, only: comm_summation,comm_is_root
-    use salmon_xc, only: xc_debug_last_pxc_alt_rko
+    use salmon_xc, only: xc_debug_last_exc_rko, xc_debug_last_invxc_rko
     use sendrecv_grid, only: update_overlap_complex8
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
     use stencil_sub, only: calc_gradient_psi
@@ -36,8 +36,7 @@ contains
     integer :: ilocal, j, ilma
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
     real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, sysvol
-    real(8) :: P_tot_raw, S1_loc, S2_loc
-    real(8) :: P_tot_raw_new, P_tot_scaled_new
+    real(8) :: P_tot_raw, S1_loc, S2_loc, P_xc_vir
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3), ptmp_z, P_wrk_z(2), P_sum_z(2), ztmp
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -199,9 +198,9 @@ contains
     ! kinetic virial (correlation part)
     virial%P_kin_c   = energy%T_c
 
-    ! XC virial
-    !virial%P_xc       = energy%P_xc - energy%T_c
-    virial%P_xc       = energy%P_xc
+    ! XC virial (Eq.40 form): -3 * (E_xc - \int n(r) v_xc(r) dr)
+    P_xc_vir = -3.d0 * (xc_debug_last_exc_rko - xc_debug_last_invxc_rko)
+    virial%P_xc = P_xc_vir
 
     ! kinetic virial
     !virial%P_kin      = ( energy%E_kin + energy%T_c )*2d0
@@ -212,11 +211,8 @@ contains
 
     ! total virial
     P_tot_raw = virial%P_kin + virial%P_h + virial%P_ion_loc &
-         + virial%P_ion_nloc + virial%P_xc + virial%P_ion_ion
+         + virial%P_ion_nloc + virial%P_xc + virial%P_ion_ion + virial%P_kin_c
     virial%P_tot = P_tot_raw
-
-    P_tot_raw_new = P_tot_raw - virial%P_xc + xc_debug_last_pxc_alt_rko
-    P_tot_scaled_new = P_tot_raw_new * system%dvinv
 
     if (comm_is_root(info%id_rko)) then
       write(*,'(A)') '===== virial debug (before 1/3V) ====='
@@ -225,14 +221,13 @@ contains
       write(*,'(A,ES24.16)') 'P_ion_loc     = ', virial%P_ion_loc
       write(*,'(A,ES24.16)') 'P_ion_nloc_tmp= ', P_tmp_nloc_sum
       write(*,'(A,ES24.16)') '3E_ion_nloc   = ', 3.d0*energy%E_ion_nloc
+      write(*,'(A,ES24.16)') 'P_kin_c(T_c)  = ', virial%P_kin_c
       write(*,'(A,ES24.16)') 'P_xc          = ', virial%P_xc
+      write(*,'(A,ES24.16)') 'P_xc(old)     = ', energy%P_xc
       write(*,'(A,ES24.16)') 'P_ion_ion     = ', virial%P_ion_ion
       write(*,'(A,ES24.16)') 'V(det_a)      = ', system%det_a
       write(*,'(A,ES24.16)') 'dvinv(1/3V)   = ', system%dvinv
-      write(*,'(A,ES24.16)') 'P_xc_old      = ', virial%P_xc
-      write(*,'(A,ES24.16)') 'P_xc_alt      = ', xc_debug_last_pxc_alt_rko
       write(*,'(A,ES24.16)') 'P_tot_raw     = ', P_tot_raw
-      write(*,'(A,ES24.16)') 'P_tot_raw_new = ', P_tot_raw_new
     end if
 
     !1/3V
@@ -247,7 +242,6 @@ contains
 
     if (comm_is_root(info%id_rko)) then
       write(*,'(A,ES24.16)') 'P_tot_scaled  = ', virial%P_tot
-      write(*,'(A,ES24.16)') 'P_tot_scaled_new = ', P_tot_scaled_new
       write(*,'(A)') '======================================'
     end if
 
