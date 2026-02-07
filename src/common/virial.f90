@@ -35,7 +35,7 @@ contains
     integer :: ilocal, j, ilma
     real(8) :: P_tmp_loc, P_tmp_nloc, rx, ry, rz, P_tmp_loc_sum, P_tmp_nloc_sum
     real(8) :: kAc(3), rtmp, g(3), r(3), G2, Gd, sysvol
-    real(8) :: P_tot_raw
+    real(8) :: P_tot_raw, S1_loc, S2_loc
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3), ptmp_z, P_wrk_z(2), P_sum_z(2), ztmp
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -96,6 +96,16 @@ contains
       call comm_summation(P_wrk_z,P_sum_z,2,info%icomm_r)
       ! electron-ion pressure (local part)
       virial%P_ion_loc = -1d0 * dble(P_sum_z(1) + P_sum_z(2))
+      S1_loc = dble(P_sum_z(1))
+      S2_loc = dble(P_sum_z(2))
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(A)') '===== virial local debug ====='
+        write(*,'(A,ES24.16)') 'S1           = ', S1_loc
+        write(*,'(A,ES24.16)') 'S2           = ', S2_loc
+        write(*,'(A,ES24.16)') 'S1_plus_S2   = ', S1_loc + S2_loc
+        write(*,'(A,ES24.16)') 'P_ion_loc    = ', virial%P_ion_loc
+        write(*,'(A)') '================================'
+      end if
     end select
 
     !Nonlocal part

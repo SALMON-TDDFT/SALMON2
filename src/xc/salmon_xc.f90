@@ -75,7 +75,7 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, T_c, P_xc, eexc)
-    use communication, only: comm_summation
+    use communication, only: comm_summation, comm_is_root
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
@@ -98,7 +98,7 @@ contains
     type(s_scalar)          ,optional   :: eexc
     !
     integer :: ix,iy,iz,is,nspin,idir
-    real(8) :: tot_exc,tot_tc,tot_pxc
+    real(8) :: tot_exc,tot_tc,tot_pxc,tot_nvxc,I_nvxc,P_xc_alt
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     ! real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
@@ -426,6 +426,7 @@ contains
     tot_exc=0.d0
     tot_tc=0.d0
     tot_pxc=0.d0
+    tot_nvxc=0.d0
 #ifdef USE_OPENACC
 !$acc kernels loop collapse(3) reduction(+:tot_exc,tot_tc,tot_pxc) private(iz,iy,ix)
 #else
@@ -449,9 +450,33 @@ contains
     tot_tc = tot_tc*system%hvol
     tot_pxc = tot_pxc*system%hvol
 
+!$omp parallel do collapse(3) reduction(+:tot_nvxc) private(is,iz,iy,ix)
+    do is=1,nspin
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      tot_nvxc = tot_nvxc + rho_s(is)%f(ix,iy,iz) * Vxc(is)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    end do
+!$omp end parallel do
+    tot_nvxc = tot_nvxc*system%hvol
+
     call comm_summation(tot_exc,E_xc,info%icomm_r)
     call comm_summation(tot_tc,T_c,info%icomm_r)
     call comm_summation(tot_pxc,P_xc,info%icomm_r)
+    call comm_summation(tot_nvxc,I_nvxc,info%icomm_r)
+    P_xc_alt = -3.d0 * (E_xc - I_nvxc)
+
+    if (comm_is_root(info%id_r)) then
+      write(*,'(A)') '===== xc virial debug ====='
+      write(*,'(A,ES24.16)') 'E_xc      = ', E_xc
+      write(*,'(A,ES24.16)') 'I_nvxc    = ', I_nvxc
+      write(*,'(A,ES24.16)') 'P_xc_alt  = ', P_xc_alt
+      write(*,'(A,ES24.16)') 'energy%P_xc= ', P_xc
+      write(*,'(A)') '==========================='
+    end if
     
     if(present(eexc)) then
       do iz=1,mg%num(3)
