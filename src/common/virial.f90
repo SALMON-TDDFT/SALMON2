@@ -11,6 +11,7 @@ contains
     use math_constants,only: pi,zI
     use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit, yn_jm!, aEwald, cutoff_r, yn_jm, yn_fix_func, theory
     use communication, only: comm_summation,comm_is_root
+    use salmon_xc, only: xc_debug_last_pxc_alt_rko
     use sendrecv_grid, only: update_overlap_complex8
     use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
     use stencil_sub, only: calc_gradient_psi
@@ -38,6 +39,7 @@ contains
     real(8) :: P_tot_raw, S1_loc, S2_loc
     real(8) :: dbg_P_kin, dbg_P_h, dbg_P_ion_loc, dbg_P_ion_nloc_tmp, dbg_3E_ion_nloc
     real(8) :: dbg_P_xc, dbg_P_ion_ion, dbg_P_tot_raw, dbg_P_tot_scaled
+    real(8) :: dbg_P_tot_raw_new, dbg_P_tot_scaled_new
     complex(8) :: rho_i, rho_e, eGd, VG
     complex(8) :: w(3),duVpsi(3), ptmp_z, P_wrk_z(2), P_sum_z(2), ztmp
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -223,6 +225,8 @@ contains
     call comm_summation(virial%P_xc,       dbg_P_xc,          info%icomm_rko)
     call comm_summation(virial%P_ion_ion,  dbg_P_ion_ion,     info%icomm_rko)
     call comm_summation(P_tot_raw,         dbg_P_tot_raw,     info%icomm_rko)
+    dbg_P_tot_raw_new = dbg_P_tot_raw - dbg_P_xc + xc_debug_last_pxc_alt_rko
+    dbg_P_tot_scaled_new = dbg_P_tot_raw_new * system%dvinv
 
     if (comm_is_root(info%id_rko)) then
       write(*,'(A)') '===== virial debug (before 1/3V) ====='
@@ -235,7 +239,10 @@ contains
       write(*,'(A,ES24.16)') 'P_ion_ion     = ', dbg_P_ion_ion
       write(*,'(A,ES24.16)') 'V(det_a)      = ', system%det_a
       write(*,'(A,ES24.16)') 'dvinv(1/3V)   = ', system%dvinv
+      write(*,'(A,ES24.16)') 'P_xc_old      = ', dbg_P_xc
+      write(*,'(A,ES24.16)') 'P_xc_alt      = ', xc_debug_last_pxc_alt_rko
       write(*,'(A,ES24.16)') 'P_tot_raw     = ', dbg_P_tot_raw
+      write(*,'(A,ES24.16)') 'P_tot_raw_new = ', dbg_P_tot_raw_new
     end if
 
     !1/3V
@@ -251,6 +258,7 @@ contains
     call comm_summation(virial%P_tot, dbg_P_tot_scaled, info%icomm_rko)
     if (comm_is_root(info%id_rko)) then
       write(*,'(A,ES24.16)') 'P_tot_scaled  = ', dbg_P_tot_scaled
+      write(*,'(A,ES24.16)') 'P_tot_scaled_new = ', dbg_P_tot_scaled_new
       write(*,'(A)') '======================================'
     end if
 

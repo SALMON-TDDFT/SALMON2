@@ -70,6 +70,12 @@ module salmon_xc
   real(8),allocatable :: tec_1d(:)
   real(8),allocatable :: pexc_1d(:)
 
+  ! Debug values reduced on info%icomm_rko
+  real(8),save,public :: xc_debug_last_exc_rko = 0d0
+  real(8),save,public :: xc_debug_last_invxc_rko = 0d0
+  real(8),save,public :: xc_debug_last_pxc_rko = 0d0
+  real(8),save,public :: xc_debug_last_pxc_alt_rko = 0d0
+
 contains
 
 
@@ -474,6 +480,10 @@ contains
     call comm_summation(tot_nvxc, dbg_I_nvxc, info%icomm_rko)
     call comm_summation(tot_pxc,  dbg_P_xc,   info%icomm_rko)
     dbg_P_xc_alt = -3.d0 * (dbg_E_xc - dbg_I_nvxc)
+    xc_debug_last_exc_rko = dbg_E_xc
+    xc_debug_last_invxc_rko = dbg_I_nvxc
+    xc_debug_last_pxc_rko = dbg_P_xc
+    xc_debug_last_pxc_alt_rko = dbg_P_xc_alt
 
     if (comm_is_root(info%id_rko)) then
       write(*,'(A)') '===== xc virial debug ====='
