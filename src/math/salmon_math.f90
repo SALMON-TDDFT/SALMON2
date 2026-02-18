@@ -386,6 +386,7 @@ contains
 ! This function Ylm is related to the real spherical harmonics Ylm0 by
 ! Ylm=sqrt(4*pi/(2l+1))*r**l*Ylm0 and is a monomial of x,y,z
   Function Ylm(x,y,z,il,im)
+    !$acc routine seq
     implicit none
     real(8),intent(IN) :: x,y,z
     integer,intent(IN) :: il,im
