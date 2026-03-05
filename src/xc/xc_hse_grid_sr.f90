@@ -157,7 +157,7 @@ contains
     real(8) :: vol, ex_local, ex_global, ex_term
     integer :: nspin, nloc_occ, nloc_owned, n_target, nocc_eff
     integer :: ix1, ix2, iy1, iy2, iz1, iz2
-    integer :: it, ispin, step, owner, nowner, jb, io_global, jstart, jcount, b, nb_max
+    integer :: it, ispin, step, owner, nowner, jb, io_global, jstart, jcount, b, nb_max, target_io
     integer :: ix, iy, iz
     integer :: next_o, prev_o, icomm_o_eff, icomm_s_eff
     integer, parameter :: tag_ring = 27413
@@ -183,6 +183,11 @@ contains
     if (size(target_global_idx) /= n_target) then
       stop "apply_sr_fock_exact: target_global_idx size mismatch"
     end if
+    do it = 1, n_target
+      if (target_global_idx(it) < 1 .or. target_global_idx(it) > maxval(info%io_e_all)) then
+        stop "apply_sr_fock_exact: target_global_idx out of range"
+      end if
+    end do
 
     vol = 1.d0
     if (present(hvol)) vol = hvol
@@ -193,7 +198,7 @@ contains
 
     batch_size = ace_w_batch_env
     batch_size = max(1, batch_size)
-    if (nloc_owned > 0) batch_size = min(batch_size, nloc_owned)
+    batch_size = min(batch_size, max(1, maxval(info%numo_all)))
     batch_size = max(1, batch_size)
     nb_max = 1
     do owner = 0, info%isize_o - 1
@@ -218,6 +223,8 @@ contains
     t_accum = 0.d0
 
     do it = 1, n_target
+      target_io = target_global_idx(it)
+      if (target_io > nocc_eff) cycle
       do b = 1, nb_max
         psi_work = (0.d0, 0.d0)
         jstart = (b - 1) * batch_size + 1
@@ -300,6 +307,8 @@ contains
     if (present(ex_sr)) then
       ex_local = 0.d0
       do it = 1, n_target
+        target_io = target_global_idx(it)
+        if (target_io > nocc_eff) cycle
         ex_term = 0.d0
         do ispin = 1, nspin
           ex_term = ex_term + real(sum(conjg(psi_targets(:,:,:,ispin,it)) * Kpsi_targets(:,:,:,ispin,it)),8) * vol

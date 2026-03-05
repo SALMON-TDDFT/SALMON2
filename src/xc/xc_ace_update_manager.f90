@@ -643,12 +643,14 @@ contains
     integer, intent(out) :: n_sample
 
     logical, allocatable :: chosen(:)
-    integer :: i, idx, ibeg, iend
+    integer :: i, idx, ibeg, iend, n_slots, n_remaining, nrand_target, pick, tmp
+    integer, allocatable :: remaining(:)
     integer(kind=8) :: x
 
     n_sample = 0
     sample_idx = 0
     if (nocc <= 0) return
+    n_slots = min(ns_max,size(sample_idx))
 
     allocate(chosen(nocc))
     chosen = .false.
@@ -656,7 +658,7 @@ contains
     ibeg = max(1, vbm-max(0,nv)+1)
     iend = min(nocc, max(1,vbm))
     do i = ibeg, iend
-      if (n_sample >= min(ns_max,size(sample_idx))) exit
+      if (n_sample >= n_slots) exit
       n_sample = n_sample + 1
       sample_idx(n_sample) = i
       chosen(i) = .true.
@@ -666,22 +668,40 @@ contains
       idx = topm_indices(i)
       if (idx < 1 .or. idx > nocc) cycle
       if (chosen(idx)) cycle
-      if (n_sample >= min(ns_max,size(sample_idx))) exit
+      if (n_sample >= n_slots) exit
       n_sample = n_sample + 1
       sample_idx(n_sample) = idx
       chosen(idx) = .true.
     end do
 
     x = int(max(1,seed),kind=8)
-    do while (n_sample < min(ns_max,size(sample_idx)) .and. nrand > 0)
-      x = mod(1103515245_8*x + 12345_8, 2147483647_8)
-      idx = 1 + int(mod(x, int(nocc,kind=8)))
-      if (chosen(idx)) cycle
+    n_remaining = count(.not. chosen)
+    nrand_target = min(nrand, max(0, n_slots - n_sample), n_remaining)
+    if (nrand_target > 0) then
+      allocate(remaining(n_remaining))
+      n_remaining = 0
+      do i = 1, nocc
+        if (.not. chosen(i)) then
+          n_remaining = n_remaining + 1
+          remaining(n_remaining) = i
+        end if
+      end do
+
+      do i = 1, nrand_target
+        x = mod(1103515245_8*x + 12345_8, 2147483647_8)
+        pick = i + int(mod(x, int(n_remaining - i + 1, kind=8)))
+        tmp = remaining(i)
+        remaining(i) = remaining(pick)
+        remaining(pick) = tmp
+
+        idx = remaining(i)
       n_sample = n_sample + 1
       sample_idx(n_sample) = idx
       chosen(idx) = .true.
-      if (n_sample >= nrand + min(nv,nocc)) exit
-    end do
+      end do
+
+      deallocate(remaining)
+    end if
     seed = int(x)
 
     call sort_indices(sample_idx, n_sample)

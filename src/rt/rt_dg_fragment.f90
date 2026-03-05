@@ -151,11 +151,7 @@ contains
     dg_frag%isize = info%isize_rko
 
     if (dg_frag%isize > dg_frag%n_frag) then
-      if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a,i0,a,i0)') "ERROR: Invalid MPI setup for DG-Fragment RT: np=", dg_frag%isize, ", n_frag=", dg_frag%n_frag
-        write(*,'(1x,a)') "       Please set MPI process count <= number of fragments."
-      end if
-      stop "DG-Fragment RT: np > n_frag is not allowed"
+      stop "DG-Fragment RT requires np <= n_frag"
     end if
     
     ! Check DFT+U status
