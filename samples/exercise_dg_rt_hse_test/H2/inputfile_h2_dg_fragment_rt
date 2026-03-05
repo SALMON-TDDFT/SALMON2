@@ -1,0 +1,83 @@
+!========================================================================================
+! H2 Molecule - DG-Fragment Real-Time TDDFT
+!
+! STEP 2: Time evolution with DG-Fragment method
+! Usage: salmon < inputfile_h2_dg_fragment_rt
+!
+! Prerequisites:
+!   - Must run DC-LCFO GS first (generates out_frag_*/ directory)
+!   - Fragment basis files must be available
+!
+!=========================================================================================
+
+&calculation
+  theory = 'tddft_pulse'
+  yn_dg_fragment_rt = 'y'
+  yn_conventional_from_dcdft = 'y'
+/
+
+&control
+  sysname = 'H2_dg_rt'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  iperiodic = 0
+  al = 20d0, 20d0, 20d0
+  nstate = 3
+  nelec = 2
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  file_pseudo(1) = './H_rps.dat'
+  izatom(1) = 1
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.5d0, 0.5d0, 0.5d0
+  num_rgrid = 40, 40, 40
+/
+
+&tgrid
+  nt = 10
+  dt = 0.1d0
+/
+
+&dg_fragment
+  num_fragment = 2
+  nstate_frag = 3
+  
+  ! Adaptive basis update (optional)
+  yn_adaptive_basis = 'y'
+  basis_update_threshold = 0.1
+  
+  ! Time integrator
+  time_integrator_dg_fragment = 'ssprk3'
+  
+  ! Basis update method
+  yn_dc_cg_basis_update = 'y'
+/
+
+&emfield
+  ae_shape1 = 'Acos2'
+  epdir_re1 = 1.0d0, 0.0d0, 0.0d0
+  I_wcm2_1 = 1.0d12
+  omega1 = 0.05d0
+  tw1 = 6.0d0
+/
+
+&atomic_coor
+  'H'  0.0d0  0.0d0  -0.7d0  1
+  'H'  0.0d0  0.0d0   0.7d0  1
+/
+

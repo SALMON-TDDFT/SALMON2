@@ -1,0 +1,86 @@
+!========================================================================================
+! H2 Periodic Superlattice (20 molecules) - Real-Time with DG-Fragment (5 Fragments)
+!
+! Purpose: Strong scaling test - compare 1 fragment vs 5 fragments
+!          Time-dependent evolution using DC-LCFO (5 fragments) GS data
+!
+! Prerequisites:
+!   - DC-LCFO GS calculation completed: inputfile_h2_periodic_20_gs_5frag
+!   - data_dcdft/ directory with 5-fragment data must exist
+!
+! Strong Scaling Test:
+!   - 1 fragment:  all 20 H2 molecules in 1 fragment
+!   - 5 fragments: 20 H2 divided into 5 fragments (4 H2 each)
+!   Expected: Better parallelization, faster time-to-solution
+!========================================================================================
+
+&calculation
+  theory = 'tddft_pulse'
+/
+
+&control
+  sysname = 'H2_periodic_20_dg_5frag'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 56.0d0, 20.0d0, 20.0d0
+  nstate = 80
+  nelec = 40
+  nelem = 1
+  natom = 40
+/
+
+&pseudo
+  file_pseudo(1) = './H_rps.dat'
+  izatom(1) = 1
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&dc
+  num_fragment(1:3) = 5,1,1     ! 5 fragments along x-direction
+  nstate_frag = 35               ! States per fragment (match GS calculation)
+  yn_dg_fragment_from_dcdft = 'y'   ! Load DC-LCFO data for DG-Fragment RT
+/
+
+&dg_fragment
+  yn_adaptive_basis = 'n'
+/
+
+&rgrid
+  num_rgrid = 120, 40, 40
+/
+
+&tgrid
+  nt = 20
+  dt = 0.05d0
+/
+
+&emfield
+  ae_shape1 = 'Acos2'
+  epdir_re1 = 1.0d0, 0.0d0, 0.0d0
+  I_wcm2_1 = 1.0d12
+  omega1 = 0.05d0
+  tw1 = 6.0d0
+/
+
+&restart
+  yn_restart = 'n'
+/
+
+&propagation
+  yn_dg_fragment_rt = 'y'
+  propagator = 'middlepoint'
+/
+
+&analysis
+  yn_out_rvf_rt = 'n'
+/

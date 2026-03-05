@@ -1,0 +1,97 @@
+!===============================================================
+! DC-LCFO Basis Update Input File Template
+!===============================================================
+! This file is used for automatic basis updates during RT calculation
+! Copy this file to the RT calculation directory and modify as needed
+!
+! Usage:
+!   1. RT calculation detects ||ΔH|| > threshold
+!   2. RT code saves current potentials to ./rt_potentials/
+!   3. RT code launches: mpirun -np N salmon < inputfile_dclcfo_update
+!   4. DC-LCFO recalculates basis using saved potentials
+!   5. New basis written to ./data_dcdft/fragments/
+!   6. RT calculation automatically reloads basis and continues
+!===============================================================
+
+&calculation
+  theory = 'dft'
+/
+
+&control
+  sysname = 'basis_update'
+/
+
+&parallel
+  nproc_k = 1
+  nproc_ob = 1
+  nproc_rgrid = 1,1,1           ! Adjust to match RT calculation
+  nproc_rgrid_tot = 1,1,1       ! Total grid processes
+  num_fragment = 2,2,2          ! Must match RT calculation
+  yn_dc = 'y'
+  yn_dc_lcfo = 'y'
+  yn_dc_lcfo_diag = 'y'
+  nstate_frag = 16              ! Must match RT calculation
+/
+
+&system
+  yn_periodic = 'y'
+  al = 10.0d0, 10.0d0, 10.0d0   ! Must match RT calculation
+  nstate = 128                  ! Must match RT calculation
+  nelec = 128                   ! Must match RT calculation
+  nelem = 1
+  natom = 8
+  !temperature = 0.001d0        ! Optional: finite temperature
+/
+
+&pseudo
+  file_pseudo(1) = 'Si_rps.dat'
+  izatom(1) = 14
+/
+
+&functional
+  xc = 'PBE'                    ! Must match RT calculation
+/
+
+&rgrid
+  dl = 0.25d0, 0.25d0, 0.25d0   ! Must match RT calculation
+/
+
+&scf
+  ncg = 5                       ! CG iterations (minimal, use RT potentials as guess)
+  nscf = 1                      ! Only 1 SCF iteration (potentials from RT)
+  threshold = 1.0d-9
+/
+
+&atomic_coor
+  ! Copy atomic coordinates from RT input file
+  'Si'    0.0d0    0.0d0    0.0d0    1
+  'Si'    2.5d0    0.0d0    0.0d0    1
+  'Si'    0.0d0    2.5d0    0.0d0    1
+  'Si'    2.5d0    2.5d0    0.0d0    1
+  'Si'    0.0d0    0.0d0    2.5d0    1
+  'Si'    2.5d0    0.0d0    2.5d0    1
+  'Si'    0.0d0    2.5d0    2.5d0    1
+  'Si'    2.5d0    2.5d0    2.5d0    1
+/
+
+!===============================================================
+! IMPORTANT NOTES:
+!===============================================================
+! 1. Set nscf = 1 to skip SCF iterations
+!    - RT potentials (Vh, Vxc, Vpsl) are already self-consistent
+!    - DC-LCFO will read potentials from ./rt_potentials/
+!    - Only CG basis expansion is performed
+!
+! 2. Match all grid/system parameters with RT input:
+!    - al, dl, nelem, natom, nstate, nelec
+!    - num_fragment, nstate_frag
+!    - xc functional
+!
+! 3. Minimal CG iterations (ncg = 5):
+!    - Just enough to expand basis space
+!    - Starting guess from old basis
+!
+! 4. MPI process count:
+!    - Should match RT calculation for consistency
+!    - Adjust nproc_rgrid accordingly
+!===============================================================

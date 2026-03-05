@@ -1,0 +1,65 @@
+!========================================================================================
+! H2 Molecule - DC-LCFO Ground State
+! 
+! STEP 1: Generate fragment basis with DC-LCFO method
+! Usage: salmon < inputfile_h2_dc_gs
+!
+! This generates:
+!   - out_frag_*/ directory with fragment data
+!   - Fragment wavefunctions for DG-Fragment RT
+!
+!=========================================================================================
+
+&calculation
+  theory = 'dft'
+  yn_dc = 'y'
+/
+
+&control
+  sysname = 'H2_dc_gs'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  iperiodic = 0
+  al = 20d0, 20d0, 20d0
+  nstate = 3
+  nelec = 2
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  file_pseudo(1) = './H_rps.dat'
+  izatom(1) = 1
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.5d0, 0.5d0, 0.5d0
+  num_rgrid = 40, 40, 40
+/
+
+&scf
+  method_min = 'cg'
+  ncg = 100
+  threshold = 1.0d-9
+/
+
+&dg_fragment
+  num_fragment = 2
+  nstate_frag = 3
+/
+
+&atomic_coor
+  'H'  0.0d0  0.0d0  -0.7d0  1
+  'H'  0.0d0  0.0d0   0.7d0  1
+/
+

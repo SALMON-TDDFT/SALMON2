@@ -1,0 +1,102 @@
+!*********************************************************************************!
+! H2 Molecule Test - LDA (No Hybrid Functional)
+!
+! Purpose: Baseline test with simple LDA functional
+! System: H2 molecule (N_basis=2, simplest case)
+! Method: DFT-LDA with DG-Fragment RT-TDDFT
+!
+! This is the SIMPLEST configuration for sanity checking:
+! - No HSE hybrid functional complexity
+! - No RI/DF approximation
+! - Just basic DG-Fragment RT-TDDFT with LDA
+!
+! Expected behavior:
+! - Fast execution (LDA = local functional only)
+! - All features should work: initialization, time evolution, output
+! - Baseline for comparing with HSE results
+!
+!*********************************************************************************!
+
+&calculation
+  calc_mode = 'RT'
+  theory = 'dft'
+  use_dg_fragment = 'y'
+/
+
+&control
+  sysname = 'H2_lda'
+  directory = './'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 20d0, 20d0, 20d0
+  nstate = 3
+  nelec = 2
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 1
+  pseudo_file(1) = './H_rps.dat'
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'PZ'              ! ✅ Simple LDA (no HSE)
+/
+
+&rgrid
+  dl = 0.5d0, 0.5d0, 0.5d0
+/
+
+&tgrid
+  nt = 10                 ! Few steps for quick test
+  dt = 0.1
+/
+
+&dg_fragment
+  num_fragment = 2, 1, 1
+  nstate_frag = 3
+  time_integrator_dg_fragment = 'AETRS'
+/
+
+&propagation
+  propagator = 'etrs'
+  yn_fix_func = 'n'
+/
+
+&emfield
+  ae_shape1 = 'impulse'
+  epdir_re1 = 1.0, 0.0, 0.0
+  I_wcm2_1 = 1.0d12
+/
+
+&atomic_coor
+  'H'  0.0  0.0  -0.7  1
+  'H'  0.0  0.0   0.7  1
+/
+
+!*********************************************************************************!
+! COMMENTS:
+!
+! This is the BASELINE test:
+! - xc = 'lda' (no hybrid functional)
+! - No yn_hse parameters
+! - No RI/DF approximation
+! - Pure local density functional
+!
+! Purpose: Verify DG-Fragment RT implementation works correctly
+! Expected timing: Very fast (< 1 minute for 10 steps)
+!
+! Comparison:
+! - LDA: E_xc computed locally at each point
+! - HSE: E_exact computed via electron repulsion integrals
+! - If LDA works, then HSE should also work (same framework)
+!
+!*********************************************************************************!

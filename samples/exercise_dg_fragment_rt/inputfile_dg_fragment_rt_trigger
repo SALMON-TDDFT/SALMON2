@@ -1,0 +1,80 @@
+!----------------------------------------------------------------------
+! Minimal trigger input for DG-Fragment RT-TDDFT basis update stability
+! - Uses adaptive basis update with default threshold
+! - Short run to verify stable projection and re-orthonormalization
+!----------------------------------------------------------------------
+
+&calculation
+  theory = 'tddft_pulse'
+/
+
+&control
+  sysname = 'DG_Fragment_RT_Trigger'
+/
+
+&parallel
+  nproc_k = 1
+  nproc_ob = 4
+  nproc_rgrid = 2,2,2
+  num_fragment = 2,2,2
+/
+
+&system
+  yn_periodic = 'y'
+  al = 10.0d0, 10.0d0, 10.0d0
+  nstate = 128
+  nelem = 2
+  natom = 32
+/
+
+&pseudo
+  iZatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  Lloc_ps(1) = 1
+  iZatom(2) = 8
+  file_pseudo(2) = './O_rps.dat'
+  Lloc_ps(2) = 1
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.25d0, 0.25d0, 0.25d0
+/
+
+&tgrid
+  nt = 200
+  dt = 0.08d0
+/
+
+&propagation
+  yn_dg_fragment_rt = 'y'
+  time_integrator_dg_fragment = 'ssprk3'
+  yn_fix_func = 'n'
+/
+
+&emfield
+  ae_shape1 = 'Acos2'
+  epdir_re1 = 1.0d0, 0.0d0, 0.0d0
+  I_wcm2_1 = 1.0d13
+  omega1 = 0.05d0
+  tw1 = 120.0d0
+  phi_cep1 = 0.75d0
+/
+
+&analysis
+  yn_out_psi = 'n'
+  yn_out_dns = 'n'
+  yn_out_dos = 'n'
+/
+
+&dg_fragment
+  yn_adaptive_basis = 'y'
+  basis_update_threshold = 0.1d0
+/
+
+&atomic_red_coor
+  ! Atomic coordinates should be specified here
+/

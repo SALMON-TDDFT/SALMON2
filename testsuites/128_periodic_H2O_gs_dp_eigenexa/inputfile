@@ -1,0 +1,62 @@
+&calculation
+  theory='dft'
+/
+
+&control
+  sysname = 'H2O'
+/
+
+&parallel
+  nproc_k = 1
+  nproc_ob = 2
+  nproc_rgrid = 1,2,1
+  yn_eigenexa = 'y'
+/
+
+&units
+  unit_system='A_eV_fs'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 5.0d0, 5.0d0, 5.0d0
+  nstate = 8
+  nelec  = 8
+  nelem  = 2
+  natom  = 3
+/
+
+
+&pseudo
+  iZatom(1)=1
+  file_pseudo(1) = './H_rps.dat'
+  Lloc_ps(1)=1
+  iZatom(2)=8
+  file_pseudo(2) = './O_rps.dat'
+  Lloc_ps(2)=1
+/
+
+&functional
+  xc ='PZ'
+/
+
+&rgrid
+  dl = 0.2d0, 0.2d0, 0.2d0
+/
+
+&kgrid
+  num_kgrid=1,1,1
+/
+
+
+&scf
+  nscf = 250
+  threshold=1d-12
+/
+
+&atomic_coor
+  'H'      3.55908403      2.48190608      2.50003451  1
+  'H'      2.48189998      3.55908246      2.50002600  1
+  'O'      2.61768087      2.61768023      2.49992927  2
+/
+

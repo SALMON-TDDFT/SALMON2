@@ -1,0 +1,66 @@
+!========================================================================================
+! H2 Molecule - DC-LCFO Ground State (Divide-and-Conquer with Fragment Orbitals)
+!
+! Purpose: Calculate ground state with DC-LCFO method
+!          Generates fragment orbitals for DG-Fragment RT time evolution
+!
+! Workflow:
+!   1. DC-LCFO GS: Divide H2 into fragments, generate fragment basis
+!   2. DG-Fragment RT: Use fragment basis for time-dependent calculation
+!
+!========================================================================================
+
+&calculation
+  theory = 'dft'
+/
+
+&control
+  sysname = 'H2_dc_lcfo'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 20d0, 20d0, 20d0
+  nstate = 3
+  nelec = 2
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  file_pseudo(1) = './H_rps.dat'
+  izatom(1) = 1
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.5d0, 0.5d0, 0.5d0
+  num_rgrid = 40, 40, 40
+/
+
+&scf
+  nscf = 100
+  threshold = 1.0d-9
+/
+
+&parallel
+  yn_domain_parallel = 'n'
+  yn_dc = 'y'
+  yn_dc_lcfo = 'y'
+  yn_dc_lcfo_diag = 'y'
+  nstate_frag = 3
+/
+
+&atomic_coor
+  'H'  0.0d0  0.0d0  -0.7d0  1
+  'H'  0.0d0  0.0d0   0.7d0  1
+/
+

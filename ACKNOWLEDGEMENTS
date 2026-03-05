@@ -1,0 +1,13 @@
+Acknowledgements
+
+- We support the GPU acceleration with OpenACC platform in parts of simulation. (However, we removed the support from version 2.0.1 due to the balance between human resources and demand of users)
+  Thanks to Mr. Akira Naruse (NVIDIA Corporation)
+
+- We use the FFTE (http://www.ffte.jp/) package with partially modification.
+  Thanks to Prof. Daisuke Takahashi (University of Tsukuba)
+
+- If necessary, we build and use the following libraries as is.
+    - Netlib LAPACK (http://www.netlib.org/lapack/)
+    - Netlib ScaLAPACK (http://www.netlib.org/scalapack/)
+    - RIKEN R-CCS EigenExa (https://www.r-ccs.riken.jp/labs/lpnctrt/en/projects/eigenexa/)
+    - Libxc (https://www.tddft.org/programs/libxc/)

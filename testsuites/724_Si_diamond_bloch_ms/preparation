@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON. 
+# if required, this script file can utilized for the preparation of 
+# the input data for the following calculations.
+
+cp ../721_Si_gs/Si* ./
+cp ../722_diamond_gs/diamond* ./
+

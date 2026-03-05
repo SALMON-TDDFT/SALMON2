@@ -1,0 +1,159 @@
+!
+!  Copyright 2019-2020 SALMON developers
+!
+!  Licensed under the Apache License, Version 2.0 (the "License");
+!  you may not use this file except in compliance with the License.
+!  You may obtain a copy of the License at
+!
+!      http://www.apache.org/licenses/LICENSE-2.0
+!
+!  Unless required by applicable law or agreed to in writing, software
+!  distributed under the License is distributed on an "AS IS" BASIS,
+!  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+!  See the License for the specific language governing permissions and
+!  limitations under the License.
+!
+!=======================================================================
+!============================ Hartree potential (Solve Poisson equation)
+module hartree_sub
+  implicit none
+
+contains
+
+!===================================================================================================================================
+subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  use math_constants,only: pi
+  use phys_constants,only: au_aa, au_ev
+  use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary, &
+                         method_poisson
+#ifdef USE_FFTW
+  use inputoutput, only: yn_fftw
+#endif
+  use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
+                        s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid,  &
+                        allocate_scalar, deallocate_scalar
+  use communication, only: comm_is_root
+  use poisson_isolated
+  use poisson_periodic
+  use poisson_dirichlet, only: jones
+  use salmon_global, only: hse_omega
+  use nvtx
+  implicit none
+  type(s_rgrid)          ,intent(in)    :: lg
+  type(s_rgrid)          ,intent(in)    :: mg
+  type(s_parallel_info)  ,intent(in)    :: info
+  type(s_dft_system)     ,intent(in)    :: system
+  type(s_reciprocal_grid),intent(in)    :: fg
+  type(s_poisson)        ,intent(inout) :: poisson
+  type(s_sendrecv_grid)  ,intent(inout) :: srg_scalar
+  type(s_stencil)        ,intent(in)    :: stencil
+  type(s_scalar)         ,intent(in)    :: rho
+  type(s_scalar)         ,intent(inout) :: Vh
+  character(16) :: env_hse_sr
+  logical :: use_hse_sr_hartree
+  integer :: env_status
+
+  env_hse_sr = ''
+  use_hse_sr_hartree = .false.
+  call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
+  if (env_status == 0) then
+    select case(trim(adjustl(env_hse_sr)))
+    case('1','y','Y','yes','YES','true','TRUE','on','ON')
+      use_hse_sr_hartree = .true.
+    end select
+  end if
+
+  call nvtxStartRange('hartree', __LINE__)
+  
+  select case(iperiodic)
+  case(0)
+    select case(method_poisson)
+    case('cg')
+      call poisson_isolated_cg(lg,mg,info,system,poisson,rho%f,Vh%f,srg_scalar,stencil)
+    case('ft')
+#ifdef USE_FFTW
+      select case(yn_fftw)
+      case('n')
+#endif
+        select case(yn_ffte)
+        case('n')
+          call poisson_isolated_ft(lg,mg,info,fg,rho,Vh,poisson)
+        case('y')
+          call poisson_isolated_ffte(lg,mg,info,fg,rho,Vh,poisson)
+        end select
+#ifdef USE_FFTW
+      case('y')
+        call poisson_isolated_fftw(lg,mg,info,fg,rho,Vh,poisson)
+      end select
+#endif
+    case('dirichlet')
+      call jones(lg,mg,info,system,rho,Vh,poisson)
+    end select
+  case(3)
+#ifdef USE_FFTW
+    select case(yn_fftw)
+    case('n')
+#endif
+      select case(yn_ffte)
+      case('n')
+        if (use_hse_sr_hartree) then
+          call poisson_ft_hse_sr(lg,mg,info,fg,rho,Vh,poisson,hse_omega)
+        else
+          call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
+        end if
+      case('y')
+        if (use_hse_sr_hartree) then
+          call poisson_ffte_hse_sr(lg,mg,info,fg,rho,Vh,poisson,hse_omega)
+        else
+          call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+        end if
+      end select
+#ifdef USE_FFTW
+    case('y')
+      if (use_hse_sr_hartree) then
+        call poisson_fftw_hse_sr(lg,mg,info,fg,rho,Vh,poisson,hse_omega)
+      else
+        call poisson_fftw(lg,mg,info,fg,rho,Vh,poisson)
+      end if
+    end select
+#endif
+  end select
+
+  !potentiall wall at the boundary on z direction
+  if(yn_put_wall_z_boundary=='y') call add_potential_wall
+
+  call nvtxEndRange
+
+  contains
+
+    subroutine  add_potential_wall
+      use inputoutput, only: wall_height, wall_width
+      implicit none
+      integer :: ix,iy,iz
+      real(8) :: Vwall_z, z,z0
+
+      !$omp parallel do private(iz,iy,ix,z,z0,Vwall_z)
+      do iz = mg%is(3),mg%ie(3)
+         z  = iz*system%hgs(3)
+         z0 = lg%num(3) * system%hgs(3)
+         if( z .le. wall_width ) then
+            Vwall_z = wall_height * cos((z/wall_width)*pi/2d0)**2
+         else if( z .ge. z0-wall_width ) then
+            Vwall_z = wall_height * cos(((z0-z)/wall_width)*pi/2d0)**2
+         else
+            cycle
+         endif
+
+         do iy = mg%is(2),mg%ie(2)
+         do ix = mg%is(1),mg%ie(1)
+            Vh%f(ix,iy,iz) = Vh%f(ix,iy,iz) + Vwall_z
+         end do
+         end do
+      end do
+      !$omp end parallel do
+
+    end subroutine add_potential_wall
+
+end subroutine hartree
+
+end module hartree_sub

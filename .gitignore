@@ -1,0 +1,151 @@
+# Log files
+*.out
+*.optrpt
+*.log
+*.dat
+
+# Executable binaries
+/bin/
+
+# temporary namelist
+*.tmp
+
+# Automatically created header files
+*version.h
+*versionf.h
+
+
+######################################################
+# Created by https://www.gitignore.io/api/c,cmake,fortran
+
+### C ###
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+### CMake ###
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+
+### Fortran ###
+# Prerequisites
+
+# Compiled Object files
+*.slo
+
+# Precompiled Headers
+
+# Compiled Dynamic libraries
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+
+# Executables
+
+# End of https://www.gitignore.io/api/c,cmake,fortran
+
+# Local build trees
+/build/
+/mybuild/
+/mybuild_dbg/
+/mybuild_scalapack/
+
+# Local Python environment
+/.venv/
+
+# macOS metadata
+.DS_Store
+
+# Backup artifacts
+*.bak
+*.bak*
+*~
+*.orig
+*.rej
+cmakefiles.bak-*/
+
+# Generated sample outputs (can be very large)
+samples/**/data_for_restart/
+samples/**/restart/
+samples/**/data_dcdft*/
+samples/**/bench_*/
+samples/**/*.bin
+
+# Sample calculation outputs
+samples/**/*_dns.cube
+samples/**/*_elf.cube
+samples/**/*_psi_ob*.cube
+samples/**/*_dos.data
+samples/**/*_pdos*.data
+samples/**/*_eigen.data
+samples/**/*_info.data
+samples/**/*_rt.data
+samples/**/*_rt_energy.data
+samples/**/*_rt_micro.data
+samples/**/*_rt_spin.data
+samples/**/*_pulse.data
+samples/**/*_trj.xyz
+samples/**/comparison.dat
+samples/**/conv_*.dat
+samples/**/current_*.dat
+samples/**/hybrid_bench_*.summary

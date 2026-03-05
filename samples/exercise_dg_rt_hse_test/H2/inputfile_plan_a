@@ -1,0 +1,99 @@
+!*********************************************************************************!
+! H2 Molecule Test - Plan A (Direct Integration)
+!
+! Purpose: Reference calculation with direct exchange integration
+! System: H2 molecule (N_basis=2, N_aux=0)
+! Method: DFT-HSE with exact exchange (no approximation)
+!
+! Timing (expected):
+! - Initialization: ~5 min
+! - Per timestep: ~120 sec
+! - Memory: ~800 MB (for DFT with full ERI)
+!
+!*********************************************************************************!
+
+&calculation
+  calc_mode = 'RT'
+  theory = 'dft'
+  use_dg_fragment = 'y'
+/
+
+&control
+  sysname = 'H2_plan_a'
+  directory = './'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 20d0, 20d0, 20d0
+  nstate = 3
+  nelec = 2
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 1
+  pseudo_file(1) = './H_rps.dat'
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'pbe'
+  yn_hse = 'y'
+  hse_alpha = 0.25
+  hse_omega = 0.11
+  yn_hse_ri = 'n'          ! ❌ NO RI/DF (Plan A = direct)
+/
+
+&rgrid
+  dl = 0.5d0, 0.5d0, 0.5d0
+/
+
+&tgrid
+  nt = 10                    ! Few steps to save time (test only)
+  dt = 0.1
+/
+
+&dg_fragment
+  num_fragment = 2, 1, 1
+  nstate_frag = 3
+  time_integrator_dg_fragment = 'AETRS'
+/
+
+&propagation
+  propagator = 'etrs'
+  yn_fix_func = 'n'
+/
+
+&emfield
+  ae_shape1 = 'impulse'
+  epdir_re1 = 1.0, 0.0, 0.0
+  I_wcm2_1 = 1.0d12
+/
+
+&atomic_coor
+  'H'  0.0  0.0  -0.7  1
+  'H'  0.0  0.0   0.7  1
+/
+
+!*********************************************************************************!
+! COMMENTS FOR PLAN A:
+!
+! yn_hse_ri = 'n'
+!   → すべての交換相互作用を直接積分で計算
+!   → 参照計算（最も正確）
+!   → 最も計算量が多い
+!
+! 期待される精度: +/- 0.0001 a.u. (reference)
+!
+! For quick test:
+! - nt = 10 (only 10 steps)
+! - dl = 0.8 (coarser grid)
+! - nstate_frag = 2 (fewer basis functions)
+!
+!*********************************************************************************!

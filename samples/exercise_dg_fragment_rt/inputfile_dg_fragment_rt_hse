@@ -1,0 +1,135 @@
+!----------------------------------------------------------------------
+! Sample input file for DG-Fragment RT-TDDFT calculation with HSE hybrid functional
+!
+! This is an extension of inputfile_dg_fragment_rt with HSE hybrid functional
+! enabled for exact exchange computation at the fragment level.
+!
+! Prerequisites:
+!   1. Run DC-LCFO calculation first to generate fragment basis data
+!      in ./data_dcdft/ directory
+!   2. Fragment basis data should contain basis_functions.bin and wavefunctions.bin
+!      for each fragment
+!
+! HSE Implementation (Plan A):
+!   - Enables fragment-local exact exchange calculation
+!   - Each fragment independently computes exchange potential
+!   - Mixing parameter (hse_alpha) applied to fragment Hamiltonian
+!   - Screening parameter (hse_omega) for future implementation
+!----------------------------------------------------------------------
+
+&calculation
+  theory = 'tddft_pulse'
+/
+
+&control
+  sysname = 'DG_Fragment_RT_HSE'
+  yn_restart = 'n'
+/
+
+&parallel
+  nproc_k = 1
+  nproc_ob = 4
+  nproc_rgrid = 2,2,2
+  num_fragment = 2,2,2  ! must match DC-LCFO calculation
+  yn_ffte = 'y'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 10.0d0, 10.0d0, 10.0d0
+  nstate = 128           ! total number of states
+  nelem = 2
+  natom = 32
+  spin = 'unpolarized'
+  temperature = 0.0d0
+/
+
+&pseudo
+  file_pseudo(1) = './C_rps.dat'
+  file_pseudo(2) = './H_rps.dat'
+  lmax_ps(1) = 2
+  lmax_ps(2) = 0
+  lloc_ps(1) = 2
+  lloc_ps(2) = 0
+  izatom(1) = 6
+  izatom(2) = 1
+/
+
+&functional
+  xc = 'PBE'
+  ! HSE Parameters
+  yn_hse = 'y'              ! Enable HSE hybrid functional
+  hse_alpha = 0.25d0        ! Exact exchange mixing coefficient (PBE0 default)
+  hse_omega = 0.11d0        ! Screening parameter in a.u. (for future use)
+/
+
+&rgrid
+  num_rgrid = 64, 64, 64
+  dl = 0.25d0, 0.25d0, 0.25d0
+/
+
+&kgrid
+  num_kgrid = 1, 1, 1
+/
+
+&tgrid
+  nt = 1000              ! Number of time steps
+  dt = 0.1d0             ! Time step in attoseconds
+/
+
+&propagation
+  n_hamil = 4
+  propagator = 'middlepoint'
+  yn_fix_func = 'n'
+  yn_dg_fragment_rt = 'y'               ! Enable DG-Fragment RT-TDDFT
+  time_integrator_dg_fragment = 'ssprk3'
+  yn_plane_wave_basis = 'y'             ! Enable plane wave mixing (optional)
+  n_plane_waves_dg = 50
+  k_cutoff_plane_wave = 0.5d0
+/
+
+&emfield
+  trans_longi = 'TL'
+  ae_shape1 = 'Ecos2'
+  I_wcm2_1 = 1.0d13
+  omega1 = 0.065d0        ! Frequency in a.u.
+  tw1 = 20.0d0            ! Pulse duration in cycles
+  epdir_re1 = 1.0d0, 0.0d0, 0.0d0
+/
+
+&analysis
+  yn_out_dns = 'y'
+  out_dns_rt_step = 100
+  yn_out_elf = 'y'
+  out_elf_rt_step = 100
+/
+
+!!!! (following fields are for DC calculation only, not used in RT) !!!
+
+&scf
+  nscf = 100
+  method_init_wf = 'gauss'
+  method_min = 'cg'
+  ncg = 3
+  method_mixing = 'broyden'
+  mixrate = 0.5d0
+  convergence = 'charge'
+  threshold = 1.0d-7
+/
+
+&poisson
+  layout_multipole = 1
+  num_multipole_xyz = 3, 3, 3
+  lmax_multipole = 4
+  threshold_cg = 1.0d-9
+/
+
+&ewald
+  cutoff_g = 2.0d0
+/
+
+&dg_fragment
+  yn_adaptive_basis = 'n'
+  basis_update_threshold = 0.1d0
+/
+

@@ -1,0 +1,6 @@
+!*.dat
+
+# Generated sample output .dat files
+comparison.dat
+conv_*.dat
+current_*.dat

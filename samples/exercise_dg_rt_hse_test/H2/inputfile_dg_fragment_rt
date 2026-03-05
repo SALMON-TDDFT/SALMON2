@@ -1,0 +1,73 @@
+!========================================================================================
+! H2 Molecule - DG-Fragment Real-Time TDDFT
+!
+! Purpose: Time-dependent evolution using DG-Fragment method
+!          Reads fragment basis from DC-LCFO GS calculation
+!
+! Prerequisites:
+!   - DC-LCFO GS calculation must be completed first
+!   - data_dcdft/ directory with fragment data must exist
+!
+!========================================================================================
+
+&calculation
+  theory = 'tddft_pulse'
+/
+
+&control
+  sysname = 'H2_dg_fragment_rt'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 20d0, 20d0, 20d0
+  nstate = 3
+  nelec = 2
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  file_pseudo(1) = './H_rps.dat'
+  izatom(1) = 1
+  lloc_ps(1) = 0
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.5d0, 0.5d0, 0.5d0
+  num_rgrid = 40, 40, 40
+/
+
+&tgrid
+  nt = 10
+  dt = 0.1d0
+/
+
+&emfield
+  ae_shape1 = 'Acos2'
+  epdir_re1 = 1.0d0, 0.0d0, 0.0d0
+  I_wcm2_1 = 1.0d12
+  omega1 = 0.05d0
+  tw1 = 6.0d0
+/
+
+&atomic_coor
+  'H'  0.0d0  0.0d0  -0.7d0  1
+  'H'  0.0d0  0.0d0   0.7d0  1
+/
+
+&dg_fragment
+  yn_dg_fragment_rt = 'y'
+  yn_adaptive_basis = 'y'
+  num_fragment(1:3) = 2, 1, 1
+  nstate_frag = 2
+/
+
