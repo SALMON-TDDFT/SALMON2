@@ -55,14 +55,17 @@ contains
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
 
-        ! Use only physical domain for overlap evaluation.
-        ! Halo cells are communication artifacts and must not affect basis metrics/projection.
-        ix_l = dg_frag%lg%is(1)
-        ix_u = dg_frag%lg%ie(1)
-        iy_l = dg_frag%lg%is(2)
-        iy_u = dg_frag%lg%ie(2)
-        iz_l = dg_frag%lg%is(3)
-        iz_u = dg_frag%lg%ie(3)
+        ! Use only physical domain for overlap evaluation (interior, excluding halo).
+        ! BUG FIX: dg_frag%lg%is/ie are global grid bounds (e.g., [1,1,Nx]).
+        ! phi_frag is fragment-local with bounds (1-nb:nxyz_domain+nb).
+        ! Accessing phi_frag(ix,...) with ix up to Nx caused out-of-bounds errors.
+        ! Fix: use fragment interior 1:nxyz_domain as loop bounds.
+        ix_l = 1
+        ix_u = dg_frag%nxyz_domain(1, ifrag)
+        iy_l = 1
+        iy_u = dg_frag%nxyz_domain(2, ifrag)
+        iz_l = 1
+        iz_u = dg_frag%nxyz_domain(3, ifrag)
 
         do istate_new = 1, dg_frag%nstate_frag
           do istate_old = 1, dg_frag%nstate_frag
@@ -260,12 +263,15 @@ contains
     allocate(ipiv(dg_frag%nstate_frag))
 
     hvol = dg_frag%hgs(1) * dg_frag%hgs(2) * dg_frag%hgs(3)
-    ix_l = dg_frag%lg%is(1)
-    ix_u = dg_frag%lg%ie(1)
-    iy_l = dg_frag%lg%is(2)
-    iy_u = dg_frag%lg%ie(2)
-    iz_l = dg_frag%lg%is(3)
-    iz_u = dg_frag%lg%ie(3)
+    ! BUG FIX: dg_frag%lg%is/ie are global grid bounds (e.g., [1,1,Nx]).
+    ! phi_frag is fragment-local with bounds (1-nb:nxyz_domain+nb).
+    ! Use interior bounds 1:nxyz_domain for the first local fragment (index 1).
+    ix_l = 1
+    ix_u = dg_frag%nxyz_domain(1, dg_frag%ifrag_start)
+    iy_l = 1
+    iy_u = dg_frag%nxyz_domain(2, dg_frag%ifrag_start)
+    iz_l = 1
+    iz_u = dg_frag%nxyz_domain(3, dg_frag%ifrag_start)
 
     do ispin = 1, dg_frag%nspin
       s_new = 0.0d0

@@ -421,14 +421,17 @@ contains
         atom_types_frag(icount) = system%kion(iatom)
       end do
       
-      ! Initialize RI data for this fragment
+      ! Initialize RI data for this fragment.
+      ! Pass fragment-interior bounds (1:nxyz_domain) so that init_hse_ri_fragment
+      ! uses the correct assumed-shape phi_frag without the global lg%is:lg%ie mismatch.
       call init_hse_ri_fragment(hse_ri_data_frag(ifrag_local), &
                                 dg_frag%phi_frag(:,:,:,:,ifrag_local), &
                                 dg_frag%lg, dg_frag%mg, &
                                 dg_frag%nstate_frag, system%hvol, &
                                 natom_frag, atom_coords_frag, atom_types_frag, &
                                 hse_omega, &
-                                (yn_hse_cd_ri == 'y'), hse_cd_ri_threshold)
+                                (yn_hse_cd_ri == 'y'), hse_cd_ri_threshold, &
+                                [1, 1, 1], dg_frag%nxyz_domain(1:3, ifrag))
       
       deallocate(atom_coords_frag, atom_types_frag)
       
@@ -523,26 +526,17 @@ contains
     allocate(n_basis_tmp(dg_frag%n_frag, dg_frag%nspin))
     allocate(index_basis_tmp(dg_frag%nstate_frag, dg_frag%n_frag, dg_frag%nspin))
     
-    ! CRITICAL: All ranks must read metadata from ALL fragments (not just assigned ones)
-    ! This is because index_basis maps local->global indices across ALL fragments
-    ! Without this, Rank 1,2,3... will have incorrect mapping and zero/NaN current
-    do ifrag = 1, dg_frag%n_frag
-      iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
-      
-      if (ifrag == 1) then
-        ! First fragment: read all metadata
-        open(iunit, file=filename, form='unformatted', access='stream', status='old')
-        read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
-        read(iunit) n_mat_tmp(1:dg_frag%nspin)
-        read(iunit) n_basis_tmp(1:dg_frag%n_frag, 1:dg_frag%nspin)
-        read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
-        close(iunit)
-      else
-        ! Subsequent fragments: verify consistency only (all fragments have same metadata)
-        ! No need to re-read, metadata is consistent across fragments
-      end if
-    end do
+    ! All ranks read global metadata from fragment 1.
+    ! index_basis maps local->global indices across ALL fragments; every rank
+    ! needs the full table or ranks > 0 will produce zero/NaN current.
+    iunit = get_filehandle()
+    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+    open(iunit, file=filename, form='unformatted', access='stream', status='old')
+    read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+    read(iunit) n_mat_tmp(1:dg_frag%nspin)
+    read(iunit) n_basis_tmp(1:dg_frag%n_frag, 1:dg_frag%nspin)
+    read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
+    close(iunit)
     
     ! Step 3: Gather metadata (now consistent across all ranks)
     dg_frag%n_basis = n_basis_tmp
@@ -907,15 +901,25 @@ contains
     if (.not. dg_frag%has_real_space_basis) return
     
     hvol = system%hvol
-    is = dg_frag%lg%is
-    ie = dg_frag%lg%ie
+    ! Use fragment-local interior indices (1:nxyz_domain).
+    ! phi_frag is allocated with halo as (1-nb:nxyz+nb,...); passing lg%is/lg%ie
+    ! (global grid bounds) caused shape mismatch in calc_exact_exchange_hse_fragment.
+    is = 1
+    ie = dg_frag%nxyz_domain(1:3, ifrag)
     n_base_frag = dg_frag%nstate_frag
     
     ! Fragment-local index
     ifrag_local = ifrag - dg_frag%ifrag_start + 1
     
-    ! Count occupied states (simple approach: first n_occ states)
-    n_occ_frag = max(1, min(nelec/2, n_base_frag))
+    ! Count occupied states per spin channel.
+    ! nspin==1: spin-paired; each orbital holds 2 electrons -> (nelec+1)/2 avoids
+    !           floor-rounding error for odd nelec (e.g. nelec=1 -> 0 without +1).
+    ! nspin==2: each spin channel holds one electron per orbital -> nelec total.
+    if (dg_frag%nspin == 1) then
+      n_occ_frag = max(1, min((nelec + 1) / 2, n_base_frag))
+    else
+      n_occ_frag = max(1, min(nelec, n_base_frag))
+    end if
     
     ! Choose method: RI/DF (Plan C) or direct integration (Plan A)
     if (dg_frag%use_hse_ri .and. yn_hse_ri == 'y') then
@@ -1077,6 +1081,7 @@ contains
     if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
     if (allocated(dg_frag%S_mat_prop_c)) deallocate(dg_frag%S_mat_prop_c)
     if (allocated(dg_frag%n_basis)) deallocate(dg_frag%n_basis)
+    if (allocated(dg_frag%index_basis)) deallocate(dg_frag%index_basis)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
     if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
     if (allocated(dg_frag%dipole_mat)) deallocate(dg_frag%dipole_mat)
