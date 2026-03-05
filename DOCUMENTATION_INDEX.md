@@ -1,278 +1,102 @@
-# DG-Fragment RT Documentation Index
+# SALMON v2.2.2 Documentation Index (整理版)
 
-**Quick Reference Guide for DG-Fragment Real-Time Dynamics Implementation**
-
----
-
-## 📋 Main Documentation Files
-
-### Executive Overviews
-
-1. **DG_FRAGMENT_RT_STATUS.md** ← START HERE
-   - Complete project status overview
-   - Implementation summary
-   - Quick reference tables
-   - ~400 lines
-
-2. **PHYSICS_VALIDATION_REPORT.md**
-   - Detailed physics validation approach
-   - Root cause analysis of SIGBUS
-   - Test configuration details
-   - Recommended next steps
-   - ~300 lines
-
-3. **SESSION_23_SUMMARY.md**
-   - Session 23 accomplishments
-   - Debug cleanup details
-   - Technical implementation specifics
-   - ~400 lines
-
-### Code & Tools
-
-4. **run_physics_validation.sh**
-   - Automated test automation script
-   - Location: samples/exercise_dg_rt_hse_test/H2/
-
-5. **physics_validation.py**
-   - Python analysis tool
-   - Compares DG-Fragment vs Conventional RT
-   - Location: samples/exercise_dg_rt_hse_test/H2/
+このファイルは、散在している Markdown を「今読むべきもの」と「履歴・提案」に分離するためのハブです。
 
 ---
 
-## 🎯 Quick Navigation
+## 1) まずここから（現行導線）
 
-### "How do I..."
+1. `README.md`  
+   - プロジェクト本体（上流 SALMON）の概要
 
-**...run a test?**
-```bash
-cd samples/exercise_dg_rt_hse_test/H2
-bash run_physics_validation.sh
-```
-See: SESSION_23_SUMMARY.md (How to Run section)
+2. `README_JP.md`  
+   - 日本語向けの入口
 
-**...understand the fix?**
-→ PHYSICS_VALIDATION_REPORT.md (Root Cause Analysis section)
+3. `doc/NOTE_DG.md`  
+   - DG系統合ノート（入口）
 
-**...check the status?**
-→ DG_FRAGMENT_RT_STATUS.md (Quick Start Guide)
+4. `doc/NOTE_PLUSU.md`  
+   - +U系統合ノート（入口）
 
-**...modify the code?**
-→ SESSION_23_SUMMARY.md (Code Changes Summary table)
+5. `doc/NOTE_HSE.md`  
+   - HSE系統合ノート（入口）
 
-**...analyze output?**
-→ physics_validation.py (inline documentation)
+6. `doc/DOCUMENT_STATUS_MATRIX.md`  
+   - 文書の現行/履歴/提案の分類表
 
----
-
-## 📊 Project Status at a Glance
-
-| Component | Status | Doc Link |
-|-----------|--------|----------|
-| **Implementation** | ✅ Complete | DG_FRAGMENT_RT_STATUS.md |
-| **SIGBUS Bug Fix** | ✅ Fixed | PHYSICS_VALIDATION_REPORT.md |
-| **Memory Safety** | ✅ Verified | SESSION_23_SUMMARY.md |
-| **Code Quality** | ✅ Clean | SESSION_23_SUMMARY.md |
-| **Documentation** | ✅ Comprehensive | This file |
-| **Validation Tools** | ✅ Complete | physics_validation.py |
-| **Physics Testing** | ⏳ Framework Ready | run_physics_validation.sh |
+注: DG関連の説明文書は更新遅延があるため、現時点では参照専用として扱います。
 
 ---
 
-## 🔬 Physics Validation Status
+## 2) テスト実行ドキュメント（参照）
 
-### What Was Validated
+- `samples/exercise_dg_rt_hse_test/README.md`
+- `samples/exercise_dg_rt_hse_test/START_HERE.md`
+- `samples/exercise_dg_rt_hse_test/EXECUTION_GUIDE.md`
+- `samples/exercise_dg_rt_hse_test/DG_FRAGMENT_WORKFLOW.md`
 
-✅ Memory access safety (no SIGBUS)  
-✅ Code compilation (clean build)  
-✅ Time evolution execution  
-✅ Observable calculation  
-✅ Numerical stability  
-✅ Initial energy matching  
-
-### What's Ready to Test
-
-Framework fully prepared for:
-- Complete time evolution validation
-- Current magnitude comparison
-- Energy conservation analysis
-- Coefficient normalization check
-- Basis orthogonality verification
-
-**Run tests with**: `bash run_physics_validation.sh`
+補助資料:
+- `samples/exercise_dg_rt_hse_test/LDA_BASELINE_TEST.md`
+- `samples/exercise_dg_rt_hse_test/TEST_PREPARATION.md`
+- `samples/exercise_dg_rt_hse_test/WORKFLOW_CORRECTED.md`
 
 ---
 
-## 🛠️ Key Technical Details
+## 3) 履歴・セッション記録（参照専用）
 
-### The SIGBUS Problem (Fixed)
+旧DG/+Uノート群は統合に伴い削除済み（2026-03-05）。
+残る履歴資料は以下です。
 
-**What went wrong**:
-- Coefficient array allocated as (nstate_frag, ...)
-- Momentum matrix allocated as (n_mat_max, ...)
-- nstate_frag ≠ n_mat_max → array bounds violation
-
-**How it was fixed**:
-- Reallocate coef to (n_mat_max, ...)
-- Map fragment-local indices → global via index_basis
-- Add bounds checking
-- Total lines changed: ~150
-
-**Verification**:
-- ✅ Compiles without errors
-- ✅ Runs 20 timesteps without SIGBUS
-- ✅ All observables calculated
+- `SALMON_v2.2.2_COMPREHENSIVE_EVALUATION.md`
 
 ---
 
-## 📁 File Organization
+## 4) 提案・設計案（未確定/条件付き）
 
-### Source Code
-```
-src/rt/
-  ├─ rt_dg_fragment.f90     [3548 lines] - MODIFIED
-  ├─ main_tddft.f90         [ 303 lines] - MODIFIED
-  └─ ...other files (unchanged)
-```
+以下は「実装済み仕様」ではなく、提案・比較・計画文書です。
 
-### Documentation
-```
-SALMON-v.2.2.2/
-  ├─ DG_FRAGMENT_RT_STATUS.md          [500+ lines] ← START
-  ├─ PHYSICS_VALIDATION_REPORT.md      [300+ lines]
-  ├─ SESSION_23_SUMMARY.md             [400+ lines]
-  └─ RT_DG_HSE_COMPLETE_IMPLEMENTATION_v2.2.2.md [historical]
-  
-samples/exercise_dg_rt_hse_test/H2/
-  ├─ run_physics_validation.sh          [Automation]
-  ├─ physics_validation.py              [Analysis tool]
-  ├─ inputfile_h2_periodic_20_dg_new_param      [Test input]
-  ├─ inputfile_h2_periodic_20_conventional     [Reference]
-  └─ H2_periodic_20_*.data              [Output files]
-```
+- `HSE_RI_DF_METHOD_PLAN_C.md`
+- `HSE_ERI_OPTIMIZATION_PROPOSAL.md`
+- `GPU_IMPLEMENTATION_GUIDE.md`
+- `GPU_URGENCY_PLAN_Si64.md`
+- `OPENACC_GPU_IMPLEMENTATION.md`
+- `ADAPTIVE_BASIS_IMPLEMENTATION.md`
+- `ADAPTIVE_BASIS_IMPLEMENTATION_ja.md`
+- `dg_fragment_rk4_adaptive_notes.md`
 
 ---
 
-## 🚀 Getting Started (5 Minutes)
+## 5) HSE関連の扱い（重要）
 
-### 1. Understand the Project (2 min)
-Read: **DG_FRAGMENT_RT_STATUS.md** → Executive Summary section
+HSE RI/DF 関連には、作成時点の異なる文書が混在しています。
 
-### 2. See the Fix (2 min)
-Read: **PHYSICS_VALIDATION_REPORT.md** → Root Cause Analysis section
+最新実装の要点（2026-03時点）:
+- ACE は標準RT経路（`src/rt/time_evolution_step.f90` → `src/xc/xc_ace_update_manager.f90`）で利用され、`SALMON_ACE_RT` 系環境変数で制御
+- RT-DG の PW/adaptive basis は DG統合ノート（`doc/NOTE_DG.md`）を一次参照
+- DG側HSEは現状 RI/DF 経路が主で、実空間基底が無い場合は自動無効化
 
-### 3. Know What to Do Next (1 min)
-Read: **SESSION_23_SUMMARY.md** → Next Steps section
+- 現行側の基準:
+   - `doc/NOTE_HSE.md`
+  - `RT_INTEGRATION_COMPLETE.md`
+  - コード実体: `src/xc/xc_hse_ri.f90`, `src/rt/rt_dg_fragment.f90`
 
----
-
-## 📈 Implementation Timeline
-
-| Session | Date | Focus | Status |
-|---------|------|-------|--------|
-| 21 | Feb 22 | Parameter implementation | ✅ Done |
-| 22 | Feb 23 | SIGBUS diagnosis & fix | ✅ Done |
-| 23 | Feb 23 | Cleanup & validation setup | ✅ Done |
-| TBD | TBD | Physics validation testing | ⏳ Pending |
+- 履歴/移行メモとして扱う:
+  - `HSE_RI_IMPLEMENTATION_README.md`（「Partial Implementation」記載を含む）
 
 ---
 
-## ✅ Quality Checklist
+## 6) 分類表
 
-### Code Quality
-- [x] Compiles: Zero errors
-- [x] Memory Safe: No SIGBUS
-- [x] Debugged: All debug output removed
-- [x] Commented: Key functions documented
+全 Markdown の分類一覧は以下を参照してください。
 
-### Documentation
-- [x] Comprehensive: 1200+ lines across 3 main docs
-- [x] Well-Organized: Clear navigation
-- [x] Examples: Code samples included
-- [x] Troubleshooting: Known issues addressed
-
-### Validation
-- [x] Framework: Automated tools created
-- [x] Test Cases: Production-quality examples
-- [x] Analysis: Python scripts for comparison
-- [x] Automation: Shell scripts for workflows
+- `doc/DOCUMENT_STATUS_MATRIX.md`
 
 ---
 
-## 🎓 Learning Resources
+## 7) メンテナンスルール（今後）
 
-### To Understand DG-Fragment RT
+1. 新規文書は、必ず「現行 / 履歴 / 提案」のいずれかを冒頭に明記する。  
+2. 実装完了時は、提案文書に「Superseded by: ...」を追記する。  
+3. `DOCUMENTATION_INDEX.md` と `doc/DOCUMENT_STATUS_MATRIX.md` を同時更新する。
 
-1. **Start**: DG_FRAGMENT_RT_STATUS.md → Physics Model section
-2. **Then**: PHYSICS_VALIDATION_REPORT.md → Physics Interpretation
-3. **Deep Dive**: Code comments in rt_dg_fragment.f90
-
-### To Understand the SIGBUS Fix
-
-1. **Start**: PHYSICS_VALIDATION_REPORT.md → Root Cause Analysis
-2. **Then**: SESSION_23_SUMMARY.md → Technical Implementation Details
-3. **Details**: rt_dg_fragment.f90 lines 751-778 (coefficient reindexing)
-
-### To Run Tests
-
-1. **Quick**: run_physics_validation.sh (automated)
-2. **Manual**: SESSION_23_SUMMARY.md → "How to Run" section
-3. **Analysis**: physics_validation.py documentation
-
----
-
-## 🔗 Cross-References
-
-### By Topic
-
-**Memory Management**
-→ PHYSICS_VALIDATION_REPORT.md (Technical Section)
-→ SESSION_23_SUMMARY.md (Memory Access Fix)
-
-**Physics Validation**
-→ PHYSICS_VALIDATION_REPORT.md (full)
-→ physics_validation.py (code)
-
-**Code Changes**
-→ SESSION_23_SUMMARY.md (Code Changes Summary table)
-→ rt_dg_fragment.f90 (source)
-
-**Testing & Tools**
-→ run_physics_validation.sh (script)
-→ physics_validation.py (analyzer)
-
----
-
-## ❓ FAQs
-
-**Q: Where's the main status?**
-A: DG_FRAGMENT_RT_STATUS.md
-
-**Q: What was the bug?**
-A: SIGBUS from coefficient array bounds violation - detailed in PHYSICS_VALIDATION_REPORT.md
-
-**Q: How do I run tests?**
-A: `bash run_physics_validation.sh` in H2 directory
-
-**Q: Is the code production-ready?**
-A: Yes - see DG_FRAGMENT_RT_STATUS.md → Conclusion
-
-**Q: What's next?**
-A: Run full physics validation test (framework is ready)
-
----
-
-## 📞 Support
-
-For questions about:
-- **What works**: Check DG_FRAGMENT_RT_STATUS.md
-- **How it works**: Check PHYSICS_VALIDATION_REPORT.md
-- **How to use it**: Check SESSION_23_SUMMARY.md
-- **What changed**: Check code comments in src/rt/*.f90
-
----
-
-**Last Updated**: 2026-02-23  
-**Version**: Complete & Production Ready  
-**Next Action**: Run physics validation tests
 

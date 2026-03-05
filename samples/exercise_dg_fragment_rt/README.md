@@ -353,7 +353,7 @@ Now +U density matrix `dm_mms_nla` and potential `V_eff` are updated every time 
 - **Unaffected systems**: Band insulators, simple metals (no +U used)
 - **DG-Fragment**: Same issue exists but requires different implementation approach (see `plusu_fragment_support.f90`)
 
-**See `BUG_REPORT_PLUSU_RT.md` in repository root for complete technical details.**
+**See `doc/NOTE_PLUSU.md` for current +U integration notes.**
 
 ---
 

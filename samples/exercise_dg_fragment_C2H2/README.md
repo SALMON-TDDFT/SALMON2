@@ -171,8 +171,7 @@ Expected features:
 
 ### Implementation
 - Source code: `src/rt/rt_dg_fragment.f90`
-- Implementation notes: `doc/DG_Fragment_Implementation_Notes.md`
-- Quick start guide (日本語): `doc/DG_Fragment_QuickStart_ja.md`
+- Consolidated note: `doc/NOTE_DG.md`
 
 ### Literature
 - DG methods for TDDFT: [Add relevant papers]
