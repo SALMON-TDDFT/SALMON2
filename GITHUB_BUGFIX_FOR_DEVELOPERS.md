@@ -789,6 +789,50 @@ Step 3: 外部ライブラリ設定を強化（バグ #8, #9）
 
 ---
 
+## 📝 追記（2026-03-06）: 今回ビルドで手間取った理由と解決法
+
+### 1. 手間取った主因（今回の実測）
+
+1. `cmakefiles/` 欠落により CMake 経路を継続できなかった
+2. `gnu_makefiles/make.body` のソース列挙が現行ソース構成と不整合
+3. RT-DG は `rt_dg_fragment.f90` 内の `#include` で多段依存が隠れ、未列挙モジュールが連鎖発生
+4. macOS で C コンパイラが `clang` のままだと `posix.c` で `-fopenmp` 非対応エラー
+5. 最終リンク時に `main_ssbe_` 未定義（`ssbe/*.f90` が make.body 未登録）
+
+### 2. 具体的に解決した内容
+
+1. GNU make 経路に切替（`Makefile.gnu-without-mpi` で依存解消を先行）
+2. `make.body` に不足モジュールを依存順で追加
+3. C コンパイラを OpenMP 対応に固定（`CC=/opt/homebrew/bin/gcc-15`）
+
+今回追加した主な不足ファイル:
+- `plusu/current_plusu.f90`
+- `gs/preconditioning.f90`
+- `gs/dc/{dcdft,dcdft_soi,lcfo,lcfo_soi,lcfo_soi_init}.f90`
+- `poisson/poisson_dg_distributed.f90`
+- `xc/{xc_hse_grid_sr,xc_ace_update_manager,xc_hse,auxiliary_basis,xc_hse_ri}.f90`
+- `rt/{rt_dg_fragment_types,rt_dg_basis_projection,rt_dg_plane_wave,rt_dg_fragment_ops,plusu_fragment_support,rt_dg_fragment,rt_dg_fragment_soi,rt_local_chern_marker}.f90`
+- `ssbe/*.f90` 一式
+
+### 3. 今回の成功コマンド
+
+```bash
+make -f gnu_makefiles/Makefile.gnu-without-mpi -j1 CC=/opt/homebrew/bin/gcc-15
+```
+
+補足（macOS）:
+- `CC` を省略すると、`src/io/posix.c` の再コンパイル時に `clang -fopenmp` で失敗する。
+- 失敗例: `clang: error: unsupported option '-fopenmp'`
+- したがって、GNU make では `CC=/opt/homebrew/bin/gcc-15` 指定を常用する。
+
+### 4. 再発防止メモ
+
+1. `make.body` は `src/*/CMakeLists.txt` と差分を定期的に照合する
+2. RT-DG のように `#include` で分割しているモジュールは、親ファイルだけでなく依存元（例: `poisson_dg_distributed`）も明示的に追う
+3. macOS では `CC` を明示しないと C/OpenMP で失敗しやすい
+
+---
+
 ## 📞 サポート
 
 修正に関する質問や追加の問題報告は、GitHub Issues で お願いします。

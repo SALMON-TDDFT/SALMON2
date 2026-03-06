@@ -52,9 +52,10 @@ contains
     real(8), intent(out) :: marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in), optional :: occ_eps
 
-    integer :: ik, ispin, io, jo, iocc, jocc, ix, iy, iz
+    integer :: ik, ispin, io, jo, iocc, jocc, ix, iy, iz, im, p
     integer :: nocc
     integer, allocatable :: occ_idx(:)
+    real(8), allocatable :: occ_w(:)
     complex(8), allocatable :: zocc(:,:,:,:), zt1(:,:,:,:), zt2(:,:,:,:)
     complex(8), allocatable :: s1(:,:), s2(:,:), s1_sum(:,:), s2_sum(:,:), g12(:,:)
     real(8), allocatable :: eval_s(:)
@@ -64,10 +65,6 @@ contains
     real(8) :: b1(3), b2(3)
     logical :: use_complex
     real(8), parameter :: eps_ortho = 1.0d-12
-
-    if (info%im_s /= 1 .or. info%im_e /= 1) then
-      stop 'compute_local_chern_marker_from_orbital: only im=1 is supported'
-    end if
 
     use_complex = allocated(psi%zwf)
     eps_occ = 1.0d-10
@@ -80,32 +77,37 @@ contains
 
     do ik = info%ik_s, info%ik_e
       do ispin = 1, system%nspin
+        do im = info%im_s, info%im_e
 
-        nocc = 0
-        do io = 1, system%no
-          if (system%rocc(io, ik, ispin) > eps_occ) nocc = nocc + 1
-        end do
-        if (nocc <= 0) cycle
+          nocc = 0
+          do io = 1, system%no
+            if (system%rocc(io, ik, ispin) > eps_occ) nocc = nocc + 1
+          end do
+          if (nocc <= 0) cycle
 
-        allocate(occ_idx(nocc))
-        nocc = 0
-        do io = 1, system%no
-          if (system%rocc(io, ik, ispin) > eps_occ) then
-            nocc = nocc + 1
-            occ_idx(nocc) = io
-          end if
-        end do
+          allocate(occ_idx(nocc), occ_w(nocc))
+          nocc = 0
+          do io = 1, system%no
+            if (system%rocc(io, ik, ispin) > eps_occ) then
+              nocc = nocc + 1
+              occ_idx(nocc) = io
+              occ_w(nocc) = system%rocc(io, ik, ispin)
+            end if
+          end do
 
-        allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc))
-        allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc))
-        allocate(zt2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc))
-        allocate(s1(nocc,nocc), s2(nocc,nocc), s1_sum(nocc,nocc), s2_sum(nocc,nocc), g12(nocc,nocc))
-        allocate(eval_s(nocc), u_mat(nocc,nocc), x_lowdin(nocc,nocc))
-        call copy_occupied_to_temp(ik, ispin, nocc, occ_idx, zocc)
-        call lowdin_orthonormalize_occupied(nocc, zocc, u_mat, eval_s, x_lowdin, eps_ortho)
+          allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc))
+          allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc))
+          allocate(zt2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc))
+          allocate(s1(nocc,nocc), s2(nocc,nocc), s1_sum(nocc,nocc), s2_sum(nocc,nocc), g12(nocc,nocc))
+          allocate(eval_s(nocc), u_mat(nocc,nocc), x_lowdin(nocc,nocc))
+          call copy_occupied_to_temp(ik, ispin, im, nocc, occ_idx, zocc)
+          do p = 1, nocc
+            zocc(:,:,:,p) = sqrt(max(0.0d0, occ_w(p))) * zocc(:,:,:,p)
+          end do
+          call lowdin_orthonormalize_occupied(nocc, zocc, u_mat, eval_s, x_lowdin, eps_ortho)
 
-        s1(:,:) = (0.0d0, 0.0d0)
-        s2(:,:) = (0.0d0, 0.0d0)
+          s1(:,:) = (0.0d0, 0.0d0)
+          s2(:,:) = (0.0d0, 0.0d0)
 
 !$omp parallel do collapse(2) private(iocc,jocc,ix,iy,iz,rvec,phase1,phase2) schedule(static)
         do iocc = 1, nocc
@@ -126,16 +128,16 @@ contains
           end do
         end do
 
-        call comm_summation(s1, s1_sum, nocc*nocc, info%icomm_r)
-        call comm_summation(s2, s2_sum, nocc*nocc, info%icomm_r)
+          call comm_summation(s1, s1_sum, nocc*nocc, info%icomm_r)
+          call comm_summation(s2, s2_sum, nocc*nocc, info%icomm_r)
 
-        s1(:,:) = s1_sum(:,:)
-        s2(:,:) = s2_sum(:,:)
-        call invert_complex_matrix_checked(s1, 'S1')
-        call invert_complex_matrix_checked(s2, 'S2')
+          s1(:,:) = s1_sum(:,:)
+          s2(:,:) = s2_sum(:,:)
+          call invert_complex_matrix_checked(s1, 'S1')
+          call invert_complex_matrix_checked(s2, 'S2')
 
-        zt1(:,:,:,:) = (0.0d0, 0.0d0)
-        zt2(:,:,:,:) = (0.0d0, 0.0d0)
+          zt1(:,:,:,:) = (0.0d0, 0.0d0)
+          zt2(:,:,:,:) = (0.0d0, 0.0d0)
 !$omp parallel do collapse(3) private(ix,iy,iz,iocc,jocc,rvec,phase1,phase2) schedule(static)
         do iz = mg%is(3), mg%ie(3)
           rvec(3) = mg%coordinate(iz,3)
@@ -155,7 +157,7 @@ contains
           end do
         end do
 
-        g12(:,:) = (0.0d0, 0.0d0)
+          g12(:,:) = (0.0d0, 0.0d0)
 !$omp parallel do collapse(2) private(iocc,jocc,ix,iy,iz) schedule(static)
         do iocc = 1, nocc
           do jocc = 1, nocc
@@ -168,8 +170,8 @@ contains
             end do
           end do
         end do
-        call comm_summation(g12, s1_sum, nocc*nocc, info%icomm_r)
-        g12(:,:) = s1_sum(:,:)
+          call comm_summation(g12, s1_sum, nocc*nocc, info%icomm_r)
+          g12(:,:) = s1_sum(:,:)
 
 !$omp parallel do collapse(3) private(ix,iy,iz,iocc,jocc,zterm12,zterm21) schedule(static)
         do iz = mg%is(3), mg%ie(3)
@@ -189,11 +191,12 @@ contains
           end do
         end do
 
-        deallocate(eval_s, u_mat, x_lowdin)
-        deallocate(s1, s2, s1_sum, s2_sum, g12)
-        deallocate(zt1, zt2, zocc)
-        deallocate(occ_idx)
+          deallocate(eval_s, u_mat, x_lowdin)
+          deallocate(s1, s2, s1_sum, s2_sum, g12)
+          deallocate(zt1, zt2, zocc)
+          deallocate(occ_idx, occ_w)
 
+        end do
       end do
     end do
 
@@ -203,9 +206,9 @@ contains
 
   contains
 
-    subroutine copy_occupied_to_temp(ik0, ispin0, nocc0, occ_list, zbuf)
+    subroutine copy_occupied_to_temp(ik0, ispin0, im0, nocc0, occ_list, zbuf)
       implicit none
-      integer, intent(in) :: ik0, ispin0, nocc0
+      integer, intent(in) :: ik0, ispin0, im0, nocc0
       integer, intent(in) :: occ_list(nocc0)
       complex(8), intent(out) :: zbuf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nocc0)
 
@@ -223,7 +226,7 @@ contains
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
                 do ix = mg%is(1), mg%ie(1)
-                  zbuf(ix,iy,iz,p) = psi%zwf(ix,iy,iz,ispin0,io_g,ik0,1)
+                  zbuf(ix,iy,iz,p) = psi%zwf(ix,iy,iz,ispin0,io_g,ik0,im0)
                 end do
               end do
             end do
@@ -235,7 +238,7 @@ contains
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
                 do ix = mg%is(1), mg%ie(1)
-                  zbuf(ix,iy,iz,p) = cmplx(psi%rwf(ix,iy,iz,ispin0,io_g,ik0,1), 0.0d0, kind=8)
+                  zbuf(ix,iy,iz,p) = cmplx(psi%rwf(ix,iy,iz,ispin0,io_g,ik0,im0), 0.0d0, kind=8)
                 end do
               end do
             end do
@@ -270,7 +273,7 @@ contains
                   do iz = mg%is(3), mg%ie(3)
                     do iy = mg%is(2), mg%ie(2)
                       do ix = mg%is(1), mg%ie(1)
-                        zblk(ix,iy,iz,t) = psi%zwf(ix,iy,iz,ispin0,io_g,ik0,1)
+                        zblk(ix,iy,iz,t) = psi%zwf(ix,iy,iz,ispin0,io_g,ik0,im0)
                       end do
                     end do
                   end do
@@ -282,7 +285,7 @@ contains
                   do iz = mg%is(3), mg%ie(3)
                     do iy = mg%is(2), mg%ie(2)
                       do ix = mg%is(1), mg%ie(1)
-                        zblk(ix,iy,iz,t) = cmplx(psi%rwf(ix,iy,iz,ispin0,io_g,ik0,1), 0.0d0, kind=8)
+                        zblk(ix,iy,iz,t) = cmplx(psi%rwf(ix,iy,iz,ispin0,io_g,ik0,im0), 0.0d0, kind=8)
                       end do
                     end do
                   end do
