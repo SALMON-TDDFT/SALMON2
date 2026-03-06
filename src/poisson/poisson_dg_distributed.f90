@@ -54,6 +54,9 @@ contains
     use structures,           only: s_rgrid, s_reciprocal_grid, s_poisson, s_scalar
     use rt_dg_fragment_types, only: s_dg_fragment_rt
     use communication,        only: comm_summation
+    use inputoutput,          only: yn_put_wall_z_boundary, wall_height, wall_width
+    use math_constants,       only: pi
+    use salmon_global,        only: hse_omega
     implicit none
 
     type(s_rgrid),           intent(in)    :: lg, mg
@@ -65,7 +68,10 @@ contains
 
     integer :: Nx, Ny, Nz, N_total
     integer :: ix, iy, iz, kx, ky, kz, kz_loc, nkz_local, nkz_actual, kz_start, kz_end
-    real(8) :: inv_N
+    real(8) :: inv_N, g2, sr_factor, Vwall_z, z, z0
+    logical :: use_hse_sr_hartree
+    character(16) :: env_hse_sr
+    integer :: env_status
 
     ! Local work arrays for the kz-slab owned by this rank
     complex(8), allocatable :: ff1(:,:,:)      ! (mg%is(1):ie(1), mg%is(2):ie(2), nkz_local)
@@ -75,17 +81,35 @@ contains
     real(8),    allocatable :: Vh_partial(:,:,:)      ! (mg range)
     complex(8), allocatable :: rhoG_partial(:,:,:)    ! (mg range)
 
-    Nx = lg%num(1)
-    Ny = lg%num(2)
-    Nz = lg%num(3)
+    ! Check SALMON_HSE_SR_HARTREE environment variable (same logic as hartree_sub::hartree)
+    env_hse_sr = ''
+    use_hse_sr_hartree = .false.
+    call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_hse_sr)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_hse_sr_hartree = .true.
+      end select
+    end if
+    if (use_hse_sr_hartree .and. hse_omega <= 0.0d0) then
+      stop 'poisson_dg_distributed: hse_omega must be > 0 when SALMON_HSE_SR_HARTREE is enabled'
+    end if
+
+    ! N_total based on mg (the arrays are allocated over mg range).
+    ! In DG-fragment lg==mg so this equals lg%num(1)*lg%num(2)*lg%num(3),
+    ! but using mg%num is correct for future callers where lg /= mg.
+    Nx = mg%num(1)
+    Ny = mg%num(2)
+    Nz = mg%num(3)
     N_total = Nx * Ny * Nz
-    inv_N   = 1.0d0 / dble(N_total)
+    inv_N   = 1.0d0 / dble(lg%num(1) * lg%num(2) * lg%num(3))
 
     ! -----------------------------------------------------------------------
     ! Distribute kz indices across dg_frag%icomm.
     ! rank r (0-based: dg_frag%id) owns kz in [kz_start : kz_end].
     ! nkz_local  = ceiling(Nz / isize)  — allocation size (may be > actual)
     ! nkz_actual = number of valid kz for this rank (kz_end - kz_start + 1)
+    ! Nz here is mg%num(3); in DG-fragment this equals lg%num(3).
     ! -----------------------------------------------------------------------
     nkz_local  = (Nz + dg_frag%isize - 1) / dg_frag%isize
     kz_start   = dg_frag%id * nkz_local + mg%is(3)
@@ -159,17 +183,34 @@ contains
 
     ! =======================================================================
     ! COULOMB KERNEL: Vh(G) = coef(G) * rho(G)
+    ! When SALMON_HSE_SR_HARTREE is set, apply the HSE short-range factor
+    ! (1 - exp(-|G|^2 / (4*omega^2))) to match hartree_sub::hartree behaviour.
     ! =======================================================================
-    !$omp parallel do private(kz_loc, kz, ky, kx)
-    do kz_loc = 1, nkz_actual
-      kz = kz_start + kz_loc - 1
-      do ky = mg%is(2), mg%ie(2)
-        do kx = mg%is(1), mg%ie(1)
-          ff1(kx, ky, kz_loc) = fg%coef(kx, ky, kz) * ff1(kx, ky, kz_loc)
+    if (use_hse_sr_hartree) then
+      !$omp parallel do private(kz_loc, kz, ky, kx, g2, sr_factor)
+      do kz_loc = 1, nkz_actual
+        kz = kz_start + kz_loc - 1
+        do ky = mg%is(2), mg%ie(2)
+          do kx = mg%is(1), mg%ie(1)
+            g2 = fg%vec_G(1,kx,ky,kz)**2 + fg%vec_G(2,kx,ky,kz)**2 + fg%vec_G(3,kx,ky,kz)**2
+            sr_factor = 1.0d0 - exp(-g2 / (4.0d0 * hse_omega * hse_omega))
+            ff1(kx, ky, kz_loc) = fg%coef(kx, ky, kz) * sr_factor * ff1(kx, ky, kz_loc)
+          end do
         end do
       end do
-    end do
-    !$omp end parallel do
+      !$omp end parallel do
+    else
+      !$omp parallel do private(kz_loc, kz, ky, kx)
+      do kz_loc = 1, nkz_actual
+        kz = kz_start + kz_loc - 1
+        do ky = mg%is(2), mg%ie(2)
+          do kx = mg%is(1), mg%ie(1)
+            ff1(kx, ky, kz_loc) = fg%coef(kx, ky, kz) * ff1(kx, ky, kz_loc)
+          end do
+        end do
+      end do
+      !$omp end parallel do
+    end if
 
     ! =======================================================================
     ! INVERSE 3D DFT: Vh(G) -> partial Vh(r) contribution from local kz slab
@@ -219,11 +260,38 @@ contains
     ! =======================================================================
     ! ALLREDUCE: sum partial Vh and rho(G) contributions across all ranks.
     ! Each rank owns a disjoint kz slab, so MPI_SUM = MPI_Gatherall.
+    ! N_total = mg%num product, matching the allocation of both arrays.
     ! =======================================================================
     call comm_summation(Vh_partial,   Vh%f,               N_total, dg_frag%icomm)
     call comm_summation(rhoG_partial, poisson%zrhoG_ele,  N_total, dg_frag%icomm)
 
     deallocate(ff1, ff2, Vh_partial, rhoG_partial)
+
+    ! =======================================================================
+    ! WALL POTENTIAL at z boundaries (yn_put_wall_z_boundary='y').
+    ! Applied after Vh is assembled, matching hartree_sub::hartree behaviour.
+    ! dg_frag%hgs(3) is the grid spacing in z.
+    ! =======================================================================
+    if (yn_put_wall_z_boundary == 'y') then
+      z0 = lg%num(3) * dg_frag%hgs(3)
+      !$omp parallel do private(iz, iy, ix, z, Vwall_z)
+      do iz = mg%is(3), mg%ie(3)
+        z = iz * dg_frag%hgs(3)
+        if (z <= wall_width) then
+          Vwall_z = wall_height * cos((z / wall_width) * pi / 2.0d0)**2
+        else if (z >= z0 - wall_width) then
+          Vwall_z = wall_height * cos(((z0 - z) / wall_width) * pi / 2.0d0)**2
+        else
+          cycle
+        end if
+        do iy = mg%is(2), mg%ie(2)
+          do ix = mg%is(1), mg%ie(1)
+            Vh%f(ix, iy, iz) = Vh%f(ix, iy, iz) + Vwall_z
+          end do
+        end do
+      end do
+      !$omp end parallel do
+    end if
 
   end subroutine hartree_dg_distributed
 
