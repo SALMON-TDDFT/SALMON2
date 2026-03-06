@@ -4,7 +4,7 @@
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional, exchange_correlation
-    use hartree_sub, only: hartree
+    use poisson_dg_distributed, only: hartree_dg_distributed
     use hamiltonian, only: update_vlocal
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use communication, only: comm_is_root
@@ -80,7 +80,7 @@
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
-    call hartree(lg, mg, info, system, fg, poisson, srg_scalar, stencil, rho, Vh)
+    call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
     if (any(Vh%f /= Vh%f)) then
       write(*,'(1x,a,i0,a,i0)') "[NaN] Vh after hartree, rank=", nproc_id_global, ", itt=", itt
     end if
