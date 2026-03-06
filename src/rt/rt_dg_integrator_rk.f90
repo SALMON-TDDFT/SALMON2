@@ -231,7 +231,14 @@
       if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)
 
     else
-      ! SSPRK3 stages
+      ! SSPRK3 stages.
+      ! Save initial PW coefficients for the Shu-Osher alpha*coef_work term
+      ! (analogous to dg_frag%coef_work which is already set above for fragment coef).
+      if (n_pw > 0) then
+        allocate(coef_pw_ref(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
+        coef_pw_ref = dg_frag%coef_pw
+      end if
+
       do istage = 1, dg_frag%rk_stages
         ! Get vector potential at this time (velocity gauge)
         ! For RK stages, interpolate between itt and itt+1
@@ -265,7 +272,10 @@
               end do
               do io = 1, dg_frag%nstate_tot
                 do jo = 1, n_pw
-                  dg_frag%coef_pw(jo, io, ispin) = dg_frag%coef_pw(jo, io, ispin) + &
+                  ! BUG FIX: was coef_pw += gamma*dt*k_pw (missing alpha/beta terms).
+                  ! Apply full Shu-Osher formula, consistent with fragment update above.
+                  dg_frag%coef_pw(jo, io, ispin) = dg_frag%rk_alpha(istage) * coef_pw_ref(jo, io, ispin) + &
+                                                   dg_frag%rk_beta(istage)  * dg_frag%coef_pw(jo, io, ispin) + &
                                                    dg_frag%rk_gamma(istage) * dt * k_pw(jo, io, ispin, istage)
                 end do
               end do
@@ -287,21 +297,40 @@
         end if
       end do
       
-      ! Final update
-      dg_frag%coef = dg_frag%coef_work
-      ! OpenMP parallelization for final coefficient update
-!$omp parallel do collapse(2) private(io,jo,istage) schedule(static)
+      ! Final update: apply Shu-Osher formula for stage rk_stages.
+      !
+      ! BUG FIX (fragment): the previous code reset coef = coef_work then accumulated
+      !   coef += Σ_s gamma_s * dt * k_s  →  coef_work + γ1*dt*k1 + γ2*dt*k2 + γ3*dt*k3
+      ! which is WRONG.  Expanding SSPRK3 (α=[1,3/4,1/3], β=[0,1/4,2/3], γ=[1,1/4,2/3])
+      ! the correct final result is
+      !   u^{n+1} = 1/3*u^0 + 2/3*u^{(2)} + 2/3*dt*k3
+      ! which is exactly the Shu-Osher formula for stage rk_stages applied to the
+      ! current coef (= u^{(rk_stages-1)} after the last intermediate update).
+      !
+      ! BUG FIX (PW): final step for coef_pw was missing entirely; added here.
+      associate(rs => dg_frag%rk_stages)
+!$omp parallel do private(io, jo) schedule(static)
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%nstate_tot
           do jo = 1, n
-            do istage = 1, dg_frag%rk_stages
-              dg_frag%coef(jo, io, ispin) = dg_frag%coef(jo, io, ispin) + &
-                                            dg_frag%rk_gamma(istage) * dt * k(jo, io, ispin, istage)
-            end do
+            dg_frag%coef(jo, io, ispin) = dg_frag%rk_alpha(rs) * dg_frag%coef_work(jo, io, ispin) + &
+                                          dg_frag%rk_beta(rs)  * dg_frag%coef(jo, io, ispin) + &
+                                          dg_frag%rk_gamma(rs) * dt * k(jo, io, ispin, rs)
           end do
         end do
+        if (n_pw > 0) then
+          do io = 1, dg_frag%nstate_tot
+            do jo = 1, n_pw
+              dg_frag%coef_pw(jo, io, ispin) = dg_frag%rk_alpha(rs) * coef_pw_ref(jo, io, ispin) + &
+                                               dg_frag%rk_beta(rs)  * dg_frag%coef_pw(jo, io, ispin) + &
+                                               dg_frag%rk_gamma(rs) * dt * k_pw(jo, io, ispin, rs)
+            end do
+          end do
+        end if
       end do
 !$omp end parallel do
+      end associate
+      if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)
     end if
 
     found_nan = .false.
