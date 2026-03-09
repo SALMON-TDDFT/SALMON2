@@ -76,7 +76,7 @@
     logical :: use_dc_cg_method
     logical :: is_global_root
     real(8) :: e_low, e_high
-    integer :: nesp
+    integer :: nesp, metric_unit, ios
 
     is_global_root = (nproc_id_global == 0)
     if (is_global_root) then
@@ -92,6 +92,18 @@
     ! Record update step and increment counter before metric evaluation in projection routines.
     dg_frag%last_basis_update_step = itt_update
     dg_frag%nbasis_update_count = dg_frag%nbasis_update_count + 1
+
+    if (is_global_root) then
+      open(newunit=metric_unit, file='basis_update_metrics.csv', status='unknown', position='append', iostat=ios)
+      if (ios == 0) then
+        if (dg_frag%nbasis_update_count == 1) then
+          write(metric_unit,'(a)') 'step,delta_h_norm,threshold,updated'
+        end if
+        write(metric_unit,'(i0,a,es16.8,a,es16.8,a,i0)') itt_update, ',', dg_frag%hamiltonian_change_norm, ',', &
+                                                             dg_frag%basis_update_threshold, ',', 1
+        close(metric_unit)
+      end if
+    end if
     
     ! Decide which method to use based on user input parameter
     ! yn_dc_cg_basis_update = 'y' : Use DC-CG method (recommended)
@@ -136,11 +148,12 @@
     
     e_low = 0.0d0
     e_high = 0.0d0
-    if (allocated(dg_frag%esp)) then
-      nesp = max(1, min(dg_frag%nstate_tot, size(dg_frag%esp,1)))
-      e_low = minval(dg_frag%esp(1:nesp, 1:dg_frag%nspin))
-      e_high = maxval(dg_frag%esp(1:nesp, 1:dg_frag%nspin))
+    if (.not. allocated(dg_frag%esp)) then
+      stop "DG-RT basis update: esp is not allocated"
     end if
+    nesp = max(1, min(dg_frag%nstate_tot, size(dg_frag%esp,1)))
+    e_low = minval(dg_frag%esp(1:nesp, 1:dg_frag%nspin))
+    e_high = maxval(dg_frag%esp(1:nesp, 1:dg_frag%nspin))
 
     if (is_global_root) then
       write(*,*) "  Basis updated via diagonalization"

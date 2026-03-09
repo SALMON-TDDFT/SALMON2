@@ -1,6 +1,6 @@
   subroutine calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     use structures
-    use salmon_global, only: nelec
+    use salmon_global, only: nelec, nelec_spin
     use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -14,7 +14,7 @@
     integer :: ix, iy, iz, ixg, iyg, izg
     integer :: ig_i, nbf, ipw, n_pw
     integer :: nxyz(3), ixyz0(3)
-    integer :: nocc_per_spin
+    integer :: nocc_per_spin, nocc_spin
     real(8) :: occ_factor
     complex(8) :: coef_i, psi_val, phase_pw, ci
     real(8) :: phi_i, rho_contrib
@@ -36,7 +36,7 @@
     w_local = 0.0d0
     w_global = 0.0d0
 
-    ! For collinear spin calculations: nelec = 2 * nocc_per_spin
+    ! Closed-shell fallback: nelec = 2 * nocc_per_spin.
     nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
     occ_factor = 2.0d0 / real(system%nspin, 8)
     n_pw = 0
@@ -80,8 +80,12 @@
       !$omp end parallel do
 
       do ispin = 1, system%nspin
+        nocc_spin = nocc_per_spin
+        if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+          nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
+        end if
         nbf = dg_frag%n_basis(ifrag, ispin)
-        do io = 1, nocc_per_spin
+        do io = 1, nocc_spin
           !$omp parallel do collapse(3) private(ix, iy, iz, ixg, iyg, izg, istate_frag, ig_i, coef_i, phi_i, psi_val, rho_contrib) schedule(static)
           do iz = 1, nxyz(3)
             do iy = 1, nxyz(2)

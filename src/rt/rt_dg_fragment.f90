@@ -885,7 +885,7 @@ contains
   !=======================================================================
   subroutine add_exact_exchange_hse(dg_frag, system, H_mat_spin, ifrag, ispin)
     use structures
-    use salmon_global, only: hse_alpha, hse_omega, nelec, yn_hse_ri
+    use salmon_global, only: hse_alpha, hse_omega, nelec, nelec_spin, yn_hse_ri
     use xc_hse, only: calc_exact_exchange_hse_fragment
     implicit none
     type(s_dg_fragment_rt), intent(in)    :: dg_frag
@@ -914,11 +914,15 @@ contains
     ! Count occupied states per spin channel.
     ! nspin==1: spin-paired; each orbital holds 2 electrons -> (nelec+1)/2 avoids
     !           floor-rounding error for odd nelec (e.g. nelec=1 -> 0 without +1).
-    ! nspin==2: each spin channel holds one electron per orbital -> nelec total.
+    ! nspin==2: use spin-resolved counts when available; otherwise fallback to nelec/2.
     if (dg_frag%nspin == 1) then
       n_occ_frag = max(1, min((nelec + 1) / 2, n_base_frag))
     else
-      n_occ_frag = max(1, min(nelec, n_base_frag))
+      if (sum(nelec_spin(:)) > 0) then
+        n_occ_frag = max(1, min(nelec_spin(ispin), n_base_frag))
+      else
+        n_occ_frag = max(1, min(int(nelec / 2.0d0 + 1.0d-12), n_base_frag))
+      end if
     end if
     
     ! Choose method: RI/DF (Plan C) or direct integration (Plan A)

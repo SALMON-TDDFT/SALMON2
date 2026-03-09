@@ -934,12 +934,8 @@ contains
     ! Fragment-local index
     ifrag_local = ifrag - dg_frag%ifrag_start + 1
     
-    ! Count occupied states per spin channel; see rt_dg_fragment.f90.
-    if (dg_frag%nspin == 1) then
-      n_occ_frag = max(1, min((nelec + 1) / 2, n_base_frag))
-    else
-      n_occ_frag = max(1, min(nelec, n_base_frag))
-    end if
+    ! SOI: nspin はスピノール成分数を表すため、占有状態数は nelec を用いる。
+    n_occ_frag = max(1, min(nelec, n_base_frag))
     
     ! Choose method: RI/DF (Plan C) or direct integration (Plan A)
     if (dg_frag%use_hse_ri .and. yn_hse_ri == 'y') then

@@ -72,8 +72,9 @@
         end if
       end block
     if (any(rho%f /= rho%f)) then
-      write(*,'(1x,a,i0,a,i0)') "[NaN] rho after calculate_density_from_fragments, rank=", &
+      write(*,'(1x,a,i0,a,i0)') "[FATAL] DG-RT invalid density (NaN), rank=", &
                                nproc_id_global, ", itt=", itt
+      stop "DG-RT density became NaN"
     end if
     
     ! Step 2: Update Hartree potential from new density
@@ -82,11 +83,13 @@
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
     call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
     if (any(Vh%f /= Vh%f)) then
-      write(*,'(1x,a,i0,a,i0)') "[NaN] Vh after hartree, rank=", nproc_id_global, ", itt=", itt
+      write(*,'(1x,a,i0,a,i0)') "[FATAL] DG-RT invalid Hartree (NaN), rank=", nproc_id_global, ", itt=", itt
+      stop "DG-RT Hartree became NaN"
     end if
-    if (maxval(abs(Vh%f)) > 1.0d150) then
-      write(*,'(1x,a,i0,a,i0,a,es12.4)') "[WARN] |Vh| huge after hartree, rank=", nproc_id_global, &
+    if (maxval(abs(Vh%f)) > 1.0d120) then
+      write(*,'(1x,a,i0,a,i0,a,es12.4)') "[FATAL] DG-RT invalid Hartree, rank=", nproc_id_global, &
         ", itt=", itt, " max=", maxval(abs(Vh%f))
+      stop "DG-RT Hartree diverged"
     end if
     
     ! Step 3: Update exchange-correlation potential
