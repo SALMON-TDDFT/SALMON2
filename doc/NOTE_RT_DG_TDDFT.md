@@ -43,6 +43,134 @@ H(t) = H_0 - i A(t) · nabla + A(t)^2 / 2
 
 with additional nonlocal pseudopotential contributions handled separately.
 
+## What "DG" Means Here
+
+In this implementation, "DG" should be understood in the fragment-basis sense, not as a textbook nodal DG code for a scalar hyperbolic PDE.
+
+The common structural idea is the same:
+
+- the computational domain is split into subdomains,
+- each subdomain carries its own local basis,
+- continuity across subdomain boundaries is not enforced by a single global continuous basis,
+- coupling between neighboring subdomains is handled explicitly through boundary/interface information.
+
+Here, the subdomains are fragments.
+
+Each fragment has:
+
+- its own local basis functions,
+- its own local piece of the real-space support,
+- its own contribution to density, Hamiltonian, and observables.
+
+The global time-dependent state is then represented by coefficients in the union of these fragment-local basis sets.
+
+So, at the practical implementation level, DG here means:
+
+```text
+global domain
+-> split into fragments
+-> build local fragment basis functions
+-> propagate global electronic state in the direct sum of fragment subspaces
+-> couple fragments through overlap, Hamiltonian, and boundary exchange
+```
+
+## Relation To Standard DG Formulations
+
+In standard discontinuous Galerkin formulations for PDEs, one usually starts from:
+
+1. a strong-form differential equation,
+2. element-wise weak formulation,
+3. integration by parts inside each element,
+4. numerical fluxes at interfaces,
+5. a discontinuous approximation space.
+
+The present RT-DG-TDDFT implementation is related in spirit, but it is not written in that explicit finite-element textbook form.
+
+Instead, it is closer to:
+
+- fragment-local basis construction in real space,
+- coefficient-space representation of the wave function,
+- explicit matrix-element construction for overlap and Hamiltonian,
+- explicit inter-fragment coupling through halo exchange and fragment-boundary data handling.
+
+So a good way to think about the difference is:
+
+- textbook DG:
+  - start from a PDE weak form and derive element matrices and numerical fluxes
+- SALMON RT-DG-Fragment:
+  - start from fragment-local basis functions and directly construct the coefficient-space quantum dynamics
+
+The method is therefore DG-like in the sense of discontinuous domain decomposition and local basis representation, but specialized to fragment-based RT-TDDFT rather than being a general-purpose DG FEM framework.
+
+## Why DG Is Useful In This RT Implementation
+
+The DG-like fragment representation is useful here for several reasons.
+
+### 1. Locality
+
+Localized fragment basis functions reduce the effective spatial extent of many matrix elements and make fragment-wise treatment natural.
+
+This is important for:
+
+- fragment-local basis storage,
+- fragment-local basis refresh,
+- local operator application,
+- mixed localized/delocalized basis design.
+
+### 2. Parallel decomposition
+
+Since fragments are explicit computational units, MPI decomposition can be organized around fragment ownership:
+
+```text
+fragments -> MPI ranks
+```
+
+This is the reason the DG RT path currently uses fragment-parallel decomposition with
+
+```text
+np <= n_frag
+```
+
+as an explicit working restriction.
+
+### 3. Adaptive basis update
+
+When the electronic structure changes strongly during RT, refreshing the basis fragment by fragment is more natural than rebuilding one large global basis.
+
+This is one of the main motivations for the current adaptive basis-update machinery.
+
+### 4. Coupling to auxiliary basis sectors
+
+Because the fragment space is already an explicitly assembled reduced space, it is comparatively straightforward to augment it with additional sectors such as plane waves.
+
+This is the role of the mixed fragment + PW path.
+
+## How Fragment Coupling Appears In Practice
+
+Although the basis is fragment-local and discontinuous in construction, the full electronic problem is not treated as a set of isolated fragments.
+
+Fragments are coupled through several mechanisms:
+
+- overlap matrices between fragment basis functions,
+- Hamiltonian matrix elements between fragment basis functions,
+- halo exchange for fragment-boundary real-space data,
+- nonlocal pseudopotential matrix elements,
+- optional fragment-PW coupling matrices in the mixed basis.
+
+So the implementation should not be interpreted as
+
+```text
+independent fragments propagated separately
+```
+
+but rather as
+
+```text
+a globally coupled RT problem represented in a fragment-local discontinuous basis
+```
+
+This distinction is important. The point of the DG representation is not to discard coupling, but to organize the coupling through local building blocks.
+
 ## High-Level Execution Flow
 
 The DG-Fragment RT branch is selected in [main_tddft.f90](/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/main_tddft.f90#L113).
