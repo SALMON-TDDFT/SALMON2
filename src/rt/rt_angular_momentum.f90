@@ -130,7 +130,12 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
   write(filenum, '(i6.6)') itt
   file_map = trim(base_directory)//trim(sysname)//'_lz_xy_'//trim(adjustl(filenum))//'.data'
   open(newunit=iunit, file=trim(file_map), status='replace', action='write')
-  write(iunit,'(a)') '# x y local_lz_zint dlocal_lz_dt_zint'
+  write(iunit,'(a)') '# Local electronic angular momentum integrated along z'
+  write(iunit,'(a)') '# x: x coordinate measured from the chosen vortex center'
+  write(iunit,'(a)') '# y: y coordinate measured from the chosen vortex center'
+  write(iunit,'(a)') '# local_lz_zint: local Lz integrated over z'
+  write(iunit,'(a)') '# dlocal_lz_dt_zint: time derivative of local_lz_zint'
+  write(iunit,'(a)') '# 1:x[a.u.] 2:y[a.u.] 3:local_lz_zint[none] 4:dlocal_lz_dt_zint[none]'
   do iy = 1, size(lz_xy, 2)
     y = (dble(iy) - 0.5d0) * system%hgs(2) - center_y
     do ix = 1, size(lz_xy, 1)
@@ -144,7 +149,12 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
   file_total = trim(base_directory)//trim(sysname)//'_lz_total.data'
   if (itt == 0) then
     open(newunit=iunit, file=trim(file_total), status='replace', action='write')
-    write(iunit,'(a)') '# step time local_lz_total dlocal_lz_total_dt'
+    write(iunit,'(a)') '# Total electronic angular momentum'
+    write(iunit,'(a)') '# step: RT step index'
+    write(iunit,'(a)') '# time: RT time'
+    write(iunit,'(a)') '# local_lz_total: total electronic Lz'
+    write(iunit,'(a)') '# dlocal_lz_total_dt: time derivative of local_lz_total'
+    write(iunit,'(a)') '# 1:step[none] 2:time[a.u.] 3:local_lz_total[none] 4:dlocal_lz_total_dt[none]'
   else
     open(newunit=iunit, file=trim(file_total), status='old', position='append', action='write')
   end if

@@ -408,7 +408,11 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
     write(filenum, '(i6.6)') itt
     filename = trim(base_directory)//trim(sysname)//'_lcm_xy_'//trim(adjustl(filenum))//'.data'
     open(newunit=iunit, file=trim(filename), status='replace', action='write')
-    write(iunit,'(a)') '# x y local_chern_marker_zint'
+    write(iunit,'(a)') '# Local Chern marker integrated along z'
+    write(iunit,'(a)') '# x: x coordinate'
+    write(iunit,'(a)') '# y: y coordinate'
+    write(iunit,'(a)') '# local_chern_marker_zint: local Chern marker integrated over z'
+    write(iunit,'(a)') '# 1:x[a.u.] 2:y[a.u.] 3:local_chern_marker_zint[none]'
     do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
         write(iunit,'(3(1x,es24.16))') mg%coordinate(ix,1), mg%coordinate(iy,2), marker_xy(ix,iy)
