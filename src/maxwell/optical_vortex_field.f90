@@ -77,21 +77,23 @@ subroutine calc_optical_vortex_Ac_ext(t, x, y, nx, ny, hgs, A_ext)
   A_ext(:) = -f0 / omega1 * (cos(pi * tt / tw1))**npower * window * radial_factor * aimag(zpol(:) * zphase)
 end subroutine calc_optical_vortex_Ac_ext
 
-subroutine calc_optical_vortex_EB_ext(t, x, y, nx, ny, hgs, dt, E_ext, B_ext)
+subroutine calc_optical_vortex_EB_ext(t, r, x, y, nx, ny, hgs, dt, E_ext, B_ext)
   use phys_constants, only: cspeed_au
   implicit none
-  real(8), intent(in) :: t, x, y, hgs(3), dt
+  real(8), intent(in) :: t, r, x, y, hgs(3), dt
   integer, intent(in) :: nx, ny
   real(8), intent(out) :: E_ext(3), B_ext(3)
   real(8) :: Ac_t_plus(3), Ac_t_minus(3), Ac_x_plus(3), Ac_x_minus(3), Ac_y_plus(3), Ac_y_minus(3)
-  real(8) :: dA_dt(3), dA_dx(3), dA_dy(3)
+  real(8) :: dA_dt(3), dA_dx(3), dA_dy(3), tt
 
-  call calc_optical_vortex_Ac_ext(t + 0.5d0 * dt, x, y, nx, ny, hgs, Ac_t_plus)
-  call calc_optical_vortex_Ac_ext(t - 0.5d0 * dt, x, y, nx, ny, hgs, Ac_t_minus)
-  call calc_optical_vortex_Ac_ext(t, x + 0.5d0 * hgs(1), y, nx, ny, hgs, Ac_x_plus)
-  call calc_optical_vortex_Ac_ext(t, x - 0.5d0 * hgs(1), y, nx, ny, hgs, Ac_x_minus)
-  call calc_optical_vortex_Ac_ext(t, x, y + 0.5d0 * hgs(2), nx, ny, hgs, Ac_y_plus)
-  call calc_optical_vortex_Ac_ext(t, x, y - 0.5d0 * hgs(2), nx, ny, hgs, Ac_y_minus)
+  tt = t - r / cspeed_au
+
+  call calc_optical_vortex_Ac_ext(tt + 0.5d0 * dt, x, y, nx, ny, hgs, Ac_t_plus)
+  call calc_optical_vortex_Ac_ext(tt - 0.5d0 * dt, x, y, nx, ny, hgs, Ac_t_minus)
+  call calc_optical_vortex_Ac_ext(tt, x + 0.5d0 * hgs(1), y, nx, ny, hgs, Ac_x_plus)
+  call calc_optical_vortex_Ac_ext(tt, x - 0.5d0 * hgs(1), y, nx, ny, hgs, Ac_x_minus)
+  call calc_optical_vortex_Ac_ext(tt, x, y + 0.5d0 * hgs(2), nx, ny, hgs, Ac_y_plus)
+  call calc_optical_vortex_Ac_ext(tt, x, y - 0.5d0 * hgs(2), nx, ny, hgs, Ac_y_minus)
 
   dA_dt(:) = (Ac_t_plus(:) - Ac_t_minus(:)) / dt
   dA_dx(:) = (Ac_x_plus(:) - Ac_x_minus(:)) / hgs(1)

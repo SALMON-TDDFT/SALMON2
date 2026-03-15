@@ -88,11 +88,11 @@ call print_header()
 if (yn_out_lcm_rt == 'y') then
   if (yn_dg_fragment_rt == 'y') stop 'yn_out_lcm_rt=y is not supported for DG-Fragment RT'
   if (info%isize_r > 1) stop 'yn_out_lcm_rt=y currently requires orbital-only decomposition (isize_r=1)'
-  call write_local_chern_marker_xy(0, mg, system, info, spsi_in)
+  call write_local_chern_marker_xy(Mit, mg, system, info, spsi_in)
 end if
 if (yn_out_lz_rt == 'y') then
   if (.not. singlescale%flag_use) stop 'yn_out_lz_rt=y requires theory=single_scale_maxwell_tddft'
-  call write_local_angular_momentum_xy(0, lg, mg, system, info, singlescale)
+  call write_local_angular_momentum_xy(Mit, lg, mg, system, info, singlescale)
 end if
 
 #ifdef USE_OPENACC
