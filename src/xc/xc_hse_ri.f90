@@ -82,6 +82,19 @@ contains
     ! Initialize auxiliary basis
     call init_auxiliary_basis(ri_data%aux_basis, natom, atom_coords, atom_types)
     ri_data%n_aux = get_n_auxiliary(ri_data%aux_basis)
+
+    if (ri_data%n_aux <= 0) then
+      allocate(ri_data%B_ijP(ri_data%n_basis, ri_data%n_basis, 0))
+      if (ri_data%use_cd_ri) then
+        ri_data%n_chol = 0
+        allocate(ri_data%L_PK(0, 0))
+      else
+        allocate(ri_data%V_inv_PQ(0, 0))
+      end if
+      ri_data%initialized = .true.
+      write(*, '(A, I0, A)') 'Initializing RI-HSE: N_basis=', ri_data%n_basis, ', N_aux=0 (vacuum fragment)'
+      return
+    end if
     
     write(*, '(A, I0, A, I0, A, F0.2)') &
       'Initializing RI-HSE: N_basis=', ri_data%n_basis, &
@@ -494,6 +507,11 @@ contains
     
     n_basis = ri_data%n_basis
     n_aux = ri_data%n_aux
+
+    if (n_aux <= 0 .or. n_basis <= 0) then
+      v_x(:, :) = 0.0d0
+      return
+    end if
     
     ! Branch: CD-RI or standard RI
     if (ri_data%use_cd_ri) then

@@ -377,7 +377,7 @@ contains
 
     integer :: ifrag, ifrag_local, n_frag_local
     integer :: natom_frag, icount
-    integer :: iatom_start, iatom_end, iatom
+    integer :: iatom
     real(8), allocatable :: atom_coords_frag(:,:)
     integer, allocatable :: atom_types_frag(:)
     
@@ -439,24 +439,18 @@ contains
         write(*,'(1x,a,i0,a,i0)') "  Initializing fragment ", ifrag, " (local ", ifrag_local, ")..."
       end if
       
-      ! Assign atoms by contiguous global index partition.
-      ! Use floor-based split to avoid OOB when nion is not divisible by n_frag.
-      iatom_start = ((ifrag - 1) * system%nion) / dg_frag%n_frag + 1
-      iatom_end   = (ifrag * system%nion) / dg_frag%n_frag
-      natom_frag  = iatom_end - iatom_start + 1
-      if (natom_frag <= 0) then
-        ! Vacuum-only fragment case (e.g., n_frag > nion):
-        ! keep RI initialization valid with a clamped representative atom.
-        iatom_start = min(max(1, iatom_start), system%nion)
-        iatom_end   = iatom_start
-        natom_frag  = 1
-      end if
+      natom_frag = 0
+      do iatom = 1, system%nion
+        if (atom_belongs_to_fragment(dg_frag, system, ifrag, iatom)) natom_frag = natom_frag + 1
+      end do
       
       allocate(atom_coords_frag(3, natom_frag))
       allocate(atom_types_frag(natom_frag))
       
-      do icount = 1, natom_frag
-        iatom = iatom_start + icount - 1
+      icount = 0
+      do iatom = 1, system%nion
+        if (.not. atom_belongs_to_fragment(dg_frag, system, ifrag, iatom)) cycle
+        icount = icount + 1
         atom_coords_frag(:, icount) = system%Rion(:, iatom)
         atom_types_frag(icount) = system%kion(iatom)
       end do
@@ -490,6 +484,56 @@ contains
     end if
     
   end subroutine init_hse_ri_data
+
+  logical function atom_belongs_to_fragment(dg_frag, system, ifrag, iatom) result(is_owned)
+    use structures, only: s_dft_system
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    integer, intent(in) :: ifrag, iatom
+    integer :: frag_idx(3), axis, g0, g1, ndiv, pos
+    real(8) :: rmin, rmax, ratom
+
+    is_owned = .true.
+    frag_idx = fragment_cartesian_index(dg_frag, ifrag)
+
+    do axis = 1, 3
+      g0 = dg_frag%ixyz_frag(axis, ifrag)
+      g1 = g0 + dg_frag%nxyz_domain(axis, ifrag) - 1
+      rmin = dg_frag%mg%coordinate(g0, axis)
+      rmax = dg_frag%mg%coordinate(g1, axis)
+      ratom = system%Rion(axis, iatom)
+      ndiv = max(1, dg_frag%num_fragment(axis))
+      pos = frag_idx(axis)
+
+      if (pos < ndiv) then
+        if (ratom < rmin .or. ratom >= rmax) then
+          is_owned = .false.
+          return
+        end if
+      else
+        if (ratom < rmin .or. ratom > rmax) then
+          is_owned = .false.
+          return
+        end if
+      end if
+    end do
+  end function atom_belongs_to_fragment
+
+  function fragment_cartesian_index(dg_frag, ifrag) result(idx)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    integer :: idx(3)
+    integer :: rem
+
+    rem = ifrag - 1
+    idx(1) = mod(rem, dg_frag%num_fragment(1)) + 1
+    rem = rem / dg_frag%num_fragment(1)
+    idx(2) = mod(rem, dg_frag%num_fragment(2)) + 1
+    rem = rem / dg_frag%num_fragment(2)
+    idx(3) = mod(rem, dg_frag%num_fragment(3)) + 1
+  end function fragment_cartesian_index
 
 #include "rt_dg_fragment_halo_soi.f90"
 
