@@ -92,7 +92,7 @@ if (yn_out_lcm_rt == 'y') then
 end if
 if (yn_out_lz_rt == 'y') then
   if (.not. singlescale%flag_use) stop 'yn_out_lz_rt=y requires theory=single_scale_maxwell_tddft'
-  call write_local_angular_momentum_xy(Mit, lg, mg, system, info, singlescale)
+  call write_local_angular_momentum_xy(Mit, lg, mg, system, info, singlescale, spsi_in)
 end if
 
 #ifdef USE_OPENACC
@@ -141,7 +141,11 @@ else
       end if
       if (yn_out_lz_rt == 'y') then
         if (mod(itt, out_lz_rt_step) == 0) then
-          call write_local_angular_momentum_xy(itt, lg, mg, system, info, singlescale)
+          if (mod(itt,2) == 1) then
+            call write_local_angular_momentum_xy(itt, lg, mg, system, info, singlescale, spsi_out)
+          else
+            call write_local_angular_momentum_xy(itt, lg, mg, system, info, singlescale, spsi_in)
+          end if
         end if
       end if
 
