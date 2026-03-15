@@ -136,8 +136,8 @@ contains
 
           s1(:,:) = s1_sum(:,:)
           s2(:,:) = s2_sum(:,:)
-          call invert_complex_matrix_checked(s1, 'S1')
-          call invert_complex_matrix_checked(s2, 'S2')
+          call build_transposed_inverse_coefficients_checked(s1, 'S1')
+          call build_transposed_inverse_coefficients_checked(s2, 'S2')
 
           zt1(:,:,:,:) = (0.0d0, 0.0d0)
           zt2(:,:,:,:) = (0.0d0, 0.0d0)
@@ -152,8 +152,8 @@ contains
               phase2 = exp(-zi * dot_product(b2, rvec))
               do iocc = 1, nocc
                 do jocc = 1, nocc
-                  zt1(ix,iy,iz,iocc) = zt1(ix,iy,iz,iocc) + s1(jocc,iocc) * phase1 * zocc(ix,iy,iz,jocc)
-                  zt2(ix,iy,iz,iocc) = zt2(ix,iy,iz,iocc) + s2(jocc,iocc) * phase2 * zocc(ix,iy,iz,jocc)
+                  zt1(ix,iy,iz,iocc) = zt1(ix,iy,iz,iocc) + s1(iocc,jocc) * phase1 * zocc(ix,iy,iz,jocc)
+                  zt2(ix,iy,iz,iocc) = zt2(ix,iy,iz,iocc) + s2(iocc,jocc) * phase2 * zocc(ix,iy,iz,jocc)
                 end do
               end do
             end do
@@ -392,52 +392,60 @@ contains
     end subroutine apply_right_transform_occ_inplace
 
 
-    subroutine invert_complex_matrix_checked(a, label)
+    subroutine build_transposed_inverse_coefficients_checked(a, label)
       implicit none
       complex(8), intent(inout) :: a(:,:)
       character(*), intent(in) :: label
-      integer :: n, lwork, info_inv
+      integer :: n, nrhs, lwork, info_inv
       integer, allocatable :: ipiv(:)
       complex(8), allocatable :: work(:)
       real(8), allocatable :: rwork(:)
-      complex(8), allocatable :: a_lu(:,:)
+      complex(8), allocatable :: a_lu(:,:), rhs(:,:)
       real(8) :: anorm, rcond
       real(8), parameter :: rcond_warn = 1.0d-10
       real(8) :: zlange
+      integer :: i
 
       n = size(a,1)
       if (n <= 0) return
 
+      nrhs = n
       lwork = max(1, n*max(n,64))
-      allocate(ipiv(n), work(lwork), rwork(max(1,2*n)), a_lu(n,n))
+      allocate(ipiv(n), work(lwork), rwork(max(1,2*n)), a_lu(n,n), rhs(n,nrhs))
       a_lu(:,:) = a(:,:)
       anorm = zlange('1', n, n, a, n, rwork)
 
       call zgetrf(n, n, a_lu, n, ipiv, info_inv)
       if (info_inv /= 0) then
-        write(*,'(a,1x,a,1x,a,i0)') 'invert_complex_matrix_checked:', trim(label), 'zgetrf info=', info_inv
-        stop 'invert_complex_matrix_checked: LU factorization failed'
+        write(*,'(a,1x,a,1x,a,i0)') 'build_transposed_inverse_coefficients_checked:', trim(label), 'zgetrf info=', info_inv
+        stop 'build_transposed_inverse_coefficients_checked: LU factorization failed'
       end if
 
       call zgecon('1', n, a_lu, n, anorm, rcond, work, rwork, info_inv)
       if (info_inv /= 0) then
-        write(*,'(a,1x,a,1x,a,i0)') 'invert_complex_matrix_checked:', trim(label), 'zgecon info=', info_inv
-        stop 'invert_complex_matrix_checked: condition estimate failed'
+        write(*,'(a,1x,a,1x,a,i0)') 'build_transposed_inverse_coefficients_checked:', trim(label), 'zgecon info=', info_inv
+        stop 'build_transposed_inverse_coefficients_checked: condition estimate failed'
       end if
       if (rcond < rcond_warn) then
-        write(*,'(a,1x,a,1x,a,es12.4,1x,a,es12.4)') 'invert_complex_matrix_checked:', trim(label), &
+        write(*,'(a,1x,a,1x,a,es12.4,1x,a,es12.4)') 'build_transposed_inverse_coefficients_checked:', trim(label), &
           'ill-conditioned matrix: rcond=', rcond, 'anorm=', anorm
       end if
 
-      a(:,:) = a_lu(:,:)
-      call zgetri(n, a, n, ipiv, work, lwork, info_inv)
+      rhs(:,:) = (0.0d0, 0.0d0)
+      do i = 1, n
+        rhs(i,i) = (1.0d0, 0.0d0)
+      end do
+
+      call zgetrs('T', n, nrhs, a_lu, n, ipiv, rhs, n, info_inv)
       if (info_inv /= 0) then
-        write(*,'(a,1x,a,1x,a,i0)') 'invert_complex_matrix_checked:', trim(label), 'zgetri info=', info_inv
-        stop 'invert_complex_matrix_checked: matrix inversion failed'
+        write(*,'(a,1x,a,1x,a,i0)') 'build_transposed_inverse_coefficients_checked:', trim(label), 'zgetrs info=', info_inv
+        stop 'build_transposed_inverse_coefficients_checked: linear solve failed'
       end if
 
-      deallocate(a_lu, rwork, ipiv, work)
-    end subroutine invert_complex_matrix_checked
+      a(:,:) = rhs(:,:)
+
+      deallocate(rhs, a_lu, rwork, ipiv, work)
+    end subroutine build_transposed_inverse_coefficients_checked
 
 
     subroutine reduce_marker_over_k(mg0, info0, lcm)
