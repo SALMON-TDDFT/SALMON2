@@ -39,6 +39,16 @@ module rt_dg_fragment_types
   end type halo_info
 
   ! Fragment basis data structure
+  !
+  ! Spin convention in DG-RT:
+  ! - phi_frag / phi_frag_c store the fragment real-space basis itself.
+  !   In the current non-SOI DG path this basis is not duplicated per spin.
+  ! - n_basis, index_basis, n_mat, coef, H_mat, S_mat, momentum_mat, etc.
+  !   carry an nspin axis because the occupied subspace bookkeeping and the
+  !   operator representation on that basis are resolved by spin channel.
+  ! - Therefore "spin-dependent basis" in this module means spin-resolved
+  !   basis indexing / coefficients / projected operators, not necessarily
+  !   distinct real-space basis functions for each spin channel.
   type, public :: s_dg_fragment_rt
     integer :: n_frag                          ! number of fragments
     integer :: nspin                           ! number of spin
@@ -46,22 +56,26 @@ module rt_dg_fragment_types
     integer :: nstate_tot                      ! total number of states
     integer :: time_integrator                 ! 1: SSPRK3, 2: AETRS, 3: RK4
 
-    ! Fragment basis coefficients and their time derivatives (MUST be complex)
+    ! Spin-resolved coefficients on the fragment basis (MUST be complex).
+    ! The first index is the global fragment-basis index after index_basis mapping,
+    ! not a separate real-space basis copy for each spin channel.
     complex(8), allocatable :: coef(:,:,:)        ! (nstate_frag, nstate_tot, nspin)
     complex(8), allocatable :: coef_new(:,:,:)    ! for time propagation
     complex(8), allocatable :: coef_work(:,:,:)   ! work array
 
-    ! Hamiltonian matrix in fragment basis
+    ! Spin-channel-resolved operator matrices on the fragment basis.
+    ! These arrays are spin-resolved projected representations, even when the
+    ! underlying real-space fragment basis functions are spin independent.
     real(8), allocatable :: H_mat(:,:,:)       ! (nmat, nmat, nspin)
     complex(8), allocatable :: H_mat_c(:,:,:)      ! complex Hamiltonian (SOI/mixed propagation path)
     real(8), allocatable :: S_mat(:,:,:)       ! raw fragment overlap matrix
     real(8), allocatable :: S_mat_prop(:,:,:)  ! overlap matrix used in propagation/unitarity
     complex(8), allocatable :: S_mat_c(:,:,:)      ! complex raw fragment overlap matrix (SOI path)
     complex(8), allocatable :: S_mat_prop_c(:,:,:) ! complex overlap used in propagation/unitarity
-    integer, allocatable :: n_basis(:,:)       ! (n_frag, nspin)
-    integer, allocatable :: index_basis(:,:,:) ! (nstate_frag, n_frag, nspin)
-    integer, allocatable :: n_mat(:)           ! (nspin)
-    integer :: n_mat_max                       ! max dimension of H_mat
+    integer, allocatable :: n_basis(:,:)       ! (n_frag, nspin), spin-resolved active basis count per fragment
+    integer, allocatable :: index_basis(:,:,:) ! (nstate_frag, n_frag, nspin), spin-resolved local->global basis map
+    integer, allocatable :: n_mat(:)           ! (nspin), spin-resolved projected-matrix dimension
+    integer :: n_mat_max                       ! max projected-matrix dimension over spin channels
 
     ! Time-dependent external field coupling (velocity gauge: H = H_0 - i*A·∇ + A^2/2)
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)
@@ -102,9 +116,10 @@ module rt_dg_fragment_types
     ! Auxiliary arrays for self-consistent calculation
     real(8), allocatable :: phi_frag(:,:,:,:,:)    ! fragment basis functions in real space
                                                    ! With halo: (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, nstate, ifrag)
-                                                   ! where nb = nxyz_buffer = 4 for 4th-order stencil
-                                                   ! REAL from DC-LCFO (no complex phase)
-    complex(8), allocatable :: phi_frag_c(:,:,:,:,:) ! complex fragment basis (SOI path)
+                                                   ! where nb = nxyz_buffer = 4 for 4th-order stencil.
+                                                   ! This is the shared real-space fragment basis itself.
+                                                   ! Spin dependence enters through bookkeeping/operators, not here.
+    complex(8), allocatable :: phi_frag_c(:,:,:,:,:) ! complex fragment basis for SOI/noncollinear path
     logical :: has_real_space_basis                ! flag: real-space basis available
     logical :: has_halo_exchange                   ! flag: halo exchange implemented
 

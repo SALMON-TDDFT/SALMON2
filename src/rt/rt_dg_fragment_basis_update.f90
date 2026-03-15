@@ -1,6 +1,9 @@
-!=======================================================================
+  !=======================================================================
   ! Check Hamiltonian change for assigned fragments and return update flag
   ! Each MPI rank checks its own fragments, then collective decision via Allreduce
+  ! H_mat_current is spin-resolved in coefficient/operator space. In the current
+  ! non-SOI DG path this does not imply distinct real-space fragment basis
+  ! functions per spin channel.
   !=======================================================================
   function check_hamiltonian_change_fragments(dg_frag, H_mat_current) result(needs_update)
     use communication, only: comm_summation

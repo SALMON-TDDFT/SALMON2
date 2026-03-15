@@ -7,6 +7,9 @@
   ! Includes halo (ghost cell) exchange for accurate boundary treatment.
   ! System boundaries use PERIODIC boundary conditions (full system is periodic).
   ! Fragment boundaries are handled via MPI communication between neighboring fragments.
+  ! The real-space fragment basis itself is shared across spin channels in the
+  ! present non-SOI DG path; the nspin axis here labels spin-resolved projected
+  ! matrices and basis indexing, not separate copies of phi_frag for each spin.
   !=======================================================================
   subroutine calculate_hamiltonian_matrix(dg_frag, system, lg, mg, stencil, &
                                          Vh, Vxc, Vpsl, pp, ppg)
