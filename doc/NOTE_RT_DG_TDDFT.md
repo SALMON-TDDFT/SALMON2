@@ -241,6 +241,16 @@ In practice, the minimum mental model is:
 - `coef` is the propagated electronic state in that basis,
 - `H_mat` is the coefficient-space Hamiltonian built from current fields and potentials.
 
+Two implementation details are worth keeping explicit:
+
+- `index_basis` is allocated with first dimension `nstate_frag`, not `n_basis`.
+  Any validation or masking loop must therefore use
+  `min(n_basis(...), size(index_basis,1))` as its upper bound.
+- `n_mat_max` is not capped in normal production runs.
+  The current code only applies a fragment-basis cap when the diagnostic
+  environment variable `SALMON_DG_NMAT_CAP` is explicitly set to a positive
+  integer.
+
 ## Initialization Path
 
 Initialization is performed in [rt_dg_fragment.f90](/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/rt_dg_fragment.f90#L114) by `init_dg_fragment_rt`.
@@ -272,6 +282,31 @@ The expected data source for production runs is the DC-LCFO fragment data direct
 ```
 
 Without this imported basis, the DG RT path is not the intended working mode.
+
+### HSE-RI fragment atom assignment
+
+The DG fragments themselves are defined by spatial boxes, so the HSE-RI atom
+assignment is also done spatially.
+
+The current implementation does not divide atoms by contiguous atom index.
+Instead, each atom is assigned to the fragment whose interior box contains
+`Rion(:,iatom)`. The box is built from:
+
+- `ixyz_frag(:,ifrag)` as the global-grid fragment origin
+- `nxyz_domain(:,ifrag)` as the fragment interior size
+- `mg%coordinate` as the real-space coordinate map
+
+To avoid double counting on internal boundaries, ownership is defined by a
+half-open rule:
+
+- lower boundary inclusive
+- upper boundary exclusive
+- except for the last fragment along an axis, where the upper boundary is also
+  inclusive
+
+Vacuum fragments with `natom_frag = 0` are explicitly allowed. In that case,
+the HSE-RI fragment data are initialized in a zero-auxiliary safe state and
+their exact-exchange contribution is zero.
 
 ## Fragment Distribution And MPI
 
@@ -358,6 +393,27 @@ calculate_density_from_fragments
 -> reconstruct_hamiltonian_matrix
 -> mixed-basis update if PW mixing is enabled
 ```
+
+## SOI Angular Momentum Output
+
+When SOI is active and RT angular-momentum output is enabled, the code reports
+
+```text
+Jz = Lz + Sz
+```
+
+where `Lz` is reconstructed from the single-scale current density and `Sz` is
+reconstructed from the local spin density.
+
+The important implementation detail is that the SOI path uses `m_micro` as the
+spin-density observable, and in SALMON this quantity is treated as
+
+```text
+m_micro = (1/2) <sigma>
+```
+
+rather than as a magnetic moment in physical units. In atomic units with
+`hbar = 1`, this makes `Sz` directly additive to `Lz` in the reported `Jz`.
 
 This is the key self-consistent bridge from coefficient space back to grid-based KS ingredients.
 
