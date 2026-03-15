@@ -64,6 +64,9 @@ subroutine write_local_angular_momentum_xy(itt, lg, mg, system, info, singlescal
         x = (dble(ix) - 0.5d0) * system%hgs(1) - center_x
         lz_local = x * singlescale%curr(ix,iy,iz,2) - y * singlescale%curr(ix,iy,iz,1)
         sz_local = 0.0d0
+        ! calc_magnetization_micro returns the local spin expectation density
+        ! m = (1/2) <sigma>, not the magnetic moment density. In atomic units
+        ! with hbar=1, Jz = Lz + Sz is therefore dimensionally consistent.
         if (yn_spinorbit == 'y') sz_local = m_micro(ix,iy,iz,3)
         lz_xy_local(ix,iy) = lz_xy_local(ix,iy) + lz_local * system%hgs(3)
         sz_xy_local(ix,iy) = sz_xy_local(ix,iy) + sz_local * system%hgs(3)
@@ -182,6 +185,7 @@ subroutine dump_lz_record(itt, time_now, lz_xy, sz_xy, jz_xy, djzdt_xy, lz_total
   real(8) :: x, y
   real(8) :: conv_ang_xy, conv_djzdt_xy, conv_ang_total, conv_djzdt_total
   character(64) :: unit_ang_xy, unit_djzdt_xy, unit_ang_total, unit_djzdt_total
+  logical :: file_exists
 
   if (.not. comm_is_root(nproc_id_global)) return
 
@@ -230,7 +234,8 @@ subroutine dump_lz_record(itt, time_now, lz_xy, sz_xy, jz_xy, djzdt_xy, lz_total
   close(iunit)
 
   file_total = trim(base_directory)//trim(sysname)//'_lz_total.data'
-  if (itt == 0) then
+  inquire(file=trim(file_total), exist=file_exists)
+  if (itt == 0 .or. .not. file_exists) then
     open(newunit=iunit, file=trim(file_total), status='replace', action='write')
     write(iunit,'(a)') '# Total electronic angular momentum components'
     write(iunit,'(a)') '# step: RT step index'
