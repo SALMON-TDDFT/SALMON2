@@ -78,6 +78,10 @@ module rt_dg_fragment_types
     real(8) :: dipole_moment(3)                ! total dipole moment
     real(8) :: current(3)                      ! current density
     real(8) :: total_energy                    ! total energy
+    real(8) :: elec_num_scaled                 ! total electrons after rho normalization
+    real(8) :: elec_num_raw                    ! total electrons before rho normalization
+    real(8) :: rho_scale_factor                ! density renormalization factor
+    real(8) :: pw_weight_raw                   ! simple diagnostic: sum |coef_pw|^2 over occupied states
 
     ! Fragment geometry information
     integer :: num_fragment(3)                 ! Fragment division in each direction (from salmon_global)

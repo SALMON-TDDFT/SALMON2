@@ -16,7 +16,7 @@
     logical :: do_interface_check
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
-    real(8) :: current_tmp, energy_tmp
+    real(8) :: current_tmp, energy_tmp, pw_weight_local
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
     complex(8) :: minus_i
@@ -28,6 +28,7 @@
     ! MPI aggregation will sum across all ranks
     current_local = 0.0d0
     energy_local = 0.0d0
+    pw_weight_local = 0.0d0
 
     n = dg_frag%n_mat_max
     ! Occupied orbitals per spin channel (closed-shell): nelec = 2 * nocc.
@@ -141,6 +142,14 @@
       energy_local = energy_local + energy_tmp
     end do
 
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
+      do ispin = 1, dg_frag%nspin
+        do io = 1, nocc
+          pw_weight_local = pw_weight_local + sum(abs(dg_frag%coef_pw(:, io, ispin))**2)
+        end do
+      end do
+    end if
+
     if (do_interface_check) then
       allocate(dndt_frag(dg_frag%n_frag))
       dndt_frag = 0.0d0
@@ -175,12 +184,14 @@
     ! MPI aggregation: sum local contributions from all ranks
     call comm_summation(current_local, dg_frag%current, 3, dg_frag%icomm)
     call comm_summation(energy_local, dg_frag%total_energy, dg_frag%icomm)
+    call comm_summation(pw_weight_local, dg_frag%pw_weight_raw, dg_frag%icomm)
 
     ! coef/momentum/H are synchronized globally on all ranks. Each rank therefore
     ! evaluates the same full-system observable; use process-average to avoid
     ! fragment-count-dependent overcounting after MPI summation.
     dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
     dg_frag%total_energy = dg_frag%total_energy / real(max(1, dg_frag%isize), 8)
+    dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
     
     ! Normalize by global grid count exactly as conventional calc_current().
     ! This avoids decomposition-dependent scaling from local/grid-view differences.

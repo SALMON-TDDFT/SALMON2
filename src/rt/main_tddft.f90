@@ -311,6 +311,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     
     ! Store observables from DG-Fragment calculation (already calculated in tddft_dg_fragment_iteration)
     energy%E_tot = dg_frag%total_energy
+    energy%elec_num = dg_frag%elec_num_scaled
+    energy%elec_num_raw = dg_frag%elec_num_raw
+    energy%pw_weight_raw = dg_frag%pw_weight_raw
 
     if (theory == 'single_scale_maxwell_tddft') then
       singlescale%E_electron = energy%E_tot

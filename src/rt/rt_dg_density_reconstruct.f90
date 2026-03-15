@@ -147,10 +147,14 @@
     end where
 
     total_charge = sum(rho%f) * system%hvol
+    dg_frag%elec_num_raw = total_charge
+    dg_frag%rho_scale_factor = 1.0d0
     if (total_charge > 1.0d-14 .and. total_charge == total_charge) then
       scale_rho = nelec / total_charge
+      dg_frag%rho_scale_factor = scale_rho
       rho%f = rho%f * scale_rho
     end if
+    dg_frag%elec_num_scaled = sum(rho%f) * system%hvol
 
     do ispin = 1, system%nspin
       rho_s(ispin)%f = rho%f / real(system%nspin, 8)
