@@ -412,7 +412,9 @@ contains
 
     light_lz_wrk = 0d0
     area = hgs(1) * hgs(2)
-    coef_lz = 1d0 / (cspeed_au * cspeed_au)
+    ! Lz flux through a z-normal plane is c times the angular-momentum density:
+    !   j_Lz = c * (r x S / c^2)_z = (r x S)_z / c
+    coef_lz = 1d0 / cspeed_au
     center_x = optical_vortex_center_x
     center_y = optical_vortex_center_y
     if (center_x < -1d20) center_x = 0.5d0 * lg%num(1) * hgs(1)
