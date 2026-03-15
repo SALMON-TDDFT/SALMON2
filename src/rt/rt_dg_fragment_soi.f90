@@ -635,9 +635,10 @@ contains
     dg_frag%n_mat(1:dg_frag%nspin) = n_mat_tmp(1:dg_frag%nspin)
     dg_frag%n_mat_max = maxval(n_mat_tmp(1:dg_frag%nspin))
 
-    ! Test-mode basis-size alignment for fragment-comparison studies.
-    ! Default cap is n_occ+6 and can be overridden with SALMON_DG_NMAT_CAP.
-    n_mat_cap = max(1, dg_frag%nstate_tot + 6)
+    ! Optional basis-size cap for fragment-comparison studies.
+    ! Normal production runs keep the full fragment basis unless
+    ! SALMON_DG_NMAT_CAP is explicitly set.
+    n_mat_cap = 0
     env_n_mat_cap = ""
     env_status = 1
     env_len = 0
@@ -656,8 +657,10 @@ contains
         end if
       end if
     end if
-    dg_frag%n_mat(1:dg_frag%nspin) = min(dg_frag%n_mat(1:dg_frag%nspin), n_mat_cap)
-    dg_frag%n_mat_max = maxval(dg_frag%n_mat(1:dg_frag%nspin))
+    if (n_mat_cap >= 1) then
+      dg_frag%n_mat(1:dg_frag%nspin) = min(dg_frag%n_mat(1:dg_frag%nspin), n_mat_cap)
+      dg_frag%n_mat_max = maxval(dg_frag%n_mat(1:dg_frag%nspin))
+    end if
 
     ! Enforce cap consistency in index_basis:
     ! indices beyond capped n_mat are masked out to prevent OOB accesses.
@@ -666,7 +669,7 @@ contains
       do ispin_cap = 1, dg_frag%nspin
         max_keep = 0
         do ifrag_cap = 1, dg_frag%n_frag
-          nbasis_iter = min(dg_frag%n_basis(ifrag_cap, ispin_cap), dg_frag%nstate_frag)
+          nbasis_iter = min(dg_frag%n_basis(ifrag_cap, ispin_cap), size(dg_frag%index_basis, 1))
           do io_cap = 1, nbasis_iter
             idx_cap = dg_frag%index_basis(io_cap, ifrag_cap, ispin_cap)
             if (idx_cap < 1 .or. idx_cap > dg_frag%n_mat(ispin_cap)) then
@@ -694,7 +697,8 @@ contains
           dup_count = 0
           out_count = 0
           do ifrag_chk = 1, dg_frag%n_frag
-            do io_chk = 1, dg_frag%n_basis(ifrag_chk, ispin_chk)
+            nbasis_iter = min(dg_frag%n_basis(ifrag_chk, ispin_chk), size(dg_frag%index_basis, 1))
+            do io_chk = 1, nbasis_iter
               global_idx = dg_frag%index_basis(io_chk, ifrag_chk, ispin_chk)
               if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) then
                 out_count = out_count + 1
