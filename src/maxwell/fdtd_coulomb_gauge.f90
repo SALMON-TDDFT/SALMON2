@@ -303,9 +303,11 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   Energy_em = e_em
   fw%Energy_joule = fw%Energy_joule + dt*e_joule
   fw%Energy_poynting = fw%Energy_poynting + dt*e_poynting
-  call calc_light_lz_flux
-  fw%light_lz_flux = light_lz_all
-  fw%light_lz_cum = fw%light_lz_cum + dt * light_lz_all
+  if(yn_optical_vortex=='y') then
+    call calc_light_lz_flux
+    fw%light_lz_flux = light_lz_all
+    fw%light_lz_cum = fw%light_lz_cum + dt * light_lz_all
+  end if
 
   if(comm_is_root(info%id_rko)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
     dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,fw%curr_ave,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule, &

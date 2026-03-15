@@ -158,8 +158,8 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
   write(iunit,'(a)') '# y: y coordinate measured from the chosen vortex center'
   write(iunit,'(a)') '# local_lz_zint: local Lz integrated over z'
   write(iunit,'(a)') '# dlocal_lz_dt_zint: time derivative of local_lz_zint'
-  write(iunit,'(a,a,a,a,a,a,a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', trim(t_unit_length%name), &
-                                 '] 3:local_lz_zint[', trim(unit_lz_xy), '] 4:dlocal_lz_dt_zint[', trim(unit_dlzdt_xy), ']'
+  write(iunit,'(9a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', trim(t_unit_length%name), &
+                     '] 3:local_lz_zint[', trim(unit_lz_xy), '] 4:dlocal_lz_dt_zint[', trim(unit_dlzdt_xy), ']'
   do iy = 1, size(lz_xy, 2)
     y = ((dble(iy) - 0.5d0) * system%hgs(2) - center_y) * t_unit_length%conv
     do ix = 1, size(lz_xy, 1)
@@ -178,8 +178,8 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
     write(iunit,'(a)') '# time: RT time'
     write(iunit,'(a)') '# local_lz_total: total electronic Lz'
     write(iunit,'(a)') '# dlocal_lz_total_dt: time derivative of local_lz_total'
-    write(iunit,'(a,a,a,a,a)') '# 1:step[none] 2:time[', trim(t_unit_time%name), '] 3:local_lz_total[', trim(unit_lz_total), &
-                               '] 4:dlocal_lz_total_dt[', trim(unit_dlzdt_total), ']'
+    write(iunit,'(7a)') '# 1:step[none] 2:time[', trim(t_unit_time%name), '] 3:local_lz_total[', trim(unit_lz_total), &
+                       '] 4:dlocal_lz_total_dt[', trim(unit_dlzdt_total), ']'
   else
     open(newunit=iunit, file=trim(file_total), status='old', position='append', action='write')
   end if

@@ -98,6 +98,10 @@ subroutine calc_optical_vortex_EB_ext(t, x, y, nx, ny, hgs, dt, E_ext, B_ext)
   dA_dy(:) = (Ac_y_plus(:) - Ac_y_minus(:)) / hgs(2)
 
   E_ext(:) = -dA_dt(:)
+  ! Plane-wave propagation along +z: dA/dz ≈ (1/c) dA/dt, so B_x ≈ -E_y and B_y ≈ E_x.
+  ! For vortex fields with A_z=0, curl A gives B_x=B_y=0, which zeroes the Poynting
+  ! vector transverse components and breaks the Lz_inc/ref flux decomposition.
+  ! The plane-wave approximation is physically correct for the OAM flux calculation.
   B_ext(1) = -E_ext(2)
   B_ext(2) =  E_ext(1)
   B_ext(3) = cspeed_au * (dA_dx(2) - dA_dy(1))

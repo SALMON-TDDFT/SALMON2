@@ -102,10 +102,13 @@ module rt_dg_fragment
   
   ! RI/DF data for HSE exchange (one per local fragment)
   type(hse_ri_data_t), allocatable, save :: hse_ri_data_frag(:)  ! (n_frag_local)
-  logical, save :: dg_hse_ace_enabled = .false.
+  ! NOTE: dg_hse_ace_enabled, dg_hse_ace_max_age, dg_hse_ace_coef_thresh are now
+  !       namelist variables in salmon_global (yn_dg_hse_ace, dg_hse_ace_max_age,
+  !       dg_hse_ace_coef_thresh). Only runtime state is kept here.
+  ! NOTE: This module is structurally parallel to rt_dg_fragment_soi (SOI variant).
+  !       The HSE-ACE cache infrastructure is intentionally identical; any bug fix
+  !       here must also be applied to rt_dg_fragment_soi and vice versa.
   logical, save :: dg_hse_ace_initialized = .false.
-  integer, save :: dg_hse_ace_max_age = 20
-  real(8), save :: dg_hse_ace_coef_thresh = 5.0d-3
   real(8), allocatable, save :: hse_ace_vx_cache(:,:,:,:)         ! (nstate_frag,nstate_frag,nspin,n_frag_local)
   complex(8), allocatable, save :: hse_ace_coef_snapshot(:,:,:,:) ! (nstate_frag,nstate_tot,nspin,n_frag_local)
   integer, allocatable, save :: hse_ace_last_rebuild(:,:)         ! (n_frag_local,nspin)
@@ -359,21 +362,20 @@ contains
   !=======================================================================
   subroutine init_hse_ri_data(dg_frag, system, info)
     use salmon_global, only: yn_hse, yn_hse_ri, hse_omega, hse_ri_ratio, &
-                             yn_hse_cd_ri, hse_cd_ri_threshold
+                             yn_hse_cd_ri, hse_cd_ri_threshold, &
+                             yn_dg_hse_ace, dg_hse_ace_max_age, dg_hse_ace_coef_thresh
     use structures
     use communication, only: comm_is_root, comm_get_groupinfo
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
     type(s_parallel_info), intent(in) :: info
-    
+
     integer :: ifrag, ifrag_local, n_frag_local
     integer :: natom_frag, icount
     integer :: iatom_start, iatom_end, iatom
-    integer :: env_status, env_len, ienv
     real(8), allocatable :: atom_coords_frag(:,:)
     integer, allocatable :: atom_types_frag(:)
-    character(len=64) :: env_ace, env_ace_age, env_ace_thresh
     
     ! Check if HSE with RI is enabled
     dg_frag%use_hse_ri = (yn_hse == 'y' .and. yn_hse_ri == 'y')
@@ -392,35 +394,8 @@ contains
     ! Calculate number of local fragments
     n_frag_local = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
 
-    env_ace = ""
-    env_ace_age = ""
-    env_ace_thresh = ""
-    env_status = 1
-    env_len = 0
-    dg_hse_ace_enabled = .false.
-    dg_hse_ace_max_age = 20
-    dg_hse_ace_coef_thresh = 5.0d-3
-    call get_environment_variable("SALMON_DG_HSE_ACE", env_ace, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      select case(trim(adjustl(env_ace(1:env_len))))
-      case('y','Y','yes','YES','true','TRUE','1','on','ON')
-        dg_hse_ace_enabled = .true.
-      end select
-    end if
-    env_status = 1
-    env_len = 0
-    call get_environment_variable("SALMON_DG_HSE_ACE_MAX_AGE", env_ace_age, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_ace_age(1:env_len), *, iostat=ienv) dg_hse_ace_max_age
-      if (ienv /= 0 .or. dg_hse_ace_max_age < 1) dg_hse_ace_max_age = 20
-    end if
-    env_status = 1
-    env_len = 0
-    call get_environment_variable("SALMON_DG_HSE_ACE_COEF_THRESH", env_ace_thresh, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_ace_thresh(1:env_len), *, iostat=ienv) dg_hse_ace_coef_thresh
-      if (ienv /= 0 .or. dg_hse_ace_coef_thresh <= 0.0d0) dg_hse_ace_coef_thresh = 5.0d-3
-    end if
+    ! ACE cache settings are read from the input namelist (yn_dg_hse_ace,
+    ! dg_hse_ace_max_age, dg_hse_ace_coef_thresh via salmon_global).
     
     if (comm_is_root(info%id_rko)) then
       write(*,*)
@@ -436,7 +411,7 @@ contains
     if (allocated(hse_ace_last_rebuild)) deallocate(hse_ace_last_rebuild)
     if (allocated(hse_ace_call_count)) deallocate(hse_ace_call_count)
     if (allocated(hse_ace_cache_valid)) deallocate(hse_ace_cache_valid)
-    if (dg_hse_ace_enabled) then
+    if (yn_dg_hse_ace == 'y') then
       allocate(hse_ace_vx_cache(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, n_frag_local))
       allocate(hse_ace_coef_snapshot(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, n_frag_local))
       allocate(hse_ace_last_rebuild(n_frag_local, dg_frag%nspin))
@@ -500,7 +475,7 @@ contains
     
     if (comm_is_root(info%id_rko)) then
       write(*,*) "RI/DF initialization complete!"
-      if (dg_hse_ace_enabled) then
+      if (yn_dg_hse_ace == 'y') then
         write(*,'(1x,a)') "DG-HSE-ACE cache: ENABLED"
         write(*,'(1x,a,i0)') "  max age (calls): ", dg_hse_ace_max_age
         write(*,'(1x,a,1pe12.4)') "  coef threshold : ", dg_hse_ace_coef_thresh
@@ -953,7 +928,8 @@ contains
   !=======================================================================
   subroutine add_exact_exchange_hse(dg_frag, system, H_mat_spin, ifrag, ispin)
     use structures
-    use salmon_global, only: hse_alpha, hse_omega, nelec, nelec_spin, yn_hse_ri
+    use salmon_global, only: hse_alpha, hse_omega, nelec, nelec_spin, yn_hse_ri, &
+                             yn_dg_hse_ace, dg_hse_ace_max_age, dg_hse_ace_coef_thresh
     use xc_hse, only: calc_exact_exchange_hse_fragment
     implicit none
     type(s_dg_fragment_rt), intent(in)    :: dg_frag
@@ -997,7 +973,7 @@ contains
     
     ! Choose method: RI/DF (Plan C) or direct integration (Plan A)
     if (dg_frag%use_hse_ri .and. yn_hse_ri == 'y') then
-      if (dg_hse_ace_initialized .and. dg_hse_ace_enabled) then
+      if (dg_hse_ace_initialized .and. yn_dg_hse_ace == 'y') then
         hse_ace_call_count(ifrag_local, ispin) = hse_ace_call_count(ifrag_local, ispin) + 1
         rebuild_ace = .not. hse_ace_cache_valid(ifrag_local, ispin)
         ace_metric = 0.0d0
@@ -1305,7 +1281,7 @@ contains
     if (allocated(hse_ace_call_count)) deallocate(hse_ace_call_count)
     if (allocated(hse_ace_cache_valid)) deallocate(hse_ace_cache_valid)
     dg_hse_ace_initialized = .false.
-    dg_hse_ace_enabled = .false.
+    ! dg_hse_ace_enabled is now yn_dg_hse_ace in salmon_global; no reset needed here.
     
   end subroutine finalize_hse_ri_data
 

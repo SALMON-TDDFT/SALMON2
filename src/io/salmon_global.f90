@@ -363,6 +363,9 @@ module salmon_global
   integer        :: out_lcm_rt_step
   character(1)   :: yn_out_lz_rt
   integer        :: out_lz_rt_step
+  character(1)   :: yn_dg_hse_ace
+  integer        :: dg_hse_ace_max_age
+  real(8)        :: dg_hse_ace_coef_thresh
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps
   integer        :: out_gs_sgm_eps_mu_nu(2)

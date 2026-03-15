@@ -522,6 +522,9 @@ contains
       & out_lcm_rt_step, &
       & yn_out_lz_rt, &
       & out_lz_rt_step, &
+      & yn_dg_hse_ace, &
+      & dg_hse_ace_max_age, &
+      & dg_hse_ace_coef_thresh, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
@@ -971,6 +974,9 @@ contains
     out_lcm_rt_step     = 100
     yn_out_lz_rt        = 'n'
     out_lz_rt_step      = 100
+    yn_dg_hse_ace          = 'n'
+    dg_hse_ace_max_age     = 20
+    dg_hse_ace_coef_thresh = 5.0d-3
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
@@ -1614,6 +1620,9 @@ contains
     call comm_bcast(out_lcm_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_lz_rt        ,nproc_group_global)
     call comm_bcast(out_lz_rt_step      ,nproc_group_global)
+    call comm_bcast(yn_dg_hse_ace          ,nproc_group_global)
+    call comm_bcast(dg_hse_ace_max_age     ,nproc_group_global)
+    call comm_bcast(dg_hse_ace_coef_thresh ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
@@ -2542,6 +2551,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lcm_rt_step', out_lcm_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lz_rt', yn_out_lz_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lz_rt_step', out_lz_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_hse_ace', yn_dg_hse_ace
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_hse_ace_max_age', dg_hse_ace_max_age
+      write(fh_variables_log, '("#",4X,A,"=",ES15.7)') 'dg_hse_ace_coef_thresh', dg_hse_ace_coef_thresh
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
@@ -2759,6 +2771,7 @@ contains
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_lcm_rt)
     call yn_argument_check(yn_out_lz_rt)
+    call yn_argument_check(yn_dg_hse_ace)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
@@ -3018,7 +3031,13 @@ contains
     if(yn_out_lz_rt=='y' .and. out_lz_rt_step<=0) then
       stop "out_lz_rt_step must be positive when yn_out_lz_rt=y"
     end if
-    
+    if(yn_dg_hse_ace=='y' .and. dg_hse_ace_max_age < 1) then
+      stop "dg_hse_ace_max_age must be >= 1 when yn_dg_hse_ace=y"
+    end if
+    if(yn_dg_hse_ace=='y' .and. dg_hse_ace_coef_thresh <= 0.0d0) then
+      stop "dg_hse_ace_coef_thresh must be positive when yn_dg_hse_ace=y"
+    end if
+
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
