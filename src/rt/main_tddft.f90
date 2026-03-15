@@ -380,6 +380,7 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root
   use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
+  use inputoutput, only: t_unit_length
   implicit none
   integer, intent(in) :: itt
   type(s_rgrid), intent(in) :: mg
@@ -412,10 +413,11 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
     write(iunit,'(a)') '# x: x coordinate'
     write(iunit,'(a)') '# y: y coordinate'
     write(iunit,'(a)') '# local_chern_marker_zint: local Chern marker integrated over z'
-    write(iunit,'(a)') '# 1:x[a.u.] 2:y[a.u.] 3:local_chern_marker_zint[none]'
+    write(iunit,'(a,a,a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', trim(t_unit_length%name), '] 3:local_chern_marker_zint[none]'
     do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
-        write(iunit,'(3(1x,es24.16))') mg%coordinate(ix,1), mg%coordinate(iy,2), marker_xy(ix,iy)
+        write(iunit,'(3(1x,es24.16))') mg%coordinate(ix,1) * t_unit_length%conv, &
+                                       mg%coordinate(iy,2) * t_unit_length%conv, marker_xy(ix,iy)
       end do
       write(iunit,*)
     end do

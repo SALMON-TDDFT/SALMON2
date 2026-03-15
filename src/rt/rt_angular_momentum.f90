@@ -117,6 +117,7 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
   use salmon_global, only: base_directory, sysname
+  use inputoutput, only: t_unit_length, t_unit_time, t_unit_time_inv
   implicit none
   integer, intent(in) :: itt
   real(8), intent(in) :: time_now, lz_xy(:,:), dlzdt_xy(:,:), lz_total, dlzdt_total, center_x, center_y
@@ -124,8 +125,30 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
   character(256) :: file_map, file_total, filenum
   integer :: ix, iy, iunit
   real(8) :: x, y
+  real(8) :: conv_lz_xy, conv_dlzdt_xy, conv_lz_total, conv_dlzdt_total
+  character(64) :: unit_lz_xy, unit_dlzdt_xy, unit_lz_total, unit_dlzdt_total
 
   if (.not. comm_is_root(nproc_id_global)) return
+
+  conv_lz_xy = t_unit_time_inv%conv
+  conv_dlzdt_xy = t_unit_time_inv%conv * t_unit_time_inv%conv
+  conv_lz_total = t_unit_length%conv * t_unit_length%conv * t_unit_time_inv%conv
+  conv_dlzdt_total = t_unit_length%conv * t_unit_length%conv * t_unit_time_inv%conv * t_unit_time_inv%conv
+
+  if (trim(t_unit_time_inv%name) == 'a.u.') then
+    unit_lz_xy = 'a.u.'
+    unit_dlzdt_xy = 'a.u.'
+  else
+    unit_lz_xy = trim(t_unit_time_inv%name)
+    unit_dlzdt_xy = trim(t_unit_time_inv%name)//'^2'
+  end if
+  if (trim(t_unit_length%name) == 'a.u.' .or. trim(t_unit_time_inv%name) == 'a.u.') then
+    unit_lz_total = 'a.u.'
+    unit_dlzdt_total = 'a.u.'
+  else
+    unit_lz_total = trim(t_unit_length%name)//'^2/'//trim(t_unit_time%name)
+    unit_dlzdt_total = trim(t_unit_length%name)//'^2/'//trim(t_unit_time%name)//'^2'
+  end if
 
   write(filenum, '(i6.6)') itt
   file_map = trim(base_directory)//trim(sysname)//'_lz_xy_'//trim(adjustl(filenum))//'.data'
@@ -135,12 +158,13 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
   write(iunit,'(a)') '# y: y coordinate measured from the chosen vortex center'
   write(iunit,'(a)') '# local_lz_zint: local Lz integrated over z'
   write(iunit,'(a)') '# dlocal_lz_dt_zint: time derivative of local_lz_zint'
-  write(iunit,'(a)') '# 1:x[a.u.] 2:y[a.u.] 3:local_lz_zint[none] 4:dlocal_lz_dt_zint[none]'
+  write(iunit,'(a,a,a,a,a,a,a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', trim(t_unit_length%name), &
+                                 '] 3:local_lz_zint[', trim(unit_lz_xy), '] 4:dlocal_lz_dt_zint[', trim(unit_dlzdt_xy), ']'
   do iy = 1, size(lz_xy, 2)
-    y = (dble(iy) - 0.5d0) * system%hgs(2) - center_y
+    y = ((dble(iy) - 0.5d0) * system%hgs(2) - center_y) * t_unit_length%conv
     do ix = 1, size(lz_xy, 1)
-      x = (dble(ix) - 0.5d0) * system%hgs(1) - center_x
-      write(iunit,'(4(1x,es24.16))') x, y, lz_xy(ix,iy), dlzdt_xy(ix,iy)
+      x = ((dble(ix) - 0.5d0) * system%hgs(1) - center_x) * t_unit_length%conv
+      write(iunit,'(4(1x,es24.16))') x, y, lz_xy(ix,iy) * conv_lz_xy, dlzdt_xy(ix,iy) * conv_dlzdt_xy
     end do
     write(iunit,*)
   end do
@@ -154,11 +178,13 @@ subroutine dump_lz_record(itt, time_now, lz_xy, dlzdt_xy, lz_total, dlzdt_total,
     write(iunit,'(a)') '# time: RT time'
     write(iunit,'(a)') '# local_lz_total: total electronic Lz'
     write(iunit,'(a)') '# dlocal_lz_total_dt: time derivative of local_lz_total'
-    write(iunit,'(a)') '# 1:step[none] 2:time[a.u.] 3:local_lz_total[none] 4:dlocal_lz_total_dt[none]'
+    write(iunit,'(a,a,a,a,a)') '# 1:step[none] 2:time[', trim(t_unit_time%name), '] 3:local_lz_total[', trim(unit_lz_total), &
+                               '] 4:dlocal_lz_total_dt[', trim(unit_dlzdt_total), ']'
   else
     open(newunit=iunit, file=trim(file_total), status='old', position='append', action='write')
   end if
-  write(iunit,'(i10,1x,3(es24.16,1x))') itt, time_now, lz_total, dlzdt_total
+  write(iunit,'(i10,1x,3(es24.16,1x))') itt, time_now * t_unit_time%conv, lz_total * conv_lz_total, &
+                                        dlzdt_total * conv_dlzdt_total
   close(iunit)
 end subroutine dump_lz_record
 
