@@ -30,6 +30,7 @@ use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pu
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
+use rt_angular_momentum, only: write_local_angular_momentum_xy, flush_local_angular_momentum_xy
 use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
 use nvtx
 use parallelization, only: nproc_id_global
@@ -61,9 +62,6 @@ type(s_singlescale) :: singlescale
 
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
-logical :: do_lcm_post
-character(16) :: env_lcm
-integer :: env_lcm_status
 
 !check condition for using jellium model
 if(yn_jm=='y') call check_condition_jm
@@ -86,6 +84,16 @@ call fapp_start('time_evol',1,0) ! performance profiling
 #endif
 
 call print_header()
+
+if (yn_out_lcm_rt == 'y') then
+  if (yn_dg_fragment_rt == 'y') stop 'yn_out_lcm_rt=y is not supported for DG-Fragment RT'
+  if (info%isize_r > 1) stop 'yn_out_lcm_rt=y currently requires orbital-only decomposition (isize_r=1)'
+  call write_local_chern_marker_xy(0, mg, system, info, spsi_in)
+end if
+if (yn_out_lz_rt == 'y') then
+  if (.not. singlescale%flag_use) stop 'yn_out_lz_rt=y requires theory=single_scale_maxwell_tddft'
+  call write_local_angular_momentum_xy(0, lg, mg, system, info, singlescale)
+end if
 
 #ifdef USE_OPENACC
 !$acc enter data copyin(rt, rt%zc)
@@ -116,13 +124,28 @@ else
     call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
-  else
-    call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
-     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
-     & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
-  end if
+	  else
+	    call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
+	     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+	     & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
+	  end if
 
-  is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
+      if (yn_out_lcm_rt == 'y') then
+        if (mod(itt, out_lcm_rt_step) == 0) then
+          if (mod(itt,2) == 1) then
+            call write_local_chern_marker_xy(itt, mg, system, info, spsi_out)
+          else
+            call write_local_chern_marker_xy(itt, mg, system, info, spsi_in)
+          end if
+        end if
+      end if
+      if (yn_out_lz_rt == 'y') then
+        if (mod(itt, out_lz_rt_step) == 0) then
+          call write_local_angular_momentum_xy(itt, lg, mg, system, info, singlescale)
+        end if
+      end if
+
+	  is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
   is_checkpoint = is_checkpoint_iter .or. is_shutdown_time
@@ -155,6 +178,10 @@ else
 end do TE
 end if  ! yn_dg_fragment_rt
 
+if (yn_out_lz_rt == 'y') then
+  call flush_local_angular_momentum_xy(system)
+end if
+
 call timer_end(LOG_RT_ITERATION)
 call timer_disable_sub
 
@@ -166,23 +193,6 @@ close(030) ! laser
 
 
 !--------------------------------- end of time-evolution
-
-env_lcm = ''
-env_lcm_status = 1
-call get_environment_variable('SALMON_CALC_LCM', env_lcm, status=env_lcm_status)
-do_lcm_post = (env_lcm_status == 0) .and. (env_lcm(1:1) == 'y' .or. env_lcm(1:1) == 'Y')
-if (do_lcm_post) then
-  if (yn_dg_fragment_rt == 'y') then
-    if (comm_is_root(nproc_id_global)) write(*,'(a)') '[LCM] skipped in DG-Fragment path (hook not added yet).'
-  else
-    if (mod(nt,2)==1) then
-      call compute_and_report_lcm(mg, system, info, spsi_out)
-    else
-      call compute_and_report_lcm(mg, system, info, spsi_in)
-    end if
-  end if
-end if
-
 
 !------------ Writing part -----------
 
@@ -363,28 +373,49 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   
 end subroutine time_evolution_dg_fragment
 
-subroutine compute_and_report_lcm(mg, system, info, psi_fin)
+subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
-  use communication, only: comm_summation, comm_is_root
-  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
   use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
   implicit none
+  integer, intent(in) :: itt
   type(s_rgrid), intent(in) :: mg
   type(s_dft_system), intent(in) :: system
   type(s_parallel_info), intent(in) :: info
   type(s_orbital), intent(in) :: psi_fin
   real(8), allocatable :: marker(:,:,:)
-  real(8) :: sum_loc, sum_glb
+  real(8), allocatable :: marker_xy(:,:)
+  character(256) :: filename, filenum
+  integer :: ix, iy, iz, iunit
 
   allocate(marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+  allocate(marker_xy(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2)))
   call compute_local_chern_marker_from_orbital(mg, system, info, psi_fin, marker)
 
-  sum_loc = sum(marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))) * system%hvol
-  call comm_summation(sum_loc, sum_glb, info%icomm_rko)
+  marker_xy(:,:) = 0.0d0
+  do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        marker_xy(ix,iy) = marker_xy(ix,iy) + marker(ix,iy,iz) * system%hgs(3)
+      end do
+    end do
+  end do
 
-  if (comm_is_root(nproc_id_global)) write(*,'(a,1x,es24.16)') '[LCM] integral(marker)=', sum_glb
-  deallocate(marker)
-end subroutine compute_and_report_lcm
+  if (comm_is_root(nproc_id_global)) then
+    write(filenum, '(i6.6)') itt
+    filename = trim(base_directory)//trim(sysname)//'_lcm_xy_'//trim(adjustl(filenum))//'.data'
+    open(newunit=iunit, file=trim(filename), status='replace', action='write')
+    write(iunit,'(a)') '# x y local_chern_marker_zint'
+    do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        write(iunit,'(3(1x,es24.16))') mg%coordinate(ix,1), mg%coordinate(iy,2), marker_xy(ix,iy)
+      end do
+      write(iunit,*)
+    end do
+    close(iunit)
+  end if
+  deallocate(marker_xy, marker)
+end subroutine write_local_chern_marker_xy
 
 subroutine print_header()
   use parallelization, only: nproc_id_global

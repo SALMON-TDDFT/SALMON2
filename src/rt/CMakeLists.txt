@@ -7,6 +7,7 @@ set(SOURCES
     rt_dg_fragment_types.f90
     rt_dg_basis_projection.f90
     rt_dg_plane_wave.f90
+    rt_angular_momentum.f90
     rt_local_chern_marker.f90
 	    rt_dg_fragment_ops.f90
 	    rt_dg_fragment.f90

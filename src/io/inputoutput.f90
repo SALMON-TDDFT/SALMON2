@@ -379,7 +379,13 @@ contains
       & yn_symmetrized_stencil, &
       & yn_put_wall_z_boundary, &
       & wall_height, &
-      & wall_width
+      & wall_width, &
+      & yn_optical_vortex, &
+      & optical_vortex_charge, &
+      & optical_vortex_polarization, &
+      & optical_vortex_radius, &
+      & optical_vortex_center_x, &
+      & optical_vortex_center_y
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -512,6 +518,10 @@ contains
       & out_estatic_rt_step, &
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
+      & yn_out_lcm_rt, &
+      & out_lcm_rt_step, &
+      & yn_out_lz_rt, &
+      & out_lz_rt_step, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
@@ -813,6 +823,12 @@ contains
     yn_put_wall_z_boundary = 'n'
     wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
     wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
+    yn_optical_vortex = 'n'
+    optical_vortex_charge = 0
+    optical_vortex_polarization = 'linear_x'
+    optical_vortex_radius = -1d0
+    optical_vortex_center_x = -1d30
+    optical_vortex_center_y = -1d30
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -951,6 +967,10 @@ contains
     out_estatic_rt_step = 50
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
+    yn_out_lcm_rt       = 'n'
+    out_lcm_rt_step     = 100
+    yn_out_lz_rt        = 'n'
+    out_lz_rt_step      = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
@@ -1154,6 +1174,7 @@ contains
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
+    call string_lowercase(optical_vortex_polarization)
     call string_lowercase(boundary_em(1,1))
     call string_lowercase(boundary_em(1,2))
     call string_lowercase(boundary_em(2,1))
@@ -1407,8 +1428,17 @@ contains
     call comm_bcast(yn_put_wall_z_boundary,nproc_group_global)
     call comm_bcast(wall_height           ,nproc_group_global)
     call comm_bcast(wall_width            ,nproc_group_global)
+    call comm_bcast(yn_optical_vortex     ,nproc_group_global)
+    call comm_bcast(optical_vortex_charge ,nproc_group_global)
+    call comm_bcast(optical_vortex_polarization,nproc_group_global)
+    call comm_bcast(optical_vortex_radius ,nproc_group_global)
+    call comm_bcast(optical_vortex_center_x,nproc_group_global)
+    call comm_bcast(optical_vortex_center_y,nproc_group_global)
     wall_height = wall_height * uenergy_to_au
     wall_width  = wall_width  * ulength_to_au
+    optical_vortex_radius   = optical_vortex_radius * ulength_to_au
+    optical_vortex_center_x = optical_vortex_center_x * ulength_to_au
+    optical_vortex_center_y = optical_vortex_center_y * ulength_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1580,6 +1610,10 @@ contains
     call comm_bcast(out_estatic_rt_step ,nproc_group_global)
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_lcm_rt       ,nproc_group_global)
+    call comm_bcast(out_lcm_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_lz_rt        ,nproc_group_global)
+    call comm_bcast(out_lz_rt_step      ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
@@ -2287,6 +2321,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_optical_vortex', yn_optical_vortex
+      write(fh_variables_log, '("#",4X,A,"=",I0)') 'optical_vortex_charge', optical_vortex_charge
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'optical_vortex_polarization', optical_vortex_polarization
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_radius', optical_vortex_radius
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_center_x', optical_vortex_center_x
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_center_y', optical_vortex_center_y
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
@@ -2498,6 +2538,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lcm_rt', yn_out_lcm_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lcm_rt_step', out_lcm_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lz_rt', yn_out_lz_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lz_rt_step', out_lz_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
@@ -2713,6 +2757,8 @@ contains
     call yn_argument_check(yn_out_elf_rt)
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
+    call yn_argument_check(yn_out_lcm_rt)
+    call yn_argument_check(yn_out_lz_rt)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
@@ -2903,6 +2949,24 @@ contains
       case default
         stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
       end select
+      if(yn_optical_vortex=='y') then
+        if(method_singlescale/='3d') stop "yn_optical_vortex='y' requires method_singlescale='3d'"
+        if(optical_vortex_radius<=0d0) stop "optical_vortex_radius must be positive when yn_optical_vortex='y'"
+        if(omega1<=0d0) stop "omega1 must be positive when yn_optical_vortex='y'"
+        if(tw1<=0d0) stop "tw1 must be positive when yn_optical_vortex='y'"
+        select case(trim(optical_vortex_polarization))
+        case('linear_x','linear_y','left_circular','right_circular')
+          continue
+        case default
+          stop "optical_vortex_polarization must be linear_x, linear_y, left_circular, or right_circular"
+        end select
+        select case(trim(ae_shape1))
+        case('Acos2','Acos3','Acos4','Acos6','Acos8')
+          continue
+        case default
+          stop "yn_optical_vortex='y' currently supports ae_shape1 = Acos2, Acos3, Acos4, Acos6, or Acos8"
+        end select
+      end if
     end if
 
     if(theory=='multi_scale_maxwell_tddft') then
@@ -2947,6 +3011,12 @@ contains
 
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
+    end if
+    if(yn_out_lcm_rt=='y' .and. out_lcm_rt_step<=0) then
+      stop "out_lcm_rt_step must be positive when yn_out_lcm_rt=y"
+    end if
+    if(yn_out_lz_rt=='y' .and. out_lz_rt_step<=0) then
+      stop "out_lz_rt_step must be positive when yn_out_lz_rt=y"
     end if
     
     if(yn_dc=='y') then

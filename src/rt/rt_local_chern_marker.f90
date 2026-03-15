@@ -15,6 +15,10 @@ module rt_local_chern_marker
 
 contains
 
+  ! This implementation assumes a gapped system with a well-defined occupied
+  ! subspace. It is not intended for metals or smeared/non-idempotent
+  ! occupations, because the occupied manifold is constructed from a sharp
+  ! occupation cutoff and then Lowdin orthonormalized.
   subroutine compute_local_chern_marker_from_rt_checkpoint(idir, lg, mg, system, info, marker, occ_eps, is_self_checkpoint)
     implicit none
     character(*), intent(in) :: idir
@@ -109,7 +113,6 @@ contains
           s1(:,:) = (0.0d0, 0.0d0)
           s2(:,:) = (0.0d0, 0.0d0)
 
-!$omp parallel do collapse(2) private(iocc,jocc,ix,iy,iz,rvec,phase1,phase2) schedule(static)
         do iocc = 1, nocc
           do jocc = 1, nocc
             do iz = mg%is(3), mg%ie(3)
@@ -158,7 +161,6 @@ contains
         end do
 
           g12(:,:) = (0.0d0, 0.0d0)
-!$omp parallel do collapse(2) private(iocc,jocc,ix,iy,iz) schedule(static)
         do iocc = 1, nocc
           do jocc = 1, nocc
             do iz = mg%is(3), mg%ie(3)
@@ -320,7 +322,6 @@ contains
       allocate(s_local(nocc0,nocc0), s_global(nocc0,nocc0))
       s_local(:,:) = (0.0d0, 0.0d0)
 
-!$omp parallel do collapse(2) private(ia,ib,ix,iy,iz) schedule(static)
       do ia = 1, nocc0
         do ib = 1, nocc0
           do iz = mg%is(3), mg%ie(3)
@@ -398,26 +399,44 @@ contains
       integer :: n, lwork, info_inv
       integer, allocatable :: ipiv(:)
       complex(8), allocatable :: work(:)
+      real(8), allocatable :: rwork(:)
+      complex(8), allocatable :: a_lu(:,:)
+      real(8) :: anorm, rcond
+      real(8), parameter :: rcond_warn = 1.0d-10
+      real(8) :: zlange
 
       n = size(a,1)
       if (n <= 0) return
 
       lwork = max(1, n*max(n,64))
-      allocate(ipiv(n), work(lwork))
+      allocate(ipiv(n), work(lwork), rwork(max(1,2*n)), a_lu(n,n))
+      a_lu(:,:) = a(:,:)
+      anorm = zlange('1', n, n, a, n, rwork)
 
-      call zgetrf(n, n, a, n, ipiv, info_inv)
+      call zgetrf(n, n, a_lu, n, ipiv, info_inv)
       if (info_inv /= 0) then
         write(*,'(a,1x,a,1x,a,i0)') 'invert_complex_matrix_checked:', trim(label), 'zgetrf info=', info_inv
         stop 'invert_complex_matrix_checked: LU factorization failed'
       end if
 
+      call zgecon('1', n, a_lu, n, anorm, rcond, work, rwork, info_inv)
+      if (info_inv /= 0) then
+        write(*,'(a,1x,a,1x,a,i0)') 'invert_complex_matrix_checked:', trim(label), 'zgecon info=', info_inv
+        stop 'invert_complex_matrix_checked: condition estimate failed'
+      end if
+      if (rcond < rcond_warn) then
+        write(*,'(a,1x,a,1x,a,es12.4,1x,a,es12.4)') 'invert_complex_matrix_checked:', trim(label), &
+          'ill-conditioned matrix: rcond=', rcond, 'anorm=', anorm
+      end if
+
+      a(:,:) = a_lu(:,:)
       call zgetri(n, a, n, ipiv, work, lwork, info_inv)
       if (info_inv /= 0) then
         write(*,'(a,1x,a,1x,a,i0)') 'invert_complex_matrix_checked:', trim(label), 'zgetri info=', info_inv
         stop 'invert_complex_matrix_checked: matrix inversion failed'
       end if
 
-      deallocate(ipiv, work)
+      deallocate(a_lu, rwork, ipiv, work)
     end subroutine invert_complex_matrix_checked
 
 

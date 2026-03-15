@@ -102,6 +102,15 @@ module rt_dg_fragment
   
   ! RI/DF data for HSE exchange (one per local fragment)
   type(hse_ri_data_t), allocatable, save :: hse_ri_data_frag(:)  ! (n_frag_local)
+  logical, save :: dg_hse_ace_enabled = .false.
+  logical, save :: dg_hse_ace_initialized = .false.
+  integer, save :: dg_hse_ace_max_age = 20
+  real(8), save :: dg_hse_ace_coef_thresh = 5.0d-3
+  real(8), allocatable, save :: hse_ace_vx_cache(:,:,:,:)         ! (nstate_frag,nstate_frag,nspin,n_frag_local)
+  complex(8), allocatable, save :: hse_ace_coef_snapshot(:,:,:,:) ! (nstate_frag,nstate_tot,nspin,n_frag_local)
+  integer, allocatable, save :: hse_ace_last_rebuild(:,:)         ! (n_frag_local,nspin)
+  integer, allocatable, save :: hse_ace_call_count(:,:)           ! (n_frag_local,nspin)
+  logical, allocatable, save :: hse_ace_cache_valid(:,:)          ! (n_frag_local,nspin)
   
 contains
 
@@ -361,8 +370,10 @@ contains
     integer :: ifrag, ifrag_local, n_frag_local
     integer :: natom_frag, icount
     integer :: iatom_start, iatom_end, iatom
+    integer :: env_status, env_len, ienv
     real(8), allocatable :: atom_coords_frag(:,:)
     integer, allocatable :: atom_types_frag(:)
+    character(len=64) :: env_ace, env_ace_age, env_ace_thresh
     
     ! Check if HSE with RI is enabled
     dg_frag%use_hse_ri = (yn_hse == 'y' .and. yn_hse_ri == 'y')
@@ -380,6 +391,36 @@ contains
     
     ! Calculate number of local fragments
     n_frag_local = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+
+    env_ace = ""
+    env_ace_age = ""
+    env_ace_thresh = ""
+    env_status = 1
+    env_len = 0
+    dg_hse_ace_enabled = .false.
+    dg_hse_ace_max_age = 20
+    dg_hse_ace_coef_thresh = 5.0d-3
+    call get_environment_variable("SALMON_DG_HSE_ACE", env_ace, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_ace(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1','on','ON')
+        dg_hse_ace_enabled = .true.
+      end select
+    end if
+    env_status = 1
+    env_len = 0
+    call get_environment_variable("SALMON_DG_HSE_ACE_MAX_AGE", env_ace_age, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_ace_age(1:env_len), *, iostat=ienv) dg_hse_ace_max_age
+      if (ienv /= 0 .or. dg_hse_ace_max_age < 1) dg_hse_ace_max_age = 20
+    end if
+    env_status = 1
+    env_len = 0
+    call get_environment_variable("SALMON_DG_HSE_ACE_COEF_THRESH", env_ace_thresh, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_ace_thresh(1:env_len), *, iostat=ienv) dg_hse_ace_coef_thresh
+      if (ienv /= 0 .or. dg_hse_ace_coef_thresh <= 0.0d0) dg_hse_ace_coef_thresh = 5.0d-3
+    end if
     
     if (comm_is_root(info%id_rko)) then
       write(*,*)
@@ -390,6 +431,26 @@ contains
     
     ! Allocate RI data for local fragments
     allocate(hse_ri_data_frag(n_frag_local))
+    if (allocated(hse_ace_vx_cache)) deallocate(hse_ace_vx_cache)
+    if (allocated(hse_ace_coef_snapshot)) deallocate(hse_ace_coef_snapshot)
+    if (allocated(hse_ace_last_rebuild)) deallocate(hse_ace_last_rebuild)
+    if (allocated(hse_ace_call_count)) deallocate(hse_ace_call_count)
+    if (allocated(hse_ace_cache_valid)) deallocate(hse_ace_cache_valid)
+    if (dg_hse_ace_enabled) then
+      allocate(hse_ace_vx_cache(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, n_frag_local))
+      allocate(hse_ace_coef_snapshot(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, n_frag_local))
+      allocate(hse_ace_last_rebuild(n_frag_local, dg_frag%nspin))
+      allocate(hse_ace_call_count(n_frag_local, dg_frag%nspin))
+      allocate(hse_ace_cache_valid(n_frag_local, dg_frag%nspin))
+      hse_ace_vx_cache = 0.0d0
+      hse_ace_coef_snapshot = (0.0d0, 0.0d0)
+      hse_ace_last_rebuild = 0
+      hse_ace_call_count = 0
+      hse_ace_cache_valid = .false.
+      dg_hse_ace_initialized = .true.
+    else
+      dg_hse_ace_initialized = .false.
+    end if
     
     ! Initialize RI data for each local fragment
     do ifrag_local = 1, n_frag_local
@@ -439,6 +500,13 @@ contains
     
     if (comm_is_root(info%id_rko)) then
       write(*,*) "RI/DF initialization complete!"
+      if (dg_hse_ace_enabled) then
+        write(*,'(1x,a)') "DG-HSE-ACE cache: ENABLED"
+        write(*,'(1x,a,i0)') "  max age (calls): ", dg_hse_ace_max_age
+        write(*,'(1x,a,1pe12.4)') "  coef threshold : ", dg_hse_ace_coef_thresh
+      else
+        write(*,'(1x,a)') "DG-HSE-ACE cache: DISABLED"
+      end if
       write(*,*)
     end if
     
@@ -896,7 +964,9 @@ contains
     integer :: ifrag_local, n_base_frag, n_occ_frag
     integer :: is(3), ie(3)
     real(8) :: hvol
-    real(8), allocatable :: density_matrix(:,:)
+    real(8), allocatable :: density_matrix(:,:), v_x_tmp(:,:)
+    real(8) :: ace_metric
+    logical :: rebuild_ace
     
     if (.not. dg_frag%has_real_space_basis) return
     
@@ -927,16 +997,46 @@ contains
     
     ! Choose method: RI/DF (Plan C) or direct integration (Plan A)
     if (dg_frag%use_hse_ri .and. yn_hse_ri == 'y') then
-      ! Plan C: RI/DF approximation (fast)
-      ! Build density matrix from occupied orbitals
-      allocate(density_matrix(n_base_frag, n_base_frag))
-      call build_density_matrix(dg_frag, ifrag, ispin, n_occ_frag, density_matrix)
-      
-      ! Call RI version (O(N²N_aux N_occ) complexity)
-      call calc_exact_exchange_hse_ri(H_mat_spin, hse_ri_data_frag(ifrag_local), &
-                                      density_matrix, hse_alpha, n_occ_frag)
-      
-      deallocate(density_matrix)
+      if (dg_hse_ace_initialized .and. dg_hse_ace_enabled) then
+        hse_ace_call_count(ifrag_local, ispin) = hse_ace_call_count(ifrag_local, ispin) + 1
+        rebuild_ace = .not. hse_ace_cache_valid(ifrag_local, ispin)
+        ace_metric = 0.0d0
+        if (.not. rebuild_ace) then
+          call compute_dg_hse_ace_metric(dg_frag, ifrag, ifrag_local, ispin, n_occ_frag, ace_metric)
+          if (ace_metric > dg_hse_ace_coef_thresh) rebuild_ace = .true.
+          if ((hse_ace_call_count(ifrag_local, ispin) - hse_ace_last_rebuild(ifrag_local, ispin)) >= dg_hse_ace_max_age) then
+            rebuild_ace = .true.
+          end if
+        end if
+
+        if (rebuild_ace) then
+          allocate(density_matrix(n_base_frag, n_base_frag))
+          allocate(v_x_tmp(n_base_frag, n_base_frag))
+          call build_density_matrix(dg_frag, ifrag, ispin, n_occ_frag, density_matrix)
+          v_x_tmp = 0.0d0
+          call calc_exact_exchange_hse_ri(v_x_tmp, hse_ri_data_frag(ifrag_local), density_matrix, hse_alpha, n_occ_frag)
+          H_mat_spin(1:n_base_frag, 1:n_base_frag) = H_mat_spin(1:n_base_frag, 1:n_base_frag) + v_x_tmp
+          hse_ace_vx_cache(1:n_base_frag, 1:n_base_frag, ispin, ifrag_local) = v_x_tmp
+          call update_dg_hse_ace_snapshot(dg_frag, ifrag, ifrag_local, ispin, n_occ_frag)
+          hse_ace_cache_valid(ifrag_local, ispin) = .true.
+          hse_ace_last_rebuild(ifrag_local, ispin) = hse_ace_call_count(ifrag_local, ispin)
+          deallocate(v_x_tmp, density_matrix)
+        else
+          H_mat_spin(1:n_base_frag, 1:n_base_frag) = H_mat_spin(1:n_base_frag, 1:n_base_frag) + &
+            hse_ace_vx_cache(1:n_base_frag, 1:n_base_frag, ispin, ifrag_local)
+        end if
+      else
+        ! Plan C: RI/DF approximation (fast)
+        ! Build density matrix from occupied orbitals
+        allocate(density_matrix(n_base_frag, n_base_frag))
+        call build_density_matrix(dg_frag, ifrag, ispin, n_occ_frag, density_matrix)
+        
+        ! Call RI version (O(N²N_aux N_occ) complexity)
+        call calc_exact_exchange_hse_ri(H_mat_spin, hse_ri_data_frag(ifrag_local), &
+                                        density_matrix, hse_alpha, n_occ_frag)
+        
+        deallocate(density_matrix)
+      end if
     else
       ! Plan A: Direct integration (slow but exact)
       call calc_exact_exchange_hse_fragment(H_mat_spin, dg_frag%phi_frag, ifrag_local, &
@@ -945,6 +1045,76 @@ contains
     end if
     
   end subroutine add_exact_exchange_hse
+
+  subroutine compute_dg_hse_ace_metric(dg_frag, ifrag, ifrag_local, ispin, n_occ, metric)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, ifrag_local, ispin, n_occ
+    real(8), intent(out) :: metric
+    integer :: io, istate, ig, nb
+    complex(8) :: c_now, c_prev
+    real(8) :: amp_now, amp_prev, amp_num, amp_den
+    real(8) :: phase_now, phase_prev, phase_diff, phase_num, phase_den, weight
+    real(8), parameter :: pi = 3.14159265358979323846d0
+
+    metric = 0.0d0
+    amp_num = 0.0d0
+    amp_den = 0.0d0
+    phase_num = 0.0d0
+    phase_den = 0.0d0
+    nb = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+
+    do io = 1, nb
+      ig = dg_frag%index_basis(io, ifrag, ispin)
+      if (ig < 1 .or. ig > size(dg_frag%coef, 1)) cycle
+      do istate = 1, min(n_occ, dg_frag%nstate_tot)
+        c_now = dg_frag%coef(ig, istate, ispin)
+        c_prev = hse_ace_coef_snapshot(io, istate, ispin, ifrag_local)
+        amp_now = abs(c_now)
+        amp_prev = abs(c_prev)
+        amp_num = amp_num + (amp_now - amp_prev) * (amp_now - amp_prev)
+        amp_den = amp_den + amp_prev * amp_prev
+
+        if (amp_now > 1.0d-14 .and. amp_prev > 1.0d-14) then
+          phase_now = atan2(aimag(c_now), real(c_now, kind=8))
+          phase_prev = atan2(aimag(c_prev), real(c_prev, kind=8))
+          phase_diff = phase_now - phase_prev
+          if (phase_diff > pi) phase_diff = phase_diff - 2.0d0 * pi
+          if (phase_diff < -pi) phase_diff = phase_diff + 2.0d0 * pi
+          weight = 0.5d0 * (amp_now + amp_prev)
+          phase_num = phase_num + (weight * phase_diff) * (weight * phase_diff)
+          phase_den = phase_den + weight * weight
+        end if
+      end do
+    end do
+
+    if (amp_den > 1.0d-30) then
+      metric = metric + (amp_num / amp_den)
+    else
+      metric = metric + amp_num
+    end if
+    if (phase_den > 1.0d-30) then
+      metric = metric + (phase_num / phase_den)
+    else
+      metric = metric + phase_num
+    end if
+    metric = sqrt(max(metric, 0.0d0))
+  end subroutine compute_dg_hse_ace_metric
+
+  subroutine update_dg_hse_ace_snapshot(dg_frag, ifrag, ifrag_local, ispin, n_occ)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, ifrag_local, ispin, n_occ
+    integer :: io, ig, nocc_eff
+
+    nocc_eff = min(n_occ, dg_frag%nstate_tot)
+    hse_ace_coef_snapshot(:, :, ispin, ifrag_local) = (0.0d0, 0.0d0)
+    do io = 1, min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+      ig = dg_frag%index_basis(io, ifrag, ispin)
+      if (ig < 1 .or. ig > size(dg_frag%coef, 1)) cycle
+      hse_ace_coef_snapshot(io, 1:nocc_eff, ispin, ifrag_local) = dg_frag%coef(ig, 1:nocc_eff, ispin)
+    end do
+  end subroutine update_dg_hse_ace_snapshot
 
   !=======================================================================
   ! Build density matrix from current wave function coefficients
@@ -1129,6 +1299,13 @@ contains
       end do
       deallocate(hse_ri_data_frag)
     end if
+    if (allocated(hse_ace_vx_cache)) deallocate(hse_ace_vx_cache)
+    if (allocated(hse_ace_coef_snapshot)) deallocate(hse_ace_coef_snapshot)
+    if (allocated(hse_ace_last_rebuild)) deallocate(hse_ace_last_rebuild)
+    if (allocated(hse_ace_call_count)) deallocate(hse_ace_call_count)
+    if (allocated(hse_ace_cache_valid)) deallocate(hse_ace_cache_valid)
+    dg_hse_ace_initialized = .false.
+    dg_hse_ace_enabled = .false.
     
   end subroutine finalize_hse_ri_data
 

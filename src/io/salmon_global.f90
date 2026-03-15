@@ -222,6 +222,12 @@ module salmon_global
   character(1)   :: yn_put_wall_z_boundary
   real(8)        :: wall_height
   real(8)        :: wall_width
+  character(1)   :: yn_optical_vortex
+  integer        :: optical_vortex_charge
+  character(16)  :: optical_vortex_polarization
+  real(8)        :: optical_vortex_radius
+  real(8)        :: optical_vortex_center_x
+  real(8)        :: optical_vortex_center_y
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -353,6 +359,10 @@ module salmon_global
   integer        :: out_estatic_rt_step
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
+  character(1)   :: yn_out_lcm_rt
+  integer        :: out_lcm_rt_step
+  character(1)   :: yn_out_lz_rt
+  integer        :: out_lz_rt_step
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps
   integer        :: out_gs_sgm_eps_mu_nu(2)
