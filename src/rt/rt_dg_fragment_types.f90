@@ -25,7 +25,7 @@ module rt_dg_fragment_types
   public :: halo_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
-  type, public :: halo_info
+  type :: halo_info
     integer :: id_src, id_dst                ! MPI ranks for communication
     integer :: ifrag_src                     ! Source fragment index
     integer :: ifrag_dst                     ! Destination (local) fragment index
@@ -49,7 +49,7 @@ module rt_dg_fragment_types
   ! - Therefore "spin-dependent basis" in this module means spin-resolved
   !   basis indexing / coefficients / projected operators, not necessarily
   !   distinct real-space basis functions for each spin channel.
-  type, public :: s_dg_fragment_rt
+  type :: s_dg_fragment_rt
     integer :: n_frag                          ! number of fragments
     integer :: nspin                           ! number of spin
     integer :: nstate_frag                     ! number of states per fragment

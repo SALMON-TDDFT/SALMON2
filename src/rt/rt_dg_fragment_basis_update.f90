@@ -1428,7 +1428,7 @@
       ! Real orbitals
       do ispin = 1, dg_frag%nspin
         nstate_loc = min(nb_local, nstate_use)
-        !$omp parallel do collapse(2) private(istate,io_idx,ix,iy,iz,lx,ly,lz) schedule(static)
+        !$omp parallel do private(istate,io_idx,ix,iy,iz,lx,ly,lz) schedule(static)
         do istate = 1, nstate_loc
           io_idx = io_lb + istate - 1
           do iz = is(3), ie(3)
@@ -1455,7 +1455,7 @@
       ! Complex orbitals - convert real basis to complex
       do ispin = 1, dg_frag%nspin
         nstate_loc = min(nb_local, nstate_use)
-        !$omp parallel do collapse(2) private(istate,io_idx,ix,iy,iz,lx,ly,lz) schedule(static)
+        !$omp parallel do private(istate,io_idx,ix,iy,iz,lx,ly,lz) schedule(static)
         do istate = 1, nstate_loc
           io_idx = io_lb + istate - 1
           do iz = is(3), ie(3)
@@ -1531,7 +1531,7 @@
       nstate_loc = min(nb_local, nstate_use)
       do istate = 1, nstate_loc
         io_idx = io_lb + istate - 1
-        !$omp parallel do collapse(3) private(lz,ly,lx,iz,iy,ix) schedule(static)
+        !$omp parallel do private(lz,ly,lx,iz,iy,ix) schedule(static)
         do lz = 1, ndom(3)
           iz = iorg(3) + lz - 1
           do ly = 1, ndom(2)

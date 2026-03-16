@@ -60,7 +60,6 @@ contains
     integer, intent(in) :: ie_frag(3)                       ! Interior upper bounds (nxyz_domain)
     real(8), intent(in) :: phi_frag(:,:,:,:)                ! Basis functions on grid (assumed-shape)
     
-    integer :: i, j, P
     real(8) :: threshold
     
     ! Store dimensions
@@ -223,7 +222,7 @@ contains
                       if (distance < 1.0d-10) then
                         cycle
                       else
-                        coulomb_kernel = erfc(hse_omega * distance) / distance
+                        coulomb_kernel = derfc(hse_omega * distance) / distance
                       end if
                       
                       chi_P_r2 = calc_auxiliary_function(aux_basis, P, r2)
@@ -298,7 +297,7 @@ contains
     end do
     
     ! Compute off-diagonal elements with center-based SR kernel approximation
-    !$omp parallel do collapse(2) private(P,Q,center_distance)
+    !$omp parallel do private(P,Q,center_distance)
     do Q = 1, n_aux
       do P = 1, Q-1
         center_distance = sqrt((aux_basis%center(1,P) - aux_basis%center(1,Q))**2 + &
@@ -307,7 +306,7 @@ contains
         if (center_distance < 1.0d-12) then
           V_PQ(P, Q) = 0.5d0 * (V_PQ(P, P) + V_PQ(Q, Q))
         else
-          V_PQ(P, Q) = erfc(hse_omega * center_distance) / center_distance
+          V_PQ(P, Q) = derfc(hse_omega * center_distance) / center_distance
         end if
         
         V_PQ(Q, P) = V_PQ(P, Q)  ! Symmetry
@@ -375,7 +374,7 @@ contains
     end do
     
     ! Off-diagonal elements with center-based SR kernel approximation
-    !$omp parallel do collapse(2) private(P,Q,center_distance)
+    !$omp parallel do private(P,Q,center_distance)
     do Q = 1, n_aux
       do P = 1, Q-1
         center_distance = sqrt((aux_basis%center(1,P) - aux_basis%center(1,Q))**2 + &
@@ -384,7 +383,7 @@ contains
         if (center_distance < 1.0d-12) then
           V_PQ(P, Q) = 0.5d0 * (V_PQ(P, P) + V_PQ(Q, Q))
         else
-          V_PQ(P, Q) = erfc(hse_omega * center_distance) / center_distance
+          V_PQ(P, Q) = derfc(hse_omega * center_distance) / center_distance
         end if
         V_PQ(Q, P) = V_PQ(P, Q)
       end do
@@ -496,7 +495,7 @@ contains
     integer, intent(in) :: n_occ
     
     integer :: n_basis, n_aux
-    integer :: i, j, k, l, P, Q
+    integer :: i, j, k, l, Q
     real(8), allocatable:: C_klQ(:,:,:)                ! Intermediate array
     real(8) :: v_x_ij
     

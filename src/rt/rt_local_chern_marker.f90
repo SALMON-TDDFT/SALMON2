@@ -56,7 +56,7 @@ contains
     real(8), intent(out) :: marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in), optional :: occ_eps
 
-    integer :: ik, ispin, io, jo, iocc, jocc, ix, iy, iz, im, p
+    integer :: ik, ispin, io, iocc, jocc, ix, iy, iz, im, p
     integer :: nocc
     integer, allocatable :: occ_idx(:)
     real(8), allocatable :: occ_w(:)
@@ -141,7 +141,7 @@ contains
 
           zt1(:,:,:,:) = (0.0d0, 0.0d0)
           zt2(:,:,:,:) = (0.0d0, 0.0d0)
-!$omp parallel do collapse(3) private(ix,iy,iz,iocc,jocc,rvec,phase1,phase2) schedule(static)
+!$omp parallel do private(ix,iy,iz,iocc,jocc,rvec,phase1,phase2) schedule(static)
         do iz = mg%is(3), mg%ie(3)
           rvec(3) = mg%coordinate(iz,3)
           do iy = mg%is(2), mg%ie(2)

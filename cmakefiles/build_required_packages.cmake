@@ -5,6 +5,9 @@
 
 # Default BLAS/LAPACK support
 # Try to find system BLAS/LAPACK
+if(DEFINED LAPACK_VENDOR_FLAGS)
+  set(BLA_VENDOR_FLAGS "${LAPACK_VENDOR_FLAGS}")
+endif()
 find_package(BLAS QUIET)
 find_package(LAPACK QUIET)
 
@@ -27,8 +30,11 @@ endif()
 
 # SCALAPACK support
 if(USE_SCALAPACK)
-  # Find or build ScaLAPACK
-  # For now, just a placeholder
+  if(DEFINED ScaLAPACK_VENDOR_FLAGS)
+    separate_arguments(_salmon_scalapack_vendor_flags NATIVE_COMMAND "${ScaLAPACK_VENDOR_FLAGS}")
+    list(APPEND EXTERNAL_LIBS ${_salmon_scalapack_vendor_flags})
+    unset(_salmon_scalapack_vendor_flags)
+  endif()
 endif()
 
 # EigenExa support
