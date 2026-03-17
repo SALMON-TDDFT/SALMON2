@@ -472,6 +472,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag
   integer        :: nstate_frag
+  integer        :: lcfo_frag_cache_size
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   

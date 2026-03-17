@@ -381,8 +381,8 @@ module salmon_pp
     real(8) :: r, rc, r1, r2, r3, u, v, w
     real(8) :: ratio1, ratio2
     logical :: flag_cuboid
-    real(8) :: rho_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
-    real(8) :: tau_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8), allocatable :: rho_nlcc_tmp(:,:,:)
+    real(8), allocatable :: tau_nlcc_tmp(:,:,:)
     call nvtxStartRange('calc_nlcc', __LINE__)
     
     if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
@@ -400,6 +400,8 @@ module salmon_pp
     ppn%rho_nlcc = 0d0
     ppn%tau_nlcc = 0d0  
 
+    allocate(rho_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3)))
+    allocate(tau_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3)))
     rho_nlcc_tmp = 0d0
     tau_nlcc_tmp = 0d0  
   
@@ -492,6 +494,7 @@ module salmon_pp
   
     ppn%rho_nlcc = rho_nlcc_tmp
     ppn%tau_nlcc = tau_nlcc_tmp
+    deallocate(rho_nlcc_tmp, tau_nlcc_tmp)
 
     call nvtxEndRange
     return

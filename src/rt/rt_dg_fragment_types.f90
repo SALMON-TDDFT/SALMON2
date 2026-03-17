@@ -109,6 +109,12 @@ module rt_dg_fragment_types
     integer :: icomm                           ! MPI communicator for fragment RT
     integer :: id                              ! MPI rank in icomm
     integer :: isize                           ! MPI size in icomm
+    integer :: icomm_frag                      ! MPI communicator for one fragment group
+    integer :: id_frag                         ! MPI rank inside fragment group
+    integer :: isize_frag                      ! MPI size inside fragment group
+    integer :: ifrag_group                     ! global fragment index owned by this subgroup
+    integer :: nproc_frag                      ! # of MPI ranks assigned to one fragment
+    logical :: is_frag_root                    ! subgroup root responsible for fragment-global ownership
 
     type(halo_info), allocatable :: halo(:)    ! Halo regions (max 26 = 3^3-1 neighbors)
     integer :: n_halo                          ! Number of active halo regions

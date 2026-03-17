@@ -26,13 +26,14 @@
     type(s_pp_grid),        intent(in)    :: ppg
     
     integer :: ifrag, ispin, io, jo, i_local, nbf, ig_i, ig_j
-    real(8) :: hvol, integral_t, integral_h
+    real(8) :: hvol
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     integer :: is(3), ie(3)
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j>
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
+    real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
@@ -74,7 +75,9 @@
     end if
     
     ! Step 2: Allocate Hamiltonian matrix
-    write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
+    if (comm_is_root(dg_frag%id)) then
+      write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
+    end if
     
     ! Only allocate if not already allocated (may be pre-allocated in initialization)
     if (.not. allocated(dg_frag%H_mat)) then
@@ -112,6 +115,7 @@
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
         nbf = dg_frag%n_basis(ifrag, ispin)
+        allocate(partial_t(nbf), partial_h(nbf), reduced_t(nbf), reduced_h(nbf))
         do jo = 1, nbf
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
@@ -119,23 +123,35 @@
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
 
           ! Calculate matrix elements with all φ_i
-          !$omp parallel do private(io, integral_t, integral_h, ig_i)
+          partial_t(:) = 0.0d0
+          partial_h(:) = 0.0d0
+          !$omp parallel do private(io, ig_i)
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
 
             ! Kinetic energy matrix element: T_ij = ∫ φ_i (T|φ_j>) dr
-            call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, T_phi, hvol, integral_t)
+            call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, T_phi, hvol, partial_t(io))
 
             ! Store kinetic part
-            dg_frag%H_mat_kinetic(ig_i, ig_j, ispin) = integral_t
-            call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, H_phi, hvol, integral_h)
-            dg_frag%H_mat(ig_i, ig_j, ispin) = integral_h
+            call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, H_phi, hvol, partial_h(io))
 
           end do
           !$omp end parallel do
 
+          call comm_summation(partial_t, reduced_t, nbf, dg_frag%icomm_frag)
+          call comm_summation(partial_h, reduced_h, nbf, dg_frag%icomm_frag)
+          if (dg_frag%is_frag_root) then
+            do io = 1, nbf
+              ig_i = dg_frag%index_basis(io, ifrag, ispin)
+              if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+              dg_frag%H_mat_kinetic(ig_i, ig_j, ispin) = reduced_t(io)
+              dg_frag%H_mat(ig_i, ig_j, ispin) = reduced_h(io)
+            end do
+          end if
+
         end do  ! jo loop
+        deallocate(partial_t, partial_h, reduced_t, reduced_h)
           
         
       end do  ! ifrag loop
@@ -253,17 +269,19 @@
     real(8), intent(out) :: H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     integer :: lx, ly, lz, gx, gy, gz
     integer :: iorg(3), ndom(3)
+    integer :: loc_s(3), loc_e(3)
 
     call apply_kinetic_to_basis(dg_frag, i_local, jo, mg, stencil, T_phi)
     H_phi(:, :, :) = T_phi(:, :, :)
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    do lz = 1, ndom(3)
+    call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
-      do ly = 1, ndom(2)
+      do ly = loc_s(2), loc_e(2)
         gy = iorg(2) + ly - 1
-        do lx = 1, ndom(1)
+        do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
           H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * dg_frag%phi_frag(lx, ly, lz, jo, i_local)
         end do
@@ -277,6 +295,7 @@
   !=======================================================================
   subroutine integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, field, hvol, integral)
     use structures
+    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, i_local, io
@@ -284,23 +303,26 @@
     real(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in) :: hvol
     real(8), intent(out) :: integral
+    real(8) :: partial
     integer :: lx, ly, lz, gx, gy, gz
-    integer :: iorg(3), ndom(3)
+    integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    integral = 0.0d0
-    do lz = 1, ndom(3)
+    call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    partial = 0.0d0
+    do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
-      do ly = 1, ndom(2)
+      do ly = loc_s(2), loc_e(2)
         gy = iorg(2) + ly - 1
-        !$omp simd reduction(+:integral)
-        do lx = 1, ndom(1)
+        !$omp simd reduction(+:partial)
+        do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
-          integral = integral + dg_frag%phi_frag(lx, ly, lz, io, i_local) * field(gx, gy, gz) * hvol
+          partial = partial + dg_frag%phi_frag(lx, ly, lz, io, i_local) * field(gx, gy, gz) * hvol
         end do
       end do
     end do
+    integral = partial
   end subroutine integrate_basis_with_field
   
   !=======================================================================
@@ -328,7 +350,7 @@
     integer :: ix, iy, iz, lx, ly, lz, gx, gy, gz, ifrag
     real(8) :: v, lap0
     real(8) :: lapt(4,3)
-    integer :: is(3), ie(3), iorg(3), ndom(3)
+    integer :: is(3), ie(3), iorg(3), ndom(3), loc_s(3), loc_e(3)
     
     ! Extract stencil coefficients
     lap0 = stencil%coef_lap0
@@ -338,6 +360,7 @@
     ifrag = dg_frag%ifrag_start + i_local - 1
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
     
     ! Note: phi_frag is allocated as (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, ...)
     ! where nb = nxyz_buffer = 4 for 4th-order stencil
@@ -354,11 +377,11 @@
     
     T_phi = 0.0d0
     
-    do lz = 1, ndom(3)
+    do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
-      do ly = 1, ndom(2)
+      do ly = loc_s(2), loc_e(2)
         gy = iorg(2) + ly - 1
-        do lx = 1, ndom(1)
+        do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
           
           ! Compute Laplacian using 4th-order finite difference
@@ -400,6 +423,40 @@
     end do
     
   end subroutine apply_kinetic_to_basis
+
+  subroutine get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    use salmon_global, only: nproc_rgrid
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ndom(3)
+    integer, intent(out) :: loc_s(3), loc_e(3)
+
+    integer :: ipx, ipy, ipz, coords(3), nsize
+
+    ipx = max(1, nproc_rgrid(1))
+    ipy = max(1, nproc_rgrid(2))
+    ipz = max(1, nproc_rgrid(3))
+
+    if (dg_frag%id_frag < 0 .or. dg_frag%id_frag >= ipx * ipy * ipz) then
+      stop "DG-Fragment RT: invalid fragment-local MPI rank in get_fragment_local_range"
+    end if
+
+    coords(1) = mod(dg_frag%id_frag, ipx)
+    coords(2) = mod(dg_frag%id_frag / ipx, ipy)
+    coords(3) = dg_frag%id_frag / max(1, ipx * ipy)
+
+    nsize = (ndom(1) + ipx - 1) / ipx
+    loc_s(1) = 1 + nsize * coords(1)
+    loc_e(1) = min(ndom(1), loc_s(1) + nsize - 1)
+
+    nsize = (ndom(2) + ipy - 1) / ipy
+    loc_s(2) = 1 + nsize * coords(2)
+    loc_e(2) = min(ndom(2), loc_s(2) + nsize - 1)
+
+    nsize = (ndom(3) + ipz - 1) / ipz
+    loc_s(3) = 1 + nsize * coords(3)
+    loc_e(3) = min(ndom(3), loc_s(3) + nsize - 1)
+  end subroutine get_fragment_local_range
 
   !=======================================================================
   ! Add non-local pseudopotential contribution to Hamiltonian matrix
@@ -541,7 +598,7 @@
     
     integer :: ifrag, i_local, ispin, io, jo, idir
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
-    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3)
+    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     real(8) :: hvol, integral
     real(8) :: max_p
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components)
@@ -578,6 +635,7 @@
         i_local = i_local + 1
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
         
         ! Loop over basis functions in fragment j (ket side)
         ! Note: Each thread allocates its own grad_phi to avoid race conditions
@@ -603,12 +661,12 @@
               ! Compute matrix element: p_ij = ∫ φ_i(r) * (∂φ_j/∂dir) dr
               ! Note: momentum operator uses p = -i∇; the -i is applied in time evolution
               integral = 0.0d0
-              do lz = 1, ndom(3)
+              do lz = loc_s(3), loc_e(3)
                 gz = iorg(3) + lz - 1
-                do ly = 1, ndom(2)
+                do ly = loc_s(2), loc_e(2)
                   gy = iorg(2) + ly - 1
                   !$omp simd reduction(+:integral)
-                  do lx = 1, ndom(1)
+                  do lx = loc_s(1), loc_e(1)
                     gx = iorg(1) + lx - 1
                     integral = integral + &
                       dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
@@ -648,19 +706,25 @@
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
             d = dg_frag%halo(i_halo)%dsp_send
+            halo_s(:) = max(loc_s(:), d(:) + 1)
+            halo_e(:) = min(loc_e(:), d(:) + l(:))
+            if (any(halo_s(:) > halo_e(:))) cycle
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
               if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
               do idir = 1, 3
                 integral = 0.0d0
-                do iz = 1, l(3)
-                  gz = iorg(3) + d(3) + iz - 1
-                  do iy = 1, l(2)
-                    gy = iorg(2) + d(2) + iy - 1
+                do lz = halo_s(3), halo_e(3)
+                  gz = iorg(3) + lz - 1
+                  iz = lz - d(3)
+                  do ly = halo_s(2), halo_e(2)
+                    gy = iorg(2) + ly - 1
+                    iy = ly - d(2)
                     !$omp simd reduction(+:integral)
-                    do ix = 1, l(1)
-                      gx = iorg(1) + d(1) + ix - 1
+                    do lx = halo_s(1), halo_e(1)
+                      gx = iorg(1) + lx - 1
+                      ix = lx - d(1)
                       integral = integral + &
                         dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
                         grad_phi(gx, gy, gz, idir) * hvol
@@ -691,6 +755,11 @@
       integer :: mat_size
       mat_size = 3 * dg_frag%n_mat_max * dg_frag%n_mat_max * dg_frag%nspin
       allocate(momentum_mat_flat(mat_size), momentum_mat_tmp_flat(mat_size))
+
+      momentum_mat_flat = reshape(dg_frag%momentum_mat, [mat_size])
+      call comm_summation(momentum_mat_flat, momentum_mat_tmp_flat, mat_size, dg_frag%icomm_frag)
+      dg_frag%momentum_mat = reshape(momentum_mat_tmp_flat, [3, dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
+      if (.not. dg_frag%is_frag_root) dg_frag%momentum_mat = 0.0d0
       
       momentum_mat_flat = reshape(dg_frag%momentum_mat, [mat_size])
       call comm_summation(momentum_mat_flat, momentum_mat_tmp_flat, mat_size, dg_frag%icomm)
@@ -743,7 +812,7 @@
     integer :: ifrag, i_local, ispin, io, jo
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj
-    integer :: lx, ly, lz, iorg(3), ndom(3)
+    integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: mat_size, n_eval, lwork, info_eig
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: work_query(1)
@@ -786,6 +855,7 @@
         i_local = i_local + 1
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
 
         do jo = 1, dg_frag%n_basis(ifrag, ispin)
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
@@ -795,9 +865,9 @@
             ig_row = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
             integral = 0.0d0
-            do lz = 1, ndom(3)
-              do ly = 1, ndom(2)
-                do lx = 1, ndom(1)
+            do lz = loc_s(3), loc_e(3)
+              do ly = loc_s(2), loc_e(2)
+                do lx = loc_s(1), loc_e(1)
                   integral = integral + dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
                              dg_frag%phi_frag(lx, ly, lz, jo, i_local) * hvol
                 end do
@@ -813,16 +883,22 @@
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
             d = dg_frag%halo(i_halo)%dsp_send
+            halo_s(:) = max(loc_s(:), d(:) + 1)
+            halo_e(:) = min(loc_e(:), d(:) + l(:))
+            if (any(halo_s(:) > halo_e(:))) cycle
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
               if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
               integral = 0.0d0
-              do iz = 1, l(3)
-                do iy = 1, l(2)
-                  do ix = 1, l(1)
+              do lz = halo_s(3), halo_e(3)
+                iz = lz - d(3)
+                do ly = halo_s(2), halo_e(2)
+                  iy = ly - d(2)
+                  do lx = halo_s(1), halo_e(1)
+                    ix = lx - d(1)
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, jo, i_local) * hvol
+                               dg_frag%phi_frag(lx, ly, lz, jo, i_local) * hvol
                   end do
                 end do
               end do
@@ -837,6 +913,11 @@
 
     mat_size = dg_frag%n_mat_max * dg_frag%n_mat_max * dg_frag%nspin
     allocate(S_flat(mat_size), S_tmp_flat(mat_size))
+    S_flat = reshape(dg_frag%S_mat, [mat_size])
+    call comm_summation(S_flat, S_tmp_flat, mat_size, dg_frag%icomm_frag)
+    dg_frag%S_mat = reshape(S_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
+    if (.not. dg_frag%is_frag_root) dg_frag%S_mat = 0.0d0
+
     S_flat = reshape(dg_frag%S_mat, [mat_size])
     call comm_summation(S_flat, S_tmp_flat, mat_size, dg_frag%icomm)
     dg_frag%S_mat = reshape(S_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])

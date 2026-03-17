@@ -94,7 +94,7 @@ The temporal envelope and field strength reuse the existing `&emfield` variables
 
 ## Actual Formula Used In The Code
 
-The implementation itself is in [src/maxwell/optical_vortex_field.f90](/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/maxwell/optical_vortex_field.f90).
+The implementation itself is in [src/maxwell/optical_vortex_field.f90]
 
 ### 1. Field amplitude
 
@@ -254,110 +254,6 @@ For `l = 0`, `(r/R)^|l| = 1`.
   - `sin^2` radial window
   - `exp(i l phi)` azimuthal phase
   - chosen polarization vector
-
-## Angular-Momentum Observables
-
-The present implementation can be used to compare electronic and optical `Lz` and inspect angular-momentum balance.
-
-### Electronic angular momentum
-
-Implementation:
-
-- [src/rt/rt_angular_momentum.f90](/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/rt_angular_momentum.f90)
-
-Using the single-scale electronic current density `j(x,y,z,t)`, the local electronic angular-momentum density around the focus center `(xc,yc)` is defined as
-
-```text
-Lz_el(x,y,z,t) = (x-xc) * j_y(x,y,z,t) - (y-yc) * j_x(x,y,z,t)
-```
-
-Outputs:
-
-- `SYSNAME_lz_xy_XXXXXX.data`
-  - columns: `x  y  local_lz_zint  dlocal_lz_dt_zint`
-  - `z`-integrated 2D map
-- `SYSNAME_lz_total.data`
-  - columns: `step  time  local_lz_total  dlocal_lz_total_dt`
-  - full-space integral
-
-### Optical angular-momentum flux
-
-Implementation:
-
-- [src/maxwell/fdtd_coulomb_gauge.f90](/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/maxwell/fdtd_coulomb_gauge.f90)
-- [src/maxwell/optical_vortex_field.f90](/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/maxwell/optical_vortex_field.f90)
-
-From the boundary electromagnetic fields, the Poynting vector is defined as
-
-```text
-S = (c / 4pi) * (E x B)
-```
-
-and the `z`-component angular-momentum flux density is evaluated as
-
-```text
-Jz_flux = ((x-xc) * S_y - (y-yc) * S_x) / c^2
-```
-
-which is then integrated over the boundary plane.
-
-Current decomposition:
-
-- incident light: incident field prescribed at the `z = 0` boundary
-- reflected light: `total - incident` at `z = 0`
-- transmitted light: total field at `z = L`
-
-The corresponding outputs are
-
-```text
-Lz_inc_flux(z=0)
-Lz_ref_flux(z=0)
-Lz_tra_flux(z=L)
-```
-
-and their time integrals
-
-```text
-Lz_inc_cum
-Lz_ref_cum
-Lz_tra_cum
-```
-
-Output file:
-
-- `SYSNAME_rt_micro.data`
-  - appended columns:
-    - `Lz_inc_flux(z=0)`
-    - `Lz_ref_flux(z=0)`
-    - `Lz_tra_flux(z=L)`
-    - `Lz_inc_cum`
-    - `Lz_ref_cum`
-    - `Lz_tra_cum`
-
-### How to inspect the balance
-
-The first practical comparison is
-
-```text
-Lz_el_total(t)
-Lz_inc_cum(t) - Lz_ref_cum(t) - Lz_tra_cum(t)
-```
-
-Because this includes modeling and numerical approximations, the practical check is not exact equality but whether
-
-- they approach similar values after the pulse,
-- the systematic mismatch remains small,
-- the result is stable against grid spacing, vacuum size, box size, and absorbing-boundary settings.
-
-### Caution
-
-The optical `Lz` is currently an approximate boundary-flux observable derived from the Poynting vector. It is not a full electromagnetic angular-momentum tensor evaluation.
-
-In particular, it includes the following approximations:
-
-- the injected vortex field itself is a simplified model,
-- incident/reflected separation is done as `total - incident` at the bottom boundary,
-- `A_z` is not included.
 
 ## Difference From A Standard LG Beam
 

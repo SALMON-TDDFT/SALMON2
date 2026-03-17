@@ -122,9 +122,10 @@ contains
   !=======================================================================
   subroutine init_dg_fragment_rt(dg_frag, system, rt, info, lg, mg)
     use structures
-    use communication, only: comm_summation, comm_is_root
+    use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, nstate_frag, time_integrator_dg_fragment, &
-                 yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft
+                 yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
+                 nproc_rgrid
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
     use filesystem, only: get_filehandle
     implicit none
@@ -161,10 +162,37 @@ contains
     dg_frag%icomm = info%icomm_rko
     dg_frag%id = info%id_rko
     dg_frag%isize = info%isize_rko
+    dg_frag%icomm_frag = COMM_GROUP_NULL
+    dg_frag%id_frag = 0
+    dg_frag%isize_frag = 1
+    dg_frag%ifrag_group = 0
+    dg_frag%nproc_frag = 1
+    dg_frag%is_frag_root = .true.
 
-    if (dg_frag%isize > dg_frag%n_frag) then
-      stop "DG-Fragment RT requires np <= n_frag"
+    dg_frag%nproc_frag = product(nproc_rgrid)
+    if (dg_frag%nproc_frag < 1) then
+      stop "DG-Fragment RT requires product(nproc_rgrid) >= 1"
     end if
+
+    if (dg_frag%isize < dg_frag%n_frag) then
+      stop "DG-Fragment RT requires np >= n_frag"
+    end if
+    if (dg_frag%isize /= dg_frag%n_frag * dg_frag%nproc_frag) then
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,i0,a,i0)') "ERROR: Invalid MPI setup for DG-Fragment RT: np=", dg_frag%isize, ", n_frag=", dg_frag%n_frag
+        write(*,'(1x,a,i0)') "       product(nproc_rgrid) = ", dg_frag%nproc_frag
+        write(*,'(1x,a)') "       Stage-1 fragment-local MPI requires one subgroup per fragment."
+        write(*,'(1x,a)') "       MPI process count must satisfy np = n_frag * product(nproc_rgrid)."
+        write(*,'(1x,a)') "       This is a current implementation restriction, not a general DG-RT requirement."
+      end if
+      stop "DG-Fragment RT stage-1 requires np = n_frag * product(nproc_rgrid)"
+    end if
+
+    dg_frag%ifrag_group = dg_frag%id / dg_frag%nproc_frag + 1
+    dg_frag%id_frag = mod(dg_frag%id, dg_frag%nproc_frag)
+    dg_frag%isize_frag = dg_frag%nproc_frag
+    dg_frag%is_frag_root = (dg_frag%id_frag == 0)
+    dg_frag%icomm_frag = comm_create_group(dg_frag%icomm, dg_frag%ifrag_group - 1, dg_frag%id_frag)
     
     ! Check DFT+U status
     dg_frag%use_plusu = PLUS_U_ON
@@ -176,16 +204,18 @@ contains
       write(*,*)
     end if
     
-    ! Distribute fragments across MPI ranks
-    call distribute_fragments(dg_frag%n_frag, dg_frag%id, dg_frag%isize, &
-                              dg_frag%ifrag_start, dg_frag%ifrag_end)
+    ! Stage-1 two-level MPI layout: one fragment per subgroup.
+    dg_frag%ifrag_start = dg_frag%ifrag_group
+    dg_frag%ifrag_end = dg_frag%ifrag_group
     
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,i0,a,i0)') "  MPI parallelization: ", dg_frag%isize, " processes"
+      write(*,'(1x,a,i0)') "  MPI ranks per fragment subgroup: ", dg_frag%nproc_frag
       write(*,'(1x,a)') "  Fragment distribution across MPI ranks:"
     end if
-    write(*,'(1x,a,i4,a,i4,a,i4)') "    Rank", dg_frag%id, ": fragments ", &
-                                    dg_frag%ifrag_start, " to ", dg_frag%ifrag_end
+    write(*,'(1x,a,i4,a,i4,a,i2,a,l1)') "    Rank", dg_frag%id, ": fragment ", &
+                                    dg_frag%ifrag_start, ", subgroup rank ", dg_frag%id_frag, &
+                                    ", root=", dg_frag%is_frag_root
     
     ! Set time integrator
     select case(trim(time_integrator_dg_fragment))
@@ -906,7 +936,7 @@ contains
     block
       integer :: owner_rank
       do ifrag = 1, dg_frag%n_frag
-        owner_rank = get_fragment_owner_rank(ifrag, dg_frag%n_frag, dg_frag%isize)
+        owner_rank = get_fragment_group_root_rank(ifrag, dg_frag%nproc_frag)
         call comm_bcast(dg_frag%ixyz_frag(1:3, ifrag), dg_frag%icomm, owner_rank)
         call comm_bcast(dg_frag%nxyz_domain(1:3, ifrag), dg_frag%icomm, owner_rank)
       end do
@@ -1266,6 +1296,7 @@ contains
   ! Finalize DG-Fragment RT calculation
   !=======================================================================
   subroutine finalize_dg_fragment_rt(dg_frag)
+    use communication, only: comm_free_group, COMM_GROUP_NULL
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     
@@ -1302,6 +1333,10 @@ contains
     if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
     if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
+    if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+      call comm_free_group(dg_frag%icomm_frag)
+      dg_frag%icomm_frag = COMM_GROUP_NULL
+    end if
     
     ! RI/DF data deallocations
     if (dg_frag%use_hse_ri .and. allocated(hse_ri_data_frag)) then
@@ -1309,6 +1344,17 @@ contains
     end if
     
   end subroutine finalize_dg_fragment_rt
+
+  integer function get_fragment_group_root_rank(ifrag, nproc_frag) result(owner_rank)
+    implicit none
+    integer, intent(in) :: ifrag, nproc_frag
+
+    if (ifrag < 1 .or. nproc_frag <= 0) then
+      owner_rank = 0
+    else
+      owner_rank = (ifrag - 1) * nproc_frag
+    end if
+  end function get_fragment_group_root_rank
 
   !=======================================================================
   ! Finalize RI/DF data

@@ -622,6 +622,7 @@ contains
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
       & nstate_frag, &
+      & lcfo_frag_cache_size, &
       & energy_cut, &
       & lambda_cut, &
       & yn_adaptive_basis, &
@@ -1070,6 +1071,7 @@ contains
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
     nstate_frag = 0
+    lcfo_frag_cache_size = 1
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
@@ -1726,6 +1728,7 @@ contains
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
+    call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
@@ -2704,6 +2707,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
       

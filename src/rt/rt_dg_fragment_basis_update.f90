@@ -1201,9 +1201,8 @@
       ncg_basis_update = max(1, ncg)
     end if
 
-    mg_frag = mg
+    call setup_fragment_system(dg_frag, system, info, mg, system_frag, info_frag, mg_frag)
     call setup_fragment_potential(dg_frag, mg_frag, Vh, Vxc, Vpsl, vlocal_frag)
-    call setup_fragment_system(dg_frag, system, info, system_frag, info_frag)
     call allocate_fragment_orbitals(dg_frag, system_frag, info_frag, mg_frag, psi, hpsi, ttpsi)
     neig = comm_proc_null
     call init_sendrecv_grid(srg_frag, mg_frag, system_frag%no, info_frag%icomm_r, neig)
@@ -1235,6 +1234,7 @@
 
     call deallocate_fragment_orbitals(psi, hpsi, ttpsi)
     call dealloc_cache(srg_frag)
+    call finalize_fragment_parallel(info_frag)
     if (allocated(vlocal_frag)) then
       do ifrag = 1, size(vlocal_frag)
         if (allocated(vlocal_frag(ifrag)%f)) deallocate(vlocal_frag(ifrag)%f)
@@ -1260,10 +1260,9 @@
     type(s_rgrid), intent(in) :: mg
     type(s_scalar), intent(in) :: Vh, Vxc(:), Vpsl
     type(s_scalar), allocatable, intent(inout) :: vlocal_frag(:)
-    
-    integer :: ispin, ix, iy, iz
-    
-    ! Allocate vlocal for each spin
+
+    integer :: ispin
+
     if (.not. allocated(vlocal_frag)) then
       allocate(vlocal_frag(dg_frag%nspin))
       do ispin = 1, dg_frag%nspin
@@ -1272,35 +1271,43 @@
                                       mg%is(3):mg%ie(3)))
       end do
     end if
-    
-    ! Copy Vpsl + Vh + Vxc (complete local potential)
-    ! Note: Non-local pseudopotential handled separately in gscg_rwf
+
     do ispin = 1, dg_frag%nspin
       vlocal_frag(ispin)%f = Vpsl%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)) + &
                              Vh%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)) + &
                              Vxc(ispin)%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     end do
-    
+
   end subroutine setup_fragment_potential
 
   !=======================================================================
-  ! Setup fragment-local system and info structures
+  ! Setup fragment-local system, communicator topology, and real-space grid
   !=======================================================================
-  subroutine setup_fragment_system(dg_frag, system, info, system_frag, info_frag)
+  subroutine setup_fragment_system(dg_frag, system, info, mg_parent, system_frag, info_frag, mg_frag)
     use structures
+    use init_communicator, only: init_communicator_dft
+    use initialization_sub, only: init_parallel_dft, init_grid_parallel
+    use salmon_global, only: nproc_rgrid
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     type(s_dft_system), intent(in) :: system
     type(s_parallel_info), intent(in) :: info
+    type(s_rgrid), intent(in) :: mg_parent
     type(s_dft_system), intent(out) :: system_frag
     type(s_parallel_info), intent(out) :: info_frag
+    type(s_rgrid), intent(out) :: mg_frag
 
     integer :: no_src, no_basis_global
+    type(s_rgrid) :: lg_frag
 
-    ! Start from a consistent initialized system object, then override orbital count.
+    if (info%npk /= 1 .or. info%nporbital /= 1 .or. product(info%nprgrid) /= 1) then
+      stop 'RT-DG fragment-local MPI basis update stage-1 requires parent k/orbital/r-space replication'
+    end if
+    if (any(mg_parent%num(1:3) /= dg_frag%lgnum_total(1:3))) then
+      stop 'RT-DG fragment-local MPI basis update stage-1 requires replicated parent real-space grid'
+    end if
+
     system_frag = system
-    ! CG basis-update must use the same orbital count on all ranks.
-    ! Using local fragment slices here causes rank-dependent sizes and MPI truncation.
     no_basis_global = max(1, maxval(dg_frag%n_basis(1:dg_frag%n_frag,1:dg_frag%nspin)))
     system_frag%no = min(system%no, no_basis_global)
     system_frag%nk = 1
@@ -1324,35 +1331,40 @@
         system%rocc(1:min(system_frag%no,no_src),1,1:system_frag%nspin)
     end if
 
-    ! Start from parent communicator topology (old behavior baseline),
-    ! then override only the CG-required index ranges.
-    info_frag = info
     info_frag%npk = 1
     info_frag%nporbital = 1
-    info_frag%nprgrid(1:3) = 1
+    info_frag%nprgrid(1:3) = nproc_rgrid(1:3)
+    call init_communicator_dft(dg_frag%icomm_frag, info_frag)
+    call init_parallel_dft(system_frag, info_frag)
+
+    lg_frag = mg_parent
+    call init_grid_parallel(info_frag, lg_frag, mg_frag)
+
+  end subroutine setup_fragment_system
+
+  subroutine finalize_fragment_parallel(info_frag)
+    use communication, only: comm_free_group, COMM_GROUP_NULL
+    use structures, only: s_parallel_info
+    implicit none
+    type(s_parallel_info), intent(inout) :: info_frag
 
     if (allocated(info_frag%irank_io)) deallocate(info_frag%irank_io)
     if (allocated(info_frag%io_s_all)) deallocate(info_frag%io_s_all)
     if (allocated(info_frag%io_e_all)) deallocate(info_frag%io_e_all)
     if (allocated(info_frag%numo_all)) deallocate(info_frag%numo_all)
+    if (allocated(info_frag%imap)) deallocate(info_frag%imap)
+    if (allocated(info_frag%imap_isolated_ffte)) deallocate(info_frag%imap_isolated_ffte)
 
-    allocate(info_frag%irank_io(system_frag%no))
-    allocate(info_frag%io_s_all(1))
-    allocate(info_frag%io_e_all(1))
-    allocate(info_frag%numo_all(1))
-    info_frag%irank_io(:) = 0
-    info_frag%io_s_all(1) = 1
-    info_frag%io_e_all(1) = system_frag%no
-    info_frag%numo_all(1) = system_frag%no
-    info_frag%io_s = 1
-    info_frag%io_e = system_frag%no
-    info_frag%numo = system_frag%no
-    info_frag%numo_max = system_frag%no
-    info_frag%im_s = 1
-    info_frag%im_e = 1
-    info_frag%numm = 1
-    
-  end subroutine setup_fragment_system
+    if (info_frag%icomm_xy /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_xy)
+    if (info_frag%icomm_z /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_z)
+    if (info_frag%icomm_y /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_y)
+    if (info_frag%icomm_x /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_x)
+    if (info_frag%icomm_ko /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_ko)
+    if (info_frag%icomm_ro /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_ro)
+    if (info_frag%icomm_k /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_k)
+    if (info_frag%icomm_o /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_o)
+    if (info_frag%icomm_r /= COMM_GROUP_NULL) call comm_free_group(info_frag%icomm_r)
+  end subroutine finalize_fragment_parallel
 
   !=======================================================================
   ! Allocate fragment-local orbitals
@@ -1487,17 +1499,19 @@
   !=======================================================================
   subroutine extract_basis_from_orbitals(dg_frag, psi, i_local)
     use structures
+    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_orbital), intent(in) :: psi
     integer, intent(in) :: i_local
-    
+
     integer :: istate, jstate, ispin, ix, iy, iz, nstate_use, nb_local, nstate_loc, io_lb, io_idx
     integer :: ifrag, lx, ly, lz
     integer :: iorg(3), ndom(3)
-    real(8) :: normv, proj, hvol
+    real(8) :: normv_local, normv_global, proj_local, proj_global, hvol
     integer :: is(3), ie(3)
-    
+    real(8), allocatable :: phi_state_sum(:,:,:)
+
     if (allocated(psi%rwf)) then
       is = [lbound(psi%rwf,1), lbound(psi%rwf,2), lbound(psi%rwf,3)]
       ie = [ubound(psi%rwf,1), ubound(psi%rwf,2), ubound(psi%rwf,3)]
@@ -1507,7 +1521,7 @@
     else
       return
     end if
-    
+
     ifrag = dg_frag%ifrag_start + i_local - 1
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
@@ -1524,13 +1538,13 @@
     end if
 
     hvol = dg_frag%hgs(1) * dg_frag%hgs(2) * dg_frag%hgs(3)
+    allocate(phi_state_sum(ndom(1), ndom(2), ndom(3)))
 
-    ! Extract converged orbitals as new basis functions
-    ! DC-LCFO returns real orbitals, store directly in phi_frag
     do ispin = 1, dg_frag%nspin
       nstate_loc = min(nb_local, nstate_use)
       do istate = 1, nstate_loc
         io_idx = io_lb + istate - 1
+        dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = 0.0d0
         !$omp parallel do private(lz,ly,lx,iz,iy,ix) schedule(static)
         do lz = 1, ndom(3)
           iz = iorg(3) + lz - 1
@@ -1538,6 +1552,7 @@
             iy = iorg(2) + ly - 1
             do lx = 1, ndom(1)
               ix = iorg(1) + lx - 1
+              if (ix < is(1) .or. ix > ie(1) .or. iy < is(2) .or. iy > ie(2) .or. iz < is(3) .or. iz > ie(3)) cycle
               if (allocated(psi%rwf)) then
                 dg_frag%phi_frag(lx, ly, lz, istate, i_local) = psi%rwf(ix, iy, iz, ispin, io_idx, 1, 1)
               else if (allocated(psi%zwf)) then
@@ -1548,52 +1563,54 @@
         end do
         !$omp end parallel do
 
-        ! Local Gram-Schmidt orthogonalization in fragment domain.
         do jstate = 1, istate - 1
-          proj = 0.0d0
-          !$omp parallel do collapse(3) private(lz,ly,lx) reduction(+:proj) schedule(static)
+          proj_local = 0.0d0
+          !$omp parallel do collapse(3) private(lz,ly,lx) reduction(+:proj_local) schedule(static)
           do lz = 1, ndom(3)
             do ly = 1, ndom(2)
               do lx = 1, ndom(1)
-                proj = proj + dg_frag%phi_frag(lx, ly, lz, istate, i_local) * &
-                              dg_frag%phi_frag(lx, ly, lz, jstate, i_local) * hvol
+                proj_local = proj_local + dg_frag%phi_frag(lx, ly, lz, istate, i_local) * &
+                                          dg_frag%phi_frag(lx, ly, lz, jstate, i_local) * hvol
               end do
             end do
           end do
           !$omp end parallel do
+          call comm_summation(proj_local, proj_global, dg_frag%icomm_frag)
           !$omp parallel do collapse(3) private(lz,ly,lx) schedule(static)
           do lz = 1, ndom(3)
             do ly = 1, ndom(2)
               do lx = 1, ndom(1)
                 dg_frag%phi_frag(lx, ly, lz, istate, i_local) = &
                   dg_frag%phi_frag(lx, ly, lz, istate, i_local) - &
-                  proj * dg_frag%phi_frag(lx, ly, lz, jstate, i_local)
+                  proj_global * dg_frag%phi_frag(lx, ly, lz, jstate, i_local)
               end do
             end do
           end do
           !$omp end parallel do
         end do
 
-        normv = 0.0d0
-        !$omp parallel do collapse(3) private(lz,ly,lx) reduction(+:normv) schedule(static)
+        normv_local = 0.0d0
+        !$omp parallel do collapse(3) private(lz,ly,lx) reduction(+:normv_local) schedule(static)
         do lz = 1, ndom(3)
           do ly = 1, ndom(2)
             do lx = 1, ndom(1)
-              normv = normv + dg_frag%phi_frag(lx, ly, lz, istate, i_local)**2
+              normv_local = normv_local + dg_frag%phi_frag(lx, ly, lz, istate, i_local)**2
             end do
           end do
         end do
         !$omp end parallel do
-        normv = sqrt(max(normv * hvol, 1.0d-20))
+        call comm_summation(normv_local, normv_global, dg_frag%icomm_frag)
+        normv_global = sqrt(max(normv_global * hvol, 1.0d-20))
         dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = &
-          dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) / normv
-      end do
-      do istate = nstate_loc + 1, dg_frag%nstate_frag
-        ! Keep high-lying basis functions unchanged when CG updates only occupied manifold.
-        dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = &
-          dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local)
+          dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) / normv_global
+
+        call comm_summation(dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local), &
+                            phi_state_sum, ndom(1)*ndom(2)*ndom(3), dg_frag%icomm_frag)
+        dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = phi_state_sum
       end do
     end do
+
+    deallocate(phi_state_sum)
 
   end subroutine extract_basis_from_orbitals
 

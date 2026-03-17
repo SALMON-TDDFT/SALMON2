@@ -44,21 +44,21 @@
   integer function get_fragment_owner_rank(ifrag, n_frag, nprocs) result(owner_rank)
     implicit none
     integer, intent(in) :: ifrag, n_frag, nprocs
-    integer :: rank, ifrag_start, ifrag_end
+    integer :: n_per_proc, n_remainder, cutoff
 
     owner_rank = 0
     if (nprocs <= 0) return
     if (ifrag < 1 .or. ifrag > n_frag) return
 
-    do rank = 0, nprocs - 1
-      call get_fragment_range_for_rank(n_frag, rank, nprocs, ifrag_start, ifrag_end)
-      if (ifrag >= ifrag_start .and. ifrag <= ifrag_end) then
-        owner_rank = rank
-        return
-      end if
-    end do
+    n_per_proc = n_frag / nprocs
+    n_remainder = mod(n_frag, nprocs)
+    cutoff = n_remainder * (n_per_proc + 1)
 
-    owner_rank = nprocs - 1
+    if (ifrag <= cutoff) then
+      owner_rank = (ifrag - 1) / (n_per_proc + 1)
+    else
+      owner_rank = n_remainder + (ifrag - cutoff - 1) / n_per_proc
+    end if
   end function get_fragment_owner_rank
 
   !=======================================================================
@@ -72,18 +72,21 @@
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_parallel_info),  intent(in)    :: info
 
-    integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag, i_local
+    integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag
     integer :: ir1(3), ir2(3), d(3)
-    integer :: id_tmp(dg_frag%n_frag)
+    integer, allocatable :: id_tmp(:)
     integer :: ifrag_count
 
     ! Build MPI rank array for all fragments (comm_summation across all ranks)
+    allocate(id_tmp(dg_frag%n_frag))
     id_tmp = 0
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
-    do i = 1, ifrag_count
-      ifrag = dg_frag%ifrag_start + i - 1
-      id_tmp(ifrag) = dg_frag%id + 1  ! +1 to distinguish from unset (0)
-    end do
+    if (dg_frag%is_frag_root) then
+      do i = 1, ifrag_count
+        ifrag = dg_frag%ifrag_start + i - 1
+        id_tmp(ifrag) = dg_frag%id + 1  ! +1 to distinguish from unset (0)
+      end do
+    end if
     call comm_summation(id_tmp, dg_frag%id_array, dg_frag%n_frag, dg_frag%icomm)
     dg_frag%id_array = dg_frag%id_array - 1  ! Convert back to 0-based rank
 
@@ -121,7 +124,6 @@
 
     i = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      i_local = ifrag - dg_frag%ifrag_start + 1
       do lx = -nh(1), nh(1)
       do ly = -nh(2), nh(2)
       do lz = -nh(3), nh(3)
@@ -145,8 +147,8 @@
             dg_frag%halo(i)%id_dst = dg_frag%id_array(jfrag)
           end if
 
-          ! source neighbor (-direction)
-          ir2(1:3) = dg_frag%ixyz_frag(1:3, ifrag) - &
+          ! source neighbor: the same adjacent fragment provides the opposite-face data
+          ir2(1:3) = dg_frag%ixyz_frag(1:3, ifrag) + &
                      dg_frag%halo(i)%dvec(1:3) * dg_frag%nxyz_domain(1:3, ifrag)
           d(1:3) = mod(ir1(1:3) - ir2(1:3), dg_frag%lgnum_total(1:3))
           if (d(1) == 0 .and. d(2) == 0 .and. d(3) == 0 .and. dg_frag%halo(i)%id_src < 0) then
@@ -181,12 +183,23 @@
           end select
         end do
 
+#ifdef DEBUG
         if (comm_is_root(dg_frag%id)) then
           write(*,'(a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a)') &
             "  [Rank ", dg_frag%id, "] Halo ", i, " dir=(", dg_frag%halo(i)%dvec(1), ",", &
             dg_frag%halo(i)%dvec(2), ",", dg_frag%halo(i)%dvec(3), " ): frag ", ifrag, &
             " -> dst frag ", dg_frag%halo(i)%ifrag_dst, " (rank ", dg_frag%halo(i)%id_dst, ")"
         end if
+#endif
+
+        allocate(dg_frag%halo(i)%buf_send(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
+                                          dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
+        allocate(dg_frag%halo(i)%buf_recv(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
+                                          dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
+        allocate(dg_frag%halo(i)%buf_send_c(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
+                                            dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
+        allocate(dg_frag%halo(i)%buf_recv_c(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
+                                            dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
 
       end do
       end do
@@ -199,6 +212,8 @@
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,i0,a)') "Halo communication initialized: ", dg_frag%n_halo, " neighbor regions"
     end if
+
+    deallocate(id_tmp)
 
   end subroutine init_halo_communication
 
@@ -234,17 +249,6 @@
       l = dg_frag%halo(i_halo)%length
       d = dg_frag%halo(i_halo)%dsp_send
 
-      if (allocated(dg_frag%halo(i_halo)%buf_send)) deallocate(dg_frag%halo(i_halo)%buf_send)
-      if (allocated(dg_frag%halo(i_halo)%buf_recv)) deallocate(dg_frag%halo(i_halo)%buf_recv)
-      if (allocated(dg_frag%halo(i_halo)%buf_send_c)) deallocate(dg_frag%halo(i_halo)%buf_send_c)
-      if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) deallocate(dg_frag%halo(i_halo)%buf_recv_c)
-      allocate(dg_frag%halo(i_halo)%buf_send(l(1), l(2), l(3), dg_frag%nstate_frag, 1))
-      allocate(dg_frag%halo(i_halo)%buf_recv(l(1), l(2), l(3), dg_frag%nstate_frag, 1))
-      if (use_complex) then
-        allocate(dg_frag%halo(i_halo)%buf_send_c(l(1), l(2), l(3), dg_frag%nstate_frag, 1))
-        allocate(dg_frag%halo(i_halo)%buf_recv_c(l(1), l(2), l(3), dg_frag%nstate_frag, 1))
-      end if
-
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)
@@ -279,7 +283,7 @@
       end if
 
       ifrag_recv = dg_frag%halo(i_halo)%ifrag_src
-      itag_recv = (ifrag_recv - 1) * 27 + dir_code
+      itag_recv = (ifrag_recv - 1) * 27 + (26 - dir_code)
       if (use_complex) then
         ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv_c, &
                                        dg_frag%halo(i_halo)%id_src, &

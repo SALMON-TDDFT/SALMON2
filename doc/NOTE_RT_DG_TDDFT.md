@@ -618,12 +618,69 @@ The minimum file map to keep in mind is:
 At the current stage, developers should assume the following unless they verify otherwise in code:
 
 - DG-Fragment RT expects fragment basis data from DC-LCFO in normal use.
-- The MPI model is fragment-parallel and requires `np <= n_frag`.
+- The original fragment-parallel model (`np <= n_frag`) has been extended only partially.
+- In the current stage-1 fragment-local MPI implementation, the supported RT-DG layout is `np = n_frag * product(nproc_rgrid)`.
+- That stage-1 restriction means one fragment subgroup per fragment, with subgroup size fixed by the input real-space split `nproc_rgrid(1:3)`. Older jobs that relied on more flexible `np` choices will now stop at initialization.
 - Halo handling assumes the fragment geometry metadata are correct and periodic wrapping is available.
 - Some observables remain less complete than in the conventional RT path.
 - DFT+U support is present as framework, but the comment in initialization explicitly warns that full RT coupling is not yet fully wired.
 - Mixed fragment+PW support exists but should still be treated as an advanced path needing careful validation.
 - Adaptive basis update is implemented, but practical stability depends on threshold choice and on the quality of the DC-CG refresh path.
+- The current stage-1 basis-update path additionally requires the parent RT communicator to be replicated in `k`, `orbital`, and real-space directions before entering the fragment-local subgroup solve. Existing parent-RT spatial decompositions are therefore rejected intentionally until the parent/subgroup redistribution path is implemented.
+
+## Recent Implementation Notes
+
+Two recent implementation areas deserve explicit tracking because they change operational constraints rather than only internal code shape.
+
+### 1. Stage-1 Fragment-Local MPI In RT-DG
+
+The current RT-DG branch now supports a stage-1 fragment-local MPI layout. In this stage:
+
+- `np` is restricted to `n_frag * product(nproc_rgrid)`.
+- One fragment subgroup is assigned to one fragment.
+- The subgroup size is exactly the real-space split given by `nproc_rgrid(1:3)`.
+- Basis update and part of the fragment-local Hamiltonian construction now use subgroup-local real-space work.
+- Halo ownership, subgroup roots, and stage-1 diagnostics have been updated accordingly.
+
+This is a deliberate compatibility break relative to older RT-DG runs that only assumed `np <= n_frag`.
+
+### 2. Conventional-From-DC Initialization
+
+The conventional RT path with `yn_conventional_from_dcdft='y'` has been refactored in both non-SOI and SOI initialization paths.
+
+The old structure was essentially:
+
+- loop over orbital `io`
+- inside that, reopen each fragment file
+- reconstruct one orbital
+- run a full-grid `comm_summation`
+
+The current structure is:
+
+- process fragment data in small fragment batches
+- for each fragment batch, loop over orbital blocks
+- reconstruct block contributions
+- reduce one orbital block at a time
+- accumulate directly into the rank-owned part of `spsi`
+
+This reduces repeated file open/read operations and lowers the number of global full-grid reductions.
+
+### 3. New Input Knob For Conventional-From-DC Memory Control
+
+The fragment cache batch size used in the conventional-from-DC initialization is now controlled by:
+
+- `lcfo_frag_cache_size` in `&dc`
+
+Operational interpretation:
+
+- `lcfo_frag_cache_size = 1`
+  - safest memory setting
+  - default
+- larger values
+  - fewer fragment reloads
+  - higher peak memory
+
+The implementation uses `max(1, lcfo_frag_cache_size)`, so nonpositive values are treated as `1`.
 
 ## Practical Reading Order
 
