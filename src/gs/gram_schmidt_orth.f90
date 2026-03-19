@@ -240,6 +240,12 @@ contains
     use pack_unpack, only: copy_data
     use timer
     use communication, only: comm_bcast, comm_summation
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+    use cudafor
+    use cublas_v2, only: cublaszgemm, cublaszdotc, cublaszdscal, cublaszaxpy, &
+                         cublasHandle, cublasCreate, cublasSetStream, cublasDestroy, &
+                         CUBLAS_OP_C, CUBLAS_OP_N
+#endif
     implicit none
     type(s_dft_system),   intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
@@ -250,6 +256,13 @@ contains
     complex(8), parameter :: one = 1d0
     integer, parameter :: n_one = 1
     character(1),parameter :: TRANSA='C', TRANSB='N'
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+    integer, parameter :: TRANSA2=CUBLAS_OP_C, TRANSB2=CUBLAS_OP_N
+    type(cublasHandle) :: handle
+    integer(kind=cuda_stream_kind) :: custream
+    integer :: istat
+    complex(8) :: norm2_tmp_comp
+#endif
 
     integer :: nsize_rg
     integer :: ik, im, ispin, m
@@ -263,6 +276,12 @@ contains
     complex(8) :: wf_block_send(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), wfi%numo_max)
     complex(8) :: umat(wfi%numo_max,wfi%numo), umat_tmp(wfi%numo_max,wfi%numo)
     complex(8) :: ZDOTC
+
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+    istat = cublasCreate(handle)
+    istat = cudaStreamCreate(custream)
+    istat = cublasSetStream(handle, custream)
+#endif
 
     nsize_rg = (rg%ie(1)-rg%is(1)+1)*(rg%ie(2)-rg%is(2)+1)*(rg%ie(3)-rg%is(3)+1)
 
@@ -366,24 +385,64 @@ contains
 
                   do jo1 = io3_s, io3_e
                     ! normaliza the orbital jo1
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+
+!$acc data copyin(wf_block(:,:,:,jo1))
+!$acc host_data use_device(wf_block(:,:,:,jo1))
+                    istat = cublasZdotc(handle, &
+                      &     nsize_rg, wf_block(:,:,:,jo1), n_one, &
+                      &               wf_block(:,:,:,jo1), n_one, &
+                      &     norm2_tmp_comp)
+                    istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+                    norm2_tmp = real(norm2_tmp_comp) * sys%hvol
+#else
                     norm2_tmp = real( ZDOTC( &
                      &      nsize_rg, wf_block(:,:,:,jo1), n_one, &
                      &                wf_block(:,:,:,jo1), n_one )) &
                      &     * sys%hvol
+#endif
+
                     if (wfi%if_divide_rspace) then
                       call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
                     else
                       norm2 = norm2_tmp
                     endif
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+
+!$acc data copy(wf_block(:,:,:,jo1))
+!$acc host_data use_device(wf_block(:,:,:,jo1))
+                    istat = cublasZdscal(handle, &
+                      & nsize_rg, one/sqrt(norm2), wf_block(:,:,:,jo1), n_one)
+                    istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                     call ZDSCAL(nsize_rg, one/sqrt(norm2), wf_block(:,:,:,jo1), n_one)
+#endif
 
                 ! Calculate overlap coefficients:
                     coeff_tmp = 0d0
                     do jo2 = jo1+1, io3_e
+
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block(:,:,:,jo1), wf_block(:,:,:,jo2))
+!$acc host_data use_device(wf_block(:,:,:,jo1), wf_block(:,:,:,jo2))
+                      istat = cublasZdotc(handle, &
+                       &      nsize_rg, wf_block(:,:,:,jo1), n_one, &
+                       &                wf_block(:,:,:,jo2), n_one, &
+                       &      coeff_tmp(jo2))
+                      istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+                      coeff_tmp(jo2) = coeff_tmp(jo2) * sys%hvol
+#else
                       coeff_tmp(jo2) = ZDOTC( &
                        &      nsize_rg, wf_block(:,:,:,jo1), n_one, &
                        &                wf_block(:,:,:,jo2), n_one ) &
                        &     * sys%hvol
+#endif
                     end do
                     if (wfi%if_divide_rspace) then
                       call comm_summation(coeff_tmp(io3_s:io3_e), coeff(io3_s:io3_e), numo3, wfi%icomm_r)
@@ -393,9 +452,20 @@ contains
 
                     ! Exclude non-orthonormal component:
                     do jo2 = jo1+1, io3_e
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copy(wf_block(:,:,:,jo1), wf_block(:,:,:,jo2))
+!$acc host_data use_device(wf_block(:,:,:,jo1), wf_block(:,:,:,jo2))
+                      istat = cublasZaxpy(handle, &
+                        &  nsize_rg, - coeff(jo2), wf_block(:,:,:,jo1), n_one, &
+                        &                          wf_block(:,:,:,jo2), n_one)
+                      istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                       call ZAXPY( &
                         &  nsize_rg, - coeff(jo2), wf_block(:,:,:,jo1), n_one, &
                         &                          wf_block(:,:,:,jo2), n_one)
+#endif
                     end do
 
                   end do !jo1
@@ -405,10 +475,23 @@ contains
                     umat_tmp = 0.d0
                     wf_block_send(:,:,:,1:numo3_0) = wf_block(:,:,:,io2_s:io2_s-1+numo3_0)
                     wf_block1(:,:,:,1:numo3_1) = wf_block(:,:,:,io2_s+numo3_0:io2_e)
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block_send, wf_block1) copy(umat_tmp)
+!$acc host_data use_device(wf_block_send, wf_block1, umat_tmp)
+                    istat = cublaszgemm(handle,  &
+                       &  TRANSA2, TRANSB2, numo3_0, numo3_1, nsize_rg,  &
+                       &  one*sys%hvol, wf_block_send, nsize_rg,  &
+                       &                wf_block1, nsize_rg,  &
+                       &          zero, umat_tmp, wfi%numo_max)
+                    istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                     call zgemm(TRANSA, TRANSB, numo3_0, numo3_1, nsize_rg,  &
                         &  one*sys%hvol, wf_block_send, nsize_rg,  &
                         &                wf_block1, nsize_rg,  &
                         &          zero, umat_tmp, wfi%numo_max)
+#endif
 
                    if(wfi%if_divide_rspace) then
                       call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
@@ -416,10 +499,24 @@ contains
                       umat = umat_tmp
                     end if
 
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block_send, umat) copy(wf_block1)
+!$acc host_data use_device(wf_block_send, wf_block1, umat)
+                    istat = cublaszgemm(handle,  &
+                      &  TRANSB2, TRANSB2, nsize_rg, numo3_1, numo3_0,  &
+                      &         - one, wf_block_send, nsize_rg,  &
+                      &                umat, wfi%numo_max,  &
+                      &           one, wf_block1, nsize_rg)
+                    istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                     call zgemm(TRANSB, TRANSB, nsize_rg, numo3_1, numo3_0,  &
                       &         - one, wf_block_send, nsize_rg,  &
                       &                umat, wfi%numo_max,  &
                       &           one, wf_block1, nsize_rg)
+#endif
+
                     wf_block(:,:,:,io2_s+numo3_0:io2_e) = wf_block1(:,:,:,1:numo3_1)
                   end if ! idiv3 == 0
 
@@ -430,10 +527,24 @@ contains
                   umat_tmp = 0.d0
                   wf_block_send(:,:,:,1:numo2_0) = wf_block(:,:,:,io1_s:io1_s-1+numo2_0)
                   wf_block1(:,:,:,1:numo2_1) = wf_block(:,:,:,io1_s+numo2_0:io1_e)
+
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block_send, wf_block1) copy(umat_tmp)
+!$acc host_data use_device(wf_block_send, wf_block1, umat_tmp)
+                  istat = cublaszgemm(handle, &
+                      &  TRANSA2, TRANSB2, numo2_0, numo2_1, nsize_rg,  &
+                      &  one*sys%hvol, wf_block_send, nsize_rg,  &
+                      &                wf_block1, nsize_rg,  &
+                      &          zero, umat_tmp, wfi%numo_max)
+                  istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                   call zgemm(TRANSA, TRANSB, numo2_0, numo2_1, nsize_rg,  &
                       &  one*sys%hvol, wf_block_send, nsize_rg,  &
                       &                wf_block1, nsize_rg,  &
                       &          zero, umat_tmp, wfi%numo_max)
+#endif
 
                   if(wfi%if_divide_rspace) then
                     call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
@@ -441,10 +552,23 @@ contains
                     umat = umat_tmp
                   end if
 
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block_send, umat) copy(wf_block1)
+!$acc host_data use_device(wf_block_send, wf_block1, umat)
+                  istat = cublaszgemm(handle,  &
+                    &  TRANSB2, TRANSB2, nsize_rg, numo2_1, numo2_0,  &
+                    &         - one, wf_block_send, nsize_rg,  &
+                    &                umat, wfi%numo_max,  &
+                    &           one, wf_block1, nsize_rg)
+                  istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                   call zgemm(TRANSB, TRANSB, nsize_rg, numo2_1, numo2_0,  &
                     &         - one, wf_block_send, nsize_rg,  &
                     &                umat, wfi%numo_max,  &
                     &           one, wf_block1, nsize_rg)
+#endif
 
                   wf_block(:,:,:,io1_s+numo2_0:io1_e) = wf_block1(:,:,:,1:numo2_1)
                 end if ! idiv2 == 0
@@ -457,10 +581,23 @@ contains
                 wf_block_send(:,:,:,1:numo1_0) = wf_block(:,:,:,io0_s:io0_s-1+numo1_0)
                 wf_block1(:,:,:,1:numo1_1) = wf_block(:,:,:,io0_s+numo1_0:io0_e)
 
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block_send, wf_block1) copy(umat_tmp)
+!$acc host_data use_device(wf_block_send, wf_block1, umat_tmp)
+                istat = cublaszgemm(handle,  &
+                    &  TRANSA2, TRANSB2, numo1_0, numo1_1, nsize_rg,  &
+                    &  one*sys%hvol, wf_block_send, nsize_rg,  &
+                    &                wf_block1, nsize_rg,  &
+                    &          zero, umat_tmp, wfi%numo_max)
+                istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                 call zgemm(TRANSA, TRANSB, numo1_0, numo1_1, nsize_rg,  &
                     &  one*sys%hvol, wf_block_send, nsize_rg,  &
                     &                wf_block1, nsize_rg,  &
                     &          zero, umat_tmp, wfi%numo_max)
+#endif
 
                 if(wfi%if_divide_rspace) then
                   call comm_summation(umat_tmp, umat, wfi%numo_max*wfi%numo, wfi%icomm_r)
@@ -468,10 +605,23 @@ contains
                   umat = umat_tmp
                 end if
 
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+!$acc data copyin(wf_block_send, umat) copy(wf_block1)
+!$acc host_data use_device(wf_block_send, wf_block1, umat)
+                istat = cublaszgemm(handle,  &
+                  &  TRANSB2, TRANSB2, nsize_rg, numo1_1, numo1_0,  &
+                  &         - one, wf_block_send, nsize_rg,  &
+                  &                umat, wfi%numo_max,  &
+                  &           one, wf_block1, nsize_rg)
+                istat = cudaStreamSynchronize(custream)
+!$acc end host_data
+!$acc end data
+#else
                 call zgemm(TRANSB, TRANSB, nsize_rg, numo1_1, numo1_0,  &
                   &         - one, wf_block_send, nsize_rg,  &
                   &                umat, wfi%numo_max,  &
                   &           one, wf_block1, nsize_rg)
+#endif
                 wf_block(:,:,:,io0_s+numo1_0:io0_e) = wf_block1(:,:,:,1:numo1_1)
               end if ! idiv1 == 0
 
@@ -519,6 +669,10 @@ contains
     end do !ik
     end do !im
 
+#if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
+    istat = cudaStreamDestroy(custream)
+    istat = cublasDestroy(handle)
+#endif
     return
 
   end subroutine gram_schmidt_col_cblas
