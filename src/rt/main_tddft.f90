@@ -87,7 +87,6 @@ call print_header()
 
 if (yn_out_lcm_rt == 'y') then
   if (yn_dg_fragment_rt == 'y') stop 'yn_out_lcm_rt=y is not supported for DG-Fragment RT'
-  if (info%isize_r > 1) stop 'yn_out_lcm_rt=y currently requires orbital-only decomposition (isize_r=1)'
   call write_local_chern_marker_xy(Mit, mg, system, info, spsi_in)
 end if
 if (yn_out_lz_rt == 'y') then
@@ -382,7 +381,7 @@ end subroutine time_evolution_dg_fragment
 
 subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
-  use communication, only: comm_is_root
+  use communication, only: comm_is_root, comm_summation
   use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
   use inputoutput, only: t_unit_length
   implicit none
@@ -392,9 +391,9 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   type(s_parallel_info), intent(in) :: info
   type(s_orbital), intent(in) :: psi_fin
   real(8), allocatable :: marker(:,:,:)
-  real(8), allocatable :: marker_xy(:,:)
+  real(8), allocatable :: marker_xy(:,:), marker_xy_full_local(:,:), marker_xy_full(:,:)
   character(256) :: filename, filenum
-  integer :: ix, iy, iz, iunit
+  integer :: ix, iy, iz, iunit, nx, ny
 
   allocate(marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
   allocate(marker_xy(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2)))
@@ -409,6 +408,18 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
     end do
   end do
 
+  nx = maxval(mg%ie_all(1,:))
+  ny = maxval(mg%ie_all(2,:))
+  allocate(marker_xy_full_local(nx, ny), marker_xy_full(nx, ny))
+  marker_xy_full_local(:,:) = 0.0d0
+  marker_xy_full(:,:) = 0.0d0
+  do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      marker_xy_full_local(ix,iy) = marker_xy(ix,iy)
+    end do
+  end do
+  call comm_summation(marker_xy_full_local, marker_xy_full, nx*ny, info%icomm_r)
+
   if (comm_is_root(nproc_id_global)) then
     write(filenum, '(i6.6)') itt
     filename = trim(base_directory)//trim(sysname)//'_lcm_xy_'//trim(adjustl(filenum))//'.data'
@@ -418,16 +429,16 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
     write(iunit,'(a)') '# y: y coordinate'
     write(iunit,'(a)') '# local_chern_marker_zint: local Chern marker integrated over z'
     write(iunit,'(a,a,a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', trim(t_unit_length%name), '] 3:local_chern_marker_zint[none]'
-    do iy = mg%is(2), mg%ie(2)
-      do ix = mg%is(1), mg%ie(1)
-        write(iunit,'(3(1x,es24.16))') mg%coordinate(ix,1) * t_unit_length%conv, &
-                                       mg%coordinate(iy,2) * t_unit_length%conv, marker_xy(ix,iy)
+    do iy = 1, ny
+      do ix = 1, nx
+        write(iunit,'(3(1x,es24.16))') dble(ix-1) * system%hgs(1) * t_unit_length%conv, &
+                                       dble(iy-1) * system%hgs(2) * t_unit_length%conv, marker_xy_full(ix,iy)
       end do
       write(iunit,*)
     end do
     close(iunit)
   end if
-  deallocate(marker_xy, marker)
+  deallocate(marker_xy_full, marker_xy_full_local, marker_xy, marker)
 end subroutine write_local_chern_marker_xy
 
 subroutine print_header()

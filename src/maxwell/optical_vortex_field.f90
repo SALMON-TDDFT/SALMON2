@@ -64,10 +64,10 @@ subroutine calc_optical_vortex_Ac_ext(t, x, y, nx, ny, hgs, A_ext)
     zpol(2) = dcmplx(1d0, 0d0)
   case('left_circular')
     zpol(1) = dcmplx(1d0 / sqrt(2d0), 0d0)
-    zpol(2) = dcmplx(0d0, 1d0 / sqrt(2d0))
+    zpol(2) = dcmplx(0d0, -1d0 / sqrt(2d0))
   case('right_circular')
     zpol(1) = dcmplx(1d0 / sqrt(2d0), 0d0)
-    zpol(2) = dcmplx(0d0, -1d0 / sqrt(2d0))
+    zpol(2) = dcmplx(0d0, 1d0 / sqrt(2d0))
   case default
     stop 'unsupported optical_vortex_polarization in calc_optical_vortex_Ac_ext'
   end select

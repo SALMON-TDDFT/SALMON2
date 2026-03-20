@@ -173,6 +173,7 @@ subroutine dump_lz_record(itt, time_now, lz_xy, sz_xy, jz_xy, djzdt_xy, lz_total
   use structures, only: s_dft_system
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
+  use filesystem, only: create_directory
   use salmon_global, only: base_directory, sysname
   use inputoutput, only: t_unit_length, t_unit_time, t_unit_time_inv
   implicit none
@@ -180,7 +181,7 @@ subroutine dump_lz_record(itt, time_now, lz_xy, sz_xy, jz_xy, djzdt_xy, lz_total
   real(8), intent(in) :: time_now, lz_xy(:,:), sz_xy(:,:), jz_xy(:,:), djzdt_xy(:,:)
   real(8), intent(in) :: lz_total, sz_total, jz_total, djzdt_total, center_x, center_y
   type(s_dft_system), intent(in) :: system
-  character(256) :: file_map, file_total, filenum
+  character(256) :: file_map, file_total, map_directory, filenum
   integer :: ix, iy, iunit
   real(8) :: x, y
   real(8) :: conv_ang_xy, conv_djzdt_xy, conv_ang_total, conv_djzdt_total
@@ -210,7 +211,9 @@ subroutine dump_lz_record(itt, time_now, lz_xy, sz_xy, jz_xy, djzdt_xy, lz_total
   end if
 
   write(filenum, '(i6.6)') itt
-  file_map = trim(base_directory)//trim(sysname)//'_lz_xy_'//trim(adjustl(filenum))//'.data'
+  map_directory = trim(base_directory)//trim(sysname)//'_lz_xy/'
+  call create_directory(trim(map_directory))
+  file_map = trim(map_directory)//trim(sysname)//'_lz_xy_'//trim(adjustl(filenum))//'.data'
   open(newunit=iunit, file=trim(file_map), status='replace', action='write')
   write(iunit,'(a)') '# Local electronic angular momentum components integrated along z'
   write(iunit,'(a)') '# x: x coordinate measured from the chosen vortex center'

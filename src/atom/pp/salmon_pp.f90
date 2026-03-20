@@ -376,6 +376,7 @@ module salmon_pp
   
     integer :: a, ik, ir, intr
     integer :: i, i1, i2, i3, j1, j2, j3
+    integer :: j1s, j1e, j2s, j2e, j3s, j3e
     integer :: irepr_min, irepr_max
     real(8) :: Rion_repr(3)
     real(8) :: r, rc, r1, r2, r3, u, v, w
@@ -427,7 +428,7 @@ module salmon_pp
 
 
 !$omp parallel do &
-!$omp   private(a,ik,rc,i,i1,i2,i3,j1,j2,j3,u,v,w,r1,r2,r3,r,ir,intr,ratio1,ratio2,Rion_repr) &
+!$omp   private(a,ik,rc,i,i1,i2,i3,j1,j2,j3,j1s,j1e,j2s,j2e,j3s,j3e,u,v,w,r1,r2,r3,r,ir,intr,ratio1,ratio2,Rion_repr) &
 !$omp   reduction(+:rho_nlcc_tmp,tau_nlcc_tmp)
     do a=1, sys%nion
       ik = Kion(a)
@@ -447,11 +448,25 @@ module salmon_pp
       do i3 = irepr_min, irepr_max
         Rion_repr(3) = sys%Rion(3, a) + i3 * sys%primitive_a(3, 3)
 
-        do j1 = rg%is(1), rg%ie(1)
+        if(flag_cuboid) then
+          j1s = max(rg%is(1), 1 + ceiling((Rion_repr(1) - rc) / sys%hgs(1)))
+          j1e = min(rg%ie(1), 1 + floor((Rion_repr(1) + rc) / sys%hgs(1)))
+          j2s = max(rg%is(2), 1 + ceiling((Rion_repr(2) - rc) / sys%hgs(2)))
+          j2e = min(rg%ie(2), 1 + floor((Rion_repr(2) + rc) / sys%hgs(2)))
+          j3s = max(rg%is(3), 1 + ceiling((Rion_repr(3) - rc) / sys%hgs(3)))
+          j3e = min(rg%ie(3), 1 + floor((Rion_repr(3) + rc) / sys%hgs(3)))
+          if(j1s > j1e .or. j2s > j2e .or. j3s > j3e) cycle
+        else
+          j1s = rg%is(1); j1e = rg%ie(1)
+          j2s = rg%is(2); j2e = rg%ie(2)
+          j3s = rg%is(3); j3e = rg%ie(3)
+        end if
+
+        do j1 = j1s, j1e
            u = (j1-1) * sys%hgs(1)
-        do j2 = rg%is(2), rg%ie(2)
+        do j2 = j2s, j2e
            v = (j2-1) * sys%hgs(2)
-        do j3 = rg%is(3), rg%ie(3)
+        do j3 = j3s, j3e
            w = (j3-1) * sys%hgs(3)
           if(flag_cuboid) then
               r1 = u - Rion_repr(1)
