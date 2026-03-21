@@ -57,12 +57,6 @@ contains
 
   subroutine compute_local_chern_marker_from_orbital(mg, system, info, psi, marker, occ_eps)
     implicit none
-    type :: s_occ_owner_cache
-      integer :: iocc = 0
-      integer :: jocc = -1
-      integer :: nblk = 0
-      complex(8), pointer :: zblk(:,:,:,:) => null()
-    end type s_occ_owner_cache
 
     type(s_rgrid), intent(in) :: mg
     type(s_dft_system), intent(in) :: system
@@ -73,25 +67,26 @@ contains
 
     integer :: ik, ispin, io, iocc, jocc, ix, iy, iz, im, p, owner, ig
     integer :: nocc, nocc_local, iocc_g, jocc_g, nblk, nloc
+    integer :: jblk_s, jblk_e, nblk_chunk, jloc
     integer, allocatable :: occ_idx(:)
     integer, allocatable :: occ_owner(:), occ_pos_owner(:), local_occ_glob(:), local_occ_io(:)
     integer, allocatable :: owner_blk_s(:), owner_blk_e(:), owner_nblk(:)
     real(8), allocatable :: occ_w(:)
     real(8), allocatable :: local_occ_w(:)
-    complex(8), allocatable, target :: zocc(:,:,:,:), zt1(:,:,:,:), zt2(:,:,:,:), g12_blk(:,:)
+    complex(8), allocatable, target :: zocc(:,:,:,:), zt1(:,:,:,:), zt2(:,:,:,:)
     complex(8), pointer :: zblk(:,:,:,:)
     complex(8), pointer :: zocc2d(:,:), zt12d(:,:), zt22d(:,:)
     complex(8), allocatable :: zrhs1(:,:), zrhs2(:,:), ztmp1(:,:), ztmp2(:,:)
-    complex(8), allocatable :: g21_blk(:,:), w12(:,:), w21(:,:)
+    complex(8), allocatable :: g12_blk(:,:), g21_blk(:,:), w12(:,:), w21(:,:)
     complex(8), allocatable :: s1_row(:,:), s2_row(:,:), s1_row_sum(:,:), s2_row_sum(:,:)
     complex(8), allocatable :: g12_row(:,:), g12_row_sum(:,:)
-    type(s_occ_owner_cache), allocatable :: occ_cache(:)
     complex(8) :: phase1, phase2, zterm12, zterm21
     real(8) :: eps_occ, rvec(3)
     real(8) :: t_s12_copy, t_s12_pack, t_s12_gemm, t_s12_accum, t0, t1
     real(8) :: b1(3), b2(3)
     logical :: use_complex
     real(8), parameter :: eps_ortho = 1.0d-12
+    integer, parameter :: rhs_blk_chunk = 64
     real(8), allocatable :: marker_local(:,:,:), marker_sum(:,:,:)
 
     use_complex = allocated(psi%zwf)
@@ -126,14 +121,8 @@ contains
           call build_occ_distribution_cache(nocc, occ_idx, occ_w, info%id_o, occ_owner, occ_pos_owner, &
             local_occ_glob, local_occ_io, local_occ_w, owner_blk_s, owner_blk_e, owner_nblk, nocc_local)
           allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
-          allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
-          allocate(zt2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
-          allocate(s1_row(max(1,nocc_local),nocc), s2_row(max(1,nocc_local),nocc))
-          allocate(s1_row_sum(max(1,nocc_local),nocc), s2_row_sum(max(1,nocc_local),nocc))
-          allocate(g12_row(max(1,nocc_local),nocc), g12_row_sum(max(1,nocc_local),nocc))
           allocate(marker_local(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           allocate(marker_sum(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-          allocate(occ_cache(info%isize_o))
           marker_local(:,:,:) = 0d0
           marker_sum(:,:,:) = 0d0
           nloc = size(marker_local,1) * size(marker_local,2) * size(marker_local,3)
@@ -145,6 +134,12 @@ contains
           end do
           call lowdin_orthonormalize_occupied(nocc, zocc, eps_ortho)
           if (info%id_rko == 0) write(*,*) 'LCM stage: lowdin done'
+
+          allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
+          allocate(zt2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
+          allocate(s1_row(max(1,nocc_local),nocc), s2_row(max(1,nocc_local),nocc))
+          allocate(s1_row_sum(max(1,nocc_local),nocc), s2_row_sum(max(1,nocc_local),nocc))
+          allocate(g12_row(max(1,nocc_local),nocc), g12_row_sum(max(1,nocc_local),nocc))
 
           s1_row(:,:) = (0.0d0, 0.0d0)
           s2_row(:,:) = (0.0d0, 0.0d0)
@@ -186,14 +181,11 @@ contains
           if (info%id_rko == 0) write(*,*) 'LCM S1/S2 stage: zocc2d ready'
           do owner = 0, info%isize_o - 1
             call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
-            occ_cache(owner+1)%iocc = iocc
-            occ_cache(owner+1)%jocc = jocc
-            occ_cache(owner+1)%nblk = nblk
             if (nblk <= 0) cycle
             if (info%id_rko == 0 .and. owner == 0) write(*,*) 'LCM S1/S2 stage: owner 0 copy begin'
             call cpu_time(t0)
-            allocate(occ_cache(owner+1)%zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
-            call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, occ_cache(owner+1)%zblk)
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, zblk)
             call cpu_time(t1)
             if (info%id_rko == 0 .and. owner == 0) write(*,*) 'LCM S1/S2 stage: owner 0 copy done'
             t_s12_copy = t_s12_copy + (t1 - t0)
@@ -202,58 +194,87 @@ contains
                 write(*,'(a,1x,i0,1x,a,1x,es12.4)') 'LCM S1/S2 timing: owner', owner, 'copy=', t1 - t0
               end if
             end if
-            zblk => occ_cache(owner+1)%zblk
-            allocate(zrhs1(max(1,nloc), nblk), zrhs2(max(1,nloc), nblk))
-            allocate(ztmp1(max(1,nocc_local), nblk), ztmp2(max(1,nocc_local), nblk))
-            call cpu_time(t0)
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc) schedule(static)
-            do iz = mg%is(3), mg%ie(3)
-              do iy = mg%is(2), mg%ie(2)
-                do ix = mg%is(1), mg%ie(1)
-                  ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                  do jocc = 1, nblk
-                    zrhs1(ig,jocc) = phase1_cache(ix,iy,iz) * zblk(ix,iy,iz,jocc)
-                    zrhs2(ig,jocc) = phase2_cache(ix,iy,iz) * zblk(ix,iy,iz,jocc)
+            do jblk_s = 1, nblk, rhs_blk_chunk
+              jblk_e = min(nblk, jblk_s + rhs_blk_chunk - 1)
+              nblk_chunk = jblk_e - jblk_s + 1
+              allocate(zrhs1(max(1,nloc), nblk_chunk))
+              allocate(ztmp1(max(1,nocc_local), nblk_chunk))
+              call cpu_time(t0)
+!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,jloc) schedule(static)
+              do iz = mg%is(3), mg%ie(3)
+                do iy = mg%is(2), mg%ie(2)
+                  do ix = mg%is(1), mg%ie(1)
+                    ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                    do jloc = 1, nblk_chunk
+                      jocc = jblk_s + jloc - 1
+                      zrhs1(ig,jloc) = phase1_cache(ix,iy,iz) * zblk(ix,iy,iz,jocc)
+                    end do
                   end do
                 end do
               end do
-            end do
-            call cpu_time(t1)
-            t_s12_pack = t_s12_pack + (t1 - t0)
+              call cpu_time(t1)
+              t_s12_pack = t_s12_pack + (t1 - t0)
             if (info%id_rko == 0) then
               if (owner == 0 .or. owner == info%isize_o - 1) then
                 write(*,'(a,1x,i0,1x,a,1x,es12.4)') 'LCM S1/S2 timing: owner', owner, 'pack=', t1 - t0
               end if
             end if
-            call cpu_time(t0)
-            call zgemm('C', 'N', nocc_local, nblk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc), &
-              zrhs1, max(1,nloc), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
-            call zgemm('C', 'N', nocc_local, nblk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc), &
-              zrhs2, max(1,nloc), (0.0d0, 0.0d0), ztmp2, max(1,nocc_local))
-            call cpu_time(t1)
-            t_s12_gemm = t_s12_gemm + (t1 - t0)
+              call cpu_time(t0)
+              call zgemm('C', 'N', nocc_local, nblk_chunk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc), &
+                zrhs1, max(1,nloc), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
+              call cpu_time(t1)
+              t_s12_gemm = t_s12_gemm + (t1 - t0)
             if (info%id_rko == 0) then
               if (owner == 0 .or. owner == info%isize_o - 1) then
                 write(*,'(a,1x,i0,1x,a,1x,es12.4)') 'LCM S1/S2 timing: owner', owner, 'gemm=', t1 - t0
               end if
             end if
-            call cpu_time(t0)
-            do p = 1, nocc_local
-              do jocc = 1, nblk
-                jocc_g = iocc + jocc - 1
-                s1_row(p,jocc_g) = s1_row(p,jocc_g) + ztmp1(p,jocc)
-                s2_row(p,jocc_g) = s2_row(p,jocc_g) + ztmp2(p,jocc)
+              call cpu_time(t0)
+              do p = 1, nocc_local
+                do jloc = 1, nblk_chunk
+                  jocc_g = iocc + (jblk_s + jloc - 1) - 1
+                  s1_row(p,jocc_g) = s1_row(p,jocc_g) + ztmp1(p,jloc)
+                end do
               end do
-            end do
-            call cpu_time(t1)
-            t_s12_accum = t_s12_accum + (t1 - t0)
+              call cpu_time(t1)
+              t_s12_accum = t_s12_accum + (t1 - t0)
             if (info%id_rko == 0) then
               if (owner == 0 .or. owner == info%isize_o - 1) then
                 write(*,'(a,1x,i0,1x,a,1x,es12.4)') 'LCM S1/S2 timing: owner', owner, 'accum=', t1 - t0
               end if
             end if
-            deallocate(ztmp1, ztmp2, zrhs1, zrhs2)
-            nullify(zblk)
+              call cpu_time(t0)
+!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,jloc) schedule(static)
+              do iz = mg%is(3), mg%ie(3)
+                do iy = mg%is(2), mg%ie(2)
+                  do ix = mg%is(1), mg%ie(1)
+                    ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                    do jloc = 1, nblk_chunk
+                      jocc = jblk_s + jloc - 1
+                      zrhs1(ig,jloc) = phase2_cache(ix,iy,iz) * zblk(ix,iy,iz,jocc)
+                    end do
+                  end do
+                end do
+              end do
+              call cpu_time(t1)
+              t_s12_pack = t_s12_pack + (t1 - t0)
+              call cpu_time(t0)
+              call zgemm('C', 'N', nocc_local, nblk_chunk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc), &
+                zrhs1, max(1,nloc), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
+              call cpu_time(t1)
+              t_s12_gemm = t_s12_gemm + (t1 - t0)
+              call cpu_time(t0)
+              do p = 1, nocc_local
+                do jloc = 1, nblk_chunk
+                  jocc_g = iocc + (jblk_s + jloc - 1) - 1
+                  s2_row(p,jocc_g) = s2_row(p,jocc_g) + ztmp1(p,jloc)
+                end do
+              end do
+              call cpu_time(t1)
+              t_s12_accum = t_s12_accum + (t1 - t0)
+              deallocate(ztmp1, zrhs1)
+            end do
+            deallocate(zblk)
           end do
           call comm_summation(s1_row, s1_row_sum, size(s1_row), info%icomm_r)
           call comm_summation(s2_row, s2_row_sum, size(s2_row), info%icomm_r)
@@ -268,11 +289,10 @@ contains
           zt1(:,:,:,:) = (0.0d0, 0.0d0)
           zt2(:,:,:,:) = (0.0d0, 0.0d0)
           do owner = 0, info%isize_o - 1
-            iocc = occ_cache(owner+1)%iocc
-            jocc = occ_cache(owner+1)%jocc
-            nblk = occ_cache(owner+1)%nblk
+            call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
             if (nblk <= 0) cycle
-            zblk => occ_cache(owner+1)%zblk
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, zblk)
 !$omp parallel do collapse(3) private(ix,iy,iz,p,jocc_g,jocc) schedule(static)
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
@@ -287,7 +307,7 @@ contains
                 end do
               end do
             end do
-            nullify(zblk)
+            deallocate(zblk)
           end do
 
           g12_row(:,:) = (0.0d0, 0.0d0)
@@ -327,17 +347,16 @@ contains
           zt12d(1:nloc,1:max(1,nocc_local)) => zt1(:,:,:,1:max(1,nocc_local))
           zt22d(1:nloc,1:max(1,nocc_local)) => zt2(:,:,:,1:max(1,nocc_local))
           do owner = 0, info%isize_o - 1
-            iocc = occ_cache(owner+1)%iocc
-            jocc = occ_cache(owner+1)%jocc
-            nblk = occ_cache(owner+1)%nblk
+            call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
             if (nblk <= 0) cycle
-            zblk => occ_cache(owner+1)%zblk
-            allocate(g12_blk(max(1,nblk), nocc))
-            call get_owned_row_block(nocc, occ_idx, owner, g12_row_sum, iocc, jocc, g12_blk)
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, zblk)
+            allocate(g12_blk(max(1,nblk), max(1,nocc_local)))
+            call get_owned_row_block_selected(nocc, occ_idx, owner, g12_row_sum, iocc, jocc, local_occ_glob, g12_blk)
             allocate(g21_blk(max(1,nocc_local), nblk), w12(max(1,nloc), nblk), w21(max(1,nloc), nblk))
             do p = 1, nocc_local
               do jocc = 1, nblk
-                g21_blk(p,jocc) = conjg(g12_blk(jocc,local_occ_glob(p)))
+                g21_blk(p,jocc) = conjg(g12_blk(jocc,p))
               end do
             end do
             call zgemm('N', 'N', nloc, nblk, nocc_local, (1.0d0, 0.0d0), zt12d, max(1,nloc), g12_row_sum(:,iocc:iocc+nblk-1), &
@@ -360,7 +379,7 @@ contains
               end do
             end do
             deallocate(w21, w12, g21_blk, g12_blk)
-            nullify(zblk)
+            deallocate(zblk)
           end do
           nloc = size(marker_local,1) * size(marker_local,2) * size(marker_local,3)
           call comm_summation(marker_local, marker_sum, nloc, info%icomm_o)
@@ -368,10 +387,6 @@ contains
           marker(:,:,:) = marker(:,:,:) + marker_sum(:,:,:)
 
           deallocate(s1_row, s2_row, s1_row_sum, s2_row_sum, g12_row, g12_row_sum)
-          do owner = 1, size(occ_cache)
-            if (associated(occ_cache(owner)%zblk)) deallocate(occ_cache(owner)%zblk)
-          end do
-          deallocate(occ_cache)
           deallocate(zt1, zt2, zocc)
           deallocate(marker_local, marker_sum)
           deallocate(occ_idx, occ_w, occ_owner, occ_pos_owner, local_occ_glob, local_occ_io, local_occ_w, &
@@ -439,16 +454,18 @@ contains
       complex(8), intent(inout), contiguous, dimension(mg%is(1):, mg%is(2):, mg%is(3):, :) :: zbuf
       real(8), intent(in) :: eps_rel
 
-      complex(8), allocatable :: s_local(:,:), s_global(:,:), u_scaled(:,:), umat(:,:), xmat_local(:,:)
+      complex(8), allocatable :: s_local(:,:), umat(:,:), xmat_local(:,:), u_scaled_blk(:,:), umat_blk(:,:)
       real(8), allocatable :: eval(:)
       real(8) :: smax
       integer :: ia, ib, ic, owner, ib_s, ib_e, nblk, ia_g, loc_s, loc_e, nloc_cols
+      integer :: ic_s, ic_e, ncol_chunk
       complex(8), allocatable :: zblk2(:,:,:,:)
 #ifdef USE_SCALAPACK
       type(s_parallel_info) :: info_sl
 #endif
+      integer, parameter :: eig_blk_chunk = 64
 
-      allocate(s_local(nocc0,nocc0), s_global(nocc0,nocc0), umat(nocc0,nocc0), eval(nocc0))
+      allocate(s_local(nocc0,nocc0), umat(nocc0,nocc0), eval(nocc0))
       s_local(:,:) = (0.0d0, 0.0d0)
 
       do owner = 0, info%isize_o - 1
@@ -472,10 +489,11 @@ contains
       end do
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: local overlap built'
 
-      call comm_summation(s_local, s_global, nocc0*nocc0, info%icomm_r)
+      call comm_summation(s_local, umat, nocc0*nocc0, info%icomm_r)
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: icomm_r reduction done'
-      call comm_summation(s_global, umat, nocc0*nocc0, info%icomm_o)
+      call comm_summation(umat, s_local, nocc0*nocc0, info%icomm_o)
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: icomm_o reduction done'
+      umat(:,:) = s_local(:,:)
       deallocate(s_local)
       if (yn_scalapack == 'y') then
 #ifdef USE_SCALAPACK
@@ -497,30 +515,34 @@ contains
       smax = maxval(abs(eval))
       if (smax <= 0.0d0) stop 'lowdin_orthonormalize_occupied: invalid overlap spectrum'
 
-      allocate(u_scaled(nocc0,nocc0))
-      u_scaled(:,:) = (0.0d0, 0.0d0)
-!$omp parallel do private(ic,ia) schedule(static)
-      do ic = 1, nocc0
-        if (eval(ic) > eps_rel * smax) then
-          do ia = 1, nocc0
-            u_scaled(ia,ic) = umat(ia,ic) / sqrt(eval(ic))
-          end do
-        end if
-      end do
       call get_owner_occ_block(nocc0, occ_idx, info%id_o, loc_s, loc_e, nloc_cols)
       allocate(xmat_local(nocc0,max(1,nloc_cols)))
       xmat_local(:,:) = (0.0d0, 0.0d0)
       if (nloc_cols > 0) then
-        call zgemm('N', 'C', nocc0, nloc_cols, nocc0, (1.0d0, 0.0d0), u_scaled, nocc0, &
-          umat(loc_s,1), nocc0, (0.0d0, 0.0d0), xmat_local, nocc0)
+        do ic_s = 1, nocc0, eig_blk_chunk
+          ic_e = min(nocc0, ic_s + eig_blk_chunk - 1)
+          ncol_chunk = ic_e - ic_s + 1
+          allocate(u_scaled_blk(nocc0,ncol_chunk), umat_blk(max(1,nloc_cols),ncol_chunk))
+          u_scaled_blk(:,:) = (0.0d0, 0.0d0)
+          do ic = ic_s, ic_e
+            umat_blk(1:nloc_cols,ic-ic_s+1) = umat(loc_s:loc_e,ic)
+            if (eval(ic) > eps_rel * smax) then
+              do ia = 1, nocc0
+                u_scaled_blk(ia,ic-ic_s+1) = umat(ia,ic) / sqrt(eval(ic))
+              end do
+            end if
+          end do
+          call zgemm('N', 'C', nocc0, nloc_cols, ncol_chunk, (1.0d0, 0.0d0), u_scaled_blk, nocc0, &
+            umat_blk, max(1,nloc_cols), (1.0d0, 0.0d0), xmat_local, nocc0)
+          deallocate(umat_blk, u_scaled_blk)
+        end do
       end if
-      deallocate(u_scaled)
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: xmat done'
 
       call apply_right_transform_occ_inplace(nocc0, zbuf, xmat_local)
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: apply_right_transform done'
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: local deallocate begin'
-      deallocate(xmat_local, eval, umat, s_global)
+      deallocate(xmat_local, eval, umat)
       if (info%id_rko == 0) write(*,*) 'LCM lowdin stage: local deallocate done'
     end subroutine lowdin_orthonormalize_occupied
 
@@ -531,43 +553,53 @@ contains
       complex(8), intent(inout), contiguous, target, dimension(mg%is(1):, mg%is(2):, mg%is(3):, :) :: zbuf
       complex(8), intent(in) :: xmat_local(:,:)
 
-      complex(8), allocatable :: vin_blk(:), vout(:), zblk2(:,:,:,:), zsrc(:,:,:,:)
-      integer :: ia, ib, owner, ia_s, ia_e, nblk, nocc_local0
+      complex(8), allocatable, target :: zsrc(:,:,:,:), zblk_owner(:,:,:,:)
+      complex(8), allocatable :: xblk(:,:)
+      complex(8), pointer :: zsrc2d(:,:), zbuf2d(:,:), zblk2d(:,:)
+      integer :: owner, ia_s, ia_e, nblk, nocc_local0, nloc0
 
       nocc_local0 = size(zbuf,4)
+      nloc0 = (mg%ie(1) - mg%is(1) + 1) * (mg%ie(2) - mg%is(2) + 1) * (mg%ie(3) - mg%is(3) + 1)
+      if (info%id_rko == 0) write(*,*) 'LCM apply_right_transform: entry'
       allocate(zsrc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local0)))
       zsrc(:,:,:,:) = zbuf(:,:,:,:)
       zbuf(:,:,:,:) = (0.0d0, 0.0d0)
-      allocate(vout(max(1,nocc_local0)))
+      zsrc2d(1:nloc0,1:max(1,nocc_local0)) => zsrc(:,:,:,1:max(1,nocc_local0))
+      zbuf2d(1:nloc0,1:max(1,nocc_local0)) => zbuf(:,:,:,1:max(1,nocc_local0))
+      if (info%id_rko == 0) write(*,*) 'LCM apply_right_transform: buffers ready'
       do owner = 0, info%isize_o - 1
         call get_owner_occ_block(nocc0, occ_idx, owner, ia_s, ia_e, nblk)
         if (nblk <= 0) cycle
-        allocate(zblk2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
-        call get_owned_occ_block(nocc0, occ_idx, owner, zsrc, ia_s, ia_e, zblk2)
-        allocate(vin_blk(nblk))
-        do iz = mg%is(3), mg%ie(3)
-          do iy = mg%is(2), mg%ie(2)
-            do ix = mg%is(1), mg%ie(1)
-              do ia = 1, nblk
-                vin_blk(ia) = zblk2(ix,iy,iz,ia)
-              end do
-              do ib = 1, nocc_local0
-                vout(ib) = (0.0d0, 0.0d0)
-                do ia = 1, nblk
-                  vout(ib) = vout(ib) + vin_blk(ia) * xmat_local(ia_s + ia - 1, ib)
-                end do
-              end do
-              do ib = 1, nocc_local0
-                zbuf(ix,iy,iz,ib) = zbuf(ix,iy,iz,ib) + vout(ib)
-              end do
-            end do
-          end do
-        end do
-        deallocate(vin_blk)
-        deallocate(zblk2)
+        if (info%id_rko == 0) then
+          write(*,'(a,1x,i0,1x,a,1x,i0,1x,a,1x,i0)') 'LCM apply_right_transform: owner', owner, 'ia_s', ia_s, 'nblk', nblk
+          write(*,'(a,1x,i0,1x,a)') 'LCM apply_right_transform: owner', owner, 'copy begin'
+        end if
+        allocate(zblk_owner(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+        call get_owned_occ_block(nocc0, occ_idx, owner, zsrc, ia_s, ia_e, zblk_owner)
+        zblk2d(1:nloc0,1:nblk) => zblk_owner(:,:,:,1:nblk)
+        allocate(xblk(nblk, max(1,nocc_local0)))
+        xblk(:,:) = xmat_local(ia_s:ia_e,1:max(1,nocc_local0))
+        if (info%id_rko == 0) then
+          write(*,'(a,1x,i0,1x,a)') 'LCM apply_right_transform: owner', owner, 'copy done'
+        end if
+        if (info%id_rko == 0) then
+          write(*,'(a,1x,i0,1x,a)') 'LCM apply_right_transform: owner', owner, 'kernel begin'
+        end if
+        call zgemm('N', 'N', nloc0, nocc_local0, nblk, (1.0d0, 0.0d0), zblk2d, max(1,nloc0), &
+          xblk, max(1,nblk), (1.0d0, 0.0d0), zbuf2d, max(1,nloc0))
+        if (info%id_rko == 0) then
+          write(*,'(a,1x,i0,1x,a)') 'LCM apply_right_transform: owner', owner, 'kernel done'
+          write(*,'(a,1x,i0,1x,a)') 'LCM apply_right_transform: owner', owner, 'cleanup begin'
+        end if
+        deallocate(xblk)
+        deallocate(zblk_owner)
+        if (info%id_rko == 0) then
+          write(*,'(a,1x,i0,1x,a)') 'LCM apply_right_transform: owner', owner, 'cleanup done'
+        end if
       end do
-      deallocate(vout)
+      if (info%id_rko == 0) write(*,*) 'LCM apply_right_transform: finalize begin'
       deallocate(zsrc)
+      if (info%id_rko == 0) write(*,*) 'LCM apply_right_transform: finalize done'
     end subroutine apply_right_transform_occ_inplace
 
     subroutine build_occ_distribution_cache(nocc0, occ_list0, occ_w0, owner_id, occ_owner0, occ_pos0, &
@@ -738,16 +770,21 @@ contains
       call comm_bcast(zblk_out(:,:,:,1:nblk0), info%icomm_o, owner_id)
     end subroutine get_owned_occ_block
 
-    subroutine assemble_owner_row_matrix(nocc0, occ_list0, row_local, amat)
+    subroutine assemble_owner_row_matrix_rooted(nocc0, occ_list0, row_local, amat)
       implicit none
       integer, intent(in) :: nocc0
       integer, intent(in) :: occ_list0(nocc0)
       complex(8), intent(in) :: row_local(:,:)
-      complex(8), intent(out) :: amat(nocc0,nocc0)
+      complex(8), allocatable, intent(inout) :: amat(:,:)
       complex(8), allocatable :: row_blk(:,:)
       integer :: owner_id, blk_s, blk_e, nblk, p
 
-      amat(:,:) = (0.0d0, 0.0d0)
+      if (info%id_o == 0) then
+        if (.not. allocated(amat)) allocate(amat(nocc0,nocc0))
+        amat(:,:) = (0.0d0, 0.0d0)
+      else
+        if (allocated(amat)) deallocate(amat)
+      end if
       do owner_id = 0, info%isize_o - 1
         call get_owner_occ_block(nocc0, occ_list0, owner_id, blk_s, blk_e, nblk)
         if (nblk <= 0) cycle
@@ -759,10 +796,10 @@ contains
           end do
         end if
         call comm_bcast(row_blk, info%icomm_o, owner_id)
-        amat(blk_s:blk_e,:) = row_blk(1:nblk,:)
+        if (info%id_o == 0) amat(blk_s:blk_e,:) = row_blk(1:nblk,:)
         deallocate(row_blk)
       end do
-    end subroutine assemble_owner_row_matrix
+    end subroutine assemble_owner_row_matrix_rooted
 
     subroutine get_owned_row_block(nocc0, occ_list0, owner_id, row_local, blk_s, blk_e, row_blk_out)
       implicit none
@@ -783,6 +820,29 @@ contains
       call comm_bcast(row_blk_out(1:nblk0,:), info%icomm_o, owner_id)
     end subroutine get_owned_row_block
 
+    subroutine get_owned_row_block_selected(nocc0, occ_list0, owner_id, row_local, blk_s, blk_e, col_idx, row_blk_out)
+      implicit none
+      integer, intent(in) :: nocc0, owner_id, blk_s, blk_e
+      integer, intent(in) :: occ_list0(nocc0)
+      integer, intent(in) :: col_idx(:)
+      complex(8), intent(in) :: row_local(:,:)
+      complex(8), intent(out) :: row_blk_out(max(1,blk_e-blk_s+1), max(1,size(col_idx)))
+      integer :: nblk0, ncol, p, j
+
+      nblk0 = max(0, blk_e - blk_s + 1)
+      ncol = size(col_idx)
+      row_blk_out(:,:) = (0.0d0, 0.0d0)
+      if (nblk0 <= 0 .or. ncol <= 0) return
+      if (info%id_o == owner_id) then
+        do p = 1, nblk0
+          do j = 1, ncol
+            row_blk_out(p,j) = row_local(p,col_idx(j))
+          end do
+        end do
+      end if
+      call comm_bcast(row_blk_out(1:nblk0,1:ncol), info%icomm_o, owner_id)
+    end subroutine get_owned_row_block_selected
+
     subroutine build_transposed_inverse_coefficients_rowwise_checked(nocc0, occ_list0, row_local, label)
       implicit none
       integer, intent(in) :: nocc0
@@ -792,8 +852,7 @@ contains
       complex(8), allocatable :: amat(:,:), row_blk(:,:)
       integer :: owner_id, blk_s, blk_e, nblk
 
-      allocate(amat(nocc0,nocc0))
-      call assemble_owner_row_matrix(nocc0, occ_list0, row_local, amat)
+      call assemble_owner_row_matrix_rooted(nocc0, occ_list0, row_local, amat)
       if (info%id_o == 0) then
         call build_transposed_inverse_coefficients_checked(amat, label)
       end if
