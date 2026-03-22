@@ -100,7 +100,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   character(10) :: fileLaser
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
-  real(8) :: t_stage_s, t_stage_e
   integer :: itt
   logical :: rion_update
 
@@ -246,7 +245,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call cpu_time(t_stage_s)
   if(yn_conventional_from_dcdft=='n' .and. .not.(yn_dg_fragment_rt=='y' .and. yn_dg_fragment_from_dcdft=='y')) then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   else
@@ -261,40 +259,21 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
-  call cpu_time(t_stage_e)
-  if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-    write(*,'(1x,a,f12.3,a)') 'RT init timing: restart_or_dc_reconstruct = ', t_stage_e - t_stage_s, ' s'
-  end if
   if(yn_restart=='n') Mit=0
 
   if((gram_schmidt_interval == 0) ) then
-    call cpu_time(t_stage_s)
     call gram_schmidt(system, mg, info, spsi_in)
-    call cpu_time(t_stage_e)
-    if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-      write(*,'(1x,a,f12.3,a)') 'RT init timing: gram_schmidt = ', t_stage_e - t_stage_s, ' s'
-    end if
   end if
 
   if(yn_jm=='n') then
-    call cpu_time(t_stage_s)
     call calc_nlcc(pp, system, mg, ppn)
-    call cpu_time(t_stage_e)
-    if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-      write(*,'(1x,a,f12.3,a)') 'RT init timing: calc_nlcc = ', t_stage_e - t_stage_s, ' s'
-    end if
     if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
       write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
       write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
     end if
   end if
   
-  call cpu_time(t_stage_s)
   call calc_density(system,rho_s,spsi_in,info,mg)
-  call cpu_time(t_stage_e)
-  if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-    write(*,'(1x,a,f12.3,a)') 'RT init timing: calc_density = ', t_stage_e - t_stage_s, ' s'
-  end if
   rho%f = 0d0
   do jspin=1,system%nspin
      rho%f = rho%f + rho_s(jspin)%f
@@ -309,18 +288,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
-  call cpu_time(t_stage_s)
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call cpu_time(t_stage_e)
-  if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-    write(*,'(1x,a,f12.3,a)') 'RT init timing: hartree = ', t_stage_e - t_stage_s, ' s'
-  end if
-  call cpu_time(t_stage_s)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
-  call cpu_time(t_stage_e)
-  if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-    write(*,'(1x,a,f12.3,a)') 'RT init timing: exchange_correlation = ', t_stage_e - t_stage_s, ' s'
-  end if
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
@@ -357,12 +326,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
   
   ! calculation of GS total energy
-  call cpu_time(t_stage_s)
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
-  call cpu_time(t_stage_e)
-  if((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-    write(*,'(1x,a,f12.3,a)') 'RT init timing: calc_eigen_energy = ', t_stage_e - t_stage_s, ' s'
-  end if
   if(yn_jm=='n') then
     rion_update = .true. ! it's first calculation
   else

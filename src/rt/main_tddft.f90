@@ -383,6 +383,7 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root, comm_summation
   use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
+  use filesystem, only: create_directory
   use inputoutput, only: t_unit_length
   implicit none
   integer, intent(in) :: itt
@@ -392,7 +393,7 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   type(s_orbital), intent(in) :: psi_fin
   real(8), allocatable :: marker(:,:,:)
   real(8), allocatable :: marker_xy(:,:), marker_xy_full_local(:,:), marker_xy_full(:,:)
-  character(256) :: filename, filenum
+  character(256) :: filename, filenum, map_directory
   integer :: ix, iy, iz, iunit, nx, ny
 
   allocate(marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -422,7 +423,9 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
 
   if (comm_is_root(nproc_id_global)) then
     write(filenum, '(i6.6)') itt
-    filename = trim(base_directory)//trim(sysname)//'_lcm_xy_'//trim(adjustl(filenum))//'.data'
+    map_directory = trim(base_directory)//trim(sysname)//'_lcm_xy/'
+    call create_directory(trim(map_directory))
+    filename = trim(map_directory)//trim(sysname)//'_lcm_xy_'//trim(adjustl(filenum))//'.data'
     open(newunit=iunit, file=trim(filename), status='replace', action='write')
     write(iunit,'(a)') '# Local Chern marker integrated along z'
     write(iunit,'(a)') '# x: x coordinate'

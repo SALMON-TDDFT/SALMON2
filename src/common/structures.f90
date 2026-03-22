@@ -728,6 +728,7 @@ contains
     DEAL(rg%idx)
     DEAL(rg%idy)
     DEAL(rg%idz)
+    DEAL(rg%coordinate)
   end subroutine deallocate_rgrid
 
   subroutine deallocate_orbital(psi)
