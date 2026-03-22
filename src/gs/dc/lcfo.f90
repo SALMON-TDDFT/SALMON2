@@ -671,7 +671,7 @@ contains
   subroutine init_conventional_from_dcdft(lg,mg,system,info,spsi)
     use communication, only: comm_is_root, comm_summation, comm_bcast
     use filesystem, only: get_filehandle
-    use salmon_global,only: num_fragment
+    use salmon_global,only: num_fragment, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -694,7 +694,13 @@ contains
     
     if(comm_is_root(info%id_rko)) then
       write(*,*) "start init_conventional_from_dcdft"
-      write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
+      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(*,*) "yn_dg_fragment_from_dcdft==y : DG-Fragment RT basis states are reconstructed from DC-LCFO data"
+      else
+        write(*,*) "wavefunctions are reconstructed from DC-LCFO data"
+      end if
       write(*,*) "read from ./data_dcdft directory"
     end if
     
