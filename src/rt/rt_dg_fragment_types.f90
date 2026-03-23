@@ -22,7 +22,7 @@ module rt_dg_fragment_types
   implicit none
 
   private
-  public :: halo_info, s_dg_fragment_rt
+  public :: halo_info, momentum_block_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -37,6 +37,14 @@ module rt_dg_fragment_types
     complex(8), allocatable :: buf_send_c(:,:,:,:,:)  ! complex halo buffer for SOI path
     complex(8), allocatable :: buf_recv_c(:,:,:,:,:)  ! complex halo buffer for SOI path
   end type halo_info
+
+  type :: momentum_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    real(8), allocatable :: val(:,:,:,:) ! (3, nrow_max, ncol_max, nspin)
+  end type momentum_block_info
 
   ! Fragment basis data structure
   !
@@ -72,6 +80,8 @@ module rt_dg_fragment_types
     real(8), allocatable :: S_mat_prop(:,:,:)  ! overlap matrix used in propagation/unitarity
     complex(8), allocatable :: S_mat_c(:,:,:)      ! complex raw fragment overlap matrix (SOI path)
     complex(8), allocatable :: S_mat_prop_c(:,:,:) ! complex overlap used in propagation/unitarity
+    logical :: has_global_overlap_copy = .true.
+    logical :: overlap_prop_root_authoritative = .false.
     integer, allocatable :: n_basis(:,:)       ! (n_frag, nspin), spin-resolved active basis count per fragment
     integer, allocatable :: index_basis(:,:,:) ! (nstate_frag, n_frag, nspin), spin-resolved local->global basis map
     integer, allocatable :: n_mat(:)           ! (nspin), spin-resolved projected-matrix dimension
@@ -80,6 +90,9 @@ module rt_dg_fragment_types
     ! Time-dependent external field coupling (velocity gauge: H = H_0 - i*A·∇ + A^2/2)
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)
     complex(8), allocatable :: momentum_mat_c(:,:,:,:) ! complex momentum matrix for SOI/mixed propagation
+    type(momentum_block_info), allocatable :: momentum_blocks(:)
+    integer, allocatable :: momentum_block_map(:,:)
+    integer :: n_momentum_blocks = 0
     real(8), allocatable :: dipole_mat(:,:,:,:)   ! dipole matrix elements for observables (x,y,z)
     complex(8), allocatable :: H_nl_cache(:,:,:)   ! cached non-local PP matrix (A-dependent)
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_cache

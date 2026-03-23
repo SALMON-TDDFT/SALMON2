@@ -25,6 +25,9 @@
       use_S = allocated(dg_frag%S_mat_mixed_prop) .or. allocated(dg_frag%S_mat_prop_c) .or. &
               allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)
       allocate(v(n), Sv(n), u_prev(n))
+      if (.not. (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) .and. use_S) then
+        call ensure_overlap_prop_available(dg_frag, n)
+      end if
 
       do io = 1, nstab
         v(:) = (0.0d0, 0.0d0)

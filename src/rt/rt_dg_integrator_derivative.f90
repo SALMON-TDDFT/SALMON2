@@ -1,6 +1,7 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
+    use rt_dg_fragment_ops, only: apply_momentum_blocks
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -134,23 +135,25 @@
 
         ! Build M = A·<∇>
         M(:, :) = (0.0d0, 0.0d0)
-        do idir = 1, 3
-          if (allocated(dg_frag%momentum_mat_c)) then
-            if (any(abs(dg_frag%momentum_mat_c(idir, 1:n_frag, 1:n_frag, ispin)) > huge_val)) then
-              write(*,'(a,i0,a,i0,a,i0,a,i0)') "[Inf] momentum_mat_c: rank=", dg_frag%id, " itt=", itt, &
-                " ispin=", ispin, " idir=", idir
-              stop "Inf in momentum_mat_c"
+        if (.not. allocated(dg_frag%momentum_blocks)) then
+          do idir = 1, 3
+            if (allocated(dg_frag%momentum_mat_c)) then
+              if (any(abs(dg_frag%momentum_mat_c(idir, 1:n_frag, 1:n_frag, ispin)) > huge_val)) then
+                write(*,'(a,i0,a,i0,a,i0,a,i0)') "[Inf] momentum_mat_c: rank=", dg_frag%id, " itt=", itt, &
+                  " ispin=", ispin, " idir=", idir
+                stop "Inf in momentum_mat_c"
+              end if
+              M(1:n_frag, 1:n_frag) = M(1:n_frag, 1:n_frag) + Ac_tot(idir) * dg_frag%momentum_mat_c(idir, 1:n_frag, 1:n_frag, ispin)
+            else
+              if (any(abs(dg_frag%momentum_mat(idir, 1:n_frag, 1:n_frag, ispin)) > huge_val)) then
+                write(*,'(a,i0,a,i0,a,i0,a,i0)') "[Inf] momentum_mat: rank=", dg_frag%id, " itt=", itt, &
+                  " ispin=", ispin, " idir=", idir
+                stop "Inf in momentum_mat"
+              end if
+              M(1:n_frag, 1:n_frag) = M(1:n_frag, 1:n_frag) + Ac_tot(idir) * dg_frag%momentum_mat(idir, 1:n_frag, 1:n_frag, ispin)
             end if
-            M(1:n_frag, 1:n_frag) = M(1:n_frag, 1:n_frag) + Ac_tot(idir) * dg_frag%momentum_mat_c(idir, 1:n_frag, 1:n_frag, ispin)
-          else
-            if (any(abs(dg_frag%momentum_mat(idir, 1:n_frag, 1:n_frag, ispin)) > huge_val)) then
-              write(*,'(a,i0,a,i0,a,i0,a,i0)') "[Inf] momentum_mat: rank=", dg_frag%id, " itt=", itt, &
-                " ispin=", ispin, " idir=", idir
-              stop "Inf in momentum_mat"
-            end if
-            M(1:n_frag, 1:n_frag) = M(1:n_frag, 1:n_frag) + Ac_tot(idir) * dg_frag%momentum_mat(idir, 1:n_frag, 1:n_frag, ispin)
-          end if
-        end do
+          end do
+        end if
         if (n_pw > 0) then
           do io = 1, n_pw
             M(n_frag+io, n_frag+io) = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
@@ -222,8 +225,28 @@
         stop "NaN in H0c term"
       end if
 
-      call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), M, n_tot, &
-                 coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_m, n_tot)
+      if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
+        dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
+        call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
+        if (n_pw > 0) then
+          do io = 1, n_pw
+            mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
+            dcoef_dt_m(n_frag+io, :) = dcoef_dt_m(n_frag+io, :) + mfp * coef_all(n_frag+io, :)
+          end do
+          if (.not. disable_mfp .and. allocated(dg_frag%S_mat_frag_pw)) then
+            do jo = 1, n_pw
+              mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo))
+              do io = 1, n_frag
+                dcoef_dt_m(io, :) = dcoef_dt_m(io, :) + mfp * dg_frag%S_mat_frag_pw(io, jo, ispin) * coef_all(n_frag+jo, :)
+                dcoef_dt_m(n_frag+jo, :) = dcoef_dt_m(n_frag+jo, :) - conjg(mfp * dg_frag%S_mat_frag_pw(io, jo, ispin)) * coef_all(io, :)
+              end do
+            end do
+          end if
+        end if
+      else
+        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), M, n_tot, &
+                   coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_m, n_tot)
+      end if
       max_abs_m = maxval(abs(dcoef_dt_m))
       if (max_abs_m > 1.0d150) then
         write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_m| huge: rank=", dg_frag%id, &
@@ -257,18 +280,22 @@
         S_eval(:, :) = dg_frag%S_mat_mixed_prop(1:n_s, 1:n_s, ispin)
       else if (allocated(dg_frag%S_mat_prop_c)) then
         n_s = n_frag
+        call ensure_overlap_prop_available(dg_frag, n_s)
         allocate(S_eval(n_s, n_s))
         S_eval(:, :) = dg_frag%S_mat_prop_c(1:n_s, 1:n_s, ispin)
       else if (allocated(dg_frag%S_mat_prop)) then
         n_s = n_frag
+        call ensure_overlap_prop_available(dg_frag, n_s)
         allocate(S_eval(n_s, n_s))
         S_eval(:, :) = cmplx(dg_frag%S_mat_prop(1:n_s, 1:n_s, ispin), 0.0d0, kind=8)
       else if (allocated(dg_frag%S_mat_c)) then
         n_s = n_frag
+        call ensure_overlap_prop_available(dg_frag, n_s)
         allocate(S_eval(n_s, n_s))
         S_eval(:, :) = dg_frag%S_mat_c(1:n_s, 1:n_s, ispin)
       else if (allocated(dg_frag%S_mat)) then
         n_s = n_frag
+        call ensure_overlap_prop_available(dg_frag, n_s)
         allocate(S_eval(n_s, n_s))
         S_eval(:, :) = cmplx(dg_frag%S_mat(1:n_s, 1:n_s, ispin), 0.0d0, kind=8)
       end if
