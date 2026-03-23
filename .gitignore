@@ -153,3 +153,6 @@ samples/**/comparison.dat
 samples/**/conv_*.dat
 samples/**/current_*.dat
 samples/**/hybrid_bench_*.summary
+
+# Local git worktrees
+/.worktrees/
