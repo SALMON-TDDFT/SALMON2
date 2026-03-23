@@ -7,6 +7,7 @@ module rt_dg_fragment_ops
   public :: calculate_microscopic_current_dg
   public :: build_spatial_A_coupling_matrices
   public :: apply_gradient_to_basis
+  public :: apply_momentum_blocks
 
 contains
 
@@ -176,35 +177,23 @@ contains
     integer,                intent(in) :: i_local, jo
     type(s_rgrid),          intent(in) :: mg
     type(s_stencil),        intent(in) :: stencil
-    real(8),                intent(out) :: grad_phi(mg%is(1):mg%ie(1), &
-                                                    mg%is(2):mg%ie(2), &
-                                                    mg%is(3):mg%ie(3), 3)
+    real(8),                intent(out) :: grad_phi(:,:,:,:)
 
-    integer :: lx, ly, lz, gx, gy, gz, ifrag
+    integer :: lx, ly, lz, ifrag
     real(8) :: nabt(4,3)
-    integer :: is(3), ie(3), iorg(3), ndom(3)
+    integer :: ndom(3)
 
     nabt = stencil%coef_nab
-    is = mg%is
-    ie = mg%ie
     ifrag = dg_frag%ifrag_start + i_local - 1
-    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
 
     grad_phi = 0.0d0
 
-    !$omp parallel do collapse(3) private(lx, ly, lz, gx, gy, gz) schedule(static)
+    !$omp parallel do collapse(3) private(lx, ly, lz) schedule(static)
     do lz = 1, ndom(3)
       do ly = 1, ndom(2)
         do lx = 1, ndom(1)
-          gx = iorg(1) + lx - 1
-          gy = iorg(2) + ly - 1
-          gz = iorg(3) + lz - 1
-          if (gx < is(1) .or. gx > ie(1)) cycle
-          if (gy < is(2) .or. gy > ie(2)) cycle
-          if (gz < is(3) .or. gz > ie(3)) cycle
-
-          grad_phi(gx, gy, gz, 1) = &
+          grad_phi(lx, ly, lz, 1) = &
               nabt(1,1) * (dg_frag%phi_frag(lx+1, ly, lz, jo, i_local) - &
                            dg_frag%phi_frag(lx-1, ly, lz, jo, i_local)) + &
               nabt(2,1) * (dg_frag%phi_frag(lx+2, ly, lz, jo, i_local) - &
@@ -214,7 +203,7 @@ contains
               nabt(4,1) * (dg_frag%phi_frag(lx+4, ly, lz, jo, i_local) - &
                            dg_frag%phi_frag(lx-4, ly, lz, jo, i_local))
 
-          grad_phi(gx, gy, gz, 2) = &
+          grad_phi(lx, ly, lz, 2) = &
               nabt(1,2) * (dg_frag%phi_frag(lx, ly+1, lz, jo, i_local) - &
                            dg_frag%phi_frag(lx, ly-1, lz, jo, i_local)) + &
               nabt(2,2) * (dg_frag%phi_frag(lx, ly+2, lz, jo, i_local) - &
@@ -224,7 +213,7 @@ contains
               nabt(4,2) * (dg_frag%phi_frag(lx, ly+4, lz, jo, i_local) - &
                            dg_frag%phi_frag(lx, ly-4, lz, jo, i_local))
 
-          grad_phi(gx, gy, gz, 3) = &
+          grad_phi(lx, ly, lz, 3) = &
               nabt(1,3) * (dg_frag%phi_frag(lx, ly, lz+1, jo, i_local) - &
                            dg_frag%phi_frag(lx, ly, lz-1, jo, i_local)) + &
               nabt(2,3) * (dg_frag%phi_frag(lx, ly, lz+2, jo, i_local) - &
@@ -239,6 +228,40 @@ contains
     !$omp end parallel do
 
   end subroutine apply_gradient_to_basis
+
+  subroutine apply_momentum_blocks(dg_frag, ispin, scale_vec, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer,                intent(in) :: ispin
+    real(8),                intent(in) :: scale_vec(3)
+    complex(8),             intent(in) :: x(:,:)
+    complex(8),             intent(inout) :: y(:,:)
+
+    integer :: iblk, idir, ib, jb, row_idx, col_idx, nstate
+    real(8) :: scale
+
+    if (.not. allocated(dg_frag%momentum_blocks)) return
+    nstate = min(size(x, 2), size(y, 2))
+
+    do iblk = 1, dg_frag%n_momentum_blocks
+      if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
+      do idir = 1, 3
+        scale = scale_vec(idir)
+        if (abs(scale) < 1.0d-30) cycle
+        do jb = 1, dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+          col_idx = dg_frag%index_basis(jb, dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+          if (col_idx < 1 .or. col_idx > size(x, 1)) cycle
+          do ib = 1, dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
+            row_idx = dg_frag%index_basis(ib, dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
+            if (row_idx < 1 .or. row_idx > size(y, 1)) cycle
+            y(row_idx, 1:nstate) = y(row_idx, 1:nstate) + &
+              scale * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin) * x(col_idx, 1:nstate)
+          end do
+        end do
+      end do
+    end do
+
+  end subroutine apply_momentum_blocks
 
   subroutine calculate_microscopic_current_dg(dg_frag, system, mg, stencil, curr)
     ! NOTE: DG microscopic current here intentionally excludes non-local PP contribution.
@@ -304,7 +327,7 @@ contains
           ig_j = dg_frag%index_basis(jstate_frag, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-          allocate(grad_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), 3))
+          allocate(grad_phi(1:nxyz(1), 1:nxyz(2), 1:nxyz(3), 3))
           call apply_gradient_to_basis(dg_frag, i_local, jstate_frag, mg, stencil, grad_phi)
 
           do istate_frag = 1, dg_frag%n_basis(ifrag, ispin)
@@ -328,9 +351,9 @@ contains
                   if (izg < mg%is(3) .or. izg > mg%ie(3)) cycle
 
                   phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-                  curr_local(1, ixg, iyg, izg) = curr_local(1, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ixg, iyg, izg, 1)
-                  curr_local(2, ixg, iyg, izg) = curr_local(2, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ixg, iyg, izg, 2)
-                  curr_local(3, ixg, iyg, izg) = curr_local(3, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ixg, iyg, izg, 3)
+                  curr_local(1, ixg, iyg, izg) = curr_local(1, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 1)
+                  curr_local(2, ixg, iyg, izg) = curr_local(2, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 2)
+                  curr_local(3, ixg, iyg, izg) = curr_local(3, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 3)
                 end do
               end do
             end do
@@ -398,7 +421,7 @@ contains
         ig_j = dg_frag%index_basis(jo, ifrag, ispin)
         if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-        allocate(grad_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), 3))
+        allocate(grad_phi(1:nxyz(1), 1:nxyz(2), 1:nxyz(3), 3))
         call apply_gradient_to_basis(dg_frag, i_local, jo, mg, stencil, grad_phi)
 
         !$omp parallel do private(io, ig_i, Ap_int, A2_int, iz, iy, ix, ixg, iyg, izg, phi_i, A2val) schedule(static)
@@ -420,9 +443,9 @@ contains
 
                 phi_i = dg_frag%phi_frag(ix, iy, iz, io, i_local)
                 Ap_int = Ap_int + phi_i * ( &
-                         system%Ac_micro%v(1, ixg, iyg, izg) * grad_phi(ixg, iyg, izg, 1) + &
-                         system%Ac_micro%v(2, ixg, iyg, izg) * grad_phi(ixg, iyg, izg, 2) + &
-                         system%Ac_micro%v(3, ixg, iyg, izg) * grad_phi(ixg, iyg, izg, 3) ) * system%hvol
+                         system%Ac_micro%v(1, ixg, iyg, izg) * grad_phi(ix, iy, iz, 1) + &
+                         system%Ac_micro%v(2, ixg, iyg, izg) * grad_phi(ix, iy, iz, 2) + &
+                         system%Ac_micro%v(3, ixg, iyg, izg) * grad_phi(ix, iy, iz, 3) ) * system%hvol
 
                 A2val = system%Ac_micro%v(1, ixg, iyg, izg)**2 + &
                         system%Ac_micro%v(2, ixg, iyg, izg)**2 + &

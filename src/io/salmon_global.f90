@@ -160,7 +160,7 @@ module salmon_global
   ! Plane wave basis mixing for DG-Fragment RT
   character(1)   :: yn_plane_wave_basis         ! Enable plane wave mixing (default: 'n')
   integer        :: n_plane_waves_dg             ! Number of plane waves (default: 50)
-  real(8)        :: k_cutoff_plane_wave          ! Cutoff wave number in a.u.^-1 (default: 0.5)
+  real(8)        :: k_cutoff_plane_wave          ! Cutoff energy for PW selection in unit_energy (default: 0.5)
 
 !! &scf
   character(8)   :: method_init_wf

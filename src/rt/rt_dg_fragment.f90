@@ -344,15 +344,12 @@ contains
     ! Note: Momentum matrix will be calculated in calculate_hamiltonian_matrix
     !       when stencil and potentials are available
     
-    ! Allocate H_mat (will be filled after init)
-    allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    dg_frag%H_mat = 0.0d0
+    ! Defer large global matrices until Hamiltonian construction to reduce init peak memory.
+    if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
-    allocate(dg_frag%H_mat_kinetic(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    dg_frag%H_mat_kinetic = 0.0d0
     
-    ! H_mat_kinetic is allocated here and filled in calculate_hamiltonian_matrix
-    ! (see time_evolution_dg_fragment in main_tddft.f90)
+    ! H_mat and H_mat_kinetic are allocated in calculate_hamiltonian_matrix
+    ! when they are first needed in RT propagation.
     
     if (comm_is_root(info%id_rko)) then
       write(*,*) "  Kinetic + ion Hamiltonian saved for incremental updates"
@@ -604,8 +601,7 @@ contains
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
       
-      if (n_frag_file /= dg_frag%n_frag .or. nspin_file /= dg_frag%nspin .or. &
-          nstate_frag_file /= dg_frag%nstate_frag) then
+      if (n_frag_file /= dg_frag%n_frag .or. nspin_file /= dg_frag%nspin) then
         write(*,*) "Error: Fragment basis data mismatch"
         write(*,*) "  Expected n_frag=", dg_frag%n_frag, ", nspin=", dg_frag%nspin, &
                    ", nstate_frag=", dg_frag%nstate_frag
@@ -622,6 +618,14 @@ contains
     call comm_bcast(nspin_file, dg_frag%icomm, 0)
     call comm_bcast(nstate_frag_file, dg_frag%icomm, 0)
     call comm_bcast(nstate_tot_file, dg_frag%icomm, 0)
+
+    if (nstate_frag_file /= dg_frag%nstate_frag) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,i0,a,i0,a)') "[INFO] nstate_frag differs: file=", nstate_frag_file, &
+          " runtime=", dg_frag%nstate_frag, " (using fragment-state count from file)"
+      end if
+      dg_frag%nstate_frag = nstate_frag_file
+    end if
 
     ! Use the full state count stored in fragment files (disable occupied-state subset mode).
     if (nstate_tot_file /= dg_frag%nstate_tot) then
@@ -706,6 +710,47 @@ contains
           end do
         end do
         dg_frag%n_mat(ispin_cap) = max_keep
+      end do
+    end block
+    dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
+
+    ! Compress fragmented/global basis indices to a dense contiguous range.
+    ! The DC-LCFO metadata may retain large holes between fragment-local basis blocks,
+    ! which inflates n_mat_max and all O(n_mat_max^2) operator matrices.
+    block
+      integer :: ispin_cmp, ifrag_cmp, io_cmp, idx_cmp, n_old, n_new
+      integer, allocatable :: remap(:)
+      do ispin_cmp = 1, dg_frag%nspin
+        n_old = max(1, dg_frag%n_mat(ispin_cmp))
+        allocate(remap(n_old))
+        remap = 0
+        n_new = 0
+        do ifrag_cmp = 1, dg_frag%n_frag
+          nbasis_iter = min(dg_frag%n_basis(ifrag_cmp, ispin_cmp), size(dg_frag%index_basis, 1))
+          do io_cmp = 1, nbasis_iter
+            idx_cmp = dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp)
+            if (idx_cmp <= 0) cycle
+            if (idx_cmp > n_old) then
+              dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp) = 0
+              cycle
+            end if
+            if (remap(idx_cmp) == 0) then
+              n_new = n_new + 1
+              remap(idx_cmp) = n_new
+            end if
+            dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp) = remap(idx_cmp)
+          end do
+        end do
+        if (dg_frag%id == 0 .and. n_new < n_old) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') "[INFO] Compressed DG basis indices for ispin=", ispin_cmp, &
+            ": old n_mat=", n_old, " new n_mat=", n_new
+        end if
+        if (n_new <= 0) then
+          write(*,'(1x,a,i0,a)') "[FATAL] DG basis compression produced zero active basis for ispin=", ispin_cmp, "."
+          stop "DG-Fragment RT: zero active basis after index compression"
+        end if
+        dg_frag%n_mat(ispin_cmp) = n_new
+        deallocate(remap)
       end do
     end block
     dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
@@ -1299,6 +1344,7 @@ contains
     use communication, only: comm_free_group, COMM_GROUP_NULL
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: i
     
     if (allocated(dg_frag%coef)) deallocate(dg_frag%coef)
     if (allocated(dg_frag%coef_new)) deallocate(dg_frag%coef_new)
@@ -1313,6 +1359,14 @@ contains
     if (allocated(dg_frag%index_basis)) deallocate(dg_frag%index_basis)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
     if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+    if (allocated(dg_frag%momentum_blocks)) then
+      do i = 1, size(dg_frag%momentum_blocks)
+        if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
+      end do
+      deallocate(dg_frag%momentum_blocks)
+      dg_frag%n_momentum_blocks = 0
+    end if
+    if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
     if (allocated(dg_frag%dipole_mat)) deallocate(dg_frag%dipole_mat)
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)

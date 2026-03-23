@@ -429,6 +429,40 @@
     
   end subroutine apply_kinetic_to_basis
 
+  subroutine get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    use salmon_global, only: nproc_rgrid
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ndom(3)
+    integer, intent(out) :: loc_s(3), loc_e(3)
+
+    integer :: ipx, ipy, ipz, coords(3), nsize
+
+    ipx = max(1, nproc_rgrid(1))
+    ipy = max(1, nproc_rgrid(2))
+    ipz = max(1, nproc_rgrid(3))
+
+    if (dg_frag%id_frag < 0 .or. dg_frag%id_frag >= ipx * ipy * ipz) then
+      stop "DG-Fragment RT: invalid fragment-local MPI rank in get_fragment_local_range"
+    end if
+
+    coords(1) = mod(dg_frag%id_frag, ipx)
+    coords(2) = mod(dg_frag%id_frag / ipx, ipy)
+    coords(3) = dg_frag%id_frag / max(1, ipx * ipy)
+
+    nsize = (ndom(1) + ipx - 1) / ipx
+    loc_s(1) = 1 + nsize * coords(1)
+    loc_e(1) = min(ndom(1), loc_s(1) + nsize - 1)
+
+    nsize = (ndom(2) + ipy - 1) / ipy
+    loc_s(2) = 1 + nsize * coords(2)
+    loc_e(2) = min(ndom(2), loc_s(2) + nsize - 1)
+
+    nsize = (ndom(3) + ipz - 1) / ipz
+    loc_s(3) = 1 + nsize * coords(3)
+    loc_e(3) = min(ndom(3), loc_s(3) + nsize - 1)
+  end subroutine get_fragment_local_range
+
   !=======================================================================
   ! Add non-local pseudopotential contribution to Hamiltonian matrix
   !
@@ -574,7 +608,7 @@
     
     integer :: ifrag, i_local, ispin, io, jo, idir
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
-    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3)
+    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     real(8) :: hvol
     complex(8) :: integral
     real(8) :: max_p
@@ -612,6 +646,7 @@
         i_local = i_local + 1
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
         
         ! Loop over basis functions in fragment j (ket side)
         ! Note: Each thread allocates its own grad_phi to avoid race conditions
@@ -637,11 +672,11 @@
               ! Compute matrix element: p_ij = ∫ φ_i(r) * (∂φ_j/∂dir) dr
               ! Note: momentum operator uses p = -i∇; the -i is applied in time evolution
               integral = (0.0d0, 0.0d0)
-              do lz = 1, ndom(3)
+              do lz = loc_s(3), loc_e(3)
                 gz = iorg(3) + lz - 1
-                do ly = 1, ndom(2)
+                do ly = loc_s(2), loc_e(2)
                   gy = iorg(2) + ly - 1
-                  do lx = 1, ndom(1)
+                  do lx = loc_s(1), loc_e(1)
                     gx = iorg(1) + lx - 1
                     if (allocated(dg_frag%phi_frag_c)) then
                       integral = integral + &
@@ -687,18 +722,24 @@
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
             d = dg_frag%halo(i_halo)%dsp_send
+            halo_s(:) = max(loc_s(:), d(:) + 1)
+            halo_e(:) = min(loc_e(:), d(:) + l(:))
+            if (any(halo_s(:) > halo_e(:))) cycle
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
               if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
               do idir = 1, 3
                 integral = (0.0d0, 0.0d0)
-                do iz = 1, l(3)
-                  gz = iorg(3) + d(3) + iz - 1
-                  do iy = 1, l(2)
-                    gy = iorg(2) + d(2) + iy - 1
-                    do ix = 1, l(1)
-                      gx = iorg(1) + d(1) + ix - 1
+                do lz = halo_s(3), halo_e(3)
+                  gz = iorg(3) + lz - 1
+                  iz = lz - d(3)
+                  do ly = halo_s(2), halo_e(2)
+                    gy = iorg(2) + ly - 1
+                    iy = ly - d(2)
+                    do lx = halo_s(1), halo_e(1)
+                      gx = iorg(1) + lx - 1
+                      ix = lx - d(1)
                       if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
                         integral = integral + &
                           conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &

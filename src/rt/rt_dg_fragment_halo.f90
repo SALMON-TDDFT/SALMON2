@@ -144,7 +144,10 @@
                      dg_frag%halo(i)%dvec(1:3) * dg_frag%nxyz_domain(1:3, ifrag)
           d(1:3) = mod(ir1(1:3) - ir2(1:3), dg_frag%lgnum_total(1:3))
           if (d(1) == 0 .and. d(2) == 0 .and. d(3) == 0 .and. dg_frag%halo(i)%id_dst < 0) then
-            dg_frag%halo(i)%id_dst = dg_frag%id_array(jfrag)
+            if (dg_frag%id_array(jfrag) < 0) then
+              stop "DG-Fragment RT: invalid halo dst subgroup root rank"
+            end if
+            dg_frag%halo(i)%id_dst = dg_frag%id_array(jfrag) + dg_frag%id_frag
           end if
 
           ! source neighbor: the same adjacent fragment provides the opposite-face data
@@ -152,7 +155,10 @@
                      dg_frag%halo(i)%dvec(1:3) * dg_frag%nxyz_domain(1:3, ifrag)
           d(1:3) = mod(ir1(1:3) - ir2(1:3), dg_frag%lgnum_total(1:3))
           if (d(1) == 0 .and. d(2) == 0 .and. d(3) == 0 .and. dg_frag%halo(i)%id_src < 0) then
-            dg_frag%halo(i)%id_src = dg_frag%id_array(jfrag)
+            if (dg_frag%id_array(jfrag) < 0) then
+              stop "DG-Fragment RT: invalid halo src subgroup root rank"
+            end if
+            dg_frag%halo(i)%id_src = dg_frag%id_array(jfrag) + dg_frag%id_frag
             dg_frag%halo(i)%ifrag_src = jfrag
           end if
         end do
@@ -228,11 +234,26 @@
     integer :: ifrag_send, ifrag_recv, dir_code
     integer :: itag_send, itag_recv
     integer, allocatable :: ireq_send(:), ireq_recv(:)
+    integer :: lb1, ub1, lb2, ub2, lb3, ub3
 
     if (.not. dg_frag%has_halo_exchange) return
     if (dg_frag%n_halo <= 0) return
 
     allocate(ireq_send(dg_frag%n_halo), ireq_recv(dg_frag%n_halo))
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "entry"
+    call flush(6)
+    if (dg_frag%id == 0) then
+      write(*,*) "        halo exchange entry"
+      call flush(6)
+    end if
+
+    lb1 = lbound(dg_frag%phi_frag, 1)
+    ub1 = ubound(dg_frag%phi_frag, 1)
+    lb2 = lbound(dg_frag%phi_frag, 2)
+    ub2 = ubound(dg_frag%phi_frag, 2)
+    lb3 = lbound(dg_frag%phi_frag, 3)
+    ub3 = ubound(dg_frag%phi_frag, 3)
 
     do i_halo = 1, dg_frag%n_halo
       i_local = dg_frag%halo(i_halo)%ifrag_dst - dg_frag%ifrag_start + 1
@@ -242,17 +263,37 @@
 
       l = dg_frag%halo(i_halo)%length
       d = dg_frag%halo(i_halo)%dsp_send
+      if (i_halo == 1 .and. dg_frag%id == 0) then
+        write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0,a,1x,i0,a,1x,i0)') &
+          "        halo1 send: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), &
+          "i_local=", i_local, "id_dst=", dg_frag%halo(i_halo)%id_dst, "id_src=", dg_frag%halo(i_halo)%id_src
+        write(*,'(1x,a,1x,6(i0,1x))') &
+          "        phi_frag bounds:", lb1, ub1, lb2, ub2, lb3, ub3
+        call flush(6)
+      end if
 
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)
       do ix = 1, l(1)
+        if (d(1) + ix < lb1 .or. d(1) + ix > ub1 .or. &
+            d(2) + iy < lb2 .or. d(2) + iy > ub2 .or. &
+            d(3) + iz < lb3 .or. d(3) + iz > ub3) then
+          write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
+            "DG-Fragment RT halo send index out of range:", d(1)+ix, d(2)+iy, d(3)+iz, &
+            "dsp=", d(1), d(2), d(3), "len=", l(1), l(2), l(3), "i_local=", i_local
+          stop "DG-Fragment RT: halo send index out of range"
+        end if
         dg_frag%halo(i_halo)%buf_send(ix, iy, iz, istate, 1) = &
           dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, istate, i_local)
       end do
       end do
       end do
       end do
+      if (i_halo == 1 .and. dg_frag%id == 0) then
+        write(*,*) "        halo1 pack done"
+        call flush(6)
+      end if
 
       ifrag_send = dg_frag%halo(i_halo)%ifrag_dst
       dir_code = (dg_frag%halo(i_halo)%dvec(1) + 1) * 9 + &
@@ -269,19 +310,46 @@
                                      dg_frag%halo(i_halo)%id_src, &
                                      itag_recv, dg_frag%icomm)
     end do
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "post-done"
+    call flush(6)
+    if (dg_frag%id == 0) then
+      write(*,*) "        halo post done"
+      call flush(6)
+    end if
 
     call comm_wait_all(ireq_recv)
     call comm_wait_all(ireq_send)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "wait-done"
+    call flush(6)
+    if (dg_frag%id == 0) then
+      write(*,*) "        halo wait done"
+      call flush(6)
+    end if
 
     do i_halo = 1, dg_frag%n_halo
       i_local = dg_frag%halo(i_halo)%ifrag_dst - dg_frag%ifrag_start + 1
       l = dg_frag%halo(i_halo)%length
       d = dg_frag%halo(i_halo)%dsp_recv
+      if (i_halo == 1 .and. dg_frag%id == 0) then
+        write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
+          "        halo1 recv: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), "i_local=", i_local
+        call flush(6)
+      end if
 
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)
       do ix = 1, l(1)
+        if (d(1) + ix < lb1 .or. d(1) + ix > ub1 .or. &
+            d(2) + iy < lb2 .or. d(2) + iy > ub2 .or. &
+            d(3) + iz < lb3 .or. d(3) + iz > ub3) then
+          write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
+            "DG-Fragment RT halo recv index out of range:", d(1)+ix, d(2)+iy, d(3)+iz, &
+            "dsp=", d(1), d(2), d(3), "len=", l(1), l(2), l(3), "i_local=", i_local
+          stop "DG-Fragment RT: halo recv index out of range"
+        end if
         dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, istate, i_local) = &
           dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, istate, 1)
       end do
@@ -289,6 +357,13 @@
       end do
       end do
     end do
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "unpack-done"
+    call flush(6)
+    if (dg_frag%id == 0) then
+      write(*,*) "        halo unpack done"
+      call flush(6)
+    end if
 
     deallocate(ireq_send, ireq_recv)
 

@@ -68,9 +68,15 @@
       if (dg_frag%time_integrator /= 3 .or. dg_frag%yn_adaptive_basis) then
         ! For adaptive-basis mode, keep post-step update active even in RK4
         ! so basis-update detection/trigger logic runs.
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-update-density-hmat"
+        flush(6)
         call update_density_and_hamiltonian(dg_frag, system, info, rt, itt, rt%Ac_tot(:,itt), &
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-update-density-hmat"
+        flush(6)
       end if
     end if
     

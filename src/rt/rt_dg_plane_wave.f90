@@ -37,6 +37,7 @@ contains
   subroutine init_plane_wave_basis(dg_frag, system, lg, info)
     use structures
     use salmon_global, only: yn_plane_wave_basis, n_plane_waves_dg, k_cutoff_plane_wave
+    use inputoutput, only: t_unit_energy
     use communication, only: comm_is_root
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -46,6 +47,7 @@ contains
 
     integer :: ikx, iky, ikz, ipw, nk(3)
     real(8) :: Lbox(3), k_vec(3), k_norm
+    real(8) :: energy_cutoff_pw
     real(8), parameter :: pi = 4.0d0*atan(1.0d0)
     integer, allocatable :: k_indices(:,:)
     integer :: n_pw_candidate, n_selected
@@ -58,7 +60,8 @@ contains
     end if
 
     dg_frag%use_plane_wave_basis = .true.
-    dg_frag%k_cutoff_pw = k_cutoff_plane_wave
+    energy_cutoff_pw = max(0.0d0, k_cutoff_plane_wave)
+    dg_frag%k_cutoff_pw = sqrt(2.0d0 * energy_cutoff_pw)
 
     ! Calculate box size from grid
     Lbox(1:3) = dg_frag%hgs(1:3) * dble(dg_frag%lgnum_total(1:3))
@@ -67,7 +70,8 @@ contains
       write(*,*)
       write(*,*) "=== Initializing plane wave basis for DG-Fragment ==="
       write(*,'(1x,a,3f12.6)') "Box size [a.u.]: ", Lbox(1:3)
-      write(*,'(1x,a,f8.4)')   "k cutoff [a.u.^-1]: ", dg_frag%k_cutoff_pw
+      write(*,'(1x,a,f10.4,1x,a)') "PW cutoff energy [", energy_cutoff_pw * t_unit_energy%conv, trim(t_unit_energy%name) // "]"
+      write(*,'(1x,a,f10.4,a)') "k cutoff [a.u.^-1]: ", dg_frag%k_cutoff_pw, ""
     end if
 
     ! Estimate number of k-points within cutoff sphere
@@ -171,11 +175,11 @@ contains
 
     if (comm_is_root(info%id_rko)) then
       if (dg_frag%n_plane_waves > 0) then
-        write(*,'(1x,a,f10.4,a)') "Lowest PW energy: ", &
-             0.5d0*sum(dg_frag%k_pw(:,1)**2), " a.u."
+        write(*,'(1x,a,f10.4,1x,a)') "Lowest PW energy: ", &
+             0.5d0*sum(dg_frag%k_pw(:,1)**2) * t_unit_energy%conv, trim(t_unit_energy%name)
         if (dg_frag%n_plane_waves > 1) then
-          write(*,'(1x,a,f10.4,a)') "Highest PW energy: ", &
-               0.5d0*sum(dg_frag%k_pw(:,dg_frag%n_plane_waves)**2), " a.u."
+          write(*,'(1x,a,f10.4,1x,a)') "Highest PW energy: ", &
+               0.5d0*sum(dg_frag%k_pw(:,dg_frag%n_plane_waves)**2) * t_unit_energy%conv, trim(t_unit_energy%name)
         end if
       else
         write(*,'(1x,a)') "No PW mode selected within cutoff/limit."

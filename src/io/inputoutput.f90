@@ -1333,6 +1333,7 @@ contains
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
+    k_cutoff_plane_wave = k_cutoff_plane_wave * uenergy_to_au
     call comm_bcast(time_integrator_dg_fragment,nproc_group_global)
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)

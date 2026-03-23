@@ -320,6 +320,7 @@
     complex(8), allocatable :: coef_old(:,:,:), coef_pw_old(:,:,:)
     logical :: basis_functions_changed, overlap_is_valid
     logical :: is_global_root
+    integer :: i
 
     is_global_root = (nproc_id_global == 0)
     if (is_global_root) then
@@ -404,6 +405,14 @@
         dg_frag%coef = coef_old
         dg_frag%coef_new = coef_old
         if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
+        if (allocated(dg_frag%momentum_blocks)) then
+          do i = 1, size(dg_frag%momentum_blocks)
+            if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
+          end do
+          deallocate(dg_frag%momentum_blocks)
+          dg_frag%n_momentum_blocks = 0
+        end if
+        if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
         if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
         if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
         if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
@@ -680,27 +689,18 @@
     external :: dsyev
 
     is_valid = .true.
-    if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_c)) return
+    if (.not. allocated(dg_frag%S_mat)) return
 
     do ispin = 1, dg_frag%nspin
       n = dg_frag%n_mat(ispin)
       if (n <= 0) cycle
       allocate(eval(n))
-      if (allocated(dg_frag%S_mat_c)) then
-        allocate(s_work_c(n,n), rwork(max(1,3*n-2)))
-        s_work_c(:,:) = dg_frag%S_mat_c(1:n,1:n,ispin)
-        lwork = max(1, 2*n)
-        allocate(cwork(lwork))
-        call zheev('N','U', n, s_work_c, n, eval, cwork, lwork, rwork, info)
-        deallocate(cwork, rwork, s_work_c)
-      else
-        allocate(s_work(n,n))
-        s_work(:,:) = dg_frag%S_mat(1:n,1:n,ispin)
-        lwork = max(1, 3*n)
-        allocate(work(lwork))
-        call dsyev('N','U', n, s_work, n, eval, work, lwork, info)
-        deallocate(work, s_work)
-      end if
+      allocate(s_work(n,n))
+      s_work(:,:) = dg_frag%S_mat(1:n,1:n,ispin)
+      lwork = max(1, 3*n)
+      allocate(work(lwork))
+      call dsyev('N','U', n, s_work, n, eval, work, lwork, info)
+      deallocate(work, s_work)
 
       if (info /= 0) then
         is_valid = .false.
@@ -762,6 +762,8 @@
     real(8), allocatable :: T_phi(:,:,:)
     real(8), allocatable :: H_phi(:,:,:)
     real(8), allocatable :: V_total(:,:,:)
+    real(8), allocatable :: mat_T_local(:,:,:,:)
+    real(8), allocatable :: halo_T_local(:,:,:,:,:)
     real(8), allocatable :: mat_H_local(:,:,:,:)
     real(8), allocatable :: halo_H_local(:,:,:,:,:)
     complex(8), allocatable :: coef_local(:,:,:,:)
@@ -775,30 +777,53 @@
     end if
     
     ! Recalculate RT operators only when requested or when not yet available.
-    if (rebuild_rt_operators .or. .not. allocated(dg_frag%momentum_mat) .or. .not. allocated(dg_frag%momentum_mat_c) .or. &
-        .not. allocated(dg_frag%S_mat) .or. .not. allocated(dg_frag%S_mat_c)) then
+    if (rebuild_rt_operators .or. (.not. allocated(dg_frag%momentum_blocks) .and. .not. allocated(dg_frag%momentum_mat)) .or. &
+        .not. allocated(dg_frag%S_mat)) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-rt-operator-recalc"
+      flush(6)
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  Recalculating momentum matrix for updated basis..."
       end if
       if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
-      if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+      if (allocated(dg_frag%momentum_blocks)) then
+        do i = 1, size(dg_frag%momentum_blocks)
+          if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
+        end do
+        deallocate(dg_frag%momentum_blocks)
+        dg_frag%n_momentum_blocks = 0
+      end if
+      if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
       if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
       if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
       if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
       if (allocated(dg_frag%S_mat_prop_c)) deallocate(dg_frag%S_mat_prop_c)
       call calculate_momentum_matrix(dg_frag, system, mg, stencil)
       call calculate_overlap_matrix(dg_frag, system, mg)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-rt-operator-recalc"
+      flush(6)
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  Momentum matrix recalculated successfully"
         write(*,*) "  Overlap matrix recalculated successfully"
       end if
     end if
 
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-second-halo"
+    flush(6)
     call exchange_phi_frag_halo(dg_frag)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-second-halo"
+    flush(6)
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    allocate(mat_T_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, ifrag_count))
+    allocate(halo_T_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, dg_frag%n_halo, ifrag_count))
     allocate(mat_H_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, ifrag_count))
     allocate(halo_H_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, dg_frag%n_halo, ifrag_count))
+    mat_T_local = 0.0d0
+    halo_T_local = 0.0d0
     mat_H_local = 0.0d0
     halo_H_local = 0.0d0
 
@@ -809,6 +834,9 @@
     allocate(T_phi(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
     allocate(H_phi(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-local-alloc"
+    flush(6)
 
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
@@ -825,6 +853,8 @@
 
           !$omp parallel do private(io,integral) schedule(static)
           do io = 1, n_basis_local
+            call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, T_phi, hvol, integral)
+            mat_T_local(io, jo, ispin, i_local) = integral
             call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, H_phi, hvol, integral)
             mat_H_local(io, jo, ispin, i_local) = integral
           end do
@@ -844,6 +874,16 @@
                 do iy = 1, l(2)
                   do ix = 1, l(1)
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
+                               T_phi(d(1) + ix, d(2) + iy, d(3) + iz) * hvol
+                  end do
+                end do
+              end do
+              halo_T_local(io, jo, ispin, i_halo, i_local) = integral
+              integral = 0.0d0
+              do iz = 1, l(3)
+                do iy = 1, l(2)
+                  do ix = 1, l(1)
+                    integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
                                H_phi(d(1) + ix, d(2) + iy, d(3) + iz) * hvol
                   end do
                 end do
@@ -858,6 +898,9 @@
     end do
 
     deallocate(T_phi, H_phi, V_total)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-local-hmat-build"
+    flush(6)
 
     allocate(coef_local(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, ifrag_count))
     coef_local = (0.0d0, 0.0d0)
@@ -887,9 +930,77 @@
     end do
     dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
 
-    deallocate(mat_H_local, halo_H_local, coef_local)
+    call refresh_operator_matrices_from_local_blocks
+    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-refresh-operators"
+    flush(6)
+
+    deallocate(mat_T_local, halo_T_local, mat_H_local, halo_H_local, coef_local)
 
   contains
+
+    subroutine refresh_operator_matrices_from_local_blocks
+      implicit none
+      integer :: i, j
+      real(8), allocatable :: mat_T(:,:), mat_H(:,:)
+
+      if (.not. allocated(dg_frag%H_mat)) then
+        allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+      end if
+      if (.not. allocated(dg_frag%H_mat_kinetic)) then
+        allocate(dg_frag%H_mat_kinetic(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+      end if
+      dg_frag%H_mat(:, :, :) = 0.0d0
+      dg_frag%H_mat_kinetic(:, :, :) = 0.0d0
+
+      do ispin = 1, system%nspin
+        n = dg_frag%n_mat(ispin)
+        if (n <= 0) cycle
+        allocate(mat_T(n, n), mat_H(n, n))
+        mat_T = 0.0d0
+        mat_H = 0.0d0
+
+        i_local = 0
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = i_local + 1
+          n_basis_local = dg_frag%n_basis(ifrag, ispin)
+          do io = 1, n_basis_local
+            i = dg_frag%index_basis(io, ifrag, ispin)
+            do jo = 1, n_basis_local
+              j = dg_frag%index_basis(jo, ifrag, ispin)
+              if (i < 1 .or. i > n) cycle
+              if (j < 1 .or. j > n) cycle
+              mat_T(i, j) = mat_T(i, j) + mat_T_local(io, jo, ispin, i_local)
+              mat_H(i, j) = mat_H(i, j) + mat_H_local(io, jo, ispin, i_local)
+            end do
+          end do
+
+          do i_halo = 1, dg_frag%n_halo
+            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+            jfrag = dg_frag%halo(i_halo)%ifrag_src
+            if (jfrag < 1) cycle
+            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            do jo = 1, n_basis_local
+              j = dg_frag%index_basis(jo, ifrag, ispin)
+              do io = 1, n_basis_halo
+                i = dg_frag%index_basis(io, jfrag, ispin)
+                if (i < 1 .or. i > n) cycle
+                if (j < 1 .or. j > n) cycle
+                mat_T(i, j) = mat_T(i, j) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
+                mat_T(j, i) = mat_T(j, i) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
+                mat_H(i, j) = mat_H(i, j) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+                mat_H(j, i) = mat_H(j, i) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+              end do
+            end do
+          end do
+        end do
+
+        call comm_summation(mat_T, dg_frag%H_mat_kinetic(1:n, 1:n, ispin), n * n, dg_frag%icomm)
+        call comm_summation(mat_H, dg_frag%H_mat(1:n, 1:n, ispin), n * n, dg_frag%icomm)
+
+        deallocate(mat_T, mat_H)
+      end do
+    end subroutine refresh_operator_matrices_from_local_blocks
 
     subroutine diag_full_lapack
       implicit none

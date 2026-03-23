@@ -608,8 +608,7 @@ contains
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
       
-      if (n_frag_file /= dg_frag%n_frag .or. nspin_file /= dg_frag%nspin .or. &
-          nstate_frag_file /= dg_frag%nstate_frag) then
+      if (n_frag_file /= dg_frag%n_frag .or. nspin_file /= dg_frag%nspin) then
         write(*,*) "Error: Fragment basis data mismatch"
         write(*,*) "  Expected n_frag=", dg_frag%n_frag, ", nspin=", dg_frag%nspin, &
                    ", nstate_frag=", dg_frag%nstate_frag
@@ -626,6 +625,14 @@ contains
     call comm_bcast(nspin_file, dg_frag%icomm, 0)
     call comm_bcast(nstate_frag_file, dg_frag%icomm, 0)
     call comm_bcast(nstate_tot_file, dg_frag%icomm, 0)
+
+    if (nstate_frag_file /= dg_frag%nstate_frag) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,i0,a,i0,a)') "[INFO] nstate_frag differs: file=", nstate_frag_file, &
+          " runtime=", dg_frag%nstate_frag, " (using fragment-state count from file)"
+      end if
+      dg_frag%nstate_frag = nstate_frag_file
+    end if
 
     ! Use the full state count stored in fragment files (disable occupied-state subset mode).
     if (nstate_tot_file /= dg_frag%nstate_tot) then

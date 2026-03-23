@@ -693,7 +693,13 @@ contains
     nstate_tot = 0 ! initial
     
     if(comm_is_root(info%id_rko)) then
-      write(*,*) "start init_conventional_from_dcdft"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "start init_conventional_from_dcdft"
+      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(*,*) "start init_dg_fragment_from_dcdft"
+      else
+        write(*,*) "start init_from_dcdft"
+      end if
       if (yn_conventional_from_dcdft == 'y') then
         write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
       else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
@@ -797,7 +803,13 @@ contains
     end do
 
     if(comm_is_root(info%id_rko)) then
-      write(*,*) "end init_conventional_from_dcdft"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "end init_conventional_from_dcdft"
+      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(*,*) "end init_dg_fragment_from_dcdft"
+      else
+        write(*,*) "end init_from_dcdft"
+      end if
     end if
     
     if(jfrag > 0) deallocate(n_mat,n_basis,index_basis,jxyz_tot,coef_wf,f_basis)

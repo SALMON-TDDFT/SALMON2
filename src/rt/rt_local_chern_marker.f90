@@ -810,14 +810,19 @@ contains
       integer, intent(in) :: occ_list0(nocc0)
       complex(8), intent(in) :: row_local(:,:)
       complex(8), intent(out) :: row_blk_out(max(1,blk_e-blk_s+1), nocc0)
-      integer :: nblk0, p
+      integer :: nblk0, p, p0
 
       nblk0 = max(0, blk_e - blk_s + 1)
       row_blk_out(:,:) = (0.0d0, 0.0d0)
       if (nblk0 <= 0) return
       if (info%id_o == owner_id) then
+        p0 = 1
+        if (allocated(owner_blk_s)) p0 = blk_s - owner_blk_s(owner_id+1) + 1
+        if (p0 < 1 .or. p0 + nblk0 - 1 > size(row_local,1)) then
+          stop 'get_owned_row_block: local row offset out of range'
+        end if
         do p = 1, nblk0
-          row_blk_out(p,:) = row_local(p,:)
+          row_blk_out(p,:) = row_local(p0 + p - 1,:)
         end do
       end if
       call comm_bcast(row_blk_out(1:nblk0,:), info%icomm_o, owner_id)
