@@ -1,4 +1,5 @@
 module rt_dg_fragment_ops
+  use communication, only: comm_bcast, COMM_GROUP_NULL
   use rt_dg_fragment_types, only: s_dg_fragment_rt
   implicit none
 
@@ -175,11 +176,27 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: n_use
 
+    integer :: n_copy
+
     if (n_use <= 0) return
     if (.not. dg_frag%overlap_prop_root_authoritative) return
-    if (dg_frag%is_frag_root) return
+    if (dg_frag%icomm_frag == COMM_GROUP_NULL) return
 
-    stop "ensure_overlap_prop_available not implemented yet"
+    n_copy = min(n_use, dg_frag%n_mat_max)
+    if (n_copy <= 0) return
+
+    if (allocated(dg_frag%S_mat_prop_c)) then
+      call comm_bcast(dg_frag%S_mat_prop_c(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
+    end if
+    if (allocated(dg_frag%S_mat_prop)) then
+      call comm_bcast(dg_frag%S_mat_prop(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
+    end if
+    if (allocated(dg_frag%S_mat_c)) then
+      call comm_bcast(dg_frag%S_mat_c(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
+    end if
+    if (allocated(dg_frag%S_mat)) then
+      call comm_bcast(dg_frag%S_mat(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
+    end if
   end subroutine ensure_overlap_prop_available
 
   !=======================================================================
