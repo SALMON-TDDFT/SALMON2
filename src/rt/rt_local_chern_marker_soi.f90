@@ -67,16 +67,16 @@ contains
     real(8), intent(out) :: marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in), optional :: occ_eps
 
-    integer :: ik, ispin, io, iocc, jocc, ix, iy, iz, im, p, owner, ig
-    integer :: nocc, nocc_local, iocc_g, jocc_g, nblk, nloc
+    integer :: ik, ispin, ispinor, io, iocc, jocc, ix, iy, iz, im, p, owner, ig
+    integer :: nocc, nocc_local, iocc_g, jocc_g, nblk, nloc, nloc_spin
     integer :: jblk_s, jblk_e, nblk_chunk, jloc
     integer, allocatable :: occ_idx(:)
     integer, allocatable :: occ_owner(:), occ_pos_owner(:), local_occ_glob(:), local_occ_io(:)
     integer, allocatable :: owner_blk_s(:), owner_blk_e(:), owner_nblk(:)
     real(8), allocatable :: occ_w(:)
     real(8), allocatable :: local_occ_w(:)
-    complex(8), allocatable, target :: zocc(:,:,:,:), zt1(:,:,:,:), zt2(:,:,:,:)
-    complex(8), pointer :: zblk(:,:,:,:)
+    complex(8), allocatable, target :: zocc(:,:,:,:,:), zt1(:,:,:,:,:), zt2(:,:,:,:,:)
+    complex(8), pointer :: zblk(:,:,:,:,:)
     complex(8), pointer :: zocc2d(:,:), zt12d(:,:), zt22d(:,:)
     complex(8), allocatable :: zrhs1(:,:), zrhs2(:,:), ztmp1(:,:), ztmp2(:,:)
     complex(8), allocatable :: g12_blk(:,:), g12_fwd_blk(:,:), g21_blk(:,:), w12(:,:), w21(:,:)
@@ -108,7 +108,7 @@ contains
     marker(:,:,:) = 0.0d0
 
     do ik = info%ik_s, info%ik_e
-      do ispin = 1, system%nspin
+      do ispin = 1, 1
         do im = info%im_s, info%im_e
 
           ! SOI review point: verify that the per-ispin rocc slice still matches the intended
@@ -118,20 +118,21 @@ contains
 
           call build_occ_distribution_cache(nocc, occ_idx, occ_w, info%id_o, occ_owner, occ_pos_owner, &
             local_occ_glob, local_occ_io, local_occ_w, owner_blk_s, owner_blk_e, owner_nblk, nocc_local)
-          allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
+          allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, max(1,nocc_local)))
           allocate(marker_local(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           allocate(marker_sum(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           marker_local(:,:,:) = 0d0
           marker_sum(:,:,:) = 0d0
           nloc = size(marker_local,1) * size(marker_local,2) * size(marker_local,3)
+          nloc_spin = nloc * system%nspin
           call copy_occupied_to_temp(ik, ispin, im, nocc, occ_idx, zocc)
           do p = 1, nocc_local
-            zocc(:,:,:,p) = sqrt(max(0.0d0, local_occ_w(p))) * zocc(:,:,:,p)
+            zocc(:,:,:,:,p) = sqrt(max(0.0d0, local_occ_w(p))) * zocc(:,:,:,:,p)
           end do
           call lowdin_orthonormalize_occupied(nocc, zocc, eps_ortho)
 
-          allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
-          allocate(zt2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
+          allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, max(1,nocc_local)))
+          allocate(zt2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, max(1,nocc_local)))
           allocate(s1_row(max(1,nocc_local),nocc), s2_row(max(1,nocc_local),nocc))
           allocate(s1_row_sum(max(1,nocc_local),nocc), s2_row_sum(max(1,nocc_local),nocc))
           allocate(g12_row(max(1,nocc_local),nocc), g12_row_sum(max(1,nocc_local),nocc))
@@ -168,30 +169,32 @@ contains
           if (info%id_rko == 0) then
             write(*,'(a,1x,es12.4)') 'LCM S1/S2 timing: phase_precompute=', t1 - t0
           end if
-          zocc2d(1:nloc,1:max(1,nocc_local)) => zocc(:,:,:,1:max(1,nocc_local))
+          zocc2d(1:nloc_spin,1:max(1,nocc_local)) => zocc(:,:,:,:,1:max(1,nocc_local))
           do owner = 0, info%isize_o - 1
             call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
             if (nblk <= 0) cycle
             call cpu_time(t0)
-            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, nblk))
             call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, zblk)
             call cpu_time(t1)
             t_s12_copy = t_s12_copy + (t1 - t0)
             do jblk_s = 1, nblk, s12_blk_chunk
               jblk_e = min(nblk, jblk_s + s12_blk_chunk - 1)
               nblk_chunk = jblk_e - jblk_s + 1
-              allocate(zrhs1(max(1,nloc), nblk_chunk))
+              allocate(zrhs1(max(1,nloc_spin), nblk_chunk))
               allocate(ztmp1(max(1,nocc_local), nblk_chunk))
               call cpu_time(t0)
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,jloc,phase1) schedule(static)
+!$omp parallel do collapse(4) private(ix,iy,iz,ig,ispinor,jocc,jloc,phase1) schedule(static)
               do iz = mg%is(3), mg%ie(3)
                 do iy = mg%is(2), mg%ie(2)
                   do ix = mg%is(1), mg%ie(1)
-                    ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                    phase1 = phase1x_l(ix) * phase1y_l(iy) * phase1z_l(iz)
-                    do jloc = 1, nblk_chunk
-                      jocc = jblk_s + jloc - 1
-                      zrhs1(ig,jloc) = phase1 * zblk(ix,iy,iz,jocc)
+                    do ispinor = 1, system%nspin
+                      ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                      phase1 = phase1x_l(ix) * phase1y_l(iy) * phase1z_l(iz)
+                      do jloc = 1, nblk_chunk
+                        jocc = jblk_s + jloc - 1
+                        zrhs1(ig,jloc) = phase1 * zblk(ix,iy,iz,ispinor,jocc)
+                      end do
                     end do
                   end do
                 end do
@@ -199,8 +202,8 @@ contains
               call cpu_time(t1)
               t_s12_pack = t_s12_pack + (t1 - t0)
               call cpu_time(t0)
-              call zgemm('C', 'N', nocc_local, nblk_chunk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc), &
-                zrhs1, max(1,nloc), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
+              call zgemm('C', 'N', nocc_local, nblk_chunk, nloc_spin, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc_spin), &
+                zrhs1, max(1,nloc_spin), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
               call cpu_time(t1)
               t_s12_gemm = t_s12_gemm + (t1 - t0)
               call cpu_time(t0)
@@ -213,15 +216,17 @@ contains
               call cpu_time(t1)
               t_s12_accum = t_s12_accum + (t1 - t0)
               call cpu_time(t0)
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,jloc,phase2) schedule(static)
+!$omp parallel do collapse(4) private(ix,iy,iz,ig,ispinor,jocc,jloc,phase2) schedule(static)
               do iz = mg%is(3), mg%ie(3)
                 do iy = mg%is(2), mg%ie(2)
                   do ix = mg%is(1), mg%ie(1)
-                    ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                    phase2 = phase2x_l(ix) * phase2y_l(iy) * phase2z_l(iz)
-                    do jloc = 1, nblk_chunk
-                      jocc = jblk_s + jloc - 1
-                      zrhs1(ig,jloc) = phase2 * zblk(ix,iy,iz,jocc)
+                    do ispinor = 1, system%nspin
+                      ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                      phase2 = phase2x_l(ix) * phase2y_l(iy) * phase2z_l(iz)
+                      do jloc = 1, nblk_chunk
+                        jocc = jblk_s + jloc - 1
+                        zrhs1(ig,jloc) = phase2 * zblk(ix,iy,iz,ispinor,jocc)
+                      end do
                     end do
                   end do
                 end do
@@ -229,8 +234,8 @@ contains
               call cpu_time(t1)
               t_s12_pack = t_s12_pack + (t1 - t0)
               call cpu_time(t0)
-              call zgemm('C', 'N', nocc_local, nblk_chunk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc), &
-                zrhs1, max(1,nloc), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
+              call zgemm('C', 'N', nocc_local, nblk_chunk, nloc_spin, cmplx(system%hvol, 0.0d0, kind=8), zocc2d, max(1,nloc_spin), &
+                zrhs1, max(1,nloc_spin), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
               call cpu_time(t1)
               t_s12_gemm = t_s12_gemm + (t1 - t0)
               call cpu_time(t0)
@@ -263,45 +268,49 @@ contains
           t_inv_s2 = t1 - t0
           if (info%id_rko == 0) write(*,'(a,1x,es12.4)') 'LCM timing: inv(S2)=', t_inv_s2
 
-          zt1(:,:,:,:) = (0.0d0, 0.0d0)
-          zt2(:,:,:,:) = (0.0d0, 0.0d0)
-          zt12d(1:nloc,1:max(1,nocc_local)) => zt1(:,:,:,1:max(1,nocc_local))
-          zt22d(1:nloc,1:max(1,nocc_local)) => zt2(:,:,:,1:max(1,nocc_local))
+          zt1(:,:,:,:,:) = (0.0d0, 0.0d0)
+          zt2(:,:,:,:,:) = (0.0d0, 0.0d0)
+          zt12d(1:nloc_spin,1:max(1,nocc_local)) => zt1(:,:,:,:,1:max(1,nocc_local))
+          zt22d(1:nloc_spin,1:max(1,nocc_local)) => zt2(:,:,:,:,1:max(1,nocc_local))
           call cpu_time(t0)
           do owner = 0, info%isize_o - 1
             call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
             if (nblk <= 0) cycle
-            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, nblk))
             call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, zblk)
-            allocate(zrhs1(max(1,nloc), nblk))
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,phase1) schedule(static)
+            allocate(zrhs1(max(1,nloc_spin), nblk))
+!$omp parallel do collapse(4) private(ix,iy,iz,ig,ispinor,jocc,phase1) schedule(static)
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
                 do ix = mg%is(1), mg%ie(1)
-                  ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                  phase1 = phase1x_l(ix) * phase1y_l(iy) * phase1z_l(iz)
-                  do jocc = 1, nblk
-                    zrhs1(ig,jocc) = phase1 * zblk(ix,iy,iz,jocc)
+                  do ispinor = 1, system%nspin
+                    ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                    phase1 = phase1x_l(ix) * phase1y_l(iy) * phase1z_l(iz)
+                    do jocc = 1, nblk
+                      zrhs1(ig,jocc) = phase1 * zblk(ix,iy,iz,ispinor,jocc)
+                    end do
                   end do
                 end do
               end do
             end do
-            call zgemm('N', 'T', nloc, nocc_local, nblk, (1.0d0, 0.0d0), zrhs1, max(1,nloc), &
-              s1_row_sum(:,iocc:iocc+nblk-1), max(1,nocc_local), (1.0d0, 0.0d0), zt12d, max(1,nloc))
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,phase2) schedule(static)
+            call zgemm('N', 'T', nloc_spin, nocc_local, nblk, (1.0d0, 0.0d0), zrhs1, max(1,nloc_spin), &
+              s1_row_sum(:,iocc:iocc+nblk-1), max(1,nocc_local), (1.0d0, 0.0d0), zt12d, max(1,nloc_spin))
+!$omp parallel do collapse(4) private(ix,iy,iz,ig,ispinor,jocc,phase2) schedule(static)
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
                 do ix = mg%is(1), mg%ie(1)
-                  ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                  phase2 = phase2x_l(ix) * phase2y_l(iy) * phase2z_l(iz)
-                  do jocc = 1, nblk
-                    zrhs1(ig,jocc) = phase2 * zblk(ix,iy,iz,jocc)
+                  do ispinor = 1, system%nspin
+                    ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                    phase2 = phase2x_l(ix) * phase2y_l(iy) * phase2z_l(iz)
+                    do jocc = 1, nblk
+                      zrhs1(ig,jocc) = phase2 * zblk(ix,iy,iz,ispinor,jocc)
+                    end do
                   end do
                 end do
               end do
             end do
-            call zgemm('N', 'T', nloc, nocc_local, nblk, (1.0d0, 0.0d0), zrhs1, max(1,nloc), &
-              s2_row_sum(:,iocc:iocc+nblk-1), max(1,nocc_local), (1.0d0, 0.0d0), zt22d, max(1,nloc))
+            call zgemm('N', 'T', nloc_spin, nocc_local, nblk, (1.0d0, 0.0d0), zrhs1, max(1,nloc_spin), &
+              s2_row_sum(:,iocc:iocc+nblk-1), max(1,nocc_local), (1.0d0, 0.0d0), zt22d, max(1,nloc_spin))
             deallocate(zrhs1)
             deallocate(zblk)
           end do
@@ -312,26 +321,28 @@ contains
           deallocate(phase2z_l, phase2y_l, phase2x_l, phase1z_l, phase1y_l, phase1x_l)
 
           g12_row(:,:) = (0.0d0, 0.0d0)
-          zt12d(1:nloc,1:max(1,nocc_local)) => zt1(:,:,:,1:max(1,nocc_local))
+          zt12d(1:nloc_spin,1:max(1,nocc_local)) => zt1(:,:,:,:,1:max(1,nocc_local))
           do owner = 0, info%isize_o - 1
             call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
             if (nblk <= 0) cycle
-            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, nblk))
             call get_owned_occ_block(nocc, occ_idx, owner, zt2, iocc, jocc, zblk)
-            allocate(zrhs1(max(1,nloc), nblk), ztmp1(max(1,nocc_local), nblk))
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc) schedule(static)
+            allocate(zrhs1(max(1,nloc_spin), nblk), ztmp1(max(1,nocc_local), nblk))
+!$omp parallel do collapse(4) private(ix,iy,iz,ig,ispinor,jocc) schedule(static)
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
                 do ix = mg%is(1), mg%ie(1)
-                  ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                  do jocc = 1, nblk
-                    zrhs1(ig,jocc) = zblk(ix,iy,iz,jocc)
+                  do ispinor = 1, system%nspin
+                    ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                    do jocc = 1, nblk
+                      zrhs1(ig,jocc) = zblk(ix,iy,iz,ispinor,jocc)
+                    end do
                   end do
                 end do
               end do
             end do
-            call zgemm('C', 'N', nocc_local, nblk, nloc, cmplx(system%hvol, 0.0d0, kind=8), zt12d, max(1,nloc), &
-              zrhs1, max(1,nloc), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
+            call zgemm('C', 'N', nocc_local, nblk, nloc_spin, cmplx(system%hvol, 0.0d0, kind=8), zt12d, max(1,nloc_spin), &
+              zrhs1, max(1,nloc_spin), (0.0d0, 0.0d0), ztmp1, max(1,nocc_local))
             do p = 1, nocc_local
               do jocc = 1, nblk
                 jocc_g = iocc + jocc - 1
@@ -344,15 +355,17 @@ contains
           call comm_summation(g12_row, g12_row_sum, size(g12_row), info%icomm_r)
 
           marker_local(:,:,:) = 0d0
-          allocate(zrhs2(max(1,nloc), max(1,nocc_local)), ztmp2(max(1,nloc), max(1,nocc_local)))
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,p) schedule(static)
+          allocate(zrhs2(max(1,nloc_spin), max(1,nocc_local)), ztmp2(max(1,nloc_spin), max(1,nocc_local)))
+!$omp parallel do collapse(4) private(ix,iy,iz,ig,ispinor,p) schedule(static)
           do iz = mg%is(3), mg%ie(3)
             do iy = mg%is(2), mg%ie(2)
               do ix = mg%is(1), mg%ie(1)
-                ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
-                do p = 1, nocc_local
-                  zrhs2(ig,p) = zt1(ix,iy,iz,p)
-                  ztmp2(ig,p) = zt2(ix,iy,iz,p)
+                do ispinor = 1, system%nspin
+                  ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                  do p = 1, nocc_local
+                    zrhs2(ig,p) = zt1(ix,iy,iz,ispinor,p)
+                    ztmp2(ig,p) = zt2(ix,iy,iz,ispinor,p)
+                  end do
                 end do
               end do
             end do
@@ -360,7 +373,7 @@ contains
           do owner = 0, info%isize_o - 1
             call get_owner_occ_block(nocc, occ_idx, owner, iocc, jocc, nblk)
             if (nblk <= 0) cycle
-            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+            allocate(zblk(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, nblk))
             call get_owned_occ_block(nocc, occ_idx, owner, zocc, iocc, jocc, zblk)
             do jblk_s = 1, nblk, marker_blk_chunk
               jblk_e = min(nblk, jblk_s + marker_blk_chunk - 1)
@@ -375,22 +388,24 @@ contains
                   g21_blk(p,jloc) = conjg(g12_blk(jloc,local_occ_glob(p)))
                 end do
               end do
-              call zgemm('N', 'N', nloc, nblk_chunk, nocc_local, (1.0d0, 0.0d0), zrhs2, max(1,nloc), g12_fwd_blk, &
-                max(1,nocc_local), (0.0d0, 0.0d0), w12, max(1,nloc))
-              call zgemm('N', 'N', nloc, nblk_chunk, nocc_local, (1.0d0, 0.0d0), ztmp2, max(1,nloc), g21_blk, &
-                max(1,nocc_local), (0.0d0, 0.0d0), w21, max(1,nloc))
+              call zgemm('N', 'N', nloc_spin, nblk_chunk, nocc_local, (1.0d0, 0.0d0), zrhs2, max(1,nloc_spin), g12_fwd_blk, &
+                max(1,nocc_local), (0.0d0, 0.0d0), w12, max(1,nloc_spin))
+              call zgemm('N', 'N', nloc_spin, nblk_chunk, nocc_local, (1.0d0, 0.0d0), ztmp2, max(1,nloc_spin), g21_blk, &
+                max(1,nocc_local), (0.0d0, 0.0d0), w21, max(1,nloc_spin))
 !$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,jloc,zterm12,zterm21,phase1) schedule(static)
               do iz = mg%is(3), mg%ie(3)
                 do iy = mg%is(2), mg%ie(2)
                   do ix = mg%is(1), mg%ie(1)
-                    ig = ((iz - mg%is(3)) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
                     zterm12 = (0.0d0, 0.0d0)
                     zterm21 = (0.0d0, 0.0d0)
                     do jloc = 1, nblk_chunk
                       jocc = jblk_s + jloc - 1
-                      phase1 = conjg(zblk(ix,iy,iz,jocc))
-                      zterm12 = zterm12 + w12(ig,jloc) * phase1
-                      zterm21 = zterm21 + w21(ig,jloc) * phase1
+                      do ispinor = 1, system%nspin
+                        ig = (((ispinor - 1) * (mg%ie(3) - mg%is(3) + 1) + (iz - mg%is(3))) * (mg%ie(2) - mg%is(2) + 1) + (iy - mg%is(2))) * (mg%ie(1) - mg%is(1) + 1) + (ix - mg%is(1)) + 1
+                        phase1 = conjg(zblk(ix,iy,iz,ispinor,jocc))
+                        zterm12 = zterm12 + w12(ig,jloc) * phase1
+                        zterm21 = zterm21 + w21(ig,jloc) * phase1
+                      end do
                     end do
                     marker_local(ix,iy,iz) = marker_local(ix,iy,iz) - aimag(zterm12 - zterm21) * system%wtk(ik) / (2.0d0*pi)
                   end do
@@ -434,7 +449,7 @@ contains
       nocc0 = 0
       allocate(occ_list0(1), occ_w0(1))
       do io0 = 1, system%no
-        if (system%rocc(io0, ik0, ispin0) > eps_occ0) nocc0 = nocc0 + 1
+        if (system%rocc(io0, ik0, 1) > eps_occ0) nocc0 = nocc0 + 1
       end do
       if (nocc0 <= 0) return
 
@@ -442,10 +457,10 @@ contains
       allocate(occ_list0(nocc0), occ_w0(nocc0))
       nocc0 = 0
       do io0 = 1, system%no
-        if (system%rocc(io0, ik0, ispin0) > eps_occ0) then
+        if (system%rocc(io0, ik0, 1) > eps_occ0) then
           nocc0 = nocc0 + 1
           occ_list0(nocc0) = io0
-          occ_w0(nocc0) = system%rocc(io0, ik0, ispin0)
+          occ_w0(nocc0) = system%rocc(io0, ik0, 1)
         end if
       end do
     end subroutine build_occupied_list_soi
@@ -467,23 +482,25 @@ contains
       implicit none
       integer, intent(in) :: ik0, ispin0, im0, nocc0
       integer, intent(in) :: occ_list(nocc0)
-      complex(8), intent(out), dimension(mg%is(1):, mg%is(2):, mg%is(3):, :) :: zbuf
+      complex(8), intent(out), dimension(mg%is(1):, mg%is(2):, mg%is(3):, :, :) :: zbuf
 
       integer :: io_g, p, nocc_local0
 
-      zbuf(:,:,:,:) = (0.0d0, 0.0d0)
-      nocc_local0 = size(zbuf,4)
+      zbuf(:,:,:,:,:) = (0.0d0, 0.0d0)
+      nocc_local0 = size(zbuf,5)
 
       if (nocc_local0 <= 0) return
 
       if (use_complex) then
-!$omp parallel do private(p,io_g,ix,iy,iz) schedule(static)
+!$omp parallel do private(p,io_g,ispin,ix,iy,iz) schedule(static)
         do p = 1, nocc_local0
           io_g = local_occ_io(p)
-          do iz = mg%is(3), mg%ie(3)
-            do iy = mg%is(2), mg%ie(2)
-              do ix = mg%is(1), mg%ie(1)
-                zbuf(ix,iy,iz,p) = psi%zwf(ix,iy,iz,ispin0,io_g,ik0,im0)
+          do ispin = 1, system%nspin
+            do iz = mg%is(3), mg%ie(3)
+              do iy = mg%is(2), mg%ie(2)
+                do ix = mg%is(1), mg%ie(1)
+                  zbuf(ix,iy,iz,ispin,p) = psi%zwf(ix,iy,iz,ispin,io_g,ik0,im0)
+                end do
               end do
             end do
           end do
@@ -502,15 +519,15 @@ contains
       use structures, only: s_parallel_info
       implicit none
       integer, intent(in) :: nocc0
-      complex(8), intent(inout), contiguous, dimension(mg%is(1):, mg%is(2):, mg%is(3):, :) :: zbuf
+      complex(8), intent(inout), contiguous, dimension(mg%is(1):, mg%is(2):, mg%is(3):, :, :) :: zbuf
       real(8), intent(in) :: eps_rel
 
       complex(8), allocatable :: s_local(:,:), umat(:,:), xmat_local(:,:), u_scaled_blk(:,:), umat_blk(:,:)
       real(8), allocatable :: eval(:)
       real(8) :: smax
-      integer :: ia, ib, ic, owner, ib_s, ib_e, nblk, ia_g, loc_s, loc_e, nloc_cols
+      integer :: ia, ib, ic, owner, ib_s, ib_e, nblk, ia_g, loc_s, loc_e, nloc_cols, ispin
       integer :: ic_s, ic_e, ncol_chunk
-      complex(8), allocatable :: zblk2(:,:,:,:)
+      complex(8), allocatable :: zblk2(:,:,:,:,:)
 #ifdef USE_SCALAPACK
       type(s_parallel_info) :: info_sl
 #endif
@@ -522,15 +539,17 @@ contains
       do owner = 0, info%isize_o - 1
         call get_owner_occ_block(nocc0, occ_idx, owner, ib_s, ib_e, nblk)
         if (nblk <= 0) cycle
-        allocate(zblk2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+        allocate(zblk2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, nblk))
         call get_owned_occ_block(nocc0, occ_idx, owner, zbuf, ib_s, ib_e, zblk2)
         do ia = 1, nocc_local
           ia_g = local_occ_glob(ia)
           do ib = 1, nblk
-            do iz = mg%is(3), mg%ie(3)
-              do iy = mg%is(2), mg%ie(2)
-                do ix = mg%is(1), mg%ie(1)
-                  s_local(ia_g,ib_s + ib - 1) = s_local(ia_g,ib_s + ib - 1) + conjg(zbuf(ix,iy,iz,ia)) * zblk2(ix,iy,iz,ib) * system%hvol
+            do ispin = 1, system%nspin
+              do iz = mg%is(3), mg%ie(3)
+                do iy = mg%is(2), mg%ie(2)
+                  do ix = mg%is(1), mg%ie(1)
+                    s_local(ia_g,ib_s + ib - 1) = s_local(ia_g,ib_s + ib - 1) + conjg(zbuf(ix,iy,iz,ispin,ia)) * zblk2(ix,iy,iz,ispin,ib) * system%hvol
+                  end do
                 end do
               end do
             end do
@@ -599,27 +618,27 @@ contains
     subroutine apply_right_transform_occ_inplace(nocc0, zbuf, xmat_local)
       implicit none
       integer, intent(in) :: nocc0
-      complex(8), intent(inout), contiguous, target, dimension(mg%is(1):, mg%is(2):, mg%is(3):, :) :: zbuf
+      complex(8), intent(inout), contiguous, target, dimension(mg%is(1):, mg%is(2):, mg%is(3):, :, :) :: zbuf
       complex(8), intent(in) :: xmat_local(:,:)
 
-      complex(8), allocatable, target :: zsrc(:,:,:,:), zblk_owner(:,:,:,:)
+      complex(8), allocatable, target :: zsrc(:,:,:,:,:), zblk_owner(:,:,:,:,:)
       complex(8), allocatable :: xblk(:,:)
       complex(8), pointer :: zsrc2d(:,:), zbuf2d(:,:), zblk2d(:,:)
       integer :: owner, ia_s, ia_e, nblk, nocc_local0, nloc0
 
-      nocc_local0 = size(zbuf,4)
-      nloc0 = (mg%ie(1) - mg%is(1) + 1) * (mg%ie(2) - mg%is(2) + 1) * (mg%ie(3) - mg%is(3) + 1)
-      allocate(zsrc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local0)))
-      zsrc(:,:,:,:) = zbuf(:,:,:,:)
-      zbuf(:,:,:,:) = (0.0d0, 0.0d0)
-      zsrc2d(1:nloc0,1:max(1,nocc_local0)) => zsrc(:,:,:,1:max(1,nocc_local0))
-      zbuf2d(1:nloc0,1:max(1,nocc_local0)) => zbuf(:,:,:,1:max(1,nocc_local0))
+      nocc_local0 = size(zbuf,5)
+      nloc0 = (mg%ie(1) - mg%is(1) + 1) * (mg%ie(2) - mg%is(2) + 1) * (mg%ie(3) - mg%is(3) + 1) * system%nspin
+      allocate(zsrc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, max(1,nocc_local0)))
+      zsrc(:,:,:,:,:) = zbuf(:,:,:,:,:)
+      zbuf(:,:,:,:,:) = (0.0d0, 0.0d0)
+      zsrc2d(1:nloc0,1:max(1,nocc_local0)) => zsrc(:,:,:,:,1:max(1,nocc_local0))
+      zbuf2d(1:nloc0,1:max(1,nocc_local0)) => zbuf(:,:,:,:,1:max(1,nocc_local0))
       do owner = 0, info%isize_o - 1
         call get_owner_occ_block(nocc0, occ_idx, owner, ia_s, ia_e, nblk)
         if (nblk <= 0) cycle
-        allocate(zblk_owner(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), nblk))
+        allocate(zblk_owner(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, nblk))
         call get_owned_occ_block(nocc0, occ_idx, owner, zsrc, ia_s, ia_e, zblk_owner)
-        zblk2d(1:nloc0,1:nblk) => zblk_owner(:,:,:,1:nblk)
+        zblk2d(1:nloc0,1:nblk) => zblk_owner(:,:,:,:,1:nblk)
         allocate(xblk(nblk, max(1,nocc_local0)))
         xblk(:,:) = xmat_local(ia_s:ia_e,1:max(1,nocc_local0))
         call zgemm('N', 'N', nloc0, nocc_local0, nblk, (1.0d0, 0.0d0), zblk2d, max(1,nloc0), &
@@ -778,8 +797,8 @@ contains
       implicit none
       integer, intent(in) :: nocc0, owner_id, blk_s, blk_e
       integer, intent(in) :: occ_list0(nocc0)
-      complex(8), intent(in), dimension(mg%is(1):, mg%is(2):, mg%is(3):, :) :: zloc
-      complex(8), intent(out) :: zblk_out(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,blk_e-blk_s+1))
+      complex(8), intent(in), dimension(mg%is(1):, mg%is(2):, mg%is(3):, :, :) :: zloc
+      complex(8), intent(out) :: zblk_out(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, max(1,blk_e-blk_s+1))
       integer :: nblk0, p, locp
       nblk0 = max(0, blk_e - blk_s + 1)
       zblk_out = (0.0d0, 0.0d0)
@@ -789,13 +808,13 @@ contains
         do p = blk_s, blk_e
           locp = locp + 1
           if (allocated(occ_pos_owner)) then
-            zblk_out(:,:,:,locp) = zloc(:,:,:,occ_pos_owner(p))
+            zblk_out(:,:,:,:,locp) = zloc(:,:,:,:,occ_pos_owner(p))
           else
-            zblk_out(:,:,:,locp) = zloc(:,:,:,local_occ_position(nocc0, occ_list0, occ_list0(p), owner_id))
+            zblk_out(:,:,:,:,locp) = zloc(:,:,:,:,local_occ_position(nocc0, occ_list0, occ_list0(p), owner_id))
           end if
         end do
       end if
-      call comm_bcast(zblk_out(:,:,:,1:nblk0), info%icomm_o, owner_id)
+      call comm_bcast(zblk_out(:,:,:,:,1:nblk0), info%icomm_o, owner_id)
     end subroutine get_owned_occ_block
 
     subroutine assemble_owner_row_matrix_rooted(nocc0, occ_list0, row_local, amat)
