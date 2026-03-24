@@ -371,13 +371,18 @@
           " len=", l(1), l(2), l(3), &
           " dsp_send=", dg_frag%halo(i_halo)%dsp_send(1), dg_frag%halo(i_halo)%dsp_send(2), dg_frag%halo(i_halo)%dsp_send(3), &
           " dsp_recv=", dg_frag%halo(i_halo)%dsp_recv(1), dg_frag%halo(i_halo)%dsp_recv(2), dg_frag%halo(i_halo)%dsp_recv(3)
-        write(*,'(1x,a,i0,a,i0)') "        halo root diag tags: itag_send=", itag_send, " itag_recv=", itag_recv
+        write(*,'(1x,a,i0,a,i0,a,i0)') "        halo root diag tags: itag_send=", itag_send, " itag_recv=", itag_recv, &
+          " ireq_send=", ireq_send(i_halo)
         call flush(6)
       end if
 
       ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv, &
                                      dg_frag%halo(i_halo)%id_src, &
                                      itag_recv, dg_frag%icomm)
+      if (diag_second_halo_root) then
+        write(*,'(1x,a,i0,a,i0)') "        halo root diag req: i_halo=", i_halo, " ireq_recv=", ireq_recv(i_halo)
+        call flush(6)
+      end if
     end do
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
       " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "post-done"
@@ -387,8 +392,25 @@
       call flush(6)
     end if
 
+    if (diag_second_halo_root) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "recv-wait-begin"
+      call flush(6)
+    end if
     call comm_wait_all(ireq_recv)
+    if (diag_second_halo_root) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "recv-wait-done"
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "send-wait-begin"
+      call flush(6)
+    end if
     call comm_wait_all(ireq_send)
+    if (diag_second_halo_root) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "send-wait-done"
+      call flush(6)
+    end if
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
       " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "wait-done"
     call flush(6)
