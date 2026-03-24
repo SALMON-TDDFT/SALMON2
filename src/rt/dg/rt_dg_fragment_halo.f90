@@ -61,6 +61,56 @@
     end if
   end function get_fragment_owner_rank
 
+
+  logical function halo_axis_matches_direction(lo_ref, hi_ref, lo_nei, hi_nei, ngrid, dir) result(matches)
+    implicit none
+    integer, intent(in) :: lo_ref, hi_ref, lo_nei, hi_nei, ngrid, dir
+    integer :: shift, nei_lo, nei_hi
+
+    matches = .false.
+    do shift = -ngrid, ngrid, ngrid
+      nei_lo = lo_nei + shift
+      nei_hi = hi_nei + shift
+      select case (dir)
+      case (-1)
+        if (nei_hi == lo_ref - 1) then
+          matches = .true.
+          return
+        end if
+      case (0)
+        if (max(lo_ref, nei_lo) <= min(hi_ref, nei_hi)) then
+          matches = .true.
+          return
+        end if
+      case (1)
+        if (nei_lo == hi_ref + 1) then
+          matches = .true.
+          return
+        end if
+      end select
+    end do
+  end function halo_axis_matches_direction
+
+  logical function fragment_matches_direction(dg_frag, ifrag, jfrag, dvec) result(matches)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, dvec(3)
+
+    integer :: axis, lo_ref, hi_ref, lo_nei, hi_nei
+
+    matches = .true.
+    do axis = 1, 3
+      lo_ref = dg_frag%ixyz_frag(axis, ifrag)
+      hi_ref = lo_ref + dg_frag%nxyz_domain(axis, ifrag) - 1
+      lo_nei = dg_frag%ixyz_frag(axis, jfrag)
+      hi_nei = lo_nei + dg_frag%nxyz_domain(axis, jfrag) - 1
+      if (.not. halo_axis_matches_direction(lo_ref, hi_ref, lo_nei, hi_nei, dg_frag%lgnum_total(axis), dvec(axis))) then
+        matches = .false.
+        return
+      end if
+    end do
+  end function fragment_matches_direction
+
   !=======================================================================
   ! Initialize halo communication structures for fragment boundaries
   ! Following lcfo.f90 halo exchange pattern with periodic boundaries
@@ -72,8 +122,8 @@
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_parallel_info),  intent(in)    :: info
 
-    integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag
-    integer :: ir1(3), ir2(3), d(3)
+    integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag, neighbor_root_rank
+    integer :: d(3)
     integer, allocatable :: id_tmp(:)
     integer :: ifrag_count
 
@@ -137,29 +187,28 @@
         dg_frag%halo(i)%ifrag_dst = ifrag
 
         do jfrag = 1, dg_frag%n_frag
-          ir1(1:3) = dg_frag%ixyz_frag(1:3, jfrag)
+          if (.not. fragment_matches_direction(dg_frag, ifrag, jfrag, dg_frag%halo(i)%dvec)) cycle
 
-          ! destination neighbor (+direction)
-          ir2(1:3) = dg_frag%ixyz_frag(1:3, ifrag) + &
-                     dg_frag%halo(i)%dvec(1:3) * dg_frag%nxyz_domain(1:3, ifrag)
-          d(1:3) = mod(ir1(1:3) - ir2(1:3), dg_frag%lgnum_total(1:3))
-          if (d(1) == 0 .and. d(2) == 0 .and. d(3) == 0 .and. dg_frag%halo(i)%id_dst < 0) then
-            if (dg_frag%id_array(jfrag) < 0) then
-              stop "DG-Fragment RT: invalid halo dst subgroup root rank"
-            end if
-            dg_frag%halo(i)%id_dst = dg_frag%id_array(jfrag) + dg_frag%id_frag
+          neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
+          if (dg_frag%id_array(jfrag) /= neighbor_root_rank) then
+            write(*,'(a,i0,a,i0,a,i0,a,i0)') &
+              "[ERROR] DG-Fragment RT: inconsistent fragment root rank for ifrag=", ifrag, &
+              " jfrag=", jfrag, " stored=", dg_frag%id_array(jfrag), " expected=", neighbor_root_rank
+            stop "DG-Fragment RT: inconsistent fragment-group root rank"
           end if
 
-          ! source neighbor: the same adjacent fragment provides the opposite-face data
-          ir2(1:3) = dg_frag%ixyz_frag(1:3, ifrag) + &
-                     dg_frag%halo(i)%dvec(1:3) * dg_frag%nxyz_domain(1:3, ifrag)
-          d(1:3) = mod(ir1(1:3) - ir2(1:3), dg_frag%lgnum_total(1:3))
-          if (d(1) == 0 .and. d(2) == 0 .and. d(3) == 0 .and. dg_frag%halo(i)%id_src < 0) then
-            if (dg_frag%id_array(jfrag) < 0) then
-              stop "DG-Fragment RT: invalid halo src subgroup root rank"
-            end if
-            dg_frag%halo(i)%id_src = dg_frag%id_array(jfrag) + dg_frag%id_frag
+          if (dg_frag%halo(i)%id_dst < 0) then
+            dg_frag%halo(i)%id_dst = neighbor_root_rank + dg_frag%id_frag
+          end if
+          if (dg_frag%halo(i)%id_src < 0) then
+            dg_frag%halo(i)%id_src = neighbor_root_rank + dg_frag%id_frag
             dg_frag%halo(i)%ifrag_src = jfrag
+          else if (dg_frag%halo(i)%ifrag_src /= jfrag) then
+            write(*,'(a,i0,a,3(i0,a),a,i0,a,i0)') &
+              "[ERROR] DG-Fragment RT: ambiguous halo source for ifrag=", ifrag, " dir=(", &
+              dg_frag%halo(i)%dvec(1), ",", dg_frag%halo(i)%dvec(2), ",", dg_frag%halo(i)%dvec(3), &
+              ") first=", dg_frag%halo(i)%ifrag_src, " second=", jfrag
+            stop "DG-Fragment RT: ambiguous halo source fragment"
           end if
         end do
 
