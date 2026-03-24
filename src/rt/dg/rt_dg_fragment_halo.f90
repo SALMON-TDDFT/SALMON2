@@ -284,9 +284,14 @@
     integer :: itag_send, itag_recv
     integer, allocatable :: ireq_send(:), ireq_recv(:)
     integer :: lb1, ub1, lb2, ub2, lb3, ub3
+    integer, save :: halo_exchange_call_count = 0
+    logical :: diag_second_halo_root
 
     if (.not. dg_frag%has_halo_exchange) return
     if (dg_frag%n_halo <= 0) return
+
+    halo_exchange_call_count = halo_exchange_call_count + 1
+    diag_second_halo_root = dg_frag%is_frag_root .and. (halo_exchange_call_count == 2)
 
     allocate(ireq_send(dg_frag%n_halo), ireq_recv(dg_frag%n_halo))
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
@@ -355,6 +360,21 @@
 
       ifrag_recv = dg_frag%halo(i_halo)%ifrag_src
       itag_recv = (ifrag_recv - 1) * 27 + (26 - dir_code)
+
+      if (diag_second_halo_root) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+          "        halo root diag: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+          " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, &
+          " ifrag_src=", dg_frag%halo(i_halo)%ifrag_src, " ifrag_dst=", dg_frag%halo(i_halo)%ifrag_dst, &
+          " id_src=", dg_frag%halo(i_halo)%id_src, " id_dst=", dg_frag%halo(i_halo)%id_dst, &
+          " dvec=", dg_frag%halo(i_halo)%dvec(1), dg_frag%halo(i_halo)%dvec(2), dg_frag%halo(i_halo)%dvec(3), &
+          " len=", l(1), l(2), l(3), &
+          " dsp_send=", dg_frag%halo(i_halo)%dsp_send(1), dg_frag%halo(i_halo)%dsp_send(2), dg_frag%halo(i_halo)%dsp_send(3), &
+          " dsp_recv=", dg_frag%halo(i_halo)%dsp_recv(1), dg_frag%halo(i_halo)%dsp_recv(2), dg_frag%halo(i_halo)%dsp_recv(3)
+        write(*,'(1x,a,i0,a,i0)') "        halo root diag tags: itag_send=", itag_send, " itag_recv=", itag_recv
+        call flush(6)
+      end if
+
       ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv, &
                                      dg_frag%halo(i_halo)%id_src, &
                                      itag_recv, dg_frag%icomm)

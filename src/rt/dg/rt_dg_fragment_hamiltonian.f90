@@ -223,6 +223,16 @@
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
         nbf = dg_frag%n_basis(ifrag, ispin)
+        if (nbf > size(dg_frag%index_basis, 1)) then
+          write(*,*) "[FATAL] hamiltonian n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf, " index_basis_dim1=", size(dg_frag%index_basis, 1)
+          stop 1
+        end if
+        if (nbf > size(dg_frag%phi_frag, 4)) then
+          write(*,*) "[FATAL] hamiltonian n_basis exceeds phi_frag dim4: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf, " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
+          stop 1
+        end if
         allocate(partial_t(nbf), partial_h(nbf), reduced_t(nbf), reduced_h(nbf))
         do jo = 1, nbf
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
@@ -1452,6 +1462,12 @@
             "phi_lb=", phi_lb1, phi_lb2, phi_lb3, "phi_ub=", phi_ub1, phi_ub2, phi_ub3
           stop 1
         end if
+        if (dg_frag%n_basis(ifrag, ispin) > size(dg_frag%index_basis, 1)) then
+          write(*,*) "[FATAL] overlap n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", dg_frag%n_basis(ifrag, ispin), &
+            " index_basis_dim1=", size(dg_frag%index_basis, 1)
+          stop 1
+        end if
 
         do jo = 1, dg_frag%n_basis(ifrag, ispin)
           if (jo > size(dg_frag%phi_frag, 4)) then
@@ -1513,6 +1529,12 @@
             if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
               write(*,*) "[FATAL] overlap halo basis exceeds buf dim4: rank=", dg_frag%id, &
                 " i_halo=", i_halo, " n_basis_halo=", n_basis_halo, " buf_dim4=", size(dg_frag%halo(i_halo)%buf_recv, 4)
+              stop 1
+            end if
+            if (n_basis_halo > size(dg_frag%index_basis, 1)) then
+              write(*,*) "[FATAL] overlap halo basis exceeds index_basis dim1: rank=", dg_frag%id, &
+                " i_halo=", i_halo, " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, &
+                " index_basis_dim1=", size(dg_frag%index_basis, 1)
               stop 1
             end if
             halo_s(:) = max(loc_s(:), d(:) + 1)
