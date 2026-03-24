@@ -426,7 +426,7 @@
       integer :: mat_size, offset_flat, ii, jj
       integer(8) :: mat_size64
       mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
-      if (mat_size64 > huge(mat_size)) then
+      if (mat_size64 >= huge(mat_size)) then
         write(*,*) "[FATAL] Hamiltonian reduce mat_size overflow: rank=", dg_frag%id, &
           " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, " mat_size64=", mat_size64
         stop 1
@@ -1747,6 +1747,7 @@
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
     integer :: offset_flat, sample_n, nan_count
     integer :: mat_size, n_eval, lwork, info_eig
+    integer(8) :: mat_size64
     logical :: log_frag_progress, log_reduce_diag
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
@@ -1960,7 +1961,14 @@
     write(*,*) "        overlap reduce begin"
     flush(6)
     call cpu_time(t0)
-    mat_size = dg_frag%n_mat_max * dg_frag%n_mat_max * dg_frag%nspin
+    mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
+    if (mat_size64 >= huge(mat_size)) then
+      write(*,*) "[FATAL] overlap reduce mat_size overflow: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+        " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, &
+        " mat_size64=", mat_size64
+      stop 1
+    end if
+    mat_size = int(mat_size64)
     allocate(S_flat(mat_size), S_tmp_flat(mat_size))
     log_reduce_diag = (dg_frag%ifrag_group == 42 .or. dg_frag%ifrag_group == 43)
     sample_n = min(8, mat_size)
