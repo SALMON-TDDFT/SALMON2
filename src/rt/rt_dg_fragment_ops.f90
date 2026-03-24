@@ -4,6 +4,7 @@ module rt_dg_fragment_ops
 
   private
   public :: ensure_nonlocal_pp_matrix_A
+  public :: ensure_overlap_prop_available
   public :: calculate_microscopic_current_dg
   public :: build_spatial_A_coupling_matrices
   public :: apply_gradient_to_basis
@@ -167,7 +168,21 @@ contains
       dg_frag%has_nl_cache = .true.
     end if
 
-  end subroutine ensure_nonlocal_pp_matrix_A  !=======================================================================
+  end subroutine ensure_nonlocal_pp_matrix_A
+
+  subroutine ensure_overlap_prop_available(dg_frag, n_use)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: n_use
+
+    if (n_use <= 0) return
+    if (.not. dg_frag%overlap_prop_root_authoritative) return
+    if (dg_frag%is_frag_root) return
+
+    stop "ensure_overlap_prop_available not implemented yet"
+  end subroutine ensure_overlap_prop_available
+
+  !=======================================================================
   ! Apply gradient operator to a basis function using finite differences
   !=======================================================================
   subroutine apply_gradient_to_basis(dg_frag, i_local, jo, mg, stencil, grad_phi)

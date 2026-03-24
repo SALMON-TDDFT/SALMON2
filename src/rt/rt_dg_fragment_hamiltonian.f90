@@ -1359,18 +1359,6 @@
   !=======================================================================
   ! Calculate overlap matrix in DG basis (S_ij = <phi_i|phi_j>)
   !=======================================================================
-  subroutine ensure_overlap_prop_available(dg_frag, n_use)
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    integer, intent(in) :: n_use
-
-    if (n_use <= 0) return
-    if (.not. dg_frag%overlap_prop_root_authoritative) return
-    if (dg_frag%is_frag_root) return
-
-    stop "ensure_overlap_prop_available not implemented yet"
-  end subroutine ensure_overlap_prop_available
-
   subroutine calculate_overlap_matrix(dg_frag, system, mg)
     use structures
     use communication, only: comm_summation, comm_is_root

@@ -88,7 +88,8 @@ module rt_dg_fragment_soi
                               diagonalize_mixed_basis_pw => diagonalize_mixed_basis
   use xc_hse_ri, only: hse_ri_data_t, init_hse_ri_fragment, &
                        calc_exact_exchange_hse_ri, deallocate_hse_ri_fragment
-  use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, calculate_microscopic_current_dg, &
+  use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
+                                calculate_microscopic_current_dg, &
                                 build_spatial_A_coupling_matrices, &
                                 apply_gradient_to_basis_ops => apply_gradient_to_basis
   implicit none
