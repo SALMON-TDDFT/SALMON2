@@ -383,8 +383,10 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root, comm_summation
   use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
+  use rt_local_chern_marker_soi, only: compute_local_chern_marker_from_orbital_soi => compute_local_chern_marker_from_orbital
   use filesystem, only: create_directory
   use inputoutput, only: t_unit_length
+  use salmon_global, only: yn_spinorbit
   implicit none
   integer, intent(in) :: itt
   type(s_rgrid), intent(in) :: mg
@@ -398,7 +400,11 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
 
   allocate(marker(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
   allocate(marker_xy(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2)))
-  call compute_local_chern_marker_from_orbital(mg, system, info, psi_fin, marker)
+  if (yn_spinorbit == 'y') then
+    call compute_local_chern_marker_from_orbital_soi(mg, system, info, psi_fin, marker)
+  else
+    call compute_local_chern_marker_from_orbital(mg, system, info, psi_fin, marker)
+  end if
 
   marker_xy(:,:) = 0.0d0
   do iz = mg%is(3), mg%ie(3)

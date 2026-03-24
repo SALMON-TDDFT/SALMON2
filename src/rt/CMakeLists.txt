@@ -9,6 +9,7 @@ set(SOURCES
     dg/rt_dg_plane_wave.f90
     rt_angular_momentum.f90
     rt_local_chern_marker.f90
+    rt_local_chern_marker_soi.f90
     dg/rt_dg_fragment_ops.f90
     dg/rt_dg_fragment.f90
     dg/rt_dg_fragment_soi.f90
