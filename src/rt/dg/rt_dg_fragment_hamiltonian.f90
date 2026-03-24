@@ -116,11 +116,14 @@
     type(s_pp_info),        intent(in)    :: pp
     type(s_pp_grid),        intent(in)    :: ppg
     
-    integer :: ifrag, ispin, io, jo, i_local, nbf, ig_i, ig_j
+    integer :: ifrag, ispin, io, jo, i_local, nbf, nbf_raw, ig_i, ig_j
+    integer :: ifrag_chk, i_local_chk, ix_chk, iy_chk, iz_chk, istate_chk
     integer :: ndom(3)
     real(8) :: hvol
     real(8) :: max_p
     real(8) :: Ac_zero(3)
+    real(8) :: phi_checksum_before, phi_checksum_after, phi_checksum_delta, phi_checksum_tol
+    logical :: did_overlap_call
     integer :: is(3), ie(3)
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
@@ -139,6 +142,12 @@
       write(*,*)
       write(*,*) "=== Preparing Hamiltonian Matrix ==="
     end if
+
+    phi_checksum_before = 0.0d0
+    phi_checksum_after = 0.0d0
+    phi_checksum_delta = 0.0d0
+    phi_checksum_tol = 0.0d0
+    did_overlap_call = .false.
     
     ! Step 1: Calculate momentum matrix elements (transition moments)
     ! Required for velocity gauge A·p coupling
@@ -148,7 +157,24 @@
         write(*,*) "        Using 4th-order finite difference stencil"
       end if
       call calculate_momentum_matrix(dg_frag, system, mg, stencil)
+
+      phi_checksum_before = 0.0d0
+      i_local_chk = 0
+      do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local_chk = i_local_chk + 1
+        do istate_chk = 1, min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
+          do iz_chk = 1, dg_frag%nxyz_domain(3, ifrag_chk)
+            do iy_chk = 1, dg_frag%nxyz_domain(2, ifrag_chk)
+              do ix_chk = 1, dg_frag%nxyz_domain(1, ifrag_chk)
+                phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(ix_chk, iy_chk, iz_chk, istate_chk, i_local_chk))
+              end do
+            end do
+          end do
+        end do
+      end do
+
       call calculate_overlap_matrix(dg_frag, system, mg)
+      did_overlap_call = .true.
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
       flush(6)
@@ -161,10 +187,54 @@
         write(*,*) "  [1/3] Momentum matrix already available"
       end if
       if (.not. allocated(dg_frag%S_mat)) then
+        phi_checksum_before = 0.0d0
+        i_local_chk = 0
+        do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local_chk = i_local_chk + 1
+          do istate_chk = 1, min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
+            do iz_chk = 1, dg_frag%nxyz_domain(3, ifrag_chk)
+              do iy_chk = 1, dg_frag%nxyz_domain(2, ifrag_chk)
+                do ix_chk = 1, dg_frag%nxyz_domain(1, ifrag_chk)
+                  phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(ix_chk, iy_chk, iz_chk, istate_chk, i_local_chk))
+                end do
+              end do
+            end do
+          end do
+        end do
+
         call calculate_overlap_matrix(dg_frag, system, mg)
+        did_overlap_call = .true.
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
         flush(6)
+      end if
+    end if
+
+    if (did_overlap_call) then
+      phi_checksum_after = 0.0d0
+      i_local_chk = 0
+      do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local_chk = i_local_chk + 1
+        do istate_chk = 1, min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
+          do iz_chk = 1, dg_frag%nxyz_domain(3, ifrag_chk)
+            do iy_chk = 1, dg_frag%nxyz_domain(2, ifrag_chk)
+              do ix_chk = 1, dg_frag%nxyz_domain(1, ifrag_chk)
+                phi_checksum_after = phi_checksum_after + abs(dg_frag%phi_frag(ix_chk, iy_chk, iz_chk, istate_chk, i_local_chk))
+              end do
+            end do
+          end do
+        end do
+      end do
+      phi_checksum_delta = abs(phi_checksum_after - phi_checksum_before)
+      phi_checksum_tol = max(1.0d-12, 1.0d-12 * max(abs(phi_checksum_before), abs(phi_checksum_after)))
+      write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        overlap phi checksum: rank=", &
+        dg_frag%id, " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
+        " before=", phi_checksum_before, " after=", phi_checksum_after, " delta=", phi_checksum_delta
+      flush(6)
+      if (phi_checksum_delta > phi_checksum_tol) then
+        write(*,'(1x,a,1pe12.4,a,1pe12.4)') "[FATAL] overlap modified interior phi_frag: delta=", &
+          phi_checksum_delta, " tol=", phi_checksum_tol
+        stop 1
       end if
     end if
     
@@ -194,8 +264,8 @@
     flush(6)
     
     hvol = system%hvol
-    is = lg%is
-    ie = lg%ie
+    is = mg%is
+    ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
@@ -205,7 +275,7 @@
     ! Construct total potential: V = Vpsl + Vh + Vxc
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
-      call build_total_potential_grid(lg, Vh, Vxc(ispin), Vpsl, V_total)
+      call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
       if (ispin == 1) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-build-total-potential"
@@ -216,29 +286,65 @@
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
-        ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-        allocate(T_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
-        allocate(H_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
-        
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
-        nbf = dg_frag%n_basis(ifrag, ispin)
+        nbf_raw = dg_frag%n_basis(ifrag, ispin)
+        if (nbf_raw < 0) then
+          write(*,*) "[FATAL] negative n_basis in Hamiltonian Step 2: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
+          stop 1
+        end if
+        nbf = min(nbf_raw, dg_frag%nstate_frag)
+        if (nbf <= 0) cycle
+        if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
+          write(*,*) "[FATAL] hamiltonian step2 invalid i_local: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " i_local=", i_local, " phi_frag_dim5=", size(dg_frag%phi_frag, 5)
+          stop 1
+        end if
+        ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        if (any(ndom <= 0)) then
+          write(*,*) "[FATAL] hamiltonian step2 non-positive ndom: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ndom=", ndom
+          stop 1
+        end if
+        allocate(T_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
+        allocate(H_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
         if (nbf > size(dg_frag%index_basis, 1)) then
           write(*,*) "[FATAL] hamiltonian n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf, " index_basis_dim1=", size(dg_frag%index_basis, 1)
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis_eff=", nbf, " n_basis_raw=", nbf_raw, &
+            " index_basis_dim1=", size(dg_frag%index_basis, 1)
           stop 1
         end if
         if (nbf > size(dg_frag%phi_frag, 4)) then
           write(*,*) "[FATAL] hamiltonian n_basis exceeds phi_frag dim4: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf, " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis_eff=", nbf, " n_basis_raw=", nbf_raw, &
+            " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
           stop 1
         end if
         allocate(partial_t(nbf), partial_h(nbf), reduced_t(nbf), reduced_h(nbf))
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian fragment begin: rank=", dg_frag%id, &
+          " ifrag=", ifrag, " ispin=", ispin, " i_local=", i_local, " nbf=", nbf
+        flush(6)
         do jo = 1, nbf
+          if (jo == 1 .or. jo == nbf) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo begin: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, " nbf=", nbf
+            flush(6)
+          end if
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
+          if (jo == 1 .or. jo == nbf) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi begin: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
+            flush(6)
+          end if
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
+          if (jo == 1 .or. jo == nbf) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi done: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
+            flush(6)
+          end if
 
           ! Calculate matrix elements with all φ_i
           partial_t(:) = 0.0d0
@@ -256,9 +362,19 @@
 
           end do
           !$omp end parallel do
+          if (jo == 1 .or. jo == nbf) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian integrate done: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
+            flush(6)
+          end if
 
           call comm_summation(partial_t, reduced_t, nbf, dg_frag%icomm_frag)
           call comm_summation(partial_h, reduced_h, nbf, dg_frag%icomm_frag)
+          if (jo == 1 .or. jo == nbf) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian reduce done: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
+            flush(6)
+          end if
           if (dg_frag%is_frag_root) then
             do io = 1, nbf
               ig_i = dg_frag%index_basis(io, ifrag, ispin)
@@ -266,36 +382,123 @@
               dg_frag%H_mat_kinetic(ig_i, ig_j, ispin) = reduced_t(io)
               dg_frag%H_mat(ig_i, ig_j, ispin) = reduced_h(io)
             end do
+            if (jo == 1 .or. jo == nbf) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian H_mat store done: rank=", dg_frag%id, &
+                " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
+              flush(6)
+            end if
           end if
 
         end do  ! jo loop
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo-loop done: rank=", dg_frag%id, &
+          " ifrag=", ifrag, " ispin=", ispin, " nbf=", nbf
+        flush(6)
         deallocate(partial_t, partial_h, reduced_t, reduced_h)
         deallocate(T_phi, H_phi)
+        if (allocated(T_phi) .or. allocated(H_phi)) then
+          write(*,*) "[FATAL] hamiltonian deallocate(T_phi,H_phi) failed: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin
+          stop 1
+        end if
+        write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian after deallocate TH: rank=", dg_frag%id, &
+          " ifrag=", ifrag, " ispin=", ispin
+        flush(6)
+        write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian fragment done: rank=", dg_frag%id, &
+          " ifrag=", ifrag, " ispin=", ispin
+        flush(6)
           
         
       end do  ! ifrag loop
+      write(*,'(1x,a,i0,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+        " ispin=", ispin, " stage=", "after-ifrag-loop"
+      flush(6)
       
     end do  ! ispin loop
+    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+      " stage=", "after-ispin-loop"
+    flush(6)
     
     ! CRITICAL: MPI aggregation of Hamiltonian matrix
     ! Each rank computed elements only for its assigned fragments
     ! Sum across all ranks to get complete global H_mat
     block
       real(8), allocatable :: H_mat_flat(:), H_mat_tmp_flat(:)
-      integer :: mat_size
-      mat_size = dg_frag%n_mat_max * dg_frag%n_mat_max * dg_frag%nspin
+      integer :: mat_size, offset_flat, ii, jj
+      integer(8) :: mat_size64
+      mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
+      if (mat_size64 > huge(mat_size)) then
+        write(*,*) "[FATAL] Hamiltonian reduce mat_size overflow: rank=", dg_frag%id, &
+          " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, " mat_size64=", mat_size64
+        stop 1
+      end if
+      mat_size = int(mat_size64)
       allocate(H_mat_flat(mat_size), H_mat_tmp_flat(mat_size))
       
-      H_mat_flat = reshape(dg_frag%H_mat, [mat_size])
+      offset_flat = 1
+      do ispin = 1, dg_frag%nspin
+        do jj = 1, dg_frag%n_mat_max
+          do ii = 1, dg_frag%n_mat_max
+            H_mat_flat(offset_flat) = dg_frag%H_mat(ii, jj, ispin)
+            offset_flat = offset_flat + 1
+          end do
+        end do
+      end do
+      if (offset_flat /= mat_size + 1) then
+        write(*,*) "[FATAL] Hamiltonian reduce pack mismatch: rank=", dg_frag%id, &
+          " offset=", offset_flat, " mat_size=", mat_size
+        stop 1
+      end if
       call comm_summation(H_mat_flat, H_mat_tmp_flat, mat_size, dg_frag%icomm)
-      dg_frag%H_mat = reshape(H_mat_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
+      offset_flat = 1
+      do ispin = 1, dg_frag%nspin
+        do jj = 1, dg_frag%n_mat_max
+          do ii = 1, dg_frag%n_mat_max
+            dg_frag%H_mat(ii, jj, ispin) = H_mat_tmp_flat(offset_flat)
+            offset_flat = offset_flat + 1
+          end do
+        end do
+      end do
+      if (offset_flat /= mat_size + 1) then
+        write(*,*) "[FATAL] Hamiltonian reduce unpack mismatch: rank=", dg_frag%id, &
+          " offset=", offset_flat, " mat_size=", mat_size
+        stop 1
+      end if
       
-      H_mat_flat = reshape(dg_frag%H_mat_kinetic, [mat_size])
+      offset_flat = 1
+      do ispin = 1, dg_frag%nspin
+        do jj = 1, dg_frag%n_mat_max
+          do ii = 1, dg_frag%n_mat_max
+            H_mat_flat(offset_flat) = dg_frag%H_mat_kinetic(ii, jj, ispin)
+            offset_flat = offset_flat + 1
+          end do
+        end do
+      end do
+      if (offset_flat /= mat_size + 1) then
+        write(*,*) "[FATAL] Hamiltonian kinetic reduce pack mismatch: rank=", dg_frag%id, &
+          " offset=", offset_flat, " mat_size=", mat_size
+        stop 1
+      end if
       call comm_summation(H_mat_flat, H_mat_tmp_flat, mat_size, dg_frag%icomm)
-      dg_frag%H_mat_kinetic = reshape(H_mat_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
+      offset_flat = 1
+      do ispin = 1, dg_frag%nspin
+        do jj = 1, dg_frag%n_mat_max
+          do ii = 1, dg_frag%n_mat_max
+            dg_frag%H_mat_kinetic(ii, jj, ispin) = H_mat_tmp_flat(offset_flat)
+            offset_flat = offset_flat + 1
+          end do
+        end do
+      end do
+      if (offset_flat /= mat_size + 1) then
+        write(*,*) "[FATAL] Hamiltonian kinetic reduce unpack mismatch: rank=", dg_frag%id, &
+          " offset=", offset_flat, " mat_size=", mat_size
+        stop 1
+      end if
       
       deallocate(H_mat_flat, H_mat_tmp_flat)
     end block
+    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+      " stage=", "after-global-hmat-sum"
+    flush(6)
 
     ! Enforce Hermiticity for the static Hamiltonian parts used in RT propagation.
     do ispin = 1, system%nspin
@@ -309,6 +512,9 @@
         end do
       end do
     end do
+    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+      " stage=", "after-hermiticity"
+    flush(6)
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Kinetic and potential terms computed"
@@ -342,6 +548,13 @@
     end if
     
     deallocate(V_total)
+    if (allocated(V_total)) then
+      write(*,*) "[FATAL] V_total still allocated before return: rank=", dg_frag%id
+      stop 1
+    end if
+    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+      " stage=", "before-return"
+    flush(6)
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "=== Hamiltonian Matrix Ready ==="
@@ -387,19 +600,66 @@
     integer :: lx, ly, lz, gx, gy, gz
     integer :: iorg(3), ndom(3)
     integer :: loc_s(3), loc_e(3)
+    integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
+    integer :: v_lb1, v_ub1, v_lb2, v_ub2, v_lb3, v_ub3
+    logical :: has_overlap
 
+    if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
+      write(*,*) "[FATAL] build_hpsi invalid i_local: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " i_local=", i_local, " phi_frag_dim5=", size(dg_frag%phi_frag, 5)
+      stop 1
+    end if
+    if (jo < 1 .or. jo > size(dg_frag%phi_frag, 4)) then
+      write(*,*) "[FATAL] build_hpsi invalid jo: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " jo=", jo, " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
+      stop 1
+    end if
     call apply_kinetic_to_basis(dg_frag, i_local, jo, mg, stencil, T_phi)
     H_phi(:, :, :) = T_phi(:, :, :)
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    if (.not. has_overlap) return
+    if (loc_s(1) < lbound(T_phi, 1) .or. loc_e(1) > ubound(T_phi, 1) .or. &
+        loc_s(2) < lbound(T_phi, 2) .or. loc_e(2) > ubound(T_phi, 2) .or. &
+        loc_s(3) < lbound(T_phi, 3) .or. loc_e(3) > ubound(T_phi, 3)) then
+      write(*,*) "[FATAL] build_hpsi local range exceeds T_phi bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, " T_shape=", shape(T_phi)
+      stop 1
+    end if
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
+    if (loc_s(1) < phi_lb1 .or. loc_e(1) > phi_ub1 .or. &
+        loc_s(2) < phi_lb2 .or. loc_e(2) > phi_ub2 .or. &
+        loc_s(3) < phi_lb3 .or. loc_e(3) > phi_ub3) then
+      write(*,*) "[FATAL] build_hpsi local range exceeds phi_frag bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, " phi_lb=", &
+        phi_lb1, phi_lb2, phi_lb3, " phi_ub=", phi_ub1, phi_ub2, phi_ub3
+      stop 1
+    end if
+    v_lb1 = lbound(V_total, 1)
+    v_ub1 = ubound(V_total, 1)
+    v_lb2 = lbound(V_total, 2)
+    v_ub2 = ubound(V_total, 2)
+    v_lb3 = lbound(V_total, 3)
+    v_ub3 = ubound(V_total, 3)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)
         gy = iorg(2) + ly - 1
         do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
+          if (gx < v_lb1 .or. gx > v_ub1 .or. gy < v_lb2 .or. gy > v_ub2 .or. gz < v_lb3 .or. gz > v_ub3) then
+            write(*,*) "[FATAL] build_hpsi V_total index out of bounds: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " gx/gy/gz=", gx, gy, gz, " V_lb=", v_lb1, v_lb2, v_lb3, &
+              " V_ub=", v_ub1, v_ub2, v_ub3
+            stop 1
+          end if
           H_phi(lx, ly, lz) = H_phi(lx, ly, lz) + V_total(gx, gy, gz) * dg_frag%phi_frag(lx, ly, lz, jo, i_local)
         end do
       end do
@@ -423,9 +683,46 @@
     real(8) :: partial
     integer :: lx, ly, lz
     integer :: ndom(3), loc_s(3), loc_e(3)
+    integer :: f_lb1, f_ub1, f_lb2, f_ub2, f_lb3, f_ub3
+    logical :: has_overlap
 
+    if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
+      write(*,*) "[FATAL] integrate invalid i_local: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " i_local=", i_local, " phi_frag_dim5=", size(dg_frag%phi_frag, 5)
+      stop 1
+    end if
+    if (io < 1 .or. io > size(dg_frag%phi_frag, 4)) then
+      write(*,*) "[FATAL] integrate invalid io: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " io=", io, " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
+      stop 1
+    end if
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    if (.not. has_overlap) then
+      integral = 0.0d0
+      return
+    end if
+    if (loc_s(1) < lbound(field, 1) .or. loc_e(1) > ubound(field, 1) .or. &
+        loc_s(2) < lbound(field, 2) .or. loc_e(2) > ubound(field, 2) .or. &
+        loc_s(3) < lbound(field, 3) .or. loc_e(3) > ubound(field, 3)) then
+      write(*,*) "[FATAL] integrate local range exceeds field bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, " field_shape=", shape(field)
+      stop 1
+    end if
+    f_lb1 = lbound(dg_frag%phi_frag, 1)
+    f_ub1 = ubound(dg_frag%phi_frag, 1)
+    f_lb2 = lbound(dg_frag%phi_frag, 2)
+    f_ub2 = ubound(dg_frag%phi_frag, 2)
+    f_lb3 = lbound(dg_frag%phi_frag, 3)
+    f_ub3 = ubound(dg_frag%phi_frag, 3)
+    if (loc_s(1) < f_lb1 .or. loc_e(1) > f_ub1 .or. &
+        loc_s(2) < f_lb2 .or. loc_e(2) > f_ub2 .or. &
+        loc_s(3) < f_lb3 .or. loc_e(3) > f_ub3) then
+      write(*,*) "[FATAL] integrate local range exceeds phi_frag bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, " phi_lb=", &
+        f_lb1, f_lb2, f_lb3, " phi_ub=", f_ub1, f_ub2, f_ub3
+      stop 1
+    end if
     partial = 0.0d0
     do lz = loc_s(3), loc_e(3)
       do ly = loc_s(2), loc_e(2)
@@ -462,13 +759,51 @@
     real(8) :: v, lap0
     real(8) :: lapt(4,3)
     integer :: ndom(3), loc_s(3), loc_e(3)
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
+    logical :: has_overlap
     
     ! Extract stencil coefficients
     lap0 = stencil%coef_lap0
     lapt = stencil%coef_lap
+    if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
+      write(*,*) "[FATAL] kinetic invalid i_local: rank=", dg_frag%id, &
+        " i_local=", i_local, " phi_frag_dim5=", size(dg_frag%phi_frag, 5)
+      stop 1
+    end if
+    if (jo < 1 .or. jo > size(dg_frag%phi_frag, 4)) then
+      write(*,*) "[FATAL] kinetic invalid jo: rank=", dg_frag%id, &
+        " jo=", jo, " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
+      stop 1
+    end if
     ifrag = dg_frag%ifrag_start + i_local - 1
+    if (ifrag < dg_frag%ifrag_start .or. ifrag > dg_frag%ifrag_end) then
+      write(*,*) "[FATAL] kinetic invalid ifrag from i_local: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " i_local=", i_local, " ifrag_start/end=", dg_frag%ifrag_start, dg_frag%ifrag_end
+      stop 1
+    end if
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+    if (any(ndom <= 0)) then
+      write(*,*) "[FATAL] kinetic non-positive domain size: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " ndom=", ndom
+      stop 1
+    end if
+    call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    T_phi = 0.0d0
+    if (.not. has_overlap) return
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
+    if (loc_s(1)-4 < p_lb1 .or. loc_e(1)+4 > p_ub1 .or. &
+        loc_s(2)-4 < p_lb2 .or. loc_e(2)+4 > p_ub2 .or. &
+        loc_s(3)-4 < p_lb3 .or. loc_e(3)+4 > p_ub3) then
+      write(*,*) "[FATAL] kinetic stencil range exceeds phi_frag bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, " phi_lb=", &
+        p_lb1, p_lb2, p_lb3, " phi_ub=", p_ub1, p_ub2, p_ub3
+      stop 1
+    end if
     
     ! Note: phi_frag is allocated as (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, ...)
     ! where nb = nxyz_buffer = 4 for 4th-order stencil
@@ -482,8 +817,6 @@
     ! With halo regions available, we can compute over FULL interior domain
     !
     ! Note: exchange_phi_frag_halo() must be called before this routine
-    
-    T_phi = 0.0d0
     
     do lz = loc_s(3), loc_e(3)
       do ly = loc_s(2), loc_e(2)
@@ -527,6 +860,35 @@
     end do
     
   end subroutine apply_kinetic_to_basis
+
+  subroutine get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    type(s_rgrid), intent(in) :: mg
+    integer, intent(out) :: loc_s(3), loc_e(3)
+    logical, intent(out) :: has_overlap
+
+    integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
+
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    g_s(:) = iorg(:)
+    g_e(:) = iorg(:) + ndom(:) - 1
+    ov_s(:) = max(g_s(:), mg%is(:))
+    ov_e(:) = min(g_e(:), mg%ie(:))
+
+    has_overlap = all(ov_s(:) <= ov_e(:))
+    if (.not. has_overlap) then
+      loc_s(:) = 1
+      loc_e(:) = 0
+      return
+    end if
+
+    loc_s(:) = ov_s(:) - iorg(:) + 1
+    loc_e(:) = ov_e(:) - iorg(:) + 1
+  end subroutine get_fragment_owned_range
 
   subroutine get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
     use salmon_global, only: nproc_rgrid
