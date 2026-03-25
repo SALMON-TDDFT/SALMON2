@@ -289,9 +289,7 @@ contains
     n_tot = n_frag + n_pw
     y(:) = (0.0d0, 0.0d0)
 
-    if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
-      y(1:n_tot) = matmul(dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin), x(1:n_tot))
-    else if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+    if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
       if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
       else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
@@ -448,9 +446,7 @@ contains
     n_tot = n_frag + n_pw
     mat(:, :) = (0.0d0, 0.0d0)
 
-    if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
-      mat(1:n_tot, 1:n_tot) = dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin)
-    else if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+    if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
       if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, mat(1:n_frag, 1:n_frag))
       else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then

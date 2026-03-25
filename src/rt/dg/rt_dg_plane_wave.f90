@@ -28,8 +28,41 @@ module rt_dg_plane_wave
   public :: compute_fragment_pw_hamiltonian
   public :: build_mixed_hamiltonian
   public :: diagonalize_mixed_basis
+  public :: assemble_mixed_hamiltonian_dense
 
 contains
+
+  subroutine assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, mat)
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: H_frag_pw(:,:,:)
+    complex(8), intent(inout) :: mat(:,:)
+
+    integer :: n_frag, n_pw, ipw, i
+
+    n_frag = dg_frag%n_mat_max
+    n_pw = dg_frag%n_plane_waves
+    mat(:, :) = (0.0d0, 0.0d0)
+
+    if (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) then
+      mat(1:n_frag, 1:n_frag) = dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin)
+    else if (allocated(dg_frag%H_mat_blocks)) then
+      call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, mat(1:n_frag, 1:n_frag))
+    else if (allocated(dg_frag%H_mat)) then
+      mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+    end if
+
+    if (n_pw <= 0) return
+
+    do ipw = 1, n_pw
+      i = n_frag + ipw
+      if (allocated(dg_frag%H_mat_pw_diag)) mat(i, i) = dg_frag%H_mat_pw_diag(ipw, ispin)
+    end do
+    mat(1:n_frag, n_frag+1:n_frag+n_pw) = H_frag_pw(1:n_frag, 1:n_pw, ispin)
+    mat(n_frag+1:n_frag+n_pw, 1:n_frag) = conjg(transpose(H_frag_pw(1:n_frag, 1:n_pw, ispin)))
+  end subroutine assemble_mixed_hamiltonian_dense
 
   !=======================================================================
   ! Initialize plane wave basis for mixing with fragment basis
@@ -444,7 +477,7 @@ contains
     complex(8),             intent(in)    :: S_frag_pw(:,:,:)
     complex(8),             intent(in)    :: H_frag_pw(:,:,:)
 
-    integer :: ispin, i, j, ii, jj, ipw, n_frag, n_pw
+    integer :: ispin, i, ipw, n_frag, n_pw
     real(8) :: k_vec(3), kinetic_energy
     real(8), allocatable :: V_mean(:)
 
@@ -452,14 +485,6 @@ contains
 
     n_frag = dg_frag%n_mat_max
     n_pw = dg_frag%n_plane_waves
-
-    if (.not. allocated(dg_frag%H_mat_mixed)) then
-      allocate(dg_frag%H_mat_mixed(n_frag + n_pw, n_frag + n_pw, dg_frag%nspin))
-    else if (size(dg_frag%H_mat_mixed,1) /= n_frag + n_pw .or. size(dg_frag%H_mat_mixed,2) /= n_frag + n_pw .or. &
-             size(dg_frag%H_mat_mixed,3) /= dg_frag%nspin) then
-      deallocate(dg_frag%H_mat_mixed)
-      allocate(dg_frag%H_mat_mixed(n_frag + n_pw, n_frag + n_pw, dg_frag%nspin))
-    end if
 
     allocate(V_mean(dg_frag%nspin))
     call compute_mean_potential(dg_frag, Vh, Vxc, Vpsl, V_mean)
@@ -470,16 +495,7 @@ contains
       allocate(dg_frag%H_mat_pw_diag(n_pw, dg_frag%nspin))
     end if
 
-    dg_frag%H_mat_mixed(:, :, :) = (0.0d0, 0.0d0)
-
     do ispin = 1, dg_frag%nspin
-      if (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) then
-        dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin) = dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin)
-      else if (allocated(dg_frag%H_mat_blocks)) then
-        call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin))
-      else
-        dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
-      end if
       if (n_pw <= 0) cycle
 
       do ipw = 1, n_pw
@@ -487,15 +503,6 @@ contains
         kinetic_energy = 0.5d0 * sum(k_vec**2)
         i = n_frag + ipw
         dg_frag%H_mat_pw_diag(ipw, ispin) = cmplx(kinetic_energy + V_mean(ispin), 0.0d0, kind=8)
-        dg_frag%H_mat_mixed(i, i, ispin) = cmplx(kinetic_energy + V_mean(ispin), 0.0d0, kind=8)
-      end do
-
-      do jj = 1, n_pw
-        j = n_frag + jj
-        do ii = 1, n_frag
-          dg_frag%H_mat_mixed(ii, j, ispin) = H_frag_pw(ii, jj, ispin)
-          dg_frag%H_mat_mixed(j, ii, ispin) = conjg(dg_frag%H_mat_mixed(ii, j, ispin))
-        end do
       end do
     end do
 
@@ -631,7 +638,7 @@ contains
       allocate(S_rebuild(n_total, n_total))
       allocate(S_eff(n_frag, n_frag), S_eff_work(n_frag, n_frag), eval_eff(n_frag))
 
-      H_work(1:n_total, 1:n_total) = dg_frag%H_mat_mixed(1:n_total, 1:n_total, ispin)
+      call assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, H_work)
       S_work(:, :) = (0.0d0, 0.0d0)
       if (allocated(dg_frag%S_mat_c)) then
         S_work(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
@@ -794,17 +801,6 @@ contains
       do j = 1, n_total
         X(:, j) = X(:, j) / sqrt(eval_s(j))
       end do
-      if (allocated(dg_frag%S_mat_mixed_prop)) then
-        S_rebuild(1:n_total, 1:n_total) = (0.0d0, 0.0d0)
-        do j = 1, n_total
-          do i = 1, n_total
-            S_rebuild(i,1:n_total) = S_rebuild(i,1:n_total) + &
-                 S_work(i,j) * eval_s(j) * conjg(S_work(1:n_total,j))
-          end do
-        end do
-        dg_frag%S_mat_mixed_prop(1:n_total, 1:n_total, ispin) = S_rebuild(1:n_total, 1:n_total)
-      end if
-
       tmp_mat = matmul(conjg(transpose(X)), H_work)
       H_ortho = matmul(tmp_mat, X)
       do j = 1, n_total
@@ -861,10 +857,8 @@ contains
     end do
 
     deallocate(coef_mixed, S_frag_pw, H_frag_pw)
-    if (.not. dg_frag%yn_adaptive_basis) then
-      if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
-      if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
-    end if
+    if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
+    if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "Mixed basis diagonalization complete"
@@ -889,10 +883,8 @@ contains
     integer, intent(in) :: keep_idx(:)
     integer, intent(in) :: n_keep
 
-    integer :: n_frag, n_pw_old, n_tot_old, n_tot_new, ispin, i, j
+    integer :: n_frag, n_pw_old, i
     real(8), allocatable :: k_new(:,:)
-    complex(8), allocatable :: H_new(:,:,:)
-    complex(8), allocatable :: S_mixed_new(:,:,:)
     complex(8), allocatable :: coef_new(:,:,:), Sfp_new(:,:,:), Hfp_new(:,:,:), Hpp_new(:,:)
 
     n_frag = dg_frag%n_mat_max
@@ -910,41 +902,13 @@ contains
       if (allocated(dg_frag%H_mat_pw_diag)) Hpp_new(i, :) = dg_frag%H_mat_pw_diag(keep_idx(i), :)
     end do
 
-    n_tot_old = n_frag + n_pw_old
-    n_tot_new = n_frag + n_keep
-    allocate(H_new(n_tot_new, n_tot_new, dg_frag%nspin), S_mixed_new(n_tot_new, n_tot_new, dg_frag%nspin))
-    H_new(:, :, :) = (0.0d0, 0.0d0)
-    S_mixed_new(:, :, :) = (0.0d0, 0.0d0)
-
-    if (allocated(dg_frag%H_mat_mixed)) then
-      do ispin = 1, dg_frag%nspin
-        H_new(1:n_frag, 1:n_frag, ispin) = dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin)
-        do i = 1, n_keep
-          H_new(1:n_frag, n_frag+i, ispin) = dg_frag%H_mat_mixed(1:n_frag, n_frag+keep_idx(i), ispin)
-          H_new(n_frag+i, 1:n_frag, ispin) = dg_frag%H_mat_mixed(n_frag+keep_idx(i), 1:n_frag, ispin)
-          do j = 1, n_keep
-            H_new(n_frag+i, n_frag+j, ispin) = dg_frag%H_mat_mixed(n_frag+keep_idx(i), n_frag+keep_idx(j), ispin)
-          end do
-        end do
-      end do
-    end if
-    if (allocated(dg_frag%S_mat_mixed_prop)) then
-      do ispin = 1, dg_frag%nspin
-        S_mixed_new(1:n_frag, 1:n_frag, ispin) = dg_frag%S_mat_mixed_prop(1:n_frag, 1:n_frag, ispin)
-        do i = 1, n_keep
-          S_mixed_new(1:n_frag, n_frag+i, ispin) = dg_frag%S_mat_mixed_prop(1:n_frag, n_frag+keep_idx(i), ispin)
-          S_mixed_new(n_frag+i, 1:n_frag, ispin) = dg_frag%S_mat_mixed_prop(n_frag+keep_idx(i), 1:n_frag, ispin)
-          do j = 1, n_keep
-            S_mixed_new(n_frag+i, n_frag+j, ispin) = dg_frag%S_mat_mixed_prop(n_frag+keep_idx(i), n_frag+keep_idx(j), ispin)
-          end do
-        end do
-      end do
-    end if
-
     deallocate(dg_frag%k_pw, dg_frag%coef_pw)
     if (allocated(dg_frag%coef_pw_owner)) deallocate(dg_frag%coef_pw_owner)
+    if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
+    dg_frag%coef_pw_full_cache_nstate = 0
     if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
     if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
+    if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
     if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
     if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)
 
@@ -963,10 +927,9 @@ contains
       if (dg_frag%owned_coef_pw_start == 0) dg_frag%owned_coef_pw_start = i
       dg_frag%owned_coef_pw_end = i
     end do
-    allocate(dg_frag%H_mat_mixed(n_tot_new, n_tot_new, dg_frag%nspin), dg_frag%S_mat_mixed_prop(n_tot_new, n_tot_new, dg_frag%nspin))
-    dg_frag%H_mat_mixed(:, :, :) = H_new(:, :, :)
-    dg_frag%S_mat_mixed_prop(:, :, :) = S_mixed_new(:, :, :)
+    allocate(dg_frag%S_mat_frag_pw(n_frag, n_keep, dg_frag%nspin))
     allocate(dg_frag%H_mat_frag_pw(n_frag, n_keep, dg_frag%nspin), dg_frag%H_mat_pw_diag(n_keep, dg_frag%nspin))
+    dg_frag%S_mat_frag_pw(:, :, :) = Sfp_new(:, :, :)
     dg_frag%H_mat_frag_pw(:, :, :) = Hfp_new(:, :, :)
     dg_frag%H_mat_pw_diag(:, :) = Hpp_new(:, :)
 
@@ -976,7 +939,7 @@ contains
     S_frag_pw(:, :, :) = Sfp_new(:, :, :)
     H_frag_pw(:, :, :) = Hfp_new(:, :, :)
 
-    deallocate(k_new, coef_new, Sfp_new, Hfp_new, Hpp_new, H_new, S_mixed_new)
+    deallocate(k_new, coef_new, Sfp_new, Hfp_new, Hpp_new)
   end subroutine compact_plane_wave_basis
 
 end module rt_dg_plane_wave

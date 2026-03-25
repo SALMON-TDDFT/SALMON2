@@ -159,6 +159,8 @@
   subroutine diagonalize_fragment_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     use structures
     use communication, only: comm_is_root
+    use rt_dg_plane_wave, only: compute_fragment_pw_overlap, compute_fragment_pw_hamiltonian, &
+                                build_mixed_hamiltonian, assemble_mixed_hamiltonian_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -204,8 +206,8 @@
       allocate(H_work(n_total, n_total))
       allocate(eigenvalues_tmp(n_total))
       
-      ! Copy mixed Hamiltonian to work array
-      H_work(1:n_total, 1:n_total) = dg_frag%H_mat_mixed(1:n_total, 1:n_total, ispin)
+      ! Assemble mixed Hamiltonian on demand from FF/FP/PP data.
+      call assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, H_work)
       
       ! Query optimal workspace size
       lwork = -1
@@ -484,9 +486,7 @@
       C_old(1:n_frag, :) = coef_old(1:n_frag, 1:nst, ispin)
       if (present(coef_pw_old) .and. n_pw > 0) C_old(n_frag+1:n_tot, :) = coef_pw_old(1:n_pw, 1:nst, ispin)
 
-      if (allocated(dg_frag%S_mat_mixed_prop)) then
-        Sm(:, :) = dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin)
-      else if (allocated(dg_frag%S_mat_prop_c)) then
+      if (allocated(dg_frag%S_mat_prop_c)) then
         Sm(1:n_frag, 1:n_frag) = dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin)
       else
         Sm(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
@@ -505,22 +505,18 @@
       end if
 
       ! A = U_new^† S C_old, then C_new = U_new A
-      if (allocated(dg_frag%S_mat_mixed_prop)) then
-        call zgemm('N', 'N', n_tot, nst, n_tot, zone, Sm, n_tot, C_old, n_tot, zzero, tmp, n_tot)
+      tmp(:, :) = zzero
+      if (allocated(dg_frag%S_mat_prop_blocks)) then
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
+      else if (allocated(dg_frag%S_mat_blocks)) then
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
       else
-        tmp(:, :) = zzero
-        if (allocated(dg_frag%S_mat_prop_blocks)) then
-          call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
-        else if (allocated(dg_frag%S_mat_blocks)) then
-          call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
-        else
-          call zgemm('N', 'N', n_frag, nst, n_frag, zone, Sm(1:n_frag, 1:n_frag), n_tot, C_old(1:n_frag, :), n_tot, zzero, tmp(1:n_frag, :), n_tot)
-        end if
-        if (n_pw > 0) then
-          call zgemm('N', 'N', n_frag, nst, n_pw, zone, Sm(1:n_frag, n_frag+1:n_tot), n_tot, &
-                     C_old(n_frag+1:n_tot, :), n_tot, zone, tmp(1:n_frag, :), n_tot)
-          tmp(n_frag+1:n_tot, :) = C_old(n_frag+1:n_tot, :)
-        end if
+        call zgemm('N', 'N', n_frag, nst, n_frag, zone, Sm(1:n_frag, 1:n_frag), n_tot, C_old(1:n_frag, :), n_tot, zzero, tmp(1:n_frag, :), n_tot)
+      end if
+      if (n_pw > 0) then
+        call zgemm('N', 'N', n_frag, nst, n_pw, zone, Sm(1:n_frag, n_frag+1:n_tot), n_tot, &
+                   C_old(n_frag+1:n_tot, :), n_tot, zone, tmp(1:n_frag, :), n_tot)
+        tmp(n_frag+1:n_tot, :) = C_old(n_frag+1:n_tot, :)
       end if
       call zgemm('C', 'N', nst, nst, n_tot, zone, U_new, n_tot, tmp, n_tot, zzero, A, nst)
       call zgemm('N', 'N', n_tot, nst, nst, zone, U_new, n_tot, A, nst, zzero, C_new, n_tot)

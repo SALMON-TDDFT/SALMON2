@@ -25,7 +25,7 @@
       nstab = min(dg_frag%nstate_tot, n)
       if (n <= 0 .or. nstab <= 0) cycle
 
-      use_S = allocated(dg_frag%S_mat_mixed_prop) .or. allocated(dg_frag%S_mat_frag_pw) .or. allocated(dg_frag%S_mat_prop_c) .or. &
+      use_S = allocated(dg_frag%S_mat_frag_pw) .or. allocated(dg_frag%S_mat_prop_c) .or. &
               allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat) .or. &
               allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)
       allocate(v(n), Sv(n), u_prev(n))

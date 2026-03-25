@@ -88,7 +88,6 @@
       ! Build H0c = H_0 + V_NL(A) + A^2/2
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
       need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks))
-      if (n_pw > 0 .and. allocated(dg_frag%H_mat_mixed) .and. .not. allocated(dg_frag%H_mat_frag_pw)) need_h0_dense = .true.
       need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks))
       if (need_h0_dense .and. .not. allocated(H0c)) allocate(H0c(n_tot, n_tot))
       if (need_m_dense .and. .not. allocated(M)) allocate(M(n_tot, n_tot))
@@ -100,10 +99,6 @@
       else if (need_h0_dense .and. .not. allocated(dg_frag%H_mat_blocks)) then
         H0c(1:n_frag, 1:n_frag) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       end if
-      if (need_h0_dense .and. n_pw > 0 .and. allocated(dg_frag%H_mat_mixed)) then
-        H0c(1:n_tot, 1:n_tot) = dg_frag%H_mat_mixed(1:n_tot, 1:n_tot, ispin)
-      end if
-
       if (allocated(dg_frag%H_mat)) then
         if (any(dg_frag%H_mat(1:n, 1:n, ispin) /= dg_frag%H_mat(1:n, 1:n, ispin))) then
           write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_mat: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
@@ -308,7 +303,7 @@
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m
       n_s = 0
-      if (n_pw > 0 .and. (allocated(dg_frag%S_mat_mixed_prop) .or. allocated(dg_frag%S_mat_frag_pw))) then
+      if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
         n_s = n_tot
       else if (allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_prop_c) .or. &
                allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)) then
