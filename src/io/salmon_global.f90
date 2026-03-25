@@ -161,6 +161,10 @@ module salmon_global
   character(1)   :: yn_plane_wave_basis         ! Enable plane wave mixing (default: 'n')
   integer        :: n_plane_waves_dg             ! Number of plane waves (default: 50)
   real(8)        :: k_cutoff_plane_wave          ! Cutoff energy for PW selection in unit_energy (default: 0.5)
+  character(1)   :: yn_dg_subspace_diag          ! Use DG subspace diagonalization for basis updates
+  integer        :: dg_subspace_extra_states     ! Extra fragment states kept in the trial subspace
+  integer        :: dg_subspace_pw_vectors       ! Number of PW helper vectors appended to the trial subspace
+  real(8)        :: dg_subspace_fallback_cond    ! Fallback threshold for projected overlap conditioning
 
 !! &scf
   character(8)   :: method_init_wf

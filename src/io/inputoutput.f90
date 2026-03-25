@@ -317,7 +317,11 @@ contains
       & time_integrator_dg_fragment, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
-      & k_cutoff_plane_wave
+      & k_cutoff_plane_wave, &
+      & yn_dg_subspace_diag, &
+      & dg_subspace_extra_states, &
+      & dg_subspace_pw_vectors, &
+      & dg_subspace_fallback_cond
 
     namelist/scf/ &
       & method_init_wf, &
@@ -766,6 +770,10 @@ contains
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
     k_cutoff_plane_wave = 0.5d0
+    yn_dg_subspace_diag = 'n'
+    dg_subspace_extra_states = 8
+    dg_subspace_pw_vectors = 4
+    dg_subspace_fallback_cond = 1.0d10
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -1333,6 +1341,10 @@ contains
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
+    call comm_bcast(yn_dg_subspace_diag,nproc_group_global)
+    call comm_bcast(dg_subspace_extra_states,nproc_group_global)
+    call comm_bcast(dg_subspace_pw_vectors,nproc_group_global)
+    call comm_bcast(dg_subspace_fallback_cond,nproc_group_global)
     k_cutoff_plane_wave = k_cutoff_plane_wave * uenergy_to_au
     call comm_bcast(time_integrator_dg_fragment,nproc_group_global)
 !! == bcast for &scf
@@ -2250,6 +2262,13 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc_cg_basis_update', yn_dc_cg_basis_update
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'k_cutoff_plane_wave', k_cutoff_plane_wave
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_subspace_diag', yn_dg_subspace_diag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_extra_states', dg_subspace_extra_states
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_pw_vectors', dg_subspace_pw_vectors
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_subspace_fallback_cond', dg_subspace_fallback_cond
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf

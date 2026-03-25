@@ -1,7 +1,6 @@
   subroutine reconstruct_hamiltonian_matrix(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     use structures
     use salmon_global, only: yn_hse
-    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -19,9 +18,6 @@
     real(8), allocatable :: Vpsl_mat(:,:,:), Vh_mat(:,:,:), Vxc_mat(:,:,:)
     real(8) :: max_asym_vpsl, max_asym_vh, max_asym_vxc
     integer :: nmat_chk
-    real(8), allocatable :: mat_flat(:), mat_tmp_flat(:)
-    integer :: mat_size
-    integer(8) :: mat_size64
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
@@ -236,33 +232,14 @@
     ! - Exploit Hermiticity: H_ji = H_ij* (only compute upper triangle)
     ! - MPI communication for cross-fragment matrix elements
 
-    ! MPI aggregation: each rank contributes local-fragment blocks only.
-    mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
-    if (mat_size64 >= huge(mat_size)) then
-      write(*,'(a,i0,a,i0,a,i0,a,i0)') "[FATAL] reconstruct mat_size overflow, rank=", dg_frag%id, &
-        " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, " mat_size64=", mat_size64
-      stop "mat_size overflow in reconstruct_hamiltonian_matrix"
+    ! Reduce the reconstructed Hamiltonian through fragment blocks to avoid
+    ! rebuilding a full dense allreduce path during basis refresh.
+    if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     end if
-    mat_size = int(mat_size64)
-    allocate(mat_flat(mat_size), mat_tmp_flat(mat_size))
-
-    mat_flat = reshape(dg_frag%H_mat, [mat_size])
-    call comm_summation(mat_flat, mat_tmp_flat, mat_size, dg_frag%icomm)
-    dg_frag%H_mat = reshape(mat_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
-
-    mat_flat = reshape(Vpsl_mat, [mat_size])
-    call comm_summation(mat_flat, mat_tmp_flat, mat_size, dg_frag%icomm)
-    Vpsl_mat = reshape(mat_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
-
-    mat_flat = reshape(Vh_mat, [mat_size])
-    call comm_summation(mat_flat, mat_tmp_flat, mat_size, dg_frag%icomm)
-    Vh_mat = reshape(mat_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
-
-    mat_flat = reshape(Vxc_mat, [mat_size])
-    call comm_summation(mat_flat, mat_tmp_flat, mat_size, dg_frag%icomm)
-    Vxc_mat = reshape(mat_tmp_flat, [dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin])
-
-    deallocate(mat_flat, mat_tmp_flat)
+    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
+    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-reconstruct", dg_frag%icomm)
+    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
 
     ! Per-term asymmetry diagnostics
     do ispin = 1, system%nspin

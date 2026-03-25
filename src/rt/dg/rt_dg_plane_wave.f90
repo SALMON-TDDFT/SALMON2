@@ -200,7 +200,7 @@ contains
   !=======================================================================
   subroutine compute_fragment_pw_overlap(dg_frag, S_complex)
     use structures
-    use communication, only: comm_summation
+    use communication, only: comm_bcast
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(out) :: S_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
@@ -210,6 +210,7 @@ contains
     real(8) :: k_vec(3), r_vec(3), Lbox(3), sqrt_V
     real(8) :: vol_elem
     complex(8) :: pw_val, overlap_local
+    complex(8), allocatable :: frag_block(:,:,:)
 
     if (.not. dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
@@ -262,17 +263,29 @@ contains
       end do
     end do
 
-    block
-      real(8), allocatable :: S_real(:,:,:), S_imag(:,:,:)
-      allocate(S_real(size(S_complex,1), size(S_complex,2), size(S_complex,3)))
-      allocate(S_imag(size(S_complex,1), size(S_complex,2), size(S_complex,3)))
-      S_real = real(S_complex, kind=8)
-      S_imag = aimag(S_complex)
-      call comm_summation(S_real, dg_frag%icomm)
-      call comm_summation(S_imag, dg_frag%icomm)
-      S_complex = cmplx(S_real, S_imag, kind=8)
-      deallocate(S_real, S_imag)
-    end block
+    allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
+    do ifrag = 1, dg_frag%n_frag
+      frag_block(:, :, :) = (0.0d0, 0.0d0)
+      if (ifrag >= dg_frag%ifrag_start .and. ifrag <= dg_frag%ifrag_end) then
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        do ispin = 1, dg_frag%nspin
+          do io = 1, dg_frag%n_basis(ifrag, ispin)
+            ig = dg_frag%index_basis(io, ifrag, ispin)
+            if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+            frag_block(io, 1:dg_frag%n_plane_waves, ispin) = S_complex(ig, 1:dg_frag%n_plane_waves, ispin)
+          end do
+        end do
+      end if
+      call comm_bcast(frag_block, dg_frag%icomm, dg_frag%id_array(ifrag))
+      do ispin = 1, dg_frag%nspin
+        do io = 1, dg_frag%n_basis(ifrag, ispin)
+          ig = dg_frag%index_basis(io, ifrag, ispin)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          S_complex(ig, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
+        end do
+      end do
+    end do
+    deallocate(frag_block)
 
   end subroutine compute_fragment_pw_overlap
 
@@ -323,7 +336,7 @@ contains
   !=======================================================================
   subroutine compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_complex)
     use structures
-    use communication, only: comm_summation
+    use communication, only: comm_bcast
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_scalar),         intent(in)    :: Vh, Vxc(:), Vpsl
@@ -334,6 +347,7 @@ contains
     real(8) :: k_vec(3), r_vec(3), Lbox(3), sqrt_V
     real(8) :: vol_elem, k_squared, V_total
     complex(8) :: pw_val, pw_laplacian, hamiltonian_local
+    complex(8), allocatable :: frag_block(:,:,:)
 
     if (.not. dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
@@ -400,17 +414,29 @@ contains
       end do
     end do
 
-    block
-      real(8), allocatable :: H_real(:,:,:), H_imag(:,:,:)
-      allocate(H_real(size(H_complex,1), size(H_complex,2), size(H_complex,3)))
-      allocate(H_imag(size(H_complex,1), size(H_complex,2), size(H_complex,3)))
-      H_real = real(H_complex, kind=8)
-      H_imag = aimag(H_complex)
-      call comm_summation(H_real, dg_frag%icomm)
-      call comm_summation(H_imag, dg_frag%icomm)
-      H_complex = cmplx(H_real, H_imag, kind=8)
-      deallocate(H_real, H_imag)
-    end block
+    allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
+    do ifrag = 1, dg_frag%n_frag
+      frag_block(:, :, :) = (0.0d0, 0.0d0)
+      if (ifrag >= dg_frag%ifrag_start .and. ifrag <= dg_frag%ifrag_end) then
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        do ispin = 1, dg_frag%nspin
+          do io = 1, dg_frag%n_basis(ifrag, ispin)
+            ig = dg_frag%index_basis(io, ifrag, ispin)
+            if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+            frag_block(io, 1:dg_frag%n_plane_waves, ispin) = H_complex(ig, 1:dg_frag%n_plane_waves, ispin)
+          end do
+        end do
+      end if
+      call comm_bcast(frag_block, dg_frag%icomm, dg_frag%id_array(ifrag))
+      do ispin = 1, dg_frag%nspin
+        do io = 1, dg_frag%n_basis(ifrag, ispin)
+          ig = dg_frag%index_basis(io, ifrag, ispin)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          H_complex(ig, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
+        end do
+      end do
+    end do
+    deallocate(frag_block)
 
   end subroutine compute_fragment_pw_hamiltonian
 

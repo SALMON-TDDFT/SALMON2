@@ -1070,11 +1070,25 @@
           end do
         end do
 
-        call comm_summation(mat_T, dg_frag%H_mat_kinetic(1:n, 1:n, ispin), n * n, dg_frag%icomm)
-        call comm_summation(mat_H, dg_frag%H_mat(1:n, 1:n, ispin), n * n, dg_frag%icomm)
+        dg_frag%H_mat_kinetic(1:n, 1:n, ispin) = mat_T
+        dg_frag%H_mat(1:n, 1:n, ispin) = mat_H
 
         deallocate(mat_T, mat_H)
       end do
+
+      if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+      end if
+      if (.not. allocated(dg_frag%H_mat_kinetic_blocks)) then
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+      end if
+
+      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat_kinetic, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map)
+      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
+      call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic-basis-update", dg_frag%icomm)
+      call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-update", dg_frag%icomm)
+      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
+      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     end subroutine refresh_operator_matrices_from_local_blocks
 
     subroutine diag_full_lapack
@@ -1082,10 +1096,15 @@
       integer :: i, j
       real(8), allocatable :: mat_H(:,:), mat_V(:,:)
 
+      if (.not. allocated(dg_frag%H_mat)) then
+        allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+      end if
+      dg_frag%H_mat(:, :, :) = 0.0d0
+
       do ispin = 1, system%nspin
         n = dg_frag%n_mat(ispin)
         if (n <= 0) cycle
-        allocate(mat_H(n, n), mat_V(n, n))
+        allocate(mat_V(n, n))
         mat_V = 0.0d0
 
         i_local = 0
@@ -1120,7 +1139,23 @@
           end do
         end do
 
-        call comm_summation(mat_V, mat_H, n * n, dg_frag%icomm)
+        dg_frag%H_mat(1:n, 1:n, ispin) = mat_V
+
+        deallocate(mat_V)
+      end do
+
+      if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+      end if
+      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
+      call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-diag", dg_frag%icomm)
+      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
+
+      do ispin = 1, system%nspin
+        n = dg_frag%n_mat(ispin)
+        if (n <= 0) cycle
+        allocate(mat_H(n, n), mat_V(n, n))
+        mat_H = dg_frag%H_mat(1:n, 1:n, ispin)
         call eigen_dsyev(mat_H, dg_frag%esp(1:n, ispin), mat_V)
 
         i_local = 0

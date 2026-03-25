@@ -86,6 +86,9 @@ module rt_dg_fragment_types
     complex(8), allocatable :: coef(:,:,:)        ! (nstate_frag, nstate_tot, nspin)
     complex(8), allocatable :: coef_new(:,:,:)    ! for time propagation
     complex(8), allocatable :: coef_work(:,:,:)   ! work array
+    integer, allocatable :: coef_owner(:,:)       ! (n_mat_max, nspin), owning rank of each fragment-basis row
+    integer :: owned_coef_start = 0               ! first owned fragment-basis row (contiguous hint)
+    integer :: owned_coef_end = -1                ! last owned fragment-basis row (contiguous hint)
 
     ! Spin-channel-resolved operator matrices on the fragment basis.
     ! These arrays are spin-resolved projected representations, even when the
@@ -209,6 +212,15 @@ module rt_dg_fragment_types
     real(8) :: k_cutoff_pw                    ! Cutoff wave number for PWs (a.u.^-1)
     real(8), allocatable :: k_pw(:,:)         ! Wave vectors (3, n_plane_waves)
     complex(8), allocatable :: coef_pw(:,:,:) ! PW coefficients (n_plane_waves, nstate_tot, nspin)
+    integer, allocatable :: coef_pw_owner(:)  ! (n_plane_waves), owning rank of each PW row
+    integer :: owned_coef_pw_start = 0         ! first owned PW row (contiguous hint)
+    integer :: owned_coef_pw_end = -1          ! last owned PW row (contiguous hint)
+    logical :: use_subspace_diag              ! Use compact DG subspace diagonalization path
+    integer :: subspace_extra_states          ! Extra fragment states appended to occupied trial space
+    integer :: subspace_pw_vectors            ! Number of PW helper vectors appended to trial space
+    real(8) :: subspace_fallback_cond         ! Threshold that triggers full dense fallback
+    integer :: last_subspace_dim              ! Last accepted DG trial subspace dimension
+    integer :: subspace_fallback_count        ! Number of times full dense fallback was used
 
     ! Mixed basis Hamiltonian and overlap matrices
     complex(8), allocatable :: H_mat_mixed(:,:,:)     ! Full Hamiltonian (fragment + PW)

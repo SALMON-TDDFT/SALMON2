@@ -126,7 +126,8 @@ contains
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
-                 nproc_rgrid
+                 nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, &
+                 dg_subspace_pw_vectors, dg_subspace_fallback_cond
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
     use filesystem, only: get_filehandle
     implicit none
@@ -310,6 +311,12 @@ contains
     ! Initialize adaptive basis parameters from input file
     dg_frag%yn_adaptive_basis = (yn_adaptive_basis == 'y')
     dg_frag%basis_update_threshold = basis_update_threshold
+    dg_frag%use_subspace_diag = (yn_dg_subspace_diag == 'y')
+    dg_frag%subspace_extra_states = max(0, dg_subspace_extra_states)
+    dg_frag%subspace_pw_vectors = max(0, dg_subspace_pw_vectors)
+    dg_frag%subspace_fallback_cond = max(1.0d0, dg_subspace_fallback_cond)
+    dg_frag%last_subspace_dim = 0
+    dg_frag%subspace_fallback_count = 0
     dg_frag%has_nl_cache = .false.
     dg_frag%Ac_nl_cache = 0.0d0
     dg_frag%Ac_nl_cache_tol = 1.0d-12
@@ -338,6 +345,12 @@ contains
         write(*,*)
       end if
     end if
+    if (comm_is_root(info%id_rko)) then
+      write(*,'(1x,a,l1)') "  DG subspace diagonalization: ", dg_frag%use_subspace_diag
+      write(*,'(1x,a,i0)') "  DG subspace extra states: ", dg_frag%subspace_extra_states
+      write(*,'(1x,a,i0)') "  DG subspace PW vectors: ", dg_frag%subspace_pw_vectors
+      write(*,'(1x,a,1pe11.3)') "  DG subspace fallback cond: ", dg_frag%subspace_fallback_cond
+    end if
     
     ! NOTE: Dipole matrix NOT needed for velocity gauge formalism
     ! In velocity gauge, current is calculated from momentum operator <p> = <ψ|-i∇|ψ>
@@ -364,6 +377,20 @@ contains
     
     ! Initialize plane wave basis if enabled
     call init_plane_wave_basis(dg_frag, system, lg, info)
+    if (allocated(dg_frag%coef_pw_owner)) deallocate(dg_frag%coef_pw_owner)
+    dg_frag%owned_coef_pw_start = 0
+    dg_frag%owned_coef_pw_end = -1
+    if (dg_frag%n_plane_waves > 0) then
+      allocate(dg_frag%coef_pw_owner(dg_frag%n_plane_waves))
+      do i = 1, dg_frag%n_plane_waves
+        dg_frag%coef_pw_owner(i) = min(dg_frag%isize - 1, ((i - 1) * dg_frag%isize) / dg_frag%n_plane_waves)
+      end do
+      do i = 1, dg_frag%n_plane_waves
+        if (dg_frag%coef_pw_owner(i) /= dg_frag%id) cycle
+        if (dg_frag%owned_coef_pw_start == 0) dg_frag%owned_coef_pw_start = i
+        dg_frag%owned_coef_pw_end = i
+      end do
+    end if
     
     ! Initialize RI/DF approximation for HSE if enabled
     call init_hse_ri_data(dg_frag, system, info)
@@ -789,6 +816,28 @@ contains
         end do
       end block
     end if
+
+    if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
+    allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
+    dg_frag%coef_owner(:, :) = -1
+    do ispin = 1, dg_frag%nspin
+      do ifrag = 1, dg_frag%n_frag
+        nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
+        do io = 1, nbasis_iter
+          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+          dg_frag%coef_owner(global_idx, ispin) = dg_frag%id_array(ifrag)
+        end do
+      end do
+    end do
+    dg_frag%owned_coef_start = 0
+    dg_frag%owned_coef_end = -1
+    do global_idx = 1, dg_frag%n_mat_max
+      if (any(dg_frag%coef_owner(global_idx, 1:dg_frag%nspin) == dg_frag%id)) then
+        if (dg_frag%owned_coef_start == 0) dg_frag%owned_coef_start = global_idx
+        dg_frag%owned_coef_end = global_idx
+      end if
+    end do
     
     ! Step 4: nstate_tot was aligned to file metadata above (full-state mode).
 
@@ -854,11 +903,7 @@ contains
       end do
     end do
 
-    ! Each rank initially owns coefficients only for its local fragments.
-    ! Aggregate to full global coefficient matrix on all ranks for consistent propagation.
-    call comm_summation(dg_frag%coef, dg_frag%coef_work, &
-                        dg_frag%n_mat_max * dg_frag%nstate_tot * dg_frag%nspin, dg_frag%icomm)
-    dg_frag%coef = dg_frag%coef_work
+    ! Keep coefficients only on the owning fragment ranks.
 
     ! Step 6: Read real-space basis functions and grid mapping
     ! This enables density reconstruction: rho(r) = sum c*_i c_j phi_i(r) phi_j(r)

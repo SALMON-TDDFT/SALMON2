@@ -1,7 +1,7 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, gather_full_coef_view
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -20,6 +20,7 @@
     logical :: has_nonlocal, use_hmat_complex
     complex(8), allocatable :: H0c(:,:), M(:,:), dcoef_dt_h0(:,:), dcoef_dt_m(:,:)
     complex(8), allocatable :: coef_all(:,:), rhs_all(:,:)
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     complex(8), allocatable :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
@@ -178,9 +179,10 @@
         stop "Inf in M"
       end if
 
+      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
       coef_all(:, :) = (0.0d0, 0.0d0)
-      coef_all(1:n_frag, :) = dg_frag%coef(1:n_frag, 1:dg_frag%nstate_tot, ispin)
-      if (n_pw > 0) coef_all(n_frag+1:n_tot, :) = dg_frag%coef_pw(1:n_pw, 1:dg_frag%nstate_tot, ispin)
+      coef_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:dg_frag%nstate_tot)
+      if (n_pw > 0) coef_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:dg_frag%nstate_tot)
 
       if (any(real(coef_all(:, :)) /= real(coef_all(:, :))) .or. &
           any(aimag(coef_all(:, :)) /= aimag(coef_all(:, :)))) then
@@ -368,10 +370,20 @@
         deallocate(work_s, rwork_s, eval_s, S_eval)
       end if
 
-      dcoef_dt(1:n_frag, 1:dg_frag%nstate_tot, ispin) = rhs_all(1:n_frag, :)
+      do io = 1, n_frag
+        if (.not. allocated(dg_frag%coef_owner)) exit
+        if (dg_frag%coef_owner(io, ispin) /= dg_frag%id) cycle
+        dcoef_dt(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(io, :)
+      end do
       if (present(dcoef_dt_pw) .and. n_pw > 0) then
-        dcoef_dt_pw(1:n_pw, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+1:n_tot, :)
+        do io = 1, n_pw
+          if (.not. allocated(dg_frag%coef_pw_owner)) exit
+          if (dg_frag%coef_pw_owner(io) /= dg_frag%id) cycle
+          dcoef_dt_pw(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+io, :)
+        end do
       end if
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     if (allocated(Ap_mat)) deallocate(Ap_mat)

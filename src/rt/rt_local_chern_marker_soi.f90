@@ -484,7 +484,7 @@ contains
       integer, intent(in) :: occ_list(nocc0)
       complex(8), intent(out), dimension(mg%is(1):, mg%is(2):, mg%is(3):, :, :) :: zbuf
 
-      integer :: io_g, p, nocc_local0
+      integer :: io_g, p, nocc_local0, ispin_local
 
       zbuf(:,:,:,:,:) = (0.0d0, 0.0d0)
       nocc_local0 = size(zbuf,5)
@@ -492,14 +492,14 @@ contains
       if (nocc_local0 <= 0) return
 
       if (use_complex) then
-!$omp parallel do private(p,io_g,ispin,ix,iy,iz) schedule(static)
+!$omp parallel do private(p,io_g,ispin_local,ix,iy,iz) schedule(static)
         do p = 1, nocc_local0
           io_g = local_occ_io(p)
-          do ispin = 1, system%nspin
+          do ispin_local = 1, system%nspin
             do iz = mg%is(3), mg%ie(3)
               do iy = mg%is(2), mg%ie(2)
                 do ix = mg%is(1), mg%ie(1)
-                  zbuf(ix,iy,iz,ispin,p) = psi%zwf(ix,iy,iz,ispin,io_g,ik0,im0)
+                  zbuf(ix,iy,iz,ispin_local,p) = psi%zwf(ix,iy,iz,ispin_local,io_g,ik0,im0)
                 end do
               end do
             end do
