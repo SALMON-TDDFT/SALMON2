@@ -13,6 +13,8 @@ module rt_dg_fragment_ops
   public :: apply_matrix_blocks
   public :: apply_matrix_blocks_batch
   public :: copy_matrix_blocks_to_complex_dense
+  public :: apply_overlap_operator
+  public :: copy_overlap_operator_to_dense
   public :: pack_owned_coef
   public :: fetch_remote_coef_rows
   public :: pack_owned_coef_pw
@@ -185,36 +187,73 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: n_use
 
-    integer :: n_copy
-
     if (n_use <= 0) return
-    if (.not. dg_frag%overlap_prop_root_authoritative) return
-    if (dg_frag%icomm_frag == COMM_GROUP_NULL) return
-
-    n_copy = min(n_use, dg_frag%n_mat_max)
-    if (n_copy <= 0) return
-
-    if (allocated(dg_frag%S_mat_prop_c)) then
-      call comm_bcast(dg_frag%S_mat_prop_c(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
-    end if
-    if (allocated(dg_frag%S_mat_prop)) then
-      call comm_bcast(dg_frag%S_mat_prop(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
-    end if
-    if (allocated(dg_frag%S_mat_c)) then
-      call comm_bcast(dg_frag%S_mat_c(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
-    end if
-    if (allocated(dg_frag%S_mat)) then
-      call comm_bcast(dg_frag%S_mat(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
-    end if
-    if (allocated(dg_frag%S_mat_prop_blocks) .and. allocated(dg_frag%S_mat_prop) .and. &
-        allocated(dg_frag%S_block_map)) then
-      call sync_dense_matrix_to_blocks_runtime(dg_frag, dg_frag%S_mat_prop, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map)
-    end if
-    if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat) .and. &
-        allocated(dg_frag%S_block_map)) then
-      call sync_dense_matrix_to_blocks_runtime(dg_frag, dg_frag%S_mat, dg_frag%S_mat_blocks, dg_frag%S_block_map)
-    end if
   end subroutine ensure_overlap_prop_available
+
+  subroutine apply_overlap_operator(dg_frag, ispin, x, y, use_prop)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:)
+    complex(8), intent(inout) :: y(:)
+    logical, intent(in) :: use_prop
+
+    integer :: n_frag, n_pw, n_tot
+
+    n_frag = dg_frag%n_mat(ispin)
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+    y(:) = (0.0d0, 0.0d0)
+
+    if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
+      y(1:n_tot) = matmul(dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin), x(1:n_tot))
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
+      call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
+    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+      call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
+      y(1:n_frag) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
+      y(1:n_frag) = matmul(cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
+    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+      y(1:n_frag) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
+    else if (allocated(dg_frag%S_mat)) then
+      y(1:n_frag) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
+    end if
+  end subroutine apply_overlap_operator
+
+  subroutine copy_overlap_operator_to_dense(dg_frag, ispin, use_prop, mat)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    logical, intent(in) :: use_prop
+    complex(8), intent(inout) :: mat(:, :)
+
+    integer :: n_frag, n_pw, n_tot
+
+    n_frag = dg_frag%n_mat(ispin)
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+    mat(:, :) = (0.0d0, 0.0d0)
+
+    if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
+      mat(1:n_tot, 1:n_tot) = dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin)
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
+      call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, mat(1:n_frag, 1:n_frag))
+    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+      call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, mat(1:n_frag, 1:n_frag))
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
+      mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin)
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
+      mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+      mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
+    else if (allocated(dg_frag%S_mat)) then
+      mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+    end if
+  end subroutine copy_overlap_operator_to_dense
 
   subroutine sync_dense_matrix_to_blocks_runtime(dg_frag, mat, blocks, block_map)
     implicit none

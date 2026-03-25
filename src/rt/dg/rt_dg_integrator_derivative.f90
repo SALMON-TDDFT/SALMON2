@@ -1,7 +1,8 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, gather_full_coef_view
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, copy_overlap_operator_to_dense, &
+                                  gather_full_coef_view
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -292,27 +293,12 @@
       if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
         n_s = n_tot
         allocate(S_eval(n_s, n_s))
-        S_eval(:, :) = dg_frag%S_mat_mixed_prop(1:n_s, 1:n_s, ispin)
-      else if (allocated(dg_frag%S_mat_prop_c)) then
+        call copy_overlap_operator_to_dense(dg_frag, ispin, .true., S_eval)
+      else if (allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_prop_c) .or. &
+               allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)) then
         n_s = n_frag
-        call ensure_overlap_prop_available(dg_frag, n_s)
         allocate(S_eval(n_s, n_s))
-        S_eval(:, :) = dg_frag%S_mat_prop_c(1:n_s, 1:n_s, ispin)
-      else if (allocated(dg_frag%S_mat_prop)) then
-        n_s = n_frag
-        call ensure_overlap_prop_available(dg_frag, n_s)
-        allocate(S_eval(n_s, n_s))
-        S_eval(:, :) = cmplx(dg_frag%S_mat_prop(1:n_s, 1:n_s, ispin), 0.0d0, kind=8)
-      else if (allocated(dg_frag%S_mat_c)) then
-        n_s = n_frag
-        call ensure_overlap_prop_available(dg_frag, n_s)
-        allocate(S_eval(n_s, n_s))
-        S_eval(:, :) = dg_frag%S_mat_c(1:n_s, 1:n_s, ispin)
-      else if (allocated(dg_frag%S_mat)) then
-        n_s = n_frag
-        call ensure_overlap_prop_available(dg_frag, n_s)
-        allocate(S_eval(n_s, n_s))
-        S_eval(:, :) = cmplx(dg_frag%S_mat(1:n_s, 1:n_s, ispin), 0.0d0, kind=8)
+        call copy_overlap_operator_to_dense(dg_frag, ispin, .true., S_eval)
       end if
       if (n_s > 0) then
         allocate(eval_s(n_s))

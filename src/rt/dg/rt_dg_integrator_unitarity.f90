@@ -1,5 +1,5 @@
   subroutine stabilize_coeff_unitarity(dg_frag, itt)
-    use rt_dg_fragment_ops, only: apply_matrix_blocks, gather_full_coef_view, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: apply_overlap_operator, gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: itt
@@ -29,10 +29,6 @@
               allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)
       allocate(v(n), Sv(n), u_prev(n))
       call gather_full_coef_view(dg_frag, ispin, n_frag, nstab, coef_frag_all, coef_pw_all)
-      if (.not. (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) .and. use_S) then
-        call ensure_overlap_prop_available(dg_frag, n)
-      end if
-
       do io = 1, nstab
         v(:) = (0.0d0, 0.0d0)
         v(1:n_frag) = coef_frag_all(1:n_frag, io)
@@ -44,23 +40,7 @@
           if (n_pw > 0) u_prev(n_frag+1:n_tot) = coef_pw_all(1:n_pw, jo)
 
           if (use_S) then
-            if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
-              Sv(:) = matmul(dg_frag%S_mat_mixed_prop(1:n, 1:n, ispin), v(:))
-            else if (allocated(dg_frag%S_mat_prop_c)) then
-              Sv(:) = matmul(dg_frag%S_mat_prop_c(1:n, 1:n, ispin), v(:))
-            else if (allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
-              Sv(:) = (0.0d0, 0.0d0)
-              call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, v(:), Sv(:))
-            else if (allocated(dg_frag%S_mat_prop)) then
-              Sv(:) = matmul(cmplx(dg_frag%S_mat_prop(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
-            else if (allocated(dg_frag%S_mat_c)) then
-              Sv(:) = matmul(dg_frag%S_mat_c(1:n, 1:n, ispin), v(:))
-            else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
-              Sv(:) = (0.0d0, 0.0d0)
-              call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, v(:), Sv(:))
-            else
-              Sv(:) = matmul(cmplx(dg_frag%S_mat(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
-            end if
+            call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
             proj = sum(conjg(u_prev(:)) * Sv(:))
           else
             proj = sum(conjg(u_prev(:)) * v(:))
@@ -69,23 +49,7 @@
         end do
 
         if (use_S) then
-          if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
-            Sv(:) = matmul(dg_frag%S_mat_mixed_prop(1:n, 1:n, ispin), v(:))
-          else if (allocated(dg_frag%S_mat_prop_c)) then
-            Sv(:) = matmul(dg_frag%S_mat_prop_c(1:n, 1:n, ispin), v(:))
-          else if (allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
-            Sv(:) = (0.0d0, 0.0d0)
-            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, v(:), Sv(:))
-          else if (allocated(dg_frag%S_mat_prop)) then
-            Sv(:) = matmul(cmplx(dg_frag%S_mat_prop(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
-          else if (allocated(dg_frag%S_mat_c)) then
-            Sv(:) = matmul(dg_frag%S_mat_c(1:n, 1:n, ispin), v(:))
-          else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
-            Sv(:) = (0.0d0, 0.0d0)
-            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, v(:), Sv(:))
-          else
-            Sv(:) = matmul(cmplx(dg_frag%S_mat(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
-          end if
+          call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
           norm2_v = real(sum(conjg(v(:)) * Sv(:)), kind=8)
         else
           norm2_v = sum(abs(v(:))**2)
@@ -122,23 +86,7 @@
 
         ! Post-normalization deviation (actual residual after correction)
         if (use_S) then
-          if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
-            Sv(:) = matmul(dg_frag%S_mat_mixed_prop(1:n, 1:n, ispin), v(:) / norm_v)
-          else if (allocated(dg_frag%S_mat_prop_c)) then
-            Sv(:) = matmul(dg_frag%S_mat_prop_c(1:n, 1:n, ispin), v(:) / norm_v)
-          else if (allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
-            Sv(:) = (0.0d0, 0.0d0)
-            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, v(:) / norm_v, Sv(:))
-          else if (allocated(dg_frag%S_mat_prop)) then
-            Sv(:) = matmul(cmplx(dg_frag%S_mat_prop(1:n, 1:n, ispin), 0.0d0, kind=8), v(:) / norm_v)
-          else if (allocated(dg_frag%S_mat_c)) then
-            Sv(:) = matmul(dg_frag%S_mat_c(1:n, 1:n, ispin), v(:) / norm_v)
-          else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
-            Sv(:) = (0.0d0, 0.0d0)
-            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, v(:) / norm_v, Sv(:))
-          else
-            Sv(:) = matmul(cmplx(dg_frag%S_mat(1:n, 1:n, ispin), 0.0d0, kind=8), v(:) / norm_v)
-          end if
+          call apply_overlap_operator(dg_frag, ispin, v(:) / norm_v, Sv(:), .true.)
           norm2_v = real(sum(conjg(v(:) / norm_v) * Sv(:)), kind=8)
         else
           norm2_v = sum(abs(v(:) / norm_v)**2)

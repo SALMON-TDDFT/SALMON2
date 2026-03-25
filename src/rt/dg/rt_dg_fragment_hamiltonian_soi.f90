@@ -31,7 +31,6 @@
     complex(8), allocatable :: T_phi(:,:,:)   ! Kinetic energy operator applied to basis
     complex(8), allocatable :: H_phi(:,:,:)   ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j>
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
-    
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
         allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
@@ -591,6 +590,7 @@
   subroutine calculate_momentum_matrix(dg_frag, system, mg, stencil)
     use structures
     use communication, only: comm_is_root, comm_summation, comm_get_groupinfo
+    use rt_dg_fragment_types, only: momentum_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -605,6 +605,9 @@
     complex(8) :: integral
     real(8) :: max_p
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components)
+    type(momentum_block_info), allocatable :: momentum_blocks_re(:), momentum_blocks_im(:)
+    integer, allocatable :: momentum_block_map_local(:,:)
+    integer :: n_momentum_blocks_local
     
     if (.not. dg_frag%has_real_space_basis) return
     
@@ -760,34 +763,27 @@
       end do  ! ifrag
     end do  ! ispin
     
-    block
-      use rt_dg_fragment_types, only: momentum_block_info
-      type(momentum_block_info), allocatable :: momentum_blocks_re(:), momentum_blocks_im(:)
-      integer, allocatable :: momentum_block_map_local(:,:)
-      integer :: n_momentum_blocks_local, iblk, ifrag, jfrag, nrow, ncol, ii, jj, idir
+    call init_complex_momentum_blocks(dg_frag, momentum_blocks_re, momentum_blocks_im, &
+                                      momentum_block_map_local, n_momentum_blocks_local)
+    call sync_complex_dense_momentum_to_blocks(dg_frag, dg_frag%momentum_mat_c, momentum_blocks_re, momentum_blocks_im, &
+                                               momentum_block_map_local)
+    call reduce_complex_momentum_blocks(dg_frag, momentum_blocks_re, momentum_blocks_im, "momentum-soi", dg_frag%icomm)
+    call sync_blocks_to_complex_dense_momentum(dg_frag, momentum_blocks_re, momentum_blocks_im, momentum_block_map_local, &
+                                               dg_frag%momentum_mat_c)
 
-      call init_complex_momentum_blocks(dg_frag, momentum_blocks_re, momentum_blocks_im, &
-                                        momentum_block_map_local, n_momentum_blocks_local)
-      call sync_complex_dense_momentum_to_blocks(dg_frag, dg_frag%momentum_mat_c, momentum_blocks_re, momentum_blocks_im, &
-                                                 momentum_block_map_local)
-      call reduce_complex_momentum_blocks(dg_frag, momentum_blocks_re, momentum_blocks_im, "momentum-soi", dg_frag%icomm)
-      call sync_blocks_to_complex_dense_momentum(dg_frag, momentum_blocks_re, momentum_blocks_im, momentum_block_map_local, &
-                                                 dg_frag%momentum_mat_c)
-
-      if (allocated(momentum_blocks_re)) then
-        do iblk = 1, size(momentum_blocks_re)
-          if (allocated(momentum_blocks_re(iblk)%val)) deallocate(momentum_blocks_re(iblk)%val)
-        end do
-        deallocate(momentum_blocks_re)
-      end if
-      if (allocated(momentum_blocks_im)) then
-        do iblk = 1, size(momentum_blocks_im)
-          if (allocated(momentum_blocks_im(iblk)%val)) deallocate(momentum_blocks_im(iblk)%val)
-        end do
-        deallocate(momentum_blocks_im)
-      end if
-      if (allocated(momentum_block_map_local)) deallocate(momentum_block_map_local)
-    end block
+    if (allocated(momentum_blocks_re)) then
+      do iblk = 1, size(momentum_blocks_re)
+        if (allocated(momentum_blocks_re(iblk)%val)) deallocate(momentum_blocks_re(iblk)%val)
+      end do
+      deallocate(momentum_blocks_re)
+    end if
+    if (allocated(momentum_blocks_im)) then
+      do iblk = 1, size(momentum_blocks_im)
+        if (allocated(momentum_blocks_im(iblk)%val)) deallocate(momentum_blocks_im(iblk)%val)
+      end do
+      deallocate(momentum_blocks_im)
+    end if
+    if (allocated(momentum_block_map_local)) deallocate(momentum_block_map_local)
 
     ! Enforce skew-Hermitian structure for gradient operator in complex basis:
     !   P = -P^\dagger.
@@ -1812,7 +1808,7 @@
     call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
     call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_prop, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map)
     dg_frag%has_global_overlap_copy = .false.
-    dg_frag%overlap_prop_root_authoritative = .true.
+    dg_frag%overlap_prop_root_authoritative = .false.
 
     if (allocated(S_blocks_re)) then
       do ii = 1, size(S_blocks_re)

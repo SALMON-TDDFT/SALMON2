@@ -334,9 +334,12 @@
     real(8) :: hvol
     real(8) :: max_p
     real(8) :: Ac_zero(3)
+    real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
     real(8) :: phi_checksum_before, phi_checksum_after, phi_checksum_delta, phi_checksum_tol
     logical :: did_overlap_call
     integer :: is(3), ie(3)
+    integer(8) :: byte_count
+    integer(8) :: i_halo_chk
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
@@ -464,8 +467,69 @@
     end if
     dg_frag%H_mat = 0.0d0
     dg_frag%H_mat_kinetic = 0.0d0
+    hmat_dense_mb = 0.0d0
+    overlap_dense_mb = 0.0d0
+    momentum_dense_mb = 0.0d0
+    phi_frag_mb = 0.0d0
+    halo_buf_mb = 0.0d0
+    if (allocated(dg_frag%H_mat)) then
+      byte_count = int(size(dg_frag%H_mat, 1), kind=8) * int(size(dg_frag%H_mat, 2), kind=8) * &
+                   int(size(dg_frag%H_mat, 3), kind=8) * 8_8
+      hmat_dense_mb = hmat_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
+    end if
+    if (allocated(dg_frag%H_mat_kinetic)) then
+      byte_count = int(size(dg_frag%H_mat_kinetic, 1), kind=8) * int(size(dg_frag%H_mat_kinetic, 2), kind=8) * &
+                   int(size(dg_frag%H_mat_kinetic, 3), kind=8) * 8_8
+      hmat_dense_mb = hmat_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
+    end if
+    if (allocated(dg_frag%S_mat)) then
+      byte_count = int(size(dg_frag%S_mat, 1), kind=8) * int(size(dg_frag%S_mat, 2), kind=8) * &
+                   int(size(dg_frag%S_mat, 3), kind=8) * 8_8
+      overlap_dense_mb = overlap_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
+    end if
+    if (allocated(dg_frag%S_mat_prop)) then
+      byte_count = int(size(dg_frag%S_mat_prop, 1), kind=8) * int(size(dg_frag%S_mat_prop, 2), kind=8) * &
+                   int(size(dg_frag%S_mat_prop, 3), kind=8) * 8_8
+      overlap_dense_mb = overlap_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
+    end if
+    if (allocated(dg_frag%momentum_mat)) then
+      byte_count = int(size(dg_frag%momentum_mat, 1), kind=8) * int(size(dg_frag%momentum_mat, 2), kind=8) * &
+                   int(size(dg_frag%momentum_mat, 3), kind=8) * int(size(dg_frag%momentum_mat, 4), kind=8) * 8_8
+      momentum_dense_mb = dble(byte_count) / (1024.0d0 * 1024.0d0)
+    end if
+    if (allocated(dg_frag%phi_frag)) then
+      byte_count = int(size(dg_frag%phi_frag, 1), kind=8) * int(size(dg_frag%phi_frag, 2), kind=8) * &
+                   int(size(dg_frag%phi_frag, 3), kind=8) * int(size(dg_frag%phi_frag, 4), kind=8) * &
+                   int(size(dg_frag%phi_frag, 5), kind=8) * 8_8
+      phi_frag_mb = dble(byte_count) / (1024.0d0 * 1024.0d0)
+    end if
+    if (allocated(dg_frag%halo)) then
+      do i_halo_chk = 1, size(dg_frag%halo)
+        if (allocated(dg_frag%halo(i_halo_chk)%buf_send)) then
+          byte_count = int(size(dg_frag%halo(i_halo_chk)%buf_send, 1), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 2), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 3), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 4), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 5), kind=8) * 8_8
+          halo_buf_mb = halo_buf_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
+        end if
+        if (allocated(dg_frag%halo(i_halo_chk)%buf_recv)) then
+          byte_count = int(size(dg_frag%halo(i_halo_chk)%buf_recv, 1), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 2), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 3), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 4), kind=8) * &
+                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 5), kind=8) * 8_8
+          halo_buf_mb = halo_buf_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
+        end if
+      end do
+    end if
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
       " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-hmat-alloc"
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+      "        hamiltonian memory estimate: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+      " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " H_dense_MB=", hmat_dense_mb, &
+      " S_dense_MB=", overlap_dense_mb, " P_dense_MB=", momentum_dense_mb, " phi_MB=", phi_frag_mb, &
+      " halo_MB=", halo_buf_mb
     flush(6)
     
     ! Exchange halo regions between fragments before stencil operations
@@ -2263,6 +2327,6 @@
     call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
     call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_prop, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map)
     dg_frag%has_global_overlap_copy = .false.
-    dg_frag%overlap_prop_root_authoritative = .true.
+    dg_frag%overlap_prop_root_authoritative = .false.
 
   end subroutine calculate_overlap_matrix
