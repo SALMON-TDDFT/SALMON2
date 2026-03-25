@@ -2,7 +2,7 @@
     use structures
     use salmon_global, only: theory
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian, &
-                                  solve_overlap_operator_batch, gather_full_coef_view
+                                  solve_overlap_operator_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -183,7 +183,12 @@
         stop "Inf in M"
       end if
 
-      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+      allocate(coef_frag_all(n_frag, dg_frag%nstate_tot))
+      coef_frag_all(:, :) = dg_frag%coef(1:n_frag, 1:dg_frag%nstate_tot, ispin)
+      if (n_pw > 0) then
+        allocate(coef_pw_all(n_pw, dg_frag%nstate_tot))
+        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:dg_frag%nstate_tot, ispin)
+      end if
       coef_all(:, :) = (0.0d0, 0.0d0)
       coef_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:dg_frag%nstate_tot)
       if (n_pw > 0) coef_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:dg_frag%nstate_tot)

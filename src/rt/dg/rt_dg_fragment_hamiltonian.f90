@@ -325,6 +325,7 @@
     use structures
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
+    use rt_dg_plane_wave, only: prepare_mixed_basis_startup
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -790,7 +791,7 @@
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  [init] Building mixed basis at startup (A=0)"
       end if
-      call diagonalize_mixed_basis_pw(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
+      call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     end if
 

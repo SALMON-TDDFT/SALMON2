@@ -356,20 +356,21 @@
     ! Step 3: Basis update and state transfer (no SCF loop)
     ! ========================================================
     if (dg_frag%use_plane_wave_basis) then
-      ! In mixed-state propagation mode, keep mixed diagonalization
-      ! coefficients (fragment + PW) as the propagated state.
-      call diagonalize_mixed_basis_pw(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
-      if (allocated(coef_pw_old)) then
-        call project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
-      else
-        call project_coefficients_mixed_state(dg_frag, coef_old)
+      ! Normal RT mixed-basis updates must not require a dense global mixed EVP.
+      ! In the current SOI mixed path the real-space fragment basis is not
+      ! refreshed here, so the propagated state transfer is the identity in the
+      ! existing fragment+PW representation.
+      dg_frag%coef(:, :, :) = coef_old(:, :, :)
+      dg_frag%coef_new(:, :, :) = coef_old(:, :, :)
+      if (allocated(coef_pw_old) .and. allocated(dg_frag%coef_pw)) then
+        dg_frag%coef_pw(:, :, :) = coef_pw_old(:, :, :)
       end if
+      call zero_nonowned_coefficients(dg_frag)
 
-      ! In mixed-basis mode we update propagated coefficients in the current
-      ! fragment+PW space; real-space fragment basis functions are not replaced
-      ! here, so RT operators (momentum/overlap) are kept as-is.
-
-      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+      if (is_global_root) then
+        write(*,'(1x,a)') "  Mixed basis update: skipped dense global re-diagonalization"
+        write(*,'(1x,a)') "  Propagated fragment/PW coefficients carried forward in-place"
+      end if
     else
       ! Reproduce the intended GS-DC partial workflow in RT:
       !  (1) fragment-wise DC-CG (no SCF),

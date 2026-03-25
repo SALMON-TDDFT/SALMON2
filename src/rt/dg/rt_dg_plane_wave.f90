@@ -29,6 +29,7 @@ module rt_dg_plane_wave
   public :: build_mixed_hamiltonian
   public :: diagonalize_mixed_basis
   public :: assemble_mixed_hamiltonian_dense
+  public :: prepare_mixed_basis_startup
 
 contains
 
@@ -216,6 +217,62 @@ contains
     end if
 
   end subroutine init_plane_wave_basis
+
+  !=======================================================================
+  ! Prepare mixed-basis operator blocks at startup without dense EVP.
+  ! Fragment initial states are kept as-is and PW coefficients start from zero.
+  !=======================================================================
+  subroutine prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
+    use structures
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    type(s_scalar), intent(in) :: Vh, Vxc(:), Vpsl
+    real(8), intent(in) :: Ac_tot(3)
+
+    integer :: n_frag, n_pw
+    complex(8), allocatable :: S_frag_pw(:,:,:), H_frag_pw(:,:,:)
+
+    n_frag = dg_frag%n_mat_max
+    n_pw = dg_frag%n_plane_waves
+    if (.not. dg_frag%use_plane_wave_basis .or. n_pw <= 0) return
+
+    allocate(S_frag_pw(n_frag, n_pw, dg_frag%nspin))
+    allocate(H_frag_pw(n_frag, n_pw, dg_frag%nspin))
+
+    call compute_fragment_pw_overlap(dg_frag, S_frag_pw)
+    call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_frag_pw)
+
+    if (.not. allocated(dg_frag%S_mat_frag_pw)) then
+      allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+    else if (size(dg_frag%S_mat_frag_pw,1) /= n_frag .or. size(dg_frag%S_mat_frag_pw,2) /= n_pw .or. &
+             size(dg_frag%S_mat_frag_pw,3) /= dg_frag%nspin) then
+      deallocate(dg_frag%S_mat_frag_pw)
+      allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+    end if
+    dg_frag%S_mat_frag_pw(:, :, :) = S_frag_pw(:, :, :)
+
+    if (.not. allocated(dg_frag%H_mat_frag_pw)) then
+      allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+    else if (size(dg_frag%H_mat_frag_pw,1) /= n_frag .or. size(dg_frag%H_mat_frag_pw,2) /= n_pw .or. &
+             size(dg_frag%H_mat_frag_pw,3) /= dg_frag%nspin) then
+      deallocate(dg_frag%H_mat_frag_pw)
+      allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+    end if
+    dg_frag%H_mat_frag_pw(:, :, :) = H_frag_pw(:, :, :)
+
+    call build_mixed_hamiltonian(dg_frag, dg_frag%lg, Vh, Vxc, Vpsl, Ac_tot, S_frag_pw, H_frag_pw)
+
+    if (allocated(dg_frag%coef_pw)) dg_frag%coef_pw(:, :, :) = (0.0d0, 0.0d0)
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') "  [init] Prepared mixed FP/PP operators without dense diagonalization"
+      write(*,'(1x,a)') "  [init] PW coefficients start from zero and couple in during propagation"
+    end if
+
+    deallocate(S_frag_pw, H_frag_pw)
+  end subroutine prepare_mixed_basis_startup
 
   !=======================================================================
   ! Compute overlap matrix between fragment basis and plane waves
