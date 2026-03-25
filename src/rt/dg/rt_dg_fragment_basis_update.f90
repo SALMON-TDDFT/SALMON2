@@ -306,7 +306,7 @@
     use structures
     use parallelization, only: nproc_id_global
     use communication, only: comm_sync_all
-    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -323,8 +323,7 @@
     complex(8), allocatable :: coef_old(:,:,:), coef_pw_old(:,:,:)
     logical :: basis_functions_changed, overlap_is_valid
     logical :: is_global_root
-    integer :: i, ispin
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    integer :: i
 
     is_global_root = (nproc_id_global == 0)
     if (is_global_root) then
@@ -347,24 +346,12 @@
     end if
 
     allocate(coef_old(size(dg_frag%coef,1), size(dg_frag%coef,2), size(dg_frag%coef,3)))
-    coef_old = (0.0d0, 0.0d0)
-    do ispin = 1, dg_frag%nspin
-      call gather_full_coef_view(dg_frag, ispin, size(dg_frag%coef,1), size(dg_frag%coef,2), coef_frag_all, coef_pw_all)
-      coef_old(:, :, ispin) = coef_frag_all(:, :)
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-    end do
+    coef_old = dg_frag%coef
 
     if (dg_frag%use_plane_wave_basis) then
       if (allocated(dg_frag%coef_pw)) then
         allocate(coef_pw_old(size(dg_frag%coef_pw,1), size(dg_frag%coef_pw,2), size(dg_frag%coef_pw,3)))
-        coef_pw_old = (0.0d0, 0.0d0)
-        do ispin = 1, dg_frag%nspin
-          call gather_full_coef_view(dg_frag, ispin, size(dg_frag%coef,1), size(dg_frag%coef,2), coef_frag_all, coef_pw_all)
-          if (size(coef_pw_old,1) > 0) coef_pw_old(:, :, ispin) = coef_pw_all(:, :)
-          if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-          if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-        end do
+        coef_pw_old = dg_frag%coef_pw
       end if
     end if
 
@@ -473,7 +460,7 @@
   ! updated mixed basis obtained by diagonalize_mixed_basis_pw.
   !=======================================================================
   subroutine project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
-    use rt_dg_fragment_ops, only: apply_matrix_blocks_batch, gather_full_coef_view, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: apply_matrix_blocks_batch, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(in) :: coef_old(:,:,:)
@@ -482,7 +469,6 @@
     integer :: ispin, n_frag, n_pw, n_tot, nst, ipw_local
     complex(8), allocatable :: U_new(:,:), C_old(:,:), C_new(:,:)
     complex(8), allocatable :: Sm(:,:), tmp(:,:), A(:,:)
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     complex(8), parameter :: zone = (1.0d0, 0.0d0), zzero = (0.0d0, 0.0d0)
 
     n_frag = dg_frag%n_mat_max
@@ -501,11 +487,8 @@
       C_new(:, :) = zzero
       Sm(:, :) = zzero
 
-      call gather_full_coef_view(dg_frag, ispin, n_frag, nst, coef_frag_all, coef_pw_all)
-      U_new(1:n_frag, :) = coef_frag_all(1:n_frag, :)
-      if (n_pw > 0) U_new(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, :)
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+      U_new(1:n_frag, :) = dg_frag%coef(1:n_frag, 1:nst, ispin)
+      if (n_pw > 0) U_new(n_frag+1:n_tot, :) = dg_frag%coef_pw(1:n_pw, 1:nst, ispin)
 
       C_old(1:n_frag, :) = coef_old(1:n_frag, 1:nst, ispin)
       if (present(coef_pw_old) .and. n_pw > 0) C_old(n_frag+1:n_tot, :) = coef_pw_old(1:n_pw, 1:nst, ispin)

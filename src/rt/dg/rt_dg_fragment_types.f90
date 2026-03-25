@@ -224,9 +224,7 @@ module rt_dg_fragment_types
     integer :: last_subspace_dim              ! Last accepted DG trial subspace dimension
     integer :: subspace_fallback_count        ! Number of times full dense fallback was used
 
-    ! Mixed basis Hamiltonian and overlap matrices
-    complex(8), allocatable :: H_mat_mixed(:,:,:)     ! Full Hamiltonian (fragment + PW)
-    complex(8), allocatable :: S_mat_mixed_prop(:,:,:) ! propagation overlap in mixed basis
+    ! Mixed basis operators stored in FF/FP/PP form
     complex(8), allocatable :: S_mat_frag_pw(:,:,:) ! Overlap <fragment_i | PW_j>
     complex(8), allocatable :: H_mat_frag_pw(:,:,:) ! Hamiltonian <fragment_i | PW_j>
     complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block

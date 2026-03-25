@@ -2,7 +2,7 @@
     use salmon_global, only: nelec, theory
     use structures
     use communication, only: comm_summation
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian, gather_full_coef_view
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -63,7 +63,12 @@
     !   - Current: j = Im[<ψ|∇|ψ>] with factor 2 and normalization by ngrid
     !   - Sign: Testing -2.0 to match conventional RT direction
     do ispin = 1, dg_frag%nspin
-      call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_all, coef_pw_all)
+      allocate(coef_frag_all(n, nocc))
+      coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
+      if (n_pw > 0) then
+        allocate(coef_pw_all(n_pw, nocc))
+        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+      end if
       if (n_pw > 0) then
         coef_all(:, :) = (0.0d0, 0.0d0)
         coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
@@ -141,7 +146,12 @@
     ! Calculate total energy: E = <ψ|H(t)|ψ>
     ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
     do ispin = 1, dg_frag%nspin
-      call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_all, coef_pw_all)
+      allocate(coef_frag_all(n, nocc))
+      coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
+      if (n_pw > 0) then
+        allocate(coef_pw_all(n_pw, nocc))
+        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+      end if
       if (n_pw > 0) then
         coef_all(:, :) = (0.0d0, 0.0d0)
         tmp_all(:, :) = (0.0d0, 0.0d0)
@@ -282,7 +292,10 @@
 
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
       do ispin = 1, dg_frag%nspin
-        call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_all, coef_pw_all)
+        allocate(coef_frag_all(n, nocc))
+        coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
+        allocate(coef_pw_all(n_pw, nocc))
+        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
         do io = 1, nocc
           pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, io))**2)
         end do

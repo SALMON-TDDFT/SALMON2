@@ -857,8 +857,6 @@ contains
     end do
 
     deallocate(coef_mixed, S_frag_pw, H_frag_pw)
-    if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
-    if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "Mixed basis diagonalization complete"
@@ -906,8 +904,6 @@ contains
     if (allocated(dg_frag%coef_pw_owner)) deallocate(dg_frag%coef_pw_owner)
     if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
     dg_frag%coef_pw_full_cache_nstate = 0
-    if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
-    if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
     if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
     if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)
