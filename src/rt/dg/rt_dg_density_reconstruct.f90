@@ -59,29 +59,20 @@
     boxL(3) = dg_frag%hgs(3) * real(mg%num(3), 8)
     inv_sqrt_vol = 1.0d0 / sqrt(max(1.0d-16, boxL(1) * boxL(2) * boxL(3)))
 
-    if (n_pw > 0) then
-      allocate(pw_row_ids(n_pw))
-      do ipw = 1, n_pw
-        pw_row_ids(ipw) = ipw
-      end do
-      allocate(coef_pw_full(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-      coef_pw_full(:, :, :) = (0.0d0, 0.0d0)
-      call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_full)
-      deallocate(pw_row_ids)
-    end if
-
     do irank = 0, dg_frag%isize - 1
       if (irank == dg_frag%id) cycle
-      if (local_fragments_overlap_rank_box(dg_frag, mg, irank)) then
-        send_active(irank) = .true.
-        allocate(rho_send(irank)%f(mg%is_all(1, irank):mg%ie_all(1, irank), &
+      if (dg_frag%is_frag_root) then
+        if (local_fragments_overlap_rank_box(dg_frag, mg, irank)) then
+          send_active(irank) = .true.
+          allocate(rho_send(irank)%f(mg%is_all(1, irank):mg%ie_all(1, irank), &
+                                     mg%is_all(2, irank):mg%ie_all(2, irank), &
+                                     mg%is_all(3, irank):mg%ie_all(3, irank)))
+          allocate(w_send(irank)%f(mg%is_all(1, irank):mg%ie_all(1, irank), &
                                    mg%is_all(2, irank):mg%ie_all(2, irank), &
                                    mg%is_all(3, irank):mg%ie_all(3, irank)))
-        allocate(w_send(irank)%f(mg%is_all(1, irank):mg%ie_all(1, irank), &
-                                 mg%is_all(2, irank):mg%ie_all(2, irank), &
-                                 mg%is_all(3, irank):mg%ie_all(3, irank)))
-        rho_send(irank)%f = 0.0d0
-        w_send(irank)%f = 0.0d0
+          rho_send(irank)%f = 0.0d0
+          w_send(irank)%f = 0.0d0
+        end if
       end if
       if (rank_fragments_overlap_local_box(dg_frag, mg, irank)) then
         recv_active(irank) = .true.
@@ -92,86 +83,99 @@
       end if
     end do
 
-    i_local = 0
-    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      i_local = i_local + 1
+    if (dg_frag%is_frag_root) then
+      if (n_pw > 0) then
+        allocate(pw_row_ids(n_pw))
+        do ipw = 1, n_pw
+          pw_row_ids(ipw) = ipw
+        end do
+        allocate(coef_pw_full(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
+        coef_pw_full(:, :, :) = (0.0d0, 0.0d0)
+        call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_full)
+        deallocate(pw_row_ids)
+      end if
 
-      nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-      ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
+      i_local = 0
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = i_local + 1
 
-      do iz = 1, nxyz(3)
-        do iy = 1, nxyz(2)
-          do ix = 1, nxyz(1)
-            ixg = ixyz0(1) + ix - 1
-            iyg = ixyz0(2) + iy - 1
-            izg = ixyz0(3) + iz - 1
+        nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
+        ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
 
-            ixg = mod(ixg - 1, mg%num(1)) + 1
-            iyg = mod(iyg - 1, mg%num(2)) + 1
-            izg = mod(izg - 1, mg%num(3)) + 1
+        do iz = 1, nxyz(3)
+          do iy = 1, nxyz(2)
+            do ix = 1, nxyz(1)
+              ixg = ixyz0(1) + ix - 1
+              iyg = ixyz0(2) + iy - 1
+              izg = ixyz0(3) + iz - 1
 
-            owner_rank = find_grid_owner(ixg, iyg, izg)
-            if (owner_rank == dg_frag%id) then
-              w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
-            else if (send_active(owner_rank)) then
-              w_send(owner_rank)%f(ixg, iyg, izg) = w_send(owner_rank)%f(ixg, iyg, izg) + 1.0d0
-            end if
+              ixg = mod(ixg - 1, mg%num(1)) + 1
+              iyg = mod(iyg - 1, mg%num(2)) + 1
+              izg = mod(izg - 1, mg%num(3)) + 1
+
+              owner_rank = find_grid_owner(ixg, iyg, izg)
+              if (owner_rank == dg_frag%id) then
+                w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
+              else if (send_active(owner_rank)) then
+                w_send(owner_rank)%f(ixg, iyg, izg) = w_send(owner_rank)%f(ixg, iyg, izg) + 1.0d0
+              end if
+            end do
           end do
         end do
-      end do
 
-      do ispin = 1, system%nspin
-        nocc_spin = nocc_per_spin
-        if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
-          nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
-        end if
-        nbf = dg_frag%n_basis(ifrag, ispin)
-        do io = 1, nocc_spin
-          do iz = 1, nxyz(3)
-            do iy = 1, nxyz(2)
-              do ix = 1, nxyz(1)
-                ixg = ixyz0(1) + ix - 1
-                iyg = ixyz0(2) + iy - 1
-                izg = ixyz0(3) + iz - 1
+        do ispin = 1, system%nspin
+          nocc_spin = nocc_per_spin
+          if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+            nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
+          end if
+          nbf = dg_frag%n_basis(ifrag, ispin)
+          do io = 1, nocc_spin
+            do iz = 1, nxyz(3)
+              do iy = 1, nxyz(2)
+                do ix = 1, nxyz(1)
+                  ixg = ixyz0(1) + ix - 1
+                  iyg = ixyz0(2) + iy - 1
+                  izg = ixyz0(3) + iz - 1
 
-                ixg = mod(ixg - 1, mg%num(1)) + 1
-                iyg = mod(iyg - 1, mg%num(2)) + 1
-                izg = mod(izg - 1, mg%num(3)) + 1
+                  ixg = mod(ixg - 1, mg%num(1)) + 1
+                  iyg = mod(iyg - 1, mg%num(2)) + 1
+                  izg = mod(izg - 1, mg%num(3)) + 1
 
-                psi_val = (0.0d0, 0.0d0)
-                do istate_frag = 1, nbf
-                  ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
-                  if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-                  coef_i = dg_frag%coef(ig_i, io, ispin)
-                  phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-                  psi_val = psi_val + coef_i * phi_i
-                end do
-                if (n_pw > 0) then
-                  rx = real(ixg - 1, 8) * dg_frag%hgs(1)
-                  ry = real(iyg - 1, 8) * dg_frag%hgs(2)
-                  rz = real(izg - 1, 8) * dg_frag%hgs(3)
-                  do ipw = 1, n_pw
-                    theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
-                    phase_pw = cmplx(cos(theta), sin(theta), kind=8)
-                    ci = coef_pw_full(ipw, io, ispin)
-                    psi_val = psi_val + ci * phase_pw * inv_sqrt_vol
+                  psi_val = (0.0d0, 0.0d0)
+                  do istate_frag = 1, nbf
+                    ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+                    if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+                    coef_i = dg_frag%coef(ig_i, io, ispin)
+                    phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
+                    psi_val = psi_val + coef_i * phi_i
                   end do
-                end if
+                  if (n_pw > 0) then
+                    rx = real(ixg - 1, 8) * dg_frag%hgs(1)
+                    ry = real(iyg - 1, 8) * dg_frag%hgs(2)
+                    rz = real(izg - 1, 8) * dg_frag%hgs(3)
+                    do ipw = 1, n_pw
+                      theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
+                      phase_pw = cmplx(cos(theta), sin(theta), kind=8)
+                      ci = coef_pw_full(ipw, io, ispin)
+                      psi_val = psi_val + ci * phase_pw * inv_sqrt_vol
+                    end do
+                  end if
 
-                rho_contrib = occ_factor * real(conjg(psi_val) * psi_val, kind=8)
+                  rho_contrib = occ_factor * real(conjg(psi_val) * psi_val, kind=8)
 
-                owner_rank = find_grid_owner(ixg, iyg, izg)
-                if (owner_rank == dg_frag%id) then
-                  rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-                else if (send_active(owner_rank)) then
-                  rho_send(owner_rank)%f(ixg, iyg, izg) = rho_send(owner_rank)%f(ixg, iyg, izg) + rho_contrib
-                end if
+                  owner_rank = find_grid_owner(ixg, iyg, izg)
+                  if (owner_rank == dg_frag%id) then
+                    rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
+                  else if (send_active(owner_rank)) then
+                    rho_send(owner_rank)%f(ixg, iyg, izg) = rho_send(owner_rank)%f(ixg, iyg, izg) + rho_contrib
+                  end if
+                end do
               end do
             end do
           end do
         end do
       end do
-    end do
+    end if
 
     nreq_recv = 0
     do irank = 0, dg_frag%isize - 1

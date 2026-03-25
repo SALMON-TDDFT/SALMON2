@@ -925,13 +925,25 @@ contains
     end if
 
     deallocate(dg_frag%k_pw, dg_frag%coef_pw)
+    if (allocated(dg_frag%coef_pw_owner)) deallocate(dg_frag%coef_pw_owner)
     if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
     if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
 
     dg_frag%n_plane_waves = n_keep
+    dg_frag%owned_coef_pw_start = 0
+    dg_frag%owned_coef_pw_end = -1
     allocate(dg_frag%k_pw(3, n_keep), dg_frag%coef_pw(n_keep, dg_frag%nstate_tot, dg_frag%nspin))
     dg_frag%k_pw(:, :) = k_new(:, :)
     dg_frag%coef_pw(:, :, :) = coef_new(:, :, :)
+    allocate(dg_frag%coef_pw_owner(dg_frag%n_plane_waves))
+    do i = 1, dg_frag%n_plane_waves
+      dg_frag%coef_pw_owner(i) = min(dg_frag%isize - 1, ((i - 1) * dg_frag%isize) / dg_frag%n_plane_waves)
+    end do
+    do i = 1, dg_frag%n_plane_waves
+      if (dg_frag%coef_pw_owner(i) /= dg_frag%id) cycle
+      if (dg_frag%owned_coef_pw_start == 0) dg_frag%owned_coef_pw_start = i
+      dg_frag%owned_coef_pw_end = i
+    end do
     allocate(dg_frag%H_mat_mixed(n_tot_new, n_tot_new, dg_frag%nspin), dg_frag%S_mat_mixed_prop(n_tot_new, n_tot_new, dg_frag%nspin))
     dg_frag%H_mat_mixed(:, :, :) = H_new(:, :, :)
     dg_frag%S_mat_mixed_prop(:, :, :) = S_mixed_new(:, :, :)
