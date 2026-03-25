@@ -10,7 +10,7 @@
     type(s_scalar),         intent(in)    :: Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
     
-    integer :: ifrag, ispin, io, jo, ix, iy, iz, idir, i_local, ig_i, ig_j, nbf
+    integer :: ifrag, ispin, io, jo, ix, iy, iz, idir, i_local, ig_i, ig_j, nbf, nbf_raw
     integer :: lx, ly, lz, gx, gy, gz
     integer :: iorg(3), ndom(3)
     real(8) :: hvol, A_squared
@@ -21,6 +21,7 @@
     integer :: nmat_chk
     real(8), allocatable :: mat_flat(:), mat_tmp_flat(:)
     integer :: mat_size
+    integer(8) :: mat_size64
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
@@ -81,15 +82,43 @@
     ! Step 2-4: Add updated potential matrix elements
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = ifrag - dg_frag%ifrag_start + 1
+      if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
+        write(*,'(a,i0,a,i0,a,i0)') "[FATAL] reconstruct invalid i_local, rank=", dg_frag%id, &
+          " ifrag=", ifrag, " i_local=", i_local
+        stop "invalid i_local in reconstruct_hamiltonian_matrix"
+      end if
       iorg(:) = dg_frag%ixyz_frag(:, ifrag)
       ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+      if (any(ndom <= 0)) then
+        write(*,'(a,i0,a,i0,a,3(i0,1x))') "[FATAL] reconstruct non-positive ndom, rank=", dg_frag%id, &
+          " ifrag=", ifrag, " ndom=", ndom(1), ndom(2), ndom(3)
+        stop "non-positive ndom in reconstruct_hamiltonian_matrix"
+      end if
+      if (ndom(1) > size(dg_frag%phi_frag, 1) .or. ndom(2) > size(dg_frag%phi_frag, 2) .or. ndom(3) > size(dg_frag%phi_frag, 3)) then
+        write(*,'(a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') "[FATAL] reconstruct ndom exceeds phi_frag bounds, rank=", dg_frag%id, &
+          " ifrag=", ifrag, " ndom=", ndom(1), ndom(2), ndom(3), " phi_dims=", &
+          size(dg_frag%phi_frag, 1), size(dg_frag%phi_frag, 2), size(dg_frag%phi_frag, 3)
+        stop "ndom exceeds phi_frag bounds in reconstruct_hamiltonian_matrix"
+      end if
       if (any(dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), 1:dg_frag%nstate_frag, i_local) /= &
               dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), 1:dg_frag%nstate_frag, i_local))) then
         write(*,'(a,i0,a,i0)') "[NaN] phi_frag in reconstruct_hamiltonian_matrix, rank=", dg_frag%id, " ifrag=", ifrag
         stop "NaN in phi_frag"
       end if
       do ispin = 1, system%nspin
-        nbf = dg_frag%n_basis(ifrag, ispin)
+        nbf_raw = dg_frag%n_basis(ifrag, ispin)
+        if (nbf_raw < 0) then
+          write(*,'(a,i0,a,i0,a,i0,a,i0)') "[FATAL] reconstruct negative n_basis, rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
+          stop "negative n_basis in reconstruct_hamiltonian_matrix"
+        end if
+        nbf = min(nbf_raw, dg_frag%nstate_frag, size(dg_frag%index_basis, 1), size(dg_frag%phi_frag, 4))
+        if (nbf_raw > nbf) then
+          write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "[WARN] reconstruct n_basis truncated, rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis_raw=", nbf_raw, " nbf_used=", nbf, &
+            " index_dim1=", size(dg_frag%index_basis, 1), " phi_dim4=", size(dg_frag%phi_frag, 4)
+        end if
+        if (nbf <= 0) cycle
         !$omp parallel do private(io, jo, ig_i, ig_j, ix, iy, iz, integral_Vh, integral_Vxc, integral_Vpsl) collapse(2)
         do jo = 1, nbf
           do io = 1, nbf
@@ -208,7 +237,13 @@
     ! - MPI communication for cross-fragment matrix elements
 
     ! MPI aggregation: each rank contributes local-fragment blocks only.
-    mat_size = dg_frag%n_mat_max * dg_frag%n_mat_max * dg_frag%nspin
+    mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
+    if (mat_size64 >= huge(mat_size)) then
+      write(*,'(a,i0,a,i0,a,i0,a,i0)') "[FATAL] reconstruct mat_size overflow, rank=", dg_frag%id, &
+        " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, " mat_size64=", mat_size64
+      stop "mat_size overflow in reconstruct_hamiltonian_matrix"
+    end if
+    mat_size = int(mat_size64)
     allocate(mat_flat(mat_size), mat_tmp_flat(mat_size))
 
     mat_flat = reshape(dg_frag%H_mat, [mat_size])

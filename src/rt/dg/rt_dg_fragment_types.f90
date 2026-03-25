@@ -22,7 +22,7 @@ module rt_dg_fragment_types
   implicit none
 
   private
-  public :: halo_info, momentum_block_info, s_dg_fragment_rt
+  public :: halo_info, matrix_block_info, vector_block_info, momentum_block_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -37,6 +37,22 @@ module rt_dg_fragment_types
     complex(8), allocatable :: buf_send_c(:,:,:,:,:)  ! complex halo buffer for SOI path
     complex(8), allocatable :: buf_recv_c(:,:,:,:,:)  ! complex halo buffer for SOI path
   end type halo_info
+
+  type :: matrix_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    real(8), allocatable :: val(:,:,:) ! (nrow_max, ncol_max, nspin)
+  end type matrix_block_info
+
+  type :: vector_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    real(8), allocatable :: val(:,:,:,:) ! (ndir, nrow_max, ncol_max, nspin)
+  end type vector_block_info
 
   type :: momentum_block_info
     integer :: ifrag_row = 0
@@ -76,10 +92,18 @@ module rt_dg_fragment_types
     ! underlying real-space fragment basis functions are spin independent.
     real(8), allocatable :: H_mat(:,:,:)       ! (nmat, nmat, nspin)
     complex(8), allocatable :: H_mat_c(:,:,:)      ! complex Hamiltonian (SOI/mixed propagation path)
+    type(matrix_block_info), allocatable :: H_mat_blocks(:)
+    type(matrix_block_info), allocatable :: H_mat_kinetic_blocks(:)
+    integer, allocatable :: H_block_map(:,:)
+    integer :: n_H_blocks = 0
     real(8), allocatable :: S_mat(:,:,:)       ! raw fragment overlap matrix
     real(8), allocatable :: S_mat_prop(:,:,:)  ! overlap matrix used in propagation/unitarity
     complex(8), allocatable :: S_mat_c(:,:,:)      ! complex raw fragment overlap matrix (SOI path)
     complex(8), allocatable :: S_mat_prop_c(:,:,:) ! complex overlap used in propagation/unitarity
+    type(matrix_block_info), allocatable :: S_mat_blocks(:)
+    type(matrix_block_info), allocatable :: S_mat_prop_blocks(:)
+    integer, allocatable :: S_block_map(:,:)
+    integer :: n_S_blocks = 0
     logical :: has_global_overlap_copy = .true.
     logical :: overlap_prop_root_authoritative = .false.
     integer, allocatable :: n_basis(:,:)       ! (n_frag, nspin), spin-resolved active basis count per fragment
@@ -90,10 +114,13 @@ module rt_dg_fragment_types
     ! Time-dependent external field coupling (velocity gauge: H = H_0 - i*A·∇ + A^2/2)
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)
     complex(8), allocatable :: momentum_mat_c(:,:,:,:) ! complex momentum matrix for SOI/mixed propagation
-    type(momentum_block_info), allocatable :: momentum_blocks(:)
+    type(vector_block_info), allocatable :: momentum_blocks(:)
     integer, allocatable :: momentum_block_map(:,:)
     integer :: n_momentum_blocks = 0
     real(8), allocatable :: dipole_mat(:,:,:,:)   ! dipole matrix elements for observables (x,y,z)
+    type(vector_block_info), allocatable :: dipole_blocks(:)
+    integer, allocatable :: dipole_block_map(:,:)
+    integer :: n_dipole_blocks = 0
     complex(8), allocatable :: H_nl_cache(:,:,:)   ! cached non-local PP matrix (A-dependent)
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_cache
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse

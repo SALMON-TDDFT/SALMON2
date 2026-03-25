@@ -455,6 +455,7 @@
   ! updated mixed basis obtained by diagonalize_mixed_basis_pw.
   !=======================================================================
   subroutine project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
+    use rt_dg_fragment_ops, only: apply_matrix_blocks_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(in) :: coef_old(:,:,:)
@@ -508,7 +509,23 @@
       end if
 
       ! A = U_new^† S C_old, then C_new = U_new A
-      call zgemm('N', 'N', n_tot, nst, n_tot, zone, Sm, n_tot, C_old, n_tot, zzero, tmp, n_tot)
+      if (allocated(dg_frag%S_mat_mixed_prop)) then
+        call zgemm('N', 'N', n_tot, nst, n_tot, zone, Sm, n_tot, C_old, n_tot, zzero, tmp, n_tot)
+      else
+        tmp(:, :) = zzero
+        if (allocated(dg_frag%S_mat_prop_blocks)) then
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
+        else if (allocated(dg_frag%S_mat_blocks)) then
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
+        else
+          call zgemm('N', 'N', n_frag, nst, n_frag, zone, Sm(1:n_frag, 1:n_frag), n_tot, C_old(1:n_frag, :), n_tot, zzero, tmp(1:n_frag, :), n_tot)
+        end if
+        if (n_pw > 0) then
+          call zgemm('N', 'N', n_frag, nst, n_pw, zone, Sm(1:n_frag, n_frag+1:n_tot), n_tot, &
+                     C_old(n_frag+1:n_tot, :), n_tot, zone, tmp(1:n_frag, :), n_tot)
+          tmp(n_frag+1:n_tot, :) = C_old(n_frag+1:n_tot, :)
+        end if
+      end if
       call zgemm('C', 'N', nst, nst, n_tot, zone, U_new, n_tot, tmp, n_tot, zzero, A, nst)
       call zgemm('N', 'N', n_tot, nst, nst, zone, U_new, n_tot, A, nst, zzero, C_new, n_tot)
 
@@ -673,20 +690,18 @@
   !=======================================================================
   subroutine validate_overlap_matrix(dg_frag, is_valid)
     use communication, only: comm_is_root, comm_summation
+    use rt_dg_fragment_ops, only: apply_matrix_blocks
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     logical, intent(out) :: is_valid
 
-    integer :: ispin, n, info, lwork
+    integer :: ispin, n
     integer :: valid_local, valid_global
-    real(8), allocatable :: s_work(:,:), eval(:), work(:)
-    complex(8), allocatable :: s_work_c(:,:), cwork(:)
-    real(8), allocatable :: rwork(:)
-    real(8) :: eval_min, eval_max, cond_est
+    real(8) :: eval_min, eval_max, cond_est, herm_err, sigma
     real(8), parameter :: eval_floor = 1.0d-10
     real(8), parameter :: cond_max = 1.0d12
+    real(8), parameter :: herm_tol = 1.0d-8
     logical :: ok_local
-    external :: dsyev
 
     is_valid = .true.
     if (.not. allocated(dg_frag%S_mat)) return
@@ -694,29 +709,13 @@
     do ispin = 1, dg_frag%nspin
       n = dg_frag%n_mat(ispin)
       if (n <= 0) cycle
-      allocate(eval(n))
-      allocate(s_work(n,n))
-      s_work(:,:) = dg_frag%S_mat(1:n,1:n,ispin)
-      lwork = max(1, 3*n)
-      allocate(work(lwork))
-      call dsyev('N','U', n, s_work, n, eval, work, lwork, info)
-      deallocate(work, s_work)
-
-      if (info /= 0) then
-        is_valid = .false.
-        deallocate(eval)
-        exit
-      end if
-
-      eval_min = minval(eval)
-      eval_max = maxval(eval)
-      deallocate(eval)
-
-      if (eval_max <= 0.0d0) then
+      call estimate_overlap_metrics_real(ispin, n, eval_min, eval_max, herm_err, sigma)
+      if (eval_max <= 0.0d0 .or. sigma <= 0.0d0) then
         is_valid = .false.
       else
         cond_est = eval_max / max(eval_floor, eval_min)
-        ok_local = (eval_min > eval_floor) .and. (cond_est < cond_max)
+        ok_local = (eval_min > eval_floor) .and. (cond_est < cond_max) .and. &
+          (herm_err < herm_tol)
         if (.not. ok_local) is_valid = .false.
       end if
       if (.not. is_valid) exit
@@ -730,6 +729,82 @@
     if (.not. is_valid .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a)') "[WARN] Overlap validation failed after basis update"
     end if
+
+  contains
+
+    subroutine estimate_overlap_metrics_real(ispin, n, lambda_min_est, lambda_max_est, herm_err, sigma)
+      integer, intent(in) :: ispin, n
+      real(8), intent(out) :: lambda_min_est, lambda_max_est, herm_err, sigma
+      real(8), allocatable :: x(:), y(:)
+      real(8) :: norm_y, mu_shift
+      integer :: i, j, iter
+      integer, parameter :: max_iter = 12
+
+      lambda_min_est = 0.0d0
+      lambda_max_est = 0.0d0
+      herm_err = 0.0d0
+      sigma = 0.0d0
+
+      do i = 1, n
+        sigma = max(sigma, dg_frag%S_mat(i, i, ispin) + &
+          sum(abs(dg_frag%S_mat(i, 1:n, ispin))) - abs(dg_frag%S_mat(i, i, ispin)))
+        do j = i + 1, n
+          herm_err = max(herm_err, abs(dg_frag%S_mat(i, j, ispin) - dg_frag%S_mat(j, i, ispin)))
+        end do
+      end do
+
+      allocate(x(n), y(n))
+      x = 1.0d0 / sqrt(dble(n))
+
+      do iter = 1, max_iter
+        call apply_overlap_real(ispin, n, x, y)
+        norm_y = sqrt(max(dot_product(y, y), 0.0d0))
+        if (norm_y <= tiny(1.0d0)) exit
+        x = y / norm_y
+      end do
+      call apply_overlap_real(ispin, n, x, y)
+      lambda_max_est = max(0.0d0, dot_product(x, y))
+
+      x = 1.0d0 / sqrt(dble(n))
+      do iter = 1, max_iter
+        call apply_shifted_overlap_real(ispin, n, sigma, x, y)
+        norm_y = sqrt(max(dot_product(y, y), 0.0d0))
+        if (norm_y <= tiny(1.0d0)) exit
+        x = y / norm_y
+      end do
+      call apply_shifted_overlap_real(ispin, n, sigma, x, y)
+      mu_shift = max(0.0d0, dot_product(x, y))
+      lambda_min_est = max(0.0d0, sigma - mu_shift)
+
+      deallocate(x, y)
+    end subroutine estimate_overlap_metrics_real
+
+    subroutine apply_overlap_real(ispin, n, x, y)
+      integer, intent(in) :: ispin, n
+      real(8), intent(in) :: x(n)
+      real(8), intent(out) :: y(n)
+      complex(8), allocatable :: x_c(:), y_c(:)
+
+      if (allocated(dg_frag%S_mat_blocks)) then
+        allocate(x_c(n), y_c(n))
+        x_c = cmplx(x, 0.0d0, kind=8)
+        call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x_c, y_c)
+        y = real(y_c, kind=8)
+        deallocate(x_c, y_c)
+      else
+        y = matmul(dg_frag%S_mat(1:n, 1:n, ispin), x)
+      end if
+    end subroutine apply_overlap_real
+
+    subroutine apply_shifted_overlap_real(ispin, n, sigma, x, y)
+      integer, intent(in) :: ispin, n
+      real(8), intent(in) :: sigma
+      real(8), intent(in) :: x(n)
+      real(8), intent(out) :: y(n)
+
+      call apply_overlap_real(ispin, n, x, y)
+      y = sigma * x - y
+    end subroutine apply_shifted_overlap_real
   end subroutine validate_overlap_matrix
 
 

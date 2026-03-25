@@ -1,6 +1,6 @@
 module rt_dg_fragment_ops
   use communication, only: comm_bcast, COMM_GROUP_NULL
-  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info
   implicit none
 
   private
@@ -10,6 +10,9 @@ module rt_dg_fragment_ops
   public :: build_spatial_A_coupling_matrices
   public :: apply_gradient_to_basis
   public :: apply_momentum_blocks
+  public :: apply_matrix_blocks
+  public :: apply_matrix_blocks_batch
+  public :: copy_matrix_blocks_to_complex_dense
 
 contains
 
@@ -198,6 +201,118 @@ contains
       call comm_bcast(dg_frag%S_mat(1:n_copy, 1:n_copy, 1:dg_frag%nspin), dg_frag%icomm_frag, 0)
     end if
   end subroutine ensure_overlap_prop_available
+
+  subroutine apply_matrix_blocks(dg_frag, blocks, ispin, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:)
+    complex(8), intent(inout) :: y(:)
+
+    integer :: iblk, ifrag_row, ifrag_col
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j
+    complex(8) :: xj
+
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    do iblk = 1, size(blocks)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      if (nrow <= 0 .or. ncol <= 0) cycle
+
+      do jj = 1, ncol
+        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (ig_j < 1 .or. ig_j > size(x)) cycle
+        xj = x(ig_j)
+        if (abs(xj) == 0.0d0) cycle
+        do ii = 1, nrow
+          ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+          if (ig_i < 1 .or. ig_i > size(y)) cycle
+          y(ig_i) = y(ig_i) + blocks(iblk)%val(ii, jj, ispin) * xj
+        end do
+      end do
+    end do
+  end subroutine apply_matrix_blocks
+
+  subroutine apply_matrix_blocks_batch(dg_frag, blocks, ispin, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:, :)
+    complex(8), intent(inout) :: y(:, :)
+
+    integer :: iblk, ifrag_row, ifrag_col
+    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j
+    complex(8) :: xj
+
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    do iblk = 1, size(blocks)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      if (nrow <= 0 .or. ncol <= 0) cycle
+
+      do jj = 1, ncol
+        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (ig_j < 1 .or. ig_j > size(x, 1)) cycle
+        do ist = 1, size(x, 2)
+          xj = x(ig_j, ist)
+          if (abs(xj) == 0.0d0) cycle
+          do ii = 1, nrow
+            ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+            if (ig_i < 1 .or. ig_i > size(y, 1)) cycle
+            y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
+          end do
+        end do
+      end do
+    end do
+  end subroutine apply_matrix_blocks_batch
+
+  subroutine copy_matrix_blocks_to_complex_dense(dg_frag, blocks, ispin, mat)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    complex(8), intent(inout) :: mat(:, :)
+
+    integer :: iblk, ifrag_row, ifrag_col
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j
+
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    do iblk = 1, size(blocks)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      if (nrow <= 0 .or. ncol <= 0) cycle
+
+      do jj = 1, ncol
+        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
+        do ii = 1, nrow
+          ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+          if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
+          mat(ig_i, ig_j) = cmplx(blocks(iblk)%val(ii, jj, ispin), 0.0d0, kind=8)
+        end do
+      end do
+    end do
+  end subroutine copy_matrix_blocks_to_complex_dense
 
   !=======================================================================
   ! Apply gradient operator to a basis function using finite differences

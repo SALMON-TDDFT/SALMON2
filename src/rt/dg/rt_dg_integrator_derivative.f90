@@ -1,7 +1,7 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -92,7 +92,7 @@
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
       if (use_hmat_complex) then
         H0c(1:n_frag, 1:n_frag) = dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin)
-      else
+      else if (.not. allocated(dg_frag%H_mat_blocks)) then
         H0c(1:n_frag, 1:n_frag) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       end if
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_mixed)) then
@@ -198,8 +198,21 @@
       end if
 
       ! dcoef_dt = -i * H0c * coef - M * coef
-      call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, -zi, H0c, n_tot, &
-                 coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
+      dcoef_dt_h0(:, :) = (0.0d0, 0.0d0)
+      if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+        if (has_nonlocal) then
+          dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
+            matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+        end if
+        do io = 1, n_frag
+          dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
+        end do
+        dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
+      else
+        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, -zi, H0c, n_tot, &
+                   coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
+      end if
       max_abs_h0 = maxval(abs(dcoef_dt_h0))
       if (max_abs_h0 > 1.0d150) then
         write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_h0| huge: rank=", dg_frag%id, &

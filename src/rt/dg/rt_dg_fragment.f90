@@ -1352,10 +1352,38 @@ contains
     if (allocated(dg_frag%coef_work)) deallocate(dg_frag%coef_work)
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_c)) deallocate(dg_frag%H_mat_c)
+    if (allocated(dg_frag%H_mat_blocks)) then
+      do i = 1, size(dg_frag%H_mat_blocks)
+        if (allocated(dg_frag%H_mat_blocks(i)%val)) deallocate(dg_frag%H_mat_blocks(i)%val)
+      end do
+      deallocate(dg_frag%H_mat_blocks)
+      dg_frag%n_H_blocks = 0
+    end if
+    if (allocated(dg_frag%H_mat_kinetic_blocks)) then
+      do i = 1, size(dg_frag%H_mat_kinetic_blocks)
+        if (allocated(dg_frag%H_mat_kinetic_blocks(i)%val)) deallocate(dg_frag%H_mat_kinetic_blocks(i)%val)
+      end do
+      deallocate(dg_frag%H_mat_kinetic_blocks)
+    end if
+    if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
     if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
     if (allocated(dg_frag%S_mat_prop_c)) deallocate(dg_frag%S_mat_prop_c)
+    if (allocated(dg_frag%S_mat_blocks)) then
+      do i = 1, size(dg_frag%S_mat_blocks)
+        if (allocated(dg_frag%S_mat_blocks(i)%val)) deallocate(dg_frag%S_mat_blocks(i)%val)
+      end do
+      deallocate(dg_frag%S_mat_blocks)
+      dg_frag%n_S_blocks = 0
+    end if
+    if (allocated(dg_frag%S_mat_prop_blocks)) then
+      do i = 1, size(dg_frag%S_mat_prop_blocks)
+        if (allocated(dg_frag%S_mat_prop_blocks(i)%val)) deallocate(dg_frag%S_mat_prop_blocks(i)%val)
+      end do
+      deallocate(dg_frag%S_mat_prop_blocks)
+    end if
+    if (allocated(dg_frag%S_block_map)) deallocate(dg_frag%S_block_map)
     if (allocated(dg_frag%n_basis)) deallocate(dg_frag%n_basis)
     if (allocated(dg_frag%index_basis)) deallocate(dg_frag%index_basis)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
@@ -1369,6 +1397,14 @@ contains
     end if
     if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
     if (allocated(dg_frag%dipole_mat)) deallocate(dg_frag%dipole_mat)
+    if (allocated(dg_frag%dipole_blocks)) then
+      do i = 1, size(dg_frag%dipole_blocks)
+        if (allocated(dg_frag%dipole_blocks(i)%val)) deallocate(dg_frag%dipole_blocks(i)%val)
+      end do
+      deallocate(dg_frag%dipole_blocks)
+      dg_frag%n_dipole_blocks = 0
+    end if
+    if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)

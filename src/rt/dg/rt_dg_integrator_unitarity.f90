@@ -1,4 +1,5 @@
   subroutine stabilize_coeff_unitarity(dg_frag, itt)
+    use rt_dg_fragment_ops, only: apply_matrix_blocks
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: itt
@@ -23,7 +24,8 @@
       if (n <= 0 .or. nstab <= 0) cycle
 
       use_S = allocated(dg_frag%S_mat_mixed_prop) .or. allocated(dg_frag%S_mat_prop_c) .or. &
-              allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)
+              allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat) .or. &
+              allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)
       allocate(v(n), Sv(n), u_prev(n))
       if (.not. (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) .and. use_S) then
         call ensure_overlap_prop_available(dg_frag, n)
@@ -44,10 +46,16 @@
               Sv(:) = matmul(dg_frag%S_mat_mixed_prop(1:n, 1:n, ispin), v(:))
             else if (allocated(dg_frag%S_mat_prop_c)) then
               Sv(:) = matmul(dg_frag%S_mat_prop_c(1:n, 1:n, ispin), v(:))
+            else if (allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
+              Sv(:) = (0.0d0, 0.0d0)
+              call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, v(:), Sv(:))
             else if (allocated(dg_frag%S_mat_prop)) then
               Sv(:) = matmul(cmplx(dg_frag%S_mat_prop(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
             else if (allocated(dg_frag%S_mat_c)) then
               Sv(:) = matmul(dg_frag%S_mat_c(1:n, 1:n, ispin), v(:))
+            else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+              Sv(:) = (0.0d0, 0.0d0)
+              call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, v(:), Sv(:))
             else
               Sv(:) = matmul(cmplx(dg_frag%S_mat(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
             end if
@@ -63,10 +71,16 @@
             Sv(:) = matmul(dg_frag%S_mat_mixed_prop(1:n, 1:n, ispin), v(:))
           else if (allocated(dg_frag%S_mat_prop_c)) then
             Sv(:) = matmul(dg_frag%S_mat_prop_c(1:n, 1:n, ispin), v(:))
+          else if (allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
+            Sv(:) = (0.0d0, 0.0d0)
+            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, v(:), Sv(:))
           else if (allocated(dg_frag%S_mat_prop)) then
             Sv(:) = matmul(cmplx(dg_frag%S_mat_prop(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
           else if (allocated(dg_frag%S_mat_c)) then
             Sv(:) = matmul(dg_frag%S_mat_c(1:n, 1:n, ispin), v(:))
+          else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+            Sv(:) = (0.0d0, 0.0d0)
+            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, v(:), Sv(:))
           else
             Sv(:) = matmul(cmplx(dg_frag%S_mat(1:n, 1:n, ispin), 0.0d0, kind=8), v(:))
           end if
@@ -100,10 +114,16 @@
             Sv(:) = matmul(dg_frag%S_mat_mixed_prop(1:n, 1:n, ispin), v(:) / norm_v)
           else if (allocated(dg_frag%S_mat_prop_c)) then
             Sv(:) = matmul(dg_frag%S_mat_prop_c(1:n, 1:n, ispin), v(:) / norm_v)
+          else if (allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
+            Sv(:) = (0.0d0, 0.0d0)
+            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, v(:) / norm_v, Sv(:))
           else if (allocated(dg_frag%S_mat_prop)) then
             Sv(:) = matmul(cmplx(dg_frag%S_mat_prop(1:n, 1:n, ispin), 0.0d0, kind=8), v(:) / norm_v)
           else if (allocated(dg_frag%S_mat_c)) then
             Sv(:) = matmul(dg_frag%S_mat_c(1:n, 1:n, ispin), v(:) / norm_v)
+          else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+            Sv(:) = (0.0d0, 0.0d0)
+            call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, v(:) / norm_v, Sv(:))
           else
             Sv(:) = matmul(cmplx(dg_frag%S_mat(1:n, 1:n, ispin), 0.0d0, kind=8), v(:) / norm_v)
           end if

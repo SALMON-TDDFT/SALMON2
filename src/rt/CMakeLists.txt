@@ -21,3 +21,16 @@ set(SOURCES
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
 list(APPEND SALMON_SOURCES ${SOURCES})
 set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)
+
+
+set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment.f90
+    PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_hamiltonian.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_basis_update.f90"
+)
+
+set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_soi.f90
+    PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_hamiltonian_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_basis_update_soi.f90"
+)

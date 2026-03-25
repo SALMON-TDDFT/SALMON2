@@ -420,6 +420,7 @@ contains
   subroutine build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, &
                                       S_frag_pw, H_frag_pw)
     use structures
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_rgrid),          intent(in)    :: lg
@@ -445,6 +446,8 @@ contains
     do ispin = 1, dg_frag%nspin
       if (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) then
         dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin) = dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin)
+      else if (allocated(dg_frag%H_mat_blocks)) then
+        call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin))
       else
         dg_frag%H_mat_mixed(1:n_frag, 1:n_frag, ispin) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       end if
@@ -477,6 +480,7 @@ contains
   subroutine diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     use structures
     use communication, only: comm_is_root
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -593,6 +597,8 @@ contains
       S_work(:, :) = (0.0d0, 0.0d0)
       if (allocated(dg_frag%S_mat_c)) then
         S_work(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
+      else if (allocated(dg_frag%S_mat_blocks)) then
+        call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, S_work(1:n_frag, 1:n_frag))
       else if (allocated(dg_frag%S_mat)) then
         S_work(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       else
@@ -684,6 +690,12 @@ contains
         if (allocated(dg_frag%S_mat_c)) then
           dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
           dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = real(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), kind=8)
+        else if (allocated(dg_frag%S_mat_prop_blocks)) then
+          call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin))
+          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = real(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), kind=8)
+        else if (allocated(dg_frag%S_mat_blocks)) then
+          call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin))
+          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = real(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), kind=8)
         else if (allocated(dg_frag%S_mat)) then
           dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = dg_frag%S_mat(1:n_frag, 1:n_frag, ispin)
           dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)

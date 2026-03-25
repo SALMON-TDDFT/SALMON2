@@ -274,7 +274,7 @@
   ! System boundaries use PERIODIC boundary conditions
   !=======================================================================
   subroutine exchange_phi_frag_halo(dg_frag)
-    use communication, only: comm_isend, comm_irecv, comm_wait_all
+    use communication, only: comm_isend, comm_irecv, comm_recv, comm_wait_all
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
@@ -284,14 +284,17 @@
     integer :: itag_send, itag_recv
     integer, allocatable :: ireq_send(:), ireq_recv(:)
     integer :: lb1, ub1, lb2, ub2, lb3, ub3
+    integer :: sample_ix, sample_iy, sample_iz, sample_istate
+    real(8) :: pack_abs_sum, pack_abs_max, pack_first_value, src_first_value
     integer, save :: halo_exchange_call_count = 0
-    logical :: diag_second_halo_root
+    logical :: diag_second_halo_root, diag_fourth_halo_root
 
     if (.not. dg_frag%has_halo_exchange) return
     if (dg_frag%n_halo <= 0) return
 
     halo_exchange_call_count = halo_exchange_call_count + 1
     diag_second_halo_root = dg_frag%is_frag_root .and. (halo_exchange_call_count == 2)
+    diag_fourth_halo_root = dg_frag%is_frag_root .and. (halo_exchange_call_count == 4)
 
     allocate(ireq_send(dg_frag%n_halo), ireq_recv(dg_frag%n_halo))
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
@@ -348,6 +351,23 @@
         write(*,*) "        halo1 pack done"
         call flush(6)
       end if
+      if (diag_fourth_halo_root) then
+        pack_abs_sum = sum(abs(dg_frag%halo(i_halo)%buf_send(:,:,:,:,1)))
+        pack_abs_max = maxval(abs(dg_frag%halo(i_halo)%buf_send(:,:,:,:,1)))
+        sample_ix = 1
+        sample_iy = 1
+        sample_iz = 1
+        sample_istate = 1
+        pack_first_value = dg_frag%halo(i_halo)%buf_send(sample_ix, sample_iy, sample_iz, sample_istate, 1)
+        src_first_value = dg_frag%phi_frag(d(1) + sample_ix, d(2) + sample_iy, d(3) + sample_iz, sample_istate, i_local)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+          "        halo fourth pack diag: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+          " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, " sumabs=", pack_abs_sum, &
+          " maxabs=", pack_abs_max, " buf_first=", pack_first_value, " src_first=", src_first_value
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        halo fourth post-pack-done: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo
+        call flush(6)
+      end if
 
       ifrag_send = dg_frag%halo(i_halo)%ifrag_dst
       dir_code = (dg_frag%halo(i_halo)%dvec(1) + 1) * 9 + &
@@ -357,12 +377,27 @@
       ireq_send(i_halo) = comm_isend(dg_frag%halo(i_halo)%buf_send, &
                                      dg_frag%halo(i_halo)%id_dst, &
                                      itag_send, dg_frag%icomm)
+      if (diag_fourth_halo_root) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        halo fourth post-isend-done: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, &
+          " ireq_send=", ireq_send(i_halo)
+        call flush(6)
+      end if
 
       ifrag_recv = dg_frag%halo(i_halo)%ifrag_src
       itag_recv = (ifrag_recv - 1) * 27 + (26 - dir_code)
+      if (diag_fourth_halo_root .and. i_halo == 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,i0,a,i0,a,5(i0,1x))') &
+          "        halo fourth irecv precheck: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+          " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, " do_blocking=", .false., &
+          " id_src=", dg_frag%halo(i_halo)%id_src, " itag_recv=", itag_recv, " buf_shape=", &
+          size(dg_frag%halo(i_halo)%buf_recv,1), size(dg_frag%halo(i_halo)%buf_recv,2), size(dg_frag%halo(i_halo)%buf_recv,3), &
+          size(dg_frag%halo(i_halo)%buf_recv,4), size(dg_frag%halo(i_halo)%buf_recv,5)
+        call flush(6)
+      end if
 
-      if (diag_second_halo_root) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+      if (diag_second_halo_root .or. diag_fourth_halo_root) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
           "        halo root diag: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
           " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, &
           " ifrag_src=", dg_frag%halo(i_halo)%ifrag_src, " ifrag_dst=", dg_frag%halo(i_halo)%ifrag_dst, &
@@ -379,8 +414,19 @@
       ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv, &
                                      dg_frag%halo(i_halo)%id_src, &
                                      itag_recv, dg_frag%icomm)
-      if (diag_second_halo_root) then
+      if (diag_second_halo_root .or. diag_fourth_halo_root) then
         write(*,'(1x,a,i0,a,i0)') "        halo root diag req: i_halo=", i_halo, " ireq_recv=", ireq_recv(i_halo)
+        call flush(6)
+      end if
+      if (diag_fourth_halo_root) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        halo fourth post-irecv-done: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, &
+          " ireq_recv=", ireq_recv(i_halo)
+        call flush(6)
+      end if
+      if (diag_fourth_halo_root .and. i_halo == 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        halo fourth irecv-postcheck: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo
         call flush(6)
       end if
     end do
@@ -392,13 +438,13 @@
       call flush(6)
     end if
 
-    if (diag_second_halo_root) then
+    if (diag_second_halo_root .or. diag_fourth_halo_root) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "recv-wait-begin"
       call flush(6)
     end if
     call comm_wait_all(ireq_recv)
-    if (diag_second_halo_root) then
+    if (diag_second_halo_root .or. diag_fourth_halo_root) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "recv-wait-done"
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
@@ -406,7 +452,7 @@
       call flush(6)
     end if
     call comm_wait_all(ireq_send)
-    if (diag_second_halo_root) then
+    if (diag_second_halo_root .or. diag_fourth_halo_root) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "send-wait-done"
       call flush(6)
@@ -428,6 +474,18 @@
           "        halo1 recv: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), "i_local=", i_local
         call flush(6)
       end if
+      if (diag_fourth_halo_root) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,6(i0,1x),a,i0)') &
+          "        halo fourth unpack diag: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+          " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, " dsp_recv=", d(1), d(2), d(3), &
+          " len=", l(1), l(2), l(3), " phi_bounds=", lb1, ub1, lb2, ub2, lb3, ub3, &
+          " i_local=", i_local
+        write(*,'(1x,a,5(i0,1x))') "        halo fourth unpack buf shape:", &
+          size(dg_frag%halo(i_halo)%buf_recv,1), size(dg_frag%halo(i_halo)%buf_recv,2), &
+          size(dg_frag%halo(i_halo)%buf_recv,3), size(dg_frag%halo(i_halo)%buf_recv,4), &
+          size(dg_frag%halo(i_halo)%buf_recv,5)
+        call flush(6)
+      end if
 
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
@@ -436,9 +494,13 @@
         if (d(1) + ix < lb1 .or. d(1) + ix > ub1 .or. &
             d(2) + iy < lb2 .or. d(2) + iy > ub2 .or. &
             d(3) + iz < lb3 .or. d(3) + iz > ub3) then
-          write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
+          write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0,a,6(i0,1x),a,5(i0,1x))') &
             "DG-Fragment RT halo recv index out of range:", d(1)+ix, d(2)+iy, d(3)+iz, &
-            "dsp=", d(1), d(2), d(3), "len=", l(1), l(2), l(3), "i_local=", i_local
+            "dsp=", d(1), d(2), d(3), "len=", l(1), l(2), l(3), "i_local=", i_local, &
+            " phi_bounds=", lb1, ub1, lb2, ub2, lb3, ub3, " buf_shape=", &
+            size(dg_frag%halo(i_halo)%buf_recv,1), size(dg_frag%halo(i_halo)%buf_recv,2), &
+            size(dg_frag%halo(i_halo)%buf_recv,3), size(dg_frag%halo(i_halo)%buf_recv,4), &
+            size(dg_frag%halo(i_halo)%buf_recv,5)
           stop "DG-Fragment RT: halo recv index out of range"
         end if
         dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, istate, i_local) = &

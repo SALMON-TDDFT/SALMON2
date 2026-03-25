@@ -2,7 +2,7 @@
     use salmon_global, only: nelec, theory
     use structures
     use communication, only: comm_summation
-    use rt_dg_fragment_ops, only: apply_momentum_blocks
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -94,12 +94,13 @@
     ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
     do ispin = 1, dg_frag%nspin
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
+      op_mat(:, :) = (0.0d0, 0.0d0)
       if (use_hmat_complex) then
         op_mat(:, :) = dg_frag%H_mat_c(1:n, 1:n, ispin)
-      else
+      else if (.not. allocated(dg_frag%H_mat_blocks)) then
         op_mat(:, :) = cmplx(dg_frag%H_mat(1:n, 1:n, ispin), 0.0d0, kind=8)
       end if
-      if (has_nonlocal) then
+      if (has_nonlocal .and. (.not. allocated(dg_frag%H_mat_blocks) .or. use_hmat_complex)) then
         op_mat(:, :) = op_mat(:, :) + dg_frag%H_nl_cache(1:n, 1:n, ispin)
       end if
       if (use_spatial_A) then
@@ -108,14 +109,31 @@
         op_mat(:, :) = op_mat(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
         op_mat(:, :) = op_mat(:, :) + minus_i * cmplx(Ap_mat(:, :), 0.0d0, kind=8)
       else
-        do io = 1, n
-          op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
-        end do
         if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
-          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, dg_frag%coef(1:n, 1:nocc, ispin), tmp_mat)
-          tmp_mat(:, :) = minus_i * tmp_mat(:, :)
+          if (.not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
+            call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, dg_frag%coef(1:n, 1:nocc, ispin), tmp_mat)
+            if (has_nonlocal) then
+              tmp_mat(:, :) = tmp_mat(:, :) + &
+                matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), dg_frag%coef(1:n, 1:nocc, ispin))
+            end if
+            do io = 1, n
+              tmp_mat(io, :) = tmp_mat(io, :) + 0.5d0 * A_squared * dg_frag%coef(io, 1:nocc, ispin)
+            end do
+          else
+            do io = 1, n
+              op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
+            end do
+            call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
+                       dg_frag%coef(1:n, 1:nocc, ispin), n, (0.0d0, 0.0d0), tmp_mat, n)
+          end if
+          op_mat(:, 1:nocc) = (0.0d0, 0.0d0)
+          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, dg_frag%coef(1:n, 1:nocc, ispin), op_mat(:, 1:nocc))
+          tmp_mat(:, :) = tmp_mat(:, :) + minus_i * op_mat(:, 1:nocc)
         else
+          do io = 1, n
+            op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
+          end do
           do idir = 1, 3
             if (allocated(dg_frag%momentum_mat_c)) then
               op_mat(:, :) = op_mat(:, :) + minus_i * Ac_tot(idir) * dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
@@ -150,9 +168,6 @@
       if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
         call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                    dg_frag%coef(1:n, 1:nocc, ispin), n, (0.0d0, 0.0d0), tmp_mat, n)
-      else
-        call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                   dg_frag%coef(1:n, 1:nocc, ispin), n, (1.0d0, 0.0d0), tmp_mat, n)
       end if
       energy_tmp = 0.0d0
       do io = 1, nocc

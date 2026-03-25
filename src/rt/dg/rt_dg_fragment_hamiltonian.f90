@@ -47,6 +47,124 @@
     iblk = dg_frag%momentum_block_map(ifrag_row, ifrag_col)
   end function find_momentum_block
 
+  integer function find_matrix_block(block_map, ifrag_row, ifrag_col) result(iblk)
+    implicit none
+    integer, intent(in) :: block_map(:, :)
+    integer, intent(in) :: ifrag_row, ifrag_col
+
+    iblk = 0
+    if (ifrag_row < 1 .or. ifrag_row > size(block_map, 1)) return
+    if (ifrag_col < 1 .or. ifrag_col > size(block_map, 2)) return
+    iblk = block_map(ifrag_row, ifrag_col)
+  end function find_matrix_block
+
+  subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks)
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), allocatable, intent(inout) :: blocks(:)
+    integer, allocatable, intent(inout) :: block_map(:, :)
+    integer, intent(out) :: n_blocks
+    integer :: ifrag_row, ifrag_col, iblk, nrow_max, ncol_max
+
+    if (allocated(blocks)) then
+      do iblk = 1, size(blocks)
+        if (allocated(blocks(iblk)%val)) deallocate(blocks(iblk)%val)
+      end do
+      deallocate(blocks)
+    end if
+    if (allocated(block_map)) deallocate(block_map)
+
+    n_blocks = dg_frag%n_frag * dg_frag%n_frag
+    if (n_blocks <= 0) return
+
+    allocate(blocks(n_blocks))
+    allocate(block_map(dg_frag%n_frag, dg_frag%n_frag))
+    block_map = 0
+
+    iblk = 0
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        iblk = iblk + 1
+        nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
+        ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
+        block_map(ifrag_row, ifrag_col) = iblk
+        blocks(iblk)%ifrag_row = ifrag_row
+        blocks(iblk)%ifrag_col = ifrag_col
+        blocks(iblk)%nrow_max = nrow_max
+        blocks(iblk)%ncol_max = ncol_max
+        allocate(blocks(iblk)%val(nrow_max, ncol_max, dg_frag%nspin))
+        blocks(iblk)%val = 0.0d0
+      end do
+    end do
+  end subroutine init_matrix_blocks
+
+  subroutine sync_dense_matrix_to_blocks(dg_frag, mat, blocks, block_map)
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    real(8), intent(in) :: mat(:, :, :)
+    type(matrix_block_info), intent(inout) :: blocks(:)
+    integer, intent(in) :: block_map(:, :)
+    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol
+
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
+        if (iblk <= 0) cycle
+        blocks(iblk)%val(:, :, :) = 0.0d0
+        do ispin = 1, dg_frag%nspin
+          nrow = dg_frag%n_basis(ifrag_row, ispin)
+          ncol = dg_frag%n_basis(ifrag_col, ispin)
+          if (nrow <= 0 .or. ncol <= 0) cycle
+          do jj = 1, ncol
+            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
+            do ii = 1, nrow
+              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
+              blocks(iblk)%val(ii, jj, ispin) = mat(ig_i, ig_j, ispin)
+            end do
+          end do
+        end do
+      end do
+    end do
+  end subroutine sync_dense_matrix_to_blocks
+
+  subroutine sync_blocks_to_dense_matrix(dg_frag, blocks, block_map, mat)
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: block_map(:, :)
+    real(8), intent(inout) :: mat(:, :, :)
+    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol
+
+    mat(:, :, :) = 0.0d0
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
+        if (iblk <= 0) cycle
+        do ispin = 1, dg_frag%nspin
+          nrow = dg_frag%n_basis(ifrag_row, ispin)
+          ncol = dg_frag%n_basis(ifrag_col, ispin)
+          if (nrow <= 0 .or. ncol <= 0) cycle
+          do jj = 1, ncol
+            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
+            do ii = 1, nrow
+              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
+              mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
+            end do
+          end do
+        end do
+      end do
+    end do
+  end subroutine sync_blocks_to_dense_matrix
+
   subroutine init_momentum_blocks(dg_frag)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -91,6 +209,100 @@
       end do
     end do
   end subroutine init_momentum_blocks
+
+  subroutine reduce_matrix_blocks(dg_frag, blocks, label, icomm_reduce)
+    use communication, only: comm_is_root, comm_summation, comm_get_max
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(inout) :: blocks(:)
+    character(*), intent(in) :: label
+    integer, intent(in) :: icomm_reduce
+    integer, parameter :: reduce_chunk_size = 262144
+    real(8), allocatable :: send_block(:), recv_block(:)
+    integer :: iblk, ispin, ii, jj
+    integer :: nrow, ncol, block_size, max_block_size, total_active_size
+    integer :: total_active_min, total_active_max, max_block_size_global
+    integer :: chunk_begin, chunk_count, offset_flat
+
+    max_block_size = 0
+    total_active_size = 0
+    do iblk = 1, size(blocks)
+      do ispin = 1, dg_frag%nspin
+        nrow = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
+        ncol = dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin)
+        if (nrow <= 0 .or. ncol <= 0) cycle
+        block_size = nrow * ncol
+        max_block_size = max(max_block_size, block_size)
+        total_active_size = total_active_size + block_size
+      end do
+    end do
+
+    max_block_size_global = max_block_size
+    call comm_get_max(max_block_size_global, icomm_reduce)
+    total_active_max = total_active_size
+    call comm_get_max(total_active_max, icomm_reduce)
+    total_active_min = -total_active_size
+    call comm_get_max(total_active_min, icomm_reduce)
+    total_active_min = -total_active_min
+
+    if (total_active_min /= total_active_max) then
+      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block size mismatch: label=", &
+        trim(label), " rank=", dg_frag%id, " local=", total_active_size, &
+        " min=", total_active_min, " max=", total_active_max
+      flush(6)
+      stop 1
+    end if
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
+        " total_active=", total_active_size, " max_block=", max_block_size_global, &
+        " chunk_size=", reduce_chunk_size
+      flush(6)
+    end if
+
+    if (max_block_size_global <= 0) return
+    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+
+    do iblk = 1, size(blocks)
+      do ispin = 1, dg_frag%nspin
+        nrow = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
+        ncol = dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin)
+        if (nrow <= 0 .or. ncol <= 0) cycle
+        block_size = nrow * ncol
+        offset_flat = 1
+        do jj = 1, ncol
+          do ii = 1, nrow
+            send_block(offset_flat) = blocks(iblk)%val(ii, jj, ispin)
+            offset_flat = offset_flat + 1
+          end do
+        end do
+
+        chunk_begin = 1
+        do while (chunk_begin <= block_size)
+          chunk_count = min(reduce_chunk_size, block_size - chunk_begin + 1)
+          call comm_summation(send_block(chunk_begin:chunk_begin + chunk_count - 1), &
+                              recv_block(chunk_begin:chunk_begin + chunk_count - 1), chunk_count, icomm_reduce)
+          chunk_begin = chunk_begin + chunk_count
+        end do
+
+        offset_flat = 1
+        do jj = 1, ncol
+          do ii = 1, nrow
+            blocks(iblk)%val(ii, jj, ispin) = recv_block(offset_flat)
+            offset_flat = offset_flat + 1
+          end do
+        end do
+      end do
+    end do
+
+    deallocate(send_block, recv_block)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
+        " total_active=", total_active_size
+      flush(6)
+    end if
+  end subroutine reduce_matrix_blocks
 
   !=======================================================================
   ! Calculate initial Hamiltonian matrix from basis functions
@@ -418,84 +630,17 @@
       " stage=", "after-ispin-loop"
     flush(6)
     
+    call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
+    call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat_kinetic, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map)
     ! CRITICAL: MPI aggregation of Hamiltonian matrix
-    ! Each rank computed elements only for its assigned fragments
-    ! Sum across all ranks to get complete global H_mat
-    block
-      real(8), allocatable :: H_mat_flat(:), H_mat_tmp_flat(:)
-      integer :: mat_size, offset_flat, ii, jj
-      integer(8) :: mat_size64
-      mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
-      if (mat_size64 >= huge(mat_size)) then
-        write(*,*) "[FATAL] Hamiltonian reduce mat_size overflow: rank=", dg_frag%id, &
-          " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, " mat_size64=", mat_size64
-        stop 1
-      end if
-      mat_size = int(mat_size64)
-      allocate(H_mat_flat(mat_size), H_mat_tmp_flat(mat_size))
-      
-      offset_flat = 1
-      do ispin = 1, dg_frag%nspin
-        do jj = 1, dg_frag%n_mat_max
-          do ii = 1, dg_frag%n_mat_max
-            H_mat_flat(offset_flat) = dg_frag%H_mat(ii, jj, ispin)
-            offset_flat = offset_flat + 1
-          end do
-        end do
-      end do
-      if (offset_flat /= mat_size + 1) then
-        write(*,*) "[FATAL] Hamiltonian reduce pack mismatch: rank=", dg_frag%id, &
-          " offset=", offset_flat, " mat_size=", mat_size
-        stop 1
-      end if
-      call comm_summation(H_mat_flat, H_mat_tmp_flat, mat_size, dg_frag%icomm)
-      offset_flat = 1
-      do ispin = 1, dg_frag%nspin
-        do jj = 1, dg_frag%n_mat_max
-          do ii = 1, dg_frag%n_mat_max
-            dg_frag%H_mat(ii, jj, ispin) = H_mat_tmp_flat(offset_flat)
-            offset_flat = offset_flat + 1
-          end do
-        end do
-      end do
-      if (offset_flat /= mat_size + 1) then
-        write(*,*) "[FATAL] Hamiltonian reduce unpack mismatch: rank=", dg_frag%id, &
-          " offset=", offset_flat, " mat_size=", mat_size
-        stop 1
-      end if
-      
-      offset_flat = 1
-      do ispin = 1, dg_frag%nspin
-        do jj = 1, dg_frag%n_mat_max
-          do ii = 1, dg_frag%n_mat_max
-            H_mat_flat(offset_flat) = dg_frag%H_mat_kinetic(ii, jj, ispin)
-            offset_flat = offset_flat + 1
-          end do
-        end do
-      end do
-      if (offset_flat /= mat_size + 1) then
-        write(*,*) "[FATAL] Hamiltonian kinetic reduce pack mismatch: rank=", dg_frag%id, &
-          " offset=", offset_flat, " mat_size=", mat_size
-        stop 1
-      end if
-      call comm_summation(H_mat_flat, H_mat_tmp_flat, mat_size, dg_frag%icomm)
-      offset_flat = 1
-      do ispin = 1, dg_frag%nspin
-        do jj = 1, dg_frag%n_mat_max
-          do ii = 1, dg_frag%n_mat_max
-            dg_frag%H_mat_kinetic(ii, jj, ispin) = H_mat_tmp_flat(offset_flat)
-            offset_flat = offset_flat + 1
-          end do
-        end do
-      end do
-      if (offset_flat /= mat_size + 1) then
-        write(*,*) "[FATAL] Hamiltonian kinetic reduce unpack mismatch: rank=", dg_frag%id, &
-          " offset=", offset_flat, " mat_size=", mat_size
-        stop 1
-      end if
-      
-      deallocate(H_mat_flat, H_mat_tmp_flat)
-    end block
+    ! Each rank computed elements only for its assigned fragments.
+    ! Reduce one fragment block at a time to avoid a single dense global allreduce.
+    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
+    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
+    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
+    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
     write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
       " stage=", "after-global-hmat-sum"
     flush(6)
@@ -562,6 +707,133 @@
     end if
     
   end subroutine calculate_hamiltonian_matrix
+
+  subroutine reduce_matrix_fragment_blocks(dg_frag, mat, label, icomm_reduce)
+    use communication, only: comm_is_root, comm_summation, comm_get_max
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    real(8), intent(inout) :: mat(:,:,:)
+    character(*), intent(in) :: label
+    integer, intent(in) :: icomm_reduce
+    integer, parameter :: reduce_chunk_size = 262144
+    real(8), allocatable :: send_block(:), recv_block(:)
+    integer :: ifrag_row, ifrag_col, ispin, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol, block_size, max_block_size, total_active_size
+    integer :: total_active_min, total_active_max, max_block_size_global
+    integer :: chunk_begin, chunk_count, offset_flat
+
+    max_block_size = 0
+    total_active_size = 0
+    do ispin = 1, dg_frag%nspin
+      do ifrag_col = 1, dg_frag%n_frag
+        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        if (ncol <= 0) cycle
+        do ifrag_row = 1, dg_frag%n_frag
+          nrow = dg_frag%n_basis(ifrag_row, ispin)
+          if (nrow <= 0) cycle
+          block_size = nrow * ncol
+          max_block_size = max(max_block_size, block_size)
+          total_active_size = total_active_size + block_size
+        end do
+      end do
+    end do
+
+    max_block_size_global = max_block_size
+    call comm_get_max(max_block_size_global, icomm_reduce)
+    total_active_max = total_active_size
+    call comm_get_max(total_active_max, icomm_reduce)
+    total_active_min = -total_active_size
+    call comm_get_max(total_active_min, icomm_reduce)
+    total_active_min = -total_active_min
+
+    if (total_active_min /= total_active_max) then
+      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block size mismatch: label=", &
+        trim(label), " rank=", dg_frag%id, " local=", total_active_size, &
+        " min=", total_active_min, " max=", total_active_max
+      flush(6)
+      stop 1
+    end if
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
+        " total_active=", total_active_size, " max_block=", max_block_size_global, &
+        " chunk_size=", reduce_chunk_size
+      flush(6)
+    end if
+
+    if (max_block_size_global <= 0) return
+    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+
+    do ispin = 1, dg_frag%nspin
+      do ifrag_col = 1, dg_frag%n_frag
+        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        if (ncol <= 0) cycle
+        do ifrag_row = 1, dg_frag%n_frag
+          nrow = dg_frag%n_basis(ifrag_row, ispin)
+          if (nrow <= 0) cycle
+          block_size = nrow * ncol
+          offset_flat = 1
+          do jj = 1, ncol
+            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+            if (ig_j < 1 .or. ig_j > size(mat, 2)) then
+              write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block column index out of range: label=", &
+                trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_col=", ifrag_col, " ig_j=", ig_j
+              flush(6)
+              stop 1
+            end if
+            do ii = 1, nrow
+              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+              if (ig_i < 1 .or. ig_i > size(mat, 1)) then
+                write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block row index out of range: label=", &
+                  trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_row=", ifrag_row, " ig_i=", ig_i
+                flush(6)
+                stop 1
+              end if
+              send_block(offset_flat) = mat(ig_i, ig_j, ispin)
+              offset_flat = offset_flat + 1
+            end do
+          end do
+          if (offset_flat /= block_size + 1) then
+            write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block pack mismatch: label=", &
+              trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_row=", ifrag_row, " ifrag_col=", ifrag_col
+            flush(6)
+            stop 1
+          end if
+
+          chunk_begin = 1
+          do while (chunk_begin <= block_size)
+            chunk_count = min(reduce_chunk_size, block_size - chunk_begin + 1)
+            call comm_summation(send_block(chunk_begin:chunk_begin + chunk_count - 1), &
+                                recv_block(chunk_begin:chunk_begin + chunk_count - 1), chunk_count, icomm_reduce)
+            chunk_begin = chunk_begin + chunk_count
+          end do
+
+          offset_flat = 1
+          do jj = 1, ncol
+            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
+            do ii = 1, nrow
+              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+              mat(ig_i, ig_j, ispin) = recv_block(offset_flat)
+              offset_flat = offset_flat + 1
+            end do
+          end do
+          if (offset_flat /= block_size + 1) then
+            write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block unpack mismatch: label=", &
+              trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_row=", ifrag_row, " ifrag_col=", ifrag_col
+            flush(6)
+            stop 1
+          end if
+        end do
+      end do
+    end do
+
+    deallocate(send_block, recv_block)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
+        " total_active=", total_active_size
+      flush(6)
+    end if
+  end subroutine reduce_matrix_fragment_blocks
 
   !=======================================================================
   ! Build total local potential on the given grid:
@@ -1733,7 +2005,7 @@
   !=======================================================================
   subroutine calculate_overlap_matrix(dg_frag, system, mg)
     use structures
-    use communication, only: comm_summation, comm_is_root
+    use communication, only: comm_is_root
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -1745,16 +2017,12 @@
     integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
-    integer :: offset_flat, sample_n, nan_count
-    integer :: mat_size, n_eval, lwork, info_eig
-    integer(8) :: mat_size64
-    logical :: log_frag_progress, log_reduce_diag
+    integer :: n_eval, lwork, info_eig
+    logical :: log_frag_progress
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
     real(8) :: frag_self_start, frag_halo_start
     real(8) :: work_query(1)
-    real(8) :: sum_abs_flat, max_abs_flat
-    real(8), allocatable :: S_flat(:), S_tmp_flat(:)
     real(8), allocatable :: S_eval(:,:), eigvals(:), eig_work(:)
 
     if (.not. dg_frag%has_real_space_basis) return
@@ -1961,75 +2229,19 @@
     write(*,*) "        overlap reduce begin"
     flush(6)
     call cpu_time(t0)
-    mat_size64 = int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%nspin, kind=8)
-    if (mat_size64 >= huge(mat_size)) then
-      write(*,*) "[FATAL] overlap reduce mat_size overflow: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-        " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " nspin=", dg_frag%nspin, &
-        " mat_size64=", mat_size64
-      stop 1
-    end if
-    mat_size = int(mat_size64)
-    allocate(S_flat(mat_size), S_tmp_flat(mat_size))
-    log_reduce_diag = (dg_frag%ifrag_group == 42 .or. dg_frag%ifrag_group == 43)
-    sample_n = min(8, mat_size)
-    offset_flat = 1
-    do ispin = 1, dg_frag%nspin
-      do jj = 1, dg_frag%n_mat_max
-        do ii = 1, dg_frag%n_mat_max
-          S_flat(offset_flat) = dg_frag%S_mat(ii, jj, ispin)
-          offset_flat = offset_flat + 1
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat, dg_frag%S_mat_blocks, dg_frag%S_block_map)
+    call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
+    if (.not. dg_frag%is_frag_root) then
+      dg_frag%S_mat = 0.0d0
+      if (allocated(dg_frag%S_mat_blocks)) then
+        do i_halo = 1, size(dg_frag%S_mat_blocks)
+          dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
         end do
-      end do
-    end do
-    if (offset_flat /= mat_size + 1) then
-      write(*,*) "[FATAL] overlap reduce pack mismatch: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-        " ifrag_group=", dg_frag%ifrag_group, " offset=", offset_flat, " mat_size=", mat_size
-      stop 1
-    end if
-    if (log_reduce_diag) then
-      nan_count = count(S_flat /= S_flat)
-      sum_abs_flat = sum(abs(S_flat))
-      max_abs_flat = maxval(abs(S_flat))
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,l1,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,i0)') &
-        "        overlap reduce stats: stage=", "before-frag-comm", " rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " root=", dg_frag%is_frag_root, &
-        " isize_frag=", dg_frag%isize_frag, " isize=", dg_frag%isize, " mat_size=", mat_size, &
-        " sample_n=", sample_n, " sumabs=", sum_abs_flat, " maxabs=", max_abs_flat, " nan=", nan_count
-      if (sample_n > 0) then
-        write(*,'(1x,a,8(1pe12.4,1x))') "        overlap reduce sample: ", S_flat(1:sample_n)
       end if
-      flush(6)
+    else
+      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%S_mat)
     end if
-    call comm_summation(S_flat, S_tmp_flat, mat_size, dg_frag%icomm_frag)
-    if (log_reduce_diag) then
-      nan_count = count(S_tmp_flat /= S_tmp_flat)
-      sum_abs_flat = sum(abs(S_tmp_flat))
-      max_abs_flat = maxval(abs(S_tmp_flat))
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,i0)') &
-        "        overlap reduce stats: stage=", "after-frag-comm", " rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-        " sumabs=", sum_abs_flat, " maxabs=", max_abs_flat, " nan=", nan_count
-      if (sample_n > 0) then
-        write(*,'(1x,a,8(1pe12.4,1x))') "        overlap reduce sample: ", S_tmp_flat(1:sample_n)
-      end if
-      flush(6)
-    end if
-    offset_flat = 1
-    do ispin = 1, dg_frag%nspin
-      do jj = 1, dg_frag%n_mat_max
-        do ii = 1, dg_frag%n_mat_max
-          dg_frag%S_mat(ii, jj, ispin) = S_tmp_flat(offset_flat)
-          offset_flat = offset_flat + 1
-        end do
-      end do
-    end do
-    if (offset_flat /= mat_size + 1) then
-      write(*,*) "[FATAL] overlap reduce unpack mismatch (frag): rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-        " ifrag_group=", dg_frag%ifrag_group, " offset=", offset_flat, " mat_size=", mat_size
-      stop 1
-    end if
-    if (.not. dg_frag%is_frag_root) dg_frag%S_mat = 0.0d0
-    deallocate(S_flat, S_tmp_flat)
     call cpu_time(t1)
     time_reduce_total = time_reduce_total + (t1 - t0)
     write(*,'(1x,a,1pe12.4)') "        overlap reduce done time=", time_reduce_total
@@ -2046,39 +2258,10 @@
       end do
     end do
 
-    do ispin = 1, dg_frag%nspin
-      n_eval = dg_frag%n_mat(ispin)
-      if (n_eval <= 1) cycle
-      if (comm_is_root(dg_frag%id)) then
-        allocate(S_eval(n_eval, n_eval), eigvals(n_eval))
-        S_eval(:, :) = dg_frag%S_mat(1:n_eval, 1:n_eval, ispin)
-        lwork = -1
-        call dsyev('N', 'U', n_eval, S_eval, n_eval, eigvals, work_query, lwork, info_eig)
-        if (info_eig == 0) then
-          lwork = max(1, int(work_query(1)))
-          allocate(eig_work(lwork))
-          call dsyev('N', 'U', n_eval, S_eval, n_eval, eigvals, eig_work, lwork, info_eig)
-          deallocate(eig_work)
-        end if
-        if (info_eig == 0) then
-          s_min = eigvals(1)
-          s_max = eigvals(n_eval)
-          if (abs(s_min) > 1.0d-14) then
-            cond_est = abs(s_max / s_min)
-          else
-            cond_est = huge(1.0d0)
-          end if
-          write(*,'(a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-            '        [S-eig] spin=', ispin, ' min=', s_min, ' max=', s_max, ' cond~', cond_est
-        else
-          write(*,'(a,i0,a,i0)') '        [S-eig] spin=', ispin, ' dsyev failed, info=', info_eig
-        end if
-        deallocate(S_eval, eigvals)
-      end if
-    end do
-
     ! Default propagation overlap equals the raw fragment overlap.
     dg_frag%S_mat_prop(:, :, :) = dg_frag%S_mat(:, :, :)
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_prop, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map)
     dg_frag%has_global_overlap_copy = .false.
     dg_frag%overlap_prop_root_authoritative = .true.
 

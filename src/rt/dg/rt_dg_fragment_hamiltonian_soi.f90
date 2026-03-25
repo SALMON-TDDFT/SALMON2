@@ -948,37 +948,6 @@
 
     dg_frag%S_mat = real(dg_frag%S_mat_c, kind=8)
 
-    do ispin = 1, dg_frag%nspin
-      n_eval = dg_frag%n_mat(ispin)
-      if (n_eval <= 1) cycle
-      allocate(S_eval(n_eval, n_eval), eigvals(n_eval), rwork(max(1, 3*n_eval-2)))
-      S_eval(:, :) = dg_frag%S_mat_c(1:n_eval, 1:n_eval, ispin)
-      lwork = -1
-      call zheev('N', 'U', n_eval, S_eval, n_eval, eigvals, cwork_query, lwork, rwork, info_eig)
-      if (info_eig == 0) then
-        lwork = max(1, int(real(cwork_query(1), kind=8)))
-        allocate(eig_work(lwork))
-        call zheev('N', 'U', n_eval, S_eval, n_eval, eigvals, eig_work, lwork, rwork, info_eig)
-        deallocate(eig_work)
-      end if
-      if (comm_is_root(dg_frag%id)) then
-        if (info_eig == 0) then
-          s_min = eigvals(1)
-          s_max = eigvals(n_eval)
-          if (abs(s_min) > 1.0d-14) then
-            cond_est = abs(s_max / s_min)
-          else
-            cond_est = huge(1.0d0)
-          end if
-          write(*,'(a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-            '        [S-eig] spin=', ispin, ' min=', s_min, ' max=', s_max, ' cond~', cond_est
-        else
-          write(*,'(a,i0,a,i0)') '        [S-eig] spin=', ispin, ' dsyev failed, info=', info_eig
-        end if
-      end if
-      deallocate(S_eval, eigvals, rwork)
-    end do
-
     ! Default propagation overlap equals the raw fragment overlap.
     dg_frag%S_mat_prop(:, :, :) = dg_frag%S_mat(:, :, :)
     dg_frag%S_mat_prop_c(:, :, :) = dg_frag%S_mat_c(:, :, :)
