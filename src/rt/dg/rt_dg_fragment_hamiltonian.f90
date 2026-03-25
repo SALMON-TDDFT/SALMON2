@@ -319,6 +319,7 @@
     use structures
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
+    use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -344,7 +345,13 @@
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
+    type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
+    integer :: n_local_diag, nbf_max, i_diag, iblk, nbf_diag
+    logical :: release_dense_fragment_ops
     
+    release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
+      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
+
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
         allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
@@ -401,7 +408,8 @@
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  [1/3] Momentum matrix already available"
       end if
-      if (.not. allocated(dg_frag%S_mat)) then
+      if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_blocks) .and. &
+          .not. allocated(dg_frag%S_mat_prop_blocks)) then
         phi_checksum_before = 0.0d0
         i_local_chk = 0
         do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -458,15 +466,8 @@
       write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
     end if
     
-    ! Allocate only when needed to keep the momentum-matrix peak lower.
-    if (.not. allocated(dg_frag%H_mat)) then
-      allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    end if
-    if (.not. allocated(dg_frag%H_mat_kinetic)) then
-      allocate(dg_frag%H_mat_kinetic(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    end if
-    dg_frag%H_mat = 0.0d0
-    dg_frag%H_mat_kinetic = 0.0d0
+    if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
+    if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
     hmat_dense_mb = 0.0d0
     overlap_dense_mb = 0.0d0
     momentum_dense_mb = 0.0d0
@@ -531,6 +532,27 @@
       " S_dense_MB=", overlap_dense_mb, " P_dense_MB=", momentum_dense_mb, " phi_MB=", phi_frag_mb, &
       " halo_MB=", halo_buf_mb
     flush(6)
+
+    n_local_diag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
+    if (n_local_diag > 0) then
+      allocate(H_diag_blocks(n_local_diag), H_kin_diag_blocks(n_local_diag))
+      do i_diag = 1, n_local_diag
+        ifrag = dg_frag%ifrag_start + i_diag - 1
+        nbf_max = max(1, maxval(dg_frag%n_basis(ifrag, 1:dg_frag%nspin)))
+        H_diag_blocks(i_diag)%ifrag_row = ifrag
+        H_diag_blocks(i_diag)%ifrag_col = ifrag
+        H_diag_blocks(i_diag)%nrow_max = nbf_max
+        H_diag_blocks(i_diag)%ncol_max = nbf_max
+        allocate(H_diag_blocks(i_diag)%val(nbf_max, nbf_max, dg_frag%nspin))
+        H_diag_blocks(i_diag)%val = 0.0d0
+        H_kin_diag_blocks(i_diag)%ifrag_row = ifrag
+        H_kin_diag_blocks(i_diag)%ifrag_col = ifrag
+        H_kin_diag_blocks(i_diag)%nrow_max = nbf_max
+        H_kin_diag_blocks(i_diag)%ncol_max = nbf_max
+        allocate(H_kin_diag_blocks(i_diag)%val(nbf_max, nbf_max, dg_frag%nspin))
+        H_kin_diag_blocks(i_diag)%val = 0.0d0
+      end do
+    end if
     
     ! Exchange halo regions between fragments before stencil operations
     ! This ensures accurate Laplacian calculation at fragment boundaries
@@ -655,8 +677,8 @@
             do io = 1, nbf
               ig_i = dg_frag%index_basis(io, ifrag, ispin)
               if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-              dg_frag%H_mat_kinetic(ig_i, ig_j, ispin) = reduced_t(io)
-              dg_frag%H_mat(ig_i, ig_j, ispin) = reduced_h(io)
+              H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
+              H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
             if (jo == 1 .or. jo == nbf) then
               write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian H_mat store done: rank=", dg_frag%id, &
@@ -695,14 +717,35 @@
     flush(6)
     
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat_kinetic, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map)
+    do i_diag = 1, n_local_diag
+      iblk = find_matrix_block(dg_frag%H_block_map, H_diag_blocks(i_diag)%ifrag_row, H_diag_blocks(i_diag)%ifrag_col)
+      if (iblk <= 0) cycle
+      do ispin = 1, dg_frag%nspin
+        nbf_diag = dg_frag%n_basis(H_diag_blocks(i_diag)%ifrag_row, ispin)
+        if (nbf_diag <= 0) cycle
+        dg_frag%H_mat_blocks(iblk)%val(1:nbf_diag, 1:nbf_diag, ispin) = H_diag_blocks(i_diag)%val(1:nbf_diag, 1:nbf_diag, ispin)
+        dg_frag%H_mat_kinetic_blocks(iblk)%val(1:nbf_diag, 1:nbf_diag, ispin) = &
+          H_kin_diag_blocks(i_diag)%val(1:nbf_diag, 1:nbf_diag, ispin)
+      end do
+    end do
+    do i_diag = 1, n_local_diag
+      if (allocated(H_diag_blocks(i_diag)%val)) deallocate(H_diag_blocks(i_diag)%val)
+      if (allocated(H_kin_diag_blocks(i_diag)%val)) deallocate(H_kin_diag_blocks(i_diag)%val)
+    end do
+    if (allocated(H_diag_blocks)) deallocate(H_diag_blocks)
+    if (allocated(H_kin_diag_blocks)) deallocate(H_kin_diag_blocks)
     ! CRITICAL: MPI aggregation of Hamiltonian matrix
     ! Each rank computed elements only for its assigned fragments.
     ! Reduce one fragment block at a time to avoid a single dense global allreduce.
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
+    if (.not. allocated(dg_frag%H_mat)) then
+      allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+    end if
+    if (.not. allocated(dg_frag%H_mat_kinetic)) then
+      allocate(dg_frag%H_mat_kinetic(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+    end if
     call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
     write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
@@ -754,6 +797,9 @@
           end do
         end do
       end do
+    end if
+    if (release_dense_fragment_ops) then
+      if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     end if
     
     deallocate(V_total)
@@ -2082,7 +2128,7 @@
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
     integer :: n_eval, lwork, info_eig
-    logical :: log_frag_progress
+    logical :: log_frag_progress, release_dense_overlap
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
     real(8) :: frag_self_start, frag_halo_start
@@ -2091,6 +2137,9 @@
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_mat)) return
+
+    release_dense_overlap = (.not. dg_frag%yn_adaptive_basis) .and. &
+      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
 
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
@@ -2326,6 +2375,10 @@
     dg_frag%S_mat_prop(:, :, :) = dg_frag%S_mat(:, :, :)
     call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
     call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_prop, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map)
+    if (release_dense_overlap) then
+      if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
+      if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
+    end if
     dg_frag%has_global_overlap_copy = .false.
     dg_frag%overlap_prop_root_authoritative = .false.
 

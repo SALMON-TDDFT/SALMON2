@@ -226,6 +226,8 @@ module rt_dg_fragment_types
     complex(8), allocatable :: H_mat_mixed(:,:,:)     ! Full Hamiltonian (fragment + PW)
     complex(8), allocatable :: S_mat_mixed_prop(:,:,:) ! propagation overlap in mixed basis
     complex(8), allocatable :: S_mat_frag_pw(:,:,:) ! Overlap <fragment_i | PW_j>
+    complex(8), allocatable :: H_mat_frag_pw(:,:,:) ! Hamiltonian <fragment_i | PW_j>
+    complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block
     real(8), allocatable :: pw_orthogonalized(:,:,:) ! [UNUSED] Orthogonalized PWs in real space
 
     ! ===================================================================

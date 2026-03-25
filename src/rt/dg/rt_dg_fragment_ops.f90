@@ -12,6 +12,7 @@ module rt_dg_fragment_ops
   public :: apply_momentum_blocks
   public :: apply_matrix_blocks
   public :: apply_matrix_blocks_batch
+  public :: apply_mixed_hamiltonian
   public :: copy_matrix_blocks_to_complex_dense
   public :: apply_overlap_operator
   public :: copy_overlap_operator_to_dense
@@ -190,6 +191,49 @@ contains
     if (n_use <= 0) return
   end subroutine ensure_overlap_prop_available
 
+  subroutine apply_mixed_hamiltonian(dg_frag, ispin, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:, :)
+    complex(8), intent(inout) :: y(:, :)
+
+    integer :: n_frag, n_pw, n_tot, ipw
+
+    n_frag = dg_frag%n_mat(ispin)
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+    y(:, :) = (0.0d0, 0.0d0)
+
+    if (n_frag > 0) then
+      if (allocated(dg_frag%H_mat_blocks)) then
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) then
+        y(1:n_frag, :) = matmul(dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
+      else if (allocated(dg_frag%H_mat)) then
+        y(1:n_frag, :) = matmul(cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
+      end if
+    end if
+
+    if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
+      y(1:n_frag, :) = y(1:n_frag, :) + matmul(dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
+      y(n_frag+1:n_tot, :) = y(n_frag+1:n_tot, :) + matmul(conjg(transpose(dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag, :))
+    end if
+
+    if (n_pw > 0) then
+      if (allocated(dg_frag%H_mat_pw_diag)) then
+        do ipw = 1, n_pw
+          y(n_frag+ipw, :) = y(n_frag+ipw, :) + dg_frag%H_mat_pw_diag(ipw, ispin) * x(n_frag+ipw, :)
+        end do
+      else
+        do ipw = 1, n_pw
+          y(n_frag+ipw, :) = y(n_frag+ipw, :) + 0.5d0 * sum(dg_frag%k_pw(:, ipw)**2) * x(n_frag+ipw, :)
+        end do
+      end if
+    end if
+  end subroutine apply_mixed_hamiltonian
+
   subroutine apply_overlap_operator(dg_frag, ispin, x, y, use_prop)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -208,6 +252,22 @@ contains
 
     if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
       y(1:n_tot) = matmul(dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin), x(1:n_tot))
+    else if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+        call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
+      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+        call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
+        y(1:n_frag) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
+        y(1:n_frag) = matmul(cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
+      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+        y(1:n_frag) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
+      else if (allocated(dg_frag%S_mat)) then
+        y(1:n_frag) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
+      end if
+      y(1:n_frag) = y(1:n_frag) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot))
+      y(n_frag+1:n_tot) = x(n_frag+1:n_tot) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
     else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
@@ -230,7 +290,7 @@ contains
     logical, intent(in) :: use_prop
     complex(8), intent(inout) :: mat(:, :)
 
-    integer :: n_frag, n_pw, n_tot
+    integer :: n_frag, n_pw, n_tot, ipw
 
     n_frag = dg_frag%n_mat(ispin)
     n_pw = 0
@@ -240,6 +300,25 @@ contains
 
     if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
       mat(1:n_tot, 1:n_tot) = dg_frag%S_mat_mixed_prop(1:n_tot, 1:n_tot, ispin)
+    else if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+        call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, mat(1:n_frag, 1:n_frag))
+      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+        call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, mat(1:n_frag, 1:n_frag))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
+        mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin)
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
+        mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+        mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
+      else if (allocated(dg_frag%S_mat)) then
+        mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+      end if
+      mat(1:n_frag, n_frag+1:n_tot) = dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin)
+      mat(n_frag+1:n_tot, 1:n_frag) = conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin)))
+      do ipw = 1, n_pw
+        mat(n_frag+ipw, n_frag+ipw) = (1.0d0, 0.0d0)
+      end do
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, mat(1:n_frag, 1:n_frag))
     else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then

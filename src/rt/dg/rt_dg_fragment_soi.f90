@@ -1444,6 +1444,8 @@ contains
     if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
     if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
+    if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
+    if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)
     if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
       call comm_free_group(dg_frag%icomm_frag)
       dg_frag%icomm_frag = COMM_GROUP_NULL

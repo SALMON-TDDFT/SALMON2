@@ -18,12 +18,16 @@
     real(8), allocatable :: Vpsl_mat(:,:,:), Vh_mat(:,:,:), Vxc_mat(:,:,:)
     real(8) :: max_asym_vpsl, max_asym_vh, max_asym_vxc
     integer :: nmat_chk
+    logical :: release_dense_h
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
       return  ! Cannot reconstruct without basis functions
     end if
     
+    release_dense_h = (.not. dg_frag%yn_adaptive_basis) .and. &
+      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
+
     hvol = system%hvol
     is = dg_frag%lg%is
     ie = dg_frag%lg%ie
@@ -63,6 +67,10 @@
     ! For basis update detection: A temporary H_mat_full is constructed
     ! including A·p and A² terms to capture complete Hamiltonian change
     
+    if (.not. allocated(dg_frag%H_mat)) then
+      allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+    end if
+
     ! Step 1: Reset to kinetic parts
     dg_frag%H_mat(:, :, :) = dg_frag%H_mat_kinetic(:, :, :)
 
@@ -304,6 +312,9 @@
     ! Keep complex Hamiltonian view consistent with reconstructed H_mat.
     if (allocated(dg_frag%H_mat_c)) then
       dg_frag%H_mat_c(:, :, :) = cmplx(dg_frag%H_mat(:, :, :), 0.0d0, kind=8)
+    end if
+    if (release_dense_h) then
+      if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     end if
     
   end subroutine reconstruct_hamiltonian_matrix

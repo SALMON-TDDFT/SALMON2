@@ -1,8 +1,8 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, copy_overlap_operator_to_dense, &
-                                  gather_full_coef_view
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian, &
+                                  copy_overlap_operator_to_dense, gather_full_coef_view
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -101,17 +101,19 @@
         H0c(1:n_tot, 1:n_tot) = dg_frag%H_mat_mixed(1:n_tot, 1:n_tot, ispin)
       end if
 
-      if (any(dg_frag%H_mat(1:n, 1:n, ispin) /= dg_frag%H_mat(1:n, 1:n, ispin))) then
-        write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_mat: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
-        stop "NaN in H_mat"
-      end if
-      if (any(abs(dg_frag%H_mat(1:n, 1:n, ispin)) > huge_val)) then
-        write(*,'(a,i0,a,i0,a,i0)') "[Inf] H_mat: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
-        stop "Inf in H_mat"
-      end if
-      if (maxval(abs(dg_frag%H_mat(1:n, 1:n, ispin))) > 1.0d150) then
-        write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |H_mat| huge: rank=", dg_frag%id, " itt=", itt, &
-          " ispin=", ispin, " max=", maxval(abs(dg_frag%H_mat(1:n, 1:n, ispin)))
+      if (allocated(dg_frag%H_mat)) then
+        if (any(dg_frag%H_mat(1:n, 1:n, ispin) /= dg_frag%H_mat(1:n, 1:n, ispin))) then
+          write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_mat: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
+          stop "NaN in H_mat"
+        end if
+        if (any(abs(dg_frag%H_mat(1:n, 1:n, ispin)) > huge_val)) then
+          write(*,'(a,i0,a,i0,a,i0)') "[Inf] H_mat: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
+          stop "Inf in H_mat"
+        end if
+        if (maxval(abs(dg_frag%H_mat(1:n, 1:n, ispin))) > 1.0d150) then
+          write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |H_mat| huge: rank=", dg_frag%id, " itt=", itt, &
+            " ispin=", ispin, " max=", maxval(abs(dg_frag%H_mat(1:n, 1:n, ispin)))
+        end if
       end if
       
       if (has_nonlocal) then
@@ -202,7 +204,17 @@
 
       ! dcoef_dt = -i * H0c * coef - M * coef
       dcoef_dt_h0(:, :) = (0.0d0, 0.0d0)
-      if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
+      if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
+        call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, :), dcoef_dt_h0(1:n_tot, :))
+        if (has_nonlocal) then
+          dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
+            matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+        end if
+        do io = 1, n_tot
+          dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
+        end do
+        dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
+      else if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
         if (has_nonlocal) then
           dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
