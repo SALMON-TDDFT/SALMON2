@@ -19,15 +19,15 @@
       n_frag = dg_frag%n_mat(ispin)
       n_pw = 0
       if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-      if (n_pw > 0) n_frag = dg_frag%n_mat_max
+      use_S = allocated(dg_frag%S_mat_frag_pw) .or. allocated(dg_frag%S_mat_prop_c) .or. &
+              allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat) .or. &
+              allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)
+      if (n_pw > 0 .or. use_S) n_frag = dg_frag%n_mat_max
       n_tot = n_frag + n_pw
       n = n_tot
       nstab = min(dg_frag%nstate_tot, n)
       if (n <= 0 .or. nstab <= 0) cycle
 
-      use_S = allocated(dg_frag%S_mat_frag_pw) .or. allocated(dg_frag%S_mat_prop_c) .or. &
-              allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat) .or. &
-              allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)
       allocate(v(n), Sv(n), u_prev(n))
       allocate(coef_frag_all(n_frag, nstab))
       coef_frag_all(:, :) = dg_frag%coef(1:n_frag, 1:nstab, ispin)
@@ -100,7 +100,8 @@
         dev_post_max = max(dev_post_max, abs(sqrt(max(0.0d0, norm2_v)) - 1.0d0))
       end do
 
-      deallocate(v, Sv, u_prev, coef_frag_all, coef_pw_all)
+      deallocate(v, Sv, u_prev, coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     call zero_nonowned_coefficients(dg_frag)
