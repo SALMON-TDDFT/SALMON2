@@ -6,6 +6,7 @@
     use salmon_xc, only: s_xc_functional, exchange_correlation
     use hartree_sub, only: hartree
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
+    use rt_dg_fragment_ops, only: refresh_pw_coef_cache
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -28,6 +29,9 @@
     complex(8), allocatable :: S_frag_pw(:,:,:), H_frag_pw(:,:,:)
     integer :: n_frag, n_pw
 
+    if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
+      call refresh_pw_coef_cache(dg_frag)
+    end if
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call hartree(lg, mg, info, system, fg, poisson, srg_scalar, stencil, rho, Vh)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &

@@ -2,7 +2,7 @@
     use structures
     use salmon_global, only: nelec, nelec_spin
     use communication, only: comm_summation, comm_isend, comm_irecv, comm_wait_all
-    use rt_dg_fragment_ops, only: fetch_remote_coef_pw_rows
+    use rt_dg_fragment_ops, only: refresh_pw_coef_cache
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -25,9 +25,8 @@
     real(8) :: total_charge, total_charge_local, scale_rho, elec_num_scaled_local
     real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta
     real(8), allocatable :: w_local(:,:,:)
-    integer, allocatable :: pw_row_ids(:), req_send(:), req_recv(:)
+    integer, allocatable :: req_send(:), req_recv(:)
     logical, allocatable :: send_active(:), recv_active(:)
-    complex(8), allocatable :: coef_pw_full(:,:,:)
     type(s_scalar), allocatable :: rho_send(:), w_send(:), rho_recv(:), w_recv(:)
 
     rho%f = 0.0d0
@@ -83,17 +82,9 @@
       end if
     end do
 
+    if (n_pw > 0 .and. .not. allocated(dg_frag%coef_pw_full_cache)) call refresh_pw_coef_cache(dg_frag)
+
     if (dg_frag%is_frag_root) then
-      if (n_pw > 0) then
-        allocate(pw_row_ids(n_pw))
-        do ipw = 1, n_pw
-          pw_row_ids(ipw) = ipw
-        end do
-        allocate(coef_pw_full(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-        coef_pw_full(:, :, :) = (0.0d0, 0.0d0)
-        call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_full)
-        deallocate(pw_row_ids)
-      end if
 
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -156,7 +147,7 @@
                     do ipw = 1, n_pw
                       theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
                       phase_pw = cmplx(cos(theta), sin(theta), kind=8)
-                      ci = coef_pw_full(ipw, io, ispin)
+                      ci = dg_frag%coef_pw_full_cache(ipw, io, ispin)
                       psi_val = psi_val + ci * phase_pw * inv_sqrt_vol
                     end do
                   end if
@@ -248,7 +239,6 @@
       rho_s(ispin)%f = rho%f / real(system%nspin, 8)
     end do
 
-    if (allocated(coef_pw_full)) deallocate(coef_pw_full)
     deallocate(w_local, send_active, recv_active, rho_send, w_send, rho_recv, w_recv)
 
   contains

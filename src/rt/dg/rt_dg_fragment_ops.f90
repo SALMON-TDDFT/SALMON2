@@ -20,6 +20,7 @@ module rt_dg_fragment_ops
   public :: fetch_remote_coef_rows
   public :: pack_owned_coef_pw
   public :: fetch_remote_coef_pw_rows
+  public :: refresh_pw_coef_cache
   public :: gather_full_coef_view
   public :: zero_nonowned_coefficients
 
@@ -200,7 +201,7 @@ contains
 
     integer :: n_frag, n_pw, n_tot, ipw
 
-    n_frag = dg_frag%n_mat(ispin)
+    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
@@ -244,7 +245,7 @@ contains
 
     integer :: n_frag, n_pw, n_tot
 
-    n_frag = dg_frag%n_mat(ispin)
+    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
@@ -292,7 +293,7 @@ contains
 
     integer :: n_frag, n_pw, n_tot, ipw
 
-    n_frag = dg_frag%n_mat(ispin)
+    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
@@ -652,6 +653,46 @@ contains
     end do
     deallocate(row_buf)
   end subroutine fetch_remote_coef_pw_rows
+
+  subroutine refresh_pw_coef_cache(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: i, n_pw
+    integer, allocatable :: pw_row_ids(:)
+
+    if (.not. dg_frag%use_plane_wave_basis) then
+      if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
+      return
+    end if
+    if (.not. allocated(dg_frag%coef_pw) .or. .not. allocated(dg_frag%coef_pw_owner)) then
+      if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
+      return
+    end if
+
+    n_pw = dg_frag%n_plane_waves
+    if (n_pw <= 0) then
+      if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
+      return
+    end if
+
+    if (.not. allocated(dg_frag%coef_pw_full_cache)) then
+      allocate(dg_frag%coef_pw_full_cache(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
+    else if (size(dg_frag%coef_pw_full_cache, 1) /= n_pw .or. &
+             size(dg_frag%coef_pw_full_cache, 2) /= dg_frag%nstate_tot .or. &
+             size(dg_frag%coef_pw_full_cache, 3) /= dg_frag%nspin) then
+      deallocate(dg_frag%coef_pw_full_cache)
+      allocate(dg_frag%coef_pw_full_cache(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
+    end if
+
+    allocate(pw_row_ids(n_pw))
+    do i = 1, n_pw
+      pw_row_ids(i) = i
+    end do
+    dg_frag%coef_pw_full_cache(:, :, :) = (0.0d0, 0.0d0)
+    call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, dg_frag%coef_pw_full_cache)
+    deallocate(pw_row_ids)
+  end subroutine refresh_pw_coef_cache
 
   subroutine gather_full_coef_view(dg_frag, ispin, n_frag_rows, nstate_use, coef_frag, coef_pw)
     implicit none

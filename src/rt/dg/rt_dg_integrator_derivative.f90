@@ -302,7 +302,7 @@
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m
       n_s = 0
-      if (n_pw > 0 .and. allocated(dg_frag%S_mat_mixed_prop)) then
+      if (n_pw > 0 .and. (allocated(dg_frag%S_mat_mixed_prop) .or. allocated(dg_frag%S_mat_frag_pw))) then
         n_s = n_tot
         allocate(S_eval(n_s, n_s))
         call copy_overlap_operator_to_dense(dg_frag, ispin, .true., S_eval)

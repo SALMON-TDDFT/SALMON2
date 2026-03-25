@@ -1466,6 +1466,7 @@ contains
     ! Plane wave basis deallocations
     if (allocated(dg_frag%k_pw)) deallocate(dg_frag%k_pw)
     if (allocated(dg_frag%coef_pw)) deallocate(dg_frag%coef_pw)
+    if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
     if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
     if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)

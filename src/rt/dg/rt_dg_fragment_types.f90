@@ -213,6 +213,7 @@ module rt_dg_fragment_types
     real(8), allocatable :: k_pw(:,:)         ! Wave vectors (3, n_plane_waves)
     complex(8), allocatable :: coef_pw(:,:,:) ! PW coefficients (n_plane_waves, nstate_tot, nspin)
     integer, allocatable :: coef_pw_owner(:)  ! (n_plane_waves), owning rank of each PW row
+    complex(8), allocatable :: coef_pw_full_cache(:,:,:) ! subgroup-replicated PW coefficients for local-density evaluation
     integer :: owned_coef_pw_start = 0         ! first owned PW row (contiguous hint)
     integer :: owned_coef_pw_end = -1          ! last owned PW row (contiguous hint)
     logical :: use_subspace_diag              ! Use compact DG subspace diagonalization path

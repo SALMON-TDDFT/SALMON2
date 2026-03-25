@@ -9,6 +9,7 @@
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
+    use rt_dg_fragment_ops, only: refresh_pw_coef_cache
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -52,6 +53,10 @@
       end if
       return
     end if
+    if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
+      call refresh_pw_coef_cache(dg_frag)
+    end if
+
     ! Step 1: Calculate electron density from fragment basis coefficients
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
       ! --- NaNチェック: rho ---

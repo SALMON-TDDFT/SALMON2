@@ -75,6 +75,16 @@ CHECKS = [
             },
         ],
     },
+    {
+        "name": "task4_overlap_memory_release",
+        "patterns": [
+            {
+                "file": "src/rt/dg/rt_dg_fragment_hamiltonian.f90",
+                "regex": r"sync_dense_matrix_to_blocks\s*\(\s*dg_frag\s*,\s*dg_frag%S_mat_prop\s*,\s*dg_frag%S_mat_prop_blocks\s*,\s*dg_frag%S_block_map\s*\)[\s\S]*?if\s*\(\s*\(\s*\.not\.\s*dg_frag%use_plane_wave_basis\s*\)\s*\.or\.\s*dg_frag%n_plane_waves\s*<=\s*0\s*\)\s*then[\s\S]*?if\s*\(\s*allocated\s*\(\s*dg_frag%S_mat_prop\s*\)\s*\)\s*deallocate\s*\(\s*dg_frag%S_mat_prop\s*\)",
+                "message": "DG-only overlap path still keeps dense S_mat_prop alive after block copies are available",
+            },
+        ],
+    },
 ]
 
 

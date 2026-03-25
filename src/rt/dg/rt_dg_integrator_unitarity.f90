@@ -19,6 +19,7 @@
       n_frag = dg_frag%n_mat(ispin)
       n_pw = 0
       if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+      if (n_pw > 0) n_frag = dg_frag%n_mat_max
       n_tot = n_frag + n_pw
       n = n_tot
       nstab = min(dg_frag%nstate_tot, n)
