@@ -9,7 +9,7 @@
     type(s_scalar),         intent(in)    :: Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
     
-    integer :: ifrag, ispin, io, jo, ix, iy, iz, idir, i_local, ig_i, ig_j, nbf, nbf_raw
+    integer :: ifrag, ispin, io, jo, ix, iy, iz, idir, i_local, ig_i, ig_j, nbf, nbf_raw, iblk
     integer :: lx, ly, lz, gx, gy, gz
     integer :: iorg(3), ndom(3)
     real(8) :: hvol, A_squared
@@ -18,7 +18,7 @@
     real(8), allocatable :: Vpsl_mat(:,:,:), Vh_mat(:,:,:), Vxc_mat(:,:,:)
     real(8) :: max_asym_vpsl, max_asym_vh, max_asym_vxc
     integer :: nmat_chk
-    logical :: release_dense_h
+    logical :: release_dense_h, use_block_reconstruct
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
@@ -26,7 +26,10 @@
     end if
     
     release_dense_h = (.not. dg_frag%yn_adaptive_basis) .and. &
-      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
+      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0) .and. &
+      (yn_hse /= 'y')
+    use_block_reconstruct = allocated(dg_frag%H_mat_blocks) .and. allocated(dg_frag%H_mat_kinetic_blocks) .and. &
+      allocated(dg_frag%H_block_map) .and. release_dense_h
 
     hvol = system%hvol
     is = dg_frag%lg%is
@@ -67,21 +70,29 @@
     ! For basis update detection: A temporary H_mat_full is constructed
     ! including A·p and A² terms to capture complete Hamiltonian change
     
-    if (.not. allocated(dg_frag%H_mat)) then
+    if ((.not. use_block_reconstruct) .and. (.not. allocated(dg_frag%H_mat))) then
       allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
     end if
 
     ! Step 1: Reset to kinetic parts
-    dg_frag%H_mat(:, :, :) = dg_frag%H_mat_kinetic(:, :, :)
+    if (use_block_reconstruct) then
+      do iblk = 1, size(dg_frag%H_mat_blocks)
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :)
+      end do
+    else
+      dg_frag%H_mat(:, :, :) = dg_frag%H_mat_kinetic(:, :, :)
+    end if
 
     ! Allocate diagnostic matrices for potential terms
     nmat_chk = dg_frag%n_mat_max
-    allocate(Vpsl_mat(nmat_chk, nmat_chk, system%nspin))
-    allocate(Vh_mat(nmat_chk, nmat_chk, system%nspin))
-    allocate(Vxc_mat(nmat_chk, nmat_chk, system%nspin))
-    Vpsl_mat = 0.0d0
-    Vh_mat = 0.0d0
-    Vxc_mat = 0.0d0
+    if (.not. use_block_reconstruct) then
+      allocate(Vpsl_mat(nmat_chk, nmat_chk, system%nspin))
+      allocate(Vh_mat(nmat_chk, nmat_chk, system%nspin))
+      allocate(Vxc_mat(nmat_chk, nmat_chk, system%nspin))
+      Vpsl_mat = 0.0d0
+      Vh_mat = 0.0d0
+      Vxc_mat = 0.0d0
+    end if
     
     ! Step 2-4: Add updated potential matrix elements
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -201,11 +212,19 @@
             
             ! Add potential contributions: V_psl + V_H + V_xc
             ! Note: A·p and A²/2 are NOT added here (added in time evolution)
-            dg_frag%H_mat(ig_i, ig_j, ispin) = dg_frag%H_mat(ig_i, ig_j, ispin) + &
-                                           real(integral_Vpsl + integral_Vh + integral_Vxc, kind=8)
-            Vpsl_mat(ig_i, ig_j, ispin) = Vpsl_mat(ig_i, ig_j, ispin) + integral_Vpsl
-            Vh_mat(ig_i, ig_j, ispin) = Vh_mat(ig_i, ig_j, ispin) + integral_Vh
-            Vxc_mat(ig_i, ig_j, ispin) = Vxc_mat(ig_i, ig_j, ispin) + integral_Vxc
+            if (use_block_reconstruct) then
+              iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
+              if (iblk > 0) then
+                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + &
+                  real(integral_Vpsl + integral_Vh + integral_Vxc, kind=8)
+              end if
+            else
+              dg_frag%H_mat(ig_i, ig_j, ispin) = dg_frag%H_mat(ig_i, ig_j, ispin) + &
+                                             real(integral_Vpsl + integral_Vh + integral_Vxc, kind=8)
+              Vpsl_mat(ig_i, ig_j, ispin) = Vpsl_mat(ig_i, ig_j, ispin) + integral_Vpsl
+              Vh_mat(ig_i, ig_j, ispin) = Vh_mat(ig_i, ig_j, ispin) + integral_Vh
+              Vxc_mat(ig_i, ig_j, ispin) = Vxc_mat(ig_i, ig_j, ispin) + integral_Vxc
+            end if
             
           end do
         end do
@@ -245,72 +264,96 @@
     if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
       call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     end if
-    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
+    if (.not. use_block_reconstruct) then
+      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
+    end if
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-reconstruct", dg_frag%icomm)
-    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
+    if (.not. use_block_reconstruct) then
+      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
+    end if
 
     ! Per-term asymmetry diagnostics
-    do ispin = 1, system%nspin
-      max_asym_vpsl = 0.0d0
-      max_asym_vh = 0.0d0
-      max_asym_vxc = 0.0d0
-      !$omp parallel do collapse(2) private(io,jo) reduction(max:max_asym_vpsl,max_asym_vh,max_asym_vxc) schedule(static)
-      do jo = 1, nmat_chk
-        do io = 1, nmat_chk
-          max_asym_vpsl = max(max_asym_vpsl, abs(Vpsl_mat(io, jo, ispin) - Vpsl_mat(jo, io, ispin)))
-          max_asym_vh = max(max_asym_vh, abs(Vh_mat(io, jo, ispin) - Vh_mat(jo, io, ispin)))
-          max_asym_vxc = max(max_asym_vxc, abs(Vxc_mat(io, jo, ispin) - Vxc_mat(jo, io, ispin)))
-        end do
-      end do
-      !$omp end parallel do
-      if (max_asym_vpsl > 1.0d-8 .or. max_asym_vh > 1.0d-8 .or. max_asym_vxc > 1.0d-8) then
-        write(*,'(1x,a,i0,a,i0,a,es12.4,a,es12.4,a,es12.4)') "[WARN] term asymmetry: rank=", &
-          dg_frag%id, " ispin=", ispin, " Vpsl=", max_asym_vpsl, " Vh=", max_asym_vh, &
-          " Vxc=", max_asym_vxc
-      end if
-    end do
-
-    deallocate(Vpsl_mat, Vh_mat, Vxc_mat)
-
-    ! Hermiticity check: max |H - H^T| (H is real)
-    block
-      integer :: nmat_chk
-      real(8) :: max_asym
-      nmat_chk = dg_frag%n_mat_max
+    if (.not. use_block_reconstruct) then
       do ispin = 1, system%nspin
-        max_asym = 0.0d0
-        !$omp parallel do collapse(2) private(io,jo) reduction(max:max_asym) schedule(static)
+        max_asym_vpsl = 0.0d0
+        max_asym_vh = 0.0d0
+        max_asym_vxc = 0.0d0
+        !$omp parallel do collapse(2) private(io,jo) reduction(max:max_asym_vpsl,max_asym_vh,max_asym_vxc) schedule(static)
         do jo = 1, nmat_chk
           do io = 1, nmat_chk
-            max_asym = max(max_asym, abs(dg_frag%H_mat(io, jo, ispin) - dg_frag%H_mat(jo, io, ispin)))
+            max_asym_vpsl = max(max_asym_vpsl, abs(Vpsl_mat(io, jo, ispin) - Vpsl_mat(jo, io, ispin)))
+            max_asym_vh = max(max_asym_vh, abs(Vh_mat(io, jo, ispin) - Vh_mat(jo, io, ispin)))
+            max_asym_vxc = max(max_asym_vxc, abs(Vxc_mat(io, jo, ispin) - Vxc_mat(jo, io, ispin)))
           end do
         end do
         !$omp end parallel do
-        if (max_asym > 1.0d-8) then
-          write(*,'(1x,a,i0,a,i0,a,es12.4)') "[WARN] H_mat not Hermitian: rank=", dg_frag%id, &
-            " ispin=", ispin, " max|H-H^T|=", max_asym
+        if (max_asym_vpsl > 1.0d-8 .or. max_asym_vh > 1.0d-8 .or. max_asym_vxc > 1.0d-8) then
+          write(*,'(1x,a,i0,a,i0,a,es12.4,a,es12.4,a,es12.4)') "[WARN] term asymmetry: rank=", &
+            dg_frag%id, " ispin=", ispin, " Vpsl=", max_asym_vpsl, " Vh=", max_asym_vh, &
+            " Vxc=", max_asym_vxc
         end if
       end do
-    end block
+
+      deallocate(Vpsl_mat, Vh_mat, Vxc_mat)
+    end if
+
+    ! Hermiticity check: max |H - H^T| (H is real)
+    if (.not. use_block_reconstruct) then
+      block
+        integer :: nmat_chk
+        real(8) :: max_asym
+        nmat_chk = dg_frag%n_mat_max
+        do ispin = 1, system%nspin
+          max_asym = 0.0d0
+          !$omp parallel do collapse(2) private(io,jo) reduction(max:max_asym) schedule(static)
+          do jo = 1, nmat_chk
+            do io = 1, nmat_chk
+              max_asym = max(max_asym, abs(dg_frag%H_mat(io, jo, ispin) - dg_frag%H_mat(jo, io, ispin)))
+            end do
+          end do
+          !$omp end parallel do
+          if (max_asym > 1.0d-8) then
+            write(*,'(1x,a,i0,a,i0,a,es12.4)') "[WARN] H_mat not Hermitian: rank=", dg_frag%id, &
+              " ispin=", ispin, " max|H-H^T|=", max_asym
+          end if
+        end do
+      end block
+    end if
 
     ! Enforce Hermiticity: H <- (H + H^T)/2
-    block
-      integer :: nmat_chk, io, jo
-      nmat_chk = dg_frag%n_mat_max
+    if (use_block_reconstruct) then
       do ispin = 1, system%nspin
-        !$omp parallel do private(io,jo) schedule(static)
-        do jo = 1, nmat_chk
-          do io = jo + 1, nmat_chk
-            dg_frag%H_mat(io, jo, ispin) = 0.5d0 * (dg_frag%H_mat(io, jo, ispin) + dg_frag%H_mat(jo, io, ispin))
-            dg_frag%H_mat(jo, io, ispin) = dg_frag%H_mat(io, jo, ispin)
+        do iblk = 1, size(dg_frag%H_mat_blocks)
+          if (dg_frag%H_mat_blocks(iblk)%ifrag_row /= dg_frag%H_mat_blocks(iblk)%ifrag_col) cycle
+          nbf = dg_frag%n_basis(dg_frag%H_mat_blocks(iblk)%ifrag_row, ispin)
+          do jo = 1, nbf
+            do io = jo + 1, nbf
+              dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = 0.5d0 * &
+                (dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin))
+              dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin) = dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin)
+            end do
           end do
         end do
-        !$omp end parallel do
       end do
-    end block
+    else
+      block
+        integer :: nmat_chk, io, jo
+        nmat_chk = dg_frag%n_mat_max
+        do ispin = 1, system%nspin
+          !$omp parallel do private(io,jo) schedule(static)
+          do jo = 1, nmat_chk
+            do io = jo + 1, nmat_chk
+              dg_frag%H_mat(io, jo, ispin) = 0.5d0 * (dg_frag%H_mat(io, jo, ispin) + dg_frag%H_mat(jo, io, ispin))
+              dg_frag%H_mat(jo, io, ispin) = dg_frag%H_mat(io, jo, ispin)
+            end do
+          end do
+          !$omp end parallel do
+        end do
+      end block
+    end if
 
     ! Keep complex Hamiltonian view consistent with reconstructed H_mat.
-    if (allocated(dg_frag%H_mat_c)) then
+    if ((.not. use_block_reconstruct) .and. allocated(dg_frag%H_mat_c)) then
       dg_frag%H_mat_c(:, :, :) = cmplx(dg_frag%H_mat(:, :, :), 0.0d0, kind=8)
     end if
     if (release_dense_h) then

@@ -75,7 +75,12 @@
     end if
     if (allocated(block_map)) deallocate(block_map)
 
-    n_blocks = dg_frag%n_frag * dg_frag%n_frag
+    n_blocks = 0
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        if (is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) n_blocks = n_blocks + 1
+      end do
+    end do
     if (n_blocks <= 0) return
 
     allocate(blocks(n_blocks))
@@ -85,6 +90,7 @@
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
+        if (.not. is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
         iblk = iblk + 1
         nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
         ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
@@ -2121,19 +2127,16 @@
     type(s_dft_system),     intent(in)    :: system
     type(s_rgrid),          intent(in)    :: mg
 
-    integer :: ifrag, i_local, ispin, io, jo
+    integer :: ifrag, i_local, ispin, io, jo, iblk
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj
     integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
-    integer :: n_eval, lwork, info_eig
     logical :: log_frag_progress, release_dense_overlap
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
     real(8) :: frag_self_start, frag_halo_start
-    real(8) :: work_query(1)
-    real(8), allocatable :: S_eval(:,:), eigvals(:), eig_work(:)
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_mat)) return
@@ -2143,16 +2146,14 @@
 
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
-    if (.not. allocated(dg_frag%S_mat)) then
-      allocate(dg_frag%S_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    end if
-    if (.not. allocated(dg_frag%S_mat_prop)) then
-      allocate(dg_frag%S_mat_prop(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    end if
-    dg_frag%S_mat = 0.0d0
-    dg_frag%S_mat_prop = 0.0d0
     dg_frag%has_global_overlap_copy = .true.
     dg_frag%overlap_prop_root_authoritative = .false.
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+    if (allocated(dg_frag%S_mat_blocks)) then
+      do i_halo = 1, size(dg_frag%S_mat_blocks)
+        dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
+      end do
+    end if
 
     is = mg%is
     ie = mg%ie
@@ -2242,7 +2243,8 @@
             end do
             call cpu_time(t1)
             time_self_integral = time_self_integral + (t1 - t0)
-            dg_frag%S_mat(ig_row, ig_col, ispin) = integral
+            iblk = find_matrix_block(dg_frag%S_block_map, ifrag, ifrag)
+            if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = integral
           end do
           if (log_frag_progress) then
             if (jo == 1 .or. jo == dg_frag%n_basis(ifrag, ispin) .or. &
@@ -2311,8 +2313,12 @@
               end do
               call cpu_time(t1)
               time_halo_integral = time_halo_integral + (t1 - t0)
-              dg_frag%S_mat(ig_row, ig_col, ispin) = dg_frag%S_mat(ig_row, ig_col, ispin) + 0.5d0 * integral
-              dg_frag%S_mat(ig_col, ig_row, ispin) = dg_frag%S_mat(ig_col, ig_row, ispin) + 0.5d0 * integral
+              iblk = find_matrix_block(dg_frag%S_block_map, jfrag, ifrag)
+              if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = &
+                dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * integral
+              iblk = find_matrix_block(dg_frag%S_block_map, ifrag, jfrag)
+              if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(jo, io, ispin) = &
+                dg_frag%S_mat_blocks(iblk)%val(jo, io, ispin) + 0.5d0 * integral
             end do
             if (log_frag_progress) then
               if (jo == 1 .or. jo == dg_frag%n_basis(ifrag, ispin) .or. &
@@ -2342,42 +2348,54 @@
     write(*,*) "        overlap reduce begin"
     flush(6)
     call cpu_time(t0)
-    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
-    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat, dg_frag%S_mat_blocks, dg_frag%S_block_map)
     call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
     if (.not. dg_frag%is_frag_root) then
-      dg_frag%S_mat = 0.0d0
       if (allocated(dg_frag%S_mat_blocks)) then
         do i_halo = 1, size(dg_frag%S_mat_blocks)
           dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
         end do
       end if
-    else
-      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%S_mat)
     end if
     call cpu_time(t1)
     time_reduce_total = time_reduce_total + (t1 - t0)
     write(*,'(1x,a,1pe12.4)') "        overlap reduce done time=", time_reduce_total
     flush(6)
 
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+    if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
+      do i_halo = 1, size(dg_frag%S_mat_blocks)
+        dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
+      end do
+    end if
+
     do ispin = 1, dg_frag%nspin
-      do ii = 1, dg_frag%n_mat_max
-        if (dg_frag%S_mat(ii, ii, ispin) < 1.0d-12) dg_frag%S_mat(ii, ii, ispin) = 1.0d0
-        do jj = ii + 1, dg_frag%n_mat_max
-          savg = 0.5d0 * (dg_frag%S_mat(ii, jj, ispin) + dg_frag%S_mat(jj, ii, ispin))
-          dg_frag%S_mat(ii, jj, ispin) = savg
-          dg_frag%S_mat(jj, ii, ispin) = savg
+      do ifrag = 1, dg_frag%n_frag
+        iblk = find_matrix_block(dg_frag%S_block_map, ifrag, ifrag)
+        if (iblk <= 0) cycle
+        do ii = 1, dg_frag%n_basis(ifrag, ispin)
+          if (dg_frag%S_mat_blocks(iblk)%val(ii, ii, ispin) < 1.0d-12) then
+            dg_frag%S_mat_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
+            dg_frag%S_mat_prop_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
+          end if
         end do
       end do
     end do
 
-    ! Default propagation overlap equals the raw fragment overlap.
-    dg_frag%S_mat_prop(:, :, :) = dg_frag%S_mat(:, :, :)
-    call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
-    call sync_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_prop, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map)
-    if (release_dense_overlap) then
-      if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
-      if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
+    if (.not. release_dense_overlap) then
+      allocate(dg_frag%S_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+      allocate(dg_frag%S_mat_prop(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
+      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%S_mat)
+      do ispin = 1, dg_frag%nspin
+        do ii = 1, dg_frag%n_mat_max
+          if (dg_frag%S_mat(ii, ii, ispin) < 1.0d-12) dg_frag%S_mat(ii, ii, ispin) = 1.0d0
+          do jj = ii + 1, dg_frag%n_mat_max
+            savg = 0.5d0 * (dg_frag%S_mat(ii, jj, ispin) + dg_frag%S_mat(jj, ii, ispin))
+            dg_frag%S_mat(ii, jj, ispin) = savg
+            dg_frag%S_mat(jj, ii, ispin) = savg
+          end do
+        end do
+      end do
+      dg_frag%S_mat_prop(:, :, :) = dg_frag%S_mat(:, :, :)
     end if
     dg_frag%has_global_overlap_copy = .false.
     dg_frag%overlap_prop_root_authoritative = .false.

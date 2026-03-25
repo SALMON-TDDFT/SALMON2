@@ -9,7 +9,7 @@
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use rt_dg_fragment_ops, only: refresh_pw_coef_cache
+    use rt_dg_fragment_ops, only: copy_hamiltonian_metric_to_complex_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -33,10 +33,10 @@
     complex(8), allocatable :: H_mat_metric(:,:,:)
     complex(8), allocatable :: H_mat_prev_c(:,:,:)
     real(8), allocatable :: H_mat_prev(:,:,:)
-    integer :: io, jo, ispin, n_metric
+    integer :: n_metric
     logical :: use_hmat_complex
     logical, parameter :: skip_hmat_rebuild = .false.
-    
+
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
     ! - Photovoltaic effects
@@ -53,10 +53,6 @@
       end if
       return
     end if
-    if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
-      call refresh_pw_coef_cache(dg_frag)
-    end if
-
     ! Step 1: Calculate electron density from fragment basis coefficients
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
       ! --- NaNチェック: rho ---
@@ -128,16 +124,10 @@
       allocate(H_mat_prev(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
       H_mat_prev(:, :, :) = 0.0d0
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
-      if (use_hmat_complex) then
-        allocate(H_mat_prev_c(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-        H_mat_prev_c(:, :, :) = (0.0d0, 0.0d0)
-      end if
-      if (n_metric > 0) then
-        H_mat_prev(1:n_metric, 1:n_metric, :) = dg_frag%H_mat(1:n_metric, 1:n_metric, :)
-        if (use_hmat_complex) then
-          H_mat_prev_c(1:n_metric, 1:n_metric, :) = dg_frag%H_mat_c(1:n_metric, 1:n_metric, :)
-        end if
-      end if
+      allocate(H_mat_prev_c(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+      H_mat_prev_c(:, :, :) = (0.0d0, 0.0d0)
+      if (n_metric > 0) call copy_hamiltonian_metric_to_complex_dense(dg_frag, n_metric, H_mat_prev_c)
+      if (n_metric > 0) H_mat_prev(1:n_metric, 1:n_metric, :) = real(H_mat_prev_c(1:n_metric, 1:n_metric, :))
       if (n_metric < dg_frag%nstate_frag .and. itt == 1 .and. comm_is_root(nproc_id_global)) then
         write(*,'(1x,a,i0,a,i0,a)') "[WARN] nstate_frag(", dg_frag%nstate_frag, &
                                      ") > n_mat_max(", dg_frag%n_mat_max, "); truncating adaptive metric block."
@@ -154,28 +144,7 @@
       !   Basis-update metric excludes external-field A contributions.
       !   A-dependent effects are absorbed by fixed PW augmentation in mixed basis.
       allocate(H_mat_metric(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-      H_mat_metric(:, :, :) = (0.0d0, 0.0d0)
-      if (use_hmat_complex) then
-        !$omp parallel do collapse(3) private(io,jo,ispin)
-        do ispin = 1, dg_frag%nspin
-          do jo = 1, n_metric
-            do io = 1, n_metric
-              H_mat_metric(io, jo, ispin) = dg_frag%H_mat_c(io, jo, ispin)
-            end do
-          end do
-        end do
-        !$omp end parallel do
-      else
-        !$omp parallel do collapse(3) private(io,jo,ispin)
-        do ispin = 1, dg_frag%nspin
-          do jo = 1, n_metric
-            do io = 1, n_metric
-              H_mat_metric(io, jo, ispin) = cmplx(dg_frag%H_mat(io, jo, ispin), 0.0d0, kind=8)
-            end do
-          end do
-        end do
-        !$omp end parallel do
-      end if
+      call copy_hamiltonian_metric_to_complex_dense(dg_frag, n_metric, H_mat_metric)
       
       ! Check field-free Hamiltonian change
       needs_basis_update = check_hamiltonian_change_fragments(dg_frag, H_mat_metric)
@@ -185,7 +154,9 @@
         ! User policy: when adaptive basis update is triggered, do not apply
         ! this step's Hamiltonian update to time propagation state.
         if (n_metric > 0) then
-          dg_frag%H_mat(1:n_metric, 1:n_metric, :) = H_mat_prev(1:n_metric, 1:n_metric, :)
+          if (allocated(dg_frag%H_mat)) then
+            dg_frag%H_mat(1:n_metric, 1:n_metric, :) = H_mat_prev(1:n_metric, 1:n_metric, :)
+          end if
           if (use_hmat_complex) then
             dg_frag%H_mat_c(1:n_metric, 1:n_metric, :) = H_mat_prev_c(1:n_metric, 1:n_metric, :)
           end if

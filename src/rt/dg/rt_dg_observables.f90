@@ -2,7 +2,7 @@
     use salmon_global, only: nelec, theory
     use structures
     use communication, only: comm_summation
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, gather_full_coef_view
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian, gather_full_coef_view
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -12,7 +12,7 @@
     type(s_rt),             intent(inout) :: rt
     integer,                intent(in)    :: itt
     
-    integer :: io, ispin, idir, n, nocc, n_pw
+    integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot
     integer :: ifrag, jfrag, ib, jb, i_idx, j_idx
     logical :: do_interface_check
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
@@ -21,11 +21,12 @@
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
     complex(8) :: minus_i
-    complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:)
+    complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     logical :: has_nonlocal, use_hmat_complex
     logical :: use_spatial_A
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
+    complex(8) :: mfp
     ! Calculate local observables (only for assigned fragments)
     ! MPI aggregation will sum across all ranks
     current_local = 0.0d0
@@ -48,8 +49,12 @@
       energy_local = 0.0d0
       goto 1000
     end if
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n + n_pw
 
-    allocate(op_mat(n, n), tmp_mat(n, nocc))
+    allocate(tmp_mat(n, nocc))
+    if (n_pw > 0) allocate(coef_all(n_tot, nocc), tmp_all(n_tot, nocc))
     minus_i = cmplx(0.0d0, -1.0d0, kind=8)
 
     ! Current calculation via momentum operator matrix (velocity gauge)
@@ -59,28 +64,67 @@
     !   - Sign: Testing -2.0 to match conventional RT direction
     do ispin = 1, dg_frag%nspin
       call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_all, coef_pw_all)
+      if (n_pw > 0) then
+        coef_all(:, :) = (0.0d0, 0.0d0)
+        coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
+        coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
+      end if
       do idir = 1, 3
         ! momentum_mat = <φ|∇|φ>, need to apply -i via aimag() and include factor 2
-        if (allocated(dg_frag%momentum_blocks)) then
+        if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+          tmp_all(:, :) = (0.0d0, 0.0d0)
+          Ac_tot = 0.0d0
+          Ac_tot(idir) = 1.0d0
+          if (allocated(dg_frag%momentum_blocks)) then
+            call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
+          else if (allocated(dg_frag%momentum_mat_c)) then
+            if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+            op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
+            call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
+                       coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+          else
+            if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+            op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
+            call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
+                       coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+          end if
+          do jo = 1, n_pw
+            mfp = cmplx(0.0d0, dg_frag%k_pw(idir, jo), kind=8)
+            tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + mfp * coef_all(n+jo, 1:nocc)
+            do io = 1, n
+              mfp = cmplx(0.0d0, dg_frag%k_pw(idir, jo), kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
+              tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + mfp * coef_all(n+jo, 1:nocc)
+              tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) - conjg(mfp) * coef_all(io, 1:nocc)
+            end do
+          end do
+          current_tmp = 0.0d0
+          do io = 1, nocc
+            current_tmp = current_tmp + sum(aimag(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
+          end do
+        else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
           Ac_tot = 0.0d0
           Ac_tot(idir) = 1.0d0
           call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), tmp_mat)
         else if (allocated(dg_frag%momentum_mat_c)) then
+          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
           call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                      coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         else
+          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
           call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                      coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         end if
         
-        current_tmp = 0.0d0
-        do io = 1, nocc
-          ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
-          current_tmp = current_tmp + sum(aimag(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
-        end do
+        if (.not. (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw))) then
+          current_tmp = 0.0d0
+          do io = 1, nocc
+            ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
+            current_tmp = current_tmp + sum(aimag(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
+          end do
+        end if
         current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
       end do
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
@@ -98,15 +142,25 @@
     ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
     do ispin = 1, dg_frag%nspin
       call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_all, coef_pw_all)
-      use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
-      op_mat(:, :) = (0.0d0, 0.0d0)
-      if (use_hmat_complex) then
-        op_mat(:, :) = dg_frag%H_mat_c(1:n, 1:n, ispin)
-      else if (.not. allocated(dg_frag%H_mat_blocks)) then
-        op_mat(:, :) = cmplx(dg_frag%H_mat(1:n, 1:n, ispin), 0.0d0, kind=8)
+      if (n_pw > 0) then
+        coef_all(:, :) = (0.0d0, 0.0d0)
+        tmp_all(:, :) = (0.0d0, 0.0d0)
+        coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
+        coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
       end if
-      if (has_nonlocal .and. (.not. allocated(dg_frag%H_mat_blocks) .or. use_hmat_complex)) then
-        op_mat(:, :) = op_mat(:, :) + dg_frag%H_nl_cache(1:n, 1:n, ispin)
+      use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
+      if (allocated(op_mat)) op_mat(:, :) = (0.0d0, 0.0d0)
+      if (use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. use_spatial_A .or. do_interface_check) then
+        if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+        op_mat(:, :) = (0.0d0, 0.0d0)
+        if (use_hmat_complex) then
+          op_mat(:, :) = dg_frag%H_mat_c(1:n, 1:n, ispin)
+        else if (.not. allocated(dg_frag%H_mat_blocks)) then
+          op_mat(:, :) = cmplx(dg_frag%H_mat(1:n, 1:n, ispin), 0.0d0, kind=8)
+        end if
+        if (has_nonlocal .and. (.not. allocated(dg_frag%H_mat_blocks) .or. use_hmat_complex)) then
+          op_mat(:, :) = op_mat(:, :) + dg_frag%H_nl_cache(1:n, 1:n, ispin)
+        end if
       end if
       if (use_spatial_A) then
         if (.not. allocated(Ap_mat)) allocate(Ap_mat(n, n), A2_mat(n, n))
@@ -114,7 +168,40 @@
         op_mat(:, :) = op_mat(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
         op_mat(:, :) = op_mat(:, :) + minus_i * cmplx(Ap_mat(:, :), 0.0d0, kind=8)
       else
-        if (allocated(dg_frag%momentum_blocks)) then
+        if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. allocated(dg_frag%S_mat_frag_pw)) then
+          call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
+          if (has_nonlocal) then
+            tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
+              matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_all(1:n, 1:nocc))
+          end if
+          do io = 1, n_tot
+            tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + 0.5d0 * A_squared * coef_all(io, 1:nocc)
+          end do
+          if (allocated(dg_frag%momentum_blocks)) then
+            call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
+          else
+            do idir = 1, 3
+              if (allocated(dg_frag%momentum_mat_c)) then
+                if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+                op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
+              else
+                if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+                op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
+              end if
+              call zgemm('N', 'N', n, nocc, n, minus_i * Ac_tot(idir), op_mat, n, &
+                         coef_all(1:n, 1:nocc), n, (1.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+            end do
+          end if
+          do jo = 1, n_pw
+            mfp = cmplx(0.0d0, dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo)), kind=8)
+            tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + minus_i * mfp * coef_all(n+jo, 1:nocc)
+            do io = 1, n
+              mfp = cmplx(0.0d0, dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo)), kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
+              tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + minus_i * mfp * coef_all(n+jo, 1:nocc)
+              tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + minus_i * (-conjg(mfp)) * coef_all(io, 1:nocc)
+            end do
+          end do
+        else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
           if (.not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
             call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
@@ -126,16 +213,19 @@
               tmp_mat(io, :) = tmp_mat(io, :) + 0.5d0 * A_squared * coef_frag_all(io, 1:nocc)
             end do
           else
+            if (.not. allocated(op_mat)) allocate(op_mat(n, n))
             do io = 1, n
               op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
             end do
             call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                        coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
           end if
+          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, 1:nocc) = (0.0d0, 0.0d0)
           call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), op_mat(:, 1:nocc))
           tmp_mat(:, :) = tmp_mat(:, :) + minus_i * op_mat(:, 1:nocc)
         else
+          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           do io = 1, n
             op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
           end do
@@ -170,14 +260,21 @@
         end do
       end if
 
-      if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
+      if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. allocated(dg_frag%S_mat_frag_pw) .and. .not. use_spatial_A) then
+        energy_tmp = 0.0d0
+        do io = 1, nocc
+          energy_tmp = energy_tmp + sum(real(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
+        end do
+      else
+        if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
         call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                    coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+        end if
+        energy_tmp = 0.0d0
+        do io = 1, nocc
+          energy_tmp = energy_tmp + sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
+        end do
       end if
-      energy_tmp = 0.0d0
-      do io = 1, nocc
-        energy_tmp = energy_tmp + sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
-      end do
       energy_local = energy_local + energy_tmp
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
@@ -218,7 +315,10 @@
 
     if (allocated(Ap_mat)) deallocate(Ap_mat)
     if (allocated(A2_mat)) deallocate(A2_mat)
-    deallocate(op_mat, tmp_mat)
+    if (allocated(op_mat)) deallocate(op_mat)
+    deallocate(tmp_mat)
+    if (allocated(coef_all)) deallocate(coef_all)
+    if (allocated(tmp_all)) deallocate(tmp_all)
 
 
     ! Cache retained for reuse

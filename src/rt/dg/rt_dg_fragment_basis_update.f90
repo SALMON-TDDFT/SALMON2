@@ -1039,37 +1039,44 @@
 
     subroutine refresh_operator_matrices_from_local_blocks
       implicit none
-      integer :: i, j
-      real(8), allocatable :: mat_T(:,:), mat_H(:,:)
+      integer :: i, j, iblk
 
       if (.not. allocated(dg_frag%H_mat)) then
         allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
       end if
-      if (.not. allocated(dg_frag%H_mat_kinetic)) then
-        allocate(dg_frag%H_mat_kinetic(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      end if
       dg_frag%H_mat(:, :, :) = 0.0d0
-      dg_frag%H_mat_kinetic(:, :, :) = 0.0d0
+      if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+      end if
+      if (.not. allocated(dg_frag%H_mat_kinetic_blocks)) then
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+      end if
+      do iblk = 1, size(dg_frag%H_mat_blocks)
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
+        dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = 0.0d0
+      end do
 
       do ispin = 1, system%nspin
         n = dg_frag%n_mat(ispin)
         if (n <= 0) cycle
-        allocate(mat_T(n, n), mat_H(n, n))
-        mat_T = 0.0d0
-        mat_H = 0.0d0
 
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
           n_basis_local = dg_frag%n_basis(ifrag, ispin)
+          iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
           do io = 1, n_basis_local
             i = dg_frag%index_basis(io, ifrag, ispin)
             do jo = 1, n_basis_local
               j = dg_frag%index_basis(jo, ifrag, ispin)
               if (i < 1 .or. i > n) cycle
               if (j < 1 .or. j > n) cycle
-              mat_T(i, j) = mat_T(i, j) + mat_T_local(io, jo, ispin, i_local)
-              mat_H(i, j) = mat_H(i, j) + mat_H_local(io, jo, ispin, i_local)
+              if (iblk > 0) then
+                dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + mat_T_local(io, jo, ispin, i_local)
+                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + mat_H_local(io, jo, ispin, i_local)
+              end if
             end do
           end do
 
@@ -1078,39 +1085,34 @@
             jfrag = dg_frag%halo(i_halo)%ifrag_src
             if (jfrag < 1) cycle
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
             do jo = 1, n_basis_local
               j = dg_frag%index_basis(jo, ifrag, ispin)
               do io = 1, n_basis_halo
                 i = dg_frag%index_basis(io, jfrag, ispin)
                 if (i < 1 .or. i > n) cycle
                 if (j < 1 .or. j > n) cycle
-                mat_T(i, j) = mat_T(i, j) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
-                mat_T(j, i) = mat_T(j, i) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
-                mat_H(i, j) = mat_H(i, j) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
-                mat_H(j, i) = mat_H(j, i) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+                if (iblk > 0) then
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
+                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+                end if
+                iblk = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
+                if (iblk > 0) then
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk)%val(jo, io, ispin) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
+                  dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+                end if
               end do
             end do
           end do
         end do
-
-        dg_frag%H_mat_kinetic(1:n, 1:n, ispin) = mat_T
-        dg_frag%H_mat(1:n, 1:n, ispin) = mat_H
-
-        deallocate(mat_T, mat_H)
       end do
 
-      if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
-        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-      end if
-      if (.not. allocated(dg_frag%H_mat_kinetic_blocks)) then
-        call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-      end if
-
-      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat_kinetic, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map)
-      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic-basis-update", dg_frag%icomm)
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-update", dg_frag%icomm)
-      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
       call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     end subroutine refresh_operator_matrices_from_local_blocks
 

@@ -1467,6 +1467,7 @@ contains
     if (allocated(dg_frag%k_pw)) deallocate(dg_frag%k_pw)
     if (allocated(dg_frag%coef_pw)) deallocate(dg_frag%coef_pw)
     if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
+    dg_frag%coef_pw_full_cache_nstate = 0
     if (allocated(dg_frag%H_mat_mixed)) deallocate(dg_frag%H_mat_mixed)
     if (allocated(dg_frag%S_mat_mixed_prop)) deallocate(dg_frag%S_mat_mixed_prop)
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)

@@ -17,7 +17,7 @@
     integer :: ix, iy, iz, ixg, iyg, izg, owner_rank
     integer :: ig_i, nbf, ipw, n_pw
     integer :: nxyz(3), ixyz0(3)
-    integer :: nocc_per_spin, nocc_spin
+    integer :: nocc_per_spin, nocc_spin, nocc_cache
     integer :: irank, nreq_send, nreq_recv, ireq
     real(8) :: occ_factor
     complex(8) :: coef_i, psi_val, phase_pw, ci
@@ -48,6 +48,10 @@
 
     ! Closed-shell fallback: nelec = 2 * nocc_per_spin.
     nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
+    nocc_cache = nocc_per_spin
+    if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+      nocc_cache = min(dg_frag%nstate_tot, maxval(nelec_spin(1:system%nspin)))
+    end if
     occ_factor = 2.0d0 / real(system%nspin, 8)
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw) .and. allocated(dg_frag%k_pw)) then
@@ -82,7 +86,11 @@
       end if
     end do
 
-    if (n_pw > 0 .and. .not. allocated(dg_frag%coef_pw_full_cache)) call refresh_pw_coef_cache(dg_frag)
+    if (n_pw > 0) then
+      if ((.not. allocated(dg_frag%coef_pw_full_cache)) .or. dg_frag%coef_pw_full_cache_nstate < nocc_cache) then
+        call refresh_pw_coef_cache(dg_frag, nocc_cache)
+      end if
+    end if
 
     if (dg_frag%is_frag_root) then
 

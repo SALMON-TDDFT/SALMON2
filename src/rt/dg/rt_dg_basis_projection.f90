@@ -400,7 +400,7 @@ contains
   subroutine diagonalize_and_update_basis(dg_frag, system)
     use structures
     use communication, only: comm_is_root
-    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients, copy_matrix_blocks_metric_to_real_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -430,7 +430,15 @@ contains
       allocate(eigenvalues_tmp(n))
       allocate(eigenvectors(n, n))
 
-      H_work(:, :) = dg_frag%H_mat(:, :, ispin)
+      if (allocated(dg_frag%H_mat)) then
+        H_work(:, :) = dg_frag%H_mat(:, :, ispin)
+      else if (allocated(dg_frag%H_mat_blocks)) then
+        H_work(:, :) = 0.0d0
+        call copy_matrix_blocks_metric_to_real_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n, H_work)
+      else
+        write(*,*) "ERROR: Hamiltonian matrix unavailable in diagonalize_and_update_basis"
+        stop
+      end if
 
       lwork = -1
       allocate(work(1))

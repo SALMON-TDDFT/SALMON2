@@ -2,7 +2,7 @@
     use structures
     use salmon_global, only: theory
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian, &
-                                  copy_overlap_operator_to_dense, gather_full_coef_view
+                                  solve_overlap_operator_batch, gather_full_coef_view
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -19,6 +19,7 @@
     real(8) :: A_squared
     complex(8), parameter :: zi = (0.0d0, 1.0d0)  ! imaginary unit
     logical :: has_nonlocal, use_hmat_complex
+    logical :: need_h0_dense, need_m_dense
     complex(8), allocatable :: H0c(:,:), M(:,:), dcoef_dt_h0(:,:), dcoef_dt_m(:,:)
     complex(8), allocatable :: coef_all(:,:), rhs_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
@@ -28,11 +29,7 @@
     logical :: found_nan
     integer :: nan_io, nan_jo
     real(8) :: max_abs_h0, max_abs_m
-    complex(8), allocatable :: S_eval(:,:), work_s(:)
-    real(8), allocatable :: eval_s(:), rwork_s(:)
-    integer :: info_eig, lwork_s, n_s, n_floor, n_keep, n_drop, i_keep_start
-    real(8) :: eps_s, tau_drop, cond_s, amp_ratio, rhs_in_norm, rhs_out_norm, s_max
-    real(8), parameter :: eps_s_abs = 1.0d-12, eps_s_rel = 1.0d-8
+    integer :: n_s
     logical :: use_spatial_A
     logical :: disable_mfp
     character(len=32) :: env_mfp
@@ -84,20 +81,26 @@
       allocate(Ap_mat(n, n), A2_mat(n, n))
     end if
 
-    allocate(H0c(n_tot, n_tot), M(n_tot, n_tot))
     allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
     allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
 
     do ispin = 1, dg_frag%nspin
       ! Build H0c = H_0 + V_NL(A) + A^2/2
-      H0c(:, :) = (0.0d0, 0.0d0)
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
-      if (use_hmat_complex) then
+      need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks))
+      if (n_pw > 0 .and. allocated(dg_frag%H_mat_mixed) .and. .not. allocated(dg_frag%H_mat_frag_pw)) need_h0_dense = .true.
+      need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks))
+      if (need_h0_dense .and. .not. allocated(H0c)) allocate(H0c(n_tot, n_tot))
+      if (need_m_dense .and. .not. allocated(M)) allocate(M(n_tot, n_tot))
+      if (allocated(H0c)) H0c(:, :) = (0.0d0, 0.0d0)
+      if (allocated(M)) M(:, :) = (0.0d0, 0.0d0)
+
+      if (need_h0_dense .and. use_hmat_complex) then
         H0c(1:n_frag, 1:n_frag) = dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin)
-      else if (.not. allocated(dg_frag%H_mat_blocks)) then
+      else if (need_h0_dense .and. .not. allocated(dg_frag%H_mat_blocks)) then
         H0c(1:n_frag, 1:n_frag) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       end if
-      if (n_pw > 0 .and. allocated(dg_frag%H_mat_mixed)) then
+      if (need_h0_dense .and. n_pw > 0 .and. allocated(dg_frag%H_mat_mixed)) then
         H0c(1:n_tot, 1:n_tot) = dg_frag%H_mat_mixed(1:n_tot, 1:n_tot, ispin)
       end if
 
@@ -117,7 +120,9 @@
       end if
       
       if (has_nonlocal) then
+        if (need_h0_dense) then
         H0c(1:n_frag, 1:n_frag) = H0c(1:n_frag, 1:n_frag) + dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin)
+        end if
         if (any(real(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= real(dg_frag%H_nl_cache(1:n, 1:n, ispin))) .or. &
             any(aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)))) then
           write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_nl_cache: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
@@ -133,12 +138,13 @@
         H0c(:, :) = H0c(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
         M(:, :) = cmplx(Ap_mat(:, :), 0.0d0, kind=8)
       else
-        do io = 1, n_tot
-          H0c(io, io) = H0c(io, io) + 0.5d0 * A_squared
-        end do
+        if (need_h0_dense) then
+          do io = 1, n_tot
+            H0c(io, io) = H0c(io, io) + 0.5d0 * A_squared
+          end do
+        end if
 
         ! Build M = A·<∇>
-        M(:, :) = (0.0d0, 0.0d0)
         if (.not. allocated(dg_frag%momentum_blocks)) then
           do idir = 1, 3
             if (allocated(dg_frag%momentum_mat_c)) then
@@ -158,7 +164,7 @@
             end if
           end do
         end if
-        if (n_pw > 0) then
+        if (need_m_dense .and. n_pw > 0) then
           do io = 1, n_pw
             M(n_frag+io, n_frag+io) = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
           end do
@@ -173,11 +179,11 @@
           end if
         end if
       end if
-      if (any(real(M(:, :)) /= real(M(:, :))) .or. any(aimag(M(:, :)) /= aimag(M(:, :)))) then
-        write(*,'(a,i0,a,i0,a,i0)') "[NaN] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
-        stop "NaN in M"
+      if (need_m_dense .and. (any(real(M(:, :)) /= real(M(:, :))) .or. any(aimag(M(:, :)) /= aimag(M(:, :))))) then
+          write(*,'(a,i0,a,i0,a,i0)') "[NaN] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
+          stop "NaN in M"
       end if
-      if (any(abs(M(:, :)) > huge_val)) then
+      if (need_m_dense .and. any(abs(M(:, :)) > huge_val)) then
         write(*,'(a,i0,a,i0,a,i0)') "[Inf] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
         stop "Inf in M"
       end if
@@ -197,7 +203,7 @@
         stop "Inf in coef before zgemm"
       end if
 
-      if (any(abs(H0c(:, :)) > huge_val)) then
+      if (need_h0_dense .and. any(abs(H0c(:, :)) > huge_val)) then
         write(*,'(a,i0,a,i0,a,i0)') "[Inf] H0c: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
         stop "Inf in H0c"
       end if
@@ -304,68 +310,15 @@
       n_s = 0
       if (n_pw > 0 .and. (allocated(dg_frag%S_mat_mixed_prop) .or. allocated(dg_frag%S_mat_frag_pw))) then
         n_s = n_tot
-        allocate(S_eval(n_s, n_s))
-        call copy_overlap_operator_to_dense(dg_frag, ispin, .true., S_eval)
       else if (allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_prop_c) .or. &
                allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)) then
         n_s = n_frag
-        allocate(S_eval(n_s, n_s))
-        call copy_overlap_operator_to_dense(dg_frag, ispin, .true., S_eval)
       end if
       if (n_s > 0) then
-        allocate(eval_s(n_s))
-        lwork_s = max(1, 2*n_s)
-        allocate(work_s(lwork_s), rwork_s(max(1, 3*n_s-2)))
-        call zheev('V', 'U', n_s, S_eval, n_s, eval_s, work_s, lwork_s, rwork_s, info_eig)
-        if (info_eig == 0) then
-          s_max = max(eval_s(n_s), 1.0d0)
-          eps_s = max(eps_s_abs, eps_s_rel * s_max)
-          tau_drop = max(eps_s_abs, 1.0d-6 * s_max)
-          i_keep_start = 1
-          do while (i_keep_start <= n_s .and. eval_s(i_keep_start) < tau_drop)
-            i_keep_start = i_keep_start + 1
-          end do
-          n_keep = max(0, n_s - i_keep_start + 1)
-          n_drop = n_s - n_keep
-          n_floor = 0
-          if (n_keep > 0) then
-            cond_s = eval_s(n_s) / max(eval_s(i_keep_start), tau_drop)
-          else
-            cond_s = huge(1.0d0)
-          end if
-
-          allocate(rhs_in(n_s, dg_frag%nstate_tot), Uc(n_s, n_s))
-          rhs_in(:, :) = rhs_all(1:n_s, :)
-          Uc(:, :) = S_eval(:, :)
-          rhs_all(1:n_s, :) = (0.0d0, 0.0d0)
-          if (n_keep > 0) then
-            allocate(Uc_keep(n_s, n_keep), rhs_eig(n_keep, dg_frag%nstate_tot))
-            Uc_keep(:, :) = Uc(:, i_keep_start:n_s)
-            call zgemm('C', 'N', n_keep, dg_frag%nstate_tot, n_s, (1.0d0,0.0d0), Uc_keep, n_s, rhs_in, n_s, (0.0d0,0.0d0), rhs_eig, n_keep)
-            do io = 1, n_keep
-              if (eval_s(i_keep_start + io - 1) < eps_s) n_floor = n_floor + 1
-              rhs_eig(io, :) = rhs_eig(io, :) / max(eval_s(i_keep_start + io - 1), eps_s)
-            end do
-            call zgemm('N', 'N', n_s, dg_frag%nstate_tot, n_keep, (1.0d0,0.0d0), Uc_keep, n_s, rhs_eig, n_keep, (0.0d0,0.0d0), rhs_all(1:n_s,:), n_s)
-            deallocate(Uc_keep, rhs_eig)
-          end if
-
-          rhs_in_norm = sqrt(sum(abs(rhs_in(:, :))**2))
-          rhs_out_norm = sqrt(sum(abs(rhs_all(1:n_s, :))**2))
-          amp_ratio = rhs_out_norm / max(rhs_in_norm, 1.0d-300)
-          if (dg_frag%id == 0 .and. mod(itt, 10) == 0) then
-            write(*,'(1x,a,i0,a,i0,a,1pe11.3,a,1pe11.3,a,i0,a,i0,a,1pe11.3,a,1pe11.3)') &
-              "[SINV] itt=", itt, " spin=", ispin, " cond=", cond_s, " amp=", amp_ratio, &
-              " n_drop=", n_drop, " n_floor=", n_floor, " eps=", eps_s, " tau_drop=", tau_drop
-          end if
-          deallocate(rhs_in, Uc)
-        else
-          if (dg_frag%id == 0) then
-            write(*,'(1x,a,i0,a,i0,a,i0)') '[WARN] dsyev failed in S^{-1} application: info=', info_eig, &
-              ', itt=', itt, ', ispin=', ispin
-          end if
-        end if
-        deallocate(work_s, rwork_s, eval_s, S_eval)
+        allocate(rhs_in(n_s, dg_frag%nstate_tot))
+        rhs_in(:, :) = rhs_all(1:n_s, :)
+        call solve_overlap_operator_batch(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
+        deallocate(rhs_in)
       end if
 
       do io = 1, n_frag
@@ -386,7 +339,9 @@
 
     if (allocated(Ap_mat)) deallocate(Ap_mat)
     if (allocated(A2_mat)) deallocate(A2_mat)
-    deallocate(H0c, M, dcoef_dt_h0, dcoef_dt_m, coef_all, rhs_all)
+    if (allocated(H0c)) deallocate(H0c)
+    if (allocated(M)) deallocate(M)
+    deallocate(dcoef_dt_h0, dcoef_dt_m, coef_all, rhs_all)
 
     ! Cache retained for reuse
     

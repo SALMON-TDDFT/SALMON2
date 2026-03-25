@@ -162,17 +162,6 @@ contains
       dg_frag%k_pw(3, ipw) = 2.0d0*pi/Lbox(3) * dble(ikz)
     end do
 
-    allocate(dg_frag%H_mat_mixed( &
-             dg_frag%n_mat_max + dg_frag%n_plane_waves, &
-             dg_frag%n_mat_max + dg_frag%n_plane_waves, &
-             dg_frag%nspin))
-    dg_frag%H_mat_mixed = (0.0d0, 0.0d0)
-    allocate(dg_frag%S_mat_mixed_prop( &
-             dg_frag%n_mat_max + dg_frag%n_plane_waves, &
-             dg_frag%n_mat_max + dg_frag%n_plane_waves, &
-             dg_frag%nspin))
-    dg_frag%S_mat_mixed_prop = (0.0d0, 0.0d0)
-
     if (comm_is_root(info%id_rko)) then
       if (dg_frag%n_plane_waves > 0) then
         write(*,'(1x,a,f10.4,1x,a)') "Lowest PW energy: ", &
@@ -463,6 +452,14 @@ contains
 
     n_frag = dg_frag%n_mat_max
     n_pw = dg_frag%n_plane_waves
+
+    if (.not. allocated(dg_frag%H_mat_mixed)) then
+      allocate(dg_frag%H_mat_mixed(n_frag + n_pw, n_frag + n_pw, dg_frag%nspin))
+    else if (size(dg_frag%H_mat_mixed,1) /= n_frag + n_pw .or. size(dg_frag%H_mat_mixed,2) /= n_frag + n_pw .or. &
+             size(dg_frag%H_mat_mixed,3) /= dg_frag%nspin) then
+      deallocate(dg_frag%H_mat_mixed)
+      allocate(dg_frag%H_mat_mixed(n_frag + n_pw, n_frag + n_pw, dg_frag%nspin))
+    end if
 
     allocate(V_mean(dg_frag%nspin))
     call compute_mean_potential(dg_frag, Vh, Vxc, Vpsl, V_mean)

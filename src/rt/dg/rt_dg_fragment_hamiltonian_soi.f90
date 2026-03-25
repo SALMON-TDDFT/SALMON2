@@ -865,7 +865,12 @@
     end if
     if (allocated(block_map)) deallocate(block_map)
 
-    n_blocks = dg_frag%n_frag * dg_frag%n_frag
+    n_blocks = 0
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        if (is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) n_blocks = n_blocks + 1
+      end do
+    end do
     if (n_blocks <= 0) return
 
     allocate(blocks(n_blocks))
@@ -875,6 +880,7 @@
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
+        if (.not. is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
         iblk = iblk + 1
         nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
         ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
