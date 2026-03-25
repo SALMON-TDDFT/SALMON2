@@ -238,6 +238,7 @@ contains
   subroutine project_wavefunction_to_new_basis(dg_frag, system)
     use structures
     use communication, only: comm_is_root
+    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -252,6 +253,7 @@ contains
     real(8) :: overlap_sum
     real(8) :: kahan_c, term, y, t
     real(8) :: hvol
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     external :: dgesv
 
     nbasis_coef = size(dg_frag%coef, 1)
@@ -274,6 +276,7 @@ contains
     iz_u = dg_frag%nxyz_domain(3, dg_frag%ifrag_start)
 
     do ispin = 1, dg_frag%nspin
+      call gather_full_coef_view(dg_frag, ispin, nbasis_coef, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
       s_new = 0.0d0
 !$omp parallel do private(istate_new,istate_old,iz,iy,ix,overlap_sum) schedule(static)
       do istate_old = 1, dg_frag%nstate_frag
@@ -311,15 +314,18 @@ contains
           do istate_old = 1, dg_frag%nstate_frag
             coef_new(istate_new, io, ispin) = coef_new(istate_new, io, ispin) + &
               rhs(istate_new, istate_old) * &
-              dg_frag%coef(istate_old, io, ispin)
+              coef_frag_all(istate_old, io)
           end do
         end do
       end do
 !$omp end parallel do
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     dg_frag%coef(:, :, :) = coef_new(:, :, :)
     dg_frag%coef_new(:, :, :) = coef_new(:, :, :)
+    call zero_nonowned_coefficients(dg_frag)
 
     call reorthonormalize_occupied_subspace(dg_frag, system)
 
@@ -351,6 +357,7 @@ contains
   !=======================================================================
   subroutine reorthonormalize_occupied_subspace(dg_frag, system)
     use structures
+    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -358,26 +365,32 @@ contains
     integer :: ispin, iocc, jocc, n_occ, n_basis
     complex(8) :: proj
     real(8) :: norm_val
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
 
     n_basis = dg_frag%nstate_frag
     n_occ = min(system%no, dg_frag%nstate_tot)
     if (n_occ <= 0) return
 
     do ispin = 1, dg_frag%nspin
+      call gather_full_coef_view(dg_frag, ispin, size(dg_frag%coef,1), n_occ, coef_frag_all, coef_pw_all)
       do iocc = 1, n_occ
         do jocc = 1, iocc - 1
-          proj = sum(conjg(dg_frag%coef(:, jocc, ispin)) * dg_frag%coef(:, iocc, ispin))
-          dg_frag%coef(:, iocc, ispin) = dg_frag%coef(:, iocc, ispin) - proj * dg_frag%coef(:, jocc, ispin)
+          proj = sum(conjg(coef_frag_all(:, jocc)) * coef_frag_all(:, iocc))
+          coef_frag_all(:, iocc) = coef_frag_all(:, iocc) - proj * coef_frag_all(:, jocc)
         end do
 
-        norm_val = sqrt(sum(abs(dg_frag%coef(:, iocc, ispin))**2))
+        norm_val = sqrt(sum(abs(coef_frag_all(:, iocc))**2))
         if (norm_val > 1.0d-12) then
-          dg_frag%coef(:, iocc, ispin) = dg_frag%coef(:, iocc, ispin) / norm_val
+          coef_frag_all(:, iocc) = coef_frag_all(:, iocc) / norm_val
         end if
       end do
+      dg_frag%coef(:, 1:n_occ, ispin) = coef_frag_all(:, 1:n_occ)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    call zero_nonowned_coefficients(dg_frag)
 
   end subroutine reorthonormalize_occupied_subspace
 
@@ -387,6 +400,7 @@ contains
   subroutine diagonalize_and_update_basis(dg_frag, system)
     use structures
     use communication, only: comm_is_root
+    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -394,6 +408,7 @@ contains
     integer :: ispin, n, lda, lwork, info, i, j, io
     real(8), allocatable :: H_work(:,:), eigenvalues_tmp(:), eigenvectors(:,:), work(:)
     complex(8), allocatable :: coef_old(:,:,:), coef_new(:,:,:)
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     logical :: use_mixed_basis
     external :: dsyev
 
@@ -439,7 +454,8 @@ contains
       allocate(coef_old(n, dg_frag%nstate_tot, 1))
       allocate(coef_new(n, dg_frag%nstate_tot, 1))
 
-      coef_old(:, :, 1) = dg_frag%coef(:, :, ispin)
+      call gather_full_coef_view(dg_frag, ispin, n, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+      coef_old(:, :, 1) = coef_frag_all(:, :)
       coef_new = 0.0d0
 
       do io = 1, dg_frag%nstate_tot
@@ -453,9 +469,12 @@ contains
 
       dg_frag%coef(:, :, ispin) = coef_new(:, :, 1)
       dg_frag%coef_new(:, :, ispin) = coef_new(:, :, 1)
+      call zero_nonowned_coefficients(dg_frag)
 
       deallocate(H_work, eigenvalues_tmp, eigenvectors, work)
       deallocate(coef_old, coef_new)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
 
       if (comm_is_root(dg_frag%icomm)) then
         write(*,'(1x,a,i0,a)') "    Spin ", ispin, " diagonalized successfully"
