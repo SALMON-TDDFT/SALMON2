@@ -120,13 +120,17 @@
         flush(6)
       end if
       if (n_pw > 0) then
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
               dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin, 1)
             end do
           end do
+        end do
+!$omp end parallel do
+!$omp parallel do collapse(2) private(jo) schedule(static)
+        do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
               dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + 0.5d0 * dt * k_pw(jo, io, ispin, 1)
@@ -135,7 +139,7 @@
         end do
 !$omp end parallel do
       else
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -188,13 +192,17 @@
 
       ! Stage 3
       if (n_pw > 0) then
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
               dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin, 2)
             end do
           end do
+        end do
+!$omp end parallel do
+!$omp parallel do collapse(2) private(jo) schedule(static)
+        do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
               dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + 0.5d0 * dt * k_pw(jo, io, ispin, 2)
@@ -203,7 +211,7 @@
         end do
 !$omp end parallel do
       else
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -233,13 +241,17 @@
       ! Stage 4
       Ac_tot = rt%Ac_tot(:, itt+1)
       if (n_pw > 0) then
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
               dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * k(jo, io, ispin, 3)
             end do
           end do
+        end do
+!$omp end parallel do
+!$omp parallel do collapse(2) private(jo) schedule(static)
+        do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
               dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + dt * k_pw(jo, io, ispin, 3)
@@ -248,7 +260,7 @@
         end do
 !$omp end parallel do
       else
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -277,7 +289,7 @@
 
       ! Final RK4 combination
       if (n_pw > 0) then
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -286,6 +298,10 @@
                                              2.0d0 * k(jo, io, ispin, 3) + k(jo, io, ispin, 4)) / 6.0d0
             end do
           end do
+        end do
+!$omp end parallel do
+!$omp parallel do collapse(2) private(jo) schedule(static)
+        do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
               dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + dt * ( &
@@ -296,7 +312,7 @@
         end do
 !$omp end parallel do
       else
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -355,7 +371,7 @@
         if (istage < dg_frag%rk_stages) then
           ! OpenMP parallelization for coefficient update
           if (n_pw > 0) then
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
                 do jo = 1, n
@@ -364,6 +380,10 @@
                                                  dg_frag%rk_gamma(istage) * dt * k(jo, io, ispin, istage)
                 end do
               end do
+            end do
+!$omp end parallel do
+!$omp parallel do collapse(2) private(jo) schedule(static)
+            do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
                 do jo = 1, n_pw
                   ! BUG FIX: was coef_pw += gamma*dt*k_pw (missing alpha/beta terms).
@@ -376,7 +396,7 @@
             end do
 !$omp end parallel do
           else
-!$omp parallel do private(io,jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
                 do jo = 1, n
@@ -409,7 +429,7 @@
       !
       ! BUG FIX (PW): final step for coef_pw was missing entirely; added here.
       associate(rs => dg_frag%rk_stages)
-!$omp parallel do private(io, jo) schedule(static)
+!$omp parallel do collapse(2) private(jo) schedule(static)
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%nstate_tot
           do jo = 1, n
@@ -418,7 +438,11 @@
                                           dg_frag%rk_gamma(rs) * dt * k(jo, io, ispin, rs)
           end do
         end do
-        if (n_pw > 0) then
+      end do
+!$omp end parallel do
+      if (n_pw > 0) then
+!$omp parallel do collapse(2) private(jo) schedule(static)
+        do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
               dg_frag%coef_pw(jo, io, ispin) = dg_frag%rk_alpha(rs) * coef_pw_ref(jo, io, ispin) + &
@@ -426,9 +450,9 @@
                                                dg_frag%rk_gamma(rs) * dt * k_pw(jo, io, ispin, rs)
             end do
           end do
-        end if
-      end do
+        end do
 !$omp end parallel do
+      end if
       end associate
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin

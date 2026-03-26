@@ -522,7 +522,7 @@
   ! updated mixed basis obtained by diagonalize_mixed_basis_pw.
   !=======================================================================
   subroutine project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
-    use rt_dg_fragment_ops, only: apply_matrix_blocks_batch, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: copy_overlap_operator_to_dense, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(in) :: coef_old(:,:,:)
@@ -555,38 +555,10 @@
       C_old(1:n_frag, :) = coef_old(1:n_frag, 1:nst, ispin)
       if (present(coef_pw_old) .and. n_pw > 0) C_old(n_frag+1:n_tot, :) = coef_pw_old(1:n_pw, 1:nst, ispin)
 
-      if (allocated(dg_frag%S_mat_prop_c)) then
-        Sm(1:n_frag, 1:n_frag) = dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin)
-      else
-        Sm(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
-        if (n_pw > 0) then
-          Sm(n_frag+1:n_tot, n_frag+1:n_tot) = zzero
-          do ipw_local = 1, n_pw
-            Sm(n_frag+ipw_local, n_frag+ipw_local) = zone
-          end do
-        end if
-      end if
-      if (n_pw > 0) then
-        Sm(n_frag+1:n_tot, n_frag+1:n_tot) = zzero
-        do ipw_local = 1, n_pw
-          Sm(n_frag+ipw_local, n_frag+ipw_local) = zone
-        end do
-      end if
+      call copy_overlap_operator_to_dense(dg_frag, ispin, .true., Sm)
 
       ! A = U_new^† S C_old, then C_new = U_new A
-      tmp(:, :) = zzero
-      if (allocated(dg_frag%S_mat_prop_blocks)) then
-        call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
-      else if (allocated(dg_frag%S_mat_blocks)) then
-        call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, C_old(1:n_frag, :), tmp(1:n_frag, :))
-      else
-        call zgemm('N', 'N', n_frag, nst, n_frag, zone, Sm(1:n_frag, 1:n_frag), n_tot, C_old(1:n_frag, :), n_tot, zzero, tmp(1:n_frag, :), n_tot)
-      end if
-      if (n_pw > 0) then
-        call zgemm('N', 'N', n_frag, nst, n_pw, zone, Sm(1:n_frag, n_frag+1:n_tot), n_tot, &
-                   C_old(n_frag+1:n_tot, :), n_tot, zone, tmp(1:n_frag, :), n_tot)
-        tmp(n_frag+1:n_tot, :) = C_old(n_frag+1:n_tot, :)
-      end if
+      call zgemm('N', 'N', n_tot, nst, n_tot, zone, Sm, n_tot, C_old, n_tot, zzero, tmp, n_tot)
       call zgemm('C', 'N', nst, nst, n_tot, zone, U_new, n_tot, tmp, n_tot, zzero, A, nst)
       call zgemm('N', 'N', n_tot, nst, nst, zone, U_new, n_tot, A, nst, zzero, C_new, n_tot)
 

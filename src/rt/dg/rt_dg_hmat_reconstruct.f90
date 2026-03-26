@@ -10,7 +10,7 @@
     type(s_scalar),         intent(in)    :: Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
     
-    integer :: ifrag, ispin, io, jo, ix, iy, iz, idir, i_local, ig_i, ig_j, nbf, nbf_raw, iblk
+    integer :: ifrag, ispin, io, jo, ix, iy, iz, idir, i_local, ig_i, ig_j, nbf, nbf_raw, iblk, ifrag_count
     integer :: lx, ly, lz, gx, gy, gz
     integer :: iorg(3), ndom(3)
     real(8) :: hvol, A_squared
@@ -38,6 +38,7 @@
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
     end do
+    ifrag_count = max(1, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
 
     hvol = system%hvol
     is = dg_frag%lg%is
@@ -157,6 +158,24 @@
         end if
         if (nbf <= 0) cycle
         ngrid = ndom(1) * ndom(2) * ndom(3)
+        if (.not. dg_frag%density_phi_cache_valid) then
+          if (.not. allocated(dg_frag%density_phi_cache)) then
+            allocate(dg_frag%density_phi_cache(ngrid_max, dg_frag%nstate_frag, ifrag_count))
+          end if
+          dg_frag%density_phi_cache(:, :, :) = 0.0d0
+          igrid_cache = 0
+          do lz = 1, ndom(3)
+            do ly = 1, ndom(2)
+              do lx = 1, ndom(1)
+                igrid_cache = igrid_cache + 1
+                do io = 1, nbf
+                  dg_frag%density_phi_cache(igrid_cache, io, i_local) = dg_frag%phi_frag(lx, ly, lz, io, i_local)
+                end do
+              end do
+            end do
+          end do
+          dg_frag%density_phi_cache_valid = .true.
+        end if
         if (allocated(dg_frag%density_phi_cache) .and. dg_frag%density_phi_cache_valid) then
           phi_blk(1:ngrid, 1:nbf) = dg_frag%density_phi_cache(1:ngrid, 1:nbf, i_local)
         else
@@ -174,11 +193,11 @@
         end if
         igrid_cache = 0
         do lz = 1, ndom(3)
-          gz = iorg(3) + lz - 1
+          gz = modulo(iorg(3) + lz - 2, dg_frag%lgnum_total(3)) + 1
           do ly = 1, ndom(2)
-            gy = iorg(2) + ly - 1
+            gy = modulo(iorg(2) + ly - 2, dg_frag%lgnum_total(2)) + 1
             do lx = 1, ndom(1)
-              gx = iorg(1) + lx - 1
+              gx = modulo(iorg(1) + lx - 2, dg_frag%lgnum_total(1)) + 1
               igrid_cache = igrid_cache + 1
               Vpsl_blk(igrid_cache) = Vpsl%f(gx, gy, gz) * hvol
               Vh_blk(igrid_cache) = Vh%f(gx, gy, gz) * hvol

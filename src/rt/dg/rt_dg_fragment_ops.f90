@@ -19,6 +19,7 @@ module rt_dg_fragment_ops
   public :: copy_matrix_blocks_metric_to_complex_dense
   public :: copy_matrix_blocks_metric_to_real_dense
   public :: copy_hamiltonian_metric_to_complex_dense
+  public :: copy_momentum_blocks_to_complex_dense
   public :: mixed_fp_coupling_active
   public :: apply_overlap_operator
   public :: solve_overlap_operator_batch
@@ -545,6 +546,9 @@ contains
     else if (allocated(dg_frag%S_mat)) then
       y(1:n_frag) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
     end if
+    if (n_pw > 0) then
+      y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
+    end if
   end subroutine apply_overlap_operator
 
   subroutine apply_overlap_operator_batch(dg_frag, ispin, x, y, use_prop)
@@ -591,6 +595,9 @@ contains
       y(1:n_frag, :) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
     else if (allocated(dg_frag%S_mat)) then
       y(1:n_frag, :) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
+    end if
+    if (n_pw > 0) then
+      y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :)
     end if
   end subroutine apply_overlap_operator_batch
 
@@ -913,7 +920,42 @@ contains
     else if (allocated(dg_frag%S_mat)) then
       mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
     end if
+    if (n_pw > 0) then
+      do ipw = 1, n_pw
+        mat(n_frag+ipw, n_frag+ipw) = (1.0d0, 0.0d0)
+      end do
+    end if
   end subroutine copy_overlap_operator_to_dense
+
+  subroutine copy_momentum_blocks_to_complex_dense(dg_frag, ispin, scale_vec, mat)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    real(8), intent(in) :: scale_vec(3)
+    complex(8), intent(inout) :: mat(:, :)
+
+    integer :: iblk, idir, ib, jb, row_idx, col_idx, n_frag
+
+    mat(:, :) = (0.0d0, 0.0d0)
+    if (.not. allocated(dg_frag%momentum_blocks)) return
+    n_frag = dg_frag%n_mat_max
+    do iblk = 1, dg_frag%n_momentum_blocks
+      if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
+      do idir = 1, 3
+        if (abs(scale_vec(idir)) <= 0.0d0) cycle
+        do jb = 1, dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+          col_idx = dg_frag%index_basis(jb, dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+          if (col_idx < 1 .or. col_idx > n_frag) cycle
+          do ib = 1, dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
+            row_idx = dg_frag%index_basis(ib, dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
+            if (row_idx < 1 .or. row_idx > n_frag) cycle
+            mat(row_idx, col_idx) = mat(row_idx, col_idx) + &
+              cmplx(scale_vec(idir) * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin), 0.0d0, kind=8)
+          end do
+        end do
+      end do
+    end do
+  end subroutine copy_momentum_blocks_to_complex_dense
 
   subroutine sync_dense_matrix_to_blocks_runtime(dg_frag, mat, blocks, block_map)
     implicit none

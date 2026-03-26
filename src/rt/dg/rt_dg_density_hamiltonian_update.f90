@@ -88,6 +88,7 @@
       block
         integer :: ix, iy, iz, nan_count
         nan_count = 0
+!$omp parallel do collapse(3) reduction(+:nan_count) schedule(static)
         do ix = mg%is(1), mg%ie(1)
           do iy = mg%is(2), mg%ie(2)
             do iz = mg%is(3), mg%ie(3)
@@ -97,6 +98,7 @@
             end do
           end do
         end do
+!$omp end parallel do
         if (nan_count > 0) then
           write(*,'(1x,a,i0)') '[CHECK] rho NaN count = ', nan_count
         end if

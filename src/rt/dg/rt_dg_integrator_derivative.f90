@@ -2,7 +2,8 @@
     use structures
     use salmon_global, only: theory
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, apply_mixed_hamiltonian, &
-                                  solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active
+                                  solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
+                                  copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -115,6 +116,8 @@
 
       if (need_h0_dense .and. use_hmat_complex) then
         H0c(1:n_frag, 1:n_frag) = dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin)
+      else if (need_h0_dense .and. allocated(dg_frag%H_mat_blocks)) then
+        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n_frag, H0c(1:n_frag, 1:n_frag))
       else if (need_h0_dense .and. .not. allocated(dg_frag%H_mat_blocks)) then
         H0c(1:n_frag, 1:n_frag) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       end if
@@ -159,7 +162,9 @@
         end if
 
         ! Build M = A·<∇>
-        if (.not. allocated(dg_frag%momentum_blocks)) then
+        if (need_m_dense .and. allocated(dg_frag%momentum_blocks)) then
+          call copy_momentum_blocks_to_complex_dense(dg_frag, ispin, Ac_tot, M(1:n_frag, 1:n_frag))
+        else if (.not. allocated(dg_frag%momentum_blocks)) then
           do idir = 1, 3
             if (allocated(dg_frag%momentum_mat_c)) then
               if (any(abs(dg_frag%momentum_mat_c(idir, 1:n_frag, 1:n_frag, ispin)) > huge_val)) then
