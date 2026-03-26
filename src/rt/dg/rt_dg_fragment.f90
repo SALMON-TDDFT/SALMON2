@@ -1796,6 +1796,10 @@ contains
     if (allocated(dg_frag%coef_pw)) deallocate(dg_frag%coef_pw)
     if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
     dg_frag%coef_pw_full_cache_nstate = 0
+    if (allocated(dg_frag%coef_mix)) deallocate(dg_frag%coef_mix)
+    if (allocated(dg_frag%mixed_basis_dim)) deallocate(dg_frag%mixed_basis_dim)
+    if (allocated(dg_frag%mixed_transform)) deallocate(dg_frag%mixed_transform)
+    dg_frag%mixed_basis_ready = .false.
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
     if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
     if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)

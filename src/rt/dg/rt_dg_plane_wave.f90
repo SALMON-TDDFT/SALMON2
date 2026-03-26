@@ -574,7 +574,7 @@ contains
   subroutine diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     use structures
     use communication, only: comm_is_root
-    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, sync_raw_coef_from_mixed
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -664,6 +664,19 @@ contains
       end if
       deallocate(A_qr, jpvt, tau_qr, work_qr)
     end if
+
+    if (.not. allocated(dg_frag%mixed_basis_dim)) then
+      allocate(dg_frag%mixed_basis_dim(dg_frag%nspin))
+    end if
+    dg_frag%mixed_basis_dim(:) = 0
+    if (allocated(dg_frag%mixed_transform)) deallocate(dg_frag%mixed_transform)
+    allocate(dg_frag%mixed_transform(n_total, n_total, dg_frag%nspin))
+    dg_frag%mixed_transform(:, :, :) = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%coef_mix)) deallocate(dg_frag%coef_mix)
+    allocate(dg_frag%coef_mix(n_total, dg_frag%nstate_tot, dg_frag%nspin))
+    dg_frag%coef_mix(:, :, :) = (0.0d0, 0.0d0)
+    dg_frag%mixed_basis_ready = .false.
+
     if (.not. allocated(dg_frag%S_mat_frag_pw)) then
       allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
     else if (size(dg_frag%S_mat_frag_pw,1) /= n_frag .or. size(dg_frag%S_mat_frag_pw,2) /= n_pw .or. &
@@ -890,28 +903,23 @@ contains
       do i = 1, min(dg_frag%nstate_tot, n_total)
         dg_frag%esp(i, ispin) = eigenvalues_tmp(i)
       end do
+      dg_frag%mixed_basis_dim(ispin) = min(dg_frag%nstate_tot, n_total)
+      dg_frag%mixed_transform(1:n_total, 1:dg_frag%mixed_basis_dim(ispin), ispin) = &
+        eigvec(1:n_total, 1:dg_frag%mixed_basis_dim(ispin))
+      dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
+      do i = 1, dg_frag%mixed_basis_dim(ispin)
+        dg_frag%coef_mix(i, i, ispin) = (1.0d0, 0.0d0)
+      end do
+      call sync_raw_coef_from_mixed(dg_frag, ispin)
 
       coef_mixed(:, :, ispin) = (0.0d0, 0.0d0)
-      do i = 1, min(dg_frag%nstate_tot, n_total)
-        do j = 1, n_frag
-          coef_mixed(j, i, ispin) = eigvec(j, i)
-        end do
-      end do
-
-      dg_frag%coef(1:n_frag, 1:dg_frag%nstate_tot, ispin) = &
-           coef_mixed(1:n_frag, 1:dg_frag%nstate_tot, ispin)
-
-      if (n_pw > 0) then
-        do i = 1, min(dg_frag%nstate_tot, n_total)
-          do j = 1, n_pw
-            dg_frag%coef_pw(j, i, ispin) = eigvec(n_frag+j, i)
-          end do
-        end do
-      end if
+      coef_mixed(:, :, ispin) = dg_frag%mixed_transform(1:n_total, 1:n_total, ispin)
 
       deallocate(H_work, S_work, eigenvalues_tmp, eval_s, X, H_ortho, tmp_mat, eigvec, S_rebuild, work_c, rwork)
       deallocate(S_eff, S_eff_work, eval_eff)
     end do
+
+    dg_frag%mixed_basis_ready = .true.
 
     deallocate(coef_mixed, S_frag_pw, H_frag_pw)
 

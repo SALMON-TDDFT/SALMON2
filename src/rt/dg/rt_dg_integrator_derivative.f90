@@ -24,14 +24,15 @@
     complex(8), allocatable :: coef_all(:,:), rhs_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     complex(8), allocatable :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
+    complex(8), allocatable :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
     logical :: found_nan
     integer :: nan_io, nan_jo
     real(8) :: max_abs_h0, max_abs_m
-    integer :: n_s
+    integer :: n_s, n_basis
     logical :: use_spatial_A
-    logical :: disable_mfp
+    logical :: disable_mfp, use_mixed_basis
     character(len=32) :: env_mfp
     integer :: env_len, env_stat
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
@@ -100,9 +101,13 @@
       end if
       ! Build H0c = H_0 + V_NL(A) + A^2/2
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
+      use_mixed_basis = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
+                         allocated(dg_frag%mixed_basis_dim) .and. allocated(dg_frag%coef_mix))
+      n_basis = 0
+      if (use_mixed_basis) n_basis = min(dg_frag%mixed_basis_dim(ispin), n_tot, size(dg_frag%coef_mix, 1))
       need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. &
-                      (n_pw > 0 .and. .not. allocated(dg_frag%H_mat_frag_pw))
-      need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks))
+                      (n_pw > 0 .and. .not. allocated(dg_frag%H_mat_frag_pw)) .or. use_mixed_basis
+      need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks)) .or. use_mixed_basis
       if (need_h0_dense .and. .not. allocated(H0c)) allocate(H0c(n_tot, n_tot))
       if (need_m_dense .and. .not. allocated(M)) allocate(M(n_tot, n_tot))
       if (allocated(H0c)) H0c(:, :) = (0.0d0, 0.0d0)
@@ -206,6 +211,10 @@
       coef_all(:, :) = (0.0d0, 0.0d0)
       coef_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:dg_frag%nstate_tot)
       if (n_pw > 0) coef_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:dg_frag%nstate_tot)
+      if (use_mixed_basis .and. n_basis > 0) then
+        allocate(coef_mix_all(n_basis, dg_frag%nstate_tot))
+        coef_mix_all(:, :) = dg_frag%coef_mix(1:n_basis, 1:dg_frag%nstate_tot, ispin)
+      end if
 
       if (any(real(coef_all(:, :)) /= real(coef_all(:, :))) .or. &
           any(aimag(coef_all(:, :)) /= aimag(coef_all(:, :)))) then
@@ -230,7 +239,17 @@
           " ispin=", ispin, " stage=", "before-h0"
         flush(6)
       end if
-      if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
+      if (use_mixed_basis .and. n_basis > 0) then
+        allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
+        rhs_mix(:, :) = (0.0d0, 0.0d0)
+        raw_rhs(:, :) = (0.0d0, 0.0d0)
+        op_mix(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), &
+                              matmul(H0c(1:n_tot, 1:n_tot), dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin)))
+        call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, -zi, op_mix, n_basis, &
+                   coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
+        raw_rhs(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), rhs_mix)
+        dcoef_dt_h0(:, :) = raw_rhs(:, :)
+      else if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
         if (enable_derivative_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -350,7 +369,15 @@
           " ispin=", ispin, " stage=", "before-m"
         flush(6)
       end if
-      if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
+      if (use_mixed_basis .and. n_basis > 0) then
+        rhs_mix(:, :) = (0.0d0, 0.0d0)
+        op_mix(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), &
+                              matmul(M(1:n_tot, 1:n_tot), dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin)))
+        call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), op_mix, n_basis, &
+                   coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
+        raw_rhs(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), rhs_mix)
+        dcoef_dt_m(:, :) = raw_rhs(:, :)
+      else if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
         dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
         call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
         if (n_pw > 0) then
@@ -405,7 +432,9 @@
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m
       n_s = 0
-      if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
+      if (use_mixed_basis .and. n_basis > 0) then
+        n_s = 0
+      else if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
         n_s = n_tot
       else if (allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_prop_c) .or. &
                allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)) then
@@ -454,6 +483,10 @@
       end if
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+      if (allocated(coef_mix_all)) deallocate(coef_mix_all)
+      if (allocated(rhs_mix)) deallocate(rhs_mix)
+      if (allocated(raw_rhs)) deallocate(raw_rhs)
+      if (allocated(op_mix)) deallocate(op_mix)
     end do
 
     if (allocated(Ap_mat)) deallocate(Ap_mat)

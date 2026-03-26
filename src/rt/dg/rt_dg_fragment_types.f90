@@ -263,6 +263,10 @@ module rt_dg_fragment_types
     complex(8), allocatable :: H_mat_frag_pw(:,:,:) ! Hamiltonian <fragment_i | PW_j>
     complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block
     real(8), allocatable :: pw_orthogonalized(:,:,:) ! [UNUSED] Orthogonalized PWs in real space
+    logical :: mixed_basis_ready = .false.          ! startup/basis-update mixed diagonalization prepared
+    integer, allocatable :: mixed_basis_dim(:)      ! retained mixed dimension per spin
+    complex(8), allocatable :: mixed_transform(:,:,:) ! raw (F+P) basis <- orthonormal mixed basis
+    complex(8), allocatable :: coef_mix(:,:,:)      ! canonical coefficients in orthonormal mixed basis
 
     ! ===================================================================
     ! RI/DF approximation for HSE exchange (Plan C)

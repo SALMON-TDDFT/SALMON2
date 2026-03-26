@@ -103,6 +103,57 @@ Recommended additions:
 
 The raw PW data (`k_pw`, `coef_pw`, `S_mat_frag_pw`, `H_mat_frag_pw`) should remain available for rebuild events, diagnostics, and fallback.
 
+## Refined Propagation Design
+
+To actually remove `FP/PF` from the RT hot path, the propagation basis must become a first-class representation rather than a startup-only diagnostic transform.
+
+### Canonical coefficient storage
+
+For `n_pw > 0`, the canonical RT coefficients should be stored in an orthonormal mixed basis `X_mix`:
+
+- `coef_mix(:, :, ispin)` is the propagation state used by the RK integrator
+- `mixed_transform(:, :, ispin)` stores the map from the raw mixed basis `(F + P)` to `X_mix`
+- raw `coef` / `coef_pw` become rebuild views used when density, Hamiltonian reconstruction, or basis updates need the original fragment/PW representation
+
+This avoids repeatedly solving raw mixed overlap systems inside the RT loop.
+
+### Basis transforms
+
+Let `T = mixed_transform`.
+Then:
+
+- raw coefficients from mixed coefficients: `c_raw = T * c_mix`
+- mixed coefficients from raw coefficients: `c_mix = T^H * c_raw`
+
+Because `X_mix` is orthonormal by construction, the overlap in propagation space is the identity.
+This means the mixed path can bypass the raw `S_mat_frag_pw`-driven overlap solve once `coef_mix` and transformed operators are available.
+
+### Operator flow in RT
+
+At each self-consistent RK stage:
+
+1. expand `coef_mix` to raw `coef` / `coef_pw` only for density and potential rebuild
+2. rebuild raw `H` and `M` in the existing fragment/PW representation
+3. transform them to propagation space:
+   - `H_mix = T^H * H_raw * T`
+   - `M_mix = T^H * M_raw * T`
+4. evaluate the derivative directly in `X_mix`
+
+This keeps the self-consistent update exact while moving the expensive `FP/PF` algebra out of the repeated apply/solve kernels.
+
+### Basis update reprojection
+
+Basis update must also rebuild the propagation basis.
+After a fragment basis update:
+
+1. rebuild raw mixed basis objects
+2. compute a new `T_new`
+3. expand the old propagation coefficients to the old raw space
+4. project the old raw coefficients onto the new orthonormal mixed basis
+5. continue RT with the new `coef_mix`
+
+If the retained mixed dimension changes after truncation of tiny overlap eigenvalues, the reprojection should keep the common subspace norm as accurately as possible and log the dimension change.
+
 ## Execution Flow
 
 ### Initialization
@@ -123,8 +174,14 @@ The raw PW data (`k_pw`, `coef_pw`, `S_mat_frag_pw`, `H_mat_frag_pw`) should rem
 
 ### RT Loop
 
-Use the orthonormal mixed basis by default.
-Only fallback to raw mixed `FP/PF` handling if mixed re-diagonalization was not prepared.
+Use the orthonormal mixed basis by default:
+
+1. propagate `coef_mix`
+2. expand to raw coefficients only when density/Hamiltonian rebuild needs them
+3. transform rebuilt raw operators back into mixed space
+4. bypass raw mixed overlap solves because `S = I` in propagation space
+
+Only fallback to raw mixed `FP/PF` handling if mixed re-diagonalization was not prepared or if numerical rank filtering rejects the mixed basis.
 
 ## Error Handling
 

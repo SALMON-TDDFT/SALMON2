@@ -5,6 +5,7 @@
     use salmon_global, only: yn_fix_func
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
+    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw, sync_raw_coef_from_mixed
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -32,6 +33,7 @@
     integer :: istage, io, jo, ispin
     real(8) :: Ac_tot(3), t_stage
     integer :: n, n_pw
+    logical :: use_mixed_rt
     logical :: found_nan
     integer :: nan_jo, nan_io, nan_ispin
     complex(8) :: nan_val
@@ -41,6 +43,7 @@
     n = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    use_mixed_rt = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%coef_mix))
     
     ! Allocate RK stage arrays (complex for proper phase evolution)
     allocate(k(n, dg_frag%nstate_tot, dg_frag%nspin, dg_frag%rk_stages))
@@ -61,6 +64,12 @@
       ! Stage 1
       Ac_tot = rt%Ac_tot(:, itt)
       dg_frag%coef = coef_ref
+      if (use_mixed_rt) then
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+      end if
       if (enable_rk_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -136,6 +145,12 @@
         end do
 !$omp end parallel do
       end if
+      if (use_mixed_rt) then
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+      end if
       if (yn_fix_func == 'n') then
         if (enable_rk_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
@@ -198,6 +213,12 @@
         end do
 !$omp end parallel do
       end if
+      if (use_mixed_rt) then
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+      end if
       if (yn_fix_func == 'n') then
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
@@ -236,6 +257,12 @@
           end do
         end do
 !$omp end parallel do
+      end if
+      if (use_mixed_rt) then
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
       end if
       if (yn_fix_func == 'n') then
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
@@ -280,6 +307,12 @@
           end do
         end do
 !$omp end parallel do
+      end if
+      if (use_mixed_rt) then
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
       end if
       if (yn_fix_func == 'n') then
         ! Rebuild H at the final RK4 state/time so next step starts from consistent rho/H.
@@ -355,6 +388,12 @@
             end do
 !$omp end parallel do
           end if
+          if (use_mixed_rt) then
+            do ispin = 1, dg_frag%nspin
+              call sync_mixed_coef_from_raw(dg_frag, ispin)
+              call sync_raw_coef_from_mixed(dg_frag, ispin)
+            end do
+          end if
         end if
       end do
       
@@ -391,6 +430,12 @@
       end do
 !$omp end parallel do
       end associate
+      if (use_mixed_rt) then
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+      end if
       if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)
     end if
 

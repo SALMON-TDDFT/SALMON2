@@ -31,6 +31,8 @@ module rt_dg_fragment_ops
   public :: refresh_pw_coef_cache
   public :: gather_full_coef_view
   public :: zero_nonowned_coefficients
+  public :: sync_raw_coef_from_mixed
+  public :: sync_mixed_coef_from_raw
 
 contains
 
@@ -55,6 +57,79 @@ contains
 
     active = (mixed_fp_maxabs(dg_frag, ispin) > fp_tol)
   end function mixed_fp_coupling_active
+
+  subroutine sync_raw_coef_from_mixed(dg_frag, ispin)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ispin
+
+    integer :: n_frag, n_pw, n_tot, n_basis, nstate
+    complex(8), allocatable :: raw_all(:,:)
+
+    if (.not. dg_frag%mixed_basis_ready) return
+    if (.not. allocated(dg_frag%mixed_transform)) return
+    if (.not. allocated(dg_frag%mixed_basis_dim)) return
+    if (.not. allocated(dg_frag%coef_mix)) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+
+    n_frag = dg_frag%n_mat_max
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+    nstate = dg_frag%nstate_tot
+    n_basis = min(dg_frag%mixed_basis_dim(ispin), size(dg_frag%mixed_transform, 2), size(dg_frag%coef_mix, 1))
+    if (n_basis <= 0 .or. n_tot <= 0 .or. nstate <= 0) return
+
+    allocate(raw_all(n_tot, nstate))
+    raw_all(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), dg_frag%coef_mix(1:n_basis, 1:nstate, ispin))
+    dg_frag%coef(1:n_frag, 1:nstate, ispin) = raw_all(1:n_frag, 1:nstate)
+    if (n_pw > 0) dg_frag%coef_pw(1:n_pw, 1:nstate, ispin) = raw_all(n_frag+1:n_tot, 1:nstate)
+    deallocate(raw_all)
+  end subroutine sync_raw_coef_from_mixed
+
+  subroutine sync_mixed_coef_from_raw(dg_frag, ispin)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ispin
+
+    integer :: n_frag, n_pw, n_tot, n_basis, nstate
+    complex(8), allocatable :: raw_all(:,:), overlap_all(:,:), mixed_all(:,:)
+
+    if (.not. dg_frag%mixed_basis_ready) return
+    if (.not. allocated(dg_frag%mixed_transform)) return
+    if (.not. allocated(dg_frag%mixed_basis_dim)) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+
+    n_frag = dg_frag%n_mat_max
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+    nstate = dg_frag%nstate_tot
+    n_basis = min(dg_frag%mixed_basis_dim(ispin), size(dg_frag%mixed_transform, 2))
+    if (n_basis <= 0 .or. n_tot <= 0 .or. nstate <= 0) return
+
+    if (.not. allocated(dg_frag%coef_mix)) then
+      allocate(dg_frag%coef_mix(n_tot, nstate, dg_frag%nspin))
+      dg_frag%coef_mix(:, :, :) = (0.0d0, 0.0d0)
+    else if (size(dg_frag%coef_mix, 1) /= n_tot .or. size(dg_frag%coef_mix, 2) /= nstate .or. &
+             size(dg_frag%coef_mix, 3) /= dg_frag%nspin) then
+      deallocate(dg_frag%coef_mix)
+      allocate(dg_frag%coef_mix(n_tot, nstate, dg_frag%nspin))
+      dg_frag%coef_mix(:, :, :) = (0.0d0, 0.0d0)
+    end if
+
+    allocate(raw_all(n_tot, nstate), overlap_all(n_tot, nstate), mixed_all(n_basis, nstate))
+    raw_all(:, :) = (0.0d0, 0.0d0)
+    raw_all(1:n_frag, :) = dg_frag%coef(1:n_frag, 1:nstate, ispin)
+    if (n_pw > 0) raw_all(n_frag+1:n_tot, :) = dg_frag%coef_pw(1:n_pw, 1:nstate, ispin)
+
+    call apply_overlap_operator_batch(dg_frag, ispin, raw_all, overlap_all, .false.)
+    mixed_all(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), overlap_all)
+    dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
+    dg_frag%coef_mix(1:n_basis, 1:nstate, ispin) = mixed_all(:, :)
+
+    deallocate(raw_all, overlap_all, mixed_all)
+  end subroutine sync_mixed_coef_from_raw
 
   logical function is_runtime_neighbor_axis(lg, s1, n1, s2, n2) result(ok)
     implicit none

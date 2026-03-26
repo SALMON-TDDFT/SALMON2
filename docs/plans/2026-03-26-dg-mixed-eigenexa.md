@@ -1,80 +1,324 @@
-# DG Mixed Basis EigenExa Plan
+# DG Mixed Basis EigenExa Implementation Plan
 
-## Scope
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-Introduce an orthonormal mixed fragment+PW propagation basis for `n_pw > 0`, using existing dense mixed assembly and EigenExa standard-problem diagonalization.
+**Goal:** Propagate `n_pw > 0` DG-RT cases in an exact orthonormal mixed fragment+PW basis so the RT hot path no longer carries raw `FP/PF` overlap and Hamiltonian coupling every step.
 
-## Phase 1: Initialization Path
+**Architecture:** Keep raw fragment/PW quantities only as rebuild views. Introduce a canonical propagation basis `X_mix` with coefficients `coef_mix`, regenerate raw coefficients only for density and potential rebuild, and transform rebuilt raw operators back into mixed space before derivative evaluation. Basis updates must rebuild the mixed basis and reproject coefficients into the new orthonormal subspace.
 
-### 1. Add mixed-basis state to `s_dg_fragment_rt`
+**Tech Stack:** Fortran 2008, existing SALMON DG RT modules, EigenExa `eigen_sx`, LAPACK/BLAS, current mixed fragment/PW assembly routines.
 
-- readiness flag
-- retained mixed dimension per spin
-- transform matrix `X`
-- optional mixed-space coefficient storage
+---
 
-### 2. Build standard-form mixed diagonalization routine
+### Task 1: Finalize mixed-basis state in `s_dg_fragment_rt`
 
-New helper flow:
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_types.f90`
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment.f90`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
 
-1. assemble dense `S_mix`
-2. assemble dense `H_mix`
-3. diagonalize `S_mix`
-4. build `X = U * diag(s^{-1/2})`
-5. form `H_ortho = X^H H_mix X`
-6. diagonalize `H_ortho` with EigenExa or existing fallback
-7. recover mixed eigenvectors in original basis if needed
+**Step 1: Write the failing test**
 
-### 3. Wire initialization to use the new routine
+Define the expected state by inspection:
+- `mixed_basis_ready`
+- `mixed_basis_dim`
+- `mixed_transform`
+- `coef_mix`
+must exist, be invalidated on teardown, and be sized by retained mixed dimension per spin.
 
-- run after PW basis selection and mixed matrix assembly
-- keep old mixed path available behind a fallback condition
+**Step 2: Run test to verify it fails**
 
-## Phase 2: Basis Update Path
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: either missing symbols for `coef_mix` or compile success before the new data model is added.
 
-### 4. Rebuild mixed basis after adaptive fragment updates
+**Step 3: Write minimal implementation**
 
-- refresh `S_mix/H_mix`
-- rerun orthogonalization + diagonalization
-- invalidate old hot-path mixed caches if basis changed
+Add to `s_dg_fragment_rt`:
+- `complex(8), allocatable :: coef_mix(:,:,:)`
+- retained mixed dimension metadata
+- cleanup/invalidation in finalization paths
 
-### 5. Reproject coefficients
+**Step 4: Run test to verify it passes**
 
-- map old coefficient representation into the new orthonormal mixed basis
-- verify norm conservation and electron count stability
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
 
-## Phase 3: RT Hot Path Simplification
+**Step 5: Commit**
 
-### 6. Prefer orthonormal mixed propagation path
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add src/rt/dg/rt_dg_fragment_types.f90 src/rt/dg/rt_dg_fragment.f90
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Store mixed-basis propagation state"
+```
 
-In derivative / overlap / stage update:
+### Task 2: Make `diagonalize_mixed_basis` return a propagation basis
 
-- bypass raw `S_mat_frag_pw`-driven overlap solves when orthonormal mixed basis is active
-- shrink mixed refresh work to rebuild events
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_plane_wave.f90`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
 
-### 7. Keep fallback path
+**Step 1: Write the failing test**
 
-Retain current `FP/PF` path for:
+Define the required postconditions:
+- `mixed_transform` stores retained raw-to-mixed eigenvectors
+- `coef_mix` is populated from the current raw coefficients
+- `mixed_basis_ready=.true.` only after both transform and coefficients are valid
 
-- missing EigenExa build
-- numerical rank issues
-- debugging comparisons
+**Step 2: Run test to verify it fails**
 
-## Verification
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: current code compiles but does not yet populate `coef_mix`.
 
-- build: `make -C build -j4`
-- orthogonality check: `X^H S X`
-- compare RT observables for a small `n_pw > 0` case
-- time density/stage-update sections before and after
+**Step 3: Write minimal implementation**
 
-## Risks
+In `diagonalize_mixed_basis(...)`:
+- keep `mixed_transform`
+- compute `coef_mix = T^H * c_raw`
+- keep raw `coef` / `coef_pw` as rebuild views
+- set retained dimensions per spin from overlap rank truncation
 
-- coefficient reprojection mistakes during basis update
-- rank truncation changing mixed dimension unexpectedly
-- memory growth from storing transforms
+**Step 4: Run test to verify it passes**
 
-## Mitigations
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
 
-- start with initialization-only enablement
-- add explicit dimension and orthogonality diagnostics
-- gate basis-update rebuild behind a conservative flag until validated
+**Step 5: Commit**
+
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add src/rt/dg/rt_dg_plane_wave.f90
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Populate mixed propagation coefficients"
+```
+
+### Task 3: Add raw/mixed coefficient projection helpers
+
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_ops.f90`
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_types.f90`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
+
+**Step 1: Write the failing test**
+
+Define two helper behaviors:
+- expand mixed coefficients to raw `(coef, coef_pw)`
+- compress raw `(coef, coef_pw)` back to `coef_mix`
+
+**Step 2: Run test to verify it fails**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: helper routines not found yet.
+
+**Step 3: Write minimal implementation**
+
+Add routines such as:
+- `expand_mixed_coef_to_raw(...)`
+- `project_raw_coef_to_mixed(...)`
+
+These should use `mixed_transform` and support all active spins/states.
+
+**Step 4: Run test to verify it passes**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add src/rt/dg/rt_dg_fragment_ops.f90 src/rt/dg/rt_dg_fragment_types.f90
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Add mixed coefficient projection helpers"
+```
+
+### Task 4: Reproject after basis update
+
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_basis_update.f90`
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_plane_wave.f90`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
+
+**Step 1: Write the failing test**
+
+Define the required sequence:
+- save old mixed coefficients
+- rebuild raw fragment basis
+- re-diagonalize mixed basis
+- project old state into the new mixed basis
+
+**Step 2: Run test to verify it fails**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: current code invalidates mixed basis but does not reproject.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+- old mixed-to-raw expansion before invalidation
+- new raw-to-mixed projection after rebuild
+- logging or guards when retained mixed dimension changes
+
+**Step 4: Run test to verify it passes**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add src/rt/dg/rt_dg_fragment_basis_update.f90 src/rt/dg/rt_dg_plane_wave.f90
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Reproject mixed coefficients after basis updates"
+```
+
+### Task 5: Build mixed-space operators from raw rebuilds
+
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_integrator_stage_update.f90`
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_ops.f90`
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_types.f90`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
+
+**Step 1: Write the failing test**
+
+Define expected behavior:
+- stage update rebuilds raw `H` and `M`
+- mixed-ready path forms transformed operators `T^H H_raw T`, `T^H M_raw T`
+- transformed operators are cached for derivative evaluation
+
+**Step 2: Run test to verify it fails**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: no transformed mixed-space operator storage exists yet.
+
+**Step 3: Write minimal implementation**
+
+Add:
+- mixed-space operator cache fields
+- helper routines to form transformed operators
+- stage-update hook to refresh them after each self-consistent rebuild
+
+**Step 4: Run test to verify it passes**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add src/rt/dg/rt_dg_integrator_stage_update.f90 src/rt/dg/rt_dg_fragment_ops.f90 src/rt/dg/rt_dg_fragment_types.f90
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Cache transformed mixed-space operators"
+```
+
+### Task 6: Switch derivative evaluation to the orthonormal mixed basis
+
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_integrator_derivative.f90`
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/src/rt/dg/rt_dg_fragment_ops.f90`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
+
+**Step 1: Write the failing test**
+
+Define expected behavior:
+- when `mixed_basis_ready` is true, derivative uses `coef_mix`
+- overlap solve is bypassed because propagation overlap is identity
+- raw `FP/PF` coupling path remains fallback only
+
+**Step 2: Run test to verify it fails**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: current derivative still uses raw `coef/cof_pw` and overlap solves.
+
+**Step 3: Write minimal implementation**
+
+Implement mixed-ready branch in `calculate_time_derivative(...)`:
+- read `coef_mix`
+- apply transformed mixed-space `H` and `M`
+- skip `solve_overlap_operator_batch*`
+- write `dcoef_dt_mix`
+
+Keep existing raw mixed branch unchanged as fallback.
+
+**Step 4: Run test to verify it passes**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add src/rt/dg/rt_dg_integrator_derivative.f90 src/rt/dg/rt_dg_fragment_ops.f90
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Propagate mixed RT states in orthonormal basis"
+```
+
+### Task 7: Verify startup, basis update, and mixed RT behavior
+
+**Files:**
+- Modify: `/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/docs/plans/2026-03-26-dg-mixed-eigenexa-design.md`
+- Test: `make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4`
+- Test: project-specific small `n_pw > 0` smoke case
+
+**Step 1: Write the failing test**
+
+Define verification checklist:
+- `T^H S T ≈ I`
+- mixed basis dimension is stable or clearly logged after updates
+- mixed RT path runs without raw overlap solve
+- observables remain finite and electron count drift is acceptable
+
+**Step 2: Run test to verify it fails**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS for build, pending runtime verification.
+
+**Step 3: Write minimal implementation**
+
+Add minimal orthogonality and dimension diagnostics guarded behind a debug flag and update the design doc with final verification notes.
+
+**Step 4: Run test to verify it passes**
+
+Run:
+```bash
+make -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/build -j4
+```
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 add docs/plans/2026-03-26-dg-mixed-eigenexa-design.md
+git -C /Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2 commit -m "Document mixed-basis RT verification"
+```

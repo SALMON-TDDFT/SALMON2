@@ -306,7 +306,8 @@
     use structures
     use parallelization, only: nproc_id_global
     use communication, only: comm_sync_all
-    use rt_dg_fragment_ops, only: zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, sync_mixed_coef_from_raw, sync_raw_coef_from_mixed
+    use rt_dg_plane_wave, only: diagonalize_mixed_basis
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
@@ -321,9 +322,12 @@
     ! Local variables
     real(8), allocatable :: phi_frag_old(:,:,:,:,:)  ! Old basis for overlap
     complex(8), allocatable :: coef_old(:,:,:), coef_pw_old(:,:,:)
+    complex(8), allocatable :: coef_mix_old(:,:,:), mixed_transform_old(:,:,:)
+    integer, allocatable :: mixed_basis_dim_old(:)
     logical :: basis_functions_changed, overlap_is_valid
+    logical :: had_old_mixed_basis
     logical :: is_global_root
-    integer :: i
+    integer :: i, ispin
 
     is_global_root = (nproc_id_global == 0)
     if (is_global_root) then
@@ -354,6 +358,19 @@
         coef_pw_old = dg_frag%coef_pw
       end if
     end if
+    had_old_mixed_basis = dg_frag%mixed_basis_ready
+    if (allocated(dg_frag%mixed_basis_dim)) then
+      allocate(mixed_basis_dim_old(size(dg_frag%mixed_basis_dim)))
+      mixed_basis_dim_old = dg_frag%mixed_basis_dim
+    end if
+    if (allocated(dg_frag%mixed_transform)) then
+      allocate(mixed_transform_old(size(dg_frag%mixed_transform,1), size(dg_frag%mixed_transform,2), size(dg_frag%mixed_transform,3)))
+      mixed_transform_old = dg_frag%mixed_transform
+    end if
+    if (allocated(dg_frag%coef_mix)) then
+      allocate(coef_mix_old(size(dg_frag%coef_mix,1), size(dg_frag%coef_mix,2), size(dg_frag%coef_mix,3)))
+      coef_mix_old = dg_frag%coef_mix
+    end if
 
     if (is_global_root) then
       write(*,*) "  [1/3] Old basis saved to memory"
@@ -372,20 +389,53 @@
     ! Step 3: Basis update and state transfer (no SCF loop)
     ! ========================================================
     if (dg_frag%use_plane_wave_basis) then
-      ! Normal RT mixed-basis updates must not require a dense global mixed EVP.
-      ! In the current mixed path the real-space fragment basis is not refreshed
-      ! here, so the propagated state transfer is the identity in the existing
-      ! fragment+PW representation.
-      dg_frag%coef(:, :, :) = coef_old(:, :, :)
-      dg_frag%coef_new(:, :, :) = coef_old(:, :, :)
-      if (allocated(coef_pw_old) .and. allocated(dg_frag%coef_pw)) then
-        dg_frag%coef_pw(:, :, :) = coef_pw_old(:, :, :)
-      end if
-      call zero_nonowned_coefficients(dg_frag)
+      call update_fragment_basis_via_cg(dg_frag, system, info, mg, stencil, srg, ppg, Vh, Vxc, Vpsl, basis_functions_changed)
 
-      if (is_global_root) then
-        write(*,'(1x,a)') "  Mixed basis update: skipped dense global re-diagonalization"
-        write(*,'(1x,a)') "  Propagated fragment/PW coefficients carried forward in-place"
+      call comm_sync_all(dg_frag%icomm)
+
+      overlap_is_valid = .true.
+      call validate_overlap_matrix(dg_frag, overlap_is_valid)
+
+      if (.not. overlap_is_valid) then
+        if (is_global_root) then
+          write(*,'(1x,a)') "  [WARN] Updated mixed basis rejected: overlap matrix is ill-conditioned"
+          write(*,'(1x,a)') "  [WARN] Restoring previous basis, mixed transform, and coefficients"
+        end if
+        if (allocated(phi_frag_old)) dg_frag%phi_frag = phi_frag_old
+        dg_frag%coef = coef_old
+        dg_frag%coef_new = coef_old
+        if (allocated(coef_pw_old) .and. allocated(dg_frag%coef_pw)) dg_frag%coef_pw = coef_pw_old
+        if (allocated(dg_frag%mixed_basis_dim)) deallocate(dg_frag%mixed_basis_dim)
+        if (allocated(mixed_basis_dim_old)) then
+          allocate(dg_frag%mixed_basis_dim(size(mixed_basis_dim_old)))
+          dg_frag%mixed_basis_dim = mixed_basis_dim_old
+        end if
+        if (allocated(dg_frag%mixed_transform)) deallocate(dg_frag%mixed_transform)
+        if (allocated(mixed_transform_old)) then
+          allocate(dg_frag%mixed_transform(size(mixed_transform_old,1), size(mixed_transform_old,2), size(mixed_transform_old,3)))
+          dg_frag%mixed_transform = mixed_transform_old
+        end if
+        if (allocated(dg_frag%coef_mix)) deallocate(dg_frag%coef_mix)
+        if (allocated(coef_mix_old)) then
+          allocate(dg_frag%coef_mix(size(coef_mix_old,1), size(coef_mix_old,2), size(coef_mix_old,3)))
+          dg_frag%coef_mix = coef_mix_old
+        end if
+        dg_frag%mixed_basis_ready = had_old_mixed_basis
+        call zero_nonowned_coefficients(dg_frag)
+      else
+        call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
+        call project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+        dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+        call zero_nonowned_coefficients(dg_frag)
+
+        if (is_global_root) then
+          write(*,'(1x,a)') "  Mixed basis update: rebuilt orthonormal mixed basis"
+          write(*,'(1x,a)') "  Old propagated state reprojected into updated mixed basis"
+        end if
       end if
     else
       ! Reproduce the intended GS-DC partial workflow in RT:
@@ -450,11 +500,20 @@
 
     if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
     dg_frag%density_phi_cache_valid = .false.
+    if (.not. dg_frag%use_plane_wave_basis) then
+      dg_frag%mixed_basis_ready = .false.
+      if (allocated(dg_frag%mixed_basis_dim)) dg_frag%mixed_basis_dim(:) = 0
+      if (allocated(dg_frag%mixed_transform)) deallocate(dg_frag%mixed_transform)
+      if (allocated(dg_frag%coef_mix)) deallocate(dg_frag%coef_mix)
+    end if
 
     ! Cleanup
     if (allocated(phi_frag_old)) deallocate(phi_frag_old)
     if (allocated(coef_old)) deallocate(coef_old)
     if (allocated(coef_pw_old)) deallocate(coef_pw_old)
+    if (allocated(coef_mix_old)) deallocate(coef_mix_old)
+    if (allocated(mixed_transform_old)) deallocate(mixed_transform_old)
+    if (allocated(mixed_basis_dim_old)) deallocate(mixed_basis_dim_old)
 
   end subroutine update_basis_via_dc_cg
 
