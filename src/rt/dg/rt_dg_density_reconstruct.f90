@@ -21,6 +21,7 @@
     integer :: irank, nreq_send, nreq_recv, ireq, slot, npts
     integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
     integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
+    logical, parameter :: enable_density_trace = .false.
     real(8) :: occ_factor
     real(8) :: phi_i, rho_contrib
     real(8) :: total_charge, total_charge_local, scale_rho, elec_num_scaled_local
@@ -44,7 +45,7 @@
     time_project = 0.0d0
     time_comm = 0.0d0
     time_norm = 0.0d0
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        density trace: stage=entry"
       flush(6)
     end if
@@ -61,8 +62,6 @@
     allocate(rho_blk(grid_block_size))
     allocate(coef_blk(dg_frag%nstate_frag, state_block_size))
     allocate(psi_blk(grid_block_size, state_block_size))
-    allocate(phase_blk(grid_block_size, pw_block_size))
-    allocate(coef_pw_blk(pw_block_size, state_block_size))
     allocate(rho_send(0:dg_frag%isize-1), w_send(0:dg_frag%isize-1))
     allocate(rho_recv(0:dg_frag%isize-1), w_recv(0:dg_frag%isize-1))
 
@@ -78,6 +77,10 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw) .and. allocated(dg_frag%k_pw)) then
       n_pw = dg_frag%n_plane_waves
+    end if
+    if (n_pw > 0) then
+      allocate(phase_blk(grid_block_size, pw_block_size))
+      allocate(coef_pw_blk(pw_block_size, state_block_size))
     end if
     boxL(1) = dg_frag%hgs(1) * real(mg%num(1), 8)
     boxL(2) = dg_frag%hgs(2) * real(mg%num(2), 8)
@@ -116,13 +119,13 @@
       call cpu_time(t_cache1)
       time_cache = time_cache + (t_cache1 - t_cache0)
     end if
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-pw-cache dt=", "", time_cache
       flush(6)
     end if
 
     if (dg_frag%is_frag_root) then
-      if (dg_frag%id == 0) then
+      if (enable_density_trace .and. dg_frag%id == 0) then
         write(*,'(1x,a)') "        density trace: stage=before-frag-loop"
         flush(6)
       end if
@@ -264,14 +267,14 @@
       end do
       call cpu_time(t_project1)
       time_project = time_project + (t_project1 - t_project0)
-      if (dg_frag%id == 0) then
+      if (enable_density_trace .and. dg_frag%id == 0) then
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
         flush(6)
       end if
       end do
     end if
 
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        density trace: stage=before-comm"
       flush(6)
     end if
@@ -333,12 +336,12 @@
     end if
     call cpu_time(t_comm1)
     time_comm = time_comm + (t_comm1 - t_comm0)
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-comm dt=", "", time_comm
       flush(6)
     end if
 
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        density trace: stage=before-normalize"
       flush(6)
     end if
@@ -364,16 +367,18 @@
     end do
     call cpu_time(t_norm1)
     time_norm = time_norm + (t_norm1 - t_norm0)
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-normalize dt=", "", time_norm
       flush(6)
     end if
 
     deallocate(w_local, ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
-    deallocate(phi_blk, rho_blk, coef_blk, psi_blk, phase_blk, coef_pw_blk)
+    deallocate(phi_blk, rho_blk, coef_blk, psi_blk)
+    if (allocated(phase_blk)) deallocate(phase_blk)
+    if (allocated(coef_pw_blk)) deallocate(coef_pw_blk)
     deallocate(rho_send, w_send, rho_recv, w_recv)
     call cpu_time(t_total1)
-    if (dg_frag%id == 0) then
+    if (enable_density_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
         "        density timing: total=", t_total1 - t_total0, " cache=", time_cache, &
         " project=", time_project, " comm=", time_comm, " norm=", time_norm

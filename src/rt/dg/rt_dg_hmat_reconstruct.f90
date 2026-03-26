@@ -123,7 +123,7 @@
       end if
       do ispin = 1, system%nspin
         nbf_raw = dg_frag%n_basis(ifrag, ispin)
-        if (dg_frag%id == 0 .and. nbf_raw >= 60) then
+        if (.false. .and. dg_frag%id == 0 .and. nbf_raw >= 60) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        reconstruct basis diag: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
           flush(6)

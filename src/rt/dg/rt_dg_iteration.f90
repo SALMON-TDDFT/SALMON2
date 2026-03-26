@@ -25,11 +25,14 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
+    logical, parameter :: enable_iteration_trace = .false.
     ! Time evolution in fragment basis coefficient space
-    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-      " stage=", "entry"
-    flush(6)
+    if (enable_iteration_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "entry"
+      flush(6)
+    end if
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
       call time_evolution_rk(dg_frag, system, info, rt, itt, dt, &
@@ -40,10 +43,12 @@
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select
-    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-      " stage=", "after-time-evolution"
-    flush(6)
+    if (enable_iteration_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "after-time-evolution"
+      flush(6)
+    end if
 
     call zero_nonowned_coefficients(dg_frag)
 
@@ -63,15 +68,19 @@
       if (dg_frag%time_integrator /= 3 .or. dg_frag%yn_adaptive_basis) then
         ! For adaptive-basis mode, keep post-step update active even in RK4
         ! so basis-update detection/trigger logic runs.
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-update-density-hmat"
-        flush(6)
+        if (enable_iteration_trace) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-update-density-hmat"
+          flush(6)
+        end if
         call update_density_and_hamiltonian(dg_frag, system, info, rt, itt, rt%Ac_tot(:,itt), &
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-update-density-hmat"
-        flush(6)
+        if (enable_iteration_trace) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-update-density-hmat"
+          flush(6)
+        end if
       end if
     end if
     

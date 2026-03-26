@@ -1099,7 +1099,7 @@ contains
                                        int(floor(dg_nmat_cap_multiple * dble(occ_count(ifrag, ispin)))))
           cap_frag(ifrag, ispin) = max(1, cap_frag(ifrag, ispin))
           dg_frag%n_basis(ifrag, ispin) = cap_frag(ifrag, ispin)
-          if (dg_frag%id == 0 .and. (cap_frag(ifrag, ispin) >= 60 .or. nbasis_iter >= 60)) then
+          if (.false. .and. dg_frag%id == 0 .and. (cap_frag(ifrag, ispin) >= 60 .or. nbasis_iter >= 60)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,f8.3,a,i0)') "        basis cap diag: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " before=", nbasis_iter, " occ_count=", occ_count(ifrag, ispin), &
               " multiple=", dg_nmat_cap_multiple, " after=", cap_frag(ifrag, ispin)

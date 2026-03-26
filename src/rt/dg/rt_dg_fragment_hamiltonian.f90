@@ -355,6 +355,7 @@
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, nbf_diag
     logical :: release_dense_fragment_ops
+    logical, parameter :: enable_hamiltonian_trace = .false.
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
@@ -404,9 +405,11 @@
 
       call calculate_overlap_matrix(dg_frag, system, mg)
       did_overlap_call = .true.
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
-      flush(6)
+      if (enable_hamiltonian_trace) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
+        flush(6)
+      end if
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "        Momentum matrix calculated (for A·p coupling)"
         write(*,*) "        Overlap matrix S calculated (for generalized propagation)"
@@ -434,9 +437,11 @@
 
         call calculate_overlap_matrix(dg_frag, system, mg)
         did_overlap_call = .true.
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
-        flush(6)
+        if (enable_hamiltonian_trace) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
+          flush(6)
+        end if
       end if
     end if
 
@@ -531,14 +536,16 @@
         end if
       end do
     end if
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-hmat-alloc"
-    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-      "        hamiltonian memory estimate: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-      " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " H_dense_MB=", hmat_dense_mb, &
-      " S_dense_MB=", overlap_dense_mb, " P_dense_MB=", momentum_dense_mb, " phi_MB=", phi_frag_mb, &
-      " halo_MB=", halo_buf_mb
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-hmat-alloc"
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+        "        hamiltonian memory estimate: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+        " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " H_dense_MB=", hmat_dense_mb, &
+        " S_dense_MB=", overlap_dense_mb, " P_dense_MB=", momentum_dense_mb, " phi_MB=", phi_frag_mb, &
+        " halo_MB=", halo_buf_mb
+      flush(6)
+    end if
 
     n_local_diag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (n_local_diag > 0) then
@@ -564,24 +571,28 @@
     ! Exchange halo regions between fragments before stencil operations
     ! This ensures accurate Laplacian calculation at fragment boundaries
     call exchange_phi_frag_halo(dg_frag)
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-step2-halo"
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-step2-halo"
+      flush(6)
+    end if
     
     hvol = system%hvol
     is = mg%is
     ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-vtotal-alloc"
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-vtotal-alloc"
+      flush(6)
+    end if
     
     ! Construct total potential: V = Vpsl + Vh + Vxc
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      if (ispin == 1) then
+      if (enable_hamiltonian_trace .and. ispin == 1) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-build-total-potential"
         flush(6)
@@ -627,11 +638,13 @@
           stop 1
         end if
         allocate(partial_t(nbf), partial_h(nbf), reduced_t(nbf), reduced_h(nbf))
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian fragment begin: rank=", dg_frag%id, &
-          " ifrag=", ifrag, " ispin=", ispin, " i_local=", i_local, " nbf=", nbf
-        flush(6)
+        if (enable_hamiltonian_trace) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian fragment begin: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " i_local=", i_local, " nbf=", nbf
+          flush(6)
+        end if
         do jo = 1, nbf
-          if (jo == 1 .or. jo == nbf) then
+          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo begin: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, " nbf=", nbf
             flush(6)
@@ -639,13 +652,13 @@
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-          if (jo == 1 .or. jo == nbf) then
+          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi begin: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
           end if
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-          if (jo == 1 .or. jo == nbf) then
+          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
@@ -667,7 +680,7 @@
 
           end do
           !$omp end parallel do
-          if (jo == 1 .or. jo == nbf) then
+          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian integrate done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
@@ -675,7 +688,7 @@
 
           call comm_summation(partial_t, reduced_t, nbf, dg_frag%icomm_frag)
           call comm_summation(partial_h, reduced_h, nbf, dg_frag%icomm_frag)
-          if (jo == 1 .or. jo == nbf) then
+          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian reduce done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
@@ -687,7 +700,7 @@
               H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
               H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
-            if (jo == 1 .or. jo == nbf) then
+            if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
               write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian H_mat store done: rank=", dg_frag%id, &
                 " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
               flush(6)
@@ -695,9 +708,11 @@
           end if
 
         end do  ! jo loop
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo-loop done: rank=", dg_frag%id, &
-          " ifrag=", ifrag, " ispin=", ispin, " nbf=", nbf
-        flush(6)
+        if (enable_hamiltonian_trace) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo-loop done: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " nbf=", nbf
+          flush(6)
+        end if
         deallocate(partial_t, partial_h, reduced_t, reduced_h)
         deallocate(T_phi, H_phi)
         if (allocated(T_phi) .or. allocated(H_phi)) then
@@ -705,23 +720,29 @@
             " ifrag=", ifrag, " ispin=", ispin
           stop 1
         end if
-        write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian after deallocate TH: rank=", dg_frag%id, &
-          " ifrag=", ifrag, " ispin=", ispin
-        flush(6)
-        write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian fragment done: rank=", dg_frag%id, &
-          " ifrag=", ifrag, " ispin=", ispin
-        flush(6)
+        if (enable_hamiltonian_trace) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian after deallocate TH: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin
+          flush(6)
+          write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian fragment done: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin
+          flush(6)
+        end if
           
         
       end do  ! ifrag loop
-      write(*,'(1x,a,i0,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " ispin=", ispin, " stage=", "after-ifrag-loop"
-      flush(6)
+      if (enable_hamiltonian_trace) then
+        write(*,'(1x,a,i0,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+          " ispin=", ispin, " stage=", "after-ifrag-loop"
+        flush(6)
+      end if
       
     end do  ! ispin loop
-    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-      " stage=", "after-ispin-loop"
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+        " stage=", "after-ispin-loop"
+      flush(6)
+    end if
     
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
@@ -756,9 +777,11 @@
     end if
     call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
-    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-      " stage=", "after-global-hmat-sum"
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+        " stage=", "after-global-hmat-sum"
+      flush(6)
+    end if
 
     ! Enforce Hermiticity for the static Hamiltonian parts used in RT propagation.
     do ispin = 1, system%nspin
@@ -772,9 +795,11 @@
         end do
       end do
     end do
-    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-      " stage=", "after-hermiticity"
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+        " stage=", "after-hermiticity"
+      flush(6)
+    end if
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Kinetic and potential terms computed"
@@ -815,9 +840,11 @@
       write(*,*) "[FATAL] V_total still allocated before return: rank=", dg_frag%id
       stop 1
     end if
-    write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-      " stage=", "before-return"
-    flush(6)
+    if (enable_hamiltonian_trace) then
+      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
+        " stage=", "before-return"
+      flush(6)
+    end if
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "=== Hamiltonian Matrix Ready ==="
