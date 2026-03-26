@@ -725,6 +725,7 @@
     
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+    call rebuild_local_h_block_ids(dg_frag)
     do i_diag = 1, n_local_diag
       iblk = find_matrix_block(dg_frag%H_block_map, H_diag_blocks(i_diag)%ifrag_row, H_diag_blocks(i_diag)%ifrag_col)
       if (iblk <= 0) cycle

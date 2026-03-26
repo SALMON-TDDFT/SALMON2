@@ -26,6 +26,10 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
     ! Time evolution in fragment basis coefficient space
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+      " stage=", "entry"
+    flush(6)
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
       call time_evolution_rk(dg_frag, system, info, rt, itt, dt, &
@@ -36,6 +40,10 @@
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+      " stage=", "after-time-evolution"
+    flush(6)
 
     call zero_nonowned_coefficients(dg_frag)
 

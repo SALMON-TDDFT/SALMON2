@@ -22,7 +22,8 @@ module rt_dg_fragment_types
   implicit none
 
   private
-  public :: halo_info, matrix_block_info, vector_block_info, momentum_block_info, s_dg_fragment_rt
+  public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, momentum_block_info, &
+            density_recv_map_info, real_buffer_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -46,6 +47,14 @@ module rt_dg_fragment_types
     real(8), allocatable :: val(:,:,:) ! (nrow_max, ncol_max, nspin)
   end type matrix_block_info
 
+  type :: complex_matrix_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    complex(8), allocatable :: val(:,:,:) ! (nrow_max, ncol_max, nspin)
+  end type complex_matrix_block_info
+
   type :: vector_block_info
     integer :: ifrag_row = 0
     integer :: ifrag_col = 0
@@ -61,6 +70,17 @@ module rt_dg_fragment_types
     integer :: ncol_max = 0
     real(8), allocatable :: val(:,:,:,:) ! (3, nrow_max, ncol_max, nspin)
   end type momentum_block_info
+
+  type :: density_recv_map_info
+    integer :: npts = 0
+    integer, allocatable :: ixg(:)
+    integer, allocatable :: iyg(:)
+    integer, allocatable :: izg(:)
+  end type density_recv_map_info
+
+  type :: real_buffer_info
+    real(8), allocatable :: val(:)
+  end type real_buffer_info
 
   ! Fragment basis data structure
   !
@@ -97,8 +117,13 @@ module rt_dg_fragment_types
     complex(8), allocatable :: H_mat_c(:,:,:)      ! complex Hamiltonian (SOI/mixed propagation path)
     type(matrix_block_info), allocatable :: H_mat_blocks(:)
     type(matrix_block_info), allocatable :: H_mat_kinetic_blocks(:)
+    type(complex_matrix_block_info), allocatable :: H_nl_blocks(:)
     integer, allocatable :: H_block_map(:,:)
     integer :: n_H_blocks = 0
+    integer, allocatable :: H_nl_block_map(:,:)
+    integer :: n_H_nl_blocks = 0
+    integer, allocatable :: H_local_block_ids(:) ! row-owner-local H block ids for RT apply
+    integer, allocatable :: H_local_rows(:)      ! fragment rows owned by this rank
     real(8), allocatable :: S_mat(:,:,:)       ! raw fragment overlap matrix
     real(8), allocatable :: S_mat_prop(:,:,:)  ! overlap matrix used in propagation/unitarity
     complex(8), allocatable :: S_mat_c(:,:,:)      ! complex raw fragment overlap matrix (SOI path)
@@ -147,6 +172,13 @@ module rt_dg_fragment_types
     integer, allocatable :: jxyz_tot(:,:)      ! r-grid mapping
     integer :: nxyz_buffer(3)                  ! # of halo points (4 for 4th-order stencil)
     integer, allocatable :: id_array(:)        ! (n_frag) MPI rank owning each fragment
+    integer, allocatable :: density_owner_map(:,:,:,:) ! local-fragment interior grid -> owner rank
+    integer, allocatable :: density_ixg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global x index
+    integer, allocatable :: density_iyg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global y index
+    integer, allocatable :: density_izg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global z index
+    integer, allocatable :: density_send_count(:)      ! packed send length per target rank
+    integer, allocatable :: density_send_slot_map(:,:,:,:) ! local-fragment grid -> packed send slot (0 if local)
+    type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)
     real(8) :: hgs(3)                           ! Grid spacing (a.u.)
     integer :: icomm                           ! MPI communicator for fragment RT

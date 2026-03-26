@@ -4,7 +4,7 @@
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional, exchange_correlation
-    use hartree_sub, only: hartree
+    use poisson_dg_distributed, only: hartree_dg_distributed
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -25,28 +25,92 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
-    complex(8), allocatable :: S_frag_pw(:,:,:), H_frag_pw(:,:,:)
+    complex(8), allocatable :: H_frag_pw(:,:,:)
     integer :: n_frag, n_pw
+    real(8) :: t_stage0, t_stage1
 
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat stage trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "entry"
+      flush(6)
+    end if
+
+    call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
-    call hartree(lg, mg, info, system, fg, poisson, srg_scalar, stencil, rho, Vh)
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
+
+    call cpu_time(t_stage0)
+    call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
+
+    call cpu_time(t_stage0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
+
     if (dg_frag%use_plusu .and. PLUS_U_ON) then
       call calc_density_matrix_and_energy_plusU(rt%tpsi0, ppg, info, system, energy%E_U)
     else
       energy%E_U = 0.0d0
     end if
+
+    call cpu_time(t_stage0)
     call reconstruct_hamiltonian_matrix(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
+
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
       n_frag = dg_frag%n_mat_max
       n_pw = dg_frag%n_plane_waves
-      allocate(S_frag_pw(n_frag, n_pw, dg_frag%nspin))
+
+      if (.not. allocated(dg_frag%S_mat_frag_pw)) then
+        allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+        call compute_fragment_pw_overlap(dg_frag, dg_frag%S_mat_frag_pw)
+      else if (size(dg_frag%S_mat_frag_pw,1) /= n_frag .or. size(dg_frag%S_mat_frag_pw,2) /= n_pw .or. &
+               size(dg_frag%S_mat_frag_pw,3) /= dg_frag%nspin) then
+        deallocate(dg_frag%S_mat_frag_pw)
+        allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+        call compute_fragment_pw_overlap(dg_frag, dg_frag%S_mat_frag_pw)
+      end if
+
+      if (.not. allocated(dg_frag%H_mat_frag_pw)) then
+        allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+      else if (size(dg_frag%H_mat_frag_pw,1) /= n_frag .or. size(dg_frag%H_mat_frag_pw,2) /= n_pw .or. &
+               size(dg_frag%H_mat_frag_pw,3) /= dg_frag%nspin) then
+        deallocate(dg_frag%H_mat_frag_pw)
+        allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+      end if
+
       allocate(H_frag_pw(n_frag, n_pw, dg_frag%nspin))
-      call compute_fragment_pw_overlap(dg_frag, S_frag_pw)
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_frag_pw)
-      call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, S_frag_pw, H_frag_pw)
-      deallocate(S_frag_pw, H_frag_pw)
+      dg_frag%H_mat_frag_pw(:, :, :) = H_frag_pw(:, :, :)
+      call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
+      deallocate(H_frag_pw)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-refresh"
+        flush(6)
+      end if
+    end if
+
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density-hmat stage trace: stage=exit"
+      flush(6)
     end if
 
   end subroutine update_density_hamiltonian_stage

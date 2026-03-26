@@ -1530,7 +1530,17 @@ contains
       end do
       deallocate(dg_frag%H_mat_kinetic_blocks)
     end if
+    if (allocated(dg_frag%H_nl_blocks)) then
+      do i = 1, size(dg_frag%H_nl_blocks)
+        if (allocated(dg_frag%H_nl_blocks(i)%val)) deallocate(dg_frag%H_nl_blocks(i)%val)
+      end do
+      deallocate(dg_frag%H_nl_blocks)
+      dg_frag%n_H_nl_blocks = 0
+    end if
     if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
+    if (allocated(dg_frag%H_nl_block_map)) deallocate(dg_frag%H_nl_block_map)
+    if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
+    if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
     if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
@@ -1572,6 +1582,20 @@ contains
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
+    if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
+    if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
+    if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
+    if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
+    if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
+    if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
+    if (allocated(dg_frag%density_recv_map)) then
+      do i = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
+        if (allocated(dg_frag%density_recv_map(i)%ixg)) deallocate(dg_frag%density_recv_map(i)%ixg)
+        if (allocated(dg_frag%density_recv_map(i)%iyg)) deallocate(dg_frag%density_recv_map(i)%iyg)
+        if (allocated(dg_frag%density_recv_map(i)%izg)) deallocate(dg_frag%density_recv_map(i)%izg)
+      end do
+      deallocate(dg_frag%density_recv_map)
+    end if
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%phi_frag_c)) deallocate(dg_frag%phi_frag_c)

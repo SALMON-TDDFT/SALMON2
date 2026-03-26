@@ -2,7 +2,7 @@
     use salmon_global, only: nelec, theory
     use structures
     use communication, only: comm_summation
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, apply_mixed_hamiltonian, mixed_fp_coupling_active
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -76,7 +76,7 @@
       end if
       do idir = 1, 3
         ! momentum_mat = <φ|∇|φ>, need to apply -i via aimag() and include factor 2
-        if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+        if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
           tmp_all(:, :) = (0.0d0, 0.0d0)
           Ac_tot = 0.0d0
           Ac_tot(idir) = 1.0d0
@@ -123,7 +123,7 @@
                      coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         end if
         
-        if (.not. (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw))) then
+        if (.not. (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))) then
           current_tmp = 0.0d0
           do io = 1, nocc
             ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
@@ -168,7 +168,7 @@
         else if (.not. allocated(dg_frag%H_mat_blocks)) then
           op_mat(:, :) = cmplx(dg_frag%H_mat(1:n, 1:n, ispin), 0.0d0, kind=8)
         end if
-        if (has_nonlocal .and. (.not. allocated(dg_frag%H_mat_blocks) .or. use_hmat_complex)) then
+        if (has_nonlocal .and. allocated(dg_frag%H_nl_cache) .and. ((.not. allocated(dg_frag%H_mat_blocks)) .or. use_hmat_complex)) then
           op_mat(:, :) = op_mat(:, :) + dg_frag%H_nl_cache(1:n, 1:n, ispin)
         end if
       end if
@@ -178,11 +178,20 @@
         op_mat(:, :) = op_mat(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
         op_mat(:, :) = op_mat(:, :) + minus_i * cmplx(Ap_mat(:, :), 0.0d0, kind=8)
       else
-        if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. allocated(dg_frag%S_mat_frag_pw)) then
+        if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin)) then
           call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
           if (has_nonlocal) then
-            tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
-              matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_all(1:n, 1:nocc))
+            if (allocated(dg_frag%H_nl_blocks)) then
+              if (allocated(dg_frag%H_local_block_ids)) then
+                call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n, 1:nocc), &
+                  tmp_all(1:n, 1:nocc), dg_frag%H_local_block_ids)
+              else
+                call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
+              end if
+            else if (allocated(dg_frag%H_nl_cache)) then
+              tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
+                matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_all(1:n, 1:nocc))
+            end if
           end if
           do io = 1, n_tot
             tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + 0.5d0 * A_squared * coef_all(io, 1:nocc)
@@ -216,8 +225,17 @@
           if (.not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
             call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
             if (has_nonlocal) then
-              tmp_mat(:, :) = tmp_mat(:, :) + &
-                matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
+              if (allocated(dg_frag%H_nl_blocks)) then
+                if (allocated(dg_frag%H_local_block_ids)) then
+                  call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_frag_all(1:n, 1:nocc), &
+                    tmp_mat, dg_frag%H_local_block_ids)
+                else
+                  call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
+                end if
+              else if (allocated(dg_frag%H_nl_cache)) then
+                tmp_mat(:, :) = tmp_mat(:, :) + &
+                  matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
+              end if
             end if
             do io = 1, n
               tmp_mat(io, :) = tmp_mat(io, :) + 0.5d0 * A_squared * coef_frag_all(io, 1:nocc)
@@ -270,7 +288,7 @@
         end do
       end if
 
-      if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. allocated(dg_frag%S_mat_frag_pw) .and. .not. use_spatial_A) then
+      if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
         energy_tmp = 0.0d0
         do io = 1, nocc
           energy_tmp = energy_tmp + sum(real(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))

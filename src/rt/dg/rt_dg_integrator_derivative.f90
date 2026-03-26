@@ -1,8 +1,8 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_mixed_hamiltonian, &
-                                  solve_overlap_operator_batch
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, apply_mixed_hamiltonian, &
+                                  solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -44,6 +44,10 @@
     ! - Phase evolution: exp(-iE_n*t)
     ! - Superposition states
     ! - Oscillatory responses (optical, currents)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+      " stage=", "entry"
+    flush(6)
     
     dcoef_dt = (0.0d0, 0.0d0)
     if (present(dcoef_dt_pw)) dcoef_dt_pw = (0.0d0, 0.0d0)
@@ -85,6 +89,10 @@
     allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
 
     do ispin = 1, dg_frag%nspin
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " ispin=", ispin, " stage=", "spin-entry"
+      flush(6)
       ! Build H0c = H_0 + V_NL(A) + A^2/2
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
       need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks))
@@ -114,9 +122,9 @@
         end if
       end if
       
-      if (has_nonlocal) then
+      if (has_nonlocal .and. allocated(dg_frag%H_nl_cache)) then
         if (need_h0_dense) then
-        H0c(1:n_frag, 1:n_frag) = H0c(1:n_frag, 1:n_frag) + dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin)
+          H0c(1:n_frag, 1:n_frag) = H0c(1:n_frag, 1:n_frag) + dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin)
         end if
         if (any(real(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= real(dg_frag%H_nl_cache(1:n, 1:n, ispin))) .or. &
             any(aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)))) then
@@ -163,7 +171,7 @@
           do io = 1, n_pw
             M(n_frag+io, n_frag+io) = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
           end do
-          if (.not. disable_mfp .and. allocated(dg_frag%S_mat_frag_pw)) then
+          if (.not. disable_mfp .and. mixed_fp_coupling_active(dg_frag, ispin)) then
             do jo = 1, n_pw
               do io = 1, n_frag
                 mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo)) * dg_frag%S_mat_frag_pw(io, jo, ispin)
@@ -210,30 +218,85 @@
 
       ! dcoef_dt = -i * H0c * coef - M * coef
       dcoef_dt_h0(:, :) = (0.0d0, 0.0d0)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " ispin=", ispin, " stage=", "before-h0"
+      flush(6)
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " stage=", "before-apply-mixed-h"
+        flush(6)
         call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, :), dcoef_dt_h0(1:n_tot, :))
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " stage=", "after-apply-mixed-h"
+        flush(6)
         if (has_nonlocal) then
-          dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
-            matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+          if (allocated(dg_frag%H_nl_blocks)) then
+            if (allocated(dg_frag%H_local_block_ids)) then
+              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
+                dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
+            else
+              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+            end if
+          else if (allocated(dg_frag%H_nl_cache)) then
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
+              matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+          end if
         end if
         do io = 1, n_tot
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
         end do
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
-        call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " stage=", "before-apply-block-h"
+        flush(6)
+        if (allocated(dg_frag%H_local_block_ids)) then
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), &
+            dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
+        else
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+        end if
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " stage=", "after-apply-block-h"
+        flush(6)
         if (has_nonlocal) then
-          dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
-            matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+          if (allocated(dg_frag%H_nl_blocks)) then
+            if (allocated(dg_frag%H_local_block_ids)) then
+              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
+                dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
+            else
+              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+            end if
+          else if (allocated(dg_frag%H_nl_cache)) then
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
+              matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+          end if
         end if
         do io = 1, n_frag
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
         end do
         dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
       else
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " stage=", "before-zgemm-h"
+        flush(6)
         call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, -zi, H0c, n_tot, &
                    coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " stage=", "after-zgemm-h"
+        flush(6)
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " ispin=", ispin, " stage=", "after-h0"
+      flush(6)
       max_abs_h0 = maxval(abs(dcoef_dt_h0))
       if (max_abs_h0 > 1.0d150) then
         write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_h0| huge: rank=", dg_frag%id, &
@@ -259,6 +322,10 @@
         stop "NaN in H0c term"
       end if
 
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " ispin=", ispin, " stage=", "before-m"
+      flush(6)
       if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
         dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
         call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
@@ -267,7 +334,7 @@
             mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
             dcoef_dt_m(n_frag+io, :) = dcoef_dt_m(n_frag+io, :) + mfp * coef_all(n_frag+io, :)
           end do
-          if (.not. disable_mfp .and. allocated(dg_frag%S_mat_frag_pw)) then
+          if (.not. disable_mfp .and. mixed_fp_coupling_active(dg_frag, ispin)) then
             do jo = 1, n_pw
               mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo))
               do io = 1, n_frag
@@ -281,6 +348,10 @@
         call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), M, n_tot, &
                    coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_m, n_tot)
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " ispin=", ispin, " stage=", "after-m"
+      flush(6)
       max_abs_m = maxval(abs(dcoef_dt_m))
       if (max_abs_m > 1.0d150) then
         write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_m| huge: rank=", dg_frag%id, &
@@ -308,17 +379,29 @@
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m
       n_s = 0
-      if (n_pw > 0 .and. allocated(dg_frag%S_mat_frag_pw)) then
+      if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
         n_s = n_tot
       else if (allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_prop_c) .or. &
                allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat)) then
         n_s = n_frag
       end if
       if (n_s > 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " n_s=", n_s, " stage=", "before-overlap-solve"
+        flush(6)
         allocate(rhs_in(n_s, dg_frag%nstate_tot))
         rhs_in(:, :) = rhs_all(1:n_s, :)
-        call solve_overlap_operator_batch(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
+        if (n_pw == 0 .and. allocated(dg_frag%H_local_rows) .and. size(dg_frag%H_local_rows) > 0) then
+          call solve_overlap_operator_batch_local(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
+        else
+          call solve_overlap_operator_batch(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
+        end if
         deallocate(rhs_in)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " ispin=", ispin, " n_s=", n_s, " stage=", "after-overlap-solve"
+        flush(6)
       end if
 
       do io = 1, n_frag
@@ -333,6 +416,10 @@
           dcoef_dt_pw(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+io, :)
         end do
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " ispin=", ispin, " stage=", "spin-exit"
+      flush(6)
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
@@ -340,8 +427,12 @@
     if (allocated(Ap_mat)) deallocate(Ap_mat)
     if (allocated(A2_mat)) deallocate(A2_mat)
     if (allocated(H0c)) deallocate(H0c)
-    if (allocated(M)) deallocate(M)
+   if (allocated(M)) deallocate(M)
     deallocate(dcoef_dt_h0, dcoef_dt_m, coef_all, rhs_all)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+      " stage=", "exit"
+    flush(6)
 
     ! Cache retained for reuse
     

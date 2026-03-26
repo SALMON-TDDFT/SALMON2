@@ -1092,6 +1092,7 @@
 
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic-basis-update", dg_frag%icomm)
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-update", dg_frag%icomm)
+      call rebuild_local_h_block_ids(dg_frag)
       call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     end subroutine refresh_operator_matrices_from_local_blocks
 

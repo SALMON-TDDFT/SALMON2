@@ -1,6 +1,7 @@
   subroutine reconstruct_hamiltonian_matrix(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     use structures
     use salmon_global, only: yn_hse
+    use rt_dg_fragment_ops, only: rebuild_local_h_block_ids
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -122,6 +123,11 @@
       end if
       do ispin = 1, system%nspin
         nbf_raw = dg_frag%n_basis(ifrag, ispin)
+        if (dg_frag%id == 0 .and. nbf_raw >= 60) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        reconstruct basis diag: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
+          flush(6)
+        end if
         if (nbf_raw < 0) then
           write(*,'(a,i0,a,i0,a,i0,a,i0)') "[FATAL] reconstruct negative n_basis, rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
@@ -268,6 +274,7 @@
       call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
     end if
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-reconstruct", dg_frag%icomm)
+    call rebuild_local_h_block_ids(dg_frag)
     if (.not. use_block_reconstruct) then
       call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     end if

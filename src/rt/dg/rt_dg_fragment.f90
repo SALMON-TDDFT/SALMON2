@@ -91,7 +91,8 @@ module rt_dg_fragment
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
                                 calculate_microscopic_current_dg, &
                                 build_spatial_A_coupling_matrices, &
-                                apply_gradient_to_basis_ops => apply_gradient_to_basis
+                                apply_gradient_to_basis_ops => apply_gradient_to_basis, &
+                                rebuild_local_h_block_ids
   implicit none
 
   private
@@ -294,6 +295,7 @@ contains
     dg_frag%lg => lg
     dg_frag%mg => mg
     dg_frag%hgs = system%hgs
+    if (dg_frag%has_real_space_basis) call build_density_grid_owner_maps(dg_frag)
     
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -412,6 +414,158 @@ contains
     end if
     
   end subroutine init_dg_fragment_rt
+
+  subroutine build_density_grid_owner_maps(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, i
+    integer :: nxyz(3), ixyz0(3), ifrag_count
+    integer :: nx_max, ny_max, nz_max
+    integer, allocatable :: recv_count(:), recv_cursor(:)
+
+    if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
+    if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
+    if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
+    if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
+    if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
+    if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
+    if (allocated(dg_frag%density_recv_map)) then
+      do i = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
+        if (allocated(dg_frag%density_recv_map(i)%ixg)) deallocate(dg_frag%density_recv_map(i)%ixg)
+        if (allocated(dg_frag%density_recv_map(i)%iyg)) deallocate(dg_frag%density_recv_map(i)%iyg)
+        if (allocated(dg_frag%density_recv_map(i)%izg)) deallocate(dg_frag%density_recv_map(i)%izg)
+      end do
+      deallocate(dg_frag%density_recv_map)
+    end if
+    if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
+    if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
+    if (allocated(dg_frag%density_recv_map)) then
+      do ifrag = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
+        if (allocated(dg_frag%density_recv_map(ifrag)%ixg)) deallocate(dg_frag%density_recv_map(ifrag)%ixg)
+        if (allocated(dg_frag%density_recv_map(ifrag)%iyg)) deallocate(dg_frag%density_recv_map(ifrag)%iyg)
+        if (allocated(dg_frag%density_recv_map(ifrag)%izg)) deallocate(dg_frag%density_recv_map(ifrag)%izg)
+      end do
+      deallocate(dg_frag%density_recv_map)
+    end if
+    if (.not. associated(dg_frag%mg)) return
+    if (.not. allocated(dg_frag%nxyz_domain)) return
+    if (.not. allocated(dg_frag%ixyz_frag)) return
+    if (dg_frag%ifrag_end < dg_frag%ifrag_start) return
+
+    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    nx_max = max(1, maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end)))
+    ny_max = max(1, maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end)))
+    nz_max = max(1, maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end)))
+
+    allocate(dg_frag%density_owner_map(nx_max, ny_max, nz_max, ifrag_count))
+    allocate(dg_frag%density_ixg_map(nx_max, ny_max, nz_max, ifrag_count))
+    allocate(dg_frag%density_iyg_map(nx_max, ny_max, nz_max, ifrag_count))
+    allocate(dg_frag%density_izg_map(nx_max, ny_max, nz_max, ifrag_count))
+    allocate(dg_frag%density_send_count(0:dg_frag%isize-1))
+    allocate(dg_frag%density_send_slot_map(nx_max, ny_max, nz_max, ifrag_count))
+    allocate(dg_frag%density_recv_map(0:dg_frag%isize-1))
+    dg_frag%density_owner_map = dg_frag%id
+    dg_frag%density_ixg_map = 1
+    dg_frag%density_iyg_map = 1
+    dg_frag%density_izg_map = 1
+    dg_frag%density_send_count = 0
+    dg_frag%density_send_slot_map = 0
+
+    i_local = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = i_local + 1
+      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
+      ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
+      do iz = 1, nxyz(3)
+        do iy = 1, nxyz(2)
+          do ix = 1, nxyz(1)
+            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%mg%num(1)) + 1
+            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%mg%num(2)) + 1
+            izg = modulo(ixyz0(3) + iz - 2, dg_frag%mg%num(3)) + 1
+            dg_frag%density_ixg_map(ix, iy, iz, i_local) = ixg
+            dg_frag%density_iyg_map(ix, iy, iz, i_local) = iyg
+            dg_frag%density_izg_map(ix, iy, iz, i_local) = izg
+            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
+            dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
+            if (owner_rank /= dg_frag%id) then
+              dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
+              dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
+            end if
+          end do
+        end do
+      end do
+    end do
+
+    allocate(recv_count(0:dg_frag%isize-1), recv_cursor(0:dg_frag%isize-1))
+    recv_count = 0
+    do ifrag = 1, dg_frag%n_frag
+      source_rank = dg_frag%id_array(ifrag)
+      if (source_rank == dg_frag%id) cycle
+      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
+      ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
+      do iz = 1, nxyz(3)
+        do iy = 1, nxyz(2)
+          do ix = 1, nxyz(1)
+            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%mg%num(1)) + 1
+            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%mg%num(2)) + 1
+            izg = modulo(ixyz0(3) + iz - 2, dg_frag%mg%num(3)) + 1
+            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
+            if (owner_rank == dg_frag%id) recv_count(source_rank) = recv_count(source_rank) + 1
+          end do
+        end do
+      end do
+    end do
+
+    do source_rank = 0, dg_frag%isize - 1
+      dg_frag%density_recv_map(source_rank)%npts = recv_count(source_rank)
+      if (recv_count(source_rank) <= 0) cycle
+      allocate(dg_frag%density_recv_map(source_rank)%ixg(recv_count(source_rank)))
+      allocate(dg_frag%density_recv_map(source_rank)%iyg(recv_count(source_rank)))
+      allocate(dg_frag%density_recv_map(source_rank)%izg(recv_count(source_rank)))
+    end do
+
+    recv_cursor = 0
+    do ifrag = 1, dg_frag%n_frag
+      source_rank = dg_frag%id_array(ifrag)
+      if (source_rank == dg_frag%id) cycle
+      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
+      ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
+      do iz = 1, nxyz(3)
+        do iy = 1, nxyz(2)
+          do ix = 1, nxyz(1)
+            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%mg%num(1)) + 1
+            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%mg%num(2)) + 1
+            izg = modulo(ixyz0(3) + iz - 2, dg_frag%mg%num(3)) + 1
+            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
+            if (owner_rank /= dg_frag%id) cycle
+            recv_cursor(source_rank) = recv_cursor(source_rank) + 1
+            dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
+            dg_frag%density_recv_map(source_rank)%iyg(recv_cursor(source_rank)) = iyg
+            dg_frag%density_recv_map(source_rank)%izg(recv_cursor(source_rank)) = izg
+          end do
+        end do
+      end do
+    end do
+
+    deallocate(recv_count, recv_cursor)
+  end subroutine build_density_grid_owner_maps
+
+  integer function find_density_grid_owner(dg_frag, ixg, iyg, izg) result(owner)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ixg, iyg, izg
+    integer :: jrank
+
+    owner = dg_frag%id
+    do jrank = 0, dg_frag%isize - 1
+      if (ixg < dg_frag%mg%is_all(1, jrank) .or. ixg > dg_frag%mg%ie_all(1, jrank)) cycle
+      if (iyg < dg_frag%mg%is_all(2, jrank) .or. iyg > dg_frag%mg%ie_all(2, jrank)) cycle
+      if (izg < dg_frag%mg%is_all(3, jrank) .or. izg > dg_frag%mg%ie_all(3, jrank)) cycle
+      owner = jrank
+      return
+    end do
+  end function find_density_grid_owner
 
   !=======================================================================
   ! Initialize RI/DF data for HSE exchange (called once at startup)
@@ -940,10 +1094,17 @@ contains
           occ_count(ifrag_best, ispin) = occ_count(ifrag_best, ispin) + 1
         end do
         do ifrag = 1, dg_frag%n_frag
+          nbasis_iter = dg_frag%n_basis(ifrag, ispin)
           cap_frag(ifrag, ispin) = min(dg_frag%n_basis(ifrag, ispin), &
                                        int(floor(dg_nmat_cap_multiple * dble(occ_count(ifrag, ispin)))))
           cap_frag(ifrag, ispin) = max(1, cap_frag(ifrag, ispin))
           dg_frag%n_basis(ifrag, ispin) = cap_frag(ifrag, ispin)
+          if (dg_frag%id == 0 .and. (cap_frag(ifrag, ispin) >= 60 .or. nbasis_iter >= 60)) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,f8.3,a,i0)') "        basis cap diag: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " ispin=", ispin, " before=", nbasis_iter, " occ_count=", occ_count(ifrag, ispin), &
+              " multiple=", dg_nmat_cap_multiple, " after=", cap_frag(ifrag, ispin)
+            flush(6)
+          end if
           do io = cap_frag(ifrag, ispin) + 1, min(dg_frag%nstate_frag, size(dg_frag%index_basis, 1))
             dg_frag%index_basis(io, ifrag, ispin) = 0
           end do
@@ -1562,7 +1723,17 @@ contains
       end do
       deallocate(dg_frag%H_mat_kinetic_blocks)
     end if
+    if (allocated(dg_frag%H_nl_blocks)) then
+      do i = 1, size(dg_frag%H_nl_blocks)
+        if (allocated(dg_frag%H_nl_blocks(i)%val)) deallocate(dg_frag%H_nl_blocks(i)%val)
+      end do
+      deallocate(dg_frag%H_nl_blocks)
+      dg_frag%n_H_nl_blocks = 0
+    end if
     if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
+    if (allocated(dg_frag%H_nl_block_map)) deallocate(dg_frag%H_nl_block_map)
+    if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
+    if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
     if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
@@ -1604,6 +1775,10 @@ contains
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
+    if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
+    if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
+    if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
+    if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)

@@ -18,34 +18,48 @@
     integer :: ig_i, nbf, ipw, n_pw
     integer :: nxyz(3), ixyz0(3)
     integer :: nocc_per_spin, nocc_spin, nocc_cache
-    integer :: irank, nreq_send, nreq_recv, ireq
+    integer :: irank, nreq_send, nreq_recv, ireq, slot, npts
+    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx
+    integer, parameter :: grid_block_size = 512, state_block_size = 64
     real(8) :: occ_factor
     complex(8) :: coef_i, psi_val, phase_pw, ci
     real(8) :: phi_i, rho_contrib
     real(8) :: total_charge, total_charge_local, scale_rho, elec_num_scaled_local
     real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta
+    real(8) :: t_total0, t_total1, t_cache0, t_cache1
+    real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
+    real(8) :: time_cache, time_project, time_comm, time_norm
     real(8), allocatable :: w_local(:,:,:)
     integer, allocatable :: req_send(:), req_recv(:)
-    logical, allocatable :: send_active(:), recv_active(:)
+    integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
     type(s_scalar), allocatable :: rho_send(:), w_send(:), rho_recv(:), w_recv(:)
+    real(8), allocatable :: phi_blk(:,:), rho_blk(:)
+    complex(8), allocatable :: coef_blk(:,:), psi_blk(:,:)
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
       rho_s(ispin)%f = 0.0d0
     end do
+    call cpu_time(t_total0)
+    time_cache = 0.0d0
+    time_project = 0.0d0
+    time_comm = 0.0d0
+    time_norm = 0.0d0
 
     if (.not. allocated(dg_frag%phi_frag)) return
 
     allocate(w_local(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    allocate(send_active(0:dg_frag%isize-1), recv_active(0:dg_frag%isize-1))
+    allocate(ix_buf(grid_block_size), iy_buf(grid_block_size), iz_buf(grid_block_size))
+    allocate(owner_buf(grid_block_size), ixg_buf(grid_block_size), iyg_buf(grid_block_size), izg_buf(grid_block_size))
+    allocate(phi_blk(grid_block_size, dg_frag%nstate_frag))
+    allocate(rho_blk(grid_block_size))
+    allocate(coef_blk(dg_frag%nstate_frag, state_block_size))
+    allocate(psi_blk(grid_block_size, state_block_size))
     allocate(rho_send(0:dg_frag%isize-1), w_send(0:dg_frag%isize-1))
     allocate(rho_recv(0:dg_frag%isize-1), w_recv(0:dg_frag%isize-1))
 
     rho%f = 0.0d0
     w_local = 0.0d0
-    send_active = .false.
-    recv_active = .false.
-
     ! Closed-shell fallback: nelec = 2 * nocc_per_spin.
     nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
     nocc_cache = nocc_per_spin
@@ -64,36 +78,38 @@
 
     do irank = 0, dg_frag%isize - 1
       if (irank == dg_frag%id) cycle
-      if (dg_frag%is_frag_root) then
-        if (local_fragments_overlap_rank_box(dg_frag, mg, irank)) then
-          send_active(irank) = .true.
-          allocate(rho_send(irank)%f(mg%is_all(1, irank):mg%ie_all(1, irank), &
-                                     mg%is_all(2, irank):mg%ie_all(2, irank), &
-                                     mg%is_all(3, irank):mg%ie_all(3, irank)))
-          allocate(w_send(irank)%f(mg%is_all(1, irank):mg%ie_all(1, irank), &
-                                   mg%is_all(2, irank):mg%ie_all(2, irank), &
-                                   mg%is_all(3, irank):mg%ie_all(3, irank)))
-          rho_send(irank)%f = 0.0d0
-          w_send(irank)%f = 0.0d0
-        end if
+      if (allocated(dg_frag%density_send_count)) then
+        npts = dg_frag%density_send_count(irank)
+      else
+        npts = 0
       end if
-      if (rank_fragments_overlap_local_box(dg_frag, mg, irank)) then
-        recv_active(irank) = .true.
-        allocate(rho_recv(irank)%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-        allocate(w_recv(irank)%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      if (npts > 0) then
+        allocate(rho_send(irank)%f(1:npts, 1:1, 1:1), w_send(irank)%f(1:npts, 1:1, 1:1))
+        rho_send(irank)%f = 0.0d0
+        w_send(irank)%f = 0.0d0
+      end if
+      if (allocated(dg_frag%density_recv_map)) then
+        npts = dg_frag%density_recv_map(irank)%npts
+      else
+        npts = 0
+      end if
+      if (npts > 0) then
+        allocate(rho_recv(irank)%f(1:npts, 1:1, 1:1), w_recv(irank)%f(1:npts, 1:1, 1:1))
         rho_recv(irank)%f = 0.0d0
         w_recv(irank)%f = 0.0d0
       end if
     end do
 
     if (n_pw > 0) then
+      call cpu_time(t_cache0)
       if ((.not. allocated(dg_frag%coef_pw_full_cache)) .or. dg_frag%coef_pw_full_cache_nstate < nocc_cache) then
         call refresh_pw_coef_cache(dg_frag, nocc_cache)
       end if
+      call cpu_time(t_cache1)
+      time_cache = time_cache + (t_cache1 - t_cache0)
     end if
 
     if (dg_frag%is_frag_root) then
-
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
@@ -112,14 +128,54 @@
               iyg = mod(iyg - 1, mg%num(2)) + 1
               izg = mod(izg - 1, mg%num(3)) + 1
 
-              owner_rank = find_grid_owner(ixg, iyg, izg)
-              if (owner_rank == dg_frag%id) then
-                w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
-              else if (send_active(owner_rank)) then
-                w_send(owner_rank)%f(ixg, iyg, izg) = w_send(owner_rank)%f(ixg, iyg, izg) + 1.0d0
+              if (allocated(dg_frag%density_owner_map)) then
+                owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
+                ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
+                iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
+                izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
+              else
+                owner_rank = find_grid_owner(ixg, iyg, izg)
               end if
-            end do
+                  if (owner_rank == dg_frag%id) then
+                    w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
+                  else if (allocated(dg_frag%density_send_slot_map)) then
+                    slot = dg_frag%density_send_slot_map(ix, iy, iz, i_local)
+                    if (slot > 0) then
+                      w_send(owner_rank)%f(slot, 1, 1) = w_send(owner_rank)%f(slot, 1, 1) + 1.0d0
+                    end if
+                  end if
           end do
+        end do
+      end do
+
+      call cpu_time(t_project0)
+      ngrid = nxyz(1) * nxyz(2) * nxyz(3)
+      do igrid0 = 1, ngrid, grid_block_size
+        npt_blk = min(grid_block_size, ngrid - igrid0 + 1)
+        do igrid = 1, npt_blk
+          tmp_idx = igrid0 + igrid - 2
+          ix = mod(tmp_idx, nxyz(1)) + 1
+          tmp_idx = tmp_idx / nxyz(1)
+          iy = mod(tmp_idx, nxyz(2)) + 1
+          iz = tmp_idx / nxyz(2) + 1
+          ix_buf(igrid) = ix
+          iy_buf(igrid) = iy
+          iz_buf(igrid) = iz
+          if (allocated(dg_frag%density_owner_map)) then
+            ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
+            iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
+            izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
+            owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
+          else
+            ixg = mod(ixyz0(1) + ix - 2, mg%num(1)) + 1
+            iyg = mod(ixyz0(2) + iy - 2, mg%num(2)) + 1
+            izg = mod(ixyz0(3) + iz - 2, mg%num(3)) + 1
+            owner_rank = find_grid_owner(ixg, iyg, izg)
+          end if
+          ixg_buf(igrid) = ixg
+          iyg_buf(igrid) = iyg
+          izg_buf(igrid) = izg
+          owner_buf(igrid) = owner_rank
         end do
 
         do ispin = 1, system%nspin
@@ -128,63 +184,89 @@
             nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
           end if
           nbf = dg_frag%n_basis(ifrag, ispin)
-          do io = 1, nocc_spin
-            do iz = 1, nxyz(3)
-              do iy = 1, nxyz(2)
-                do ix = 1, nxyz(1)
-                  ixg = ixyz0(1) + ix - 1
-                  iyg = ixyz0(2) + iy - 1
-                  izg = ixyz0(3) + iz - 1
+          if (nbf <= 0 .or. nocc_spin <= 0) cycle
 
-                  ixg = mod(ixg - 1, mg%num(1)) + 1
-                  iyg = mod(iyg - 1, mg%num(2)) + 1
-                  izg = mod(izg - 1, mg%num(3)) + 1
+          do igrid = 1, npt_blk
+            ix = ix_buf(igrid)
+            iy = iy_buf(igrid)
+            iz = iz_buf(igrid)
+            do istate_frag = 1, nbf
+              phi_blk(igrid, istate_frag) = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
+            end do
+          end do
 
+          do io0 = 1, nocc_spin, state_block_size
+            nbatch = min(state_block_size, nocc_spin - io0 + 1)
+            coef_blk(1:nbf, 1:nbatch) = (0.0d0, 0.0d0)
+            do io = 1, nbatch
+              do istate_frag = 1, nbf
+                ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+                if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+                coef_blk(istate_frag, io) = dg_frag%coef(ig_i, io0 + io - 1, ispin)
+              end do
+            end do
+
+            psi_blk(1:npt_blk, 1:nbatch) = matmul(phi_blk(1:npt_blk, 1:nbf), coef_blk(1:nbf, 1:nbatch))
+
+            if (n_pw > 0) then
+              do io = 1, nbatch
+                do igrid = 1, npt_blk
+                  ixg = ixg_buf(igrid)
+                  iyg = iyg_buf(igrid)
+                  izg = izg_buf(igrid)
+                  rx = real(ixg - 1, 8) * dg_frag%hgs(1)
+                  ry = real(iyg - 1, 8) * dg_frag%hgs(2)
+                  rz = real(izg - 1, 8) * dg_frag%hgs(3)
                   psi_val = (0.0d0, 0.0d0)
-                  do istate_frag = 1, nbf
-                    ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
-                    if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-                    coef_i = dg_frag%coef(ig_i, io, ispin)
-                    phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-                    psi_val = psi_val + coef_i * phi_i
+                  do ipw = 1, n_pw
+                    theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
+                    phase_pw = cmplx(cos(theta), sin(theta), kind=8)
+                    ci = dg_frag%coef_pw_full_cache(ipw, io0 + io - 1, ispin)
+                    psi_val = psi_val + ci * phase_pw * inv_sqrt_vol
                   end do
-                  if (n_pw > 0) then
-                    rx = real(ixg - 1, 8) * dg_frag%hgs(1)
-                    ry = real(iyg - 1, 8) * dg_frag%hgs(2)
-                    rz = real(izg - 1, 8) * dg_frag%hgs(3)
-                    do ipw = 1, n_pw
-                      theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
-                      phase_pw = cmplx(cos(theta), sin(theta), kind=8)
-                      ci = dg_frag%coef_pw_full_cache(ipw, io, ispin)
-                      psi_val = psi_val + ci * phase_pw * inv_sqrt_vol
-                    end do
-                  end if
-
-                  rho_contrib = occ_factor * real(conjg(psi_val) * psi_val, kind=8)
-
-                  owner_rank = find_grid_owner(ixg, iyg, izg)
-                  if (owner_rank == dg_frag%id) then
-                    rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-                  else if (send_active(owner_rank)) then
-                    rho_send(owner_rank)%f(ixg, iyg, izg) = rho_send(owner_rank)%f(ixg, iyg, izg) + rho_contrib
-                  end if
+                  psi_blk(igrid, io) = psi_blk(igrid, io) + psi_val
                 end do
               end do
+            end if
+
+            rho_blk(1:npt_blk) = 0.0d0
+            do io = 1, nbatch
+              rho_blk(1:npt_blk) = rho_blk(1:npt_blk) + occ_factor * real(conjg(psi_blk(1:npt_blk, io)) * psi_blk(1:npt_blk, io), kind=8)
+            end do
+
+            do igrid = 1, npt_blk
+              owner_rank = owner_buf(igrid)
+              ixg = ixg_buf(igrid)
+              iyg = iyg_buf(igrid)
+              izg = izg_buf(igrid)
+              rho_contrib = rho_blk(igrid)
+              if (owner_rank == dg_frag%id) then
+                rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
+              else if (allocated(dg_frag%density_send_slot_map)) then
+                slot = dg_frag%density_send_slot_map(ix_buf(igrid), iy_buf(igrid), iz_buf(igrid), i_local)
+                if (slot > 0) then
+                  rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
+                end if
+              end if
             end do
           end do
         end do
       end do
+        call cpu_time(t_project1)
+        time_project = time_project + (t_project1 - t_project0)
+      end do
     end if
 
+    call cpu_time(t_comm0)
     nreq_recv = 0
     do irank = 0, dg_frag%isize - 1
-      if (recv_active(irank)) nreq_recv = nreq_recv + 2
+      if (allocated(rho_recv(irank)%f)) nreq_recv = nreq_recv + 2
     end do
     if (nreq_recv > 0) then
       allocate(req_recv(nreq_recv))
       ireq = 0
       do irank = 0, dg_frag%isize - 1
-        if (.not. recv_active(irank)) cycle
+        if (.not. allocated(rho_recv(irank)%f)) cycle
         ireq = ireq + 1
         req_recv(ireq) = comm_irecv(rho_recv(irank)%f, irank, rho_tag_base + dg_frag%id, dg_frag%icomm)
         ireq = ireq + 1
@@ -194,13 +276,13 @@
 
     nreq_send = 0
     do irank = 0, dg_frag%isize - 1
-      if (send_active(irank)) nreq_send = nreq_send + 2
+      if (allocated(rho_send(irank)%f)) nreq_send = nreq_send + 2
     end do
     if (nreq_send > 0) then
       allocate(req_send(nreq_send))
       ireq = 0
       do irank = 0, dg_frag%isize - 1
-        if (.not. send_active(irank)) cycle
+        if (.not. allocated(rho_send(irank)%f)) cycle
         ireq = ireq + 1
         req_send(ireq) = comm_isend(rho_send(irank)%f, irank, rho_tag_base + irank, dg_frag%icomm)
         ireq = ireq + 1
@@ -211,9 +293,14 @@
     if (nreq_recv > 0) then
       call comm_wait_all(req_recv)
       do irank = 0, dg_frag%isize - 1
-        if (.not. recv_active(irank)) cycle
-        rho%f = rho%f + rho_recv(irank)%f
-        w_local = w_local + w_recv(irank)%f
+        if (.not. allocated(rho_recv(irank)%f)) cycle
+        do slot = 1, dg_frag%density_recv_map(irank)%npts
+          ixg = dg_frag%density_recv_map(irank)%ixg(slot)
+          iyg = dg_frag%density_recv_map(irank)%iyg(slot)
+          izg = dg_frag%density_recv_map(irank)%izg(slot)
+          rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_recv(irank)%f(slot, 1, 1)
+          w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + w_recv(irank)%f(slot, 1, 1)
+        end do
         deallocate(rho_recv(irank)%f, w_recv(irank)%f)
       end do
       deallocate(req_recv)
@@ -221,12 +308,15 @@
     if (nreq_send > 0) then
       call comm_wait_all(req_send)
       do irank = 0, dg_frag%isize - 1
-        if (.not. send_active(irank)) cycle
+        if (.not. allocated(rho_send(irank)%f)) cycle
         deallocate(rho_send(irank)%f, w_send(irank)%f)
       end do
       deallocate(req_send)
     end if
+    call cpu_time(t_comm1)
+    time_comm = time_comm + (t_comm1 - t_comm0)
 
+    call cpu_time(t_norm0)
     where (w_local > 0.5d0)
       rho%f = rho%f / w_local
     end where
@@ -246,8 +336,19 @@
     do ispin = 1, system%nspin
       rho_s(ispin)%f = rho%f / real(system%nspin, 8)
     end do
+    call cpu_time(t_norm1)
+    time_norm = time_norm + (t_norm1 - t_norm0)
 
-    deallocate(w_local, send_active, recv_active, rho_send, w_send, rho_recv, w_recv)
+    deallocate(w_local, ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
+    deallocate(phi_blk, rho_blk, coef_blk, psi_blk)
+    deallocate(rho_send, w_send, rho_recv, w_recv)
+    call cpu_time(t_total1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+        "        density timing: total=", t_total1 - t_total0, " cache=", time_cache, &
+        " project=", time_project, " comm=", time_comm, " norm=", time_norm
+      flush(6)
+    end if
 
   contains
 

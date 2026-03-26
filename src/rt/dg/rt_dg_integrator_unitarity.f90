@@ -14,6 +14,10 @@
 
     dev_max = 0.0d0
     dev_post_max = 0.0d0
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        unitarity trace: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+      " stage=", "entry"
+    flush(6)
 
     do ispin = 1, dg_frag%nspin
       n_frag = dg_frag%n_mat(ispin)
@@ -110,5 +114,9 @@
       write(*,'(1x,a,i0,a,es12.4,a,es12.4)') "[INFO] Unitary stabilization at itt=", itt, &
         ", pre max(norm-1)=", dev_max, ", post max(norm-1)=", dev_post_max
     end if
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        unitarity trace: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+      " stage=", "exit"
+    flush(6)
 
   end subroutine stabilize_coeff_unitarity

@@ -60,19 +60,43 @@
       ! Stage 1
       Ac_tot = rt%Ac_tot(:, itt)
       dg_frag%coef = coef_ref
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "rk4-stage1-entry"
+      flush(6)
       if (yn_fix_func == 'n') then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " stage=", "rk4-stage1-before-update"
+        flush(6)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " stage=", "rk4-stage1-after-update"
+        flush(6)
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "rk4-stage1-before-derivative"
+      flush(6)
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,1), k_pw(:,:,:,1))
       else
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,1))
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "rk4-stage1-after-derivative"
+      flush(6)
 
       ! Stage 2
       Ac_tot = 0.5d0 * (rt%Ac_tot(:, itt) + rt%Ac_tot(:, itt+1))
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "rk4-stage2-entry"
+      flush(6)
       if (n_pw > 0) then
 !$omp parallel do private(io,jo) schedule(static)
         do ispin = 1, dg_frag%nspin
@@ -100,15 +124,31 @@
 !$omp end parallel do
       end if
       if (yn_fix_func == 'n') then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " stage=", "rk4-stage2-before-update"
+        flush(6)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+          " stage=", "rk4-stage2-after-update"
+        flush(6)
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "rk4-stage2-before-derivative"
+      flush(6)
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,2), k_pw(:,:,:,2))
       else
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,2))
       end if
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+        " stage=", "rk4-stage2-after-derivative"
+      flush(6)
 
       ! Stage 3
       if (n_pw > 0) then
