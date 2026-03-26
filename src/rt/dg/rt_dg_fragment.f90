@@ -561,25 +561,23 @@ contains
     dg_frag%density_weight_local = 0.0d0
     dg_frag%density_inv_weight_local = 0.0d0
 
-    if (dg_frag%is_frag_root) then
-      i_local = 0
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local = i_local + 1
-        nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
-        do iz = 1, nxyz(3)
-          do iy = 1, nxyz(2)
-            do ix = 1, nxyz(1)
-              owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-              if (owner_rank /= dg_frag%id) cycle
-              ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
-              iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
-              izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
-              dg_frag%density_weight_local(ixg, iyg, izg) = dg_frag%density_weight_local(ixg, iyg, izg) + 1.0d0
-            end do
+    i_local = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = i_local + 1
+      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
+      do iz = 1, nxyz(3)
+        do iy = 1, nxyz(2)
+          do ix = 1, nxyz(1)
+            owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
+            if (owner_rank /= dg_frag%id) cycle
+            ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
+            iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
+            izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
+            dg_frag%density_weight_local(ixg, iyg, izg) = dg_frag%density_weight_local(ixg, iyg, izg) + 1.0d0
           end do
         end do
       end do
-    end if
+    end do
 
     do source_rank = 0, dg_frag%isize - 1
       do i = 1, dg_frag%density_recv_map(source_rank)%npts
@@ -1038,7 +1036,8 @@ contains
         do io = 1, nbasis_iter
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
           if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-          dg_frag%coef_owner(global_idx, ispin) = dg_frag%id_array(ifrag)
+          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
+            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
         end do
       end do
     end do
@@ -1202,7 +1201,8 @@ contains
           do io = 1, nbasis_iter
             global_idx = dg_frag%index_basis(io, ifrag, ispin)
             if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-            dg_frag%coef_owner(global_idx, ispin) = dg_frag%id_array(ifrag)
+            dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
+              dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
           end do
         end do
       end do
@@ -1873,6 +1873,35 @@ contains
       owner_rank = (ifrag - 1) * nproc_frag
     end if
   end function get_fragment_group_root_rank
+
+  integer function get_subgroup_block_owner_rank(root_rank, subgroup_size, local_row, n_local_rows) result(owner_rank)
+    implicit none
+    integer, intent(in) :: root_rank, subgroup_size, local_row, n_local_rows
+    integer :: subgroup_root_rank, owner_offset
+    integer :: block_base, block_rem, cutoff
+
+    if (subgroup_size <= 1 .or. n_local_rows <= 0) then
+      owner_rank = max(0, root_rank)
+      return
+    end if
+
+    subgroup_root_rank = root_rank - mod(max(0, root_rank), subgroup_size)
+    block_base = n_local_rows / subgroup_size
+    block_rem = mod(n_local_rows, subgroup_size)
+    cutoff = (block_base + 1) * block_rem
+
+    if (local_row <= 0) then
+      owner_offset = 0
+    else if (block_base <= 0) then
+      owner_offset = min(local_row - 1, subgroup_size - 1)
+    else if (local_row <= cutoff) then
+      owner_offset = (local_row - 1) / (block_base + 1)
+    else
+      owner_offset = block_rem + (local_row - cutoff - 1) / block_base
+    end if
+
+    owner_rank = subgroup_root_rank + min(owner_offset, subgroup_size - 1)
+  end function get_subgroup_block_owner_rank
 
   !=======================================================================
   ! Finalize RI/DF data

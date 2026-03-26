@@ -849,6 +849,18 @@
     iblk = block_map(ifrag_row, ifrag_col)
   end function find_matrix_block
 
+  logical function matrix_row_is_locally_owned(dg_frag, row_idx, ispin) result(is_local)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: row_idx, ispin
+
+    is_local = .false.
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (ispin < 1 .or. ispin > size(dg_frag%coef_owner, 2)) return
+    if (row_idx < 1 .or. row_idx > size(dg_frag%coef_owner, 1)) return
+    is_local = (dg_frag%coef_owner(row_idx, ispin) == dg_frag%id)
+  end function matrix_row_is_locally_owned
+
   subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks)
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
@@ -1789,10 +1801,14 @@
     call init_complex_matrix_blocks(dg_frag, S_blocks_re, S_blocks_im, S_block_map_local, n_blocks)
     call sync_complex_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_c, S_blocks_re, S_blocks_im, S_block_map_local)
     call reduce_complex_matrix_blocks(dg_frag, S_blocks_re, S_blocks_im, "smat-soi", icomm_reduce)
+    call sync_blocks_to_complex_dense_matrix(dg_frag, S_blocks_re, S_blocks_im, S_block_map_local, dg_frag%S_mat_c)
     if (icomm_reduce == dg_frag%icomm_frag .and. .not. dg_frag%is_frag_root) then
-      dg_frag%S_mat_c(:, :, :) = (0.0d0, 0.0d0)
-    else
-      call sync_blocks_to_complex_dense_matrix(dg_frag, S_blocks_re, S_blocks_im, S_block_map_local, dg_frag%S_mat_c)
+      do ispin = 1, dg_frag%nspin
+        do ii = 1, dg_frag%n_mat_max
+          if (matrix_row_is_locally_owned(dg_frag, ii, ispin)) cycle
+          dg_frag%S_mat_c(ii, :, ispin) = (0.0d0, 0.0d0)
+        end do
+      end do
     end if
 
     do ispin = 1, dg_frag%nspin

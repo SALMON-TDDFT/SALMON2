@@ -58,6 +58,30 @@
     iblk = block_map(ifrag_row, ifrag_col)
   end function find_matrix_block
 
+  logical function fragment_row_is_locally_owned(dg_frag, ifrag_row) result(is_local)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag_row
+    integer :: ispin, io, global_idx
+
+    is_local = .false.
+    if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) return
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    do ispin = 1, dg_frag%nspin
+      if (dg_frag%n_basis(ifrag_row, ispin) <= 0) cycle
+      do io = 1, min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1))
+        global_idx = dg_frag%index_basis(io, ifrag_row, ispin)
+        if (global_idx < 1 .or. global_idx > size(dg_frag%coef_owner, 1)) cycle
+        if (dg_frag%coef_owner(global_idx, ispin) /= dg_frag%id) cycle
+        is_local = .true.
+        return
+      end do
+    end do
+  end function fragment_row_is_locally_owned
+
   subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks)
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
@@ -2384,6 +2408,7 @@
     if (.not. dg_frag%is_frag_root) then
       if (allocated(dg_frag%S_mat_blocks)) then
         do i_halo = 1, size(dg_frag%S_mat_blocks)
+          if (fragment_row_is_locally_owned(dg_frag, dg_frag%S_mat_blocks(i_halo)%ifrag_row)) cycle
           dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
         end do
       end if

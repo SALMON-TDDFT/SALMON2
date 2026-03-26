@@ -32,6 +32,7 @@ module rt_dg_fragment_ops
   public :: refresh_pw_coef_cache
   public :: gather_full_coef_view
   public :: zero_nonowned_coefficients
+  public :: zero_nonlocal_h_matrix_blocks
   public :: sync_raw_coef_from_mixed
   public :: sync_mixed_coef_from_raw
 
@@ -1621,6 +1622,31 @@ contains
 
     deallocate(row_is_local)
   end subroutine rebuild_local_h_block_ids
+
+  subroutine zero_nonlocal_h_matrix_blocks(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: iblk
+
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%H_local_block_ids)) then
+      do iblk = 1, size(dg_frag%H_mat_blocks)
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
+        if (allocated(dg_frag%H_mat_kinetic_blocks) .and. iblk <= size(dg_frag%H_mat_kinetic_blocks)) then
+          dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = 0.0d0
+        end if
+      end do
+      return
+    end if
+
+    do iblk = 1, size(dg_frag%H_mat_blocks)
+      if (any(dg_frag%H_local_block_ids == iblk)) cycle
+      dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
+      if (allocated(dg_frag%H_mat_kinetic_blocks) .and. iblk <= size(dg_frag%H_mat_kinetic_blocks)) then
+        dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = 0.0d0
+      end if
+    end do
+  end subroutine zero_nonlocal_h_matrix_blocks
 
   subroutine apply_matrix_blocks(dg_frag, blocks, ispin, x, y)
     implicit none

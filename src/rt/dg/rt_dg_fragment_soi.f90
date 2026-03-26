@@ -804,7 +804,8 @@ contains
         do io = 1, nbasis_iter
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
           if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-          dg_frag%coef_owner(global_idx, ispin) = dg_frag%id_array(ifrag)
+          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
+            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
         end do
       end do
     end do
@@ -955,7 +956,8 @@ contains
           do io = 1, nbasis_iter
             global_idx = dg_frag%index_basis(io, ifrag, ispin)
             if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-            dg_frag%coef_owner(global_idx, ispin) = dg_frag%id_array(ifrag)
+            dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
+              dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
           end do
         end do
       end do
@@ -1638,6 +1640,35 @@ contains
       owner_rank = (ifrag - 1) * nproc_frag
     end if
   end function get_fragment_group_root_rank
+
+  integer function get_subgroup_block_owner_rank(root_rank, subgroup_size, local_row, n_local_rows) result(owner_rank)
+    implicit none
+    integer, intent(in) :: root_rank, subgroup_size, local_row, n_local_rows
+    integer :: subgroup_root_rank, owner_offset
+    integer :: block_base, block_rem, cutoff
+
+    if (subgroup_size <= 1 .or. n_local_rows <= 0) then
+      owner_rank = max(0, root_rank)
+      return
+    end if
+
+    subgroup_root_rank = root_rank - mod(max(0, root_rank), subgroup_size)
+    block_base = n_local_rows / subgroup_size
+    block_rem = mod(n_local_rows, subgroup_size)
+    cutoff = (block_base + 1) * block_rem
+
+    if (local_row <= 0) then
+      owner_offset = 0
+    else if (block_base <= 0) then
+      owner_offset = min(local_row - 1, subgroup_size - 1)
+    else if (local_row <= cutoff) then
+      owner_offset = (local_row - 1) / (block_base + 1)
+    else
+      owner_offset = block_rem + (local_row - cutoff - 1) / block_base
+    end if
+
+    owner_rank = subgroup_root_rank + min(owner_offset, subgroup_size - 1)
+  end function get_subgroup_block_owner_rank
 
   !=======================================================================
   ! Finalize RI/DF data
