@@ -325,7 +325,7 @@
     use structures
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
-    use rt_dg_plane_wave, only: prepare_mixed_basis_startup
+    use rt_dg_plane_wave, only: diagonalize_mixed_basis
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -811,13 +811,16 @@
       write(*,*) "  [3/3] Non-local PP handled in time evolution (A-dependent)"
     end if
 
-    ! Build initial mixed basis once (fragment + orthogonalized PW) with A=0.
+    ! Build initial mixed basis once (fragment + PW) with A=0.
+    ! This is the first rollout of the mixed-basis orthogonalization path:
+    ! initialization uses the mixed diagonalization, while later RT updates
+    ! still fall back to the existing mixed refresh path.
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
       Ac_zero(:) = 0.0d0
       if (comm_is_root(dg_frag%id)) then
-        write(*,*) "  [init] Building mixed basis at startup (A=0)"
+        write(*,*) "  [init] Diagonalizing mixed basis at startup (A=0)"
       end if
-      call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
+      call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     end if
 
