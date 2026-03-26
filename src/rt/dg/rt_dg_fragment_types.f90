@@ -179,6 +179,8 @@ module rt_dg_fragment_types
     integer, allocatable :: density_send_count(:)      ! packed send length per target rank
     integer, allocatable :: density_send_slot_map(:,:,:,:) ! local-fragment grid -> packed send slot (0 if local)
     type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
+    real(8), allocatable :: density_phi_cache(:,:,:)   ! prepacked fragment basis on interior grid (ngrid_max,nstate_frag,ifrag_local)
+    logical :: density_phi_cache_valid = .false.
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)
     real(8) :: hgs(3)                           ! Grid spacing (a.u.)
     integer :: icomm                           ! MPI communicator for fragment RT

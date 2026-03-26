@@ -1779,6 +1779,7 @@ contains
     if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
     if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
+    if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)

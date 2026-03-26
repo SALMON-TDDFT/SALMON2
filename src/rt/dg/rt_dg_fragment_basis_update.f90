@@ -448,6 +448,9 @@
       write(*,*)
     end if
 
+    if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
+    dg_frag%density_phi_cache_valid = .false.
+
     ! Cleanup
     if (allocated(phi_frag_old)) deallocate(phi_frag_old)
     if (allocated(coef_old)) deallocate(coef_old)

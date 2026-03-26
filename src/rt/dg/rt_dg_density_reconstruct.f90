@@ -44,8 +44,15 @@
     time_project = 0.0d0
     time_comm = 0.0d0
     time_norm = 0.0d0
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density trace: stage=entry"
+      flush(6)
+    end if
 
     if (.not. allocated(dg_frag%phi_frag)) return
+    if ((.not. allocated(dg_frag%density_phi_cache)) .or. (.not. dg_frag%density_phi_cache_valid)) then
+      call rebuild_density_phi_cache()
+    end if
 
     allocate(w_local(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(ix_buf(grid_block_size), iy_buf(grid_block_size), iz_buf(grid_block_size))
@@ -109,8 +116,16 @@
       call cpu_time(t_cache1)
       time_cache = time_cache + (t_cache1 - t_cache0)
     end if
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-pw-cache dt=", "", time_cache
+      flush(6)
+    end if
 
     if (dg_frag%is_frag_root) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        density trace: stage=before-frag-loop"
+        flush(6)
+      end if
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
@@ -187,14 +202,7 @@
           nbf = dg_frag%n_basis(ifrag, ispin)
           if (nbf <= 0 .or. nocc_spin <= 0) cycle
 
-          do igrid = 1, npt_blk
-            ix = ix_buf(igrid)
-            iy = iy_buf(igrid)
-            iz = iz_buf(igrid)
-            do istate_frag = 1, nbf
-              phi_blk(igrid, istate_frag) = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-            end do
-          end do
+          phi_blk(1:npt_blk, 1:nbf) = dg_frag%density_phi_cache(igrid0:igrid0+npt_blk-1, 1:nbf, i_local)
 
           do io0 = 1, nocc_spin, state_block_size
             nbatch = min(state_block_size, nocc_spin - io0 + 1)
@@ -254,11 +262,19 @@
           end do
         end do
       end do
-        call cpu_time(t_project1)
-        time_project = time_project + (t_project1 - t_project0)
+      call cpu_time(t_project1)
+      time_project = time_project + (t_project1 - t_project0)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
+        flush(6)
+      end if
       end do
     end if
 
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density trace: stage=before-comm"
+      flush(6)
+    end if
     call cpu_time(t_comm0)
     nreq_recv = 0
     do irank = 0, dg_frag%isize - 1
@@ -317,7 +333,15 @@
     end if
     call cpu_time(t_comm1)
     time_comm = time_comm + (t_comm1 - t_comm0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-comm dt=", "", time_comm
+      flush(6)
+    end if
 
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density trace: stage=before-normalize"
+      flush(6)
+    end if
     call cpu_time(t_norm0)
     where (w_local > 0.5d0)
       rho%f = rho%f / w_local
@@ -340,9 +364,13 @@
     end do
     call cpu_time(t_norm1)
     time_norm = time_norm + (t_norm1 - t_norm0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-normalize dt=", "", time_norm
+      flush(6)
+    end if
 
     deallocate(w_local, ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
-    deallocate(phi_blk, rho_blk, coef_blk, psi_blk)
+    deallocate(phi_blk, rho_blk, coef_blk, psi_blk, phase_blk, coef_pw_blk)
     deallocate(rho_send, w_send, rho_recv, w_recv)
     call cpu_time(t_total1)
     if (dg_frag%id == 0) then
@@ -353,6 +381,52 @@
     end if
 
   contains
+
+  subroutine rebuild_density_phi_cache()
+    implicit none
+    integer :: ifrag_cache, i_local_cache
+    integer :: nxyz_cache(3), ngrid_cache, ngrid_max
+    integer :: ix_cache, iy_cache, iz_cache, igrid_cache
+    integer :: ib_cache
+
+    ngrid_max = 0
+    i_local_cache = 0
+    do ifrag_cache = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local_cache = i_local_cache + 1
+      nxyz_cache(1:3) = dg_frag%nxyz_domain(1:3, ifrag_cache)
+      ngrid_cache = nxyz_cache(1) * nxyz_cache(2) * nxyz_cache(3)
+      ngrid_max = max(ngrid_max, ngrid_cache)
+    end do
+
+    if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
+    if (ngrid_max <= 0) then
+      dg_frag%density_phi_cache_valid = .false.
+      return
+    end if
+
+    allocate(dg_frag%density_phi_cache(ngrid_max, dg_frag%nstate_frag, max(1, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)))
+    dg_frag%density_phi_cache = 0.0d0
+
+    i_local_cache = 0
+    do ifrag_cache = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local_cache = i_local_cache + 1
+      nxyz_cache(1:3) = dg_frag%nxyz_domain(1:3, ifrag_cache)
+      igrid_cache = 0
+      do iz_cache = 1, nxyz_cache(3)
+        do iy_cache = 1, nxyz_cache(2)
+          do ix_cache = 1, nxyz_cache(1)
+            igrid_cache = igrid_cache + 1
+            do ib_cache = 1, dg_frag%nstate_frag
+              dg_frag%density_phi_cache(igrid_cache, ib_cache, i_local_cache) = &
+                dg_frag%phi_frag(ix_cache, iy_cache, iz_cache, ib_cache, i_local_cache)
+            end do
+          end do
+        end do
+      end do
+    end do
+
+    dg_frag%density_phi_cache_valid = .true.
+  end subroutine rebuild_density_phi_cache
 
   integer function find_grid_owner(ixg, iyg, izg) result(owner)
     implicit none
