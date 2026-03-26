@@ -11,12 +11,11 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin)
 
     integer, parameter :: rho_tag_base = 4101
-    integer, parameter :: w_tag_base = 4201
     integer :: ifrag, io, i_local, ispin
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, owner_rank
-    integer :: ig_i, nbf, ipw, n_pw
-    integer :: nxyz(3), ixyz0(3)
+    integer :: ig_i, nbf, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
+    integer :: nxyz(3), ixyz0(3), ifrag_count, ngrid_max, igrid_cache
     integer :: nocc_per_spin, nocc_spin, nocc_cache
     integer :: irank, nreq_send, nreq_recv, ireq, slot, npts
     integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
@@ -28,13 +27,15 @@
     real(8) :: t_total0, t_total1, t_cache0, t_cache1
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
     real(8) :: time_cache, time_project, time_comm, time_norm
-    real(8), allocatable :: w_local(:,:,:)
+    logical :: use_mixed_density
     integer, allocatable :: req_send(:), req_recv(:)
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
-    type(s_scalar), allocatable :: rho_send(:), w_send(:), rho_recv(:), w_recv(:)
+    type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
     type(s_scalar), allocatable :: rho_s_send(:,:), rho_s_recv(:,:)
     real(8), allocatable :: phi_blk(:,:), rho_blk(:)
-    complex(8), allocatable :: coef_blk(:,:), psi_blk(:,:), phase_blk(:,:), coef_pw_blk(:,:)
+    complex(8), allocatable :: coef_blk(:,:), psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:)
+    complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
+    complex(8), allocatable :: transform_frag(:,:), transform_pw(:,:)
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
@@ -52,21 +53,26 @@
 
     if (.not. allocated(dg_frag%phi_frag)) return
 
-    allocate(w_local(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    ngrid_max = 0
+    if (ifrag_count > 0) then
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
+      end do
+    end if
+
     allocate(ix_buf(grid_block_size), iy_buf(grid_block_size), iz_buf(grid_block_size))
     allocate(owner_buf(grid_block_size), ixg_buf(grid_block_size), iyg_buf(grid_block_size), izg_buf(grid_block_size))
     allocate(phi_blk(grid_block_size, dg_frag%nstate_frag))
     allocate(rho_blk(grid_block_size))
     allocate(coef_blk(dg_frag%nstate_frag, state_block_size))
     allocate(psi_blk(grid_block_size, state_block_size))
-    allocate(phase_blk(grid_block_size, pw_block_size))
     allocate(coef_pw_blk(pw_block_size, state_block_size))
-    allocate(rho_send(0:dg_frag%isize-1), w_send(0:dg_frag%isize-1))
-    allocate(rho_recv(0:dg_frag%isize-1), w_recv(0:dg_frag%isize-1))
+    allocate(rho_send(0:dg_frag%isize-1))
+    allocate(rho_recv(0:dg_frag%isize-1))
     allocate(rho_s_send(0:dg_frag%isize-1, system%nspin), rho_s_recv(0:dg_frag%isize-1, system%nspin))
 
     rho%f = 0.0d0
-    w_local = 0.0d0
     ! Closed-shell fallback: nelec = 2 * nocc_per_spin.
     nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
     nocc_cache = nocc_per_spin
@@ -77,6 +83,35 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw) .and. allocated(dg_frag%k_pw)) then
       n_pw = dg_frag%n_plane_waves
+    end if
+    n_frag = dg_frag%n_mat_max
+    n_tot = n_frag + n_pw
+    if (n_pw > 0) allocate(phase_cache(grid_block_size, n_pw))
+    use_mixed_density = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
+      allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
+    max_mixed_basis = 0
+    if (use_mixed_density) then
+      max_mixed_basis = maxval(dg_frag%mixed_basis_dim(1:system%nspin))
+      use_mixed_density = (max_mixed_basis > 0)
+    end if
+    if (use_mixed_density) then
+      allocate(density_mix(max_mixed_basis, max_mixed_basis, system%nspin))
+      density_mix(:, :, :) = (0.0d0, 0.0d0)
+      allocate(basis_mix_blk(grid_block_size, max_mixed_basis))
+      allocate(density_mix_tmp(grid_block_size, max_mixed_basis))
+      allocate(transform_frag(dg_frag%nstate_frag, max_mixed_basis))
+      if (n_pw > 0) allocate(transform_pw(n_pw, max_mixed_basis))
+      do ispin = 1, system%nspin
+        nocc_spin = nocc_per_spin
+        if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+          nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
+        end if
+        n_basis_mix = min(dg_frag%mixed_basis_dim(ispin), max_mixed_basis, size(dg_frag%coef_mix, 1))
+        if (n_basis_mix <= 0 .or. nocc_spin <= 0) cycle
+        density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = occ_factor * &
+          matmul(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin), &
+                 conjg(transpose(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin))))
+      end do
     end if
     boxL(1) = dg_frag%hgs(1) * real(mg%num(1), 8)
     boxL(2) = dg_frag%hgs(2) * real(mg%num(2), 8)
@@ -91,9 +126,8 @@
         npts = 0
       end if
       if (npts > 0) then
-        allocate(rho_send(irank)%f(1:npts, 1:1, 1:1), w_send(irank)%f(1:npts, 1:1, 1:1))
+        allocate(rho_send(irank)%f(1:npts, 1:1, 1:1))
         rho_send(irank)%f = 0.0d0
-        w_send(irank)%f = 0.0d0
         do ispin = 1, system%nspin
           allocate(rho_s_send(irank, ispin)%f(1:npts, 1:1, 1:1))
           rho_s_send(irank, ispin)%f = 0.0d0
@@ -105,9 +139,8 @@
         npts = 0
       end if
       if (npts > 0) then
-        allocate(rho_recv(irank)%f(1:npts, 1:1, 1:1), w_recv(irank)%f(1:npts, 1:1, 1:1))
+        allocate(rho_recv(irank)%f(1:npts, 1:1, 1:1))
         rho_recv(irank)%f = 0.0d0
-        w_recv(irank)%f = 0.0d0
         do ispin = 1, system%nspin
           allocate(rho_s_recv(irank, ispin)%f(1:npts, 1:1, 1:1))
           rho_s_recv(irank, ispin)%f = 0.0d0
@@ -133,148 +166,209 @@
         write(*,'(1x,a)') "        density trace: stage=before-frag-loop"
         flush(6)
       end if
+      call cpu_time(t_project0)
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
 
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
         ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
-
-        do iz = 1, nxyz(3)
-          do iy = 1, nxyz(2)
-            do ix = 1, nxyz(1)
-              ixg = ixyz0(1) + ix - 1
-              iyg = ixyz0(2) + iy - 1
-              izg = ixyz0(3) + iz - 1
-
-              ixg = mod(ixg - 1, mg%num(1)) + 1
-              iyg = mod(iyg - 1, mg%num(2)) + 1
-              izg = mod(izg - 1, mg%num(3)) + 1
-
-              if (allocated(dg_frag%density_owner_map)) then
-                owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-                ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
-                iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
-                izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
-              else
-                owner_rank = find_grid_owner(ixg, iyg, izg)
-              end if
-                  if (owner_rank == dg_frag%id) then
-                    w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
-                  else if (allocated(dg_frag%density_send_slot_map)) then
-                    slot = dg_frag%density_send_slot_map(ix, iy, iz, i_local)
-                    if (slot > 0) then
-                      w_send(owner_rank)%f(slot, 1, 1) = w_send(owner_rank)%f(slot, 1, 1) + 1.0d0
-                    end if
-                  end if
-          end do
-        end do
-      end do
-
-      call cpu_time(t_project0)
-      ngrid = nxyz(1) * nxyz(2) * nxyz(3)
-      do igrid0 = 1, ngrid, grid_block_size
-        npt_blk = min(grid_block_size, ngrid - igrid0 + 1)
-        do igrid = 1, npt_blk
-          tmp_idx = igrid0 + igrid - 2
-          ix = mod(tmp_idx, nxyz(1)) + 1
-          tmp_idx = tmp_idx / nxyz(1)
-          iy = mod(tmp_idx, nxyz(2)) + 1
-          iz = tmp_idx / nxyz(2) + 1
-          ix_buf(igrid) = ix
-          iy_buf(igrid) = iy
-          iz_buf(igrid) = iz
-          if (allocated(dg_frag%density_owner_map)) then
-            ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
-            iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
-            izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
-            owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-          else
-            ixg = mod(ixyz0(1) + ix - 2, mg%num(1)) + 1
-            iyg = mod(ixyz0(2) + iy - 2, mg%num(2)) + 1
-            izg = mod(ixyz0(3) + iz - 2, mg%num(3)) + 1
-            owner_rank = find_grid_owner(ixg, iyg, izg)
-          end if
-          ixg_buf(igrid) = ixg
-          iyg_buf(igrid) = iyg
-          izg_buf(igrid) = izg
-          owner_buf(igrid) = owner_rank
-        end do
-
-        do ispin = 1, system%nspin
-          nocc_spin = nocc_per_spin
-          if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
-            nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
-          end if
-          nbf = dg_frag%n_basis(ifrag, ispin)
-          if (nbf <= 0 .or. nocc_spin <= 0) cycle
-
+        ngrid = nxyz(1) * nxyz(2) * nxyz(3)
+        do igrid0 = 1, ngrid, grid_block_size
+          npt_blk = min(grid_block_size, ngrid - igrid0 + 1)
           do igrid = 1, npt_blk
-            ix = ix_buf(igrid)
-            iy = iy_buf(igrid)
-            iz = iz_buf(igrid)
-            do istate_frag = 1, nbf
-              phi_blk(igrid, istate_frag) = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-            end do
+            tmp_idx = igrid0 + igrid - 2
+            ix = mod(tmp_idx, nxyz(1)) + 1
+            tmp_idx = tmp_idx / nxyz(1)
+            iy = mod(tmp_idx, nxyz(2)) + 1
+            iz = tmp_idx / nxyz(2) + 1
+            ix_buf(igrid) = ix
+            iy_buf(igrid) = iy
+            iz_buf(igrid) = iz
+            if (allocated(dg_frag%density_owner_map)) then
+              ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
+              iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
+              izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
+              owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
+            else
+              ixg = mod(ixyz0(1) + ix - 2, mg%num(1)) + 1
+              iyg = mod(ixyz0(2) + iy - 2, mg%num(2)) + 1
+              izg = mod(ixyz0(3) + iz - 2, mg%num(3)) + 1
+              owner_rank = find_grid_owner(ixg, iyg, izg)
+            end if
+            ixg_buf(igrid) = ixg
+            iyg_buf(igrid) = iyg
+            izg_buf(igrid) = izg
+            owner_buf(igrid) = owner_rank
           end do
 
-          do io0 = 1, nocc_spin, state_block_size
-            nbatch = min(state_block_size, nocc_spin - io0 + 1)
-            coef_blk(1:nbf, 1:nbatch) = (0.0d0, 0.0d0)
-            do io = 1, nbatch
-              do istate_frag = 1, nbf
-                ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
-                if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-                coef_blk(istate_frag, io) = dg_frag%coef(ig_i, io0 + io - 1, ispin)
-              end do
-            end do
-
-            psi_blk(1:npt_blk, 1:nbatch) = matmul(phi_blk(1:npt_blk, 1:nbf), coef_blk(1:nbf, 1:nbatch))
-
-            if (n_pw > 0) then
-              do ipw0 = 1, n_pw, pw_block_size
-                npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
-                do igrid = 1, npt_blk
-                  ixg = ixg_buf(igrid)
-                  iyg = iyg_buf(igrid)
-                  izg = izg_buf(igrid)
-                  rx = real(ixg - 1, 8) * dg_frag%hgs(1)
-                  ry = real(iyg - 1, 8) * dg_frag%hgs(2)
-                  rz = real(izg - 1, 8) * dg_frag%hgs(3)
-                  do ipw_loc = 1, npw_blk
-                    ipw = ipw0 + ipw_loc - 1
-                    theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
-                    phase_blk(igrid, ipw_loc) = cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
-                  end do
-                end do
-                coef_pw_blk(1:npw_blk, 1:nbatch) = dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
-                psi_blk(1:npt_blk, 1:nbatch) = psi_blk(1:npt_blk, 1:nbatch) + &
-                  matmul(phase_blk(1:npt_blk, 1:npw_blk), coef_pw_blk(1:npw_blk, 1:nbatch))
-              end do
-            end if
-
-            rho_blk(1:npt_blk) = 0.0d0
-            do io = 1, nbatch
-              rho_blk(1:npt_blk) = rho_blk(1:npt_blk) + occ_factor * real(conjg(psi_blk(1:npt_blk, io)) * psi_blk(1:npt_blk, io), kind=8)
-            end do
-
+          if (n_pw > 0) then
+!$omp parallel do private(ixg, iyg, izg, rx, ry, rz, ipw, theta) schedule(static)
             do igrid = 1, npt_blk
-              owner_rank = owner_buf(igrid)
               ixg = ixg_buf(igrid)
               iyg = iyg_buf(igrid)
               izg = izg_buf(igrid)
-              rho_contrib = rho_blk(igrid)
-              if (owner_rank == dg_frag%id) then
-                rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-                rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
-              else if (allocated(dg_frag%density_send_slot_map)) then
-                slot = dg_frag%density_send_slot_map(ix_buf(igrid), iy_buf(igrid), iz_buf(igrid), i_local)
-                if (slot > 0) then
-                  rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
-                  rho_s_send(owner_rank, ispin)%f(slot, 1, 1) = rho_s_send(owner_rank, ispin)%f(slot, 1, 1) + rho_contrib
-                end if
-              end if
+              rx = real(ixg - 1, 8) * dg_frag%hgs(1)
+              ry = real(iyg - 1, 8) * dg_frag%hgs(2)
+              rz = real(izg - 1, 8) * dg_frag%hgs(3)
+              do ipw = 1, n_pw
+                theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
+                phase_cache(igrid, ipw) = cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
+              end do
             end do
+!$omp end parallel do
+          end if
+
+          do ispin = 1, system%nspin
+            nocc_spin = nocc_per_spin
+            if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+            nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
+            end if
+            nbf = dg_frag%n_basis(ifrag, ispin)
+            if (nbf <= 0 .or. nocc_spin <= 0) cycle
+
+            if (.not. dg_frag%density_phi_cache_valid) then
+              if (.not. allocated(dg_frag%density_phi_cache)) then
+                allocate(dg_frag%density_phi_cache(ngrid_max, dg_frag%nstate_frag, ifrag_count))
+              end if
+              dg_frag%density_phi_cache(:, :, :) = 0.0d0
+              igrid_cache = 0
+              do iz = 1, nxyz(3)
+                do iy = 1, nxyz(2)
+                  do ix = 1, nxyz(1)
+                    igrid_cache = igrid_cache + 1
+                    do istate_frag = 1, nbf
+                      dg_frag%density_phi_cache(igrid_cache, istate_frag, i_local) = &
+                        dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
+                    end do
+                  end do
+                end do
+              end do
+              dg_frag%density_phi_cache_valid = .true.
+            end if
+
+            if (allocated(dg_frag%density_phi_cache) .and. dg_frag%density_phi_cache_valid) then
+!$omp parallel do collapse(2) schedule(static)
+              do istate_frag = 1, nbf
+                do igrid = 1, npt_blk
+                  phi_blk(igrid, istate_frag) = dg_frag%density_phi_cache(igrid0 + igrid - 1, istate_frag, i_local)
+                end do
+              end do
+!$omp end parallel do
+            else
+!$omp parallel do collapse(2) private(ix, iy, iz) schedule(static)
+              do istate_frag = 1, nbf
+                do igrid = 1, npt_blk
+                  ix = ix_buf(igrid)
+                  iy = iy_buf(igrid)
+                  iz = iz_buf(igrid)
+                  phi_blk(igrid, istate_frag) = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
+                end do
+              end do
+!$omp end parallel do
+            end if
+
+            if (use_mixed_density) then
+              n_basis_mix = min(dg_frag%mixed_basis_dim(ispin), max_mixed_basis)
+              if (n_basis_mix <= 0) cycle
+              transform_frag(1:nbf, 1:n_basis_mix) = (0.0d0, 0.0d0)
+              do istate_frag = 1, nbf
+                ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+                if (ig_i < 1 .or. ig_i > n_frag) cycle
+                transform_frag(istate_frag, 1:n_basis_mix) = dg_frag%mixed_transform(ig_i, 1:n_basis_mix, ispin)
+              end do
+              basis_mix_blk(1:npt_blk, 1:n_basis_mix) = matmul(phi_blk(1:npt_blk, 1:nbf), transform_frag(1:nbf, 1:n_basis_mix))
+              if (n_pw > 0) then
+                transform_pw(1:n_pw, 1:n_basis_mix) = dg_frag%mixed_transform(n_frag+1:n_tot, 1:n_basis_mix, ispin)
+                basis_mix_blk(1:npt_blk, 1:n_basis_mix) = basis_mix_blk(1:npt_blk, 1:n_basis_mix) + &
+                  matmul(phase_cache(1:npt_blk, 1:n_pw), transform_pw(1:n_pw, 1:n_basis_mix))
+              end if
+              density_mix_tmp(1:npt_blk, 1:n_basis_mix) = matmul(basis_mix_blk(1:npt_blk, 1:n_basis_mix), &
+                density_mix(1:n_basis_mix, 1:n_basis_mix, ispin))
+
+!$omp parallel private(io, igrid, owner_rank, ixg, iyg, izg, rho_contrib, slot)
+!$omp do schedule(static)
+              do igrid = 1, npt_blk
+                rho_blk(igrid) = real(sum(conjg(basis_mix_blk(igrid, 1:n_basis_mix)) * &
+                  density_mix_tmp(igrid, 1:n_basis_mix)), kind=8)
+              end do
+!$omp end do
+
+!$omp do schedule(static)
+              do igrid = 1, npt_blk
+                owner_rank = owner_buf(igrid)
+                ixg = ixg_buf(igrid)
+                iyg = iyg_buf(igrid)
+                izg = izg_buf(igrid)
+                rho_contrib = rho_blk(igrid)
+                if (owner_rank == dg_frag%id) then
+                  rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
+                  rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
+                else if (allocated(dg_frag%density_send_slot_map)) then
+                  slot = dg_frag%density_send_slot_map(ix_buf(igrid), iy_buf(igrid), iz_buf(igrid), i_local)
+                  if (slot > 0) then
+                    rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
+                    rho_s_send(owner_rank, ispin)%f(slot, 1, 1) = rho_s_send(owner_rank, ispin)%f(slot, 1, 1) + rho_contrib
+                  end if
+                end if
+              end do
+!$omp end do
+!$omp end parallel
+            else
+              do io0 = 1, nocc_spin, state_block_size
+                nbatch = min(state_block_size, nocc_spin - io0 + 1)
+                coef_blk(1:nbf, 1:nbatch) = (0.0d0, 0.0d0)
+                do io = 1, nbatch
+                  do istate_frag = 1, nbf
+                    ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+                    if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+                    coef_blk(istate_frag, io) = dg_frag%coef(ig_i, io0 + io - 1, ispin)
+                  end do
+                end do
+
+                psi_blk(1:npt_blk, 1:nbatch) = matmul(phi_blk(1:npt_blk, 1:nbf), coef_blk(1:nbf, 1:nbatch))
+
+                if (n_pw > 0) then
+                  do ipw0 = 1, n_pw, pw_block_size
+                    npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
+                    coef_pw_blk(1:npw_blk, 1:nbatch) = dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
+                    psi_blk(1:npt_blk, 1:nbatch) = psi_blk(1:npt_blk, 1:nbatch) + &
+                      matmul(phase_cache(1:npt_blk, ipw0:ipw0+npw_blk-1), coef_pw_blk(1:npw_blk, 1:nbatch))
+                  end do
+                end if
+
+!$omp parallel private(io, igrid, owner_rank, ixg, iyg, izg, rho_contrib, slot)
+!$omp do schedule(static)
+                do igrid = 1, npt_blk
+                  rho_blk(igrid) = 0.0d0
+                  do io = 1, nbatch
+                    rho_blk(igrid) = rho_blk(igrid) + occ_factor * real(conjg(psi_blk(igrid, io)) * psi_blk(igrid, io), kind=8)
+                  end do
+                end do
+!$omp end do
+
+!$omp do schedule(static)
+                do igrid = 1, npt_blk
+                  owner_rank = owner_buf(igrid)
+                  ixg = ixg_buf(igrid)
+                  iyg = iyg_buf(igrid)
+                  izg = izg_buf(igrid)
+                  rho_contrib = rho_blk(igrid)
+                  if (owner_rank == dg_frag%id) then
+                    rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
+                    rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
+                  else if (allocated(dg_frag%density_send_slot_map)) then
+                    slot = dg_frag%density_send_slot_map(ix_buf(igrid), iy_buf(igrid), iz_buf(igrid), i_local)
+                    if (slot > 0) then
+                      rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
+                      rho_s_send(owner_rank, ispin)%f(slot, 1, 1) = rho_s_send(owner_rank, ispin)%f(slot, 1, 1) + rho_contrib
+                    end if
+                  end if
+                end do
+!$omp end do
+!$omp end parallel
+              end do
+            end if
           end do
         end do
       end do
@@ -284,7 +378,6 @@
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
         flush(6)
       end if
-      end do
     end if
 
     if (dg_frag%id == 0) then
@@ -294,7 +387,7 @@
     call cpu_time(t_comm0)
     nreq_recv = 0
     do irank = 0, dg_frag%isize - 1
-      if (allocated(rho_recv(irank)%f)) nreq_recv = nreq_recv + 2 + system%nspin
+      if (allocated(rho_recv(irank)%f)) nreq_recv = nreq_recv + 1 + system%nspin
     end do
     if (nreq_recv > 0) then
       allocate(req_recv(nreq_recv))
@@ -303,8 +396,6 @@
         if (.not. allocated(rho_recv(irank)%f)) cycle
         ireq = ireq + 1
         req_recv(ireq) = comm_irecv(rho_recv(irank)%f, irank, rho_tag_base + dg_frag%id, dg_frag%icomm)
-        ireq = ireq + 1
-        req_recv(ireq) = comm_irecv(w_recv(irank)%f, irank, w_tag_base + dg_frag%id, dg_frag%icomm)
         do ispin = 1, system%nspin
           ireq = ireq + 1
           req_recv(ireq) = comm_irecv(rho_s_recv(irank, ispin)%f, irank, rho_tag_base + 100 * ispin + dg_frag%id, dg_frag%icomm)
@@ -315,7 +406,7 @@
     nreq_send = 0
     if (dg_frag%is_frag_root) then
       do irank = 0, dg_frag%isize - 1
-        if (allocated(rho_send(irank)%f)) nreq_send = nreq_send + 2 + system%nspin
+        if (allocated(rho_send(irank)%f)) nreq_send = nreq_send + 1 + system%nspin
       end do
     end if
     if (dg_frag%is_frag_root .and. nreq_send > 0) then
@@ -325,8 +416,6 @@
         if (.not. allocated(rho_send(irank)%f)) cycle
         ireq = ireq + 1
         req_send(ireq) = comm_isend(rho_send(irank)%f, irank, rho_tag_base + irank, dg_frag%icomm)
-        ireq = ireq + 1
-        req_send(ireq) = comm_isend(w_send(irank)%f, irank, w_tag_base + irank, dg_frag%icomm)
         do ispin = 1, system%nspin
           ireq = ireq + 1
           req_send(ireq) = comm_isend(rho_s_send(irank, ispin)%f, irank, rho_tag_base + 100 * ispin + irank, dg_frag%icomm)
@@ -347,12 +436,11 @@
           iyg = dg_frag%density_recv_map(irank)%iyg(slot)
           izg = dg_frag%density_recv_map(irank)%izg(slot)
           rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_recv(irank)%f(slot, 1, 1)
-          w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + w_recv(irank)%f(slot, 1, 1)
           do ispin = 1, system%nspin
             rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_s_recv(irank, ispin)%f(slot, 1, 1)
           end do
         end do
-        deallocate(rho_recv(irank)%f, w_recv(irank)%f)
+        deallocate(rho_recv(irank)%f)
         do ispin = 1, system%nspin
           if (allocated(rho_s_recv(irank, ispin)%f)) deallocate(rho_s_recv(irank, ispin)%f)
         end do
@@ -367,7 +455,7 @@
       flush(6)
       do irank = 0, dg_frag%isize - 1
         if (.not. allocated(rho_send(irank)%f)) cycle
-        deallocate(rho_send(irank)%f, w_send(irank)%f)
+        deallocate(rho_send(irank)%f)
         do ispin = 1, system%nspin
           if (allocated(rho_s_send(irank, ispin)%f)) deallocate(rho_s_send(irank, ispin)%f)
         end do
@@ -386,14 +474,12 @@
       flush(6)
     end if
     call cpu_time(t_norm0)
-    where (w_local > 0.5d0)
-      rho%f = rho%f / w_local
-    end where
-    do ispin = 1, system%nspin
-      where (w_local > 0.5d0)
-        rho_s(ispin)%f = rho_s(ispin)%f / w_local
-      end where
-    end do
+    if (allocated(dg_frag%density_inv_weight_local)) then
+      rho%f = rho%f * dg_frag%density_inv_weight_local
+      do ispin = 1, system%nspin
+        rho_s(ispin)%f = rho_s(ispin)%f * dg_frag%density_inv_weight_local
+      end do
+    end if
 
     total_charge_local = sum(rho%f) * system%hvol
     write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-total-charge-sum"
@@ -427,9 +513,15 @@
       flush(6)
     end if
 
-    deallocate(w_local, ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
+    deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
     deallocate(phi_blk, rho_blk, coef_blk, psi_blk)
-    deallocate(rho_send, w_send, rho_recv, w_recv, rho_s_send, rho_s_recv)
+    if (allocated(phase_cache)) deallocate(phase_cache)
+    if (allocated(density_mix)) deallocate(density_mix)
+    if (allocated(basis_mix_blk)) deallocate(basis_mix_blk)
+    if (allocated(density_mix_tmp)) deallocate(density_mix_tmp)
+    if (allocated(transform_frag)) deallocate(transform_frag)
+    if (allocated(transform_pw)) deallocate(transform_pw)
+    deallocate(rho_send, rho_recv, rho_s_send, rho_s_recv)
     call cpu_time(t_total1)
     if (dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &

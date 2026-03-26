@@ -428,6 +428,8 @@ contains
     if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
     if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
+    if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
+    if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
     if (allocated(dg_frag%density_recv_map)) then
@@ -549,6 +551,50 @@ contains
     end do
 
     deallocate(recv_count, recv_cursor)
+
+    allocate(dg_frag%density_weight_local(dg_frag%mg%is(1):dg_frag%mg%ie(1), &
+                                          dg_frag%mg%is(2):dg_frag%mg%ie(2), &
+                                          dg_frag%mg%is(3):dg_frag%mg%ie(3)))
+    allocate(dg_frag%density_inv_weight_local(dg_frag%mg%is(1):dg_frag%mg%ie(1), &
+                                              dg_frag%mg%is(2):dg_frag%mg%ie(2), &
+                                              dg_frag%mg%is(3):dg_frag%mg%ie(3)))
+    dg_frag%density_weight_local = 0.0d0
+    dg_frag%density_inv_weight_local = 0.0d0
+
+    if (dg_frag%is_frag_root) then
+      i_local = 0
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = i_local + 1
+        nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
+        do iz = 1, nxyz(3)
+          do iy = 1, nxyz(2)
+            do ix = 1, nxyz(1)
+              owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
+              if (owner_rank /= dg_frag%id) cycle
+              ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
+              iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
+              izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
+              dg_frag%density_weight_local(ixg, iyg, izg) = dg_frag%density_weight_local(ixg, iyg, izg) + 1.0d0
+            end do
+          end do
+        end do
+      end do
+    end if
+
+    do source_rank = 0, dg_frag%isize - 1
+      do i = 1, dg_frag%density_recv_map(source_rank)%npts
+        ixg = dg_frag%density_recv_map(source_rank)%ixg(i)
+        iyg = dg_frag%density_recv_map(source_rank)%iyg(i)
+        izg = dg_frag%density_recv_map(source_rank)%izg(i)
+        dg_frag%density_weight_local(ixg, iyg, izg) = dg_frag%density_weight_local(ixg, iyg, izg) + 1.0d0
+      end do
+    end do
+
+    where (dg_frag%density_weight_local > 0.5d0)
+      dg_frag%density_inv_weight_local = 1.0d0 / dg_frag%density_weight_local
+    elsewhere
+      dg_frag%density_inv_weight_local = 0.0d0
+    end where
   end subroutine build_density_grid_owner_maps
 
   integer function find_density_grid_owner(dg_frag, ixg, iyg, izg) result(owner)
@@ -1779,6 +1825,8 @@ contains
     if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
     if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
+    if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
+    if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
