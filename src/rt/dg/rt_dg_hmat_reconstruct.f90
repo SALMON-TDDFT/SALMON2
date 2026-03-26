@@ -17,8 +17,11 @@
     real(8) :: integral_Vh, integral_Vxc, integral_Vpsl  ! Real integrals (real basis)
     integer :: is(3), ie(3)
     real(8), allocatable :: Vpsl_mat(:,:,:), Vh_mat(:,:,:), Vxc_mat(:,:,:)
+    real(8), allocatable :: phi_blk(:,:), weighted_phi(:,:), Vpsl_blk(:), Vh_blk(:), Vxc_blk(:), Vtot_blk(:)
+    real(8), allocatable :: total_mat(:,:), Vpsl_local_mat(:,:), Vh_local_mat(:,:), Vxc_local_mat(:,:)
     real(8) :: max_asym_vpsl, max_asym_vh, max_asym_vxc
     integer :: nmat_chk
+    integer :: ngrid, ngrid_max, igrid_cache
     logical :: release_dense_h, use_block_reconstruct
     
     ! Check if real-space basis functions are available
@@ -31,6 +34,10 @@
       (yn_hse /= 'y')
     use_block_reconstruct = allocated(dg_frag%H_mat_blocks) .and. allocated(dg_frag%H_mat_kinetic_blocks) .and. &
       allocated(dg_frag%H_block_map) .and. release_dense_h
+    ngrid_max = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
+    end do
 
     hvol = system%hvol
     is = dg_frag%lg%is
@@ -94,6 +101,15 @@
       Vh_mat = 0.0d0
       Vxc_mat = 0.0d0
     end if
+    if (ngrid_max > 0) then
+      allocate(phi_blk(ngrid_max, dg_frag%nstate_frag))
+      allocate(weighted_phi(ngrid_max, dg_frag%nstate_frag))
+      allocate(Vpsl_blk(ngrid_max), Vh_blk(ngrid_max), Vxc_blk(ngrid_max), Vtot_blk(ngrid_max))
+      allocate(total_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
+      allocate(Vpsl_local_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
+      allocate(Vh_local_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
+      allocate(Vxc_local_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
+    end if
     
     ! Step 2-4: Add updated potential matrix elements
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -140,101 +156,82 @@
             " index_dim1=", size(dg_frag%index_basis, 1), " phi_dim4=", size(dg_frag%phi_frag, 4)
         end if
         if (nbf <= 0) cycle
-        !$omp parallel do private(io, jo, ig_i, ig_j, ix, iy, iz, integral_Vh, integral_Vxc, integral_Vpsl) collapse(2)
-        do jo = 1, nbf
-          do io = 1, nbf
-            ig_i = dg_frag%index_basis(io, ifrag, ispin)
-            ig_j = dg_frag%index_basis(jo, ifrag, ispin)
-            if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-            
-            ! Calculate pseudopotential matrix element:
-            ! V_psl,ij = ∫ φ_i*(r) V_psl(r) φ_j(r) dr
-            integral_Vpsl = 0.0d0
-            do lz = 1, ndom(3)
-              gz = iorg(3) + lz - 1
-              do ly = 1, ndom(2)
-                gy = iorg(2) + ly - 1
-                do lx = 1, ndom(1)
-                  gx = iorg(1) + lx - 1
-                  integral_Vpsl = integral_Vpsl + &
-                    dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
-                    Vpsl%f(gx, gy, gz) * &
-                    dg_frag%phi_frag(lx, ly, lz, jo, i_local) * &
-                    hvol
+        ngrid = ndom(1) * ndom(2) * ndom(3)
+        if (allocated(dg_frag%density_phi_cache) .and. dg_frag%density_phi_cache_valid) then
+          phi_blk(1:ngrid, 1:nbf) = dg_frag%density_phi_cache(1:ngrid, 1:nbf, i_local)
+        else
+          igrid_cache = 0
+          do lz = 1, ndom(3)
+            do ly = 1, ndom(2)
+              do lx = 1, ndom(1)
+                igrid_cache = igrid_cache + 1
+                do io = 1, nbf
+                  phi_blk(igrid_cache, io) = dg_frag%phi_frag(lx, ly, lz, io, i_local)
                 end do
               end do
             end do
-            if (integral_Vpsl /= integral_Vpsl) then
-              write(*,'(a,i0,a,i0,a,i0,a,i0)') "[NaN] Vpsl integral, rank=", dg_frag%id, " ifrag=", ifrag, " io=", io, " jo=", jo
-              stop "NaN in Vpsl integral"
-            end if
-            
-            ! Calculate Hartree potential matrix element:
-            ! V_H,ij = ∫ φ_i*(r) V_H(r) φ_j(r) dr
-            integral_Vh = 0.0d0
-            do lz = 1, ndom(3)
-              gz = iorg(3) + lz - 1
-              do ly = 1, ndom(2)
-                gy = iorg(2) + ly - 1
-                do lx = 1, ndom(1)
-                  gx = iorg(1) + lx - 1
-                  ! Numerical integration: φ_i * V_H * φ_j * volume_element (real basis)
-                  integral_Vh = integral_Vh + &
-                    dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
-                    Vh%f(gx, gy, gz) * &
-                    dg_frag%phi_frag(lx, ly, lz, jo, i_local) * &
-                    hvol
-                end do
-              end do
+          end do
+        end if
+        igrid_cache = 0
+        do lz = 1, ndom(3)
+          gz = iorg(3) + lz - 1
+          do ly = 1, ndom(2)
+            gy = iorg(2) + ly - 1
+            do lx = 1, ndom(1)
+              gx = iorg(1) + lx - 1
+              igrid_cache = igrid_cache + 1
+              Vpsl_blk(igrid_cache) = Vpsl%f(gx, gy, gz) * hvol
+              Vh_blk(igrid_cache) = Vh%f(gx, gy, gz) * hvol
+              Vxc_blk(igrid_cache) = Vxc(ispin)%f(gx, gy, gz) * hvol
+              Vtot_blk(igrid_cache) = Vpsl_blk(igrid_cache) + Vh_blk(igrid_cache) + Vxc_blk(igrid_cache)
             end do
-            if (integral_Vh /= integral_Vh) then
-              write(*,'(a,i0,a,i0,a,i0,a,i0)') "[NaN] Vh integral, rank=", dg_frag%id, " ifrag=", ifrag, " io=", io, " jo=", jo
-              stop "NaN in Vh integral"
-            end if
-            
-            ! Calculate XC potential matrix element:
-            ! V_xc,ij = ∫ φ*_i(r) V_xc(r) φ_j(r) dr
-            integral_Vxc = 0.0d0
-            do lz = 1, ndom(3)
-              gz = iorg(3) + lz - 1
-              do ly = 1, ndom(2)
-                gy = iorg(2) + ly - 1
-                do lx = 1, ndom(1)
-                  gx = iorg(1) + lx - 1
-                  ! Numerical integration: φ_i * V_xc * φ_j * volume_element (real basis)
-                  integral_Vxc = integral_Vxc + &
-                    dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
-                    Vxc(ispin)%f(gx, gy, gz) * &
-                    dg_frag%phi_frag(lx, ly, lz, jo, i_local) * &
-                    hvol
-                end do
-              end do
-            end do
-            if (integral_Vxc /= integral_Vxc) then
-              write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0)') "[NaN] Vxc integral, rank=", dg_frag%id, " ifrag=", ifrag, " ispin=", ispin, " io=", io, " jo=", jo
-              stop "NaN in Vxc integral"
-            end if
-            
-            ! Add potential contributions: V_psl + V_H + V_xc
-            ! Note: A·p and A²/2 are NOT added here (added in time evolution)
-            if (use_block_reconstruct) then
-              iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
-              if (iblk > 0) then
-                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + &
-                  real(integral_Vpsl + integral_Vh + integral_Vxc, kind=8)
-              end if
-            else
-              dg_frag%H_mat(ig_i, ig_j, ispin) = dg_frag%H_mat(ig_i, ig_j, ispin) + &
-                                             real(integral_Vpsl + integral_Vh + integral_Vxc, kind=8)
-              Vpsl_mat(ig_i, ig_j, ispin) = Vpsl_mat(ig_i, ig_j, ispin) + integral_Vpsl
-              Vh_mat(ig_i, ig_j, ispin) = Vh_mat(ig_i, ig_j, ispin) + integral_Vh
-              Vxc_mat(ig_i, ig_j, ispin) = Vxc_mat(ig_i, ig_j, ispin) + integral_Vxc
-            end if
-            
           end do
         end do
-        !$omp end parallel do
+
+        do io = 1, nbf
+          weighted_phi(1:ngrid, io) = Vtot_blk(1:ngrid) * phi_blk(1:ngrid, io)
+        end do
+        total_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi(1:ngrid, 1:nbf))
+        if (.not. use_block_reconstruct) then
+          do io = 1, nbf
+            weighted_phi(1:ngrid, io) = Vpsl_blk(1:ngrid) * phi_blk(1:ngrid, io)
+          end do
+          Vpsl_local_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi(1:ngrid, 1:nbf))
+          do io = 1, nbf
+            weighted_phi(1:ngrid, io) = Vh_blk(1:ngrid) * phi_blk(1:ngrid, io)
+          end do
+          Vh_local_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi(1:ngrid, 1:nbf))
+          do io = 1, nbf
+            weighted_phi(1:ngrid, io) = Vxc_blk(1:ngrid) * phi_blk(1:ngrid, io)
+          end do
+          Vxc_local_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi(1:ngrid, 1:nbf))
+        end if
+
+        if (any(total_mat(1:nbf, 1:nbf) /= total_mat(1:nbf, 1:nbf))) then
+          write(*,'(a,i0,a,i0,a,i0)') "[NaN] total potential mat, rank=", dg_frag%id, " ifrag=", ifrag, " ispin=", ispin
+          stop "NaN in reconstructed total potential matrix"
+        end if
+
+        if (use_block_reconstruct) then
+          iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
+          if (iblk > 0) then
+            dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + &
+              total_mat(1:nbf, 1:nbf)
+          end if
+        else
+          do jo = 1, nbf
+            ig_j = dg_frag%index_basis(jo, ifrag, ispin)
+            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
+            do io = 1, nbf
+              ig_i = dg_frag%index_basis(io, ifrag, ispin)
+              if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+              dg_frag%H_mat(ig_i, ig_j, ispin) = dg_frag%H_mat(ig_i, ig_j, ispin) + total_mat(io, jo)
+              Vpsl_mat(ig_i, ig_j, ispin) = Vpsl_mat(ig_i, ig_j, ispin) + Vpsl_local_mat(io, jo)
+              Vh_mat(ig_i, ig_j, ispin) = Vh_mat(ig_i, ig_j, ispin) + Vh_local_mat(io, jo)
+              Vxc_mat(ig_i, ig_j, ispin) = Vxc_mat(ig_i, ig_j, ispin) + Vxc_local_mat(io, jo)
+            end do
+          end do
+        end if
         
         ! HSE hybrid functional contribution (Plan A: density matrix method)
         if (yn_hse == 'y') then
@@ -366,5 +363,7 @@
     if (release_dense_h) then
       if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     end if
+    if (allocated(phi_blk)) deallocate(phi_blk, weighted_phi, Vpsl_blk, Vh_blk, Vxc_blk, Vtot_blk)
+    if (allocated(total_mat)) deallocate(total_mat, Vpsl_local_mat, Vh_local_mat, Vxc_local_mat)
     
   end subroutine reconstruct_hamiltonian_matrix
