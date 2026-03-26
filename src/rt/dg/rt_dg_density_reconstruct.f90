@@ -19,10 +19,9 @@
     integer :: nxyz(3), ixyz0(3)
     integer :: nocc_per_spin, nocc_spin, nocc_cache
     integer :: irank, nreq_send, nreq_recv, ireq, slot, npts
-    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx
-    integer, parameter :: grid_block_size = 512, state_block_size = 64
+    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
+    integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
     real(8) :: occ_factor
-    complex(8) :: coef_i, psi_val, phase_pw, ci
     real(8) :: phi_i, rho_contrib
     real(8) :: total_charge, total_charge_local, scale_rho, elec_num_scaled_local
     real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta
@@ -34,7 +33,7 @@
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
     type(s_scalar), allocatable :: rho_send(:), w_send(:), rho_recv(:), w_recv(:)
     real(8), allocatable :: phi_blk(:,:), rho_blk(:)
-    complex(8), allocatable :: coef_blk(:,:), psi_blk(:,:)
+    complex(8), allocatable :: coef_blk(:,:), psi_blk(:,:), phase_blk(:,:), coef_pw_blk(:,:)
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
@@ -55,6 +54,8 @@
     allocate(rho_blk(grid_block_size))
     allocate(coef_blk(dg_frag%nstate_frag, state_block_size))
     allocate(psi_blk(grid_block_size, state_block_size))
+    allocate(phase_blk(grid_block_size, pw_block_size))
+    allocate(coef_pw_blk(pw_block_size, state_block_size))
     allocate(rho_send(0:dg_frag%isize-1), w_send(0:dg_frag%isize-1))
     allocate(rho_recv(0:dg_frag%isize-1), w_recv(0:dg_frag%isize-1))
 
@@ -209,7 +210,8 @@
             psi_blk(1:npt_blk, 1:nbatch) = matmul(phi_blk(1:npt_blk, 1:nbf), coef_blk(1:nbf, 1:nbatch))
 
             if (n_pw > 0) then
-              do io = 1, nbatch
+              do ipw0 = 1, n_pw, pw_block_size
+                npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
                 do igrid = 1, npt_blk
                   ixg = ixg_buf(igrid)
                   iyg = iyg_buf(igrid)
@@ -217,15 +219,15 @@
                   rx = real(ixg - 1, 8) * dg_frag%hgs(1)
                   ry = real(iyg - 1, 8) * dg_frag%hgs(2)
                   rz = real(izg - 1, 8) * dg_frag%hgs(3)
-                  psi_val = (0.0d0, 0.0d0)
-                  do ipw = 1, n_pw
+                  do ipw_loc = 1, npw_blk
+                    ipw = ipw0 + ipw_loc - 1
                     theta = dg_frag%k_pw(1, ipw) * rx + dg_frag%k_pw(2, ipw) * ry + dg_frag%k_pw(3, ipw) * rz
-                    phase_pw = cmplx(cos(theta), sin(theta), kind=8)
-                    ci = dg_frag%coef_pw_full_cache(ipw, io0 + io - 1, ispin)
-                    psi_val = psi_val + ci * phase_pw * inv_sqrt_vol
+                    phase_blk(igrid, ipw_loc) = cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
                   end do
-                  psi_blk(igrid, io) = psi_blk(igrid, io) + psi_val
                 end do
+                coef_pw_blk(1:npw_blk, 1:nbatch) = dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
+                psi_blk(1:npt_blk, 1:nbatch) = psi_blk(1:npt_blk, 1:nbatch) + &
+                  matmul(phase_blk(1:npt_blk, 1:npw_blk), coef_pw_blk(1:npw_blk, 1:nbatch))
               end do
             end if
 
