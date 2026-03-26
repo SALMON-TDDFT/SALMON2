@@ -107,8 +107,9 @@ subroutine init_communicator_dft(comm,info)
       stop 'undefined: process_allocation'
     end if
 
-    if (nl /= info%isize_rko-1) &
+    if (nl /= info%isize_rko-1) then
       stop '[FATAL ERROR] init_communicator_dft'
+    end if
 #ifdef __FUJITSU
   end if
 #endif
