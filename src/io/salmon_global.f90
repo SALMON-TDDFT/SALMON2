@@ -481,8 +481,16 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: lambda_cut
   
   !! &dg_fragment (DG-Fragment RT-TDDFT)
+  ! Legacy entries kept for backward-compatible parsing of existing inputs.
+  character(1)   :: yn_dg_frag
+  real(8)        :: eps_dg_frag
+  character(1)   :: yn_adaptive_basis_dg
+  integer        :: niter_dg_frag_rt_max
   character(1)   :: yn_adaptive_basis
   real(8)        :: basis_update_threshold
   character(1)   :: yn_dg_fragment_from_dcdft  ! Initialize DG-Fragment RT from DC-LCFO data
+  character(16)  :: dg_nmat_cap_mode
+  integer        :: dg_nmat_cap_fixed
+  real(8)        :: dg_nmat_cap_multiple
 
 end module salmon_global

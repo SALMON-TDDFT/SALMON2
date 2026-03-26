@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_dg_fragment
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -633,6 +634,19 @@ contains
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft
 
+    namelist/dg_fragment/ &
+      & yn_dg_fragment_rt, &
+      & yn_dg_frag, &
+      & eps_dg_frag, &
+      & yn_adaptive_basis_dg, &
+      & niter_dg_frag_rt_max, &
+      & yn_adaptive_basis, &
+      & basis_update_threshold, &
+      & yn_dg_fragment_from_dcdft, &
+      & dg_nmat_cap_mode, &
+      & dg_nmat_cap_fixed, &
+      & dg_nmat_cap_multiple
+
 !! == default for &unit ==
     unit_system='au'
 !! =======================
@@ -1083,9 +1097,16 @@ contains
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
+    yn_dg_frag = 'n'
+    eps_dg_frag = 1.0d-10
+    yn_adaptive_basis_dg = 'n'
+    niter_dg_frag_rt_max = 0
     yn_adaptive_basis = 'n'
     basis_update_threshold = 0.1d0  ! 0.1 a.u. (~2.7 eV)
     yn_dg_fragment_from_dcdft = 'n'
+    dg_nmat_cap_mode = 'none'
+    dg_nmat_cap_fixed = 0
+    dg_nmat_cap_multiple = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1164,6 +1185,8 @@ contains
       rewind(fh_namelist)
       
       read(fh_namelist, nml=dc, iostat=inml_dc)
+      rewind(fh_namelist)
+      read(fh_namelist, nml=dg_fragment, iostat=inml_dg_fragment)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1746,10 +1769,17 @@ contains
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
 !! == bcast for dg_fragment
+    call comm_bcast(yn_dg_frag, nproc_group_global)
+    call comm_bcast(eps_dg_frag, nproc_group_global)
+    call comm_bcast(yn_adaptive_basis_dg, nproc_group_global)
+    call comm_bcast(niter_dg_frag_rt_max, nproc_group_global)
     call comm_bcast(yn_adaptive_basis, nproc_group_global)
     call comm_bcast(basis_update_threshold, nproc_group_global)
     basis_update_threshold = basis_update_threshold * uenergy_to_au
     call comm_bcast(yn_dg_fragment_from_dcdft, nproc_group_global)
+    call comm_bcast(dg_nmat_cap_mode, nproc_group_global)
+    call comm_bcast(dg_nmat_cap_fixed, nproc_group_global)
+    call comm_bcast(dg_nmat_cap_multiple, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2721,6 +2751,8 @@ contains
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
+      if(inml_dg_fragment >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dg_fragment', inml_dg_fragment
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
