@@ -39,13 +39,14 @@
     real(8) :: t_stage0, t_stage1
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct
     logical, parameter :: enable_density_hmat_trace = .false.
+    logical, parameter :: enable_density_hmat_progress = .true.
 
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
     ! - Photovoltaic effects
     ! - Catalytic reactions under light
     ! - Laser excitation and ionization
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "entry"
@@ -67,7 +68,7 @@
       return
     end if
     ! Step 1: Calculate electron density from fragment basis coefficients
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "before-density"
@@ -77,7 +78,7 @@
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call cpu_time(t_stage1)
     time_density = time_density + (t_stage1 - t_stage0)
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "after-density", " dt=", time_density
@@ -110,7 +111,7 @@
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "before-hartree"
@@ -120,7 +121,7 @@
     call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
     time_hartree = time_hartree + (t_stage1 - t_stage0)
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "after-hartree", " dt=", time_hartree
@@ -143,7 +144,7 @@
     !            Current implementation: calculated on full grid for simplicity
     ! Note: For meta-GGA functionals, spsi (wavefunctions) would be needed for τ and j
     !       DG-Fragment RT currently supports LDA/GGA functionals
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "before-xc"
@@ -154,7 +155,7 @@
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
     time_xc = time_xc + (t_stage1 - t_stage0)
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "after-xc", " dt=", time_xc
@@ -193,7 +194,7 @@
     end if
 
     if (.not. skip_hmat_rebuild) then
-      if (enable_density_hmat_trace) then
+      if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
           " stage=", "before-reconstruct"
@@ -203,7 +204,7 @@
       call reconstruct_hamiltonian_matrix(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
       call cpu_time(t_stage1)
       time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
-      if (enable_density_hmat_trace) then
+      if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
           " stage=", "after-reconstruct", " dt=", time_reconstruct
@@ -260,13 +261,13 @@
       if (allocated(H_mat_prev)) deallocate(H_mat_prev)
       if (allocated(H_mat_prev_c)) deallocate(H_mat_prev_c)
     end if
-    if (enable_density_hmat_trace) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "exit"
       flush(6)
     end if
-    if (enable_density_hmat_trace .and. dg_frag%id == 0) then
+    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        density-hmat timing: density=", time_density, &
         " hartree=", time_hartree, " xc=", time_xc, " reconstruct=", time_reconstruct
       flush(6)

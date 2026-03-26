@@ -277,6 +277,7 @@
     use communication, only: comm_isend, comm_irecv, comm_recv, comm_wait_all
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    logical, parameter :: enable_halo_trace = .false.
 
     integer :: i_halo, ix, iy, iz, istate
     integer :: l(3), d(3), i_local
@@ -293,14 +294,16 @@
     if (dg_frag%n_halo <= 0) return
 
     halo_exchange_call_count = halo_exchange_call_count + 1
-    diag_second_halo_root = dg_frag%is_frag_root .and. (halo_exchange_call_count == 2)
-    diag_fourth_halo_root = dg_frag%is_frag_root .and. (halo_exchange_call_count == 4)
+    diag_second_halo_root = enable_halo_trace .and. dg_frag%is_frag_root .and. (halo_exchange_call_count == 2)
+    diag_fourth_halo_root = enable_halo_trace .and. dg_frag%is_frag_root .and. (halo_exchange_call_count == 4)
 
     allocate(ireq_send(dg_frag%n_halo), ireq_recv(dg_frag%n_halo))
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "entry"
-    call flush(6)
-    if (dg_frag%id == 0) then
+    if (enable_halo_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "entry"
+      call flush(6)
+    end if
+    if (enable_halo_trace .and. dg_frag%id == 0) then
       write(*,*) "        halo exchange entry"
       call flush(6)
     end if
@@ -320,7 +323,7 @@
 
       l = dg_frag%halo(i_halo)%length
       d = dg_frag%halo(i_halo)%dsp_send
-      if (i_halo == 1 .and. dg_frag%id == 0) then
+      if (enable_halo_trace .and. i_halo == 1 .and. dg_frag%id == 0) then
         write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0,a,1x,i0,a,1x,i0)') &
           "        halo1 send: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), &
           "i_local=", i_local, "id_dst=", dg_frag%halo(i_halo)%id_dst, "id_src=", dg_frag%halo(i_halo)%id_src
@@ -347,7 +350,7 @@
       end do
       end do
       end do
-      if (i_halo == 1 .and. dg_frag%id == 0) then
+      if (enable_halo_trace .and. i_halo == 1 .and. dg_frag%id == 0) then
         write(*,*) "        halo1 pack done"
         call flush(6)
       end if
@@ -430,10 +433,12 @@
         call flush(6)
       end if
     end do
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "post-done"
-    call flush(6)
-    if (dg_frag%id == 0) then
+    if (enable_halo_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "post-done"
+      call flush(6)
+    end if
+    if (enable_halo_trace .and. dg_frag%id == 0) then
       write(*,*) "        halo post done"
       call flush(6)
     end if
@@ -457,10 +462,12 @@
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "send-wait-done"
       call flush(6)
     end if
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "wait-done"
-    call flush(6)
-    if (dg_frag%id == 0) then
+    if (enable_halo_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "wait-done"
+      call flush(6)
+    end if
+    if (enable_halo_trace .and. dg_frag%id == 0) then
       write(*,*) "        halo wait done"
       call flush(6)
     end if
@@ -469,7 +476,7 @@
       i_local = dg_frag%halo(i_halo)%ifrag_dst - dg_frag%ifrag_start + 1
       l = dg_frag%halo(i_halo)%length
       d = dg_frag%halo(i_halo)%dsp_recv
-      if (i_halo == 1 .and. dg_frag%id == 0) then
+      if (enable_halo_trace .and. i_halo == 1 .and. dg_frag%id == 0) then
         write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
           "        halo1 recv: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), "i_local=", i_local
         call flush(6)
@@ -510,10 +517,12 @@
       end do
       end do
     end do
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "unpack-done"
-    call flush(6)
-    if (dg_frag%id == 0) then
+    if (enable_halo_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "unpack-done"
+      call flush(6)
+    end if
+    if (enable_halo_trace .and. dg_frag%id == 0) then
       write(*,*) "        halo unpack done"
       call flush(6)
     end if
