@@ -1,7 +1,7 @@
   subroutine calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     use structures
     use salmon_global, only: nelec, nelec_spin
-    use communication, only: comm_summation, comm_isend, comm_irecv, comm_wait_all
+    use communication, only: comm_summation, comm_bcast, comm_isend, comm_irecv, comm_wait_all, COMM_GROUP_NULL
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -18,7 +18,8 @@
     integer :: nxyz(3), ixyz0(3), ifrag_count, ngrid_max, igrid_cache
     integer :: nocc_per_spin, nocc_spin, nocc_cache
     integer :: irank, nreq_send, nreq_recv, ireq, slot, npts
-    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
+    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc, block_idx
+    integer :: total_send_pts, pack_offset
     integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
     real(8) :: occ_factor
     real(8) :: phi_i, rho_contrib
@@ -27,7 +28,7 @@
     real(8) :: t_total0, t_total1, t_cache0, t_cache1
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
     real(8) :: time_cache, time_project, time_comm, time_norm
-    logical :: use_mixed_density
+    logical :: use_mixed_density, distribute_project
     integer, allocatable :: req_send(:), req_recv(:)
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
     type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
@@ -36,6 +37,7 @@
     complex(8), allocatable :: coef_blk(:,:), psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: transform_frag(:,:), transform_pw(:,:)
+    real(8), allocatable :: send_pack(:), send_sum(:)
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
@@ -89,6 +91,7 @@
     if (n_pw > 0) allocate(phase_cache(grid_block_size, n_pw))
     use_mixed_density = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
       allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
+    distribute_project = (dg_frag%icomm_frag /= COMM_GROUP_NULL .and. dg_frag%isize_frag > 1)
     max_mixed_basis = 0
     if (use_mixed_density) then
       max_mixed_basis = maxval(dg_frag%mixed_basis_dim(1:system%nspin))
@@ -108,9 +111,16 @@
         end if
         n_basis_mix = min(dg_frag%mixed_basis_dim(ispin), max_mixed_basis, size(dg_frag%coef_mix, 1))
         if (n_basis_mix <= 0 .or. nocc_spin <= 0) cycle
-        density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = occ_factor * &
-          matmul(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin), &
-                 conjg(transpose(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin))))
+        if (.not. distribute_project .or. dg_frag%is_frag_root) then
+          density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = occ_factor * &
+            matmul(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin), &
+                   conjg(transpose(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin))))
+        else
+          density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = (0.0d0, 0.0d0)
+        end if
+        if (distribute_project) then
+          call comm_bcast(density_mix(1:n_basis_mix, 1:n_basis_mix, ispin), dg_frag%icomm_frag, 0)
+        end if
       end do
     end if
     boxL(1) = dg_frag%hgs(1) * real(mg%num(1), 8)
@@ -120,7 +130,7 @@
 
     do irank = 0, dg_frag%isize - 1
       if (irank == dg_frag%id) cycle
-      if (dg_frag%is_frag_root .and. allocated(dg_frag%density_send_count)) then
+      if ((dg_frag%is_frag_root .or. distribute_project) .and. allocated(dg_frag%density_send_count)) then
         npts = dg_frag%density_send_count(irank)
       else
         npts = 0
@@ -147,6 +157,16 @@
         end do
       end if
     end do
+    total_send_pts = 0
+    if ((dg_frag%is_frag_root .or. distribute_project) .and. allocated(dg_frag%density_send_count)) then
+      do irank = 0, dg_frag%isize - 1
+        if (irank == dg_frag%id) cycle
+        total_send_pts = total_send_pts + (1 + system%nspin) * dg_frag%density_send_count(irank)
+      end do
+    end if
+    if (total_send_pts > 0) then
+      allocate(send_pack(total_send_pts), send_sum(total_send_pts))
+    end if
 
     if (n_pw > 0) then
       call cpu_time(t_cache0)
@@ -161,7 +181,7 @@
       flush(6)
     end if
 
-    if (dg_frag%is_frag_root) then
+    if (dg_frag%is_frag_root .or. distribute_project) then
       if (dg_frag%id == 0) then
         write(*,'(1x,a)') "        density trace: stage=before-frag-loop"
         flush(6)
@@ -175,6 +195,10 @@
         ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
         ngrid = nxyz(1) * nxyz(2) * nxyz(3)
         do igrid0 = 1, ngrid, grid_block_size
+          block_idx = (igrid0 - 1) / grid_block_size
+          if (distribute_project) then
+            if (mod(block_idx, dg_frag%isize_frag) /= dg_frag%id_frag) cycle
+          end if
           npt_blk = min(grid_block_size, ngrid - igrid0 + 1)
           do igrid = 1, npt_blk
             tmp_idx = igrid0 + igrid - 2
@@ -318,20 +342,32 @@
               do io0 = 1, nocc_spin, state_block_size
                 nbatch = min(state_block_size, nocc_spin - io0 + 1)
                 coef_blk(1:nbf, 1:nbatch) = (0.0d0, 0.0d0)
-                do io = 1, nbatch
-                  do istate_frag = 1, nbf
-                    ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
-                    if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-                    coef_blk(istate_frag, io) = dg_frag%coef(ig_i, io0 + io - 1, ispin)
+                if (.not. distribute_project .or. dg_frag%is_frag_root) then
+                  do io = 1, nbatch
+                    do istate_frag = 1, nbf
+                      ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+                      if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+                      coef_blk(istate_frag, io) = dg_frag%coef(ig_i, io0 + io - 1, ispin)
+                    end do
                   end do
-                end do
+                end if
+                if (distribute_project) then
+                  call comm_bcast(coef_blk(1:nbf, 1:nbatch), dg_frag%icomm_frag, 0)
+                end if
 
                 psi_blk(1:npt_blk, 1:nbatch) = matmul(phi_blk(1:npt_blk, 1:nbf), coef_blk(1:nbf, 1:nbatch))
 
                 if (n_pw > 0) then
                   do ipw0 = 1, n_pw, pw_block_size
                     npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
-                    coef_pw_blk(1:npw_blk, 1:nbatch) = dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
+                    coef_pw_blk(1:npw_blk, 1:nbatch) = (0.0d0, 0.0d0)
+                    if (.not. distribute_project .or. dg_frag%is_frag_root) then
+                      coef_pw_blk(1:npw_blk, 1:nbatch) = &
+                        dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
+                    end if
+                    if (distribute_project) then
+                      call comm_bcast(coef_pw_blk(1:npw_blk, 1:nbatch), dg_frag%icomm_frag, 0)
+                    end if
                     psi_blk(1:npt_blk, 1:nbatch) = psi_blk(1:npt_blk, 1:nbatch) + &
                       matmul(phase_cache(1:npt_blk, ipw0:ipw0+npw_blk-1), coef_pw_blk(1:npw_blk, 1:nbatch))
                   end do
@@ -378,6 +414,41 @@
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
         flush(6)
       end if
+    end if
+
+    if (distribute_project .and. allocated(send_sum)) then
+      send_pack(:) = 0.0d0
+      pack_offset = 0
+      do irank = 0, dg_frag%isize - 1
+        if (.not. allocated(rho_send(irank)%f)) cycle
+        npts = size(rho_send(irank)%f, 1)
+        send_pack(pack_offset+1:pack_offset+npts) = rho_send(irank)%f(:, 1, 1)
+        pack_offset = pack_offset + npts
+        do ispin = 1, system%nspin
+          send_pack(pack_offset+1:pack_offset+npts) = rho_s_send(irank, ispin)%f(:, 1, 1)
+          pack_offset = pack_offset + npts
+        end do
+      end do
+      call comm_summation(send_pack, send_sum, total_send_pts, dg_frag%icomm_frag)
+      pack_offset = 0
+      do irank = 0, dg_frag%isize - 1
+        if (.not. allocated(rho_send(irank)%f)) cycle
+        npts = size(rho_send(irank)%f, 1)
+        if (dg_frag%is_frag_root) then
+          rho_send(irank)%f(:, 1, 1) = send_sum(pack_offset+1:pack_offset+npts)
+        else
+          rho_send(irank)%f(:, 1, 1) = 0.0d0
+        end if
+        pack_offset = pack_offset + npts
+        do ispin = 1, system%nspin
+          if (dg_frag%is_frag_root) then
+            rho_s_send(irank, ispin)%f(:, 1, 1) = send_sum(pack_offset+1:pack_offset+npts)
+          else
+            rho_s_send(irank, ispin)%f(:, 1, 1) = 0.0d0
+          end if
+          pack_offset = pack_offset + npts
+        end do
+      end do
     end if
 
     if (dg_frag%id == 0) then
@@ -462,6 +533,12 @@
       end do
       deallocate(req_send)
     end if
+    do irank = 0, dg_frag%isize - 1
+      if (allocated(rho_send(irank)%f)) deallocate(rho_send(irank)%f)
+      do ispin = 1, system%nspin
+        if (allocated(rho_s_send(irank, ispin)%f)) deallocate(rho_s_send(irank, ispin)%f)
+      end do
+    end do
     call cpu_time(t_comm1)
     time_comm = time_comm + (t_comm1 - t_comm0)
     if (dg_frag%id == 0) then
@@ -521,6 +598,8 @@
     if (allocated(density_mix_tmp)) deallocate(density_mix_tmp)
     if (allocated(transform_frag)) deallocate(transform_frag)
     if (allocated(transform_pw)) deallocate(transform_pw)
+    if (allocated(send_pack)) deallocate(send_pack)
+    if (allocated(send_sum)) deallocate(send_sum)
     deallocate(rho_send, rho_recv, rho_s_send, rho_s_recv)
     call cpu_time(t_total1)
     if (dg_frag%id == 0) then
