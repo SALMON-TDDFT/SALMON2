@@ -949,9 +949,12 @@
     integer, intent(in) :: block_map(:, :)
     real(8), intent(inout) :: mat(:, :, :)
     integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
+    integer :: nrow, ncol, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
 
     mat(:, :, :) = 0.0d0
+    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
+    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
         iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
@@ -960,18 +963,33 @@
           nrow = dg_frag%n_basis(ifrag_row, ispin)
           ncol = dg_frag%n_basis(ifrag_col, ispin)
           if (nrow <= 0 .or. ncol <= 0) cycle
+          valid_row_count = 0
+          do ii = 1, nrow
+            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
+            valid_row_count = valid_row_count + 1
+            valid_row_ids(valid_row_count) = ii
+          end do
+          valid_col_count = 0
           do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
+            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
+            valid_col_count = valid_col_count + 1
+            valid_col_ids(valid_col_count) = jj
+          end do
+          do idx_jj = 1, valid_col_count
+            jj = valid_col_ids(idx_jj)
+            ig_j = col_gid(jj)
+            do idx_ii = 1, valid_row_count
+              ii = valid_row_ids(idx_ii)
+              ig_i = row_gid(ii)
               mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
             end do
           end do
         end do
       end do
     end do
+    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
   end subroutine sync_blocks_to_dense_matrix
 
   logical function is_momentum_neighbor_axis(lg, s1, n1, s2, n2) result(ok)

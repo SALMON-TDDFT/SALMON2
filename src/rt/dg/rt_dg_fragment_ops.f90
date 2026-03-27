@@ -968,6 +968,7 @@ contains
     integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
     integer :: nrow, ncol
 
+!$omp parallel do collapse(2) private(ifrag_col, ifrag_row, iblk, ispin, ii, jj, ig_i, ig_j, nrow, ncol) schedule(static)
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
         iblk = find_matrix_block_runtime(block_map, ifrag_row, ifrag_col)
@@ -989,6 +990,7 @@ contains
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine sync_dense_matrix_to_blocks_runtime
 
   subroutine init_matrix_blocks_runtime(dg_frag, blocks, block_map)
@@ -1045,9 +1047,12 @@ contains
     real(8), intent(inout) :: mat(:, :, :)
 
     integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
+    integer :: nrow, ncol, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
 
     mat(:, :, :) = 0.0d0
+    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
+    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
         iblk = find_matrix_block_runtime(block_map, ifrag_row, ifrag_col)
@@ -1056,18 +1061,33 @@ contains
           nrow = dg_frag%n_basis(ifrag_row, ispin)
           ncol = dg_frag%n_basis(ifrag_col, ispin)
           if (nrow <= 0 .or. ncol <= 0) cycle
+          valid_row_count = 0
+          do ii = 1, nrow
+            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
+            valid_row_count = valid_row_count + 1
+            valid_row_ids(valid_row_count) = ii
+          end do
+          valid_col_count = 0
           do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
+            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
+            valid_col_count = valid_col_count + 1
+            valid_col_ids(valid_col_count) = jj
+          end do
+          do idx_jj = 1, valid_col_count
+            jj = valid_col_ids(idx_jj)
+            ig_j = col_gid(jj)
+            do idx_ii = 1, valid_row_count
+              ii = valid_row_ids(idx_ii)
+              ig_i = row_gid(ii)
               mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
             end do
           end do
         end do
       end do
     end do
+    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
   end subroutine sync_blocks_to_dense_matrix_runtime
 
   subroutine reduce_matrix_blocks_runtime(dg_frag, blocks, label, icomm_reduce)
@@ -1346,12 +1366,14 @@ contains
     if (.not. allocated(dg_frag%coef_owner)) return
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
 
+!$omp parallel do private(irow, global_row) schedule(static)
     do irow = 1, min(size(row_ids), size(packed, 1))
       global_row = row_ids(irow)
       if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
       if (dg_frag%coef_owner(global_row, ispin) /= dg_frag%id) cycle
       packed(irow, 1:size(packed, 2)) = dg_frag%coef(global_row, 1:size(packed, 2), ispin)
     end do
+!$omp end parallel do
   end subroutine pack_owned_coef
 
   subroutine fetch_remote_coef_rows(dg_frag, ispin, row_ids, fetched)
@@ -1400,6 +1422,7 @@ contains
     if (.not. allocated(dg_frag%coef_pw_owner)) return
     if (.not. allocated(dg_frag%coef_pw)) return
 
+!$omp parallel do private(irow, pw_row) schedule(static)
     do irow = 1, min(size(row_ids), size(packed, 1))
       pw_row = row_ids(irow)
       if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
@@ -1407,6 +1430,7 @@ contains
       packed(irow, 1:size(packed, 2), 1:size(packed, 3)) = &
         dg_frag%coef_pw(pw_row, 1:size(packed, 2), 1:size(packed, 3))
     end do
+!$omp end parallel do
   end subroutine pack_owned_coef_pw
 
   subroutine fetch_remote_coef_pw_rows(dg_frag, row_ids, fetched)
@@ -1630,15 +1654,18 @@ contains
 
     if (.not. allocated(dg_frag%H_mat_blocks)) return
     if (.not. allocated(dg_frag%H_local_block_ids)) then
+!$omp parallel do private(iblk) schedule(static)
       do iblk = 1, size(dg_frag%H_mat_blocks)
         dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
         if (allocated(dg_frag%H_mat_kinetic_blocks) .and. iblk <= size(dg_frag%H_mat_kinetic_blocks)) then
           dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = 0.0d0
         end if
       end do
+!$omp end parallel do
       return
     end if
 
+!$omp parallel do private(iblk) schedule(static)
     do iblk = 1, size(dg_frag%H_mat_blocks)
       if (any(dg_frag%H_local_block_ids == iblk)) cycle
       dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
@@ -1646,6 +1673,7 @@ contains
         dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = 0.0d0
       end if
     end do
+!$omp end parallel do
   end subroutine zero_nonlocal_h_matrix_blocks
 
   subroutine apply_matrix_blocks(dg_frag, blocks, ispin, x, y)

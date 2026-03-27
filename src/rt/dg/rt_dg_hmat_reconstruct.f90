@@ -10,7 +10,8 @@
     type(s_scalar),         intent(in)    :: Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
     
-    integer :: ifrag, ifrag_pack, ispin, io, jo, ix, iy, iz, idir, i_local, i_local_pack, ig_i, ig_j, nbf, nbf_raw, iblk, ifrag_count
+    integer :: ifrag, ifrag_pack, ispin, io, jo, ix, iy, iz, idir, i_local, i_local_pack, ig_i, ig_j
+    integer :: nbf, nbf_raw, iblk, ifrag_count, idx_io, idx_jo, valid_basis_count
     integer :: lx, ly, lz, gx, gy, gz
     integer :: iorg(3), ndom(3), ndom_pack(3)
     real(8) :: hvol, A_squared
@@ -20,6 +21,7 @@
     real(8), allocatable :: phi_blk(:,:), weighted_phi(:,:), weighted_phi_vpsl(:,:), weighted_phi_vh(:,:), &
                             weighted_phi_vxc(:,:), Vpsl_blk(:), Vh_blk(:), Vxc_blk(:), Vtot_blk(:)
     real(8), allocatable :: total_mat(:,:), Vpsl_local_mat(:,:), Vh_local_mat(:,:), Vxc_local_mat(:,:)
+    integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     real(8) :: max_asym_vpsl, max_asym_vh, max_asym_vxc
     integer :: nmat_chk
     integer :: ngrid, ngrid_max, igrid_cache
@@ -114,6 +116,7 @@
       allocate(Vpsl_local_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
       allocate(Vh_local_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
       allocate(Vxc_local_mat(dg_frag%nstate_frag, dg_frag%nstate_frag))
+      allocate(basis_gid(dg_frag%nstate_frag), valid_basis_ids(dg_frag%nstate_frag))
     end if
     
     ! Step 2-4: Add updated potential matrix elements
@@ -234,12 +237,19 @@
               total_mat(1:nbf, 1:nbf)
           end if
         else
-          do jo = 1, nbf
-            ig_j = dg_frag%index_basis(jo, ifrag, ispin)
-            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-            do io = 1, nbf
-              ig_i = dg_frag%index_basis(io, ifrag, ispin)
-              if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+          valid_basis_count = 0
+          do io = 1, nbf
+            basis_gid(io) = dg_frag%index_basis(io, ifrag, ispin)
+            if (basis_gid(io) < 1 .or. basis_gid(io) > dg_frag%n_mat_max) cycle
+            valid_basis_count = valid_basis_count + 1
+            valid_basis_ids(valid_basis_count) = io
+          end do
+          do idx_jo = 1, valid_basis_count
+            jo = valid_basis_ids(idx_jo)
+            ig_j = basis_gid(jo)
+            do idx_io = 1, valid_basis_count
+              io = valid_basis_ids(idx_io)
+              ig_i = basis_gid(io)
               dg_frag%H_mat(ig_i, ig_j, ispin) = dg_frag%H_mat(ig_i, ig_j, ispin) + total_mat(io, jo)
               Vpsl_mat(ig_i, ig_j, ispin) = Vpsl_mat(ig_i, ig_j, ispin) + Vpsl_local_mat(io, jo)
               Vh_mat(ig_i, ig_j, ispin) = Vh_mat(ig_i, ig_j, ispin) + Vh_local_mat(io, jo)
@@ -384,5 +394,6 @@
     if (allocated(phi_blk)) deallocate(phi_blk, weighted_phi, weighted_phi_vpsl, weighted_phi_vh, weighted_phi_vxc, &
                                        Vpsl_blk, Vh_blk, Vxc_blk, Vtot_blk)
     if (allocated(total_mat)) deallocate(total_mat, Vpsl_local_mat, Vh_local_mat, Vxc_local_mat)
+    if (allocated(basis_gid)) deallocate(basis_gid, valid_basis_ids)
     
   end subroutine reconstruct_hamiltonian_matrix
