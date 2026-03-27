@@ -25,6 +25,13 @@
       is_pair = .true.
       return
     end if
+    if (allocated(dg_frag%momentum_neighbor_pair_cache)) then
+      if (ifrag_row >= 1 .and. ifrag_row <= size(dg_frag%momentum_neighbor_pair_cache, 1) .and. &
+          ifrag_col >= 1 .and. ifrag_col <= size(dg_frag%momentum_neighbor_pair_cache, 2)) then
+        is_pair = dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col)
+        return
+      end if
+    end if
 
     do axis = 1, 3
       axis_ok(axis) = is_momentum_neighbor_axis(dg_frag%lgnum_total(axis), &
@@ -34,6 +41,31 @@
 
     is_pair = all(axis_ok)
   end function is_momentum_neighbor_pair
+
+  subroutine ensure_momentum_neighbor_pair_cache(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: ifrag_row, ifrag_col, axis
+    logical :: axis_ok(3)
+
+    if (allocated(dg_frag%momentum_neighbor_pair_cache)) return
+    allocate(dg_frag%momentum_neighbor_pair_cache(dg_frag%n_frag, dg_frag%n_frag))
+    dg_frag%momentum_neighbor_pair_cache(:, :) = .false.
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        if (ifrag_row == ifrag_col) then
+          dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col) = .true.
+        else
+          do axis = 1, 3
+            axis_ok(axis) = is_momentum_neighbor_axis(dg_frag%lgnum_total(axis), &
+              dg_frag%ixyz_frag(axis, ifrag_row), dg_frag%nxyz_domain(axis, ifrag_row), &
+              dg_frag%ixyz_frag(axis, ifrag_col), dg_frag%nxyz_domain(axis, ifrag_col))
+          end do
+          dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col) = all(axis_ok)
+        end if
+      end do
+    end do
+  end subroutine ensure_momentum_neighbor_pair_cache
 
   integer function find_momentum_block(dg_frag, ifrag_row, ifrag_col) result(iblk)
     implicit none
@@ -85,7 +117,7 @@
   subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks)
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(matrix_block_info), allocatable, intent(inout) :: blocks(:)
     integer, allocatable, intent(inout) :: block_map(:, :)
     integer, intent(out) :: n_blocks
@@ -98,6 +130,7 @@
       deallocate(blocks)
     end if
     if (allocated(block_map)) deallocate(block_map)
+    call ensure_momentum_neighbor_pair_cache(dg_frag)
 
     n_blocks = 0
     do ifrag_col = 1, dg_frag%n_frag
@@ -226,6 +259,7 @@
       deallocate(dg_frag%momentum_blocks)
     end if
     if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
+    call ensure_momentum_neighbor_pair_cache(dg_frag)
 
     nblk = 0
     do ifrag_col = 1, dg_frag%n_frag

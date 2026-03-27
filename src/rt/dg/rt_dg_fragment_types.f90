@@ -124,6 +124,9 @@ module rt_dg_fragment_types
     integer :: n_H_nl_blocks = 0
     integer, allocatable :: H_local_block_ids(:) ! row-owner-local H block ids for RT apply
     integer, allocatable :: H_local_rows(:)      ! fragment rows owned by this rank
+    logical :: H_local_block_ids_valid = .false.
+    logical, allocatable :: runtime_neighbor_pair_cache(:,:)    ! static fragment-pair runtime adjacency
+    logical, allocatable :: momentum_neighbor_pair_cache(:,:)   ! static fragment-pair momentum adjacency
     real(8), allocatable :: S_mat(:,:,:)       ! raw fragment overlap matrix
     real(8), allocatable :: S_mat_prop(:,:,:)  ! overlap matrix used in propagation/unitarity
     complex(8), allocatable :: S_mat_c(:,:,:)      ! complex raw fragment overlap matrix (SOI path)
@@ -182,6 +185,24 @@ module rt_dg_fragment_types
     integer, allocatable :: density_izg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global z index
     integer, allocatable :: density_send_count(:)      ! packed send length per target rank
     integer, allocatable :: density_send_slot_map(:,:,:,:) ! local-fragment grid -> packed send slot (0 if local)
+    integer, allocatable :: density_subgroup_send_count(:)      ! packed subgroup-reduce length per target rank
+    integer, allocatable :: density_subgroup_send_slot_map(:,:,:,:) ! local-fragment grid -> packed subgroup-reduce slot
+    integer, allocatable :: density_subgroup_self_ixg(:)        ! root-owned subgroup-reduce unpack x index
+    integer, allocatable :: density_subgroup_self_iyg(:)        ! root-owned subgroup-reduce unpack y index
+    integer, allocatable :: density_subgroup_self_izg(:)        ! root-owned subgroup-reduce unpack z index
+    integer, allocatable :: density_block_nblocks(:)            ! subgroup density block count per local fragment
+    integer, allocatable :: density_block_first_offset(:)       ! first subgroup-owned block offset per local fragment
+    integer, allocatable :: density_block_step(:)               ! subgroup density block stride per local fragment
+    integer, allocatable :: current_valid_grid_count(:)         ! valid local-current grid count per local fragment
+    integer, allocatable :: current_valid_ix(:,:)               ! valid fragment-local x indices for microscopic current
+    integer, allocatable :: current_valid_iy(:,:)               ! valid fragment-local y indices for microscopic current
+    integer, allocatable :: current_valid_iz(:,:)               ! valid fragment-local z indices for microscopic current
+    integer, allocatable :: current_valid_ixg(:,:)              ! valid wrapped global x indices for microscopic current
+    integer, allocatable :: current_valid_iyg(:,:)              ! valid wrapped global y indices for microscopic current
+    integer, allocatable :: current_valid_izg(:,:)              ! valid wrapped global z indices for microscopic current
+    integer, allocatable :: hmat_grid_gx(:,:)                   ! packed wrapped global x index for Hamiltonian reconstruct
+    integer, allocatable :: hmat_grid_gy(:,:)                   ! packed wrapped global y index for Hamiltonian reconstruct
+    integer, allocatable :: hmat_grid_gz(:,:)                   ! packed wrapped global z index for Hamiltonian reconstruct
     type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
     real(8), allocatable :: density_weight_local(:,:,:) ! static overlap count on local grid
     real(8), allocatable :: density_inv_weight_local(:,:,:) ! inverse of static overlap count on local grid

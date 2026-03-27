@@ -798,6 +798,7 @@ contains
     if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
     allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
     dg_frag%coef_owner(:, :) = -1
+    dg_frag%H_local_block_ids_valid = .false.
     do ispin = 1, dg_frag%nspin
       do ifrag = 1, dg_frag%n_frag
         nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
@@ -950,6 +951,7 @@ contains
       if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
       allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
       dg_frag%coef_owner(:, :) = -1
+      dg_frag%H_local_block_ids_valid = .false.
       do ispin = 1, dg_frag%nspin
         do ifrag = 1, dg_frag%n_frag
           nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
@@ -1590,6 +1592,26 @@ contains
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
     if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
+    if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
+    if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
+    if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
+    if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
+    if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
+    if (allocated(dg_frag%density_block_nblocks)) deallocate(dg_frag%density_block_nblocks)
+    if (allocated(dg_frag%density_block_first_offset)) deallocate(dg_frag%density_block_first_offset)
+    if (allocated(dg_frag%density_block_step)) deallocate(dg_frag%density_block_step)
+    if (allocated(dg_frag%current_valid_grid_count)) deallocate(dg_frag%current_valid_grid_count)
+    if (allocated(dg_frag%current_valid_ix)) deallocate(dg_frag%current_valid_ix)
+    if (allocated(dg_frag%current_valid_iy)) deallocate(dg_frag%current_valid_iy)
+    if (allocated(dg_frag%current_valid_iz)) deallocate(dg_frag%current_valid_iz)
+    if (allocated(dg_frag%current_valid_ixg)) deallocate(dg_frag%current_valid_ixg)
+    if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
+    if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
+    if (allocated(dg_frag%hmat_grid_gx)) deallocate(dg_frag%hmat_grid_gx)
+    if (allocated(dg_frag%hmat_grid_gy)) deallocate(dg_frag%hmat_grid_gy)
+    if (allocated(dg_frag%hmat_grid_gz)) deallocate(dg_frag%hmat_grid_gz)
+    if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
+    if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
     if (allocated(dg_frag%density_recv_map)) then
       do i = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
         if (allocated(dg_frag%density_recv_map(i)%ixg)) deallocate(dg_frag%density_recv_map(i)%ixg)

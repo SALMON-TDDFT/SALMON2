@@ -181,6 +181,13 @@ contains
       is_pair = .true.
       return
     end if
+    if (allocated(dg_frag%runtime_neighbor_pair_cache)) then
+      if (ifrag_row >= 1 .and. ifrag_row <= size(dg_frag%runtime_neighbor_pair_cache, 1) .and. &
+          ifrag_col >= 1 .and. ifrag_col <= size(dg_frag%runtime_neighbor_pair_cache, 2)) then
+        is_pair = dg_frag%runtime_neighbor_pair_cache(ifrag_row, ifrag_col)
+        return
+      end if
+    end if
 
     do axis = 1, 3
       axis_ok(axis) = is_runtime_neighbor_axis(dg_frag%lgnum_total(axis), &
@@ -190,6 +197,31 @@ contains
 
     is_pair = all(axis_ok)
   end function is_runtime_neighbor_pair
+
+  subroutine ensure_runtime_neighbor_pair_cache(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: ifrag_row, ifrag_col, axis
+    logical :: axis_ok(3)
+
+    if (allocated(dg_frag%runtime_neighbor_pair_cache)) return
+    allocate(dg_frag%runtime_neighbor_pair_cache(dg_frag%n_frag, dg_frag%n_frag))
+    dg_frag%runtime_neighbor_pair_cache(:, :) = .false.
+    do ifrag_col = 1, dg_frag%n_frag
+      do ifrag_row = 1, dg_frag%n_frag
+        if (ifrag_row == ifrag_col) then
+          dg_frag%runtime_neighbor_pair_cache(ifrag_row, ifrag_col) = .true.
+        else
+          do axis = 1, 3
+            axis_ok(axis) = is_runtime_neighbor_axis(dg_frag%lgnum_total(axis), &
+              dg_frag%ixyz_frag(axis, ifrag_row), dg_frag%nxyz_domain(axis, ifrag_row), &
+              dg_frag%ixyz_frag(axis, ifrag_col), dg_frag%nxyz_domain(axis, ifrag_col))
+          end do
+          dg_frag%runtime_neighbor_pair_cache(ifrag_row, ifrag_col) = all(axis_ok)
+        end if
+      end do
+    end do
+  end subroutine ensure_runtime_neighbor_pair_cache
 
   !=======================================================================
   ! Build non-local pseudopotential matrix with vector potential A(t)
@@ -634,7 +666,7 @@ contains
     real(8), intent(out) :: diag(:)
 
     integer :: n_frag, n_pw, n_tot
-    integer :: ifrag, iblk, ib
+    integer :: ifrag, iblk, ib, ig, nbf, nblock_diag
 
     diag(:) = 0.0d0
     n_frag = dg_frag%n_mat_max
@@ -647,18 +679,24 @@ contains
       do ifrag = 1, dg_frag%n_frag
         iblk = find_matrix_block_runtime(dg_frag%S_block_map, ifrag, ifrag)
         if (iblk <= 0 .or. iblk > size(dg_frag%S_mat_prop_blocks)) cycle
-        do ib = 1, dg_frag%n_basis(ifrag, ispin)
-          if (ib > size(dg_frag%S_mat_prop_blocks(iblk)%val, 1) .or. ib > size(dg_frag%S_mat_prop_blocks(iblk)%val, 2)) cycle
-          diag(dg_frag%index_basis(ib, ifrag, ispin)) = real(dg_frag%S_mat_prop_blocks(iblk)%val(ib, ib, ispin), kind=8)
+        nbf = dg_frag%n_basis(ifrag, ispin)
+        nblock_diag = min(nbf, size(dg_frag%S_mat_prop_blocks(iblk)%val, 1), size(dg_frag%S_mat_prop_blocks(iblk)%val, 2))
+        do ib = 1, nblock_diag
+          ig = dg_frag%index_basis(ib, ifrag, ispin)
+          if (ig < 1 .or. ig > size(diag)) cycle
+          diag(ig) = real(dg_frag%S_mat_prop_blocks(iblk)%val(ib, ib, ispin), kind=8)
         end do
       end do
     else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
       do ifrag = 1, dg_frag%n_frag
         iblk = find_matrix_block_runtime(dg_frag%S_block_map, ifrag, ifrag)
         if (iblk <= 0 .or. iblk > size(dg_frag%S_mat_blocks)) cycle
-        do ib = 1, dg_frag%n_basis(ifrag, ispin)
-          if (ib > size(dg_frag%S_mat_blocks(iblk)%val, 1) .or. ib > size(dg_frag%S_mat_blocks(iblk)%val, 2)) cycle
-          diag(dg_frag%index_basis(ib, ifrag, ispin)) = real(dg_frag%S_mat_blocks(iblk)%val(ib, ib, ispin), kind=8)
+        nbf = dg_frag%n_basis(ifrag, ispin)
+        nblock_diag = min(nbf, size(dg_frag%S_mat_blocks(iblk)%val, 1), size(dg_frag%S_mat_blocks(iblk)%val, 2))
+        do ib = 1, nblock_diag
+          ig = dg_frag%index_basis(ib, ifrag, ispin)
+          if (ig < 1 .or. ig > size(diag)) cycle
+          diag(ig) = real(dg_frag%S_mat_blocks(iblk)%val(ib, ib, ispin), kind=8)
         end do
       end do
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
@@ -1053,7 +1091,7 @@ contains
 
   subroutine init_matrix_blocks_runtime(dg_frag, blocks, block_map)
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(matrix_block_info), allocatable, intent(inout) :: blocks(:)
     integer, allocatable, intent(inout) :: block_map(:, :)
 
@@ -1066,6 +1104,7 @@ contains
       deallocate(blocks)
     end if
     if (allocated(block_map)) deallocate(block_map)
+    call ensure_runtime_neighbor_pair_cache(dg_frag)
 
     n_blocks = 0
     do ifrag_col = 1, dg_frag%n_frag
@@ -1111,36 +1150,36 @@ contains
     mat(:, :, :) = 0.0d0
     allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
     allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_matrix_block_runtime(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          valid_row_count = 0
-          do ii = 1, nrow
-            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
-            valid_row_count = valid_row_count + 1
-            valid_row_ids(valid_row_count) = ii
-          end do
-          valid_col_count = 0
-          do jj = 1, ncol
-            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
-            valid_col_count = valid_col_count + 1
-            valid_col_ids(valid_col_count) = jj
-          end do
-          do idx_jj = 1, valid_col_count
-            jj = valid_col_ids(idx_jj)
-            ig_j = col_gid(jj)
-            do idx_ii = 1, valid_row_count
-              ii = valid_row_ids(idx_ii)
-              ig_i = row_gid(ii)
-              mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
-            end do
+    do iblk = 1, size(blocks)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+      do ispin = 1, dg_frag%nspin
+        nrow = dg_frag%n_basis(ifrag_row, ispin)
+        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        if (nrow <= 0 .or. ncol <= 0) cycle
+        valid_row_count = 0
+        do ii = 1, nrow
+          row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+          if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
+          valid_row_count = valid_row_count + 1
+          valid_row_ids(valid_row_count) = ii
+        end do
+        valid_col_count = 0
+        do jj = 1, ncol
+          col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+          if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
+          valid_col_count = valid_col_count + 1
+          valid_col_ids(valid_col_count) = jj
+        end do
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
+          ig_j = col_gid(jj)
+          do idx_ii = 1, valid_row_count
+            ii = valid_row_ids(idx_ii)
+            ig_i = row_gid(ii)
+            mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
           end do
         end do
       end do
@@ -1243,7 +1282,7 @@ contains
 
   subroutine init_complex_matrix_blocks_runtime(dg_frag, blocks, block_map)
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(complex_matrix_block_info), allocatable, intent(inout) :: blocks(:)
     integer, allocatable, intent(inout) :: block_map(:, :)
     integer :: ifrag_row, ifrag_col, iblk, n_blocks, nrow_max, ncol_max
@@ -1255,6 +1294,7 @@ contains
       deallocate(blocks)
     end if
     if (allocated(block_map)) deallocate(block_map)
+    call ensure_runtime_neighbor_pair_cache(dg_frag)
 
     n_blocks = 0
     do ifrag_col = 1, dg_frag%n_frag
@@ -1649,8 +1689,10 @@ contains
     integer :: ifrag, iblk, io, ispin, n_local_rows, n_local_blocks
     integer :: global_idx
 
+    if (dg_frag%H_local_block_ids_valid .and. allocated(dg_frag%H_local_block_ids) .and. allocated(dg_frag%H_local_rows)) return
     if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
     if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
+    dg_frag%H_local_block_ids_valid = .false.
     if (.not. allocated(dg_frag%H_mat_blocks)) return
     if (.not. allocated(dg_frag%coef_owner)) return
     if (.not. allocated(dg_frag%n_basis)) return
@@ -1703,6 +1745,7 @@ contains
     end if
 
     deallocate(row_is_local)
+    dg_frag%H_local_block_ids_valid = .true.
   end subroutine rebuild_local_h_block_ids
 
   subroutine zero_nonlocal_h_matrix_blocks(dg_frag)
@@ -2130,24 +2173,60 @@ contains
     complex(8),             intent(inout) :: y(:,:)
 
     integer :: iblk, idir, ib, jb, row_idx, col_idx, nstate, istate
+    integer :: active_dir_count, valid_row_count, valid_col_count, idx_dir, idx_ib, idx_jb
+    integer :: ifrag_row, ifrag_col, nrow, ncol
+    integer :: active_dirs(3), valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     real(8) :: scale
 
     if (.not. allocated(dg_frag%momentum_blocks)) return
     nstate = min(size(x, 2), size(y, 2))
 
-!$omp parallel do private(istate,iblk,idir,scale,jb,col_idx,ib,row_idx) schedule(static)
+!$omp parallel do private(istate,iblk,idir,scale,jb,col_idx,ib,row_idx,active_dir_count,valid_row_count,valid_col_count,idx_dir,idx_ib,idx_jb,ifrag_row,ifrag_col,nrow,ncol,active_dirs,valid_row_ids,valid_col_ids,row_gid,col_gid) schedule(static)
     do istate = 1, nstate
       do iblk = 1, dg_frag%n_momentum_blocks
         if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
+        active_dir_count = 0
         do idir = 1, 3
+          if (abs(scale_vec(idir)) < 1.0d-30) cycle
+          active_dir_count = active_dir_count + 1
+          active_dirs(active_dir_count) = idir
+        end do
+        if (active_dir_count <= 0) cycle
+
+        ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
+        ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
+        nrow = dg_frag%n_basis(ifrag_row, ispin)
+        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        if (nrow <= 0 .or. ncol <= 0) cycle
+
+        valid_row_count = 0
+        do ib = 1, nrow
+          row_gid(ib) = dg_frag%index_basis(ib, ifrag_row, ispin)
+          if (row_gid(ib) < 1 .or. row_gid(ib) > size(y, 1)) cycle
+          valid_row_count = valid_row_count + 1
+          valid_row_ids(valid_row_count) = ib
+        end do
+        if (valid_row_count <= 0) cycle
+
+        valid_col_count = 0
+        do jb = 1, ncol
+          col_gid(jb) = dg_frag%index_basis(jb, ifrag_col, ispin)
+          if (col_gid(jb) < 1 .or. col_gid(jb) > size(x, 1)) cycle
+          valid_col_count = valid_col_count + 1
+          valid_col_ids(valid_col_count) = jb
+        end do
+        if (valid_col_count <= 0) cycle
+
+        do idx_dir = 1, active_dir_count
+          idir = active_dirs(idx_dir)
           scale = scale_vec(idir)
-          if (abs(scale) < 1.0d-30) cycle
-          do jb = 1, dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
-            col_idx = dg_frag%index_basis(jb, dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
-            if (col_idx < 1 .or. col_idx > size(x, 1)) cycle
-            do ib = 1, dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
-              row_idx = dg_frag%index_basis(ib, dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
-              if (row_idx < 1 .or. row_idx > size(y, 1)) cycle
+          do idx_jb = 1, valid_col_count
+            jb = valid_col_ids(idx_jb)
+            col_idx = col_gid(jb)
+            do idx_ib = 1, valid_row_count
+              ib = valid_row_ids(idx_ib)
+              row_idx = row_gid(ib)
               y(row_idx, istate) = y(row_idx, istate) + &
                 scale * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin) * x(col_idx, istate)
             end do
@@ -2173,13 +2252,13 @@ contains
 
     integer :: ifrag, i_local, ispin, io, istate_frag, jstate_frag
     integer :: ig_i, ig_j
-    integer :: ix, iy, iz, ixg, iyg, izg
-    integer :: nxyz(3), ixyz0(3)
+    integer :: ix, iy, iz, ixg, iyg, izg, igrid, valid_grid_count
+    integer :: nxyz(3), ixyz0(3), ifrag_count, ngrid_max
     integer :: nocc_per_spin
     real(8) :: occ_factor
     complex(8) :: coef_pair
     real(8) :: phi_i
-    real(8), allocatable :: grad_phi(:,:,:,:)
+    real(8), allocatable :: grad_phi(:,:,:,:), curr_thread(:,:,:,:)
     real(8), allocatable :: curr_local(:,:,:,:), curr_sum(:,:,:,:)
     real(8), allocatable :: w_local(:,:,:), w_sum(:,:,:)
 
@@ -2198,65 +2277,116 @@ contains
     w_local = 0.0d0
     w_sum = 0.0d0
 
+    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    ngrid_max = 0
+    if (ifrag_count > 0) then
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(1:3, ifrag)))
+      end do
+    end if
+    if (.not. allocated(dg_frag%current_valid_grid_count)) then
+      if (ifrag_count > 0 .and. ngrid_max > 0) then
+        allocate(dg_frag%current_valid_grid_count(ifrag_count))
+        allocate(dg_frag%current_valid_ix(ngrid_max, ifrag_count), dg_frag%current_valid_iy(ngrid_max, ifrag_count), &
+                 dg_frag%current_valid_iz(ngrid_max, ifrag_count))
+        allocate(dg_frag%current_valid_ixg(ngrid_max, ifrag_count), dg_frag%current_valid_iyg(ngrid_max, ifrag_count), &
+                 dg_frag%current_valid_izg(ngrid_max, ifrag_count))
+        dg_frag%current_valid_grid_count = 0
+        dg_frag%current_valid_ix = 0
+        dg_frag%current_valid_iy = 0
+        dg_frag%current_valid_iz = 0
+        dg_frag%current_valid_ixg = 0
+        dg_frag%current_valid_iyg = 0
+        dg_frag%current_valid_izg = 0
+
+        i_local = 0
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = i_local + 1
+          nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
+          ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
+          valid_grid_count = 0
+          do iz = 1, nxyz(3)
+            do iy = 1, nxyz(2)
+              do ix = 1, nxyz(1)
+                ixg = modulo(ixyz0(1) + ix - 2, mg%num(1)) + 1
+                iyg = modulo(ixyz0(2) + iy - 2, mg%num(2)) + 1
+                izg = modulo(ixyz0(3) + iz - 2, mg%num(3)) + 1
+                if (ixg < mg%is(1) .or. ixg > mg%ie(1)) cycle
+                if (iyg < mg%is(2) .or. iyg > mg%ie(2)) cycle
+                if (izg < mg%is(3) .or. izg > mg%ie(3)) cycle
+                valid_grid_count = valid_grid_count + 1
+                dg_frag%current_valid_ix(valid_grid_count, i_local) = ix
+                dg_frag%current_valid_iy(valid_grid_count, i_local) = iy
+                dg_frag%current_valid_iz(valid_grid_count, i_local) = iz
+                dg_frag%current_valid_ixg(valid_grid_count, i_local) = ixg
+                dg_frag%current_valid_iyg(valid_grid_count, i_local) = iyg
+                dg_frag%current_valid_izg(valid_grid_count, i_local) = izg
+              end do
+            end do
+          end do
+          dg_frag%current_valid_grid_count(i_local) = valid_grid_count
+        end do
+      end if
+    end if
+
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
       nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-      ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
-
-      do iz = 1, nxyz(3)
-        do iy = 1, nxyz(2)
-          do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, mg%num(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, mg%num(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, mg%num(3)) + 1
-            if (ixg < mg%is(1) .or. ixg > mg%ie(1)) cycle
-            if (iyg < mg%is(2) .or. iyg > mg%ie(2)) cycle
-            if (izg < mg%is(3) .or. izg > mg%ie(3)) cycle
-            w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
-          end do
-        end do
+      valid_grid_count = dg_frag%current_valid_grid_count(i_local)
+      do igrid = 1, valid_grid_count
+        ixg = dg_frag%current_valid_ixg(igrid, i_local)
+        iyg = dg_frag%current_valid_iyg(igrid, i_local)
+        izg = dg_frag%current_valid_izg(igrid, i_local)
+        w_local(ixg, iyg, izg) = w_local(ixg, iyg, izg) + 1.0d0
       end do
 
       do ispin = 1, system%nspin
-        do jstate_frag = 1, dg_frag%n_basis(ifrag, ispin)
-          ig_j = dg_frag%index_basis(jstate_frag, ifrag, ispin)
-          if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-
+!$omp parallel private(jstate_frag, istate_frag, ig_j, ig_i, io, coef_pair, phi_i, iz, iy, ix, ixg, iyg, izg, grad_phi, curr_thread)
+          allocate(curr_thread(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+          curr_thread = 0.0d0
           allocate(grad_phi(1:nxyz(1), 1:nxyz(2), 1:nxyz(3), 3))
-          call apply_gradient_to_basis(dg_frag, i_local, jstate_frag, mg, stencil, grad_phi)
 
-          do istate_frag = 1, dg_frag%n_basis(ifrag, ispin)
-            ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
-            if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+!$omp do schedule(static)
+          do jstate_frag = 1, dg_frag%n_basis(ifrag, ispin)
+            ig_j = dg_frag%index_basis(jstate_frag, ifrag, ispin)
+            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-            coef_pair = (0.0d0, 0.0d0)
-            do io = 1, nocc_per_spin
-              coef_pair = coef_pair + occ_factor * conjg(dg_frag%coef(ig_i, io, ispin)) * dg_frag%coef(ig_j, io, ispin)
-            end do
-            if (abs(aimag(coef_pair)) < 1.0d-18) cycle
+            call apply_gradient_to_basis(dg_frag, i_local, jstate_frag, mg, stencil, grad_phi)
 
-            do iz = 1, nxyz(3)
-              do iy = 1, nxyz(2)
-                do ix = 1, nxyz(1)
-                  ixg = modulo(ixyz0(1) + ix - 2, mg%num(1)) + 1
-                  iyg = modulo(ixyz0(2) + iy - 2, mg%num(2)) + 1
-                  izg = modulo(ixyz0(3) + iz - 2, mg%num(3)) + 1
-                  if (ixg < mg%is(1) .or. ixg > mg%ie(1)) cycle
-                  if (iyg < mg%is(2) .or. iyg > mg%ie(2)) cycle
-                  if (izg < mg%is(3) .or. izg > mg%ie(3)) cycle
+            do istate_frag = 1, dg_frag%n_basis(ifrag, ispin)
+              ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+              if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
 
-                  phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-                  curr_local(1, ixg, iyg, izg) = curr_local(1, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 1)
-                  curr_local(2, ixg, iyg, izg) = curr_local(2, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 2)
-                  curr_local(3, ixg, iyg, izg) = curr_local(3, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 3)
-                end do
+              coef_pair = (0.0d0, 0.0d0)
+              do io = 1, nocc_per_spin
+                coef_pair = coef_pair + occ_factor * conjg(dg_frag%coef(ig_i, io, ispin)) * dg_frag%coef(ig_j, io, ispin)
+              end do
+              if (abs(aimag(coef_pair)) < 1.0d-18) cycle
+
+              do igrid = 1, valid_grid_count
+                ix = dg_frag%current_valid_ix(igrid, i_local)
+                iy = dg_frag%current_valid_iy(igrid, i_local)
+                iz = dg_frag%current_valid_iz(igrid, i_local)
+                ixg = dg_frag%current_valid_ixg(igrid, i_local)
+                iyg = dg_frag%current_valid_iyg(igrid, i_local)
+                izg = dg_frag%current_valid_izg(igrid, i_local)
+
+                phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
+                curr_thread(1, ixg, iyg, izg) = curr_thread(1, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 1)
+                curr_thread(2, ixg, iyg, izg) = curr_thread(2, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 2)
+                curr_thread(3, ixg, iyg, izg) = curr_thread(3, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 3)
               end do
             end do
           end do
+!$omp end do
 
-          deallocate(grad_phi)
-        end do
+!$omp critical
+          curr_local(:, :, :, :) = curr_local(:, :, :, :) + curr_thread(:, :, :, :)
+!$omp end critical
+
+          deallocate(grad_phi, curr_thread)
+!$omp end parallel
       end do
     end do
 

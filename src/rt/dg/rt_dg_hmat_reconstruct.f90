@@ -42,6 +42,30 @@
       ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
     end do
     ifrag_count = max(1, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
+    if (.not. allocated(dg_frag%hmat_grid_gx)) then
+      allocate(dg_frag%hmat_grid_gx(ngrid_max, ifrag_count), dg_frag%hmat_grid_gy(ngrid_max, ifrag_count), &
+               dg_frag%hmat_grid_gz(ngrid_max, ifrag_count))
+      dg_frag%hmat_grid_gx = 1
+      dg_frag%hmat_grid_gy = 1
+      dg_frag%hmat_grid_gz = 1
+      do ifrag_pack = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local_pack = ifrag_pack - dg_frag%ifrag_start + 1
+        iorg(:) = dg_frag%ixyz_frag(:, ifrag_pack)
+        ndom_pack(:) = dg_frag%nxyz_domain(:, ifrag_pack)
+!$omp parallel do collapse(3) private(lx, ly, lz, igrid_cache) schedule(static)
+        do lz = 1, ndom_pack(3)
+          do ly = 1, ndom_pack(2)
+            do lx = 1, ndom_pack(1)
+              igrid_cache = lx + ndom_pack(1) * ((ly - 1) + ndom_pack(2) * (lz - 1))
+              dg_frag%hmat_grid_gx(igrid_cache, i_local_pack) = modulo(iorg(1) + lx - 2, dg_frag%lgnum_total(1)) + 1
+              dg_frag%hmat_grid_gy(igrid_cache, i_local_pack) = modulo(iorg(2) + ly - 2, dg_frag%lgnum_total(2)) + 1
+              dg_frag%hmat_grid_gz(igrid_cache, i_local_pack) = modulo(iorg(3) + lz - 2, dg_frag%lgnum_total(3)) + 1
+            end do
+          end do
+        end do
+!$omp end parallel do
+      end do
+    end if
 
     hvol = system%hvol
     is = dg_frag%lg%is
@@ -193,10 +217,10 @@
         do lz = 1, ndom(3)
           do ly = 1, ndom(2)
             do lx = 1, ndom(1)
-              gz = modulo(iorg(3) + lz - 2, dg_frag%lgnum_total(3)) + 1
-              gy = modulo(iorg(2) + ly - 2, dg_frag%lgnum_total(2)) + 1
-              gx = modulo(iorg(1) + lx - 2, dg_frag%lgnum_total(1)) + 1
               igrid_cache = lx + ndom(1) * ((ly - 1) + ndom(2) * (lz - 1))
+              gx = dg_frag%hmat_grid_gx(igrid_cache, i_local)
+              gy = dg_frag%hmat_grid_gy(igrid_cache, i_local)
+              gz = dg_frag%hmat_grid_gz(igrid_cache, i_local)
               Vpsl_blk(igrid_cache) = Vpsl%f(gx, gy, gz) * hvol
               Vh_blk(igrid_cache) = Vh%f(gx, gy, gz) * hvol
               Vxc_blk(igrid_cache) = Vxc(ispin)%f(gx, gy, gz) * hvol
