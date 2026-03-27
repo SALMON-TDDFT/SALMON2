@@ -971,7 +971,9 @@
     subroutine diag_full_lapack
       use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_real_dense
       implicit none
-      integer :: i, j
+      integer :: i, j, idx_io, idx_jo, valid_local_count, valid_halo_count
+      integer :: local_gid(dg_frag%nstate_frag), halo_gid(dg_frag%nstate_frag)
+      integer :: valid_local_ids(dg_frag%nstate_frag), valid_halo_ids(dg_frag%nstate_frag)
       real(8), allocatable :: mat_H(:,:), mat_V(:,:)
 
       if (.not. allocated(dg_frag%H_mat)) then
@@ -989,12 +991,19 @@
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
           n_basis_local = dg_frag%n_basis(ifrag, ispin)
+          valid_local_count = 0
           do io = 1, n_basis_local
-            i = dg_frag%index_basis(io, ifrag, ispin)
-            do jo = 1, n_basis_local
-              j = dg_frag%index_basis(jo, ifrag, ispin)
-              if (i < 1 .or. i > n) cycle
-              if (j < 1 .or. j > n) cycle
+            local_gid(io) = dg_frag%index_basis(io, ifrag, ispin)
+            if (local_gid(io) < 1 .or. local_gid(io) > n) cycle
+            valid_local_count = valid_local_count + 1
+            valid_local_ids(valid_local_count) = io
+          end do
+          do idx_jo = 1, valid_local_count
+            jo = valid_local_ids(idx_jo)
+            j = local_gid(jo)
+            do idx_io = 1, valid_local_count
+              io = valid_local_ids(idx_io)
+              i = local_gid(io)
               mat_V(i, j) = mat_V(i, j) + mat_H_local(io, jo, ispin, i_local)
             end do
           end do
@@ -1004,12 +1013,19 @@
             jfrag = dg_frag%halo(i_halo)%ifrag_src
             if (jfrag < 1) cycle
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
-            do jo = 1, n_basis_local
-              j = dg_frag%index_basis(jo, ifrag, ispin)
-              do io = 1, n_basis_halo
-                i = dg_frag%index_basis(io, jfrag, ispin)
-                if (i < 1 .or. i > n) cycle
-                if (j < 1 .or. j > n) cycle
+            valid_halo_count = 0
+            do io = 1, n_basis_halo
+              halo_gid(io) = dg_frag%index_basis(io, jfrag, ispin)
+              if (halo_gid(io) < 1 .or. halo_gid(io) > n) cycle
+              valid_halo_count = valid_halo_count + 1
+              valid_halo_ids(valid_halo_count) = io
+            end do
+            do idx_jo = 1, valid_local_count
+              jo = valid_local_ids(idx_jo)
+              j = local_gid(jo)
+              do idx_io = 1, valid_halo_count
+                io = valid_halo_ids(idx_io)
+                i = halo_gid(io)
                 mat_V(i, j) = mat_V(i, j) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
                 mat_V(j, i) = mat_V(j, i) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
               end do

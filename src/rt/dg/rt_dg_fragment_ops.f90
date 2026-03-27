@@ -20,6 +20,7 @@ module rt_dg_fragment_ops
   public :: copy_matrix_blocks_metric_to_real_dense
   public :: copy_hamiltonian_metric_to_complex_dense
   public :: copy_momentum_blocks_to_complex_dense
+  public :: symmetrize_real_matrix_blocks
   public :: mixed_fp_coupling_active
   public :: apply_overlap_operator
   public :: solve_overlap_operator_batch
@@ -132,6 +133,29 @@ contains
 
     deallocate(raw_all, overlap_all, mixed_all)
   end subroutine sync_mixed_coef_from_raw
+
+  subroutine symmetrize_real_matrix_blocks(dg_frag, blocks)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(inout) :: blocks(:)
+    integer :: ispin, iblk, nbf, io, jo
+
+    !$omp parallel do collapse(2) private(ispin,iblk,nbf,jo,io) schedule(static)
+    do ispin = 1, dg_frag%nspin
+      do iblk = 1, size(blocks)
+        if (blocks(iblk)%ifrag_row /= blocks(iblk)%ifrag_col) cycle
+        nbf = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
+        if (nbf <= 0) cycle
+        do jo = 1, nbf
+          do io = jo + 1, nbf
+            blocks(iblk)%val(io, jo, ispin) = 0.5d0 * (blocks(iblk)%val(io, jo, ispin) + blocks(iblk)%val(jo, io, ispin))
+            blocks(iblk)%val(jo, io, ispin) = blocks(iblk)%val(io, jo, ispin)
+          end do
+        end do
+      end do
+    end do
+    !$omp end parallel do
+  end subroutine symmetrize_real_matrix_blocks
 
   logical function is_runtime_neighbor_axis(lg, s1, n1, s2, n2) result(ok)
     implicit none
@@ -930,21 +954,33 @@ contains
 
   subroutine copy_momentum_blocks_to_complex_dense(dg_frag, ispin, scale_vec, mat)
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: ispin
     real(8), intent(in) :: scale_vec(3)
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, idir, ib, jb, row_idx, col_idx, n_frag
     integer :: nrow, ncol, idx_ib, idx_jb, valid_row_count, valid_col_count
-    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
+    integer :: scratch_size
 
     mat(:, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%momentum_blocks)) return
     if (.not. allocated(dg_frag%index_basis)) return
     n_frag = dg_frag%n_mat_max
-    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
-    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
+    scratch_size = size(dg_frag%index_basis, 1)
+    if (.not. allocated(dg_frag%momentum_dense_row_gid_cache)) then
+      allocate(dg_frag%momentum_dense_row_gid_cache(scratch_size))
+      allocate(dg_frag%momentum_dense_col_gid_cache(scratch_size))
+      allocate(dg_frag%momentum_dense_valid_row_ids(scratch_size))
+      allocate(dg_frag%momentum_dense_valid_col_ids(scratch_size))
+    else if (size(dg_frag%momentum_dense_row_gid_cache) /= scratch_size) then
+      deallocate(dg_frag%momentum_dense_row_gid_cache, dg_frag%momentum_dense_col_gid_cache, &
+        dg_frag%momentum_dense_valid_row_ids, dg_frag%momentum_dense_valid_col_ids)
+      allocate(dg_frag%momentum_dense_row_gid_cache(scratch_size))
+      allocate(dg_frag%momentum_dense_col_gid_cache(scratch_size))
+      allocate(dg_frag%momentum_dense_valid_row_ids(scratch_size))
+      allocate(dg_frag%momentum_dense_valid_col_ids(scratch_size))
+    end if
     do iblk = 1, dg_frag%n_momentum_blocks
       if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
       nrow = dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
@@ -952,33 +988,32 @@ contains
       if (nrow <= 0 .or. ncol <= 0) cycle
       valid_row_count = 0
       do ib = 1, nrow
-        row_gid(ib) = dg_frag%index_basis(ib, dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
-        if (row_gid(ib) < 1 .or. row_gid(ib) > n_frag) cycle
+        dg_frag%momentum_dense_row_gid_cache(ib) = dg_frag%index_basis(ib, dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
+        if (dg_frag%momentum_dense_row_gid_cache(ib) < 1 .or. dg_frag%momentum_dense_row_gid_cache(ib) > n_frag) cycle
         valid_row_count = valid_row_count + 1
-        valid_row_ids(valid_row_count) = ib
+        dg_frag%momentum_dense_valid_row_ids(valid_row_count) = ib
       end do
       valid_col_count = 0
       do jb = 1, ncol
-        col_gid(jb) = dg_frag%index_basis(jb, dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
-        if (col_gid(jb) < 1 .or. col_gid(jb) > n_frag) cycle
+        dg_frag%momentum_dense_col_gid_cache(jb) = dg_frag%index_basis(jb, dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+        if (dg_frag%momentum_dense_col_gid_cache(jb) < 1 .or. dg_frag%momentum_dense_col_gid_cache(jb) > n_frag) cycle
         valid_col_count = valid_col_count + 1
-        valid_col_ids(valid_col_count) = jb
+        dg_frag%momentum_dense_valid_col_ids(valid_col_count) = jb
       end do
       do idir = 1, 3
         if (abs(scale_vec(idir)) <= 0.0d0) cycle
         do idx_jb = 1, valid_col_count
-          jb = valid_col_ids(idx_jb)
-          col_idx = col_gid(jb)
+          jb = dg_frag%momentum_dense_valid_col_ids(idx_jb)
+          col_idx = dg_frag%momentum_dense_col_gid_cache(jb)
           do idx_ib = 1, valid_row_count
-            ib = valid_row_ids(idx_ib)
-            row_idx = row_gid(ib)
+            ib = dg_frag%momentum_dense_valid_row_ids(idx_ib)
+            row_idx = dg_frag%momentum_dense_row_gid_cache(ib)
             mat(row_idx, col_idx) = mat(row_idx, col_idx) + &
               cmplx(scale_vec(idir) * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin), 0.0d0, kind=8)
           end do
         end do
       end do
     end do
-    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
   end subroutine copy_momentum_blocks_to_complex_dense
 
   subroutine sync_dense_matrix_to_blocks_runtime(dg_frag, mat, blocks, block_map)

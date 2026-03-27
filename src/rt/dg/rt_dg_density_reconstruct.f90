@@ -19,8 +19,9 @@
     integer :: nocc_per_spin, nocc_spin, nocc_cache
     integer :: irank, nreq_send, nreq_recv, ireq, slot, npts, idx_local, idx_remote, idx_subgroup
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count, valid_subgroup_grid_count
-    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc, block_idx
+    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
     integer :: total_send_pts, pack_offset, subgroup_root_rank, block_idx_global, self_slot_count
+    integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
     integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
     real(8) :: occ_factor
     real(8) :: phi_i, rho_contrib
@@ -283,12 +284,15 @@
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
         ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
         ngrid = nxyz(1) * nxyz(2) * nxyz(3)
-        do igrid0 = 1, ngrid, grid_block_size
-          block_idx = block_idx_global
-          block_idx_global = block_idx_global + 1
-          if (distribute_project) then
-            if (mod(block_idx, dg_frag%isize_frag) /= dg_frag%id_frag) cycle
-          end if
+        nblocks_ifrag = (ngrid + grid_block_size - 1) / grid_block_size
+        first_block_offset = 0
+        block_step_blocks = 1
+        if (distribute_project) then
+          first_block_offset = modulo(dg_frag%id_frag - modulo(block_idx_global, dg_frag%isize_frag), dg_frag%isize_frag)
+          block_step_blocks = dg_frag%isize_frag
+        end if
+        do block_offset = first_block_offset, nblocks_ifrag - 1, block_step_blocks
+          igrid0 = 1 + block_offset * grid_block_size
           npt_blk = min(grid_block_size, ngrid - igrid0 + 1)
           local_grid_count = 0
           remote_grid_count = 0
@@ -683,6 +687,7 @@
             end if
           end do
         end do
+        block_idx_global = block_idx_global + nblocks_ifrag
       end do
       call cpu_time(t_project1)
       time_project = time_project + (t_project1 - t_project0)

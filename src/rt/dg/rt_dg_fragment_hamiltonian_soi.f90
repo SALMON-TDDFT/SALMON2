@@ -14,7 +14,8 @@
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
     use rt_dg_plane_wave, only: prepare_mixed_basis_startup
-    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, copy_matrix_blocks_metric_to_complex_dense
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, copy_matrix_blocks_metric_to_complex_dense, &
+      symmetrize_real_matrix_blocks
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -202,30 +203,6 @@
     end if
     
   end subroutine calculate_hamiltonian_matrix
-
-  subroutine symmetrize_real_matrix_blocks(dg_frag, blocks)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    type(matrix_block_info), intent(inout) :: blocks(:)
-    integer :: ispin, iblk, nbf, io, jo
-
-    !$omp parallel do collapse(2) private(ispin,iblk,nbf,jo,io) schedule(static)
-    do ispin = 1, dg_frag%nspin
-      do iblk = 1, size(blocks)
-        if (blocks(iblk)%ifrag_row /= blocks(iblk)%ifrag_col) cycle
-        nbf = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
-        if (nbf <= 0) cycle
-        do jo = 1, nbf
-          do io = jo + 1, nbf
-            blocks(iblk)%val(io, jo, ispin) = 0.5d0 * (blocks(iblk)%val(io, jo, ispin) + blocks(iblk)%val(jo, io, ispin))
-            blocks(iblk)%val(jo, io, ispin) = blocks(iblk)%val(io, jo, ispin)
-          end do
-        end do
-      end do
-    end do
-    !$omp end parallel do
-  end subroutine symmetrize_real_matrix_blocks
 
   !=======================================================================
   ! Build total local potential on the given grid:

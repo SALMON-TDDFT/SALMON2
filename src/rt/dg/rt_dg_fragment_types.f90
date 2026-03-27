@@ -145,6 +145,10 @@ module rt_dg_fragment_types
     type(vector_block_info), allocatable :: momentum_blocks(:)
     integer, allocatable :: momentum_block_map(:,:)
     integer :: n_momentum_blocks = 0
+    integer, allocatable :: momentum_dense_row_gid_cache(:)    ! reusable scratch for momentum dense materialization
+    integer, allocatable :: momentum_dense_col_gid_cache(:)    ! reusable scratch for momentum dense materialization
+    integer, allocatable :: momentum_dense_valid_row_ids(:)    ! reusable scratch for momentum dense materialization
+    integer, allocatable :: momentum_dense_valid_col_ids(:)    ! reusable scratch for momentum dense materialization
     real(8), allocatable :: dipole_mat(:,:,:,:)   ! dipole matrix elements for observables (x,y,z)
     type(vector_block_info), allocatable :: dipole_blocks(:)
     integer, allocatable :: dipole_block_map(:,:)
