@@ -626,6 +626,7 @@ contains
       & nproc_rgrid_tot, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
+      & yn_dc_fragment_optimization, &
       & nstate_frag, &
       & lcfo_frag_cache_size, &
       & energy_cut, &
@@ -1092,6 +1093,7 @@ contains
     nproc_rgrid_tot = 1
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
+    yn_dc_fragment_optimization = 'n'
     nstate_frag = 0
     lcfo_frag_cache_size = 1
     energy_cut = 0d0
@@ -1763,6 +1765,7 @@ contains
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
@@ -2758,6 +2761,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
@@ -2862,6 +2866,7 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+    call yn_argument_check(yn_dc_fragment_optimization)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

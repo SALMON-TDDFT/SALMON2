@@ -19,6 +19,7 @@
 
 #include "config.h"
 module lcfo
+  use dc_fragment_geometry, only: get_fragment_domain
   implicit none
   
   private
@@ -104,6 +105,7 @@ contains
       use salmon_global, only: num_fragment
       implicit none
       integer :: lx,ly,lz
+      integer :: nxyz_domain(3)
       integer,dimension(3) :: nh,ir1,ir2,d
       integer :: id_tmp(dc%n_frag)
       
@@ -111,10 +113,11 @@ contains
       if(dc%id_frag==0) id_tmp(dc%i_frag) = dc%id_tot + 1
       call comm_summation(id_tmp,id_array,dc%n_frag,dc%icomm_tot)
       id_array = id_array - 1
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       
       nh = 0
       do n=1,3 ! x,y,z
-        if(dc%nxyz_buffer(n) > dc%nxyz_domain(n)) stop "DC-LCFO: buffer > domain"
+        if(dc%nxyz_buffer(n) > nxyz_domain(n)) stop "DC-LCFO: buffer > domain"
         if(num_fragment(n) > 1) nh(n) = 1
       end do
       
@@ -131,13 +134,13 @@ contains
         ! dc%ixyz_frag: r-grid index of the fragment origin
           ir1(1:3) = dc%ixyz_frag(1:3,ifrag) ! position of fragment ifrag
         ! dst neighbor (+)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*dc%nxyz_domain(1:3) ! neighbor fragment
+          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*nxyz_domain(1:3) ! neighbor fragment
           d(1:3) = mod( ir1(1:3) - ir2(1:3) , dc%lg_tot%num(1:3) )
           if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_dst < 0) then
             halo(i)%id_dst = id_array(ifrag) ! process ID of the communication destination
           end if
         ! src neighbor (-)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*dc%nxyz_domain(1:3) ! neighbor fragment
+          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*nxyz_domain(1:3) ! neighbor fragment
           d(1:3) = mod( ir1(1:3) - ir2(1:3) , dc%lg_tot%num(1:3) )
           if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_src < 0) then
             halo(i)%id_src = id_array(ifrag) ! process ID of the communication source
@@ -154,17 +157,17 @@ contains
         do n=1,3 ! x,y,z
           select case (halo(i)%dvec(n))
           case(0)
-            halo(i)%length(n) = dc%nxyz_domain(n)
+            halo(i)%length(n) = nxyz_domain(n)
             halo(i)%dsp_send(n) = 0
             halo(i)%dsp_recv(n) = 0
           case(1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
-            halo(i)%dsp_send(n) = dc%nxyz_domain(n) - dc%nxyz_buffer(n)
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n) + dc%nxyz_buffer(n)
+            halo(i)%dsp_send(n) = nxyz_domain(n) - dc%nxyz_buffer(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n) + dc%nxyz_buffer(n)
           case(-1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
             halo(i)%dsp_send(n) = 0
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n)
           end select
         end do
       end do
@@ -176,11 +179,14 @@ contains
       use salmon_global, only: energy_cut,lambda_cut
       implicit none
       integer :: nb(nspin),itmp(dc%n_frag,nspin)
+      integer :: nxyz_domain(3)
       real(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
       
-      allocate(f_basis  (dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
-      allocate(wrk_array(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      
+      allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
       
     ! f_basis <-- | \bar{\phi} > (projected fragment orbitals)
       wrk_array = 0d0
@@ -189,7 +195,7 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        if( ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. iz <= dc%nxyz_domain(3) &
+        if( ix <= nxyz_domain(1) .and. iy <= nxyz_domain(2) .and. iz <= nxyz_domain(3) &
         & .and. energy%esp(io,1,ispin) - system%mu < energy_cut ) then ! energy cutoff
           wrk_array(ix,iy,iz,ispin,io) = spsi%rwf(ix,iy,iz,ispin,io,1,1) ! | \phi > @ core domain
         end if
@@ -198,7 +204,7 @@ contains
       end do
       end do
       end do
-      call comm_summation(wrk_array,f_basis,product(dc%nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
+      call comm_summation(wrk_array,f_basis,product(nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
       
     ! mat_S <-- S_{ij} = < \bar{\phi}_i | \bar{\phi}_j > (overlap matrix)
       do ispin=1,nspin
@@ -538,6 +544,7 @@ contains
       use inputoutput, only: uenergy_from_au
       implicit none
       integer :: iunit,i_halo
+      integer :: nxyz_domain(3)
       character(256) :: filename
       
     ! total system data
@@ -578,9 +585,10 @@ contains
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bf ! base_directory==./data_dcdft/fragments/dc%i_frag/
         open(iunit,file=filename,form='unformatted',access='stream')
-        write(iunit) dc%nxyz_domain(1:3),nspin,dc%nstate_frag
+        call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+        write(iunit) nxyz_domain(1:3),nspin,dc%nstate_frag
         write(iunit) n_basis(dc%i_frag,1:nspin) ! # of basis functions
-        write(iunit) f_basis(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3) &
+        write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3) &
         & ,1:nspin,1:dc%nstate_frag) ! basis functions | lambda >
         close(iunit)
       ! local hamiltonian matrix

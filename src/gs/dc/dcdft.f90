@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module dcdft
+  use dc_fragment_geometry, only: get_fragment_domain, optimize_fragment_geometry
   implicit none
 contains
 
@@ -168,18 +169,21 @@ contains
     end subroutine init_comm_frag
     
     subroutine init_fragment
-      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment
+      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment, &
+      & yn_dc_fragment_optimization
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag
       integer :: kion_frag(natom,dc%n_frag),natom_frag(dc%n_frag)
+      integer :: nxyz_domain(3), nxyz_domain_frag(3)
       real(8) :: dr
       real(8) :: r1(3),r2(3),r(3)
-      real(8) :: ldomain(3),lbuffer(3)
+      real(8) :: ldomain(3),lbuffer(3),ldomain_frag(3)
       real(8) :: rion_frag(3,natom,dc%n_frag)
     
     ! length of domain
       ldomain(1:3) = al(1:3) / dble(num_fragment(1:3))
+      dc%optimized_fragment_geometry = .false.
       
       do n=1,3 ! x,y,z
       ! rion --> rion = [0:al] (total system)
@@ -199,23 +203,11 @@ contains
         end if
       end do ! n=x,y,z
 
-    ! position of each fragment
-      allocate(dc%ixyz_frag(3,dc%n_frag),dc%rxyz_frag(3,dc%n_frag))
-      i_frag = 1
-      do i=1,num_fragment(1)
-      do j=1,num_fragment(2)
-      do k=1,num_fragment(3)
-      ! ix_total = ix_fragment + dc%ixyz_frag(1,dc%i_frag), ix_fragment=[1:dc%nxyz_domain(1)], etc.
-        dc%ixyz_frag(1,i_frag) = (i-1)*dc%nxyz_domain(1)
-        dc%ixyz_frag(2,i_frag) = (j-1)*dc%nxyz_domain(2)
-        dc%ixyz_frag(3,i_frag) = (k-1)*dc%nxyz_domain(3)
-        dc%rxyz_frag(1,i_frag) = dble(i-1)*ldomain(1)
-        dc%rxyz_frag(2,i_frag) = dble(j-1)*ldomain(2)
-        dc%rxyz_frag(3,i_frag) = dble(k-1)*ldomain(3)
-        i_frag = i_frag + 1
-      end do
-      end do
-      end do
+      if (yn_dc_fragment_optimization == 'y') then
+        call build_optimized_fragment_geometry(num_fragment, num_rgrid, al, natom, rion)
+      else
+        call build_uniform_fragment_geometry(num_fragment, ldomain)
+      end if
       
     ! variables for each fragment
       i_frag = 1
@@ -223,8 +215,10 @@ contains
       do j=1,num_fragment(2)
       do k=1,num_fragment(3)
       ! boundaries of the fragment i_frag
+        call get_fragment_domain(dc, i_frag, nxyz_domain_frag)
+        ldomain_frag(1:3) = al(1:3) * dble(nxyz_domain_frag(1:3)) / dble(num_rgrid(1:3))
         r1 = dc%rxyz_frag(:,i_frag) - lbuffer
-        r2 = dc%rxyz_frag(:,i_frag) + ldomain + lbuffer
+        r2 = dc%rxyz_frag(:,i_frag) + ldomain_frag + lbuffer
       ! atom count
         iatom_frag = 0
         do iatom=1,natom
@@ -253,13 +247,15 @@ contains
       end do
     
     ! set variables for own fragment
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
     
     ! nelec (total system) --> nelec (fragment)
       nelec = nelec * natom_frag(dc%i_frag) / natom ! initial guess
     
     ! al, num_rgrid (total system) --> al, num_rgrid (fragment)
-      al = ldomain + 2d0*lbuffer
-      num_rgrid = dc%nxyz_domain + 2*dc%nxyz_buffer
+      ldomain_frag(1:3) = al(1:3) * dble(nxyz_domain(1:3)) / dble(num_rgrid(1:3))
+      al = ldomain_frag + 2d0*lbuffer
+      num_rgrid = nxyz_domain + 2*dc%nxyz_buffer
       
     ! natom, rion, kion (total system) --> natom, rion, kion (fragment)
       natom = natom_frag(dc%i_frag)
@@ -277,7 +273,7 @@ contains
       allocate(dc%jxyz_tot(maxval(num_rgrid),3))
       do n=1,3 ! x,y,z
         do i=1,num_rgrid(n) ! r-grid (fragment)
-          if(i <= dc%nxyz_domain(n) + dc%nxyz_buffer(n)) then
+          if(i <= nxyz_domain(n) + dc%nxyz_buffer(n)) then
             j = dc%ixyz_frag(n,dc%i_frag) + i
           else
             j = dc%ixyz_frag(n,dc%i_frag) + ( i - num_rgrid(n) ) ! minus region
@@ -292,6 +288,85 @@ contains
       end if
     
     end subroutine init_fragment
+
+    subroutine build_uniform_fragment_geometry(num_fragment, ldomain)
+      implicit none
+      integer, intent(in) :: num_fragment(3)
+      real(8), intent(in) :: ldomain(3)
+      integer :: i_frag, i, j, k
+
+      if (allocated(dc%ixyz_frag)) deallocate(dc%ixyz_frag)
+      if (allocated(dc%rxyz_frag)) deallocate(dc%rxyz_frag)
+      if (allocated(dc%nxyz_domain_frag)) deallocate(dc%nxyz_domain_frag)
+      allocate(dc%ixyz_frag(3,dc%n_frag),dc%rxyz_frag(3,dc%n_frag),dc%nxyz_domain_frag(3,dc%n_frag))
+
+      i_frag = 1
+      do i=1,num_fragment(1)
+      do j=1,num_fragment(2)
+      do k=1,num_fragment(3)
+        dc%ixyz_frag(1,i_frag) = (i-1)*dc%nxyz_domain(1)
+        dc%ixyz_frag(2,i_frag) = (j-1)*dc%nxyz_domain(2)
+        dc%ixyz_frag(3,i_frag) = (k-1)*dc%nxyz_domain(3)
+        dc%rxyz_frag(1,i_frag) = dble(i-1)*ldomain(1)
+        dc%rxyz_frag(2,i_frag) = dble(j-1)*ldomain(2)
+        dc%rxyz_frag(3,i_frag) = dble(k-1)*ldomain(3)
+        dc%nxyz_domain_frag(1:3,i_frag) = dc%nxyz_domain(1:3)
+        i_frag = i_frag + 1
+      end do
+      end do
+      end do
+    end subroutine build_uniform_fragment_geometry
+
+    subroutine build_optimized_fragment_geometry(num_fragment, num_rgrid, al, natom, rion)
+      implicit none
+      integer, intent(in) :: num_fragment(3), num_rgrid(3), natom
+      real(8), intent(in) :: al(3), rion(3, natom)
+      integer :: axis, ifrag, ix_frag, iy_frag, iz_frag
+      integer :: axis_offset(3, maxval(num_fragment))
+      integer :: widths(3)
+      integer :: i
+
+      call optimize_fragment_geometry(dc, num_fragment, num_rgrid, al, natom, rion)
+      if (allocated(dc%ixyz_frag)) deallocate(dc%ixyz_frag)
+      if (allocated(dc%rxyz_frag)) deallocate(dc%rxyz_frag)
+      allocate(dc%ixyz_frag(3,dc%n_frag),dc%rxyz_frag(3,dc%n_frag))
+
+      axis_offset(:, :) = 0
+      do axis = 1, 3
+        do i = 2, num_fragment(axis)
+          axis_offset(axis, i) = axis_offset(axis, i - 1) + dc%nxyz_domain_frag(axis, fragment_id_for_axis(axis, i - 1, num_fragment))
+        end do
+      end do
+
+      ifrag = 0
+      do ix_frag = 1, num_fragment(1)
+      do iy_frag = 1, num_fragment(2)
+      do iz_frag = 1, num_fragment(3)
+        ifrag = ifrag + 1
+        widths(1:3) = dc%nxyz_domain_frag(1:3, ifrag)
+        dc%ixyz_frag(1, ifrag) = axis_offset(1, ix_frag)
+        dc%ixyz_frag(2, ifrag) = axis_offset(2, iy_frag)
+        dc%ixyz_frag(3, ifrag) = axis_offset(3, iz_frag)
+        dc%rxyz_frag(1, ifrag) = al(1) * dble(dc%ixyz_frag(1, ifrag)) / dble(num_rgrid(1))
+        dc%rxyz_frag(2, ifrag) = al(2) * dble(dc%ixyz_frag(2, ifrag)) / dble(num_rgrid(2))
+        dc%rxyz_frag(3, ifrag) = al(3) * dble(dc%ixyz_frag(3, ifrag)) / dble(num_rgrid(3))
+      end do
+      end do
+      end do
+    end subroutine build_optimized_fragment_geometry
+
+    integer function fragment_id_for_axis(axis, iseg, num_fragment) result(ifrag_axis)
+      integer, intent(in) :: axis, iseg, num_fragment(3)
+
+      select case(axis)
+      case(1)
+        ifrag_axis = ((iseg - 1) * num_fragment(2)) * num_fragment(3) + 1
+      case(2)
+        ifrag_axis = (iseg - 1) * num_fragment(3) + 1
+      case default
+        ifrag_axis = iseg
+      end select
+    end function fragment_id_for_axis
     
     function r_periodic(r,a) ! r --> r_periodic in [0,a]
       implicit none

@@ -476,8 +476,10 @@ module structures
   type s_dcdft
   ! summation
     integer :: n_frag ! # of fragments (subsystems)
+    logical :: optimized_fragment_geometry
     integer :: nxyz_domain(3) ! # of r-grid points for the core domain
     integer :: nxyz_buffer(3) ! # of r-grid points for the buffer region
+    integer,allocatable :: nxyz_domain_frag(:,:) ! per-fragment core-domain sizes
     integer,allocatable :: ixyz_frag(:,:) ! r-grid index of the fragment origin
     real(8),allocatable :: rxyz_frag(:,:) ! position of the fragment origin
   ! total system
