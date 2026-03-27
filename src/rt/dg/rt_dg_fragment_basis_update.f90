@@ -1056,10 +1056,6 @@
       implicit none
       integer :: i, j, iblk
 
-      if (.not. allocated(dg_frag%H_mat)) then
-        allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      end if
-      dg_frag%H_mat(:, :, :) = 0.0d0
       if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
         call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
       end if
@@ -1130,7 +1126,6 @@
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-update", dg_frag%icomm)
       call rebuild_local_h_block_ids(dg_frag)
       call zero_nonlocal_h_matrix_blocks(dg_frag)
-      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
     end subroutine refresh_operator_matrices_from_local_blocks
 
     subroutine diag_full_lapack

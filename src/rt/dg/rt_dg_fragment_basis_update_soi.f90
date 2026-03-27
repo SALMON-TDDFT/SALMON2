@@ -969,6 +969,7 @@
   contains
 
     subroutine diag_full_lapack
+      use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_real_dense
       implicit none
       integer :: i, j
       real(8), allocatable :: mat_H(:,:), mat_V(:,:)
@@ -1026,13 +1027,13 @@
       end if
       call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-diag-soi", dg_frag%icomm)
-      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
 
       do ispin = 1, system%nspin
         n = dg_frag%n_mat(ispin)
         if (n <= 0) cycle
         allocate(mat_H(n, n), mat_V(n, n))
-        mat_H = dg_frag%H_mat(1:n, 1:n, ispin)
+        mat_H = 0.0d0
+        call copy_matrix_blocks_metric_to_real_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n, mat_H)
         call eigen_dsyev(mat_H, dg_frag%esp(1:n, ispin), mat_V)
 
         i_local = 0
@@ -1050,6 +1051,7 @@
 
         deallocate(mat_H, mat_V)
       end do
+      if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
 
     end subroutine diag_full_lapack
 

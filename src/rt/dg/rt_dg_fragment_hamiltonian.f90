@@ -368,6 +368,7 @@
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
     use rt_dg_plane_wave, only: diagonalize_mixed_basis
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_complex_dense
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -396,8 +397,10 @@
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, nbf_diag
+    integer :: n_metric
     logical :: release_dense_fragment_ops
     logical, parameter :: enable_hamiltonian_trace = .false.
+    complex(8), allocatable :: H_metric_ref(:,:)
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
@@ -811,32 +814,16 @@
     ! Reduce one fragment block at a time to avoid a single dense global allreduce.
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
-    if (.not. allocated(dg_frag%H_mat)) then
-      allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    end if
-    if (.not. allocated(dg_frag%H_mat_kinetic)) then
-      allocate(dg_frag%H_mat_kinetic(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    end if
-    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
-    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
+    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_blocks)
+    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
+    if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
+    if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
     if (enable_hamiltonian_trace) then
       write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
         " stage=", "after-global-hmat-sum"
       flush(6)
     end if
 
-    ! Enforce Hermiticity for the static Hamiltonian parts used in RT propagation.
-    do ispin = 1, system%nspin
-      do jo = 1, dg_frag%n_mat_max
-        do io = jo + 1, dg_frag%n_mat_max
-          dg_frag%H_mat_kinetic(io, jo, ispin) = 0.5d0 * (dg_frag%H_mat_kinetic(io, jo, ispin) + dg_frag%H_mat_kinetic(jo, io, ispin))
-          dg_frag%H_mat_kinetic(jo, io, ispin) = dg_frag%H_mat_kinetic(io, jo, ispin)
-
-          dg_frag%H_mat(io, jo, ispin) = 0.5d0 * (dg_frag%H_mat(io, jo, ispin) + dg_frag%H_mat(jo, io, ispin))
-          dg_frag%H_mat(jo, io, ispin) = dg_frag%H_mat(io, jo, ispin)
-        end do
-      end do
-    end do
     if (enable_hamiltonian_trace) then
       write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
         " stage=", "after-hermiticity"
@@ -868,16 +855,18 @@
 
     ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
     if (allocated(dg_frag%H_mat_old)) then
+      dg_frag%H_mat_old(:, :, :) = (0.0d0, 0.0d0)
+      n_metric = min(dg_frag%nstate_frag, size(dg_frag%H_mat_old, 1), size(dg_frag%H_mat_old, 2))
+      if (n_metric > 0) then
+        allocate(H_metric_ref(n_metric, n_metric))
+      end if
       do ispin = 1, min(dg_frag%nspin, size(dg_frag%H_mat_old,3))
-        do jo = 1, min(dg_frag%nstate_frag, size(dg_frag%H_mat_old,2))
-          do io = 1, min(dg_frag%nstate_frag, size(dg_frag%H_mat_old,1))
-            dg_frag%H_mat_old(io, jo, ispin) = cmplx(dg_frag%H_mat(io, jo, ispin), 0.0d0, kind=8)
-          end do
-        end do
+        if (n_metric <= 0) cycle
+        H_metric_ref(:, :) = (0.0d0, 0.0d0)
+        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n_metric, H_metric_ref)
+        dg_frag%H_mat_old(1:n_metric, 1:n_metric, ispin) = H_metric_ref(:, :)
       end do
-    end if
-    if (release_dense_fragment_ops) then
-      if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
+      if (allocated(H_metric_ref)) deallocate(H_metric_ref)
     end if
     
     deallocate(V_total)
@@ -898,6 +887,30 @@
     
   end subroutine calculate_hamiltonian_matrix
 
+  subroutine symmetrize_real_matrix_blocks(dg_frag, blocks)
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(inout) :: blocks(:)
+    integer :: ispin, iblk, nbf, io, jo
+
+    !$omp parallel do collapse(2) private(ispin,iblk,nbf,jo,io) schedule(static)
+    do ispin = 1, dg_frag%nspin
+      do iblk = 1, size(blocks)
+        if (blocks(iblk)%ifrag_row /= blocks(iblk)%ifrag_col) cycle
+        nbf = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
+        if (nbf <= 0) cycle
+        do jo = 1, nbf
+          do io = jo + 1, nbf
+            blocks(iblk)%val(io, jo, ispin) = 0.5d0 * (blocks(iblk)%val(io, jo, ispin) + blocks(iblk)%val(jo, io, ispin))
+            blocks(iblk)%val(jo, io, ispin) = blocks(iblk)%val(io, jo, ispin)
+          end do
+        end do
+      end do
+    end do
+    !$omp end parallel do
+  end subroutine symmetrize_real_matrix_blocks
+
   subroutine reduce_matrix_fragment_blocks(dg_frag, mat, label, icomm_reduce)
     use communication, only: comm_is_root, comm_summation, comm_get_max
     implicit none
@@ -908,9 +921,11 @@
     integer, parameter :: reduce_chunk_size = 262144
     real(8), allocatable :: send_block(:), recv_block(:)
     integer :: ifrag_row, ifrag_col, ispin, ii, jj, ig_i, ig_j
+    integer :: idx_ii, idx_jj, valid_row_count, valid_col_count
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
 
     max_block_size = 0
     total_active_size = 0
@@ -953,6 +968,8 @@
 
     if (max_block_size_global <= 0) return
     allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
+    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
 
     do ispin = 1, dg_frag%nspin
       do ifrag_col = 1, dg_frag%n_frag
@@ -961,34 +978,31 @@
         do ifrag_row = 1, dg_frag%n_frag
           nrow = dg_frag%n_basis(ifrag_row, ispin)
           if (nrow <= 0) cycle
-          block_size = nrow * ncol
-          offset_flat = 1
+          valid_row_count = 0
+          do ii = 1, nrow
+            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
+            valid_row_count = valid_row_count + 1
+            valid_row_ids(valid_row_count) = ii
+          end do
+          valid_col_count = 0
           do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) then
-              write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block column index out of range: label=", &
-                trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_col=", ifrag_col, " ig_j=", ig_j
-              flush(6)
-              stop 1
-            end if
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) then
-                write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block row index out of range: label=", &
-                  trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_row=", ifrag_row, " ig_i=", ig_i
-                flush(6)
-                stop 1
-              end if
+            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
+            valid_col_count = valid_col_count + 1
+            valid_col_ids(valid_col_count) = jj
+          end do
+          block_size = valid_row_count * valid_col_count
+          do idx_jj = 1, valid_col_count
+            jj = valid_col_ids(idx_jj)
+            ig_j = col_gid(jj)
+            do idx_ii = 1, valid_row_count
+              ii = valid_row_ids(idx_ii)
+              ig_i = row_gid(ii)
+              offset_flat = (idx_jj - 1) * valid_row_count + idx_ii
               send_block(offset_flat) = mat(ig_i, ig_j, ispin)
-              offset_flat = offset_flat + 1
             end do
           end do
-          if (offset_flat /= block_size + 1) then
-            write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block pack mismatch: label=", &
-              trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_row=", ifrag_row, " ifrag_col=", ifrag_col
-            flush(6)
-            stop 1
-          end if
 
           chunk_begin = 1
           do while (chunk_begin <= block_size)
@@ -998,25 +1012,21 @@
             chunk_begin = chunk_begin + chunk_count
           end do
 
-          offset_flat = 1
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
+          do idx_jj = 1, valid_col_count
+            jj = valid_col_ids(idx_jj)
+            ig_j = col_gid(jj)
+            do idx_ii = 1, valid_row_count
+              ii = valid_row_ids(idx_ii)
+              ig_i = row_gid(ii)
+              offset_flat = (idx_jj - 1) * valid_row_count + idx_ii
               mat(ig_i, ig_j, ispin) = recv_block(offset_flat)
-              offset_flat = offset_flat + 1
             end do
           end do
-          if (offset_flat /= block_size + 1) then
-            write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block unpack mismatch: label=", &
-              trim(label), " rank=", dg_frag%id, " ispin=", ispin, " ifrag_row=", ifrag_row, " ifrag_col=", ifrag_col
-            flush(6)
-            stop 1
-          end if
         end do
       end do
     end do
 
+    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
     deallocate(send_block, recv_block)
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
@@ -1059,7 +1069,7 @@
     real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(out) :: T_phi(:,:,:)
     real(8), intent(out) :: H_phi(:,:,:)
-    integer :: lx, ly, lz, gx, gy, gz
+    integer :: lx, ly, lz, gx, gy, gz, gx0, gx1, gy0, gy1, gz0, gz1
     integer :: iorg(3), ndom(3)
     integer :: loc_s(3), loc_e(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
@@ -1110,22 +1120,30 @@
     v_ub2 = ubound(V_total, 2)
     v_lb3 = lbound(V_total, 3)
     v_ub3 = ubound(V_total, 3)
+    gx0 = iorg(1) + loc_s(1) - 1
+    gx1 = iorg(1) + loc_e(1) - 1
+    gy0 = iorg(2) + loc_s(2) - 1
+    gy1 = iorg(2) + loc_e(2) - 1
+    gz0 = iorg(3) + loc_s(3) - 1
+    gz1 = iorg(3) + loc_e(3) - 1
+    if (gx0 < v_lb1 .or. gx1 > v_ub1 .or. gy0 < v_lb2 .or. gy1 > v_ub2 .or. gz0 < v_lb3 .or. gz1 > v_ub3) then
+      write(*,*) "[FATAL] build_hpsi V_total index out of bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " g0=", gx0, gy0, gz0, " g1=", gx1, gy1, gz1, &
+        " V_lb=", v_lb1, v_lb2, v_lb3, " V_ub=", v_ub1, v_ub2, v_ub3
+      stop 1
+    end if
+!$omp parallel do collapse(3) private(lz, ly, lx, gz, gy, gx) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)
         gy = iorg(2) + ly - 1
         do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
-          if (gx < v_lb1 .or. gx > v_ub1 .or. gy < v_lb2 .or. gy > v_ub2 .or. gz < v_lb3 .or. gz > v_ub3) then
-            write(*,*) "[FATAL] build_hpsi V_total index out of bounds: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " gx/gy/gz=", gx, gy, gz, " V_lb=", v_lb1, v_lb2, v_lb3, &
-              " V_ub=", v_ub1, v_ub2, v_ub3
-            stop 1
-          end if
           H_phi(lx, ly, lz) = H_phi(lx, ly, lz) + V_total(gx, gy, gz) * dg_frag%phi_frag(lx, ly, lz, jo, i_local)
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine build_hpsi_for_basis
 
   !=======================================================================
@@ -1597,7 +1615,7 @@
     type(s_rgrid),          intent(in)    :: mg
     type(s_stencil),        intent(in)    :: stencil
     
-    integer :: ifrag, i_local, ispin, io, jo, idir
+    integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
@@ -1725,23 +1743,26 @@
             "lb=", phi_lb1, phi_lb2, phi_lb3, "ub=", phi_ub1, phi_ub2, phi_ub3
           stop "DG-Fragment RT: momentum phi_frag local range out of bounds"
         end if
+        nbf = dg_frag%n_basis(ifrag, ispin)
+        jo_progress_stride = max(1, nbf / 4)
         npts_local = (loc_e(1) - loc_s(1) + 1) * (loc_e(2) - loc_s(2) + 1) * (loc_e(3) - loc_s(3) + 1)
-        allocate(phi_local_2d(npts_local, dg_frag%n_basis(ifrag, ispin)), &
-                 grad_local_2d(npts_local, 3), self_proj(dg_frag%n_basis(ifrag, ispin), 3))
+        allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
 
-        do io = 1, dg_frag%n_basis(ifrag, ispin)
-          if (log_frag_progress .and. io == 1) then
-            write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum first io: io=", io, " n_basis=", dg_frag%n_basis(ifrag, ispin), &
-              " phi_dim4=", size(dg_frag%phi_frag, 4)
-            write(*,'(1x,a,3(i0,1x),a,3(i0,1x))') &
-              "        momentum first local range: loc_s=", loc_s(1), loc_s(2), loc_s(3), &
-              " loc_e=", loc_e(1), loc_e(2), loc_e(3)
-            flush(6)
-          end if
-          if (io < 1 .or. io > size(dg_frag%phi_frag, 4)) then
-            write(*,'(1x,a,i0,a,i0)') "DG-Fragment RT invalid io=", io, " phi_frag dim4=", size(dg_frag%phi_frag, 4)
-            stop "DG-Fragment RT: invalid basis-function index"
-          end if
+        if (nbf > size(dg_frag%phi_frag, 4)) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "DG-Fragment RT invalid n_basis=", nbf, &
+            " phi_frag dim4=", size(dg_frag%phi_frag, 4), " ifrag=", ifrag, " ispin=", ispin
+          stop "DG-Fragment RT: invalid basis-function count"
+        end if
+        if (log_frag_progress) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum first io: io=", 1, " n_basis=", nbf, &
+            " phi_dim4=", size(dg_frag%phi_frag, 4)
+          write(*,'(1x,a,3(i0,1x),a,3(i0,1x))') &
+            "        momentum first local range: loc_s=", loc_s(1), loc_s(2), loc_s(3), &
+            " loc_e=", loc_e(1), loc_e(2), loc_e(3)
+          flush(6)
+        end if
+
+        do io = 1, nbf
           ipt = 0
           do lz = loc_s(3), loc_e(3)
             do ly = loc_s(2), loc_e(2)
@@ -1763,7 +1784,7 @@
         ! Loop over basis functions in fragment j (ket side)
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
         ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
-        do jo = 1, dg_frag%n_basis(ifrag, ispin)
+        do jo = 1, nbf
           if (log_frag_progress .and. jo == 1) then
             write(*,*) "        momentum first jo begin"
             flush(6)
@@ -1779,10 +1800,9 @@
             flush(6)
           end if
           if (log_frag_progress) then
-            if (jo == 1 .or. jo == dg_frag%n_basis(ifrag, ispin) .or. &
-                mod(jo, max(1, dg_frag%n_basis(ifrag, ispin) / 4)) == 0) then
+            if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
               write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        momentum basis progress: jo=", jo, "/", &
-                dg_frag%n_basis(ifrag, ispin), " grad=", time_grad_total
+                nbf, " grad=", time_grad_total
               flush(6)
             end if
           end if
@@ -1804,13 +1824,17 @@
           end if
 
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
+          if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) then
+            deallocate(grad_phi)
+            cycle
+          end if
           call cpu_time(t0)
-          call dgemm('T', 'N', dg_frag%n_basis(ifrag, ispin), 3, npts_local, hvol, phi_local_2d, npts_local, &
-            grad_local_2d, npts_local, 0.0d0, self_proj, dg_frag%n_basis(ifrag, ispin))
+          call dgemm('T', 'N', nbf, 3, npts_local, hvol, phi_local_2d, npts_local, &
+            grad_local_2d, npts_local, 0.0d0, self_proj, nbf)
           call cpu_time(t1)
           time_self_integral = time_self_integral + (t1 - t0)
 
-          do io = 1, dg_frag%n_basis(ifrag, ispin)
+          do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
             if (log_frag_progress .and. jo == 1 .and. io == 1) then
               write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum first index: ig_i=", ig_i, " ig_j=", ig_j, &
@@ -1819,7 +1843,6 @@
               flush(6)
             end if
             if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
             do idir = 1, 3
               integral = self_proj(io, idir)
               if (iblk_self > 0) dg_frag%momentum_blocks(iblk_self)%val(idir, io, jo, ispin) = integral
@@ -1838,12 +1861,26 @@
               n_basis_halo = dg_frag%n_basis(jfrag, ispin)
               l = dg_frag%halo(i_halo)%length
               d = dg_frag%halo(i_halo)%dsp_send
+              if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
+                write(*,*) "[FATAL] momentum halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
+                stop 1
+              end if
+              if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
+                write(*,*) "[FATAL] momentum halo basis exceeds buf dim4: rank=", dg_frag%id, &
+                  " i_halo=", i_halo, " n_basis_halo=", n_basis_halo, " buf_dim4=", size(dg_frag%halo(i_halo)%buf_recv, 4)
+                stop 1
+              end if
+              if (n_basis_halo > size(dg_frag%index_basis, 1)) then
+                write(*,*) "[FATAL] momentum halo basis exceeds index_basis dim1: rank=", dg_frag%id, &
+                  " i_halo=", i_halo, " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, &
+                  " index_basis_dim1=", size(dg_frag%index_basis, 1)
+                stop 1
+              end if
               halo_s(:) = max(loc_s(:), d(:) + 1)
               halo_e(:) = min(loc_e(:), d(:) + l(:))
               if (any(halo_s(:) > halo_e(:))) cycle
               if (log_frag_progress) then
-                if (jo == 1 .or. jo == dg_frag%n_basis(ifrag, ispin) .or. &
-                    mod(jo, max(1, dg_frag%n_basis(ifrag, ispin) / 4)) == 0) then
+                if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
                   write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,1pe12.4)') &
                     "        momentum halo detail: jo=", jo, " i_halo=", i_halo, &
                     " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, " halo_len=", &
@@ -2201,7 +2238,7 @@
     type(s_dft_system),     intent(in)    :: system
     type(s_rgrid),          intent(in)    :: mg
 
-    integer :: ifrag, i_local, ispin, io, jo, iblk
+    integer :: ifrag, i_local, ispin, io, jo, iblk, iblk_rev, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj
     integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
@@ -2273,6 +2310,8 @@
             " n_basis=", dg_frag%n_basis(ifrag, ispin)
           flush(6)
         end if
+        nbf = dg_frag%n_basis(ifrag, ispin)
+        jo_progress_stride = max(1, nbf / 4)
         if (loc_s(1) < phi_lb1 .or. loc_e(1) > phi_ub1 .or. &
             loc_s(2) < phi_lb2 .or. loc_e(2) > phi_ub2 .or. &
             loc_s(3) < phi_lb3 .or. loc_e(3) > phi_ub3) then
@@ -2281,28 +2320,24 @@
             "phi_lb=", phi_lb1, phi_lb2, phi_lb3, "phi_ub=", phi_ub1, phi_ub2, phi_ub3
           stop 1
         end if
-        if (dg_frag%n_basis(ifrag, ispin) > size(dg_frag%index_basis, 1)) then
+        if (nbf > size(dg_frag%index_basis, 1)) then
           write(*,*) "[FATAL] overlap n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", dg_frag%n_basis(ifrag, ispin), &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf, &
             " index_basis_dim1=", size(dg_frag%index_basis, 1)
           stop 1
         end if
+        if (nbf > size(dg_frag%phi_frag, 4)) then
+          write(*,*) "[FATAL] overlap n_basis exceeds phi dim4: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf, &
+            " phi_dim4=", size(dg_frag%phi_frag, 4)
+          stop 1
+        end if
 
-        do jo = 1, dg_frag%n_basis(ifrag, ispin)
-          if (jo > size(dg_frag%phi_frag, 4)) then
-            write(*,*) "[FATAL] overlap jo exceeds phi dim4: rank=", dg_frag%id, " ifrag=", ifrag, &
-              " jo=", jo, " phi_dim4=", size(dg_frag%phi_frag, 4)
-            stop 1
-          end if
+        do jo = 1, nbf
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
 
-          do io = 1, dg_frag%n_basis(ifrag, ispin)
-            if (io > size(dg_frag%phi_frag, 4)) then
-              write(*,*) "[FATAL] overlap io exceeds phi dim4: rank=", dg_frag%id, " ifrag=", ifrag, &
-                " io=", io, " phi_dim4=", size(dg_frag%phi_frag, 4)
-              stop 1
-            end if
+          do io = 1, nbf
             ig_row = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
             integral = 0.0d0
@@ -2321,10 +2356,9 @@
             if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = integral
           end do
           if (log_frag_progress) then
-            if (jo == 1 .or. jo == dg_frag%n_basis(ifrag, ispin) .or. &
-                mod(jo, max(1, dg_frag%n_basis(ifrag, ispin) / 4)) == 0) then
+            if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
               write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        overlap self progress: jo=", jo, "/", &
-                dg_frag%n_basis(ifrag, ispin), " self=", time_self_integral - frag_self_start
+                nbf, " self=", time_self_integral - frag_self_start
               flush(6)
             end if
           end if
@@ -2360,6 +2394,8 @@
             halo_s(:) = max(loc_s(:), d(:) + 1)
             halo_e(:) = min(loc_e(:), d(:) + l(:))
             if (any(halo_s(:) > halo_e(:))) cycle
+            iblk = find_matrix_block(dg_frag%S_block_map, jfrag, ifrag)
+            iblk_rev = find_matrix_block(dg_frag%S_block_map, ifrag, jfrag)
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
@@ -2387,16 +2423,13 @@
               end do
               call cpu_time(t1)
               time_halo_integral = time_halo_integral + (t1 - t0)
-              iblk = find_matrix_block(dg_frag%S_block_map, jfrag, ifrag)
               if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = &
                 dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * integral
-              iblk = find_matrix_block(dg_frag%S_block_map, ifrag, jfrag)
-              if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(jo, io, ispin) = &
-                dg_frag%S_mat_blocks(iblk)%val(jo, io, ispin) + 0.5d0 * integral
+              if (iblk_rev > 0) dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
+                dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * integral
             end do
             if (log_frag_progress) then
-              if (jo == 1 .or. jo == dg_frag%n_basis(ifrag, ispin) .or. &
-                  mod(jo, max(1, dg_frag%n_basis(ifrag, ispin) / 4)) == 0) then
+              if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
                 write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,1pe12.4)') &
                   "        overlap halo detail: jo=", jo, " i_halo=", i_halo, " jfrag=", jfrag, &
                   " n_basis_halo=", n_basis_halo, " halo_len=", l(1), l(2), l(3), &

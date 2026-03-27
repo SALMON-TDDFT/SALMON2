@@ -23,10 +23,14 @@
     complex(8) :: minus_i
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
-    logical :: has_nonlocal, use_hmat_complex
+    logical :: has_nonlocal, use_hmat_complex, use_mixed_current
     logical :: use_spatial_A
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     complex(8) :: mfp
+    real(8), parameter :: unit_dir(3,3) = reshape((/ &
+      1.0d0, 0.0d0, 0.0d0, &
+      0.0d0, 1.0d0, 0.0d0, &
+      0.0d0, 0.0d0, 1.0d0 /), (/3, 3/))
     ! Calculate local observables (only for assigned fragments)
     ! MPI aggregation will sum across all ranks
     current_local = 0.0d0
@@ -54,7 +58,11 @@
     n_tot = n + n_pw
 
     allocate(tmp_mat(n, nocc))
-    if (n_pw > 0) allocate(coef_all(n_tot, nocc), tmp_all(n_tot, nocc))
+    allocate(coef_frag_all(n, nocc))
+    if (n_pw > 0) then
+      allocate(coef_pw_all(n_pw, nocc))
+      allocate(coef_all(n_tot, nocc), tmp_all(n_tot, nocc))
+    end if
     minus_i = cmplx(0.0d0, -1.0d0, kind=8)
 
     ! Current calculation via momentum operator matrix (velocity gauge)
@@ -63,10 +71,9 @@
     !   - Current: j = Im[<ψ|∇|ψ>] with factor 2 and normalization by ngrid
     !   - Sign: Testing -2.0 to match conventional RT direction
     do ispin = 1, dg_frag%nspin
-      allocate(coef_frag_all(n, nocc))
+      use_mixed_current = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
       coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
-        allocate(coef_pw_all(n_pw, nocc))
         coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
       end if
       if (n_pw > 0) then
@@ -76,12 +83,10 @@
       end if
       do idir = 1, 3
         ! momentum_mat = <φ|∇|φ>, need to apply -i via aimag() and include factor 2
-        if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
+        if (use_mixed_current) then
           tmp_all(:, :) = (0.0d0, 0.0d0)
-          Ac_tot = 0.0d0
-          Ac_tot(idir) = 1.0d0
           if (allocated(dg_frag%momentum_blocks)) then
-            call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
+            call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
           else if (allocated(dg_frag%momentum_mat_c)) then
             if (.not. allocated(op_mat)) allocate(op_mat(n, n))
             op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
@@ -102,15 +107,10 @@
               tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) - conjg(mfp) * coef_all(io, 1:nocc)
             end do
           end do
-          current_tmp = 0.0d0
-          do io = 1, nocc
-            current_tmp = current_tmp + sum(aimag(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
-          end do
+          current_tmp = sum(aimag(conjg(coef_all(1:n_tot, 1:nocc)) * tmp_all(1:n_tot, 1:nocc)))
         else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
-          Ac_tot = 0.0d0
-          Ac_tot(idir) = 1.0d0
-          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), tmp_mat)
+          call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_frag_all(1:n, 1:nocc), tmp_mat)
         else if (allocated(dg_frag%momentum_mat_c)) then
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
@@ -123,17 +123,12 @@
                      coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         end if
         
-        if (.not. (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))) then
-          current_tmp = 0.0d0
-          do io = 1, nocc
-            ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
-            current_tmp = current_tmp + sum(aimag(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
-          end do
+        if (.not. use_mixed_current) then
+          ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
+          current_tmp = sum(aimag(conjg(coef_frag_all(1:n, 1:nocc)) * tmp_mat(1:n, 1:nocc)))
         end if
         current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
       end do
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
     
     ! Get vector potential at current time for energy calculation
@@ -146,10 +141,8 @@
     ! Calculate total energy: E = <ψ|H(t)|ψ>
     ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
     do ispin = 1, dg_frag%nspin
-      allocate(coef_frag_all(n, nocc))
       coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
-        allocate(coef_pw_all(n_pw, nocc))
         coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
       end if
       if (n_pw > 0) then
@@ -289,36 +282,21 @@
       end if
 
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
-        energy_tmp = 0.0d0
-        do io = 1, nocc
-          energy_tmp = energy_tmp + sum(real(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
-        end do
+        energy_tmp = sum(real(conjg(coef_all(1:n_tot, 1:nocc)) * tmp_all(1:n_tot, 1:nocc)))
       else
         if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
         call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                    coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         end if
-        energy_tmp = 0.0d0
-        do io = 1, nocc
-          energy_tmp = energy_tmp + sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
-        end do
+        energy_tmp = sum(real(conjg(coef_frag_all(1:n, 1:nocc)) * tmp_mat(1:n, 1:nocc)))
       end if
       energy_local = energy_local + energy_tmp
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
       do ispin = 1, dg_frag%nspin
-        allocate(coef_frag_all(n, nocc))
-        coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
-        allocate(coef_pw_all(n_pw, nocc))
         coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
-        do io = 1, nocc
-          pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, io))**2)
-        end do
-        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+        pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, 1:nocc))**2)
       end do
     end if
 
@@ -348,6 +326,8 @@
     if (allocated(A2_mat)) deallocate(A2_mat)
     if (allocated(op_mat)) deallocate(op_mat)
     deallocate(tmp_mat)
+    if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+    if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     if (allocated(coef_all)) deallocate(coef_all)
     if (allocated(tmp_all)) deallocate(tmp_all)
 

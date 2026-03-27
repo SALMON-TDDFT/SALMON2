@@ -14,6 +14,7 @@
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
     use rt_dg_plane_wave, only: prepare_mixed_basis_startup
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, copy_matrix_blocks_metric_to_complex_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -28,10 +29,12 @@
     complex(8) :: integral_t, integral_h
     real(8) :: max_p
     real(8) :: Ac_zero(3)
+    integer :: n_metric
     integer :: is(3), ie(3)
     complex(8), allocatable :: T_phi(:,:,:)   ! Kinetic energy operator applied to basis
     complex(8), allocatable :: H_phi(:,:,:)   ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j>
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
+    complex(8), allocatable :: H_metric_ref(:,:)
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
         allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
@@ -146,23 +149,14 @@
     ! Global Hamiltonian aggregation via fragment blocks to avoid a monolithic dense allreduce.
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-soi", dg_frag%icomm)
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic-soi", dg_frag%icomm)
-    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
-    call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%H_mat_kinetic)
-
-    ! Enforce Hermiticity for the static Hamiltonian parts used in RT propagation.
-    do ispin = 1, system%nspin
-      do jo = 1, dg_frag%n_mat_max
-        do io = jo + 1, dg_frag%n_mat_max
-          dg_frag%H_mat_kinetic(io, jo, ispin) = 0.5d0 * (dg_frag%H_mat_kinetic(io, jo, ispin) + dg_frag%H_mat_kinetic(jo, io, ispin))
-          dg_frag%H_mat_kinetic(jo, io, ispin) = dg_frag%H_mat_kinetic(io, jo, ispin)
-
-          dg_frag%H_mat(io, jo, ispin) = 0.5d0 * (dg_frag%H_mat(io, jo, ispin) + dg_frag%H_mat(jo, io, ispin))
-          dg_frag%H_mat(jo, io, ispin) = dg_frag%H_mat(io, jo, ispin)
-        end do
-      end do
+    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_blocks)
+    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
+    dg_frag%H_mat_c(:, :, :) = (0.0d0, 0.0d0)
+    do ispin = 1, dg_frag%nspin
+      call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, dg_frag%H_mat_c(1:dg_frag%n_mat_max, 1:dg_frag%n_mat_max, ispin))
     end do
-
-    dg_frag%H_mat_c(:, :, :) = cmplx(dg_frag%H_mat(:, :, :), 0.0d0, kind=8)
+    if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
+    if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Kinetic and potential terms computed"
@@ -186,13 +180,18 @@
 
     ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
     if (allocated(dg_frag%H_mat_old)) then
+      dg_frag%H_mat_old(:, :, :) = (0.0d0, 0.0d0)
+      n_metric = min(dg_frag%nstate_frag, size(dg_frag%H_mat_old, 1), size(dg_frag%H_mat_old, 2))
+      if (n_metric > 0) then
+        allocate(H_metric_ref(n_metric, n_metric))
+      end if
       do ispin = 1, min(dg_frag%nspin, size(dg_frag%H_mat_old,3))
-        do jo = 1, min(dg_frag%nstate_frag, size(dg_frag%H_mat_old,2))
-          do io = 1, min(dg_frag%nstate_frag, size(dg_frag%H_mat_old,1))
-            dg_frag%H_mat_old(io, jo, ispin) = cmplx(dg_frag%H_mat(io, jo, ispin), 0.0d0, kind=8)
-          end do
-        end do
+        if (n_metric <= 0) cycle
+        H_metric_ref(:, :) = (0.0d0, 0.0d0)
+        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n_metric, H_metric_ref)
+        dg_frag%H_mat_old(1:n_metric, 1:n_metric, ispin) = H_metric_ref(:, :)
       end do
+      if (allocated(H_metric_ref)) deallocate(H_metric_ref)
     end if
     
     deallocate(T_phi, H_phi, V_total)
@@ -203,6 +202,30 @@
     end if
     
   end subroutine calculate_hamiltonian_matrix
+
+  subroutine symmetrize_real_matrix_blocks(dg_frag, blocks)
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(inout) :: blocks(:)
+    integer :: ispin, iblk, nbf, io, jo
+
+    !$omp parallel do collapse(2) private(ispin,iblk,nbf,jo,io) schedule(static)
+    do ispin = 1, dg_frag%nspin
+      do iblk = 1, size(blocks)
+        if (blocks(iblk)%ifrag_row /= blocks(iblk)%ifrag_col) cycle
+        nbf = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
+        if (nbf <= 0) cycle
+        do jo = 1, nbf
+          do io = jo + 1, nbf
+            blocks(iblk)%val(io, jo, ispin) = 0.5d0 * (blocks(iblk)%val(io, jo, ispin) + blocks(iblk)%val(jo, io, ispin))
+            blocks(iblk)%val(jo, io, ispin) = blocks(iblk)%val(io, jo, ispin)
+          end do
+        end do
+      end do
+    end do
+    !$omp end parallel do
+  end subroutine symmetrize_real_matrix_blocks
 
   !=======================================================================
   ! Build total local potential on the given grid:
