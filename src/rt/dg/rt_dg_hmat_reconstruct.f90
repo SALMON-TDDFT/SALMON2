@@ -213,9 +213,10 @@
         end if
         if (nbf <= 0) cycle
         phi_blk(1:ngrid, 1:nbf) = dg_frag%density_phi_cache(1:ngrid, 1:nbf, i_local)
-!$omp parallel do collapse(3) private(lz, ly, lx, gz, gy, gx, igrid_cache) schedule(static)
+!$omp parallel do collapse(2) private(lz, ly, lx, gz, gy, gx, igrid_cache) schedule(static)
         do lz = 1, ndom(3)
           do ly = 1, ndom(2)
+!$omp simd private(gz, gy, gx, igrid_cache)
             do lx = 1, ndom(1)
               igrid_cache = lx + ndom(1) * ((ly - 1) + ndom(2) * (lz - 1))
               gx = dg_frag%hmat_grid_gx(igrid_cache, i_local)
@@ -231,12 +232,16 @@
 !$omp end parallel do
 
         do io = 1, nbf
-          weighted_phi(1:ngrid, io) = Vtot_blk(1:ngrid) * phi_blk(1:ngrid, io)
+!$omp simd
+          do igrid_cache = 1, ngrid
+            weighted_phi(igrid_cache, io) = Vtot_blk(igrid_cache) * phi_blk(igrid_cache, io)
+          end do
         end do
         total_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi(1:ngrid, 1:nbf))
         if (.not. use_block_reconstruct) then
-!$omp parallel do collapse(2) schedule(static)
+!$omp parallel do private(io, igrid_cache) schedule(static)
           do io = 1, nbf
+!$omp simd
             do igrid_cache = 1, ngrid
               weighted_phi_vpsl(igrid_cache, io) = Vpsl_blk(igrid_cache) * phi_blk(igrid_cache, io)
               weighted_phi_vh(igrid_cache, io) = Vh_blk(igrid_cache) * phi_blk(igrid_cache, io)

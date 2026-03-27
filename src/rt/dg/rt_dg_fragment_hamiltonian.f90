@@ -1142,11 +1142,12 @@
         " V_lb=", v_lb1, v_lb2, v_lb3, " V_ub=", v_ub1, v_ub2, v_ub3
       stop 1
     end if
-!$omp parallel do collapse(3) private(lz, ly, lx, gz, gy, gx) schedule(static)
+!$omp parallel do collapse(2) private(lz, ly, lx, gz, gy, gx) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)
         gy = iorg(2) + ly - 1
+!$omp simd private(gx)
         do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
           H_phi(lx, ly, lz) = H_phi(lx, ly, lz) + V_total(gx, gy, gz) * dg_frag%phi_frag(lx, ly, lz, jo, i_local)
@@ -1308,8 +1309,10 @@
     !
     ! Note: exchange_phi_frag_halo() must be called before this routine
     
+!$omp parallel do collapse(2) private(lz, ly, lx, v) schedule(static)
     do lz = loc_s(3), loc_e(3)
       do ly = loc_s(2), loc_e(2)
+!$omp simd private(v)
         do lx = loc_s(1), loc_e(1)
           ! Compute Laplacian using 4th-order finite difference
           ! Stencil accesses phi_frag(ix±4, iy±4, iz±4) which now includes halo
@@ -1348,6 +1351,7 @@
         end do
       end do
     end do
+!$omp end parallel do
     
   end subroutine apply_kinetic_to_basis
 
@@ -1434,9 +1438,10 @@
     nloc1 = loc_e(1) - loc_s(1) + 1
     nloc2 = loc_e(2) - loc_s(2) + 1
 
-    !$omp parallel do collapse(3) private(lx, ly, lz, ipt, gx, gy, gz) schedule(static)
+    !$omp parallel do collapse(2) private(lx, ly, lz, ipt, gx, gy, gz) schedule(static)
     do lz = 1, ndom(3)
       do ly = 1, ndom(2)
+        !$omp simd private(ipt, gx, gy, gz)
         do lx = 1, ndom(1)
           gx = &
               nabt(1,1) * (dg_frag%phi_frag(lx+1, ly, lz, jo, i_local) - &

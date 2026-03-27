@@ -1043,6 +1043,7 @@ contains
         do idx_jb = 1, valid_col_count
           jb = dg_frag%momentum_dense_valid_col_ids(idx_jb)
           col_idx = dg_frag%momentum_dense_col_gid_cache(jb)
+!$omp simd private(ib,row_idx)
           do idx_ib = 1, valid_row_count
             ib = dg_frag%momentum_dense_valid_row_ids(idx_ib)
             row_idx = dg_frag%momentum_dense_row_gid_cache(ib)
@@ -2124,9 +2125,10 @@ contains
 
     grad_phi = 0.0d0
 
-    !$omp parallel do collapse(3) private(lx, ly, lz) schedule(static)
+    !$omp parallel do collapse(2) private(lx, ly, lz) schedule(static)
     do lz = 1, ndom(3)
       do ly = 1, ndom(2)
+        !$omp simd
         do lx = 1, ndom(1)
           grad_phi(lx, ly, lz, 1) = &
               nabt(1,1) * (dg_frag%phi_frag(lx+1, ly, lz, jo, i_local) - &
@@ -2224,6 +2226,7 @@ contains
           do idx_jb = 1, valid_col_count
             jb = valid_col_ids(idx_jb)
             col_idx = col_gid(jb)
+!$omp simd private(ib,row_idx)
             do idx_ib = 1, valid_row_count
               ib = valid_row_ids(idx_ib)
               row_idx = row_gid(ib)

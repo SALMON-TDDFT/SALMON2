@@ -246,10 +246,12 @@
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+!$omp parallel do collapse(2) private(lz, ly, lx, gx, gy, gz) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
       do ly = 1, ndom(2)
         gy = iorg(2) + ly - 1
+!$omp simd private(gx)
         do lx = 1, ndom(1)
           gx = iorg(1) + lx - 1
           if (allocated(dg_frag%phi_frag_c)) then
@@ -260,6 +262,7 @@
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine build_hpsi_for_basis
 
   !=======================================================================
@@ -349,10 +352,12 @@
     
     T_phi = (0.0d0, 0.0d0)
     
+!$omp parallel do collapse(2) private(lz, ly, lx, gx, gy, gz, v) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
       do ly = 1, ndom(2)
         gy = iorg(2) + ly - 1
+!$omp simd private(gx, v)
         do lx = 1, ndom(1)
           gx = iorg(1) + lx - 1
           
@@ -417,6 +422,7 @@
         end do
       end do
     end do
+!$omp end parallel do
     
   end subroutine apply_kinetic_to_basis
 
