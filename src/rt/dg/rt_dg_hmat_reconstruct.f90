@@ -186,14 +186,14 @@
         end if
         if (nbf <= 0) cycle
         phi_blk(1:ngrid, 1:nbf) = dg_frag%density_phi_cache(1:ngrid, 1:nbf, i_local)
-        igrid_cache = 0
+!$omp parallel do collapse(3) private(lz, ly, lx, gz, gy, gx, igrid_cache) schedule(static)
         do lz = 1, ndom(3)
-          gz = modulo(iorg(3) + lz - 2, dg_frag%lgnum_total(3)) + 1
           do ly = 1, ndom(2)
-            gy = modulo(iorg(2) + ly - 2, dg_frag%lgnum_total(2)) + 1
             do lx = 1, ndom(1)
+              gz = modulo(iorg(3) + lz - 2, dg_frag%lgnum_total(3)) + 1
+              gy = modulo(iorg(2) + ly - 2, dg_frag%lgnum_total(2)) + 1
               gx = modulo(iorg(1) + lx - 2, dg_frag%lgnum_total(1)) + 1
-              igrid_cache = igrid_cache + 1
+              igrid_cache = lx + ndom(1) * ((ly - 1) + ndom(2) * (lz - 1))
               Vpsl_blk(igrid_cache) = Vpsl%f(gx, gy, gz) * hvol
               Vh_blk(igrid_cache) = Vh%f(gx, gy, gz) * hvol
               Vxc_blk(igrid_cache) = Vxc(ispin)%f(gx, gy, gz) * hvol
@@ -201,6 +201,7 @@
             end do
           end do
         end do
+!$omp end parallel do
 
         do io = 1, nbf
           weighted_phi(1:ngrid, io) = Vtot_blk(1:ngrid) * phi_blk(1:ngrid, io)
