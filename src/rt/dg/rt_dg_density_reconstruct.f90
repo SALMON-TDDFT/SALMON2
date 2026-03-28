@@ -34,6 +34,8 @@
     real(8) :: time_cache, time_project, time_comm, time_norm
     real(8) :: time_project_setup, time_project_psi, time_project_rho
     real(8) :: time_project_grid_prep, time_project_phi_pack, time_project_overhead
+    real(8) :: time_project_dmat_build
+    real(8) :: t_dmat0, t_dmat1
     logical :: use_mixed_density, distribute_project
     integer, allocatable :: req_send(:), req_recv(:)
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
@@ -66,6 +68,7 @@
     time_project_grid_prep = 0.0d0
     time_project_phi_pack = 0.0d0
     time_project_overhead = 0.0d0
+    time_project_dmat_build = 0.0d0
     if (dg_frag%id == 0) then
       write(*,'(1x,a)') "        density trace: stage=entry"
       flush(6)
@@ -545,6 +548,7 @@
               time_project_rho = time_project_rho + (t_rho1 - t_rho0)
             else
               if (.not. dg_frag%density_matrix_frag_valid(ispin, i_local)) then
+                call cpu_time(t_dmat0)
                 ! nocc >> nbf: build D on root only, bcast D (O(nbf^2)) instead of coef (O(nbf*nocc))
                 if (.not. distribute_project .or. dg_frag%is_frag_root) then
                   coef_occ_weighted(1:nbf, 1:nocc_spin) = (0.0d0, 0.0d0)
@@ -563,6 +567,8 @@
                   call comm_bcast(dg_frag%density_matrix_frag(:, :, ispin, i_local), dg_frag%icomm_frag, 0)
                 end if
                 dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
+                call cpu_time(t_dmat1)
+                time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
               end if
               rho_blk_accum(1:npt_blk) = 0.0d0
               if (n_pw == 0) then
@@ -711,9 +717,10 @@
       time_project = time_project + (t_project1 - t_project0)
       if (dg_frag%id == 0) then
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
-        write(*,'(1x,a,6(a,1pe12.4))') "        density trace: project breakdown", &
+        write(*,'(1x,a,7(a,1pe12.4))') "        density trace: project breakdown", &
           " setup=", time_project_setup, " psi=", time_project_psi, " rho=", time_project_rho, &
-          " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, " over=", time_project_overhead
+          " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, &
+          " over=", time_project_overhead, " dmat=", time_project_dmat_build
         flush(6)
       end if
     end if
