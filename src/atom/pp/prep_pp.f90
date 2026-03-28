@@ -836,7 +836,7 @@ END SUBROUTINE calc_Vpsl_isolated
 !===================================================================================================================================
 
 subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
-  use salmon_global,only : nelem, kion, yn_ffte
+  use salmon_global,only : nelem, kion, yn_ffte, yn_out_stress
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
@@ -861,6 +861,10 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   
     allocate(ppg%zrhoG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) & ! rho_ion(G)
           & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) ! V_ion(G)
+    if(yn_out_stress == 'y') then
+      allocate(ppg%dVG_ion_dG2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem))
+      ppg%dVG_ion_dG2 = 0d0
+    end if
 
     ppg%zVG_ion = 0d0
   !$omp parallel
@@ -896,6 +900,38 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
     end do
   !$omp end do
   !$omp end parallel
+
+    if(yn_out_stress == 'y') then
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+      do ik=1,nelem
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          if(fg%if_Gzero(ix,iy,iz)) cycle
+          g(1) = fg%vec_G(1,ix,iy,iz)
+          g(2) = fg%vec_G(2,ix,iy,iz)
+          g(3) = fg%vec_G(3,ix,iy,iz)
+          g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
+          s = 0d0
+          do i=2,pp%nrloc(ik)
+            r1 = 0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
+            dr = pp%rad(i,ik)-pp%rad(i-1,ik)
+            vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+            if(g2sq*r1 < 1d-2) then
+              s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+                    * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/2520d0) * dr
+            else
+              s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+                    * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
+            end if
+          end do
+          ppg%dVG_ion_dG2(ix,iy,iz,ik) = s
+        end do
+        end do
+        end do
+      end do
+  !$omp end parallel do
+    end if
 
   endif
 
