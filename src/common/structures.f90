@@ -56,6 +56,14 @@ module structures
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
     real(8),allocatable :: Force(:,:)    ! (1:3,1:nion), force on atom
+    real(8) :: stress_tensor(3,3)   ! total stress [Hartree/Bohr^3]
+    real(8) :: stress_kin(3,3)
+    real(8) :: stress_har(3,3)
+    real(8) :: stress_xc(3,3)
+    real(8) :: stress_loc(3,3)
+    real(8) :: stress_loc_fd(3,3)
+    real(8) :: stress_nl(3,3)
+    real(8) :: stress_ewa(3,3)
     integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field
     real(8) :: vec_Ac(3) ! A/c (spatially averaged), A: vector potential, c: speed of light
@@ -265,6 +273,7 @@ module structures
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     !
     complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential in G-space
+    real(8),allocatable :: dVG_ion_dG2(:,:,:,:) ! dV_sr/d(G^2), same shape as zVG_ion
     real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)
@@ -421,11 +430,13 @@ module structures
     integer :: fh_rt_spin
     integer :: fh_mag_decomposed_rt,fh_spin_current_decomposed
     integer :: fh_trj
+    integer :: fh_stress
     character(100) :: file_eigen_data
     character(256) :: file_rt_data
     character(256) :: file_rt_energy_data
     character(256) :: file_response_data
     character(256) :: file_pulse_data
+    character(256) :: file_stress_data
     character(256) :: file_dft_md
     character(256) :: file_ovlp,file_nex
     !
@@ -770,6 +781,9 @@ contains
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
+    DEAL(ppg%zrhoG_ion)
+    DEAL(ppg%zVG_ion)
+    DEAL(ppg%dVG_ion_dG2)
     DEAL(ppg%uv_so)
   end subroutine deallocate_pp_grid
 

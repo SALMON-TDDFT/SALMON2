@@ -336,6 +336,10 @@ module salmon_global
   integer        :: out_estatic_rt_step
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
+  character(1)   :: yn_out_stress        = 'n'
+  character(1)   :: yn_out_stress_decomp = 'n'
+  character(1)   :: yn_stress_loc_fd     = 'n'
+  integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps
   integer        :: out_gs_sgm_eps_mu_nu(2)

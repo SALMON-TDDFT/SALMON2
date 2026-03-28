@@ -25,6 +25,8 @@ module inputoutput
   real(8),parameter :: au_time_fs = 0.02418884326505d0
   real(8),parameter :: au_energy_ev = 27.21138505d0
   real(8),parameter :: au_length_aa = 0.52917721067d0
+  ! 1 Hartree/Bohr^3 in GPa
+  real(8),parameter :: au_pressure_gpa = 29421.02648438959d0
 
 
   integer :: fh_variables_log
@@ -499,6 +501,10 @@ contains
       & out_estatic_rt_step, &
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
+      & yn_out_stress, &
+      & yn_out_stress_decomp, &
+      & yn_stress_loc_fd, &
+      & out_stress_step, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
@@ -924,6 +930,10 @@ contains
     out_estatic_rt_step = 50
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
+    yn_out_stress       = 'n'
+    yn_out_stress_decomp = 'n'
+    yn_stress_loc_fd    = 'n'
+    out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
@@ -1538,6 +1548,10 @@ contains
     call comm_bcast(out_estatic_rt_step ,nproc_group_global)
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_stress       ,nproc_group_global)
+    call comm_bcast(yn_out_stress_decomp,nproc_group_global)
+    call comm_bcast(yn_stress_loc_fd    ,nproc_group_global)
+    call comm_bcast(out_stress_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
@@ -2451,6 +2465,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress', yn_out_stress
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_decomp', yn_out_stress_decomp
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stress_loc_fd', yn_stress_loc_fd
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
@@ -2668,6 +2686,9 @@ contains
     call yn_argument_check(yn_out_elf_rt)
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
+    call yn_argument_check(yn_out_stress)
+    call yn_argument_check(yn_out_stress_decomp)
+    call yn_argument_check(yn_stress_loc_fd)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
@@ -2903,6 +2924,21 @@ contains
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if
+
+    if(yn_out_stress == 'y' .and. yn_periodic /= 'y') &
+      stop "yn_out_stress='y' requires yn_periodic='y'"
+    if(yn_out_stress == 'y' .and. yn_jm /= 'n') &
+      stop "yn_out_stress='y' requires yn_jm='n'"
+    if(yn_out_stress == 'y' .and. yn_dc /= 'n') &
+      stop "yn_out_stress='y' requires yn_dc='n'"
+    if(yn_out_stress == 'y' .and. yn_spinorbit /= 'n') &
+      stop "yn_out_stress='y' requires yn_spinorbit='n'"
+    if(yn_out_stress == 'y' .and. spin /= 'unpolarized') &
+      stop "yn_out_stress='y' requires spin='unpolarized'"
+    if(yn_out_stress_decomp == 'y' .and. yn_out_stress /= 'y') &
+      stop "yn_out_stress_decomp='y' requires yn_out_stress='y'"
+    if(out_stress_step < 1) &
+      stop "out_stress_step must be >= 1"
     
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
