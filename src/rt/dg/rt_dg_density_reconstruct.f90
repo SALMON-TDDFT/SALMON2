@@ -46,6 +46,7 @@
     type(s_scalar), allocatable :: rho_reduce(:), rho_s_reduce(:,:)
     real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:)
     real(8), allocatable :: density_mat_re(:,:), density_tmp(:,:)
+    real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
     complex(8), allocatable :: psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:), coef_occ_weighted(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: transform_frag(:,:), transform_pw(:,:)
@@ -340,6 +341,7 @@
         flush(6)
       end if
       call cpu_time(t_project0)
+      allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
       i_local = 0
       block_idx_global = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -351,6 +353,52 @@
         nblocks_ifrag = dg_frag%density_block_nblocks(i_local)
         first_block_offset = dg_frag%density_block_first_offset(i_local)
         block_step_blocks = dg_frag%density_block_step(i_local)
+        ! --- D pre-pass: compute density matrix for all spins before block loop ---
+        D_frag_re(:,:,:) = 0.0d0
+        if (n_pw == 0) then
+          do ispin = 1, system%nspin
+            nbf = dg_frag%n_basis(ifrag, ispin)
+            nocc_spin = nocc_per_spin
+            if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+              nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
+            end if
+            if (nbf <= 0 .or. nocc_spin <= 0) cycle
+            valid_basis_count = 0
+            do istate_frag = 1, nbf
+              basis_gid(istate_frag) = dg_frag%index_basis(istate_frag, ifrag, ispin)
+              if (basis_gid(istate_frag) < 1 .or. basis_gid(istate_frag) > dg_frag%n_mat_max) cycle
+              valid_basis_count = valid_basis_count + 1
+              valid_basis_ids(valid_basis_count) = istate_frag
+            end do
+            call cpu_time(t_dmat0)
+            if (.not. distribute_project .or. dg_frag%is_frag_root) then
+              coef_occ_weighted(1:nbf, 1:nocc_spin) = (0.0d0, 0.0d0)
+!$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
+              do io = 1, nocc_spin
+                do idx_local = 1, valid_basis_count
+                  istate_frag = valid_basis_ids(idx_local)
+                  coef_occ_weighted(istate_frag, io) = occ_scale * dg_frag%coef(basis_gid(istate_frag), io, ispin)
+                end do
+              end do
+!$omp end parallel do
+              call zgemm('N', 'C', nbf, nbf, nocc_spin, (1.0d0, 0.0d0), coef_occ_weighted, nbf_max, &
+                         coef_occ_weighted, nbf_max, (0.0d0, 0.0d0), dg_frag%density_matrix_frag(1, 1, ispin, i_local), nbf_max)
+            end if
+            if (distribute_project) then
+              call comm_bcast(dg_frag%density_matrix_frag(:, :, ispin, i_local), dg_frag%icomm_frag, 0)
+            end if
+            dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
+            do io = 1, nbf
+!$omp simd
+              do istate_frag = 1, nbf
+                D_frag_re(istate_frag, io, ispin) = real(dg_frag%density_matrix_frag(istate_frag, io, ispin, i_local), kind=8)
+              end do
+            end do
+            call cpu_time(t_dmat1)
+            time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
+          end do
+        end if
+        ! --- end D pre-pass ---
         do block_offset = first_block_offset, nblocks_ifrag - 1, block_step_blocks
           igrid0 = 1 + block_offset * grid_block_size
           npt_blk = min(grid_block_size, ngrid - igrid0 + 1)
@@ -547,29 +595,7 @@
               call cpu_time(t_rho1)
               time_project_rho = time_project_rho + (t_rho1 - t_rho0)
             else
-              if (.not. dg_frag%density_matrix_frag_valid(ispin, i_local)) then
-                call cpu_time(t_dmat0)
-                ! nocc >> nbf: build D on root only, bcast D (O(nbf^2)) instead of coef (O(nbf*nocc))
-                if (.not. distribute_project .or. dg_frag%is_frag_root) then
-                  coef_occ_weighted(1:nbf, 1:nocc_spin) = (0.0d0, 0.0d0)
-!$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
-                  do io = 1, nocc_spin
-                    do idx_local = 1, valid_basis_count
-                      istate_frag = valid_basis_ids(idx_local)
-                      coef_occ_weighted(istate_frag, io) = occ_scale * dg_frag%coef(basis_gid(istate_frag), io, ispin)
-                    end do
-                  end do
-!$omp end parallel do
-                  call zgemm('N', 'C', nbf, nbf, nocc_spin, (1.0d0, 0.0d0), coef_occ_weighted, nbf_max, &
-                             coef_occ_weighted, nbf_max, (0.0d0, 0.0d0), dg_frag%density_matrix_frag(1, 1, ispin, i_local), nbf_max)
-                end if
-                if (distribute_project) then
-                  call comm_bcast(dg_frag%density_matrix_frag(:, :, ispin, i_local), dg_frag%icomm_frag, 0)
-                end if
-                dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
-                call cpu_time(t_dmat1)
-                time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
-              end if
+              ! D already computed in pre-pass for n_pw == 0
               rho_blk_accum(1:npt_blk) = 0.0d0
               if (n_pw == 0) then
                 call cpu_time(t_psi0)
@@ -577,7 +603,7 @@
                 do io = 1, nbf
 !$omp simd
                   do istate_frag = 1, nbf
-                    density_mat_re(istate_frag, io) = real(dg_frag%density_matrix_frag(istate_frag, io, ispin, i_local), kind=8)
+                    density_mat_re(istate_frag, io) = D_frag_re(istate_frag, io, ispin)
                   end do
                 end do
 !$omp end parallel do
@@ -715,6 +741,7 @@
       end do
       call cpu_time(t_project1)
       time_project = time_project + (t_project1 - t_project0)
+      if (allocated(D_frag_re)) deallocate(D_frag_re)
       if (dg_frag%id == 0) then
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
         write(*,'(1x,a,7(a,1pe12.4))') "        density trace: project breakdown", &
