@@ -1142,7 +1142,7 @@
         " V_lb=", v_lb1, v_lb2, v_lb3, " V_ub=", v_ub1, v_ub2, v_ub3
       stop 1
     end if
-!$omp parallel do collapse(2) private(lz, ly, lx, gz, gy, gx) schedule(static)
+!$omp parallel do private(lz, ly, lx, gz, gy, gx) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)

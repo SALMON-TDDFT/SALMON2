@@ -42,6 +42,154 @@ module poisson_dg_distributed
 
 contains
 
+  subroutine allocate_fragment_poisson_periodic(lg, mg, info, use_ffte, poisson_frag)
+    use structures, only: s_rgrid, s_parallel_info, s_poisson
+    implicit none
+    type(s_rgrid), intent(in) :: lg, mg
+    type(s_parallel_info), intent(in) :: info
+    logical, intent(in) :: use_ffte
+    type(s_poisson), intent(inout) :: poisson_frag
+
+    if (use_ffte) then
+      allocate(poisson_frag%a_ffte(lg%num(1), mg%num(2), mg%num(3)))
+      allocate(poisson_frag%b_ffte(lg%num(1), mg%num(2), mg%num(3)))
+      call PZFFT3DV_MOD(poisson_frag%a_ffte, poisson_frag%b_ffte, lg%num(1), lg%num(2), lg%num(3), &
+                        info%isize_y, info%isize_z, 0, info%icomm_y, info%icomm_z)
+    else
+      allocate(poisson_frag%ff1x(lg%is(1):lg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(poisson_frag%ff1y(mg%is(1):mg%ie(1), lg%is(2):lg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(poisson_frag%ff1z(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), lg%is(3):lg%ie(3)))
+      allocate(poisson_frag%ff2x(lg%is(1):lg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(poisson_frag%ff2y(mg%is(1):mg%ie(1), lg%is(2):lg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(poisson_frag%ff2z(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), lg%is(3):lg%ie(3)))
+    end if
+
+    allocate(poisson_frag%zrhoG_ele(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+  end subroutine allocate_fragment_poisson_periodic
+
+  subroutine deallocate_fragment_poisson_periodic(poisson_frag)
+    use structures, only: s_poisson
+    implicit none
+    type(s_poisson), intent(inout) :: poisson_frag
+
+    if (allocated(poisson_frag%zrhoG_ele)) deallocate(poisson_frag%zrhoG_ele)
+    if (allocated(poisson_frag%ff1x)) deallocate(poisson_frag%ff1x)
+    if (allocated(poisson_frag%ff1y)) deallocate(poisson_frag%ff1y)
+    if (allocated(poisson_frag%ff1z)) deallocate(poisson_frag%ff1z)
+    if (allocated(poisson_frag%ff2x)) deallocate(poisson_frag%ff2x)
+    if (allocated(poisson_frag%ff2y)) deallocate(poisson_frag%ff2y)
+    if (allocated(poisson_frag%ff2z)) deallocate(poisson_frag%ff2z)
+    if (allocated(poisson_frag%a_ffte)) deallocate(poisson_frag%a_ffte)
+    if (allocated(poisson_frag%b_ffte)) deallocate(poisson_frag%b_ffte)
+  end subroutine deallocate_fragment_poisson_periodic
+
+  subroutine hartree_dg_via_poisson_periodic(lg, mg, fg, poisson, dg_frag, rho, Vh)
+    use structures, only: s_rgrid, s_reciprocal_grid, s_poisson, s_scalar, s_parallel_info
+    use rt_dg_fragment_types, only: s_dg_fragment_rt
+    use rt_dg_fragment_parallel, only: setup_fragment_parallel_grid, finalize_fragment_parallel
+    use communication, only: comm_summation
+    use poisson_periodic, only: poisson_ft, poisson_ffte, poisson_ft_hse_sr, poisson_ffte_hse_sr
+    use inputoutput, only: yn_ffte, yn_put_wall_z_boundary, wall_height, wall_width
+    use salmon_global, only: hse_omega
+    use math_constants, only: pi
+    implicit none
+
+    type(s_rgrid), intent(in) :: lg, mg
+    type(s_reciprocal_grid), intent(in) :: fg
+    type(s_poisson), intent(inout) :: poisson
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_scalar), intent(in) :: rho
+    type(s_scalar), intent(inout) :: Vh
+
+    type(s_parallel_info) :: info_frag
+    type(s_rgrid) :: mg_frag
+    type(s_poisson) :: poisson_frag
+    type(s_scalar) :: Vh_work
+    complex(8), allocatable :: rhoG_work(:,:,:)
+    character(16) :: env_hse_sr
+    logical :: use_hse_sr_hartree
+    logical :: use_ffte_local
+    integer :: env_status, ix, iy, iz
+    real(8) :: z, z0, Vwall_z
+
+    env_hse_sr = ''
+    use_hse_sr_hartree = .false.
+    call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_hse_sr)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_hse_sr_hartree = .true.
+      end select
+    end if
+    if (use_hse_sr_hartree .and. hse_omega <= 0.0d0) then
+      stop 'poisson_dg_distributed: hse_omega must be > 0 when SALMON_HSE_SR_HARTREE is enabled'
+    end if
+
+    call setup_fragment_parallel_grid(dg_frag, mg, info_frag, mg_frag)
+    use_ffte_local = (yn_ffte == 'y')
+    call allocate_fragment_poisson_periodic(lg, mg_frag, info_frag, use_ffte_local, poisson_frag)
+
+    allocate(Vh_work%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)))
+    Vh_work%f = 0.0d0
+    allocate(rhoG_work(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                       lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                       lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3)))
+    rhoG_work = (0.0d0, 0.0d0)
+
+    if (dg_frag%id == 0) then
+      if (use_ffte_local) then
+        write(*,'(1x,a,a)') "        hartree trace: bridge=", "poisson_ffte"
+      else
+        write(*,'(1x,a,a)') "        hartree trace: bridge=", "poisson_ft"
+      end if
+      flush(6)
+    end if
+    if (use_ffte_local) then
+      if (use_hse_sr_hartree) then
+        call poisson_ffte_hse_sr(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag, hse_omega)
+      else
+        call poisson_ffte(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag)
+      end if
+    else
+      if (use_hse_sr_hartree) then
+        call poisson_ft_hse_sr(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag, hse_omega)
+      else
+        call poisson_ft(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag)
+      end if
+    end if
+
+    rhoG_work(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)) = &
+      poisson_frag%zrhoG_ele(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3))
+    call comm_summation(Vh_work%f, Vh%f, size(Vh_work%f), dg_frag%icomm_frag)
+    call comm_summation(rhoG_work, poisson%zrhoG_ele, size(rhoG_work), dg_frag%icomm_frag)
+
+    if (yn_put_wall_z_boundary == 'y') then
+      !$omp parallel do private(iz,iy,ix,z,z0,Vwall_z) schedule(static)
+      do iz = mg%is(3), mg%ie(3)
+        z = iz * dg_frag%hgs(3)
+        z0 = lg%num(3) * dg_frag%hgs(3)
+        if (z <= wall_width) then
+          Vwall_z = wall_height * cos((z / wall_width) * pi / 2.0d0)**2
+        else if (z >= z0 - wall_width) then
+          Vwall_z = wall_height * cos(((z0 - z) / wall_width) * pi / 2.0d0)**2
+        else
+          cycle
+        end if
+        do iy = mg%is(2), mg%ie(2)
+          do ix = mg%is(1), mg%ie(1)
+            Vh%f(ix, iy, iz) = Vh%f(ix, iy, iz) + Vwall_z
+          end do
+        end do
+      end do
+      !$omp end parallel do
+    end if
+
+    call deallocate_fragment_poisson_periodic(poisson_frag)
+    call finalize_fragment_parallel(info_frag)
+    deallocate(Vh_work%f)
+    deallocate(rhoG_work)
+  end subroutine hartree_dg_via_poisson_periodic
+
   ! hartree_dg_distributed
   !   Compute Vh%f = Hartree potential from rho%f using a distributed
   !   dimension-by-dimension DFT (same algorithm as poisson_ft, but
@@ -69,6 +217,7 @@ contains
     integer :: Nx, Ny, Nz, N_total
     integer :: ix, iy, iz, kx, ky, kz, kz_loc, nkz_local, nkz_actual, kz_start, kz_end
     real(8) :: inv_N, g2, sr_factor, Vwall_z, z, z0
+    real(8) :: t_stage0, t_stage1
     logical :: use_hse_sr_hartree
     character(16) :: env_hse_sr
     integer :: env_status
@@ -81,7 +230,14 @@ contains
     real(8),    allocatable :: Vh_partial(:,:,:)      ! (mg range)
     complex(8), allocatable :: rhoG_partial(:,:,:)    ! (mg range)
 
+    call hartree_dg_via_poisson_periodic(lg, mg, fg, poisson, dg_frag, rho, Vh)
+    return
+
     ! Check SALMON_HSE_SR_HARTREE environment variable (same logic as hartree_sub::hartree)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: entered-subroutine"
+      flush(6)
+    end if
     env_hse_sr = ''
     use_hse_sr_hartree = .false.
     call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
@@ -103,6 +259,10 @@ contains
     Nz = mg%num(3)
     N_total = Nx * Ny * Nz
     inv_N   = 1.0d0 / dble(lg%num(1) * lg%num(2) * lg%num(3))
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=after-dims"
+      flush(6)
+    end if
 
     ! -----------------------------------------------------------------------
     ! Distribute kz indices across dg_frag%icomm.
@@ -115,38 +275,89 @@ contains
     kz_start   = dg_frag%id * nkz_local + mg%is(3)
     kz_end     = min(kz_start + nkz_local - 1, mg%ie(3))
     nkz_actual = max(0, kz_end - kz_start + 1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=after-slab-partition"
+      flush(6)
+    end if
 
     ! Allocate local slab work arrays and global partial arrays
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-alloc"
+      flush(6)
+    end if
     allocate(ff1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), nkz_local))
     allocate(ff2(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), nkz_local))
     allocate(Vh_partial   (mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(rhoG_partial (mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=after-alloc"
+      flush(6)
+    end if
 
     ff1          = (0.0d0, 0.0d0)
     ff2          = (0.0d0, 0.0d0)
     Vh_partial   = 0.0d0
     rhoG_partial = (0.0d0, 0.0d0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,3(a,i0),2(a,i0))') "        hartree trace: entry", &
+        " Nx=", Nx, " Ny=", Ny, " Nz=", Nz, " nkz_local=", nkz_local, " nkz_actual=", nkz_actual
+      flush(6)
+    end if
 
     ! =======================================================================
     ! FORWARD 3D DFT: rho(r) -> rho_G for local kz slab
     ! No communication is needed: every rank already holds the full rho%f.
     ! =======================================================================
+    call cpu_time(t_stage0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-forward-dft"
+      flush(6)
+    end if
 
     ! -- Step 1: z-DFT --
     ! ff1(ix,iy,kz_loc) = sum_iz  egzc(kz, iz) * rho(ix, iy, iz)
+    call cpu_time(t_stage0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-z-dft"
+      flush(6)
+    end if
     !$omp parallel do private(kz_loc, kz, iy, ix)
     do kz_loc = 1, nkz_actual
       kz = kz_start + kz_loc - 1
       do iy = mg%is(2), mg%ie(2)
         do ix = mg%is(1), mg%ie(1)
+          if (dg_frag%id == 0 .and. kz_loc == 1 .and. iy == mg%is(2) .and. ix == mg%is(1)) then
+!$omp critical
+            write(*,'(1x,a,2(a,i0),a)') "        hartree trace: z-dft first-point", &
+              " kz=", kz, " iy=", iy, " before-sum"
+            flush(6)
+!$omp end critical
+          end if
           ff1(ix, iy, kz_loc) = sum(fg%egzc(kz, :) * dcmplx(rho%f(ix, iy, :)))
+          if (dg_frag%id == 0 .and. kz_loc == 1 .and. iy == mg%is(2) .and. ix == mg%is(1)) then
+!$omp critical
+            write(*,'(1x,a,2(a,i0),a)') "        hartree trace: z-dft first-point", &
+              " kz=", kz, " iy=", iy, " after-sum"
+            flush(6)
+!$omp end critical
+          end if
         end do
       end do
     end do
     !$omp end parallel do
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4)') "        hartree trace: stage=after-z-dft dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
 
     ! -- Step 2: y-DFT --
     ! ff2(ix,ky,kz_loc) = sum_iy  egyc(ky, iy) * ff1(ix, iy, kz_loc)
+    call cpu_time(t_stage0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-y-dft"
+      flush(6)
+    end if
     !$omp parallel do private(kz_loc, ky, ix)
     do kz_loc = 1, nkz_actual
       do ky = mg%is(2), mg%ie(2)
@@ -156,9 +367,19 @@ contains
       end do
     end do
     !$omp end parallel do
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4)') "        hartree trace: stage=after-y-dft dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
 
     ! -- Step 3: x-DFT + normalize --
     ! ff1(kx,ky,kz_loc) = sum_ix  egxc(kx, ix) * ff2(ix, ky, kz_loc) / N
+    call cpu_time(t_stage0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-x-dft"
+      flush(6)
+    end if
     !$omp parallel do private(kz_loc, ky, kx)
     do kz_loc = 1, nkz_actual
       do ky = mg%is(2), mg%ie(2)
@@ -168,6 +389,11 @@ contains
       end do
     end do
     !$omp end parallel do
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4)') "        hartree trace: stage=after-x-dft dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
 
     ! -- Save rho(G) for local kz slab (energy / force calculations) --
     !$omp parallel do private(kz_loc, kz, ky, kx)
@@ -180,12 +406,22 @@ contains
       end do
     end do
     !$omp end parallel do
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4)') "        hartree trace: stage=after-forward-dft dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
 
     ! =======================================================================
     ! COULOMB KERNEL: Vh(G) = coef(G) * rho(G)
     ! When SALMON_HSE_SR_HARTREE is set, apply the HSE short-range factor
     ! (1 - exp(-|G|^2 / (4*omega^2))) to match hartree_sub::hartree behaviour.
     ! =======================================================================
+    call cpu_time(t_stage0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-kernel"
+      flush(6)
+    end if
     if (use_hse_sr_hartree) then
       !$omp parallel do private(kz_loc, kz, ky, kx, g2, sr_factor)
       do kz_loc = 1, nkz_actual
@@ -211,10 +447,20 @@ contains
       end do
       !$omp end parallel do
     end if
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4)') "        hartree trace: stage=after-kernel dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
 
     ! =======================================================================
     ! INVERSE 3D DFT: Vh(G) -> partial Vh(r) contribution from local kz slab
     ! =======================================================================
+    call cpu_time(t_stage0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-inverse-dft"
+      flush(6)
+    end if
 
     ! -- Step 4: inverse x-DFT --
     ! ff2(ix,ky,kz_loc) = sum_kx  egx(kx, ix) * ff1(kx, ky, kz_loc)
@@ -256,14 +502,32 @@ contains
       end do
     end do
     !$omp end parallel do
+    call cpu_time(t_stage1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4)') "        hartree trace: stage=after-inverse-dft dt=", t_stage1 - t_stage0
+      flush(6)
+    end if
 
     ! =======================================================================
     ! ALLREDUCE: sum partial Vh and rho(G) contributions across all ranks.
     ! Each rank owns a disjoint kz slab, so MPI_SUM = MPI_Gatherall.
     ! N_total = mg%num product, matching the allocation of both arrays.
     ! =======================================================================
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=before-allreduce-vh"
+      flush(6)
+    end if
     call comm_summation(Vh_partial,   Vh%f,               N_total, dg_frag%icomm)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=after-allreduce-vh"
+      write(*,'(1x,a)') "        hartree trace: stage=before-allreduce-rhog"
+      flush(6)
+    end if
     call comm_summation(rhoG_partial, poisson%zrhoG_ele,  N_total, dg_frag%icomm)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: stage=after-allreduce-rhog"
+      flush(6)
+    end if
 
     deallocate(ff1, ff2, Vh_partial, rhoG_partial)
 
@@ -273,6 +537,10 @@ contains
     ! dg_frag%hgs(3) is the grid spacing in z.
     ! =======================================================================
     if (yn_put_wall_z_boundary == 'y') then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hartree trace: stage=before-wall"
+        flush(6)
+      end if
       z0 = lg%num(3) * dg_frag%hgs(3)
       !$omp parallel do private(iz, iy, ix, z, Vwall_z)
       do iz = mg%is(3), mg%ie(3)
@@ -291,6 +559,14 @@ contains
         end do
       end do
       !$omp end parallel do
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hartree trace: stage=after-wall"
+        flush(6)
+      end if
+    end if
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: exit"
+      flush(6)
     end if
 
   end subroutine hartree_dg_distributed

@@ -237,7 +237,7 @@
             weighted_phi(igrid_cache, io) = Vtot_blk(igrid_cache) * phi_blk(igrid_cache, io)
           end do
         end do
-        total_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi(1:ngrid, 1:nbf))
+        call dgemm('T', 'N', nbf, nbf, ngrid, 1.0d0, phi_blk, ngrid_max, weighted_phi, ngrid_max, 0.0d0, total_mat, dg_frag%nstate_frag)
         if (.not. use_block_reconstruct) then
 !$omp parallel do private(io, igrid_cache) schedule(static)
           do io = 1, nbf
@@ -249,9 +249,12 @@
             end do
           end do
 !$omp end parallel do
-          Vpsl_local_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi_vpsl(1:ngrid, 1:nbf))
-          Vh_local_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi_vh(1:ngrid, 1:nbf))
-          Vxc_local_mat(1:nbf, 1:nbf) = matmul(transpose(phi_blk(1:ngrid, 1:nbf)), weighted_phi_vxc(1:ngrid, 1:nbf))
+          call dgemm('T', 'N', nbf, nbf, ngrid, 1.0d0, phi_blk, ngrid_max, weighted_phi_vpsl, ngrid_max, 0.0d0, &
+                     Vpsl_local_mat, dg_frag%nstate_frag)
+          call dgemm('T', 'N', nbf, nbf, ngrid, 1.0d0, phi_blk, ngrid_max, weighted_phi_vh, ngrid_max, 0.0d0, &
+                     Vh_local_mat, dg_frag%nstate_frag)
+          call dgemm('T', 'N', nbf, nbf, ngrid, 1.0d0, phi_blk, ngrid_max, weighted_phi_vxc, ngrid_max, 0.0d0, &
+                     Vxc_local_mat, dg_frag%nstate_frag)
         end if
 
         if (any(total_mat(1:nbf, 1:nbf) /= total_mat(1:nbf, 1:nbf))) then

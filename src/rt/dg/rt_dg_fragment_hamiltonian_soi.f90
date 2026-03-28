@@ -246,7 +246,7 @@
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-!$omp parallel do collapse(2) private(lz, ly, lx, gx, gy, gz) schedule(static)
+!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
       do ly = 1, ndom(2)
@@ -322,7 +322,7 @@
                                                  mg%is(2):mg%ie(2), &
                                                  mg%is(3):mg%ie(3))
     
-    integer :: ix, iy, iz, lx, ly, lz, gx, gy, gz, ifrag
+    integer :: lx, ly, lz, gx, gy, gz, ifrag
     complex(8) :: v
     real(8) :: lap0
     real(8) :: lapt(4,3)
@@ -352,7 +352,7 @@
     
     T_phi = (0.0d0, 0.0d0)
     
-!$omp parallel do collapse(2) private(lz, ly, lx, gx, gy, gz, v) schedule(static)
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, v) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
       do ly = 1, ndom(2)

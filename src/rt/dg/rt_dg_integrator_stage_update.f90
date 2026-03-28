@@ -42,24 +42,32 @@
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call cpu_time(t_stage1)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", t_stage1 - t_stage0
       flush(6)
     end if
 
+    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density-hmat stage trace: stage=before-hartree"
+      flush(6)
+    end if
     call cpu_time(t_stage0)
     call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
       flush(6)
     end if
 
+    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density-hmat stage trace: stage=before-xc"
+      flush(6)
+    end if
     call cpu_time(t_stage0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0
       flush(6)
     end if
 
@@ -69,11 +77,15 @@
       energy%E_U = 0.0d0
     end if
 
+    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density-hmat stage trace: stage=before-reconstruct"
+      flush(6)
+    end if
     call cpu_time(t_stage0)
     call reconstruct_hamiltonian_matrix(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     call cpu_time(t_stage1)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", t_stage1 - t_stage0
       flush(6)
     end if
 

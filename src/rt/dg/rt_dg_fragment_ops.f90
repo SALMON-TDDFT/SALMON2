@@ -812,9 +812,12 @@ contains
     logical, intent(in) :: use_prop
 
     integer :: n_dim, n_rhs, n_loc, ifrag, iblk, ii, jj, ig_i, ig_j, info, n_frag, n_pw, ipw
+    integer :: idx_ii, idx_jj, nrow, ncol, valid_row_count, valid_col_count
     integer, allocatable :: row_ids(:), local_pos(:), ipiv(:)
     logical, allocatable :: frag_selected(:)
     complex(8), allocatable :: mat_loc(:,:), rhs_loc(:,:)
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
     n_dim = size(rhs, 1)
     n_rhs = size(rhs, 2)
@@ -895,14 +898,33 @@ contains
       do iblk = 1, size(dg_frag%S_mat_prop_blocks)
         if (.not. frag_selected(dg_frag%S_mat_prop_blocks(iblk)%ifrag_row)) cycle
         if (.not. frag_selected(dg_frag%S_mat_prop_blocks(iblk)%ifrag_col)) cycle
-        do jj = 1, dg_frag%n_basis(dg_frag%S_mat_prop_blocks(iblk)%ifrag_col, ispin)
-          ig_j = dg_frag%index_basis(jj, dg_frag%S_mat_prop_blocks(iblk)%ifrag_col, ispin)
-          if (ig_j < 1 .or. ig_j > n_dim) cycle
-          if (local_pos(ig_j) <= 0) cycle
-          do ii = 1, dg_frag%n_basis(dg_frag%S_mat_prop_blocks(iblk)%ifrag_row, ispin)
-            ig_i = dg_frag%index_basis(ii, dg_frag%S_mat_prop_blocks(iblk)%ifrag_row, ispin)
-            if (ig_i < 1 .or. ig_i > n_dim) cycle
-            if (local_pos(ig_i) <= 0) cycle
+        nrow = dg_frag%n_basis(dg_frag%S_mat_prop_blocks(iblk)%ifrag_row, ispin)
+        ncol = dg_frag%n_basis(dg_frag%S_mat_prop_blocks(iblk)%ifrag_col, ispin)
+        valid_row_count = 0
+        do ii = 1, nrow
+          row_gid(ii) = dg_frag%index_basis(ii, dg_frag%S_mat_prop_blocks(iblk)%ifrag_row, ispin)
+          if (row_gid(ii) < 1 .or. row_gid(ii) > n_dim) cycle
+          if (local_pos(row_gid(ii)) <= 0) cycle
+          valid_row_count = valid_row_count + 1
+          valid_row_ids(valid_row_count) = ii
+        end do
+        if (valid_row_count <= 0) cycle
+        valid_col_count = 0
+        do jj = 1, ncol
+          col_gid(jj) = dg_frag%index_basis(jj, dg_frag%S_mat_prop_blocks(iblk)%ifrag_col, ispin)
+          if (col_gid(jj) < 1 .or. col_gid(jj) > n_dim) cycle
+          if (local_pos(col_gid(jj)) <= 0) cycle
+          valid_col_count = valid_col_count + 1
+          valid_col_ids(valid_col_count) = jj
+        end do
+        if (valid_col_count <= 0) cycle
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
+          ig_j = col_gid(jj)
+!$omp simd private(ii,ig_i)
+          do idx_ii = 1, valid_row_count
+            ii = valid_row_ids(idx_ii)
+            ig_i = row_gid(ii)
             mat_loc(local_pos(ig_i), local_pos(ig_j)) = dg_frag%S_mat_prop_blocks(iblk)%val(ii, jj, ispin)
           end do
         end do
@@ -911,14 +933,33 @@ contains
       do iblk = 1, size(dg_frag%S_mat_blocks)
         if (.not. frag_selected(dg_frag%S_mat_blocks(iblk)%ifrag_row)) cycle
         if (.not. frag_selected(dg_frag%S_mat_blocks(iblk)%ifrag_col)) cycle
-        do jj = 1, dg_frag%n_basis(dg_frag%S_mat_blocks(iblk)%ifrag_col, ispin)
-          ig_j = dg_frag%index_basis(jj, dg_frag%S_mat_blocks(iblk)%ifrag_col, ispin)
-          if (ig_j < 1 .or. ig_j > n_dim) cycle
-          if (local_pos(ig_j) <= 0) cycle
-          do ii = 1, dg_frag%n_basis(dg_frag%S_mat_blocks(iblk)%ifrag_row, ispin)
-            ig_i = dg_frag%index_basis(ii, dg_frag%S_mat_blocks(iblk)%ifrag_row, ispin)
-            if (ig_i < 1 .or. ig_i > n_dim) cycle
-            if (local_pos(ig_i) <= 0) cycle
+        nrow = dg_frag%n_basis(dg_frag%S_mat_blocks(iblk)%ifrag_row, ispin)
+        ncol = dg_frag%n_basis(dg_frag%S_mat_blocks(iblk)%ifrag_col, ispin)
+        valid_row_count = 0
+        do ii = 1, nrow
+          row_gid(ii) = dg_frag%index_basis(ii, dg_frag%S_mat_blocks(iblk)%ifrag_row, ispin)
+          if (row_gid(ii) < 1 .or. row_gid(ii) > n_dim) cycle
+          if (local_pos(row_gid(ii)) <= 0) cycle
+          valid_row_count = valid_row_count + 1
+          valid_row_ids(valid_row_count) = ii
+        end do
+        if (valid_row_count <= 0) cycle
+        valid_col_count = 0
+        do jj = 1, ncol
+          col_gid(jj) = dg_frag%index_basis(jj, dg_frag%S_mat_blocks(iblk)%ifrag_col, ispin)
+          if (col_gid(jj) < 1 .or. col_gid(jj) > n_dim) cycle
+          if (local_pos(col_gid(jj)) <= 0) cycle
+          valid_col_count = valid_col_count + 1
+          valid_col_ids(valid_col_count) = jj
+        end do
+        if (valid_col_count <= 0) cycle
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
+          ig_j = col_gid(jj)
+!$omp simd private(ii,ig_i)
+          do idx_ii = 1, valid_row_count
+            ii = valid_row_ids(idx_ii)
+            ig_i = row_gid(ii)
             mat_loc(local_pos(ig_i), local_pos(ig_j)) = cmplx(dg_frag%S_mat_blocks(iblk)%val(ii, jj, ispin), 0.0d0, kind=8)
           end do
         end do
@@ -1787,7 +1828,9 @@ contains
     complex(8), intent(inout) :: y(:)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
     complex(8) :: xj
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
@@ -1802,14 +1845,32 @@ contains
       ncol = dg_frag%n_basis(ifrag_col, ispin)
       if (nrow <= 0 .or. ncol <= 0) cycle
 
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > size(y)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+      valid_col_count = 0
       do jj = 1, ncol
-        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (ig_j < 1 .or. ig_j > size(x)) cycle
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > size(x)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
         xj = x(ig_j)
         if (abs(xj) == 0.0d0) cycle
-        do ii = 1, nrow
-          ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-          if (ig_i < 1 .or. ig_i > size(y)) cycle
+!$omp simd private(ii,ig_i)
+        do idx_ii = 1, valid_row_count
+          ii = valid_row_ids(idx_ii)
+          ig_i = row_gid(ii)
           y(ig_i) = y(ig_i) + blocks(iblk)%val(ii, jj, ispin) * xj
         end do
       end do
@@ -1826,7 +1887,9 @@ contains
     integer, intent(in), optional :: block_ids(:)
 
     integer :: iblk, iblk_idx, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j
+    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
     complex(8) :: xj
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
@@ -1845,15 +1908,32 @@ contains
         ncol = dg_frag%n_basis(ifrag_col, ispin)
         if (nrow <= 0 .or. ncol <= 0) cycle
 
+        valid_row_count = 0
+        do ii = 1, nrow
+          row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+          if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+          valid_row_count = valid_row_count + 1
+          valid_row_ids(valid_row_count) = ii
+        end do
+        if (valid_row_count <= 0) cycle
+        valid_col_count = 0
         do jj = 1, ncol
-          ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-          if (ig_j < 1 .or. ig_j > size(x, 1)) cycle
+          col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+          if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+          valid_col_count = valid_col_count + 1
+          valid_col_ids(valid_col_count) = jj
+        end do
+        if (valid_col_count <= 0) cycle
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
+          ig_j = col_gid(jj)
           do ist = 1, size(x, 2)
             xj = x(ig_j, ist)
             if (abs(xj) == 0.0d0) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(y, 1)) cycle
+!$omp simd private(ii,ig_i)
+            do idx_ii = 1, valid_row_count
+              ii = valid_row_ids(idx_ii)
+              ig_i = row_gid(ii)
               y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
             end do
           end do
@@ -1871,15 +1951,32 @@ contains
       ncol = dg_frag%n_basis(ifrag_col, ispin)
       if (nrow <= 0 .or. ncol <= 0) cycle
 
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+      valid_col_count = 0
       do jj = 1, ncol
-        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (ig_j < 1 .or. ig_j > size(x, 1)) cycle
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
         do ist = 1, size(x, 2)
           xj = x(ig_j, ist)
           if (abs(xj) == 0.0d0) cycle
-          do ii = 1, nrow
-            ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-            if (ig_i < 1 .or. ig_i > size(y, 1)) cycle
+!$omp simd private(ii,ig_i)
+          do idx_ii = 1, valid_row_count
+            ii = valid_row_ids(idx_ii)
+            ig_i = row_gid(ii)
             y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
           end do
         end do
@@ -1897,7 +1994,9 @@ contains
     integer, intent(in), optional :: block_ids(:)
 
     integer :: iblk, iblk_idx, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j
+    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
     complex(8) :: xj
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
@@ -1916,15 +2015,32 @@ contains
         ncol = dg_frag%n_basis(ifrag_col, ispin)
         if (nrow <= 0 .or. ncol <= 0) cycle
 
+        valid_row_count = 0
+        do ii = 1, nrow
+          row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+          if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+          valid_row_count = valid_row_count + 1
+          valid_row_ids(valid_row_count) = ii
+        end do
+        if (valid_row_count <= 0) cycle
+        valid_col_count = 0
         do jj = 1, ncol
-          ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-          if (ig_j < 1 .or. ig_j > size(x, 1)) cycle
+          col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+          if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+          valid_col_count = valid_col_count + 1
+          valid_col_ids(valid_col_count) = jj
+        end do
+        if (valid_col_count <= 0) cycle
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
+          ig_j = col_gid(jj)
           do ist = 1, size(x, 2)
             xj = x(ig_j, ist)
             if (abs(xj) == 0.0d0) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(y, 1)) cycle
+!$omp simd private(ii,ig_i)
+            do idx_ii = 1, valid_row_count
+              ii = valid_row_ids(idx_ii)
+              ig_i = row_gid(ii)
               y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
             end do
           end do
@@ -1942,15 +2058,32 @@ contains
       ncol = dg_frag%n_basis(ifrag_col, ispin)
       if (nrow <= 0 .or. ncol <= 0) cycle
 
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+      valid_col_count = 0
       do jj = 1, ncol
-        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (ig_j < 1 .or. ig_j > size(x, 1)) cycle
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
         do ist = 1, size(x, 2)
           xj = x(ig_j, ist)
           if (abs(xj) == 0.0d0) cycle
-          do ii = 1, nrow
-            ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-            if (ig_i < 1 .or. ig_i > size(y, 1)) cycle
+!$omp simd private(ii,ig_i)
+          do idx_ii = 1, valid_row_count
+            ii = valid_row_ids(idx_ii)
+            ig_i = row_gid(ii)
             y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
           end do
         end do
@@ -1966,7 +2099,9 @@ contains
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
     if (.not. allocated(dg_frag%index_basis)) return
@@ -1980,12 +2115,31 @@ contains
       ncol = dg_frag%n_basis(ifrag_col, ispin)
       if (nrow <= 0 .or. ncol <= 0) cycle
 
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+
+      valid_col_count = 0
       do jj = 1, ncol
-        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-        do ii = 1, nrow
-          ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-          if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
+!$omp simd private(ii,ig_i)
+        do idx_ii = 1, valid_row_count
+          ii = valid_row_ids(idx_ii)
+          ig_i = row_gid(ii)
           mat(ig_i, ig_j) = cmplx(blocks(iblk)%val(ii, jj, ispin), 0.0d0, kind=8)
         end do
       end do
@@ -2001,7 +2155,9 @@ contains
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
     if (n_metric <= 0) return
@@ -2016,12 +2172,31 @@ contains
       ncol = dg_frag%n_basis(ifrag_col, ispin)
       if (nrow <= 0 .or. ncol <= 0) cycle
 
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > n_metric .or. row_gid(ii) > size(mat, 1)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+
+      valid_col_count = 0
       do jj = 1, ncol
-        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (ig_j < 1 .or. ig_j > n_metric .or. ig_j > size(mat, 2)) cycle
-        do ii = 1, nrow
-          ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-          if (ig_i < 1 .or. ig_i > n_metric .or. ig_i > size(mat, 1)) cycle
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > n_metric .or. col_gid(jj) > size(mat, 2)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
+!$omp simd private(ii,ig_i)
+        do idx_ii = 1, valid_row_count
+          ii = valid_row_ids(idx_ii)
+          ig_i = row_gid(ii)
           mat(ig_i, ig_j) = cmplx(blocks(iblk)%val(ii, jj, ispin), 0.0d0, kind=8)
         end do
       end do
@@ -2037,7 +2212,9 @@ contains
     real(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
     if (n_metric <= 0) return
@@ -2052,12 +2229,31 @@ contains
       ncol = dg_frag%n_basis(ifrag_col, ispin)
       if (nrow <= 0 .or. ncol <= 0) cycle
 
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > n_metric .or. row_gid(ii) > size(mat, 1)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+
+      valid_col_count = 0
       do jj = 1, ncol
-        ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (ig_j < 1 .or. ig_j > n_metric .or. ig_j > size(mat, 2)) cycle
-        do ii = 1, nrow
-          ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-          if (ig_i < 1 .or. ig_i > n_metric .or. ig_i > size(mat, 1)) cycle
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > n_metric .or. col_gid(jj) > size(mat, 2)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
+!$omp simd private(ii,ig_i)
+        do idx_ii = 1, valid_row_count
+          ii = valid_row_ids(idx_ii)
+          ig_i = row_gid(ii)
           mat(ig_i, ig_j) = blocks(iblk)%val(ii, jj, ispin)
         end do
       end do
