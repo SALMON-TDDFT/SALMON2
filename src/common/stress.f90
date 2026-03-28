@@ -86,7 +86,7 @@ contains
 
     if(PLUS_U_ON) stop "stress tensor is not supported with PLUS_U_ON"
     if(system%nspin /= 1) stop "stress tensor supports only unpolarized calculations"
-    if(trim(xc) /= 'PZ') stop "stress tensor supports only built-in xc='PZ'"
+    if(trim(xc) /= 'pz') stop "stress tensor supports only built-in xc='PZ'"
 
     if(info%if_divide_rspace) then
       if(.not. tpsi%update_zwf_overlap) then
