@@ -28,7 +28,7 @@ use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, &
                          comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
-use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
+use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d, write_stress_rt
 use initialization_rt_sub
 use checkpoint_restart_sub
 use fdtd_weyl, only: ls_fdtd_weyl, weyl_init, weyl_calc, weyl_finalize
@@ -38,6 +38,7 @@ use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
 use input_checker_ms, only: check_input_variables_ms
+use stress_sub, only: calc_stress, refresh_stress_output_state, s_stress_field_state
 
 use inputoutput, only: t_unit_ac, t_unit_elec, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
 implicit none
@@ -85,6 +86,8 @@ integer :: nmacro_mygroup, isize_mygroup
 logical :: is_checkpoint_iter, is_shutdown_time
 ! Only for 1D calculation outputs:
 integer :: fh_wave
+integer :: stress_label_iter, stress_state_iter
+type(s_stress_field_state) :: field_state
 
 
 ! character(256) :: file_debug_log
@@ -352,6 +355,7 @@ subroutine initialization_ms()
     itt = mit
     allocate(Ac_inc(1:3, -1:nt+2))
     call incident()
+    call emit_multiscale_initial_stress()
 
     ! Experimental implementation
     if (comm_is_root(ms%id_ms_world)) then
@@ -431,10 +435,7 @@ subroutine time_evolution_step_ms
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        rt%Ac_tot(1:3, itt-1) = matmul(rmat_ms, fw%vec_Ac%v(1:3, iix, iiy, iiz))
-        rt%Ac_tot(1:3, itt)   = matmul(rmat_ms, fw%vec_Ac_new%v(1:3, iix, iiy, iiz))
-        rt%Ac_ext(1:3, itt-1) = matmul(rmat_ms, rt%Ac_tot(1:3, itt-1))
-        rt%Ac_ext(1:3, itt)   = matmul(rmat_ms, rt%Ac_tot(1:3, itt))
+        call sync_multiscale_macro_rt_fields(itt, iix, iiy, iiz, .true.)
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
@@ -481,6 +482,63 @@ subroutine time_evolution_step_ms
 
     return
 end subroutine time_evolution_step_ms
+
+
+subroutine emit_multiscale_initial_stress()
+    implicit none
+    integer :: iimacro, iix, iiy, iiz
+
+    if(yn_out_stress /= 'y') return
+
+    if(yn_restart == 'n') then
+        stress_label_iter = 0
+        stress_state_iter = 0
+    else if(yn_reset_step_restart == 'y') then
+        stress_label_iter = 0
+        stress_state_iter = 0
+    else
+        stress_label_iter = Mit
+        stress_state_iter = Mit
+    end if
+
+    nproc_group_global = ms%icomm_macropoint
+    nproc_id_global = ms%id_macropoint
+    nproc_size_global = ms%isize_macropoint
+    quiet = .true.
+
+    do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
+        iix = ms%ixyz_tbl(1, iimacro)
+        iiy = ms%ixyz_tbl(2, iimacro)
+        iiz = ms%ixyz_tbl(3, iimacro)
+
+        call sync_multiscale_macro_rt_fields(stress_state_iter, iix, iiy, iiz, stress_state_iter >= 1)
+        system%vec_Ac(:) = rt%Ac_tot(:,stress_state_iter)
+        call refresh_stress_output_state(system, theory, info, mg, stencil, srg, ppg, &
+                                         energy, V_local, spsi_in, spsi_out, tpsi, field_state)
+        call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, &
+                         spsi_in, ewald, energy, xc_func, rho_s, Vxc, field_state)
+        call write_stress_rt(stress_label_iter, ofl, dt, system)
+    end do
+
+    nproc_group_global = ms%icomm_ms_world
+    nproc_id_global = ms%id_ms_world
+    nproc_size_global = ms%isize_ms_world
+    quiet = .false.
+end subroutine emit_multiscale_initial_stress
+
+
+subroutine sync_multiscale_macro_rt_fields(iter, iix, iiy, iiz, fill_prev)
+    implicit none
+    integer, intent(in) :: iter, iix, iiy, iiz
+    logical, intent(in) :: fill_prev
+
+    if(fill_prev) then
+        rt%Ac_tot(1:3, iter-1) = matmul(rmat_ms, fw%vec_Ac%v(1:3, iix, iiy, iiz))
+        rt%Ac_ext(1:3, iter-1) = matmul(rmat_ms, rt%Ac_tot(1:3, iter-1))
+    end if
+    rt%Ac_tot(1:3, iter) = matmul(rmat_ms, fw%vec_Ac_new%v(1:3, iix, iiy, iiz))
+    rt%Ac_ext(1:3, iter) = matmul(rmat_ms, rt%Ac_tot(1:3, iter))
+end subroutine sync_multiscale_macro_rt_fields
 
 
 
@@ -780,4 +838,3 @@ end subroutine close_wave_data_file
 
 
 end subroutine main_ms
-
