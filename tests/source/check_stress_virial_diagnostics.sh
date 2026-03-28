@@ -6,7 +6,7 @@ write_f90="$repo_root/src/io/write.f90"
 
 grep -Fq 'Stress virial diagnostics [Hartree]' "$write_f90"
 grep -Fq 'Tr(kin)*V + 2E_kin' "$write_f90"
-grep -Fq 'Tr(har)*V + E_h' "$write_f90"
+grep -Fq 'Tr(har)*V - E_h' "$write_f90"
 grep -Fq 'Kinetic stress diagnostics [Hartree]' "$write_f90"
 grep -Fq 'E_kin(from stress trace)' "$write_f90"
 grep -Fq 'E_kin(grad2/2)' "$write_f90"

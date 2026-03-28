@@ -1530,9 +1530,9 @@ contains
          write(fh,*)
          write(fh,*) "Stress virial diagnostics [Hartree]"
          virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
-         virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
+         virial_har = stress_tensor_trace(system%stress_har) * system%det_a - energy%E_h
          write(fh,'(1x,"Tr(kin)*V + 2E_kin =",e16.8)') virial_kin
-         write(fh,'(1x,"Tr(har)*V + E_h    =",e16.8)') virial_har
+         write(fh,'(1x,"Tr(har)*V - E_h    =",e16.8)') virial_har
          write(fh,*)
          write(fh,*) "Kinetic stress diagnostics [Hartree]"
          e_kin_from_stress = -0.5d0 * stress_tensor_trace(system%stress_kin) * system%det_a
