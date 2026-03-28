@@ -114,6 +114,13 @@ contains
 
     env_hse_sr = ''
     use_hse_sr_hartree = .false.
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-entry"
+      flush(6)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hartree trace: bridge-comm-state icomm_frag=", dg_frag%icomm_frag, &
+        " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
+      flush(6)
+    end if
     call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
     if (env_status == 0) then
       select case(trim(adjustl(env_hse_sr)))
@@ -125,9 +132,26 @@ contains
       stop 'poisson_dg_distributed: hse_omega must be > 0 when SALMON_HSE_SR_HARTREE is enabled'
     end if
 
-    call setup_fragment_parallel_grid(dg_frag, mg, info_frag, mg_frag)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-before-setup-frag-grid"
+      flush(6)
+    end if
+    call setup_fragment_parallel_grid(dg_frag, lg, info_frag, mg_frag)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,3(a,i0))') "        hartree trace: bridge-after-setup-frag-grid", &
+        " mgx=", mg_frag%num(1), " mgy=", mg_frag%num(2), " mgz=", mg_frag%num(3)
+      flush(6)
+    end if
     use_ffte_local = (yn_ffte == 'y')
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-before-alloc-poisson"
+      flush(6)
+    end if
     call allocate_fragment_poisson_periodic(lg, mg_frag, info_frag, use_ffte_local, poisson_frag)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-after-alloc-poisson"
+      flush(6)
+    end if
 
     allocate(Vh_work%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)))
     Vh_work%f = 0.0d0
@@ -144,6 +168,10 @@ contains
       end if
       flush(6)
     end if
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-before-poisson-call"
+      flush(6)
+    end if
     if (use_ffte_local) then
       if (use_hse_sr_hartree) then
         call poisson_ffte_hse_sr(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag, hse_omega)
@@ -157,11 +185,23 @@ contains
         call poisson_ft(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag)
       end if
     end if
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-after-poisson-call"
+      flush(6)
+    end if
 
     rhoG_work(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)) = &
       poisson_frag%zrhoG_ele(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3))
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-before-allreduce"
+      flush(6)
+    end if
     call comm_summation(Vh_work%f, Vh%f, size(Vh_work%f), dg_frag%icomm_frag)
     call comm_summation(rhoG_work, poisson%zrhoG_ele, size(rhoG_work), dg_frag%icomm_frag)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-after-allreduce"
+      flush(6)
+    end if
 
     if (yn_put_wall_z_boundary == 'y') then
       !$omp parallel do private(iz,iy,ix,z,z0,Vwall_z) schedule(static)
@@ -188,6 +228,10 @@ contains
     call finalize_fragment_parallel(info_frag)
     deallocate(Vh_work%f)
     deallocate(rhoG_work)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: bridge-exit"
+      flush(6)
+    end if
   end subroutine hartree_dg_via_poisson_periodic
 
   ! hartree_dg_distributed

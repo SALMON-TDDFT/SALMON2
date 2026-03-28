@@ -1890,6 +1890,8 @@ contains
     if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
     if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
+    if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
+    if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
