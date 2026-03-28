@@ -377,7 +377,7 @@
             end do
             call cpu_time(t_dmat0)
             ! Step 3a: root fills coef_re_frag, bcasts to all ranks in icomm_frag
-            coef_re_frag(1:nbf, 1:nocc_spin) = 0.0d0
+            coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
             if (.not. distribute_project .or. dg_frag%is_frag_root) then
 !$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
               do io = 1, nocc_spin
@@ -419,11 +419,14 @@
             end if
 
             ! Step 3d: symmetrize (copy upper triangle to lower)
+!$omp parallel do private(io, istate_frag) schedule(static)
             do io = 1, nbf
               do istate_frag = io + 1, nbf
                 D_frag_re(istate_frag, io, ispin) = D_frag_re(io, istate_frag, ispin)
               end do
             end do
+!$omp end parallel do
+            ! n_pw=0: D_frag_re is authoritative; density_matrix_frag (complex) not updated in this path
             dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
             call cpu_time(t_dmat1)
             time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
