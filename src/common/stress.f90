@@ -317,7 +317,7 @@ contains
     type(s_pp_grid),         intent(in)    :: ppg
     type(s_poisson),         intent(in)    :: poisson
     type(s_dft_energy),      intent(in)    :: energy
-    integer :: ix, iy, iz, ia, a, b, ig_s(3), ig_e(3)
+    integer :: ix, iy, iz, ia, ik, a, b, ig_s(3), ig_e(3)
     real(8) :: g(3), G2, Gd, coeff_lr, strs(3,3), strs_sum(3,3), E_sr, E_lr, E_sr_loc, E_lr_loc, V
     complex(8) :: rho_e, V_sr_sum, V_lr_sum, dVsr_dG2_sum, phase
 
@@ -343,11 +343,12 @@ contains
       dVsr_dG2_sum = (0d0, 0d0)
 
       do ia = 1, system%nion
+        ik = kion(ia)
         Gd = g(1)*system%Rion(1,ia) + g(2)*system%Rion(2,ia) + g(3)*system%Rion(3,ia)
-        phase = exp(-zi*Gd)
-        V_sr_sum = V_sr_sum + ppg%zVG_ion(ix,iy,iz,kion(ia)) * phase
-        V_lr_sum = V_lr_sum - (4d0*pi / G2) * pp%zps(kion(ia)) * phase
-        dVsr_dG2_sum = dVsr_dG2_sum + ppg%dVG_ion_dG2(ix,iy,iz,kion(ia)) * phase
+        phase = dcmplx(cos(Gd), -sin(Gd))
+        V_sr_sum = V_sr_sum + ppg%zVG_ion(ix,iy,iz,ik) * phase
+        V_lr_sum = V_lr_sum - (4d0*pi / G2) * pp%zps(ik) * phase
+        dVsr_dG2_sum = dVsr_dG2_sum + ppg%dVG_ion_dG2(ix,iy,iz,ik) * phase
       end do
 
       E_sr_loc = E_sr_loc + dble(conjg(rho_e) * V_sr_sum)
