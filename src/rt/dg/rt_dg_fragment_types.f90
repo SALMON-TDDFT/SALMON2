@@ -208,6 +208,10 @@ module rt_dg_fragment_types
     real(8), allocatable :: density_inv_weight_local(:,:,:) ! inverse of static overlap count on local grid
     real(8), allocatable :: density_phi_cache(:,:,:)   ! prepacked fragment basis on interior grid (ngrid_max,nstate_frag,ifrag_local)
     logical :: density_phi_cache_valid = .false.
+    real(8), allocatable :: density_phi_block_cache(:,:,:,:) ! block-packed basis (block_size,nstate_frag,nblock_max,ifrag_local)
+    integer, allocatable :: density_phi_block_count(:)       ! block count per local fragment
+    integer :: density_phi_block_size = 0
+    logical :: density_phi_block_cache_valid = .false.
     complex(8), allocatable :: density_matrix_frag(:,:,:,:) ! raw fragment density matrix cache (nbf,nbf,nspin,ifrag_local)
     logical, allocatable :: density_matrix_frag_valid(:,:)  ! raw fragment density matrix validity (nspin,ifrag_local)
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)

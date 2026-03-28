@@ -502,6 +502,10 @@
 
     if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
     dg_frag%density_phi_cache_valid = .false.
+    if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
+    if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
+    dg_frag%density_phi_block_size = 0
+    dg_frag%density_phi_block_cache_valid = .false.
     if (.not. dg_frag%use_plane_wave_basis) then
       dg_frag%mixed_basis_ready = .false.
       if (allocated(dg_frag%mixed_basis_dim)) dg_frag%mixed_basis_dim(:) = 0

@@ -42,6 +42,21 @@ module poisson_dg_distributed
 
 contains
 
+  subroutine append_hartree_rank_trace(rank, label, ifrag_group, id_frag, isize_frag, comm_rank, comm_size)
+    implicit none
+    integer, intent(in) :: rank, ifrag_group, id_frag, isize_frag, comm_rank, comm_size
+    character(*), intent(in) :: label
+    integer :: iunit
+    character(256) :: filename
+
+    write(filename,'(a,i0,a)') 'hartree_rank_trace.', rank, '.log'
+    open(newunit=iunit, file=trim(filename), status='unknown', position='append', action='write')
+    write(iunit,'(a,1x,a,i0,1x,a,i0,1x,a,i0,1x,a,i0,1x,a,i0)') trim(label), &
+      'ifrag_group=', ifrag_group, 'id_frag=', id_frag, 'isize_frag=', isize_frag, &
+      'comm_rank=', comm_rank, 'comm_size=', comm_size
+    close(iunit)
+  end subroutine append_hartree_rank_trace
+
   subroutine allocate_fragment_poisson_periodic(lg, mg, info, use_ffte, poisson_frag)
     use structures, only: s_rgrid, s_parallel_info, s_poisson
     implicit none
@@ -87,7 +102,7 @@ contains
     use structures, only: s_rgrid, s_reciprocal_grid, s_poisson, s_scalar, s_parallel_info
     use rt_dg_fragment_types, only: s_dg_fragment_rt
     use rt_dg_fragment_parallel, only: setup_fragment_parallel_grid, finalize_fragment_parallel
-    use communication, only: comm_summation
+    use communication, only: comm_summation, comm_sync_all, comm_get_groupinfo
     use poisson_periodic, only: poisson_ft, poisson_ffte, poisson_ft_hse_sr, poisson_ffte_hse_sr
     use inputoutput, only: yn_ffte, yn_put_wall_z_boundary, wall_height, wall_width
     use salmon_global, only: hse_omega
@@ -104,13 +119,15 @@ contains
     type(s_parallel_info) :: info_frag
     type(s_rgrid) :: mg_frag
     type(s_poisson) :: poisson_frag
-    type(s_scalar) :: Vh_work
-    complex(8), allocatable :: rhoG_work(:,:,:)
+    type(s_scalar) :: rho_work, rho_reduce, Vh_work, Vh_reduce
+    complex(8), allocatable :: rhoG_work(:,:,:), rhoG_reduce(:,:,:)
     character(16) :: env_hse_sr
     logical :: use_hse_sr_hartree
     logical :: use_ffte_local
     integer :: env_status, ix, iy, iz
+    integer :: frag_rank_check, frag_size_check
     real(8) :: z, z0, Vwall_z
+    real(8) :: rho_probe_in, rho_probe_out
 
     env_hse_sr = ''
     use_hse_sr_hartree = .false.
@@ -120,6 +137,20 @@ contains
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hartree trace: bridge-comm-state icomm_frag=", dg_frag%icomm_frag, &
         " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
       flush(6)
+    end if
+    call comm_get_groupinfo(dg_frag%icomm_frag, frag_rank_check, frag_size_check)
+    call append_hartree_rank_trace(dg_frag%id, 'hartree-entry', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hartree trace: rank-entry rank=", dg_frag%id, &
+      " ifrag_group=", dg_frag%ifrag_group, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, &
+      " comm_rank=", frag_rank_check, " comm_size=", frag_size_check
+    flush(6)
+    if (frag_rank_check /= dg_frag%id_frag .or. frag_size_check /= dg_frag%isize_frag) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] hartree communicator mismatch rank=", dg_frag%id, &
+        " ifrag_group=", dg_frag%ifrag_group, " id_frag=", dg_frag%id_frag, " comm_rank=", frag_rank_check, &
+        " comm_size=", frag_size_check
+      flush(6)
+      stop 'poisson_dg_distributed: dg_frag communicator metadata mismatch before barrier'
     end if
     call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
     if (env_status == 0) then
@@ -148,17 +179,81 @@ contains
       flush(6)
     end if
     call allocate_fragment_poisson_periodic(lg, mg_frag, info_frag, use_ffte_local, poisson_frag)
+    call append_hartree_rank_trace(dg_frag%id, 'after-alloc-poisson', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
     if (dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: bridge-after-alloc-poisson"
       flush(6)
     end if
 
+    allocate(rho_work%f(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)))
+    rho_work%f = 0.0d0
+    allocate(rho_reduce%f(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)))
+    rho_reduce%f = 0.0d0
+    call append_hartree_rank_trace(dg_frag%id, 'after-alloc-rho-work', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
+    if (lbound(rho%f,1) < lbound(rho_work%f,1) .or. ubound(rho%f,1) > ubound(rho_work%f,1) .or. &
+        lbound(rho%f,2) < lbound(rho_work%f,2) .or. ubound(rho%f,2) > ubound(rho_work%f,2) .or. &
+        lbound(rho%f,3) < lbound(rho_work%f,3) .or. ubound(rho%f,3) > ubound(rho_work%f,3)) then
+      write(*,'(1x,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        [FATAL] rho local bounds outside work rank=", dg_frag%id_frag, &
+        " work=", lbound(rho_work%f,1), ":", ubound(rho_work%f,1), ",", lbound(rho_work%f,2), ":", ubound(rho_work%f,2), ",", &
+        lbound(rho_work%f,3), ":", ubound(rho_work%f,3), ",", " local=", lbound(rho%f,1), ":", ubound(rho%f,1), ",", &
+        lbound(rho%f,2), ":", ubound(rho%f,2), ",", lbound(rho%f,3), ":", ubound(rho%f,3), ","
+      flush(6)
+      stop 'poisson_dg_distributed: rho local bounds outside work'
+    end if
+    write(*,'(1x,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        hartree trace: before-rho-allreduce rank=", dg_frag%id_frag, &
+      " work=", lbound(rho_work%f,1), ":", ubound(rho_work%f,1), ",", lbound(rho_work%f,2), ":", ubound(rho_work%f,2), ",", &
+      lbound(rho_work%f,3), ":", ubound(rho_work%f,3), ",", " local=", lbound(rho%f,1), ":", ubound(rho%f,1), ",", &
+      lbound(rho%f,2), ":", ubound(rho%f,2), ",", lbound(rho%f,3), ":", ubound(rho%f,3), ","
+    flush(6)
+    call append_hartree_rank_trace(dg_frag%id, 'before-rho-copy', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
+    do iz = lbound(rho%f,3), ubound(rho%f,3)
+      do iy = lbound(rho%f,2), ubound(rho%f,2)
+        do ix = lbound(rho%f,1), ubound(rho%f,1)
+          rho_work%f(ix, iy, iz) = rho%f(ix, iy, iz)
+        end do
+      end do
+    end do
+    call append_hartree_rank_trace(dg_frag%id, 'after-rho-copy', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
+    call append_hartree_rank_trace(dg_frag%id, 'before-rho-barrier', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
+    write(*,'(1x,a,i0,a,i0,a,i0)') "        hartree trace: before-rho-barrier rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group
+    flush(6)
+    call comm_sync_all(dg_frag%icomm_frag)
+    call append_hartree_rank_trace(dg_frag%id, 'after-rho-barrier', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
+      frag_rank_check, frag_size_check)
+    write(*,'(1x,a,i0,a,i0,a,i0)') "        hartree trace: after-rho-barrier rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group
+    flush(6)
+    rho_probe_in = real(dg_frag%id_frag + 1, 8)
+    rho_probe_out = -1.0d0
+    write(*,'(1x,a,i0,a,1pe12.4)') "        hartree trace: before-rho-probe-allreduce rank=", dg_frag%id_frag, &
+      " val=", rho_probe_in
+    flush(6)
+    call comm_summation(rho_probe_in, rho_probe_out, dg_frag%icomm_frag)
+    write(*,'(1x,a,i0,a,1pe12.4)') "        hartree trace: after-rho-probe-allreduce rank=", dg_frag%id_frag, &
+      " sum=", rho_probe_out
+    flush(6)
+    call comm_summation(rho_work%f, rho_reduce%f, size(rho_work%f), dg_frag%icomm_frag)
+    write(*,'(1x,a,i0)') "        hartree trace: after-rho-allreduce rank=", dg_frag%id_frag
+    flush(6)
+    rho_work%f(:, :, :) = rho_reduce%f(:, :, :)
+
     allocate(Vh_work%f(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)))
     Vh_work%f = 0.0d0
+    allocate(Vh_reduce%f(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)))
+    Vh_reduce%f = 0.0d0
     allocate(rhoG_work(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
                        lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
                        lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3)))
     rhoG_work = (0.0d0, 0.0d0)
+    allocate(rhoG_reduce(lbound(rhoG_work,1):ubound(rhoG_work,1), lbound(rhoG_work,2):ubound(rhoG_work,2), &
+                         lbound(rhoG_work,3):ubound(rhoG_work,3)))
+    rhoG_reduce = (0.0d0, 0.0d0)
 
     if (dg_frag%id == 0) then
       if (use_ffte_local) then
@@ -174,15 +269,15 @@ contains
     end if
     if (use_ffte_local) then
       if (use_hse_sr_hartree) then
-        call poisson_ffte_hse_sr(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag, hse_omega)
+        call poisson_ffte_hse_sr(lg, mg_frag, info_frag, fg, rho_work, Vh_work, poisson_frag, hse_omega)
       else
-        call poisson_ffte(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag)
+        call poisson_ffte(lg, mg_frag, info_frag, fg, rho_work, Vh_work, poisson_frag)
       end if
     else
       if (use_hse_sr_hartree) then
-        call poisson_ft_hse_sr(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag, hse_omega)
+        call poisson_ft_hse_sr(lg, mg_frag, info_frag, fg, rho_work, Vh_work, poisson_frag, hse_omega)
       else
-        call poisson_ft(lg, mg_frag, info_frag, fg, rho, Vh_work, poisson_frag)
+        call poisson_ft(lg, mg_frag, info_frag, fg, rho_work, Vh_work, poisson_frag)
       end if
     end if
     if (dg_frag%id == 0) then
@@ -192,21 +287,51 @@ contains
 
     rhoG_work(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)) = &
       poisson_frag%zrhoG_ele(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3))
-    write(*,'(1x,a,i0,a,i0,a,6(i0,a))') "        hartree trace: before-vh-allreduce rank=", dg_frag%id_frag, &
-      " count=", size(Vh_work%f), " bounds=", lbound(Vh_work%f,1), ":", ubound(Vh_work%f,1), ",", &
-      lbound(Vh_work%f,2), ":", ubound(Vh_work%f,2), ",", lbound(Vh_work%f,3), ":", ubound(Vh_work%f,3)
+    write(*,'(1x,a,i0,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        hartree trace: before-vh-allreduce rank=", dg_frag%id_frag, &
+      " count=", size(Vh_work%f), " work-bounds=", lbound(Vh_work%f,1), ":", ubound(Vh_work%f,1), ",", &
+      lbound(Vh_work%f,2), ":", ubound(Vh_work%f,2), ",", lbound(Vh_work%f,3), ":", ubound(Vh_work%f,3), ",", &
+      " local-dest=", lbound(Vh%f,1), ":", ubound(Vh%f,1), ",", lbound(Vh%f,2), ":", ubound(Vh%f,2), ",", &
+      lbound(Vh%f,3), ":", ubound(Vh%f,3), ","
     flush(6)
-    call comm_summation(Vh_work%f, Vh%f, size(Vh_work%f), dg_frag%icomm_frag)
+    if (lbound(Vh%f,1) < lbound(Vh_work%f,1) .or. ubound(Vh%f,1) > ubound(Vh_work%f,1) .or. &
+        lbound(Vh%f,2) < lbound(Vh_work%f,2) .or. ubound(Vh%f,2) > ubound(Vh_work%f,2) .or. &
+        lbound(Vh%f,3) < lbound(Vh_work%f,3) .or. ubound(Vh%f,3) > ubound(Vh_work%f,3)) then
+      write(*,'(1x,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        [FATAL] Vh local bounds outside work rank=", dg_frag%id_frag, &
+        " work=", lbound(Vh_work%f,1), ":", ubound(Vh_work%f,1), ",", lbound(Vh_work%f,2), ":", ubound(Vh_work%f,2), ",", &
+        lbound(Vh_work%f,3), ":", ubound(Vh_work%f,3), ",", " local=", lbound(Vh%f,1), ":", ubound(Vh%f,1), ",", &
+        lbound(Vh%f,2), ":", ubound(Vh%f,2), ",", lbound(Vh%f,3), ":", ubound(Vh%f,3), ","
+      flush(6)
+      stop 'poisson_dg_distributed: Vh local bounds outside work'
+    end if
+    call comm_summation(Vh_work%f, Vh_reduce%f, size(Vh_work%f), dg_frag%icomm_frag)
+    Vh%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)) = &
+      Vh_reduce%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3))
     write(*,'(1x,a,i0)') "        hartree trace: after-vh-allreduce rank=", dg_frag%id_frag
     flush(6)
 
-    write(*,'(1x,a,i0,a,i0,a,6(i0,a),a,6(i0,a))') "        hartree trace: before-rhog-allreduce rank=", dg_frag%id_frag, &
+    write(*,'(1x,a,i0,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        hartree trace: before-rhog-allreduce rank=", dg_frag%id_frag, &
       " count=", size(rhoG_work), " work-bounds=", lbound(rhoG_work,1), ":", ubound(rhoG_work,1), ",", &
-      lbound(rhoG_work,2), ":", ubound(rhoG_work,2), ",", lbound(rhoG_work,3), ":", ubound(rhoG_work,3), &
-      " dest-bounds=", lbound(poisson%zrhoG_ele,1), ":", ubound(poisson%zrhoG_ele,1), ",", &
-      lbound(poisson%zrhoG_ele,2), ":", ubound(poisson%zrhoG_ele,2), ",", lbound(poisson%zrhoG_ele,3), ":", ubound(poisson%zrhoG_ele,3)
+      lbound(rhoG_work,2), ":", ubound(rhoG_work,2), ",", lbound(rhoG_work,3), ":", ubound(rhoG_work,3), ",", &
+      " local-dest=", lbound(poisson%zrhoG_ele,1), ":", ubound(poisson%zrhoG_ele,1), ",", &
+      lbound(poisson%zrhoG_ele,2), ":", ubound(poisson%zrhoG_ele,2), ",", lbound(poisson%zrhoG_ele,3), ":", ubound(poisson%zrhoG_ele,3), ","
     flush(6)
-    call comm_summation(rhoG_work, poisson%zrhoG_ele, size(rhoG_work), dg_frag%icomm_frag)
+    if (lbound(poisson%zrhoG_ele,1) < lbound(rhoG_work,1) .or. ubound(poisson%zrhoG_ele,1) > ubound(rhoG_work,1) .or. &
+        lbound(poisson%zrhoG_ele,2) < lbound(rhoG_work,2) .or. ubound(poisson%zrhoG_ele,2) > ubound(rhoG_work,2) .or. &
+        lbound(poisson%zrhoG_ele,3) < lbound(rhoG_work,3) .or. ubound(poisson%zrhoG_ele,3) > ubound(rhoG_work,3)) then
+      write(*,'(1x,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        [FATAL] rhoG local bounds outside work rank=", dg_frag%id_frag, &
+        " work=", lbound(rhoG_work,1), ":", ubound(rhoG_work,1), ",", lbound(rhoG_work,2), ":", ubound(rhoG_work,2), ",", &
+        lbound(rhoG_work,3), ":", ubound(rhoG_work,3), ",", " local=", lbound(poisson%zrhoG_ele,1), ":", ubound(poisson%zrhoG_ele,1), ",", &
+        lbound(poisson%zrhoG_ele,2), ":", ubound(poisson%zrhoG_ele,2), ",", lbound(poisson%zrhoG_ele,3), ":", ubound(poisson%zrhoG_ele,3), ","
+      flush(6)
+      stop 'poisson_dg_distributed: rhoG local bounds outside work'
+    end if
+    call comm_summation(rhoG_work, rhoG_reduce, size(rhoG_work), dg_frag%icomm_frag)
+    poisson%zrhoG_ele(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                      lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                      lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3)) = &
+      rhoG_reduce(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                  lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                  lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3))
     write(*,'(1x,a,i0)') "        hartree trace: after-rhog-allreduce rank=", dg_frag%id_frag
     flush(6)
 
@@ -233,8 +358,12 @@ contains
 
     call deallocate_fragment_poisson_periodic(poisson_frag)
     call finalize_fragment_parallel(info_frag)
+    deallocate(rho_work%f)
+    deallocate(rho_reduce%f)
     deallocate(Vh_work%f)
+    deallocate(Vh_reduce%f)
     deallocate(rhoG_work)
+    deallocate(rhoG_reduce)
     if (dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: bridge-exit"
       flush(6)
@@ -270,7 +399,9 @@ contains
     real(8) :: inv_N, g2, sr_factor, Vwall_z, z, z0
     real(8) :: t_stage0, t_stage1
     logical :: use_hse_sr_hartree
+    logical :: use_fragment_local_poisson
     character(16) :: env_hse_sr
+    character(16) :: env_local_poisson
     integer :: env_status
 
     ! Local work arrays for the kz-slab owned by this rank
@@ -281,12 +412,41 @@ contains
     real(8),    allocatable :: Vh_partial(:,:,:)      ! (mg range)
     complex(8), allocatable :: rhoG_partial(:,:,:)    ! (mg range)
 
-    call hartree_dg_via_poisson_periodic(lg, mg, fg, poisson, dg_frag, rho, Vh)
-    return
+    env_local_poisson = ''
+    use_fragment_local_poisson = .false.
+    call get_environment_variable('SALMON_USE_FRAGMENT_LOCAL_POISSON', env_local_poisson, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_local_poisson)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_fragment_local_poisson = .true.
+      end select
+    end if
+    ! The direct distributed DFT path assumes every rank sees the full mg/rho box
+    ! on the communicator it reduces over. DG fragment RT currently provides
+    ! fragment-subgroup/local-grid data instead, so fall back to the bridge path.
+    use_fragment_local_poisson = use_fragment_local_poisson .or. dg_frag%icomm_frag /= dg_frag%icomm
+    use_fragment_local_poisson = use_fragment_local_poisson .or. dg_frag%isize_frag /= dg_frag%isize
+    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,1) /= mg%is(1)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,1) /= mg%ie(1)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,2) /= mg%is(2)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,2) /= mg%ie(2)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,3) /= mg%is(3)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,3) /= mg%ie(3)
+    if (use_fragment_local_poisson) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,4(a,i0))') "        hartree trace: using-bridge-fallback", &
+          " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
+        flush(6)
+      end if
+      call hartree_dg_via_poisson_periodic(lg, mg, fg, poisson, dg_frag, rho, Vh)
+      return
+    end if
 
     ! Check SALMON_HSE_SR_HARTREE environment variable (same logic as hartree_sub::hartree)
     if (dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: entered-subroutine"
+      write(*,'(1x,a,4(a,i0))') "        hartree trace: rank-state", &
+        " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
       flush(6)
     end if
     env_hse_sr = ''
@@ -350,8 +510,9 @@ contains
     Vh_partial   = 0.0d0
     rhoG_partial = (0.0d0, 0.0d0)
     if (dg_frag%id == 0) then
-      write(*,'(1x,a,3(a,i0),2(a,i0))') "        hartree trace: entry", &
-        " Nx=", Nx, " Ny=", Ny, " Nz=", Nz, " nkz_local=", nkz_local, " nkz_actual=", nkz_actual
+      write(*,'(1x,a,3(a,i0),4(a,i0))') "        hartree trace: entry", &
+        " Nx=", Nx, " Ny=", Ny, " Nz=", Nz, " nkz_local=", nkz_local, " nkz_actual=", nkz_actual, &
+        " kz_start=", kz_start, " kz_end=", kz_end
       flush(6)
     end if
 
@@ -379,8 +540,13 @@ contains
         do ix = mg%is(1), mg%ie(1)
           if (dg_frag%id == 0 .and. kz_loc == 1 .and. iy == mg%is(2) .and. ix == mg%is(1)) then
 !$omp critical
-            write(*,'(1x,a,2(a,i0),a)') "        hartree trace: z-dft first-point", &
-              " kz=", kz, " iy=", iy, " before-sum"
+            write(*,'(1x,a,3(a,i0),a,6(i0,a),a,6(i0,a),a,4(i0,a),a,l1,a,l1)') "        hartree trace: z-dft first-point", &
+              " kz=", kz, " iy=", iy, " ix=", ix, " mg=", mg%is(1), ":", mg%ie(1), ",", mg%is(2), ":", mg%ie(2), ",", &
+              mg%is(3), ":", mg%ie(3), ",", " rho=", lbound(rho%f,1), ":", ubound(rho%f,1), ",", lbound(rho%f,2), ":", ubound(rho%f,2), ",", &
+              lbound(rho%f,3), ":", ubound(rho%f,3), ",", " egzc=", lbound(fg%egzc,1), ":", ubound(fg%egzc,1), ",", &
+              lbound(fg%egzc,2), ":", ubound(fg%egzc,2), ",", " kz_in=", &
+              (kz >= lbound(fg%egzc,1) .and. kz <= ubound(fg%egzc,1)), " iz_ok=", &
+              (mg%is(3) >= lbound(fg%egzc,2) .and. mg%ie(3) <= ubound(fg%egzc,2))
             flush(6)
 !$omp end critical
           end if

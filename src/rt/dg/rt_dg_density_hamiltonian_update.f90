@@ -113,6 +113,9 @@
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat trace: before-hartree rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
+    flush(6)
     if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -123,6 +126,9 @@
     call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
     time_hartree = time_hartree + (t_stage1 - t_stage0)
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat trace: after-hartree rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
+    flush(6)
     if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
