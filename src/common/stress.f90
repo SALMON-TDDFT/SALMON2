@@ -102,7 +102,14 @@ contains
     system%stress_loc_fd = 0d0
     system%stress_nl = 0d0
     system%stress_ewa = 0d0
+    system%stress_loc_sr_energy = 0d0
+    system%stress_loc_lr_energy = 0d0
+    system%stress_ewa_g = 0d0
+    system%stress_ewa_r = 0d0
     system%stress_tensor = 0d0
+    system%stress_kin_dbg_grad2 = 0d0
+    system%stress_kin_dbg_cross = 0d0
+    system%stress_kin_dbg_k2 = 0d0
 
     call calc_stress_kin(system, info, mg, stencil, ppg, tpsi, field_state)
     call calc_stress_har(system, info, mg, fg, poisson, energy)
@@ -254,12 +261,16 @@ contains
     type(s_stress_field_state), intent(in)    :: field_state
     integer :: ix, iy, iz, ik, io, ispin, im, a, b
     real(8) :: rtmp, kAc(3), strs(3,3), strs_sum(3,3), V
+    real(8) :: grad2_loc, cross_loc, k2_loc, grad2_sum, cross_sum, k2_sum, psi_abs2
     complex(8) :: w(3), psi_r
     complex(8), allocatable :: gtpsi(:,:,:,:)
 
     V = system%det_a
     im = 1
     strs = 0d0
+    grad2_loc = 0d0
+    cross_loc = 0d0
+    k2_loc = 0d0
     allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
 
     do ik = info%ik_s, info%ik_e
@@ -267,8 +278,9 @@ contains
     do ispin = 1, system%nspin
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im), gtpsi, &
            mg%is_array, mg%ie_array, mg%is, mg%ie, mg%idx, mg%idy, mg%idz, stencil%coef_nab, system%rmatrix_B)
-      rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-      !$omp parallel do collapse(2) private(ix,iy,iz,kAc,psi_r,w,a,b) reduction(+:strs)
+      rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+      !$omp parallel do collapse(2) private(ix,iy,iz,kAc,psi_r,w,a,b,psi_abs2) &
+      !$omp& reduction(+:strs,grad2_loc,cross_loc,k2_loc)
       do iz = mg%is(3), mg%ie(3)
       do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
@@ -282,9 +294,15 @@ contains
           kAc(3) = system%vec_k(3,ik) + field_state%Ac_uniform(3)
         end if
         psi_r = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        psi_abs2 = abs(psi_r)**2
         w(1) = gtpsi(1,ix,iy,iz) + zi * kAc(1) * psi_r
         w(2) = gtpsi(2,ix,iy,iz) + zi * kAc(2) * psi_r
         w(3) = gtpsi(3,ix,iy,iz) + zi * kAc(3) * psi_r
+        do a = 1, 3
+          grad2_loc = grad2_loc + rtmp * abs(gtpsi(a,ix,iy,iz))**2
+          cross_loc = cross_loc + rtmp * dble(conjg(gtpsi(a,ix,iy,iz)) * (zi * kAc(a) * psi_r))
+          k2_loc = k2_loc + rtmp * kAc(a)**2 * psi_abs2
+        end do
         do b = 1, 3
         do a = 1, 3
           strs(a,b) = strs(a,b) - rtmp * dble(conjg(w(a)) * w(b))
@@ -300,7 +318,13 @@ contains
 
     deallocate(gtpsi)
     call comm_summation(strs, strs_sum, 9, info%icomm_rko)
+    call comm_summation(grad2_loc, grad2_sum, info%icomm_rko)
+    call comm_summation(cross_loc, cross_sum, info%icomm_rko)
+    call comm_summation(k2_loc, k2_sum, info%icomm_rko)
     system%stress_kin = strs_sum / V
+    system%stress_kin_dbg_grad2 = grad2_sum
+    system%stress_kin_dbg_cross = cross_sum
+    system%stress_kin_dbg_k2 = k2_sum
   end subroutine calc_stress_kin
 
   subroutine calc_stress_loc(system, pp, fg, info, mg, ppg, poisson, energy)
@@ -376,6 +400,8 @@ contains
     do a = 1, 3
       strs_sum(a,a) = strs_sum(a,a) + (E_sr + E_lr) / V
     end do
+    system%stress_loc_sr_energy = E_sr
+    system%stress_loc_lr_energy = E_lr
     system%stress_loc = strs_sum
   end subroutine calc_stress_loc
 
@@ -415,7 +441,7 @@ contains
     do ispin = 1, system%nspin
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im), gtpsi, &
            mg%is_array, mg%ie_array, mg%is, mg%ie, mg%idx, mg%idy, mg%idz, stencil%coef_nab, system%rmatrix_B)
-      rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+      rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
       do ilma = 1, ppg%nlma
         ia = ppg%ia_tbl(ilma)
@@ -506,11 +532,11 @@ contains
       fact = (2d0*pi/G2) * exp(-G2/(4d0*aEwald)) / V**2 * abs(SG)**2
       do b = 1, 3
       do a = 1, 3
-        strs_G(a,b) = strs_G(a,b) - fact * 2d0 * g(a) * g(b) / G2 * (1d0 + G2/(4d0*aEwald))
+        strs_G(a,b) = strs_G(a,b) + fact * 2d0 * g(a) * g(b) / G2 * (1d0 + G2/(4d0*aEwald))
       end do
       end do
       do a = 1, 3
-        strs_G(a,a) = strs_G(a,a) + fact
+        strs_G(a,a) = strs_G(a,a) - fact
       end do
     end do
     end do
@@ -518,7 +544,7 @@ contains
 
     call sum_stress_tensor(info%icomm_r, strs_G, strs_G_sum)
     do a = 1, 3
-      strs_G_sum(a,a) = strs_G_sum(a,a) - pi * Qtot**2 / (2d0*aEwald*V**2)
+      strs_G_sum(a,a) = strs_G_sum(a,a) + pi * Qtot**2 / (2d0*aEwald*V**2)
     end do
 
     do iia = 1, info%nion_mg
@@ -549,6 +575,8 @@ contains
     end do
 
     call comm_summation(strs_R, strs_R_sum, 9, info%icomm_r)
+    system%stress_ewa_g = strs_G_sum
+    system%stress_ewa_r = strs_R_sum
     system%stress_ewa = strs_G_sum + strs_R_sum
   end subroutine calc_stress_ewa
 

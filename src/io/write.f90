@@ -1435,6 +1435,10 @@ contains
     real(8) :: stress_gpa(3,3)
     real(8) :: term_gpa(3,3)
     real(8) :: pressure_gpa
+    real(8) :: virial_kin
+    real(8) :: virial_har
+    real(8) :: e_kin_from_stress
+    real(8) :: pressure_term_gpa
 
     file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
@@ -1523,6 +1527,30 @@ contains
          write(fh,'(1x,"xx yy zz =",3e16.8)') stress_gpa(1,1), stress_gpa(2,2), stress_gpa(3,3)
          write(fh,'(1x,"xy yz xz =",3e16.8)') stress_gpa(1,2), stress_gpa(2,3), stress_gpa(1,3)
          write(fh,'(1x,"pressure =",e16.8)') pressure_gpa
+         write(fh,*)
+         write(fh,*) "Stress virial diagnostics [Hartree]"
+         virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
+         virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
+         write(fh,'(1x,"Tr(kin)*V + 2E_kin =",e16.8)') virial_kin
+         write(fh,'(1x,"Tr(har)*V + E_h    =",e16.8)') virial_har
+         write(fh,*)
+         write(fh,*) "Kinetic stress diagnostics [Hartree]"
+         e_kin_from_stress = -0.5d0 * stress_tensor_trace(system%stress_kin) * system%det_a
+         write(fh,'(1x,"E_kin(from stress trace) =",e16.8)') e_kin_from_stress
+         write(fh,'(1x,"E_kin(grad2/2)          =",e16.8)') 0.5d0 * system%stress_kin_dbg_grad2
+         write(fh,'(1x,"E_kin(cross)            =",e16.8)') system%stress_kin_dbg_cross
+         write(fh,'(1x,"E_kin(k2/2)             =",e16.8)') 0.5d0 * system%stress_kin_dbg_k2
+         write(fh,'(1x,"E_kin(reconstructed)    =",e16.8)') 0.5d0 * system%stress_kin_dbg_grad2 &
+              + system%stress_kin_dbg_cross + 0.5d0 * system%stress_kin_dbg_k2
+         write(fh,'(1x,"E_kin(reference)        =",e16.8)') energy%E_kin
+         write(fh,*)
+         write(fh,*) "Local/Ewald diagnostics"
+         write(fh,'(1x,"E_loc_sr               =",e16.8)') system%stress_loc_sr_energy
+         write(fh,'(1x,"E_loc_lr               =",e16.8)') system%stress_loc_lr_energy
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_g, au_pressure_gpa)
+         write(fh,'(1x,"P_ewald_G [GPa]        =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_r, au_pressure_gpa)
+         write(fh,'(1x,"P_ewald_R [GPa]        =",e16.8)') pressure_term_gpa
 
          if(yn_out_stress_decomp == 'y') then
            write(fh,*)
@@ -1566,6 +1594,13 @@ contains
       strs = 0d0
     end where
   end subroutine cleanup_stress_tensor_for_output
+
+  pure real(8) function stress_tensor_trace(strs)
+    implicit none
+    real(8), intent(in) :: strs(3,3)
+
+    stress_tensor_trace = strs(1,1) + strs(2,2) + strs(3,3)
+  end function stress_tensor_trace
 
   subroutine write_stress_rt(iter, ofl, dt, system)
     use structures

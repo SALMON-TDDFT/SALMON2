@@ -64,6 +64,13 @@ module structures
     real(8) :: stress_loc_fd(3,3)
     real(8) :: stress_nl(3,3)
     real(8) :: stress_ewa(3,3)
+    real(8) :: stress_loc_sr_energy
+    real(8) :: stress_loc_lr_energy
+    real(8) :: stress_ewa_g(3,3)
+    real(8) :: stress_ewa_r(3,3)
+    real(8) :: stress_kin_dbg_grad2
+    real(8) :: stress_kin_dbg_cross
+    real(8) :: stress_kin_dbg_k2
     integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field
     real(8) :: vec_Ac(3) ! A/c (spatially averaged), A: vector potential, c: speed of light
