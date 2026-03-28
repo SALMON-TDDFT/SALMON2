@@ -6,7 +6,6 @@ contains
   subroutine setup_fragment_parallel_grid(dg_frag, mg_parent, info_frag, mg_frag)
     use structures
     use rt_dg_fragment_types, only: s_dg_fragment_rt
-    use init_communicator, only: init_communicator_dft
     use initialization_sub, only: init_parallel_dft, init_grid_parallel
     use salmon_global, only: nproc_rgrid
     use communication, only: comm_get_groupinfo
@@ -81,7 +80,7 @@ contains
       flush(6)
       stop 'RT-DG fragment-local MPI Hartree invalid nprgrid for icomm_frag'
     end if
-    call init_communicator_dft(dg_frag%icomm_frag, info_frag)
+    call init_fragment_poisson_info(dg_frag%icomm_frag, info_frag)
     if (dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: frag-grid-after-init-communicator"
       flush(6)
@@ -107,6 +106,130 @@ contains
     deallocate(system_frag%wtk)
     deallocate(system_frag%rocc)
   end subroutine setup_fragment_parallel_grid
+
+  subroutine init_fragment_poisson_info(comm, info_frag)
+    use structures, only: s_parallel_info
+    use communication, only: comm_create_group_byid, comm_get_groupinfo, COMM_GROUP_NULL
+    implicit none
+    integer, intent(in) :: comm
+    type(s_parallel_info), intent(inout) :: info_frag
+
+    integer :: myrank, nproc
+    integer :: i1, i2, i3, i4, i5, ix, iy, iz, nl
+    integer, allocatable :: iranklists(:)
+
+    call comm_get_groupinfo(comm, myrank, nproc)
+
+    info_frag%icomm_r = COMM_GROUP_NULL
+    info_frag%icomm_k = COMM_GROUP_NULL
+    info_frag%icomm_o = COMM_GROUP_NULL
+    info_frag%icomm_ro = COMM_GROUP_NULL
+    info_frag%icomm_ko = COMM_GROUP_NULL
+    info_frag%icomm_rko = comm
+    info_frag%icomm_x = COMM_GROUP_NULL
+    info_frag%icomm_y = COMM_GROUP_NULL
+    info_frag%icomm_z = COMM_GROUP_NULL
+    info_frag%icomm_xy = COMM_GROUP_NULL
+    info_frag%id_rko = myrank
+    info_frag%isize_rko = nproc
+
+    allocate(iranklists(nproc))
+    allocate(info_frag%imap(0:info_frag%nprgrid(1)-1, 0:info_frag%nprgrid(2)-1, 0:info_frag%nprgrid(3)-1, 0:0, 0:0))
+
+    nl = -1
+    do i5 = 0, 0
+      do i4 = 0, 0
+        do i3 = 0, info_frag%nprgrid(3) - 1
+          do i2 = 0, info_frag%nprgrid(2) - 1
+            do i1 = 0, info_frag%nprgrid(1) - 1
+              nl = nl + 1
+              info_frag%imap(i1, i2, i3, i4, i5) = nl
+              if (nl == myrank) info_frag%iaddress = [i1, i2, i3, i4, i5]
+            end do
+          end do
+        end do
+      end do
+    end do
+
+    i5 = info_frag%iaddress(5)
+    i4 = info_frag%iaddress(4)
+
+    nl = 0
+    do i3 = 0, info_frag%nprgrid(3) - 1
+      do i2 = 0, info_frag%nprgrid(2) - 1
+        do i1 = 0, info_frag%nprgrid(1) - 1
+          nl = nl + 1
+          iranklists(nl) = info_frag%imap(i1, i2, i3, i4, i5)
+        end do
+      end do
+    end do
+    info_frag%icomm_r = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_r, info_frag%id_r, info_frag%isize_r)
+
+    nl = 1
+    iranklists(nl) = myrank
+    info_frag%icomm_o = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_o, info_frag%id_o, info_frag%isize_o)
+    info_frag%icomm_k = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_k, info_frag%id_k, info_frag%isize_k)
+    info_frag%icomm_ko = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_ko, info_frag%id_ko, info_frag%isize_ko)
+
+    nl = 0
+    do i3 = 0, info_frag%nprgrid(3) - 1
+      do i2 = 0, info_frag%nprgrid(2) - 1
+        do i1 = 0, info_frag%nprgrid(1) - 1
+          nl = nl + 1
+          iranklists(nl) = info_frag%imap(i1, i2, i3, 0, 0)
+        end do
+      end do
+    end do
+    info_frag%icomm_ro = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_ro, info_frag%id_ro, info_frag%isize_ro)
+
+    iz = info_frag%iaddress(3)
+    iy = info_frag%iaddress(2)
+    nl = 0
+    do ix = 0, info_frag%nprgrid(1) - 1
+      nl = nl + 1
+      iranklists(nl) = info_frag%imap(ix, iy, iz, 0, 0)
+    end do
+    info_frag%icomm_x = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_x, info_frag%id_x, info_frag%isize_x)
+
+    iz = info_frag%iaddress(3)
+    ix = info_frag%iaddress(1)
+    nl = 0
+    do iy = 0, info_frag%nprgrid(2) - 1
+      nl = nl + 1
+      iranklists(nl) = info_frag%imap(ix, iy, iz, 0, 0)
+    end do
+    info_frag%icomm_y = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_y, info_frag%id_y, info_frag%isize_y)
+
+    iy = info_frag%iaddress(2)
+    ix = info_frag%iaddress(1)
+    nl = 0
+    do iz = 0, info_frag%nprgrid(3) - 1
+      nl = nl + 1
+      iranklists(nl) = info_frag%imap(ix, iy, iz, 0, 0)
+    end do
+    info_frag%icomm_z = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_z, info_frag%id_z, info_frag%isize_z)
+
+    iz = info_frag%iaddress(3)
+    nl = 0
+    do iy = 0, info_frag%nprgrid(2) - 1
+      do ix = 0, info_frag%nprgrid(1) - 1
+        nl = nl + 1
+        iranklists(nl) = info_frag%imap(ix, iy, iz, 0, 0)
+      end do
+    end do
+    info_frag%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
+    call comm_get_groupinfo(info_frag%icomm_xy, info_frag%id_xy, info_frag%isize_xy)
+
+    deallocate(iranklists)
+  end subroutine init_fragment_poisson_info
 
   subroutine setup_fragment_system(dg_frag, system, info, mg_parent, system_frag, info_frag, mg_frag)
     use structures

@@ -37,6 +37,7 @@ subroutine init_communicator_dft(comm,info)
   integer :: nproc_d_o(3)
   integer :: i1,i2,i3,i4,i5,ix,iy,iz,nl,io2,io3,io4
   integer,allocatable :: iranklists(:)
+  logical :: debug_trace
 
 #ifdef __FUJITSU
   integer :: iret
@@ -47,6 +48,7 @@ subroutine init_communicator_dft(comm,info)
   nproc_k   = info%npk
   nproc_ob  = info%nporbital
   nproc_d_o = info%nprgrid
+  debug_trace = (nproc <= 8 .and. nproc_k == 1 .and. nproc_ob == 1)
 
   allocate(iranklists(nproc))
 
@@ -129,6 +131,11 @@ subroutine init_communicator_dft(comm,info)
 
   info%icomm_r = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_r, info%id_r, info%isize_r)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_r size=", info%isize_r, &
+      " id=", info%id_r, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
   ! icomm_o
   i5 = info%iaddress(5)
@@ -143,6 +150,11 @@ subroutine init_communicator_dft(comm,info)
 
   info%icomm_o = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_o, info%id_o, info%isize_o)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_o size=", info%isize_o, &
+      " id=", info%id_o, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
   ! icomm_k
   i4 = info%iaddress(4)
@@ -157,6 +169,11 @@ subroutine init_communicator_dft(comm,info)
 
   info%icomm_k = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_k size=", info%isize_k, &
+      " id=", info%id_k, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
   ! icomm_ro
   i5 = info%iaddress(5)
@@ -174,6 +191,11 @@ subroutine init_communicator_dft(comm,info)
 
   info%icomm_ro = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_ro, info%id_ro, info%isize_ro)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_ro size=", info%isize_ro, &
+      " id=", info%id_ro, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
   ! icomm_ko
   i3 = info%iaddress(3)
@@ -189,6 +211,11 @@ subroutine init_communicator_dft(comm,info)
 
   info%icomm_ko = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_ko, info%id_ko, info%isize_ko)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_ko size=", info%isize_ko, &
+      " id=", info%id_ko, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
   i5 = info%iaddress(5)
   i4 = info%iaddress(4)
@@ -203,6 +230,11 @@ subroutine init_communicator_dft(comm,info)
   end do
   info%icomm_x = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_x, info%id_x, info%isize_x)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_x size=", info%isize_x, &
+      " id=", info%id_x, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
 ! y-dir summation
   iz = info%iaddress(3)
@@ -214,6 +246,11 @@ subroutine init_communicator_dft(comm,info)
   end do
   info%icomm_y = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_y, info%id_y, info%isize_y)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_y size=", info%isize_y, &
+      " id=", info%id_y, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
 ! z-dir summation
   iy = info%iaddress(2)
@@ -225,6 +262,11 @@ subroutine init_communicator_dft(comm,info)
   end do
   info%icomm_z = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_z, info%id_z, info%isize_z)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_z size=", info%isize_z, &
+      " id=", info%id_z, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
 ! xy-dir summation (for singlescale FDTD and for FFTW)
   iz = info%iaddress(3)
@@ -237,6 +279,11 @@ subroutine init_communicator_dft(comm,info)
   end do
   info%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_xy, info%id_xy, info%isize_xy)
+  if (debug_trace .and. comm_is_root(info%id_rko)) then
+    write(*,'(1x,a,2(i0,a),4(i0,1x))') "        init-comm trace: built icomm_xy size=", info%isize_xy, &
+      " id=", info%id_xy, " ranks=", iranklists(1), iranklists(min(2,nl)), iranklists(min(3,nl)), iranklists(nl)
+    flush(6)
+  end if
 
 ! begin: preparation of communicator for isolated_ffte
   if(method_poisson=='ft'.and.yn_ffte=='y')then

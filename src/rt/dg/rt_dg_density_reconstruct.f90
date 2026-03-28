@@ -90,6 +90,12 @@
     allocate(phi_blk(grid_block_size, dg_frag%nstate_frag))
     allocate(rho_blk(grid_block_size))
     allocate(rho_blk_accum(grid_block_size))
+    ! Closed-shell fallback: nelec = 2 * nocc_per_spin.
+    nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
+    nocc_cache = nocc_per_spin
+    if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+      nocc_cache = min(dg_frag%nstate_tot, maxval(nelec_spin(1:system%nspin)))
+    end if
     allocate(coef_blk_re(nbf_max, state_block_size), coef_blk_im(nbf_max, state_block_size))
     allocate(psi_blk_re(grid_block_size, state_block_size), psi_blk_im(grid_block_size, state_block_size))
     allocate(density_mat_re(nbf_max, nbf_max), density_tmp(grid_block_size, nbf_max))
@@ -103,12 +109,6 @@
     allocate(rho_s_reduce(0:dg_frag%isize-1, system%nspin))
 
     rho%f = 0.0d0
-    ! Closed-shell fallback: nelec = 2 * nocc_per_spin.
-    nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
-    nocc_cache = nocc_per_spin
-    if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
-      nocc_cache = min(dg_frag%nstate_tot, maxval(nelec_spin(1:system%nspin)))
-    end if
     occ_factor = 2.0d0 / real(system%nspin, 8)
     occ_scale = sqrt(occ_factor)
     n_pw = 0
@@ -545,8 +545,9 @@
               time_project_rho = time_project_rho + (t_rho1 - t_rho0)
             else
               if (.not. dg_frag%density_matrix_frag_valid(ispin, i_local)) then
-                coef_occ_weighted(1:nbf, 1:nocc_spin) = (0.0d0, 0.0d0)
+                ! nocc >> nbf: build D on root only, bcast D (O(nbf^2)) instead of coef (O(nbf*nocc))
                 if (.not. distribute_project .or. dg_frag%is_frag_root) then
+                  coef_occ_weighted(1:nbf, 1:nocc_spin) = (0.0d0, 0.0d0)
 !$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
                   do io = 1, nocc_spin
                     do idx_local = 1, valid_basis_count
@@ -555,12 +556,12 @@
                     end do
                   end do
 !$omp end parallel do
+                  call zgemm('N', 'C', nbf, nbf, nocc_spin, (1.0d0, 0.0d0), coef_occ_weighted, nbf_max, &
+                             coef_occ_weighted, nbf_max, (0.0d0, 0.0d0), dg_frag%density_matrix_frag(1, 1, ispin, i_local), nbf_max)
                 end if
                 if (distribute_project) then
-                  call comm_bcast(coef_occ_weighted(1:nbf, 1:nocc_spin), dg_frag%icomm_frag, 0)
+                  call comm_bcast(dg_frag%density_matrix_frag(:, :, ispin, i_local), dg_frag%icomm_frag, 0)
                 end if
-                call zgemm('N', 'C', nbf, nbf, nocc_spin, (1.0d0, 0.0d0), coef_occ_weighted, nbf_max, &
-                           coef_occ_weighted, nbf_max, (0.0d0, 0.0d0), dg_frag%density_matrix_frag(1, 1, ispin, i_local), nbf_max)
                 dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
               end if
               rho_blk_accum(1:npt_blk) = 0.0d0

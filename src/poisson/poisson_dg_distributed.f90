@@ -153,7 +153,7 @@ contains
       flush(6)
     end if
 
-    allocate(Vh_work%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)))
+    allocate(Vh_work%f(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)))
     Vh_work%f = 0.0d0
     allocate(rhoG_work(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
                        lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
@@ -192,16 +192,23 @@ contains
 
     rhoG_work(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3)) = &
       poisson_frag%zrhoG_ele(mg_frag%is(1):mg_frag%ie(1), mg_frag%is(2):mg_frag%ie(2), mg_frag%is(3):mg_frag%ie(3))
-    if (dg_frag%id == 0) then
-      write(*,'(1x,a)') "        hartree trace: bridge-before-allreduce"
-      flush(6)
-    end if
+    write(*,'(1x,a,i0,a,i0,a,6(i0,a))') "        hartree trace: before-vh-allreduce rank=", dg_frag%id_frag, &
+      " count=", size(Vh_work%f), " bounds=", lbound(Vh_work%f,1), ":", ubound(Vh_work%f,1), ",", &
+      lbound(Vh_work%f,2), ":", ubound(Vh_work%f,2), ",", lbound(Vh_work%f,3), ":", ubound(Vh_work%f,3)
+    flush(6)
     call comm_summation(Vh_work%f, Vh%f, size(Vh_work%f), dg_frag%icomm_frag)
+    write(*,'(1x,a,i0)') "        hartree trace: after-vh-allreduce rank=", dg_frag%id_frag
+    flush(6)
+
+    write(*,'(1x,a,i0,a,i0,a,6(i0,a),a,6(i0,a))') "        hartree trace: before-rhog-allreduce rank=", dg_frag%id_frag, &
+      " count=", size(rhoG_work), " work-bounds=", lbound(rhoG_work,1), ":", ubound(rhoG_work,1), ",", &
+      lbound(rhoG_work,2), ":", ubound(rhoG_work,2), ",", lbound(rhoG_work,3), ":", ubound(rhoG_work,3), &
+      " dest-bounds=", lbound(poisson%zrhoG_ele,1), ":", ubound(poisson%zrhoG_ele,1), ",", &
+      lbound(poisson%zrhoG_ele,2), ":", ubound(poisson%zrhoG_ele,2), ",", lbound(poisson%zrhoG_ele,3), ":", ubound(poisson%zrhoG_ele,3)
+    flush(6)
     call comm_summation(rhoG_work, poisson%zrhoG_ele, size(rhoG_work), dg_frag%icomm_frag)
-    if (dg_frag%id == 0) then
-      write(*,'(1x,a)') "        hartree trace: bridge-after-allreduce"
-      flush(6)
-    end if
+    write(*,'(1x,a,i0)') "        hartree trace: after-rhog-allreduce rank=", dg_frag%id_frag
+    flush(6)
 
     if (yn_put_wall_z_boundary == 'y') then
       !$omp parallel do private(iz,iy,ix,z,z0,Vwall_z) schedule(static)
