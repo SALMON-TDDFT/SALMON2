@@ -759,6 +759,7 @@
                 end do  ! io0
 
                 ! AllReduce rho_blk_partial across icomm_frag → rho_blk_accum
+                ! Note: comm_summation overwrites rho_blk_accum (does not accumulate into it)
                 call cpu_time(t_rho0)
                 if (distribute_project) then
                   call comm_summation(rho_blk_partial(1:npt_blk), rho_blk_accum(1:npt_blk), &
@@ -769,6 +770,7 @@
                 call cpu_time(t_rho1)
                 time_project_rho_reduce = time_project_rho_reduce + (t_rho1 - t_rho0)
               end if
+              ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
 !$omp parallel private(igrid, owner_rank, ixg, iyg, izg, rho_contrib, slot, pack_offset)
               if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
