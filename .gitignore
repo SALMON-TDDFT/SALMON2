@@ -3,6 +3,7 @@
 *.optrpt
 *.log
 *.dat
+.worktrees/
 
 # Executable binaries
 /bin/
