@@ -47,6 +47,9 @@
     real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:)
     real(8), allocatable :: density_mat_re(:,:), density_tmp(:,:)
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
+    real(8), allocatable :: coef_re_frag(:,:)   ! (nbf_max, nocc_spin) real coef for current fragment
+    real(8), allocatable :: D_partial_re(:,:)    ! (nbf_max, nbf_max) partial D per rank
+    integer :: io_s_frag, io_e_frag, nocc_loc, nocc_per_rank_loc
     complex(8), allocatable :: psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:), coef_occ_weighted(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: transform_frag(:,:), transform_pw(:,:)
@@ -340,6 +343,8 @@
           " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
         flush(6)
       end if
+      allocate(coef_re_frag(nbf_max, max(1, nocc_cache)))
+      allocate(D_partial_re(nbf_max, nbf_max))
       allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
       call cpu_time(t_project0)
       i_local = 0
@@ -371,33 +376,57 @@
               valid_basis_ids(valid_basis_count) = istate_frag
             end do
             call cpu_time(t_dmat0)
+            ! Step 3a: root fills coef_re_frag, bcasts to all ranks in icomm_frag
+            coef_re_frag(1:nbf, 1:nocc_spin) = 0.0d0
             if (.not. distribute_project .or. dg_frag%is_frag_root) then
-              coef_occ_weighted(1:nbf, 1:nocc_spin) = (0.0d0, 0.0d0)
 !$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
               do io = 1, nocc_spin
                 do idx_local = 1, valid_basis_count
                   istate_frag = valid_basis_ids(idx_local)
-                  coef_occ_weighted(istate_frag, io) = occ_scale * dg_frag%coef(basis_gid(istate_frag), io, ispin)
+                  coef_re_frag(istate_frag, io) = real(dg_frag%coef(basis_gid(istate_frag), io, ispin), kind=8)
                 end do
               end do
 !$omp end parallel do
-              call zgemm('N', 'C', nbf, nbf, nocc_spin, (1.0d0, 0.0d0), coef_occ_weighted, nbf_max, &
-                         coef_occ_weighted, nbf_max, (0.0d0, 0.0d0), dg_frag%density_matrix_frag(1, 1, ispin, i_local), nbf_max)
             end if
             if (distribute_project) then
-              call comm_bcast(dg_frag%density_matrix_frag(:, :, ispin, i_local), dg_frag%icomm_frag, 0)
+              call comm_bcast(coef_re_frag(1:nbf, 1:nocc_spin), dg_frag%icomm_frag, 0)
             end if
+
+            ! Step 3b: each rank computes dsyrk on its state slice
+            nocc_per_rank_loc = (nocc_spin + dg_frag%isize_frag - 1) / dg_frag%isize_frag
+            io_s_frag = dg_frag%id_frag * nocc_per_rank_loc + 1
+            io_e_frag = min((dg_frag%id_frag + 1) * nocc_per_rank_loc, nocc_spin)
+            nocc_loc = max(0, io_e_frag - io_s_frag + 1)
+
+            D_partial_re(1:nbf_max, 1:nbf_max) = 0.0d0
+            if (nocc_loc > 0 .and. nbf > 0) then
+              ! D_partial = occ_factor * coef_re_frag[:,io_s:io_e] * coef_re_frag[:,io_s:io_e]^T
+              ! upper triangle only
+              ! NOTE: use 'N' (not 'T') — A is (nbf_max x nocc_loc), LDA=nbf_max
+              !   'N': C = alpha * A * A^T where A is (n x k) = (nbf x nocc_loc), LDA>=n
+              call dsyrk('U', 'N', nbf, nocc_loc, occ_factor, &
+                         coef_re_frag(1, io_s_frag), nbf_max, &
+                         0.0d0, D_partial_re(1,1), nbf_max)
+            end if
+
+            ! Step 3c: AllReduce partial D across icomm_frag
+            if (distribute_project) then
+              call comm_summation(D_partial_re(1:nbf_max, 1:nbf_max), &
+                                  D_frag_re(1:nbf_max, 1:nbf_max, ispin), &
+                                  nbf_max * nbf_max, dg_frag%icomm_frag)
+            else
+              D_frag_re(1:nbf_max, 1:nbf_max, ispin) = D_partial_re(1:nbf_max, 1:nbf_max)
+            end if
+
+            ! Step 3d: symmetrize (copy upper triangle to lower)
+            do io = 1, nbf
+              do istate_frag = io + 1, nbf
+                D_frag_re(istate_frag, io, ispin) = D_frag_re(io, istate_frag, ispin)
+              end do
+            end do
             dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
             call cpu_time(t_dmat1)
             time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
-!$omp parallel do private(io, istate_frag) schedule(static)
-            do io = 1, nbf
-!$omp simd
-              do istate_frag = 1, nbf
-                D_frag_re(istate_frag, io, ispin) = real(dg_frag%density_matrix_frag(istate_frag, io, ispin, i_local), kind=8)
-              end do
-            end do
-!$omp end parallel do
           end do
         end if
         ! --- end D pre-pass ---
@@ -744,6 +773,8 @@
       call cpu_time(t_project1)
       time_project = time_project + (t_project1 - t_project0)
       if (allocated(D_frag_re)) deallocate(D_frag_re)
+      if (allocated(coef_re_frag)) deallocate(coef_re_frag)
+      if (allocated(D_partial_re)) deallocate(D_partial_re)
       if (dg_frag%id == 0) then
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
         write(*,'(1x,a,7(a,1pe12.4))') "        density trace: project breakdown", &
