@@ -1419,11 +1419,11 @@ contains
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
-                                   yn_jm, yn_periodic, base_directory
+                                   yn_jm, yn_out_stress, yn_out_stress_decomp, yn_periodic, yn_stress_loc_fd, base_directory
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
-    use inputoutput,         only: au_length_aa,au_energy_ev
+    use inputoutput,         only: au_length_aa, au_energy_ev, au_pressure_gpa
     implicit none
     integer           ,intent(in) :: Miter
     type(s_dft_energy),intent(in) :: energy
@@ -1432,6 +1432,9 @@ contains
     !
     integer :: fh,is,p1,p2,p5,iob,jj,ik,ikoa,iatom,ix
     character(100) :: file_gs_info
+    real(8) :: stress_gpa(3,3)
+    real(8) :: term_gpa(3,3)
+    real(8) :: pressure_gpa
 
     file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
@@ -1511,10 +1514,119 @@ contains
 300    format(i6,3e16.8)
        end if
 
+       if(yn_out_stress == 'y') then
+         write(fh,*)
+         write(fh,*) "Stress tensor [GPa]"
+         stress_gpa = system%stress_tensor * au_pressure_gpa
+         call cleanup_stress_tensor_for_output(stress_gpa)
+         pressure_gpa = -sum((/stress_gpa(1,1), stress_gpa(2,2), stress_gpa(3,3)/)) / 3d0
+         write(fh,'(1x,"xx yy zz =",3e16.8)') stress_gpa(1,1), stress_gpa(2,2), stress_gpa(3,3)
+         write(fh,'(1x,"xy yz xz =",3e16.8)') stress_gpa(1,2), stress_gpa(2,3), stress_gpa(1,3)
+         write(fh,'(1x,"pressure =",e16.8)') pressure_gpa
+
+         if(yn_out_stress_decomp == 'y') then
+           write(fh,*)
+           write(fh,*) "Stress decomposition pressure [GPa]"
+           term_gpa = system%stress_kin * au_pressure_gpa
+           call cleanup_stress_tensor_for_output(term_gpa)
+           write(fh,'(1x,"Kinetic    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           term_gpa = system%stress_har * au_pressure_gpa
+           call cleanup_stress_tensor_for_output(term_gpa)
+           write(fh,'(1x,"Hartree    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           term_gpa = system%stress_xc * au_pressure_gpa
+           call cleanup_stress_tensor_for_output(term_gpa)
+           write(fh,'(1x,"XC         =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           term_gpa = system%stress_loc * au_pressure_gpa
+           call cleanup_stress_tensor_for_output(term_gpa)
+           write(fh,'(1x,"Local      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           if(yn_stress_loc_fd == 'y') then
+             term_gpa = system%stress_loc_fd * au_pressure_gpa
+             call cleanup_stress_tensor_for_output(term_gpa)
+             write(fh,'(1x,"Local(G-FD)=",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           end if
+           term_gpa = system%stress_nl * au_pressure_gpa
+           call cleanup_stress_tensor_for_output(term_gpa)
+           write(fh,'(1x,"Nonlocal   =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           term_gpa = system%stress_ewa * au_pressure_gpa
+           call cleanup_stress_tensor_for_output(term_gpa)
+           write(fh,'(1x,"Ewald      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+         end if
+       end if
+
        close(fh)
     endif
 
   end subroutine write_info_data
+
+  subroutine cleanup_stress_tensor_for_output(strs)
+    implicit none
+    real(8), intent(inout) :: strs(3,3)
+
+    where(abs(strs) < 1d-8)
+      strs = 0d0
+    end where
+  end subroutine cleanup_stress_tensor_for_output
+
+  subroutine write_stress_rt(iter, ofl, dt, system)
+    use structures
+    use salmon_global,   only: yn_out_stress_decomp
+    use inputoutput,     only: au_pressure_gpa, t_unit_time
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root
+    use filesystem,      only: open_filehandle
+    implicit none
+    integer,            intent(in)    :: iter
+    type(s_ofile),      intent(inout) :: ofl
+    real(8),            intent(in)    :: dt
+    type(s_dft_system), intent(in)    :: system
+    real(8) :: time_out, pres, gpa
+    real(8) :: s(3,3), term_gpa(3,3)
+
+    if(.not. comm_is_root(nproc_id_global)) return
+    gpa = au_pressure_gpa
+
+    if(iter < 0) then
+      ofl%fh_stress = open_filehandle(trim(ofl%file_stress_data), status='replace')
+      write(ofl%fh_stress,'(a)') "# Stress tensor time series  [time: " // trim(t_unit_time%name) // ", stress: GPa]"
+      if(yn_out_stress_decomp == 'n') then
+        write(ofl%fh_stress,'(a)') "# col: time s_xx s_yy s_zz s_xy s_yz s_xz pressure"
+      else
+        write(ofl%fh_stress,'(a)') "# col: time s_xx s_yy s_zz s_xy s_yz s_xz pressure p_kin p_har p_xc p_loc p_nl p_ewa"
+      end if
+      flush(ofl%fh_stress)
+      return
+    end if
+
+    time_out = iter * dt * t_unit_time%conv
+    s = system%stress_tensor * gpa
+    call cleanup_stress_tensor_for_output(s)
+    pres = -(s(1,1) + s(2,2) + s(3,3)) / 3d0
+
+    if(yn_out_stress_decomp == 'n') then
+      write(ofl%fh_stress,'(8e16.8)') time_out, s(1,1), s(2,2), s(3,3), s(1,2), s(2,3), s(1,3), pres
+    else
+      term_gpa = system%stress_kin * gpa
+      call cleanup_stress_tensor_for_output(term_gpa)
+      write(ofl%fh_stress,'(14e16.8)') time_out, s(1,1), s(2,2), s(3,3), s(1,2), s(2,3), s(1,3), pres, &
+           -(term_gpa(1,1)+term_gpa(2,2)+term_gpa(3,3))/3d0, &
+           -stress_term_pressure_gpa(system%stress_har, gpa), &
+           -stress_term_pressure_gpa(system%stress_xc, gpa), &
+           -stress_term_pressure_gpa(system%stress_loc, gpa), &
+           -stress_term_pressure_gpa(system%stress_nl, gpa), &
+           -stress_term_pressure_gpa(system%stress_ewa, gpa)
+    end if
+    flush(ofl%fh_stress)
+  end subroutine write_stress_rt
+
+  real(8) function stress_term_pressure_gpa(strs, gpa)
+    implicit none
+    real(8), intent(in) :: strs(3,3), gpa
+    real(8) :: term_gpa(3,3)
+
+    term_gpa = strs * gpa
+    call cleanup_stress_tensor_for_output(term_gpa)
+    stress_term_pressure_gpa = (term_gpa(1,1) + term_gpa(2,2) + term_gpa(3,3)) / 3d0
+  end function stress_term_pressure_gpa
   
 !===================================================================================================================================
 

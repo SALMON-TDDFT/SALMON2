@@ -42,6 +42,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
   use nvtx
+  use stress_sub, only: calc_stress, refresh_stress_output_state, s_stress_field_state
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -77,6 +78,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
+  type(s_stress_field_state) :: field_state
   call nvtxStartRange('time_evolution_step', __LINE__)
 
   spsi_out%update_zwf_overlap = .false. 
@@ -377,6 +379,15 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   & .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_current_decomposed_step)==0)) then
     call write_current_decomposed(itt,ofl,mg,system,info,stencil,srg,spsi_out,ppg)
   end if
+
+  if(yn_out_stress == 'y' .and. mod(itt, out_stress_step) == 0) then
+    if(.not. singlescale%flag_use) system%vec_Ac(:) = rt%Ac_tot(:,itt)
+    call refresh_stress_output_state(system, theory, info, mg, stencil, srg, ppg, &
+                                     energy, V_local, spsi_out, tpsi, spsi_in, field_state)
+    call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, &
+                     spsi_out, ewald, energy, xc_func, rho_s, Vxc, field_state)
+    call write_stress_rt(itt, ofl, dt, system)
+  end if
   
   call timer_end(LOG_WRITE_RT_INFOS)
 
@@ -541,4 +552,3 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
 
   call nvtxEndRange
 end subroutine calc_current_ion
-

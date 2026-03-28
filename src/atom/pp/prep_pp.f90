@@ -553,7 +553,7 @@ END SUBROUTINE dealloc_init_ps
 
 SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   use structures
-  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_spinorbit
+  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_out_stress, yn_spinorbit
 #ifdef USE_FFTW
   use salmon_global,only : yn_fftw
 #endif
@@ -693,6 +693,10 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
     if( property == 'initial' ) then
       allocate(ppg%zrhoG_ion(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e)  & ! rho_ion(G)
             & ,ppg%zVG_ion  (ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,nelem)) ! V_ion(G)
+      if(yn_out_stress == 'y') then
+        allocate(ppg%dVG_ion_dG2(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,nelem))
+        ppg%dVG_ion_dG2 = 0d0
+      end if
 
       ppg%zVG_ion = 0d0
 
@@ -730,6 +734,38 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
       end do
   !$omp end do
   !$omp end parallel
+
+      if(yn_out_stress == 'y') then
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+        do ik=1,nelem
+          do iz=ifgz_s,ifgz_e
+          do iy=ifgy_s,ifgy_e
+          do ix=ifgx_s,ifgx_e
+            if(fg%if_Gzero(ix,iy,iz)) cycle
+            g(1) = fg%vec_G(1,ix,iy,iz)
+            g(2) = fg%vec_G(2,ix,iy,iz)
+            g(3) = fg%vec_G(3,ix,iy,iz)
+            g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
+            s = 0d0
+            do i=2,pp%nrloc(ik)
+              r1 = 0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
+              dr = pp%rad(i,ik)-pp%rad(i-1,ik)
+              vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+              if(g2sq*r1 < 1d-2) then
+                s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+                      * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/2520d0) * dr
+              else
+                s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+                      * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
+              end if
+            end do
+            ppg%dVG_ion_dG2(ix,iy,iz,ik) = s
+          end do
+          end do
+          end do
+        end do
+  !$omp end parallel do
+      end if
 
     end if
 

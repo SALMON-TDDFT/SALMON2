@@ -38,7 +38,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use salmon_xc
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
-                       write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
+                       write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,write_stress_rt,&
                        init_projection,write_rt_spin,write_current_decomposed
   use code_optimization
   use initialization_sub
@@ -56,11 +56,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
-  use salmon_global, only: quiet
+  use salmon_global, only: quiet, theory, yn_out_stress
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
+  use stress_sub, only: calc_stress, refresh_stress_output_state, s_stress_field_state
   implicit none
   integer,parameter :: Nd = 4
 
@@ -100,7 +101,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
+  integer :: Mit_restart_loaded, stress_label_iter, stress_state_iter
   logical :: rion_update
+  type(s_stress_field_state) :: field_state
 
   call nvtxStartRange('initialization_rt', __LINE__)
 
@@ -188,6 +191,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%Ac_tot(1:3, 0:nt+1) = rt%Ac_ext(1:3, 0:nt+1)
   rt%E_tot(1:3, 0:nt+1) = rt%E_ext(1:3, 0:nt+1) 
   
+  Mit_restart_loaded = Mit
   if (yn_restart == 'n') Mit=0
   call timer_end(LOG_READ_RT_DATA)
   
@@ -250,6 +254,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data
     call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
   end if
+  Mit_restart_loaded = Mit
   if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
@@ -349,11 +354,13 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
      write(ofl%file_response_data,"(2A,'_response.data')") trim(base_directory),trim(SYSname)
      write(ofl%file_pulse_data,"(2A,'_pulse.data')") trim(base_directory),trim(SYSname)
+     if(yn_out_stress == 'y') write(ofl%file_stress_data,"(2A,'_stress.data')") trim(base_directory),trim(SYSname)
   endif
   call comm_bcast(ofl%file_rt_data,       nproc_group_global)
   call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
   call comm_bcast(ofl%file_response_data, nproc_group_global)
   call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
+  if(yn_out_stress == 'y') call comm_bcast(ofl%file_stress_data, nproc_group_global)
   
  ! write file header
   
@@ -365,6 +372,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   !(header of SYSname_rt_energy.data)
   call write_rt_energy_data(-1,ofl,dt,energy,md)
+  if(yn_out_stress == 'y') call write_stress_rt(-1, ofl, dt, system)
   
   if(yn_spinorbit=='y') then
   !(header in SYSname_rt_spin.data)
@@ -491,6 +499,25 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call write_xyz(comment_line,"add","rvf",system,ofl)
   10 format("#rt   step=",i8,"   time",e16.6)
   12 format(a,"  xi_nh=",e18.10)
+  end if
+
+  if(yn_out_stress == 'y' .and. theory /= 'multi_scale_maxwell_tddft') then
+    if(yn_restart == 'n') then
+      stress_label_iter = 0
+      stress_state_iter = 0
+    else if(yn_reset_step_restart == 'y') then
+      stress_label_iter = 0
+      stress_state_iter = Mit_restart_loaded
+    else
+      stress_label_iter = Mit_restart_loaded
+      stress_state_iter = Mit_restart_loaded
+    end if
+    if(.not. singlescale%flag_use) system%vec_Ac(:) = rt%Ac_tot(:,stress_state_iter)
+    call refresh_stress_output_state(system, theory, info, mg, stencil, srg, ppg, &
+                                     energy, V_local, spsi_in, spsi_out, tpsi, field_state)
+    call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, &
+                     spsi_in, ewald, energy, xc_func, rho_s, Vxc, field_state)
+    call write_stress_rt(stress_label_iter, ofl, dt, system)
   end if
   
   call timer_end(LOG_INIT_TIME_PROPAGATION)

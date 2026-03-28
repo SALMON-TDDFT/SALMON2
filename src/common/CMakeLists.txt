@@ -12,6 +12,7 @@ set(SOURCES
    total_energy.f90
    lattice.f90
    force.f90
+   stress.f90
    )
 
 if (IS_FUJITSU_COMPILER)

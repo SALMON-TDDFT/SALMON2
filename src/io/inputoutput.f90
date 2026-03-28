@@ -2937,7 +2937,7 @@ contains
       stop "yn_out_stress='y' requires spin='unpolarized'"
     if(yn_out_stress_decomp == 'y' .and. yn_out_stress /= 'y') &
       stop "yn_out_stress_decomp='y' requires yn_out_stress='y'"
-    if(out_stress_step < 1) &
+    if(yn_out_stress == 'y' .and. out_stress_step < 1) &
       stop "out_stress_step must be >= 1"
     
     if(yn_dc=='y') then

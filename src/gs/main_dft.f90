@@ -48,6 +48,7 @@ use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
 use lcfo
+use stress_sub
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -77,6 +78,7 @@ type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 type(s_opt) :: opt
 type(s_dcdft) :: dc
+type(s_stress_field_state) :: stress_field_state
 
 logical :: rion_update
 logical :: flag_opt_conv
@@ -316,6 +318,10 @@ end if
 ! write GS: basic data
 if(yn_dc=='n') call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
+if(yn_out_stress == 'y') then
+  call prepare_stress_field_state(system, theory, stress_field_state)
+  call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, spsi, ewald, energy, xc_func, rho_s, Vxc, stress_field_state)
+end if
 call write_info_data(Miter,system,energy,pp)
 call write_k_data(system,stencil)
 if(yn_spinorbit=='y') call write_mag_decomposed_gs(system,mg,info,spsi)
