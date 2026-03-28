@@ -340,8 +340,8 @@
           " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
         flush(6)
       end if
-      call cpu_time(t_project0)
       allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
+      call cpu_time(t_project0)
       i_local = 0
       block_idx_global = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -388,14 +388,16 @@
               call comm_bcast(dg_frag%density_matrix_frag(:, :, ispin, i_local), dg_frag%icomm_frag, 0)
             end if
             dg_frag%density_matrix_frag_valid(ispin, i_local) = .true.
+            call cpu_time(t_dmat1)
+            time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
+!$omp parallel do private(io, istate_frag) schedule(static)
             do io = 1, nbf
 !$omp simd
               do istate_frag = 1, nbf
                 D_frag_re(istate_frag, io, ispin) = real(dg_frag%density_matrix_frag(istate_frag, io, ispin, i_local), kind=8)
               end do
             end do
-            call cpu_time(t_dmat1)
-            time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
+!$omp end parallel do
           end do
         end if
         ! --- end D pre-pass ---
