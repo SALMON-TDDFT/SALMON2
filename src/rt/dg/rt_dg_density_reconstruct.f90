@@ -49,6 +49,10 @@
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
     real(8), allocatable :: coef_re_frag(:,:)   ! (nbf_max, nocc_spin) real coef for current fragment
     real(8), allocatable :: D_partial_re(:,:)    ! (nbf_max, nbf_max) partial D per rank
+    real(8), allocatable :: coef_re_full(:,:,:)  ! (nbf_max, nocc_cache, nspin) upfront bcast coef (n_pw>0)
+    real(8), allocatable :: coef_im_full(:,:,:)  ! (nbf_max, nocc_cache, nspin)
+    real(8), allocatable :: rho_blk_partial(:)   ! (grid_block_size) partial rho for state slice
+    real(8) :: time_project_rho_reduce
     integer :: io_s_frag, io_e_frag, nocc_loc, nocc_per_rank_loc
     complex(8), allocatable :: psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:), coef_occ_weighted(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
@@ -73,6 +77,7 @@
     time_project_phi_pack = 0.0d0
     time_project_overhead = 0.0d0
     time_project_dmat_build = 0.0d0
+    time_project_rho_reduce = 0.0d0
     if (dg_frag%id == 0) then
       write(*,'(1x,a)') "        density trace: stage=entry"
       flush(6)
@@ -431,6 +436,51 @@
             call cpu_time(t_dmat1)
             time_project_dmat_build = time_project_dmat_build + (t_dmat1 - t_dmat0)
           end do
+        else
+          ! n_pw > 0: upfront bcast of coef_re/im to all icomm_frag ranks
+          if (.not. allocated(coef_re_full)) then
+            allocate(coef_re_full(nbf_max, max(1, nocc_cache), system%nspin))
+            allocate(coef_im_full(nbf_max, max(1, nocc_cache), system%nspin))
+          end if
+          coef_re_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
+          coef_im_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
+          do ispin = 1, system%nspin
+            nbf = dg_frag%n_basis(ifrag, ispin)
+            nocc_spin = nocc_per_spin
+            if (system%nspin == 2 .and. sum(nelec_spin(:)) > 0) then
+              nocc_spin = min(dg_frag%nstate_tot, nelec_spin(ispin))
+            end if
+            if (nbf <= 0 .or. nocc_spin <= 0) cycle
+            valid_basis_count = 0
+            do istate_frag = 1, nbf
+              basis_gid(istate_frag) = dg_frag%index_basis(istate_frag, ifrag, ispin)
+              if (basis_gid(istate_frag) < 1 .or. basis_gid(istate_frag) > dg_frag%n_mat_max) cycle
+              valid_basis_count = valid_basis_count + 1
+              valid_basis_ids(valid_basis_count) = istate_frag
+            end do
+            if (.not. distribute_project .or. dg_frag%is_frag_root) then
+!$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
+              do io = 1, nocc_spin
+                do idx_local = 1, valid_basis_count
+                  istate_frag = valid_basis_ids(idx_local)
+                  coef_re_full(istate_frag, io, ispin) = real(dg_frag%coef(basis_gid(istate_frag), io, ispin), kind=8)
+                  coef_im_full(istate_frag, io, ispin) = aimag(dg_frag%coef(basis_gid(istate_frag), io, ispin))
+                end do
+              end do
+!$omp end parallel do
+            end if
+            if (distribute_project) then
+              call comm_bcast(coef_re_full(1:nbf, 1:nocc_spin, ispin), dg_frag%icomm_frag, 0)
+              call comm_bcast(coef_im_full(1:nbf, 1:nocc_spin, ispin), dg_frag%icomm_frag, 0)
+            end if
+          end do
+          ! NOTE: coef_pw_full_cache is already populated on all ranks by refresh_pw_coef_cache
+          ! (called before the fragment loop), so no bcast is needed here.
+
+          ! Compute state range for this rank
+          nocc_per_rank_loc = (nocc_per_spin + dg_frag%isize_frag - 1) / dg_frag%isize_frag
+          io_s_frag = dg_frag%id_frag * nocc_per_rank_loc + 1
+          io_e_frag = min((dg_frag%id_frag + 1) * nocc_per_rank_loc, nocc_per_spin)
         end if
         ! --- end D pre-pass ---
         do block_offset = first_block_offset, nblocks_ifrag - 1, block_step_blocks
@@ -659,37 +709,22 @@
                 call cpu_time(t_rho1)
                 time_project_rho = time_project_rho + (t_rho1 - t_rho0)
               else
-                do io0 = 1, nocc_spin, state_block_size
-                  nbatch = min(state_block_size, nocc_spin - io0 + 1)
-                  call cpu_time(t_setup0)
-                  if (.not. distribute_project .or. dg_frag%is_frag_root) then
-                    if (valid_basis_count < nbf) then
-                      coef_blk_re(1:nbf, 1:nbatch) = 0.0d0
-                      coef_blk_im(1:nbf, 1:nbatch) = 0.0d0
-                    end if
-!$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
-                    do io = 1, nbatch
-                      do idx_local = 1, valid_basis_count
-                        istate_frag = valid_basis_ids(idx_local)
-                        coef_blk_re(istate_frag, io) = real(dg_frag%coef(basis_gid(istate_frag), io0 + io - 1, ispin), kind=8)
-                        coef_blk_im(istate_frag, io) = aimag(dg_frag%coef(basis_gid(istate_frag), io0 + io - 1, ispin))
-                      end do
-                    end do
-!$omp end parallel do
-                  end if
-                  if (distribute_project) then
-                    call comm_bcast(coef_blk_re(1:nbf, 1:nbatch), dg_frag%icomm_frag, 0)
-                    call comm_bcast(coef_blk_im(1:nbf, 1:nbatch), dg_frag%icomm_frag, 0)
-                  end if
-                  call cpu_time(t_setup1)
-                  time_project_setup = time_project_setup + (t_setup1 - t_setup0)
+                ! n_pw > 0: state-distributed loop, no per-batch bcast
+                if (.not. allocated(rho_blk_partial)) allocate(rho_blk_partial(grid_block_size))
+                rho_blk_partial(1:npt_blk) = 0.0d0
+
+                do io0 = io_s_frag, io_e_frag, state_block_size
+                  nbatch = min(state_block_size, io_e_frag - io0 + 1)
+
+                  ! copy coef from upfront buffer (no bcast)
+                  coef_blk_re(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
+                  coef_blk_im(1:nbf, 1:nbatch) = coef_im_full(1:nbf, io0:io0+nbatch-1, ispin)
 
                   call cpu_time(t_psi0)
                   call dgemm('N', 'N', npt_blk, nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
                              coef_blk_re, nbf_max, 0.0d0, psi_blk_re, grid_block_size)
                   call dgemm('N', 'N', npt_blk, nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
                              coef_blk_im, nbf_max, 0.0d0, psi_blk_im, grid_block_size)
-
 !$omp parallel do collapse(2) private(io, igrid) schedule(static)
                   do io = 1, nbatch
                     do igrid = 1, npt_blk
@@ -699,19 +734,15 @@
 !$omp end parallel do
                   do ipw0 = 1, n_pw, pw_block_size
                     npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
-                    coef_pw_blk(1:npw_blk, 1:nbatch) = (0.0d0, 0.0d0)
-                    if (.not. distribute_project .or. dg_frag%is_frag_root) then
-                      coef_pw_blk(1:npw_blk, 1:nbatch) = &
-                        dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
-                    end if
-                    if (distribute_project) then
-                      call comm_bcast(coef_pw_blk(1:npw_blk, 1:nbatch), dg_frag%icomm_frag, 0)
-                    end if
+                    ! direct access from full_cache on all ranks (no bcast)
+                    coef_pw_blk(1:npw_blk, 1:nbatch) = &
+                      dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
                     psi_blk(1:npt_blk, 1:nbatch) = psi_blk(1:npt_blk, 1:nbatch) + &
                       matmul(phase_cache(1:npt_blk, ipw0:ipw0+npw_blk-1), coef_pw_blk(1:npw_blk, 1:nbatch))
                   end do
                   call cpu_time(t_psi1)
                   time_project_psi = time_project_psi + (t_psi1 - t_psi0)
+
                   call cpu_time(t_rho0)
 !$omp parallel do private(io, igrid, rho_accum) schedule(static)
                   do igrid = 1, npt_blk
@@ -720,12 +751,23 @@
                     do io = 1, nbatch
                       rho_accum = rho_accum + occ_factor * real(conjg(psi_blk(igrid, io)) * psi_blk(igrid, io), kind=8)
                     end do
-                    rho_blk_accum(igrid) = rho_blk_accum(igrid) + rho_accum
+                    rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                   end do
 !$omp end parallel do
                   call cpu_time(t_rho1)
                   time_project_rho = time_project_rho + (t_rho1 - t_rho0)
-                end do
+                end do  ! io0
+
+                ! AllReduce rho_blk_partial across icomm_frag → rho_blk_accum
+                call cpu_time(t_rho0)
+                if (distribute_project) then
+                  call comm_summation(rho_blk_partial(1:npt_blk), rho_blk_accum(1:npt_blk), &
+                                      npt_blk, dg_frag%icomm_frag)
+                else
+                  rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
+                end if
+                call cpu_time(t_rho1)
+                time_project_rho_reduce = time_project_rho_reduce + (t_rho1 - t_rho0)
               end if
               call cpu_time(t_rho0)
 !$omp parallel private(igrid, owner_rank, ixg, iyg, izg, rho_contrib, slot, pack_offset)
@@ -778,12 +820,16 @@
       if (allocated(D_frag_re)) deallocate(D_frag_re)
       if (allocated(coef_re_frag)) deallocate(coef_re_frag)
       if (allocated(D_partial_re)) deallocate(D_partial_re)
+      if (allocated(coef_re_full)) deallocate(coef_re_full)
+      if (allocated(coef_im_full)) deallocate(coef_im_full)
+      if (allocated(rho_blk_partial)) deallocate(rho_blk_partial)
       if (dg_frag%id == 0) then
         write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-project dt=", "", time_project
-        write(*,'(1x,a,7(a,1pe12.4))') "        density trace: project breakdown", &
+        write(*,'(1x,a,8(a,1pe12.4))') "        density trace: project breakdown", &
           " setup=", time_project_setup, " psi=", time_project_psi, " rho=", time_project_rho, &
           " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, &
-          " over=", time_project_overhead, " dmat=", time_project_dmat_build
+          " over=", time_project_overhead, " dmat=", time_project_dmat_build, &
+          " rho_red=", time_project_rho_reduce
         flush(6)
       end if
     end if
