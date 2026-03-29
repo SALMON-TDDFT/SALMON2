@@ -127,7 +127,7 @@ contains
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
-                 nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, &
+                 nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, yn_spinorbit, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
                  dg_subspace_pw_vectors, dg_subspace_fallback_cond
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
@@ -163,6 +163,15 @@ contains
     dg_frag%nspin = system%nspin
     dg_frag%nstate_frag = nstate_frag
     dg_frag%nstate_tot = system%no
+
+    if (dg_frag%nspin > 1 .and. yn_spinorbit /= 'y') then
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,i0,a)') "ERROR: non-SOI DG-Fragment RT does not support nspin=", dg_frag%nspin, "."
+        write(*,'(1x,a)') "       Use SOI/non-collinear DG-RT for multi-spin fragment propagation."
+      end if
+      stop "DG-Fragment RT requires SOI/non-collinear path when nspin > 1"
+    end if
+
     dg_frag%icomm = info%icomm_rko
     dg_frag%id = info%id_rko
     dg_frag%isize = info%isize_rko
