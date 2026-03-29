@@ -71,7 +71,7 @@
       write(*,'(1x,a)') "        derivative trace: stage=before-ensure-nonlocal"
       flush(6)
     end if
-    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
+    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, .false.)
     if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        derivative trace: stage=after-ensure-nonlocal"
       flush(6)
@@ -160,9 +160,6 @@
       end if
       
       if (has_nonlocal .and. allocated(dg_frag%H_nl_cache)) then
-        if (need_h0_dense) then
-          H0c(1:n_frag, 1:n_frag) = H0c(1:n_frag, 1:n_frag) + dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin)
-        end if
         if (any(real(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= real(dg_frag%H_nl_cache(1:n, 1:n, ispin))) .or. &
             any(aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)))) then
           write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_nl_cache: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
@@ -229,6 +226,10 @@
         write(*,'(a,i0,a,i0,a,i0)') "[Inf] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
         stop "Inf in M"
       end if
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-after-operators"
+        flush(6)
+      end if
 
       allocate(coef_frag_all(n_frag, dg_frag%nstate_tot))
       coef_frag_all(:, :) = dg_frag%coef(1:n_frag, 1:dg_frag%nstate_tot, ispin)
@@ -253,10 +254,18 @@
         write(*,'(a,i0,a,i0,a,i0)') "[Inf] coef: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
         stop "Inf in coef before zgemm"
       end if
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-after-coef-pack"
+        flush(6)
+      end if
 
       if (need_h0_dense .and. any(abs(H0c(:, :)) > huge_val)) then
         write(*,'(a,i0,a,i0,a,i0)') "[Inf] H0c: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
         stop "Inf in H0c"
+      end if
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-before-h0-apply"
+        flush(6)
       end if
 
       ! dcoef_dt = -i * H0c * coef - M * coef
@@ -268,6 +277,10 @@
         flush(6)
       end if
       if (use_mixed_basis .and. n_basis > 0) then
+        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+          write(*,'(1x,a)') "        derivative trace: stage=spin1-h0-branch-mixed-basis"
+          flush(6)
+        end if
         allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
         rhs_mix(:, :) = (0.0d0, 0.0d0)
         raw_rhs(:, :) = (0.0d0, 0.0d0)
@@ -277,7 +290,28 @@
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
         raw_rhs(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), rhs_mix)
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
+        if (has_nonlocal) then
+          if (allocated(dg_frag%H_nl_blocks)) then
+            if (allocated(dg_frag%H_local_block_ids)) then
+              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
+                dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
+            else
+              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+            end if
+          else if (allocated(dg_frag%H_nl_cache)) then
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
+              matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+          end if
+        end if
+        do io = 1, n_tot
+          dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
+        end do
+        dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
+        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+          write(*,'(1x,a)') "        derivative trace: stage=spin1-h0-branch-mixed-h"
+          flush(6)
+        end if
         if (enable_derivative_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -309,6 +343,12 @@
         end do
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
+        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+          write(*,'(1x,a)') "        derivative trace: stage=spin1-h0-branch-block"
+          flush(6)
+          write(*,'(1x,a)') "        derivative trace: stage=spin1-before-apply-block-h"
+          flush(6)
+        end if
         if (enable_derivative_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -327,7 +367,15 @@
             " ispin=", ispin, " stage=", "after-apply-block-h"
           flush(6)
         end if
+        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+          write(*,'(1x,a)') "        derivative trace: stage=spin1-after-apply-block-h"
+          flush(6)
+        end if
         if (has_nonlocal) then
+          if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+            write(*,'(1x,a)') "        derivative trace: stage=spin1-before-apply-block-nl"
+            flush(6)
+          end if
           if (allocated(dg_frag%H_nl_blocks)) then
             if (allocated(dg_frag%H_local_block_ids)) then
               call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
@@ -339,12 +387,20 @@
             dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
               matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
           end if
+          if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+            write(*,'(1x,a)') "        derivative trace: stage=spin1-after-apply-block-nl"
+            flush(6)
+          end if
         end if
         do io = 1, n_frag
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
         end do
         dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
       else
+        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+          write(*,'(1x,a)') "        derivative trace: stage=spin1-h0-branch-zgemm"
+          flush(6)
+        end if
         if (enable_derivative_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -359,6 +415,10 @@
             " ispin=", ispin, " stage=", "after-zgemm-h"
           flush(6)
         end if
+      end if
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-after-h0-apply"
+        flush(6)
       end if
       if (enable_derivative_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &

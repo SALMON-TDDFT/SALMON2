@@ -438,7 +438,7 @@ contains
   !=======================================================================
   ! Ensure cached non-local PP matrix for current A(t)
   !=======================================================================
-  subroutine ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
+  subroutine ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, require_dense_cache)
     use structures
     use salmon_global, only: ae_shape1, ae_shape2, theory
     implicit none
@@ -447,13 +447,20 @@ contains
     type(s_pp_grid),        intent(in)    :: ppg
     type(s_dft_system),     intent(in)    :: system
     real(8),                intent(in)    :: Ac_tot(3)
+    logical, optional,      intent(in)    :: require_dense_cache
 
     real(8) :: delta_A
     logical :: reuse_allowed
     logical :: use_micro_A
     logical :: need_dense_cache
+    logical :: want_dense_cache
     integer :: i
     logical, parameter :: enable_hmat_nl_progress = .true.
+
+    if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hmat-nl trace: stage=entry"
+      flush(6)
+    end if
 
     if (ppg%Nlma == 0 .or. .not. allocated(ppg%uV)) then
       if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
@@ -470,7 +477,9 @@ contains
     end if
 
     use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
-    need_dense_cache = (.not. allocated(dg_frag%H_mat_blocks)) .or. allocated(dg_frag%H_mat_c)
+    want_dense_cache = (.not. allocated(dg_frag%H_mat_blocks)) .or. allocated(dg_frag%H_mat_c)
+    if (present(require_dense_cache)) want_dense_cache = require_dense_cache
+    need_dense_cache = want_dense_cache
 
     reuse_allowed = (.not. use_micro_A) .and. &
                     (trim(ae_shape1) == 'impulse' .or. trim(ae_shape1) == 'none') .and. &
@@ -482,12 +491,22 @@ contains
         call init_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, dg_frag%H_nl_block_map)
         dg_frag%n_H_nl_blocks = size(dg_frag%H_nl_blocks)
       end if
+      if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hmat-nl trace: stage=after-init-blocks"
+        flush(6)
+      end if
       if (use_micro_A) then
         call build_nonlocal_pp_matrix_A_blocks(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
              .true., system%Ac_micro%v, dg_frag%H_nl_blocks, dg_frag%H_nl_block_map)
       else
         call build_nonlocal_pp_matrix_A_blocks(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
              .false., H_nl_blocks=dg_frag%H_nl_blocks, H_nl_block_map=dg_frag%H_nl_block_map)
+      end if
+      if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hmat-nl trace: stage=after-build-blocks"
+        flush(6)
+        write(*,'(1x,a)') "        hmat-nl trace: stage=before-block-reduce"
+        flush(6)
       end if
       call reduce_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, "hmat-nl", dg_frag%icomm)
       if (enable_hmat_nl_progress .and. dg_frag%id == 0) then

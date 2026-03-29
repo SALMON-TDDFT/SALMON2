@@ -24,6 +24,7 @@
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     logical :: has_nonlocal, use_hmat_complex, use_mixed_current
+    logical :: require_dense_nl
     logical :: use_spatial_A
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     complex(8) :: mfp
@@ -135,7 +136,10 @@
     Ac_tot = rt%Ac_tot(:, itt)
     A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
     
-    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
+    require_dense_nl = (.not. allocated(dg_frag%H_mat_blocks)) .or. &
+                       (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) .or. &
+                       use_spatial_A .or. do_interface_check
+    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, require_dense_nl)
     has_nonlocal = dg_frag%has_nl_cache
 
     ! Calculate total energy: E = <ψ|H(t)|ψ>
