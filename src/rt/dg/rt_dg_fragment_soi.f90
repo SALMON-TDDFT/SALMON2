@@ -1608,9 +1608,6 @@ contains
     if (allocated(dg_frag%current_valid_ixg)) deallocate(dg_frag%current_valid_ixg)
     if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
-    if (allocated(dg_frag%hmat_grid_gx)) deallocate(dg_frag%hmat_grid_gx)
-    if (allocated(dg_frag%hmat_grid_gy)) deallocate(dg_frag%hmat_grid_gy)
-    if (allocated(dg_frag%hmat_grid_gz)) deallocate(dg_frag%hmat_grid_gz)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
     if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
@@ -1634,6 +1631,9 @@ contains
     if (allocated(dg_frag%eigenvalues)) deallocate(dg_frag%eigenvalues)
     if (allocated(dg_frag%basis_overlap)) deallocate(dg_frag%basis_overlap)
     if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
+    if (allocated(dg_frag%nl_pp_phi_self)) deallocate(dg_frag%nl_pp_phi_self)
+    if (allocated(dg_frag%nl_pp_phi_halo)) deallocate(dg_frag%nl_pp_phi_halo)
+    dg_frag%nl_pp_phi_cache_valid = .false.
     
     ! Plane wave basis deallocations
     if (allocated(dg_frag%k_pw)) deallocate(dg_frag%k_pw)

@@ -163,6 +163,9 @@ module rt_dg_fragment_types
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_cache
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
+    real(8), allocatable :: nl_pp_phi_self(:,:,:,:) ! (nps,natom,nstate_frag,ifrag_local)
+    real(8), allocatable :: nl_pp_phi_halo(:,:,:,:) ! (nps,natom,nstate_frag,n_halo)
+    logical :: nl_pp_phi_cache_valid = .false.
 
     ! Observables
     real(8), allocatable :: esp(:,:)           ! eigenvalues (nstate_tot, nspin)
@@ -203,14 +206,9 @@ module rt_dg_fragment_types
     integer, allocatable :: current_valid_ixg(:,:)              ! valid wrapped global x indices for microscopic current
     integer, allocatable :: current_valid_iyg(:,:)              ! valid wrapped global y indices for microscopic current
     integer, allocatable :: current_valid_izg(:,:)              ! valid wrapped global z indices for microscopic current
-    integer, allocatable :: hmat_grid_gx(:,:)                   ! packed wrapped global x index for Hamiltonian reconstruct
-    integer, allocatable :: hmat_grid_gy(:,:)                   ! packed wrapped global y index for Hamiltonian reconstruct
-    integer, allocatable :: hmat_grid_gz(:,:)                   ! packed wrapped global z index for Hamiltonian reconstruct
     type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
     real(8), allocatable :: density_weight_local(:,:,:) ! static overlap count on local grid
     real(8), allocatable :: density_inv_weight_local(:,:,:) ! inverse of static overlap count on local grid
-    real(8), allocatable :: density_phi_cache(:,:,:)   ! prepacked fragment basis on interior grid (ngrid_max,nstate_frag,ifrag_local)
-    logical :: density_phi_cache_valid = .false.
     real(8), allocatable :: density_phi_block_cache(:,:,:,:) ! block-packed basis (block_size,nstate_frag,nblock_max,ifrag_local)
     integer, allocatable :: density_phi_block_count(:)       ! block count per local fragment
     integer :: density_phi_block_size = 0

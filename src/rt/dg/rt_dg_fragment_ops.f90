@@ -597,12 +597,97 @@ contains
 
   end subroutine ensure_nonlocal_pp_matrix_A
 
+  subroutine ensure_nonlocal_projector_phi_cache(dg_frag, mg, ppg)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_rgrid), intent(in) :: mg
+    type(s_pp_grid), intent(in) :: ppg
+
+    integer :: local_frag_count, natom
+    integer :: ifrag, i_local, ia, j, ix, iy, iz, lx, ly, lz, i_halo, nbf
+    integer :: iorg(3), ndom(3), d(3), l(3)
+    integer :: self_shape(4), halo_shape(4)
+
+    local_frag_count = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
+    if (local_frag_count <= 0 .or. .not. allocated(dg_frag%phi_frag)) return
+    if (.not. allocated(ppg%mps) .or. .not. allocated(ppg%jxyz)) return
+
+    natom = size(ppg%mps)
+    self_shape = [ppg%nps, natom, dg_frag%nstate_frag, local_frag_count]
+    halo_shape = [ppg%nps, natom, dg_frag%nstate_frag, max(0, dg_frag%n_halo)]
+
+    if (allocated(dg_frag%nl_pp_phi_self)) then
+      if (any(shape(dg_frag%nl_pp_phi_self) /= self_shape)) deallocate(dg_frag%nl_pp_phi_self)
+    end if
+    if (allocated(dg_frag%nl_pp_phi_halo)) then
+      if (any(shape(dg_frag%nl_pp_phi_halo) /= halo_shape)) deallocate(dg_frag%nl_pp_phi_halo)
+    end if
+    if (.not. allocated(dg_frag%nl_pp_phi_self)) allocate(dg_frag%nl_pp_phi_self(self_shape(1), self_shape(2), self_shape(3), self_shape(4)))
+    if (.not. allocated(dg_frag%nl_pp_phi_halo)) allocate(dg_frag%nl_pp_phi_halo(halo_shape(1), halo_shape(2), halo_shape(3), halo_shape(4)))
+    if (dg_frag%nl_pp_phi_cache_valid) return
+
+    dg_frag%nl_pp_phi_self(:, :, :, :) = 0.0d0
+    dg_frag%nl_pp_phi_halo(:, :, :, :) = 0.0d0
+
+    i_local = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = i_local + 1
+      nbf = min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
+      if (nbf <= 0) cycle
+      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+      do ia = 1, natom
+        do j = 1, ppg%mps(ia)
+          ix = ppg%jxyz(1, j, ia)
+          iy = ppg%jxyz(2, j, ia)
+          iz = ppg%jxyz(3, j, ia)
+          if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+          lx = modulo(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
+          ly = modulo(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
+          lz = modulo(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
+          if (lx < 1 .or. lx > ndom(1) .or. ly < 1 .or. ly > ndom(2) .or. lz < 1 .or. lz > ndom(3)) cycle
+          dg_frag%nl_pp_phi_self(j, ia, 1:nbf, i_local) = dg_frag%phi_frag(lx, ly, lz, 1:nbf, i_local)
+        end do
+      end do
+    end do
+
+    do i_halo = 1, dg_frag%n_halo
+      ifrag = dg_frag%halo(i_halo)%ifrag_dst
+      i_local = ifrag - dg_frag%ifrag_start + 1
+      if (i_local < 1 .or. i_local > local_frag_count) cycle
+      if (.not. allocated(dg_frag%halo(i_halo)%buf_recv)) cycle
+      nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv, 4))
+      if (nbf <= 0) cycle
+      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+      d(:) = dg_frag%halo(i_halo)%dsp_send
+      l(:) = dg_frag%halo(i_halo)%length
+      do ia = 1, natom
+        do j = 1, ppg%mps(ia)
+          ix = ppg%jxyz(1, j, ia)
+          iy = ppg%jxyz(2, j, ia)
+          iz = ppg%jxyz(3, j, ia)
+          if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+          lx = modulo(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
+          ly = modulo(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
+          lz = modulo(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
+          if (lx <= d(1) .or. lx > d(1) + l(1)) cycle
+          if (ly <= d(2) .or. ly > d(2) + l(2)) cycle
+          if (lz <= d(3) .or. lz > d(3) + l(3)) cycle
+          dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%halo(i_halo)%buf_recv(lx - d(1), ly - d(2), lz - d(3), 1:nbf, 1)
+        end do
+      end do
+    end do
+
+    dg_frag%nl_pp_phi_cache_valid = .true.
+  end subroutine ensure_nonlocal_projector_phi_cache
+
   subroutine apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, x, y)
     use structures
     use salmon_global, only: theory
     use math_constants, only: zi
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_rgrid), intent(in) :: mg
     type(s_pp_grid), intent(in) :: ppg
     type(s_dft_system), intent(in) :: system
@@ -611,17 +696,13 @@ contains
     complex(8), intent(in) :: x(:, :)
     complex(8), intent(inout) :: y(:, :)
 
-    integer :: ifrag, i_local, local_frag_count, frag_slot
-    integer :: io, ist, ilma, ia, j, ix, iy, iz, nbf, global_idx
-    integer :: iorg(3), ndom(3), is(3), ie(3), lx, ly, lz
+    integer :: ifrag, frag_slot, local_frag_count, ifrag_halo, nbf, nbf_halo
+    integer :: io, ist, ilma, ia, j, ix, iy, iz, global_idx, i_halo
     real(8) :: xcoord, ycoord, zcoord, phase
     real(8) :: A_local(3)
     logical :: use_micro_A
-    complex(8) :: overlap_i, proj_amp
-    complex(8), allocatable :: overlap_local(:,:), overlap_global(:,:)
-    complex(8), allocatable :: proj_local(:,:), proj_global(:,:)
-    complex(8), allocatable :: uVphi_frag(:,:,:)
-    integer, allocatable :: frag_ids(:), frag_nbf(:)
+    complex(8) :: phase_factor, psi_point, proj_amp
+    complex(8), allocatable :: proj_local(:,:), proj_global(:,:), uVphi_self(:,:,:)
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
     if (ppg%Nlma <= 0 .or. .not. allocated(ppg%uV)) return
@@ -633,84 +714,70 @@ contains
     local_frag_count = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (local_frag_count <= 0) return
 
-    allocate(uVphi_frag(dg_frag%nstate_frag, ppg%Nlma, local_frag_count))
+    call ensure_nonlocal_projector_phi_cache(dg_frag, mg, ppg)
+
+    allocate(uVphi_self(dg_frag%nstate_frag, ppg%Nlma, local_frag_count))
     allocate(proj_local(ppg%Nlma, size(x, 2)), proj_global(ppg%Nlma, size(x, 2)))
-    allocate(frag_ids(local_frag_count), frag_nbf(local_frag_count))
-    uVphi_frag(:, :, :) = (0.0d0, 0.0d0)
+    uVphi_self(:, :, :) = (0.0d0, 0.0d0)
     proj_local(:, :) = (0.0d0, 0.0d0)
     proj_global(:, :) = (0.0d0, 0.0d0)
-    frag_ids(:) = 0
-    frag_nbf(:) = 0
 
     use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
-    is = mg%is
-    ie = mg%ie
 
-    i_local = 0
-    frag_slot = 0
-    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      i_local = i_local + 1
-      frag_slot = frag_slot + 1
-      frag_ids(frag_slot) = ifrag
+    do frag_slot = 1, local_frag_count
+      ifrag = dg_frag%ifrag_start + frag_slot - 1
       nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
-      frag_nbf(frag_slot) = nbf
       if (nbf <= 0) cycle
-
-      allocate(overlap_local(nbf, ppg%Nlma), overlap_global(nbf, ppg%Nlma))
-      overlap_local(:, :) = (0.0d0, 0.0d0)
-      overlap_global(:, :) = (0.0d0, 0.0d0)
-
-      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
       do ilma = 1, ppg%Nlma
         ia = ppg%ia_tbl(ilma)
-        do io = 1, nbf
-          overlap_i = (0.0d0, 0.0d0)
-          do j = 1, ppg%mps(ia)
-            ix = ppg%jxyz(1, j, ia)
-            iy = ppg%jxyz(2, j, ia)
-            iz = ppg%jxyz(3, j, ia)
-            if (ix < is(1) .or. ix > ie(1) .or. iy < is(2) .or. iy > ie(2) .or. iz < is(3) .or. iz > ie(3)) cycle
-            lx = mod(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
-            ly = mod(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
-            lz = mod(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
-            if (lx < 1 .or. lx > ndom(1) .or. ly < 1 .or. ly > ndom(2) .or. lz < 1 .or. lz > ndom(3)) cycle
-            xcoord = ppg%rxyz(1, j, ia)
-            ycoord = ppg%rxyz(2, j, ia)
-            zcoord = ppg%rxyz(3, j, ia)
-            if (use_micro_A) then
-              A_local(1:3) = system%Ac_micro%v(1:3, ix, iy, iz)
-            else
-              A_local(1:3) = Ac_tot(1:3)
-            end if
-            phase = A_local(1) * xcoord + A_local(2) * ycoord + A_local(3) * zcoord
-            overlap_i = overlap_i + dg_frag%phi_frag(lx, ly, lz, io, i_local) * ppg%uV(j, ilma) * exp(-zi * phase) * system%hvol
+        do j = 1, ppg%mps(ia)
+          ix = ppg%jxyz(1, j, ia)
+          iy = ppg%jxyz(2, j, ia)
+          iz = ppg%jxyz(3, j, ia)
+          if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+          xcoord = ppg%rxyz(1, j, ia)
+          ycoord = ppg%rxyz(2, j, ia)
+          zcoord = ppg%rxyz(3, j, ia)
+          if (use_micro_A) then
+            A_local(1:3) = system%Ac_micro%v(1:3, ix, iy, iz)
+          else
+            A_local(1:3) = Ac_tot(1:3)
+          end if
+          phase = A_local(1) * xcoord + A_local(2) * ycoord + A_local(3) * zcoord
+          phase_factor = ppg%uV(j, ilma) * exp(-zi * phase) * system%hvol
+          do io = 1, nbf
+            uVphi_self(io, ilma, frag_slot) = uVphi_self(io, ilma, frag_slot) + &
+              dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * phase_factor
           end do
-          overlap_local(io, ilma) = overlap_i
+          do ist = 1, size(x, 2)
+            psi_point = (0.0d0, 0.0d0)
+            do io = 1, nbf
+              global_idx = dg_frag%index_basis(io, ifrag, ispin)
+              if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
+              psi_point = psi_point + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x(global_idx, ist)
+            end do
+            do i_halo = 1, dg_frag%n_halo
+              if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+              ifrag_halo = dg_frag%halo(i_halo)%ifrag_src
+              nbf_halo = min(dg_frag%n_basis(ifrag_halo, ispin), dg_frag%nstate_frag)
+              if (nbf_halo <= 0) cycle
+              do io = 1, nbf_halo
+                global_idx = dg_frag%index_basis(io, ifrag_halo, ispin)
+                if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
+                psi_point = psi_point + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x(global_idx, ist)
+              end do
+            end do
+            proj_local(ilma, ist) = proj_local(ilma, ist) + phase_factor * psi_point
+          end do
         end do
       end do
-
-      call comm_summation(overlap_local, overlap_global, size(overlap_local), dg_frag%icomm)
-      uVphi_frag(1:nbf, 1:ppg%Nlma, frag_slot) = overlap_global(1:nbf, 1:ppg%Nlma)
-
-      do io = 1, nbf
-        global_idx = dg_frag%index_basis(io, ifrag, ispin)
-        if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
-        do ist = 1, size(x, 2)
-          do ilma = 1, ppg%Nlma
-            proj_local(ilma, ist) = proj_local(ilma, ist) + overlap_global(io, ilma) * x(global_idx, ist)
-          end do
-        end do
-      end do
-
-      deallocate(overlap_local, overlap_global)
     end do
 
     call comm_summation(proj_local, proj_global, size(proj_local), dg_frag%icomm)
 
     do frag_slot = 1, local_frag_count
-      ifrag = frag_ids(frag_slot)
-      nbf = frag_nbf(frag_slot)
+      ifrag = dg_frag%ifrag_start + frag_slot - 1
+      nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
       if (nbf <= 0) cycle
       do io = 1, nbf
         global_idx = dg_frag%index_basis(io, ifrag, ispin)
@@ -719,14 +786,14 @@ contains
         do ist = 1, size(y, 2)
           proj_amp = (0.0d0, 0.0d0)
           do ilma = 1, ppg%Nlma
-            proj_amp = proj_amp + uVphi_frag(io, ilma, frag_slot) * ppg%rinv_uvu(ilma) * proj_global(ilma, ist)
+            proj_amp = proj_amp + uVphi_self(io, ilma, frag_slot) * ppg%rinv_uvu(ilma) * proj_global(ilma, ist)
           end do
           y(global_idx, ist) = y(global_idx, ist) + proj_amp
         end do
       end do
     end do
 
-    deallocate(uVphi_frag, proj_local, proj_global, frag_ids, frag_nbf)
+    deallocate(uVphi_self, proj_local, proj_global)
   end subroutine apply_nonlocal_pp_projector_batch
 
   subroutine ensure_overlap_prop_available(dg_frag, n_use)

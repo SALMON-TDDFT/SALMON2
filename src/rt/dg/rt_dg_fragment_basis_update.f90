@@ -478,6 +478,7 @@
         if (allocated(dg_frag%S_mat_prop_c)) deallocate(dg_frag%S_mat_prop_c)
         if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
         dg_frag%has_nl_cache = .false.
+        dg_frag%nl_pp_phi_cache_valid = .false.
         call calculate_momentum_matrix(dg_frag, system, mg, stencil)
         call calculate_overlap_matrix(dg_frag, system, mg)
       else if (allocated(phi_frag_old)) then
@@ -502,10 +503,9 @@
       write(*,*)
     end if
 
-    if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
-    dg_frag%density_phi_cache_valid = .false.
     if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
     dg_frag%gradient_basis_cache_valid = .false.
+    dg_frag%nl_pp_phi_cache_valid = .false.
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     dg_frag%density_phi_block_size = 0
