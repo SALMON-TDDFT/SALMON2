@@ -139,7 +139,7 @@ bohr_per_ang = 1.0 / 0.529177249
 a_bohr = [r[0] * bohr_per_ang for r in rows]
 h = a_bohr[1] - a_bohr[0]
 
-coeff7 = [1/60, -9/60, 45/60, 0, -45/60, 9/60, -1/60]
+coeff7 = [-1/60, 9/60, -45/60, 0, 45/60, -9/60, 1/60]
 
 def fd7(vals, step):
     if len(vals) == 7:
