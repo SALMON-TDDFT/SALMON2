@@ -23,6 +23,7 @@
     integer :: total_send_pts, pack_offset, subgroup_root_rank, block_idx_global, self_slot_count, total_local_pts
     integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
     integer :: valid_basis_count
+    integer :: handler_id_frag
     integer :: packed_npts, spin_offset
     integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
     real(8) :: occ_factor, occ_scale
@@ -216,7 +217,7 @@
               owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
               dg_frag%density_subgroup_send_count(owner_rank) = dg_frag%density_subgroup_send_count(owner_rank) + 1
               dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_subgroup_send_count(owner_rank)
-              if (owner_rank == subgroup_root_rank) then
+              if (owner_rank == dg_frag%id) then
                 self_slot_count = self_slot_count + 1
                 subgroup_self_ixg_tmp(self_slot_count) = dg_frag%density_ixg_map(ix, iy, iz, i_local)
                 subgroup_self_iyg_tmp(self_slot_count) = dg_frag%density_iyg_map(ix, iy, iz, i_local)
@@ -262,7 +263,7 @@
     time_project_overhead = time_project_overhead + (t_setup1 - t_setup0)
 
     do irank = 0, dg_frag%isize - 1
-      if (dg_frag%is_frag_root .and. allocated(dg_frag%density_send_count)) then
+      if (allocated(dg_frag%density_send_count) .and. target_rank_owned_by_handler(irank)) then
         if (irank == dg_frag%id) then
           npts = 0
         else
@@ -277,7 +278,7 @@
         rho_send(irank)%f = 0.0d0
       end if
       if (irank == dg_frag%id) cycle
-      if (allocated(dg_frag%density_recv_map)) then
+      if (target_rank_owned_by_handler(dg_frag%id) .and. allocated(dg_frag%density_recv_map)) then
         npts = dg_frag%density_recv_map(irank)%npts
       else
         npts = 0
@@ -842,9 +843,16 @@
       do irank = 0, dg_frag%isize - 1
         npts = dg_frag%density_subgroup_send_count(irank)
         if (npts <= 0) cycle
-        pack_offset = subgroup_send_offset(irank, 0)
-        if (dg_frag%is_frag_root) then
-          if (irank == subgroup_root_rank) then
+        if (target_rank_owned_by_handler(irank)) then
+          handler_id_frag = modulo(irank, dg_frag%isize_frag)
+          if (dg_frag%is_frag_root) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        density trace: handler-map rank=", dg_frag%id, &
+              " id_frag=", dg_frag%id_frag, " target_rank=", irank, " handler_id_frag=", handler_id_frag, &
+              " handler_world_rank=", subgroup_root_rank + handler_id_frag
+            flush(6)
+          end if
+          pack_offset = subgroup_send_offset(irank, 0)
+          if (irank == dg_frag%id) then
 !$omp parallel do private(slot, ixg, iyg, izg) schedule(static)
             do slot = 1, npts
               ixg = dg_frag%density_subgroup_self_ixg(slot)
@@ -853,12 +861,6 @@
               rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + send_sum(pack_offset+slot)
             end do
 !$omp end parallel do
-          else
-            rho_send(irank)%f(:, 1, 1) = send_sum(pack_offset+1:pack_offset+npts)
-          end if
-        end if
-        if (dg_frag%is_frag_root) then
-          if (irank == subgroup_root_rank) then
 !$omp parallel do collapse(2) private(ispin, slot, ixg, iyg, izg, pack_offset) schedule(static)
             do ispin = 1, system%nspin
               do slot = 1, npts
@@ -871,7 +873,7 @@
             end do
 !$omp end parallel do
           else
-            rho_send(irank)%f(1:npts, 1, 1) = send_sum(subgroup_send_offset(irank, 0)+1:subgroup_send_offset(irank, 0)+npts)
+            rho_send(irank)%f(:, 1, 1) = send_sum(pack_offset+1:pack_offset+npts)
             do ispin = 1, system%nspin
               pack_offset = subgroup_send_offset(irank, ispin)
               spin_offset = ispin * npts
@@ -889,9 +891,11 @@
     end if
     call cpu_time(t_comm0)
     nreq_recv = 0
-    do irank = 0, dg_frag%isize - 1
-      if (allocated(rho_recv(irank)%f)) nreq_recv = nreq_recv + 1
-    end do
+    if (target_rank_owned_by_handler(dg_frag%id)) then
+      do irank = 0, dg_frag%isize - 1
+        if (allocated(rho_recv(irank)%f)) nreq_recv = nreq_recv + 1
+      end do
+    end if
     if (nreq_recv > 0) then
       allocate(req_recv(nreq_recv))
       ireq = 0
@@ -906,12 +910,10 @@
     end if
 
     nreq_send = 0
-    if (dg_frag%is_frag_root) then
-      do irank = 0, dg_frag%isize - 1
-        if (allocated(rho_send(irank)%f)) nreq_send = nreq_send + 1
-      end do
-    end if
-    if (dg_frag%is_frag_root .and. nreq_send > 0) then
+    do irank = 0, dg_frag%isize - 1
+      if (allocated(rho_send(irank)%f)) nreq_send = nreq_send + 1
+    end do
+    if (nreq_send > 0) then
       allocate(req_send(nreq_send))
       ireq = 0
       call cpu_time(t_setup0)
@@ -955,7 +957,7 @@
       time_comm_unpack = time_comm_unpack + (t_setup1 - t_setup0)
       deallocate(req_recv)
     end if
-    if (dg_frag%is_frag_root .and. nreq_send > 0) then
+    if (nreq_send > 0) then
       write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-send-wait"
       flush(6)
       call cpu_time(t_setup0)
@@ -1195,6 +1197,15 @@
       return
     end do
   end function find_grid_owner
+
+  logical function target_rank_owned_by_handler(target_rank) result(is_handler)
+    implicit none
+    integer, intent(in) :: target_rank
+    integer :: handler_id_frag
+
+    handler_id_frag = modulo(target_rank, dg_frag%isize_frag)
+    is_handler = (dg_frag%id_frag == handler_id_frag)
+  end function target_rank_owned_by_handler
 
   logical function local_fragments_overlap_rank_box(dg_frag_local, mg_local, rank_box) result(overlap)
     implicit none

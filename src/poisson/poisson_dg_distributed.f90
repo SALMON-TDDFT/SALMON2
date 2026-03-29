@@ -38,9 +38,70 @@
 !=======================================================================
 
 module poisson_dg_distributed
+  use structures, only: s_reciprocal_grid, s_poisson, s_rgrid, s_parallel_info
   implicit none
 
+  type(s_reciprocal_grid), save :: fg_full_cache
+  type(s_poisson), save :: poisson_full_cache
+  logical, save :: global_fullrho_ffte_cache_valid = .false.
+  integer, save :: global_fullrho_cache_lg_num(3) = 0
+  integer, save :: global_fullrho_cache_mg_num(3) = 0
+  integer, save :: global_fullrho_cache_mg_is(3) = 0
+  integer, save :: global_fullrho_cache_mg_ie(3) = -1
+
 contains
+
+  subroutine deallocate_full_hartree_fg(fg)
+    implicit none
+    type(s_reciprocal_grid), intent(inout) :: fg
+
+    if (allocated(fg%if_Gzero)) deallocate(fg%if_Gzero)
+    if (allocated(fg%vec_G)) deallocate(fg%vec_G)
+    if (allocated(fg%coef)) deallocate(fg%coef)
+    if (allocated(fg%exp_ewald)) deallocate(fg%exp_ewald)
+    if (allocated(fg%egx)) deallocate(fg%egx)
+    if (allocated(fg%egxc)) deallocate(fg%egxc)
+    if (allocated(fg%egy)) deallocate(fg%egy)
+    if (allocated(fg%egyc)) deallocate(fg%egyc)
+    if (allocated(fg%egz)) deallocate(fg%egz)
+    if (allocated(fg%egzc)) deallocate(fg%egzc)
+  end subroutine deallocate_full_hartree_fg
+
+  subroutine invalidate_global_fullrho_ffte_cache()
+    implicit none
+
+    call deallocate_full_hartree_fg(fg_full_cache)
+    call deallocate_fragment_poisson_periodic(poisson_full_cache)
+    global_fullrho_ffte_cache_valid = .false.
+    global_fullrho_cache_lg_num = 0
+    global_fullrho_cache_mg_num = 0
+    global_fullrho_cache_mg_is = 0
+    global_fullrho_cache_mg_ie = -1
+  end subroutine invalidate_global_fullrho_ffte_cache
+
+  subroutine ensure_global_fullrho_ffte_cache(lg, mg, info)
+    implicit none
+    type(s_rgrid), intent(in) :: lg, mg
+    type(s_parallel_info), intent(in) :: info
+
+    logical :: cache_matches
+
+    cache_matches = global_fullrho_ffte_cache_valid
+    cache_matches = cache_matches .and. all(global_fullrho_cache_lg_num == lg%num(1:3))
+    cache_matches = cache_matches .and. all(global_fullrho_cache_mg_num == mg%num(1:3))
+    cache_matches = cache_matches .and. all(global_fullrho_cache_mg_is == mg%is(1:3))
+    cache_matches = cache_matches .and. all(global_fullrho_cache_mg_ie == mg%ie(1:3))
+    if (cache_matches) return
+
+    call invalidate_global_fullrho_ffte_cache()
+    call build_full_hartree_fg(lg, fg_full_cache)
+    call allocate_fragment_poisson_periodic(lg, mg, info, .true., poisson_full_cache)
+    global_fullrho_ffte_cache_valid = .true.
+    global_fullrho_cache_lg_num = lg%num(1:3)
+    global_fullrho_cache_mg_num = mg%num(1:3)
+    global_fullrho_cache_mg_is = mg%is(1:3)
+    global_fullrho_cache_mg_ie = mg%ie(1:3)
+  end subroutine ensure_global_fullrho_ffte_cache
 
   subroutine append_hartree_rank_trace(rank, label, ifrag_group, id_frag, isize_frag, comm_rank, comm_size)
     implicit none
@@ -56,6 +117,112 @@ contains
       'comm_rank=', comm_rank, 'comm_size=', comm_size
     close(iunit)
   end subroutine append_hartree_rank_trace
+
+  subroutine append_hartree_bounds_trace(rank, label, lo1, hi1, lo2, hi2, lo3, hi3)
+    implicit none
+    integer, intent(in) :: rank, lo1, hi1, lo2, hi2, lo3, hi3
+    character(*), intent(in) :: label
+    integer :: iunit
+    character(256) :: filename
+
+    write(filename,'(a,i0,a)') 'hartree_rank_trace.', rank, '.log'
+    open(newunit=iunit, file=trim(filename), status='unknown', position='append', action='write')
+    write(iunit,'(a,1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') trim(label), &
+      'x=', lo1, ':', hi1, ' y=', lo2, ':', hi2, ' z=', lo3, ':', hi3
+    close(iunit)
+  end subroutine append_hartree_bounds_trace
+
+  subroutine build_full_hartree_fg(lg, fg)
+    use structures, only: s_rgrid, s_reciprocal_grid, s_dft_system, s_stencil
+    use lattice, only: init_lattice
+    use salmon_global, only: al, al_vec1, al_vec2, al_vec3, aEwald
+    use math_constants, only: pi, zi
+    implicit none
+
+    type(s_rgrid), intent(in) :: lg
+    type(s_reciprocal_grid), intent(inout) :: fg
+
+    type(s_dft_system) :: system_fg
+    type(s_stencil) :: stencil_fg
+    integer :: ix, iy, iz, kx, ky, kz
+    integer :: iix, iiy, iiz
+    real(8) :: G2, g(3)
+    complex(8) :: tmp
+
+    if (all(abs(al_vec1) < 1.0d-12) .and. all(abs(al_vec2) < 1.0d-12) .and. all(abs(al_vec3) < 1.0d-12)) then
+      system_fg%primitive_a(:,1) = (/ al(1), 0.0d0, 0.0d0 /)
+      system_fg%primitive_a(:,2) = (/ 0.0d0, al(2), 0.0d0 /)
+      system_fg%primitive_a(:,3) = (/ 0.0d0, 0.0d0, al(3) /)
+    else
+      system_fg%primitive_a(:,1) = al_vec1
+      system_fg%primitive_a(:,2) = al_vec2
+      system_fg%primitive_a(:,3) = al_vec3
+    end if
+    system_fg%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
+    call init_lattice(system_fg, stencil_fg)
+
+    allocate(fg%if_Gzero(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+    allocate(fg%vec_G(1:3, lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+    allocate(fg%coef(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+    allocate(fg%exp_ewald(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+    fg%if_Gzero = .false.
+    fg%vec_G = 0.0d0
+    fg%coef = 0.0d0
+    fg%exp_ewald = 0.0d0
+
+    do iz = lg%is(3), lg%ie(3)
+      do iy = lg%is(2), lg%ie(2)
+        do ix = lg%is(1), lg%ie(1)
+          if ((ix - 1)**2 + (iy - 1)**2 + (iz - 1)**2 == 0) fg%if_Gzero(ix, iy, iz) = .true.
+          iix = ix - 1 - lg%num(1) * (1 + sign(1, (ix - 1 - (lg%num(1) + 1) / 2))) / 2
+          iiy = iy - 1 - lg%num(2) * (1 + sign(1, (iy - 1 - (lg%num(2) + 1) / 2))) / 2
+          iiz = iz - 1 - lg%num(3) * (1 + sign(1, (iz - 1 - (lg%num(3) + 1) / 2))) / 2
+          g(1) = dble(iix) * system_fg%primitive_b(1,1) + dble(iiy) * system_fg%primitive_b(1,2) + dble(iiz) * system_fg%primitive_b(1,3)
+          g(2) = dble(iix) * system_fg%primitive_b(2,1) + dble(iiy) * system_fg%primitive_b(2,2) + dble(iiz) * system_fg%primitive_b(2,3)
+          g(3) = dble(iix) * system_fg%primitive_b(3,1) + dble(iiy) * system_fg%primitive_b(3,2) + dble(iiz) * system_fg%primitive_b(3,3)
+          fg%vec_G(1,ix,iy,iz) = g(1)
+          fg%vec_G(2,ix,iy,iz) = g(2)
+          fg%vec_G(3,ix,iy,iz) = g(3)
+          G2 = g(1)**2 + g(2)**2 + g(3)**2
+          if (fg%if_Gzero(ix,iy,iz)) then
+            fg%coef(ix,iy,iz) = 0.d0
+          else
+            fg%coef(ix,iy,iz) = 4.d0*pi/G2
+          end if
+          fg%exp_ewald(ix,iy,iz) = exp(-G2/(4.d0*aEwald))
+        end do
+      end do
+    end do
+
+    allocate(fg%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(fg%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(fg%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(fg%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(fg%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    allocate(fg%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+
+    do ix = lg%is(1), lg%ie(1)
+      do kx = lg%is(1), lg%ie(1)
+        tmp = exp(zI * (2.d0 * pi * dble((ix - 1) * (kx - 1)) / dble(lg%num(1))))
+        fg%egx(kx,ix) = tmp
+        fg%egxc(kx,ix) = conjg(tmp)
+      end do
+    end do
+    do iy = lg%is(2), lg%ie(2)
+      do ky = lg%is(2), lg%ie(2)
+        tmp = exp(zI * (2.d0 * pi * dble((iy - 1) * (ky - 1)) / dble(lg%num(2))))
+        fg%egy(ky,iy) = tmp
+        fg%egyc(ky,iy) = conjg(tmp)
+      end do
+    end do
+    do iz = lg%is(3), lg%ie(3)
+      do kz = lg%is(3), lg%ie(3)
+        tmp = exp(zI * (2.d0 * pi * dble((iz - 1) * (kz - 1)) / dble(lg%num(3))))
+        fg%egz(kz,iz) = tmp
+        fg%egzc(kz,iz) = conjg(tmp)
+      end do
+    end do
+  end subroutine build_full_hartree_fg
 
   subroutine allocate_fragment_poisson_periodic(lg, mg, info, use_ffte, poisson_frag)
     use structures, only: s_rgrid, s_parallel_info, s_poisson
@@ -195,17 +362,27 @@ contains
     if (lbound(rho%f,1) < lbound(rho_work%f,1) .or. ubound(rho%f,1) > ubound(rho_work%f,1) .or. &
         lbound(rho%f,2) < lbound(rho_work%f,2) .or. ubound(rho%f,2) > ubound(rho_work%f,2) .or. &
         lbound(rho%f,3) < lbound(rho_work%f,3) .or. ubound(rho%f,3) > ubound(rho_work%f,3)) then
-      write(*,'(1x,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        [FATAL] rho local bounds outside work rank=", dg_frag%id_frag, &
-        " work=", lbound(rho_work%f,1), ":", ubound(rho_work%f,1), ",", lbound(rho_work%f,2), ":", ubound(rho_work%f,2), ",", &
-        lbound(rho_work%f,3), ":", ubound(rho_work%f,3), ",", " local=", lbound(rho%f,1), ":", ubound(rho%f,1), ",", &
-        lbound(rho%f,2), ":", ubound(rho%f,2), ",", lbound(rho%f,3), ":", ubound(rho%f,3), ","
+      call append_hartree_rank_trace(dg_frag%id, 'rho-work-bounds', lbound(rho_work%f,1), ubound(rho_work%f,1), &
+        lbound(rho_work%f,2), ubound(rho_work%f,2), lbound(rho_work%f,3))
+      call append_hartree_rank_trace(dg_frag%id, 'rho-local-bounds', lbound(rho%f,1), ubound(rho%f,1), &
+        lbound(rho%f,2), ubound(rho%f,2), lbound(rho%f,3))
+      call append_hartree_bounds_trace(dg_frag%id, 'rho-work-bounds-full', lbound(rho_work%f,1), ubound(rho_work%f,1), &
+        lbound(rho_work%f,2), ubound(rho_work%f,2), lbound(rho_work%f,3), ubound(rho_work%f,3))
+      call append_hartree_bounds_trace(dg_frag%id, 'rho-local-bounds-full', lbound(rho%f,1), ubound(rho%f,1), &
+        lbound(rho%f,2), ubound(rho%f,2), lbound(rho%f,3), ubound(rho%f,3))
+      write(*,'(1x,a,i0)') "        [FATAL] rho local bounds outside work rank=", dg_frag%id_frag
       flush(6)
       stop 'poisson_dg_distributed: rho local bounds outside work'
     end if
-    write(*,'(1x,a,i0,a,3(i0,a,i0,a),a,3(i0,a,i0,a))') "        hartree trace: before-rho-allreduce rank=", dg_frag%id_frag, &
-      " work=", lbound(rho_work%f,1), ":", ubound(rho_work%f,1), ",", lbound(rho_work%f,2), ":", ubound(rho_work%f,2), ",", &
-      lbound(rho_work%f,3), ":", ubound(rho_work%f,3), ",", " local=", lbound(rho%f,1), ":", ubound(rho%f,1), ",", &
-      lbound(rho%f,2), ":", ubound(rho%f,2), ",", lbound(rho%f,3), ":", ubound(rho%f,3), ","
+    call append_hartree_rank_trace(dg_frag%id, 'rho-work-bounds', lbound(rho_work%f,1), ubound(rho_work%f,1), &
+      lbound(rho_work%f,2), ubound(rho_work%f,2), lbound(rho_work%f,3))
+    call append_hartree_rank_trace(dg_frag%id, 'rho-local-bounds', lbound(rho%f,1), ubound(rho%f,1), &
+      lbound(rho%f,2), ubound(rho%f,2), lbound(rho%f,3))
+    call append_hartree_bounds_trace(dg_frag%id, 'rho-work-bounds-full', lbound(rho_work%f,1), ubound(rho_work%f,1), &
+      lbound(rho_work%f,2), ubound(rho_work%f,2), lbound(rho_work%f,3), ubound(rho_work%f,3))
+    call append_hartree_bounds_trace(dg_frag%id, 'rho-local-bounds-full', lbound(rho%f,1), ubound(rho%f,1), &
+      lbound(rho%f,2), ubound(rho%f,2), lbound(rho%f,3), ubound(rho%f,3))
+    write(*,'(1x,a,i0)') "        hartree trace: before-rho-allreduce rank=", dg_frag%id_frag
     flush(6)
     call append_hartree_rank_trace(dg_frag%id, 'before-rho-copy', dg_frag%ifrag_group, dg_frag%id_frag, dg_frag%isize_frag, &
       frag_rank_check, frag_size_check)
@@ -370,15 +547,144 @@ contains
     end if
   end subroutine hartree_dg_via_poisson_periodic
 
+  subroutine hartree_dg_via_global_fullrho(info_parent, lg, mg, fg, poisson, dg_frag, rho, Vh)
+    use structures,           only: s_rgrid, s_reciprocal_grid, s_poisson, s_scalar, s_parallel_info
+    use rt_dg_fragment_types, only: s_dg_fragment_rt
+    use communication,        only: comm_summation
+    use poisson_periodic, only: poisson_ffte
+    use salmon_global, only: yn_ffte
+    implicit none
+
+    type(s_parallel_info),  intent(in)    :: info_parent
+    type(s_rgrid),           intent(in)    :: lg, mg
+    type(s_reciprocal_grid), intent(in)    :: fg
+    type(s_poisson),         intent(inout) :: poisson
+    type(s_dg_fragment_rt),  intent(in)    :: dg_frag
+    type(s_scalar),          intent(in)    :: rho
+    type(s_scalar),          intent(inout) :: Vh
+
+    type(s_scalar)  :: rho_partial, rho_full, Vh_full
+    type(s_poisson) :: poisson_full
+    type(s_reciprocal_grid) :: fg_full
+
+    allocate(rho_partial%f(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+    allocate(rho_full%f(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+    rho_partial%f = 0.0d0
+    rho_full%f = 0.0d0
+
+    rho_partial%f(lbound(rho%f,1):ubound(rho%f,1), lbound(rho%f,2):ubound(rho%f,2), lbound(rho%f,3):ubound(rho%f,3)) = rho%f
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,4(a,i0))') "        hartree trace: using-global-fullrho-fallback", &
+        " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
+      write(*,'(1x,a)') "        hartree trace: before-rho-global-allreduce"
+      flush(6)
+    end if
+    call comm_summation(rho_partial%f, rho_full%f, size(rho_full%f), dg_frag%icomm)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        hartree trace: after-rho-global-allreduce"
+      flush(6)
+    end if
+
+    if (yn_ffte == 'y') then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hartree trace: before-ensure-global-poisson-cache"
+        flush(6)
+      end if
+      call ensure_global_fullrho_ffte_cache(lg, mg, info_parent)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hartree trace: after-ensure-global-poisson-cache"
+        flush(6)
+      end if
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "        hartree trace: using-global-fullrho-ffte"
+        flush(6)
+      end if
+      call poisson_ffte(lg, mg, info_parent, fg_full_cache, rho_full, Vh, poisson_full_cache)
+      poisson%zrhoG_ele(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                        lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                        lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3)) = &
+        poisson_full_cache%zrhoG_ele(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                                     lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                                     lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3))
+    else
+      allocate(Vh_full%f(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+      allocate(poisson_full%zrhoG_ele(lg%is(1):lg%ie(1), lg%is(2):lg%ie(2), lg%is(3):lg%ie(3)))
+      Vh_full%f = 0.0d0
+      poisson_full%zrhoG_ele = (0.0d0, 0.0d0)
+      call build_full_hartree_fg(lg, fg_full)
+      call hartree_dg_fullrho_core(lg, lg, fg_full, poisson_full, dg_frag, rho_full, Vh_full)
+      Vh%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)) = &
+        Vh_full%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3))
+      poisson%zrhoG_ele(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                        lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                        lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3)) = &
+        poisson_full%zrhoG_ele(lbound(poisson%zrhoG_ele,1):ubound(poisson%zrhoG_ele,1), &
+                               lbound(poisson%zrhoG_ele,2):ubound(poisson%zrhoG_ele,2), &
+                               lbound(poisson%zrhoG_ele,3):ubound(poisson%zrhoG_ele,3))
+      deallocate(Vh_full%f)
+      deallocate(poisson_full%zrhoG_ele)
+      call deallocate_full_hartree_fg(fg_full)
+    end if
+
+    deallocate(rho_partial%f)
+    deallocate(rho_full%f)
+  end subroutine hartree_dg_via_global_fullrho
+
   ! hartree_dg_distributed
   !   Compute Vh%f = Hartree potential from rho%f using a distributed
   !   dimension-by-dimension DFT (same algorithm as poisson_ft, but
   !   kz-work split across dg_frag%icomm).
-  !
-  !   On exit:
-  !     Vh%f              — full Hartree potential, identical on all ranks
-  !     poisson%zrhoG_ele — full rho(G), identical on all ranks
-  subroutine hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
+  subroutine hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
+    use structures,           only: s_rgrid, s_reciprocal_grid, s_poisson, s_scalar, s_parallel_info
+    use rt_dg_fragment_types, only: s_dg_fragment_rt
+    implicit none
+
+    type(s_parallel_info),  intent(in)    :: info
+    type(s_rgrid),           intent(in)    :: lg, mg
+    type(s_reciprocal_grid), intent(in)    :: fg
+    type(s_poisson),         intent(inout) :: poisson
+    type(s_dg_fragment_rt),  intent(in)    :: dg_frag
+    type(s_scalar),          intent(in)    :: rho
+    type(s_scalar),          intent(inout) :: Vh
+
+    logical :: use_fragment_local_poisson
+    character(16) :: env_local_poisson
+    integer :: env_status
+
+    env_local_poisson = ''
+    use_fragment_local_poisson = .false.
+    call get_environment_variable('SALMON_USE_FRAGMENT_LOCAL_POISSON', env_local_poisson, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_local_poisson)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_fragment_local_poisson = .true.
+      end select
+    end if
+
+    ! The global distributed Hartree core requires full rho on dg_frag%icomm.
+    ! DG fragment RT currently provides rho on the parent local-grid partition,
+    ! so rebuild full rho globally before entering the core path.
+    use_fragment_local_poisson = use_fragment_local_poisson .or. any(mg%num(1:3) /= lg%num(1:3))
+    use_fragment_local_poisson = use_fragment_local_poisson .or. any(mg%is(1:3) /= lg%is(1:3))
+    use_fragment_local_poisson = use_fragment_local_poisson .or. any(mg%ie(1:3) /= lg%ie(1:3))
+    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,1) /= mg%is(1)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,1) /= mg%ie(1)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,2) /= mg%is(2)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,2) /= mg%ie(2)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,3) /= mg%is(3)
+    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,3) /= mg%ie(3)
+    if (use_fragment_local_poisson) then
+      call hartree_dg_via_global_fullrho(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
+      return
+    end if
+
+    call hartree_dg_fullrho_core(lg, mg, fg, poisson, dg_frag, rho, Vh)
+  end subroutine hartree_dg_distributed
+
+  ! hartree_dg_fullrho_core
+  !   Core path for distributed Hartree when every rank already holds the full
+  !   rho box on dg_frag%icomm and the output buffers have the same full bounds.
+  subroutine hartree_dg_fullrho_core(lg, mg, fg, poisson, dg_frag, rho, Vh)
     use structures,           only: s_rgrid, s_reciprocal_grid, s_poisson, s_scalar
     use rt_dg_fragment_types, only: s_dg_fragment_rt
     use communication,        only: comm_summation
@@ -399,9 +705,7 @@ contains
     real(8) :: inv_N, g2, sr_factor, Vwall_z, z, z0
     real(8) :: t_stage0, t_stage1
     logical :: use_hse_sr_hartree
-    logical :: use_fragment_local_poisson
     character(16) :: env_hse_sr
-    character(16) :: env_local_poisson
     integer :: env_status
 
     ! Local work arrays for the kz-slab owned by this rank
@@ -411,36 +715,6 @@ contains
     ! Partial contributions on the full real-space / G-space grids
     real(8),    allocatable :: Vh_partial(:,:,:)      ! (mg range)
     complex(8), allocatable :: rhoG_partial(:,:,:)    ! (mg range)
-
-    env_local_poisson = ''
-    use_fragment_local_poisson = .false.
-    call get_environment_variable('SALMON_USE_FRAGMENT_LOCAL_POISSON', env_local_poisson, status=env_status)
-    if (env_status == 0) then
-      select case(trim(adjustl(env_local_poisson)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        use_fragment_local_poisson = .true.
-      end select
-    end if
-    ! The direct distributed DFT path assumes every rank sees the full mg/rho box
-    ! on the communicator it reduces over. DG fragment RT currently provides
-    ! fragment-subgroup/local-grid data instead, so fall back to the bridge path.
-    use_fragment_local_poisson = use_fragment_local_poisson .or. dg_frag%icomm_frag /= dg_frag%icomm
-    use_fragment_local_poisson = use_fragment_local_poisson .or. dg_frag%isize_frag /= dg_frag%isize
-    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,1) /= mg%is(1)
-    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,1) /= mg%ie(1)
-    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,2) /= mg%is(2)
-    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,2) /= mg%ie(2)
-    use_fragment_local_poisson = use_fragment_local_poisson .or. lbound(rho%f,3) /= mg%is(3)
-    use_fragment_local_poisson = use_fragment_local_poisson .or. ubound(rho%f,3) /= mg%ie(3)
-    if (use_fragment_local_poisson) then
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,4(a,i0))') "        hartree trace: using-bridge-fallback", &
-          " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
-        flush(6)
-      end if
-      call hartree_dg_via_poisson_periodic(lg, mg, fg, poisson, dg_frag, rho, Vh)
-      return
-    end if
 
     ! Check SALMON_HSE_SR_HARTREE environment variable (same logic as hartree_sub::hartree)
     if (dg_frag%id == 0) then
@@ -786,6 +1060,6 @@ contains
       flush(6)
     end if
 
-  end subroutine hartree_dg_distributed
+  end subroutine hartree_dg_fullrho_core
 
 end module poisson_dg_distributed

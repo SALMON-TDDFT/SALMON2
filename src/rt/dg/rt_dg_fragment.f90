@@ -419,9 +419,10 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
-    integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, i
+    integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
     integer :: nxyz(3), ixyz0(3), ifrag_count
     integer :: nx_max, ny_max, nz_max
+    integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
     integer, allocatable :: recv_count(:), recv_cursor(:)
 
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
@@ -522,9 +523,9 @@ contains
       do iz = 1, nxyz(3)
         do iy = 1, nxyz(2)
           do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%mg%num(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%mg%num(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, dg_frag%mg%num(3)) + 1
+            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
+            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
+            izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
             dg_frag%density_ixg_map(ix, iy, iz, i_local) = ixg
             dg_frag%density_iyg_map(ix, iy, iz, i_local) = iyg
             dg_frag%density_izg_map(ix, iy, iz, i_local) = izg
@@ -537,27 +538,115 @@ contains
           end do
         end do
       end do
+      if (dg_frag%id_frag == 0 .and. i_local <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') &
+             'density fragment-grid: rank=', dg_frag%id, &
+             ' ifrag=', ifrag, &
+             ' i_local=', i_local, &
+             ' ixyz0=', ixyz0(1), ixyz0(2), ixyz0(3), &
+             ' nxyz=', nxyz(1), nxyz(2), nxyz(3)
+        printed_points = 0
+        do iz = 1, min(1, nxyz(3))
+          do iy = 1, min(2, nxyz(2))
+            do ix = 1, min(2, nxyz(1))
+              ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
+              iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
+              izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
+              owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
+              write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0)') &
+                   'density fragment-point: rank=', dg_frag%id, &
+                   ' ifrag=', ifrag, &
+                   ' local=', ix, iy, iz, &
+                   ' global=', ixg, iyg, izg, &
+                   ' owner=', owner_rank
+              printed_points = printed_points + 1
+              if (printed_points >= 4) exit
+            end do
+            if (printed_points >= 4) exit
+          end do
+          if (printed_points >= 4) exit
+        end do
+      end if
     end do
 
     allocate(recv_count(0:dg_frag%isize-1), recv_cursor(0:dg_frag%isize-1))
     recv_count = 0
     do ifrag = 1, dg_frag%n_frag
-      source_rank = dg_frag%id_array(ifrag)
+      source_root_rank = dg_frag%id_array(ifrag)
+      source_rank = source_root_rank + modulo(dg_frag%id, dg_frag%isize_frag)
       if (source_rank == dg_frag%id) cycle
       nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
       ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
       do iz = 1, nxyz(3)
         do iy = 1, nxyz(2)
           do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%mg%num(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%mg%num(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, dg_frag%mg%num(3)) + 1
+            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
+            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
+            izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank == dg_frag%id) recv_count(source_rank) = recv_count(source_rank) + 1
           end do
         end do
       end do
     end do
+
+    if (dg_frag%id_frag == 0) then
+      nsend_nonzero = count(dg_frag%density_send_count > 0)
+      nrecv_nonzero = count(recv_count > 0)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+           'density owner-map trace: rank=', dg_frag%id, &
+           ' id_frag=', dg_frag%id_frag, &
+           ' send_nonzero=', nsend_nonzero, &
+           ' recv_nonzero=', nrecv_nonzero, &
+           ' self_owner=', dg_frag%id
+      printed_targets = 0
+      do owner_rank = 0, dg_frag%isize - 1
+        if (dg_frag%density_send_count(owner_rank) <= 0) cycle
+        printed_targets = printed_targets + 1
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+             'density owner-map send-target: rank=', dg_frag%id, &
+             ' id_frag=', dg_frag%id_frag, &
+             ' target_rank=', owner_rank, &
+             ' npts=', dg_frag%density_send_count(owner_rank)
+        if (printed_targets >= 8) exit
+      end do
+      printed_sources = 0
+      do source_rank = 0, dg_frag%isize - 1
+        if (recv_count(source_rank) <= 0) cycle
+        printed_sources = printed_sources + 1
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+             'density owner-map recv-source: rank=', dg_frag%id, &
+             ' id_frag=', dg_frag%id_frag, &
+             ' source_rank=', source_rank, &
+             ' npts=', recv_count(source_rank)
+        if (printed_sources >= 8) exit
+      end do
+      if (dg_frag%id == 0) then
+        printed_ranges = 0
+        do owner_rank = 0, dg_frag%isize - 1
+          printed_ranges = printed_ranges + 1
+          write(*,'(1x,a,i0,a,i0,a,3(i0,a,i0,1x))') &
+               'density owner-grid-range: rank=', dg_frag%id, &
+               ' target_rank=', owner_rank, &
+               ' is_ie=', dg_frag%mg%is_all(1, owner_rank), ':', dg_frag%mg%ie_all(1, owner_rank), &
+                         dg_frag%mg%is_all(2, owner_rank), ':', dg_frag%mg%ie_all(2, owner_rank), &
+                         dg_frag%mg%is_all(3, owner_rank), ':', dg_frag%mg%ie_all(3, owner_rank)
+          if (printed_ranges >= 8) exit
+        end do
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+             'density owner-sample: rank=', dg_frag%id, &
+             ' point=1,1,1 owner=', find_density_grid_owner(dg_frag, 1, 1, 1), &
+             ' self=', dg_frag%id
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+             'density owner-sample: rank=', dg_frag%id, &
+             ' point=160,160,1 owner=', find_density_grid_owner(dg_frag, 160, 160, 1), &
+             ' self=', dg_frag%id
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+             'density owner-sample: rank=', dg_frag%id, &
+             ' point=320,320,1 owner=', find_density_grid_owner(dg_frag, 320, 320, 1), &
+             ' self=', dg_frag%id
+      end if
+    end if
 
     do source_rank = 0, dg_frag%isize - 1
       dg_frag%density_recv_map(source_rank)%npts = recv_count(source_rank)
@@ -569,16 +658,17 @@ contains
 
     recv_cursor = 0
     do ifrag = 1, dg_frag%n_frag
-      source_rank = dg_frag%id_array(ifrag)
+      source_root_rank = dg_frag%id_array(ifrag)
+      source_rank = source_root_rank + modulo(dg_frag%id, dg_frag%isize_frag)
       if (source_rank == dg_frag%id) cycle
       nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
       ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
       do iz = 1, nxyz(3)
         do iy = 1, nxyz(2)
           do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%mg%num(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%mg%num(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, dg_frag%mg%num(3)) + 1
+            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
+            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
+            izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank /= dg_frag%id) cycle
             recv_cursor(source_rank) = recv_cursor(source_rank) + 1

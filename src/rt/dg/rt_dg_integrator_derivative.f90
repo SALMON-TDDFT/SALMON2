@@ -38,6 +38,7 @@
     integer :: env_len, env_stat
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     logical, parameter :: enable_derivative_trace = .false.
+    logical, parameter :: enable_derivative_progress = .true.
     
     ! Time derivative in velocity gauge:
     !   d/dt c_i = -i * (H_0_ij + A^2(t)/2 * delta_ij) * c_j - A(t)·<i|∇|j> * c_j
@@ -66,7 +67,15 @@
       stop "NaN in A_squared"
     end if
 
+    if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        derivative trace: stage=before-ensure-nonlocal"
+      flush(6)
+    end if
     call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
+    if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        derivative trace: stage=after-ensure-nonlocal"
+      flush(6)
+    end if
     has_nonlocal = dg_frag%has_nl_cache
     
     n = dg_frag%n_mat_max
@@ -75,6 +84,10 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
+    if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        derivative trace: stage=after-dims"
+      flush(6)
+    end if
 
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
     disable_mfp = .false.
@@ -92,8 +105,18 @@
 
     allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
     allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
+    if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "        derivative trace: stage=after-main-alloc"
+      flush(6)
+      write(*,'(1x,a)') "        derivative trace: stage=before-spin-loop"
+      flush(6)
+    end if
 
     do ispin = 1, dg_frag%nspin
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-entry"
+        flush(6)
+      end if
       if (enable_derivative_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &

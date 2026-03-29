@@ -54,7 +54,7 @@
       flush(6)
     end if
     call cpu_time(t_stage0)
-    call hartree_dg_distributed(lg, mg, fg, poisson, dg_frag, rho, Vh)
+    call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
     write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat stage trace: after-hartree rank=", dg_frag%id, &
       " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
