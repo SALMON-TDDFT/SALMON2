@@ -504,6 +504,7 @@ contains
       & yn_out_stress, &
       & yn_out_stress_decomp, &
       & yn_stress_loc_fd, &
+      & stress_fd_detail, &
       & out_stress_step, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
@@ -933,6 +934,7 @@ contains
     yn_out_stress       = 'n'
     yn_out_stress_decomp = 'n'
     yn_stress_loc_fd    = 'n'
+    stress_fd_detail    = 'C'
     out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -1551,6 +1553,7 @@ contains
     call comm_bcast(yn_out_stress       ,nproc_group_global)
     call comm_bcast(yn_out_stress_decomp,nproc_group_global)
     call comm_bcast(yn_stress_loc_fd    ,nproc_group_global)
+    call comm_bcast(stress_fd_detail    ,nproc_group_global)
     call comm_bcast(out_stress_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
@@ -2468,6 +2471,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress', yn_out_stress
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_decomp', yn_out_stress_decomp
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stress_loc_fd', yn_stress_loc_fd
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'stress_fd_detail', stress_fd_detail
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
@@ -2937,6 +2941,9 @@ contains
       stop "yn_out_stress='y' requires spin='unpolarized'"
     if(yn_out_stress_decomp == 'y' .and. yn_out_stress /= 'y') &
       stop "yn_out_stress_decomp='y' requires yn_out_stress='y'"
+    if(yn_out_stress == 'y' .and. &
+       stress_fd_detail /= 'A' .and. stress_fd_detail /= 'B' .and. stress_fd_detail /= 'C') &
+      stop "stress_fd_detail must be 'A', 'B', or 'C'"
     if(yn_out_stress == 'y' .and. out_stress_step < 1) &
       stop "out_stress_step must be >= 1"
     
