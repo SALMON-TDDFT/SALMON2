@@ -536,7 +536,7 @@ contains
     type(s_rgrid),           intent(in)    :: mg
     type(s_ewald_ion_ion),   intent(in)    :: ewald
     integer :: ix, iy, iz, ia, ib, a, b, iia, ipair, ig_s(3), ig_e(3)
-    real(8) :: g(3), G2, fact, rr, r_abs, rab(3), r(3), Qtot, strs_G(3,3), strs_R(3,3), strs_G_sum(3,3), strs_R_sum(3,3), V
+    real(8) :: g(3), G2, fact, rr, r_abs, rab(3), r(3), Qtot, zps2, strs_G(3,3), strs_R(3,3), strs_G_sum(3,3), strs_R_sum(3,3), V
     real(8) :: strs_G_grad(3,3), strs_G_diag(3,3), strs_G_self(3,3), strs_G_grad_sum(3,3), strs_G_diag_sum(3,3)
     real(8) :: E_ewa_G_loc, E_ewa_R_loc, E_ewa_G_sum, E_ewa_R_sum
     complex(8) :: SG
@@ -550,8 +550,10 @@ contains
     E_ewa_G_loc = 0d0
     E_ewa_R_loc = 0d0
     Qtot = 0d0
+    zps2 = 0d0
     do ia = 1, system%nion
       Qtot = Qtot + pp%zps(kion(ia))
+      zps2 = zps2 + pp%zps(kion(ia))**2
     end do
 
     call get_g_bounds(fg, ig_s, ig_e)
@@ -623,7 +625,7 @@ contains
     call comm_summation(strs_R, strs_R_sum, 9, info%icomm_r)
     call comm_summation(E_ewa_G_loc, E_ewa_G_sum, info%icomm_r)
     call comm_summation(E_ewa_R_loc, E_ewa_R_sum, info%icomm_r)
-    E_ewa_G_sum = E_ewa_G_sum - pi * Qtot**2 / (2d0*aEwald*V)
+    E_ewa_G_sum = E_ewa_G_sum - pi * Qtot**2 / (2d0*aEwald*V) - sqrt(aEwald/pi) * zps2
     system%stress_ewa_energy_G = E_ewa_G_sum
     system%stress_ewa_energy_R = E_ewa_R_sum
     system%stress_ewa_g_grad = strs_G_grad_sum
