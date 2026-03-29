@@ -56,6 +56,7 @@ module communication
   public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
   public :: comm_alltoall
+  public :: comm_alltoallv
   public :: comm_get_min
   public :: comm_get_max
 
@@ -240,6 +241,11 @@ module communication
   interface comm_alltoall
     ! 1-D array
     module procedure comm_alltoall_array1d_complex
+  end interface
+
+  interface comm_alltoallv
+    ! 1-D array
+    module procedure comm_alltoallv_array1d_double
   end interface
 
   interface comm_get_min
@@ -1258,6 +1264,24 @@ contains
     UNUSED_VARIABLE(ncount)
     !NOP! ABORT_MESSAGE(ngroup,"comm_alltoall_array1d_complex")
     outvalue = invalue
+  end subroutine
+
+  subroutine comm_alltoallv_array1d_double(invalue, sendcounts, sdispls, outvalue, recvcounts, rdispls, ngroup)
+    implicit none
+    real(8), intent(in)  :: invalue(:)
+    integer, intent(in)  :: sendcounts(:)
+    integer, intent(in)  :: sdispls(:)
+    real(8), intent(out) :: outvalue(:)
+    integer, intent(in)  :: recvcounts(:)
+    integer, intent(in)  :: rdispls(:)
+    integer, intent(in)  :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    UNUSED_VARIABLE(recvcounts)
+    UNUSED_VARIABLE(rdispls)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_alltoallv_array1d_double")
+    if (size(sendcounts) > 0 .and. sendcounts(1) > 0) then
+      outvalue(1:sendcounts(1)) = invalue(1+sdispls(1):sdispls(1)+sendcounts(1))
+    end if
   end subroutine
 
   subroutine comm_get_min_double(svalue, ngroup)

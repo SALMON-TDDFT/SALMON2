@@ -54,6 +54,7 @@ module communication
   public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
   public :: comm_alltoall
+  public :: comm_alltoallv
   public :: comm_get_min
   public :: comm_get_max
 
@@ -238,6 +239,11 @@ module communication
   interface comm_alltoall
     ! 1-D array
     module procedure comm_alltoall_array1d_complex
+  end interface
+
+  interface comm_alltoallv
+    ! 1-D array
+    module procedure comm_alltoallv_array1d_double
   end interface
 
   interface comm_get_min
@@ -1591,6 +1597,24 @@ contains
     call MPI_Alltoall(invalue,  ncount,          MPI_DOUBLE_COMPLEX, &
                       outvalue, ncount,          MPI_DOUBLE_COMPLEX, &
                       ngroup, ierr)
+    call error_check(ierr)
+  end subroutine
+
+  subroutine comm_alltoallv_array1d_double(invalue, sendcounts, sdispls, outvalue, recvcounts, rdispls, ngroup)
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(in)  :: invalue(:)
+    integer, intent(in)  :: sendcounts(:)
+    integer, intent(in)  :: sdispls(:)
+    real(8), intent(out) :: outvalue(:)
+    integer, intent(in)  :: recvcounts(:)
+    integer, intent(in)  :: rdispls(:)
+    integer, intent(in)  :: ngroup
+    integer :: ierr
+
+    call MPI_Alltoallv(invalue, sendcounts, sdispls, MPI_DOUBLE_PRECISION, &
+                       outvalue, recvcounts, rdispls, MPI_DOUBLE_PRECISION, &
+                       ngroup, ierr)
     call error_check(ierr)
   end subroutine
 

@@ -1,7 +1,7 @@
   subroutine calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     use structures
     use salmon_global, only: nelec, nelec_spin
-    use communication, only: comm_summation, comm_bcast, comm_isend, comm_irecv, comm_wait_all, COMM_GROUP_NULL
+    use communication, only: comm_summation, comm_bcast, comm_alltoallv, COMM_GROUP_NULL
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -10,14 +10,13 @@
     type(s_scalar),         intent(inout) :: rho
     type(s_scalar),         intent(inout) :: rho_s(system%nspin)
 
-    integer, parameter :: rho_tag_base = 4101
     integer :: ifrag, ifrag_pack, io, i_local, i_local_pack, ispin
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, owner_rank
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), nxyz_pack(3), ixyz0(3), ifrag_count, ngrid_max, igrid_cache
     integer :: nocc_per_spin, nocc_spin, nocc_cache
-    integer :: irank, nreq_send, nreq_recv, ireq, slot, npts, idx_local, idx_remote, idx_subgroup
+    integer :: irank, slot, npts, idx_local, idx_remote, idx_subgroup
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count, valid_subgroup_grid_count
     integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
     integer :: total_send_pts, pack_offset, subgroup_root_rank, block_idx_global, self_slot_count, total_local_pts
@@ -35,18 +34,18 @@
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
     real(8) :: t_setup0, t_setup1, t_psi0, t_psi1, t_rho0, t_rho1
     real(8) :: time_cache, time_project, time_comm, time_norm
-    real(8) :: time_comm_subgroup_reduce, time_comm_post_recv, time_comm_post_send
-    real(8) :: time_comm_recv_wait, time_comm_unpack, time_comm_send_wait
+    real(8) :: time_comm_subgroup_reduce, time_comm_pack, time_comm_exchange, time_comm_unpack
     real(8) :: time_project_setup, time_project_psi, time_project_rho
     real(8) :: time_project_grid_prep, time_project_phi_pack, time_project_overhead
     real(8) :: time_project_dmat_build
     real(8) :: t_dmat0, t_dmat1
     logical :: use_mixed_density, distribute_project
-    integer, allocatable :: req_send(:), req_recv(:)
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
     integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:), valid_subgroup_grid_ids(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
+    integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
+    real(8), allocatable :: send_flat(:), recv_flat(:)
     real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:)
     real(8), allocatable :: density_mat_re(:,:), density_tmp(:,:)
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
@@ -75,11 +74,9 @@
     time_comm = 0.0d0
     time_norm = 0.0d0
     time_comm_subgroup_reduce = 0.0d0
-    time_comm_post_recv = 0.0d0
-    time_comm_post_send = 0.0d0
-    time_comm_recv_wait = 0.0d0
+    time_comm_pack = 0.0d0
+    time_comm_exchange = 0.0d0
     time_comm_unpack = 0.0d0
-    time_comm_send_wait = 0.0d0
     time_project_setup = 0.0d0
     time_project_psi = 0.0d0
     time_project_rho = 0.0d0
@@ -196,52 +193,6 @@
     inv_sqrt_vol = 1.0d0 / sqrt(max(1.0d-16, boxL(1) * boxL(2) * boxL(3)))
 
     call cpu_time(t_setup0)
-    if (distribute_project .and. allocated(dg_frag%density_owner_map) .and. .not. allocated(dg_frag%density_subgroup_send_count)) then
-      allocate(dg_frag%density_subgroup_send_count(0:dg_frag%isize-1))
-      allocate(dg_frag%density_subgroup_send_slot_map(size(dg_frag%density_owner_map, 1), size(dg_frag%density_owner_map, 2), &
-                                                     size(dg_frag%density_owner_map, 3), size(dg_frag%density_owner_map, 4)))
-      dg_frag%density_subgroup_send_count = 0
-      dg_frag%density_subgroup_send_slot_map = 0
-      total_local_pts = 0
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        total_local_pts = total_local_pts + product(dg_frag%nxyz_domain(1:3, ifrag))
-      end do
-      if (total_local_pts > 0) then
-        allocate(subgroup_self_ixg_tmp(total_local_pts), subgroup_self_iyg_tmp(total_local_pts), subgroup_self_izg_tmp(total_local_pts))
-      end if
-      self_slot_count = 0
-      i_local = 0
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local = i_local + 1
-        nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-        do iz = 1, nxyz(3)
-          do iy = 1, nxyz(2)
-            do ix = 1, nxyz(1)
-              if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local)) cycle
-              owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-              dg_frag%density_subgroup_send_count(owner_rank) = dg_frag%density_subgroup_send_count(owner_rank) + 1
-              dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_subgroup_send_count(owner_rank)
-              if (owner_rank == dg_frag%id) then
-                self_slot_count = self_slot_count + 1
-                subgroup_self_ixg_tmp(self_slot_count) = dg_frag%density_ixg_map(ix, iy, iz, i_local)
-                subgroup_self_iyg_tmp(self_slot_count) = dg_frag%density_iyg_map(ix, iy, iz, i_local)
-                subgroup_self_izg_tmp(self_slot_count) = dg_frag%density_izg_map(ix, iy, iz, i_local)
-              end if
-            end do
-          end do
-        end do
-      end do
-      if (self_slot_count > 0) then
-        allocate(dg_frag%density_subgroup_self_ixg(self_slot_count), dg_frag%density_subgroup_self_iyg(self_slot_count), &
-                 dg_frag%density_subgroup_self_izg(self_slot_count))
-        dg_frag%density_subgroup_self_ixg(:) = subgroup_self_ixg_tmp(1:self_slot_count)
-        dg_frag%density_subgroup_self_iyg(:) = subgroup_self_iyg_tmp(1:self_slot_count)
-        dg_frag%density_subgroup_self_izg(:) = subgroup_self_izg_tmp(1:self_slot_count)
-      end if
-      if (allocated(subgroup_self_ixg_tmp)) deallocate(subgroup_self_ixg_tmp)
-      if (allocated(subgroup_self_iyg_tmp)) deallocate(subgroup_self_iyg_tmp)
-      if (allocated(subgroup_self_izg_tmp)) deallocate(subgroup_self_izg_tmp)
-    end if
     if (.not. allocated(dg_frag%density_block_nblocks)) then
       allocate(dg_frag%density_block_nblocks(ifrag_count), dg_frag%density_block_first_offset(ifrag_count), &
                dg_frag%density_block_step(ifrag_count))
@@ -265,60 +216,6 @@
     end if
     call cpu_time(t_setup1)
     time_project_overhead = time_project_overhead + (t_setup1 - t_setup0)
-
-    do irank = 0, dg_frag%isize - 1
-      if (allocated(dg_frag%density_send_count) .and. target_rank_owned_by_handler(irank)) then
-        if (irank == dg_frag%id) then
-          npts = 0
-        else
-          npts = dg_frag%density_send_count(irank)
-        end if
-      else
-        npts = 0
-      end if
-      if (npts > 0) then
-        packed_npts = (1 + system%nspin) * npts
-        allocate(rho_send(irank)%f(1:packed_npts, 1:1, 1:1))
-        rho_send(irank)%f = 0.0d0
-      end if
-      if (irank == dg_frag%id) cycle
-      if (target_rank_owned_by_handler(dg_frag%id) .and. allocated(dg_frag%density_recv_map)) then
-        npts = dg_frag%density_recv_map(irank)%npts
-      else
-        npts = 0
-      end if
-      if (npts > 0) then
-        packed_npts = (1 + system%nspin) * npts
-        allocate(rho_recv(irank)%f(1:packed_npts, 1:1, 1:1))
-        rho_recv(irank)%f = 0.0d0
-      end if
-    end do
-    total_send_pts = 0
-    if (distribute_project .and. allocated(dg_frag%density_subgroup_send_count)) then
-      do irank = 0, dg_frag%isize - 1
-        total_send_pts = total_send_pts + (1 + system%nspin) * dg_frag%density_subgroup_send_count(irank)
-      end do
-    end if
-    if (total_send_pts > 0) then
-      allocate(send_pack(total_send_pts), send_sum(total_send_pts))
-      send_pack(:) = 0.0d0
-      allocate(subgroup_send_offset(0:dg_frag%isize-1, 0:system%nspin))
-      subgroup_send_offset(:, :) = 0
-      pack_offset = 0
-      do irank = 0, dg_frag%isize - 1
-        npts = dg_frag%density_subgroup_send_count(irank)
-        subgroup_send_offset(irank, 0) = pack_offset
-        if (npts > 0) then
-          pack_offset = pack_offset + npts
-        end if
-        do ispin = 1, system%nspin
-          subgroup_send_offset(irank, ispin) = pack_offset
-          if (npts > 0) then
-            pack_offset = pack_offset + npts
-          end if
-        end do
-      end do
-    end if
 
     if (n_pw > 0) then
       call cpu_time(t_cache0)
@@ -924,115 +821,87 @@
       flush(6)
     end if
     call cpu_time(t_comm0)
-    nreq_recv = 0
-    if (target_rank_owned_by_handler(dg_frag%id)) then
-      do irank = 0, dg_frag%isize - 1
-        if (allocated(rho_recv(irank)%f)) nreq_recv = nreq_recv + 1
-      end do
-    end if
-    if (nreq_recv > 0) then
-      allocate(req_recv(nreq_recv))
-      ireq = 0
-      call cpu_time(t_setup0)
-      do irank = 0, dg_frag%isize - 1
-        if (.not. allocated(rho_recv(irank)%f)) cycle
-        ireq = ireq + 1
-        req_recv(ireq) = comm_irecv(rho_recv(irank)%f, irank, rho_tag_base + dg_frag%id, dg_frag%icomm)
-      end do
-      call cpu_time(t_setup1)
-      time_comm_post_recv = time_comm_post_recv + (t_setup1 - t_setup0)
-    end if
-
-    nreq_send = 0
+    allocate(send_counts(0:dg_frag%isize-1), recv_counts(0:dg_frag%isize-1))
+    allocate(send_displs(0:dg_frag%isize-1), recv_displs(0:dg_frag%isize-1))
+    send_counts = 0
+    recv_counts = 0
     do irank = 0, dg_frag%isize - 1
-      if (allocated(rho_send(irank)%f)) nreq_send = nreq_send + 1
+      if (allocated(rho_send(irank)%f)) send_counts(irank) = size(rho_send(irank)%f)
+      if (allocated(rho_recv(irank)%f)) recv_counts(irank) = size(rho_recv(irank)%f)
     end do
-    if (nreq_send > 0) then
-      allocate(req_send(nreq_send))
-      ireq = 0
-      call cpu_time(t_setup0)
-      do irank = 0, dg_frag%isize - 1
-        if (.not. allocated(rho_send(irank)%f)) cycle
-        ireq = ireq + 1
-        req_send(ireq) = comm_isend(rho_send(irank)%f, irank, rho_tag_base + irank, dg_frag%icomm)
-      end do
-      call cpu_time(t_setup1)
-      time_comm_post_send = time_comm_post_send + (t_setup1 - t_setup0)
-    end if
-
-    if (nreq_recv > 0) then
-      write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-recv-wait"
-      flush(6)
-      call cpu_time(t_setup0)
-      call comm_wait_all(req_recv)
-      call cpu_time(t_setup1)
-      time_comm_recv_wait = time_comm_recv_wait + (t_setup1 - t_setup0)
-      write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=after-recv-wait"
-      flush(6)
-      call cpu_time(t_setup0)
-      do irank = 0, dg_frag%isize - 1
-        if (.not. allocated(rho_recv(irank)%f)) cycle
-        npts = dg_frag%density_recv_map(irank)%npts
+    send_displs(0) = 0
+    recv_displs(0) = 0
+    do irank = 1, dg_frag%isize - 1
+      send_displs(irank) = send_displs(irank-1) + send_counts(irank-1)
+      recv_displs(irank) = recv_displs(irank-1) + recv_counts(irank-1)
+    end do
+    allocate(send_flat(max(1, sum(send_counts))), recv_flat(max(1, sum(recv_counts))))
+    send_flat = 0.0d0
+    recv_flat = 0.0d0
+    call cpu_time(t_setup0)
+    do irank = 0, dg_frag%isize - 1
+      if (.not. allocated(rho_send(irank)%f)) cycle
+      if (send_counts(irank) <= 0) cycle
+      send_flat(send_displs(irank)+1:send_displs(irank)+send_counts(irank)) = rho_send(irank)%f(:, 1, 1)
+      deallocate(rho_send(irank)%f)
+    end do
+    call cpu_time(t_setup1)
+    time_comm_pack = time_comm_pack + (t_setup1 - t_setup0)
+    write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-alltoallv"
+    flush(6)
+    call cpu_time(t_setup0)
+    call comm_alltoallv(send_flat, send_counts, send_displs, recv_flat, recv_counts, recv_displs, dg_frag%icomm)
+    call cpu_time(t_setup1)
+    time_comm_exchange = time_comm_exchange + (t_setup1 - t_setup0)
+    write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=after-alltoallv"
+    flush(6)
+    call cpu_time(t_setup0)
+    do irank = 0, dg_frag%isize - 1
+      if (.not. allocated(rho_recv(irank)%f)) cycle
+      if (recv_counts(irank) > 0) then
+        rho_recv(irank)%f(:, 1, 1) = recv_flat(recv_displs(irank)+1:recv_displs(irank)+recv_counts(irank))
+      end if
+      npts = dg_frag%density_recv_map(irank)%npts
 !$omp parallel do private(slot, ixg, iyg, izg, ispin, spin_offset, rho_contrib, rho_raw_contrib) schedule(static)
-        do slot = 1, dg_frag%density_recv_map(irank)%npts
-          ixg = dg_frag%density_recv_map(irank)%ixg(slot)
-          iyg = dg_frag%density_recv_map(irank)%iyg(slot)
-          izg = dg_frag%density_recv_map(irank)%izg(slot)
-          rho_raw_contrib = rho_recv(irank)%f(slot, 1, 1)
-          rho_contrib = rho_raw_contrib
+      do slot = 1, dg_frag%density_recv_map(irank)%npts
+        ixg = dg_frag%density_recv_map(irank)%ixg(slot)
+        iyg = dg_frag%density_recv_map(irank)%iyg(slot)
+        izg = dg_frag%density_recv_map(irank)%izg(slot)
+        rho_raw_contrib = rho_recv(irank)%f(slot, 1, 1)
+        rho_contrib = rho_raw_contrib
+        if (allocated(dg_frag%density_inv_weight_local)) then
+          rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
+        end if
+!$omp atomic
+        charge_budget_local(5) = charge_budget_local(5) + rho_raw_contrib
+!$omp atomic
+        charge_budget_local(6) = charge_budget_local(6) + rho_contrib
+        rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
+        do ispin = 1, system%nspin
+          spin_offset = ispin * npts
+          rho_contrib = rho_recv(irank)%f(spin_offset + slot, 1, 1)
           if (allocated(dg_frag%density_inv_weight_local)) then
             rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
           end if
-!$omp atomic
-          charge_budget_local(5) = charge_budget_local(5) + rho_raw_contrib
-!$omp atomic
-          charge_budget_local(6) = charge_budget_local(6) + rho_contrib
-          rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-          do ispin = 1, system%nspin
-            spin_offset = ispin * npts
-            rho_contrib = rho_recv(irank)%f(spin_offset + slot, 1, 1)
-            if (allocated(dg_frag%density_inv_weight_local)) then
-              rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-            end if
-            rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
-          end do
+          rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
         end do
+      end do
 !$omp end parallel do
-        deallocate(rho_recv(irank)%f)
-      end do
-      call cpu_time(t_setup1)
-      time_comm_unpack = time_comm_unpack + (t_setup1 - t_setup0)
-      deallocate(req_recv)
-    end if
-    if (nreq_send > 0) then
-      write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-send-wait"
-      flush(6)
-      call cpu_time(t_setup0)
-      call comm_wait_all(req_send)
-      call cpu_time(t_setup1)
-      time_comm_send_wait = time_comm_send_wait + (t_setup1 - t_setup0)
-      write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=after-send-wait"
-      flush(6)
-      do irank = 0, dg_frag%isize - 1
-        if (.not. allocated(rho_send(irank)%f)) cycle
-        deallocate(rho_send(irank)%f)
-      end do
-      deallocate(req_send)
-    end if
-    do irank = 0, dg_frag%isize - 1
-      if (allocated(rho_send(irank)%f)) deallocate(rho_send(irank)%f)
+      deallocate(rho_recv(irank)%f)
     end do
+    call cpu_time(t_setup1)
+    time_comm_unpack = time_comm_unpack + (t_setup1 - t_setup0)
+    deallocate(send_flat, recv_flat, send_counts, recv_counts, send_displs, recv_displs)
     if (allocated(subgroup_send_offset)) deallocate(subgroup_send_offset)
     call cpu_time(t_comm1)
     time_comm = time_comm + (t_comm1 - t_comm0)
     if (dg_frag%is_frag_root) then
       write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        density trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " stage=after-comm dt=", time_comm
-      write(*,'(1x,a,i0,a,i0,6(a,1pe12.4))') "        density trace: rank=", dg_frag%id, &
+      write(*,'(1x,a,i0,a,i0,4(a,1pe12.4))') "        density trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, &
-        " subgroup_reduce=", time_comm_subgroup_reduce, " post_recv=", time_comm_post_recv, &
-        " post_send=", time_comm_post_send, " recv_wait=", time_comm_recv_wait, &
-        " unpack=", time_comm_unpack, " send_wait=", time_comm_send_wait
+        " subgroup_reduce=", time_comm_subgroup_reduce, " pack=", time_comm_pack, &
+        " exchange=", time_comm_exchange, " unpack=", time_comm_unpack
       flush(6)
     end if
 

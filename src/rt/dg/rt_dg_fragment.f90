@@ -699,60 +699,24 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag_ref, ixg, iyg, izg
-    integer :: ifrag, best_ifrag, idx_ref(3), idx_try(3), candidate_ifrags(27), ncandidate
-    integer :: dx, dy, dz, icand
-    real(8) :: score, best_score
-
-    best_ifrag = 0
-    best_score = -huge(1.0d0)
-    ncandidate = 0
-    idx_ref = fragment_cartesian_index(dg_frag, ifrag_ref)
-    do dz = -1, 1
-      do dy = -1, 1
-        do dx = -1, 1
-          idx_try(1) = wrap_fragment_cartesian_index(idx_ref(1) + dx, dg_frag%num_fragment(1))
-          idx_try(2) = wrap_fragment_cartesian_index(idx_ref(2) + dy, dg_frag%num_fragment(2))
-          idx_try(3) = wrap_fragment_cartesian_index(idx_ref(3) + dz, dg_frag%num_fragment(3))
-          ifrag = cartesian_index_to_fragment(dg_frag, idx_try)
-          do icand = 1, ncandidate
-            if (candidate_ifrags(icand) == ifrag) exit
-          end do
-          if (icand <= ncandidate) cycle
-          ncandidate = ncandidate + 1
-          candidate_ifrags(ncandidate) = ifrag
-        end do
-      end do
-    end do
-
-    do icand = 1, ncandidate
-      ifrag = candidate_ifrags(icand)
-      score = density_primary_score(dg_frag, ifrag, ixg, iyg, izg)
-      if (score <= -1.0d290) cycle
-      if (score > best_score + 1.0d-12) then
-        best_score = score
-        best_ifrag = ifrag
-      else if (abs(score - best_score) <= 1.0d-12 .and. best_ifrag > 0 .and. ifrag < best_ifrag) then
-        best_ifrag = ifrag
-      end if
-    end do
-    is_primary = (ifrag_ref == best_ifrag)
+    is_primary = is_density_core_point(dg_frag, ifrag_ref, ixg, iyg, izg)
   end function is_density_primary_fragment
 
-  real(8) function density_primary_score(dg_frag, ifrag, ixg, iyg, izg) result(score)
+  logical function is_density_core_point(dg_frag, ifrag, ixg, iyg, izg) result(is_core)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, ixg, iyg, izg
-    integer :: lcoord(3), axis, nloc, nb, core_lo, core_hi, dist_lo, dist_hi
+    integer :: lcoord(3), axis, nloc, nb, core_lo, core_hi
     integer :: ixg_arr(3)
 
     ixg_arr = [ixg, iyg, izg]
-    score = 0.0d0
+    is_core = .true.
 
     do axis = 1, 3
       lcoord(axis) = modulo(ixg_arr(axis) - dg_frag%ixyz_frag(axis, ifrag), dg_frag%lgnum_total(axis)) + 1
       nloc = dg_frag%nxyz_domain(axis, ifrag)
       if (lcoord(axis) < 1 .or. lcoord(axis) > nloc) then
-        score = -huge(1.0d0)
+        is_core = .false.
         return
       end if
 
@@ -764,17 +728,12 @@ contains
         core_hi = core_lo
       end if
 
-      if (lcoord(axis) < core_lo) then
-        score = score - real(core_lo - lcoord(axis), 8)
-      else if (lcoord(axis) > core_hi) then
-        score = score - real(lcoord(axis) - core_hi, 8)
-      else
-        dist_lo = lcoord(axis) - core_lo
-        dist_hi = core_hi - lcoord(axis)
-        score = score + 1.0d0 + real(min(dist_lo, dist_hi), 8)
+      if (lcoord(axis) < core_lo .or. lcoord(axis) > core_hi) then
+        is_core = .false.
+        return
       end if
     end do
-  end function density_primary_score
+  end function is_density_core_point
 
   integer function wrap_fragment_cartesian_index(i, ndiv) result(iwrap)
     implicit none

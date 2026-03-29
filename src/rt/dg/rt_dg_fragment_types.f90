@@ -163,8 +163,8 @@ module rt_dg_fragment_types
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_cache
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
-    real(8), allocatable :: nl_pp_phi_self(:,:,:,:) ! (nps,natom,nstate_frag,ifrag_local)
-    real(8), allocatable :: nl_pp_phi_halo(:,:,:,:) ! (nps,natom,nstate_frag,n_halo)
+    complex(8), allocatable :: nl_pp_phi_self(:,:,:,:) ! (nps,natom,nstate_frag,ifrag_local)
+    complex(8), allocatable :: nl_pp_phi_halo(:,:,:,:) ! (nps,natom,nstate_frag,n_halo)
     logical :: nl_pp_phi_cache_valid = .false.
 
     ! Observables

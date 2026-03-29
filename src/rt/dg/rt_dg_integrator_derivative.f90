@@ -1,7 +1,8 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, apply_mixed_hamiltonian, &
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
+                                  apply_nonlocal_pp_projector_batch_so, apply_mixed_hamiltonian, &
                                   solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
                                   copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense, gather_full_coef_view
     implicit none
@@ -19,11 +20,12 @@
     integer :: n, n_frag, n_pw, n_tot
     real(8) :: A_squared
     complex(8), parameter :: zi = (0.0d0, 1.0d0)  ! imaginary unit
-    logical :: has_nonlocal, use_hmat_complex
+    logical :: has_nonlocal, has_so_nonlocal, use_hmat_complex
     logical :: need_h0_dense, need_m_dense
     complex(8), allocatable :: H0c(:,:), M(:,:), dcoef_dt_h0(:,:), dcoef_dt_m(:,:)
     complex(8), allocatable :: coef_all(:,:), rhs_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: coef_frag_other(:,:), coef_pw_other(:,:)
     complex(8), allocatable :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
     complex(8), allocatable :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:)
     complex(8) :: mfp
@@ -32,7 +34,7 @@
     logical :: found_nan
     integer :: nan_io, nan_jo
     real(8) :: max_abs_h0, max_abs_m
-    integer :: n_s, n_basis
+    integer :: n_s, n_basis, ispin_other
     logical :: use_spatial_A
     logical :: disable_mfp, use_mixed_basis
     character(len=32) :: env_mfp
@@ -77,6 +79,7 @@
       flush(6)
     end if
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
+    has_so_nonlocal = (allocated(ppg%uv_so) .and. allocated(dg_frag%phi_frag_c) .and. dg_frag%nspin == 2)
     
     n = dg_frag%n_mat_max
     if (n <= 0) return
@@ -231,14 +234,42 @@
         flush(6)
       end if
 
+      if (n_frag > size(dg_frag%coef, 1)) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] derivative n_frag exceeds coef rows: rank=", dg_frag%id, &
+          " ispin=", ispin, " n_frag=", n_frag
+        stop "DG derivative invalid n_frag/coefficient shape"
+      end if
+      if (dg_frag%nstate_tot > size(dg_frag%coef, 2)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] derivative nstate exceeds coef cols: rank=", dg_frag%id, &
+          " ispin=", ispin, " nstate_tot=", dg_frag%nstate_tot, " coef_cols=", size(dg_frag%coef, 2)
+        stop "DG derivative invalid nstate/coefficient shape"
+      end if
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-before-full-coef-gather-guard"
+        flush(6)
+      end if
       if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
         write(*,'(1x,a)') "        derivative trace: stage=spin1-before-full-coef-gather"
         flush(6)
       end if
       call cpu_time(t_coef_gather0)
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-before-full-coef-dealloc"
+        flush(6)
+      end if
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+      if (allocated(coef_frag_other)) deallocate(coef_frag_other)
+      if (allocated(coef_pw_other)) deallocate(coef_pw_other)
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-after-full-coef-dealloc"
+        flush(6)
+      end if
       call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+      if (has_so_nonlocal) then
+        ispin_other = 3 - ispin
+        call gather_full_coef_view(dg_frag, ispin_other, n_frag, dg_frag%nstate_tot, coef_frag_other, coef_pw_other)
+      end if
       call cpu_time(t_coef_gather1)
       if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
         write(*,'(1x,a,es12.4)') "        derivative trace: stage=spin1-after-full-coef-gather dt=", &
@@ -300,6 +331,10 @@
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+          if (has_so_nonlocal) then
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
+          end if
         end if
         do io = 1, n_tot
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
@@ -325,6 +360,10 @@
         end if
         if (has_nonlocal) then
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+          if (has_so_nonlocal) then
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
+          end if
         end if
         do io = 1, n_tot
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
@@ -365,6 +404,10 @@
             flush(6)
           end if
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+          if (has_so_nonlocal) then
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
+          end if
           if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
             write(*,'(1x,a)') "        derivative trace: stage=spin1-after-apply-block-nl"
             flush(6)
