@@ -1,7 +1,7 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, apply_mixed_hamiltonian, &
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, apply_mixed_hamiltonian, &
                                   solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
                                   copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense
     implicit none
@@ -71,12 +71,11 @@
       write(*,'(1x,a)') "        derivative trace: stage=before-ensure-nonlocal"
       flush(6)
     end if
-    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, .false.)
     if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        derivative trace: stage=after-ensure-nonlocal"
       flush(6)
     end if
-    has_nonlocal = dg_frag%has_nl_cache
+    has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
     
     n = dg_frag%n_mat_max
     if (n <= 0) return
@@ -291,17 +290,7 @@
         raw_rhs(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), rhs_mix)
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
-          if (allocated(dg_frag%H_nl_blocks)) then
-            if (allocated(dg_frag%H_local_block_ids)) then
-              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
-                dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
-            else
-              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-            end if
-          else if (allocated(dg_frag%H_nl_cache)) then
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
-              matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
-          end if
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
         end if
         do io = 1, n_tot
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
@@ -326,17 +315,7 @@
           flush(6)
         end if
         if (has_nonlocal) then
-          if (allocated(dg_frag%H_nl_blocks)) then
-            if (allocated(dg_frag%H_local_block_ids)) then
-              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
-                dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
-            else
-              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-            end if
-          else if (allocated(dg_frag%H_nl_cache)) then
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
-              matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
-          end if
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
         end if
         do io = 1, n_tot
           dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
@@ -376,17 +355,7 @@
             write(*,'(1x,a)') "        derivative trace: stage=spin1-before-apply-block-nl"
             flush(6)
           end if
-          if (allocated(dg_frag%H_nl_blocks)) then
-            if (allocated(dg_frag%H_local_block_ids)) then
-              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), &
-                dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
-            else
-              call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-            end if
-          else if (allocated(dg_frag%H_nl_cache)) then
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + &
-              matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
-          end if
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
           if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
             write(*,'(1x,a)') "        derivative trace: stage=spin1-after-apply-block-nl"
             flush(6)

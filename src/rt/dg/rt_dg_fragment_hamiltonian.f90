@@ -1680,23 +1680,7 @@
     ! The A·p term couples to momentum matrix elements
     ! The A^2/2 term is diagonal (diamagnetic contribution)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        momentum alloc begin"
-      flush(6)
-    end if
     call init_momentum_blocks(dg_frag)
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        momentum real alloc done"
-      flush(6)
-    end if
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        momentum zero real done"
-      flush(6)
-    end if
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        momentum alloc done"
-      flush(6)
-    end if
     is = mg%is
     ie = mg%ie
     hvol = system%hvol
@@ -1706,13 +1690,6 @@
     call exchange_phi_frag_halo(dg_frag)
     call cpu_time(t1)
     time_halo_exchange = time_halo_exchange + (t1 - t0)
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        momentum stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-halo-exchange"
-    flush(6)
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        momentum halo exchange done"
-      flush(6)
-    end if
     
     ! Loop over spin
     do ispin = 1, system%nspin
@@ -1724,16 +1701,6 @@
         frag_grad_start = time_grad_total
         frag_self_start = time_self_integral
         frag_halo_start = time_halo_integral
-        if (ifrag == dg_frag%ifrag_start) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        momentum stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-            " ifrag=", ifrag, " stage=", "fragment-begin"
-          flush(6)
-        end if
-        if (log_frag_progress) then
-          write(*,'(1x,a,i0,a,i0)') "        momentum fragment begin: ifrag=", ifrag, " i_local=", i_local
-          flush(6)
-        end if
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
@@ -1768,15 +1735,6 @@
             " phi_frag dim4=", size(dg_frag%phi_frag, 4), " ifrag=", ifrag, " ispin=", ispin
           stop "DG-Fragment RT: invalid basis-function count"
         end if
-        if (log_frag_progress) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum first io: io=", 1, " n_basis=", nbf, &
-            " phi_dim4=", size(dg_frag%phi_frag, 4)
-          write(*,'(1x,a,3(i0,1x),a,3(i0,1x))') &
-            "        momentum first local range: loc_s=", loc_s(1), loc_s(2), loc_s(3), &
-            " loc_e=", loc_e(1), loc_e(2), loc_e(3)
-          flush(6)
-        end if
-
         do io = 1, nbf
           ipt = 0
           do lz = loc_s(3), loc_e(3)
@@ -1788,39 +1746,17 @@
             end do
           end do
         end do
-        if (ifrag == dg_frag%ifrag_start) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        momentum stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-            " ifrag=", ifrag, " stage=", "after-local-pack"
-          flush(6)
-        end if
         iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
 
         ! Loop over basis functions in fragment j (ket side)
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
         ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
         do jo = 1, nbf
-          if (log_frag_progress .and. jo == 1) then
-            write(*,*) "        momentum first jo begin"
-            flush(6)
-          end if
-
           allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
           call cpu_time(t0)
           call apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
           call cpu_time(t1)
           time_grad_total = time_grad_total + (t1 - t0)
-          if (log_frag_progress .and. jo == 1) then
-            write(*,*) "        momentum first gradient done"
-            flush(6)
-          end if
-          if (log_frag_progress) then
-            if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
-              write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        momentum basis progress: jo=", jo, "/", &
-                nbf, " grad=", time_grad_total
-              flush(6)
-            end if
-          end if
 
           grad_lb1 = lbound(grad_phi, 1)
           grad_ub1 = ubound(grad_phi, 1)
@@ -1851,20 +1787,10 @@
 
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
-            if (log_frag_progress .and. jo == 1 .and. io == 1) then
-              write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum first index: ig_i=", ig_i, " ig_j=", ig_j, &
-                " n_mat_max=", dg_frag%n_mat_max, " ispin=", ispin
-              write(*,*) "        momentum first idir begin"
-              flush(6)
-            end if
             if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
             do idir = 1, 3
               integral = self_proj(io, idir)
               if (iblk_self > 0) dg_frag%momentum_blocks(iblk_self)%val(idir, io, jo, ispin) = integral
-              if (log_frag_progress .and. jo == 1 .and. io == 1 .and. idir == 1) then
-                write(*,'(1x,a,1x,es12.4)') "        momentum first idir done integral=", integral
-                flush(6)
-              end if
             end do
           end do
 
@@ -1894,16 +1820,6 @@
               halo_s(:) = max(loc_s(:), d(:) + 1)
               halo_e(:) = min(loc_e(:), d(:) + l(:))
               if (any(halo_s(:) > halo_e(:))) cycle
-              if (log_frag_progress) then
-                if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
-                  write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,1pe12.4)') &
-                    "        momentum halo detail: jo=", jo, " i_halo=", i_halo, &
-                    " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, " halo_len=", &
-                    l(1), l(2), l(3), " time_halo=", time_halo_integral
-                  flush(6)
-                end if
-              end if
-
               npts_halo = (halo_e(1) - halo_s(1) + 1) * (halo_e(2) - halo_s(2) + 1) * (halo_e(3) - halo_s(3) + 1)
               if (npts_halo <= 0 .or. n_basis_halo <= 0) cycle
 
@@ -1964,30 +1880,11 @@
 
           deallocate(grad_phi)
         end do  ! jo
-        if (ifrag == dg_frag%ifrag_start) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        momentum stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-            " ifrag=", ifrag, " stage=", "after-jo-loop"
-          flush(6)
-        end if
-
         deallocate(phi_local_2d, grad_local_2d, self_proj)
-
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-            "        momentum fragment done: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-            " ifrag=", ifrag, " ispin=", ispin, " root=", dg_frag%is_frag_root, &
-            " grad=", time_grad_total - frag_grad_start, &
-            " self=", time_self_integral - frag_self_start, &
-            " halo=", time_halo_integral - frag_halo_start
-        flush(6)
       end do  ! ifrag
     end do  ! ispin
     
     ! MPI aggregation of fragment-neighbor momentum blocks.
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        momentum reduce begin"
-      flush(6)
-    end if
     block
       real(8), allocatable :: send_flat(:), recv_flat(:)
       real(8) :: t_reduce_start, t_reduce_end
@@ -2004,24 +1901,11 @@
         ncol = dg_frag%momentum_blocks(iblk)%ncol_max
         total_size = total_size + 3 * nrow * ncol * dg_frag%nspin
       end do
-      if (comm_is_root(dg_frag%id)) then
-        write(*,*) "        momentum reduce metadata begin"
-        flush(6)
-      end if
-      write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,i0)') "        momentum reduce reach: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-        " root=", dg_frag%is_frag_root, " nblk=", dg_frag%n_momentum_blocks
-      flush(6)
-
       nblk_max = dg_frag%n_momentum_blocks
       call comm_get_max(nblk_max, dg_frag%icomm)
       nblk_min = -dg_frag%n_momentum_blocks
       call comm_get_max(nblk_min, dg_frag%icomm)
       nblk_min = -nblk_min
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,a,i0)') "        momentum reduce metadata nblk done: min=", nblk_min, " max=", nblk_max
-        flush(6)
-      end if
       if (nblk_min /= nblk_max) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] momentum reduce metadata mismatch: rank=", &
           dg_frag%id, " nblk=", dg_frag%n_momentum_blocks, " min=", nblk_min, " max=", nblk_max
@@ -2042,11 +1926,6 @@
       meta_sig_blocks_max(1) = meta_sig_blocks
       call comm_get_min(meta_sig_blocks_min, meta_sig_blocks_min, 1, dg_frag%icomm)
       call comm_get_max(meta_sig_blocks_max, meta_sig_blocks_max, 1, dg_frag%icomm)
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,1pe14.6,a,1pe14.6)') "        momentum reduce metadata block-sig done: min=", &
-          meta_sig_blocks_min(1), " max=", meta_sig_blocks_max(1)
-        flush(6)
-      end if
 
       meta_sig_basis = 0.0d0
       do ispin = 1, dg_frag%nspin
@@ -2061,11 +1940,6 @@
       meta_sig_basis_max(1) = meta_sig_basis
       call comm_get_min(meta_sig_basis_min, meta_sig_basis_min, 1, dg_frag%icomm)
       call comm_get_max(meta_sig_basis_max, meta_sig_basis_max, 1, dg_frag%icomm)
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,1pe14.6,a,1pe14.6)') "        momentum reduce metadata basis-sig done: min=", &
-          meta_sig_basis_min(1), " max=", meta_sig_basis_max(1)
-        flush(6)
-      end if
 
       if (abs(meta_sig_blocks_max(1) - meta_sig_blocks_min(1)) > 1.0d-9 .or. &
           abs(meta_sig_basis_max(1) - meta_sig_basis_min(1)) > 1.0d-9) then
@@ -2084,11 +1958,6 @@
       total_size_min = -total_size
       call comm_get_max(total_size_min, dg_frag%icomm)
       total_size_min = -total_size_min
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,a,i0)') "        momentum reduce metadata total-size done: min=", total_size_min, &
-          " max=", total_size_max
-        flush(6)
-      end if
       if (total_size_min /= total_size_max) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] momentum reduce size mismatch: rank=", &
           dg_frag%id, " local=", total_size, " min=", total_size_min, " max=", total_size_max
@@ -2098,10 +1967,6 @@
 
       if (total_size > 0) then
         allocate(send_flat(total_size), recv_flat(total_size))
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0)') "        momentum reduce pack begin total_size=", total_size
-          flush(6)
-        end if
         call cpu_time(t0)
         offset_flat = 1
         do iblk = 1, dg_frag%n_momentum_blocks
@@ -2120,34 +1985,17 @@
         end do
         call cpu_time(t1)
         time_reduce_pack = time_reduce_pack + (t1 - t0)
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,1pe12.4)') "        momentum reduce pack done time=", time_reduce_pack
-          flush(6)
-        end if
         chunk_size = 262144
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0)') "        momentum reduce comm begin chunk_size=", chunk_size
-          flush(6)
-        end if
         call cpu_time(t0)
         chunk_begin = 1
         do while (chunk_begin <= total_size)
           chunk_count = min(chunk_size, total_size - chunk_begin + 1)
           call comm_summation(send_flat(chunk_begin:chunk_begin + chunk_count - 1), &
                               recv_flat(chunk_begin:chunk_begin + chunk_count - 1), chunk_count, dg_frag%icomm)
-          if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0,a,i0)') "        momentum reduce comm chunk done: begin=", chunk_begin, &
-              " count=", chunk_count
-            flush(6)
-          end if
           chunk_begin = chunk_begin + chunk_count
         end do
         call cpu_time(t1)
         time_reduce_comm = time_reduce_comm + (t1 - t0)
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,1pe12.4)') "        momentum reduce comm done time=", time_reduce_comm
-          flush(6)
-        end if
         call cpu_time(t0)
         offset_flat = 1
         do iblk = 1, dg_frag%n_momentum_blocks
@@ -2166,21 +2014,11 @@
         end do
         call cpu_time(t1)
         time_reduce_unpack = time_reduce_unpack + (t1 - t0)
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,1pe12.4)') "        momentum reduce unpack done time=", time_reduce_unpack
-          flush(6)
-        end if
         deallocate(send_flat, recv_flat)
       end if
       call cpu_time(t_reduce_end)
       time_block_reduce = time_block_reduce + (t_reduce_end - t_reduce_start)
     end block
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        momentum reduce done time=", time_block_reduce, &
-        " pack=", time_reduce_pack, " comm=", time_reduce_comm, " unpack=", time_reduce_unpack
-      write(*,*) "        momentum antisym begin"
-      flush(6)
-    end if
 
     ! Enforce anti-symmetry blockwise: self blocks against themselves, off-diagonal
     ! blocks against the reverse ordered fragment pair.

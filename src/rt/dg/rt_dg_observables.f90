@@ -179,11 +179,14 @@
           call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
           if (has_nonlocal) then
             if (allocated(dg_frag%H_nl_blocks)) then
-              if (allocated(dg_frag%H_local_block_ids)) then
+              if (allocated(dg_frag%H_nl_local_block_ids)) then
                 call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n, 1:nocc), &
-                  tmp_all(1:n, 1:nocc), dg_frag%H_local_block_ids)
+                  tmp_all(1:n, 1:nocc), dg_frag%H_nl_local_block_ids)
               else
-                call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
+                write(*,'(1x,a,i0,a,i0,a,i0)') "        [FATAL] missing H_nl_local_block_ids in observables: rank=", &
+                  dg_frag%id, " ifrag_group=", dg_frag%ifrag_group, " ispin=", ispin
+                flush(6)
+                stop "missing H_nl_local_block_ids in observables"
               end if
             else if (allocated(dg_frag%H_nl_cache)) then
               tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
@@ -223,11 +226,14 @@
             call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
             if (has_nonlocal) then
               if (allocated(dg_frag%H_nl_blocks)) then
-                if (allocated(dg_frag%H_local_block_ids)) then
+                if (allocated(dg_frag%H_nl_local_block_ids)) then
                   call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_frag_all(1:n, 1:nocc), &
-                    tmp_mat, dg_frag%H_local_block_ids)
+                    tmp_mat, dg_frag%H_nl_local_block_ids)
                 else
-                  call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
+                  write(*,'(1x,a,i0,a,i0,a,i0)') "        [FATAL] missing H_nl_local_block_ids in observables: rank=", &
+                    dg_frag%id, " ifrag_group=", dg_frag%ifrag_group, " ispin=", ispin
+                  flush(6)
+                  stop "missing H_nl_local_block_ids in observables"
                 end if
               else if (allocated(dg_frag%H_nl_cache)) then
                 tmp_mat(:, :) = tmp_mat(:, :) + &

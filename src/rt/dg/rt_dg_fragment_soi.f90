@@ -1544,6 +1544,7 @@ contains
     if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
     if (allocated(dg_frag%H_nl_block_map)) deallocate(dg_frag%H_nl_block_map)
     if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
+    if (allocated(dg_frag%H_nl_local_block_ids)) deallocate(dg_frag%H_nl_local_block_ids)
     if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)

@@ -123,6 +123,7 @@ module rt_dg_fragment_types
     integer, allocatable :: H_nl_block_map(:,:)
     integer :: n_H_nl_blocks = 0
     integer, allocatable :: H_local_block_ids(:) ! row-owner-local H block ids for RT apply
+    integer, allocatable :: H_nl_local_block_ids(:) ! row-owner-local nonlocal H block ids for RT apply
     integer, allocatable :: H_local_rows(:)      ! fragment rows owned by this rank
     logical :: H_local_block_ids_valid = .false.
     logical, allocatable :: runtime_neighbor_pair_cache(:,:)    ! static fragment-pair runtime adjacency
@@ -152,6 +153,8 @@ module rt_dg_fragment_types
     integer, allocatable :: momentum_dense_col_gid_cache(:)    ! reusable scratch for momentum dense materialization
     integer, allocatable :: momentum_dense_valid_row_ids(:)    ! reusable scratch for momentum dense materialization
     integer, allocatable :: momentum_dense_valid_col_ids(:)    ! reusable scratch for momentum dense materialization
+    real(8), allocatable :: gradient_basis_cache(:,:,:,:,:,:)  ! (nx,ny,nz,3,nstate_frag,ifrag_local)
+    logical :: gradient_basis_cache_valid = .false.
     real(8), allocatable :: dipole_mat(:,:,:,:)   ! dipole matrix elements for observables (x,y,z)
     type(vector_block_info), allocatable :: dipole_blocks(:)
     integer, allocatable :: dipole_block_map(:,:)
@@ -228,6 +231,8 @@ module rt_dg_fragment_types
 
     type(halo_info), allocatable :: halo(:)    ! Halo regions (max 26 = 3^3-1 neighbors)
     integer :: n_halo                          ! Number of active halo regions
+    integer, allocatable :: halo_ireq_send(:)  ! persistent send requests for halo exchange
+    integer, allocatable :: halo_ireq_recv(:)  ! persistent recv requests for halo exchange
 
     ! Auxiliary arrays for self-consistent calculation
     real(8), allocatable :: phi_frag(:,:,:,:,:)    ! fragment basis functions in real space

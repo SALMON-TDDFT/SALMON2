@@ -1911,6 +1911,7 @@ contains
     if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
     if (allocated(dg_frag%H_nl_block_map)) deallocate(dg_frag%H_nl_block_map)
     if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
+    if (allocated(dg_frag%H_nl_local_block_ids)) deallocate(dg_frag%H_nl_local_block_ids)
     if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
@@ -1934,6 +1935,8 @@ contains
     if (allocated(dg_frag%index_basis)) deallocate(dg_frag%index_basis)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
     if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+    if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
+    dg_frag%gradient_basis_cache_valid = .false.
     if (allocated(dg_frag%momentum_blocks)) then
       do i = 1, size(dg_frag%momentum_blocks)
         if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
@@ -1994,6 +1997,8 @@ contains
     if (allocated(dg_frag%eigenvalues)) deallocate(dg_frag%eigenvalues)
     if (allocated(dg_frag%basis_overlap)) deallocate(dg_frag%basis_overlap)
     if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
+    if (allocated(dg_frag%halo_ireq_send)) deallocate(dg_frag%halo_ireq_send)
+    if (allocated(dg_frag%halo_ireq_recv)) deallocate(dg_frag%halo_ireq_recv)
     
     ! Plane wave basis deallocations
     if (allocated(dg_frag%k_pw)) deallocate(dg_frag%k_pw)
