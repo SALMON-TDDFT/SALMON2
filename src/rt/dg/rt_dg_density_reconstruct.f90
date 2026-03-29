@@ -27,8 +27,9 @@
     integer :: packed_npts, spin_offset
     integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
     real(8) :: occ_factor, occ_scale
-    real(8) :: phi_i, rho_contrib, rho_accum, rho_mix_accum
-    real(8) :: total_charge, total_charge_local, scale_rho, weight_scale
+    real(8) :: phi_i, rho_contrib, rho_raw_contrib, rho_accum, rho_mix_accum
+    real(8) :: total_charge, total_charge_local, scale_rho, rho_sum_local
+    real(8) :: charge_budget_local(6), charge_budget_total(6)
     real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta
     real(8) :: t_total0, t_total1, t_cache0, t_cache1
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
@@ -88,6 +89,8 @@
     time_project_dmat_build = 0.0d0
     time_project_rho_reduce = 0.0d0
     time_project_phi_block_build = 0.0d0
+    charge_budget_local(:) = 0.0d0
+    charge_budget_total(:) = 0.0d0
     if (dg_frag%is_frag_root) then
       write(*,'(1x,a,i0,a,i0,a,i0)') "        density trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " stage=entry_root root_world=", dg_frag%id - dg_frag%id_frag
@@ -214,6 +217,7 @@
         do iz = 1, nxyz(3)
           do iy = 1, nxyz(2)
             do ix = 1, nxyz(1)
+              if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local)) cycle
               owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
               dg_frag%density_subgroup_send_count(owner_rank) = dg_frag%density_subgroup_send_count(owner_rank) + 1
               dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_subgroup_send_count(owner_rank)
@@ -532,11 +536,12 @@
             else if (allocated(dg_frag%density_send_slot_map)) then
               call prepare_grid_buffers_runtime_map(i_local, igrid0, npt_blk, nxyz, ixyz0, .false.)
             else
-              call prepare_grid_buffers_runtime_map_no_slot(igrid0, npt_blk, nxyz, ixyz0)
+              call prepare_grid_buffers_runtime_map_no_slot(i_local, igrid0, npt_blk, nxyz, ixyz0)
             end if
           end if
           if (.not. distribute_project) then
             do igrid = 1, npt_blk
+              if (owner_buf(igrid) < 0) cycle
               if (owner_buf(igrid) == dg_frag%id) then
                 local_grid_count = local_grid_count + 1
                 local_grid_ids(local_grid_count) = igrid
@@ -622,7 +627,7 @@
               time_project_psi = time_project_psi + (t_psi1 - t_psi0)
               call cpu_time(t_rho0)
 
-!$omp parallel private(io, igrid, owner_rank, ixg, iyg, izg, rho_contrib, slot, pack_offset, rho_mix_accum, weight_scale)
+!$omp parallel private(io, igrid, owner_rank, ixg, iyg, izg, rho_contrib, rho_raw_contrib, slot, pack_offset, rho_mix_accum)
 !$omp do schedule(static)
               do igrid = 1, npt_blk
                 rho_mix_accum = 0.0d0
@@ -654,10 +659,15 @@
                   ixg = ixg_buf(igrid)
                   iyg = iyg_buf(igrid)
                   izg = izg_buf(igrid)
-                  rho_contrib = rho_blk(igrid)
+                  rho_raw_contrib = rho_blk(igrid)
+                  rho_contrib = rho_raw_contrib
                   if (allocated(dg_frag%density_inv_weight_local)) then
                     rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
                   end if
+!$omp atomic
+                  charge_budget_local(1) = charge_budget_local(1) + rho_raw_contrib
+!$omp atomic
+                  charge_budget_local(2) = charge_budget_local(2) + rho_contrib
                   rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
                   rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
                 end do
@@ -771,7 +781,7 @@
               end if
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
-!$omp parallel private(igrid, owner_rank, ixg, iyg, izg, rho_contrib, slot, pack_offset, weight_scale)
+!$omp parallel private(igrid, owner_rank, ixg, iyg, izg, rho_contrib, rho_raw_contrib, slot, pack_offset)
               if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
 !$omp do schedule(static)
                   do idx_subgroup = 1, valid_subgroup_grid_count
@@ -792,10 +802,15 @@
                     ixg = ixg_buf(igrid)
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
-                    rho_contrib = rho_blk_accum(igrid)
+                    rho_raw_contrib = rho_blk_accum(igrid)
+                    rho_contrib = rho_raw_contrib
                     if (allocated(dg_frag%density_inv_weight_local)) then
                       rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
                     end if
+!$omp atomic
+                    charge_budget_local(1) = charge_budget_local(1) + rho_raw_contrib
+!$omp atomic
+                    charge_budget_local(2) = charge_budget_local(2) + rho_contrib
                     rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
                     rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
                   end do
@@ -859,15 +874,20 @@
           end if
           pack_offset = subgroup_send_offset(irank, 0)
           if (irank == dg_frag%id) then
-!$omp parallel do private(slot, ixg, iyg, izg, rho_contrib) schedule(static)
+!$omp parallel do private(slot, ixg, iyg, izg, rho_contrib, rho_raw_contrib) schedule(static)
             do slot = 1, npts
               ixg = dg_frag%density_subgroup_self_ixg(slot)
               iyg = dg_frag%density_subgroup_self_iyg(slot)
               izg = dg_frag%density_subgroup_self_izg(slot)
-              rho_contrib = send_sum(pack_offset+slot)
+              rho_raw_contrib = send_sum(pack_offset+slot)
+              rho_contrib = rho_raw_contrib
               if (allocated(dg_frag%density_inv_weight_local)) then
                 rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
               end if
+!$omp atomic
+              charge_budget_local(3) = charge_budget_local(3) + rho_raw_contrib
+!$omp atomic
+              charge_budget_local(4) = charge_budget_local(4) + rho_contrib
               rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
             end do
 !$omp end parallel do
@@ -953,15 +973,20 @@
       do irank = 0, dg_frag%isize - 1
         if (.not. allocated(rho_recv(irank)%f)) cycle
         npts = dg_frag%density_recv_map(irank)%npts
-!$omp parallel do private(slot, ixg, iyg, izg, ispin, spin_offset, rho_contrib) schedule(static)
+!$omp parallel do private(slot, ixg, iyg, izg, ispin, spin_offset, rho_contrib, rho_raw_contrib) schedule(static)
         do slot = 1, dg_frag%density_recv_map(irank)%npts
           ixg = dg_frag%density_recv_map(irank)%ixg(slot)
           iyg = dg_frag%density_recv_map(irank)%iyg(slot)
           izg = dg_frag%density_recv_map(irank)%izg(slot)
-          rho_contrib = rho_recv(irank)%f(slot, 1, 1)
+          rho_raw_contrib = rho_recv(irank)%f(slot, 1, 1)
+          rho_contrib = rho_raw_contrib
           if (allocated(dg_frag%density_inv_weight_local)) then
             rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
           end if
+!$omp atomic
+          charge_budget_local(5) = charge_budget_local(5) + rho_raw_contrib
+!$omp atomic
+          charge_budget_local(6) = charge_budget_local(6) + rho_contrib
           rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
           do ispin = 1, system%nspin
             spin_offset = ispin * npts
@@ -1015,6 +1040,7 @@
       write(*,'(1x,a)') "        density trace: stage=before-normalize"
       flush(6)
     end if
+    call comm_summation(charge_budget_local, charge_budget_total, 6, dg_frag%icomm)
     call cpu_time(t_norm0)
     total_charge_local = 0.0d0
 !$omp parallel do collapse(3) reduction(+:total_charge_local) private(ix,iy,iz) schedule(static)
@@ -1028,6 +1054,16 @@
 !$omp end parallel do
     total_charge_local = total_charge_local * system%hvol
     if (dg_frag%id == 0) then
+      write(*,'(1x,a,8(a,1pe12.4))') "        density charge budget:", &
+        " raw_local=", charge_budget_total(1) * system%hvol, &
+        " weighted_local=", charge_budget_total(2) * system%hvol, &
+        " raw_subgroup=", charge_budget_total(3) * system%hvol, &
+        " weighted_subgroup=", charge_budget_total(4) * system%hvol, &
+        " raw_recv=", charge_budget_total(5) * system%hvol, &
+        " weighted_recv=", charge_budget_total(6) * system%hvol, &
+        " raw_total=", (charge_budget_total(1) + charge_budget_total(3) + charge_budget_total(5)) * system%hvol, &
+        " weighted_total=", (charge_budget_total(2) + charge_budget_total(4) + charge_budget_total(6)) * system%hvol
+      flush(6)
       write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-total-charge-sum"
       flush(6)
     end if
@@ -1042,14 +1078,16 @@
     if (total_charge > 1.0d-14 .and. total_charge == total_charge) then
       scale_rho = nelec / total_charge
       dg_frag%rho_scale_factor = scale_rho
-!$omp parallel do collapse(3) private(ix,iy,iz,ispin) schedule(static)
+!$omp parallel do collapse(3) private(ix,iy,iz,ispin,rho_sum_local) schedule(static)
       do iz = lbound(rho%f, 3), ubound(rho%f, 3)
         do iy = lbound(rho%f, 2), ubound(rho%f, 2)
           do ix = lbound(rho%f, 1), ubound(rho%f, 1)
-            rho%f(ix, iy, iz) = rho%f(ix, iy, iz) * scale_rho
+            rho_sum_local = 0.0d0
             do ispin = 1, system%nspin
               rho_s(ispin)%f(ix, iy, iz) = rho_s(ispin)%f(ix, iy, iz) * scale_rho
+              rho_sum_local = rho_sum_local + rho_s(ispin)%f(ix, iy, iz)
             end do
+            rho%f(ix, iy, iz) = rho_sum_local
           end do
         end do
       end do
@@ -1117,6 +1155,14 @@
         ix_buf(igrid) = ix
         iy_buf(igrid) = iy
         iz_buf(igrid) = iz
+        if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
+          ixg_buf(igrid) = 1
+          iyg_buf(igrid) = 1
+          izg_buf(igrid) = 1
+          owner_buf(igrid) = -1
+          slot_buf(igrid) = 0
+          cycle
+        end if
         ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local_grid)
         iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local_grid)
         izg = dg_frag%density_izg_map(ix, iy, iz, i_local_grid)
@@ -1149,6 +1195,14 @@
         ix_buf(igrid) = ix
         iy_buf(igrid) = iy
         iz_buf(igrid) = iz
+        if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
+          ixg_buf(igrid) = 1
+          iyg_buf(igrid) = 1
+          izg_buf(igrid) = 1
+          owner_buf(igrid) = -1
+          slot_buf(igrid) = 0
+          cycle
+        end if
         ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local_grid)
         iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local_grid)
         izg = dg_frag%density_izg_map(ix, iy, iz, i_local_grid)
@@ -1178,6 +1232,16 @@
         ix_buf(igrid) = ix
         iy_buf(igrid) = iy
         iz_buf(igrid) = iz
+        if (allocated(dg_frag%density_primary_local_map)) then
+          if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
+            ixg_buf(igrid) = 1
+            iyg_buf(igrid) = 1
+            izg_buf(igrid) = 1
+            owner_buf(igrid) = -1
+            slot_buf(igrid) = 0
+            cycle
+          end if
+        end if
         ixg = mod(ixyz0_grid(1) + ix - 2, mg%num(1)) + 1
         iyg = mod(ixyz0_grid(2) + iy - 2, mg%num(2)) + 1
         izg = mod(ixyz0_grid(3) + iz - 2, mg%num(3)) + 1
@@ -1195,9 +1259,9 @@
 !$omp end parallel do
     end subroutine prepare_grid_buffers_runtime_map
 
-    subroutine prepare_grid_buffers_runtime_map_no_slot(igrid0_grid, npt_blk_grid, nxyz_grid, ixyz0_grid)
+    subroutine prepare_grid_buffers_runtime_map_no_slot(i_local_grid, igrid0_grid, npt_blk_grid, nxyz_grid, ixyz0_grid)
       implicit none
-      integer, intent(in) :: igrid0_grid, npt_blk_grid
+      integer, intent(in) :: i_local_grid, igrid0_grid, npt_blk_grid
       integer, intent(in) :: nxyz_grid(3), ixyz0_grid(3)
 
 !$omp parallel do private(igrid, tmp_idx, ix, iy, iz, ixg, iyg, izg, owner_rank) schedule(static)
@@ -1210,6 +1274,16 @@
         ix_buf(igrid) = ix
         iy_buf(igrid) = iy
         iz_buf(igrid) = iz
+        if (allocated(dg_frag%density_primary_local_map)) then
+          if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
+            ixg_buf(igrid) = 1
+            iyg_buf(igrid) = 1
+            izg_buf(igrid) = 1
+            owner_buf(igrid) = -1
+            slot_buf(igrid) = 0
+            cycle
+          end if
+        end if
         ixg = mod(ixyz0_grid(1) + ix - 2, mg%num(1)) + 1
         iyg = mod(ixyz0_grid(2) + iy - 2, mg%num(2)) + 1
         izg = mod(ixyz0_grid(3) + iz - 2, mg%num(3)) + 1

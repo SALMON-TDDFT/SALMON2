@@ -28,6 +28,7 @@
     complex(8), allocatable :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
+    real(8) :: t_coef_gather0, t_coef_gather1
     logical :: found_nan
     integer :: nan_io, nan_jo
     real(8) :: max_abs_h0, max_abs_m
@@ -230,9 +231,20 @@
         flush(6)
       end if
 
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a)') "        derivative trace: stage=spin1-before-full-coef-gather"
+        flush(6)
+      end if
+      call cpu_time(t_coef_gather0)
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
       call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+      call cpu_time(t_coef_gather1)
+      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
+        write(*,'(1x,a,es12.4)') "        derivative trace: stage=spin1-after-full-coef-gather dt=", &
+          t_coef_gather1 - t_coef_gather0
+        flush(6)
+      end if
       coef_all(:, :) = (0.0d0, 0.0d0)
       coef_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:dg_frag%nstate_tot)
       if (n_pw > 0) coef_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:dg_frag%nstate_tot)

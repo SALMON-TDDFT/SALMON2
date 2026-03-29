@@ -1813,6 +1813,7 @@ contains
     complex(8), intent(out) :: fetched(:, :)
 
     integer :: irow, global_row, owner_rank
+    integer :: progress_stride
     complex(8), allocatable :: row_buf(:)
 
     fetched(:, :) = (0.0d0, 0.0d0)
@@ -1820,6 +1821,12 @@ contains
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
 
     allocate(row_buf(size(fetched, 2)))
+    progress_stride = max(1, size(row_ids) / 8)
+    if (dg_frag%id == 0 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather trace: rank=", dg_frag%id, &
+        " ispin=", ispin, " nrows=", size(row_ids), " nstate=", size(fetched, 2)
+      flush(6)
+    end if
     do irow = 1, min(size(row_ids), size(fetched, 1))
       global_row = row_ids(irow)
       row_buf(:) = (0.0d0, 0.0d0)
@@ -1832,9 +1839,26 @@ contains
         fetched(irow, :) = row_buf(:)
         cycle
       end if
+      if (owner_rank >= dg_frag%isize) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid coef owner rank: rank=", dg_frag%id, &
+          " ispin=", ispin, " row=", global_row, " owner_rank=", owner_rank, " isize=", dg_frag%isize
+        stop "DG-Fragment RT: invalid coef owner rank in fetch_remote_coef_rows"
+      end if
+      if (owner_rank /= dg_frag%coef_owner(global_row, ispin)) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] coef owner changed during fetch: rank=", dg_frag%id, &
+          " ispin=", ispin, " row=", global_row
+        stop "DG-Fragment RT: unstable coef owner in fetch_remote_coef_rows"
+      end if
       if (owner_rank == dg_frag%id) row_buf(:) = dg_frag%coef(global_row, 1:size(fetched, 2), ispin)
       call comm_bcast(row_buf, dg_frag%icomm, owner_rank)
       fetched(irow, :) = row_buf(:)
+      if (dg_frag%id == 0 .and. ispin == 1) then
+        if (irow == 1 .or. irow == size(row_ids) .or. mod(irow, progress_stride) == 0) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') "        coef gather trace: row=", irow, &
+            "/", size(row_ids), " owner=", owner_rank
+          flush(6)
+        end if
+      end if
     end do
     deallocate(row_buf)
   end subroutine fetch_remote_coef_rows
@@ -1887,6 +1911,11 @@ contains
       if (owner_rank < 0) then
         fetched(irow, :, :) = row_buf(:, :)
         cycle
+      end if
+      if (owner_rank >= dg_frag%isize) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid coef_pw owner rank: rank=", dg_frag%id, &
+          " row=", pw_row, " owner_rank=", owner_rank, " isize=", dg_frag%isize
+        stop "DG-Fragment RT: invalid coef_pw owner rank in fetch_remote_coef_pw_rows"
       end if
       if (owner_rank == dg_frag%id) row_buf(:, :) = dg_frag%coef_pw(pw_row, 1:size(fetched, 2), 1:size(fetched, 3))
       call comm_bcast(row_buf, dg_frag%icomm, owner_rank)

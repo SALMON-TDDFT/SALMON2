@@ -186,6 +186,7 @@ module rt_dg_fragment_types
     integer :: nxyz_buffer(3)                  ! # of halo points (4 for 4th-order stencil)
     integer, allocatable :: id_array(:)        ! (n_frag) MPI rank owning each fragment
     integer, allocatable :: density_owner_map(:,:,:,:) ! local-fragment interior grid -> owner rank
+    logical, allocatable :: density_primary_local_map(:,:,:,:) ! local-fragment interior grid -> primary fragment selection
     integer, allocatable :: density_ixg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global x index
     integer, allocatable :: density_iyg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global y index
     integer, allocatable :: density_izg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global z index
