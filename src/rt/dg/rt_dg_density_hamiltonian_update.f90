@@ -209,7 +209,7 @@
         flush(6)
       end if
       call cpu_time(t_stage0)
-      call reconstruct_hamiltonian_matrix(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
       call cpu_time(t_stage1)
       time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
       if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then

@@ -28,7 +28,7 @@
     integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
     real(8) :: occ_factor, occ_scale
     real(8) :: phi_i, rho_contrib, rho_accum, rho_mix_accum
-    real(8) :: total_charge, total_charge_local, scale_rho, elec_num_scaled_local
+    real(8) :: total_charge, total_charge_local, scale_rho
     real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta
     real(8) :: t_total0, t_total1, t_cache0, t_cache1
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
@@ -995,13 +995,10 @@
     end if
     call cpu_time(t_norm0)
     if (allocated(dg_frag%density_inv_weight_local)) then
-      rho%f = rho%f * dg_frag%density_inv_weight_local
-      do ispin = 1, system%nspin
-        rho_s(ispin)%f = rho_s(ispin)%f * dg_frag%density_inv_weight_local
-      end do
+      total_charge_local = sum(rho%f * dg_frag%density_inv_weight_local) * system%hvol
+    else
+      total_charge_local = sum(rho%f) * system%hvol
     end if
-
-    total_charge_local = sum(rho%f) * system%hvol
     write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-total-charge-sum"
     flush(6)
     call comm_summation(total_charge_local, total_charge, dg_frag%icomm)
@@ -1013,15 +1010,30 @@
     if (total_charge > 1.0d-14 .and. total_charge == total_charge) then
       scale_rho = nelec / total_charge
       dg_frag%rho_scale_factor = scale_rho
-      rho%f = rho%f * scale_rho
+      if (allocated(dg_frag%density_inv_weight_local)) then
+        rho%f = rho%f * (dg_frag%density_inv_weight_local * scale_rho)
+      else
+        rho%f = rho%f * scale_rho
+      end if
       do ispin = 1, system%nspin
-        rho_s(ispin)%f = rho_s(ispin)%f * scale_rho
+        if (allocated(dg_frag%density_inv_weight_local)) then
+          rho_s(ispin)%f = rho_s(ispin)%f * (dg_frag%density_inv_weight_local * scale_rho)
+        else
+          rho_s(ispin)%f = rho_s(ispin)%f * scale_rho
+        end if
       end do
+      dg_frag%elec_num_scaled = total_charge * scale_rho
+    else
+      if (allocated(dg_frag%density_inv_weight_local)) then
+        rho%f = rho%f * dg_frag%density_inv_weight_local
+        do ispin = 1, system%nspin
+          rho_s(ispin)%f = rho_s(ispin)%f * dg_frag%density_inv_weight_local
+        end do
+      end if
+      dg_frag%elec_num_scaled = total_charge
     end if
-    elec_num_scaled_local = sum(rho%f) * system%hvol
     write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-scaled-charge-sum"
     flush(6)
-    call comm_summation(elec_num_scaled_local, dg_frag%elec_num_scaled, dg_frag%icomm)
     write(*,'(1x,a,i0,a,1pe12.4)') "        density collective: rank=", dg_frag%id, &
       " stage=after-scaled-charge-sum elec_num_scaled=", dg_frag%elec_num_scaled
     flush(6)
