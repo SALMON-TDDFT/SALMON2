@@ -17,6 +17,8 @@
     integer :: nbf, nbf_raw, iblk, idx_io, idx_jo, valid_basis_count
     integer :: nmat_chk
     real(8) :: hvol
+    real(8) :: t0, t1
+    real(8) :: time_local_build, time_subgroup_reduce, time_global_reduce
     complex(8) :: integral_t, integral_h
     real(8) :: max_asym_vpsl, max_asym_vh, max_asym_vxc
     real(8), allocatable :: Vpsl_mat(:,:,:), Vh_mat(:,:,:), Vxc_mat(:,:,:)
@@ -29,12 +31,16 @@
     real(8), allocatable :: partial_vxc(:), reduced_vxc(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     logical :: release_dense_h, use_block_reconstruct
+    logical, parameter :: enable_reconstruct_timing = .true.
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. associated(dg_frag%mg)) then
       stop "reconstruct_hamiltonian_matrix requires dg_frag%mg"
     end if
     mg => dg_frag%mg
+    time_local_build = 0.0d0
+    time_subgroup_reduce = 0.0d0
+    time_global_reduce = 0.0d0
 
     hvol = system%hvol
     if (hvol /= hvol) then
@@ -136,6 +142,7 @@
         end if
 
         do jo = 1, nbf
+          call cpu_time(t0)
           call build_local_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
           if (.not. use_block_reconstruct) then
             call build_local_potential_applied_basis(dg_frag, ifrag, i_local, jo, mg, Vpsl%f, Vpsl_phi)
@@ -165,13 +172,18 @@
             end if
           end do
 !$omp end parallel do
+          call cpu_time(t1)
+          time_local_build = time_local_build + (t1 - t0)
 
+          call cpu_time(t0)
           call comm_summation(partial_total, reduced_total, nbf, dg_frag%icomm_frag)
           if (.not. use_block_reconstruct) then
             call comm_summation(partial_vpsl, reduced_vpsl, nbf, dg_frag%icomm_frag)
             call comm_summation(partial_vh, reduced_vh, nbf, dg_frag%icomm_frag)
             call comm_summation(partial_vxc, reduced_vxc, nbf, dg_frag%icomm_frag)
           end if
+          call cpu_time(t1)
+          time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
 
           if (dg_frag%is_frag_root) then
             if (use_block_reconstruct) then
@@ -213,11 +225,19 @@
     if (.not. use_block_reconstruct) then
       call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
     end if
-    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-reconstruct", dg_frag%icomm)
+    call cpu_time(t0)
+    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-reconstruct", dg_frag%icomm_frag)
+    call cpu_time(t1)
+    time_global_reduce = time_global_reduce + (t1 - t0)
     call rebuild_local_h_block_ids(dg_frag)
     call zero_nonlocal_h_matrix_blocks(dg_frag)
     if (.not. use_block_reconstruct) then
       call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
+    end if
+    if (enable_reconstruct_timing .and. dg_frag%id == 0) then
+      write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        reconstruct timing: local=", time_local_build, &
+        " subgroup_reduce=", time_subgroup_reduce, " global_reduce=", time_global_reduce
+      flush(6)
     end if
 
     if (.not. use_block_reconstruct) then
@@ -322,7 +342,7 @@
     loc_e(:) = ov_e(:) - iorg(:) + 1
     lap0 = stencil%coef_lap0
     lapt = stencil%coef_lap
-!$omp parallel do collapse(2) private(lz, ly, lx, gx, gy, gz) schedule(static)
+!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)
@@ -391,7 +411,7 @@
     if (.not. has_overlap) return
     loc_s(:) = ov_s(:) - iorg(:) + 1
     loc_e(:) = ov_e(:) - iorg(:) + 1
-!$omp parallel do collapse(2) private(lz, ly, lx, gx, gy, gz) schedule(static)
+!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)
