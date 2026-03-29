@@ -100,12 +100,23 @@ contains
     system%stress_xc = 0d0
     system%stress_loc = 0d0
     system%stress_loc_fd = 0d0
+    system%stress_loc_grad = 0d0
+    system%stress_loc_diag = 0d0
+    system%stress_loc_sr_grad = 0d0
+    system%stress_loc_lr_grad = 0d0
+    system%stress_loc_sr_diag = 0d0
+    system%stress_loc_lr_diag = 0d0
     system%stress_nl = 0d0
     system%stress_ewa = 0d0
     system%stress_loc_sr_energy = 0d0
     system%stress_loc_lr_energy = 0d0
     system%stress_ewa_g = 0d0
     system%stress_ewa_r = 0d0
+    system%stress_ewa_g_grad = 0d0
+    system%stress_ewa_g_diag = 0d0
+    system%stress_ewa_g_self = 0d0
+    system%stress_ewa_energy_G = 0d0
+    system%stress_ewa_energy_R = 0d0
     system%stress_tensor = 0d0
     system%stress_kin_dbg_grad2 = 0d0
     system%stress_kin_dbg_cross = 0d0
@@ -342,11 +353,14 @@ contains
     type(s_poisson),         intent(in)    :: poisson
     type(s_dft_energy),      intent(in)    :: energy
     integer :: ix, iy, iz, ia, ik, a, b, ig_s(3), ig_e(3)
-    real(8) :: g(3), r(3), G2, Gd, coeff_lr, strs(3,3), strs_sum(3,3), E_sr, E_lr, E_sr_loc, E_lr_loc, V
+    real(8) :: g(3), r(3), G2, Gd, coeff_lr, strs(3,3), strs_sum(3,3), strs_sr(3,3), strs_lr(3,3), &
+      & strs_sr_sum(3,3), strs_lr_sum(3,3), E_sr, E_lr, E_sr_loc, E_lr_loc, V
     complex(8) :: rho_e, V_sr_sum, V_lr_sum, dVsr_dG2_sum, phase
 
     V = system%det_a
     strs = 0d0
+    strs_sr = 0d0
+    strs_lr = 0d0
     E_sr_loc = 0d0
     E_lr_loc = 0d0
     call get_g_bounds(fg, ig_s, ig_e)
@@ -380,12 +394,12 @@ contains
 
       E_sr_loc = E_sr_loc + dble(conjg(rho_e) * V_sr_sum)
       E_lr_loc = E_lr_loc + dble(conjg(rho_e) * V_lr_sum)
-      coeff_lr = 2d0 * dble(conjg(rho_e) * V_lr_sum) / G2
+      coeff_lr = -2d0 * dble(conjg(rho_e) * V_lr_sum) / G2
 
       do b = 1, 3
       do a = 1, 3
-        strs(a,b) = strs(a,b) - 2d0 * dble(conjg(rho_e) * dVsr_dG2_sum) * g(a) * g(b)
-        strs(a,b) = strs(a,b) + coeff_lr * g(a) * g(b)
+        strs_sr(a,b) = strs_sr(a,b) + 2d0 * dble(conjg(rho_e) * dVsr_dG2_sum) * g(a) * g(b)
+        strs_lr(a,b) = strs_lr(a,b) + coeff_lr * g(a) * g(b)
       end do
       end do
     end do
@@ -394,11 +408,29 @@ contains
 
     call comm_summation(E_sr_loc, E_sr, info%icomm_r)
     call comm_summation(E_lr_loc, E_lr, info%icomm_r)
+    strs = strs_sr + strs_lr
     call sum_stress_tensor(info%icomm_r, strs, strs_sum)
+    call sum_stress_tensor(info%icomm_r, strs_sr, strs_sr_sum)
+    call sum_stress_tensor(info%icomm_r, strs_lr, strs_lr_sum)
 
-    strs_sum = strs_sum / V**2
+    ! poisson%zrhoG_ele already carries the reciprocal-space 1/V normalization,
+    ! while dVG_ion_dG2 is stored as a bare pseudopotential derivative.
+    strs_sum = strs_sum / V
+    strs_sr_sum = strs_sr_sum / V
+    strs_lr_sum = strs_lr_sum / V
+    system%stress_loc_grad = strs_sum
+    system%stress_loc_diag = 0d0
+    system%stress_loc_sr_grad = strs_sr_sum
+    system%stress_loc_lr_grad = strs_lr_sum
+    system%stress_loc_sr_diag = 0d0
+    system%stress_loc_lr_diag = 0d0
     do a = 1, 3
+      ! Keep the diagonal consistent with the periodic local-energy decomposition:
+      ! E_ion_loc = E_sr + E_lr.
       strs_sum(a,a) = strs_sum(a,a) + (E_sr + E_lr) / V
+      system%stress_loc_sr_diag(a,a) = E_sr / V
+      system%stress_loc_lr_diag(a,a) = E_lr / V
+      system%stress_loc_diag(a,a) = (E_sr + E_lr) / V
     end do
     system%stress_loc_sr_energy = E_sr
     system%stress_loc_lr_energy = E_lr
@@ -505,11 +537,18 @@ contains
     type(s_ewald_ion_ion),   intent(in)    :: ewald
     integer :: ix, iy, iz, ia, ib, a, b, iia, ipair, ig_s(3), ig_e(3)
     real(8) :: g(3), G2, fact, rr, r_abs, rab(3), r(3), Qtot, strs_G(3,3), strs_R(3,3), strs_G_sum(3,3), strs_R_sum(3,3), V
+    real(8) :: strs_G_grad(3,3), strs_G_diag(3,3), strs_G_self(3,3), strs_G_grad_sum(3,3), strs_G_diag_sum(3,3)
+    real(8) :: E_ewa_G_loc, E_ewa_R_loc, E_ewa_G_sum, E_ewa_R_sum
     complex(8) :: SG
 
     V = system%det_a
     strs_G = 0d0
     strs_R = 0d0
+    strs_G_grad = 0d0
+    strs_G_diag = 0d0
+    strs_G_self = 0d0
+    E_ewa_G_loc = 0d0
+    E_ewa_R_loc = 0d0
     Qtot = 0d0
     do ia = 1, system%nion
       Qtot = Qtot + pp%zps(kion(ia))
@@ -530,21 +569,26 @@ contains
         SG = SG + pp%zps(kion(ia)) * exp((0d0,1d0) * (g(1)*system%Rion(1,ia) + g(2)*system%Rion(2,ia) + g(3)*system%Rion(3,ia)))
       end do
       fact = (2d0*pi/G2) * exp(-G2/(4d0*aEwald)) / V**2 * abs(SG)**2
+      E_ewa_G_loc = E_ewa_G_loc + (2d0*pi/G2) * exp(-G2/(4d0*aEwald)) / V * abs(SG)**2
       do b = 1, 3
       do a = 1, 3
-        strs_G(a,b) = strs_G(a,b) + fact * 2d0 * g(a) * g(b) / G2 * (1d0 + G2/(4d0*aEwald))
+        strs_G_grad(a,b) = strs_G_grad(a,b) + fact * 2d0 * g(a) * g(b) / G2 * (1d0 + G2/(4d0*aEwald))
       end do
       end do
       do a = 1, 3
-        strs_G(a,a) = strs_G(a,a) - fact
+        strs_G_diag(a,a) = strs_G_diag(a,a) - fact
       end do
     end do
     end do
     end do
 
+    strs_G = strs_G_grad + strs_G_diag
     call sum_stress_tensor(info%icomm_r, strs_G, strs_G_sum)
+    call sum_stress_tensor(info%icomm_r, strs_G_grad, strs_G_grad_sum)
+    call sum_stress_tensor(info%icomm_r, strs_G_diag, strs_G_diag_sum)
     do a = 1, 3
       strs_G_sum(a,a) = strs_G_sum(a,a) + pi * Qtot**2 / (2d0*aEwald*V**2)
+      strs_G_self(a,a) = pi * Qtot**2 / (2d0*aEwald*V**2)
     end do
 
     do iia = 1, info%nion_mg
@@ -566,6 +610,8 @@ contains
         r_abs = sqrt(rr)
         fact = 0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) / (V * r_abs**3) &
              * (erfc_salmon(sqrt(aEwald)*r_abs) + 2d0*r_abs*sqrt(aEwald/pi)*exp(-aEwald*rr))
+        E_ewa_R_loc = E_ewa_R_loc + 0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) &
+                   * erfc_salmon(sqrt(aEwald)*r_abs) / r_abs
         do b = 1, 3
         do a = 1, 3
           strs_R(a,b) = strs_R(a,b) + fact * rab(a) * rab(b)
@@ -575,6 +621,14 @@ contains
     end do
 
     call comm_summation(strs_R, strs_R_sum, 9, info%icomm_r)
+    call comm_summation(E_ewa_G_loc, E_ewa_G_sum, info%icomm_r)
+    call comm_summation(E_ewa_R_loc, E_ewa_R_sum, info%icomm_r)
+    E_ewa_G_sum = E_ewa_G_sum - pi * Qtot**2 / (2d0*aEwald*V)
+    system%stress_ewa_energy_G = E_ewa_G_sum
+    system%stress_ewa_energy_R = E_ewa_R_sum
+    system%stress_ewa_g_grad = strs_G_grad_sum
+    system%stress_ewa_g_diag = strs_G_diag_sum
+    system%stress_ewa_g_self = strs_G_self
     system%stress_ewa_g = strs_G_sum
     system%stress_ewa_r = strs_R_sum
     system%stress_ewa = strs_G_sum + strs_R_sum

@@ -62,12 +62,23 @@ module structures
     real(8) :: stress_xc(3,3)
     real(8) :: stress_loc(3,3)
     real(8) :: stress_loc_fd(3,3)
+    real(8) :: stress_loc_grad(3,3)
+    real(8) :: stress_loc_diag(3,3)
+    real(8) :: stress_loc_sr_grad(3,3)
+    real(8) :: stress_loc_lr_grad(3,3)
+    real(8) :: stress_loc_sr_diag(3,3)
+    real(8) :: stress_loc_lr_diag(3,3)
     real(8) :: stress_nl(3,3)
     real(8) :: stress_ewa(3,3)
     real(8) :: stress_loc_sr_energy
     real(8) :: stress_loc_lr_energy
     real(8) :: stress_ewa_g(3,3)
     real(8) :: stress_ewa_r(3,3)
+    real(8) :: stress_ewa_g_grad(3,3)
+    real(8) :: stress_ewa_g_diag(3,3)
+    real(8) :: stress_ewa_g_self(3,3)
+    real(8) :: stress_ewa_energy_G
+    real(8) :: stress_ewa_energy_R
     real(8) :: stress_kin_dbg_grad2
     real(8) :: stress_kin_dbg_cross
     real(8) :: stress_kin_dbg_k2
