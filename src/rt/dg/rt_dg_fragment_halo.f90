@@ -274,7 +274,7 @@
   ! System boundaries use PERIODIC boundary conditions
   !=======================================================================
   subroutine exchange_phi_frag_halo(dg_frag)
-    use communication, only: comm_isend, comm_irecv, comm_recv, comm_wait_all
+    use communication, only: comm_isend, comm_irecv, comm_wait_all
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     logical, parameter :: enable_halo_trace = .false.
@@ -283,7 +283,6 @@
     integer :: l(3), d(3), i_local
     integer :: ifrag_send, ifrag_recv, dir_code
     integer :: itag_send, itag_recv
-    integer, allocatable :: ireq_send(:), ireq_recv(:)
     integer :: lb1, ub1, lb2, ub2, lb3, ub3
     integer :: sample_ix, sample_iy, sample_iz, sample_istate
     real(8) :: pack_abs_sum, pack_abs_max, pack_first_value, src_first_value
@@ -297,7 +296,14 @@
     diag_second_halo_root = enable_halo_trace .and. dg_frag%is_frag_root .and. (halo_exchange_call_count == 2)
     diag_fourth_halo_root = enable_halo_trace .and. dg_frag%is_frag_root .and. (halo_exchange_call_count == 4)
 
-    allocate(ireq_send(dg_frag%n_halo), ireq_recv(dg_frag%n_halo))
+    if (allocated(dg_frag%halo_ireq_send)) then
+      if (size(dg_frag%halo_ireq_send) /= dg_frag%n_halo) deallocate(dg_frag%halo_ireq_send)
+    end if
+    if (allocated(dg_frag%halo_ireq_recv)) then
+      if (size(dg_frag%halo_ireq_recv) /= dg_frag%n_halo) deallocate(dg_frag%halo_ireq_recv)
+    end if
+    if (.not. allocated(dg_frag%halo_ireq_send)) allocate(dg_frag%halo_ireq_send(dg_frag%n_halo))
+    if (.not. allocated(dg_frag%halo_ireq_recv)) allocate(dg_frag%halo_ireq_recv(dg_frag%n_halo))
     if (enable_halo_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "entry"
@@ -332,6 +338,7 @@
         call flush(6)
       end if
 
+!$omp parallel do collapse(4) private(istate,iz,iy,ix) schedule(static)
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)
@@ -350,6 +357,7 @@
       end do
       end do
       end do
+!$omp end parallel do
       if (enable_halo_trace .and. i_halo == 1 .and. dg_frag%id == 0) then
         write(*,*) "        halo1 pack done"
         call flush(6)
@@ -377,13 +385,13 @@
                  (dg_frag%halo(i_halo)%dvec(2) + 1) * 3 + &
                  (dg_frag%halo(i_halo)%dvec(3) + 1)
       itag_send = (ifrag_send - 1) * 27 + dir_code
-      ireq_send(i_halo) = comm_isend(dg_frag%halo(i_halo)%buf_send, &
-                                     dg_frag%halo(i_halo)%id_dst, &
-                                     itag_send, dg_frag%icomm)
+      dg_frag%halo_ireq_send(i_halo) = comm_isend(dg_frag%halo(i_halo)%buf_send, &
+                                                  dg_frag%halo(i_halo)%id_dst, &
+                                                  itag_send, dg_frag%icomm)
       if (diag_fourth_halo_root) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        halo fourth post-isend-done: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, &
-          " ireq_send=", ireq_send(i_halo)
+          " ireq_send=", dg_frag%halo_ireq_send(i_halo)
         call flush(6)
       end if
 
@@ -410,21 +418,21 @@
           " dsp_send=", dg_frag%halo(i_halo)%dsp_send(1), dg_frag%halo(i_halo)%dsp_send(2), dg_frag%halo(i_halo)%dsp_send(3), &
           " dsp_recv=", dg_frag%halo(i_halo)%dsp_recv(1), dg_frag%halo(i_halo)%dsp_recv(2), dg_frag%halo(i_halo)%dsp_recv(3)
         write(*,'(1x,a,i0,a,i0,a,i0)') "        halo root diag tags: itag_send=", itag_send, " itag_recv=", itag_recv, &
-          " ireq_send=", ireq_send(i_halo)
+          " ireq_send=", dg_frag%halo_ireq_send(i_halo)
         call flush(6)
       end if
 
-      ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv, &
-                                     dg_frag%halo(i_halo)%id_src, &
-                                     itag_recv, dg_frag%icomm)
+      dg_frag%halo_ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv, &
+                                                  dg_frag%halo(i_halo)%id_src, &
+                                                  itag_recv, dg_frag%icomm)
       if (diag_second_halo_root .or. diag_fourth_halo_root) then
-        write(*,'(1x,a,i0,a,i0)') "        halo root diag req: i_halo=", i_halo, " ireq_recv=", ireq_recv(i_halo)
+        write(*,'(1x,a,i0,a,i0)') "        halo root diag req: i_halo=", i_halo, " ireq_recv=", dg_frag%halo_ireq_recv(i_halo)
         call flush(6)
       end if
       if (diag_fourth_halo_root) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        halo fourth post-irecv-done: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, &
-          " ireq_recv=", ireq_recv(i_halo)
+          " ireq_recv=", dg_frag%halo_ireq_recv(i_halo)
         call flush(6)
       end if
       if (diag_fourth_halo_root .and. i_halo == 2) then
@@ -448,7 +456,7 @@
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "recv-wait-begin"
       call flush(6)
     end if
-    call comm_wait_all(ireq_recv)
+    call comm_wait_all(dg_frag%halo_ireq_recv)
     if (diag_second_halo_root .or. diag_fourth_halo_root) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "recv-wait-done"
@@ -456,7 +464,7 @@
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "send-wait-begin"
       call flush(6)
     end if
-    call comm_wait_all(ireq_send)
+    call comm_wait_all(dg_frag%halo_ireq_send)
     if (diag_second_halo_root .or. diag_fourth_halo_root) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "send-wait-done"
@@ -494,6 +502,7 @@
         call flush(6)
       end if
 
+!$omp parallel do collapse(4) private(istate,iz,iy,ix) schedule(static)
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)
@@ -516,6 +525,7 @@
       end do
       end do
       end do
+!$omp end parallel do
     end do
     if (enable_halo_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        halo stage: rank=", dg_frag%id, &
@@ -526,7 +536,5 @@
       write(*,*) "        halo unpack done"
       call flush(6)
     end if
-
-    deallocate(ireq_send, ireq_recv)
 
   end subroutine exchange_phi_frag_halo

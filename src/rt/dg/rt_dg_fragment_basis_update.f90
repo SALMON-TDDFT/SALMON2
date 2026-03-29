@@ -461,6 +461,8 @@
         dg_frag%coef_new = coef_old
         call zero_nonowned_coefficients(dg_frag)
         if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
+        if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
+        dg_frag%gradient_basis_cache_valid = .false.
         if (allocated(dg_frag%momentum_blocks)) then
           do i = 1, size(dg_frag%momentum_blocks)
             if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
@@ -502,6 +504,8 @@
 
     if (allocated(dg_frag%density_phi_cache)) deallocate(dg_frag%density_phi_cache)
     dg_frag%density_phi_cache_valid = .false.
+    if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
+    dg_frag%gradient_basis_cache_valid = .false.
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     dg_frag%density_phi_block_size = 0
@@ -903,6 +907,8 @@
         write(*,*) "  Recalculating momentum matrix for updated basis..."
       end if
       if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
+      if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
+      dg_frag%gradient_basis_cache_valid = .false.
       if (allocated(dg_frag%momentum_blocks)) then
         do i = 1, size(dg_frag%momentum_blocks)
           if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
