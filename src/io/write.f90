@@ -1483,6 +1483,14 @@ contains
        end select
        write(fh,*)       
 100    format(1x,4(i5,f15.4,2x))
+       write(fh,*) "Energy decomposition [Hartree]"
+       write(fh,'(1x,"E_kin      =",e16.8)') energy%E_kin
+       write(fh,'(1x,"E_h        =",e16.8)') energy%E_h
+       write(fh,'(1x,"E_xc       =",e16.8)') energy%E_xc
+       write(fh,'(1x,"E_ion_loc  =",e16.8)') energy%E_ion_loc
+       write(fh,'(1x,"E_ion_nloc =",e16.8)') energy%E_ion_nloc
+       write(fh,'(1x,"E_ion_ion  =",e16.8)') energy%E_ion_ion
+       write(fh,*)
 
        write(fh,200) "Size of the box (A) = ", system%primitive_a*au_length_aa
        write(fh,200) "Grid spacing (A)    = ", (system%Hgs(jj)*au_length_aa,jj=1,3)
@@ -1547,10 +1555,38 @@ contains
          write(fh,*) "Local/Ewald diagnostics"
          write(fh,'(1x,"E_loc_sr               =",e16.8)') system%stress_loc_sr_energy
          write(fh,'(1x,"E_loc_lr               =",e16.8)') system%stress_loc_lr_energy
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_sr_grad [GPa]    =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_lr_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_lr_grad [GPa]    =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_sr_diag [GPa]    =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_lr_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_lr_diag [GPa]    =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_sr [GPa]         =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_lr_grad + system%stress_loc_lr_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_lr [GPa]         =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_grad [GPa]       =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_diag [GPa]       =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_g_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_ewald_G_grad [GPa]   =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_g_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_ewald_G_diag [GPa]   =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_g_self, au_pressure_gpa)
+         write(fh,'(1x,"P_ewald_G_self [GPa]   =",e16.8)') pressure_term_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_g, au_pressure_gpa)
          write(fh,'(1x,"P_ewald_G [GPa]        =",e16.8)') pressure_term_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_r, au_pressure_gpa)
          write(fh,'(1x,"P_ewald_R [GPa]        =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_lr_grad + system%stress_loc_lr_diag &
+              + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_lr+ewald [GPa]   =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har + system%stress_loc_lr_grad &
+              + system%stress_loc_lr_diag + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
+         write(fh,'(1x,"P_har+loc_lr+ewald [GPa] =",e16.8)') pressure_term_gpa
 
          if(yn_out_stress_decomp == 'y') then
            write(fh,*)
@@ -1584,7 +1620,100 @@ contains
        close(fh)
     endif
 
+    ! Write sector-resolved energy data for FD validation
+    call write_stress_energy_data(Miter, system, energy)
+
   end subroutine write_info_data
+
+  subroutine write_stress_energy_data(Miter, system, energy)
+    use structures
+    use salmon_global,   only: sysname, base_directory, yn_out_stress, stress_fd_detail
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root
+    use filesystem,      only: open_filehandle
+    use inputoutput,     only: au_energy_ev, au_pressure_gpa
+    implicit none
+    integer,            intent(in) :: Miter
+    type(s_dft_system), intent(in) :: system
+    type(s_dft_energy), intent(in) :: energy
+    integer :: fh, i
+    character(256) :: fname
+    real(8) :: e_sr, e_lr, e_ewa_g, e_ewa_r
+    real(8) :: p(13)
+
+    if(.not. comm_is_root(nproc_id_global)) return
+    if(yn_out_stress /= 'y') return
+
+    fname = trim(base_directory)//trim(sysname)//'_stress_energy.data'
+    fh = open_filehandle(trim(fname))
+
+    write(fh,'(a)') '# SALMON stress energy decomposition'
+    write(fh,'(a)') '# stress_fd_detail = '//stress_fd_detail
+    write(fh,'(a)') '# col  1: iter'
+    write(fh,'(a)') '# col  2: E_total [eV]'
+    write(fh,'(a)') '# col  3: E_kin [Ha]'
+    write(fh,'(a)') '# col  4: E_har [Ha]'
+    write(fh,'(a)') '# col  5: E_xc [Ha]'
+    write(fh,'(a)') '# col  6: E_ion_loc [Ha]'
+    write(fh,'(a)') '# col  7: E_ion_nloc [Ha]'
+    write(fh,'(a)') '# col  8: E_ion_ion [Ha]'
+    write(fh,'(a)') '# col  9: E_loc_sr [Ha]        (level B+, else 0)'
+    write(fh,'(a)') '# col 10: E_loc_lr [Ha]        (level B+, else 0)'
+    write(fh,'(a)') '# col 11: E_ewa_G [Ha]         (level B+, else 0)'
+    write(fh,'(a)') '# col 12: E_ewa_R [Ha]         (level B+, else 0)'
+    write(fh,'(a)') '# col 13: P_kin [GPa]          (level C, else 0)'
+    write(fh,'(a)') '# col 14: P_har [GPa]          (level C, else 0)'
+    write(fh,'(a)') '# col 15: P_xc [GPa]           (level C, else 0)'
+    write(fh,'(a)') '# col 16: P_loc_sr_grad [GPa]  (level C, else 0)'
+    write(fh,'(a)') '# col 17: P_loc_sr_diag [GPa]  (level C, else 0)'
+    write(fh,'(a)') '# col 18: P_loc_lr_grad [GPa]  (level C, else 0)'
+    write(fh,'(a)') '# col 19: P_loc_lr_diag [GPa]  (level C, else 0)'
+    write(fh,'(a)') '# col 20: P_ewa_G_grad [GPa]   (level C, else 0)'
+    write(fh,'(a)') '# col 21: P_ewa_G_diag [GPa]   (level C, else 0)'
+    write(fh,'(a)') '# col 22: P_ewa_G_self [GPa]   (level C, else 0)'
+    write(fh,'(a)') '# col 23: P_ewa_R [GPa]        (level C, else 0)'
+    write(fh,'(a)') '# col 24: P_nl [GPa]           (level C, else 0)'
+    write(fh,'(a)') '# col 25: P_total [GPa]        (level C, else 0)'
+
+    if(stress_fd_detail == 'B' .or. stress_fd_detail == 'C') then
+      e_sr    = system%stress_loc_sr_energy
+      e_lr    = system%stress_loc_lr_energy
+      e_ewa_g = system%stress_ewa_energy_G
+      e_ewa_r = system%stress_ewa_energy_R
+    else
+      e_sr = 0d0
+      e_lr = 0d0
+      e_ewa_g = 0d0
+      e_ewa_r = 0d0
+    end if
+
+    p = 0d0
+    if(stress_fd_detail == 'C') then
+      p(1)  = -stress_term_pressure_gpa(system%stress_kin,           au_pressure_gpa)
+      p(2)  = -stress_term_pressure_gpa(system%stress_har,           au_pressure_gpa)
+      p(3)  = -stress_term_pressure_gpa(system%stress_xc,            au_pressure_gpa)
+      p(4)  = -stress_term_pressure_gpa(system%stress_loc_sr_grad,   au_pressure_gpa)
+      p(5)  = -stress_term_pressure_gpa(system%stress_loc_sr_diag,   au_pressure_gpa)
+      p(6)  = -stress_term_pressure_gpa(system%stress_loc_lr_grad,   au_pressure_gpa)
+      p(7)  = -stress_term_pressure_gpa(system%stress_loc_lr_diag,   au_pressure_gpa)
+      p(8)  = -stress_term_pressure_gpa(system%stress_ewa_g_grad,    au_pressure_gpa)
+      p(9)  = -stress_term_pressure_gpa(system%stress_ewa_g_diag,    au_pressure_gpa)
+      p(10) = -stress_term_pressure_gpa(system%stress_ewa_g_self,    au_pressure_gpa)
+      p(11) = -stress_term_pressure_gpa(system%stress_ewa_r,         au_pressure_gpa)
+      p(12) = -stress_term_pressure_gpa(system%stress_nl,            au_pressure_gpa)
+      p(13) = -stress_term_pressure_gpa(system%stress_tensor,        au_pressure_gpa)
+    end if
+
+    write(fh, '(i6,11e20.12,13f20.8)') &
+      Miter, &
+      energy%E_tot * au_energy_ev, &
+      energy%E_kin, energy%E_h, energy%E_xc, &
+      energy%E_ion_loc, energy%E_ion_nloc, energy%E_ion_ion, &
+      e_sr, e_lr, e_ewa_g, e_ewa_r, &
+      (p(i), i=1,13)
+
+    close(fh)
+  end subroutine write_stress_energy_data
 
   subroutine cleanup_stress_tensor_for_output(strs)
     implicit none
