@@ -819,7 +819,8 @@ contains
       end do
     end do
 
-    call comm_summation(strs, strs_sum, 9, info%icomm_rko)
+    ! Use icomm_r (not icomm_rko): this is a density-only sum with no k/orbital loops.
+    call comm_summation(strs, strs_sum, 9, info%icomm_r)
     system%stress_loc_sr_rs = strs_sum / V
 
   contains
