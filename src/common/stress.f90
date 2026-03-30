@@ -106,10 +106,16 @@ contains
     system%stress_loc_lr_grad = 0d0
     system%stress_loc_sr_diag = 0d0
     system%stress_loc_lr_diag = 0d0
+    system%stress_loc_sr_scr_grad = 0d0
+    system%stress_loc_lr_scr_grad = 0d0
+    system%stress_loc_sr_scr_diag = 0d0
+    system%stress_loc_lr_scr_diag = 0d0
     system%stress_nl = 0d0
     system%stress_ewa = 0d0
     system%stress_loc_sr_energy = 0d0
     system%stress_loc_lr_energy = 0d0
+    system%stress_loc_sr_scr_energy = 0d0
+    system%stress_loc_lr_scr_energy = 0d0
     system%stress_ewa_g = 0d0
     system%stress_ewa_r = 0d0
     system%stress_ewa_g_grad = 0d0
@@ -342,7 +348,7 @@ contains
     use structures
     use math_constants, only: pi, zi
     use communication,  only: comm_summation
-    use salmon_global,  only: cutoff_g, kion
+    use salmon_global,  only: aEwald, cutoff_g, kion
     implicit none
     type(s_dft_system),      intent(inout) :: system
     type(s_pp_info),         intent(in)    :: pp
@@ -353,16 +359,20 @@ contains
     type(s_poisson),         intent(in)    :: poisson
     type(s_dft_energy),      intent(in)    :: energy
     integer :: ix, iy, iz, ia, ik, a, b, ig_s(3), ig_e(3)
-    real(8) :: g(3), r(3), G2, Gd, coeff_lr, strs(3,3), strs_sum(3,3), strs_sr(3,3), strs_lr(3,3), &
-      & strs_sr_sum(3,3), strs_lr_sum(3,3), E_sr, E_lr, E_sr_loc, E_lr_loc, V
-    complex(8) :: rho_e, V_sr_sum, V_lr_sum, dVsr_dG2_sum, phase
+    real(8) :: g(3), r(3), G2, Gd, coeff_lr, coeff_lr_scr, scr_fac, strs(3,3), strs_sum(3,3), &
+      & strs_grad_sum(3,3), strs_diag_sum(3,3), strs_sr(3,3), strs_lr(3,3), strs_lr_scr(3,3), &
+      & strs_sr_sum(3,3), strs_lr_sum(3,3), strs_lr_scr_sum(3,3), E_sr, E_lr, E_sr_scr, E_lr_scr, &
+      & E_sr_loc, E_lr_loc, E_lr_scr_loc, V
+    complex(8) :: rho_e, V_sr_sum, V_lr_sum, V_lr_scr_sum, dVsr_dG2_sum, phase
 
     V = system%det_a
     strs = 0d0
     strs_sr = 0d0
     strs_lr = 0d0
+    strs_lr_scr = 0d0
     E_sr_loc = 0d0
     E_lr_loc = 0d0
+    E_lr_scr_loc = 0d0
     call get_g_bounds(fg, ig_s, ig_e)
 
     do iz = ig_s(3), ig_e(3)
@@ -378,6 +388,7 @@ contains
       rho_e = poisson%zrhoG_ele(ix,iy,iz)
       V_sr_sum = (0d0, 0d0)
       V_lr_sum = (0d0, 0d0)
+      V_lr_scr_sum = (0d0, 0d0)
       dVsr_dG2_sum = (0d0, 0d0)
 
       do ia = 1, system%nion
@@ -394,12 +405,17 @@ contains
 
       E_sr_loc = E_sr_loc + dble(conjg(rho_e) * V_sr_sum)
       E_lr_loc = E_lr_loc + dble(conjg(rho_e) * V_lr_sum)
+      scr_fac = fg%exp_ewald(ix,iy,iz)
+      V_lr_scr_sum = scr_fac * V_lr_sum
+      E_lr_scr_loc = E_lr_scr_loc + dble(conjg(rho_e) * V_lr_scr_sum)
       coeff_lr = -2d0 * dble(conjg(rho_e) * V_lr_sum) / G2
+      coeff_lr_scr = -2d0 * dble(conjg(rho_e) * V_lr_scr_sum) / G2 * (1d0 + G2 / (4d0 * aEwald))
 
       do b = 1, 3
       do a = 1, 3
         strs_sr(a,b) = strs_sr(a,b) + 2d0 * dble(conjg(rho_e) * dVsr_dG2_sum) * g(a) * g(b)
         strs_lr(a,b) = strs_lr(a,b) + coeff_lr * g(a) * g(b)
+        strs_lr_scr(a,b) = strs_lr_scr(a,b) + coeff_lr_scr * g(a) * g(b)
       end do
       end do
     end do
@@ -408,32 +424,47 @@ contains
 
     call comm_summation(E_sr_loc, E_sr, info%icomm_r)
     call comm_summation(E_lr_loc, E_lr, info%icomm_r)
+    call comm_summation(E_lr_scr_loc, E_lr_scr, info%icomm_r)
     strs = strs_sr + strs_lr
     call sum_stress_tensor(info%icomm_r, strs, strs_sum)
     call sum_stress_tensor(info%icomm_r, strs_sr, strs_sr_sum)
     call sum_stress_tensor(info%icomm_r, strs_lr, strs_lr_sum)
+    call sum_stress_tensor(info%icomm_r, strs_lr_scr, strs_lr_scr_sum)
 
     ! poisson%zrhoG_ele already carries the reciprocal-space 1/V normalization,
     ! while dVG_ion_dG2 is stored as a bare pseudopotential derivative.
     strs_sum = strs_sum / V
     strs_sr_sum = strs_sr_sum / V
     strs_lr_sum = strs_lr_sum / V
-    system%stress_loc_grad = strs_sum
+    strs_lr_scr_sum = strs_lr_scr_sum / V
+    strs_grad_sum = strs_sum
+    strs_diag_sum = 0d0
+    E_sr_scr = (E_sr + E_lr) - E_lr_scr
+    system%stress_loc_grad = strs_grad_sum
     system%stress_loc_diag = 0d0
     system%stress_loc_sr_grad = strs_sr_sum
     system%stress_loc_lr_grad = strs_lr_sum
+    system%stress_loc_sr_scr_grad = strs_grad_sum - strs_lr_scr_sum
+    system%stress_loc_lr_scr_grad = strs_lr_scr_sum
     system%stress_loc_sr_diag = 0d0
     system%stress_loc_lr_diag = 0d0
+    system%stress_loc_sr_scr_diag = 0d0
+    system%stress_loc_lr_scr_diag = 0d0
     do a = 1, 3
       ! Keep the diagonal consistent with the periodic local-energy decomposition:
       ! E_ion_loc = E_sr + E_lr.
-      strs_sum(a,a) = strs_sum(a,a) + (E_sr + E_lr) / V
+      strs_diag_sum(a,a) = (E_sr + E_lr) / V
+      strs_sum(a,a) = strs_grad_sum(a,a) + strs_diag_sum(a,a)
       system%stress_loc_sr_diag(a,a) = E_sr / V
       system%stress_loc_lr_diag(a,a) = E_lr / V
-      system%stress_loc_diag(a,a) = (E_sr + E_lr) / V
+      system%stress_loc_sr_scr_diag(a,a) = E_sr_scr / V
+      system%stress_loc_lr_scr_diag(a,a) = E_lr_scr / V
+      system%stress_loc_diag(a,a) = strs_diag_sum(a,a)
     end do
     system%stress_loc_sr_energy = E_sr
     system%stress_loc_lr_energy = E_lr
+    system%stress_loc_sr_scr_energy = E_sr_scr
+    system%stress_loc_lr_scr_energy = E_lr_scr
     system%stress_loc = strs_sum
   end subroutine calc_stress_loc
 
