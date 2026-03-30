@@ -68,10 +68,17 @@ module structures
     real(8) :: stress_loc_lr_grad(3,3)
     real(8) :: stress_loc_sr_diag(3,3)
     real(8) :: stress_loc_lr_diag(3,3)
+    ! Diagnostic-only screened regrouping. These fields are not used in total stress assembly.
+    real(8) :: stress_loc_sr_scr_grad(3,3)
+    real(8) :: stress_loc_lr_scr_grad(3,3)
+    real(8) :: stress_loc_sr_scr_diag(3,3)
+    real(8) :: stress_loc_lr_scr_diag(3,3)
     real(8) :: stress_nl(3,3)
     real(8) :: stress_ewa(3,3)
     real(8) :: stress_loc_sr_energy
     real(8) :: stress_loc_lr_energy
+    real(8) :: stress_loc_sr_scr_energy
+    real(8) :: stress_loc_lr_scr_energy
     real(8) :: stress_ewa_g(3,3)
     real(8) :: stress_ewa_r(3,3)
     real(8) :: stress_ewa_g_grad(3,3)
