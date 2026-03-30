@@ -661,11 +661,17 @@ contains
       ifrag = dg_frag%halo(i_halo)%ifrag_dst
       i_local = ifrag - dg_frag%ifrag_start + 1
       if (i_local < 1 .or. i_local > local_frag_count) cycle
-      if (.not. allocated(dg_frag%halo(i_halo)%buf_recv)) cycle
-      nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv, 4))
+      if ((.not. allocated(dg_frag%halo(i_halo)%buf_recv)) .and. &
+          (.not. allocated(dg_frag%halo(i_halo)%buf_recv_c))) cycle
+      if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
+        nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv_c, 4))
+      else
+        nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv, 4))
+      end if
       if (nbf <= 0) cycle
       iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      d(:) = dg_frag%halo(i_halo)%dsp_send
+      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+      d(:) = dg_frag%halo(i_halo)%dsp_recv
       l(:) = dg_frag%halo(i_halo)%length
       do ia = 1, natom
         do j = 1, ppg%mps(ia)
@@ -673,12 +679,12 @@ contains
           iy = ppg%jxyz(2, j, ia)
           iz = ppg%jxyz(3, j, ia)
           if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
-          lx = modulo(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
-          ly = modulo(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
-          lz = modulo(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
-          if (lx <= d(1) .or. lx > d(1) + l(1)) cycle
-          if (ly <= d(2) .or. ly > d(2) + l(2)) cycle
-          if (lz <= d(3) .or. lz > d(3) + l(3)) cycle
+          lx = map_global_to_fragment_extended_coord(ix, iorg(1), ndom(1), dg_frag%nxyz_buffer(1), dg_frag%lgnum_total(1))
+          ly = map_global_to_fragment_extended_coord(iy, iorg(2), ndom(2), dg_frag%nxyz_buffer(2), dg_frag%lgnum_total(2))
+          lz = map_global_to_fragment_extended_coord(iz, iorg(3), ndom(3), dg_frag%nxyz_buffer(3), dg_frag%lgnum_total(3))
+          if (lx < d(1) + 1 .or. lx > d(1) + l(1)) cycle
+          if (ly < d(2) + 1 .or. ly > d(2) + l(2)) cycle
+          if (lz < d(3) + 1 .or. lz > d(3) + l(3)) cycle
           if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
             dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%halo(i_halo)%buf_recv_c(lx - d(1), ly - d(2), lz - d(3), 1:nbf, 1)
           else
@@ -690,6 +696,19 @@ contains
 
     dg_frag%nl_pp_phi_cache_valid = .true.
   end subroutine ensure_nonlocal_projector_phi_cache
+
+  integer function map_global_to_fragment_extended_coord(ig, iorg, nloc, nb, lgtot) result(iloc)
+    implicit none
+    integer, intent(in) :: ig, iorg, nloc, nb, lgtot
+
+    iloc = ig - iorg + 1
+    do while (iloc < 1 - nb)
+      iloc = iloc + lgtot
+    end do
+    do while (iloc > nloc + nb)
+      iloc = iloc - lgtot
+    end do
+  end function map_global_to_fragment_extended_coord
 
   subroutine apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin_out, x_up, x_dn, y_out)
     use structures
@@ -724,6 +743,12 @@ contains
 
     local_frag_count = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (local_frag_count <= 0) return
+
+    if (dg_frag%id == 0 .and. ispin_out == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0)') "        nonlocal projector trace: stage=so-entry local_frag_count=", &
+        local_frag_count, " nlma=", size(ppg%ia_tbl_so), " nstate=", size(x_up, 2)
+      flush(6)
+    end if
 
     call ensure_nonlocal_projector_phi_cache(dg_frag, mg, ppg)
 
@@ -809,8 +834,21 @@ contains
       end do
     end do
 
+    if (dg_frag%id == 0 .and. ispin_out == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=so-after-self-halo-loop"
+      flush(6)
+    end if
+
+    if (dg_frag%id == 0 .and. ispin_out == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=so-before-proj-sum"
+      flush(6)
+    end if
     call comm_summation(proj_local_up, proj_global_up, size(proj_local_up), dg_frag%icomm)
     call comm_summation(proj_local_dn, proj_global_dn, size(proj_local_dn), dg_frag%icomm)
+    if (dg_frag%id == 0 .and. ispin_out == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=so-after-proj-sum"
+      flush(6)
+    end if
 
     do frag_slot = 1, local_frag_count
       ifrag = dg_frag%ifrag_start + frag_slot - 1
@@ -831,6 +869,10 @@ contains
       end do
     end do
 
+    if (dg_frag%id == 0 .and. ispin_out == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=so-exit"
+      flush(6)
+    end if
     deallocate(uVphi_self, proj_local_up, proj_local_dn, proj_global_up, proj_global_dn)
   end subroutine apply_nonlocal_pp_projector_batch_so
 
@@ -865,6 +907,12 @@ contains
 
     local_frag_count = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (local_frag_count <= 0) return
+
+    if (dg_frag%id == 0 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0)') "        nonlocal projector trace: stage=entry local_frag_count=", &
+        local_frag_count, " nlma=", ppg%Nlma, " nstate=", size(x, 2)
+      flush(6)
+    end if
 
     call ensure_nonlocal_projector_phi_cache(dg_frag, mg, ppg)
 
@@ -925,7 +973,20 @@ contains
       end do
     end do
 
+    if (dg_frag%id == 0 .and. ispin == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=after-self-halo-loop"
+      flush(6)
+    end if
+
+    if (dg_frag%id == 0 .and. ispin == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=before-proj-sum"
+      flush(6)
+    end if
     call comm_summation(proj_local, proj_global, size(proj_local), dg_frag%icomm)
+    if (dg_frag%id == 0 .and. ispin == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=after-proj-sum"
+      flush(6)
+    end if
 
     do frag_slot = 1, local_frag_count
       ifrag = dg_frag%ifrag_start + frag_slot - 1
@@ -945,6 +1006,10 @@ contains
       end do
     end do
 
+    if (dg_frag%id == 0 .and. ispin == 1) then
+      write(*,'(1x,a)') "        nonlocal projector trace: stage=exit"
+      flush(6)
+    end if
     deallocate(uVphi_self, proj_local, proj_global)
   end subroutine apply_nonlocal_pp_projector_batch
 

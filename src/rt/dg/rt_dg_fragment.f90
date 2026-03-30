@@ -430,6 +430,7 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
     integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
+    integer :: source_id_frag, recv_slot_count
     integer :: nxyz(3), ixyz0(3), ifrag_count
     integer :: nx_max, ny_max, nz_max
     integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
@@ -602,10 +603,9 @@ contains
     recv_count = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      source_rank = source_root_rank + modulo(dg_frag%id, dg_frag%isize_frag)
-      if (source_rank == dg_frag%id) cycle
       nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
       ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
+      recv_slot_count = 0
       do iz = 1, nxyz(3)
         do iy = 1, nxyz(2)
           do ix = 1, nxyz(1)
@@ -614,10 +614,16 @@ contains
             izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank == dg_frag%id .and. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) then
-              recv_count(source_rank) = recv_count(source_rank) + 1
+              recv_slot_count = recv_slot_count + 1
             end if
           end do
         end do
+      end do
+      if (recv_slot_count <= 0) cycle
+      do source_id_frag = 0, dg_frag%isize_frag - 1
+        source_rank = source_root_rank + source_id_frag
+        if (source_rank == dg_frag%id) cycle
+        recv_count(source_rank) = recv_slot_count
       end do
     end do
 
@@ -690,10 +696,9 @@ contains
     recv_cursor = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      source_rank = source_root_rank + modulo(dg_frag%id, dg_frag%isize_frag)
-      if (source_rank == dg_frag%id) cycle
       nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
       ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
+      recv_slot_count = 0
       do iz = 1, nxyz(3)
         do iy = 1, nxyz(2)
           do ix = 1, nxyz(1)
@@ -703,10 +708,15 @@ contains
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank /= dg_frag%id) cycle
             if (.not. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) cycle
-            recv_cursor(source_rank) = recv_cursor(source_rank) + 1
-            dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
-            dg_frag%density_recv_map(source_rank)%iyg(recv_cursor(source_rank)) = iyg
-            dg_frag%density_recv_map(source_rank)%izg(recv_cursor(source_rank)) = izg
+            recv_slot_count = recv_slot_count + 1
+            do source_id_frag = 0, dg_frag%isize_frag - 1
+              source_rank = source_root_rank + source_id_frag
+              if (source_rank == dg_frag%id) cycle
+              recv_cursor(source_rank) = recv_slot_count
+              dg_frag%density_recv_map(source_rank)%ixg(recv_slot_count) = ixg
+              dg_frag%density_recv_map(source_rank)%iyg(recv_slot_count) = iyg
+              dg_frag%density_recv_map(source_rank)%izg(recv_slot_count) = izg
+            end do
           end do
         end do
       end do

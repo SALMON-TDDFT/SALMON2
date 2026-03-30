@@ -2133,9 +2133,6 @@
     phi_ub3 = ubound(dg_frag%phi_frag, 3)
 
     call exchange_phi_frag_halo(dg_frag)
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        overlap stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-halo-exchange"
-    flush(6)
 
     do ispin = 1, system%nspin
       i_local = 0
@@ -2152,17 +2149,6 @@
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        overlap stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-          " ifrag=", ifrag, " stage=", "fragment-begin"
-        flush(6)
-        if (log_frag_progress) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0)') &
-            "        overlap fragment begin: ifrag=", ifrag, " i_local=", i_local, " ispin=", ispin, &
-            " loc_s=", loc_s(1), loc_s(2), loc_s(3), " loc_e=", loc_e(1), loc_e(2), loc_e(3), &
-            " n_basis=", dg_frag%n_basis(ifrag, ispin)
-          flush(6)
-        end if
         nbf = dg_frag%n_basis(ifrag, ispin)
         jo_progress_stride = max(1, nbf / 4)
         if (loc_s(1) < phi_lb1 .or. loc_e(1) > phi_ub1 .or. &
@@ -2208,14 +2194,6 @@
             iblk = find_matrix_block(dg_frag%S_block_map, ifrag, ifrag)
             if (iblk > 0) dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = integral
           end do
-          if (log_frag_progress) then
-            if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
-              write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        overlap self progress: jo=", jo, "/", &
-                nbf, " self=", time_self_integral - frag_self_start
-              flush(6)
-            end if
-          end if
-
           do i_halo = 1, dg_frag%n_halo
             if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
             jfrag = dg_frag%halo(i_halo)%ifrag_src
@@ -2281,32 +2259,12 @@
               if (iblk_rev > 0) dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
                 dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * integral
             end do
-            if (log_frag_progress) then
-              if (jo == 1 .or. jo == nbf .or. mod(jo, jo_progress_stride) == 0) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,1pe12.4)') &
-                  "        overlap halo detail: jo=", jo, " i_halo=", i_halo, " jfrag=", jfrag, &
-                  " n_basis_halo=", n_basis_halo, " halo_len=", l(1), l(2), l(3), &
-                  " halo=", time_halo_integral - frag_halo_start
-                flush(6)
-              end if
-            end if
           end do
 
         end do
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        overlap stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-          " ifrag=", ifrag, " stage=", "after-jo-loop"
-        flush(6)
-        write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,1pe12.4,a,1pe12.4)') &
-          "        overlap fragment done: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-          " ifrag=", ifrag, " root=", dg_frag%is_frag_root, " self=", time_self_integral - frag_self_start, &
-          " halo=", time_halo_integral - frag_halo_start
-        flush(6)
       end do
     end do
 
-    write(*,*) "        overlap reduce begin"
-    flush(6)
     call cpu_time(t0)
     call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
     if (.not. dg_frag%is_frag_root) then
