@@ -1555,6 +1555,7 @@ contains
          write(fh,*) "Local/Ewald diagnostics"
          write(fh,'(1x,"E_loc_sr               =",e16.8)') system%stress_loc_sr_energy
          write(fh,'(1x,"E_loc_lr               =",e16.8)') system%stress_loc_lr_energy
+         write(fh,'(1x,"E_loc_fullobj          =",e16.8)') energy%E_ion_loc
          write(fh,'(1x,"E_loc_sr_scr           =",e16.8)') system%stress_loc_sr_scr_energy
          write(fh,'(1x,"E_loc_lr_scr           =",e16.8)') system%stress_loc_lr_scr_energy
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa)
@@ -1583,6 +1584,13 @@ contains
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_lr_scr_grad &
               + system%stress_loc_lr_scr_diag, au_pressure_gpa)
          write(fh,'(1x,"P_loc_lr_scr [GPa]     =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_fullobj_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_fullobj_grad [GPa] =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_fullobj_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_fullobj_diag [GPa] =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_fullobj_grad &
+              + system%stress_loc_fullobj_diag, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_fullobj [GPa]   =",e16.8)') pressure_term_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_grad, au_pressure_gpa)
          write(fh,'(1x,"P_loc_grad [GPa]       =",e16.8)') pressure_term_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_diag, au_pressure_gpa)
@@ -1606,6 +1614,9 @@ contains
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har + system%stress_loc_lr_scr_grad &
               + system%stress_loc_lr_scr_diag + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
          write(fh,'(1x,"P_har+loc_lr_scr+ewald [GPa] =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har + system%stress_loc_fullobj_grad &
+              + system%stress_loc_fullobj_diag + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
+         write(fh,'(1x,"P_har+loc_fullobj+ewald [GPa] =",e16.8)') pressure_term_gpa
 
          if(yn_out_stress_decomp == 'y') then
            write(fh,*)

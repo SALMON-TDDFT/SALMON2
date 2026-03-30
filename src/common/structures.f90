@@ -64,6 +64,8 @@ module structures
     real(8) :: stress_loc_fd(3,3)
     real(8) :: stress_loc_grad(3,3)
     real(8) :: stress_loc_diag(3,3)
+    real(8) :: stress_loc_fullobj_grad(3,3)
+    real(8) :: stress_loc_fullobj_diag(3,3)
     real(8) :: stress_loc_sr_grad(3,3)
     real(8) :: stress_loc_lr_grad(3,3)
     real(8) :: stress_loc_sr_diag(3,3)
