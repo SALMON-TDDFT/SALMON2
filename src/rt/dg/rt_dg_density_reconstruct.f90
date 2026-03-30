@@ -39,7 +39,11 @@
     real(8) :: time_project_grid_prep, time_project_phi_pack, time_project_overhead
     real(8) :: time_project_dmat_build
     real(8) :: t_dmat0, t_dmat1
+    real(8) :: time_cache_pw_refresh, time_cache_phi_block_refresh
     logical :: use_mixed_density, distribute_project
+    logical :: rebuilt_pw_cache, rebuilt_phi_block_cache
+    logical :: need_pw_cache_alloc, need_pw_cache_expand
+    logical :: need_phi_cache_alloc, need_phi_count_alloc, need_phi_cache_invalid, need_phi_cache_resize
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
     integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:), valid_subgroup_grid_ids(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
@@ -86,8 +90,18 @@
     time_project_dmat_build = 0.0d0
     time_project_rho_reduce = 0.0d0
     time_project_phi_block_build = 0.0d0
+    time_cache_pw_refresh = 0.0d0
+    time_cache_phi_block_refresh = 0.0d0
     charge_budget_local(:) = 0.0d0
     charge_budget_total(:) = 0.0d0
+    rebuilt_pw_cache = .false.
+    rebuilt_phi_block_cache = .false.
+    need_pw_cache_alloc = .false.
+    need_pw_cache_expand = .false.
+    need_phi_cache_alloc = .false.
+    need_phi_count_alloc = .false.
+    need_phi_cache_invalid = .false.
+    need_phi_cache_resize = .false.
     if (dg_frag%is_frag_root) then
       write(*,'(1x,a,i0,a,i0,a,i0)') "        density trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " stage=entry_root root_world=", dg_frag%id - dg_frag%id_frag
@@ -219,14 +233,20 @@
 
     if (n_pw > 0) then
       call cpu_time(t_cache0)
-      if ((.not. allocated(dg_frag%coef_pw_full_cache)) .or. dg_frag%coef_pw_full_cache_nstate < nocc_cache) then
+      need_pw_cache_alloc = (.not. allocated(dg_frag%coef_pw_full_cache))
+      need_pw_cache_expand = (.not. need_pw_cache_alloc) .and. dg_frag%coef_pw_full_cache_nstate < nocc_cache
+      if (need_pw_cache_alloc .or. need_pw_cache_expand) then
         call refresh_pw_coef_cache(dg_frag, nocc_cache)
+        rebuilt_pw_cache = .true.
       end if
       call cpu_time(t_cache1)
       time_cache = time_cache + (t_cache1 - t_cache0)
+      if (rebuilt_pw_cache) time_cache_pw_refresh = time_cache_pw_refresh + (t_cache1 - t_cache0)
     end if
     if (dg_frag%id == 0) then
       write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-pw-cache dt=", "", time_cache
+      write(*,'(1x,a,l1,a,l1,a,1pe12.4)') "        density cache: pw_refresh rebuilt=", rebuilt_pw_cache, &
+        " expand_only=", need_pw_cache_expand, " dt=", time_cache_pw_refresh
       flush(6)
     end if
 
@@ -242,8 +262,11 @@
       allocate(D_partial_re(nbf_max, nbf_max))
       allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
       call cpu_time(t_setup0)
-      if ((.not. allocated(dg_frag%density_phi_block_cache)) .or. (.not. allocated(dg_frag%density_phi_block_count)) .or. &
-          (.not. dg_frag%density_phi_block_cache_valid) .or. dg_frag%density_phi_block_size /= grid_block_size) then
+      need_phi_cache_alloc = (.not. allocated(dg_frag%density_phi_block_cache))
+      need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
+      need_phi_cache_invalid = (.not. dg_frag%density_phi_block_cache_valid)
+      need_phi_cache_resize = dg_frag%density_phi_block_size /= grid_block_size
+      if (need_phi_cache_alloc .or. need_phi_count_alloc .or. need_phi_cache_invalid .or. need_phi_cache_resize) then
         if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
         if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
         nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
@@ -276,9 +299,17 @@
         end do
         dg_frag%density_phi_block_size = grid_block_size
         dg_frag%density_phi_block_cache_valid = .true.
+        rebuilt_phi_block_cache = .true.
       end if
       call cpu_time(t_setup1)
       time_project_phi_block_build = time_project_phi_block_build + (t_setup1 - t_setup0)
+      if (rebuilt_phi_block_cache) time_cache_phi_block_refresh = time_cache_phi_block_refresh + (t_setup1 - t_setup0)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,l1,a,l1,a,l1,a,l1,a,l1,a,1pe12.4)') "        density cache: phi_block rebuilt=", &
+          rebuilt_phi_block_cache, " alloc=", need_phi_cache_alloc, " count_alloc=", need_phi_count_alloc, &
+          " invalid=", need_phi_cache_invalid, " resize=", need_phi_cache_resize, " dt=", time_cache_phi_block_refresh
+        flush(6)
+      end if
       call cpu_time(t_project0)
       i_local = 0
       block_idx_global = 0
@@ -743,11 +774,11 @@
       if (dg_frag%is_frag_root) then
         write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        density trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " stage=after-project dt=", time_project
-        write(*,'(1x,a,i0,a,i0,9(a,1pe12.4))') "        density trace: rank=", dg_frag%id, &
+        write(*,'(1x,a,i0,a,i0,8(a,1pe12.4))') "        density trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, &
           " setup=", time_project_setup, " psi=", time_project_psi, " rho=", time_project_rho, &
           " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, &
-          " phi_blk_build=", time_project_phi_block_build, " over=", time_project_overhead, " dmat=", time_project_dmat_build, &
+          " over=", time_project_overhead, " dmat=", time_project_dmat_build, &
           " rho_red=", time_project_rho_reduce
         flush(6)
       end if
@@ -999,6 +1030,10 @@
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
         "        density timing: total=", t_total1 - t_total0, " cache=", time_cache, &
         " project=", time_project, " comm=", time_comm, " norm=", time_norm
+      write(*,'(1x,a,4(a,1pe12.4),2(a,l1))') "        density cache timing:", &
+        " pw_refresh=", time_cache_pw_refresh, " phi_blk_build=", time_cache_phi_block_refresh, &
+        " cache_total=", time_cache + time_cache_phi_block_refresh, " step_total=", time_cache_pw_refresh + time_cache_phi_block_refresh, &
+        " pw_rebuilt=", rebuilt_pw_cache, " phi_rebuilt=", rebuilt_phi_block_cache
       write(*,'(1x,a,7(a,1pe12.4))') "        density timing detail: project", &
         " setup=", time_project_setup, " psi=", time_project_psi, " rho=", time_project_rho, &
         " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, &

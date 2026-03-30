@@ -276,6 +276,7 @@ contains
     ! Initialize halo communication structures
     if (dg_frag%has_real_space_basis) then
       call init_halo_communication(dg_frag, info)
+      call rebuild_coef_owner_map(dg_frag, "post-halo-init")
     end if
     
     ! Perform initial halo exchange to fill ghost cells
@@ -432,6 +433,7 @@ contains
     integer :: nxyz(3), ixyz0(3), ifrag_count
     integer :: nx_max, ny_max, nz_max
     integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
+    integer :: primary_count_local, primary_owned_local, primary_remote_local
     integer, allocatable :: recv_count(:), recv_cursor(:)
 
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
@@ -526,6 +528,9 @@ contains
       i_local = i_local + 1
       nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
       ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
+      primary_count_local = 0
+      primary_owned_local = 0
+      primary_remote_local = 0
       do iz = 1, nxyz(3)
         do iy = 1, nxyz(2)
           do ix = 1, nxyz(1)
@@ -538,7 +543,15 @@ contains
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
             dg_frag%density_primary_local_map(ix, iy, iz, i_local) = &
-              is_density_primary_fragment(dg_frag, ifrag, ixg, iyg, izg)
+              is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)
+            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
+              primary_count_local = primary_count_local + 1
+              if (owner_rank == dg_frag%id) then
+                primary_owned_local = primary_owned_local + 1
+              else
+                primary_remote_local = primary_remote_local + 1
+              end if
+            end if
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= dg_frag%id) then
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
               dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
@@ -546,6 +559,14 @@ contains
           end do
         end do
       end do
+      if (dg_frag%id_frag == 0 .and. i_local <= 4) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+             'density core-count: rank=', dg_frag%id, &
+             ' ifrag=', ifrag, &
+             ' primary=', primary_count_local, &
+             ' owned=', primary_owned_local, &
+             ' remote=', primary_remote_local
+      end if
       if (dg_frag%id_frag == 0 .and. i_local <= 2) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') &
              'density fragment-grid: rank=', dg_frag%id, &
@@ -592,7 +613,7 @@ contains
             iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
             izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
-            if (owner_rank == dg_frag%id .and. is_density_primary_fragment(dg_frag, ifrag, ixg, iyg, izg)) then
+            if (owner_rank == dg_frag%id .and. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) then
               recv_count(source_rank) = recv_count(source_rank) + 1
             end if
           end do
@@ -681,7 +702,7 @@ contains
             izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank /= dg_frag%id) cycle
-            if (.not. is_density_primary_fragment(dg_frag, ifrag, ixg, iyg, izg)) cycle
+            if (.not. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) cycle
             recv_cursor(source_rank) = recv_cursor(source_rank) + 1
             dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
             dg_frag%density_recv_map(source_rank)%iyg(recv_cursor(source_rank)) = iyg
@@ -949,7 +970,7 @@ contains
   !=======================================================================
   subroutine read_fragment_basis_data(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
-    use communication, only: comm_is_root, comm_bcast, comm_sync_all, comm_summation
+    use communication, only: comm_is_root, comm_bcast, comm_sync_all, comm_summation, comm_get_max
     use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -1183,29 +1204,8 @@ contains
       end block
     end if
 
-    if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
-    allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
-    dg_frag%coef_owner(:, :) = -1
-    dg_frag%H_local_block_ids_valid = .false.
-    do ispin = 1, dg_frag%nspin
-      do ifrag = 1, dg_frag%n_frag
-        nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
-        do io = 1, nbasis_iter
-          global_idx = dg_frag%index_basis(io, ifrag, ispin)
-          if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
-        end do
-      end do
-    end do
     dg_frag%owned_coef_start = 0
     dg_frag%owned_coef_end = -1
-    do global_idx = 1, dg_frag%n_mat_max
-      if (any(dg_frag%coef_owner(global_idx, 1:dg_frag%nspin) == dg_frag%id)) then
-        if (dg_frag%owned_coef_start == 0) dg_frag%owned_coef_start = global_idx
-        dg_frag%owned_coef_end = global_idx
-      end if
-    end do
     
     ! Step 4: nstate_tot was aligned to file metadata above (full-state mode).
 
@@ -1349,29 +1349,8 @@ contains
       end block
       dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
 
-      if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
-      allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
-      dg_frag%coef_owner(:, :) = -1
-      dg_frag%H_local_block_ids_valid = .false.
-      do ispin = 1, dg_frag%nspin
-        do ifrag = 1, dg_frag%n_frag
-          nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
-          do io = 1, nbasis_iter
-            global_idx = dg_frag%index_basis(io, ifrag, ispin)
-            if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-            dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-              dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
-          end do
-        end do
-      end do
       dg_frag%owned_coef_start = 0
       dg_frag%owned_coef_end = -1
-      do global_idx = 1, dg_frag%n_mat_max
-        if (any(dg_frag%coef_owner(global_idx, 1:dg_frag%nspin) == dg_frag%id)) then
-          if (dg_frag%owned_coef_start == 0) dg_frag%owned_coef_start = global_idx
-          dg_frag%owned_coef_end = global_idx
-        end if
-      end do
 
       if (dg_frag%id == 0) then
         occ_min = minval(occ_count(:, 1:dg_frag%nspin))
@@ -2060,6 +2039,92 @@ contains
       owner_rank = (ifrag - 1) * nproc_frag
     end if
   end function get_fragment_group_root_rank
+
+  subroutine validate_coef_owner_map(dg_frag, stage_label)
+    use communication, only: comm_get_max
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    character(*), intent(in) :: stage_label
+
+    integer :: ispin, global_idx, probe_row, owner_rank
+    integer :: owner_min, owner_max, invalid_local, invalid_global
+    integer :: probe_count
+
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (size(dg_frag%coef_owner, 1) <= 0 .or. size(dg_frag%coef_owner, 2) <= 0) return
+
+    do ispin = 1, min(dg_frag%nspin, size(dg_frag%coef_owner, 2))
+      invalid_local = 0
+      do global_idx = 1, size(dg_frag%coef_owner, 1)
+        owner_rank = dg_frag%coef_owner(global_idx, ispin)
+        if (owner_rank < -1 .or. owner_rank >= dg_frag%isize) invalid_local = invalid_local + 1
+      end do
+      invalid_global = invalid_local
+      call comm_get_max(invalid_global, dg_frag%icomm)
+      if (invalid_global > 0) then
+        write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "[FATAL] invalid coef owner values after build: stage=", &
+          trim(stage_label), " rank=", dg_frag%id, " ispin=", ispin, " invalid_local=", invalid_local
+        stop "DG-Fragment RT: invalid coef owner values after build"
+      end if
+
+      probe_count = min(8, size(dg_frag%coef_owner, 1))
+      do probe_row = 1, probe_count
+        owner_rank = dg_frag%coef_owner(probe_row, ispin)
+        owner_min = -owner_rank
+        call comm_get_max(owner_min, dg_frag%icomm)
+        owner_min = -owner_min
+        owner_max = owner_rank
+        call comm_get_max(owner_max, dg_frag%icomm)
+        if (owner_min /= owner_max) then
+          write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] inconsistent coef owner after build: stage=", &
+            trim(stage_label), " rank=", dg_frag%id, " ispin=", ispin, " row=", probe_row, &
+            " owner_min=", owner_min, " owner_max=", owner_max
+          stop "DG-Fragment RT: inconsistent coef owner after build"
+        end if
+      end do
+    end do
+  end subroutine validate_coef_owner_map
+
+  subroutine rebuild_coef_owner_map(dg_frag, stage_label)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: stage_label
+
+    integer :: ispin, ifrag, io, global_idx, nbasis_iter
+
+    if (.not. allocated(dg_frag%id_array)) then
+      write(*,'(1x,a,a,a,i0)') "[FATAL] id_array is not allocated before coef owner build: stage=", &
+        trim(stage_label), " rank=", dg_frag%id
+      stop "DG-Fragment RT: missing id_array before coef owner build"
+    end if
+
+    if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
+    allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
+    dg_frag%coef_owner(:, :) = -1
+    dg_frag%H_local_block_ids_valid = .false.
+    do ispin = 1, dg_frag%nspin
+      do ifrag = 1, dg_frag%n_frag
+        nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
+        do io = 1, nbasis_iter
+          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
+            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+        end do
+      end do
+    end do
+
+    dg_frag%owned_coef_start = 0
+    dg_frag%owned_coef_end = -1
+    do global_idx = 1, dg_frag%n_mat_max
+      if (any(dg_frag%coef_owner(global_idx, 1:dg_frag%nspin) == dg_frag%id)) then
+        if (dg_frag%owned_coef_start == 0) dg_frag%owned_coef_start = global_idx
+        dg_frag%owned_coef_end = global_idx
+      end if
+    end do
+
+    call validate_coef_owner_map(dg_frag, stage_label)
+  end subroutine rebuild_coef_owner_map
 
   integer function get_subgroup_block_owner_rank(root_rank, subgroup_size, local_row, n_local_rows) result(owner_rank)
     implicit none

@@ -2,7 +2,8 @@
     use salmon_global, only: nelec, theory
     use structures
     use communication, only: comm_summation
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, apply_mixed_hamiltonian, mixed_fp_coupling_active
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
+                                  apply_mixed_hamiltonian, mixed_fp_coupling_active
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -178,19 +179,12 @@
         if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin)) then
           call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
           if (has_nonlocal) then
-            if (allocated(dg_frag%H_nl_blocks)) then
-              if (allocated(dg_frag%H_nl_local_block_ids)) then
-                call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_all(1:n, 1:nocc), &
-                  tmp_all(1:n, 1:nocc), dg_frag%H_nl_local_block_ids)
-              else
-                write(*,'(1x,a,i0,a,i0,a,i0)') "        [FATAL] missing H_nl_local_block_ids in observables: rank=", &
-                  dg_frag%id, " ifrag_group=", dg_frag%ifrag_group, " ispin=", ispin
-                flush(6)
-                stop "missing H_nl_local_block_ids in observables"
-              end if
-            else if (allocated(dg_frag%H_nl_cache)) then
+            if (allocated(dg_frag%H_nl_cache) .and. ((.not. allocated(dg_frag%H_mat_blocks)) .or. use_hmat_complex)) then
               tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
                 matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_all(1:n, 1:nocc))
+            else
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n, 1:nocc), &
+                tmp_all(1:n, 1:nocc))
             end if
           end if
           do io = 1, n_tot
@@ -225,19 +219,12 @@
           if (.not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
             call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
             if (has_nonlocal) then
-              if (allocated(dg_frag%H_nl_blocks)) then
-                if (allocated(dg_frag%H_nl_local_block_ids)) then
-                  call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_frag_all(1:n, 1:nocc), &
-                    tmp_mat, dg_frag%H_nl_local_block_ids)
-                else
-                  write(*,'(1x,a,i0,a,i0,a,i0)') "        [FATAL] missing H_nl_local_block_ids in observables: rank=", &
-                    dg_frag%id, " ifrag_group=", dg_frag%ifrag_group, " ispin=", ispin
-                  flush(6)
-                  stop "missing H_nl_local_block_ids in observables"
-                end if
-              else if (allocated(dg_frag%H_nl_cache)) then
+              if (allocated(dg_frag%H_nl_cache)) then
                 tmp_mat(:, :) = tmp_mat(:, :) + &
                   matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
+              else
+                call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
+                  tmp_mat)
               end if
             end if
             do io = 1, n

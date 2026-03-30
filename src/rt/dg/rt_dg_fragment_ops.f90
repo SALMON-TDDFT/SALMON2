@@ -1958,13 +1958,14 @@ contains
   end subroutine pack_owned_coef
 
   subroutine fetch_remote_coef_rows(dg_frag, ispin, row_ids, fetched)
+    use communication, only: comm_get_max
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ispin
     integer, intent(in) :: row_ids(:)
     complex(8), intent(out) :: fetched(:, :)
 
-    integer :: irow, global_row, owner_rank
+    integer :: irow, global_row, owner_rank, owner_rank_min, owner_rank_max
     integer :: progress_stride
     complex(8), allocatable :: row_buf(:)
 
@@ -1990,6 +1991,16 @@ contains
       if (owner_rank < 0) then
         fetched(irow, :) = row_buf(:)
         cycle
+      end if
+      owner_rank_min = -owner_rank
+      call comm_get_max(owner_rank_min, dg_frag%icomm)
+      owner_rank_min = -owner_rank_min
+      owner_rank_max = owner_rank
+      call comm_get_max(owner_rank_max, dg_frag%icomm)
+      if (owner_rank_min /= owner_rank_max) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] inconsistent coef owner across ranks: rank=", dg_frag%id, &
+          " ispin=", ispin, " row=", global_row, " owner_min=", owner_rank_min, " owner_max=", owner_rank_max
+        stop "DG-Fragment RT: inconsistent coef owner across ranks"
       end if
       if (owner_rank >= dg_frag%isize) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid coef owner rank: rank=", dg_frag%id, &
