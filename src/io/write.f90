@@ -1437,6 +1437,7 @@ contains
     real(8) :: pressure_gpa
     real(8) :: virial_kin
     real(8) :: virial_har
+    real(8) :: virial_har_shadow
     real(8) :: e_kin_from_stress
     real(8) :: pressure_term_gpa
 
@@ -1539,8 +1540,10 @@ contains
          write(fh,*) "Stress virial diagnostics [Hartree]"
          virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
          virial_har = stress_tensor_trace(system%stress_har) * system%det_a - energy%E_h
+         virial_har_shadow = stress_tensor_trace(system%stress_har_shadow) * system%det_a - energy%E_h
          write(fh,'(1x,"Tr(kin)*V + 2E_kin =",e16.8)') virial_kin
          write(fh,'(1x,"Tr(har)*V - E_h    =",e16.8)') virial_har
+         write(fh,'(1x,"Tr(har_shadow)*V - E_h =",e16.8)') virial_har_shadow
          write(fh,*)
          write(fh,*) "Kinetic stress diagnostics [Hartree]"
          e_kin_from_stress = -0.5d0 * stress_tensor_trace(system%stress_kin) * system%det_a
@@ -1605,6 +1608,8 @@ contains
          write(fh,'(1x,"P_ewald_G [GPa]        =",e16.8)') pressure_term_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_ewa_r, au_pressure_gpa)
          write(fh,'(1x,"P_ewald_R [GPa]        =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har_shadow, au_pressure_gpa)
+         write(fh,'(1x,"P_har_shadow [GPa]    =",e16.8)') pressure_term_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_lr_grad + system%stress_loc_lr_diag &
               + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
          write(fh,'(1x,"P_loc_lr+ewald [GPa]   =",e16.8)') pressure_term_gpa
@@ -1617,6 +1622,24 @@ contains
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har + system%stress_loc_fullobj_grad &
               + system%stress_loc_fullobj_diag + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
          write(fh,'(1x,"P_har+loc_fullobj+ewald [GPa] =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har_shadow + system%stress_loc_fullobj_grad &
+              + system%stress_loc_fullobj_diag + system%stress_ewa_g + system%stress_ewa_r, au_pressure_gpa)
+         write(fh,'(1x,"P_har_shadow+loc_fullobj+ewald [GPa] =",e16.8)') pressure_term_gpa
+
+         ! Real-space SR local stress shadow vs G-space SR
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_sr_rs [GPa]     =",e16.8)') pressure_term_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_sr_grad_G [GPa] =",e16.8)') pressure_term_gpa
+         ! Difference: real-space SR - G-space SR (gradient only, no diagonal)
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs &
+              - system%stress_loc_sr_grad, au_pressure_gpa)
+         write(fh,'(1x,"P_loc_sr_rs-G [GPa]   =",e16.8)') pressure_term_gpa
+         ! Closed block: real-space SR + LR(G) + diag + Hartree + Ewald
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_har &
+              + system%stress_loc_sr_rs + system%stress_loc_lr_grad &
+              + system%stress_loc_diag + system%stress_ewa, au_pressure_gpa)
+         write(fh,'(1x,"P_har+loc_sr_rs+lr_G+diag+ewa [GPa] =",e16.8)') pressure_term_gpa
 
          if(yn_out_stress_decomp == 'y') then
            write(fh,*)

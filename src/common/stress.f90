@@ -5,7 +5,8 @@
 module stress_sub
   implicit none
   private
-  public :: calc_stress, prepare_stress_field_state, refresh_stress_output_state, s_stress_field_state
+  public :: calc_stress, calc_stress_har_shadow, calc_stress_loc_sr_rs, &
+    prepare_stress_field_state, refresh_stress_output_state, s_stress_field_state
 
   type s_stress_field_state
     logical :: use_micro_ac = .false.
@@ -97,6 +98,7 @@ contains
 
     system%stress_kin = 0d0
     system%stress_har = 0d0
+    system%stress_har_shadow = 0d0
     system%stress_xc = 0d0
     system%stress_loc = 0d0
     system%stress_loc_fd = 0d0
@@ -225,6 +227,62 @@ contains
     end do
     system%stress_har = strs_sum
   end subroutine calc_stress_har
+
+  subroutine calc_stress_har_shadow(system, info, mg, stencil, srg_scalar, Vh, energy)
+    use structures
+    use math_constants, only: pi
+    use sendrecv_grid, only: update_overlap_real8
+    use stencil_sub, only: calc_gradient_field
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_stencil),       intent(in)    :: stencil
+    type(s_sendrecv_grid), intent(inout) :: srg_scalar
+    type(s_scalar),        intent(in)    :: Vh
+    type(s_dft_energy),    intent(in)    :: energy
+    integer :: ix, iy, iz, a, b
+    real(8) :: box(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
+    real(8) :: grad_vh(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8) :: strs(3,3), strs_sum(3,3), coeff, V
+
+    V = system%det_a
+    coeff = system%Hvol / (4d0 * pi)
+    strs = 0d0
+    box = 0d0
+
+    do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      box(ix,iy,iz) = Vh%f(ix,iy,iz)
+    end do
+    end do
+    end do
+
+    if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
+    call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, box, grad_vh)
+
+    ! Keep the diagnostic accumulation order deterministic across runs.
+    do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      do b = 1, 3
+      do a = 1, 3
+        strs(a,b) = strs(a,b) - coeff * grad_vh(a,ix,iy,iz) * grad_vh(b,ix,iy,iz)
+      end do
+      end do
+    end do
+    end do
+    end do
+
+    call sum_stress_tensor(info%icomm_r, strs, strs_sum)
+    strs_sum = strs_sum / V
+    do a = 1, 3
+      strs_sum(a,a) = strs_sum(a,a) + energy%E_h / V
+    end do
+    call symmetrize_stress_term(strs_sum)
+    system%stress_har_shadow = strs_sum
+  end subroutine calc_stress_har_shadow
 
   subroutine calc_stress_xc(system, info, mg, ppn, rho_s, Vxc, energy, xc_func)
     use structures
@@ -671,6 +729,122 @@ contains
     system%stress_ewa_r = strs_R_sum
     system%stress_ewa = strs_G_sum + strs_R_sum
   end subroutine calc_stress_ewa
+
+  !----------------------------------------------------------------------------
+  ! Real-space local-SR stress shadow (Nielsen-Martin Paper I, Eq. 30b)
+  !
+  ! Computes the short-range part of the ion-electron stress directly in real
+  ! space, completely bypassing the G-space SR/LR decomposition and its
+  ! associated numerical integration / cancellation issues.
+  !
+  ! Formula:
+  !   sigma_{ab}^{sr} = -(1/V) sum_I sum_j rho(r_j) V'_sr(|s_j|)
+  !                     * s_{j,a} s_{j,b} / |s_j| * hvol
+  !
+  ! where s_j = r_j - R_I,  V_sr(r) = V_loc(r) + Z/r,
+  !       V'_sr(r) = dV_loc/dr - Z/r^2.
+  !
+  ! The LR Coulomb gradient and diagonal terms must be added from the existing
+  ! G-space computation to form the total local stress.
+  !----------------------------------------------------------------------------
+  subroutine calc_stress_loc_sr_rs(system, pp, info, mg, ppg, rho_s)
+    use structures
+    use math_constants, only: pi
+    use communication,  only: comm_summation
+    use salmon_global,  only: kion
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_pp_info),       intent(in)    :: pp
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_pp_grid),       intent(in)    :: ppg
+    type(s_scalar),        intent(in)    :: rho_s(:)
+    integer  :: ia, ik, j, a, b, ix, iy, iz, intr, ispin, nspin
+    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, vloc_r, dvloc_r
+    real(8)  :: ratio, V, hvol
+    real(8)  :: strs(3,3), strs_sum(3,3)
+    real(8)  :: r_lo, r_hi, v_lo, v_hi, dv_lo, dv_hi
+
+    V = system%det_a
+    hvol = system%Hvol
+    nspin = system%nspin
+    strs = 0d0
+
+    do ia = 1, system%nion
+      ik = kion(ia)
+      do j = 1, ppg%mps(ia)
+        ix = ppg%jxyz(1,j,ia)
+        iy = ppg%jxyz(2,j,ia)
+        iz = ppg%jxyz(3,j,ia)
+        s(1) = ppg%rxyz(1,j,ia)
+        s(2) = ppg%rxyz(2,j,ia)
+        s(3) = ppg%rxyz(3,j,ia)
+        r_abs = sqrt(s(1)**2 + s(2)**2 + s(3)**2)
+        if(r_abs < 1d-12) cycle  ! skip on-site point
+        r_inv = 1d0 / r_abs
+
+        ! Sum electron density over spins at this grid point
+        rho_val = 0d0
+        do ispin = 1, nspin
+          rho_val = rho_val + rho_s(ispin)%f(ix,iy,iz)
+        end do
+
+        ! Interpolate V_loc(r) and dV_loc/dr from the PP table.
+        ! Find radial interval by bisection in pp%rad.
+        call find_radial_index(r_abs, pp%rad(:,ik), pp%nrloc(ik), intr)
+        if(intr < 2 .or. intr >= pp%nrloc(ik)) cycle
+
+        r_lo = pp%rad(intr, ik)
+        r_hi = pp%rad(intr+1, ik)
+        v_lo = pp%vloctbl(intr, ik)
+        v_hi = pp%vloctbl(intr+1, ik)
+        dv_lo = pp%dvloctbl(intr, ik)
+        dv_hi = pp%dvloctbl(intr+1, ik)
+        ratio = (r_abs - r_lo) / (r_hi - r_lo)
+
+        ! Linear interpolation of V_loc and dV_loc/dr
+        vloc_r = v_lo + ratio * (v_hi - v_lo)
+        dvloc_r = dv_lo + ratio * (dv_hi - dv_lo)
+
+        ! V'_sr(r) = dV_loc/dr - Z/r^2
+        ! (V_sr = V_loc + Z/r, so V'_sr = V'_loc - Z/r^2)
+        dvsr_dr = dvloc_r - dble(pp%zps(ik)) * r_inv**2
+
+        ! Accumulate: -rho * V'_sr * s_a * s_b / |s| * hvol
+        do b = 1, 3
+        do a = 1, 3
+          strs(a,b) = strs(a,b) - rho_val * dvsr_dr * s(a) * s(b) * r_inv * hvol
+        end do
+        end do
+      end do
+    end do
+
+    call comm_summation(strs, strs_sum, 9, info%icomm_rko)
+    system%stress_loc_sr_rs = strs_sum / V
+
+  contains
+
+    subroutine find_radial_index(r, rad, nr, idx)
+      implicit none
+      real(8), intent(in)  :: r
+      real(8), intent(in)  :: rad(:)
+      integer, intent(in)  :: nr
+      integer, intent(out) :: idx
+      integer :: lo, hi, mid
+      lo = 1
+      hi = nr
+      do while(hi - lo > 1)
+        mid = (lo + hi) / 2
+        if(rad(mid) <= r) then
+          lo = mid
+        else
+          hi = mid
+        end if
+      end do
+      idx = lo
+    end subroutine find_radial_index
+
+  end subroutine calc_stress_loc_sr_rs
 
   subroutine calc_stress_loc_fd(system, pp, fg, info, mg, ppg, poisson, energy)
     use structures

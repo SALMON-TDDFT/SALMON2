@@ -59,6 +59,7 @@ module structures
     real(8) :: stress_tensor(3,3)   ! total stress [Hartree/Bohr^3]
     real(8) :: stress_kin(3,3)
     real(8) :: stress_har(3,3)
+    real(8) :: stress_har_shadow(3,3)
     real(8) :: stress_xc(3,3)
     real(8) :: stress_loc(3,3)
     real(8) :: stress_loc_fd(3,3)
@@ -75,6 +76,7 @@ module structures
     real(8) :: stress_loc_lr_scr_grad(3,3)
     real(8) :: stress_loc_sr_scr_diag(3,3)
     real(8) :: stress_loc_lr_scr_diag(3,3)
+    real(8) :: stress_loc_sr_rs(3,3)      ! real-space SR local stress shadow (Nielsen-Martin Eq.30b)
     real(8) :: stress_nl(3,3)
     real(8) :: stress_ewa(3,3)
     real(8) :: stress_loc_sr_energy
