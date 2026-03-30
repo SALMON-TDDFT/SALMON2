@@ -111,6 +111,131 @@
     end do
   end function fragment_matches_direction
 
+  integer function map_global_to_phi_box_index(gidx, lb, ub, ngrid) result(idx)
+    implicit none
+    integer, intent(in) :: gidx, lb, ub, ngrid
+
+    idx = modulo(gidx - 1, ngrid) + 1
+    do while (idx < lb)
+      idx = idx + ngrid
+    end do
+    do while (idx > ub)
+      idx = idx - ngrid
+    end do
+  end function map_global_to_phi_box_index
+
+  subroutine map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, lx, ly, lz
+    integer, intent(out) :: px, py, pz
+
+    px = map_global_to_phi_box_index(dg_frag%ixyz_frag(1, ifrag) + lx - 1, &
+      lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
+    py = map_global_to_phi_box_index(dg_frag%ixyz_frag(2, ifrag) + ly - 1, &
+      lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
+    pz = map_global_to_phi_box_index(dg_frag%ixyz_frag(3, ifrag) + lz - 1, &
+      lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+  end subroutine map_fragment_local_to_phi_box
+
+  subroutine compute_halo_axis_segment(dg_frag, ifrag, axis, dir, start_send_g, start_recv_g, len_raw)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, dir
+    integer, intent(out) :: start_send_g, start_recv_g, len_raw
+    integer :: lo_frag, nloc, nbuf
+
+    lo_frag = dg_frag%ixyz_frag(axis, ifrag)
+    nloc = dg_frag%nxyz_domain(axis, ifrag)
+    nbuf = dg_frag%nxyz_buffer(axis)
+
+    select case (dir)
+    case (0)
+      start_send_g = lo_frag
+      start_recv_g = lo_frag
+      len_raw = nloc
+    case (1)
+      start_send_g = lo_frag + nloc - nbuf
+      start_recv_g = lo_frag + nloc
+      len_raw = nbuf
+    case (-1)
+      start_send_g = lo_frag
+      start_recv_g = lo_frag - nbuf
+      len_raw = nbuf
+    case default
+      start_send_g = lo_frag
+      start_recv_g = lo_frag
+      len_raw = 0
+    end select
+  end subroutine compute_halo_axis_segment
+
+  integer function halo_axis_local_index(dg_frag, ifrag, axis, dir, ioff, recv_side) result(idx)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, dir, ioff
+    logical, intent(in) :: recv_side
+    integer :: start_send_g, start_recv_g, len_raw
+    integer :: gidx, lb, ub
+
+    call compute_halo_axis_segment(dg_frag, ifrag, axis, dir, start_send_g, start_recv_g, len_raw)
+    if (ioff < 1 .or. ioff > len_raw) then
+      idx = 0
+      return
+    end if
+    if (recv_side) then
+      gidx = start_recv_g + ioff - 1
+    else
+      gidx = start_send_g + ioff - 1
+    end if
+    lb = lbound(dg_frag%phi_frag, axis)
+    ub = ubound(dg_frag%phi_frag, axis)
+    idx = map_global_to_phi_box_index(gidx, lb, ub, dg_frag%lgnum_total(axis))
+  end function halo_axis_local_index
+
+  subroutine get_halo_point_indices(dg_frag, halo, ix_buf, iy_buf, iz_buf, send_idx, recv_idx)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(halo_info), intent(in) :: halo
+    integer, intent(in) :: ix_buf, iy_buf, iz_buf
+    integer, intent(out) :: send_idx(3), recv_idx(3)
+
+    send_idx(1) = halo_axis_local_index(dg_frag, halo%ifrag_dst, 1, halo%dvec(1), ix_buf, .false.)
+    send_idx(2) = halo_axis_local_index(dg_frag, halo%ifrag_dst, 2, halo%dvec(2), iy_buf, .false.)
+    send_idx(3) = halo_axis_local_index(dg_frag, halo%ifrag_dst, 3, halo%dvec(3), iz_buf, .false.)
+    recv_idx(1) = halo_axis_local_index(dg_frag, halo%ifrag_dst, 1, halo%dvec(1), ix_buf, .true.)
+    recv_idx(2) = halo_axis_local_index(dg_frag, halo%ifrag_dst, 2, halo%dvec(2), iy_buf, .true.)
+    recv_idx(3) = halo_axis_local_index(dg_frag, halo%ifrag_dst, 3, halo%dvec(3), iz_buf, .true.)
+  end subroutine get_halo_point_indices
+
+  subroutine compute_halo_axis_window(dg_frag, ifrag, axis, dir, dsp_send, dsp_recv, length)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, dir
+    integer, intent(out) :: dsp_send, dsp_recv, length
+    integer :: lb, ub
+    integer :: start_send_g, start_recv_g, len_raw
+    integer :: ioff, idx_send, idx_recv
+
+    lb = dg_frag%mg%is(axis) - dg_frag%nxyz_buffer(axis)
+    ub = dg_frag%mg%ie(axis) + dg_frag%nxyz_buffer(axis)
+    call compute_halo_axis_segment(dg_frag, ifrag, axis, dir, start_send_g, start_recv_g, len_raw)
+
+    length = 0
+    dsp_send = lb - 1
+    dsp_recv = lb - 1
+    do ioff = 0, max(0, len_raw - 1)
+      idx_send = map_global_to_phi_box_index(start_send_g + ioff, lb, ub, dg_frag%lgnum_total(axis))
+      idx_recv = map_global_to_phi_box_index(start_recv_g + ioff, lb, ub, dg_frag%lgnum_total(axis))
+      if (idx_send < lb .or. idx_send > ub) cycle
+      if (idx_recv < lb .or. idx_recv > ub) cycle
+      if (length == 0) then
+        dsp_send = idx_send - 1
+        dsp_recv = idx_recv - 1
+      end if
+      length = length + 1
+    end do
+  end subroutine compute_halo_axis_window
+
   !=======================================================================
   ! Initialize halo communication structures for fragment boundaries
   ! Following lcfo.f90 halo exchange pattern with periodic boundaries
@@ -222,20 +347,9 @@
         end if
 
         do n = 1, 3
-          select case (dg_frag%halo(i)%dvec(n))
-          case (0)
-            dg_frag%halo(i)%length(n) = dg_frag%nxyz_domain(n, ifrag)
-            dg_frag%halo(i)%dsp_send(n) = 0
-            dg_frag%halo(i)%dsp_recv(n) = 0
-          case (1)
-            dg_frag%halo(i)%length(n) = dg_frag%nxyz_buffer(n)
-            dg_frag%halo(i)%dsp_send(n) = dg_frag%nxyz_domain(n, ifrag) - dg_frag%nxyz_buffer(n)
-            dg_frag%halo(i)%dsp_recv(n) = dg_frag%nxyz_domain(n, ifrag)
-          case (-1)
-            dg_frag%halo(i)%length(n) = dg_frag%nxyz_buffer(n)
-            dg_frag%halo(i)%dsp_send(n) = 0
-            dg_frag%halo(i)%dsp_recv(n) = -dg_frag%nxyz_buffer(n)
-          end select
+          call compute_halo_axis_window(dg_frag, ifrag, n, dg_frag%halo(i)%dvec(n), &
+                                        dg_frag%halo(i)%dsp_send(n), dg_frag%halo(i)%dsp_recv(n), &
+                                        dg_frag%halo(i)%length(n))
         end do
 
 #ifdef DEBUG
@@ -280,9 +394,10 @@
     logical, parameter :: enable_halo_trace = .false.
 
     integer :: i_halo, ix, iy, iz, istate
-    integer :: l(3), d(3), i_local
+    integer :: l(3), i_local
     integer :: ifrag_send, ifrag_recv, dir_code
     integer :: itag_send, itag_recv
+    integer :: send_idx(3), recv_idx(3)
     integer :: lb1, ub1, lb2, ub2, lb3, ub3
     integer :: sample_ix, sample_iy, sample_iz, sample_istate
     real(8) :: pack_abs_sum, pack_abs_max, pack_first_value, src_first_value
@@ -328,10 +443,9 @@
       end if
 
       l = dg_frag%halo(i_halo)%length
-      d = dg_frag%halo(i_halo)%dsp_send
       if (enable_halo_trace .and. i_halo == 1 .and. dg_frag%id == 0) then
         write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0,a,1x,i0,a,1x,i0)') &
-          "        halo1 send: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), &
+          "        halo1 send: len=", l(1), l(2), l(3), "dsp=", dg_frag%halo(i_halo)%dsp_send(1), dg_frag%halo(i_halo)%dsp_send(2), dg_frag%halo(i_halo)%dsp_send(3), &
           "i_local=", i_local, "id_dst=", dg_frag%halo(i_halo)%id_dst, "id_src=", dg_frag%halo(i_halo)%id_src
         write(*,'(1x,a,1x,6(i0,1x))') &
           "        phi_frag bounds:", lb1, ub1, lb2, ub2, lb3, ub3
@@ -343,16 +457,18 @@
       do iz = 1, l(3)
       do iy = 1, l(2)
       do ix = 1, l(1)
-        if (d(1) + ix < lb1 .or. d(1) + ix > ub1 .or. &
-            d(2) + iy < lb2 .or. d(2) + iy > ub2 .or. &
-            d(3) + iz < lb3 .or. d(3) + iz > ub3) then
+        call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, send_idx, recv_idx)
+        if (send_idx(1) < lb1 .or. send_idx(1) > ub1 .or. &
+            send_idx(2) < lb2 .or. send_idx(2) > ub2 .or. &
+            send_idx(3) < lb3 .or. send_idx(3) > ub3) then
           write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
-            "DG-Fragment RT halo send index out of range:", d(1)+ix, d(2)+iy, d(3)+iz, &
-            "dsp=", d(1), d(2), d(3), "len=", l(1), l(2), l(3), "i_local=", i_local
+            "DG-Fragment RT halo send index out of range:", send_idx(1), send_idx(2), send_idx(3), &
+            "dsp=", dg_frag%halo(i_halo)%dsp_send(1), dg_frag%halo(i_halo)%dsp_send(2), dg_frag%halo(i_halo)%dsp_send(3), &
+            "len=", l(1), l(2), l(3), "i_local=", i_local
           stop "DG-Fragment RT: halo send index out of range"
         end if
         dg_frag%halo(i_halo)%buf_send(ix, iy, iz, istate, 1) = &
-          dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, istate, i_local)
+          dg_frag%phi_frag(send_idx(1), send_idx(2), send_idx(3), istate, i_local)
       end do
       end do
       end do
@@ -370,7 +486,8 @@
         sample_iz = 1
         sample_istate = 1
         pack_first_value = dg_frag%halo(i_halo)%buf_send(sample_ix, sample_iy, sample_iz, sample_istate, 1)
-        src_first_value = dg_frag%phi_frag(d(1) + sample_ix, d(2) + sample_iy, d(3) + sample_iz, sample_istate, i_local)
+        call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), sample_ix, sample_iy, sample_iz, send_idx, recv_idx)
+        src_first_value = dg_frag%phi_frag(send_idx(1), send_idx(2), send_idx(3), sample_istate, i_local)
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
           "        halo fourth pack diag: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
           " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, " sumabs=", pack_abs_sum, &
@@ -483,16 +600,15 @@
     do i_halo = 1, dg_frag%n_halo
       i_local = dg_frag%halo(i_halo)%ifrag_dst - dg_frag%ifrag_start + 1
       l = dg_frag%halo(i_halo)%length
-      d = dg_frag%halo(i_halo)%dsp_recv
       if (enable_halo_trace .and. i_halo == 1 .and. dg_frag%id == 0) then
         write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0)') &
-          "        halo1 recv: len=", l(1), l(2), l(3), "dsp=", d(1), d(2), d(3), "i_local=", i_local
+          "        halo1 recv: len=", l(1), l(2), l(3), "dsp=", dg_frag%halo(i_halo)%dsp_recv(1), dg_frag%halo(i_halo)%dsp_recv(2), dg_frag%halo(i_halo)%dsp_recv(3), "i_local=", i_local
         call flush(6)
       end if
       if (diag_fourth_halo_root) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,6(i0,1x),a,i0)') &
           "        halo fourth unpack diag: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-          " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, " dsp_recv=", d(1), d(2), d(3), &
+          " ifrag_group=", dg_frag%ifrag_group, " i_halo=", i_halo, " dsp_recv=", dg_frag%halo(i_halo)%dsp_recv(1), dg_frag%halo(i_halo)%dsp_recv(2), dg_frag%halo(i_halo)%dsp_recv(3), &
           " len=", l(1), l(2), l(3), " phi_bounds=", lb1, ub1, lb2, ub2, lb3, ub3, &
           " i_local=", i_local
         write(*,'(1x,a,5(i0,1x))') "        halo fourth unpack buf shape:", &
@@ -507,19 +623,20 @@
       do iz = 1, l(3)
       do iy = 1, l(2)
       do ix = 1, l(1)
-        if (d(1) + ix < lb1 .or. d(1) + ix > ub1 .or. &
-            d(2) + iy < lb2 .or. d(2) + iy > ub2 .or. &
-            d(3) + iz < lb3 .or. d(3) + iz > ub3) then
+        call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, send_idx, recv_idx)
+        if (recv_idx(1) < lb1 .or. recv_idx(1) > ub1 .or. &
+            recv_idx(2) < lb2 .or. recv_idx(2) > ub2 .or. &
+            recv_idx(3) < lb3 .or. recv_idx(3) > ub3) then
           write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,i0,a,6(i0,1x),a,5(i0,1x))') &
-            "DG-Fragment RT halo recv index out of range:", d(1)+ix, d(2)+iy, d(3)+iz, &
-            "dsp=", d(1), d(2), d(3), "len=", l(1), l(2), l(3), "i_local=", i_local, &
+            "DG-Fragment RT halo recv index out of range:", recv_idx(1), recv_idx(2), recv_idx(3), &
+            "dsp=", dg_frag%halo(i_halo)%dsp_recv(1), dg_frag%halo(i_halo)%dsp_recv(2), dg_frag%halo(i_halo)%dsp_recv(3), "len=", l(1), l(2), l(3), "i_local=", i_local, &
             " phi_bounds=", lb1, ub1, lb2, ub2, lb3, ub3, " buf_shape=", &
             size(dg_frag%halo(i_halo)%buf_recv,1), size(dg_frag%halo(i_halo)%buf_recv,2), &
             size(dg_frag%halo(i_halo)%buf_recv,3), size(dg_frag%halo(i_halo)%buf_recv,4), &
             size(dg_frag%halo(i_halo)%buf_recv,5)
           stop "DG-Fragment RT: halo recv index out of range"
         end if
-        dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, istate, i_local) = &
+        dg_frag%phi_frag(recv_idx(1), recv_idx(2), recv_idx(3), istate, i_local) = &
           dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, istate, 1)
       end do
       end do

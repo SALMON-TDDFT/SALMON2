@@ -644,10 +644,15 @@ contains
           iy = ppg%jxyz(2, j, ia)
           iz = ppg%jxyz(3, j, ia)
           if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
-          lx = modulo(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
-          ly = modulo(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
-          lz = modulo(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
-          if (lx < 1 .or. lx > ndom(1) .or. ly < 1 .or. ly > ndom(2) .or. lz < 1 .or. lz > ndom(3)) cycle
+          lx = map_global_to_phi_box_coord(ix, mg%is(1) - dg_frag%nxyz_buffer(1), mg%ie(1) + dg_frag%nxyz_buffer(1), &
+                                           dg_frag%lgnum_total(1))
+          ly = map_global_to_phi_box_coord(iy, mg%is(2) - dg_frag%nxyz_buffer(2), mg%ie(2) + dg_frag%nxyz_buffer(2), &
+                                           dg_frag%lgnum_total(2))
+          lz = map_global_to_phi_box_coord(iz, mg%is(3) - dg_frag%nxyz_buffer(3), mg%ie(3) + dg_frag%nxyz_buffer(3), &
+                                           dg_frag%lgnum_total(3))
+          if (lx < lbound(dg_frag%phi_frag, 1) .or. lx > ubound(dg_frag%phi_frag, 1)) cycle
+          if (ly < lbound(dg_frag%phi_frag, 2) .or. ly > ubound(dg_frag%phi_frag, 2)) cycle
+          if (lz < lbound(dg_frag%phi_frag, 3) .or. lz > ubound(dg_frag%phi_frag, 3)) cycle
           if (allocated(dg_frag%phi_frag_c)) then
             dg_frag%nl_pp_phi_self(j, ia, 1:nbf, i_local) = dg_frag%phi_frag_c(lx, ly, lz, 1:nbf, i_local)
           else
@@ -671,24 +676,25 @@ contains
       if (nbf <= 0) cycle
       iorg(:) = dg_frag%ixyz_frag(:, ifrag)
       ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-      d(:) = dg_frag%halo(i_halo)%dsp_recv
-      l(:) = dg_frag%halo(i_halo)%length
       do ia = 1, natom
         do j = 1, ppg%mps(ia)
           ix = ppg%jxyz(1, j, ia)
           iy = ppg%jxyz(2, j, ia)
           iz = ppg%jxyz(3, j, ia)
           if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
-          lx = map_global_to_fragment_extended_coord(ix, iorg(1), ndom(1), dg_frag%nxyz_buffer(1), dg_frag%lgnum_total(1))
-          ly = map_global_to_fragment_extended_coord(iy, iorg(2), ndom(2), dg_frag%nxyz_buffer(2), dg_frag%lgnum_total(2))
-          lz = map_global_to_fragment_extended_coord(iz, iorg(3), ndom(3), dg_frag%nxyz_buffer(3), dg_frag%lgnum_total(3))
-          if (lx < d(1) + 1 .or. lx > d(1) + l(1)) cycle
-          if (ly < d(2) + 1 .or. ly > d(2) + l(2)) cycle
-          if (lz < d(3) + 1 .or. lz > d(3) + l(3)) cycle
-          if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
-            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%halo(i_halo)%buf_recv_c(lx - d(1), ly - d(2), lz - d(3), 1:nbf, 1)
+          lx = map_global_to_phi_box_coord(ix, mg%is(1) - dg_frag%nxyz_buffer(1), mg%ie(1) + dg_frag%nxyz_buffer(1), &
+                                           dg_frag%lgnum_total(1))
+          ly = map_global_to_phi_box_coord(iy, mg%is(2) - dg_frag%nxyz_buffer(2), mg%ie(2) + dg_frag%nxyz_buffer(2), &
+                                           dg_frag%lgnum_total(2))
+          lz = map_global_to_phi_box_coord(iz, mg%is(3) - dg_frag%nxyz_buffer(3), mg%ie(3) + dg_frag%nxyz_buffer(3), &
+                                           dg_frag%lgnum_total(3))
+          if (lx < lbound(dg_frag%phi_frag, 1) .or. lx > ubound(dg_frag%phi_frag, 1)) cycle
+          if (ly < lbound(dg_frag%phi_frag, 2) .or. ly > ubound(dg_frag%phi_frag, 2)) cycle
+          if (lz < lbound(dg_frag%phi_frag, 3) .or. lz > ubound(dg_frag%phi_frag, 3)) cycle
+          if (allocated(dg_frag%phi_frag_c)) then
+            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%phi_frag_c(lx, ly, lz, 1:nbf, i_local)
           else
-            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = cmplx(dg_frag%halo(i_halo)%buf_recv(lx - d(1), ly - d(2), lz - d(3), 1:nbf, 1), 0.0d0, kind=8)
+            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = cmplx(dg_frag%phi_frag(lx, ly, lz, 1:nbf, i_local), 0.0d0, kind=8)
           end if
         end do
       end do
@@ -697,18 +703,18 @@ contains
     dg_frag%nl_pp_phi_cache_valid = .true.
   end subroutine ensure_nonlocal_projector_phi_cache
 
-  integer function map_global_to_fragment_extended_coord(ig, iorg, nloc, nb, lgtot) result(iloc)
+  integer function map_global_to_phi_box_coord(ig, lb, ub, lgtot) result(iloc)
     implicit none
-    integer, intent(in) :: ig, iorg, nloc, nb, lgtot
+    integer, intent(in) :: ig, lb, ub, lgtot
 
-    iloc = ig - iorg + 1
-    do while (iloc < 1 - nb)
+    iloc = modulo(ig - 1, lgtot) + 1
+    do while (iloc < lb)
       iloc = iloc + lgtot
     end do
-    do while (iloc > nloc + nb)
+    do while (iloc > ub)
       iloc = iloc - lgtot
     end do
-  end function map_global_to_fragment_extended_coord
+  end function map_global_to_phi_box_coord
 
   subroutine apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin_out, x_up, x_dn, y_out)
     use structures
@@ -3105,8 +3111,9 @@ contains
 
     integer :: ifrag, i_local, ispin, io, istate_frag, jstate_frag
     integer :: ig_i, ig_j
-    integer :: ix, iy, iz, ixg, iyg, izg, igrid, valid_grid_count
-    integer :: nxyz(3), ixyz0(3), ifrag_count, ngrid_max
+    integer :: ix, iy, iz, ixg, iyg, izg, igrid, valid_grid_count, point_idx
+    integer :: grid_x_lo, grid_x_hi, grid_y_lo, grid_y_hi, grid_z_lo, grid_z_hi
+    integer :: nxyz(3), ifrag_count, ngrid_max
     integer :: nocc_per_spin
     real(8) :: occ_factor
     complex(8) :: coef_pair
@@ -3129,6 +3136,12 @@ contains
     curr_sum = 0.0d0
     w_local = 0.0d0
     w_sum = 0.0d0
+    grid_x_lo = mg%is(1)
+    grid_x_hi = mg%ie(1)
+    grid_y_lo = mg%is(2)
+    grid_y_hi = mg%ie(2)
+    grid_z_lo = mg%is(3)
+    grid_z_hi = mg%ie(3)
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     ngrid_max = 0
@@ -3155,27 +3168,21 @@ contains
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
-          nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-          ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
           valid_grid_count = 0
-          do iz = 1, nxyz(3)
-            do iy = 1, nxyz(2)
-              do ix = 1, nxyz(1)
-                ixg = modulo(ixyz0(1) + ix - 2, mg%num(1)) + 1
-                iyg = modulo(ixyz0(2) + iy - 2, mg%num(2)) + 1
-                izg = modulo(ixyz0(3) + iz - 2, mg%num(3)) + 1
-                if (ixg < mg%is(1) .or. ixg > mg%ie(1)) cycle
-                if (iyg < mg%is(2) .or. iyg > mg%ie(2)) cycle
-                if (izg < mg%is(3) .or. izg > mg%ie(3)) cycle
-                valid_grid_count = valid_grid_count + 1
-                dg_frag%current_valid_ix(valid_grid_count, i_local) = ix
-                dg_frag%current_valid_iy(valid_grid_count, i_local) = iy
-                dg_frag%current_valid_iz(valid_grid_count, i_local) = iz
-                dg_frag%current_valid_ixg(valid_grid_count, i_local) = ixg
-                dg_frag%current_valid_iyg(valid_grid_count, i_local) = iyg
-                dg_frag%current_valid_izg(valid_grid_count, i_local) = izg
-              end do
-            end do
+          do point_idx = 1, dg_frag%density_grid_point_count(i_local)
+            ixg = dg_frag%density_grid_points(point_idx, i_local)%ixg
+            iyg = dg_frag%density_grid_points(point_idx, i_local)%iyg
+            izg = dg_frag%density_grid_points(point_idx, i_local)%izg
+            if (ixg < grid_x_lo .or. ixg > grid_x_hi) cycle
+            if (iyg < grid_y_lo .or. iyg > grid_y_hi) cycle
+            if (izg < grid_z_lo .or. izg > grid_z_hi) cycle
+            valid_grid_count = valid_grid_count + 1
+            dg_frag%current_valid_ix(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%ix
+            dg_frag%current_valid_iy(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%iy
+            dg_frag%current_valid_iz(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%iz
+            dg_frag%current_valid_ixg(valid_grid_count, i_local) = ixg
+            dg_frag%current_valid_iyg(valid_grid_count, i_local) = iyg
+            dg_frag%current_valid_izg(valid_grid_count, i_local) = izg
           end do
           dg_frag%current_valid_grid_count(i_local) = valid_grid_count
         end do
@@ -3278,8 +3285,9 @@ contains
 
     integer :: ifrag, i_local, io, jo
     integer :: ig_i, ig_j
-    integer :: ix, iy, iz, ixg, iyg, izg
-    integer :: nxyz(3), ixyz0(3)
+    integer :: ix, iy, iz, ixg, iyg, izg, valid_grid_count, igrid
+    integer :: nxyz(3), ifrag_count, ngrid_max, point_idx
+    integer :: grid_x_lo, grid_x_hi, grid_y_lo, grid_y_hi, grid_z_lo, grid_z_hi
     real(8) :: phi_i, Ap_int
     real(8), allocatable :: Ap_spin(:,:,:)
     type(matrix_block_info), allocatable :: Ap_blocks(:)
@@ -3290,6 +3298,58 @@ contains
     if (.not. allocated(system%Ac_micro%v)) return
 
     call ensure_gradient_basis_cache(dg_frag, mg, stencil)
+    grid_x_lo = mg%is(1)
+    grid_x_hi = mg%ie(1)
+    grid_y_lo = mg%is(2)
+    grid_y_hi = mg%ie(2)
+    grid_z_lo = mg%is(3)
+    grid_z_hi = mg%ie(3)
+
+    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    ngrid_max = 0
+    if (ifrag_count > 0) then
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(1:3, ifrag)))
+      end do
+    end if
+    if (.not. allocated(dg_frag%current_valid_grid_count)) then
+      if (ifrag_count > 0 .and. ngrid_max > 0) then
+        allocate(dg_frag%current_valid_grid_count(ifrag_count))
+        allocate(dg_frag%current_valid_ix(ngrid_max, ifrag_count), dg_frag%current_valid_iy(ngrid_max, ifrag_count), &
+                 dg_frag%current_valid_iz(ngrid_max, ifrag_count))
+        allocate(dg_frag%current_valid_ixg(ngrid_max, ifrag_count), dg_frag%current_valid_iyg(ngrid_max, ifrag_count), &
+                 dg_frag%current_valid_izg(ngrid_max, ifrag_count))
+        dg_frag%current_valid_grid_count = 0
+        dg_frag%current_valid_ix = 0
+        dg_frag%current_valid_iy = 0
+        dg_frag%current_valid_iz = 0
+        dg_frag%current_valid_ixg = 0
+        dg_frag%current_valid_iyg = 0
+        dg_frag%current_valid_izg = 0
+
+        i_local = 0
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = i_local + 1
+          valid_grid_count = 0
+          do point_idx = 1, dg_frag%density_grid_point_count(i_local)
+            ixg = dg_frag%density_grid_points(point_idx, i_local)%ixg
+            iyg = dg_frag%density_grid_points(point_idx, i_local)%iyg
+            izg = dg_frag%density_grid_points(point_idx, i_local)%izg
+            if (ixg < grid_x_lo .or. ixg > grid_x_hi) cycle
+            if (iyg < grid_y_lo .or. iyg > grid_y_hi) cycle
+            if (izg < grid_z_lo .or. izg > grid_z_hi) cycle
+            valid_grid_count = valid_grid_count + 1
+            dg_frag%current_valid_ix(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%ix
+            dg_frag%current_valid_iy(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%iy
+            dg_frag%current_valid_iz(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%iz
+            dg_frag%current_valid_ixg(valid_grid_count, i_local) = ixg
+            dg_frag%current_valid_iyg(valid_grid_count, i_local) = iyg
+            dg_frag%current_valid_izg(valid_grid_count, i_local) = izg
+          end do
+          dg_frag%current_valid_grid_count(i_local) = valid_grid_count
+        end do
+      end if
+    end if
 
     allocate(Ap_spin(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
     Ap_spin(:, :, :) = 0.0d0
@@ -3298,35 +3358,31 @@ contains
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
       nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-      ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
+      valid_grid_count = dg_frag%current_valid_grid_count(i_local)
 
       do jo = 1, dg_frag%n_basis(ifrag, ispin)
         ig_j = dg_frag%index_basis(jo, ifrag, ispin)
         if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-        !$omp parallel do private(io, ig_i, Ap_int, iz, iy, ix, ixg, iyg, izg, phi_i) schedule(static)
+        !$omp parallel do private(io, ig_i, Ap_int, igrid, ix, iy, iz, ixg, iyg, izg, phi_i) schedule(static)
         do io = 1, dg_frag%n_basis(ifrag, ispin)
           ig_i = dg_frag%index_basis(io, ifrag, ispin)
           if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
 
           Ap_int = 0.0d0
-          do iz = 1, nxyz(3)
-            do iy = 1, nxyz(2)
-              do ix = 1, nxyz(1)
-                ixg = modulo(ixyz0(1) + ix - 2, mg%num(1)) + 1
-                iyg = modulo(ixyz0(2) + iy - 2, mg%num(2)) + 1
-                izg = modulo(ixyz0(3) + iz - 2, mg%num(3)) + 1
-                if (ixg < mg%is(1) .or. ixg > mg%ie(1)) cycle
-                if (iyg < mg%is(2) .or. iyg > mg%ie(2)) cycle
-                if (izg < mg%is(3) .or. izg > mg%ie(3)) cycle
+          do igrid = 1, valid_grid_count
+            ix = dg_frag%current_valid_ix(igrid, i_local)
+            iy = dg_frag%current_valid_iy(igrid, i_local)
+            iz = dg_frag%current_valid_iz(igrid, i_local)
+            ixg = dg_frag%current_valid_ixg(igrid, i_local)
+            iyg = dg_frag%current_valid_iyg(igrid, i_local)
+            izg = dg_frag%current_valid_izg(igrid, i_local)
 
-                phi_i = dg_frag%phi_frag(ix, iy, iz, io, i_local)
-                Ap_int = Ap_int + phi_i * ( &
-                         system%Ac_micro%v(1, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 1, jo, i_local) + &
-                         system%Ac_micro%v(2, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 2, jo, i_local) + &
-                         system%Ac_micro%v(3, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 3, jo, i_local) ) * system%hvol
-              end do
-            end do
+            phi_i = dg_frag%phi_frag(ix, iy, iz, io, i_local)
+            Ap_int = Ap_int + phi_i * ( &
+                     system%Ac_micro%v(1, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 1, jo, i_local) + &
+                     system%Ac_micro%v(2, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 2, jo, i_local) + &
+                     system%Ac_micro%v(3, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 3, jo, i_local) ) * system%hvol
           end do
 
           Ap_spin(ig_i, ig_j, ispin) = Ap_spin(ig_i, ig_j, ispin) + Ap_int

@@ -215,10 +215,17 @@
     type(s_scalar), intent(in) :: Vh, Vxc_spin, Vpsl
     real(8), intent(out) :: V_total(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
     integer :: ix, iy, iz
+    integer :: grid_x_lo, grid_x_hi, grid_y_lo, grid_y_hi, grid_z_lo, grid_z_hi
 
-    do iz = grid%is(3), grid%ie(3)
-      do iy = grid%is(2), grid%ie(2)
-        do ix = grid%is(1), grid%ie(1)
+    grid_x_lo = grid%is(1)
+    grid_x_hi = grid%ie(1)
+    grid_y_lo = grid%is(2)
+    grid_y_hi = grid%ie(2)
+    grid_z_lo = grid%is(3)
+    grid_z_hi = grid%ie(3)
+    do iz = grid_z_lo, grid_z_hi
+      do iy = grid_y_lo, grid_y_hi
+        do ix = grid_x_lo, grid_x_hi
           V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh%f(ix, iy, iz) + Vxc_spin%f(ix, iy, iz)
         end do
       end do
@@ -606,6 +613,7 @@
     
     integer :: ifrag, i_local, ispin, io, jo, idir, iblk
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
+    integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: nrow, ncol, ii, jj
     real(8) :: hvol
@@ -723,33 +731,24 @@
             jfrag = dg_frag%halo(i_halo)%ifrag_src
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
-            d = dg_frag%halo(i_halo)%dsp_send
-            halo_s(:) = max(loc_s(:), d(:) + 1)
-            halo_e(:) = min(loc_e(:), d(:) + l(:))
-            if (any(halo_s(:) > halo_e(:))) cycle
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
               if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
               do idir = 1, 3
                 integral = (0.0d0, 0.0d0)
-                do lz = halo_s(3), halo_e(3)
-                  gz = iorg(3) + lz - 1
-                  iz = lz - d(3)
-                  do ly = halo_s(2), halo_e(2)
-                    gy = iorg(2) + ly - 1
-                    iy = ly - d(2)
-                    do lx = halo_s(1), halo_e(1)
-                      gx = iorg(1) + lx - 1
-                      ix = lx - d(1)
+                do iz = 1, l(3)
+                  do iy = 1, l(2)
+                    do ix = 1, l(1)
+                      call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                       if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
                         integral = integral + &
                           conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
-                          cmplx(grad_phi(gx, gy, gz, idir), 0.0d0, kind=8) * hvol
+                          cmplx(grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), idir), 0.0d0, kind=8) * hvol
                       else
                         integral = integral + &
                           cmplx(dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1), 0.0d0, kind=8) * &
-                          cmplx(grad_phi(gx, gy, gz, idir), 0.0d0, kind=8) * hvol
+                          cmplx(grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), idir), 0.0d0, kind=8) * hvol
                       end if
                     end do
                   end do
@@ -1751,7 +1750,7 @@
 
     integer :: ifrag, i_local, ispin, io, jo
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
-    integer :: ig_row, ig_col, l(3), d(3), ii, jj
+    integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
     integer :: lx, ly, lz, iorg(3), ndom(3)
     integer :: n_eval, lwork, info_eig, n_blocks, icomm_reduce
     real(8) :: hvol, s_min, s_max, cond_est
@@ -1825,7 +1824,6 @@
             if (jfrag < 1) cycle
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
-            d = dg_frag%halo(i_halo)%dsp_send
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
@@ -1834,12 +1832,13 @@
               do iz = 1, l(3)
                 do iy = 1, l(2)
                   do ix = 1, l(1)
+                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     if (allocated(dg_frag%halo(i_halo)%buf_recv_c) .and. allocated(dg_frag%phi_frag_c)) then
                       integral = integral + conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
-                                 dg_frag%phi_frag_c(d(1) + ix, d(2) + iy, d(3) + iz, jo, i_local) * hvol
+                                 dg_frag%phi_frag_c(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local) * hvol
                     else
                       integral = integral + cmplx(dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1), 0.0d0, kind=8) * &
-                                 cmplx(dg_frag%phi_frag(d(1) + ix, d(2) + iy, d(3) + iz, jo, i_local), 0.0d0, kind=8) * hvol
+                                 cmplx(dg_frag%phi_frag(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local), 0.0d0, kind=8) * hvol
                     end if
                   end do
                 end do

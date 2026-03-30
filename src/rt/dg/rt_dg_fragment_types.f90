@@ -23,7 +23,7 @@ module rt_dg_fragment_types
 
   private
   public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, momentum_block_info, &
-            density_recv_map_info, real_buffer_info, s_dg_fragment_rt
+            density_recv_map_info, density_grid_point_info, real_buffer_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -77,6 +77,19 @@ module rt_dg_fragment_types
     integer, allocatable :: iyg(:)
     integer, allocatable :: izg(:)
   end type density_recv_map_info
+
+  type :: density_grid_point_info
+    integer :: ix = 1
+    integer :: iy = 1
+    integer :: iz = 1
+    integer :: ixg = 1
+    integer :: iyg = 1
+    integer :: izg = 1
+    integer :: owner_rank = -1
+    integer :: send_slot = 0
+    integer :: subgroup_send_slot = 0
+    logical :: is_primary = .false.
+  end type density_grid_point_info
 
   type :: real_buffer_info
     real(8), allocatable :: val(:)
@@ -182,6 +195,14 @@ module rt_dg_fragment_types
     integer :: num_fragment(3)                 ! Fragment division in each direction (from salmon_global)
     integer, allocatable :: nxyz_domain(:,:)   ! (3, n_frag) domain size of each fragment
     integer, allocatable :: ixyz_frag(:,:)     ! (3, n_frag) r-grid index of fragment origin
+    integer, allocatable :: frag_core_lo(:,:)  ! (3, n_frag) unwrapped fragment-core lower bounds
+    integer, allocatable :: frag_core_hi(:,:)  ! (3, n_frag) unwrapped fragment-core upper bounds
+    integer, allocatable :: frag_buf_lo(:,:)   ! (3, n_frag) unwrapped fragment buffer-box lower bounds
+    integer, allocatable :: frag_buf_hi(:,:)   ! (3, n_frag) unwrapped fragment buffer-box upper bounds
+    integer :: rank_core_lo(3) = 0             ! unwrapped owner box lower bounds on this MPI rank
+    integer :: rank_core_hi(3) = -1            ! unwrapped owner box upper bounds on this MPI rank
+    integer :: rank_buf_lo(3) = 0              ! unwrapped local phi/rho buffer-box lower bounds on this MPI rank
+    integer :: rank_buf_hi(3) = -1             ! unwrapped local phi/rho buffer-box upper bounds on this MPI rank
     integer, allocatable :: jxyz_tot(:,:)      ! r-grid mapping
     integer :: nxyz_buffer(3)                  ! # of halo points (4 for 4th-order stencil)
     integer, allocatable :: id_array(:)        ! (n_frag) MPI rank owning each fragment
@@ -194,6 +215,8 @@ module rt_dg_fragment_types
     integer, allocatable :: density_send_slot_map(:,:,:,:) ! local-fragment grid -> packed send slot (0 if local)
     integer, allocatable :: density_subgroup_send_count(:)      ! packed subgroup-reduce length per target rank
     integer, allocatable :: density_subgroup_send_slot_map(:,:,:,:) ! local-fragment grid -> packed subgroup-reduce slot
+    type(density_grid_point_info), allocatable :: density_grid_points(:,:) ! (max_points_per_local_fragment, ifrag_local)
+    integer, allocatable :: density_grid_point_count(:)         ! valid point count per local fragment
     integer, allocatable :: density_subgroup_self_ixg(:)        ! root-owned subgroup-reduce unpack x index
     integer, allocatable :: density_subgroup_self_iyg(:)        ! root-owned subgroup-reduce unpack y index
     integer, allocatable :: density_subgroup_self_izg(:)        ! root-owned subgroup-reduce unpack z index

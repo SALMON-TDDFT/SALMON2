@@ -1056,10 +1056,17 @@
     type(s_scalar), intent(in) :: Vh, Vxc_spin, Vpsl
     real(8), intent(out) :: V_total(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
     integer :: ix, iy, iz
+    integer :: grid_x_lo, grid_x_hi, grid_y_lo, grid_y_hi, grid_z_lo, grid_z_hi
 
-    do iz = grid%is(3), grid%ie(3)
-      do iy = grid%is(2), grid%ie(2)
-        do ix = grid%is(1), grid%ie(1)
+    grid_x_lo = grid%is(1)
+    grid_x_hi = grid%ie(1)
+    grid_y_lo = grid%is(2)
+    grid_y_hi = grid%ie(2)
+    grid_z_lo = grid%is(3)
+    grid_z_hi = grid%ie(3)
+    do iz = grid_z_lo, grid_z_hi
+      do iy = grid_y_lo, grid_y_hi
+        do ix = grid_x_lo, grid_x_hi
           V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh%f(ix, iy, iz) + Vxc_spin%f(ix, iy, iz)
         end do
       end do
@@ -1633,6 +1640,7 @@
     integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size
@@ -1801,7 +1809,6 @@
               jfrag = dg_frag%halo(i_halo)%ifrag_src
               n_basis_halo = dg_frag%n_basis(jfrag, ispin)
               l = dg_frag%halo(i_halo)%length
-              d = dg_frag%halo(i_halo)%dsp_send
               if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
                 write(*,*) "[FATAL] momentum halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
                 stop 1
@@ -1817,32 +1824,27 @@
                   " index_basis_dim1=", size(dg_frag%index_basis, 1)
                 stop 1
               end if
-              halo_s(:) = max(loc_s(:), d(:) + 1)
-              halo_e(:) = min(loc_e(:), d(:) + l(:))
-              if (any(halo_s(:) > halo_e(:))) cycle
-              npts_halo = (halo_e(1) - halo_s(1) + 1) * (halo_e(2) - halo_s(2) + 1) * (halo_e(3) - halo_s(3) + 1)
+              npts_halo = l(1) * l(2) * l(3)
               if (npts_halo <= 0 .or. n_basis_halo <= 0) cycle
 
               allocate(grad_halo_2d(npts_halo, 3), halo_buf_2d(npts_halo, n_basis_halo), halo_proj(n_basis_halo, 3))
 
               ipt = 0
-              do lz = halo_s(3), halo_e(3)
-                do ly = halo_s(2), halo_e(2)
-                  do lx = halo_s(1), halo_e(1)
+              do iz = 1, l(3)
+                do iy = 1, l(2)
+                  do ix = 1, l(1)
+                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     ipt = ipt + 1
-                    grad_halo_2d(ipt, 1:3) = grad_phi(lx, ly, lz, 1:3)
+                    grad_halo_2d(ipt, 1:3) = grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), 1:3)
                   end do
                 end do
               end do
 
               do io = 1, n_basis_halo
                 ipt = 0
-                do lz = halo_s(3), halo_e(3)
-                  iz = lz - d(3)
-                  do ly = halo_s(2), halo_e(2)
-                    iy = ly - d(2)
-                    do lx = halo_s(1), halo_e(1)
-                      ix = lx - d(1)
+                do iz = 1, l(3)
+                  do iy = 1, l(2)
+                    do ix = 1, l(1)
                       ipt = ipt + 1
                       halo_buf_2d(ipt, io) = dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1)
                     end do
@@ -2093,7 +2095,7 @@
 
     integer :: ifrag, i_local, ispin, io, jo, iblk, iblk_rev, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
-    integer :: ig_row, ig_col, l(3), d(3), ii, jj
+    integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
     integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
@@ -2200,13 +2202,6 @@
             if (jfrag < 1) cycle
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
-            d = dg_frag%halo(i_halo)%dsp_send
-            buf_lb1 = lbound(dg_frag%halo(i_halo)%buf_recv, 1)
-            buf_lb2 = lbound(dg_frag%halo(i_halo)%buf_recv, 2)
-            buf_lb3 = lbound(dg_frag%halo(i_halo)%buf_recv, 3)
-            buf_ub1 = ubound(dg_frag%halo(i_halo)%buf_recv, 1)
-            buf_ub2 = ubound(dg_frag%halo(i_halo)%buf_recv, 2)
-            buf_ub3 = ubound(dg_frag%halo(i_halo)%buf_recv, 3)
             if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
               write(*,*) "[FATAL] overlap halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
               stop 1
@@ -2222,9 +2217,6 @@
                 " index_basis_dim1=", size(dg_frag%index_basis, 1)
               stop 1
             end if
-            halo_s(:) = max(loc_s(:), d(:) + 1)
-            halo_e(:) = min(loc_e(:), d(:) + l(:))
-            if (any(halo_s(:) > halo_e(:))) cycle
             iblk = find_matrix_block(dg_frag%S_block_map, jfrag, ifrag)
             iblk_rev = find_matrix_block(dg_frag%S_block_map, ifrag, jfrag)
 
@@ -2233,22 +2225,12 @@
               if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
               integral = 0.0d0
               call cpu_time(t0)
-              do lz = halo_s(3), halo_e(3)
-                iz = lz - d(3)
-                do ly = halo_s(2), halo_e(2)
-                  iy = ly - d(2)
-                  do lx = halo_s(1), halo_e(1)
-                    ix = lx - d(1)
-                    if (ix < buf_lb1 .or. ix > buf_ub1 .or. &
-                        iy < buf_lb2 .or. iy > buf_ub2 .or. &
-                        iz < buf_lb3 .or. iz > buf_ub3) then
-                      write(*,*) "[FATAL] overlap halo index out of bounds: ifrag=", ifrag, &
-                        "jfrag=", jfrag, "i_halo=", i_halo, "idx=", ix, iy, iz, &
-                        "buf_lb=", buf_lb1, buf_lb2, buf_lb3, "buf_ub=", buf_ub1, buf_ub2, buf_ub3
-                      stop 1
-                    end if
+              do iz = 1, l(3)
+                do iy = 1, l(2)
+                  do ix = 1, l(1)
+                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               dg_frag%phi_frag(lx, ly, lz, jo, i_local) * hvol
+                               dg_frag%phi_frag(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local) * hvol
                   end do
                 end do
               end do

@@ -124,7 +124,7 @@ contains
   subroutine init_dg_fragment_rt(dg_frag, system, rt, info, lg, mg)
     use structures
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
-    use salmon_global, only: num_fragment, nstate_frag, time_integrator_dg_fragment, &
+    use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
                  nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
@@ -239,7 +239,7 @@ contains
     ! Store fragment geometry information for halo exchange
     dg_frag%num_fragment(1:3) = num_fragment(1:3)
     dg_frag%lgnum_total(1:3) = lg%num(1:3)
-    dg_frag%nxyz_buffer(1:3) = 4  ! 4th-order stencil requires ±4 points
+    dg_frag%nxyz_buffer(1:3) = num_rgrid_buffer(1:3)
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,3i5)') "  nxyz_buffer (runtime): ", dg_frag%nxyz_buffer(1:3)
     end if
@@ -248,6 +248,9 @@ contains
     allocate(dg_frag%nxyz_domain(3, dg_frag%n_frag))
     allocate(dg_frag%ixyz_frag(3, dg_frag%n_frag))
     allocate(dg_frag%id_array(dg_frag%n_frag))
+    dg_frag%lg => lg
+    dg_frag%mg => mg
+    dg_frag%hgs = system%hgs
     
     ! Read fragment basis data from DC-LCFO calculation if requested
     if (load_from_dcdft) then
@@ -295,9 +298,6 @@ contains
     call init_rk_coefficients(dg_frag)
     
     ! Store grid pointers
-    dg_frag%lg => lg
-    dg_frag%mg => mg
-    dg_frag%hgs = system%hgs
     
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -524,7 +524,8 @@ contains
                                 natom_frag, atom_coords_frag, atom_types_frag, &
                                 hse_omega, &
                                 (yn_hse_cd_ri == 'y'), hse_cd_ri_threshold, &
-                                [1, 1, 1], dg_frag%nxyz_domain(1:3, ifrag))
+                                max(dg_frag%mg%is(1:3), dg_frag%ixyz_frag(1:3, ifrag)), &
+                                min(dg_frag%mg%ie(1:3), dg_frag%ixyz_frag(1:3, ifrag) + dg_frag%nxyz_domain(1:3, ifrag) - 1))
       
       deallocate(atom_coords_frag, atom_types_frag)
       
@@ -622,6 +623,7 @@ contains
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
+    integer :: ixg_store, iyg_store, izg_store
     integer :: nb  ! halo width
     integer :: nbasis_iter
     integer :: n_mat_cap, n_mat_cap_env, ienv
@@ -1070,45 +1072,19 @@ contains
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
       
-      ! Allocate/expand phi_frag with halo regions.
-      ! Use max local fragment domain so heterogeneous fragment sizes are safe.
+      ! Allocate phi_frag on the mg-local world-grid box plus buffer so all
+      ! real-space data share the same global-index contract.
       if (.not. allocated(dg_frag%phi_frag)) then
-        nxyz_alloc = nxyz_domain
-        allocate(dg_frag%phi_frag(1-nb:nxyz_alloc(1)+nb, &
-                                   1-nb:nxyz_alloc(2)+nb, &
-                                   1-nb:nxyz_alloc(3)+nb, &
+        allocate(dg_frag%phi_frag(dg_frag%mg%is(1)-nb:dg_frag%mg%ie(1)+nb, &
+                                   dg_frag%mg%is(2)-nb:dg_frag%mg%ie(2)+nb, &
+                                   dg_frag%mg%is(3)-nb:dg_frag%mg%ie(3)+nb, &
                                    dg_frag%nstate_frag, ifrag_count))
-        allocate(dg_frag%phi_frag_c(1-nb:nxyz_alloc(1)+nb, &
-                                    1-nb:nxyz_alloc(2)+nb, &
-                                    1-nb:nxyz_alloc(3)+nb, &
+        allocate(dg_frag%phi_frag_c(dg_frag%mg%is(1)-nb:dg_frag%mg%ie(1)+nb, &
+                                    dg_frag%mg%is(2)-nb:dg_frag%mg%ie(2)+nb, &
+                                    dg_frag%mg%is(3)-nb:dg_frag%mg%ie(3)+nb, &
                                     dg_frag%nstate_frag, ifrag_count))
         dg_frag%phi_frag = 0.0d0  ! Initialize (including halo) to zero
         dg_frag%phi_frag_c = (0.0d0, 0.0d0)
-      else
-        nxyz_new = max(nxyz_alloc, nxyz_domain)
-        if (any(nxyz_new /= nxyz_alloc)) then
-          block
-            real(8), allocatable :: phi_frag_grow(:,:,:,:,:)
-            complex(8), allocatable :: phi_frag_c_grow(:,:,:,:,:)
-            allocate(phi_frag_grow(1-nb:nxyz_new(1)+nb, &
-                                   1-nb:nxyz_new(2)+nb, &
-                                   1-nb:nxyz_new(3)+nb, &
-                                   dg_frag%nstate_frag, ifrag_count))
-            allocate(phi_frag_c_grow(1-nb:nxyz_new(1)+nb, &
-                                     1-nb:nxyz_new(2)+nb, &
-                                     1-nb:nxyz_new(3)+nb, &
-                                     dg_frag%nstate_frag, ifrag_count))
-            phi_frag_grow = 0.0d0
-            phi_frag_c_grow = (0.0d0, 0.0d0)
-            phi_frag_grow(1-nb:nxyz_alloc(1)+nb, 1-nb:nxyz_alloc(2)+nb, 1-nb:nxyz_alloc(3)+nb, :, :) = &
-              dg_frag%phi_frag(1-nb:nxyz_alloc(1)+nb, 1-nb:nxyz_alloc(2)+nb, 1-nb:nxyz_alloc(3)+nb, :, :)
-            phi_frag_c_grow(1-nb:nxyz_alloc(1)+nb, 1-nb:nxyz_alloc(2)+nb, 1-nb:nxyz_alloc(3)+nb, :, :) = &
-              dg_frag%phi_frag_c(1-nb:nxyz_alloc(1)+nb, 1-nb:nxyz_alloc(2)+nb, 1-nb:nxyz_alloc(3)+nb, :, :)
-            call move_alloc(phi_frag_grow, dg_frag%phi_frag)
-            call move_alloc(phi_frag_c_grow, dg_frag%phi_frag_c)
-          end block
-          nxyz_alloc = nxyz_new
-        end if
       end if
       
       ! Read basis functions: f_basis(ix,iy,iz,ispin,istate)
@@ -1129,11 +1105,26 @@ contains
             read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
             
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
-              ! Store in phi_frag (interior only; halo will be filled by exchange)
-              dg_frag%phi_frag_c(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3), n, i_local) = &
-                phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
-              dg_frag%phi_frag(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3), n, i_local) = &
-                real(phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3)))
+              do iz = 1, nxyz_domain(3)
+                izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
+                if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
+                if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
+                do iy = 1, nxyz_domain(2)
+                  iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                  if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
+                  if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
+                  if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
+                  do ix = 1, nxyz_domain(1)
+                    ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                    if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
+                    if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
+                    if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
+                    dg_frag%phi_frag_c(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+                    dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = real(phi_tmp(ix, iy, iz))
+                  end do
+                end do
+              end do
             end if
           end do
         end do
@@ -1595,6 +1586,8 @@ contains
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
     if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
+    if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
+    if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)

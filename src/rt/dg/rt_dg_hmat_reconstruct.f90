@@ -210,6 +210,7 @@
     real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     complex(8), intent(out) :: V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
     integer :: lx, ly, lz, gx, gy, gz
     complex(8) :: phi0
@@ -226,24 +227,43 @@
     if (.not. has_overlap) return
     loc_s(:) = ov_s(:) - iorg(:) + 1
     loc_e(:) = ov_e(:) - iorg(:) + 1
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
+    if (allocated(dg_frag%phi_frag_c)) then
 !$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
-    do lz = loc_s(3), loc_e(3)
-      gz = iorg(3) + lz - 1
-      do ly = loc_s(2), loc_e(2)
-        gy = iorg(2) + ly - 1
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
 !$omp simd private(gx, phi0)
-        do lx = loc_s(1), loc_e(1)
-          gx = iorg(1) + lx - 1
-          if (allocated(dg_frag%phi_frag_c)) then
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
             phi0 = dg_frag%phi_frag_c(lx, ly, lz, jo, i_local)
-          else
-            phi0 = cmplx(dg_frag%phi_frag(lx, ly, lz, jo, i_local), 0.0d0, kind=8)
-          end if
-          V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
+            V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
+          end do
         end do
       end do
-    end do
 !$omp end parallel do
+    else
+!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+!$omp simd private(gx, phi0)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
+            phi0 = cmplx(dg_frag%phi_frag(lx, ly, lz, jo, i_local), 0.0d0, kind=8)
+            V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
+          end do
+        end do
+      end do
+!$omp end parallel do
+    end if
   end subroutine build_local_potential_applied_basis
 
   subroutine integrate_local_basis_with_field(dg_frag, ifrag, i_local, io, mg, field, hvol, integral)
@@ -256,6 +276,7 @@
     real(8), intent(in) :: hvol
     complex(8), intent(out) :: integral
     integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
     integer :: lx, ly, lz, gx, gy, gz
     logical :: has_overlap
@@ -271,18 +292,33 @@
     if (.not. has_overlap) return
     loc_s(:) = ov_s(:) - iorg(:) + 1
     loc_e(:) = ov_e(:) - iorg(:) + 1
-    do lz = loc_s(3), loc_e(3)
-      gz = iorg(3) + lz - 1
-      do ly = loc_s(2), loc_e(2)
-        gy = iorg(2) + ly - 1
-        do lx = loc_s(1), loc_e(1)
-          gx = iorg(1) + lx - 1
-          if (allocated(dg_frag%phi_frag_c)) then
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
+    if (allocated(dg_frag%phi_frag_c)) then
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
             integral = integral + conjg(dg_frag%phi_frag_c(lx, ly, lz, io, i_local)) * field(gx, gy, gz) * hvol
-          else
-            integral = integral + cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
-          end if
+          end do
         end do
       end do
-    end do
+    else
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
+            integral = integral + cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
+          end do
+        end do
+      end do
+    end if
   end subroutine integrate_local_basis_with_field

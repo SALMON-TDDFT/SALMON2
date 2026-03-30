@@ -125,7 +125,7 @@ contains
   subroutine init_dg_fragment_rt(dg_frag, system, rt, info, lg, mg)
     use structures
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
-    use salmon_global, only: num_fragment, nstate_frag, time_integrator_dg_fragment, &
+    use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
                  nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, yn_spinorbit, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
@@ -245,7 +245,7 @@ contains
     ! Store fragment geometry information for halo exchange
     dg_frag%num_fragment(1:3) = num_fragment(1:3)
     dg_frag%lgnum_total(1:3) = lg%num(1:3)
-    dg_frag%nxyz_buffer(1:3) = 4  ! 4th-order stencil requires ±4 points
+    dg_frag%nxyz_buffer(1:3) = num_rgrid_buffer(1:3)
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,3i5)') "  nxyz_buffer (runtime): ", dg_frag%nxyz_buffer(1:3)
     end if
@@ -254,6 +254,9 @@ contains
     allocate(dg_frag%nxyz_domain(3, dg_frag%n_frag))
     allocate(dg_frag%ixyz_frag(3, dg_frag%n_frag))
     allocate(dg_frag%id_array(dg_frag%n_frag))
+    dg_frag%lg => lg
+    dg_frag%mg => mg
+    dg_frag%hgs = system%hgs
     
     ! Read fragment basis data from DC-LCFO calculation if requested
     if (load_from_dcdft) then
@@ -302,9 +305,6 @@ contains
     call init_rk_coefficients(dg_frag)
     
     ! Store grid pointers
-    dg_frag%lg => lg
-    dg_frag%mg => mg
-    dg_frag%hgs = system%hgs
     if (dg_frag%has_real_space_basis) call build_density_grid_owner_maps(dg_frag)
     
     ! Allocate density and potential arrays
@@ -430,8 +430,7 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
     integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
-    integer :: source_id_frag, recv_slot_count
-    integer :: nxyz(3), ixyz0(3), ifrag_count
+    integer :: ixg0, iyg0, izg0, ifrag_count
     integer :: nx_max, ny_max, nz_max
     integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
     integer :: primary_count_local, primary_owned_local, primary_remote_local
@@ -448,6 +447,8 @@ contains
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
     if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
+    if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
+    if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
@@ -475,6 +476,8 @@ contains
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
     if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
+    if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
+    if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
@@ -503,6 +506,8 @@ contains
     if (.not. allocated(dg_frag%ixyz_frag)) return
     if (dg_frag%ifrag_end < dg_frag%ifrag_start) return
 
+    call build_fragment_global_boxes(dg_frag)
+
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     nx_max = max(1, maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end)))
     ny_max = max(1, maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end)))
@@ -516,6 +521,8 @@ contains
     allocate(dg_frag%density_send_count(0:dg_frag%isize-1))
     allocate(dg_frag%density_send_slot_map(nx_max, ny_max, nz_max, ifrag_count))
     allocate(dg_frag%density_recv_map(0:dg_frag%isize-1))
+    allocate(dg_frag%density_grid_points(nx_max * ny_max * nz_max, ifrag_count))
+    allocate(dg_frag%density_grid_point_count(ifrag_count))
     dg_frag%density_owner_map = dg_frag%id
     dg_frag%density_primary_local_map = .false.
     dg_frag%density_ixg_map = 1
@@ -523,21 +530,23 @@ contains
     dg_frag%density_izg_map = 1
     dg_frag%density_send_count = 0
     dg_frag%density_send_slot_map = 0
+    dg_frag%density_grid_point_count = 0
 
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
-      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
-      ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
       primary_count_local = 0
       primary_owned_local = 0
       primary_remote_local = 0
-      do iz = 1, nxyz(3)
-        do iy = 1, nxyz(2)
-          do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
+      izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
+      izg = izg0
+      do iz = 1, dg_frag%nxyz_domain(3, ifrag)
+        iyg0 = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2))
+        iyg = iyg0
+        do iy = 1, dg_frag%nxyz_domain(2, ifrag)
+          ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
+          ixg = ixg0
+          do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             dg_frag%density_ixg_map(ix, iy, iz, i_local) = ixg
             dg_frag%density_iyg_map(ix, iy, iz, i_local) = iyg
             dg_frag%density_izg_map(ix, iy, iz, i_local) = izg
@@ -557,8 +566,26 @@ contains
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
               dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
             end if
+            dg_frag%density_grid_point_count(i_local) = dg_frag%density_grid_point_count(i_local) + 1
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%ix = ix
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%iy = iy
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%iz = iz
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%ixg = ixg
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%iyg = iyg
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%izg = izg
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%owner_rank = owner_rank
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%is_primary = &
+              dg_frag%density_primary_local_map(ix, iy, iz, i_local)
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%send_slot = &
+              dg_frag%density_send_slot_map(ix, iy, iz, i_local)
+            ixg = ixg + 1
+            if (ixg > dg_frag%lgnum_total(1)) ixg = 1
           end do
+          iyg = iyg + 1
+          if (iyg > dg_frag%lgnum_total(2)) iyg = 1
         end do
+        izg = izg + 1
+        if (izg > dg_frag%lgnum_total(3)) izg = 1
       end do
       if (dg_frag%id_frag == 0 .and. i_local <= 4) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -573,12 +600,12 @@ contains
              'density fragment-grid: rank=', dg_frag%id, &
              ' ifrag=', ifrag, &
              ' i_local=', i_local, &
-             ' ixyz0=', ixyz0(1), ixyz0(2), ixyz0(3), &
-             ' nxyz=', nxyz(1), nxyz(2), nxyz(3)
+             ' core_lo=', dg_frag%frag_core_lo(1, ifrag), dg_frag%frag_core_lo(2, ifrag), dg_frag%frag_core_lo(3, ifrag), &
+             ' core_hi=', dg_frag%frag_core_hi(1, ifrag), dg_frag%frag_core_hi(2, ifrag), dg_frag%frag_core_hi(3, ifrag)
         printed_points = 0
-        do iz = 1, min(1, nxyz(3))
-          do iy = 1, min(2, nxyz(2))
-            do ix = 1, min(2, nxyz(1))
+        do iz = 1, min(1, dg_frag%nxyz_domain(3, ifrag))
+          do iy = 1, min(2, dg_frag%nxyz_domain(2, ifrag))
+            do ix = 1, min(2, dg_frag%nxyz_domain(1, ifrag))
               ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
               iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
               izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
@@ -603,27 +630,29 @@ contains
     recv_count = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
-      ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
-      recv_slot_count = 0
-      do iz = 1, nxyz(3)
-        do iy = 1, nxyz(2)
-          do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
+      source_rank = source_root_rank
+      if (source_rank == dg_frag%id) cycle
+      izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
+      izg = izg0
+      do iz = 1, dg_frag%nxyz_domain(3, ifrag)
+        iyg0 = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2))
+        iyg = iyg0
+        do iy = 1, dg_frag%nxyz_domain(2, ifrag)
+          ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
+          ixg = ixg0
+          do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank == dg_frag%id .and. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) then
-              recv_slot_count = recv_slot_count + 1
+              recv_count(source_rank) = recv_count(source_rank) + 1
             end if
+            ixg = ixg + 1
+            if (ixg > dg_frag%lgnum_total(1)) ixg = 1
           end do
+          iyg = iyg + 1
+          if (iyg > dg_frag%lgnum_total(2)) iyg = 1
         end do
-      end do
-      if (recv_slot_count <= 0) cycle
-      do source_id_frag = 0, dg_frag%isize_frag - 1
-        source_rank = source_root_rank + source_id_frag
-        if (source_rank == dg_frag%id) cycle
-        recv_count(source_rank) = recv_slot_count
+        izg = izg + 1
+        if (izg > dg_frag%lgnum_total(3)) izg = 1
       end do
     end do
 
@@ -696,29 +725,32 @@ contains
     recv_cursor = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      nxyz(:) = dg_frag%nxyz_domain(:, ifrag)
-      ixyz0(:) = dg_frag%ixyz_frag(:, ifrag)
-      recv_slot_count = 0
-      do iz = 1, nxyz(3)
-        do iy = 1, nxyz(2)
-          do ix = 1, nxyz(1)
-            ixg = modulo(ixyz0(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
-            iyg = modulo(ixyz0(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
-            izg = modulo(ixyz0(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
+      source_rank = source_root_rank
+      if (source_rank == dg_frag%id) cycle
+      izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
+      izg = izg0
+      do iz = 1, dg_frag%nxyz_domain(3, ifrag)
+        iyg0 = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2))
+        iyg = iyg0
+        do iy = 1, dg_frag%nxyz_domain(2, ifrag)
+          ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
+          ixg = ixg0
+          do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank /= dg_frag%id) cycle
             if (.not. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) cycle
-            recv_slot_count = recv_slot_count + 1
-            do source_id_frag = 0, dg_frag%isize_frag - 1
-              source_rank = source_root_rank + source_id_frag
-              if (source_rank == dg_frag%id) cycle
-              recv_cursor(source_rank) = recv_slot_count
-              dg_frag%density_recv_map(source_rank)%ixg(recv_slot_count) = ixg
-              dg_frag%density_recv_map(source_rank)%iyg(recv_slot_count) = iyg
-              dg_frag%density_recv_map(source_rank)%izg(recv_slot_count) = izg
-            end do
+            recv_cursor(source_rank) = recv_cursor(source_rank) + 1
+            dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
+            dg_frag%density_recv_map(source_rank)%iyg(recv_cursor(source_rank)) = iyg
+            dg_frag%density_recv_map(source_rank)%izg(recv_cursor(source_rank)) = izg
+            ixg = ixg + 1
+            if (ixg > dg_frag%lgnum_total(1)) ixg = 1
           end do
+          iyg = iyg + 1
+          if (iyg > dg_frag%lgnum_total(2)) iyg = 1
         end do
+        izg = izg + 1
+        if (izg > dg_frag%lgnum_total(3)) izg = 1
       end do
     end do
 
@@ -733,37 +765,89 @@ contains
     is_primary = is_density_core_point(dg_frag, ifrag_ref, ixg, iyg, izg)
   end function is_density_primary_fragment
 
+  integer function wrap_global_grid_index(ig_raw, ngrid) result(ig)
+    implicit none
+    integer, intent(in) :: ig_raw, ngrid
+
+    ig = modulo(ig_raw - 1, ngrid) + 1
+  end function wrap_global_grid_index
+
+  subroutine build_fragment_global_boxes(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: ifrag
+
+    if (.not. allocated(dg_frag%nxyz_domain) .or. .not. allocated(dg_frag%ixyz_frag)) return
+
+    if (allocated(dg_frag%frag_core_lo)) deallocate(dg_frag%frag_core_lo)
+    if (allocated(dg_frag%frag_core_hi)) deallocate(dg_frag%frag_core_hi)
+    if (allocated(dg_frag%frag_buf_lo)) deallocate(dg_frag%frag_buf_lo)
+    if (allocated(dg_frag%frag_buf_hi)) deallocate(dg_frag%frag_buf_hi)
+    allocate(dg_frag%frag_core_lo(3, dg_frag%n_frag), dg_frag%frag_core_hi(3, dg_frag%n_frag))
+    allocate(dg_frag%frag_buf_lo(3, dg_frag%n_frag), dg_frag%frag_buf_hi(3, dg_frag%n_frag))
+
+    do ifrag = 1, dg_frag%n_frag
+      dg_frag%frag_core_lo(:, ifrag) = dg_frag%ixyz_frag(:, ifrag)
+      dg_frag%frag_core_hi(:, ifrag) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+      dg_frag%frag_buf_lo(:, ifrag) = dg_frag%frag_core_lo(:, ifrag) - dg_frag%nxyz_buffer(:)
+      dg_frag%frag_buf_hi(:, ifrag) = dg_frag%frag_core_hi(:, ifrag) + dg_frag%nxyz_buffer(:)
+    end do
+
+    dg_frag%rank_core_lo(:) = dg_frag%mg%is(:)
+    dg_frag%rank_core_hi(:) = dg_frag%mg%ie(:)
+    dg_frag%rank_buf_lo(:) = dg_frag%mg%is(:) - dg_frag%nxyz_buffer(:)
+    dg_frag%rank_buf_hi(:) = dg_frag%mg%ie(:) + dg_frag%nxyz_buffer(:)
+  end subroutine build_fragment_global_boxes
+
   logical function is_density_core_point(dg_frag, ifrag, ixg, iyg, izg) result(is_core)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, ixg, iyg, izg
-    integer :: lcoord(3), axis, nloc, nb, core_lo, core_hi
-    integer :: ixg_arr(3)
+    integer :: xloc, yloc, zloc
+    integer :: nx, ny, nz
+    integer :: nbx, nby, nbz
+    integer :: xcore_lo, ycore_lo, zcore_lo
+    integer :: xcore_hi, ycore_hi, zcore_hi
 
-    ixg_arr = [ixg, iyg, izg]
-    is_core = .true.
+    nx = dg_frag%nxyz_domain(1, ifrag)
+    ny = dg_frag%nxyz_domain(2, ifrag)
+    nz = dg_frag%nxyz_domain(3, ifrag)
 
-    do axis = 1, 3
-      lcoord(axis) = modulo(ixg_arr(axis) - dg_frag%ixyz_frag(axis, ifrag), dg_frag%lgnum_total(axis)) + 1
-      nloc = dg_frag%nxyz_domain(axis, ifrag)
-      if (lcoord(axis) < 1 .or. lcoord(axis) > nloc) then
-        is_core = .false.
-        return
-      end if
+    xloc = modulo(ixg - dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1)) + 1
+    yloc = modulo(iyg - dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2)) + 1
+    zloc = modulo(izg - dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3)) + 1
+    if (xloc < 1 .or. xloc > nx) then
+      is_core = .false.
+      return
+    end if
+    if (yloc < 1 .or. yloc > ny) then
+      is_core = .false.
+      return
+    end if
+    if (zloc < 1 .or. zloc > nz) then
+      is_core = .false.
+      return
+    end if
 
-      nb = min(dg_frag%nxyz_buffer(axis), max(0, (nloc - 1) / 2))
-      core_lo = min(nloc, 1 + nb)
-      core_hi = max(1, nloc - nb)
-      if (core_lo > core_hi) then
-        core_lo = (nloc + 1) / 2
-        core_hi = core_lo
-      end if
+    nbx = min(dg_frag%nxyz_buffer(1), max(0, (nx - 1) / 2))
+    nby = min(dg_frag%nxyz_buffer(2), max(0, (ny - 1) / 2))
+    nbz = min(dg_frag%nxyz_buffer(3), max(0, (nz - 1) / 2))
+    xcore_lo = min(nx, 1 + nbx)
+    ycore_lo = min(ny, 1 + nby)
+    zcore_lo = min(nz, 1 + nbz)
+    xcore_hi = max(1, nx - nbx)
+    ycore_hi = max(1, ny - nby)
+    zcore_hi = max(1, nz - nbz)
+    if (xcore_lo > xcore_hi) xcore_lo = (nx + 1) / 2
+    if (xcore_lo > xcore_hi) xcore_hi = xcore_lo
+    if (ycore_lo > ycore_hi) ycore_lo = (ny + 1) / 2
+    if (ycore_lo > ycore_hi) ycore_hi = ycore_lo
+    if (zcore_lo > zcore_hi) zcore_lo = (nz + 1) / 2
+    if (zcore_lo > zcore_hi) zcore_hi = zcore_lo
 
-      if (lcoord(axis) < core_lo .or. lcoord(axis) > core_hi) then
-        is_core = .false.
-        return
-      end if
-    end do
+    is_core = (xloc >= xcore_lo .and. xloc <= xcore_hi .and. &
+               yloc >= ycore_lo .and. yloc <= ycore_hi .and. &
+               zloc >= zcore_lo .and. zloc <= zcore_hi)
   end function is_density_core_point
 
   integer function wrap_fragment_cartesian_index(i, ndiv) result(iwrap)
@@ -787,12 +871,22 @@ contains
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ixg, iyg, izg
     integer :: jrank
+    integer :: xlo, xhi, ylo, yhi, zlo, zhi
 
     owner = dg_frag%id
+    if (ixg >= dg_frag%rank_core_lo(1) .and. ixg <= dg_frag%rank_core_hi(1) .and. &
+        iyg >= dg_frag%rank_core_lo(2) .and. iyg <= dg_frag%rank_core_hi(2) .and. &
+        izg >= dg_frag%rank_core_lo(3) .and. izg <= dg_frag%rank_core_hi(3)) return
     do jrank = 0, dg_frag%isize - 1
-      if (ixg < dg_frag%mg%is_all(1, jrank) .or. ixg > dg_frag%mg%ie_all(1, jrank)) cycle
-      if (iyg < dg_frag%mg%is_all(2, jrank) .or. iyg > dg_frag%mg%ie_all(2, jrank)) cycle
-      if (izg < dg_frag%mg%is_all(3, jrank) .or. izg > dg_frag%mg%ie_all(3, jrank)) cycle
+      xlo = dg_frag%mg%is_all(1, jrank)
+      xhi = dg_frag%mg%ie_all(1, jrank)
+      if (ixg < xlo .or. ixg > xhi) cycle
+      ylo = dg_frag%mg%is_all(2, jrank)
+      yhi = dg_frag%mg%ie_all(2, jrank)
+      if (iyg < ylo .or. iyg > yhi) cycle
+      zlo = dg_frag%mg%is_all(3, jrank)
+      zhi = dg_frag%mg%ie_all(3, jrank)
+      if (izg < zlo .or. izg > zhi) cycle
       owner = jrank
       return
     end do
@@ -902,7 +996,8 @@ contains
                                 natom_frag, atom_coords_frag, atom_types_frag, &
                                 hse_omega, &
                                 (yn_hse_cd_ri == 'y'), hse_cd_ri_threshold, &
-                                [1, 1, 1], dg_frag%nxyz_domain(1:3, ifrag))
+                                max(dg_frag%mg%is(1:3), dg_frag%ixyz_frag(1:3, ifrag)), &
+                                min(dg_frag%mg%ie(1:3), dg_frag%ixyz_frag(1:3, ifrag) + dg_frag%nxyz_domain(1:3, ifrag) - 1))
       
       deallocate(atom_coords_frag, atom_types_frag)
       
@@ -1000,6 +1095,7 @@ contains
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
+    integer :: ixg_store, iyg_store, izg_store
     integer :: nb  ! halo width
     integer :: nbasis_iter
     integer :: n_mat_cap, n_mat_cap_env, ienv
@@ -1459,31 +1555,14 @@ contains
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
       
-      ! Allocate/expand phi_frag with halo regions.
-      ! Use max local fragment domain so heterogeneous fragment sizes are safe.
+      ! Allocate phi_frag on the mg-local world-grid box plus buffer so all
+      ! real-space data share the same global-index contract.
       if (.not. allocated(dg_frag%phi_frag)) then
-        nxyz_alloc = nxyz_domain
-        allocate(dg_frag%phi_frag(1-nb:nxyz_alloc(1)+nb, &
-                                   1-nb:nxyz_alloc(2)+nb, &
-                                   1-nb:nxyz_alloc(3)+nb, &
+        allocate(dg_frag%phi_frag(dg_frag%mg%is(1)-nb:dg_frag%mg%ie(1)+nb, &
+                                   dg_frag%mg%is(2)-nb:dg_frag%mg%ie(2)+nb, &
+                                   dg_frag%mg%is(3)-nb:dg_frag%mg%ie(3)+nb, &
                                    dg_frag%nstate_frag, ifrag_count))
         dg_frag%phi_frag = 0.0d0  ! Initialize (including halo) to zero
-      else
-        nxyz_new = max(nxyz_alloc, nxyz_domain)
-        if (any(nxyz_new /= nxyz_alloc)) then
-          block
-            real(8), allocatable :: phi_frag_grow(:,:,:,:,:)
-            allocate(phi_frag_grow(1-nb:nxyz_new(1)+nb, &
-                                   1-nb:nxyz_new(2)+nb, &
-                                   1-nb:nxyz_new(3)+nb, &
-                                   dg_frag%nstate_frag, ifrag_count))
-            phi_frag_grow = 0.0d0
-            phi_frag_grow(1-nb:nxyz_alloc(1)+nb, 1-nb:nxyz_alloc(2)+nb, 1-nb:nxyz_alloc(3)+nb, :, :) = &
-              dg_frag%phi_frag(1-nb:nxyz_alloc(1)+nb, 1-nb:nxyz_alloc(2)+nb, 1-nb:nxyz_alloc(3)+nb, :, :)
-            call move_alloc(phi_frag_grow, dg_frag%phi_frag)
-          end block
-          nxyz_alloc = nxyz_new
-        end if
       end if
       
       ! Read basis functions: f_basis(ix,iy,iz,ispin,istate)
@@ -1504,9 +1583,25 @@ contains
             read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
             
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
-              ! Store in phi_frag (interior only; halo will be filled by exchange)
-              dg_frag%phi_frag(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3), n, i_local) = &
-                phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+              do iz = 1, nxyz_domain(3)
+                izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
+                if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
+                if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
+                do iy = 1, nxyz_domain(2)
+                  iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                  if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
+                  if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
+                  if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
+                  do ix = 1, nxyz_domain(1)
+                    ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                    if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
+                    if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
+                    if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
+                    dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+                  end do
+                end do
+              end do
             end if
           end do
         end do
@@ -1978,6 +2073,8 @@ contains
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
     if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
+    if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
+    if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)

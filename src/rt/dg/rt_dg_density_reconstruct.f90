@@ -3,6 +3,7 @@
     use salmon_global, only: nelec, nelec_spin
     use communication, only: comm_summation, comm_bcast, comm_alltoallv, COMM_GROUP_NULL
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache
+    use rt_dg_fragment_types, only: density_grid_point_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -50,6 +51,7 @@
     type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
     integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
     real(8), allocatable :: send_flat(:), recv_flat(:)
+    real(8), allocatable :: rho_bf(:,:,:), rho_s_bf(:,:,:,:)
     real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:)
     real(8), allocatable :: density_mat_re(:,:), density_tmp(:,:)
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
@@ -61,6 +63,9 @@
     real(8) :: time_project_rho_reduce, time_project_phi_block_build
     integer :: io_s_frag, io_e_frag, nocc_loc, nocc_per_rank_loc
     integer :: nblocks_max, block_cache_idx, npt_cache, rem_xy
+    integer :: ibuf_x, ibuf_y, ibuf_z
+    integer :: rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi
+    integer :: rho_s_x_lo, rho_s_x_hi, rho_s_y_lo, rho_s_y_hi, rho_s_z_lo, rho_s_z_hi
     complex(8), allocatable :: psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:), coef_occ_weighted(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: transform_frag(:,:), transform_pw(:,:)
@@ -139,10 +144,34 @@
     allocate(psi_blk(grid_block_size, state_block_size))
     allocate(coef_occ_weighted(nbf_max, max(1, nocc_cache)))
     allocate(coef_pw_blk(pw_block_size, state_block_size))
+    ibuf_x = dg_frag%nxyz_buffer(1)
+    ibuf_y = dg_frag%nxyz_buffer(2)
+    ibuf_z = dg_frag%nxyz_buffer(3)
+    rho_x_lo = mg%is(1)
+    rho_x_hi = mg%ie(1)
+    rho_y_lo = mg%is(2)
+    rho_y_hi = mg%ie(2)
+    rho_z_lo = mg%is(3)
+    rho_z_hi = mg%ie(3)
+    rho_s_x_lo = rho_x_lo
+    rho_s_x_hi = rho_x_hi
+    rho_s_y_lo = rho_y_lo
+    rho_s_y_hi = rho_y_hi
+    rho_s_z_lo = rho_z_lo
+    rho_s_z_hi = rho_z_hi
+    allocate(rho_bf(rho_x_lo-ibuf_x:rho_x_hi+ibuf_x, &
+                    rho_y_lo-ibuf_y:rho_y_hi+ibuf_y, &
+                    rho_z_lo-ibuf_z:rho_z_hi+ibuf_z))
+    allocate(rho_s_bf(rho_s_x_lo:rho_s_x_hi, &
+                      rho_s_y_lo:rho_s_y_hi, &
+                      rho_s_z_lo:rho_s_z_hi, &
+      system%nspin))
     allocate(rho_send(0:dg_frag%isize-1))
     allocate(rho_recv(0:dg_frag%isize-1))
 
     rho%f = 0.0d0
+    rho_bf(:, :, :) = 0.0d0
+    rho_s_bf(:, :, :, :) = 0.0d0
     occ_factor = 2.0d0 / real(system%nspin, 8)
     occ_scale = sqrt(occ_factor)
     n_pw = 0
@@ -154,7 +183,9 @@
     if (n_pw > 0) allocate(phase_cache(grid_block_size, n_pw))
     use_mixed_density = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
       allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
-    distribute_project = (dg_frag%icomm_frag /= COMM_GROUP_NULL .and. dg_frag%isize_frag > 1)
+    ! Temporarily keep density reconstruction on fragment roots only.
+    ! The subgroup-distributed path still needs a sender/slot contract redesign.
+    distribute_project = .false.
     subgroup_root_rank = dg_frag%id - dg_frag%id_frag
     total_send_pts = 0
     do irank = 0, dg_frag%isize - 1
@@ -600,8 +631,8 @@
                   charge_budget_local(1) = charge_budget_local(1) + rho_raw_contrib
 !$omp atomic
                   charge_budget_local(2) = charge_budget_local(2) + rho_contrib
-                  rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-                  rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
+                  rho_bf(ixg, iyg, izg) = rho_bf(ixg, iyg, izg) + rho_contrib
+                  rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
                 end do
 !$omp end do nowait
 !$omp do schedule(static)
@@ -632,8 +663,8 @@
                   charge_budget_local(1) = charge_budget_local(1) + rho_raw_contrib
 !$omp atomic
                   charge_budget_local(2) = charge_budget_local(2) + rho_contrib
-                  rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-                  rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
+                  rho_bf(ixg, iyg, izg) = rho_bf(ixg, iyg, izg) + rho_contrib
+                  rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
                 end do
 !$omp end do nowait
 !$omp do schedule(static)
@@ -761,8 +792,8 @@
                     charge_budget_local(1) = charge_budget_local(1) + rho_raw_contrib
 !$omp atomic
                     charge_budget_local(2) = charge_budget_local(2) + rho_contrib
-                    rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
-                    rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
+                    rho_bf(ixg, iyg, izg) = rho_bf(ixg, iyg, izg) + rho_contrib
+                    rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
                   end do
 !$omp end do nowait
 !$omp do schedule(static)
@@ -866,14 +897,14 @@
         charge_budget_local(5) = charge_budget_local(5) + rho_raw_contrib
 !$omp atomic
         charge_budget_local(6) = charge_budget_local(6) + rho_contrib
-        rho%f(ixg, iyg, izg) = rho%f(ixg, iyg, izg) + rho_contrib
+        rho_bf(ixg, iyg, izg) = rho_bf(ixg, iyg, izg) + rho_contrib
         do ispin = 1, system%nspin
           spin_offset = ispin * npts
           rho_contrib = rho_recv(irank)%f(spin_offset + slot, 1, 1)
           if (allocated(dg_frag%density_inv_weight_local)) then
             rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
           end if
-          rho_s(ispin)%f(ixg, iyg, izg) = rho_s(ispin)%f(ixg, iyg, izg) + rho_contrib
+          rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
         end do
       end do
 !$omp end parallel do
@@ -899,13 +930,19 @@
       write(*,'(1x,a)') "        density trace: stage=before-normalize"
       flush(6)
     end if
+    ! rho_bf -> rho_s boundary: only the authoritative mg-local density is
+    ! materialized below for downstream Hartree/XC/reconstruct consumers.
+    rho%f(:, :, :) = rho_bf(:, :, :)
+    do ispin = 1, system%nspin
+      rho_s(ispin)%f(:, :, :) = rho_s_bf(:, :, :, ispin)
+    end do
     call comm_summation(charge_budget_local, charge_budget_total, 6, dg_frag%icomm)
     call cpu_time(t_norm0)
     total_charge_local = 0.0d0
 !$omp parallel do collapse(3) reduction(+:total_charge_local) private(ix,iy,iz) schedule(static)
-    do iz = lbound(rho%f, 3), ubound(rho%f, 3)
-      do iy = lbound(rho%f, 2), ubound(rho%f, 2)
-        do ix = lbound(rho%f, 1), ubound(rho%f, 1)
+    do iz = rho_z_lo, rho_z_hi
+      do iy = rho_y_lo, rho_y_hi
+        do ix = rho_x_lo, rho_x_hi
           total_charge_local = total_charge_local + rho%f(ix, iy, iz)
         end do
       end do
@@ -938,9 +975,9 @@
       scale_rho = nelec / total_charge
       dg_frag%rho_scale_factor = scale_rho
 !$omp parallel do collapse(3) private(ix,iy,iz,ispin,rho_sum_local) schedule(static)
-      do iz = lbound(rho%f, 3), ubound(rho%f, 3)
-        do iy = lbound(rho%f, 2), ubound(rho%f, 2)
-          do ix = lbound(rho%f, 1), ubound(rho%f, 1)
+      do iz = rho_z_lo, rho_z_hi
+        do iy = rho_y_lo, rho_y_hi
+          do ix = rho_x_lo, rho_x_hi
             rho_sum_local = 0.0d0
             do ispin = 1, system%nspin
               rho_s(ispin)%f(ix, iy, iz) = rho_s(ispin)%f(ix, iy, iz) * scale_rho
@@ -983,6 +1020,7 @@
     if (allocated(transform_pw)) deallocate(transform_pw)
     if (allocated(send_pack)) deallocate(send_pack)
     if (allocated(send_sum)) deallocate(send_sum)
+    deallocate(rho_bf, rho_s_bf)
     deallocate(rho_send, rho_recv)
     call cpu_time(t_total1)
     if (dg_frag%id == 0) then
@@ -1007,18 +1045,15 @@
       integer, intent(in) :: i_local_grid, igrid0_grid, npt_blk_grid
       integer, intent(in) :: nxyz_grid(3)
       logical, intent(in) :: use_subgroup_slot
+      type(density_grid_point_info) :: point
 
-!$omp parallel do private(igrid, tmp_idx, ix, iy, iz, ixg, iyg, izg, owner_rank) schedule(static)
+!$omp parallel do private(igrid, point) schedule(static)
       do igrid = 1, npt_blk_grid
-        tmp_idx = igrid0_grid + igrid - 2
-        ix = mod(tmp_idx, nxyz_grid(1)) + 1
-        tmp_idx = tmp_idx / nxyz_grid(1)
-        iy = mod(tmp_idx, nxyz_grid(2)) + 1
-        iz = tmp_idx / nxyz_grid(2) + 1
-        ix_buf(igrid) = ix
-        iy_buf(igrid) = iy
-        iz_buf(igrid) = iz
-        if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
+        point = dg_frag%density_grid_points(igrid0_grid + igrid - 1, i_local_grid)
+        ix_buf(igrid) = point%ix
+        iy_buf(igrid) = point%iy
+        iz_buf(igrid) = point%iz
+        if (.not. point%is_primary) then
           ixg_buf(igrid) = 1
           iyg_buf(igrid) = 1
           izg_buf(igrid) = 1
@@ -1026,18 +1061,14 @@
           slot_buf(igrid) = 0
           cycle
         end if
-        ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local_grid)
-        iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local_grid)
-        izg = dg_frag%density_izg_map(ix, iy, iz, i_local_grid)
-        owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local_grid)
-        ixg_buf(igrid) = ixg
-        iyg_buf(igrid) = iyg
-        izg_buf(igrid) = izg
-        owner_buf(igrid) = owner_rank
+        ixg_buf(igrid) = point%ixg
+        iyg_buf(igrid) = point%iyg
+        izg_buf(igrid) = point%izg
+        owner_buf(igrid) = point%owner_rank
         if (use_subgroup_slot) then
-          slot_buf(igrid) = dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local_grid)
+          slot_buf(igrid) = point%subgroup_send_slot
         else
-          slot_buf(igrid) = dg_frag%density_send_slot_map(ix, iy, iz, i_local_grid)
+          slot_buf(igrid) = point%send_slot
         end if
       end do
 !$omp end parallel do
@@ -1047,18 +1078,15 @@
       implicit none
       integer, intent(in) :: i_local_grid, igrid0_grid, npt_blk_grid
       integer, intent(in) :: nxyz_grid(3)
+      type(density_grid_point_info) :: point
 
-!$omp parallel do private(igrid, tmp_idx, ix, iy, iz, ixg, iyg, izg, owner_rank) schedule(static)
+!$omp parallel do private(igrid, point) schedule(static)
       do igrid = 1, npt_blk_grid
-        tmp_idx = igrid0_grid + igrid - 2
-        ix = mod(tmp_idx, nxyz_grid(1)) + 1
-        tmp_idx = tmp_idx / nxyz_grid(1)
-        iy = mod(tmp_idx, nxyz_grid(2)) + 1
-        iz = tmp_idx / nxyz_grid(2) + 1
-        ix_buf(igrid) = ix
-        iy_buf(igrid) = iy
-        iz_buf(igrid) = iz
-        if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
+        point = dg_frag%density_grid_points(igrid0_grid + igrid - 1, i_local_grid)
+        ix_buf(igrid) = point%ix
+        iy_buf(igrid) = point%iy
+        iz_buf(igrid) = point%iz
+        if (.not. point%is_primary) then
           ixg_buf(igrid) = 1
           iyg_buf(igrid) = 1
           izg_buf(igrid) = 1
@@ -1066,14 +1094,10 @@
           slot_buf(igrid) = 0
           cycle
         end if
-        ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local_grid)
-        iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local_grid)
-        izg = dg_frag%density_izg_map(ix, iy, iz, i_local_grid)
-        owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local_grid)
-        ixg_buf(igrid) = ixg
-        iyg_buf(igrid) = iyg
-        izg_buf(igrid) = izg
-        owner_buf(igrid) = owner_rank
+        ixg_buf(igrid) = point%ixg
+        iyg_buf(igrid) = point%iyg
+        izg_buf(igrid) = point%izg
+        owner_buf(igrid) = point%owner_rank
         slot_buf(igrid) = 0
       end do
 !$omp end parallel do

@@ -879,6 +879,7 @@
     integer :: ifrag, i_local, ispin, io, jo, ix, iy, iz, i_halo, i, j
     integer :: n, ifrag_count, n_basis_local, n_basis_halo, jfrag
     integer :: is(3), ie(3), l(3), d(3), iorg(3), ndom(3), lx, ly, lz, gx, gy, gz
+    integer :: halo_send_idx(3), halo_recv_idx(3)
     real(8) :: hvol, integral
     real(8), allocatable :: T_phi(:,:,:)
     real(8), allocatable :: H_phi(:,:,:)
@@ -989,15 +990,15 @@
             if (jfrag < 1) cycle
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
-            d = dg_frag%halo(i_halo)%dsp_send
             !$omp parallel do private(io,integral,iz,iy,ix) schedule(static)
             do io = 1, n_basis_halo
               integral = 0.0d0
               do iz = 1, l(3)
                 do iy = 1, l(2)
                   do ix = 1, l(1)
+                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               T_phi(d(1) + ix, d(2) + iy, d(3) + iz) * hvol
+                               T_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol
                   end do
                 end do
               end do
@@ -1006,8 +1007,9 @@
               do iz = 1, l(3)
                 do iy = 1, l(2)
                   do ix = 1, l(1)
+                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               H_phi(d(1) + ix, d(2) + iy, d(3) + iz) * hvol
+                               H_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol
                   end do
                 end do
               end do
@@ -1603,7 +1605,7 @@
     integer, intent(in) :: i_local
     
     integer :: istate, jstate, ispin, ix, iy, iz, nstate_use, nb_local, nstate_loc, io_lb, io_idx
-    integer :: ifrag, lx, ly, lz
+    integer :: ifrag, lx, ly, lz, px, py, pz
     integer :: iorg(3), ndom(3)
     integer :: is(3), ie(3)
     
@@ -1639,7 +1641,7 @@
       ! Real orbitals
       do ispin = 1, dg_frag%nspin
         nstate_loc = min(nb_local, nstate_use)
-        !$omp parallel do private(istate,io_idx,ix,iy,iz,lx,ly,lz) schedule(static)
+        !$omp parallel do private(istate,io_idx,ix,iy,iz,lx,ly,lz,px,py,pz) schedule(static)
         do istate = 1, nstate_loc
           io_idx = io_lb + istate - 1
           do iz = is(3), ie(3)
@@ -1651,8 +1653,9 @@
                 if (lx >= 1 .and. lx <= ndom(1) .and. &
                     ly >= 1 .and. ly <= ndom(2) .and. &
                     lz >= 1 .and. lz <= ndom(3)) then
+                  call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
                   psi%rwf(ix, iy, iz, ispin, io_idx, 1, 1) = &
-                    dg_frag%phi_frag(lx, ly, lz, istate, i_local)
+                    dg_frag%phi_frag(px, py, pz, istate, i_local)
                 else
                   psi%rwf(ix, iy, iz, ispin, io_idx, 1, 1) = 0.0d0
                 end if
@@ -1666,7 +1669,7 @@
       ! Complex orbitals - convert real basis to complex
       do ispin = 1, dg_frag%nspin
         nstate_loc = min(nb_local, nstate_use)
-        !$omp parallel do private(istate,io_idx,ix,iy,iz,lx,ly,lz) schedule(static)
+        !$omp parallel do private(istate,io_idx,ix,iy,iz,lx,ly,lz,px,py,pz) schedule(static)
         do istate = 1, nstate_loc
           io_idx = io_lb + istate - 1
           do iz = is(3), ie(3)
@@ -1678,8 +1681,9 @@
                 if (lx >= 1 .and. lx <= ndom(1) .and. &
                     ly >= 1 .and. ly <= ndom(2) .and. &
                     lz >= 1 .and. lz <= ndom(3)) then
+                  call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
                   psi%zwf(ix, iy, iz, ispin, io_idx, 1, 1) = &
-                    cmplx(dg_frag%phi_frag(lx, ly, lz, istate, i_local), 0.0d0, kind=8)
+                    cmplx(dg_frag%phi_frag(px, py, pz, istate, i_local), 0.0d0, kind=8)
                 else
                   psi%zwf(ix, iy, iz, ispin, io_idx, 1, 1) = (0.0d0, 0.0d0)
                 end if
@@ -1705,11 +1709,12 @@
     integer, intent(in) :: i_local
 
     integer :: istate, jstate, ispin, ix, iy, iz, nstate_use, nb_local, nstate_loc, io_lb, io_idx
-    integer :: ifrag, lx, ly, lz
+    integer :: ifrag, lx, ly, lz, px, py, pz
     integer :: iorg(3), ndom(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     real(8) :: normv_local, normv_global, proj_local, proj_global, hvol
     integer :: is(3), ie(3)
-    real(8), allocatable :: phi_state_sum(:,:,:)
+    real(8), allocatable :: phi_state_sum(:,:,:), phi_state_local(:,:,:)
 
     if (allocated(psi%rwf)) then
       is = [lbound(psi%rwf,1), lbound(psi%rwf,2), lbound(psi%rwf,3)]
@@ -1724,6 +1729,12 @@
     ifrag = dg_frag%ifrag_start + i_local - 1
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    lx_lo = 1
+    lx_hi = ndom(1)
+    ly_lo = 1
+    ly_hi = ndom(2)
+    lz_lo = 1
+    lz_hi = ndom(3)
     nb_local = dg_frag%n_basis(ifrag,1)
     if (allocated(psi%rwf)) then
       io_lb = lbound(psi%rwf,5)
@@ -1738,50 +1749,61 @@
 
     hvol = dg_frag%hgs(1) * dg_frag%hgs(2) * dg_frag%hgs(3)
     allocate(phi_state_sum(ndom(1), ndom(2), ndom(3)))
+    allocate(phi_state_local(ndom(1), ndom(2), ndom(3)))
 
     do ispin = 1, dg_frag%nspin
       nstate_loc = min(nb_local, nstate_use)
       do istate = 1, nstate_loc
         io_idx = io_lb + istate - 1
-        dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = 0.0d0
+        phi_state_local(:, :, :) = 0.0d0
         !$omp parallel do private(lz,ly,lx,iz,iy,ix) schedule(static)
-        do lz = 1, ndom(3)
+        do lz = lz_lo, lz_hi
           iz = iorg(3) + lz - 1
-          do ly = 1, ndom(2)
+          do ly = ly_lo, ly_hi
             iy = iorg(2) + ly - 1
-            do lx = 1, ndom(1)
+            do lx = lx_lo, lx_hi
               ix = iorg(1) + lx - 1
               if (ix < is(1) .or. ix > ie(1) .or. iy < is(2) .or. iy > ie(2) .or. iz < is(3) .or. iz > ie(3)) cycle
               if (allocated(psi%rwf)) then
-                dg_frag%phi_frag(lx, ly, lz, istate, i_local) = psi%rwf(ix, iy, iz, ispin, io_idx, 1, 1)
+                phi_state_local(lx, ly, lz) = psi%rwf(ix, iy, iz, ispin, io_idx, 1, 1)
               else if (allocated(psi%zwf)) then
-                dg_frag%phi_frag(lx, ly, lz, istate, i_local) = real(psi%zwf(ix, iy, iz, ispin, io_idx, 1, 1), kind=8)
+                phi_state_local(lx, ly, lz) = real(psi%zwf(ix, iy, iz, ispin, io_idx, 1, 1), kind=8)
               end if
             end do
           end do
         end do
         !$omp end parallel do
+        do lz = lz_lo, lz_hi
+          do ly = ly_lo, ly_hi
+            do lx = lx_lo, lx_hi
+              call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+              dg_frag%phi_frag(px, py, pz, istate, i_local) = phi_state_local(lx, ly, lz)
+            end do
+          end do
+        end do
 
         do jstate = 1, istate - 1
           proj_local = 0.0d0
           !$omp parallel do collapse(3) private(lz,ly,lx) reduction(+:proj_local) schedule(static)
-          do lz = 1, ndom(3)
-            do ly = 1, ndom(2)
-              do lx = 1, ndom(1)
-                proj_local = proj_local + dg_frag%phi_frag(lx, ly, lz, istate, i_local) * &
-                                          dg_frag%phi_frag(lx, ly, lz, jstate, i_local) * hvol
+          do lz = lz_lo, lz_hi
+            do ly = ly_lo, ly_hi
+              do lx = lx_lo, lx_hi
+                call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+                proj_local = proj_local + dg_frag%phi_frag(px, py, pz, istate, i_local) * &
+                                          dg_frag%phi_frag(px, py, pz, jstate, i_local) * hvol
               end do
             end do
           end do
           !$omp end parallel do
           call comm_summation(proj_local, proj_global, dg_frag%icomm_frag)
           !$omp parallel do collapse(3) private(lz,ly,lx) schedule(static)
-          do lz = 1, ndom(3)
-            do ly = 1, ndom(2)
-              do lx = 1, ndom(1)
-                dg_frag%phi_frag(lx, ly, lz, istate, i_local) = &
-                  dg_frag%phi_frag(lx, ly, lz, istate, i_local) - &
-                  proj_global * dg_frag%phi_frag(lx, ly, lz, jstate, i_local)
+          do lz = lz_lo, lz_hi
+            do ly = ly_lo, ly_hi
+              do lx = lx_lo, lx_hi
+                call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+                dg_frag%phi_frag(px, py, pz, istate, i_local) = &
+                  dg_frag%phi_frag(px, py, pz, istate, i_local) - &
+                  proj_global * dg_frag%phi_frag(px, py, pz, jstate, i_local)
               end do
             end do
           end do
@@ -1790,26 +1812,39 @@
 
         normv_local = 0.0d0
         !$omp parallel do collapse(3) private(lz,ly,lx) reduction(+:normv_local) schedule(static)
-        do lz = 1, ndom(3)
-          do ly = 1, ndom(2)
-            do lx = 1, ndom(1)
-              normv_local = normv_local + dg_frag%phi_frag(lx, ly, lz, istate, i_local)**2
+        do lz = lz_lo, lz_hi
+          do ly = ly_lo, ly_hi
+            do lx = lx_lo, lx_hi
+              call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+              normv_local = normv_local + dg_frag%phi_frag(px, py, pz, istate, i_local)**2
             end do
           end do
         end do
         !$omp end parallel do
         call comm_summation(normv_local, normv_global, dg_frag%icomm_frag)
         normv_global = sqrt(max(normv_global * hvol, 1.0d-20))
-        dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = &
-          dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) / normv_global
+        do lz = lz_lo, lz_hi
+          do ly = ly_lo, ly_hi
+            do lx = lx_lo, lx_hi
+              call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+              phi_state_local(lx, ly, lz) = dg_frag%phi_frag(px, py, pz, istate, i_local) / normv_global
+            end do
+          end do
+        end do
 
-        call comm_summation(dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local), &
-                            phi_state_sum, ndom(1)*ndom(2)*ndom(3), dg_frag%icomm_frag)
-        dg_frag%phi_frag(1:ndom(1), 1:ndom(2), 1:ndom(3), istate, i_local) = phi_state_sum
+        call comm_summation(phi_state_local, phi_state_sum, ndom(1)*ndom(2)*ndom(3), dg_frag%icomm_frag)
+        do lz = lz_lo, lz_hi
+          do ly = ly_lo, ly_hi
+            do lx = lx_lo, lx_hi
+              call map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)
+              dg_frag%phi_frag(px, py, pz, istate, i_local) = phi_state_sum(lx, ly, lz)
+            end do
+          end do
+        end do
       end do
     end do
 
-    deallocate(phi_state_sum)
+    deallocate(phi_state_sum, phi_state_local)
 
   end subroutine extract_basis_from_orbitals
 
