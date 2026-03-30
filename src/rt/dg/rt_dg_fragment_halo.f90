@@ -116,12 +116,13 @@
     integer, intent(in) :: gidx, lb, ub, ngrid
 
     idx = modulo(gidx - 1, ngrid) + 1
-    do while (idx < lb)
-      idx = idx + ngrid
-    end do
-    do while (idx > ub)
-      idx = idx - ngrid
-    end do
+    if (idx < lb) then
+      idx = idx + ((lb - idx + ngrid - 1) / ngrid) * ngrid
+    end if
+    if (idx > ub) then
+      idx = idx - ((idx - ub + ngrid - 1) / ngrid) * ngrid
+    end if
+    if (idx < lb .or. idx > ub) idx = 0
   end function map_global_to_phi_box_index
 
   subroutine map_fragment_local_to_phi_box(dg_frag, ifrag, lx, ly, lz, px, py, pz)

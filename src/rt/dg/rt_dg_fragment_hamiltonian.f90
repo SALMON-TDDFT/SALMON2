@@ -1087,6 +1087,7 @@
     real(8), intent(out) :: T_phi(:,:,:)
     real(8), intent(out) :: H_phi(:,:,:)
     integer :: lx, ly, lz, gx, gy, gz, gx0, gx1, gy0, gy1, gz0, gz1
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: iorg(3), ndom(3)
     integer :: loc_s(3), loc_e(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
@@ -1149,14 +1150,20 @@
         " V_lb=", v_lb1, v_lb2, v_lb3, " V_ub=", v_ub1, v_ub2, v_ub3
       stop 1
     end if
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
 !$omp parallel do private(lz, ly, lx, gz, gy, gx) schedule(static)
-    do lz = loc_s(3), loc_e(3)
-      gz = iorg(3) + lz - 1
-      do ly = loc_s(2), loc_e(2)
-        gy = iorg(2) + ly - 1
+    do lz = lz_lo, lz_hi
+      gz = gz0 + (lz - lz_lo)
+      do ly = ly_lo, ly_hi
+        gy = gy0 + (ly - ly_lo)
 !$omp simd private(gx)
-        do lx = loc_s(1), loc_e(1)
-          gx = iorg(1) + lx - 1
+        do lx = lx_lo, lx_hi
+          gx = gx0 + (lx - lx_lo)
           H_phi(lx, ly, lz) = H_phi(lx, ly, lz) + V_total(gx, gy, gz) * dg_frag%phi_frag(lx, ly, lz, jo, i_local)
         end do
       end do
@@ -1181,6 +1188,7 @@
     real(8) :: partial
     integer :: lx, ly, lz
     integer :: ndom(3), loc_s(3), loc_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: f_lb1, f_ub1, f_lb2, f_ub2, f_lb3, f_ub3
     logical :: has_overlap
 
@@ -1221,11 +1229,17 @@
         f_lb1, f_lb2, f_lb3, " phi_ub=", f_ub1, f_ub2, f_ub3
       stop 1
     end if
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
     partial = 0.0d0
-    do lz = loc_s(3), loc_e(3)
-      do ly = loc_s(2), loc_e(2)
+    do lz = lz_lo, lz_hi
+      do ly = ly_lo, ly_hi
         !$omp simd reduction(+:partial)
-        do lx = loc_s(1), loc_e(1)
+        do lx = lx_lo, lx_hi
           partial = partial + dg_frag%phi_frag(lx, ly, lz, io, i_local) * field(lx, ly, lz) * hvol
         end do
       end do
@@ -1257,6 +1271,7 @@
     real(8) :: v, lap0
     real(8) :: lapt(4,3)
     integer :: ndom(3), loc_s(3), loc_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     logical :: has_overlap
     
@@ -1316,11 +1331,17 @@
     !
     ! Note: exchange_phi_frag_halo() must be called before this routine
     
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
 !$omp parallel do collapse(2) private(lz, ly, lx, v) schedule(static)
-    do lz = loc_s(3), loc_e(3)
-      do ly = loc_s(2), loc_e(2)
+    do lz = lz_lo, lz_hi
+      do ly = ly_lo, ly_hi
 !$omp simd private(v)
-        do lx = loc_s(1), loc_e(1)
+        do lx = lx_lo, lx_hi
           ! Compute Laplacian using 4th-order finite difference
           ! Stencil accesses phi_frag(ix±4, iy±4, iz±4) which now includes halo
           v = lapt(1,1) * (dg_frag%phi_frag(lx+1, ly, lz, jo, i_local) + &
@@ -1640,6 +1661,7 @@
     integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
@@ -1736,6 +1758,12 @@
         nbf = dg_frag%n_basis(ifrag, ispin)
         jo_progress_stride = max(1, nbf / 4)
         npts_local = (loc_e(1) - loc_s(1) + 1) * (loc_e(2) - loc_s(2) + 1) * (loc_e(3) - loc_s(3) + 1)
+        lx_lo = loc_s(1)
+        lx_hi = loc_e(1)
+        ly_lo = loc_s(2)
+        ly_hi = loc_e(2)
+        lz_lo = loc_s(3)
+        lz_hi = loc_e(3)
         allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
 
         if (nbf > size(dg_frag%phi_frag, 4)) then
@@ -1745,9 +1773,9 @@
         end if
         do io = 1, nbf
           ipt = 0
-          do lz = loc_s(3), loc_e(3)
-            do ly = loc_s(2), loc_e(2)
-              do lx = loc_s(1), loc_e(1)
+          do lz = lz_lo, lz_hi
+            do ly = ly_lo, ly_hi
+              do lx = lx_lo, lx_hi
                 ipt = ipt + 1
                 phi_local_2d(ipt, io) = dg_frag%phi_frag(lx, ly, lz, io, i_local)
               end do
@@ -2097,6 +2125,7 @@
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
     integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
     logical :: log_frag_progress, release_dense_overlap
@@ -2153,6 +2182,12 @@
         call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
         nbf = dg_frag%n_basis(ifrag, ispin)
         jo_progress_stride = max(1, nbf / 4)
+        lx_lo = loc_s(1)
+        lx_hi = loc_e(1)
+        ly_lo = loc_s(2)
+        ly_hi = loc_e(2)
+        lz_lo = loc_s(3)
+        lz_hi = loc_e(3)
         if (loc_s(1) < phi_lb1 .or. loc_e(1) > phi_ub1 .or. &
             loc_s(2) < phi_lb2 .or. loc_e(2) > phi_ub2 .or. &
             loc_s(3) < phi_lb3 .or. loc_e(3) > phi_ub3) then
@@ -2183,9 +2218,9 @@
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
             integral = 0.0d0
             call cpu_time(t0)
-            do lz = loc_s(3), loc_e(3)
-              do ly = loc_s(2), loc_e(2)
-                do lx = loc_s(1), loc_e(1)
+            do lz = lz_lo, lz_hi
+              do ly = ly_lo, ly_hi
+                do lx = lx_lo, lx_hi
                   integral = integral + dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
                              dg_frag%phi_frag(lx, ly, lz, jo, i_local) * hvol
                 end do

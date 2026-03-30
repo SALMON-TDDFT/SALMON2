@@ -615,6 +615,7 @@
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: nrow, ncol, ii, jj
     real(8) :: hvol
     complex(8) :: integral
@@ -657,6 +658,12 @@
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
+        lx_lo = loc_s(1)
+        lx_hi = loc_e(1)
+        ly_lo = loc_s(2)
+        ly_hi = loc_e(2)
+        lz_lo = loc_s(3)
+        lz_hi = loc_e(3)
         
         ! Loop over basis functions in fragment j (ket side)
         ! Note: Each thread allocates its own grad_phi to avoid race conditions
@@ -682,24 +689,33 @@
               ! Compute matrix element: p_ij = ∫ φ_i(r) * (∂φ_j/∂dir) dr
               ! Note: momentum operator uses p = -i∇; the -i is applied in time evolution
               integral = (0.0d0, 0.0d0)
-              do lz = loc_s(3), loc_e(3)
-                gz = iorg(3) + lz - 1
-                do ly = loc_s(2), loc_e(2)
-                  gy = iorg(2) + ly - 1
-                  do lx = loc_s(1), loc_e(1)
-                    gx = iorg(1) + lx - 1
-                    if (allocated(dg_frag%phi_frag_c)) then
+              if (allocated(dg_frag%phi_frag_c)) then
+                do lz = lz_lo, lz_hi
+                  gz = iorg(3) + lz - 1
+                  do ly = ly_lo, ly_hi
+                    gy = iorg(2) + ly - 1
+                    do lx = lx_lo, lx_hi
+                      gx = iorg(1) + lx - 1
                       integral = integral + &
                         conjg(dg_frag%phi_frag_c(lx, ly, lz, io, i_local)) * &
                         cmplx(grad_phi(gx, gy, gz, idir), 0.0d0, kind=8) * hvol
-                    else
+                    end do
+                  end do
+                end do
+              else
+                do lz = lz_lo, lz_hi
+                  gz = iorg(3) + lz - 1
+                  do ly = ly_lo, ly_hi
+                    gy = iorg(2) + ly - 1
+                    do lx = lx_lo, lx_hi
+                      gx = iorg(1) + lx - 1
                       integral = integral + &
                         cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * &
                         cmplx(grad_phi(gx, gy, gz, idir), 0.0d0, kind=8) * hvol
-                    end if
+                    end do
                   end do
                 end do
-              end do
+              end if
               
               ! Store in global momentum matrix
               dg_frag%momentum_mat_c(idir, ig_i, ig_j, ispin) = integral

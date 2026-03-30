@@ -15,7 +15,7 @@
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, owner_rank
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
-    integer :: nxyz(3), nxyz_pack(3), ixyz0(3), ifrag_count, ngrid_max, igrid_cache
+    integer :: nxyz(3), nxyz_pack(3), ifrag_count, ngrid_max, igrid_cache
     integer :: nocc_per_spin, nocc_spin, nocc_cache
     integer :: irank, slot, npts, idx_local, idx_remote, idx_subgroup
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count, valid_subgroup_grid_count
@@ -361,7 +361,6 @@
         i_local = i_local + 1
 
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-        ixyz0(1:3) = dg_frag%ixyz_frag(1:3, ifrag)
         ngrid = nxyz(1) * nxyz(2) * nxyz(3)
         nblocks_ifrag = dg_frag%density_block_nblocks(i_local)
         first_block_offset = dg_frag%density_block_first_offset(i_local)
@@ -494,22 +493,12 @@
           valid_remote_grid_count = 0
           valid_subgroup_grid_count = 0
           call cpu_time(t_setup0)
-          if (allocated(dg_frag%density_owner_map)) then
-            if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
-              call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .true.)
-            else if (allocated(dg_frag%density_send_slot_map)) then
-              call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .false.)
-            else
-              call prepare_grid_buffers_owner_map_no_slot(i_local, igrid0, npt_blk, nxyz)
-            end if
+          if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
+            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .true.)
+          else if (allocated(dg_frag%density_send_slot_map)) then
+            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .false.)
           else
-            if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
-              call prepare_grid_buffers_runtime_map(i_local, igrid0, npt_blk, nxyz, ixyz0, .true.)
-            else if (allocated(dg_frag%density_send_slot_map)) then
-              call prepare_grid_buffers_runtime_map(i_local, igrid0, npt_blk, nxyz, ixyz0, .false.)
-            else
-              call prepare_grid_buffers_runtime_map_no_slot(i_local, igrid0, npt_blk, nxyz, ixyz0)
-            end if
+            call prepare_grid_buffers_owner_map_no_slot(i_local, igrid0, npt_blk, nxyz)
           end if
           if (.not. distribute_project) then
             do igrid = 1, npt_blk
@@ -1102,87 +1091,6 @@
       end do
 !$omp end parallel do
     end subroutine prepare_grid_buffers_owner_map_no_slot
-
-    subroutine prepare_grid_buffers_runtime_map(i_local_grid, igrid0_grid, npt_blk_grid, nxyz_grid, ixyz0_grid, use_subgroup_slot)
-      implicit none
-      integer, intent(in) :: i_local_grid, igrid0_grid, npt_blk_grid
-      integer, intent(in) :: nxyz_grid(3), ixyz0_grid(3)
-      logical, intent(in) :: use_subgroup_slot
-
-!$omp parallel do private(igrid, tmp_idx, ix, iy, iz, ixg, iyg, izg, owner_rank) schedule(static)
-      do igrid = 1, npt_blk_grid
-        tmp_idx = igrid0_grid + igrid - 2
-        ix = mod(tmp_idx, nxyz_grid(1)) + 1
-        tmp_idx = tmp_idx / nxyz_grid(1)
-        iy = mod(tmp_idx, nxyz_grid(2)) + 1
-        iz = tmp_idx / nxyz_grid(2) + 1
-        ix_buf(igrid) = ix
-        iy_buf(igrid) = iy
-        iz_buf(igrid) = iz
-        if (allocated(dg_frag%density_primary_local_map)) then
-          if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
-            ixg_buf(igrid) = 1
-            iyg_buf(igrid) = 1
-            izg_buf(igrid) = 1
-            owner_buf(igrid) = -1
-            slot_buf(igrid) = 0
-            cycle
-          end if
-        end if
-        ixg = mod(ixyz0_grid(1) + ix - 2, mg%num(1)) + 1
-        iyg = mod(ixyz0_grid(2) + iy - 2, mg%num(2)) + 1
-        izg = mod(ixyz0_grid(3) + iz - 2, mg%num(3)) + 1
-        owner_rank = find_grid_owner(ixg, iyg, izg)
-        ixg_buf(igrid) = ixg
-        iyg_buf(igrid) = iyg
-        izg_buf(igrid) = izg
-        owner_buf(igrid) = owner_rank
-        if (use_subgroup_slot) then
-          slot_buf(igrid) = dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local_grid)
-        else
-          slot_buf(igrid) = dg_frag%density_send_slot_map(ix, iy, iz, i_local_grid)
-        end if
-      end do
-!$omp end parallel do
-    end subroutine prepare_grid_buffers_runtime_map
-
-    subroutine prepare_grid_buffers_runtime_map_no_slot(i_local_grid, igrid0_grid, npt_blk_grid, nxyz_grid, ixyz0_grid)
-      implicit none
-      integer, intent(in) :: i_local_grid, igrid0_grid, npt_blk_grid
-      integer, intent(in) :: nxyz_grid(3), ixyz0_grid(3)
-
-!$omp parallel do private(igrid, tmp_idx, ix, iy, iz, ixg, iyg, izg, owner_rank) schedule(static)
-      do igrid = 1, npt_blk_grid
-        tmp_idx = igrid0_grid + igrid - 2
-        ix = mod(tmp_idx, nxyz_grid(1)) + 1
-        tmp_idx = tmp_idx / nxyz_grid(1)
-        iy = mod(tmp_idx, nxyz_grid(2)) + 1
-        iz = tmp_idx / nxyz_grid(2) + 1
-        ix_buf(igrid) = ix
-        iy_buf(igrid) = iy
-        iz_buf(igrid) = iz
-        if (allocated(dg_frag%density_primary_local_map)) then
-          if (.not. dg_frag%density_primary_local_map(ix, iy, iz, i_local_grid)) then
-            ixg_buf(igrid) = 1
-            iyg_buf(igrid) = 1
-            izg_buf(igrid) = 1
-            owner_buf(igrid) = -1
-            slot_buf(igrid) = 0
-            cycle
-          end if
-        end if
-        ixg = mod(ixyz0_grid(1) + ix - 2, mg%num(1)) + 1
-        iyg = mod(ixyz0_grid(2) + iy - 2, mg%num(2)) + 1
-        izg = mod(ixyz0_grid(3) + iz - 2, mg%num(3)) + 1
-        owner_rank = find_grid_owner(ixg, iyg, izg)
-        ixg_buf(igrid) = ixg
-        iyg_buf(igrid) = iyg
-        izg_buf(igrid) = izg
-        owner_buf(igrid) = owner_rank
-        slot_buf(igrid) = 0
-      end do
-!$omp end parallel do
-    end subroutine prepare_grid_buffers_runtime_map_no_slot
 
     integer function find_grid_owner(ixg, iyg, izg) result(owner)
       implicit none
