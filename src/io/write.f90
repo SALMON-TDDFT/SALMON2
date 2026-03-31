@@ -1447,6 +1447,17 @@ contains
     real(8) :: virial_known_residual
     real(8) :: virial_loc_ewa
     real(8) :: virial_remainder_after_known
+    real(8) :: virial_loc
+    real(8) :: virial_loc_grad
+    real(8) :: virial_loc_diag
+    real(8) :: virial_loc_sr_grad
+    real(8) :: virial_loc_lr_grad
+    real(8) :: virial_loc_lr_residual
+    real(8) :: virial_ewa
+    real(8) :: virial_ewa_g_grad
+    real(8) :: virial_ewa_g_diag_self
+    real(8) :: virial_ewa_r
+    real(8) :: virial_ewa_energy_residual
     real(8) :: e_kin_from_stress
     real(8) :: pressure_term_gpa
     real(8) :: pressure_nl_diag_gpa
@@ -1576,6 +1587,33 @@ contains
          write(fh,'(1x,"Tr(loc+ewa)*V         =",e16.8)') virial_loc_ewa
          virial_remainder_after_known = virial_total - virial_known_rhs
          write(fh,'(1x,"Remainder_after_known =",e16.8)') virial_remainder_after_known
+         write(fh,*)
+         write(fh,*) "Local/Ewald trace diagnostics [Hartree]"
+         virial_loc = stress_tensor_trace(system%stress_loc) * system%det_a
+         virial_loc_grad = stress_tensor_trace(system%stress_loc_grad) * system%det_a
+         virial_loc_diag = stress_tensor_trace(system%stress_loc_diag) * system%det_a
+         virial_loc_sr_grad = stress_tensor_trace(system%stress_loc_sr_grad) * system%det_a
+         virial_loc_lr_grad = stress_tensor_trace(system%stress_loc_lr_grad) * system%det_a
+         virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) &
+                                * system%det_a - system%stress_loc_lr_energy
+         virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a
+         virial_ewa_g_grad = stress_tensor_trace(system%stress_ewa_g_grad) * system%det_a
+         virial_ewa_g_diag_self = stress_tensor_trace(system%stress_ewa_g_diag + system%stress_ewa_g_self) &
+                                * system%det_a
+         virial_ewa_r = stress_tensor_trace(system%stress_ewa_r) * system%det_a
+         virial_ewa_energy_residual = energy%E_ion_ion - (system%stress_ewa_energy_G + system%stress_ewa_energy_R)
+         write(fh,'(1x,"Tr(loc)*V             =",e16.8)') virial_loc
+         write(fh,'(1x,"Tr(loc_grad)*V        =",e16.8)') virial_loc_grad
+         write(fh,'(1x,"Tr(loc_diag)*V        =",e16.8)') virial_loc_diag
+         write(fh,'(1x,"Tr(loc_sr_grad)*V     =",e16.8)') virial_loc_sr_grad
+         write(fh,'(1x,"Tr(loc_lr_grad)*V     =",e16.8)') virial_loc_lr_grad
+         write(fh,'(1x,"Tr(loc_lr)*V - E_lr   =",e16.8)') virial_loc_lr_residual
+         write(fh,'(1x,"Tr(ewa)*V             =",e16.8)') virial_ewa
+         write(fh,'(1x,"Tr(ewa_G_grad)*V      =",e16.8)') virial_ewa_g_grad
+         write(fh,'(1x,"Tr(ewa_G_diag+self)*V =",e16.8)') virial_ewa_g_diag_self
+         write(fh,'(1x,"Tr(ewa_R)*V           =",e16.8)') virial_ewa_r
+         write(fh,'(1x,"E_ion_ion - (E_ewa_G+E_ewa_R) =",e16.8)') virial_ewa_energy_residual
+         write(fh,'(1x,"Tr(loc+ewa)*V         =",e16.8)') virial_loc_ewa
          write(fh,*)
          write(fh,*) "NL virial diagnostics [Hartree]"
          write(fh,'(1x,"Tr(nl)*V              =",e16.8)') virial_nl
