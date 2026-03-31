@@ -630,8 +630,6 @@ contains
     recv_count = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      source_rank = source_root_rank
-      if (source_rank == dg_frag%id) cycle
       izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
       izg = izg0
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
@@ -641,6 +639,12 @@ contains
           ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
           ixg = ixg0
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
+            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            if (source_rank == dg_frag%id) then
+              ixg = ixg + 1
+              if (ixg > dg_frag%lgnum_total(1)) ixg = 1
+              cycle
+            end if
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank == dg_frag%id .and. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) then
               recv_count(source_rank) = recv_count(source_rank) + 1
@@ -725,8 +729,6 @@ contains
     recv_cursor = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      source_rank = source_root_rank
-      if (source_rank == dg_frag%id) cycle
       izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
       izg = izg0
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
@@ -736,6 +738,12 @@ contains
           ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
           ixg = ixg0
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
+            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            if (source_rank == dg_frag%id) then
+              ixg = ixg + 1
+              if (ixg > dg_frag%lgnum_total(1)) ixg = 1
+              cycle
+            end if
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank /= dg_frag%id) cycle
             if (.not. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) cycle
@@ -771,6 +779,26 @@ contains
 
     ig = modulo(ig_raw - 1, ngrid) + 1
   end function wrap_global_grid_index
+
+  integer function get_fragment_grid_sender_rank(root_rank, ndom, ix, iy, iz) result(sender_rank)
+    use salmon_global, only: nproc_rgrid
+    implicit none
+    integer, intent(in) :: root_rank, ndom(3), ix, iy, iz
+    integer :: ipx, ipy, ipz, coords(3), nsize
+
+    ipx = max(1, nproc_rgrid(1))
+    ipy = max(1, nproc_rgrid(2))
+    ipz = max(1, nproc_rgrid(3))
+
+    nsize = max(1, (ndom(1) + ipx - 1) / ipx)
+    coords(1) = min(ipx - 1, max(0, (ix - 1) / nsize))
+    nsize = max(1, (ndom(2) + ipy - 1) / ipy)
+    coords(2) = min(ipy - 1, max(0, (iy - 1) / nsize))
+    nsize = max(1, (ndom(3) + ipz - 1) / ipz)
+    coords(3) = min(ipz - 1, max(0, (iz - 1) / nsize))
+
+    sender_rank = root_rank + coords(1) + ipx * (coords(2) + ipy * coords(3))
+  end function get_fragment_grid_sender_rank
 
   subroutine build_fragment_global_boxes(dg_frag)
     implicit none

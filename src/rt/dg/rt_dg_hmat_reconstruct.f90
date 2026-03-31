@@ -201,6 +201,20 @@
 
   end subroutine reconstruct_hamiltonian_matrix
 
+  integer function map_global_to_phi_box_coord_reconstruct(ig, lb, ub, lgtot) result(iloc)
+    implicit none
+    integer, intent(in) :: ig, lb, ub, lgtot
+
+    iloc = modulo(ig - 1, lgtot) + 1
+    if (iloc < lb) then
+      iloc = iloc + ((lb - iloc + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc > ub) then
+      iloc = iloc - ((iloc - ub + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc < lb .or. iloc > ub) iloc = 0
+  end function map_global_to_phi_box_coord_reconstruct
+
   subroutine build_local_potential_applied_basis(dg_frag, ifrag, i_local, jo, mg, V_total, V_phi)
     use structures
     implicit none
@@ -212,7 +226,8 @@
     integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
-    integer :: lx, ly, lz, gx, gy, gz
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     complex(8) :: phi0
     logical :: has_overlap
 
@@ -233,8 +248,14 @@
     ly_hi = loc_e(2)
     lz_lo = loc_s(3)
     lz_hi = loc_e(3)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
     if (allocated(dg_frag%phi_frag_c)) then
-!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         do ly = ly_lo, ly_hi
@@ -242,14 +263,18 @@
 !$omp simd private(gx, phi0)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            phi0 = dg_frag%phi_frag_c(lx, ly, lz, jo, i_local)
+            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            phi0 = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
             V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
           end do
         end do
       end do
 !$omp end parallel do
     else
-!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         do ly = ly_lo, ly_hi
@@ -257,7 +282,11 @@
 !$omp simd private(gx, phi0)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            phi0 = cmplx(dg_frag%phi_frag(lx, ly, lz, jo, i_local), 0.0d0, kind=8)
+            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            phi0 = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
             V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
           end do
         end do
@@ -278,7 +307,8 @@
     integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
-    integer :: lx, ly, lz, gx, gy, gz
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     logical :: has_overlap
 
     integral = (0.0d0, 0.0d0)
@@ -298,6 +328,12 @@
     ly_hi = loc_e(2)
     lz_lo = loc_s(3)
     lz_hi = loc_e(3)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
     if (allocated(dg_frag%phi_frag_c)) then
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
@@ -305,7 +341,11 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            integral = integral + conjg(dg_frag%phi_frag_c(lx, ly, lz, io, i_local)) * field(gx, gy, gz) * hvol
+            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
           end do
         end do
       end do
@@ -316,7 +356,11 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            integral = integral + cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
+            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            integral = integral + cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
           end do
         end do
       end do

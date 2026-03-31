@@ -13,14 +13,14 @@
 
     integer :: ifrag, ifrag_pack, io, i_local, i_local_pack, ispin
     integer :: istate_frag
-    integer :: ix, iy, iz, ixg, iyg, izg, owner_rank
+    integer :: ix, iy, iz, ixg, iyg, izg, bx, by, bz, owner_rank
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), nxyz_pack(3), ifrag_count, ngrid_max, igrid_cache
     integer :: nocc_per_spin, nocc_spin, nocc_cache
-    integer :: irank, slot, npts, idx_local, idx_remote, idx_subgroup
-    integer :: local_grid_count, remote_grid_count, valid_remote_grid_count, valid_subgroup_grid_count
+    integer :: irank, slot, npts, idx_local, idx_remote
+    integer :: local_grid_count, remote_grid_count, valid_remote_grid_count
     integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
-    integer :: total_send_pts, pack_offset, subgroup_root_rank, block_idx_global, self_slot_count, total_local_pts
+    integer :: total_send_pts, subgroup_root_rank, block_idx_global, self_slot_count, total_local_pts
     integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
     integer :: valid_basis_count
     integer :: handler_id_frag
@@ -41,12 +41,12 @@
     real(8) :: time_project_dmat_build
     real(8) :: t_dmat0, t_dmat1
     real(8) :: time_cache_pw_refresh, time_cache_phi_block_refresh
-    logical :: use_mixed_density, distribute_project
+    logical :: use_mixed_density
     logical :: rebuilt_pw_cache, rebuilt_phi_block_cache
     logical :: need_pw_cache_alloc, need_pw_cache_expand
     logical :: need_phi_cache_alloc, need_phi_count_alloc, need_phi_cache_invalid, need_phi_cache_resize
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
-    integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:), valid_subgroup_grid_ids(:)
+    integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
     integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
@@ -69,8 +69,6 @@
     complex(8), allocatable :: psi_blk(:,:), phase_cache(:,:), coef_pw_blk(:,:), coef_occ_weighted(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: transform_frag(:,:), transform_pw(:,:)
-    real(8), allocatable :: send_pack(:), send_sum(:)
-    integer, allocatable :: subgroup_send_offset(:,:)
     integer, allocatable :: subgroup_self_ixg_tmp(:), subgroup_self_iyg_tmp(:), subgroup_self_izg_tmp(:)
 
     rho%f = 0.0d0
@@ -127,7 +125,7 @@
     allocate(ix_buf(grid_block_size), iy_buf(grid_block_size), iz_buf(grid_block_size))
     allocate(owner_buf(grid_block_size), ixg_buf(grid_block_size), iyg_buf(grid_block_size), izg_buf(grid_block_size))
     allocate(slot_buf(grid_block_size), local_grid_ids(grid_block_size), remote_grid_ids(grid_block_size))
-    allocate(valid_remote_grid_ids(grid_block_size), valid_subgroup_grid_ids(grid_block_size))
+    allocate(valid_remote_grid_ids(grid_block_size))
     allocate(basis_gid(dg_frag%nstate_frag), valid_basis_ids(dg_frag%nstate_frag))
     allocate(phi_blk(grid_block_size, dg_frag%nstate_frag))
     allocate(rho_blk(grid_block_size))
@@ -183,9 +181,7 @@
     if (n_pw > 0) allocate(phase_cache(grid_block_size, n_pw))
     use_mixed_density = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
       allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
-    ! Temporarily keep density reconstruction on fragment roots only.
-    ! The subgroup-distributed path still needs a sender/slot contract redesign.
-    distribute_project = .false.
+    ! Density reconstruction uses subgroup-distributed projection and collective reductions on icomm_frag.
     subgroup_root_rank = dg_frag%id - dg_frag%id_frag
     total_send_pts = 0
     do irank = 0, dg_frag%isize - 1
@@ -233,16 +229,9 @@
         end if
         n_basis_mix = min(dg_frag%mixed_basis_dim(ispin), max_mixed_basis, size(dg_frag%coef_mix, 1))
         if (n_basis_mix <= 0 .or. nocc_spin <= 0) cycle
-        if (.not. distribute_project .or. dg_frag%is_frag_root) then
-          density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = occ_factor * &
-            matmul(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin), &
-                   conjg(transpose(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin))))
-        else
-          density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = (0.0d0, 0.0d0)
-        end if
-        if (distribute_project) then
-          call comm_bcast(density_mix(1:n_basis_mix, 1:n_basis_mix, ispin), dg_frag%icomm_frag, 0)
-        end if
+        density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = occ_factor * &
+          matmul(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin), &
+                 conjg(transpose(dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin))))
       end do
     end if
     boxL(1) = dg_frag%hgs(1) * real(mg%num(1), 8)
@@ -264,11 +253,6 @@
         dg_frag%density_block_nblocks(i_local) = nblocks_ifrag
         dg_frag%density_block_first_offset(i_local) = 0
         dg_frag%density_block_step(i_local) = 1
-        if (distribute_project) then
-          dg_frag%density_block_first_offset(i_local) = modulo(dg_frag%id_frag - modulo(block_idx_global, dg_frag%isize_frag), &
-                                                               dg_frag%isize_frag)
-          dg_frag%density_block_step(i_local) = dg_frag%isize_frag
-        end if
         block_idx_global = block_idx_global + nblocks_ifrag
       end do
     end if
@@ -294,65 +278,68 @@
       flush(6)
     end if
 
-    if (dg_frag%is_frag_root .or. distribute_project) then
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a)') "        density trace: stage=before-frag-loop"
-        flush(6)
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density trace: comm-state icomm_frag=", dg_frag%icomm_frag, &
-          " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
-        flush(6)
-      end if
-      allocate(coef_re_frag(nbf_max, max(1, nocc_cache)))
-      allocate(D_partial_re(nbf_max, nbf_max))
-      allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
-      call cpu_time(t_setup0)
-      need_phi_cache_alloc = (.not. allocated(dg_frag%density_phi_block_cache))
-      need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
-      need_phi_cache_invalid = (.not. dg_frag%density_phi_block_cache_valid)
-      need_phi_cache_resize = dg_frag%density_phi_block_size /= grid_block_size
-      if (need_phi_cache_alloc .or. need_phi_count_alloc .or. need_phi_cache_invalid .or. need_phi_cache_resize) then
-        if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
-        if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
-        nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
-        allocate(dg_frag%density_phi_block_cache(grid_block_size, dg_frag%nstate_frag, nblocks_max, ifrag_count))
-        allocate(dg_frag%density_phi_block_count(ifrag_count))
-        dg_frag%density_phi_block_cache(:, :, :, :) = 0.0d0
-        dg_frag%density_phi_block_count(:) = 0
-        i_local = 0
-        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-          i_local = i_local + 1
-          local_grid_count = dg_frag%density_grid_point_count(i_local)
-          dg_frag%density_phi_block_count(i_local) = dg_frag%density_block_nblocks(i_local)
-          do block_cache_idx = 1, dg_frag%density_phi_block_count(i_local)
-            igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
-            npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
-!$omp parallel do private(istate_frag, igrid, ixg, iyg, izg) schedule(static)
-            do istate_frag = 1, dg_frag%nstate_frag
-              do igrid = 1, npt_cache
-                ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
-                iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
-                izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
-                dg_frag%density_phi_block_cache(igrid, istate_frag, block_cache_idx, i_local) = &
-                  dg_frag%phi_frag(ixg, iyg, izg, istate_frag, i_local)
-              end do
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        density trace: stage=before-frag-loop"
+      flush(6)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density trace: comm-state icomm_frag=", dg_frag%icomm_frag, &
+        " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
+      flush(6)
+    end if
+    allocate(coef_re_frag(nbf_max, max(1, nocc_cache)))
+    allocate(D_partial_re(nbf_max, nbf_max))
+    allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
+    call cpu_time(t_setup0)
+    need_phi_cache_alloc = (.not. allocated(dg_frag%density_phi_block_cache))
+    need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
+    need_phi_cache_invalid = (.not. dg_frag%density_phi_block_cache_valid)
+    need_phi_cache_resize = dg_frag%density_phi_block_size /= grid_block_size
+    if (need_phi_cache_alloc .or. need_phi_count_alloc .or. need_phi_cache_invalid .or. need_phi_cache_resize) then
+      if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
+      if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
+      nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
+      allocate(dg_frag%density_phi_block_cache(grid_block_size, dg_frag%nstate_frag, nblocks_max, ifrag_count))
+      allocate(dg_frag%density_phi_block_count(ifrag_count))
+      dg_frag%density_phi_block_cache(:, :, :, :) = 0.0d0
+      dg_frag%density_phi_block_count(:) = 0
+      i_local = 0
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = i_local + 1
+        local_grid_count = dg_frag%density_grid_point_count(i_local)
+        dg_frag%density_phi_block_count(i_local) = dg_frag%density_block_nblocks(i_local)
+        do block_cache_idx = 1, dg_frag%density_phi_block_count(i_local)
+          igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
+          npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
+!$omp parallel do private(istate_frag, igrid, ixg, iyg, izg, bx, by, bz) schedule(static)
+          do istate_frag = 1, dg_frag%nstate_frag
+            do igrid = 1, npt_cache
+              ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
+              iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
+              izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
+              bx = map_global_to_phi_box_coord_ham(ixg, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
+              by = map_global_to_phi_box_coord_ham(iyg, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
+              bz = map_global_to_phi_box_coord_ham(izg, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+              if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+              dg_frag%density_phi_block_cache(igrid, istate_frag, block_cache_idx, i_local) = &
+                dg_frag%phi_frag(bx, by, bz, istate_frag, i_local)
             end do
-!$omp end parallel do
           end do
+!$omp end parallel do
         end do
-        dg_frag%density_phi_block_size = grid_block_size
-        dg_frag%density_phi_block_cache_valid = .true.
-        rebuilt_phi_block_cache = .true.
-      end if
-      call cpu_time(t_setup1)
-      time_project_phi_block_build = time_project_phi_block_build + (t_setup1 - t_setup0)
-      if (rebuilt_phi_block_cache) time_cache_phi_block_refresh = time_cache_phi_block_refresh + (t_setup1 - t_setup0)
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,l1,a,l1,a,l1,a,l1,a,l1,a,1pe12.4)') "        density cache: phi_block rebuilt=", &
-          rebuilt_phi_block_cache, " alloc=", need_phi_cache_alloc, " count_alloc=", need_phi_count_alloc, &
-          " invalid=", need_phi_cache_invalid, " resize=", need_phi_cache_resize, " dt=", time_cache_phi_block_refresh
-        flush(6)
-      end if
-      call cpu_time(t_project0)
+      end do
+      dg_frag%density_phi_block_size = grid_block_size
+      dg_frag%density_phi_block_cache_valid = .true.
+      rebuilt_phi_block_cache = .true.
+    end if
+    call cpu_time(t_setup1)
+    time_project_phi_block_build = time_project_phi_block_build + (t_setup1 - t_setup0)
+    if (rebuilt_phi_block_cache) time_cache_phi_block_refresh = time_cache_phi_block_refresh + (t_setup1 - t_setup0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,l1,a,l1,a,l1,a,l1,a,l1,a,1pe12.4)') "        density cache: phi_block rebuilt=", &
+        rebuilt_phi_block_cache, " alloc=", need_phi_cache_alloc, " count_alloc=", need_phi_count_alloc, &
+        " invalid=", need_phi_cache_invalid, " resize=", need_phi_cache_resize, " dt=", time_cache_phi_block_refresh
+      flush(6)
+    end if
+    call cpu_time(t_project0)
       i_local = 0
       block_idx_global = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -383,7 +370,7 @@
             call cpu_time(t_dmat0)
             ! Step 3a: root fills coef_re_frag, bcasts to all ranks in icomm_frag
             coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
-            if (.not. distribute_project .or. dg_frag%is_frag_root) then
+            if (dg_frag%is_frag_root) then
 !$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
               do io = 1, nocc_spin
                 do idx_local = 1, valid_basis_count
@@ -393,8 +380,9 @@
               end do
 !$omp end parallel do
             end if
-            if (distribute_project) then
-              call comm_bcast(coef_re_frag(1:nbf, 1:nocc_spin), dg_frag%icomm_frag, 0)
+            ! bcast coef_re_frag from root to all ranks in icomm_frag
+            if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+              call comm_bcast(coef_re_frag(1:nbf_max, 1:nocc_spin), dg_frag%icomm_frag, 0)
             end if
 
             ! Step 3b: each rank computes dsyrk on its state slice
@@ -415,9 +403,8 @@
             end if
 
             ! Step 3c: AllReduce partial D across icomm_frag
-            if (distribute_project) then
-              call comm_summation(D_partial_re(1:nbf_max, 1:nbf_max), &
-                                  D_frag_re(1:nbf_max, 1:nbf_max, ispin), &
+            if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+              call comm_summation(D_partial_re(1:nbf_max, 1:nbf_max), D_frag_re(1:nbf_max, 1:nbf_max, ispin), &
                                   nbf_max * nbf_max, dg_frag%icomm_frag)
             else
               D_frag_re(1:nbf_max, 1:nbf_max, ispin) = D_partial_re(1:nbf_max, 1:nbf_max)
@@ -458,7 +445,7 @@
               valid_basis_count = valid_basis_count + 1
               valid_basis_ids(valid_basis_count) = istate_frag
             end do
-            if (.not. distribute_project .or. dg_frag%is_frag_root) then
+            if (dg_frag%is_frag_root) then
 !$omp parallel do collapse(2) private(io, idx_local, istate_frag) schedule(static)
               do io = 1, nocc_spin
                 do idx_local = 1, valid_basis_count
@@ -469,11 +456,12 @@
               end do
 !$omp end parallel do
             end if
-            if (distribute_project) then
-              call comm_bcast(coef_re_full(1:nbf, 1:nocc_spin, ispin), dg_frag%icomm_frag, 0)
-              call comm_bcast(coef_im_full(1:nbf, 1:nocc_spin, ispin), dg_frag%icomm_frag, 0)
-            end if
           end do
+          ! bcast coef_re/im_full from root to all ranks in icomm_frag
+          if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+            call comm_bcast(coef_re_full(1:nbf_max, 1:nocc_cache, 1:system%nspin), dg_frag%icomm_frag, 0)
+            call comm_bcast(coef_im_full(1:nbf_max, 1:nocc_cache, 1:system%nspin), dg_frag%icomm_frag, 0)
+          end if
           ! NOTE: coef_pw_full_cache is already populated on all ranks by refresh_pw_coef_cache
           ! (called before the fragment loop), so no bcast is needed here.
 
@@ -489,42 +477,26 @@
           local_grid_count = 0
           remote_grid_count = 0
           valid_remote_grid_count = 0
-          valid_subgroup_grid_count = 0
           call cpu_time(t_setup0)
-          if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
-            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .true.)
-          else if (allocated(dg_frag%density_send_slot_map)) then
+          if (allocated(dg_frag%density_send_slot_map)) then
             call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .false.)
           else
             call prepare_grid_buffers_owner_map_no_slot(i_local, igrid0, npt_blk, nxyz)
           end if
-          if (.not. distribute_project) then
-            do igrid = 1, npt_blk
-              if (owner_buf(igrid) < 0) cycle
-              if (owner_buf(igrid) == dg_frag%id) then
-                local_grid_count = local_grid_count + 1
-                local_grid_ids(local_grid_count) = igrid
-              else
-                remote_grid_count = remote_grid_count + 1
-                remote_grid_ids(remote_grid_count) = igrid
-                if (slot_buf(igrid) > 0) then
-                  valid_remote_grid_count = valid_remote_grid_count + 1
-                  valid_remote_grid_ids(valid_remote_grid_count) = igrid
-                end if
+          do igrid = 1, npt_blk
+            if (owner_buf(igrid) < 0) cycle
+            if (owner_buf(igrid) == dg_frag%id) then
+              local_grid_count = local_grid_count + 1
+              local_grid_ids(local_grid_count) = igrid
+            else
+              remote_grid_count = remote_grid_count + 1
+              remote_grid_ids(remote_grid_count) = igrid
+              if (slot_buf(igrid) > 0) then
+                valid_remote_grid_count = valid_remote_grid_count + 1
+                valid_remote_grid_ids(valid_remote_grid_count) = igrid
               end if
-            end do
-          else
-            do igrid = 1, npt_blk
-              if (owner_buf(igrid) < 0) cycle
-              if (owner_buf(igrid) == dg_frag%id) then
-                local_grid_count = local_grid_count + 1
-                local_grid_ids(local_grid_count) = igrid
-              else if (slot_buf(igrid) > 0) then
-                valid_subgroup_grid_count = valid_subgroup_grid_count + 1
-                valid_subgroup_grid_ids(valid_subgroup_grid_count) = igrid
-              end if
-            end do
-          end if
+            end if
+          end do
           call cpu_time(t_setup1)
           time_project_grid_prep = time_project_grid_prep + (t_setup1 - t_setup0)
 
@@ -590,7 +562,7 @@
               time_project_psi = time_project_psi + (t_psi1 - t_psi0)
               call cpu_time(t_rho0)
 
-!$omp parallel private(io, igrid, owner_rank, ixg, iyg, izg, rho_contrib, rho_raw_contrib, slot, pack_offset, rho_mix_accum)
+!$omp parallel private(io, igrid, owner_rank, ixg, iyg, izg, rho_contrib, rho_raw_contrib, slot, rho_mix_accum)
 !$omp do schedule(static)
               do igrid = 1, npt_blk
                 rho_mix_accum = 0.0d0
@@ -602,39 +574,6 @@
               end do
 !$omp end do
 
-              if (distribute_project .and. allocated(dg_frag%density_subgroup_send_slot_map)) then
-!$omp do schedule(static)
-                do idx_local = 1, local_grid_count
-                  igrid = local_grid_ids(idx_local)
-                  ixg = ixg_buf(igrid)
-                  iyg = iyg_buf(igrid)
-                  izg = izg_buf(igrid)
-                  rho_raw_contrib = rho_blk(igrid)
-                  rho_contrib = rho_raw_contrib
-                  if (allocated(dg_frag%density_inv_weight_local)) then
-                    rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-                  end if
-!$omp atomic
-                  charge_budget_local(1) = charge_budget_local(1) + rho_raw_contrib
-!$omp atomic
-                  charge_budget_local(2) = charge_budget_local(2) + rho_contrib
-                  rho_bf(ixg, iyg, izg) = rho_bf(ixg, iyg, izg) + rho_contrib
-                  rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
-                end do
-!$omp end do nowait
-!$omp do schedule(static)
-                do idx_subgroup = 1, valid_subgroup_grid_count
-                  igrid = valid_subgroup_grid_ids(idx_subgroup)
-                  owner_rank = owner_buf(igrid)
-                  slot = slot_buf(igrid)
-                  rho_contrib = rho_blk(igrid)
-                  pack_offset = subgroup_send_offset(owner_rank, 0)
-                  send_pack(pack_offset + slot) = send_pack(pack_offset + slot) + rho_contrib
-                  pack_offset = subgroup_send_offset(owner_rank, ispin)
-                  send_pack(pack_offset + slot) = send_pack(pack_offset + slot) + rho_contrib
-                end do
-!$omp end do
-              else
 !$omp do schedule(static)
                 do idx_local = 1, local_grid_count
                   igrid = local_grid_ids(idx_local)
@@ -701,7 +640,6 @@
                   rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                 end do
 !$omp end do
-              end if
 !$omp end parallel
               call cpu_time(t_rho1)
               time_project_rho = time_project_rho + (t_rho1 - t_rho0)
@@ -788,18 +726,13 @@
                 ! AllReduce rho_blk_partial across icomm_frag → rho_blk_accum
                 ! Note: comm_summation overwrites rho_blk_accum (does not accumulate into it)
                 call cpu_time(t_rho0)
-                if (distribute_project) then
-                  call comm_summation(rho_blk_partial(1:npt_blk), rho_blk_accum(1:npt_blk), &
-                                      npt_blk, dg_frag%icomm_frag)
-                else
-                  rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
-                end if
+                rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
                 call cpu_time(t_rho1)
                 time_project_rho_reduce = time_project_rho_reduce + (t_rho1 - t_rho0)
               end if
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
-!$omp parallel private(igrid, owner_rank, ixg, iyg, izg, rho_contrib, rho_raw_contrib, slot, pack_offset)
+!$omp parallel private(igrid, owner_rank, ixg, iyg, izg, rho_contrib, rho_raw_contrib, slot)
 !$omp do schedule(static)
                   do idx_local = 1, local_grid_count
                     igrid = local_grid_ids(idx_local)
@@ -873,26 +806,25 @@
           end do
         end do
         block_idx_global = block_idx_global + nblocks_ifrag
-      end do
-      call cpu_time(t_project1)
-      time_project = time_project + (t_project1 - t_project0)
-      if (allocated(D_frag_re)) deallocate(D_frag_re)
-      if (allocated(coef_re_frag)) deallocate(coef_re_frag)
-      if (allocated(D_partial_re)) deallocate(D_partial_re)
-      if (allocated(coef_re_full)) deallocate(coef_re_full)
-      if (allocated(coef_im_full)) deallocate(coef_im_full)
-      if (allocated(rho_blk_partial)) deallocate(rho_blk_partial)
-      if (dg_frag%is_frag_root) then
-        write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        density trace: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " stage=after-project dt=", time_project
-        write(*,'(1x,a,i0,a,i0,8(a,1pe12.4))') "        density trace: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, &
-          " setup=", time_project_setup, " psi=", time_project_psi, " rho=", time_project_rho, &
-          " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, &
-          " over=", time_project_overhead, " dmat=", time_project_dmat_build, &
-          " rho_red=", time_project_rho_reduce
-        flush(6)
-      end if
+    end do
+    call cpu_time(t_project1)
+    time_project = time_project + (t_project1 - t_project0)
+    if (allocated(D_frag_re)) deallocate(D_frag_re)
+    if (allocated(coef_re_frag)) deallocate(coef_re_frag)
+    if (allocated(D_partial_re)) deallocate(D_partial_re)
+    if (allocated(coef_re_full)) deallocate(coef_re_full)
+    if (allocated(coef_im_full)) deallocate(coef_im_full)
+    if (allocated(rho_blk_partial)) deallocate(rho_blk_partial)
+    if (dg_frag%is_frag_root) then
+      write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        density trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " stage=after-project dt=", time_project
+      write(*,'(1x,a,i0,a,i0,8(a,1pe12.4))') "        density trace: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, &
+        " setup=", time_project_setup, " psi=", time_project_psi, " rho=", time_project_rho, &
+        " grid=", time_project_grid_prep, " phi=", time_project_phi_pack, &
+        " over=", time_project_overhead, " dmat=", time_project_dmat_build, &
+        " rho_red=", time_project_rho_reduce
+      flush(6)
     end if
 
     if (dg_frag%is_frag_root) then
@@ -914,6 +846,18 @@
     do irank = 1, dg_frag%isize - 1
       send_displs(irank) = send_displs(irank-1) + send_counts(irank-1)
       recv_displs(irank) = recv_displs(irank-1) + recv_counts(irank-1)
+    end do
+    write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density alltoallv summary: rank=", dg_frag%id, &
+      " id_frag=", dg_frag%id_frag, " send_total=", sum(send_counts), " recv_total=", sum(recv_counts)
+    flush(6)
+    do irank = 0, dg_frag%isize - 1
+      if (send_counts(irank) > 0 .or. recv_counts(irank) > 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+          "        density alltoallv peer: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+          " peer=", irank, " send_count=", send_counts(irank), " recv_count=", recv_counts(irank), &
+          " send_pts=", dg_frag%density_send_count(irank), " recv_pts=", dg_frag%density_recv_map(irank)%npts
+        flush(6)
+      end if
     end do
     allocate(send_flat(max(1, sum(send_counts))), recv_flat(max(1, sum(recv_counts))))
     send_flat = 0.0d0
@@ -972,7 +916,6 @@
     call cpu_time(t_setup1)
     time_comm_unpack = time_comm_unpack + (t_setup1 - t_setup0)
     deallocate(send_flat, recv_flat, send_counts, recv_counts, send_displs, recv_displs)
-    if (allocated(subgroup_send_offset)) deallocate(subgroup_send_offset)
     call cpu_time(t_comm1)
     time_comm = time_comm + (t_comm1 - t_comm0)
     if (dg_frag%is_frag_root) then
@@ -1067,7 +1010,7 @@
     end if
 
     deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
-    deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids, valid_subgroup_grid_ids)
+    deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids)
     deallocate(basis_gid, valid_basis_ids)
     deallocate(phi_blk, rho_blk, rho_blk_accum, coef_blk_re, coef_blk_im, psi_blk_re, psi_blk_im, density_mat_re, density_tmp, &
       psi_blk, coef_occ_weighted)
@@ -1077,8 +1020,6 @@
     if (allocated(density_mix_tmp)) deallocate(density_mix_tmp)
     if (allocated(transform_frag)) deallocate(transform_frag)
     if (allocated(transform_pw)) deallocate(transform_pw)
-    if (allocated(send_pack)) deallocate(send_pack)
-    if (allocated(send_sum)) deallocate(send_sum)
     deallocate(rho_bf, rho_s_bf)
     deallocate(rho_send, rho_recv)
     call cpu_time(t_total1)
@@ -1256,5 +1197,19 @@
       current_start = 1
     end do
   end function periodic_range_overlaps
+
+  integer function map_global_to_phi_box_coord_ham(ig, lb, ub, lgtot) result(iloc)
+    implicit none
+    integer, intent(in) :: ig, lb, ub, lgtot
+
+    iloc = modulo(ig - 1, lgtot) + 1
+    if (iloc < lb) then
+      iloc = iloc + ((lb - iloc + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc > ub) then
+      iloc = iloc - ((iloc - ub + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc < lb .or. iloc > ub) iloc = 0
+  end function map_global_to_phi_box_coord_ham
 
   end subroutine calculate_density_from_fragments
