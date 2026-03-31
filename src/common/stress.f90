@@ -96,6 +96,8 @@ contains
       end if
     end if
 
+    if(allocated(system%stress_nl_l)) deallocate(system%stress_nl_l)
+
     system%stress_kin = 0d0
     system%stress_har = 0d0
     system%stress_har_shadow = 0d0
@@ -137,7 +139,7 @@ contains
     call calc_stress_har(system, info, mg, fg, poisson, energy)
     call calc_stress_xc(system, info, mg, ppn, rho_s, Vxc, energy, xc_func)
     call calc_stress_loc(system, pp, fg, info, mg, ppg, poisson, energy)
-    call calc_stress_nl(system, info, mg, stencil, ppg, tpsi, energy, field_state)
+    call calc_stress_nl(system, pp, info, mg, stencil, ppg, tpsi, energy, field_state)
     call calc_stress_ewa(system, pp, fg, info, mg, ewald)
 
     if(yn_stress_loc_fd == 'y') then
@@ -533,14 +535,16 @@ contains
     system%stress_loc = -strs_sum
   end subroutine calc_stress_loc
 
-  subroutine calc_stress_nl(system, info, mg, stencil, ppg, tpsi, energy, field_state)
+  subroutine calc_stress_nl(system, pp, info, mg, stencil, ppg, tpsi, energy, field_state)
     use structures
     use math_constants,     only: zi
     use stencil_sub,        only: calc_gradient_psi
     use nonlocal_potential, only: calc_uVpsi, calc_uVpsi_rdivided
     use communication,      only: comm_summation
+    use salmon_global,      only: stress_fd_detail, kion
     implicit none
     type(s_dft_system),         intent(inout) :: system
+    type(s_pp_info),            intent(in)    :: pp
     type(s_parallel_info),      intent(in)    :: info
     type(s_rgrid),              intent(in)    :: mg
     type(s_stencil),            intent(in)    :: stencil
@@ -548,14 +552,27 @@ contains
     type(s_orbital),            intent(inout) :: tpsi
     type(s_dft_energy),         intent(in)    :: energy
     type(s_stress_field_state), intent(in)    :: field_state
-    integer :: ix, iy, iz, ik, io, ispin, im, ilma, ia, j, a, b
-    real(8) :: rtmp, kAc(3), strs(3,3), strs_sum(3,3), V
+    integer :: ix, iy, iz, ik, io, ispin, im, ilma, ia, j, a, b, ll, lmax_nl
+    real(8) :: rtmp, kAc(3), strs(3,3), strs_sum(3,3), V, nl_energy_part
     complex(8) :: psi_r, w(3), r_uVpsi_b(3), uVpsi_ilma
     complex(8), allocatable :: gtpsi(:,:,:,:), uVpsibox(:,:,:,:,:), uVpsibox2(:,:,:,:,:)
+    integer, allocatable :: ll_of_ilma(:)
+    real(8), allocatable :: strs_l(:,:,:), strs_l_sum(:,:,:), e_nl_l(:), e_nl_l_sum(:)
+    logical :: want_l_detail
 
     V = system%det_a
     im = 1
     strs = 0d0
+    want_l_detail = (trim(stress_fd_detail) == 'high')
+
+    if(want_l_detail) then
+      call build_nl_l_channel_map(pp, kion, ppg%nlma, ll_of_ilma, lmax_nl)
+      allocate(strs_l(0:lmax_nl,3,3), strs_l_sum(0:lmax_nl,3,3))
+      allocate(e_nl_l(0:lmax_nl), e_nl_l_sum(0:lmax_nl))
+      strs_l = 0d0
+      e_nl_l = 0d0
+    end if
+
     allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
 
     if(info%if_divide_rspace) then
@@ -574,6 +591,11 @@ contains
       do ilma = 1, ppg%nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi_ilma = uVpsibox2(ispin, io, ik, im, ilma)
+        if(want_l_detail) then
+          ll = ll_of_ilma(ilma)
+          nl_energy_part = rtmp * dble(conjg(uVpsi_ilma) * uVpsi_ilma) / ppg%rinv_uvu(ilma)
+          e_nl_l(ll) = e_nl_l(ll) + nl_energy_part
+        end if
         do a = 1, 3
           r_uVpsi_b = (0d0, 0d0)
           ! Follow-up micro-optimization: kAc(1:3) is rebuilt inside the tensor-row loop
@@ -599,6 +621,7 @@ contains
           end do
           do b = 1, 3
             strs(a,b) = strs(a,b) + 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
+            if(want_l_detail) strs_l(ll,a,b) = strs_l(ll,a,b) + 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
           end do
         end do
       end do
@@ -611,12 +634,62 @@ contains
     if(allocated(uVpsibox2)) deallocate(uVpsibox2)
 
     call comm_summation(strs, strs_sum, 9, info%icomm_rko)
+    if(want_l_detail) then
+      call comm_summation(strs_l, strs_l_sum, size(strs_l), info%icomm_rko)
+      call comm_summation(e_nl_l, e_nl_l_sum, size(e_nl_l), info%icomm_rko)
+    end if
     strs_sum = strs_sum / V
     do a = 1, 3
       strs_sum(a,a) = strs_sum(a,a) + energy%E_ion_nloc / V
     end do
     system%stress_nl = -strs_sum
+
+    if(want_l_detail) then
+      allocate(system%stress_nl_l(0:lmax_nl,3,3))
+      system%stress_nl_l = -strs_l_sum / V
+      do ll = 0, lmax_nl
+        do a = 1, 3
+          system%stress_nl_l(ll,a,a) = system%stress_nl_l(ll,a,a) - e_nl_l_sum(ll) / V
+        end do
+      end do
+      deallocate(strs_l, strs_l_sum, e_nl_l, e_nl_l_sum, ll_of_ilma)
+    end if
   end subroutine calc_stress_nl
+
+  subroutine build_nl_l_channel_map(pp, kion, nlma, ll_of_ilma, lmax_nl)
+    use structures
+    implicit none
+    type(s_pp_info),      intent(in)  :: pp
+    integer,              intent(in)  :: kion(:)
+    integer,              intent(in)  :: nlma
+    integer, allocatable, intent(out) :: ll_of_ilma(:)
+    integer,              intent(out) :: lmax_nl
+    integer :: ia, ik, ll, iproj, m, ilma
+
+    lmax_nl = 0
+    do ia = 1, size(kion)
+      ik = kion(ia)
+      lmax_nl = max(lmax_nl, pp%mlps(ik))
+    end do
+
+    allocate(ll_of_ilma(nlma))
+    ll_of_ilma = -1
+
+    ilma = 0
+    do ia = 1, size(kion)
+      ik = kion(ia)
+      do ll = 0, pp%mlps(ik)
+        do iproj = 1, pp%nproj(ll,ik)
+          do m = -ll, ll
+            ilma = ilma + 1
+            ll_of_ilma(ilma) = ll
+          end do
+        end do
+      end do
+    end do
+
+    if(ilma /= nlma) stop "error: build_nl_l_channel_map size mismatch"
+  end subroutine build_nl_l_channel_map
 
   subroutine calc_stress_ewa(system, pp, fg, info, mg, ewald)
     use structures

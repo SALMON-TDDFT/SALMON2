@@ -1606,41 +1606,45 @@ contains
 
          if(yn_out_stress_decomp == 'y') then
            write(fh,*)
-           write(fh,*) "Stress decomposition pressure [GPa]"
-           term_gpa = system%stress_kin * au_pressure_gpa
-           call cleanup_stress_tensor_for_output(term_gpa)
-           write(fh,'(1x,"Kinetic    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           term_gpa = system%stress_har * au_pressure_gpa
-           call cleanup_stress_tensor_for_output(term_gpa)
-           write(fh,'(1x,"Hartree    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           term_gpa = system%stress_xc * au_pressure_gpa
-           call cleanup_stress_tensor_for_output(term_gpa)
-           write(fh,'(1x,"XC         =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           term_gpa = system%stress_loc * au_pressure_gpa
-           call cleanup_stress_tensor_for_output(term_gpa)
-           write(fh,'(1x,"Local      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           if(yn_stress_loc_fd == 'y') then
-             term_gpa = system%stress_loc_fd * au_pressure_gpa
+           if(stress_detail_level == 1) then
+             write(fh,*) "Stress decomposition pressure [GPa]"
+             term_gpa = system%stress_kin * au_pressure_gpa
              call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"Local(G-FD)=",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           end if
-           term_gpa = system%stress_nl * au_pressure_gpa
-           call cleanup_stress_tensor_for_output(term_gpa)
-           write(fh,'(1x,"Nonlocal   =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           term_gpa = system%stress_ewa * au_pressure_gpa
-           call cleanup_stress_tensor_for_output(term_gpa)
-           write(fh,'(1x,"Ewald      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           if(stress_fd_detail == 'high') then
-             write(fh,*)
+             write(fh,'(1x,"Kinetic    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+             term_gpa = system%stress_har * au_pressure_gpa
+             call cleanup_stress_tensor_for_output(term_gpa)
+             write(fh,'(1x,"Hartree    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+             term_gpa = system%stress_xc * au_pressure_gpa
+             call cleanup_stress_tensor_for_output(term_gpa)
+             write(fh,'(1x,"XC         =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+             term_gpa = system%stress_loc * au_pressure_gpa
+             call cleanup_stress_tensor_for_output(term_gpa)
+             write(fh,'(1x,"Local      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+             term_gpa = system%stress_nl * au_pressure_gpa
+             call cleanup_stress_tensor_for_output(term_gpa)
+             write(fh,'(1x,"Nonlocal   =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+             term_gpa = system%stress_ewa * au_pressure_gpa
+             call cleanup_stress_tensor_for_output(term_gpa)
+             write(fh,'(1x,"Ewald      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           else
              write(fh,*) "Stress decomposition tensor [GPa]"
-             write(fh,'(1x,a8,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
-             call write_stress_tensor_row_gpa(fh, 'Kinetic', system%stress_kin, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Hartree', system%stress_har, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'XC',      system%stress_xc,  au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Local',   system%stress_loc, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Ewald',   system%stress_ewa, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Total',   system%stress_tensor, au_pressure_gpa)
+             write(fh,'(1x,a10,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+             call write_stress_tensor_row_gpa(fh, 'Kinetic',  system%stress_kin, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Hartree',  system%stress_har, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'XC',       system%stress_xc,  au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Local',    system%stress_loc, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl,  au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Ewald',    system%stress_ewa, au_pressure_gpa)
+             if(stress_detail_level == 3) then
+               write(fh,*)
+               write(fh,*) "Stress decomposition detail [GPa]"
+               write(fh,'(1x,a10,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+               call write_stress_tensor_row_gpa(fh, 'Local-SR', &
+                    system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)
+               call write_stress_tensor_row_gpa(fh, 'Local-LR', &
+                    system%stress_loc_lr_grad + system%stress_loc_lr_diag, au_pressure_gpa)
+               if(allocated(system%stress_nl_l)) call write_nl_l_channel_tensor_rows_gpa(fh, system%stress_nl_l, au_pressure_gpa)
+             end if
            end if
          end if
        end if
@@ -1685,10 +1689,12 @@ contains
     write(fh,'(a)') '# col  6: E_ion_loc [Ha]'
     write(fh,'(a)') '# col  7: E_ion_nloc [Ha]'
     write(fh,'(a)') '# col  8: E_ion_ion [Ha]'
+    write(fh,'(a)') '#'
     write(fh,'(a)') '# col  9: E_loc_sr [Ha]        (middle+, else 0)'
     write(fh,'(a)') '# col 10: E_loc_lr [Ha]        (middle+, else 0)'
     write(fh,'(a)') '# col 11: E_ewa_G [Ha]         (middle+, else 0)'
     write(fh,'(a)') '# col 12: E_ewa_R [Ha]         (middle+, else 0)'
+    write(fh,'(a)') '#'
     write(fh,'(a)') '# col 13: P_kin [GPa]          (high, else 0)'
     write(fh,'(a)') '# col 14: P_har [GPa]          (high, else 0)'
     write(fh,'(a)') '# col 15: P_xc [GPa]           (high, else 0)'
@@ -1702,6 +1708,7 @@ contains
     write(fh,'(a)') '# col 23: P_ewa_R [GPa]        (high, else 0)'
     write(fh,'(a)') '# col 24: P_nl [GPa]           (high, else 0)'
     write(fh,'(a)') '# col 25: P_total [GPa]        (high, else 0)'
+    write(fh,'(a)') '#'
 
     if(stress_fd_detail == 'middle' .or. stress_fd_detail == 'high') then
       e_sr    = system%stress_loc_sr_energy
@@ -1759,12 +1766,50 @@ contains
     real(8),          intent(in) :: strs(3,3), au_pressure_gpa
     real(8) :: strs_gpa(3,3), pressure_gpa
 
-    strs_gpa = strs * au_pressure_gpa
+    strs_gpa = 0.5d0 * (strs + transpose(strs)) * au_pressure_gpa
     call cleanup_stress_tensor_for_output(strs_gpa)
     pressure_gpa = -stress_tensor_trace(strs_gpa) / 3d0
-    write(fh,'(1x,a8,7e16.8)') label, strs_gpa(1,1), strs_gpa(2,2), strs_gpa(3,3), &
+    write(fh,'(1x,a10,7e16.8)') label, strs_gpa(1,1), strs_gpa(2,2), strs_gpa(3,3), &
          strs_gpa(1,2), strs_gpa(2,3), strs_gpa(1,3), pressure_gpa
   end subroutine write_stress_tensor_row_gpa
+
+  subroutine write_nl_l_channel_tensor_rows_gpa(fh, stress_nl_l, au_pressure_gpa)
+    implicit none
+    integer,      intent(in) :: fh
+    real(8),      intent(in) :: stress_nl_l(0:,:,:), au_pressure_gpa
+    integer :: ll
+    real(8) :: strs(3,3)
+
+    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
+      strs = stress_nl_l(ll,:,:)
+      if(maxval(abs(strs)) < 1d-14) cycle
+      call write_stress_tensor_row_gpa(fh, nl_l_channel_label(ll), strs, au_pressure_gpa)
+    end do
+  end subroutine write_nl_l_channel_tensor_rows_gpa
+
+  character(10) function nl_l_channel_label(ll)
+    implicit none
+    integer, intent(in) :: ll
+
+    select case(ll)
+    case(0)
+      nl_l_channel_label = 'NL-s'
+    case(1)
+      nl_l_channel_label = 'NL-p'
+    case(2)
+      nl_l_channel_label = 'NL-d'
+    case(3)
+      nl_l_channel_label = 'NL-f'
+    case(4)
+      nl_l_channel_label = 'NL-g'
+    case(5)
+      nl_l_channel_label = 'NL-h'
+    case(6)
+      nl_l_channel_label = 'NL-i'
+    case default
+      write(nl_l_channel_label,'("NL-l",i0)') ll
+    end select
+  end function nl_l_channel_label
 
   pure real(8) function stress_tensor_trace(strs)
     implicit none
