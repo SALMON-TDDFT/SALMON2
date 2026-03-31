@@ -664,7 +664,7 @@ contains
     integer,              intent(in)  :: nlma
     integer, allocatable, intent(out) :: ll_of_ilma(:)
     integer,              intent(out) :: lmax_nl
-    integer :: ia, ik, ll, iproj, m, ilma
+    integer :: ia, ik, ll, l, l0, m, ilma
 
     lmax_nl = 0
     do ia = 1, size(kion)
@@ -678,13 +678,16 @@ contains
     ilma = 0
     do ia = 1, size(kion)
       ik = kion(ia)
+      l0 = 0
       do ll = 0, pp%mlps(ik)
-        do iproj = 1, pp%nproj(ll,ik)
+        do l = l0, l0 + pp%nproj(ll,ik) - 1
+          if(pp%inorm(l,ik) == 0) cycle
           do m = -ll, ll
             ilma = ilma + 1
             ll_of_ilma(ilma) = ll
           end do
         end do
+        l0 = l
       end do
     end do
 
