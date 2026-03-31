@@ -1630,6 +1630,18 @@ contains
            term_gpa = system%stress_ewa * au_pressure_gpa
            call cleanup_stress_tensor_for_output(term_gpa)
            write(fh,'(1x,"Ewald      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
+           if(stress_fd_detail == 'high') then
+             write(fh,*)
+             write(fh,*) "Stress decomposition tensor [GPa]"
+             write(fh,'(1x,a8,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+             call write_stress_tensor_row_gpa(fh, 'Kinetic', system%stress_kin, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Hartree', system%stress_har, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'XC',      system%stress_xc,  au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Local',   system%stress_loc, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Ewald',   system%stress_ewa, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'Total',   system%stress_tensor, au_pressure_gpa)
+           end if
          end if
        end if
 
@@ -1739,6 +1751,20 @@ contains
       strs = 0d0
     end where
   end subroutine cleanup_stress_tensor_for_output
+
+  subroutine write_stress_tensor_row_gpa(fh, label, strs, au_pressure_gpa)
+    implicit none
+    integer,          intent(in) :: fh
+    character(*),     intent(in) :: label
+    real(8),          intent(in) :: strs(3,3), au_pressure_gpa
+    real(8) :: strs_gpa(3,3), pressure_gpa
+
+    strs_gpa = strs * au_pressure_gpa
+    call cleanup_stress_tensor_for_output(strs_gpa)
+    pressure_gpa = -stress_tensor_trace(strs_gpa) / 3d0
+    write(fh,'(1x,a8,7e16.8)') label, strs_gpa(1,1), strs_gpa(2,2), strs_gpa(3,3), &
+         strs_gpa(1,2), strs_gpa(2,3), strs_gpa(1,3), pressure_gpa
+  end subroutine write_stress_tensor_row_gpa
 
   pure real(8) function stress_tensor_trace(strs)
     implicit none
