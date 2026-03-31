@@ -321,7 +321,7 @@ contains
     system%stress_xc = 0d0
     system%stress_xc_e_vxc = E_vxc
     do a = 1, 3
-      system%stress_xc(a,a) = (E_vxc - energy%E_xc) / V
+      system%stress_xc(a,a) = -(E_vxc - energy%E_xc) / V
     end do
   end subroutine calc_stress_xc
 
