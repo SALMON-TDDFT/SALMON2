@@ -226,7 +226,7 @@ contains
     do a = 1, 3
       strs_sum(a,a) = strs_sum(a,a) + energy%E_h / V
     end do
-    system%stress_har = strs_sum
+    system%stress_har = -strs_sum
   end subroutine calc_stress_har
 
   subroutine calc_stress_har_shadow(system, info, mg, stencil, srg_scalar, Vh, energy)
