@@ -934,7 +934,7 @@ contains
     yn_out_stress       = 'n'
     yn_out_stress_decomp = 'n'
     yn_stress_loc_fd    = 'n'
-    stress_fd_detail    = 'C'
+    stress_fd_detail    = 'high'
     out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -2941,9 +2941,20 @@ contains
       stop "yn_out_stress='y' requires spin='unpolarized'"
     if(yn_out_stress_decomp == 'y' .and. yn_out_stress /= 'y') &
       stop "yn_out_stress_decomp='y' requires yn_out_stress='y'"
-    if(yn_out_stress == 'y' .and. &
-       stress_fd_detail /= 'A' .and. stress_fd_detail /= 'B' .and. stress_fd_detail /= 'C') &
-      stop "stress_fd_detail must be 'A', 'B', or 'C'"
+    if(yn_out_stress == 'y') then
+      select case(trim(stress_fd_detail))
+      case('A')
+        stress_fd_detail = 'low'
+      case('B')
+        stress_fd_detail = 'middle'
+      case('C')
+        stress_fd_detail = 'high'
+      case('low','middle','high')
+        continue
+      case default
+        stop "stress_fd_detail must be 'low', 'middle', or 'high' (aliases: 'A', 'B', 'C')"
+      end select
+    end if
     if(yn_out_stress == 'y' .and. out_stress_step < 1) &
       stop "out_stress_step must be >= 1"
     

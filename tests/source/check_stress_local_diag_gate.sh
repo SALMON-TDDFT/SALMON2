@@ -9,8 +9,9 @@ if grep -Eq 'E_sr[[:space:]]*/[[:space:]]*3d0' "$stress_f90"; then
   exit 1
 fi
 
-grep -F "strs_sum(a,a) = strs_sum(a,a) + (E_sr + E_lr) / V" "$stress_f90" >/dev/null
-grep -F "system%stress_loc_diag(a,a) = (E_sr + E_lr) / V" "$stress_f90" >/dev/null
+grep -F "strs_sum(a,a) = strs_grad_sum(a,a) + strs_diag_sum(a,a)" "$stress_f90" >/dev/null
+grep -F "strs_diag_sum(a,a) = (E_sr + E_lr) / V" "$stress_f90" >/dev/null
+grep -F "system%stress_loc_diag(a,a) = -strs_diag_sum(a,a)" "$stress_f90" >/dev/null
 grep -F "strs_sum = strs_sum / V" "$stress_f90" >/dev/null
 
 if grep -Fq "strs_sum = strs_sum / V**2" "$stress_f90"; then

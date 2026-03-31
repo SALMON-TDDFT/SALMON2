@@ -339,7 +339,7 @@ module salmon_global
   character(1)   :: yn_out_stress        = 'n'
   character(1)   :: yn_out_stress_decomp = 'n'
   character(1)   :: yn_stress_loc_fd     = 'n'
-  character(1)   :: stress_fd_detail     = 'C'
+  character(6)   :: stress_fd_detail     = 'high'
   integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps
