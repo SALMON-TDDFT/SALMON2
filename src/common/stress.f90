@@ -1,6 +1,6 @@
 !
 !  SALMON2 stress tensor implementation
-!  Nielsen-Martin formula: sigma_{ab} = -(1/V) dE/d(eps_{ab})
+!  Nielsen-Martin formula: sigma_{ab} = +(1/V) dE/d(eps_{ab})
 !
 module stress_sub
   implicit none
