@@ -596,7 +596,7 @@ contains
             end do
           end do
           do b = 1, 3
-            strs(a,b) = strs(a,b) + rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
+            strs(a,b) = strs(a,b) + 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
           end do
         end do
       end do

@@ -3,6 +3,7 @@ set(STRESS_SOURCE_TESTS
   check_stress_ewald_g_sign.sh
   check_stress_virial_diagnostics.sh
   check_stress_nl_virial_diagnostic.sh
+  check_stress_nl_factor_gate.sh
   check_stress_hartree_shadow.sh
   check_stress_local_fullobj_diagnostic.sh
   check_stress_local_diag_gate.sh
