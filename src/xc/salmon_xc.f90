@@ -26,6 +26,7 @@ module salmon_xc
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
+  use builtin_r2scan, only: exc_cor_r2scan
   use builtin_tbmbj, only: exc_cor_tbmbj
   use builtin_pw, only: exc_cor_pw
 
@@ -47,6 +48,7 @@ module salmon_xc
   integer, parameter :: salmon_xctype_tpss  = 5
   integer, parameter :: salmon_xctype_vs98  = 6
   integer, parameter :: salmon_xctype_pw    = 7
+  integer, parameter :: salmon_xctype_r2scan = 8
 #ifdef USE_LIBXC
   integer, parameter :: salmon_xctype_libxc = 101
 #endif
@@ -675,6 +677,14 @@ contains
         xc%use_current = .true.
         stop "VS98 functional is not implemented" ! future work
 
+      case ('r2scan')
+
+        xc%xctype(1) = salmon_xctype_r2scan
+        xc%use_gradient = .true.
+        xc%use_laplacian = .true.
+        xc%use_kinetic_energy = .true.
+        return
+
       ! Please insert additional functional here:
       ! e.g.
       ! case ('additional_functional')
@@ -988,6 +998,8 @@ contains
       call exec_builtin_pw()
     case(salmon_xctype_tbmbj)
       call exec_builtin_tbmbj()
+    case(salmon_xctype_r2scan)
+      call exec_builtin_r2scan()
 #ifdef USE_LIBXC
     case(salmon_xctype_libxc)
      if (xc%ispin == 0) then 
@@ -1280,6 +1292,14 @@ contains
       call nvtxEndRange
       return
     end subroutine exec_builtin_tbmbj
+
+
+    subroutine exec_builtin_r2scan()
+      implicit none
+
+      if (xc%ispin /= 0) stop "r2SCAN supports only nspin=1"
+      stop "builtin r2SCAN kernel not implemented"
+    end subroutine exec_builtin_r2scan
 
 
 
