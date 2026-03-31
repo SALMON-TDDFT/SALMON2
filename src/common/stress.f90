@@ -102,6 +102,8 @@ contains
     system%stress_har = 0d0
     system%stress_har_shadow = 0d0
     system%stress_xc = 0d0
+    system%stress_x = 0d0
+    system%stress_c = 0d0
     system%stress_loc = 0d0
     system%stress_loc_fd = 0d0
     system%stress_loc_grad = 0d0
@@ -123,6 +125,8 @@ contains
     system%stress_loc_sr_scr_energy = 0d0
     system%stress_loc_lr_scr_energy = 0d0
     system%stress_xc_e_vxc = 0d0
+    system%stress_x_e_vx = 0d0
+    system%stress_c_e_vc = 0d0
     system%stress_ewa_g = 0d0
     system%stress_ewa_r = 0d0
     system%stress_ewa_g_grad = 0d0
@@ -300,32 +304,88 @@ contains
     type(s_dft_energy),    intent(in)    :: energy
     type(s_xc_functional), intent(in)    :: xc_func
     integer :: ix, iy, iz, ispin, a
-    real(8) :: rho_xc, E_vxc_loc, E_vxc, V
+    real(8) :: rho_xc, trho
+    real(8) :: exc_x, exc_c, vxc_x, vxc_c
+    real(8) :: E_vx_loc, E_vc_loc, E_vx, E_vc
+    real(8) :: E_x_loc, E_c_loc, E_x, E_c
+    real(8) :: V
 
     if(xc_func%use_gradient) stop "stress tensor supports only built-in PZ LDA XC"
 
     V = system%det_a
-    E_vxc_loc = 0d0
+    E_vx_loc = 0d0
+    E_vc_loc = 0d0
+    E_x_loc = 0d0
+    E_c_loc = 0d0
     do ispin = 1, system%nspin
       do iz = mg%is(3), mg%ie(3)
       do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
         rho_xc = rho_s(ispin)%f(ix,iy,iz)
         if(allocated(ppn%rho_nlcc)) rho_xc = rho_xc + 0.5d0 * ppn%rho_nlcc(ix,iy,iz)
-        E_vxc_loc = E_vxc_loc + rho_xc * Vxc(ispin)%f(ix,iy,iz)
+        trho = 2d0 * rho_xc
+        call calc_builtin_pz_xc_split(trho, exc_x, exc_c, vxc_x, vxc_c)
+        E_x_loc = E_x_loc + trho * exc_x
+        E_c_loc = E_c_loc + trho * exc_c
+        E_vx_loc = E_vx_loc + rho_xc * vxc_x
+        E_vc_loc = E_vc_loc + rho_xc * vxc_c
       end do
       end do
       end do
     end do
-    E_vxc_loc = E_vxc_loc * system%Hvol
-    call comm_summation(E_vxc_loc, E_vxc, info%icomm_r)
+    E_x_loc = E_x_loc * system%Hvol
+    E_c_loc = E_c_loc * system%Hvol
+    E_vx_loc = E_vx_loc * system%Hvol
+    E_vc_loc = E_vc_loc * system%Hvol
+    call comm_summation(E_x_loc, E_x, info%icomm_r)
+    call comm_summation(E_c_loc, E_c, info%icomm_r)
+    call comm_summation(E_vx_loc, E_vx, info%icomm_r)
+    call comm_summation(E_vc_loc, E_vc, info%icomm_r)
 
+    system%stress_x = 0d0
+    system%stress_c = 0d0
     system%stress_xc = 0d0
-    system%stress_xc_e_vxc = E_vxc
+    system%stress_x_e_vx = E_vx
+    system%stress_c_e_vc = E_vc
     do a = 1, 3
-      system%stress_xc(a,a) = -(E_vxc - energy%E_xc) / V
+      system%stress_x(a,a) = -(E_vx - E_x) / V
+      system%stress_c(a,a) = -(E_vc - E_c) / V
     end do
+    system%stress_xc = system%stress_x + system%stress_c
+    system%stress_xc_e_vxc = system%stress_x_e_vx + system%stress_c_e_vc
   end subroutine calc_stress_xc
+
+  pure subroutine calc_builtin_pz_xc_split(trho, exc_x, exc_c, vxc_x, vxc_c)
+    implicit none
+    real(8), parameter :: pi = 3.141592653589793d0
+    real(8), parameter :: gammaU = -0.1423d0, beta1U = 1.0529d0
+    real(8), parameter :: beta2U = 0.3334d0, AU = 0.0311d0, BU = -0.048d0
+    real(8), parameter :: CU = 0.002d0, DU = -0.0116d0
+    real(8), parameter :: const = 0.75d0 * (3d0 / (2d0 * pi))**(2d0 / 3d0)
+    real(8), intent(in)  :: trho
+    real(8), intent(out) :: exc_x, exc_c, vxc_x, vxc_c
+    real(8) :: ttrho, rs, rssq, rsln
+    real(8) :: dexc_x_drho, dexc_c_drho
+
+    ttrho = trho + 1d-10
+    rs = (3d0 / (4d0 * pi * ttrho))**(1d0 / 3d0)
+
+    exc_x = -const / rs
+    dexc_x_drho = exc_x / (3d0 * ttrho)
+    vxc_x = exc_x + ttrho * dexc_x_drho
+
+    if(rs > 1d0) then
+      rssq = sqrt(rs)
+      exc_c = gammaU / (1d0 + beta1U * rssq + beta2U * rs)
+      dexc_c_drho = gammaU * (0.5d0 * beta1U * rssq + beta2U * rs) / (3d0 * ttrho) &
+                  / (1d0 + beta1U * rssq + beta2U * rs)**2
+    else
+      rsln = log(rs)
+      exc_c = AU * rsln + BU + CU * rs * rsln + DU * rs
+      dexc_c_drho = -rs / (3d0 * ttrho) * (AU / rs + CU * (rsln + 1d0) + DU)
+    end if
+    vxc_c = exc_c + ttrho * dexc_c_drho
+  end subroutine calc_builtin_pz_xc_split
 
   subroutine calc_stress_kin(system, info, mg, stencil, ppg, tpsi, field_state)
     use structures

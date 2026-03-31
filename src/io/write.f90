@@ -1644,6 +1644,9 @@ contains
                write(fh,*)
                write(fh,*) "Stress decomposition detail [GPa]"
                write(fh,'(1x,a12,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+               call write_stress_tensor_row_gpa(fh, '  XC', system%stress_xc, au_pressure_gpa)
+               call write_stress_tensor_row_gpa(fh, '    X', system%stress_x, au_pressure_gpa)
+               call write_stress_tensor_row_gpa(fh, '    C', system%stress_c, au_pressure_gpa)
                call write_stress_tensor_row_gpa(fh, '  Local', system%stress_loc, au_pressure_gpa)
                call write_stress_tensor_row_gpa(fh, '    Local-SR', &
                     system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)

@@ -11,6 +11,7 @@ set(STRESS_SOURCE_TESTS
   check_stress_local_grad_norm_gate.sh
   check_stress_local_grad_form_gate.sh
   check_stress_convention_a_sign_flip.sh
+  check_stress_xc_split.sh
 )
 
 foreach(test_script IN LISTS STRESS_SOURCE_TESTS)
