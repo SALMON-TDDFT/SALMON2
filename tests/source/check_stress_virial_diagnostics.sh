@@ -10,7 +10,7 @@ grep -Fq 'virial_har = stress_tensor_trace(system%stress_har) * system%det_a + e
 grep -Fq 'Tr(har)*V + E_h' "$write_f90"
 grep -Fq 'Tr(xc)*V + 3(E_vxc-E_xc)' "$write_f90"
 grep -Fq 'Tr(loc_lr)*V + E_lr' "$write_f90"
-grep -Fq 'Tr(ewa)*V - E_ion_ion' "$write_f90"
+grep -Fq 'Tr(ewa)*V + E_ion_ion' "$write_f90"
 grep -Fq 'Residual_kin_har_xc' "$write_f90"
 
 ! rg -F -q 'Energy decomposition [Hartree]' "$write_f90"

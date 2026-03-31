@@ -1576,13 +1576,13 @@ contains
                      + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
            virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) &
                                   * system%det_a + system%stress_loc_lr_energy
-           virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a - energy%E_ion_ion
+           virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a + energy%E_ion_ion
            virial_known_residual = virial_kin + virial_har + virial_xc
            write(fh,'(1x,"Tr(kin)*V + 2E_kin      =",e16.8)') virial_kin
            write(fh,'(1x,"Tr(har)*V + E_h         =",e16.8)') virial_har
            write(fh,'(1x,"Tr(xc)*V + 3(E_vxc-E_xc) =",e16.8)') virial_xc
            write(fh,'(1x,"Tr(loc_lr)*V + E_lr      =",e16.8)') virial_loc_lr_residual
-           write(fh,'(1x,"Tr(ewa)*V - E_ion_ion    =",e16.8)') virial_ewa
+           write(fh,'(1x,"Tr(ewa)*V + E_ion_ion    =",e16.8)') virial_ewa
            write(fh,'(1x,"Residual_kin_har_xc    =",e16.8)') virial_known_residual
          end if
          if(stress_fd_detail == 'high') then
