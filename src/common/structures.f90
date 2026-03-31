@@ -83,6 +83,7 @@ module structures
     real(8) :: stress_loc_lr_energy
     real(8) :: stress_loc_sr_scr_energy
     real(8) :: stress_loc_lr_scr_energy
+    real(8) :: stress_xc_e_vxc
     real(8) :: stress_ewa_g(3,3)
     real(8) :: stress_ewa_r(3,3)
     real(8) :: stress_ewa_g_grad(3,3)

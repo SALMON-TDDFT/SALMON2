@@ -1438,8 +1438,15 @@ contains
     real(8) :: virial_kin
     real(8) :: virial_har
     real(8) :: virial_har_shadow
+    real(8) :: virial_xc
     real(8) :: virial_nl
     real(8) :: virial_nl_grad
+    real(8) :: virial_total
+    real(8) :: virial_known_trace
+    real(8) :: virial_known_rhs
+    real(8) :: virial_known_residual
+    real(8) :: virial_loc_ewa
+    real(8) :: virial_remainder_after_known
     real(8) :: e_kin_from_stress
     real(8) :: pressure_term_gpa
     real(8) :: pressure_nl_diag_gpa
@@ -1544,13 +1551,33 @@ contains
          virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
          virial_har = stress_tensor_trace(system%stress_har) * system%det_a - energy%E_h
          virial_har_shadow = stress_tensor_trace(system%stress_har_shadow) * system%det_a - energy%E_h
+         virial_nl = stress_tensor_trace(system%stress_nl) * system%det_a
+         virial_nl_grad = virial_nl - 3d0 * energy%E_ion_nloc
          write(fh,'(1x,"Tr(kin)*V + 2E_kin =",e16.8)') virial_kin
          write(fh,'(1x,"Tr(har)*V - E_h    =",e16.8)') virial_har
          write(fh,'(1x,"Tr(har_shadow)*V - E_h =",e16.8)') virial_har_shadow
          write(fh,*)
+         write(fh,*) "Total cancellation diagnostics [Hartree]"
+         virial_total = stress_tensor_trace(system%stress_tensor) * system%det_a
+         virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a &
+                   - 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+         virial_known_trace = stress_tensor_trace(system%stress_kin + system%stress_har &
+                             + system%stress_xc + system%stress_nl) * system%det_a
+         virial_known_rhs = -2d0 * energy%E_kin + energy%E_h &
+                          + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+         virial_loc_ewa = stress_tensor_trace(system%stress_loc + system%stress_ewa) * system%det_a
+         write(fh,'(1x,"Tr(total)*V            =",e16.8)') virial_total
+         write(fh,'(1x,"Tr(xc)*V - 3(E_vxc-E_xc) =",e16.8)') virial_xc
+         write(fh,'(1x,"Tr(kin+har+xc+nl)*V   =",e16.8)') virial_known_trace
+         virial_known_rhs = virial_known_rhs + virial_nl
+         write(fh,'(1x,"RHS_known(kin+har+xc+nl) =",e16.8)') virial_known_rhs
+         virial_known_residual = virial_known_trace - virial_known_rhs
+         write(fh,'(1x,"Residual_known        =",e16.8)') virial_known_residual
+         write(fh,'(1x,"Tr(loc+ewa)*V         =",e16.8)') virial_loc_ewa
+         virial_remainder_after_known = virial_total - virial_known_rhs
+         write(fh,'(1x,"Remainder_after_known =",e16.8)') virial_remainder_after_known
+         write(fh,*)
          write(fh,*) "NL virial diagnostics [Hartree]"
-         virial_nl = stress_tensor_trace(system%stress_nl) * system%det_a
-         virial_nl_grad = virial_nl - 3d0 * energy%E_ion_nloc
          write(fh,'(1x,"Tr(nl)*V              =",e16.8)') virial_nl
          write(fh,'(1x,"3E_nl                 =",e16.8)') 3d0 * energy%E_ion_nloc
          write(fh,'(1x,"Tr(nl_grad)*V         =",e16.8)') virial_nl_grad

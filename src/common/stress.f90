@@ -120,6 +120,7 @@ contains
     system%stress_loc_lr_energy = 0d0
     system%stress_loc_sr_scr_energy = 0d0
     system%stress_loc_lr_scr_energy = 0d0
+    system%stress_xc_e_vxc = 0d0
     system%stress_ewa_g = 0d0
     system%stress_ewa_r = 0d0
     system%stress_ewa_g_grad = 0d0
@@ -318,6 +319,7 @@ contains
     call comm_summation(E_vxc_loc, E_vxc, info%icomm_r)
 
     system%stress_xc = 0d0
+    system%stress_xc_e_vxc = E_vxc
     do a = 1, 3
       system%stress_xc(a,a) = (E_vxc - energy%E_xc) / V
     end do
