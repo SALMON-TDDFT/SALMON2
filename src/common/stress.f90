@@ -282,7 +282,7 @@ contains
       strs_sum(a,a) = strs_sum(a,a) + energy%E_h / V
     end do
     call symmetrize_stress_term(strs_sum)
-    system%stress_har_shadow = strs_sum
+    system%stress_har_shadow = -strs_sum
   end subroutine calc_stress_har_shadow
 
   subroutine calc_stress_xc(system, info, mg, ppn, rho_s, Vxc, energy, xc_func)
@@ -823,7 +823,7 @@ contains
 
     ! Use icomm_r (not icomm_rko): this is a density-only sum with no k/orbital loops.
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
-    system%stress_loc_sr_rs = strs_sum / V
+    system%stress_loc_sr_rs = -strs_sum / V
 
   contains
 
