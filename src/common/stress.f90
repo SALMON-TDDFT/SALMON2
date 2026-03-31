@@ -502,14 +502,14 @@ contains
     strs_grad_sum = strs_sum
     strs_diag_sum = 0d0
     E_sr_scr = (E_sr + E_lr) - E_lr_scr
-    system%stress_loc_grad = strs_grad_sum
+    system%stress_loc_grad = -strs_grad_sum
     system%stress_loc_diag = 0d0
-    system%stress_loc_fullobj_grad = strs_grad_sum
+    system%stress_loc_fullobj_grad = -strs_grad_sum
     system%stress_loc_fullobj_diag = 0d0
-    system%stress_loc_sr_grad = strs_sr_sum
-    system%stress_loc_lr_grad = strs_lr_sum
-    system%stress_loc_sr_scr_grad = strs_grad_sum - strs_lr_scr_sum
-    system%stress_loc_lr_scr_grad = strs_lr_scr_sum
+    system%stress_loc_sr_grad = -strs_sr_sum
+    system%stress_loc_lr_grad = -strs_lr_sum
+    system%stress_loc_sr_scr_grad = -(strs_grad_sum - strs_lr_scr_sum)
+    system%stress_loc_lr_scr_grad = -strs_lr_scr_sum
     system%stress_loc_sr_diag = 0d0
     system%stress_loc_lr_diag = 0d0
     system%stress_loc_sr_scr_diag = 0d0
@@ -519,18 +519,18 @@ contains
       ! E_ion_loc = E_sr + E_lr.
       strs_diag_sum(a,a) = (E_sr + E_lr) / V
       strs_sum(a,a) = strs_grad_sum(a,a) + strs_diag_sum(a,a)
-      system%stress_loc_sr_diag(a,a) = E_sr / V
-      system%stress_loc_lr_diag(a,a) = E_lr / V
-      system%stress_loc_sr_scr_diag(a,a) = E_sr_scr / V
-      system%stress_loc_lr_scr_diag(a,a) = E_lr_scr / V
-      system%stress_loc_diag(a,a) = strs_diag_sum(a,a)
-      system%stress_loc_fullobj_diag(a,a) = energy%E_ion_loc / V
+      system%stress_loc_sr_diag(a,a) = -E_sr / V
+      system%stress_loc_lr_diag(a,a) = -E_lr / V
+      system%stress_loc_sr_scr_diag(a,a) = -E_sr_scr / V
+      system%stress_loc_lr_scr_diag(a,a) = -E_lr_scr / V
+      system%stress_loc_diag(a,a) = -strs_diag_sum(a,a)
+      system%stress_loc_fullobj_diag(a,a) = -energy%E_ion_loc / V
     end do
     system%stress_loc_sr_energy = E_sr
     system%stress_loc_lr_energy = E_lr
     system%stress_loc_sr_scr_energy = E_sr_scr
     system%stress_loc_lr_scr_energy = E_lr_scr
-    system%stress_loc = strs_sum
+    system%stress_loc = -strs_sum
   end subroutine calc_stress_loc
 
   subroutine calc_stress_nl(system, info, mg, stencil, ppg, tpsi, energy, field_state)
