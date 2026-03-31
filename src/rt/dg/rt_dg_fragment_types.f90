@@ -33,6 +33,8 @@ module rt_dg_fragment_types
     integer :: dvec(3)                       ! Direction vector to neighbor (-1,0,+1)
     integer :: length(3)                     ! Size of halo region in each direction
     integer :: dsp_send(3), dsp_recv(3)      ! Displacement for send/recv buffers
+    integer :: send_lo(3), send_hi(3)        ! Local phi_frag send block bounds
+    integer :: recv_lo(3), recv_hi(3)        ! Local phi_frag recv block bounds
     real(8), allocatable :: buf_send(:,:,:,:,:)  ! (lx,ly,lz,nstate,ifrag_count)
     real(8), allocatable :: buf_recv(:,:,:,:,:)  ! (lx,ly,lz,nstate,ifrag_count)
     complex(8), allocatable :: buf_send_c(:,:,:,:,:)  ! complex halo buffer for SOI path

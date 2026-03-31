@@ -917,7 +917,7 @@
               do iz = 1, l(3)
                 do iy = 1, l(2)
                   do ix = 1, l(1)
-                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
+                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
                       integral = integral + conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
                                  H_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol

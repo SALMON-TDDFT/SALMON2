@@ -322,8 +322,6 @@ contains
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
-      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
       uVpsi = (0.0d0, 0.0d0)
 
       do ispin = 1, nspin
@@ -340,12 +338,13 @@ contains
               if (ix >= is(1) .and. ix <= ie(1) .and. &
                   iy >= is(2) .and. iy <= ie(2) .and. &
                   iz >= is(3) .and. iz <= ie(3)) then
-                lx = mod(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
-                ly = mod(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
-                lz = mod(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
-                if (lx < 1 .or. lx > ndom(1)) cycle
-                if (ly < 1 .or. ly > ndom(2)) cycle
-                if (lz < 1 .or. lz > ndom(3)) cycle
+                lx = map_global_to_phi_box_coord(ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), &
+                                                 dg_frag%lgnum_total(1))
+                ly = map_global_to_phi_box_coord(iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), &
+                                                 dg_frag%lgnum_total(2))
+                lz = map_global_to_phi_box_coord(iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), &
+                                                 dg_frag%lgnum_total(3))
+                if (lx == 0 .or. ly == 0 .or. lz == 0) cycle
                 x = ppg%rxyz(1, j, ia)
                 y = ppg%rxyz(2, j, ia)
                 z = ppg%rxyz(3, j, ia)
@@ -425,8 +424,6 @@ contains
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
-      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
       uVpsi = (0.0d0, 0.0d0)
 
       do ispin = 1, nspin
@@ -443,12 +440,13 @@ contains
               if (ix >= is(1) .and. ix <= ie(1) .and. &
                   iy >= is(2) .and. iy <= ie(2) .and. &
                   iz >= is(3) .and. iz <= ie(3)) then
-                lx = mod(ix - iorg(1), dg_frag%lgnum_total(1)) + 1
-                ly = mod(iy - iorg(2), dg_frag%lgnum_total(2)) + 1
-                lz = mod(iz - iorg(3), dg_frag%lgnum_total(3)) + 1
-                if (lx < 1 .or. lx > ndom(1)) cycle
-                if (ly < 1 .or. ly > ndom(2)) cycle
-                if (lz < 1 .or. lz > ndom(3)) cycle
+                lx = map_global_to_phi_box_coord(ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), &
+                                                 dg_frag%lgnum_total(1))
+                ly = map_global_to_phi_box_coord(iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), &
+                                                 dg_frag%lgnum_total(2))
+                lz = map_global_to_phi_box_coord(iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), &
+                                                 dg_frag%lgnum_total(3))
+                if (lx == 0 .or. ly == 0 .or. lz == 0) cycle
                 x = ppg%rxyz(1, j, ia)
                 y = ppg%rxyz(2, j, ia)
                 z = ppg%rxyz(3, j, ia)
@@ -619,10 +617,16 @@ contains
     halo_shape = [ppg%nps, natom, dg_frag%nstate_frag, max(0, dg_frag%n_halo)]
 
     if (allocated(dg_frag%nl_pp_phi_self)) then
-      if (any(shape(dg_frag%nl_pp_phi_self) /= self_shape)) deallocate(dg_frag%nl_pp_phi_self)
+      if (any(shape(dg_frag%nl_pp_phi_self) /= self_shape)) then
+        deallocate(dg_frag%nl_pp_phi_self)
+        dg_frag%nl_pp_phi_cache_valid = .false.
+      end if
     end if
     if (allocated(dg_frag%nl_pp_phi_halo)) then
-      if (any(shape(dg_frag%nl_pp_phi_halo) /= halo_shape)) deallocate(dg_frag%nl_pp_phi_halo)
+      if (any(shape(dg_frag%nl_pp_phi_halo) /= halo_shape)) then
+        deallocate(dg_frag%nl_pp_phi_halo)
+        dg_frag%nl_pp_phi_cache_valid = .false.
+      end if
     end if
     if (.not. allocated(dg_frag%nl_pp_phi_self)) allocate(dg_frag%nl_pp_phi_self(self_shape(1), self_shape(2), self_shape(3), self_shape(4)))
     if (.not. allocated(dg_frag%nl_pp_phi_halo)) allocate(dg_frag%nl_pp_phi_halo(halo_shape(1), halo_shape(2), halo_shape(3), halo_shape(4)))
@@ -682,19 +686,16 @@ contains
           iy = ppg%jxyz(2, j, ia)
           iz = ppg%jxyz(3, j, ia)
           if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
-          lx = map_global_to_phi_box_coord(ix, mg%is(1) - dg_frag%nxyz_buffer(1), mg%ie(1) + dg_frag%nxyz_buffer(1), &
-                                           dg_frag%lgnum_total(1))
-          ly = map_global_to_phi_box_coord(iy, mg%is(2) - dg_frag%nxyz_buffer(2), mg%ie(2) + dg_frag%nxyz_buffer(2), &
-                                           dg_frag%lgnum_total(2))
-          lz = map_global_to_phi_box_coord(iz, mg%is(3) - dg_frag%nxyz_buffer(3), mg%ie(3) + dg_frag%nxyz_buffer(3), &
-                                           dg_frag%lgnum_total(3))
-          if (lx < lbound(dg_frag%phi_frag, 1) .or. lx > ubound(dg_frag%phi_frag, 1)) cycle
-          if (ly < lbound(dg_frag%phi_frag, 2) .or. ly > ubound(dg_frag%phi_frag, 2)) cycle
-          if (lz < lbound(dg_frag%phi_frag, 3) .or. lz > ubound(dg_frag%phi_frag, 3)) cycle
-          if (allocated(dg_frag%phi_frag_c)) then
-            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%phi_frag_c(lx, ly, lz, 1:nbf, i_local)
+          lx = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 1, ix)
+          ly = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 2, iy)
+          lz = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 3, iz)
+          if (lx < 1 .or. lx > dg_frag%halo(i_halo)%length(1)) cycle
+          if (ly < 1 .or. ly > dg_frag%halo(i_halo)%length(2)) cycle
+          if (lz < 1 .or. lz > dg_frag%halo(i_halo)%length(3)) cycle
+          if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
+            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%halo(i_halo)%buf_recv_c(lx, ly, lz, 1:nbf, 1)
           else
-            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = cmplx(dg_frag%phi_frag(lx, ly, lz, 1:nbf, i_local), 0.0d0, kind=8)
+            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = cmplx(dg_frag%halo(i_halo)%buf_recv(lx, ly, lz, 1:nbf, 1), 0.0d0, kind=8)
           end if
         end do
       end do
@@ -708,13 +709,38 @@ contains
     integer, intent(in) :: ig, lb, ub, lgtot
 
     iloc = modulo(ig - 1, lgtot) + 1
-    do while (iloc < lb)
-      iloc = iloc + lgtot
-    end do
-    do while (iloc > ub)
-      iloc = iloc - lgtot
-    end do
+    if (iloc < lb) then
+      iloc = iloc + ((lb - iloc + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc > ub) then
+      iloc = iloc - ((iloc - ub + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord
+
+  integer function map_global_to_halo_recv_buf_coord(dg_frag, halo, axis, ig) result(ibuf)
+    use rt_dg_fragment_types, only: halo_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(halo_info), intent(in) :: halo
+    integer, intent(in) :: axis, ig
+
+    integer :: local_idx
+
+    local_idx = map_global_to_phi_box_coord(ig, lbound(dg_frag%phi_frag, axis), ubound(dg_frag%phi_frag, axis), &
+                                            dg_frag%lgnum_total(axis))
+    if (local_idx == 0) then
+      ibuf = 0
+      return
+    end if
+
+    if (local_idx < halo%recv_lo(axis) .or. local_idx > halo%recv_hi(axis)) then
+      ibuf = 0
+      return
+    end if
+
+    ibuf = local_idx - halo%recv_lo(axis) + 1
+  end function map_global_to_halo_recv_buf_coord
 
   subroutine apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin_out, x_up, x_dn, y_out)
     use structures

@@ -245,26 +245,31 @@
     real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     complex(8), intent(out) :: T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     complex(8), intent(out) :: H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    integer :: lx, ly, lz, gx, gy, gz
+    integer :: gx, gy, gz
     integer :: iorg(3), ndom(3)
+    integer :: gx_lo, gx_hi, gy_lo, gy_hi, gz_lo, gz_hi
 
     call apply_kinetic_to_basis(dg_frag, i_local, jo, mg, stencil, T_phi)
     H_phi(:, :, :) = T_phi(:, :, :)
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-!$omp parallel do private(lz, ly, lx, gx, gy, gz) schedule(static)
-    do lz = 1, ndom(3)
-      gz = iorg(3) + lz - 1
-      do ly = 1, ndom(2)
-        gy = iorg(2) + ly - 1
-!$omp simd private(gx)
-        do lx = 1, ndom(1)
-          gx = iorg(1) + lx - 1
+    gx_lo = max(iorg(1), mg%is(1))
+    gx_hi = min(iorg(1) + ndom(1) - 1, mg%ie(1))
+    gy_lo = max(iorg(2), mg%is(2))
+    gy_hi = min(iorg(2) + ndom(2) - 1, mg%ie(2))
+    gz_lo = max(iorg(3), mg%is(3))
+    gz_hi = min(iorg(3) + ndom(3) - 1, mg%ie(3))
+    if (gx_lo > gx_hi .or. gy_lo > gy_hi .or. gz_lo > gz_hi) return
+!$omp parallel do private(gz, gy, gx) schedule(static)
+    do gz = gz_lo, gz_hi
+      do gy = gy_lo, gy_hi
+!$omp simd
+        do gx = gx_lo, gx_hi
           if (allocated(dg_frag%phi_frag_c)) then
-            H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * dg_frag%phi_frag_c(lx, ly, lz, jo, i_local)
+            H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * dg_frag%phi_frag_c(gx, gy, gz, jo, i_local)
           else
-            H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * cmplx(dg_frag%phi_frag(lx, ly, lz, jo, i_local), 0.0d0, kind=8)
+            H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * cmplx(dg_frag%phi_frag(gx, gy, gz, jo, i_local), 0.0d0, kind=8)
           end if
         end do
       end do
@@ -285,22 +290,27 @@
     complex(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in) :: hvol
     complex(8), intent(out) :: integral
-    integer :: lx, ly, lz, gx, gy, gz
+    integer :: gx, gy, gz
     integer :: iorg(3), ndom(3)
+    integer :: gx_lo, gx_hi, gy_lo, gy_hi, gz_lo, gz_hi
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    gx_lo = max(iorg(1), mg%is(1))
+    gx_hi = min(iorg(1) + ndom(1) - 1, mg%ie(1))
+    gy_lo = max(iorg(2), mg%is(2))
+    gy_hi = min(iorg(2) + ndom(2) - 1, mg%ie(2))
+    gz_lo = max(iorg(3), mg%is(3))
+    gz_hi = min(iorg(3) + ndom(3) - 1, mg%ie(3))
     integral = (0.0d0, 0.0d0)
-    do lz = 1, ndom(3)
-      gz = iorg(3) + lz - 1
-      do ly = 1, ndom(2)
-        gy = iorg(2) + ly - 1
-        do lx = 1, ndom(1)
-          gx = iorg(1) + lx - 1
+    if (gx_lo > gx_hi .or. gy_lo > gy_hi .or. gz_lo > gz_hi) return
+    do gz = gz_lo, gz_hi
+      do gy = gy_lo, gy_hi
+        do gx = gx_lo, gx_hi
           if (allocated(dg_frag%phi_frag_c)) then
-            integral = integral + conjg(dg_frag%phi_frag_c(lx, ly, lz, io, i_local)) * field(gx, gy, gz) * hvol
+            integral = integral + conjg(dg_frag%phi_frag_c(gx, gy, gz, io, i_local)) * field(gx, gy, gz) * hvol
           else
-            integral = integral + cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
+            integral = integral + cmplx(dg_frag%phi_frag(gx, gy, gz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
           end if
         end do
       end do
@@ -329,11 +339,12 @@
                                                  mg%is(2):mg%ie(2), &
                                                  mg%is(3):mg%ie(3))
     
-    integer :: lx, ly, lz, gx, gy, gz, ifrag
+    integer :: gx, gy, gz, ifrag
     complex(8) :: v
     real(8) :: lap0
     real(8) :: lapt(4,3)
     integer :: is(3), ie(3), iorg(3), ndom(3)
+    integer :: gx_lo, gx_hi, gy_lo, gy_hi, gz_lo, gz_hi
     
     ! Extract stencil coefficients
     lap0 = stencil%coef_lap0
@@ -344,86 +355,78 @@
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
     
-    ! Note: phi_frag is allocated as (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, ...)
-    ! where nb = nxyz_buffer = 4 for 4th-order stencil
-    ! The interior domain is (1:nx, 1:ny, 1:nz), and halo provides data for stencil
-    ! operations near boundaries.
-    !
-    ! With halo exchange, stencil operations can access phi_frag(ix±4, iy±4, iz±4)
-    ! for all interior points without boundary restrictions.
-    
-    ! Apply kinetic operator using finite difference stencil
-    ! With halo regions available, we can compute over FULL interior domain
-    !
-    ! Note: exchange_phi_frag_halo() must be called before this routine
+    gx_lo = max(iorg(1), mg%is(1))
+    gx_hi = min(iorg(1) + ndom(1) - 1, mg%ie(1))
+    gy_lo = max(iorg(2), mg%is(2))
+    gy_hi = min(iorg(2) + ndom(2) - 1, mg%ie(2))
+    gz_lo = max(iorg(3), mg%is(3))
+    gz_hi = min(iorg(3) + ndom(3) - 1, mg%ie(3))
     
     T_phi = (0.0d0, 0.0d0)
     
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, v) schedule(static)
-    do lz = 1, ndom(3)
-      gz = iorg(3) + lz - 1
-      do ly = 1, ndom(2)
-        gy = iorg(2) + ly - 1
-!$omp simd private(gx, v)
-        do lx = 1, ndom(1)
-          gx = iorg(1) + lx - 1
+    if (gx_lo > gx_hi .or. gy_lo > gy_hi .or. gz_lo > gz_hi) return
+!$omp parallel do private(gz, gy, gx, v) schedule(static)
+    do gz = gz_lo, gz_hi
+      do gy = gy_lo, gy_hi
+!$omp simd private(v)
+        do gx = gx_lo, gx_hi
           
           ! Compute Laplacian using 4th-order finite difference
           ! Stencil accesses phi_frag(ix±4, iy±4, iz±4) which now includes halo
           if (allocated(dg_frag%phi_frag_c)) then
-            v = lapt(1,1) * (dg_frag%phi_frag_c(lx+1, ly, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx-1, ly, lz, jo, i_local)) + &
-                lapt(2,1) * (dg_frag%phi_frag_c(lx+2, ly, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx-2, ly, lz, jo, i_local)) + &
-                lapt(3,1) * (dg_frag%phi_frag_c(lx+3, ly, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx-3, ly, lz, jo, i_local)) + &
-                lapt(4,1) * (dg_frag%phi_frag_c(lx+4, ly, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx-4, ly, lz, jo, i_local))
+            v = lapt(1,1) * (dg_frag%phi_frag_c(gx+1, gy, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx-1, gy, gz, jo, i_local)) + &
+                lapt(2,1) * (dg_frag%phi_frag_c(gx+2, gy, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx-2, gy, gz, jo, i_local)) + &
+                lapt(3,1) * (dg_frag%phi_frag_c(gx+3, gy, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx-3, gy, gz, jo, i_local)) + &
+                lapt(4,1) * (dg_frag%phi_frag_c(gx+4, gy, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx-4, gy, gz, jo, i_local))
             v = v + &
-                lapt(1,2) * (dg_frag%phi_frag_c(lx, ly+1, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly-1, lz, jo, i_local)) + &
-                lapt(2,2) * (dg_frag%phi_frag_c(lx, ly+2, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly-2, lz, jo, i_local)) + &
-                lapt(3,2) * (dg_frag%phi_frag_c(lx, ly+3, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly-3, lz, jo, i_local)) + &
-                lapt(4,2) * (dg_frag%phi_frag_c(lx, ly+4, lz, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly-4, lz, jo, i_local))
+                lapt(1,2) * (dg_frag%phi_frag_c(gx, gy+1, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy-1, gz, jo, i_local)) + &
+                lapt(2,2) * (dg_frag%phi_frag_c(gx, gy+2, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy-2, gz, jo, i_local)) + &
+                lapt(3,2) * (dg_frag%phi_frag_c(gx, gy+3, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy-3, gz, jo, i_local)) + &
+                lapt(4,2) * (dg_frag%phi_frag_c(gx, gy+4, gz, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy-4, gz, jo, i_local))
             v = v + &
-                lapt(1,3) * (dg_frag%phi_frag_c(lx, ly, lz+1, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly, lz-1, jo, i_local)) + &
-                lapt(2,3) * (dg_frag%phi_frag_c(lx, ly, lz+2, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly, lz-2, jo, i_local)) + &
-                lapt(3,3) * (dg_frag%phi_frag_c(lx, ly, lz+3, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly, lz-3, jo, i_local)) + &
-                lapt(4,3) * (dg_frag%phi_frag_c(lx, ly, lz+4, jo, i_local) + &
-                             dg_frag%phi_frag_c(lx, ly, lz-4, jo, i_local))
-            T_phi(gx, gy, gz) = lap0 * dg_frag%phi_frag_c(lx, ly, lz, jo, i_local) - 0.5d0 * v
+                lapt(1,3) * (dg_frag%phi_frag_c(gx, gy, gz+1, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy, gz-1, jo, i_local)) + &
+                lapt(2,3) * (dg_frag%phi_frag_c(gx, gy, gz+2, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy, gz-2, jo, i_local)) + &
+                lapt(3,3) * (dg_frag%phi_frag_c(gx, gy, gz+3, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy, gz-3, jo, i_local)) + &
+                lapt(4,3) * (dg_frag%phi_frag_c(gx, gy, gz+4, jo, i_local) + &
+                             dg_frag%phi_frag_c(gx, gy, gz-4, jo, i_local))
+            T_phi(gx, gy, gz) = lap0 * dg_frag%phi_frag_c(gx, gy, gz, jo, i_local) - 0.5d0 * v
           else
-            v = cmplx(lapt(1,1) * (dg_frag%phi_frag(lx+1, ly, lz, jo, i_local) + &
-                                   dg_frag%phi_frag(lx-1, ly, lz, jo, i_local)) + &
-                      lapt(2,1) * (dg_frag%phi_frag(lx+2, ly, lz, jo, i_local) + &
-                                   dg_frag%phi_frag(lx-2, ly, lz, jo, i_local)) + &
-                      lapt(3,1) * (dg_frag%phi_frag(lx+3, ly, lz, jo, i_local) + &
-                                   dg_frag%phi_frag(lx-3, ly, lz, jo, i_local)) + &
-                      lapt(4,1) * (dg_frag%phi_frag(lx+4, ly, lz, jo, i_local) + &
-                                   dg_frag%phi_frag(lx-4, ly, lz, jo, i_local)), 0.0d0, kind=8)
-            v = v + cmplx(lapt(1,2) * (dg_frag%phi_frag(lx, ly+1, lz, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly-1, lz, jo, i_local)) + &
-                          lapt(2,2) * (dg_frag%phi_frag(lx, ly+2, lz, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly-2, lz, jo, i_local)) + &
-                          lapt(3,2) * (dg_frag%phi_frag(lx, ly+3, lz, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly-3, lz, jo, i_local)) + &
-                          lapt(4,2) * (dg_frag%phi_frag(lx, ly+4, lz, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly-4, lz, jo, i_local)), 0.0d0, kind=8)
-            v = v + cmplx(lapt(1,3) * (dg_frag%phi_frag(lx, ly, lz+1, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly, lz-1, jo, i_local)) + &
-                          lapt(2,3) * (dg_frag%phi_frag(lx, ly, lz+2, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly, lz-2, jo, i_local)) + &
-                          lapt(3,3) * (dg_frag%phi_frag(lx, ly, lz+3, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly, lz-3, jo, i_local)) + &
-                          lapt(4,3) * (dg_frag%phi_frag(lx, ly, lz+4, jo, i_local) + &
-                                       dg_frag%phi_frag(lx, ly, lz-4, jo, i_local)), 0.0d0, kind=8)
-            T_phi(gx, gy, gz) = cmplx(lap0 * dg_frag%phi_frag(lx, ly, lz, jo, i_local), 0.0d0, kind=8) - 0.5d0 * v
+            v = cmplx(lapt(1,1) * (dg_frag%phi_frag(gx+1, gy, gz, jo, i_local) + &
+                                   dg_frag%phi_frag(gx-1, gy, gz, jo, i_local)) + &
+                      lapt(2,1) * (dg_frag%phi_frag(gx+2, gy, gz, jo, i_local) + &
+                                   dg_frag%phi_frag(gx-2, gy, gz, jo, i_local)) + &
+                      lapt(3,1) * (dg_frag%phi_frag(gx+3, gy, gz, jo, i_local) + &
+                                   dg_frag%phi_frag(gx-3, gy, gz, jo, i_local)) + &
+                      lapt(4,1) * (dg_frag%phi_frag(gx+4, gy, gz, jo, i_local) + &
+                                   dg_frag%phi_frag(gx-4, gy, gz, jo, i_local)), 0.0d0, kind=8)
+            v = v + cmplx(lapt(1,2) * (dg_frag%phi_frag(gx, gy+1, gz, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy-1, gz, jo, i_local)) + &
+                          lapt(2,2) * (dg_frag%phi_frag(gx, gy+2, gz, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy-2, gz, jo, i_local)) + &
+                          lapt(3,2) * (dg_frag%phi_frag(gx, gy+3, gz, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy-3, gz, jo, i_local)) + &
+                          lapt(4,2) * (dg_frag%phi_frag(gx, gy+4, gz, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy-4, gz, jo, i_local)), 0.0d0, kind=8)
+            v = v + cmplx(lapt(1,3) * (dg_frag%phi_frag(gx, gy, gz+1, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy, gz-1, jo, i_local)) + &
+                          lapt(2,3) * (dg_frag%phi_frag(gx, gy, gz+2, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy, gz-2, jo, i_local)) + &
+                          lapt(3,3) * (dg_frag%phi_frag(gx, gy, gz+3, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy, gz-3, jo, i_local)) + &
+                          lapt(4,3) * (dg_frag%phi_frag(gx, gy, gz+4, jo, i_local) + &
+                                       dg_frag%phi_frag(gx, gy, gz-4, jo, i_local)), 0.0d0, kind=8)
+            T_phi(gx, gy, gz) = cmplx(lap0 * dg_frag%phi_frag(gx, gy, gz, jo, i_local), 0.0d0, kind=8) - 0.5d0 * v
           end if
           
         end do
@@ -432,6 +435,35 @@
 !$omp end parallel do
     
   end subroutine apply_kinetic_to_basis
+
+  subroutine get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    type(s_rgrid), intent(in) :: mg
+    integer, intent(out) :: loc_s(3), loc_e(3)
+    logical, intent(out) :: has_overlap
+
+    integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
+
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    g_s(:) = iorg(:)
+    g_e(:) = iorg(:) + ndom(:) - 1
+    ov_s(:) = max(g_s(:), mg%is(:))
+    ov_e(:) = min(g_e(:), mg%ie(:))
+
+    has_overlap = all(ov_s(:) <= ov_e(:))
+    if (.not. has_overlap) then
+      loc_s(:) = 1
+      loc_e(:) = 0
+      return
+    end if
+
+    loc_s(:) = ov_s(:) - iorg(:) + 1
+    loc_e(:) = ov_e(:) - iorg(:) + 1
+  end subroutine get_fragment_owned_range
 
   subroutine get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
     use salmon_global, only: nproc_rgrid
@@ -485,116 +517,7 @@
     integer,                intent(in)    :: nspin
     real(8),                intent(in)    :: hvol
     
-    integer :: ifrag, ispin, io, jo, i_local, ilma, ia, j, ix, iy, iz, ig_i, ig_j, nbf
-    integer :: is(3), ie(3), ifrag_count
-    integer :: iorg(3), ndom(3), lx, ly, lz
-    complex(8), allocatable :: uVpsi(:,:,:)  ! Projector overlaps (unnormalized): (nstate_frag, Nlma, nspin)
-    complex(8) :: overlap_i, overlap_j, nlpp_contrib
-    
-    if (ppg%Nlma == 0) return  ! No non-local PP
-    
-    is = mg%is
-    ie = mg%ie
-    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
-    
-    ! Allocate array for projector overlaps
-    ! MEMORY OPTIMIZATION: Only store current fragment's data (removed ifrag_count dimension)
-    allocate(uVpsi(dg_frag%nstate_frag, ppg%Nlma, nspin))
-    uVpsi = (0.0d0, 0.0d0)
-    
-    ! Loop over fragments assigned to this rank
-    i_local = 0
-    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      i_local = i_local + 1
-      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-      
-      ! Reset uVpsi for this fragment (memory reuse)
-      uVpsi = (0.0d0, 0.0d0)
-      
-      do ispin = 1, nspin
-        
-        ! Calculate projector overlaps <φ_io|proj_ilma> for all basis and projectors
-        ! OpenMP parallelization over basis functions
-!$omp parallel do collapse(2) private(ilma, io, ia, j, ix, iy, iz, overlap_i)
-        do ilma = 1, ppg%Nlma
-          do io = 1, dg_frag%nstate_frag
-            
-            ia = ppg%ia_tbl(ilma)  ! Atom index for this projector
-            
-            ! Calculate <φ_io|proj_ilma> = Σ_j φ_io(r_j) * uV(r_j, ilma) * hvol
-            ! NOTE: Store UNNORMALIZED overlap to avoid rinv_uvu^2 numerical error
-            overlap_i = (0.0d0, 0.0d0)
-            do j = 1, ppg%mps(ia)
-              ix = ppg%jxyz(1, j, ia)
-              iy = ppg%jxyz(2, j, ia)
-              iz = ppg%jxyz(3, j, ia)
-              
-              ! Map global projector-grid index to fragment-local basis index.
-              lx = ix - iorg(1) + 1
-              ly = iy - iorg(2) + 1
-              lz = iz - iorg(3) + 1
-              if (lx >= 1 .and. lx <= ndom(1) .and. &
-                  ly >= 1 .and. ly <= ndom(2) .and. &
-                  lz >= 1 .and. lz <= ndom(3)) then
-                if (allocated(dg_frag%phi_frag_c)) then
-                  overlap_i = overlap_i + &
-                    conjg(dg_frag%phi_frag_c(lx, ly, lz, io, i_local)) * cmplx(ppg%uV(j, ilma), 0.0d0, kind=8) * hvol
-                else
-                  overlap_i = overlap_i + &
-                    cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * cmplx(ppg%uV(j, ilma), 0.0d0, kind=8) * hvol
-                end if
-              end if
-            end do
-            
-            ! Store unnormalized overlap (normalization applied once in matrix calculation)
-            uVpsi(io, ilma, ispin) = overlap_i
-            
-          end do  ! io loop
-        end do  ! ilma loop
-!$omp end parallel do
-        
-        ! Calculate matrix elements <φ_i|V_NL|φ_j> = Σ_ilma <φ_i|proj_ilma> V_ilma <proj_ilma|φ_j>
-        ! where V_ilma is encoded in rinv_uvu (includes normalization and energy coefficient)
-        ! OpenMP parallelization over matrix elements
-        nbf = dg_frag%n_basis(ifrag, ispin)
-!$omp parallel do collapse(2) private(jo, io, ilma, nlpp_contrib, overlap_i, overlap_j, ig_i, ig_j)
-        do jo = 1, nbf
-          do io = 1, nbf
-            ig_i = dg_frag%index_basis(io, ifrag, ispin)
-            ig_j = dg_frag%index_basis(jo, ifrag, ispin)
-            if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-
-! Sum over all projectors
-            nlpp_contrib = (0.0d0, 0.0d0)
-            do ilma = 1, ppg%Nlma
-              
-              ! Get unnormalized overlaps
-              overlap_i = uVpsi(io, ilma, ispin)
-              overlap_j = uVpsi(jo, ilma, ispin)
-              
-              ! V_NL matrix element contribution from this projector
-              ! Physical formula: <i|V_NL|j> = Σ_ilma <i|proj> * V_coeff * <proj|j>
-              ! where V_coeff = rinv_uvu contains normalization and energy
-              ! NUMERICAL ACCURACY: Apply rinv_uvu ONCE to avoid error amplification
-              nlpp_contrib = nlpp_contrib + conjg(overlap_i) * overlap_j * cmplx(ppg%rinv_uvu(ilma), 0.0d0, kind=8)
-              
-            end do  ! ilma loop
-            
-            ! Add non-local PP contribution to Hamiltonian matrix
-!$omp atomic update
-            dg_frag%H_mat(ig_i, ig_j, ispin) = dg_frag%H_mat(ig_i, ig_j, ispin) + real(nlpp_contrib, kind=8)
-            
-          end do  ! io loop
-        end do  ! jo loop
-!$omp end parallel do
-        
-      end do  ! ispin loop
-      
-    end do  ! ifrag loop
-    
-    deallocate(uVpsi)
+    stop "DG-Fragment RT SOI: add_nonlocal_pp_matrix fallback path is retired; use ensure_nonlocal_pp_matrix_A"
     
   end subroutine add_nonlocal_pp_matrix
 
@@ -614,12 +537,14 @@
     integer :: ifrag, i_local, ispin, io, jo, idir, iblk
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: halo_send_idx(3), halo_recv_idx(3)
-    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3), halo_s(3), halo_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: nrow, ncol, ii, jj
     real(8) :: hvol
     complex(8) :: integral
     real(8) :: max_p
+    logical :: has_overlap
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components)
     type(momentum_block_info), allocatable :: momentum_blocks_re(:), momentum_blocks_im(:)
     integer, allocatable :: momentum_block_map_local(:,:)
@@ -642,6 +567,12 @@
     allocate(dg_frag%momentum_mat_c(3, dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
     dg_frag%momentum_mat = 0.0d0    
     dg_frag%momentum_mat_c = (0.0d0, 0.0d0)
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
     is = mg%is
     ie = mg%ie
     hvol = system%hvol
@@ -657,13 +588,30 @@
         i_local = i_local + 1
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-        call get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
-        lx_lo = loc_s(1)
-        lx_hi = loc_e(1)
-        ly_lo = loc_s(2)
-        ly_hi = loc_e(2)
-        lz_lo = loc_s(3)
-        lz_hi = loc_e(3)
+        call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+        if (.not. has_overlap) cycle
+        phi_loc_s(:) = iorg(:) + loc_s(:) - 1
+        phi_loc_e(:) = iorg(:) + loc_e(:) - 1
+        if (phi_loc_s(1) < phi_lb1 .or. phi_loc_e(1) > phi_ub1 .or. &
+            phi_loc_s(2) < phi_lb2 .or. phi_loc_e(2) > phi_ub2 .or. &
+            phi_loc_s(3) < phi_lb3 .or. phi_loc_e(3) > phi_ub3) then
+          write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x))') &
+            "DG-Fragment RT SOI momentum phi_frag local range out of bounds: phi_loc_s=", &
+            phi_loc_s(1), phi_loc_s(2), phi_loc_s(3), "phi_loc_e=", phi_loc_e(1), phi_loc_e(2), phi_loc_e(3), &
+            "lb=", phi_lb1, phi_lb2, phi_lb3, "ub=", phi_ub1, phi_ub2, phi_ub3
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+            "        soi momentum context: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, " ifrag=", ifrag, &
+            " i_local=", i_local, " mg_is=", mg%is(1), mg%is(2), mg%is(3), " mg_ie=", mg%ie(1), mg%ie(2), mg%ie(3), &
+            " loc_s=", loc_s(1), loc_s(2), loc_s(3), " loc_e=", loc_e(1), loc_e(2), loc_e(3)
+          call flush(6)
+          stop "DG-Fragment RT SOI: momentum phi_frag local range out of bounds"
+        end if
+        lx_lo = phi_loc_s(1)
+        lx_hi = phi_loc_e(1)
+        ly_lo = phi_loc_s(2)
+        ly_hi = phi_loc_e(2)
+        lz_lo = phi_loc_s(3)
+        lz_hi = phi_loc_e(3)
         
         ! Loop over basis functions in fragment j (ket side)
         ! Note: Each thread allocates its own grad_phi to avoid race conditions
@@ -756,7 +704,7 @@
                 do iz = 1, l(3)
                   do iy = 1, l(2)
                     do ix = 1, l(1)
-                      call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
+                      call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                       if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
                         integral = integral + &
                           conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
@@ -1848,7 +1796,7 @@
               do iz = 1, l(3)
                 do iy = 1, l(2)
                   do ix = 1, l(1)
-                    call get_halo_point_indices(dg_frag, dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
+                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     if (allocated(dg_frag%halo(i_halo)%buf_recv_c) .and. allocated(dg_frag%phi_frag_c)) then
                       integral = integral + conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
                                  dg_frag%phi_frag_c(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local) * hvol

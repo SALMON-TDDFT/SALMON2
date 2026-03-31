@@ -321,21 +321,19 @@
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
-          nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
+          local_grid_count = dg_frag%density_grid_point_count(i_local)
           dg_frag%density_phi_block_count(i_local) = dg_frag%density_block_nblocks(i_local)
           do block_cache_idx = 1, dg_frag%density_phi_block_count(i_local)
             igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
-            npt_cache = min(grid_block_size, product(nxyz) - igrid0 + 1)
-!$omp parallel do private(istate_frag, igrid, tmp_idx, iz, rem_xy, iy, ix) schedule(static)
+            npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
+!$omp parallel do private(istate_frag, igrid, ixg, iyg, izg) schedule(static)
             do istate_frag = 1, dg_frag%nstate_frag
               do igrid = 1, npt_cache
-                tmp_idx = igrid0 + igrid - 2
-                iz = tmp_idx / (nxyz(1) * nxyz(2)) + 1
-                rem_xy = mod(tmp_idx, nxyz(1) * nxyz(2))
-                iy = rem_xy / nxyz(1) + 1
-                ix = mod(rem_xy, nxyz(1)) + 1
+                ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
+                iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
+                izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
                 dg_frag%density_phi_block_cache(igrid, istate_frag, block_cache_idx, i_local) = &
-                  dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
+                  dg_frag%phi_frag(ixg, iyg, izg, istate_frag, i_local)
               end do
             end do
 !$omp end parallel do
@@ -661,9 +659,45 @@
                   igrid = valid_remote_grid_ids(idx_remote)
                   owner_rank = owner_buf(igrid)
                   slot = slot_buf(igrid)
+                  if (owner_rank < 0 .or. owner_rank > dg_frag%isize - 1) then
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                      "DG density remote owner out of range: rank=", dg_frag%id, &
+                      " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                      " igrid=", igrid, " owner=", owner_rank, " valid_remote=", valid_remote_grid_count
+                    flush(6)
+                    stop "DG-Fragment RT: density remote owner out of range"
+                  end if
+                  if (.not. allocated(rho_send(owner_rank)%f)) then
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                      "DG density remote send buffer missing: rank=", dg_frag%id, &
+                      " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                      " igrid=", igrid, " owner=", owner_rank, " nsend=", dg_frag%density_send_count(owner_rank)
+                    flush(6)
+                    stop "DG-Fragment RT: density remote send buffer missing"
+                  end if
+                  if (slot < 1 .or. slot > dg_frag%density_send_count(owner_rank)) then
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                      "DG density remote slot out of range: rank=", dg_frag%id, &
+                      " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                      " igrid=", igrid, " owner=", owner_rank, " slot=", slot, &
+                      " nsend=", dg_frag%density_send_count(owner_rank)
+                    flush(6)
+                    stop "DG-Fragment RT: density remote slot out of range"
+                  end if
                   rho_contrib = rho_blk(igrid)
+!$omp atomic update
                   rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
                   spin_offset = ispin * dg_frag%density_send_count(owner_rank)
+                  if (spin_offset + slot < 1 .or. spin_offset + slot > size(rho_send(owner_rank)%f, 1)) then
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                      "DG density remote spin slot out of range: rank=", dg_frag%id, &
+                      " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                      " igrid=", igrid, " owner=", owner_rank, " slot=", slot, &
+                      " spin_slot=", spin_offset + slot, " send_size=", size(rho_send(owner_rank)%f, 1)
+                    flush(6)
+                    stop "DG-Fragment RT: density remote spin slot out of range"
+                  end if
+!$omp atomic update
                   rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                 end do
 !$omp end do
@@ -790,9 +824,45 @@
                     igrid = valid_remote_grid_ids(idx_remote)
                     owner_rank = owner_buf(igrid)
                     slot = slot_buf(igrid)
+                    if (owner_rank < 0 .or. owner_rank > dg_frag%isize - 1) then
+                      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                        "DG density accum owner out of range: rank=", dg_frag%id, &
+                        " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                        " igrid=", igrid, " owner=", owner_rank, " valid_remote=", valid_remote_grid_count
+                      flush(6)
+                      stop "DG-Fragment RT: density accum owner out of range"
+                    end if
+                    if (.not. allocated(rho_send(owner_rank)%f)) then
+                      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                        "DG density accum send buffer missing: rank=", dg_frag%id, &
+                        " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                        " igrid=", igrid, " owner=", owner_rank, " nsend=", dg_frag%density_send_count(owner_rank)
+                      flush(6)
+                      stop "DG-Fragment RT: density accum send buffer missing"
+                    end if
+                    if (slot < 1 .or. slot > dg_frag%density_send_count(owner_rank)) then
+                      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                        "DG density accum slot out of range: rank=", dg_frag%id, &
+                        " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                        " igrid=", igrid, " owner=", owner_rank, " slot=", slot, &
+                        " nsend=", dg_frag%density_send_count(owner_rank)
+                      flush(6)
+                      stop "DG-Fragment RT: density accum slot out of range"
+                    end if
                     rho_contrib = rho_blk_accum(igrid)
+!$omp atomic update
                     rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
                     spin_offset = ispin * dg_frag%density_send_count(owner_rank)
+                    if (spin_offset + slot < 1 .or. spin_offset + slot > size(rho_send(owner_rank)%f, 1)) then
+                      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                        "DG density accum spin slot out of range: rank=", dg_frag%id, &
+                        " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                        " igrid=", igrid, " owner=", owner_rank, " slot=", slot, &
+                        " spin_slot=", spin_offset + slot, " send_size=", size(rho_send(owner_rank)%f, 1)
+                      flush(6)
+                      stop "DG-Fragment RT: density accum spin slot out of range"
+                    end if
+!$omp atomic update
                     rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                   end do
 !$omp end do
