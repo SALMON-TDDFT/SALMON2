@@ -1438,8 +1438,11 @@ contains
     real(8) :: virial_kin
     real(8) :: virial_har
     real(8) :: virial_har_shadow
+    real(8) :: virial_nl
+    real(8) :: virial_nl_grad
     real(8) :: e_kin_from_stress
     real(8) :: pressure_term_gpa
+    real(8) :: pressure_nl_diag_gpa
 
     file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
@@ -1544,6 +1547,17 @@ contains
          write(fh,'(1x,"Tr(kin)*V + 2E_kin =",e16.8)') virial_kin
          write(fh,'(1x,"Tr(har)*V - E_h    =",e16.8)') virial_har
          write(fh,'(1x,"Tr(har_shadow)*V - E_h =",e16.8)') virial_har_shadow
+         write(fh,*)
+         write(fh,*) "NL virial diagnostics [Hartree]"
+         virial_nl = stress_tensor_trace(system%stress_nl) * system%det_a
+         virial_nl_grad = virial_nl - 3d0 * energy%E_ion_nloc
+         write(fh,'(1x,"Tr(nl)*V              =",e16.8)') virial_nl
+         write(fh,'(1x,"3E_nl                 =",e16.8)') 3d0 * energy%E_ion_nloc
+         write(fh,'(1x,"Tr(nl_grad)*V         =",e16.8)') virial_nl_grad
+         pressure_nl_diag_gpa = -(energy%E_ion_nloc / system%det_a) * au_pressure_gpa
+         write(fh,'(1x,"P_nl_diag [GPa]       =",e16.8)') pressure_nl_diag_gpa
+         pressure_term_gpa = -stress_term_pressure_gpa(system%stress_nl, au_pressure_gpa) - pressure_nl_diag_gpa
+         write(fh,'(1x,"P_nl_grad [GPa]       =",e16.8)') pressure_term_gpa
          write(fh,*)
          write(fh,*) "Kinetic stress diagnostics [Hartree]"
          e_kin_from_stress = -0.5d0 * stress_tensor_trace(system%stress_kin) * system%det_a

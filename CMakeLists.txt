@@ -84,6 +84,7 @@ configure_file(
 
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src)        # sources
+add_subdirectory(${CMAKE_SOURCE_DIR}/tests)      # lightweight source-level checks
 add_subdirectory(${CMAKE_SOURCE_DIR}/testsuites) # tests
 
 
