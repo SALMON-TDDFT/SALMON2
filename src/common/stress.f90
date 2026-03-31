@@ -304,7 +304,7 @@ contains
     type(s_dft_energy),    intent(in)    :: energy
     type(s_xc_functional), intent(in)    :: xc_func
     integer :: ix, iy, iz, ispin, a
-    real(8) :: rho_xc, trho
+    real(8) :: rho_xc, trho_xc
     real(8) :: exc_x, exc_c, vxc_x, vxc_c
     real(8) :: E_vx_loc, E_vc_loc, E_vx, E_vc
     real(8) :: E_x_loc, E_c_loc, E_x, E_c
@@ -322,11 +322,14 @@ contains
       do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
         rho_xc = rho_s(ispin)%f(ix,iy,iz)
-        if(allocated(ppn%rho_nlcc)) rho_xc = rho_xc + 0.5d0 * ppn%rho_nlcc(ix,iy,iz)
-        trho = 2d0 * rho_xc
-        call calc_builtin_pz_xc_split(trho, exc_x, exc_c, vxc_x, vxc_c)
-        E_x_loc = E_x_loc + trho * exc_x
-        E_c_loc = E_c_loc + trho * exc_c
+        trho_xc = rho_xc
+        if(allocated(ppn%rho_nlcc)) then
+          rho_xc = rho_xc + 0.5d0 * ppn%rho_nlcc(ix,iy,iz)
+          trho_xc = trho_xc + ppn%rho_nlcc(ix,iy,iz)
+        end if
+        call calc_builtin_pz_xc_split(trho_xc, exc_x, exc_c, vxc_x, vxc_c)
+        E_x_loc = E_x_loc + trho_xc * exc_x
+        E_c_loc = E_c_loc + trho_xc * exc_c
         E_vx_loc = E_vx_loc + rho_xc * vxc_x
         E_vc_loc = E_vc_loc + rho_xc * vxc_c
       end do
