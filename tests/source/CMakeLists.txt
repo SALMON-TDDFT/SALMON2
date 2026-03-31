@@ -13,6 +13,7 @@ set(STRESS_SOURCE_TESTS
   check_stress_convention_a_sign_flip.sh
   check_stress_xc_split.sh
   check_builtin_r2scan_registration.sh
+  check_builtin_r2scan_operator_gate.sh
 )
 
 foreach(test_script IN LISTS STRESS_SOURCE_TESTS)

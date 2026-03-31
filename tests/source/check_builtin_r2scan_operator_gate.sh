@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+
+grep -Fq 'type(s_xc_operator_payload)' "$repo_root/src/common/structures.f90"
+grep -Fq 'payload%use_tau_operator' "$repo_root/src/xc/salmon_xc.f90"
+grep -Fq 'subroutine add_xc_tau_operator' "$repo_root/src/common/hamiltonian.f90"
+grep -Fq 'check_builtin_r2scan_operator_gate.sh' "$repo_root/tests/source/CMakeLists.txt"
