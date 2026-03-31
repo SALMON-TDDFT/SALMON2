@@ -21,13 +21,33 @@ if ! rg -F -q 'Total cancellation diagnostics [Hartree]' "$write_f90"; then
   exit 1
 fi
 
-if ! rg -F -q 'Tr(xc)*V - 3(E_vxc-E_xc)' "$write_f90"; then
+if ! rg -F -q 'Tr(xc)*V + 3(E_vxc-E_xc)' "$write_f90"; then
   echo "missing XC virial residual line" >&2
+  exit 1
+fi
+
+if ! rg -F -q 'virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a &' "$write_f90"; then
+  echo "missing XC virial trace definition" >&2
+  exit 1
+fi
+
+if ! rg -F -q '+ 3d0 * (system%stress_xc_e_vxc - energy%E_xc)' "$write_f90"; then
+  echo "missing flipped XC virial sign" >&2
   exit 1
 fi
 
 if ! rg -F -q 'RHS_known(kin+har+xc+nl)' "$write_f90"; then
   echo "missing known-block theorem RHS line" >&2
+  exit 1
+fi
+
+if ! rg -F -q 'virial_known_rhs = -2d0 * energy%E_kin - energy%E_h &' "$write_f90"; then
+  echo "missing flipped known RHS definition" >&2
+  exit 1
+fi
+
+if ! grep -Fq -- '- 3d0 * (system%stress_xc_e_vxc - energy%E_xc)' "$write_f90"; then
+  echo "missing flipped known RHS XC sign" >&2
   exit 1
 fi
 

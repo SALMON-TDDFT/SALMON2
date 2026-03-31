@@ -9,13 +9,23 @@ if ! rg -F -q 'Local/Ewald trace diagnostics [Hartree]' "$write_f90"; then
   exit 1
 fi
 
+if ! rg -F -q 'virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) &' "$write_f90"; then
+  echo "missing local LR virial residual definition" >&2
+  exit 1
+fi
+
+if ! rg -F -q '* system%det_a + system%stress_loc_lr_energy' "$write_f90"; then
+  echo "missing flipped local LR virial sign" >&2
+  exit 1
+fi
+
 for needle in \
   'Tr(loc)*V' \
   'Tr(loc_grad)*V' \
   'Tr(loc_diag)*V' \
   'Tr(loc_sr_grad)*V' \
   'Tr(loc_lr_grad)*V' \
-  'Tr(loc_lr)*V - E_lr' \
+  'Tr(loc_lr)*V + E_lr' \
   'Tr(ewa)*V' \
   'Tr(ewa_G_grad)*V' \
   'Tr(ewa_G_diag+self)*V' \

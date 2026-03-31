@@ -1560,25 +1560,25 @@ contains
          write(fh,*)
          write(fh,*) "Stress virial diagnostics [Hartree]"
          virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
-         virial_har = stress_tensor_trace(system%stress_har) * system%det_a - energy%E_h
+         virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
          virial_har_shadow = stress_tensor_trace(system%stress_har_shadow) * system%det_a - energy%E_h
          virial_nl = stress_tensor_trace(system%stress_nl) * system%det_a
          virial_nl_grad = virial_nl - 3d0 * energy%E_ion_nloc
          write(fh,'(1x,"Tr(kin)*V + 2E_kin =",e16.8)') virial_kin
-         write(fh,'(1x,"Tr(har)*V - E_h    =",e16.8)') virial_har
+         write(fh,'(1x,"Tr(har)*V + E_h    =",e16.8)') virial_har
          write(fh,'(1x,"Tr(har_shadow)*V - E_h =",e16.8)') virial_har_shadow
          write(fh,*)
          write(fh,*) "Total cancellation diagnostics [Hartree]"
          virial_total = stress_tensor_trace(system%stress_tensor) * system%det_a
          virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a &
-                   - 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+                   + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
          virial_known_trace = stress_tensor_trace(system%stress_kin + system%stress_har &
                              + system%stress_xc + system%stress_nl) * system%det_a
-         virial_known_rhs = -2d0 * energy%E_kin + energy%E_h &
-                          + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+         virial_known_rhs = -2d0 * energy%E_kin - energy%E_h &
+                          - 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
          virial_loc_ewa = stress_tensor_trace(system%stress_loc + system%stress_ewa) * system%det_a
          write(fh,'(1x,"Tr(total)*V            =",e16.8)') virial_total
-         write(fh,'(1x,"Tr(xc)*V - 3(E_vxc-E_xc) =",e16.8)') virial_xc
+         write(fh,'(1x,"Tr(xc)*V + 3(E_vxc-E_xc) =",e16.8)') virial_xc
          write(fh,'(1x,"Tr(kin+har+xc+nl)*V   =",e16.8)') virial_known_trace
          virial_known_rhs = virial_known_rhs + virial_nl
          write(fh,'(1x,"RHS_known(kin+har+xc+nl) =",e16.8)') virial_known_rhs
@@ -1595,7 +1595,7 @@ contains
          virial_loc_sr_grad = stress_tensor_trace(system%stress_loc_sr_grad) * system%det_a
          virial_loc_lr_grad = stress_tensor_trace(system%stress_loc_lr_grad) * system%det_a
          virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) &
-                                * system%det_a - system%stress_loc_lr_energy
+                                * system%det_a + system%stress_loc_lr_energy
          virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a
          virial_ewa_g_grad = stress_tensor_trace(system%stress_ewa_g_grad) * system%det_a
          virial_ewa_g_diag_self = stress_tensor_trace(system%stress_ewa_g_diag + system%stress_ewa_g_self) &
@@ -1607,7 +1607,7 @@ contains
          write(fh,'(1x,"Tr(loc_diag)*V        =",e16.8)') virial_loc_diag
          write(fh,'(1x,"Tr(loc_sr_grad)*V     =",e16.8)') virial_loc_sr_grad
          write(fh,'(1x,"Tr(loc_lr_grad)*V     =",e16.8)') virial_loc_lr_grad
-         write(fh,'(1x,"Tr(loc_lr)*V - E_lr   =",e16.8)') virial_loc_lr_residual
+         write(fh,'(1x,"Tr(loc_lr)*V + E_lr   =",e16.8)') virial_loc_lr_residual
          write(fh,'(1x,"Tr(ewa)*V             =",e16.8)') virial_ewa
          write(fh,'(1x,"Tr(ewa_G_grad)*V      =",e16.8)') virial_ewa_g_grad
          write(fh,'(1x,"Tr(ewa_G_diag+self)*V =",e16.8)') virial_ewa_g_diag_self
@@ -1619,7 +1619,7 @@ contains
          write(fh,'(1x,"Tr(nl)*V              =",e16.8)') virial_nl
          write(fh,'(1x,"3E_nl                 =",e16.8)') 3d0 * energy%E_ion_nloc
          write(fh,'(1x,"Tr(nl_grad)*V         =",e16.8)') virial_nl_grad
-         pressure_nl_diag_gpa = -(energy%E_ion_nloc / system%det_a) * au_pressure_gpa
+         pressure_nl_diag_gpa = +(energy%E_ion_nloc / system%det_a) * au_pressure_gpa
          write(fh,'(1x,"P_nl_diag [GPa]       =",e16.8)') pressure_nl_diag_gpa
          pressure_term_gpa = -stress_term_pressure_gpa(system%stress_nl, au_pressure_gpa) - pressure_nl_diag_gpa
          write(fh,'(1x,"P_nl_grad [GPa]       =",e16.8)') pressure_term_gpa
