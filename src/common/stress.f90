@@ -615,7 +615,7 @@ contains
     do a = 1, 3
       strs_sum(a,a) = strs_sum(a,a) + energy%E_ion_nloc / V
     end do
-    system%stress_nl = strs_sum
+    system%stress_nl = -strs_sum
   end subroutine calc_stress_nl
 
   subroutine calc_stress_ewa(system, pp, fg, info, mg, ewald)
