@@ -14,6 +14,8 @@ grep -Fq 'type(s_xc_operator_payload) :: xc_payload' "$repo_root/src/gs/scf_iter
 grep -Fq 'call exchange_correlation(' "$repo_root/src/gs/scf_iteration.f90"
 grep -Fq 'xc_payload' "$repo_root/src/gs/initialization_dft.f90"
 grep -Fq 'xc_payload' "$repo_root/src/common/hamiltonian.f90"
+grep -Fq 'xc_payload=system%xc_payload' "$repo_root/src/gs/conjugate_gradient.f90"
+grep -Fq 'xc_payload=system%xc_payload' "$repo_root/src/so/subspace_diagonalization_so.f90"
 grep -Fq 'subroutine update_vlocal(' "$repo_root/src/common/hamiltonian.f90"
 grep -Fq 'subroutine add_xc_tau_operator' "$repo_root/src/common/hamiltonian.f90"
 grep -Fq 'check_builtin_r2scan_operator_gate.sh' "$repo_root/tests/source/CMakeLists.txt"
