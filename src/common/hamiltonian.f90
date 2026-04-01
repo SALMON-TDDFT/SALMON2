@@ -846,6 +846,9 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   real(8) :: a0, aplus, aminus, kvec(3), corr_r
   complex(8) :: psi0, corr, lap_axis, dprod_axis, dpsi_axis
 
+#ifdef USE_OPENACC
+  stop "error: tau operator support is unavailable for OpenACC builds"
+#endif
   if (present(xc_payload)) then
     if (.not. xc_payload%use_tau_operator) return
   else
