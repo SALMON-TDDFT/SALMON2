@@ -113,6 +113,7 @@ contains
     if (present(xc_payload)) then
       xc_payload%use_tau_operator = .false.
       xc_payload%use_laplacian_operator = .false.
+      xc_payload%vtau_has_shadow_values = .false.
       if (allocated(xc_payload%vtau%f)) deallocate(xc_payload%vtau%f)
     end if
     
@@ -998,6 +999,7 @@ contains
     if (present(payload)) then
       payload%use_tau_operator = .false.
       payload%use_laplacian_operator = .false.
+      payload%vtau_has_shadow_values = .false.
       if (allocated(payload%vtau%f)) deallocate(payload%vtau%f)
     end if
 

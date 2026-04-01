@@ -854,6 +854,9 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   if (.not. allocated(xc_payload%vtau%f)) then
     stop "error: tau operator payload is enabled without vtau field"
   end if
+  if (.not. xc_payload%vtau_has_shadow_values) then
+    stop "error: tau operator requires vtau shadow values to be prepared"
+  end if
   if (.not. stencil%if_orthogonal) then
     stop "error: tau operator support requires orthogonal stencil"
   end if

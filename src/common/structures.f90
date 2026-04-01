@@ -46,6 +46,7 @@ module structures
   type s_xc_operator_payload
     logical :: use_tau_operator = .false.
     logical :: use_laplacian_operator = .false.
+    logical :: vtau_has_shadow_values = .false.
     type(s_scalar) :: vtau
   end type s_xc_operator_payload
 
