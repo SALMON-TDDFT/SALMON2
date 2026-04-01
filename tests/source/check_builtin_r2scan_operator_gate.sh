@@ -25,5 +25,9 @@ grep -Fq 'else if (system%xc_payload%use_tau_operator) then' "$repo_root/src/com
 grep -Fq 'call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)' "$repo_root/src/common/hamiltonian.f90"
 grep -Fq 'call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,system%xc_payload)' "$repo_root/src/common/hamiltonian.f90"
 grep -Fq 'Vlocal(is)%f(ix,iy,iz) = Vpsl%f(ix,iy,iz) + Vh%f(ix,iy,iz) + Vxc(is)%f(ix,iy,iz)' "$repo_root/src/common/hamiltonian.f90"
-! sed -n '/subroutine update_vlocal(/,/end subroutine update_vlocal/p' "$repo_root/src/common/hamiltonian.f90" | grep -Eq 'xc_payload|vtau'
+update_vlocal_block=$(sed -n '/subroutine update_vlocal(/,/end subroutine update_vlocal/p' "$repo_root/src/common/hamiltonian.f90")
+printf '%s\n' "$update_vlocal_block" | grep -Fq 'Vlocal(is)%f(ix,iy,iz) = Vpsl%f(ix,iy,iz) + Vh%f(ix,iy,iz) + Vxc(is)%f(ix,iy,iz)'
+if printf '%s\n' "$update_vlocal_block" | grep -Eq 'xc_payload|vtau'; then
+  exit 1
+fi
 grep -Fq 'check_builtin_r2scan_operator_gate.sh' "$repo_root/tests/source/CMakeLists.txt"
