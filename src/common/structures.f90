@@ -42,6 +42,13 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
+! exchange-correlation operator payload
+  type s_xc_operator_payload
+    logical :: use_tau_operator = .false.
+    logical :: use_laplacian_operator = .false.
+    type(s_scalar) :: vtau
+  end type s_xc_operator_payload
+
   type s_dft_system
     logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
@@ -370,12 +377,6 @@ module structures
   end type s_pp_nlcc
 
 ! exchange-correlation operator payload
-  type s_xc_operator_payload
-    logical :: use_tau_operator = .false.
-    logical :: use_laplacian_operator = .false.
-    type(s_scalar) :: vtau
-  end type s_xc_operator_payload
-
 ! exchange-correlation functional
   type s_xc_functional
     integer :: xctype(3)
