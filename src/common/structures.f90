@@ -368,6 +368,13 @@ module structures
     real(8), allocatable :: tau_nlcc(:,:,:)
   end type s_pp_nlcc
 
+! exchange-correlation operator payload
+  type s_xc_operator_payload
+    logical :: use_tau_operator
+    logical :: use_laplacian_operator
+    type(s_scalar) :: vtau
+  end type s_xc_operator_payload
+
 ! exchange-correlation functional
   type s_xc_functional
     integer :: xctype(3)

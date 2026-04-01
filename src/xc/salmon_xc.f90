@@ -22,7 +22,7 @@
 #endif
 
 module salmon_xc
-  use structures, only: s_xc_functional
+  use structures, only: s_xc_functional, s_xc_operator_payload
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
@@ -72,7 +72,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc, xc_payload)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -94,6 +94,7 @@ contains
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
     type(s_scalar)          ,optional   :: eexc
+    type(s_xc_operator_payload), intent(out), optional :: xc_payload
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
@@ -108,6 +109,12 @@ contains
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
     
     call nvtxStartRange('exchange_correlation', __LINE__)
+
+    if (present(xc_payload)) then
+      xc_payload%use_tau_operator = .false.
+      xc_payload%use_laplacian_operator = .false.
+      if (allocated(xc_payload%vtau%f)) deallocate(xc_payload%vtau%f)
+    end if
     
     nspin = system%nspin
 
@@ -293,18 +300,18 @@ contains
 !      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       if(nspin==1)then
         call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
-               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc) 
+               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=xc_payload) 
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
         call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, & 
-         & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc) 
+         & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc, payload=xc_payload) 
 !               &     rlrho_s=lrho_s, tau_s=tau_s, rj_s=j_s, rho_nlcc=ppn%rho_nlcc)
       endif 
     else
       if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc, payload=xc_payload)
       else if(nspin==2)then
-        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
+        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc, payload=xc_payload)
       end if
     end if
 
@@ -884,10 +891,10 @@ contains
 
   subroutine calc_xc(xc, pp, rho, rho_s, exc, eexc, vxc, vxc_s, rdedd, rdedd_s, &
       & grho, grho_s, rlrho, rlrho_s, tau, tau_s, rj, rj_s, &
-      & rho_nlcc, &
+      & rho_nlcc, payload, &
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
-    use structures, only: s_pp_info
+    use structures, only: s_pp_info, s_xc_operator_payload
     use nvtx
     implicit none
     type(s_xc_functional), intent(in) :: xc
@@ -912,6 +919,7 @@ contains
     real(8), intent(in), optional :: rho_nlcc(:, :, :)
     real(8), intent(out),optional :: rdedd(:, :, :, :) 
     real(8), intent(out),optional :: rdedd_s(:, :, :, :, :)
+    type(s_xc_operator_payload), intent(out), optional :: payload
 
     !===============================================================
     ! NOTE:
@@ -987,6 +995,11 @@ contains
     if (present(rdedd)) rdedd = 0.d0
     if (present(rdedd_s)) rdedd_s = 0.d0
 #endif
+    if (present(payload)) then
+      payload%use_tau_operator = .false.
+      payload%use_laplacian_operator = .false.
+      if (allocated(payload%vtau%f)) deallocate(payload%vtau%f)
+    end if
 
     ! Exchange-Correlation
     select case (xc%xctype(1))
