@@ -555,7 +555,7 @@ CONTAINS
     call timer_end(LOG_EIGEN_ENERGY_CALC)
 
     call timer_begin(LOG_EIGEN_ENERGY_HPSI)
-    call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
+    call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,xc_payload=system%xc_payload)
     call timer_end(LOG_EIGEN_ENERGY_HPSI)
 
     if(allocated(tpsi%rwf)) then

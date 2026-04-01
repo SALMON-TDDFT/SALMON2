@@ -290,7 +290,7 @@ contains
       allocate(wrk_array(lg%num(1),lg%num(2),lg%num(3),nspin,dc%nstate_frag))
       
     ! shpsi <-- H | lambda > (Hamiltonian operation)
-      call hpsi(sttpsi,shpsi,info,mg,v_local,system,stencil,srg,ppg)
+      call hpsi(sttpsi,shpsi,info,mg,v_local,system,stencil,srg,ppg,xc_payload=system%xc_payload)
       
     ! hf <-- shpsi == H | lambda >
       wrk_array = 0d0

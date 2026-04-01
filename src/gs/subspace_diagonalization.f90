@@ -97,7 +97,7 @@ subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   call timer_end(LOG_SSDG_ISOLATED_CALC)
 
   call timer_begin(LOG_SSDG_ISOLATED_HPSI)
-  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
   call timer_end(LOG_SSDG_ISOLATED_HPSI)
 
   call timer_begin(LOG_SSDG_ISOLATED_CALC)
@@ -271,7 +271,7 @@ end subroutine ssdg_rwf
   real(8) :: eval(system%no)
 
   call timer_begin(LOG_SSDG_PERIODIC_HPSI)
-  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
   call timer_end(LOG_SSDG_PERIODIC_HPSI)
 
   nsize_rg = (mg%ie(1)-mg%is(1)+1)*(mg%ie(2)-mg%is(2)+1)*(mg%ie(3)-mg%is(3)+1)
@@ -435,7 +435,7 @@ real(8) :: hmat_block_tmp(info%numo_max, info%numo)
 real(8) :: eval(system%no)
 
 call timer_begin(LOG_SSDG_PERIODIC_HPSI)
-call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
 call timer_end(LOG_SSDG_PERIODIC_HPSI)
 
 nsize_rg = (mg%ie(1)-mg%is(1)+1)*(mg%ie(2)-mg%is(2)+1)*(mg%ie(3)-mg%is(3)+1)
@@ -607,7 +607,7 @@ real(8) :: hmat_block_tmp(info%numo_max, info%numo)
 real(8) :: eval(system%no)
 
 call timer_begin(LOG_SSDG_PERIODIC_HPSI)
-call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
 call timer_end(LOG_SSDG_PERIODIC_HPSI)
 
 nsize_rg = (mg%ie(1)-mg%is(1)+1)*(mg%ie(2)-mg%is(2)+1)*(mg%ie(3)-mg%is(3)+1)
@@ -789,7 +789,7 @@ subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   call timer_end(LOG_SSDG_PERIODIC_CALC)
 
   call timer_begin(LOG_SSDG_PERIODIC_HPSI)
-  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
   call timer_end(LOG_SSDG_PERIODIC_HPSI)
 
   call timer_begin(LOG_SSDG_PERIODIC_CALC)

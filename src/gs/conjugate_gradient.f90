@@ -77,7 +77,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   call timer_end(LOG_GSCG_ISOLATED_CALC)
 
   call timer_begin(LOG_GSCG_ISOLATED_HPSI)
-  call hpsi(xk,hxk,info,mg,vlocal,system,stencil,srg,ppg)
+  call hpsi(xk,hxk,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
   call timer_end(LOG_GSCG_ISOLATED_HPSI)
 
   call timer_begin(LOG_GSCG_ISOLATED_CALC)
@@ -177,7 +177,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
     call timer_end(LOG_GSCG_ISOLATED_CALC)
 
     call timer_begin(LOG_GSCG_ISOLATED_HPSI)
-    call hpsi(cg%pk,cg%hpk,info,mg,vlocal,system,stencil,srg,ppg)
+    call hpsi(cg%pk,cg%hpk,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
     call timer_end(LOG_GSCG_ISOLATED_HPSI)
 
     call timer_begin(LOG_GSCG_ISOLATED_CALC)

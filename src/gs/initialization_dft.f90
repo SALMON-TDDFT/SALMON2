@@ -61,6 +61,7 @@ type(s_stencil) :: stencil
 type(s_scalar) :: rho,rho_jm,Vh,Vpsl !,rho_old,Vlocal_old
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
+type(s_xc_operator_payload) :: xc_payload
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -198,6 +199,7 @@ type(s_xc_functional) :: xc_func
 type(s_scalar) :: rho,rho_jm,Vh,Vpsl
 !type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
+type(s_xc_operator_payload) :: xc_payload
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -295,7 +297,8 @@ real(8) :: rNe0,rNe
   end if
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,xc_payload=xc_payload)
+  system%xc_payload = xc_payload
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)

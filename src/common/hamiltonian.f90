@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,xc_payload)
   use structures
   use stencil_sub
   use nonlocal_potential
@@ -52,6 +52,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   type(s_pp_grid),intent(in) :: ppg
   type(s_orbital)            :: tpsi,htpsi
   type(s_orbital),optional   :: ttpsi
+  type(s_xc_operator_payload), optional, intent(in) :: xc_payload
   !
   integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
@@ -123,6 +124,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     ! DFT+U
     if ( PLUS_U_ON ) then
       call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+    end if
+
+    if (present(xc_payload)) then
+      if (xc_payload%use_tau_operator) then
+        call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)
+      end if
+    else if (system%xc_payload%use_tau_operator) then
+      call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,system%xc_payload)
     end if
 
   else
@@ -807,6 +816,27 @@ contains
   end subroutine add_imaginary_potential_for_absorbing_boundary_z
 
 end subroutine hpsi
+
+!===================================================================================================================================
+
+subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)
+  use structures
+  implicit none
+  type(s_orbital),            intent(inout) :: htpsi
+  type(s_orbital),            intent(in)    :: tpsi
+  type(s_parallel_info),      intent(in)    :: info
+  type(s_rgrid),              intent(in)    :: mg
+  type(s_dft_system),         intent(in)    :: system
+  type(s_stencil),            intent(in)    :: stencil
+  type(s_sendrecv_grid),      intent(inout) :: srg
+  type(s_pp_grid),            intent(in)    :: ppg
+  type(s_xc_operator_payload), optional, intent(in) :: xc_payload
+
+  if (present(xc_payload)) then
+    if (.not. xc_payload%use_tau_operator) return
+  end if
+  return
+end subroutine add_xc_tau_operator
 
 !===================================================================================================================================
 

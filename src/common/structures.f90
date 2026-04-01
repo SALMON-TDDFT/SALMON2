@@ -99,6 +99,7 @@ module structures
     real(8) :: stress_kin_dbg_grad2
     real(8) :: stress_kin_dbg_cross
     real(8) :: stress_kin_dbg_k2
+    type(s_xc_operator_payload) :: xc_payload
     integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field
     real(8) :: vec_Ac(3) ! A/c (spatially averaged), A: vector potential, c: speed of light
@@ -370,8 +371,8 @@ module structures
 
 ! exchange-correlation operator payload
   type s_xc_operator_payload
-    logical :: use_tau_operator
-    logical :: use_laplacian_operator
+    logical :: use_tau_operator = .false.
+    logical :: use_laplacian_operator = .false.
     type(s_scalar) :: vtau
   end type s_xc_operator_payload
 
