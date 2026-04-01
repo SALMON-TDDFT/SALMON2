@@ -443,6 +443,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,xc_paylo
       end if
     end if
 
+    if (present(xc_payload)) then
+      if (xc_payload%use_tau_operator) then
+        call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)
+      end if
+    else if (system%xc_payload%use_tau_operator) then
+      call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,system%xc_payload)
+    end if
+
   end if
 
   call timer_end(LOG_UHPSI_ALL)
@@ -821,6 +829,8 @@ end subroutine hpsi
 
 subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)
   use structures
+  use salmon_global, only: yn_periodic
+  use math_constants, only: zi
   implicit none
   type(s_orbital),            intent(inout) :: htpsi
   type(s_orbital),            intent(in)    :: tpsi
@@ -831,11 +841,169 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   type(s_sendrecv_grid),      intent(inout) :: srg
   type(s_pp_grid),            intent(in)    :: ppg
   type(s_xc_operator_payload), optional, intent(in) :: xc_payload
+  integer :: im, ik, io, ispin, ix, iy, iz, n
+  integer :: ixp, ixm, iyp, iym, izp, izm
+  real(8) :: a0, aplus, aminus, kvec(3), corr_r
+  complex(8) :: psi0, corr, lap_axis, dprod_axis, dpsi_axis
 
   if (present(xc_payload)) then
     if (.not. xc_payload%use_tau_operator) return
+  else
+    return
   end if
-  return
+  if (.not. allocated(xc_payload%vtau%f)) then
+    stop "error: tau operator payload is enabled without vtau field"
+  end if
+  if (.not. stencil%if_orthogonal) then
+    stop "error: tau operator support requires orthogonal stencil"
+  end if
+  if (allocated(system%Ac_micro%v)) then
+    stop "error: tau operator support is unavailable for single-scale Maxwell-TDDFT"
+  end if
+  if (lbound(xc_payload%vtau%f,1) > mg%is(1)-4 .or. ubound(xc_payload%vtau%f,1) < mg%ie(1)+4 .or. &
+      lbound(xc_payload%vtau%f,2) > mg%is(2)-4 .or. ubound(xc_payload%vtau%f,2) < mg%ie(2)+4 .or. &
+      lbound(xc_payload%vtau%f,3) > mg%is(3)-4 .or. ubound(xc_payload%vtau%f,3) < mg%ie(3)+4) then
+    stop "error: tau operator requires vtau shadow values"
+  end if
+
+  if (allocated(tpsi%rwf)) then
+!$omp parallel do collapse(4) default(none) &
+!$omp          private(im,ik,io,ispin,iz,iy,ix,n,ixp,ixm,iyp,iym,izp,izm,a0,aplus,aminus,corr_r) &
+!$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload)
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        a0 = xc_payload%vtau%f(ix,iy,iz)
+        corr_r = 0d0
+
+        do n=1,4
+          ixp = mg%idx(ix+n)
+          ixm = mg%idx(ix-n)
+          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp,iy,iz))
+          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm,iy,iz))
+          corr_r = corr_r - stencil%coef_lap(n,1) * ( &
+                 aplus  * (tpsi%rwf(ixp,iy,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
+                 aminus * (tpsi%rwf(ixm,iy,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
+        end do
+
+        do n=1,4
+          iyp = mg%idy(iy+n)
+          iym = mg%idy(iy-n)
+          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iyp,iz))
+          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iym,iz))
+          corr_r = corr_r - stencil%coef_lap(n,2) * ( &
+                 aplus  * (tpsi%rwf(ix,iyp,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
+                 aminus * (tpsi%rwf(ix,iym,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
+        end do
+
+        do n=1,4
+          izp = mg%idz(iz+n)
+          izm = mg%idz(iz-n)
+          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izp))
+          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izm))
+          corr_r = corr_r - stencil%coef_lap(n,3) * ( &
+                 aplus  * (tpsi%rwf(ix,iy,izp,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
+                 aminus * (tpsi%rwf(ix,iy,izm,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
+        end do
+
+        htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) + corr_r
+      end do
+      end do
+      end do
+    end do
+    end do
+    end do
+    end do
+!$omp end parallel do
+    return
+  end if
+
+!$omp parallel do collapse(4) default(none) &
+!$omp          private(im,ik,io,ispin,iz,iy,ix,n,ixp,ixm,iyp,iym,izp,izm,a0,aplus,aminus,kvec,psi0,corr,lap_axis,dprod_axis,dpsi_axis) &
+!$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload,yn_periodic)
+  do im=info%im_s,info%im_e
+  do ik=info%ik_s,info%ik_e
+  do io=info%io_s,info%io_e
+  do ispin=1,system%nspin
+    kvec = 0d0
+    if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      a0 = xc_payload%vtau%f(ix,iy,iz)
+      psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      corr = 0d0
+
+      lap_axis = 0d0
+      dprod_axis = 0d0
+      dpsi_axis = 0d0
+      do n=1,4
+        ixp = mg%idx(ix+n)
+        ixm = mg%idx(ix-n)
+        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp,iy,iz))
+        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm,iy,iz))
+        lap_axis = lap_axis + stencil%coef_lap(n,1) * ( &
+                 aplus  * (tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - psi0) + &
+                 aminus * (tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) - psi0) )
+        dprod_axis = dprod_axis + stencil%coef_nab(n,1) * ( &
+                   xc_payload%vtau%f(ixp,iy,iz) * tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - &
+                   xc_payload%vtau%f(ixm,iy,iz) * tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
+        dpsi_axis = dpsi_axis + stencil%coef_nab(n,1) * ( &
+                  tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
+      end do
+      corr = corr - lap_axis - zi * kvec(1) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(1)**2 * psi0
+
+      lap_axis = 0d0
+      dprod_axis = 0d0
+      dpsi_axis = 0d0
+      do n=1,4
+        iyp = mg%idy(iy+n)
+        iym = mg%idy(iy-n)
+        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iyp,iz))
+        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iym,iz))
+        lap_axis = lap_axis + stencil%coef_lap(n,2) * ( &
+                 aplus  * (tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - psi0) + &
+                 aminus * (tpsi%zwf(ix,iym,iz,ispin,io,ik,im) - psi0) )
+        dprod_axis = dprod_axis + stencil%coef_nab(n,2) * ( &
+                   xc_payload%vtau%f(ix,iyp,iz) * tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - &
+                   xc_payload%vtau%f(ix,iym,iz) * tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
+        dpsi_axis = dpsi_axis + stencil%coef_nab(n,2) * ( &
+                  tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
+      end do
+      corr = corr - lap_axis - zi * kvec(2) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(2)**2 * psi0
+
+      lap_axis = 0d0
+      dprod_axis = 0d0
+      dpsi_axis = 0d0
+      do n=1,4
+        izp = mg%idz(iz+n)
+        izm = mg%idz(iz-n)
+        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izp))
+        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izm))
+        lap_axis = lap_axis + stencil%coef_lap(n,3) * ( &
+                 aplus  * (tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - psi0) + &
+                 aminus * (tpsi%zwf(ix,iy,izm,ispin,io,ik,im) - psi0) )
+        dprod_axis = dprod_axis + stencil%coef_nab(n,3) * ( &
+                   xc_payload%vtau%f(ix,iy,izp) * tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - &
+                   xc_payload%vtau%f(ix,iy,izm) * tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
+        dpsi_axis = dpsi_axis + stencil%coef_nab(n,3) * ( &
+                  tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
+      end do
+      corr = corr - lap_axis - zi * kvec(3) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(3)**2 * psi0
+
+      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + corr
+    end do
+    end do
+    end do
+  end do
+  end do
+  end do
+  end do
+!$omp end parallel do
 end subroutine add_xc_tau_operator
 
 !===================================================================================================================================

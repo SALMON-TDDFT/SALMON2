@@ -18,4 +18,6 @@ grep -Fq 'xc_payload=system%xc_payload' "$repo_root/src/gs/conjugate_gradient.f9
 grep -Fq 'xc_payload=system%xc_payload' "$repo_root/src/so/subspace_diagonalization_so.f90"
 grep -Fq 'subroutine update_vlocal(' "$repo_root/src/common/hamiltonian.f90"
 grep -Fq 'subroutine add_xc_tau_operator' "$repo_root/src/common/hamiltonian.f90"
+grep -Fq 'xc_payload%vtau%f' "$repo_root/src/common/hamiltonian.f90"
+grep -Fq 'if (.not. xc_payload%use_tau_operator) return' "$repo_root/src/common/hamiltonian.f90"
 grep -Fq 'check_builtin_r2scan_operator_gate.sh' "$repo_root/tests/source/CMakeLists.txt"
