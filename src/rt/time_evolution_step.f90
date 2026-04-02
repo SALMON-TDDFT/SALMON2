@@ -20,7 +20,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
-  use communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast, comm_get_max
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
   use writefield
   use timer
@@ -77,6 +77,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
+  real(8) :: rho_vh_local, rho_vh_sum, rho_vxc_local, rho_vxc_sum, rho_vpsl_local, rho_vpsl_sum
+  real(8) :: rho2_local, rho2_sum
+  real(8) :: rho_max_local(1), rho_max_sum(1)
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
@@ -346,6 +349,48 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
+    if (comm_is_root(info%id_rko) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+        "        full-energy-components: itt=", itt, " E_tot=", energy%E_tot, " E_kin=", energy%E_kin, &
+        " E_h=", energy%E_h, " E_ion=", energy%E_ion_loc + energy%E_ion_nloc, &
+        " E_xc=", energy%E_xc, " E_ion_ion=", energy%E_ion_ion
+      flush(6)
+    end if
+    if (itt == 1 .or. mod(itt, 10) == 0) then
+      rho_vh_local = 0.0d0
+      rho_vxc_local = 0.0d0
+      rho_vpsl_local = 0.0d0
+      rho2_local = 0.0d0
+      rho_max_local(1) = 0.0d0
+      do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+          do ix = mg%is(1), mg%ie(1)
+            rho_max_local(1) = max(rho_max_local(1), rho%f(ix, iy, iz))
+            rho2_local = rho2_local + rho%f(ix, iy, iz) * rho%f(ix, iy, iz)
+            rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
+            rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
+            do is = 1, system%nspin
+              rho_vxc_local = rho_vxc_local + rho_s(is)%f(ix, iy, iz) * Vxc(is)%f(ix, iy, iz)
+            end do
+          end do
+        end do
+      end do
+      rho_vh_local = rho_vh_local * system%Hvol
+      rho_vxc_local = rho_vxc_local * system%Hvol
+      rho_vpsl_local = rho_vpsl_local * system%Hvol
+      rho2_local = rho2_local * system%Hvol
+      call comm_summation(rho_vh_local, rho_vh_sum, info%icomm_r)
+      call comm_summation(rho_vxc_local, rho_vxc_sum, info%icomm_r)
+      call comm_summation(rho_vpsl_local, rho_vpsl_sum, info%icomm_r)
+      call comm_summation(rho2_local, rho2_sum, info%icomm_r)
+      call comm_get_max(rho_max_local, rho_max_sum, 1, info%icomm_r)
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+          "        full-potential-overlap: itt=", itt, " rhoVh=", rho_vh_sum, &
+          " rhoVxc=", rho_vxc_sum, " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1)
+        flush(6)
+      end if
+    end if
 
     if(singlescale%flag_use) then
       call timer_begin(LOG_CALC_SINGLESCALE)

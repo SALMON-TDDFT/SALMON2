@@ -97,6 +97,7 @@ module rt_dg_fragment_soi
   private
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
+  public :: diagnose_density_from_fragments
   public :: s_dg_fragment_rt, halo_info
   
   ! Types and data structures are defined in rt_dg_fragment_types
@@ -1712,6 +1713,18 @@ contains
   end subroutine finalize_hse_ri_data
 
 #include "rt_dg_fragment_basis_update_soi.f90"
+
+  subroutine diagnose_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    type(s_rgrid),          intent(in)    :: mg
+    type(s_scalar),         intent(inout) :: rho
+    type(s_scalar),         intent(inout) :: rho_s(system%nspin)
+
+    call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+  end subroutine diagnose_density_from_fragments
 
 
 end module rt_dg_fragment_soi

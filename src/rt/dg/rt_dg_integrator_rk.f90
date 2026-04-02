@@ -349,28 +349,24 @@
         coef_pw_ref = dg_frag%coef_pw
       end if
 
-      do istage = 1, dg_frag%rk_stages
-        ! Get vector potential at this time (velocity gauge)
-        ! For RK stages, interpolate between itt and itt+1
-        if (istage == 1) then
-          Ac_tot = rt%Ac_tot(:, itt)
-        else
-          t_stage = dble(istage-1) / dble(dg_frag%rk_stages)
-          Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
-        end if
-        
-        ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
-        ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
-        if (n_pw > 0) then
+      if (n_pw > 0) then
+        do istage = 1, dg_frag%rk_stages
+          ! Get vector potential at this time (velocity gauge)
+          ! For RK stages, interpolate between itt and itt+1
+          if (istage == 1) then
+            Ac_tot = rt%Ac_tot(:, itt)
+          else
+            t_stage = dble(istage-1) / dble(dg_frag%rk_stages)
+            Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
+          end if
+
+          ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
+          ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
           call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,istage), k_pw(:,:,:,istage))
-        else
-          call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,istage))
-        end if
-        
-        ! Update coefficients for next stage
-        if (istage < dg_frag%rk_stages) then
-          ! OpenMP parallelization for coefficient update
-          if (n_pw > 0) then
+
+          ! Update coefficients for next stage
+          if (istage < dg_frag%rk_stages) then
+            ! OpenMP parallelization for coefficient update
 !$omp parallel do collapse(2) private(jo) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
@@ -395,7 +391,32 @@
               end do
             end do
 !$omp end parallel do
+            if (use_mixed_rt) then
+              do ispin = 1, dg_frag%nspin
+                call sync_mixed_coef_from_raw(dg_frag, ispin)
+                call sync_raw_coef_from_mixed(dg_frag, ispin)
+              end do
+            end if
+          end if
+        end do
+      else
+        do istage = 1, dg_frag%rk_stages
+          ! Get vector potential at this time (velocity gauge)
+          ! For RK stages, interpolate between itt and itt+1
+          if (istage == 1) then
+            Ac_tot = rt%Ac_tot(:, itt)
           else
+            t_stage = dble(istage-1) / dble(dg_frag%rk_stages)
+            Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
+          end if
+
+          ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
+          ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
+          call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,istage))
+
+          ! Update coefficients for next stage
+          if (istage < dg_frag%rk_stages) then
+            ! OpenMP parallelization for coefficient update
 !$omp parallel do collapse(2) private(jo) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
@@ -407,15 +428,15 @@
               end do
             end do
 !$omp end parallel do
+            if (use_mixed_rt) then
+              do ispin = 1, dg_frag%nspin
+                call sync_mixed_coef_from_raw(dg_frag, ispin)
+                call sync_raw_coef_from_mixed(dg_frag, ispin)
+              end do
+            end if
           end if
-          if (use_mixed_rt) then
-            do ispin = 1, dg_frag%nspin
-              call sync_mixed_coef_from_raw(dg_frag, ispin)
-              call sync_raw_coef_from_mixed(dg_frag, ispin)
-            end do
-          end if
-        end if
-      end do
+        end do
+      end if
       
       ! Final update: apply Shu-Osher formula for stage rk_stages.
       !

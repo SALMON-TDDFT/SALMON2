@@ -100,7 +100,9 @@
     integer :: ispin_probe, n_frag_rows, n_pw, n_tot, nstate_probe, io
     complex(8), allocatable :: vec(:), svec(:)
     real(8) :: c2(3), cs2(3)
+    logical, parameter :: enable_coef_metric_probe = .true.
 
+    if (.not. enable_coef_metric_probe) return
     if (itt /= 1) return
     if (dg_frag%id /= 0) return
     if (dg_frag%nspin <= 0 .or. dg_frag%nstate_tot <= 0) return
@@ -117,14 +119,24 @@
 
     c2(:) = 0.0d0
     cs2(:) = 0.0d0
-    do io = 1, nstate_probe
-      vec(:) = (0.0d0, 0.0d0)
-      if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
-      if (n_pw > 0) vec(n_frag_rows+1:n_tot) = dg_frag%coef_pw(1:n_pw, io, ispin_probe)
-      call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
-      c2(io) = real(sum(conjg(vec) * vec), kind=8)
-      cs2(io) = real(sum(conjg(vec) * svec), kind=8)
-    end do
+    if (n_pw > 0) then
+      do io = 1, nstate_probe
+        vec(:) = (0.0d0, 0.0d0)
+        if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
+        vec(n_frag_rows+1:n_tot) = dg_frag%coef_pw(1:n_pw, io, ispin_probe)
+        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
+        c2(io) = real(sum(conjg(vec) * vec), kind=8)
+        cs2(io) = real(sum(conjg(vec) * svec), kind=8)
+      end do
+    else
+      do io = 1, nstate_probe
+        vec(:) = (0.0d0, 0.0d0)
+        if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
+        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
+        c2(io) = real(sum(conjg(vec) * vec), kind=8)
+        cs2(io) = real(sum(conjg(vec) * svec), kind=8)
+      end do
+    end if
 
     write(*,'(1x,a,a,a,3(1x,es12.4),a,3(1x,es12.4))') "        coef stage probe: stage=", trim(stage_label), &
       " c2=", c2(1), c2(2), c2(3), " cs2=", cs2(1), cs2(2), cs2(3)

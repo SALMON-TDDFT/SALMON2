@@ -1,5 +1,6 @@
 module rt_dg_fragment_parallel
   implicit none
+  logical, parameter :: enable_fragment_hartree_trace = .false.
 
 contains
 
@@ -19,7 +20,7 @@ contains
     type(s_rgrid) :: lg_frag
     integer :: frag_rank, frag_size
 
-    if (dg_frag%id == 0) then
+    if (enable_fragment_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: frag-grid-entry"
       flush(6)
       write(*,'(1x,a)') "        hartree trace: frag-grid-before-groupinfo"
@@ -31,7 +32,7 @@ contains
     end if
 
     call comm_get_groupinfo(dg_frag%icomm_frag, frag_rank, frag_size)
-    if (dg_frag%id == 0) then
+    if (enable_fragment_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0)') "        hartree trace: frag-grid-after-groupinfo rank=", frag_rank, &
         " size=", frag_size
       flush(6)
@@ -65,7 +66,7 @@ contains
     info_frag%npk = 1
     info_frag%nporbital = 1
     info_frag%nprgrid(1:3) = nproc_rgrid(1:3)
-    if (dg_frag%id == 0) then
+    if (enable_fragment_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,3(i0,1x),a,i0)') "        hartree trace: frag-grid-shape comm_size=", frag_size, &
         " nprgrid=", info_frag%nprgrid(1), info_frag%nprgrid(2), info_frag%nprgrid(3), &
         " product=", product(info_frag%nprgrid)
@@ -81,14 +82,14 @@ contains
       stop 'RT-DG fragment-local MPI Hartree invalid nprgrid for icomm_frag'
     end if
     call init_fragment_poisson_info(dg_frag%icomm_frag, info_frag)
-    if (dg_frag%id == 0) then
+    if (enable_fragment_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: frag-grid-after-init-communicator"
       flush(6)
       write(*,'(1x,a)') "        hartree trace: frag-grid-before-init-parallel-dft"
       flush(6)
     end if
     call init_parallel_dft(system_frag, info_frag)
-    if (dg_frag%id == 0) then
+    if (enable_fragment_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: frag-grid-after-init-parallel-dft"
       flush(6)
       write(*,'(1x,a)') "        hartree trace: frag-grid-before-init-grid-parallel"

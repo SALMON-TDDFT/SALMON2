@@ -98,6 +98,7 @@ module rt_dg_fragment
   private
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
+  public :: diagnose_density_from_fragments
   public :: s_dg_fragment_rt, halo_info
   
   ! Types and data structures are defined in rt_dg_fragment_types
@@ -445,6 +446,7 @@ contains
   end subroutine init_dg_fragment_rt
 
   subroutine build_density_grid_owner_maps(dg_frag)
+    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
@@ -454,7 +456,10 @@ contains
     integer :: nx_max, ny_max, nz_max
     integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
     integer :: primary_count_local, primary_owned_local, primary_remote_local
+    integer :: local_send_pts, local_recv_pts, global_send_pts, global_recv_pts
+    integer :: self_source_owned_pts, self_source_total_pts, global_self_source_owned_pts, global_self_source_total_pts
     integer, allocatable :: recv_count(:), recv_cursor(:)
+    logical, parameter :: enable_density_owner_map_probe = .true.
 
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
     if (allocated(dg_frag%density_primary_local_map)) deallocate(dg_frag%density_primary_local_map)
@@ -627,7 +632,7 @@ contains
           end do
         end do
       end do
-      if (dg_frag%id_frag == 0 .and. i_local <= 4) then
+      if (.false. .and. dg_frag%id_frag == 0 .and. i_local <= 4) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
              'density core-count: rank=', dg_frag%id, &
              ' ifrag=', ifrag, &
@@ -640,7 +645,7 @@ contains
                ' ifrag=', ifrag, ' npts=', subgroup_self_count
         end if
       end if
-      if (dg_frag%id_frag == 0 .and. i_local <= 2) then
+      if (.false. .and. dg_frag%id_frag == 0 .and. i_local <= 2) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') &
              'density fragment-grid: rank=', dg_frag%id, &
              ' ifrag=', ifrag, &
@@ -673,6 +678,8 @@ contains
 
     allocate(recv_count(0:dg_frag%isize-1), recv_cursor(0:dg_frag%isize-1))
     recv_count = 0
+    self_source_owned_pts = 0
+    self_source_total_pts = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
@@ -682,8 +689,12 @@ contains
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
             source_rank = source_root_rank
-            if (source_rank == dg_frag%id) cycle
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
+            if (source_rank == dg_frag%id) then
+              self_source_total_pts = self_source_total_pts + 1
+              if (owner_rank == dg_frag%id) self_source_owned_pts = self_source_owned_pts + 1
+              cycle
+            end if
             if (owner_rank == dg_frag%id) then
               recv_count(source_rank) = recv_count(source_rank) + 1
             end if
@@ -692,7 +703,26 @@ contains
       end do
     end do
 
-    if (dg_frag%id_frag == 0) then
+    if (enable_density_owner_map_probe) then
+      local_send_pts = sum(dg_frag%density_send_count)
+      local_recv_pts = sum(recv_count)
+      call comm_summation(local_send_pts, global_send_pts, dg_frag%icomm)
+      call comm_summation(local_recv_pts, global_recv_pts, dg_frag%icomm)
+      call comm_summation(self_source_owned_pts, global_self_source_owned_pts, dg_frag%icomm)
+      call comm_summation(self_source_total_pts, global_self_source_total_pts, dg_frag%icomm)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,2(a,i0),2(a,i0))') 'density owner-map global summary:', &
+          ' send_pts=', global_send_pts, ' recv_pts=', global_recv_pts, &
+          ' self_src_owned_pts=', global_self_source_owned_pts, ' self_src_total_pts=', global_self_source_total_pts
+        flush(6)
+      end if
+      write(*,'(1x,a,i0,4(a,i0))') 'density owner-map local summary: rank=', dg_frag%id, &
+        ' send_pts=', local_send_pts, ' recv_pts=', local_recv_pts, &
+        ' self_src_owned_pts=', self_source_owned_pts, ' self_src_total_pts=', self_source_total_pts
+      flush(6)
+    end if
+
+    if (.false. .and. dg_frag%id_frag == 0) then
       nsend_nonzero = count(dg_frag%density_send_count > 0)
       nrecv_nonzero = count(recv_count > 0)
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -2333,6 +2363,18 @@ contains
   end subroutine finalize_hse_ri_data
 
 #include "rt_dg_fragment_basis_update.f90"
+
+  subroutine diagnose_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    type(s_rgrid),          intent(in)    :: mg
+    type(s_scalar),         intent(inout) :: rho
+    type(s_scalar),         intent(inout) :: rho_s(system%nspin)
+
+    call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+  end subroutine diagnose_density_from_fragments
 
 
 end module rt_dg_fragment

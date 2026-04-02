@@ -23,8 +23,9 @@
     complex(8) :: integral_v
     real(8), allocatable :: V_total(:,:,:)
     complex(8), allocatable :: V_phi(:,:,:)
-    real(8), allocatable :: partial_total(:), reduced_total(:)
+    real(8), allocatable :: partial_total(:), partial_block(:,:), reduced_block(:,:)
     logical :: use_block_reconstruct
+    logical, save :: debug_static_seed_logged = .false.
     logical, parameter :: enable_reconstruct_timing = .true.
 
     if (.not. dg_frag%has_real_space_basis) return
@@ -78,7 +79,10 @@
     end if
 
     do iblk = 1, size(dg_frag%H_mat_blocks)
-      dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :)
+      dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
+      if (dg_frag%is_frag_root) then
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :)
+      end if
     end do
 
     allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -119,7 +123,8 @@
         iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
         if (iblk <= 0) cycle
 
-        allocate(partial_total(nbf), reduced_total(nbf))
+        allocate(partial_total(nbf), partial_block(nbf, nbf), reduced_block(nbf, nbf))
+        partial_block(:, :) = 0.0d0
 
         do jo = 1, nbf
           call cpu_time(t0)
@@ -136,19 +141,34 @@
           call cpu_time(t1)
           time_local_build = time_local_build + (t1 - t0)
 
-          call cpu_time(t0)
-          call comm_summation(partial_total, reduced_total, nbf, dg_frag%icomm_frag)
-          call cpu_time(t1)
-          time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
-
-          if (dg_frag%is_frag_root) then
-            do io = 1, nbf
-              dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + reduced_total(io)
-            end do
-          end if
+          partial_block(:, jo) = partial_total(:)
         end do
 
-        deallocate(partial_total, reduced_total)
+        call cpu_time(t0)
+        call comm_summation(partial_block, reduced_block, nbf * nbf, dg_frag%icomm_frag)
+        call cpu_time(t1)
+        time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
+
+        if (.not. debug_static_seed_logged .and. dg_frag%is_frag_root .and. ispin == 1 .and. nbf >= 3) then
+          write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
+            "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " seed_t=", &
+            dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin), &
+            " add_block=", reduced_block(1,1), reduced_block(2,2), reduced_block(3,3)
+          flush(6)
+        end if
+
+        if (dg_frag%is_frag_root) then
+          dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(:, :)
+          if (.not. debug_static_seed_logged .and. ispin == 1 .and. nbf >= 3) then
+            write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x))') &
+              "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " final_h=", &
+              dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin)
+            flush(6)
+            debug_static_seed_logged = .true.
+          end if
+        end if
+
+        deallocate(partial_total, partial_block, reduced_block)
       end do
     end do
 

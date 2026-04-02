@@ -42,70 +42,124 @@
         allocate(coef_pw_all(n_pw, nstab))
         coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nstab, ispin)
       end if
-      do io = 1, nstab
-        v(:) = (0.0d0, 0.0d0)
-        v(1:n_frag) = coef_frag_all(1:n_frag, io)
-        if (n_pw > 0) v(n_frag+1:n_tot) = coef_pw_all(1:n_pw, io)
+      if (n_pw > 0) then
+        do io = 1, nstab
+          v(:) = (0.0d0, 0.0d0)
+          v(1:n_frag) = coef_frag_all(1:n_frag, io)
+          v(n_frag+1:n_tot) = coef_pw_all(1:n_pw, io)
 
-        do jo = 1, io - 1
-          u_prev(:) = (0.0d0, 0.0d0)
-          u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
-          if (n_pw > 0) u_prev(n_frag+1:n_tot) = coef_pw_all(1:n_pw, jo)
+          do jo = 1, io - 1
+            u_prev(:) = (0.0d0, 0.0d0)
+            u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
+            u_prev(n_frag+1:n_tot) = coef_pw_all(1:n_pw, jo)
+
+            if (use_S) then
+              call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
+              proj = sum(conjg(u_prev(:)) * Sv(:))
+            else
+              proj = sum(conjg(u_prev(:)) * v(:))
+            end if
+            v(:) = v(:) - proj * u_prev(:)
+          end do
 
           if (use_S) then
             call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
-            proj = sum(conjg(u_prev(:)) * Sv(:))
+            norm2_v = real(sum(conjg(v(:)) * Sv(:)), kind=8)
           else
-            proj = sum(conjg(u_prev(:)) * v(:))
+            norm2_v = sum(abs(v(:))**2)
           end if
-          v(:) = v(:) - proj * u_prev(:)
-        end do
 
-        if (use_S) then
-          call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
-          norm2_v = real(sum(conjg(v(:)) * Sv(:)), kind=8)
-        else
-          norm2_v = sum(abs(v(:))**2)
-        end if
+          if (norm2_v < 0.0d0 .and. abs(norm2_v) < 1.0d-12) norm2_v = 0.0d0
+          norm_v = sqrt(max(0.0d0, norm2_v))
+          dev_max = max(dev_max, abs(norm_v - 1.0d0))
 
-        if (norm2_v < 0.0d0 .and. abs(norm2_v) < 1.0d-12) norm2_v = 0.0d0
-        norm_v = sqrt(max(0.0d0, norm2_v))
-        dev_max = max(dev_max, abs(norm_v - 1.0d0))
-
-        if (norm_v < eps_norm .or. norm_v /= norm_v) then
-          if (dg_frag%id == 0) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
-              ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S
+          if (norm_v < eps_norm .or. norm_v /= norm_v) then
+            if (dg_frag%id == 0) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
+                ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S
+            end if
+            cycle
           end if
-          cycle
-        end if
 
-        coef_frag_all(1:n_frag, io) = v(1:n_frag) / norm_v
-        if (n_pw > 0) coef_pw_all(1:n_pw, io) = v(n_frag+1:n_tot) / norm_v
-        do jo = 1, n_frag
-          if (allocated(dg_frag%coef_owner)) then
-            if (dg_frag%coef_owner(jo, ispin) /= dg_frag%id) cycle
-          end if
-          dg_frag%coef(jo, io, ispin) = coef_frag_all(jo, io)
-        end do
-        if (n_pw > 0) then
+          coef_frag_all(1:n_frag, io) = v(1:n_frag) / norm_v
+          coef_pw_all(1:n_pw, io) = v(n_frag+1:n_tot) / norm_v
+          do jo = 1, n_frag
+            if (allocated(dg_frag%coef_owner)) then
+              if (dg_frag%coef_owner(jo, ispin) /= dg_frag%id) cycle
+            end if
+            dg_frag%coef(jo, io, ispin) = coef_frag_all(jo, io)
+          end do
           do jo = 1, n_pw
             if (allocated(dg_frag%coef_pw_owner)) then
               if (dg_frag%coef_pw_owner(jo) /= dg_frag%id) cycle
             end if
             dg_frag%coef_pw(jo, io, ispin) = coef_pw_all(jo, io)
           end do
-        end if
 
-        ! Post-normalization deviation (actual residual after correction)
-        if (use_S) then
-          call apply_overlap_operator(dg_frag, ispin, v(:) / norm_v, Sv(:), .true.)
-          norm2_v = real(sum(conjg(v(:) / norm_v) * Sv(:)), kind=8)
-        else
-          norm2_v = sum(abs(v(:) / norm_v)**2)
-        end if
-        dev_post_max = max(dev_post_max, abs(sqrt(max(0.0d0, norm2_v)) - 1.0d0))
-      end do
+          ! Post-normalization deviation (actual residual after correction)
+          if (use_S) then
+            call apply_overlap_operator(dg_frag, ispin, v(:) / norm_v, Sv(:), .true.)
+            norm2_v = real(sum(conjg(v(:) / norm_v) * Sv(:)), kind=8)
+          else
+            norm2_v = sum(abs(v(:) / norm_v)**2)
+          end if
+          dev_post_max = max(dev_post_max, abs(sqrt(max(0.0d0, norm2_v)) - 1.0d0))
+        end do
+      else
+        do io = 1, nstab
+          v(:) = (0.0d0, 0.0d0)
+          v(1:n_frag) = coef_frag_all(1:n_frag, io)
+
+          do jo = 1, io - 1
+            u_prev(:) = (0.0d0, 0.0d0)
+            u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
+
+            if (use_S) then
+              call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
+              proj = sum(conjg(u_prev(:)) * Sv(:))
+            else
+              proj = sum(conjg(u_prev(:)) * v(:))
+            end if
+            v(:) = v(:) - proj * u_prev(:)
+          end do
+
+          if (use_S) then
+            call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
+            norm2_v = real(sum(conjg(v(:)) * Sv(:)), kind=8)
+          else
+            norm2_v = sum(abs(v(:))**2)
+          end if
+
+          if (norm2_v < 0.0d0 .and. abs(norm2_v) < 1.0d-12) norm2_v = 0.0d0
+          norm_v = sqrt(max(0.0d0, norm2_v))
+          dev_max = max(dev_max, abs(norm_v - 1.0d0))
+
+          if (norm_v < eps_norm .or. norm_v /= norm_v) then
+            if (dg_frag%id == 0) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
+                ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S
+            end if
+            cycle
+          end if
+
+          coef_frag_all(1:n_frag, io) = v(1:n_frag) / norm_v
+          do jo = 1, n_frag
+            if (allocated(dg_frag%coef_owner)) then
+              if (dg_frag%coef_owner(jo, ispin) /= dg_frag%id) cycle
+            end if
+            dg_frag%coef(jo, io, ispin) = coef_frag_all(jo, io)
+          end do
+
+          ! Post-normalization deviation (actual residual after correction)
+          if (use_S) then
+            call apply_overlap_operator(dg_frag, ispin, v(:) / norm_v, Sv(:), .true.)
+            norm2_v = real(sum(conjg(v(:) / norm_v) * Sv(:)), kind=8)
+          else
+            norm2_v = sum(abs(v(:) / norm_v)**2)
+          end if
+          dev_post_max = max(dev_post_max, abs(sqrt(max(0.0d0, norm2_v)) - 1.0d0))
+        end do
+      end if
 
       deallocate(v, Sv, u_prev, coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)

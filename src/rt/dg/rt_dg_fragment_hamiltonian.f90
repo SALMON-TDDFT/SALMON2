@@ -453,13 +453,19 @@
     integer :: n_metric
     logical :: release_dense_fragment_ops
     logical :: has_overlap_dbg
+    logical :: probe_rank_main, probe_rank_352_396, probe_small_frag2
+    logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup
+    logical :: jo_edge, jo_probe_main, jo_probe_352_396, jo_probe_small_frag2
     logical, parameter :: enable_hamiltonian_trace = .false.
-    logical, parameter :: enable_step2_probe = .true.
+    logical, parameter :: enable_step2_probe = .false.
     complex(8), allocatable :: H_metric_ref(:,:)
     real(8) :: partial_t_abs, partial_h_abs
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
+    probe_rank_main = enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)
+    probe_rank_352_396 = enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)
+    probe_small_frag2 = enable_step2_probe .and. dg_frag%n_frag == 2 .and. dg_frag%id <= 3
 
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
@@ -616,7 +622,7 @@
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
     end if
-    if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)) then
+    if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=enter"
       flush(6)
     end if
@@ -691,7 +697,7 @@
     end if
 
     n_local_diag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
-    if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)) then
+    if (probe_rank_main) then
       write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " n_local_diag=", n_local_diag
       flush(6)
     end if
@@ -714,7 +720,7 @@
         H_kin_diag_blocks(i_diag)%val = 0.0d0
       end do
     end if
-    if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)) then
+    if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-diag-block-alloc"
       flush(6)
     end if
@@ -722,7 +728,7 @@
     ! Exchange halo regions between fragments before stencil operations
     ! This ensures accurate Laplacian calculation at fragment boundaries
     call exchange_phi_frag_halo(dg_frag)
-    if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)) then
+    if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-step2-halo"
       flush(6)
     end if
@@ -737,7 +743,7 @@
     ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
-    if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)) then
+    if (probe_rank_main) then
       write(*,'(1x,a,i0,a,3(i0,1x),a,3(i0,1x))') "        step2-probe: rank=", dg_frag%id, &
         " V_total is=", is(1), is(2), is(3), " ie=", ie(1), ie(2), ie(3)
       flush(6)
@@ -752,7 +758,8 @@
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1) then
+      trace_spin1 = (ispin == 1)
+      if (probe_rank_main .and. trace_spin1) then
         write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " after-build-total-potential ispin=", ispin
         flush(6)
       end if
@@ -769,8 +776,12 @@
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
         nbf_raw = dg_frag%n_basis(ifrag, ispin)
-        if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. &
-            (ifrag == dg_frag%ifrag_start .or. ifrag == dg_frag%ifrag_end)) then
+        probe_frag_edge = probe_rank_main .and. trace_spin1 .and. &
+          (ifrag == dg_frag%ifrag_start .or. ifrag == dg_frag%ifrag_end)
+        probe_ifrag_head = trace_spin1 .and. (ifrag == dg_frag%ifrag_start)
+        probe_subgroup = enable_step2_probe .and. trace_spin1 .and. &
+          (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100)
+        if (probe_frag_edge) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, &
             " ifrag=", ifrag, " i_local=", i_local, " nbf_raw=", nbf_raw
           flush(6)
@@ -817,7 +828,7 @@
         end if
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s_dbg, loc_e_dbg, has_overlap_dbg)
-        if (enable_step2_probe .and. ispin == 1 .and. (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100)) then
+        if (probe_subgroup) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0)') &
             "        step2-subprobe: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
             " ifrag=", ifrag, " has_overlap=", has_overlap_dbg, " loc_s=", &
@@ -831,13 +842,16 @@
           flush(6)
         end if
         do jo = 1, nbf
-          if (enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. &
-              ifrag == dg_frag%ifrag_start .and. (jo == 1 .or. jo == nbf)) then
+          jo_edge = (jo == 1 .or. jo == nbf)
+          jo_probe_main = probe_rank_main .and. probe_ifrag_head .and. jo_edge
+          jo_probe_352_396 = probe_rank_352_396 .and. probe_ifrag_head .and. (jo <= 2 .or. jo == nbf)
+          jo_probe_small_frag2 = probe_small_frag2 .and. probe_ifrag_head .and. (jo <= 2 .or. jo == nbf)
+          if (jo_probe_main) then
             write(*,'(1x,a,i0,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, &
               " ifrag=", ifrag, " jo=", jo
             flush(6)
           end if
-          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
+          if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo begin: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, " nbf=", nbf
             flush(6)
@@ -845,18 +859,17 @@
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
+          if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi begin: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
           end if
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-          if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_352_396) then
             write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-build_hpsi"
             flush(6)
           end if
-          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
+          if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
@@ -878,18 +891,16 @@
 
           end do
           !$omp end parallel do
-          if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_352_396) then
             write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-integrate"
             flush(6)
           end if
-          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
+          if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian integrate done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
           end if
-          if (enable_step2_probe .and. ispin == 1 .and. dg_frag%n_frag == 2 .and. ifrag == dg_frag%ifrag_start .and. &
-              dg_frag%id <= 3 .and. (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_small_frag2) then
             partial_t_abs = sum(abs(partial_t(1:nbf)))
             partial_h_abs = sum(abs(partial_h(1:nbf)))
             write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
@@ -898,16 +909,14 @@
             flush(6)
           end if
 
-          if (enable_step2_probe .and. ispin == 1 .and. dg_frag%n_frag == 2 .and. ifrag == dg_frag%ifrag_start .and. &
-              dg_frag%id <= 3 .and. (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_small_frag2) then
             write(*,'(1x,a,i0,a,i0,a,i0,a)') "        step2-subprobe: rank=", dg_frag%id, &
               " id_frag=", dg_frag%id_frag, " jo=", jo, " before-frag-reduce"
             flush(6)
           end if
           call comm_summation(partial_t, reduced_t, nbf_comm, dg_frag%icomm_frag)
           call comm_summation(partial_h, reduced_h, nbf_comm, dg_frag%icomm_frag)
-          if (enable_step2_probe .and. ispin == 1 .and. dg_frag%n_frag == 2 .and. ifrag == dg_frag%ifrag_start .and. &
-              dg_frag%id <= 3 .and. (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_small_frag2) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
               " id_frag=", dg_frag%id_frag, " jo=", jo, " reduced_t_abs=", sum(abs(reduced_t(1:nbf))), &
               " reduced_h_abs=", sum(abs(reduced_h(1:nbf)))
@@ -916,12 +925,11 @@
               " h12=", reduced_h(1), reduced_h(min(2,nbf))
             flush(6)
           end if
-          if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_352_396) then
             write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-frag-reduce"
             flush(6)
           end if
-          if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
+          if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian reduce done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
@@ -933,14 +941,13 @@
               H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
               H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
-            if (enable_hamiltonian_trace .and. (jo == 1 .or. jo == nbf)) then
+            if (enable_hamiltonian_trace .and. jo_edge) then
               write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian H_mat store done: rank=", dg_frag%id, &
                 " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
               flush(6)
             end if
           end if
-          if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (jo_probe_352_396) then
             write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-store"
             flush(6)
           end if
@@ -2102,7 +2109,7 @@
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
     integer :: npts_local, npts_halo, ipt
     logical :: log_frag_progress, has_overlap
-    logical, parameter :: enable_momentum_probe = .true.
+    logical, parameter :: enable_momentum_probe = .false.
     real(8) :: hvol, integral
     real(8) :: momentum_gb
     real(8) :: max_p, pavg

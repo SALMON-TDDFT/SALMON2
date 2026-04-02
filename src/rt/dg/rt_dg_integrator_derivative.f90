@@ -42,7 +42,7 @@
     integer :: env_len, env_stat
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     logical, parameter :: enable_derivative_trace = .false.
-    logical, parameter :: enable_derivative_progress = .true.
+    logical, parameter :: enable_derivative_progress = .false.
     
     ! Time derivative in velocity gauge:
     !   d/dt c_i = -i * (H_0_ij + A^2(t)/2 * delta_ij) * c_j - A(t)·<i|∇|j> * c_j

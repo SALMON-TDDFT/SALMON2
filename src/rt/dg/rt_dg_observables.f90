@@ -33,6 +33,7 @@
     real(8) :: kinetic_diag_abs_sum, kinetic_offdiag_abs_sum
     real(8) :: kinetic_apply_diff_local, kinetic_apply_diff_sum
     real(8) :: energy_static_avg, energy_kin_avg, energy_nl_avg, energy_ap_avg, energy_a2_avg
+    real(8) :: frag_reduce_factor
     complex(8) :: minus_i
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
@@ -490,6 +491,8 @@
     call comm_summation(current_local, dg_frag%current, 3, dg_frag%icomm)
     call comm_summation(energy_local, dg_frag%total_energy, dg_frag%icomm)
     call comm_summation(pw_weight_local, dg_frag%pw_weight_raw, dg_frag%icomm)
+    frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
+    dg_frag%total_energy = dg_frag%total_energy / frag_reduce_factor
     if (enable_energy_component_probe) then
       call comm_summation(energy_static_local, energy_static_sum, dg_frag%icomm)
       call comm_summation(energy_kin_local, energy_kin_sum, dg_frag%icomm)
@@ -501,16 +504,21 @@
       call comm_summation(kinetic_diag_abs_local, kinetic_diag_abs_sum, dg_frag%icomm)
       call comm_summation(kinetic_offdiag_abs_local, kinetic_offdiag_abs_sum, dg_frag%icomm)
       call comm_summation(kinetic_apply_diff_local, kinetic_apply_diff_sum, dg_frag%icomm)
-      energy_static_avg = energy_static_sum / real(max(1, dg_frag%isize), 8)
-      energy_kin_avg = energy_kin_sum / real(max(1, dg_frag%isize), 8)
-      energy_nl_avg = energy_nl_sum / real(max(1, dg_frag%isize), 8)
-      energy_ap_avg = energy_ap_sum / real(max(1, dg_frag%isize), 8)
-      energy_a2_avg = energy_a2_sum / real(max(1, dg_frag%isize), 8)
+      energy_static_sum = energy_static_sum / frag_reduce_factor
+      energy_kin_sum = energy_kin_sum / frag_reduce_factor
+      energy_nl_sum = energy_nl_sum / frag_reduce_factor
+      energy_ap_sum = energy_ap_sum / frag_reduce_factor
+      energy_a2_sum = energy_a2_sum / frag_reduce_factor
+      energy_kin_diag_sum = energy_kin_diag_sum / frag_reduce_factor
+      energy_kin_offdiag_sum = energy_kin_offdiag_sum / frag_reduce_factor
+      energy_static_avg = energy_static_sum
+      energy_kin_avg = energy_kin_sum
+      energy_nl_avg = energy_nl_sum
+      energy_ap_avg = energy_ap_sum
+      energy_a2_avg = energy_a2_sum
     end if
 
-    ! coef/momentum/H are synchronized globally on all ranks. Each rank therefore
-    ! evaluates the same full-system observable; use process-average to avoid
-    ! fragment-count-dependent overcounting after MPI summation.
+    ! Current and PW weight are replicated over all ranks, so these remain world-averaged.
     dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
     dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
     if (enable_energy_component_probe) then
@@ -558,6 +566,10 @@
       dg_frag%energy_Ap = energy_ap_sum
       dg_frag%energy_A2 = energy_a2_sum
     end if
+
+    if (n_pw == 0 .and. (itt == 1 .or. itt == 40)) then
+      call debug_vloc_block_probe(dg_frag, system, mg, stencil, Vh, Vxc, Vpsl, itt)
+    end if
     
     ! Normalize by global grid count exactly as conventional calc_current().
     ! This avoids decomposition-dependent scaling from local/grid-view differences.
@@ -567,6 +579,285 @@
     rt%curr(:, itt) = dg_frag%current(:)
     
   end subroutine calculate_observables
+
+  subroutine debug_vloc_block_probe(dg_frag, system, mg, stencil, Vh, Vxc, Vpsl, itt)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    type(s_rgrid), intent(in) :: mg
+    type(s_stencil), intent(in) :: stencil
+    type(s_scalar), intent(in) :: Vh, Vpsl
+    type(s_scalar), intent(in) :: Vxc(system%nspin)
+    integer, intent(in) :: itt
+
+    integer :: ifrag, i_local, ispin, iblk, nbf, jo, io, nprobe
+    real(8), allocatable :: V_total(:,:,:)
+    complex(8), allocatable :: V_phi(:,:,:), T_phi(:,:,:), H_phi(:,:,:)
+    complex(8) :: integral_v, integral_t, integral_h
+    real(8) :: vdiag_direct(3), vdiag_mat(3), tdiag_direct(3), tdiag_mat(3), hdiag_direct(3), hdiag_mat(3)
+    real(8) :: voff12_direct, voff12_mat
+
+    if (.not. dg_frag%is_frag_root) return
+    if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_mat_kinetic_blocks)) return
+    if (dg_frag%ifrag_end < dg_frag%ifrag_start) return
+
+    ispin = 1
+    ifrag = dg_frag%ifrag_start
+    i_local = 1
+    nbf = min(3, dg_frag%n_basis(ifrag, ispin))
+    if (nbf <= 0) return
+
+    iblk = find_matrix_block_local(dg_frag%H_block_map, ifrag, ifrag)
+    if (iblk <= 0) return
+
+    allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    allocate(V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    call build_total_potential_grid_local(mg, Vh, Vxc(ispin), Vpsl, V_total)
+
+    vdiag_direct(:) = 0.0d0
+    vdiag_mat(:) = 0.0d0
+    tdiag_direct(:) = 0.0d0
+    tdiag_mat(:) = 0.0d0
+    hdiag_direct(:) = 0.0d0
+    hdiag_mat(:) = 0.0d0
+    voff12_direct = 0.0d0
+    voff12_mat = 0.0d0
+
+    do jo = 1, nbf
+      call build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
+      call integrate_local_basis_with_field_local(dg_frag, ifrag, i_local, jo, mg, T_phi, system%hvol, integral_t)
+      call integrate_local_basis_with_field_local(dg_frag, ifrag, i_local, jo, mg, H_phi, system%hvol, integral_h)
+      call build_local_potential_applied_basis_local(dg_frag, ifrag, i_local, jo, mg, V_total, V_phi)
+      call integrate_local_basis_with_field_local(dg_frag, ifrag, i_local, jo, mg, V_phi, system%hvol, integral_v)
+      tdiag_direct(jo) = real(integral_t, kind=8)
+      hdiag_direct(jo) = real(integral_h, kind=8)
+      vdiag_direct(jo) = real(integral_v, kind=8)
+      tdiag_mat(jo) = dg_frag%H_mat_kinetic_blocks(iblk)%val(jo, jo, ispin)
+      hdiag_mat(jo) = dg_frag%H_mat_blocks(iblk)%val(jo, jo, ispin)
+      vdiag_mat(jo) = dg_frag%H_mat_blocks(iblk)%val(jo, jo, ispin) - dg_frag%H_mat_kinetic_blocks(iblk)%val(jo, jo, ispin)
+    end do
+
+    if (nbf >= 2) then
+      call build_local_potential_applied_basis_local(dg_frag, ifrag, i_local, 2, mg, V_total, V_phi)
+      call integrate_local_basis_with_field_local(dg_frag, ifrag, i_local, 1, mg, V_phi, system%hvol, integral_v)
+      voff12_direct = real(integral_v, kind=8)
+      voff12_mat = dg_frag%H_mat_blocks(iblk)%val(1, 2, ispin) - dg_frag%H_mat_kinetic_blocks(iblk)%val(1, 2, ispin)
+    end if
+
+    write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
+      "        static-diag probe: rank=", dg_frag%id, " itt=", itt, " h_mat=", &
+      hdiag_mat(1), hdiag_mat(2), hdiag_mat(3), " h_rs=", hdiag_direct(1), hdiag_direct(2), hdiag_direct(3)
+    write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
+      "        static-diag probe: rank=", dg_frag%id, " itt=", itt, " t_mat=", &
+      tdiag_mat(1), tdiag_mat(2), tdiag_mat(3), " t_rs=", tdiag_direct(1), tdiag_direct(2), tdiag_direct(3)
+    write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
+      "        static-diag probe: rank=", dg_frag%id, " itt=", itt, " v_mat=", &
+      vdiag_mat(1), vdiag_mat(2), vdiag_mat(3), " diag_rs=", vdiag_direct(1), vdiag_direct(2), vdiag_direct(3)
+    if (nbf >= 2) then
+      write(*,'(1x,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+        "        static-diag probe: rank=", dg_frag%id, " itt=", itt, " v12_mat=", voff12_mat, " v12_rs=", voff12_direct
+    end if
+    flush(6)
+
+    deallocate(V_total, V_phi, T_phi, H_phi)
+  end subroutine debug_vloc_block_probe
+
+  integer function find_matrix_block_local(block_map, ifrag_row, ifrag_col) result(iblk)
+    implicit none
+    integer, intent(in) :: block_map(:, :)
+    integer, intent(in) :: ifrag_row, ifrag_col
+
+    iblk = 0
+    if (ifrag_row < 1 .or. ifrag_row > size(block_map, 1)) return
+    if (ifrag_col < 1 .or. ifrag_col > size(block_map, 2)) return
+    iblk = block_map(ifrag_row, ifrag_col)
+  end function find_matrix_block_local
+
+  subroutine build_total_potential_grid_local(grid, Vh, Vxc_spin, Vpsl, V_total)
+    use structures
+    implicit none
+    type(s_rgrid), intent(in) :: grid
+    type(s_scalar), intent(in) :: Vh, Vxc_spin, Vpsl
+    real(8), intent(out) :: V_total(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
+    integer :: ix, iy, iz
+
+    do iz = grid%is(3), grid%ie(3)
+      do iy = grid%is(2), grid%ie(2)
+        do ix = grid%is(1), grid%ie(1)
+          V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh%f(ix, iy, iz) + Vxc_spin%f(ix, iy, iz)
+        end do
+      end do
+    end do
+  end subroutine build_total_potential_grid_local
+
+  integer function map_global_to_phi_box_coord_obs(ig, lb, ub, lgtot) result(iloc)
+    implicit none
+    integer, intent(in) :: ig, lb, ub, lgtot
+
+    iloc = modulo(ig - 1, lgtot) + 1
+    if (iloc < lb) then
+      iloc = iloc + ((lb - iloc + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc > ub) then
+      iloc = iloc - ((iloc - ub + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc < lb .or. iloc > ub) iloc = 0
+  end function map_global_to_phi_box_coord_obs
+
+  subroutine build_local_potential_applied_basis_local(dg_frag, ifrag, i_local, jo, mg, V_total, V_phi)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, jo
+    type(s_rgrid), intent(in) :: mg
+    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    complex(8), intent(out) :: V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
+    complex(8) :: phi0
+    logical :: has_overlap
+
+    V_phi(:, :, :) = (0.0d0, 0.0d0)
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    g_s(:) = iorg(:)
+    g_e(:) = iorg(:) + ndom(:) - 1
+    ov_s(:) = max(g_s(:), mg%is(:))
+    ov_e(:) = min(g_e(:), mg%ie(:))
+    has_overlap = all(ov_s(:) <= ov_e(:))
+    if (.not. has_overlap) return
+    loc_s(:) = ov_s(:) - iorg(:) + 1
+    loc_e(:) = ov_e(:) - iorg(:) + 1
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
+
+    if (allocated(dg_frag%phi_frag_c)) then
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz, phi0) schedule(static)
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
+            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            phi0 = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
+            V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
+          end do
+        end do
+      end do
+!$omp end parallel do
+    else
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz, phi0) schedule(static)
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
+            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            phi0 = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
+            V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
+          end do
+        end do
+      end do
+!$omp end parallel do
+    end if
+  end subroutine build_local_potential_applied_basis_local
+
+  subroutine integrate_local_basis_with_field_local(dg_frag, ifrag, i_local, io, mg, field, hvol, integral)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, io
+    type(s_rgrid), intent(in) :: mg
+    complex(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8), intent(in) :: hvol
+    complex(8), intent(out) :: integral
+    integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
+    logical :: has_overlap
+
+    integral = (0.0d0, 0.0d0)
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    g_s(:) = iorg(:)
+    g_e(:) = iorg(:) + ndom(:) - 1
+    ov_s(:) = max(g_s(:), mg%is(:))
+    ov_e(:) = min(g_e(:), mg%ie(:))
+    has_overlap = all(ov_s(:) <= ov_e(:))
+    if (.not. has_overlap) return
+    loc_s(:) = ov_s(:) - iorg(:) + 1
+    loc_e(:) = ov_e(:) - iorg(:) + 1
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
+
+    if (allocated(dg_frag%phi_frag_c)) then
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
+            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
+          end do
+        end do
+      end do
+    else
+      do lz = lz_lo, lz_hi
+        gz = ov_s(3) + (lz - lz_lo)
+        do ly = ly_lo, ly_hi
+          gy = ov_s(2) + (ly - ly_lo)
+          do lx = lx_lo, lx_hi
+            gx = ov_s(1) + (lx - lx_lo)
+            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+            integral = integral + cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
+          end do
+        end do
+      end do
+    end if
+  end subroutine integrate_local_basis_with_field_local
 
   subroutine compute_realspace_energy_probe(dg_frag, system, mg, stencil, itt, Vh, Vxc, Vpsl, energy_kin_mat, energy_one_mat, kin_sum_out, one_sum_out)
     use structures
@@ -591,6 +882,7 @@
     complex(8), allocatable :: T_phi(:,:,:), H_phi(:,:,:)
     complex(8) :: coeff, ztmp
     real(8) :: kin_local, one_local, kin_sum, one_sum
+    real(8) :: frag_reduce_factor
 
     kin_sum_out = 0.0d0
     one_sum_out = 0.0d0
@@ -604,7 +896,7 @@
     do ispin = 1, dg_frag%nspin
       if (dg_frag%nocc_spin(ispin) <= 0) cycle
       allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-      call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      call build_total_potential_grid_local(mg, Vh, Vxc(ispin), Vpsl, V_total)
       allocate(psi(1:dg_frag%lgnum_total(1), 1:dg_frag%lgnum_total(2), 1:dg_frag%lgnum_total(3)))
       allocate(tpsi(1:dg_frag%lgnum_total(1), 1:dg_frag%lgnum_total(2), 1:dg_frag%lgnum_total(3)))
       allocate(hpsi(1:dg_frag%lgnum_total(1), 1:dg_frag%lgnum_total(2), 1:dg_frag%lgnum_total(3)))
