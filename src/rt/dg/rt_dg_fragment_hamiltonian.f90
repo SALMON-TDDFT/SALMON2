@@ -434,7 +434,7 @@
     integer :: i_halo, jfrag, n_basis_halo
     integer :: l(3), halo_send_idx(3), halo_recv_idx(3)
     real(8) :: hvol
-    real(8) :: halo_integral_t, t_point
+    real(8) :: halo_integral_t, halo_integral_h, halo_integral_t_sum, halo_integral_h_sum, t_point, h_point
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
@@ -888,8 +888,8 @@
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
             flush(6)
           end if
-          if (enable_step2_probe .and. ispin == 1 .and. (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100) .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (enable_step2_probe .and. ispin == 1 .and. dg_frag%n_frag == 2 .and. ifrag == dg_frag%ifrag_start .and. &
+              dg_frag%id <= 3 .and. (jo <= 2 .or. jo == nbf)) then
             partial_t_abs = sum(abs(partial_t(1:nbf)))
             partial_h_abs = sum(abs(partial_h(1:nbf)))
             write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
@@ -898,19 +898,22 @@
             flush(6)
           end if
 
-          if (enable_step2_probe .and. ispin == 1 .and. (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100) .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (enable_step2_probe .and. ispin == 1 .and. dg_frag%n_frag == 2 .and. ifrag == dg_frag%ifrag_start .and. &
+              dg_frag%id <= 3 .and. (jo <= 2 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a)') "        step2-subprobe: rank=", dg_frag%id, &
               " id_frag=", dg_frag%id_frag, " jo=", jo, " before-frag-reduce"
             flush(6)
           end if
           call comm_summation(partial_t, reduced_t, nbf_comm, dg_frag%icomm_frag)
           call comm_summation(partial_h, reduced_h, nbf_comm, dg_frag%icomm_frag)
-          if (enable_step2_probe .and. ispin == 1 .and. (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100) .and. &
-              (jo <= 2 .or. jo == nbf)) then
+          if (enable_step2_probe .and. ispin == 1 .and. dg_frag%n_frag == 2 .and. ifrag == dg_frag%ifrag_start .and. &
+              dg_frag%id <= 3 .and. (jo <= 2 .or. jo == nbf)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
               " id_frag=", dg_frag%id_frag, " jo=", jo, " reduced_t_abs=", sum(abs(reduced_t(1:nbf))), &
               " reduced_h_abs=", sum(abs(reduced_h(1:nbf)))
+            write(*,'(1x,a,i0,a,i0,a,i0,a,2(es12.4,1x),a,2(es12.4,1x))') "        step2-elem probe: rank=", dg_frag%id, &
+              " id_frag=", dg_frag%id_frag, " jo=", jo, " t12=", reduced_t(1), reduced_t(min(2,nbf)), &
+              " h12=", reduced_h(1), reduced_h(min(2,nbf))
             flush(6)
           end if
           if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396) .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. &
@@ -1016,23 +1019,34 @@
 
             do io = 1, n_basis_halo
               halo_integral_t = 0.0d0
+              halo_integral_h = 0.0d0
               do iz_chk = 1, l(3)
                 do iy_chk = 1, l(2)
                   do ix_chk = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_chk, iy_chk, iz_chk, halo_send_idx, halo_recv_idx)
                     call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_recv_idx, t_point)
+                    call apply_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, halo_recv_idx, h_point)
                     halo_integral_t = halo_integral_t + dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1) * t_point * hvol
+                    halo_integral_h = halo_integral_h + dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1) * h_point * hvol
                   end do
                 end do
               end do
+              call comm_summation(halo_integral_t, halo_integral_t_sum, dg_frag%icomm_frag)
+              call comm_summation(halo_integral_h, halo_integral_h_sum, dg_frag%icomm_frag)
+
+              if (.not. dg_frag%is_frag_root) cycle
 
               if (iblk > 0) then
                 dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
+                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
               end if
               if (iblk_rev > 0) then
                 dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t
+                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
+                dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
+                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
               end if
             end do
           end do
@@ -1364,6 +1378,43 @@
     end do
 !$omp end parallel do
   end subroutine build_hpsi_for_basis
+
+  subroutine build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, jo
+    type(s_rgrid), intent(in) :: mg
+    type(s_stencil), intent(in) :: stencil
+    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    complex(8), intent(out) :: T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    complex(8), intent(out) :: H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8), allocatable :: T_phi_re(:,:,:), H_phi_re(:,:,:)
+
+    allocate(T_phi_re(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    allocate(H_phi_re(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi_re, H_phi_re)
+    T_phi(:, :, :) = cmplx(T_phi_re(:, :, :), 0.0d0, kind=8)
+    H_phi(:, :, :) = cmplx(H_phi_re(:, :, :), 0.0d0, kind=8)
+    deallocate(T_phi_re, H_phi_re)
+  end subroutine build_hpsi_for_basis_probe
+
+  subroutine get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, gx, gy, gz, phi_val)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, jo, gx, gy, gz
+    complex(8), intent(out) :: phi_val
+    integer :: bx, by, bz
+
+    bx = map_global_to_phi_box_coord_ham(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
+    by = map_global_to_phi_box_coord_ham(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
+    bz = map_global_to_phi_box_coord_ham(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+    if (bx == 0 .or. by == 0 .or. bz == 0) then
+      phi_val = (0.0d0, 0.0d0)
+      return
+    end if
+    phi_val = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
+  end subroutine get_phi_value_at_global_probe
 
   !=======================================================================
   ! Integrate one bra basis function against a real-space field
@@ -1980,6 +2031,32 @@
 
     t_val = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
   end subroutine apply_kinetic_at_phi_box_point
+
+  subroutine apply_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, h_val)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer,                intent(in) :: i_local, jo
+    type(s_rgrid),          intent(in) :: mg
+    type(s_stencil),        intent(in) :: stencil
+    real(8),                intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer,                intent(in) :: phi_idx(3)
+    real(8),                intent(out) :: h_val
+
+    integer :: gx, gy, gz
+
+    call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, h_val)
+    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
+    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
+    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
+    if (gx < mg%is(1) .or. gx > mg%ie(1) .or. &
+        gy < mg%is(2) .or. gy > mg%ie(2) .or. &
+        gz < mg%is(3) .or. gz > mg%ie(3)) return
+    if (phi_idx(1) < lbound(dg_frag%phi_frag, 1) .or. phi_idx(1) > ubound(dg_frag%phi_frag, 1) .or. &
+        phi_idx(2) < lbound(dg_frag%phi_frag, 2) .or. phi_idx(2) > ubound(dg_frag%phi_frag, 2) .or. &
+        phi_idx(3) < lbound(dg_frag%phi_frag, 3) .or. phi_idx(3) > ubound(dg_frag%phi_frag, 3)) return
+    h_val = h_val + V_total(gx, gy, gz) * dg_frag%phi_frag(phi_idx(1), phi_idx(2), phi_idx(3), jo, i_local)
+  end subroutine apply_hamiltonian_at_phi_box_point
 
   !=======================================================================
   ! Add non-local pseudopotential contribution to Hamiltonian matrix

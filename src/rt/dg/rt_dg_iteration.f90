@@ -86,7 +86,7 @@
     end if
     
     ! Calculate observables
-    call calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt)
+    call calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl)
 
     if (trim(theory) == 'single_scale_maxwell_tddft') then
       call calculate_microscopic_current_dg(dg_frag, system, mg, stencil, rt%j_e)
