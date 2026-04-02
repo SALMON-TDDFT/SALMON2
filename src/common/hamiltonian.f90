@@ -866,10 +866,10 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   if (allocated(system%Ac_micro%v)) then
     stop "error: tau operator support is unavailable for single-scale Maxwell-TDDFT"
   end if
-  if (lbound(xc_payload%vtau%f,1) > mg%is(1)-4 .or. ubound(xc_payload%vtau%f,1) < mg%ie(1)+4 .or. &
-      lbound(xc_payload%vtau%f,2) > mg%is(2)-4 .or. ubound(xc_payload%vtau%f,2) < mg%ie(2)+4 .or. &
-      lbound(xc_payload%vtau%f,3) > mg%is(3)-4 .or. ubound(xc_payload%vtau%f,3) < mg%ie(3)+4) then
-    stop "error: tau operator requires vtau shadow values"
+  if (lbound(xc_payload%vtau%f,1) > mg%is_array(1) .or. ubound(xc_payload%vtau%f,1) < mg%ie_array(1) .or. &
+      lbound(xc_payload%vtau%f,2) > mg%is_array(2) .or. ubound(xc_payload%vtau%f,2) < mg%ie_array(2) .or. &
+      lbound(xc_payload%vtau%f,3) > mg%is_array(3) .or. ubound(xc_payload%vtau%f,3) < mg%ie_array(3)) then
+    stop "error: tau operator requires vtau bounds compatible with mg%is_array:mg%ie_array"
   end if
 
   if (allocated(tpsi%rwf)) then
@@ -883,14 +883,14 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        a0 = xc_payload%vtau%f(ix,iy,iz)
+        a0 = xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), mg%idz(iz))
         corr_r = 0d0
 
         do n=1,4
           ixp = mg%idx(ix+n)
           ixm = mg%idx(ix-n)
-          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp,iy,iz))
-          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm,iy,iz))
+          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp, mg%idy(iy), mg%idz(iz)))
+          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm, mg%idy(iy), mg%idz(iz)))
           corr_r = corr_r - stencil%coef_lap(n,1) * ( &
                  aplus  * (tpsi%rwf(ixp,iy,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
                  aminus * (tpsi%rwf(ixm,iy,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
@@ -899,8 +899,8 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
         do n=1,4
           iyp = mg%idy(iy+n)
           iym = mg%idy(iy-n)
-          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iyp,iz))
-          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iym,iz))
+          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iyp, mg%idz(iz)))
+          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iym, mg%idz(iz)))
           corr_r = corr_r - stencil%coef_lap(n,2) * ( &
                  aplus  * (tpsi%rwf(ix,iyp,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
                  aminus * (tpsi%rwf(ix,iym,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
@@ -909,8 +909,8 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
         do n=1,4
           izp = mg%idz(iz+n)
           izm = mg%idz(iz-n)
-          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izp))
-          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izm))
+          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izp))
+          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izm))
           corr_r = corr_r - stencil%coef_lap(n,3) * ( &
                  aplus  * (tpsi%rwf(ix,iy,izp,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
                  aminus * (tpsi%rwf(ix,iy,izm,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
@@ -940,7 +940,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      a0 = xc_payload%vtau%f(ix,iy,iz)
+      a0 = xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), mg%idz(iz))
       psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
       corr = 0d0
 
@@ -950,14 +950,14 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
       do n=1,4
         ixp = mg%idx(ix+n)
         ixm = mg%idx(ix-n)
-        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp,iy,iz))
-        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm,iy,iz))
+        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp, mg%idy(iy), mg%idz(iz)))
+        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm, mg%idy(iy), mg%idz(iz)))
         lap_axis = lap_axis + stencil%coef_lap(n,1) * ( &
                  aplus  * (tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - psi0) + &
                  aminus * (tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) - psi0) )
         dprod_axis = dprod_axis + stencil%coef_nab(n,1) * ( &
-                   xc_payload%vtau%f(ixp,iy,iz) * tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - &
-                   xc_payload%vtau%f(ixm,iy,iz) * tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
+                   xc_payload%vtau%f(ixp, mg%idy(iy), mg%idz(iz)) * tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - &
+                   xc_payload%vtau%f(ixm, mg%idy(iy), mg%idz(iz)) * tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
         dpsi_axis = dpsi_axis + stencil%coef_nab(n,1) * ( &
                   tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
       end do
@@ -969,14 +969,14 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
       do n=1,4
         iyp = mg%idy(iy+n)
         iym = mg%idy(iy-n)
-        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iyp,iz))
-        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iym,iz))
+        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iyp, mg%idz(iz)))
+        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iym, mg%idz(iz)))
         lap_axis = lap_axis + stencil%coef_lap(n,2) * ( &
                  aplus  * (tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - psi0) + &
                  aminus * (tpsi%zwf(ix,iym,iz,ispin,io,ik,im) - psi0) )
         dprod_axis = dprod_axis + stencil%coef_nab(n,2) * ( &
-                   xc_payload%vtau%f(ix,iyp,iz) * tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - &
-                   xc_payload%vtau%f(ix,iym,iz) * tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
+                   xc_payload%vtau%f(mg%idx(ix), iyp, mg%idz(iz)) * tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - &
+                   xc_payload%vtau%f(mg%idx(ix), iym, mg%idz(iz)) * tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
         dpsi_axis = dpsi_axis + stencil%coef_nab(n,2) * ( &
                   tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
       end do
@@ -988,14 +988,14 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
       do n=1,4
         izp = mg%idz(iz+n)
         izm = mg%idz(iz-n)
-        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izp))
-        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ix,iy,izm))
+        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izp))
+        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izm))
         lap_axis = lap_axis + stencil%coef_lap(n,3) * ( &
                  aplus  * (tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - psi0) + &
                  aminus * (tpsi%zwf(ix,iy,izm,ispin,io,ik,im) - psi0) )
         dprod_axis = dprod_axis + stencil%coef_nab(n,3) * ( &
-                   xc_payload%vtau%f(ix,iy,izp) * tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - &
-                   xc_payload%vtau%f(ix,iy,izm) * tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
+                   xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izp) * tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - &
+                   xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izm) * tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
         dpsi_axis = dpsi_axis + stencil%coef_nab(n,3) * ( &
                   tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
       end do

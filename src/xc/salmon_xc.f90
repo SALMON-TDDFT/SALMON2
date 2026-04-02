@@ -26,7 +26,7 @@ module salmon_xc
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
-  use builtin_r2scan, only: exc_cor_r2scan
+  use builtin_r2scan, only: exc_cor_r2scan, grad_floor
   use builtin_tbmbj, only: exc_cor_tbmbj
   use builtin_pw, only: exc_cor_pw
 
@@ -114,7 +114,12 @@ contains
       xc_payload%use_tau_operator = .false.
       xc_payload%use_laplacian_operator = .false.
       xc_payload%vtau_has_shadow_values = .false.
+      xc_payload%rdedd_has_shadow_values = .false.
+      xc_payload%vsigma_has_shadow_values = .false.
       if (allocated(xc_payload%vtau%f)) deallocate(xc_payload%vtau%f)
+      if (allocated(xc_payload%vsigma%f)) deallocate(xc_payload%vsigma%f)
+      if (allocated(xc_payload%grho%v)) deallocate(xc_payload%grho%v)
+      if (allocated(xc_payload%rdedd%v)) deallocate(xc_payload%rdedd%v)
     end if
     
     nspin = system%nspin
@@ -316,11 +321,23 @@ contains
       end if
     end if
 
+    if (present(xc_payload)) then
+      call finalize_xc_payload(xc_payload)
+      if (xc_func%use_gradient .and. nspin == 1) then
+        allocate(xc_payload%grho%v(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+        xc_payload%grho%v = grho
+      end if
+    end if
+
 !!!!To include the sigma contribution to GGA Vxc potential !!!!!!!
     if (xc_func%use_gradient) then
     if(nspin==1)then
       drdedd=0.d0
       drdedd_tmp=0.d0
+      if (present(xc_payload)) then
+        allocate(xc_payload%rdedd%v(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+        xc_payload%rdedd%v = 0d0
+      end if
       do idir=1,3 
         rdedd=0.d0
         do iz=1,mg%num(3)
@@ -331,6 +348,7 @@ contains
         enddo
         enddo
         if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rdedd)
+        if (present(xc_payload)) xc_payload%rdedd%v(idir,:,:,:) = rdedd
         call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rdedd,drdedd_tmp)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -340,6 +358,7 @@ contains
         enddo
         enddo
       enddo
+      if (present(xc_payload)) xc_payload%rdedd_has_shadow_values = .true.
     elseif(nspin==2)then
       drdedd_s=0.d0
       drdedd_tmp=0.d0
@@ -467,7 +486,65 @@ contains
     return
     
   contains
-  
+
+    subroutine finalize_xc_payload(xc_payload)
+      use sendrecv_grid, only: update_overlap_real8
+      implicit none
+      type(s_xc_operator_payload), intent(inout) :: xc_payload
+      real(8), allocatable :: vtau_local(:,:,:)
+      real(8), allocatable :: vsigma_local(:,:,:)
+      integer :: ix, iy, iz
+
+      if (xc_payload%use_tau_operator) then
+        if (.not. allocated(xc_payload%vtau%f)) then
+          stop "error: tau operator payload is enabled without vtau field"
+        end if
+      end if
+      if (.not. xc_payload%use_tau_operator .and. .not. allocated(xc_payload%vsigma%f)) return
+
+      if (xc_payload%use_tau_operator) then
+        allocate(vtau_local(mg%num(1), mg%num(2), mg%num(3)))
+        vtau_local = xc_payload%vtau%f
+
+        deallocate(xc_payload%vtau%f)
+        allocate(xc_payload%vtau%f(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+        xc_payload%vtau%f = 0d0
+
+        do iz = 1, mg%num(3)
+        do iy = 1, mg%num(2)
+        do ix = 1, mg%num(1)
+          xc_payload%vtau%f(mg%is(1)+ix-1, mg%is(2)+iy-1, mg%is(3)+iz-1) = vtau_local(ix, iy, iz)
+        end do
+        end do
+        end do
+
+        if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, xc_payload%vtau%f)
+        xc_payload%vtau_has_shadow_values = .true.
+        deallocate(vtau_local)
+      end if
+
+      if (allocated(xc_payload%vsigma%f)) then
+        allocate(vsigma_local(mg%num(1), mg%num(2), mg%num(3)))
+        vsigma_local = xc_payload%vsigma%f
+
+        deallocate(xc_payload%vsigma%f)
+        allocate(xc_payload%vsigma%f(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+        xc_payload%vsigma%f = 0d0
+
+        do iz = 1, mg%num(3)
+        do iy = 1, mg%num(2)
+        do ix = 1, mg%num(1)
+          xc_payload%vsigma%f(mg%is(1)+ix-1, mg%is(2)+iy-1, mg%is(3)+iz-1) = vsigma_local(ix, iy, iz)
+        end do
+        end do
+        end do
+
+        if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, xc_payload%vsigma%f)
+        xc_payload%vsigma_has_shadow_values = .true.
+        deallocate(vsigma_local)
+      end if
+    end subroutine finalize_xc_payload
+
     subroutine calc_tau
       use sendrecv_grid, only: update_overlap_complex8
       use math_constants,only : zi
@@ -549,6 +626,52 @@ contains
     end subroutine calc_tau
     
   end subroutine exchange_correlation
+
+
+  subroutine copy_xc_operator_payload(dst, src)
+    implicit none
+    type(s_xc_operator_payload), intent(inout) :: dst
+    type(s_xc_operator_payload), intent(in) :: src
+
+    dst%use_tau_operator = src%use_tau_operator
+    dst%use_laplacian_operator = src%use_laplacian_operator
+    dst%vtau_has_shadow_values = src%vtau_has_shadow_values
+    dst%rdedd_has_shadow_values = src%rdedd_has_shadow_values
+    dst%vsigma_has_shadow_values = src%vsigma_has_shadow_values
+
+    if (allocated(dst%vtau%f)) deallocate(dst%vtau%f)
+    if (allocated(dst%vsigma%f)) deallocate(dst%vsigma%f)
+    if (allocated(dst%grho%v)) deallocate(dst%grho%v)
+    if (allocated(dst%rdedd%v)) deallocate(dst%rdedd%v)
+
+    if (allocated(src%vtau%f)) then
+      allocate(dst%vtau%f(lbound(src%vtau%f,1):ubound(src%vtau%f,1), &
+                          lbound(src%vtau%f,2):ubound(src%vtau%f,2), &
+                          lbound(src%vtau%f,3):ubound(src%vtau%f,3)))
+      dst%vtau%f = src%vtau%f
+    end if
+
+    if (allocated(src%vsigma%f)) then
+      allocate(dst%vsigma%f(lbound(src%vsigma%f,1):ubound(src%vsigma%f,1), &
+                            lbound(src%vsigma%f,2):ubound(src%vsigma%f,2), &
+                            lbound(src%vsigma%f,3):ubound(src%vsigma%f,3)))
+      dst%vsigma%f = src%vsigma%f
+    end if
+
+    if (allocated(src%grho%v)) then
+      allocate(dst%grho%v(3, lbound(src%grho%v,2):ubound(src%grho%v,2), &
+                              lbound(src%grho%v,3):ubound(src%grho%v,3), &
+                              lbound(src%grho%v,4):ubound(src%grho%v,4)))
+      dst%grho%v = src%grho%v
+    end if
+
+    if (allocated(src%rdedd%v)) then
+      allocate(dst%rdedd%v(3, lbound(src%rdedd%v,2):ubound(src%rdedd%v,2), &
+                              lbound(src%rdedd%v,3):ubound(src%rdedd%v,3), &
+                              lbound(src%rdedd%v,4):ubound(src%rdedd%v,4)))
+      dst%rdedd%v = src%rdedd%v
+    end if
+  end subroutine copy_xc_operator_payload
 
 
   subroutine print_xc_info()
@@ -1001,6 +1124,7 @@ contains
       payload%use_laplacian_operator = .false.
       payload%vtau_has_shadow_values = .false.
       if (allocated(payload%vtau%f)) deallocate(payload%vtau%f)
+      if (allocated(payload%grho%v)) deallocate(payload%grho%v)
     end if
 
     ! Exchange-Correlation
@@ -1310,10 +1434,89 @@ contains
 
 
     subroutine exec_builtin_r2scan()
+      use salmon_global, only: calc_mode
       implicit none
+      real(8) :: rho_1d(nl)
+      real(8) :: rho_s_1d(nl)
+      real(8) :: grho_s_1d(nl, 3)
+      real(8) :: tau_s_1d(nl)
+      real(8) :: eexc_1d(nl)
+      real(8) :: vexc_1d(nl)
+      real(8) :: vtau_1d(nl)
+      real(8) :: vgrad_1d(nl)
+      real(8) :: vsigma_1d(nl)
+      real(8) :: grho_norm_1d(nl)
+      real(8) :: vgrad_3d(nx, ny, nz)
+      real(8) :: rho_safe
+      real(8) :: grho_norm
+      integer :: ix, iy, iz, idir
 
+      if (trim(calc_mode) /= 'GS') stop "r2SCAN supports only GS calculations"
       if (xc%ispin /= 0) stop "r2SCAN supports only nspin=1"
-      stop "builtin r2SCAN kernel not implemented"
+
+      rho_1d = reshape(rho, (/nl/))
+#ifndef SALMON_DEBUG_NEGLECT_NLCC
+      if (present(rho_nlcc)) then
+        rho_1d = rho_1d + reshape(rho_nlcc, (/nl/))
+      end if
+#endif
+      rho_s_1d = rho_1d * 0.5d0
+      grho_s_1d = reshape(grho(:, :, :, :), (/nl, 3/)) * 0.5d0
+      tau_s_1d = reshape(tau(:, :, :), (/nl/)) * 0.5d0
+
+      call exc_cor_r2scan(nl, rho_1d, rho_s_1d, grho_s_1d, tau_s_1d, eexc_1d, vexc_1d, vtau_1d, vgrad_1d)
+
+      if (present(vxc)) then
+        vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
+      end if
+
+      if (present(exc)) then
+        do iz = 1, nz
+        do iy = 1, ny
+        do ix = 1, nx
+          rho_safe = max(rho_1d((iz-1) * nx * ny + (iy-1) * nx + ix), 1d-18)
+          exc(ix,iy,iz) = exc(ix,iy,iz) + eexc_1d((iz-1) * nx * ny + (iy-1) * nx + ix) / rho_safe
+        end do
+        end do
+        end do
+      end if
+
+      if (present(eexc)) then
+        eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
+      end if
+
+      if (present(rdedd)) then
+        vgrad_3d = reshape(vgrad_1d, (/nx, ny, nz/))
+        do iz = 1, nz
+        do iy = 1, ny
+        do ix = 1, nx
+          grho_norm = sqrt(grho(ix,iy,iz,1)**2 + grho(ix,iy,iz,2)**2 + grho(ix,iy,iz,3)**2)
+          if (grho_norm <= 1d-18) cycle
+          do idir = 1, 3
+            rdedd(ix,iy,iz,idir) = rdedd(ix,iy,iz,idir) - vgrad_3d(ix,iy,iz) * grho(ix,iy,iz,idir) / grho_norm
+          end do
+        end do
+        end do
+        end do
+      end if
+
+      if (present(payload)) then
+        payload%use_tau_operator = .true.
+        payload%use_laplacian_operator = .false.
+        payload%vtau_has_shadow_values = .false.
+        payload%vsigma_has_shadow_values = .false.
+        if (allocated(payload%vtau%f)) deallocate(payload%vtau%f)
+        if (allocated(payload%vsigma%f)) deallocate(payload%vsigma%f)
+        allocate(payload%vtau%f(nx, ny, nz))
+        allocate(payload%vsigma%f(nx, ny, nz))
+        payload%vtau%f = reshape(vtau_1d, (/nx, ny, nz/))
+        grho_norm_1d = reshape(sqrt(grho(:,:,:,1)**2 + grho(:,:,:,2)**2 + grho(:,:,:,3)**2), (/nl/))
+        vsigma_1d = 0d0
+        where (grho_norm_1d > grad_floor)
+          vsigma_1d = 0.5d0 * vgrad_1d / grho_norm_1d
+        end where
+        payload%vsigma%f = reshape(vsigma_1d, (/nx, ny, nz/))
+      end if
     end subroutine exec_builtin_r2scan
 
 

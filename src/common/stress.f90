@@ -61,7 +61,7 @@ contains
   end subroutine refresh_stress_output_state
 
   subroutine calc_stress(system, pp, fg, info, mg, stencil, poisson, &
-                         srg, ppg, ppn, tpsi, ewald, energy, xc_func, rho_s, Vxc, field_state)
+                         srg, ppg, ppn, tpsi, ewald, energy, xc_func, rho_s, Vxc, field_state, srg_scalar)
     use structures
     use plusU_global,  only: PLUS_U_ON
     use salmon_global, only: xc, yn_stress_loc_fd
@@ -84,10 +84,11 @@ contains
     type(s_scalar),             intent(in)    :: rho_s(:)
     type(s_scalar),             intent(in)    :: Vxc(:)
     type(s_stress_field_state), intent(in)    :: field_state
+    type(s_sendrecv_grid),      intent(inout), optional :: srg_scalar
 
     if(PLUS_U_ON) stop "stress tensor is not supported with PLUS_U_ON"
     if(system%nspin /= 1) stop "stress tensor supports only unpolarized calculations"
-    if(trim(xc) /= 'pz') stop "stress tensor supports only built-in xc='PZ'"
+    if(trim(xc) /= 'pz' .and. trim(xc) /= 'r2scan') stop "stress tensor supports only built-in xc='PZ' or xc='r2scan'"
 
     if(info%if_divide_rspace) then
       if(.not. tpsi%update_zwf_overlap) then
@@ -102,6 +103,11 @@ contains
     system%stress_har = 0d0
     system%stress_har_shadow = 0d0
     system%stress_xc = 0d0
+    system%stress_xc_local = 0d0
+    system%stress_xc_grad = 0d0
+    system%stress_xc_grad_payload = 0d0
+    system%stress_xc_grad_vsigma = 0d0
+    system%stress_xc_tau = 0d0
     system%stress_x = 0d0
     system%stress_c = 0d0
     system%stress_loc = 0d0
@@ -138,10 +144,22 @@ contains
     system%stress_kin_dbg_grad2 = 0d0
     system%stress_kin_dbg_cross = 0d0
     system%stress_kin_dbg_k2 = 0d0
+    system%stress_xc_dbg_rdedd_refresh_maxdiff = 0d0
+    system%stress_xc_dbg_grho_refresh_maxdiff = 0d0
+    system%stress_xc_dbg_grho_local_payload_maxdiff = 0d0
+    system%stress_xc_dbg_grho_direct_payload_maxdiff = 0d0
+    system%stress_xc_dbg_grho_direct_local_maxdiff = 0d0
+    system%stress_xc_dbg_rho_box_direct_maxdiff = 0d0
+    system%stress_xc_dbg_rho_box_direct_active_maxdiff = 0d0
+    system%stress_xc_dbg_grho_direct_local_early_maxdiff = 0d0
+    system%stress_xc_dbg_grho_direct_local_bulk_maxdiff = 0d0
+    system%stress_xc_dbg_rdedd_dot_grho_local = 0d0
+    system%stress_xc_dbg_rdedd_dot_grho_payload = 0d0
+    system%stress_xc_dbg_rho_div_rdedd = 0d0
 
     call calc_stress_kin(system, info, mg, stencil, ppg, tpsi, field_state)
     call calc_stress_har(system, info, mg, fg, poisson, energy)
-    call calc_stress_xc(system, info, mg, ppn, rho_s, Vxc, energy, xc_func)
+    call calc_stress_xc(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
     call calc_stress_loc(system, pp, fg, info, mg, ppg, poisson, energy)
     call calc_stress_nl(system, pp, info, mg, stencil, ppg, tpsi, energy, field_state)
     call calc_stress_ewa(system, pp, fg, info, mg, ewald)
@@ -153,6 +171,11 @@ contains
     call symmetrize_stress_term(system%stress_kin)
     call symmetrize_stress_term(system%stress_har)
     call symmetrize_stress_term(system%stress_xc)
+    call symmetrize_stress_term(system%stress_xc_local)
+    call symmetrize_stress_term(system%stress_xc_grad)
+    call symmetrize_stress_term(system%stress_xc_grad_payload)
+    call symmetrize_stress_term(system%stress_xc_grad_vsigma)
+    call symmetrize_stress_term(system%stress_xc_tau)
     call symmetrize_stress_term(system%stress_loc)
     if(yn_stress_loc_fd == 'y') call symmetrize_stress_term(system%stress_loc_fd)
     call symmetrize_stress_term(system%stress_nl)
@@ -184,7 +207,7 @@ contains
   end subroutine get_g_bounds
 
   subroutine sum_stress_tensor(icomm, strs, strs_sum)
-    use communication, only: comm_summation
+    use communication, only: comm_summation, comm_get_max_array1d_double
     implicit none
     integer, intent(in)  :: icomm
     real(8), intent(in)  :: strs(3,3)
@@ -291,7 +314,37 @@ contains
     system%stress_har_shadow = -strs_sum
   end subroutine calc_stress_har_shadow
 
-  subroutine calc_stress_xc(system, info, mg, ppn, rho_s, Vxc, energy, xc_func)
+  subroutine calc_stress_xc(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
+    use structures
+    use salmon_global, only: xc
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_pp_info),       intent(in)    :: pp
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_stencil),       intent(in)    :: stencil
+    type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_pp_nlcc),       intent(in)    :: ppn
+    type(s_scalar),        intent(in)    :: rho_s(:)
+    type(s_scalar),        intent(in)    :: Vxc(:)
+    type(s_dft_energy),    intent(in)    :: energy
+    type(s_xc_functional), intent(in)    :: xc_func
+    type(s_orbital),        intent(inout) :: tpsi
+    type(s_stress_field_state), intent(in) :: field_state
+    type(s_sendrecv_grid), intent(inout), optional :: srg_scalar
+
+    select case (trim(xc))
+    case ('pz')
+      call calc_stress_xc_builtin_pz(system, info, mg, ppn, rho_s, energy, xc_func)
+    case ('r2scan')
+      call calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
+    case default
+      if(xc_func%use_gradient) stop "stress tensor supports only built-in PZ or built-in r2SCAN XC"
+      stop "stress tensor supports only built-in xc='PZ' or xc='r2scan'"
+    end select
+  end subroutine calc_stress_xc
+
+  subroutine calc_stress_xc_builtin_pz(system, info, mg, ppn, rho_s, energy, xc_func)
     use structures
     use communication, only: comm_summation
     implicit none
@@ -300,7 +353,6 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_pp_nlcc),       intent(in)    :: ppn
     type(s_scalar),        intent(in)    :: rho_s(:)
-    type(s_scalar),        intent(in)    :: Vxc(:)
     type(s_dft_energy),    intent(in)    :: energy
     type(s_xc_functional), intent(in)    :: xc_func
     integer :: ix, iy, iz, ispin, a
@@ -356,7 +408,347 @@ contains
     end do
     system%stress_xc = system%stress_x + system%stress_c
     system%stress_xc_e_vxc = system%stress_x_e_vx + system%stress_c_e_vc
-  end subroutine calc_stress_xc
+  end subroutine calc_stress_xc_builtin_pz
+
+  subroutine calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
+    use structures
+    use stencil_sub, only: calc_gradient_field, calc_gradient_psi
+    use communication, only: comm_summation, comm_get_max_array1d_double
+    use sendrecv_grid, only: update_overlap_real8
+    use math_constants, only: zi
+    use salmon_global, only: stress_fd_detail
+    implicit none
+    type(s_dft_system),         intent(inout) :: system
+    type(s_pp_info),            intent(in)    :: pp
+    type(s_parallel_info),      intent(in)    :: info
+    type(s_rgrid),              intent(in)    :: mg
+    type(s_stencil),            intent(in)    :: stencil
+    type(s_sendrecv_grid),      intent(inout) :: srg
+    type(s_pp_nlcc),            intent(in)    :: ppn
+    type(s_scalar),             intent(in)    :: rho_s(:)
+    type(s_dft_energy),         intent(in)    :: energy
+    type(s_scalar),             intent(in)    :: Vxc(:)
+    type(s_xc_functional),      intent(in)    :: xc_func
+    type(s_orbital),            intent(inout) :: tpsi
+    type(s_stress_field_state), intent(in)    :: field_state
+    type(s_sendrecv_grid),      intent(inout), optional :: srg_scalar
+    integer :: ix, iy, iz, ik, io, ispin, im, idir, a, b
+    real(8) :: rho_loc, V, E_vxc_loc, E_vxc, rtmp, vtau_loc, vsigma_loc
+    real(8) :: kAc(3)
+    real(8) :: strs_grad(3,3), strs_grad_sum(3,3)
+    real(8) :: strs_grad_payload(3,3), strs_grad_payload_sum(3,3)
+    real(8) :: strs_grad_vsigma(3,3), strs_grad_vsigma_sum(3,3)
+    real(8) :: strs_tau(3,3), strs_tau_sum(3,3)
+    logical :: want_rdedd_payload_diag
+    real(8), allocatable :: rho_box(:,:,:)
+    real(8), allocatable :: rho_direct(:,:,:)
+    real(8), allocatable :: grho_local(:,:,:,:)
+    real(8), allocatable :: grho_direct_early(:,:,:,:)
+    complex(8), allocatable :: gtpsi(:,:,:,:)
+    complex(8) :: psi_r, w(3)
+    real(8) :: early_maxdiff_in(4), early_maxdiff_out(4)
+
+    if (system%nspin /= 1) stop "r2scan stress supports only nspin=1"
+    if (.not. allocated(system%xc_payload%rdedd%v)) stop "r2scan stress requires rdedd payload"
+    if (.not. system%xc_payload%rdedd_has_shadow_values) stop "r2scan stress requires rdedd payload with shadow values"
+    if (.not. allocated(system%xc_payload%vtau%f)) stop "r2scan stress requires vtau payload"
+    if (.not. system%xc_payload%vtau_has_shadow_values) stop "r2scan stress requires vtau payload with shadow values"
+    if (.not. allocated(system%xc_payload%vsigma%f)) stop "r2scan stress requires vsigma payload"
+    if (.not. system%xc_payload%vsigma_has_shadow_values) stop "r2scan stress requires vsigma payload with shadow values"
+
+    V = system%det_a
+    want_rdedd_payload_diag = (trim(stress_fd_detail) == 'high')
+    allocate(rho_box(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+    allocate(grho_local(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+
+    rho_box = 0d0
+    do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      rho_box(ix,iy,iz) = dble(rho_s(1)%f(ix,iy,iz))
+    end do
+    end do
+    end do
+    if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rho_box)
+    call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, rho_box, grho_local)
+    system%stress_xc_dbg_rho_box_direct_maxdiff = 0d0
+    system%stress_xc_dbg_rho_box_direct_active_maxdiff = 0d0
+    system%stress_xc_dbg_grho_direct_local_early_maxdiff = 0d0
+    system%stress_xc_dbg_grho_direct_local_bulk_maxdiff = 0d0
+    if (want_rdedd_payload_diag .and. present(srg_scalar)) then
+      allocate(rho_direct(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+      allocate(grho_direct_early(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      rho_direct = 0d0
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        rho_direct(ix,iy,iz) = dble(rho_s(1)%f(ix,iy,iz))
+      end do
+      end do
+      end do
+      if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rho_direct)
+      call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, rho_direct, grho_direct_early)
+      early_maxdiff_in = 0d0
+      do iz = mg%is_array(3), mg%ie_array(3)
+      do iy = mg%is_array(2), mg%ie_array(2)
+      do ix = mg%is_array(1), mg%ie_array(1)
+        early_maxdiff_in(1) = max(early_maxdiff_in(1), abs(rho_box(ix,iy,iz) - rho_direct(ix,iy,iz)))
+      end do
+      end do
+      end do
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        early_maxdiff_in(2) = max(early_maxdiff_in(2), abs(rho_box(ix,iy,iz) - rho_direct(ix,iy,iz)))
+      end do
+      end do
+      end do
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+      do idir = 1, 3
+        early_maxdiff_in(3) = max(early_maxdiff_in(3), abs(grho_local(idir,ix,iy,iz) - grho_direct_early(idir,ix,iy,iz)))
+      end do
+      end do
+      end do
+      end do
+      if (mg%num(1) > 8 .and. mg%num(2) > 8 .and. mg%num(3) > 8) then
+        do iz = mg%is(3)+4, mg%ie(3)-4
+        do iy = mg%is(2)+4, mg%ie(2)-4
+        do ix = mg%is(1)+4, mg%ie(1)-4
+        do idir = 1, 3
+          early_maxdiff_in(4) = max(early_maxdiff_in(4), abs(grho_local(idir,ix,iy,iz) - grho_direct_early(idir,ix,iy,iz)))
+        end do
+        end do
+        end do
+        end do
+      end if
+      call comm_get_max_array1d_double(early_maxdiff_in, early_maxdiff_out, 4, info%icomm_rko)
+      system%stress_xc_dbg_rho_box_direct_maxdiff = early_maxdiff_out(1)
+      system%stress_xc_dbg_rho_box_direct_active_maxdiff = early_maxdiff_out(2)
+      system%stress_xc_dbg_grho_direct_local_early_maxdiff = early_maxdiff_out(3)
+      system%stress_xc_dbg_grho_direct_local_bulk_maxdiff = early_maxdiff_out(4)
+      deallocate(grho_direct_early)
+      deallocate(rho_direct)
+    end if
+
+    E_vxc_loc = 0d0
+    strs_grad = 0d0
+    strs_grad_payload = 0d0
+    strs_grad_vsigma = 0d0
+    do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      rho_loc = dble(rho_s(1)%f(ix,iy,iz))
+      E_vxc_loc = E_vxc_loc + rho_loc * Vxc(1)%f(ix,iy,iz)
+      vsigma_loc = system%xc_payload%vsigma%f(mg%idx(ix), mg%idy(iy), mg%idz(iz))
+      do b = 1, 3
+      do a = 1, 3
+        strs_grad(a,b) = strs_grad(a,b) + system%Hvol * &
+             system%xc_payload%rdedd%v(a, mg%idx(ix), mg%idy(iy), mg%idz(iz)) * grho_local(b,ix,iy,iz)
+        if (allocated(system%xc_payload%grho%v)) then
+          strs_grad_payload(a,b) = strs_grad_payload(a,b) + system%Hvol * &
+               system%xc_payload%rdedd%v(a, mg%idx(ix), mg%idy(iy), mg%idz(iz)) * &
+               system%xc_payload%grho%v(b, ix, iy, iz)
+        end if
+        strs_grad_vsigma(a,b) = strs_grad_vsigma(a,b) + system%Hvol * &
+             2d0 * vsigma_loc * grho_local(a,ix,iy,iz) * grho_local(b,ix,iy,iz)
+      end do
+      end do
+    end do
+    end do
+    end do
+
+    strs_tau = 0d0
+    im = 1
+    do ik = info%ik_s, info%ik_e
+    do io = info%io_s, info%io_e
+    do ispin = 1, system%nspin
+      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im), gtpsi, &
+           mg%is_array, mg%ie_array, mg%is, mg%ie, mg%idx, mg%idy, mg%idz, stencil%coef_nab, system%rmatrix_B)
+      rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+      !$omp parallel do collapse(2) private(ix,iy,iz,kAc,psi_r,w,a,b,vtau_loc) reduction(+:strs_tau)
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        if(field_state%use_micro_ac) then
+          kAc(1) = system%vec_k(1,ik) + system%Ac_micro%v(1,ix,iy,iz)
+          kAc(2) = system%vec_k(2,ik) + system%Ac_micro%v(2,ix,iy,iz)
+          kAc(3) = system%vec_k(3,ik) + system%Ac_micro%v(3,ix,iy,iz)
+        else
+           kAc(1) = system%vec_k(1,ik) + field_state%Ac_uniform(1)
+           kAc(2) = system%vec_k(2,ik) + field_state%Ac_uniform(2)
+           kAc(3) = system%vec_k(3,ik) + field_state%Ac_uniform(3)
+        end if
+        vtau_loc = system%xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), mg%idz(iz))
+        psi_r = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        w(1) = gtpsi(1,ix,iy,iz) + zi * kAc(1) * psi_r
+        w(2) = gtpsi(2,ix,iy,iz) + zi * kAc(2) * psi_r
+        w(3) = gtpsi(3,ix,iy,iz) + zi * kAc(3) * psi_r
+        do b = 1, 3
+        do a = 1, 3
+          strs_tau(a,b) = strs_tau(a,b) - rtmp * vtau_loc * dble(conjg(w(a)) * w(b))
+        end do
+        end do
+      end do
+      end do
+      end do
+      !$omp end parallel do
+    end do
+    end do
+    end do
+
+    call comm_summation(E_vxc_loc * system%Hvol, E_vxc, info%icomm_r)
+    call comm_summation(strs_grad, strs_grad_sum, 9, info%icomm_r)
+    if (allocated(system%xc_payload%grho%v)) then
+      call comm_summation(strs_grad_payload, strs_grad_payload_sum, 9, info%icomm_r)
+    else
+      strs_grad_payload_sum = 0d0
+    end if
+    call comm_summation(strs_grad_vsigma, strs_grad_vsigma_sum, 9, info%icomm_r)
+    call comm_summation(strs_tau, strs_tau_sum, 9, info%icomm_rko)
+
+    system%stress_x = 0d0
+    system%stress_c = 0d0
+    system%stress_x_e_vx = 0d0
+    system%stress_c_e_vc = 0d0
+    system%stress_xc = 0d0
+    system%stress_xc_local = 0d0
+    system%stress_xc_grad = 0d0
+    system%stress_xc_grad_payload = 0d0
+    system%stress_xc_grad_vsigma = 0d0
+    system%stress_xc_tau = 0d0
+    do a = 1, 3
+      system%stress_xc_local(a,a) = -(E_vxc - energy%E_xc) / V
+    end do
+    system%stress_xc_grad = strs_grad_sum / V
+    do b = 1, 3
+    do a = 1, 3
+      system%stress_xc_grad_payload(a,b) = system%stress_xc_grad_payload(a,b) + strs_grad_payload_sum(a,b) / V
+      system%stress_xc_grad_vsigma(a,b) = system%stress_xc_grad_vsigma(a,b) + strs_grad_vsigma_sum(a,b) / V
+    end do
+    end do
+    system%stress_xc_tau = strs_tau_sum / V
+    system%stress_xc = system%stress_xc_local + system%stress_xc_grad + system%stress_xc_tau
+    system%stress_xc_e_vxc = E_vxc
+
+    if (want_rdedd_payload_diag) then
+      if (present(srg_scalar)) then
+        call calc_r2scan_rdedd_refresh_maxdiff(system, pp, info, mg, stencil, srg_scalar, srg, ppn, rho_s, xc_func, tpsi, &
+             grho_local)
+      end if
+    end if
+
+    deallocate(gtpsi)
+    deallocate(grho_local)
+    deallocate(rho_box)
+  end subroutine calc_stress_xc_builtin_r2scan
+
+  subroutine calc_r2scan_rdedd_refresh_maxdiff(system, pp, info, mg, stencil, srg_scalar, srg, ppn, rho_s, xc_func, tpsi, &
+                                               grho_local)
+    use structures
+    use stencil_sub, only: calc_gradient_field
+    use sendrecv_grid, only: update_overlap_real8
+    use communication, only: comm_get_max_array1d_double, comm_summation
+    use salmon_xc, only: exchange_correlation
+    implicit none
+    type(s_dft_system),         intent(inout) :: system
+    type(s_pp_info),            intent(in)    :: pp
+    type(s_parallel_info),      intent(in)    :: info
+    type(s_rgrid),              intent(in)    :: mg
+    type(s_stencil),            intent(in)    :: stencil
+    type(s_sendrecv_grid),      intent(inout) :: srg_scalar
+    type(s_sendrecv_grid),      intent(inout) :: srg
+    type(s_pp_nlcc),            intent(in)    :: ppn
+    type(s_scalar),             intent(in)    :: rho_s(:)
+    type(s_xc_functional),      intent(in)    :: xc_func
+    type(s_orbital),            intent(inout) :: tpsi
+    real(8),                    intent(in)    :: grho_local(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), &
+                                                             mg%is(3):mg%ie(3))
+    type(s_xc_operator_payload) :: xc_payload_refresh
+    type(s_scalar) :: Vxc_refresh(system%nspin)
+    real(8) :: rhd_direct(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
+    real(8) :: rdedd_component(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                               mg%is_array(3):mg%ie_array(3))
+    real(8) :: div_component(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8) :: grho_direct(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer :: ispin, idir, ix, iy, iz
+    real(8) :: E_xc_refresh, maxdiff_in(5), maxdiff_out(5)
+    real(8) :: diag_in(3), diag_out(3), rho_loc, rdedd_loc
+
+    do ispin = 1, system%nspin
+      allocate(Vxc_refresh(ispin)%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      Vxc_refresh(ispin)%f = 0d0
+    end do
+
+    call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, tpsi, stencil, &
+         Vxc_refresh, E_xc_refresh, xc_payload=xc_payload_refresh)
+
+    maxdiff_in = 0d0
+    diag_in = 0d0
+    rhd_direct = 0d0
+    do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      rhd_direct(ix,iy,iz) = dble(rho_s(1)%f(ix,iy,iz))
+    end do
+    end do
+    end do
+    if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd_direct)
+    call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, rhd_direct, grho_direct)
+
+    do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+    do ix = mg%is(1), mg%ie(1)
+      rho_loc = dble(rho_s(1)%f(ix,iy,iz))
+      do idir = 1, 3
+        rdedd_loc = system%xc_payload%rdedd%v(idir, mg%idx(ix), mg%idy(iy), mg%idz(iz))
+        maxdiff_in(1) = max(maxdiff_in(1), abs(rdedd_loc - &
+                           xc_payload_refresh%rdedd%v(idir, mg%idx(ix), mg%idy(iy), mg%idz(iz))))
+        maxdiff_in(2) = max(maxdiff_in(2), abs(system%xc_payload%grho%v(idir,ix,iy,iz) - &
+                           xc_payload_refresh%grho%v(idir,ix,iy,iz)))
+        maxdiff_in(3) = max(maxdiff_in(3), abs(system%xc_payload%grho%v(idir,ix,iy,iz) - &
+                           grho_local(idir,ix,iy,iz)))
+        maxdiff_in(4) = max(maxdiff_in(4), abs(system%xc_payload%grho%v(idir,ix,iy,iz) - &
+                           grho_direct(idir,ix,iy,iz)))
+        maxdiff_in(5) = max(maxdiff_in(5), abs(grho_direct(idir,ix,iy,iz) - &
+                           grho_local(idir,ix,iy,iz)))
+        diag_in(1) = diag_in(1) + system%Hvol * rdedd_loc * grho_local(idir,ix,iy,iz)
+        diag_in(2) = diag_in(2) + system%Hvol * rdedd_loc * system%xc_payload%grho%v(idir,ix,iy,iz)
+      end do
+    end do
+    end do
+    end do
+
+    do idir = 1, 3
+      rdedd_component = system%xc_payload%rdedd%v(idir,:,:,:)
+      call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, rdedd_component, div_component)
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        rho_loc = dble(rho_s(1)%f(ix,iy,iz))
+        diag_in(3) = diag_in(3) + system%Hvol * rho_loc * div_component(idir,ix,iy,iz)
+      end do
+      end do
+      end do
+    end do
+
+    call comm_get_max_array1d_double(maxdiff_in, maxdiff_out, 5, info%icomm_rko)
+    call comm_summation(diag_in, diag_out, 3, info%icomm_rko)
+    system%stress_xc_dbg_rdedd_refresh_maxdiff = maxdiff_out(1)
+    system%stress_xc_dbg_grho_refresh_maxdiff = maxdiff_out(2)
+    system%stress_xc_dbg_grho_local_payload_maxdiff = maxdiff_out(3)
+    system%stress_xc_dbg_grho_direct_payload_maxdiff = maxdiff_out(4)
+    system%stress_xc_dbg_grho_direct_local_maxdiff = maxdiff_out(5)
+    system%stress_xc_dbg_rdedd_dot_grho_local = diag_out(1)
+    system%stress_xc_dbg_rdedd_dot_grho_payload = diag_out(2)
+    system%stress_xc_dbg_rho_div_rdedd = diag_out(3)
+
+    do ispin = 1, system%nspin
+      deallocate(Vxc_refresh(ispin)%f)
+    end do
+  end subroutine calc_r2scan_rdedd_refresh_maxdiff
 
   pure subroutine calc_builtin_pz_xc_split(trho, exc_x, exc_c, vxc_x, vxc_c)
     implicit none

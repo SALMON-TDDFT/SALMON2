@@ -47,7 +47,12 @@ module structures
     logical :: use_tau_operator = .false.
     logical :: use_laplacian_operator = .false.
     logical :: vtau_has_shadow_values = .false.
+    logical :: rdedd_has_shadow_values = .false.
+    logical :: vsigma_has_shadow_values = .false.
     type(s_scalar) :: vtau
+    type(s_scalar) :: vsigma
+    type(s_vector) :: grho
+    type(s_vector) :: rdedd
   end type s_xc_operator_payload
 
   type s_dft_system
@@ -69,6 +74,11 @@ module structures
     real(8) :: stress_har(3,3)
     real(8) :: stress_har_shadow(3,3)
     real(8) :: stress_xc(3,3)
+    real(8) :: stress_xc_local(3,3)
+    real(8) :: stress_xc_grad(3,3)
+    real(8) :: stress_xc_grad_payload(3,3)
+    real(8) :: stress_xc_grad_vsigma(3,3)
+    real(8) :: stress_xc_tau(3,3)
     real(8) :: stress_x(3,3)
     real(8) :: stress_c(3,3)
     real(8) :: stress_loc(3,3)
@@ -107,6 +117,18 @@ module structures
     real(8) :: stress_kin_dbg_grad2
     real(8) :: stress_kin_dbg_cross
     real(8) :: stress_kin_dbg_k2
+    real(8) :: stress_xc_dbg_rdedd_refresh_maxdiff
+    real(8) :: stress_xc_dbg_grho_refresh_maxdiff
+    real(8) :: stress_xc_dbg_grho_local_payload_maxdiff
+    real(8) :: stress_xc_dbg_grho_direct_payload_maxdiff
+    real(8) :: stress_xc_dbg_grho_direct_local_maxdiff
+    real(8) :: stress_xc_dbg_rho_box_direct_maxdiff
+    real(8) :: stress_xc_dbg_rho_box_direct_active_maxdiff
+    real(8) :: stress_xc_dbg_grho_direct_local_early_maxdiff
+    real(8) :: stress_xc_dbg_grho_direct_local_bulk_maxdiff
+    real(8) :: stress_xc_dbg_rdedd_dot_grho_local
+    real(8) :: stress_xc_dbg_rdedd_dot_grho_payload
+    real(8) :: stress_xc_dbg_rho_div_rdedd
     type(s_xc_operator_payload) :: xc_payload
     integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field

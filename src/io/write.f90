@@ -1420,7 +1420,7 @@ contains
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
                                    yn_jm, yn_out_stress, yn_out_stress_decomp, yn_periodic, yn_stress_loc_fd, &
-                                   stress_fd_detail, base_directory
+                                   stress_fd_detail, base_directory, xc
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1591,6 +1591,36 @@ contains
          end if
          if(stress_fd_detail == 'high') then
            write(fh,*)
+           write(fh,*) "XC payload diagnostics [a.u.]"
+           write(fh,'(1x,"max|rdedd_payload-rdedd_xc_refresh| =",e16.8)') &
+                system%stress_xc_dbg_rdedd_refresh_maxdiff
+           write(fh,'(1x,"max|grho_payload-grho_xc_refresh|   =",e16.8)') &
+                system%stress_xc_dbg_grho_refresh_maxdiff
+           write(fh,'(1x,"max|rho_box-rho_direct|            =",e16.8)') &
+                system%stress_xc_dbg_rho_box_direct_maxdiff
+           write(fh,'(1x,"max|rho_box-rho_direct| active     =",e16.8)') &
+                system%stress_xc_dbg_rho_box_direct_active_maxdiff
+           write(fh,'(1x,"max|grho_local_early-grho_direct|  =",e16.8)') &
+                system%stress_xc_dbg_grho_direct_local_early_maxdiff
+           write(fh,'(1x,"max|grho_local_bulk-grho_direct|   =",e16.8)') &
+                system%stress_xc_dbg_grho_direct_local_bulk_maxdiff
+           write(fh,'(1x,"max|grho_payload-grho_local|        =",e16.8)') &
+                system%stress_xc_dbg_grho_local_payload_maxdiff
+           write(fh,'(1x,"max|grho_payload-grho_direct|       =",e16.8)') &
+                system%stress_xc_dbg_grho_direct_payload_maxdiff
+           write(fh,'(1x,"max|grho_direct-grho_local|         =",e16.8)') &
+                system%stress_xc_dbg_grho_direct_local_maxdiff
+           write(fh,'(1x,"int rdedd.grho_local dV            =",e16.8)') &
+                system%stress_xc_dbg_rdedd_dot_grho_local
+           write(fh,'(1x,"int rdedd.grho_payload dV          =",e16.8)') &
+                system%stress_xc_dbg_rdedd_dot_grho_payload
+           write(fh,'(1x,"int rho div(rdedd) dV              =",e16.8)') &
+                system%stress_xc_dbg_rho_div_rdedd
+           write(fh,'(1x,"int rdedd.grho_local + rho div(rdedd) dV =",e16.8)') &
+                system%stress_xc_dbg_rdedd_dot_grho_local + system%stress_xc_dbg_rho_div_rdedd
+           write(fh,'(1x,"int rdedd.grho_payload + rho div(rdedd) dV =",e16.8)') &
+                system%stress_xc_dbg_rdedd_dot_grho_payload + system%stress_xc_dbg_rho_div_rdedd
+           write(fh,*)
            write(fh,*) "Alternate implementation checks [GPa/Hartree]"
            virial_har_shadow = stress_tensor_trace(system%stress_har_shadow) * system%det_a + energy%E_h
            pressure_har_gpa = -stress_term_pressure_gpa(system%stress_har, au_pressure_gpa)
@@ -1645,8 +1675,16 @@ contains
                write(fh,*) "Stress decomposition detail [GPa]"
                write(fh,'(1x,a12,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
                call write_stress_tensor_row_gpa(fh, '  XC', system%stress_xc, au_pressure_gpa)
-               call write_stress_tensor_row_gpa(fh, '    X', system%stress_x, au_pressure_gpa)
-               call write_stress_tensor_row_gpa(fh, '    C', system%stress_c, au_pressure_gpa)
+               if(trim(xc) == 'r2scan') then
+                 call write_stress_tensor_row_gpa(fh, '    XC-local', system%stress_xc_local, au_pressure_gpa)
+                 call write_stress_tensor_row_gpa(fh, '    XC-grad',  system%stress_xc_grad,  au_pressure_gpa)
+                 call write_stress_tensor_row_gpa(fh, 'XC-grad-pyld', system%stress_xc_grad_payload, au_pressure_gpa)
+                 call write_stress_tensor_row_gpa(fh, '    XC-grad-vsigma', system%stress_xc_grad_vsigma, au_pressure_gpa)
+                 call write_stress_tensor_row_gpa(fh, '    XC-tau',   system%stress_xc_tau,   au_pressure_gpa)
+               else
+                 call write_stress_tensor_row_gpa(fh, '    X', system%stress_x, au_pressure_gpa)
+                 call write_stress_tensor_row_gpa(fh, '    C', system%stress_c, au_pressure_gpa)
+               end if
                call write_stress_tensor_row_gpa(fh, '  Local', system%stress_loc, au_pressure_gpa)
                call write_stress_tensor_row_gpa(fh, '    Local-SR', &
                     system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)

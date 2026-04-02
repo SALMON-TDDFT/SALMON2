@@ -298,7 +298,7 @@ real(8) :: rNe0,rNe
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,xc_payload=xc_payload)
-  system%xc_payload = xc_payload
+  call copy_xc_operator_payload(system%xc_payload, xc_payload)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)

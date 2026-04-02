@@ -14,6 +14,12 @@ set(STRESS_SOURCE_TESTS
   check_stress_xc_split.sh
   check_builtin_r2scan_registration.sh
   check_builtin_r2scan_operator_gate.sh
+  check_builtin_r2scan_stress_payload_consistency.sh
+  check_builtin_r2scan_stress_detail_split.sh
+  check_builtin_r2scan_stress_grho_payload_diag.sh
+  check_builtin_r2scan_stress_gradient_trace_diag.sh
+  check_builtin_r2scan_stress_vsigma_diag.sh
+  check_builtin_r2scan_stress_guard.sh
 )
 
 foreach(test_script IN LISTS STRESS_SOURCE_TESTS)

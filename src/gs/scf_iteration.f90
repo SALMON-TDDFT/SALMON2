@@ -78,12 +78,12 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
-  use salmon_xc, only: exchange_correlation
+  use salmon_xc, only: exchange_correlation, copy_xc_operator_payload
   use noncollinear_module, only: simple_mixing_so
   use hamiltonian, only: update_vlocal
   implicit none
   type(s_rgrid),          intent(in)    :: lg,mg
-  type(s_dft_system),     intent(in)    :: system
+  type(s_dft_system),     intent(inout) :: system
   type(s_parallel_info),  intent(in)    :: info
   type(s_stencil),        intent(in)    :: stencil
   type(s_xc_functional),  intent(in)    :: xc_func
@@ -135,7 +135,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc,xc_payload=xc_payload)
     call timer_end(LOG_CALC_EXC_COR)
-    system%xc_payload = xc_payload
+    call copy_xc_operator_payload(system%xc_payload, xc_payload)
 
     if(method_mixing=='simple_potential')then
       call simple_mixing_potential(mg,system,1.d0-mixing%mixrate,mixing%mixrate,Vh,Vxc,mixing)

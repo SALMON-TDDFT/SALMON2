@@ -200,6 +200,28 @@ for sec, ecol, pcol, label in sector_defs:
     else:
         lines_out.append(f"{label:<15} {'(no analytic)':>17} {p_fd:>12.3f} {'':>11}  (FD only)")
 
+e_h = [r[1][3] for r in rows]
+e_loc_lr = [r[1][9] for r in rows]
+e_ion_ion = [r[1][7] for r in rows]
+
+p_fd_lr_ewa = p_from_deda(fd7([a + b for a, b in zip(e_loc_lr, e_ion_ion)], h), a_bohr[mid])
+p_fd_h_lr_ewa = p_from_deda(fd7([a + b + c for a, b, c in zip(e_h, e_loc_lr, e_ion_ion)], h), a_bohr[mid])
+
+p_har = rows[mid][1][13]
+p_loc_lr_grad = rows[mid][1][17]
+p_loc_lr_diag = rows[mid][1][18]
+p_ewa = rows[mid][1][19] + rows[mid][1][20] + rows[mid][1][21] + rows[mid][1][22]
+
+lines_out.append("")
+lines_out.append("Closed-block checks")
+lines_out.append("-" * 65)
+lines_out.append(f"{'E_loc_lr + E_ion_ion':<25} {'FD':>5} {p_fd_lr_ewa:>12.3f}  GPa")
+lines_out.append(f"{'P_loc_lr + P_ewald':<25} {'AN':>5} {p_loc_lr_grad + p_loc_lr_diag + p_ewa:>12.3f}  GPa")
+lines_out.append(f"{'P_loc_lr_diag + P_ewald':<25} {'AN':>5} {p_loc_lr_diag + p_ewa:>12.3f}  GPa")
+lines_out.append(f"{'E_h + E_loc_lr + E_ion_ion':<25} {'FD':>5} {p_fd_h_lr_ewa:>12.3f}  GPa")
+lines_out.append(f"{'P_har + P_loc_lr + P_ewald':<25} {'AN':>5} {p_har + p_loc_lr_grad + p_loc_lr_diag + p_ewa:>12.3f}  GPa")
+lines_out.append(f"{'P_har + P_loc_lr_diag + P_ewald':<25} {'AN':>5} {p_har + p_loc_lr_diag + p_ewa:>12.3f}  GPa")
+
 lines_out.append("")
 
 output = "\n".join(lines_out)

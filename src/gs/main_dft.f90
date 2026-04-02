@@ -320,7 +320,7 @@ if(yn_dc=='n') call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 if(yn_out_stress == 'y') then
   call prepare_stress_field_state(system, theory, stress_field_state)
-  call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, spsi, ewald, energy, xc_func, rho_s, Vxc, stress_field_state)
+  call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, spsi, ewald, energy, xc_func, rho_s, Vxc, stress_field_state, srg_scalar)
   call calc_stress_har_shadow(system, info, mg, stencil, srg_scalar, Vh, energy)
   call calc_stress_loc_sr_rs(system, pp, info, mg, ppg, rho_s)
 end if
