@@ -431,7 +431,10 @@
     integer :: ifrag_chk, i_local_chk, ix_chk, iy_chk, iz_chk, istate_chk
     integer :: gx, gy, gz, bx, by, bz
     integer :: ndom(3)
+    integer :: i_halo, jfrag, n_basis_halo
+    integer :: l(3), halo_send_idx(3), halo_recv_idx(3)
     real(8) :: hvol
+    real(8) :: halo_integral_t, t_point
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
@@ -445,7 +448,7 @@
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
-    integer :: n_local_diag, nbf_max, i_diag, iblk, nbf_diag, nbf_comm
+    integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: loc_s_dbg(3), loc_e_dbg(3)
     integer :: n_metric
     logical :: release_dense_fragment_ops
@@ -790,8 +793,8 @@
             " ifrag=", ifrag, " ndom=", ndom
           stop 1
         end if
-        allocate(T_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
-        allocate(H_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
+        allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+        allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
         if (nbf > size(dg_frag%index_basis, 1)) then
           write(*,*) "[FATAL] hamiltonian n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis_eff=", nbf, " n_basis_raw=", nbf_raw, &
@@ -990,6 +993,53 @@
           H_kin_diag_blocks(i_diag)%val(1:nbf_diag, 1:nbf_diag, ispin)
       end do
     end do
+
+    do ispin = 1, system%nspin
+      i_local = 0
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = i_local + 1
+        nbf_raw = dg_frag%n_basis(ifrag, ispin)
+        nbf = min(nbf_raw, dg_frag%nstate_frag)
+        if (nbf <= 0) cycle
+
+        do jo = 1, nbf
+          do i_halo = 1, dg_frag%n_halo
+            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+            jfrag = dg_frag%halo(i_halo)%ifrag_src
+            if (jfrag < 1) cycle
+            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            if (n_basis_halo <= 0) cycle
+            l = dg_frag%halo(i_halo)%length
+            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
+            iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
+            if (iblk <= 0 .and. iblk_rev <= 0) cycle
+
+            do io = 1, n_basis_halo
+              halo_integral_t = 0.0d0
+              do iz_chk = 1, l(3)
+                do iy_chk = 1, l(2)
+                  do ix_chk = 1, l(1)
+                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_chk, iy_chk, iz_chk, halo_send_idx, halo_recv_idx)
+                    call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_recv_idx, t_point)
+                    halo_integral_t = halo_integral_t + dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1) * t_point * hvol
+                  end do
+                end do
+              end do
+
+              if (iblk > 0) then
+                dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t
+              end if
+              if (iblk_rev > 0) then
+                dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
+                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t
+              end if
+            end do
+          end do
+        end do
+      end do
+    end do
+
     do i_diag = 1, n_local_diag
       if (allocated(H_diag_blocks(i_diag)%val)) deallocate(H_diag_blocks(i_diag)%val)
       if (allocated(H_kin_diag_blocks(i_diag)%val)) deallocate(H_kin_diag_blocks(i_diag)%val)
@@ -1746,6 +1796,191 @@
 
   end subroutine apply_gradient_to_basis_ops_local_2d
 
+  subroutine apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, grad_vec)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer,                intent(in) :: i_local, jo
+    type(s_rgrid),          intent(in) :: mg
+    type(s_stencil),        intent(in) :: stencil
+    integer,                intent(in) :: phi_idx(3)
+    real(8),                intent(out) :: grad_vec(3)
+
+    integer :: gx, gy, gz
+    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
+    integer :: ix0, iy0, iz0
+    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
+    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
+    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
+    real(8) :: nabt(4,3)
+
+    nabt = stencil%coef_nab
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
+
+    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
+    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
+    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
+    ix0 = map_global_to_phi_box_coord_ham(gx, phi_lb1, phi_ub1, mg%num(1))
+    iy0 = map_global_to_phi_box_coord_ham(gy, phi_lb2, phi_ub2, mg%num(2))
+    iz0 = map_global_to_phi_box_coord_ham(gz, phi_lb3, phi_ub3, mg%num(3))
+    if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) then
+      grad_vec(:) = 0.0d0
+      return
+    end if
+
+    ixp1 = map_global_to_phi_box_coord_ham(gx + 1, phi_lb1, phi_ub1, mg%num(1))
+    ixm1 = map_global_to_phi_box_coord_ham(gx - 1, phi_lb1, phi_ub1, mg%num(1))
+    ixp2 = map_global_to_phi_box_coord_ham(gx + 2, phi_lb1, phi_ub1, mg%num(1))
+    ixm2 = map_global_to_phi_box_coord_ham(gx - 2, phi_lb1, phi_ub1, mg%num(1))
+    ixp3 = map_global_to_phi_box_coord_ham(gx + 3, phi_lb1, phi_ub1, mg%num(1))
+    ixm3 = map_global_to_phi_box_coord_ham(gx - 3, phi_lb1, phi_ub1, mg%num(1))
+    ixp4 = map_global_to_phi_box_coord_ham(gx + 4, phi_lb1, phi_ub1, mg%num(1))
+    ixm4 = map_global_to_phi_box_coord_ham(gx - 4, phi_lb1, phi_ub1, mg%num(1))
+    iyp1 = map_global_to_phi_box_coord_ham(gy + 1, phi_lb2, phi_ub2, mg%num(2))
+    iym1 = map_global_to_phi_box_coord_ham(gy - 1, phi_lb2, phi_ub2, mg%num(2))
+    iyp2 = map_global_to_phi_box_coord_ham(gy + 2, phi_lb2, phi_ub2, mg%num(2))
+    iym2 = map_global_to_phi_box_coord_ham(gy - 2, phi_lb2, phi_ub2, mg%num(2))
+    iyp3 = map_global_to_phi_box_coord_ham(gy + 3, phi_lb2, phi_ub2, mg%num(2))
+    iym3 = map_global_to_phi_box_coord_ham(gy - 3, phi_lb2, phi_ub2, mg%num(2))
+    iyp4 = map_global_to_phi_box_coord_ham(gy + 4, phi_lb2, phi_ub2, mg%num(2))
+    iym4 = map_global_to_phi_box_coord_ham(gy - 4, phi_lb2, phi_ub2, mg%num(2))
+    izp1 = map_global_to_phi_box_coord_ham(gz + 1, phi_lb3, phi_ub3, mg%num(3))
+    izm1 = map_global_to_phi_box_coord_ham(gz - 1, phi_lb3, phi_ub3, mg%num(3))
+    izp2 = map_global_to_phi_box_coord_ham(gz + 2, phi_lb3, phi_ub3, mg%num(3))
+    izm2 = map_global_to_phi_box_coord_ham(gz - 2, phi_lb3, phi_ub3, mg%num(3))
+    izp3 = map_global_to_phi_box_coord_ham(gz + 3, phi_lb3, phi_ub3, mg%num(3))
+    izm3 = map_global_to_phi_box_coord_ham(gz - 3, phi_lb3, phi_ub3, mg%num(3))
+    izp4 = map_global_to_phi_box_coord_ham(gz + 4, phi_lb3, phi_ub3, mg%num(3))
+    izm4 = map_global_to_phi_box_coord_ham(gz - 4, phi_lb3, phi_ub3, mg%num(3))
+
+    grad_vec(:) = 0.0d0
+    if (ixp1 > 0 .and. ixm1 > 0) grad_vec(1) = grad_vec(1) + nabt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local))
+    if (ixp2 > 0 .and. ixm2 > 0) grad_vec(1) = grad_vec(1) + nabt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local))
+    if (ixp3 > 0 .and. ixm3 > 0) grad_vec(1) = grad_vec(1) + nabt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local))
+    if (ixp4 > 0 .and. ixm4 > 0) grad_vec(1) = grad_vec(1) + nabt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+
+    if (iyp1 > 0 .and. iym1 > 0) grad_vec(2) = grad_vec(2) + nabt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local))
+    if (iyp2 > 0 .and. iym2 > 0) grad_vec(2) = grad_vec(2) + nabt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local))
+    if (iyp3 > 0 .and. iym3 > 0) grad_vec(2) = grad_vec(2) + nabt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local))
+    if (iyp4 > 0 .and. iym4 > 0) grad_vec(2) = grad_vec(2) + nabt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
+
+    if (izp1 > 0 .and. izm1 > 0) grad_vec(3) = grad_vec(3) + nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local))
+    if (izp2 > 0 .and. izm2 > 0) grad_vec(3) = grad_vec(3) + nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local))
+    if (izp3 > 0 .and. izm3 > 0) grad_vec(3) = grad_vec(3) + nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local))
+    if (izp4 > 0 .and. izm4 > 0) grad_vec(3) = grad_vec(3) + nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) - &
+                                                                             dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+
+  end subroutine apply_gradient_at_phi_box_point
+
+  subroutine apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, t_val)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer,                intent(in) :: i_local, jo
+    type(s_rgrid),          intent(in) :: mg
+    type(s_stencil),        intent(in) :: stencil
+    integer,                intent(in) :: phi_idx(3)
+    real(8),                intent(out) :: t_val
+
+    integer :: gx, gy, gz
+    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
+    integer :: ix0, iy0, iz0
+    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
+    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
+    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
+    real(8) :: lap0, lapt(4,3), v
+
+    lap0 = stencil%coef_lap0
+    lapt = stencil%coef_lap
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
+
+    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
+    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
+    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
+    ix0 = map_global_to_phi_box_coord_ham(gx, phi_lb1, phi_ub1, mg%num(1))
+    iy0 = map_global_to_phi_box_coord_ham(gy, phi_lb2, phi_ub2, mg%num(2))
+    iz0 = map_global_to_phi_box_coord_ham(gz, phi_lb3, phi_ub3, mg%num(3))
+    if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) then
+      t_val = 0.0d0
+      return
+    end if
+
+    ixp1 = map_global_to_phi_box_coord_ham(gx + 1, phi_lb1, phi_ub1, mg%num(1))
+    ixm1 = map_global_to_phi_box_coord_ham(gx - 1, phi_lb1, phi_ub1, mg%num(1))
+    ixp2 = map_global_to_phi_box_coord_ham(gx + 2, phi_lb1, phi_ub1, mg%num(1))
+    ixm2 = map_global_to_phi_box_coord_ham(gx - 2, phi_lb1, phi_ub1, mg%num(1))
+    ixp3 = map_global_to_phi_box_coord_ham(gx + 3, phi_lb1, phi_ub1, mg%num(1))
+    ixm3 = map_global_to_phi_box_coord_ham(gx - 3, phi_lb1, phi_ub1, mg%num(1))
+    ixp4 = map_global_to_phi_box_coord_ham(gx + 4, phi_lb1, phi_ub1, mg%num(1))
+    ixm4 = map_global_to_phi_box_coord_ham(gx - 4, phi_lb1, phi_ub1, mg%num(1))
+    iyp1 = map_global_to_phi_box_coord_ham(gy + 1, phi_lb2, phi_ub2, mg%num(2))
+    iym1 = map_global_to_phi_box_coord_ham(gy - 1, phi_lb2, phi_ub2, mg%num(2))
+    iyp2 = map_global_to_phi_box_coord_ham(gy + 2, phi_lb2, phi_ub2, mg%num(2))
+    iym2 = map_global_to_phi_box_coord_ham(gy - 2, phi_lb2, phi_ub2, mg%num(2))
+    iyp3 = map_global_to_phi_box_coord_ham(gy + 3, phi_lb2, phi_ub2, mg%num(2))
+    iym3 = map_global_to_phi_box_coord_ham(gy - 3, phi_lb2, phi_ub2, mg%num(2))
+    iyp4 = map_global_to_phi_box_coord_ham(gy + 4, phi_lb2, phi_ub2, mg%num(2))
+    iym4 = map_global_to_phi_box_coord_ham(gy - 4, phi_lb2, phi_ub2, mg%num(2))
+    izp1 = map_global_to_phi_box_coord_ham(gz + 1, phi_lb3, phi_ub3, mg%num(3))
+    izm1 = map_global_to_phi_box_coord_ham(gz - 1, phi_lb3, phi_ub3, mg%num(3))
+    izp2 = map_global_to_phi_box_coord_ham(gz + 2, phi_lb3, phi_ub3, mg%num(3))
+    izm2 = map_global_to_phi_box_coord_ham(gz - 2, phi_lb3, phi_ub3, mg%num(3))
+    izp3 = map_global_to_phi_box_coord_ham(gz + 3, phi_lb3, phi_ub3, mg%num(3))
+    izm3 = map_global_to_phi_box_coord_ham(gz - 3, phi_lb3, phi_ub3, mg%num(3))
+    izp4 = map_global_to_phi_box_coord_ham(gz + 4, phi_lb3, phi_ub3, mg%num(3))
+    izm4 = map_global_to_phi_box_coord_ham(gz - 4, phi_lb3, phi_ub3, mg%num(3))
+    if (ixp1 == 0 .or. ixm1 == 0 .or. ixp2 == 0 .or. ixm2 == 0 .or. ixp3 == 0 .or. ixm3 == 0 .or. ixp4 == 0 .or. ixm4 == 0) then
+      t_val = 0.0d0
+      return
+    end if
+    if (iyp1 == 0 .or. iym1 == 0 .or. iyp2 == 0 .or. iym2 == 0 .or. iyp3 == 0 .or. iym3 == 0 .or. iyp4 == 0 .or. iym4 == 0) then
+      t_val = 0.0d0
+      return
+    end if
+    if (izp1 == 0 .or. izm1 == 0 .or. izp2 == 0 .or. izm2 == 0 .or. izp3 == 0 .or. izm3 == 0 .or. izp4 == 0 .or. izm4 == 0) then
+      t_val = 0.0d0
+      return
+    end if
+
+    v = lapt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local)) + &
+        lapt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local)) + &
+        lapt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local)) + &
+        lapt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+    v = v + &
+        lapt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local)) + &
+        lapt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local)) + &
+        lapt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local)) + &
+        lapt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
+    v = v + &
+        lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local)) + &
+        lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local)) + &
+        lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local)) + &
+        lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+
+    t_val = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
+  end subroutine apply_kinetic_at_phi_box_point
+
   !=======================================================================
   ! Add non-local pseudopotential contribution to Hamiltonian matrix
   !
@@ -1790,6 +2025,7 @@
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
     integer :: npts_local, npts_halo, ipt
     logical :: log_frag_progress, has_overlap
+    logical, parameter :: enable_momentum_probe = .true.
     real(8) :: hvol, integral
     real(8) :: momentum_gb
     real(8) :: max_p, pavg
@@ -1818,6 +2054,10 @@
       write(*,*) "        Computing transition moments: <φ_i|∇|φ_j>"
       flush(6)
     end if
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=enter"
+      flush(6)
+    end if
     momentum_gb = real(3_8 * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * &
       int(dg_frag%nspin, kind=8) * 8_8, 8) / 1.0d9
     if (comm_is_root(dg_frag%id)) then
@@ -1842,6 +2082,10 @@
     call exchange_phi_frag_halo(dg_frag)
     call cpu_time(t1)
     time_halo_exchange = time_halo_exchange + (t1 - t0)
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo"
+      flush(6)
+    end if
     
     ! Loop over spin
     do ispin = 1, system%nspin
@@ -1856,6 +2100,12 @@
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+        if (enable_momentum_probe) then
+          write(*,'(1x,a,i0,a,i0,a,l1,a,3(i0,1x),a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " has_overlap=", has_overlap, " loc_s=", loc_s(1), loc_s(2), loc_s(3), &
+            " loc_e=", loc_e(1), loc_e(2), loc_e(3)
+          flush(6)
+        end if
         if (.not. has_overlap) cycle
         
         ! Cache the local basis matrix once per fragment; it does not depend on jo.
@@ -1895,6 +2145,11 @@
         lz_lo = phi_loc_s(3)
         lz_hi = phi_loc_e(3)
         allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
+        if (enable_momentum_probe) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " nbf=", nbf, " npts_local=", npts_local
+          flush(6)
+        end if
 
         if (nbf > size(dg_frag%phi_frag, 4)) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "DG-Fragment RT invalid n_basis=", nbf, &
@@ -1918,11 +2173,26 @@
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
         ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
         do jo = 1, nbf
+          if (enable_momentum_probe .and. (jo == 1 .or. jo == nbf)) then
+            write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " jo=", jo
+            flush(6)
+          end if
           allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
+          if (enable_momentum_probe .and. jo == 1) then
+            write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " stage=before-apply-gradient"
+            flush(6)
+          end if
           call cpu_time(t0)
           call apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
           call cpu_time(t1)
           time_grad_total = time_grad_total + (t1 - t0)
+          if (enable_momentum_probe .and. jo == 1) then
+            write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " stage=after-apply-gradient"
+            flush(6)
+          end if
 
           grad_lb1 = lbound(grad_phi, 1)
           grad_ub1 = ubound(grad_phi, 1)
@@ -1950,6 +2220,11 @@
             grad_local_2d, npts_local, 0.0d0, self_proj, nbf)
           call cpu_time(t1)
           time_self_integral = time_self_integral + (t1 - t0)
+          if (enable_momentum_probe .and. jo == 1) then
+            write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
+              " ifrag=", ifrag, " stage=after-self-dgemm"
+            flush(6)
+          end if
 
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
@@ -1967,14 +2242,39 @@
 
           ig_col = ig_j
           if (ig_col >= 1 .and. ig_col <= dg_frag%n_mat_max) then
+            if (enable_momentum_probe .and. jo == 1) then
+              write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
+                " ifrag=", ifrag, " stage=before-halo-loop ig_col=", ig_col
+              flush(6)
+            end if
             do i_halo = 1, dg_frag%n_halo
+              if (enable_momentum_probe .and. jo == 1) then
+                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
+                  " ifrag=", ifrag, " i_halo=", i_halo, " src=", dg_frag%halo(i_halo)%ifrag_src, &
+                  " dst=", dg_frag%halo(i_halo)%ifrag_dst, " len=", dg_frag%halo(i_halo)%length(1), &
+                  dg_frag%halo(i_halo)%length(2), dg_frag%halo(i_halo)%length(3)
+                flush(6)
+              end if
               if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
               jfrag = dg_frag%halo(i_halo)%ifrag_src
               n_basis_halo = dg_frag%n_basis(jfrag, ispin)
               l = dg_frag%halo(i_halo)%length
+              if (enable_momentum_probe .and. jo == 1) then
+                write(*,'(1x,a,i0,a,i0,a,l1,a,l1,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
+                  " ifrag=", ifrag, " buf_recv_alloc=", allocated(dg_frag%halo(i_halo)%buf_recv), &
+                  " buf_send_alloc=", allocated(dg_frag%halo(i_halo)%buf_send), " n_basis_halo=", n_basis_halo
+                flush(6)
+              end if
               if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
                 write(*,*) "[FATAL] momentum halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
                 stop 1
+              end if
+              if (enable_momentum_probe .and. jo == 1) then
+                write(*,'(1x,a,i0,a,5(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
+                  " buf_recv_shape=", size(dg_frag%halo(i_halo)%buf_recv, 1), size(dg_frag%halo(i_halo)%buf_recv, 2), &
+                  size(dg_frag%halo(i_halo)%buf_recv, 3), size(dg_frag%halo(i_halo)%buf_recv, 4), &
+                  size(dg_frag%halo(i_halo)%buf_recv, 5)
+                flush(6)
               end if
               if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
                 write(*,*) "[FATAL] momentum halo basis exceeds buf dim4: rank=", dg_frag%id, &
@@ -1989,16 +2289,37 @@
               end if
               npts_halo = l(1) * l(2) * l(3)
               if (npts_halo <= 0 .or. n_basis_halo <= 0) cycle
+              if (enable_momentum_probe .and. jo == 1) then
+                write(*,'(1x,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
+                  " npts_halo=", npts_halo
+                flush(6)
+              end if
 
               allocate(grad_halo_2d(npts_halo, 3), halo_buf_2d(npts_halo, n_basis_halo), halo_proj(n_basis_halo, 3))
+              if (enable_momentum_probe .and. jo == 1) then
+                write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo-alloc"
+                flush(6)
+              end if
 
               ipt = 0
               do iz = 1, l(3)
                 do iy = 1, l(2)
                   do ix = 1, l(1)
+                    if (enable_momentum_probe .and. jo == 1 .and. ix == 1 .and. iy == 1 .and. iz == 1) then
+                      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=before-first-halo-index"
+                      flush(6)
+                    end if
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
+                    if (enable_momentum_probe .and. jo == 1 .and. ix == 1 .and. iy == 1 .and. iz == 1) then
+                      write(*,'(1x,a,i0,a,3(i0,1x),a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
+                        " first-halo send_idx=", halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), &
+                        " recv_idx=", halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)
+                      flush(6)
+                    end if
                     ipt = ipt + 1
-                    grad_halo_2d(ipt, 1:3) = grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), 1:3)
+                    ! grad_phi is defined on the local fragment domain (1:ndom),
+                    ! so the source-side block indices are the valid local coordinates here.
+                    call apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_recv_idx, grad_halo_2d(ipt, 1:3))
                   end do
                 end do
               end do
@@ -2047,10 +2368,20 @@
 
               deallocate(grad_halo_2d, halo_buf_2d, halo_proj)
             end do
+            if (enable_momentum_probe .and. jo == 1) then
+              write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
+                " ifrag=", ifrag, " stage=after-halo-loop"
+              flush(6)
+            end if
           end if
 
           deallocate(grad_phi)
         end do  ! jo
+        if (enable_momentum_probe) then
+          write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " stage=after-jo-loop"
+          flush(6)
+        end if
         deallocate(phi_local_2d, grad_local_2d, self_proj)
       end do  ! ifrag
     end do  ! ispin

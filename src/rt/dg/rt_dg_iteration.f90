@@ -5,7 +5,7 @@
     use salmon_global, only: yn_fix_func, theory
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_ops, only: zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, apply_overlap_operator
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -33,6 +33,7 @@
         " stage=", "entry"
       flush(6)
     end if
+    call debug_coef_metric("entry")
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
       call time_evolution_rk(dg_frag, system, info, rt, itt, dt, &
@@ -49,11 +50,11 @@
         " stage=", "after-time-evolution"
       flush(6)
     end if
+    call debug_coef_metric("after-time-evolution")
 
-    call zero_nonowned_coefficients(dg_frag)
-
-    ! Enforce orthonormality after synchronization to preserve unitary evolution.
-    call stabilize_coeff_unitarity(dg_frag, itt)
+    ! Probe: bypass local-only unitarity stabilization to test whether it
+    ! over-normalizes distributed coefficients before density reconstruction.
+    call debug_coef_metric("after-unitarity")
 
     ! Self-consistent update of density and Hamiltonian (if enabled)
     ! Performance note:
@@ -91,4 +92,45 @@
       call calculate_microscopic_current_dg(dg_frag, system, mg, stencil, rt%j_e)
     end if
     
+  contains
+
+  subroutine debug_coef_metric(stage_label)
+    character(len=*), intent(in) :: stage_label
+
+    integer :: ispin_probe, n_frag_rows, n_pw, n_tot, nstate_probe, io
+    complex(8), allocatable :: vec(:), svec(:)
+    real(8) :: c2(3), cs2(3)
+
+    if (itt /= 1) return
+    if (dg_frag%id /= 0) return
+    if (dg_frag%nspin <= 0 .or. dg_frag%nstate_tot <= 0) return
+
+    ispin_probe = 1
+    n_frag_rows = dg_frag%n_mat_max
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag_rows + n_pw
+    nstate_probe = min(3, dg_frag%nstate_tot)
+    if (n_tot <= 0 .or. nstate_probe <= 0) return
+
+    allocate(vec(n_tot), svec(n_tot))
+
+    c2(:) = 0.0d0
+    cs2(:) = 0.0d0
+    do io = 1, nstate_probe
+      vec(:) = (0.0d0, 0.0d0)
+      if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
+      if (n_pw > 0) vec(n_frag_rows+1:n_tot) = dg_frag%coef_pw(1:n_pw, io, ispin_probe)
+      call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
+      c2(io) = real(sum(conjg(vec) * vec), kind=8)
+      cs2(io) = real(sum(conjg(vec) * svec), kind=8)
+    end do
+
+    write(*,'(1x,a,a,a,3(1x,es12.4),a,3(1x,es12.4))') "        coef stage probe: stage=", trim(stage_label), &
+      " c2=", c2(1), c2(2), c2(3), " cs2=", cs2(1), cs2(2), cs2(3)
+    flush(6)
+
+    deallocate(vec, svec)
+  end subroutine debug_coef_metric
+
   end subroutine tddft_dg_fragment_iteration

@@ -113,6 +113,7 @@ module rt_dg_fragment_types
     integer :: nspin                           ! number of spin
     integer :: nstate_frag                     ! number of states per fragment
     integer :: nstate_tot                      ! total number of states
+    integer, allocatable :: nocc_spin(:)       ! (nspin), occupied-state count per spin channel
     integer :: time_integrator                 ! 1: SSPRK3, 2: AETRS, 3: RK4
 
     ! Spin-resolved coefficients on the fragment basis (MUST be complex).
@@ -188,6 +189,10 @@ module rt_dg_fragment_types
     real(8) :: dipole_moment(3)                ! total dipole moment
     real(8) :: current(3)                      ! current density
     real(8) :: total_energy                    ! total energy
+    real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
+    real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block
+    real(8) :: energy_Ap                       ! occupied expectation of -i A.p term
+    real(8) :: energy_A2                       ! occupied expectation of A^2/2 term
     real(8) :: elec_num_scaled                 ! total electrons after rho normalization
     real(8) :: elec_num_raw                    ! total electrons before rho normalization
     real(8) :: rho_scale_factor                ! density renormalization factor

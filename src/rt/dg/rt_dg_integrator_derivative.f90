@@ -1,7 +1,8 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
     use salmon_global, only: theory
-    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
+    use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, &
+                                  apply_nonlocal_pp_projector_batch, &
                                   apply_nonlocal_pp_projector_batch_so, apply_mixed_hamiltonian, &
                                   solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
                                   copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense, gather_full_coef_view
@@ -221,13 +222,17 @@
           end if
         end if
       end if
-      if (need_m_dense .and. (any(real(M(:, :)) /= real(M(:, :))) .or. any(aimag(M(:, :)) /= aimag(M(:, :))))) then
-          write(*,'(a,i0,a,i0,a,i0)') "[NaN] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
-          stop "NaN in M"
+      if (need_m_dense) then
+        if (any(real(M(:, :)) /= real(M(:, :))) .or. any(aimag(M(:, :)) /= aimag(M(:, :)))) then
+            write(*,'(a,i0,a,i0,a,i0)') "[NaN] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
+            stop "NaN in M"
+        end if
       end if
-      if (need_m_dense .and. any(abs(M(:, :)) > huge_val)) then
-        write(*,'(a,i0,a,i0,a,i0)') "[Inf] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
-        stop "Inf in M"
+      if (need_m_dense) then
+        if (any(abs(M(:, :)) > huge_val)) then
+          write(*,'(a,i0,a,i0,a,i0)') "[Inf] M: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
+          stop "Inf in M"
+        end if
       end if
       if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
         write(*,'(1x,a)') "        derivative trace: stage=spin1-after-operators"
@@ -298,9 +303,11 @@
         flush(6)
       end if
 
-      if (need_h0_dense .and. any(abs(H0c(:, :)) > huge_val)) then
-        write(*,'(a,i0,a,i0,a,i0)') "[Inf] H0c: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
-        stop "Inf in H0c"
+      if (need_h0_dense) then
+        if (any(abs(H0c(:, :)) > huge_val)) then
+          write(*,'(a,i0,a,i0,a,i0)') "[Inf] H0c: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
+          stop "Inf in H0c"
+        end if
       end if
       if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
         write(*,'(1x,a)') "        derivative trace: stage=spin1-before-h0-apply"
@@ -373,6 +380,13 @@
         if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
           write(*,'(1x,a)') "        derivative trace: stage=spin1-h0-branch-block"
           flush(6)
+          write(*,'(1x,a,6(a,i0),2(a,l1))') "        derivative block-h info:", &
+            " n_frag=", n_frag, " nstate_tot=", dg_frag%nstate_tot, &
+            " coef_rows=", size(coef_all, 1), " coef_cols=", size(coef_all, 2), &
+            " rhs_rows=", size(dcoef_dt_h0, 1), " rhs_cols=", size(dcoef_dt_h0, 2), &
+            " local_block_ids=", allocated(dg_frag%H_local_block_ids), &
+            " nl_local_block_ids=", allocated(dg_frag%H_nl_local_block_ids)
+          flush(6)
           write(*,'(1x,a)') "        derivative trace: stage=spin1-before-apply-block-h"
           flush(6)
         end if
@@ -383,10 +397,9 @@
           flush(6)
         end if
         if (allocated(dg_frag%H_local_block_ids)) then
-          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), &
-            dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all, dcoef_dt_h0, dg_frag%H_local_block_ids)
         else
-          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all, dcoef_dt_h0)
         end if
         if (enable_derivative_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
@@ -394,16 +407,24 @@
             " ispin=", ispin, " stage=", "after-apply-block-h"
           flush(6)
         end if
-        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
-          write(*,'(1x,a)') "        derivative trace: stage=spin1-after-apply-block-h"
+        if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id <= 1 .and. ispin == 1) then
+          write(*,'(1x,a,i0,a,es12.4,a,es12.4)') "        derivative trace: rank=", dg_frag%id, &
+            " stage=spin1-after-apply-block-h coef_norm=", sum(abs(coef_all(1:n_frag, :))), &
+            " rhs_norm=", sum(abs(dcoef_dt_h0(1:n_frag, :)))
           flush(6)
         end if
         if (has_nonlocal) then
-          if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
-            write(*,'(1x,a)') "        derivative trace: stage=spin1-before-apply-block-nl"
+          if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id <= 1 .and. ispin == 1) then
+            write(*,'(1x,a,i0,4(a,i0),2(a,l1))') "        derivative block-nl info: rank=", dg_frag%id, &
+              " n_frag=", n_frag, " nstate_tot=", dg_frag%nstate_tot, &
+              " x_rows=", size(coef_all, 1), " y_rows=", size(dcoef_dt_h0, 1), &
+              " nl_blocks=", allocated(dg_frag%H_nl_blocks), &
+              " nl_local_block_ids=", allocated(dg_frag%H_nl_local_block_ids)
+            flush(6)
+            write(*,'(1x,a,i0,a)') "        derivative trace: rank=", dg_frag%id, " stage=spin1-before-apply-block-nl"
             flush(6)
           end if
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_h0)
           if (has_so_nonlocal) then
             call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                  coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))

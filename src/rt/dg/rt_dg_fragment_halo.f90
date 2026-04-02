@@ -366,15 +366,15 @@
     integer :: lb1, ub1, lb2, ub2, lb3, ub3
     integer :: sample_ix, sample_iy, sample_iz, sample_istate
     real(8) :: pack_abs_sum, pack_abs_max, pack_first_value, src_first_value
-    integer, save :: halo_exchange_call_count = 0
     logical :: diag_second_halo_root, diag_fourth_halo_root
 
     if (.not. dg_frag%has_halo_exchange) return
     if (dg_frag%n_halo <= 0) return
 
-    halo_exchange_call_count = halo_exchange_call_count + 1
-    diag_second_halo_root = enable_halo_trace .and. dg_frag%is_frag_root .and. (halo_exchange_call_count == 2)
-    diag_fourth_halo_root = enable_halo_trace .and. dg_frag%is_frag_root .and. (halo_exchange_call_count == 4)
+    ! Avoid call-count-based diagnostics because a SAVE counter drifts across
+    ! ranks and makes multi-rank comparisons harder during debugging.
+    diag_second_halo_root = .false.
+    diag_fourth_halo_root = .false.
 
     if (allocated(dg_frag%halo_ireq_send)) then
       if (size(dg_frag%halo_ireq_send) /= dg_frag%n_halo) deallocate(dg_frag%halo_ireq_send)
@@ -417,7 +417,7 @@
         call flush(6)
       end if
 
-!$omp parallel do collapse(4) private(istate,iz,iy,ix) schedule(static)
+!$omp parallel do collapse(4) private(istate,iz,iy,ix,send_idx,recv_idx) schedule(static)
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)
@@ -596,7 +596,7 @@
         call flush(6)
       end if
 
-!$omp parallel do collapse(4) private(istate,iz,iy,ix) schedule(static)
+!$omp parallel do collapse(4) private(istate,iz,iy,ix,send_idx,recv_idx) schedule(static)
       do istate = 1, dg_frag%nstate_frag
       do iz = 1, l(3)
       do iy = 1, l(2)

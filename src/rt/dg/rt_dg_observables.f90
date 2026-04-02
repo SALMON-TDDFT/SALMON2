@@ -1,5 +1,5 @@
   subroutine calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt)
-    use salmon_global, only: nelec, theory
+    use salmon_global, only: theory
     use structures
     use communication, only: comm_summation
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
@@ -13,21 +13,29 @@
     type(s_rt),             intent(inout) :: rt
     integer,                intent(in)    :: itt
     
-    integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot
+    integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot, max_nocc
     integer :: ifrag, jfrag, ib, jb, i_idx, j_idx
+    integer :: iblk, nrow_blk, ncol_blk
     logical :: do_interface_check
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
     real(8) :: current_tmp, energy_tmp, pw_weight_local
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
+    real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
+    real(8) :: energy_static_sum, energy_kin_sum, energy_nl_sum, energy_ap_sum, energy_a2_sum
+    real(8) :: kinetic_diag_abs_local, kinetic_offdiag_abs_local
+    real(8) :: kinetic_diag_abs_sum, kinetic_offdiag_abs_sum
     complex(8) :: minus_i
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: tmp_probe(:,:)
     logical :: has_nonlocal, use_hmat_complex, use_mixed_current
     logical :: require_dense_nl
     logical :: use_spatial_A
+    logical, parameter :: enable_energy_component_probe = .true.
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
+    real(8), allocatable :: occ_weight(:)
     complex(8) :: mfp
     real(8), parameter :: unit_dir(3,3) = reshape((/ &
       1.0d0, 0.0d0, 0.0d0, &
@@ -38,11 +46,15 @@
     current_local = 0.0d0
     energy_local = 0.0d0
     pw_weight_local = 0.0d0
+    energy_static_local = 0.0d0
+    energy_kin_local = 0.0d0
+    energy_nl_local = 0.0d0
+    energy_ap_local = 0.0d0
+    energy_a2_local = 0.0d0
+    kinetic_diag_abs_local = 0.0d0
+    kinetic_offdiag_abs_local = 0.0d0
 
     n = dg_frag%n_mat_max
-    ! Occupied orbitals per spin channel (closed-shell): nelec = 2 * nocc.
-    ! Using nelec/nspin here over-occupies states when nspin=1.
-    nocc = min(int(nelec / 2.0d0 + 1.0d-12), min(dg_frag%nstate_tot, n))
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
 
     do_interface_check = .false.
@@ -58,12 +70,15 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n + n_pw
+    max_nocc = max(1, maxval(dg_frag%nocc_spin(1:dg_frag%nspin)))
 
-    allocate(tmp_mat(n, nocc))
-    allocate(coef_frag_all(n, nocc))
+    allocate(tmp_mat(n, max_nocc))
+    if (enable_energy_component_probe) allocate(tmp_probe(n, max_nocc))
+    allocate(coef_frag_all(n, max_nocc))
+    allocate(occ_weight(max_nocc))
     if (n_pw > 0) then
-      allocate(coef_pw_all(n_pw, nocc))
-      allocate(coef_all(n_tot, nocc), tmp_all(n_tot, nocc))
+      allocate(coef_pw_all(n_pw, max_nocc))
+      allocate(coef_all(n_tot, max_nocc), tmp_all(n_tot, max_nocc))
     end if
     minus_i = cmplx(0.0d0, -1.0d0, kind=8)
 
@@ -73,6 +88,8 @@
     !   - Current: j = Im[<ψ|∇|ψ>] with factor 2 and normalization by ngrid
     !   - Sign: Testing -2.0 to match conventional RT direction
     do ispin = 1, dg_frag%nspin
+      nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
+      if (nocc <= 0) cycle
       use_mixed_current = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
       coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
@@ -146,6 +163,12 @@
     ! Calculate total energy: E = <ψ|H(t)|ψ>
     ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
     do ispin = 1, dg_frag%nspin
+      nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
+      if (nocc <= 0) cycle
+      occ_weight(:) = 0.0d0
+      do io = 1, nocc
+        occ_weight(io) = system%rocc(io, 1, ispin)
+      end do
       coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
         coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
@@ -218,14 +241,50 @@
           tmp_mat(:, :) = (0.0d0, 0.0d0)
           if (.not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
             call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
+            if (enable_energy_component_probe) then
+              tmp_probe(:, :) = (0.0d0, 0.0d0)
+              if (allocated(dg_frag%H_mat_kinetic_blocks)) then
+                call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_kinetic_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_probe)
+                do io = 1, nocc
+                  energy_kin_local = energy_kin_local + occ_weight(io) * &
+                    sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                end do
+              end if
+              do io = 1, nocc
+                energy_static_local = energy_static_local + occ_weight(io) * &
+                  sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
+              end do
+            end if
             if (has_nonlocal) then
               if (allocated(dg_frag%H_nl_cache)) then
+                if (enable_energy_component_probe) then
+                  tmp_probe(:, :) = matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
+                  do io = 1, nocc
+                    energy_nl_local = energy_nl_local + occ_weight(io) * &
+                      sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                  end do
+                end if
                 tmp_mat(:, :) = tmp_mat(:, :) + &
                   matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
               else
+                if (enable_energy_component_probe) then
+                  tmp_probe(:, :) = (0.0d0, 0.0d0)
+                  call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
+                    tmp_probe)
+                  do io = 1, nocc
+                    energy_nl_local = energy_nl_local + occ_weight(io) * &
+                      sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                  end do
+                end if
                 call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
                   tmp_mat)
               end if
+            end if
+            if (enable_energy_component_probe) then
+              do io = 1, nocc
+                energy_a2_local = energy_a2_local + occ_weight(io) * 0.5d0 * A_squared * &
+                  sum(abs(coef_frag_all(1:n, io))**2)
+              end do
             end if
             do io = 1, n
               tmp_mat(io, :) = tmp_mat(io, :) + 0.5d0 * A_squared * coef_frag_all(io, 1:nocc)
@@ -241,6 +300,12 @@
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, 1:nocc) = (0.0d0, 0.0d0)
           call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), op_mat(:, 1:nocc))
+          if (enable_energy_component_probe) then
+            do io = 1, nocc
+              energy_ap_local = energy_ap_local + occ_weight(io) * &
+                sum(real(conjg(coef_frag_all(1:n, io)) * (minus_i * op_mat(:, io))))
+            end do
+          end if
           tmp_mat(:, :) = tmp_mat(:, :) + minus_i * op_mat(:, 1:nocc)
         else
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
@@ -279,19 +344,27 @@
       end if
 
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
-        energy_tmp = sum(real(conjg(coef_all(1:n_tot, 1:nocc)) * tmp_all(1:n_tot, 1:nocc)))
+        energy_tmp = 0.0d0
+        do io = 1, nocc
+          energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
+        end do
       else
         if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
         call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                    coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         end if
-        energy_tmp = sum(real(conjg(coef_frag_all(1:n, 1:nocc)) * tmp_mat(1:n, 1:nocc)))
+        energy_tmp = 0.0d0
+        do io = 1, nocc
+          energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
+        end do
       end if
       energy_local = energy_local + energy_tmp
     end do
 
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
       do ispin = 1, dg_frag%nspin
+        nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
+        if (nocc <= 0) cycle
         coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
         pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, 1:nocc))**2)
       end do
@@ -319,31 +392,87 @@
       deallocate(dndt_frag, interface_flow)
     end if
 
+    if (enable_energy_component_probe .and. allocated(dg_frag%H_mat_kinetic_blocks)) then
+      do iblk = 1, size(dg_frag%H_mat_kinetic_blocks)
+        do ispin = 1, dg_frag%nspin
+          nrow_blk = dg_frag%n_basis(dg_frag%H_mat_kinetic_blocks(iblk)%ifrag_row, ispin)
+          ncol_blk = dg_frag%n_basis(dg_frag%H_mat_kinetic_blocks(iblk)%ifrag_col, ispin)
+          if (nrow_blk <= 0 .or. ncol_blk <= 0) cycle
+          if (dg_frag%H_mat_kinetic_blocks(iblk)%ifrag_row == dg_frag%H_mat_kinetic_blocks(iblk)%ifrag_col) then
+            kinetic_diag_abs_local = kinetic_diag_abs_local + &
+              sum(abs(dg_frag%H_mat_kinetic_blocks(iblk)%val(1:nrow_blk, 1:ncol_blk, ispin)))
+          else
+            kinetic_offdiag_abs_local = kinetic_offdiag_abs_local + &
+              sum(abs(dg_frag%H_mat_kinetic_blocks(iblk)%val(1:nrow_blk, 1:ncol_blk, ispin)))
+          end if
+        end do
+      end do
+    end if
+
     if (allocated(Ap_mat)) deallocate(Ap_mat)
     if (allocated(A2_mat)) deallocate(A2_mat)
     if (allocated(op_mat)) deallocate(op_mat)
     deallocate(tmp_mat)
+    if (allocated(tmp_probe)) deallocate(tmp_probe)
+    if (allocated(occ_weight)) deallocate(occ_weight)
     if (allocated(coef_frag_all)) deallocate(coef_frag_all)
     if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     if (allocated(coef_all)) deallocate(coef_all)
     if (allocated(tmp_all)) deallocate(tmp_all)
-
-
     ! Cache retained for reuse
 
   1000 continue
     
+    if (enable_energy_component_probe .and. n_pw == 0 .and. (itt == 1 .or. itt == 40)) then
+      write(*,'(1x,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+        "        energy-local probe: rank=", dg_frag%id, " itt=", itt, &
+        " local_total=", energy_local, " local_static=", energy_static_local, " local_kin=", energy_kin_local
+      flush(6)
+    end if
+
     ! MPI aggregation: sum local contributions from all ranks
     call comm_summation(current_local, dg_frag%current, 3, dg_frag%icomm)
     call comm_summation(energy_local, dg_frag%total_energy, dg_frag%icomm)
     call comm_summation(pw_weight_local, dg_frag%pw_weight_raw, dg_frag%icomm)
+    if (enable_energy_component_probe) then
+      call comm_summation(energy_static_local, energy_static_sum, dg_frag%icomm)
+      call comm_summation(energy_kin_local, energy_kin_sum, dg_frag%icomm)
+      call comm_summation(energy_nl_local, energy_nl_sum, dg_frag%icomm)
+      call comm_summation(energy_ap_local, energy_ap_sum, dg_frag%icomm)
+      call comm_summation(energy_a2_local, energy_a2_sum, dg_frag%icomm)
+      call comm_summation(kinetic_diag_abs_local, kinetic_diag_abs_sum, dg_frag%icomm)
+      call comm_summation(kinetic_offdiag_abs_local, kinetic_offdiag_abs_sum, dg_frag%icomm)
+    end if
 
     ! coef/momentum/H are synchronized globally on all ranks. Each rank therefore
     ! evaluates the same full-system observable; use process-average to avoid
     ! fragment-count-dependent overcounting after MPI summation.
     dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
-    dg_frag%total_energy = dg_frag%total_energy / real(max(1, dg_frag%isize), 8)
     dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
+    if (enable_energy_component_probe) then
+      kinetic_diag_abs_sum = kinetic_diag_abs_sum / real(max(1, dg_frag%isize), 8)
+      kinetic_offdiag_abs_sum = kinetic_offdiag_abs_sum / real(max(1, dg_frag%isize), 8)
+      if (dg_frag%id == 0 .and. n_pw == 0 .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+          "        energy-components: itt=", itt, " total=", dg_frag%total_energy, &
+          " static=", energy_static_sum, " kin=", energy_kin_sum, " nl=", energy_nl_sum, &
+          " Ap=", energy_ap_sum, " A2=", energy_a2_sum
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6)') &
+          "        kinetic-block-norms: itt=", itt, " diag_abs=", kinetic_diag_abs_sum, &
+          " offdiag_abs=", kinetic_offdiag_abs_sum
+        flush(6)
+      end if
+    end if
+    dg_frag%energy_kinetic = 0.0d0
+    dg_frag%energy_nonlocal = 0.0d0
+    dg_frag%energy_Ap = 0.0d0
+    dg_frag%energy_A2 = 0.0d0
+    if (enable_energy_component_probe) then
+      dg_frag%energy_kinetic = energy_kin_sum
+      dg_frag%energy_nonlocal = energy_nl_sum
+      dg_frag%energy_Ap = energy_ap_sum
+      dg_frag%energy_A2 = energy_a2_sum
+    end if
     
     ! Normalize by global grid count exactly as conventional calc_current().
     ! This avoids decomposition-dependent scaling from local/grid-view differences.

@@ -299,7 +299,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     write(*,*) "=== Starting DG-Fragment RT time evolution ==="
     write(*,*)
   end if
-  
+
   ! Time evolution loop
   do itt = Mit+1, nt
     if (yn_spinorbit == 'y') then
@@ -312,8 +312,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                                            rho, rho_s, Vh, Vxc, Vpsl, energy)
     end if
     
-    ! Store observables from DG-Fragment calculation (already calculated in tddft_dg_fragment_iteration)
-    energy%E_tot = dg_frag%total_energy
+    ! Reconstruct the DFT total energy from the DG one-body expectation.
+    call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
     energy%elec_num = dg_frag%elec_num_scaled
     energy%elec_num_raw = dg_frag%elec_num_raw
     energy%pw_weight_raw = dg_frag%pw_weight_raw
@@ -378,6 +378,101 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   end if
   
 end subroutine time_evolution_dg_fragment
+
+subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
+  use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_reciprocal_grid, s_poisson, s_pp_grid, &
+                        s_scalar, s_dft_energy
+  use communication, only: comm_summation, comm_is_root
+  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use math_constants, only: zi
+  use salmon_global, only: yn_jm
+  use parallelization, only: nproc_id_global
+  implicit none
+  type(s_dft_system),     intent(in)    :: system
+  type(s_parallel_info),  intent(in)    :: info
+  type(s_rgrid),          intent(in)    :: mg
+  type(s_reciprocal_grid),intent(in)    :: fg
+  type(s_poisson),        intent(in)    :: poisson
+  type(s_pp_grid),        intent(in)    :: ppg
+  type(s_scalar),         intent(in)    :: rho, Vh, Vpsl
+  type(s_scalar),         intent(in)    :: rho_s(system%nspin), Vxc(system%nspin)
+  type(s_dg_fragment_rt), intent(in)    :: dg_frag
+  type(s_dft_energy),     intent(inout) :: energy
+  integer,                intent(in)    :: itt
+  integer :: ix, iy, iz, ispin, ia
+  real(8) :: rho_vh_local, rho_vh_sum
+  real(8) :: rho_vxc_local, rho_vxc_sum
+  real(8) :: rho_vpsl_local, rho_vpsl_sum
+  real(8) :: E_wrk(3), E_sum(3), etmp, sysvol, g(3), r(3), Gd
+  complex(8) :: rho_e, rho_i
+
+  rho_vh_local = 0.0d0
+  rho_vxc_local = 0.0d0
+  rho_vpsl_local = 0.0d0
+  E_wrk(:) = 0.0d0
+  E_sum(:) = 0.0d0
+  etmp = 0.0d0
+
+  do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
+        rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
+        do ispin = 1, system%nspin
+          rho_vxc_local = rho_vxc_local + rho_s(ispin)%f(ix, iy, iz) * Vxc(ispin)%f(ix, iy, iz)
+        end do
+      end do
+    end do
+  end do
+
+  rho_vh_local = rho_vh_local * system%Hvol
+  rho_vxc_local = rho_vxc_local * system%Hvol
+  rho_vpsl_local = rho_vpsl_local * system%Hvol
+
+  call comm_summation(rho_vh_local, rho_vh_sum, info%icomm_r)
+  call comm_summation(rho_vxc_local, rho_vxc_sum, info%icomm_r)
+  call comm_summation(rho_vpsl_local, rho_vpsl_sum, info%icomm_r)
+
+  sysvol = system%det_a
+  do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        g(1) = fg%vec_G(1, ix, iy, iz)
+        g(2) = fg%vec_G(2, ix, iy, iz)
+        g(3) = fg%vec_G(3, ix, iy, iz)
+        rho_e = poisson%zrhoG_ele(ix, iy, iz)
+        E_wrk(1) = E_wrk(1) + sysvol * fg%coef(ix, iy, iz) * (abs(rho_e)**2 * 0.5d0)
+        if (yn_jm == 'n') then
+          rho_i = ppg%zrhoG_ion(ix, iy, iz)
+          E_wrk(2) = E_wrk(2) + sysvol * fg%coef(ix, iy, iz) * (-rho_e * conjg(rho_i))
+          do ia = info%ia_s, info%ia_e
+            r(:) = system%Rion(:, ia)
+            Gd = g(1) * r(1) + g(2) * r(2) + g(3) * r(3)
+            etmp = etmp + conjg(rho_e) * ppg%zVG_ion(ix, iy, iz, system%kion(ia)) * exp(-zi * Gd)
+          end do
+        end if
+      end do
+    end do
+  end do
+
+  call comm_summation(etmp, E_wrk(3), info%icomm_ko)
+  call comm_summation(E_wrk, E_sum, 3, info%icomm_r)
+
+  energy%E_kin = dg_frag%energy_kinetic
+  energy%E_ion_nloc = dg_frag%energy_nonlocal
+  energy%E_h = E_sum(1)
+  energy%E_ion_loc = E_sum(2) + E_sum(3)
+  energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
+  if (comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+    write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+      "        dg-energy-helper: itt=", itt, " E_one=", dg_frag%total_energy, " rhoVh=", rho_vh_sum, " rhoVxc=", rho_vxc_sum, &
+      " rhoVpsl=", rho_vpsl_sum, &
+      " E_kin=", energy%E_kin, &
+      " E_ion_nloc=", energy%E_ion_nloc, " E_h=", energy%E_h, " E_xc=", energy%E_xc, &
+      " E_ion_loc=", energy%E_ion_loc, " E_ion_ion=", energy%E_ion_ion, " E_tot=", energy%E_tot
+    flush(6)
+  end if
+end subroutine update_dg_rt_total_energy
 
 subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital

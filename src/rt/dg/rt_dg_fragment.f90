@@ -129,7 +129,7 @@ contains
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
                  nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, yn_spinorbit, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
-                 dg_subspace_pw_vectors, dg_subspace_fallback_cond
+                 dg_subspace_pw_vectors, dg_subspace_fallback_cond, nelec, nelec_spin
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
     use filesystem, only: get_filehandle
     implicit none
@@ -141,7 +141,7 @@ contains
     
     character(32), parameter :: bdir_frag='./data_dcdft/fragments/'
     character(256) :: filename
-    integer :: iunit, i, j, ispin, ifrag
+    integer :: iunit, i, j, io, ispin, ifrag
     logical :: load_from_dcdft
     
     if (comm_is_root(info%id_rko)) then
@@ -163,6 +163,25 @@ contains
     dg_frag%nspin = system%nspin
     dg_frag%nstate_frag = nstate_frag
     dg_frag%nstate_tot = system%no
+    allocate(dg_frag%nocc_spin(dg_frag%nspin))
+    dg_frag%nocc_spin(:) = 0
+    if (allocated(system%rocc)) then
+      do ispin = 1, dg_frag%nspin
+        do io = 1, min(dg_frag%nstate_tot, size(system%rocc, 1))
+          if (system%rocc(io, 1, ispin) > 0.0d0) dg_frag%nocc_spin(ispin) = io
+        end do
+      end do
+    else
+      do ispin = 1, dg_frag%nspin
+        if (dg_frag%nspin == 1) then
+          dg_frag%nocc_spin(ispin) = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
+        else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
+          dg_frag%nocc_spin(ispin) = min(dg_frag%nstate_tot, nelec_spin(ispin))
+        else
+          dg_frag%nocc_spin(ispin) = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
+        end if
+      end do
+    end if
 
     if (dg_frag%nspin > 1 .and. yn_spinorbit /= 'y') then
       if (comm_is_root(info%id_rko)) then
@@ -430,7 +449,8 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
     integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
-    integer :: ixg0, iyg0, izg0, ifrag_count
+    integer :: subgroup_target_rank, subgroup_self_count
+    integer :: ifrag_count
     integer :: nx_max, ny_max, nz_max
     integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
     integer :: primary_count_local, primary_owned_local, primary_remote_local
@@ -520,6 +540,8 @@ contains
     allocate(dg_frag%density_izg_map(nx_max, ny_max, nz_max, ifrag_count))
     allocate(dg_frag%density_send_count(0:dg_frag%isize-1))
     allocate(dg_frag%density_send_slot_map(nx_max, ny_max, nz_max, ifrag_count))
+    allocate(dg_frag%density_subgroup_send_count(0:dg_frag%isize_frag-1))
+    allocate(dg_frag%density_subgroup_send_slot_map(nx_max, ny_max, nz_max, ifrag_count))
     allocate(dg_frag%density_recv_map(0:dg_frag%isize-1))
     allocate(dg_frag%density_grid_points(nx_max * ny_max * nz_max, ifrag_count))
     allocate(dg_frag%density_grid_point_count(ifrag_count))
@@ -530,6 +552,8 @@ contains
     dg_frag%density_izg_map = 1
     dg_frag%density_send_count = 0
     dg_frag%density_send_slot_map = 0
+    dg_frag%density_subgroup_send_count = 0
+    dg_frag%density_subgroup_send_slot_map = 0
     dg_frag%density_grid_point_count = 0
 
     i_local = 0
@@ -538,22 +562,19 @@ contains
       primary_count_local = 0
       primary_owned_local = 0
       primary_remote_local = 0
-      izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
-      izg = izg0
+      subgroup_self_count = 0
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
-        iyg0 = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2))
-        iyg = iyg0
+        izg = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag) + iz - 1, dg_frag%lgnum_total(3))
         do iy = 1, dg_frag%nxyz_domain(2, ifrag)
-          ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
-          ixg = ixg0
+          iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
+            ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
             dg_frag%density_ixg_map(ix, iy, iz, i_local) = ixg
             dg_frag%density_iyg_map(ix, iy, iz, i_local) = iyg
             dg_frag%density_izg_map(ix, iy, iz, i_local) = izg
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
-            dg_frag%density_primary_local_map(ix, iy, iz, i_local) = &
-              is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)
+            dg_frag%density_primary_local_map(ix, iy, iz, i_local) = .true.
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
               primary_count_local = primary_count_local + 1
               if (owner_rank == dg_frag%id) then
@@ -562,7 +583,30 @@ contains
                 primary_remote_local = primary_remote_local + 1
               end if
             end if
-            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= dg_frag%id) then
+            source_rank = dg_frag%id_array(ifrag)
+            subgroup_target_rank = source_rank - dg_frag%id_array(ifrag)
+            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
+              source_rank = get_fragment_grid_sender_rank(dg_frag%id_array(ifrag), dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+              subgroup_target_rank = source_rank - dg_frag%id_array(ifrag)
+              if (subgroup_target_rank < 0 .or. subgroup_target_rank > dg_frag%isize_frag - 1) then
+                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                     "[FATAL] density subgroup target out of range: rank=", dg_frag%id, &
+                     " ifrag=", ifrag, " ix=", ix, " iy=", iy, " iz=", iz
+                flush(6)
+                stop "DG-Fragment RT: density subgroup target out of range"
+              end if
+              if (subgroup_target_rank == dg_frag%id_frag) then
+                subgroup_self_count = subgroup_self_count + 1
+              else
+                dg_frag%density_subgroup_send_count(subgroup_target_rank) = &
+                  dg_frag%density_subgroup_send_count(subgroup_target_rank) + 1
+                dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local) = &
+                  dg_frag%density_subgroup_send_count(subgroup_target_rank)
+              end if
+            end if
+            source_rank = dg_frag%id_array(ifrag)
+            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= source_rank .and. &
+                dg_frag%is_frag_root) then
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
               dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
             end if
@@ -578,14 +622,10 @@ contains
               dg_frag%density_primary_local_map(ix, iy, iz, i_local)
             dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%send_slot = &
               dg_frag%density_send_slot_map(ix, iy, iz, i_local)
-            ixg = ixg + 1
-            if (ixg > dg_frag%lgnum_total(1)) ixg = 1
+            dg_frag%density_grid_points(dg_frag%density_grid_point_count(i_local), i_local)%subgroup_send_slot = &
+              dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local)
           end do
-          iyg = iyg + 1
-          if (iyg > dg_frag%lgnum_total(2)) iyg = 1
         end do
-        izg = izg + 1
-        if (izg > dg_frag%lgnum_total(3)) izg = 1
       end do
       if (dg_frag%id_frag == 0 .and. i_local <= 4) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -594,6 +634,11 @@ contains
              ' primary=', primary_count_local, &
              ' owned=', primary_owned_local, &
              ' remote=', primary_remote_local
+        if (subgroup_self_count > 0) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') &
+               'density subgroup-self-count: rank=', dg_frag%id, &
+               ' ifrag=', ifrag, ' npts=', subgroup_self_count
+        end if
       end if
       if (dg_frag%id_frag == 0 .and. i_local <= 2) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') &
@@ -630,33 +675,20 @@ contains
     recv_count = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
-      izg = izg0
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
-        iyg0 = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2))
-        iyg = iyg0
+        izg = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag) + iz - 1, dg_frag%lgnum_total(3))
         do iy = 1, dg_frag%nxyz_domain(2, ifrag)
-          ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
-          ixg = ixg0
+          iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
-            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
-            if (source_rank == dg_frag%id) then
-              ixg = ixg + 1
-              if (ixg > dg_frag%lgnum_total(1)) ixg = 1
-              cycle
-            end if
+            ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
+            source_rank = source_root_rank
+            if (source_rank == dg_frag%id) cycle
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
-            if (owner_rank == dg_frag%id .and. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) then
+            if (owner_rank == dg_frag%id) then
               recv_count(source_rank) = recv_count(source_rank) + 1
             end if
-            ixg = ixg + 1
-            if (ixg > dg_frag%lgnum_total(1)) ixg = 1
           end do
-          iyg = iyg + 1
-          if (iyg > dg_frag%lgnum_total(2)) iyg = 1
         end do
-        izg = izg + 1
-        if (izg > dg_frag%lgnum_total(3)) izg = 1
       end do
     end do
 
@@ -729,36 +761,23 @@ contains
     recv_cursor = 0
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
-      izg0 = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag), dg_frag%lgnum_total(3))
-      izg = izg0
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
-        iyg0 = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag), dg_frag%lgnum_total(2))
-        iyg = iyg0
+        izg = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag) + iz - 1, dg_frag%lgnum_total(3))
         do iy = 1, dg_frag%nxyz_domain(2, ifrag)
-          ixg0 = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag), dg_frag%lgnum_total(1))
-          ixg = ixg0
+          iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
-            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
-            if (source_rank == dg_frag%id) then
-              ixg = ixg + 1
-              if (ixg > dg_frag%lgnum_total(1)) ixg = 1
-              cycle
-            end if
+            ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
+            source_rank = source_root_rank
+            if (source_rank == dg_frag%id) cycle
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
-            if (owner_rank /= dg_frag%id) cycle
-            if (.not. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) cycle
-            recv_cursor(source_rank) = recv_cursor(source_rank) + 1
-            dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
-            dg_frag%density_recv_map(source_rank)%iyg(recv_cursor(source_rank)) = iyg
-            dg_frag%density_recv_map(source_rank)%izg(recv_cursor(source_rank)) = izg
-            ixg = ixg + 1
-            if (ixg > dg_frag%lgnum_total(1)) ixg = 1
+            if (owner_rank == dg_frag%id) then
+              recv_cursor(source_rank) = recv_cursor(source_rank) + 1
+              dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
+              dg_frag%density_recv_map(source_rank)%iyg(recv_cursor(source_rank)) = iyg
+              dg_frag%density_recv_map(source_rank)%izg(recv_cursor(source_rank)) = izg
+            end if
           end do
-          iyg = iyg + 1
-          if (iyg > dg_frag%lgnum_total(2)) iyg = 1
         end do
-        izg = izg + 1
-        if (izg > dg_frag%lgnum_total(3)) izg = 1
       end do
     end do
 
@@ -833,9 +852,6 @@ contains
     integer, intent(in) :: ifrag, ixg, iyg, izg
     integer :: xloc, yloc, zloc
     integer :: nx, ny, nz
-    integer :: nbx, nby, nbz
-    integer :: xcore_lo, ycore_lo, zcore_lo
-    integer :: xcore_hi, ycore_hi, zcore_hi
 
     nx = dg_frag%nxyz_domain(1, ifrag)
     ny = dg_frag%nxyz_domain(2, ifrag)
@@ -857,25 +873,7 @@ contains
       return
     end if
 
-    nbx = min(dg_frag%nxyz_buffer(1), max(0, (nx - 1) / 2))
-    nby = min(dg_frag%nxyz_buffer(2), max(0, (ny - 1) / 2))
-    nbz = min(dg_frag%nxyz_buffer(3), max(0, (nz - 1) / 2))
-    xcore_lo = min(nx, 1 + nbx)
-    ycore_lo = min(ny, 1 + nby)
-    zcore_lo = min(nz, 1 + nbz)
-    xcore_hi = max(1, nx - nbx)
-    ycore_hi = max(1, ny - nby)
-    zcore_hi = max(1, nz - nbz)
-    if (xcore_lo > xcore_hi) xcore_lo = (nx + 1) / 2
-    if (xcore_lo > xcore_hi) xcore_hi = xcore_lo
-    if (ycore_lo > ycore_hi) ycore_lo = (ny + 1) / 2
-    if (ycore_lo > ycore_hi) ycore_hi = ycore_lo
-    if (zcore_lo > zcore_hi) zcore_lo = (nz + 1) / 2
-    if (zcore_lo > zcore_hi) zcore_hi = zcore_lo
-
-    is_core = (xloc >= xcore_lo .and. xloc <= xcore_hi .and. &
-               yloc >= ycore_lo .and. yloc <= ycore_hi .and. &
-               zloc >= zcore_lo .and. zloc <= zcore_hi)
+    is_core = .true.
   end function is_density_core_point
 
   integer function wrap_fragment_cartesian_index(i, ndiv) result(iwrap)
@@ -1132,6 +1130,7 @@ contains
     character(len=64) :: env_n_mat_cap
     logical :: warned_spin_discard
     real(8) :: cap_avg, weight_best
+    real(8) :: coef_file_probe(3), coef_global_probe(3)
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
     
@@ -1346,6 +1345,8 @@ contains
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     allocate(coef_local(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, ifrag_count))
     coef_local = 0.0d0
+    coef_file_probe(:) = 0.0d0
+    coef_global_probe(:) = 0.0d0
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
@@ -1373,6 +1374,15 @@ contains
       
       close(iunit)
     end do
+
+    if (dg_frag%id == 0) then
+      do io = 1, min(3, dg_frag%nstate_tot)
+        coef_file_probe(io) = sum(abs(coef_local(:, io, 1:dg_frag%nspin, 1:ifrag_count))**2)
+      end do
+      write(*,'(1x,a,3(1pe12.4,1x))') "        coef init probe: file-local c2=", &
+        coef_file_probe(1), coef_file_probe(2), coef_file_probe(3)
+      flush(6)
+    end if
 
     if (n_mat_cap < 1 .and. trim(dg_nmat_cap_mode) == 'occ_multiple' .and. dg_nmat_cap_multiple > 0.0d0) then
       if (dg_frag%nspin == 1) then
@@ -1532,6 +1542,15 @@ contains
         end do
       end do
     end do
+
+    if (dg_frag%id == 0) then
+      do io = 1, min(3, dg_frag%nstate_tot)
+        coef_global_probe(io) = sum(abs(dg_frag%coef(:, io, 1:dg_frag%nspin))**2)
+      end do
+      write(*,'(1x,a,3(1pe12.4,1x))') "        coef init probe: global c2=", &
+        coef_global_probe(1), coef_global_probe(2), coef_global_probe(3)
+      flush(6)
+    end if
 
     ! Keep coefficients only on the owning fragment ranks.
 

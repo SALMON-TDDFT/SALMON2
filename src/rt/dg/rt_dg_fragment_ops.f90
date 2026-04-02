@@ -375,7 +375,7 @@ contains
             do ilma = 1, ppg%Nlma
               overlap_i = uVpsi(io, ilma, ispin)
               overlap_j = uVpsi(jo, ilma, ispin)
-              nlpp_contrib = nlpp_contrib + overlap_i * overlap_j * ppg%rinv_uvu(ilma)
+              nlpp_contrib = nlpp_contrib + conjg(overlap_i) * overlap_j * ppg%rinv_uvu(ilma)
             end do
             H_nl(ig_i, ig_j, ispin) = H_nl(ig_i, ig_j, ispin) + nlpp_contrib
           end do
@@ -478,7 +478,7 @@ contains
             do ilma = 1, ppg%Nlma
               overlap_i = uVpsi(io, ilma, ispin)
               overlap_j = uVpsi(jo, ilma, ispin)
-              nlpp_contrib = nlpp_contrib + overlap_i * overlap_j * ppg%rinv_uvu(ilma)
+              nlpp_contrib = nlpp_contrib + conjg(overlap_i) * overlap_j * ppg%rinv_uvu(ilma)
             end do
             H_nl_blocks(iblk)%val(io, jo, ispin) = H_nl_blocks(iblk)%val(io, jo, ispin) + nlpp_contrib
           end do
@@ -615,6 +615,12 @@ contains
     natom = size(ppg%mps)
     self_shape = [ppg%nps, natom, dg_frag%nstate_frag, local_frag_count]
     halo_shape = [ppg%nps, natom, dg_frag%nstate_frag, max(0, dg_frag%n_halo)]
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a,4(a,i0),a,i0)') "        nonlocal projector cache trace: stage=entry", &
+        " local_frag_count=", local_frag_count, " natom=", natom, " nps=", ppg%nps, &
+        " nstate_frag=", dg_frag%nstate_frag, " n_halo=", dg_frag%n_halo
+      flush(6)
+    end if
 
     if (allocated(dg_frag%nl_pp_phi_self)) then
       if (any(shape(dg_frag%nl_pp_phi_self) /= self_shape)) then
@@ -631,9 +637,17 @@ contains
     if (.not. allocated(dg_frag%nl_pp_phi_self)) allocate(dg_frag%nl_pp_phi_self(self_shape(1), self_shape(2), self_shape(3), self_shape(4)))
     if (.not. allocated(dg_frag%nl_pp_phi_halo)) allocate(dg_frag%nl_pp_phi_halo(halo_shape(1), halo_shape(2), halo_shape(3), halo_shape(4)))
     if (dg_frag%nl_pp_phi_cache_valid) return
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-alloc"
+      flush(6)
+    end if
 
     dg_frag%nl_pp_phi_self(:, :, :, :) = (0.0d0, 0.0d0)
     dg_frag%nl_pp_phi_halo(:, :, :, :) = (0.0d0, 0.0d0)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-zero"
+      flush(6)
+    end if
 
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -642,6 +656,13 @@ contains
       if (nbf <= 0) cycle
       iorg(:) = dg_frag%ixyz_frag(:, ifrag)
       ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+      if (dg_frag%id == 0 .and. i_local == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') &
+          "        nonlocal projector cache trace: stage=self-loop ifrag=", ifrag, &
+          " i_local=", i_local, " nbf=", nbf, " iorg=", iorg(1), iorg(2), iorg(3), &
+          " ndom=", ndom(1), ndom(2), ndom(3)
+        flush(6)
+      end if
       do ia = 1, natom
         do j = 1, ppg%mps(ia)
           ix = ppg%jxyz(1, j, ia)
@@ -665,6 +686,10 @@ contains
         end do
       end do
     end do
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-self-build"
+      flush(6)
+    end if
 
     do i_halo = 1, dg_frag%n_halo
       ifrag = dg_frag%halo(i_halo)%ifrag_dst
@@ -680,6 +705,13 @@ contains
       if (nbf <= 0) cycle
       iorg(:) = dg_frag%ixyz_frag(:, ifrag)
       ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+      if (dg_frag%id == 0 .and. i_halo == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x))') &
+          "        nonlocal projector cache trace: stage=halo-loop i_halo=", i_halo, &
+          " ifrag=", ifrag, " nbf=", nbf, " halo_len=", &
+          dg_frag%halo(i_halo)%length(1), dg_frag%halo(i_halo)%length(2), dg_frag%halo(i_halo)%length(3)
+        flush(6)
+      end if
       do ia = 1, natom
         do j = 1, ppg%mps(ia)
           ix = ppg%jxyz(1, j, ia)
@@ -700,6 +732,10 @@ contains
         end do
       end do
     end do
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-halo-build"
+      flush(6)
+    end if
 
     dg_frag%nl_pp_phi_cache_valid = .true.
   end subroutine ensure_nonlocal_projector_phi_cache
@@ -940,19 +976,39 @@ contains
     local_frag_count = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (local_frag_count <= 0) return
 
-    if (dg_frag%id == 0 .and. ispin == 1) then
-      write(*,'(1x,a,i0,a,i0,a,i0)') "        nonlocal projector trace: stage=entry local_frag_count=", &
-        local_frag_count, " nlma=", ppg%Nlma, " nstate=", size(x, 2)
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        nonlocal projector trace: rank=", dg_frag%id, &
+        " stage=entry local_frag_count=", local_frag_count, " nlma=", ppg%Nlma, " nstate=", size(x, 2)
       flush(6)
     end if
 
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a)') "        nonlocal projector trace: rank=", dg_frag%id, " stage=before-ensure-cache"
+      flush(6)
+    end if
     call ensure_nonlocal_projector_phi_cache(dg_frag, mg, ppg)
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,l1,a,l1,a,i0,a,i0)') "        nonlocal projector trace: rank=", dg_frag%id, &
+        " stage=after-ensure-cache has_self=", allocated(dg_frag%nl_pp_phi_self), " has_halo=", &
+        allocated(dg_frag%nl_pp_phi_halo), " n_halo=", dg_frag%n_halo, " nstate_frag=", dg_frag%nstate_frag
+      flush(6)
+    end if
 
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a)') "        nonlocal projector trace: rank=", dg_frag%id, " stage=before-alloc"
+      flush(6)
+    end if
     allocate(uVphi_self(dg_frag%nstate_frag, ppg%Nlma, local_frag_count))
     allocate(proj_local(ppg%Nlma, size(x, 2)), proj_global(ppg%Nlma, size(x, 2)))
     uVphi_self(:, :, :) = (0.0d0, 0.0d0)
     proj_local(:, :) = (0.0d0, 0.0d0)
     proj_global(:, :) = (0.0d0, 0.0d0)
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,2(i0,1x),a,2(i0,1x))') "        nonlocal projector trace: rank=", dg_frag%id, &
+        " stage=after-alloc proj_shape=", size(proj_local, 1), size(proj_local, 2), &
+        " uVphi_shape=", size(uVphi_self, 1), size(uVphi_self, 2)
+      flush(6)
+    end if
 
     use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
 
@@ -960,6 +1016,11 @@ contains
       ifrag = dg_frag%ifrag_start + frag_slot - 1
       nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
       if (nbf <= 0) cycle
+      if (dg_frag%id <= 1 .and. ispin == 1 .and. (frag_slot == 1 .or. frag_slot == local_frag_count)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        nonlocal projector trace: rank=", dg_frag%id, &
+          " stage=frag-loop frag_slot=", frag_slot, " ifrag=", ifrag, " nbf=", nbf
+        flush(6)
+      end if
       do ilma = 1, ppg%Nlma
         ia = ppg%ia_tbl(ilma)
         do j = 1, ppg%mps(ia)
@@ -999,24 +1060,26 @@ contains
                 psi_point = psi_point + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x(global_idx, ist)
               end do
             end do
-            proj_local(ilma, ist) = proj_local(ilma, ist) + phase_factor * psi_point
+            proj_local(ilma, ist) = proj_local(ilma, ist) + conjg(phase_factor) * psi_point
           end do
         end do
       end do
     end do
 
-    if (dg_frag%id == 0 .and. ispin == 1) then
-      write(*,'(1x,a)') "        nonlocal projector trace: stage=after-self-halo-loop"
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,2(es12.4,1x))') "        nonlocal projector trace: rank=", dg_frag%id, &
+        " stage=after-self-halo-loop proj_norms=", sum(abs(proj_local)), sum(abs(uVphi_self))
       flush(6)
     end if
 
-    if (dg_frag%id == 0 .and. ispin == 1) then
-      write(*,'(1x,a)') "        nonlocal projector trace: stage=before-proj-sum"
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a)') "        nonlocal projector trace: rank=", dg_frag%id, " stage=before-proj-sum"
       flush(6)
     end if
     call comm_summation(proj_local, proj_global, size(proj_local), dg_frag%icomm)
-    if (dg_frag%id == 0 .and. ispin == 1) then
-      write(*,'(1x,a)') "        nonlocal projector trace: stage=after-proj-sum"
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,es12.4)') "        nonlocal projector trace: rank=", dg_frag%id, &
+        " stage=after-proj-sum proj_global_norm=", sum(abs(proj_global))
       flush(6)
     end if
 
@@ -1038,8 +1101,9 @@ contains
       end do
     end do
 
-    if (dg_frag%id == 0 .and. ispin == 1) then
-      write(*,'(1x,a)') "        nonlocal projector trace: stage=exit"
+    if (dg_frag%id <= 1 .and. ispin == 1) then
+      write(*,'(1x,a,i0,a,es12.4)') "        nonlocal projector trace: rank=", dg_frag%id, &
+        " stage=exit y_norm=", sum(abs(y))
       flush(6)
     end if
     deallocate(uVphi_self, proj_local, proj_global)
@@ -2084,16 +2148,58 @@ contains
         fetched(irow, :) = row_buf(:)
         cycle
       end if
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-owner-check"
+        flush(6)
+      end if
       owner_rank = dg_frag%coef_owner(global_row, ispin)
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " coef_owner_rows=", size(dg_frag%coef_owner, 1), &
+          " coef_rows=", size(dg_frag%coef, 1), " owner_rank_raw=", owner_rank
+        flush(6)
+      end if
       if (owner_rank < 0) then
+        if (irow == 1 .and. ispin == 1) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=owner-negative-cycle"
+          flush(6)
+        end if
         fetched(irow, :) = row_buf(:)
         cycle
       end if
       owner_rank_min = -owner_rank
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-owner-min"
+        flush(6)
+      end if
       call comm_get_max(owner_rank_min, dg_frag%icomm)
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=after-owner-min"
+        flush(6)
+      end if
       owner_rank_min = -owner_rank_min
       owner_rank_max = owner_rank
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-owner-max"
+        flush(6)
+      end if
       call comm_get_max(owner_rank_max, dg_frag%icomm)
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=after-owner-max"
+        flush(6)
+      end if
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " owner=", owner_rank, &
+          " owner_min=", owner_rank_min, " owner_max=", owner_rank_max
+        flush(6)
+      end if
       if (owner_rank_min /= owner_rank_max) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] inconsistent coef owner across ranks: rank=", dg_frag%id, &
           " ispin=", ispin, " row=", global_row, " owner_min=", owner_rank_min, " owner_max=", owner_rank_max
@@ -2110,7 +2216,17 @@ contains
         stop "DG-Fragment RT: unstable coef owner in fetch_remote_coef_rows"
       end if
       if (owner_rank == dg_frag%id) row_buf(:) = dg_frag%coef(global_row, 1:size(fetched, 2), ispin)
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-bcast owner=", owner_rank
+        flush(6)
+      end if
       call comm_bcast(row_buf, dg_frag%icomm, owner_rank)
+      if (irow == 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
+          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=after-bcast owner=", owner_rank
+        flush(6)
+      end if
       fetched(irow, :) = row_buf(:)
       if (dg_frag%id == 0 .and. ispin == 1) then
         if (irow == 1 .or. irow == size(row_ids) .or. mod(irow, progress_stride) == 0) then
@@ -2548,6 +2664,11 @@ contains
     if (.not. allocated(dg_frag%index_basis)) return
 
     if (present(block_ids)) then
+      if (dg_frag%id <= 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        block-apply trace: rank=", dg_frag%id, &
+          " stage=entry ispin=", ispin, " nblocks=", size(block_ids), " x_rows=", size(x, 1), " y_rows=", size(y, 1)
+        flush(6)
+      end if
       if (size(block_ids) <= 0) then
         write(*,'(1x,a,i0,a,i0)') "        [FATAL] empty complex block_ids: rank=", dg_frag%id, " ispin=", ispin
         flush(6)
@@ -2591,12 +2712,7 @@ contains
           valid_row_count = valid_row_count + 1
           valid_row_ids(valid_row_count) = ii
         end do
-        if (valid_row_count <= 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] no valid local rows for complex block apply: rank=", &
-            dg_frag%id, " ispin=", ispin, " iblk=", iblk, " ifrag_row=", ifrag_row, " nrow=", nrow, " y_rows=", size(y, 1)
-          flush(6)
-          stop "no valid local rows for complex block apply"
-        end if
+        if (valid_row_count <= 0) cycle
         valid_col_count = 0
         do jj = 1, ncol
           col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
@@ -2604,12 +2720,16 @@ contains
           valid_col_count = valid_col_count + 1
           valid_col_ids(valid_col_count) = jj
         end do
-        if (valid_col_count <= 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] no valid source cols for complex block apply: rank=", &
-            dg_frag%id, " ispin=", ispin, " iblk=", iblk, " ifrag_col=", ifrag_col, " ncol=", ncol, " x_rows=", size(x, 1)
+        if (dg_frag%id <= 1 .and. ispin == 1 .and. iblk_idx <= 2) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        block-apply trace: rank=", dg_frag%id, &
+            " iblk_idx=", iblk_idx, " iblk=", iblk, " ifrag_row=", ifrag_row, " ifrag_col=", ifrag_col, &
+            " nrow=", nrow, " ncol=", ncol, " valid_rows=", valid_row_count
           flush(6)
-          stop "no valid source cols for complex block apply"
+          write(*,'(1x,a,i0,a,i0)') "        block-apply trace: rank=", dg_frag%id, &
+            " valid_cols=", valid_col_count
+          flush(6)
         end if
+        if (valid_col_count <= 0) cycle
         do idx_jj = 1, valid_col_count
           jj = valid_col_ids(idx_jj)
           ig_j = col_gid(jj)
@@ -2625,6 +2745,11 @@ contains
           end do
         end do
       end do
+      if (dg_frag%id <= 1 .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,es12.4)') "        block-apply trace: rank=", dg_frag%id, &
+          " stage=exit y_norm=", sum(abs(y))
+        flush(6)
+      end if
       return
     end if
 
@@ -2998,49 +3123,102 @@ contains
     real(8),                intent(out) :: grad_phi(:,:,:,:)
 
     integer :: lx, ly, lz, ifrag
+    integer :: ixg, iyg, izg
+    integer :: ix0, iy0, iz0
+    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
+    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
+    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
+    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
+    real(8) :: gx, gy, gz
     real(8) :: nabt(4,3)
     integer :: ndom(3)
 
     nabt = stencil%coef_nab
     ifrag = dg_frag%ifrag_start + i_local - 1
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
 
     grad_phi = 0.0d0
 
-    !$omp parallel do collapse(2) private(lx, ly, lz) schedule(static)
+    !$omp parallel do collapse(2) private(lx, ly, lz, ixg, iyg, izg, ix0, iy0, iz0, gx, gy, gz, &
+    !$omp& ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4, &
+    !$omp& iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4, &
+    !$omp& izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4) schedule(static)
     do lz = 1, ndom(3)
       do ly = 1, ndom(2)
-        !$omp simd
+        !$omp simd private(gx, gy, gz)
         do lx = 1, ndom(1)
-          grad_phi(lx, ly, lz, 1) = &
-              nabt(1,1) * (dg_frag%phi_frag(lx+1, ly, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx-1, ly, lz, jo, i_local)) + &
-              nabt(2,1) * (dg_frag%phi_frag(lx+2, ly, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx-2, ly, lz, jo, i_local)) + &
-              nabt(3,1) * (dg_frag%phi_frag(lx+3, ly, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx-3, ly, lz, jo, i_local)) + &
-              nabt(4,1) * (dg_frag%phi_frag(lx+4, ly, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx-4, ly, lz, jo, i_local))
+          ixg = modulo(dg_frag%ixyz_frag(1, ifrag) + lx - 2, dg_frag%lgnum_total(1)) + 1
+          iyg = modulo(dg_frag%ixyz_frag(2, ifrag) + ly - 2, dg_frag%lgnum_total(2)) + 1
+          izg = modulo(dg_frag%ixyz_frag(3, ifrag) + lz - 2, dg_frag%lgnum_total(3)) + 1
+          ix0 = map_global_to_phi_box_coord(ixg, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          iy0 = map_global_to_phi_box_coord(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iz0 = map_global_to_phi_box_coord(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) cycle
 
-          grad_phi(lx, ly, lz, 2) = &
-              nabt(1,2) * (dg_frag%phi_frag(lx, ly+1, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly-1, lz, jo, i_local)) + &
-              nabt(2,2) * (dg_frag%phi_frag(lx, ly+2, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly-2, lz, jo, i_local)) + &
-              nabt(3,2) * (dg_frag%phi_frag(lx, ly+3, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly-3, lz, jo, i_local)) + &
-              nabt(4,2) * (dg_frag%phi_frag(lx, ly+4, lz, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly-4, lz, jo, i_local))
+          ixp1 = map_global_to_phi_box_coord(ixg + 1, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixm1 = map_global_to_phi_box_coord(ixg - 1, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixp2 = map_global_to_phi_box_coord(ixg + 2, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixm2 = map_global_to_phi_box_coord(ixg - 2, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixp3 = map_global_to_phi_box_coord(ixg + 3, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixm3 = map_global_to_phi_box_coord(ixg - 3, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixp4 = map_global_to_phi_box_coord(ixg + 4, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          ixm4 = map_global_to_phi_box_coord(ixg - 4, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+          iyp1 = map_global_to_phi_box_coord(iyg + 1, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iym1 = map_global_to_phi_box_coord(iyg - 1, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iyp2 = map_global_to_phi_box_coord(iyg + 2, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iym2 = map_global_to_phi_box_coord(iyg - 2, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iyp3 = map_global_to_phi_box_coord(iyg + 3, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iym3 = map_global_to_phi_box_coord(iyg - 3, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iyp4 = map_global_to_phi_box_coord(iyg + 4, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          iym4 = map_global_to_phi_box_coord(iyg - 4, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+          izp1 = map_global_to_phi_box_coord(izg + 1, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izm1 = map_global_to_phi_box_coord(izg - 1, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izp2 = map_global_to_phi_box_coord(izg + 2, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izm2 = map_global_to_phi_box_coord(izg - 2, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izp3 = map_global_to_phi_box_coord(izg + 3, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izm3 = map_global_to_phi_box_coord(izg - 3, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izp4 = map_global_to_phi_box_coord(izg + 4, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          izm4 = map_global_to_phi_box_coord(izg - 4, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
 
-          grad_phi(lx, ly, lz, 3) = &
-              nabt(1,3) * (dg_frag%phi_frag(lx, ly, lz+1, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly, lz-1, jo, i_local)) + &
-              nabt(2,3) * (dg_frag%phi_frag(lx, ly, lz+2, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly, lz-2, jo, i_local)) + &
-              nabt(3,3) * (dg_frag%phi_frag(lx, ly, lz+3, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly, lz-3, jo, i_local)) + &
-              nabt(4,3) * (dg_frag%phi_frag(lx, ly, lz+4, jo, i_local) - &
-                           dg_frag%phi_frag(lx, ly, lz-4, jo, i_local))
+          gx = 0.0d0
+          if (ixp1 > 0 .and. ixm1 > 0) gx = gx + nabt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local))
+          if (ixp2 > 0 .and. ixm2 > 0) gx = gx + nabt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local))
+          if (ixp3 > 0 .and. ixm3 > 0) gx = gx + nabt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local))
+          if (ixp4 > 0 .and. ixm4 > 0) gx = gx + nabt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+
+          gy = 0.0d0
+          if (iyp1 > 0 .and. iym1 > 0) gy = gy + nabt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local))
+          if (iyp2 > 0 .and. iym2 > 0) gy = gy + nabt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local))
+          if (iyp3 > 0 .and. iym3 > 0) gy = gy + nabt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local))
+          if (iyp4 > 0 .and. iym4 > 0) gy = gy + nabt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
+
+          gz = 0.0d0
+          if (izp1 > 0 .and. izm1 > 0) gz = gz + nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local))
+          if (izp2 > 0 .and. izm2 > 0) gz = gz + nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local))
+          if (izp3 > 0 .and. izm3 > 0) gz = gz + nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local))
+          if (izp4 > 0 .and. izm4 > 0) gz = gz + nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) - &
+                                                               dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+
+          grad_phi(lx, ly, lz, 1) = gx
+          grad_phi(lx, ly, lz, 2) = gy
+          grad_phi(lx, ly, lz, 3) = gz
         end do
       end do
     end do
@@ -3126,7 +3304,6 @@ contains
   subroutine calculate_microscopic_current_dg(dg_frag, system, mg, stencil, curr)
     ! NOTE: DG microscopic current here intentionally excludes non-local PP contribution.
     use structures
-    use salmon_global, only: nelec
     use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -3139,19 +3316,18 @@ contains
     integer :: ig_i, ig_j
     integer :: ix, iy, iz, ixg, iyg, izg, igrid, valid_grid_count, point_idx
     integer :: grid_x_lo, grid_x_hi, grid_y_lo, grid_y_hi, grid_z_lo, grid_z_hi
-    integer :: nxyz(3), ifrag_count, ngrid_max
-    integer :: nocc_per_spin
-    real(8) :: occ_factor
-    complex(8) :: coef_pair
+    integer :: nxyz(3), ifrag_count, ngrid_max, max_nbf, max_nocc
+    integer :: nocc_spin
+    real(8) :: occ_factor, current_tmp
     real(8) :: phi_i
-    real(8), allocatable :: grad_phi(:,:,:,:), curr_thread(:,:,:,:)
+    real(8), allocatable :: curr_thread(:,:,:,:)
     real(8), allocatable :: curr_local(:,:,:,:), curr_sum(:,:,:,:)
     real(8), allocatable :: w_local(:,:,:), w_sum(:,:,:)
+    complex(8), allocatable :: coef_occ_frag(:,:), coef_pair_mat(:,:)
 
     curr%v = 0.0d0
     if (.not. allocated(dg_frag%phi_frag)) return
 
-    nocc_per_spin = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
     occ_factor = 2.0d0 / real(system%nspin, 8)
 
     allocate(curr_local(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -3162,6 +3338,10 @@ contains
     curr_sum = 0.0d0
     w_local = 0.0d0
     w_sum = 0.0d0
+    call ensure_gradient_basis_cache(dg_frag, mg, stencil)
+    max_nbf = max(1, maxval(dg_frag%n_basis(dg_frag%ifrag_start:dg_frag%ifrag_end, 1:system%nspin)))
+    max_nocc = max(1, maxval(dg_frag%nocc_spin(1:system%nspin)))
+    allocate(coef_occ_frag(max_nbf, max_nocc), coef_pair_mat(max_nbf, max_nbf))
     grid_x_lo = mg%is(1)
     grid_x_hi = mg%ie(1)
     grid_y_lo = mg%is(2)
@@ -3228,27 +3408,33 @@ contains
       end do
 
       do ispin = 1, system%nspin
-!$omp parallel private(jstate_frag, istate_frag, ig_j, ig_i, io, coef_pair, phi_i, iz, iy, ix, ixg, iyg, izg, grad_phi, curr_thread)
+        nocc_spin = dg_frag%nocc_spin(ispin)
+        if (nocc_spin <= 0) cycle
+        coef_occ_frag(:, :) = (0.0d0, 0.0d0)
+        coef_pair_mat(:, :) = (0.0d0, 0.0d0)
+        do jstate_frag = 1, dg_frag%n_basis(ifrag, ispin)
+          ig_j = dg_frag%index_basis(jstate_frag, ifrag, ispin)
+          if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
+          coef_occ_frag(jstate_frag, 1:nocc_spin) = dg_frag%coef(ig_j, 1:nocc_spin, ispin)
+        end do
+        call zgemm('N', 'C', dg_frag%n_basis(ifrag, ispin), dg_frag%n_basis(ifrag, ispin), nocc_spin, &
+                   cmplx(occ_factor, 0.0d0, kind=8), coef_occ_frag, max_nbf, coef_occ_frag, max_nbf, &
+                   cmplx(0.0d0, 0.0d0, kind=8), coef_pair_mat, max_nbf)
+!$omp parallel private(jstate_frag, istate_frag, ig_j, ig_i, phi_i, iz, iy, ix, ixg, iyg, izg, curr_thread, current_tmp)
           allocate(curr_thread(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           curr_thread = 0.0d0
-          allocate(grad_phi(1:nxyz(1), 1:nxyz(2), 1:nxyz(3), 3))
 
 !$omp do schedule(static)
           do jstate_frag = 1, dg_frag%n_basis(ifrag, ispin)
             ig_j = dg_frag%index_basis(jstate_frag, ifrag, ispin)
             if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
 
-            call apply_gradient_to_basis(dg_frag, i_local, jstate_frag, mg, stencil, grad_phi)
-
             do istate_frag = 1, dg_frag%n_basis(ifrag, ispin)
               ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
               if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
 
-              coef_pair = (0.0d0, 0.0d0)
-              do io = 1, nocc_per_spin
-                coef_pair = coef_pair + occ_factor * conjg(dg_frag%coef(ig_i, io, ispin)) * dg_frag%coef(ig_j, io, ispin)
-              end do
-              if (abs(aimag(coef_pair)) < 1.0d-18) cycle
+              current_tmp = aimag(coef_pair_mat(istate_frag, jstate_frag))
+              if (abs(current_tmp) < 1.0d-18) cycle
 
               do igrid = 1, valid_grid_count
                 ix = dg_frag%current_valid_ix(igrid, i_local)
@@ -3259,9 +3445,12 @@ contains
                 izg = dg_frag%current_valid_izg(igrid, i_local)
 
                 phi_i = dg_frag%phi_frag(ix, iy, iz, istate_frag, i_local)
-                curr_thread(1, ixg, iyg, izg) = curr_thread(1, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 1)
-                curr_thread(2, ixg, iyg, izg) = curr_thread(2, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 2)
-                curr_thread(3, ixg, iyg, izg) = curr_thread(3, ixg, iyg, izg) + aimag(coef_pair) * phi_i * grad_phi(ix, iy, iz, 3)
+                curr_thread(1, ixg, iyg, izg) = curr_thread(1, ixg, iyg, izg) + &
+                  current_tmp * phi_i * dg_frag%gradient_basis_cache(ix, iy, iz, 1, jstate_frag, i_local)
+                curr_thread(2, ixg, iyg, izg) = curr_thread(2, ixg, iyg, izg) + &
+                  current_tmp * phi_i * dg_frag%gradient_basis_cache(ix, iy, iz, 2, jstate_frag, i_local)
+                curr_thread(3, ixg, iyg, izg) = curr_thread(3, ixg, iyg, izg) + &
+                  current_tmp * phi_i * dg_frag%gradient_basis_cache(ix, iy, iz, 3, jstate_frag, i_local)
               end do
             end do
           end do
@@ -3271,7 +3460,7 @@ contains
           curr_local(:, :, :, :) = curr_local(:, :, :, :) + curr_thread(:, :, :, :)
 !$omp end critical
 
-          deallocate(grad_phi, curr_thread)
+          deallocate(curr_thread)
 !$omp end parallel
       end do
     end do
@@ -3292,7 +3481,7 @@ contains
     end do
 
     deallocate(curr_local, curr_sum, w_local, w_sum)
-
+    deallocate(coef_occ_frag, coef_pair_mat)
   end subroutine calculate_microscopic_current_dg
 
   !=======================================================================
