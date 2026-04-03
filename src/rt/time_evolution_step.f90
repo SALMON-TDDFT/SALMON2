@@ -74,12 +74,20 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_ofile) :: ofl
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
+  integer, parameter :: n_gprobe = 3
+  integer, parameter :: gprobe_idx(3, n_gprobe) = reshape((/ 1,1,1, 2,1,1, 3,1,1 /), (/3, n_gprobe/))
+  integer :: iprobe
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   real(8) :: rho_vh_local, rho_vh_sum, rho_vxc_local, rho_vxc_sum, rho_vpsl_local, rho_vpsl_sum
   real(8) :: rho2_local, rho2_sum
   real(8) :: rho_max_local(1), rho_max_sum(1)
+  real(8) :: rho_g2_local, rho_g2_sum, sysvol
+  real(8) :: rho_gmax_local(1), rho_gmax_sum(1)
+  complex(8) :: rho_e
+  real(8) :: rho_gprobe_re_local(n_gprobe), rho_gprobe_re_sum(n_gprobe)
+  real(8) :: rho_gprobe_im_local(n_gprobe), rho_gprobe_im_sum(n_gprobe)
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
@@ -362,6 +370,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       rho_vpsl_local = 0.0d0
       rho2_local = 0.0d0
       rho_max_local(1) = 0.0d0
+      rho_g2_local = 0.0d0
+      rho_gmax_local(1) = 0.0d0
+      rho_gprobe_re_local(:) = 0.0d0
+      rho_gprobe_im_local(:) = 0.0d0
+      sysvol = system%det_a
       do iz = mg%is(3), mg%ie(3)
         do iy = mg%is(2), mg%ie(2)
           do ix = mg%is(1), mg%ie(1)
@@ -369,6 +382,15 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
             rho2_local = rho2_local + rho%f(ix, iy, iz) * rho%f(ix, iy, iz)
             rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
             rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
+            rho_e = poisson%zrhoG_ele(ix, iy, iz)
+            rho_g2_local = rho_g2_local + sysvol * fg%coef(ix, iy, iz) * abs(rho_e)**2
+            rho_gmax_local(1) = max(rho_gmax_local(1), abs(rho_e))
+            do iprobe = 1, n_gprobe
+              if (ix == gprobe_idx(1, iprobe) .and. iy == gprobe_idx(2, iprobe) .and. iz == gprobe_idx(3, iprobe)) then
+                rho_gprobe_re_local(iprobe) = real(rho_e)
+                rho_gprobe_im_local(iprobe) = aimag(rho_e)
+              end if
+            end do
             do is = 1, system%nspin
               rho_vxc_local = rho_vxc_local + rho_s(is)%f(ix, iy, iz) * Vxc(is)%f(ix, iy, iz)
             end do
@@ -383,11 +405,26 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call comm_summation(rho_vxc_local, rho_vxc_sum, info%icomm_r)
       call comm_summation(rho_vpsl_local, rho_vpsl_sum, info%icomm_r)
       call comm_summation(rho2_local, rho2_sum, info%icomm_r)
+      call comm_summation(rho_g2_local, rho_g2_sum, info%icomm_r)
+      call comm_summation(rho_gprobe_re_local, rho_gprobe_re_sum, n_gprobe, info%icomm_r)
+      call comm_summation(rho_gprobe_im_local, rho_gprobe_im_sum, n_gprobe, info%icomm_r)
       call comm_get_max(rho_max_local, rho_max_sum, 1, info%icomm_r)
+      call comm_get_max(rho_gmax_local, rho_gmax_sum, 1, info%icomm_r)
       if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
           "        full-potential-overlap: itt=", itt, " rhoVh=", rho_vh_sum, &
-          " rhoVxc=", rho_vxc_sum, " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1)
+          " rhoVxc=", rho_vxc_sum, " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &
+          " rhoG2=", rho_g2_sum, " rhoGmax=", rho_gmax_sum(1)
+        write(*,'(1x,a,i0,6(a,1pe14.6),3(a,1pe14.6))') &
+          "        full-rhoG-probe: itt=", itt, &
+          " g111_re=", rho_gprobe_re_sum(1), " g111_im=", rho_gprobe_im_sum(1), &
+          " g211_re=", rho_gprobe_re_sum(2), " g211_im=", rho_gprobe_im_sum(2), &
+          " g311_re=", rho_gprobe_re_sum(3), " g311_im=", rho_gprobe_im_sum(3), &
+          " g111_abs=", sqrt(rho_gprobe_re_sum(1)**2 + rho_gprobe_im_sum(1)**2), &
+          " g211_abs=", sqrt(rho_gprobe_re_sum(2)**2 + rho_gprobe_im_sum(2)**2), &
+          " g311_abs=", sqrt(rho_gprobe_re_sum(3)**2 + rho_gprobe_im_sum(3)**2)
+        write(*,'(1x,a,i0,3(a,1pe14.6))') "        full-rhoG-probe-gvec: itt=", itt, &
+          " g211_gx=", fg%vec_G(1, 2, 1, 1), " g211_gy=", fg%vec_G(2, 2, 1, 1), " g211_gz=", fg%vec_G(3, 2, 1, 1)
         flush(6)
       end if
     end if
