@@ -860,9 +860,6 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   if (.not. xc_payload%vtau_has_shadow_values) then
     stop "error: tau operator requires vtau shadow values to be prepared"
   end if
-  if (.not. stencil%if_orthogonal) then
-    stop "error: tau operator support requires orthogonal stencil"
-  end if
   if (allocated(system%Ac_micro%v)) then
     stop "error: tau operator support is unavailable for single-scale Maxwell-TDDFT"
   end if
@@ -873,6 +870,9 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   end if
 
   if (allocated(tpsi%rwf)) then
+    if (.not. stencil%if_orthogonal) then
+      stop "error: nonorthogonal tau operator with real orbitals is unsupported"
+    end if
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin,iz,iy,ix,n,ixp,ixm,iyp,iym,izp,izm,a0,aplus,aminus,corr_r) &
 !$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload)
@@ -925,6 +925,23 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
     end do
     end do
 !$omp end parallel do
+    return
+  end if
+
+  if (.not. stencil%if_orthogonal) then
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+      kvec = 0d0
+      if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      call add_xc_tau_operator_nonorth_complex( &
+           htpsi%zwf(:,:,:,ispin,io,ik,im), tpsi%zwf(:,:,:,ispin,io,ik,im), &
+           mg, stencil, system, xc_payload%vtau%f, kvec)
+    end do
+    end do
+    end do
+    end do
     return
   end if
 
@@ -1013,6 +1030,239 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
 end subroutine add_xc_tau_operator
 
 !===================================================================================================================================
+
+subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system, vtau, kvec_cart)
+  use structures
+  use math_constants, only: zi
+  implicit none
+  type(s_rgrid),      intent(in)    :: mg
+  type(s_stencil),    intent(in)    :: stencil
+  type(s_dft_system), intent(in)    :: system
+  complex(8),         intent(inout) :: htpsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                             mg%is_array(3):mg%ie_array(3))
+  complex(8),         intent(in)    :: tpsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                             mg%is_array(3):mg%ie_array(3))
+  real(8),            intent(in)    :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                            mg%is_array(3):mg%ie_array(3))
+  real(8),            intent(in)    :: kvec_cart(3)
+  integer :: ix, iy, iz
+  real(8) :: a0, k2, kvec_grid(3)
+  complex(8) :: psi0, corr
+  complex(8), allocatable :: dpsi(:,:,:,:), apsi(:,:,:), dapsi(:,:,:,:), adpsi(:,:,:,:)
+
+  allocate(dpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+  allocate(apsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+  allocate(dapsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+  allocate(adpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+
+  call calc_tau_operator_axis_derivatives_complex(tpsi, mg, stencil%coef_nab, dpsi)
+
+  apsi = 0d0
+  adpsi = 0d0
+  do iz = mg%is(3), mg%ie(3)
+  do iy = mg%is(2), mg%ie(2)
+  do ix = mg%is(1), mg%ie(1)
+    a0 = vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz))
+    apsi(ix,iy,iz) = a0 * tpsi(ix,iy,iz)
+    adpsi(1,ix,iy,iz) = a0 * dpsi(1,ix,iy,iz)
+    adpsi(2,ix,iy,iz) = a0 * dpsi(2,ix,iy,iz)
+    adpsi(3,ix,iy,iz) = a0 * dpsi(3,ix,iy,iz)
+  end do
+  end do
+  end do
+
+  call calc_tau_operator_axis_derivatives_complex(apsi, mg, stencil%coef_nab, dapsi)
+
+  kvec_grid = matmul(system%rmatrix_B, kvec_cart)
+  k2 = sum(kvec_cart(1:3)**2)
+
+  do iz = mg%is(3), mg%ie(3)
+  do iy = mg%is(2), mg%ie(2)
+  do ix = mg%is(1), mg%ie(1)
+    a0 = vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz))
+    psi0 = tpsi(ix,iy,iz)
+
+    corr = 0d0
+    corr = corr - stencil%coef_F(1) * calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, stencil%coef_lap, 1, ix, iy, iz)
+    corr = corr - stencil%coef_F(2) * calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, stencil%coef_lap, 2, ix, iy, iz)
+    corr = corr - stencil%coef_F(3) * calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, stencil%coef_lap, 3, ix, iy, iz)
+    corr = corr - 0.5d0 * stencil%coef_F(4) * ( &
+         calc_tau_operator_cross_component_complex(vtau, dpsi, 2, mg, stencil%coef_nab, 3, ix, iy, iz) + &
+         calc_tau_operator_cross_component_complex(vtau, dpsi, 3, mg, stencil%coef_nab, 2, ix, iy, iz) )
+    corr = corr - 0.5d0 * stencil%coef_F(5) * ( &
+         calc_tau_operator_cross_component_complex(vtau, dpsi, 1, mg, stencil%coef_nab, 3, ix, iy, iz) + &
+         calc_tau_operator_cross_component_complex(vtau, dpsi, 3, mg, stencil%coef_nab, 1, ix, iy, iz) )
+    corr = corr - 0.5d0 * stencil%coef_F(6) * ( &
+         calc_tau_operator_cross_component_complex(vtau, dpsi, 1, mg, stencil%coef_nab, 2, ix, iy, iz) + &
+         calc_tau_operator_cross_component_complex(vtau, dpsi, 2, mg, stencil%coef_nab, 1, ix, iy, iz) )
+    corr = corr - zi * ( &
+         kvec_grid(1) * (dapsi(1,ix,iy,iz) + adpsi(1,ix,iy,iz)) + &
+         kvec_grid(2) * (dapsi(2,ix,iy,iz) + adpsi(2,ix,iy,iz)) + &
+         kvec_grid(3) * (dapsi(3,ix,iy,iz) + adpsi(3,ix,iy,iz)) )
+    corr = corr + a0 * k2 * psi0
+
+    htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + corr
+  end do
+  end do
+  end do
+
+  deallocate(adpsi)
+  deallocate(dapsi)
+  deallocate(apsi)
+  deallocate(dpsi)
+end subroutine add_xc_tau_operator_nonorth_complex
+
+subroutine calc_tau_operator_axis_derivatives_complex(box, mg, nabt, deriv)
+  use structures
+  implicit none
+  type(s_rgrid), intent(in) :: mg
+  real(8),       intent(in) :: nabt(4,3)
+  complex(8),    intent(in) :: box(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                   mg%is_array(3):mg%ie_array(3))
+  complex(8), intent(out) :: deriv(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                   mg%is_array(3):mg%ie_array(3))
+  integer :: ix, iy, iz
+  complex(8) :: w(3)
+
+  deriv = 0d0
+  do iz = mg%is(3), mg%ie(3)
+  do iy = mg%is(2), mg%ie(2)
+  do ix = mg%is(1), mg%ie(1)
+    w(1) = nabt(1,1) * (box(mg%idx(ix+1), iy, iz) - box(mg%idx(ix-1), iy, iz)) &
+         + nabt(2,1) * (box(mg%idx(ix+2), iy, iz) - box(mg%idx(ix-2), iy, iz)) &
+         + nabt(3,1) * (box(mg%idx(ix+3), iy, iz) - box(mg%idx(ix-3), iy, iz)) &
+         + nabt(4,1) * (box(mg%idx(ix+4), iy, iz) - box(mg%idx(ix-4), iy, iz))
+    w(2) = nabt(1,2) * (box(ix, mg%idy(iy+1), iz) - box(ix, mg%idy(iy-1), iz)) &
+         + nabt(2,2) * (box(ix, mg%idy(iy+2), iz) - box(ix, mg%idy(iy-2), iz)) &
+         + nabt(3,2) * (box(ix, mg%idy(iy+3), iz) - box(ix, mg%idy(iy-3), iz)) &
+         + nabt(4,2) * (box(ix, mg%idy(iy+4), iz) - box(ix, mg%idy(iy-4), iz))
+    w(3) = nabt(1,3) * (box(ix, iy, mg%idz(iz+1)) - box(ix, iy, mg%idz(iz-1))) &
+         + nabt(2,3) * (box(ix, iy, mg%idz(iz+2)) - box(ix, iy, mg%idz(iz-2))) &
+         + nabt(3,3) * (box(ix, iy, mg%idz(iz+3)) - box(ix, iy, mg%idz(iz-3))) &
+         + nabt(4,3) * (box(ix, iy, mg%idz(iz+4)) - box(ix, iy, mg%idz(iz-4)))
+    deriv(:,ix,iy,iz) = w(:)
+  end do
+  end do
+  end do
+end subroutine calc_tau_operator_axis_derivatives_complex
+
+pure function calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, lapt, idir, ix, iy, iz) result(val)
+  use structures
+  implicit none
+  type(s_rgrid), intent(in) :: mg
+  real(8),       intent(in) :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                    mg%is_array(3):mg%ie_array(3))
+  complex(8),    intent(in) :: tpsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                    mg%is_array(3):mg%ie_array(3))
+  real(8),       intent(in) :: lapt(4,3)
+  integer,       intent(in) :: idir, ix, iy, iz
+  complex(8) :: val
+  complex(8) :: psi0
+  real(8) :: a0, aplus, aminus
+
+  val = 0d0
+  psi0 = tpsi(ix,iy,iz)
+  a0 = vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz))
+
+  select case(idir)
+  case(1)
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+1), mg%idy(iy), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-1), mg%idy(iy), mg%idz(iz)))
+    val = val + lapt(1,1) * (aplus * (tpsi(mg%idx(ix+1),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-1),iy,iz) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+2), mg%idy(iy), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-2), mg%idy(iy), mg%idz(iz)))
+    val = val + lapt(2,1) * (aplus * (tpsi(mg%idx(ix+2),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-2),iy,iz) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+3), mg%idy(iy), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-3), mg%idy(iy), mg%idz(iz)))
+    val = val + lapt(3,1) * (aplus * (tpsi(mg%idx(ix+3),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-3),iy,iz) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+4), mg%idy(iy), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-4), mg%idy(iy), mg%idz(iz)))
+    val = val + lapt(4,1) * (aplus * (tpsi(mg%idx(ix+4),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-4),iy,iz) - psi0))
+  case(2)
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+1), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-1), mg%idz(iz)))
+    val = val + lapt(1,2) * (aplus * (tpsi(ix,mg%idy(iy+1),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-1),iz) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+2), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-2), mg%idz(iz)))
+    val = val + lapt(2,2) * (aplus * (tpsi(ix,mg%idy(iy+2),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-2),iz) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+3), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-3), mg%idz(iz)))
+    val = val + lapt(3,2) * (aplus * (tpsi(ix,mg%idy(iy+3),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-3),iz) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+4), mg%idz(iz)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-4), mg%idz(iz)))
+    val = val + lapt(4,2) * (aplus * (tpsi(ix,mg%idy(iy+4),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-4),iz) - psi0))
+  case(3)
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+1)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-1)))
+    val = val + lapt(1,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+1)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-1)) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+2)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-2)))
+    val = val + lapt(2,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+2)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-2)) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+3)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-3)))
+    val = val + lapt(3,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+3)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-3)) - psi0))
+    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+4)))
+    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-4)))
+    val = val + lapt(4,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+4)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-4)) - psi0))
+  end select
+end function calc_tau_operator_direct_axis_complex
+
+pure function calc_tau_operator_cross_component_complex(vtau, dpsi, iaxis, mg, nabt, idir, ix, iy, iz) result(val)
+  use structures
+  implicit none
+  type(s_rgrid), intent(in) :: mg
+  real(8),       intent(in) :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                    mg%is_array(3):mg%ie_array(3))
+  complex(8),    intent(in) :: dpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
+                                    mg%is_array(3):mg%ie_array(3))
+  real(8),       intent(in) :: nabt(4,3)
+  integer,       intent(in) :: iaxis, idir, ix, iy, iz
+  complex(8) :: val
+  complex(8) :: flux_p, flux_m
+
+  val = 0d0
+  select case(idir)
+  case(1)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+1), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+1), iy, iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-1), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-1), iy, iz)
+    val = val + nabt(1,1) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+2), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+2), iy, iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-2), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-2), iy, iz)
+    val = val + nabt(2,1) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+3), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+3), iy, iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-3), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-3), iy, iz)
+    val = val + nabt(3,1) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+4), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+4), iy, iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-4), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-4), iy, iz)
+    val = val + nabt(4,1) * (flux_p - flux_m)
+  case(2)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+1), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+1), iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-1), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-1), iz)
+    val = val + nabt(1,2) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+2), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+2), iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-2), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-2), iz)
+    val = val + nabt(2,2) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+3), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+3), iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-3), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-3), iz)
+    val = val + nabt(3,2) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+4), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+4), iz)
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-4), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-4), iz)
+    val = val + nabt(4,2) * (flux_p - flux_m)
+  case(3)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+1))) * dpsi(iaxis, ix, iy, mg%idz(iz+1))
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-1))) * dpsi(iaxis, ix, iy, mg%idz(iz-1))
+    val = val + nabt(1,3) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+2))) * dpsi(iaxis, ix, iy, mg%idz(iz+2))
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-2))) * dpsi(iaxis, ix, iy, mg%idz(iz-2))
+    val = val + nabt(2,3) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+3))) * dpsi(iaxis, ix, iy, mg%idz(iz+3))
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-3))) * dpsi(iaxis, ix, iy, mg%idz(iz-3))
+    val = val + nabt(3,3) * (flux_p - flux_m)
+    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+4))) * dpsi(iaxis, ix, iy, mg%idz(iz+4))
+    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-4))) * dpsi(iaxis, ix, iy, mg%idz(iz-4))
+    val = val + nabt(4,3) * (flux_p - flux_m)
+  end select
+end function calc_tau_operator_cross_component_complex
 
 subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   use structures
