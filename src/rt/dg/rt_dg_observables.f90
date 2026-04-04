@@ -2,6 +2,7 @@
     use salmon_global, only: theory
     use structures
     use communication, only: comm_summation
+    use timer, only: timer_begin, timer_end, LOG_CALC_CURRENT
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
                                   apply_mixed_hamiltonian, mixed_fp_coupling_active, copy_matrix_blocks_to_complex_dense
     implicit none
@@ -21,7 +22,7 @@
     logical :: do_interface_check
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
-    real(8) :: current_tmp, energy_tmp, pw_weight_local
+    real(8) :: current_tmp, energy_tmp, pw_weight_local, kpw_dir
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
     real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
@@ -41,7 +42,7 @@
     logical :: has_nonlocal, use_hmat_complex, use_mixed_current
     logical :: require_dense_nl
     logical :: use_spatial_A
-    logical, parameter :: enable_energy_component_probe = .true.
+    logical, parameter :: enable_energy_component_probe = .false.
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     integer, allocatable :: diag_block_ids(:)
     real(8), allocatable :: occ_weight(:)
@@ -101,23 +102,24 @@
     !   - momentum_mat stores <φ|∇|φ> (gradient operator)
     !   - Current: j = Im[<ψ|∇|ψ>] with factor 2 and normalization by ngrid
     !   - Sign: Testing -2.0 to match conventional RT direction
+    call timer_begin(LOG_CALC_CURRENT)
     do ispin = 1, dg_frag%nspin
       nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
       if (nocc <= 0) cycle
       use_mixed_current = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
-      coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
+      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
-        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+        coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
       end if
       if (n_pw > 0) then
-        coef_all(:, :) = (0.0d0, 0.0d0)
+        coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
         coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
         coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
       end if
       do idir = 1, 3
         ! momentum_mat = <φ|∇|φ>, need to apply -i via aimag() and include factor 2
         if (use_mixed_current) then
-          tmp_all(:, :) = (0.0d0, 0.0d0)
+          tmp_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
           if (allocated(dg_frag%momentum_blocks)) then
             call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
           else if (allocated(dg_frag%momentum_mat_c)) then
@@ -132,10 +134,11 @@
                        coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
           end if
           do jo = 1, n_pw
-            mfp = cmplx(0.0d0, dg_frag%k_pw(idir, jo), kind=8)
+            kpw_dir = dg_frag%k_pw(idir, jo)
+            mfp = cmplx(0.0d0, kpw_dir, kind=8)
             tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + mfp * coef_all(n+jo, 1:nocc)
             do io = 1, n
-              mfp = cmplx(0.0d0, dg_frag%k_pw(idir, jo), kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
+              mfp = cmplx(0.0d0, kpw_dir, kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
               tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + mfp * coef_all(n+jo, 1:nocc)
               tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) - conjg(mfp) * coef_all(io, 1:nocc)
             end do
@@ -163,33 +166,34 @@
         current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
       end do
     end do
+    call timer_end(LOG_CALC_CURRENT)
     
-    ! Get vector potential at current time for energy calculation
-    Ac_tot = rt%Ac_tot(:, itt)
-    A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
-    
-    require_dense_nl = (.not. allocated(dg_frag%H_mat_blocks)) .or. &
-                       (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) .or. &
-                       use_spatial_A .or. do_interface_check
-    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, require_dense_nl)
-    has_nonlocal = dg_frag%has_nl_cache
+      ! Get vector potential at current time for energy calculation
+      Ac_tot = rt%Ac_tot(:, itt)
+      A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
+      
+      require_dense_nl = (.not. allocated(dg_frag%H_mat_blocks)) .or. &
+                         (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) .or. &
+                         use_spatial_A .or. do_interface_check
+      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, require_dense_nl)
+      has_nonlocal = dg_frag%has_nl_cache
 
-    ! Calculate total energy: E = <ψ|H(t)|ψ>
-    ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
-    do ispin = 1, dg_frag%nspin
+      ! Calculate total energy: E = <ψ|H(t)|ψ>
+      ! H(t) = H_0 - i*A(t)·∇ + A²(t)/2 + V_NL(A)
+      do ispin = 1, dg_frag%nspin
       nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
       if (nocc <= 0) cycle
       occ_weight(:) = 0.0d0
       do io = 1, nocc
         occ_weight(io) = system%rocc(io, 1, ispin)
       end do
-      coef_frag_all(:, :) = dg_frag%coef(1:n, 1:nocc, ispin)
+      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
-        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+        coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
       end if
       if (n_pw > 0) then
-        coef_all(:, :) = (0.0d0, 0.0d0)
-        tmp_all(:, :) = (0.0d0, 0.0d0)
+        coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
+        tmp_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
         coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
         coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
       end if
@@ -224,9 +228,7 @@
                 tmp_all(1:n, 1:nocc))
             end if
           end if
-          do io = 1, n_tot
-            tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + 0.5d0 * A_squared * coef_all(io, 1:nocc)
-          end do
+          tmp_all(1:n_tot, 1:nocc) = tmp_all(1:n_tot, 1:nocc) + 0.5d0 * A_squared * coef_all(1:n_tot, 1:nocc)
           if (allocated(dg_frag%momentum_blocks)) then
             call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
           else
@@ -243,10 +245,11 @@
             end do
           end if
           do jo = 1, n_pw
-            mfp = cmplx(0.0d0, dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo)), kind=8)
+            kpw_dir = dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo))
+            mfp = cmplx(0.0d0, kpw_dir, kind=8)
             tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + minus_i * mfp * coef_all(n+jo, 1:nocc)
             do io = 1, n
-              mfp = cmplx(0.0d0, dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo)), kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
+              mfp = cmplx(0.0d0, kpw_dir, kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
               tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + minus_i * mfp * coef_all(n+jo, 1:nocc)
               tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + minus_i * (-conjg(mfp)) * coef_all(io, 1:nocc)
             end do
@@ -338,9 +341,7 @@
                   sum(abs(coef_frag_all(1:n, io))**2)
               end do
             end if
-            do io = 1, n
-              tmp_mat(io, :) = tmp_mat(io, :) + 0.5d0 * A_squared * coef_frag_all(io, 1:nocc)
-            end do
+            tmp_mat(1:n, 1:nocc) = tmp_mat(1:n, 1:nocc) + 0.5d0 * A_squared * coef_frag_all(1:n, 1:nocc)
           else
             if (.not. allocated(op_mat)) allocate(op_mat(n, n))
             do io = 1, n
@@ -410,18 +411,17 @@
           energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
         end do
       end if
-      energy_local = energy_local + energy_tmp
-    end do
-
-    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
-      do ispin = 1, dg_frag%nspin
-        nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
-        if (nocc <= 0) cycle
-        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
-        pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, 1:nocc))**2)
+        energy_local = energy_local + energy_tmp
       end do
-    end if
 
+      if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
+        do ispin = 1, dg_frag%nspin
+          nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
+          if (nocc <= 0) cycle
+          coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+          pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, 1:nocc))**2)
+        end do
+      end if
     if (do_interface_check) then
       allocate(dndt_frag(dg_frag%n_frag))
       dndt_frag = 0.0d0

@@ -23,12 +23,12 @@
     complex(8), parameter :: zi = (0.0d0, 1.0d0)  ! imaginary unit
     logical :: has_nonlocal, has_so_nonlocal, use_hmat_complex
     logical :: need_h0_dense, need_m_dense
-    complex(8), allocatable :: H0c(:,:), M(:,:), dcoef_dt_h0(:,:), dcoef_dt_m(:,:)
-    complex(8), allocatable :: coef_all(:,:), rhs_all(:,:)
+    complex(8), allocatable, save :: H0c(:,:), M(:,:), dcoef_dt_h0(:,:), dcoef_dt_m(:,:)
+    complex(8), allocatable, save :: coef_all(:,:), rhs_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     complex(8), allocatable :: coef_frag_other(:,:), coef_pw_other(:,:)
-    complex(8), allocatable :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
-    complex(8), allocatable :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:)
+    complex(8), allocatable, save :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
+    complex(8), allocatable, save :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
     real(8) :: t_coef_gather0, t_coef_gather1
@@ -36,13 +36,15 @@
     integer :: nan_io, nan_jo
     real(8) :: max_abs_h0, max_abs_m
     integer :: n_s, n_basis, ispin_other
+    integer :: state_s, state_e, state0, nstate_blk
     logical :: use_spatial_A
     logical :: disable_mfp, use_mixed_basis
     character(len=32) :: env_mfp
     integer :: env_len, env_stat
-    real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
+    real(8), allocatable, save :: Ap_mat(:,:), A2_mat(:,:)
     logical, parameter :: enable_derivative_trace = .false.
     logical, parameter :: enable_derivative_progress = .false.
+    integer, parameter :: state_block_size = 64
     
     ! Time derivative in velocity gauge:
     !   d/dt c_i = -i * (H_0_ij + A^2(t)/2 * delta_ij) * c_j - A(t)·<i|∇|j> * c_j
@@ -104,11 +106,26 @@
       end if
     end if
     if (use_spatial_A) then
-      allocate(Ap_mat(n, n), A2_mat(n, n))
+      if (.not. allocated(Ap_mat)) then
+        allocate(Ap_mat(n, n), A2_mat(n, n))
+      else if (size(Ap_mat, 1) /= n .or. size(Ap_mat, 2) /= n) then
+        deallocate(Ap_mat, A2_mat)
+        allocate(Ap_mat(n, n), A2_mat(n, n))
+      end if
     end if
 
-    allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
-    allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
+    if (.not. allocated(dcoef_dt_h0)) then
+      allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
+    else if (size(dcoef_dt_h0, 1) /= n_tot .or. size(dcoef_dt_h0, 2) /= dg_frag%nstate_tot) then
+      deallocate(dcoef_dt_h0, dcoef_dt_m)
+      allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
+    end if
+    if (.not. allocated(coef_all)) then
+      allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
+    else if (size(coef_all, 1) /= n_tot .or. size(coef_all, 2) /= dg_frag%nstate_tot) then
+      deallocate(coef_all, rhs_all)
+      allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
+    end if
     if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        derivative trace: stage=after-main-alloc"
       flush(6)
@@ -136,8 +153,22 @@
       need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. &
                       (n_pw > 0 .and. .not. allocated(dg_frag%H_mat_frag_pw)) .or. use_mixed_basis
       need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks)) .or. use_mixed_basis
-      if (need_h0_dense .and. .not. allocated(H0c)) allocate(H0c(n_tot, n_tot))
-      if (need_m_dense .and. .not. allocated(M)) allocate(M(n_tot, n_tot))
+      if (need_h0_dense) then
+        if (.not. allocated(H0c)) then
+          allocate(H0c(n_tot, n_tot))
+        else if (size(H0c, 1) /= n_tot .or. size(H0c, 2) /= n_tot) then
+          deallocate(H0c)
+          allocate(H0c(n_tot, n_tot))
+        end if
+      end if
+      if (need_m_dense) then
+        if (.not. allocated(M)) then
+          allocate(M(n_tot, n_tot))
+        else if (size(M, 1) /= n_tot .or. size(M, 2) /= n_tot) then
+          deallocate(M)
+          allocate(M(n_tot, n_tot))
+        end if
+      end if
       if (allocated(H0c)) H0c(:, :) = (0.0d0, 0.0d0)
       if (allocated(M)) M(:, :) = (0.0d0, 0.0d0)
 
@@ -258,22 +289,41 @@
         flush(6)
       end if
       call cpu_time(t_coef_gather0)
-      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
-        write(*,'(1x,a)') "        derivative trace: stage=spin1-before-full-coef-dealloc"
-        flush(6)
-      end if
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-      if (allocated(coef_frag_other)) deallocate(coef_frag_other)
-      if (allocated(coef_pw_other)) deallocate(coef_pw_other)
-      if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
-        write(*,'(1x,a)') "        derivative trace: stage=spin1-after-full-coef-dealloc"
-        flush(6)
-      end if
-      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+      coef_all(:, :) = (0.0d0, 0.0d0)
+      do state0 = 1, dg_frag%nstate_tot, state_block_size
+        nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
+        state_s = state0
+        state_e = state0 + nstate_blk - 1
+        call gather_full_coef_view(dg_frag, ispin, n_frag, nstate_blk, coef_frag_all, coef_pw_all, state_s, state_e)
+        coef_all(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
+        if (n_pw > 0) coef_all(n_frag+1:n_tot, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
+      end do
       if (has_so_nonlocal) then
         ispin_other = 3 - ispin
-        call gather_full_coef_view(dg_frag, ispin_other, n_frag, dg_frag%nstate_tot, coef_frag_other, coef_pw_other)
+        if (.not. allocated(coef_frag_other)) then
+          allocate(coef_frag_other(max(0, n_frag), max(0, dg_frag%nstate_tot)))
+        else if (size(coef_frag_other, 1) /= max(0, n_frag) .or. size(coef_frag_other, 2) /= max(0, dg_frag%nstate_tot)) then
+          deallocate(coef_frag_other)
+          allocate(coef_frag_other(max(0, n_frag), max(0, dg_frag%nstate_tot)))
+        end if
+        coef_frag_other(:, :) = (0.0d0, 0.0d0)
+        if (n_pw > 0) then
+          if (.not. allocated(coef_pw_other)) then
+            allocate(coef_pw_other(max(0, n_pw), max(0, dg_frag%nstate_tot)))
+          else if (size(coef_pw_other, 1) /= max(0, n_pw) .or. size(coef_pw_other, 2) /= max(0, dg_frag%nstate_tot)) then
+            deallocate(coef_pw_other)
+            allocate(coef_pw_other(max(0, n_pw), max(0, dg_frag%nstate_tot)))
+          end if
+          coef_pw_other(:, :) = (0.0d0, 0.0d0)
+        end if
+        do state0 = 1, dg_frag%nstate_tot, state_block_size
+          nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
+          state_s = state0
+          state_e = state0 + nstate_blk - 1
+          call gather_full_coef_view(dg_frag, ispin_other, n_frag, nstate_blk, coef_frag_all, coef_pw_all, state_s, state_e)
+          coef_frag_other(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
+          if (n_pw > 0) coef_pw_other(1:n_pw, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
+        end do
       end if
       call cpu_time(t_coef_gather1)
       if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
@@ -281,11 +331,13 @@
           t_coef_gather1 - t_coef_gather0
         flush(6)
       end if
-      coef_all(:, :) = (0.0d0, 0.0d0)
-      coef_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:dg_frag%nstate_tot)
-      if (n_pw > 0) coef_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:dg_frag%nstate_tot)
       if (use_mixed_basis .and. n_basis > 0) then
-        allocate(coef_mix_all(n_basis, dg_frag%nstate_tot))
+        if (.not. allocated(coef_mix_all)) then
+          allocate(coef_mix_all(n_basis, dg_frag%nstate_tot))
+        else if (size(coef_mix_all, 1) /= n_basis .or. size(coef_mix_all, 2) /= dg_frag%nstate_tot) then
+          deallocate(coef_mix_all)
+          allocate(coef_mix_all(n_basis, dg_frag%nstate_tot))
+        end if
         coef_mix_all(:, :) = dg_frag%coef_mix(1:n_basis, 1:dg_frag%nstate_tot, ispin)
       end if
 
@@ -327,7 +379,14 @@
           write(*,'(1x,a)') "        derivative trace: stage=spin1-h0-branch-mixed-basis"
           flush(6)
         end if
-        allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
+        if (.not. allocated(rhs_mix)) then
+          allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
+        else if (size(rhs_mix, 1) /= n_basis .or. size(rhs_mix, 2) /= dg_frag%nstate_tot .or. &
+                 size(raw_rhs, 1) /= n_tot .or. size(raw_rhs, 2) /= dg_frag%nstate_tot .or. &
+                 size(op_mix, 1) /= n_basis .or. size(op_mix, 2) /= n_basis) then
+          deallocate(rhs_mix, raw_rhs, op_mix)
+          allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
+        end if
         rhs_mix(:, :) = (0.0d0, 0.0d0)
         raw_rhs(:, :) = (0.0d0, 0.0d0)
         op_mix(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), &
@@ -577,14 +636,18 @@
             " ispin=", ispin, " n_s=", n_s, " stage=", "before-overlap-solve"
           flush(6)
         end if
-        allocate(rhs_in(n_s, dg_frag%nstate_tot))
+        if (.not. allocated(rhs_in)) then
+          allocate(rhs_in(n_s, dg_frag%nstate_tot))
+        else if (size(rhs_in, 1) /= n_s .or. size(rhs_in, 2) /= dg_frag%nstate_tot) then
+          deallocate(rhs_in)
+          allocate(rhs_in(n_s, dg_frag%nstate_tot))
+        end if
         rhs_in(:, :) = rhs_all(1:n_s, :)
         if (n_pw == 0 .and. allocated(dg_frag%H_local_rows) .and. size(dg_frag%H_local_rows) > 0) then
           call solve_overlap_operator_batch_local(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
         else
           call solve_overlap_operator_batch(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
         end if
-        deallocate(rhs_in)
         if (enable_derivative_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -611,19 +674,7 @@
           " ispin=", ispin, " stage=", "spin-exit"
         flush(6)
       end if
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-      if (allocated(coef_mix_all)) deallocate(coef_mix_all)
-      if (allocated(rhs_mix)) deallocate(rhs_mix)
-      if (allocated(raw_rhs)) deallocate(raw_rhs)
-      if (allocated(op_mix)) deallocate(op_mix)
     end do
-
-    if (allocated(Ap_mat)) deallocate(Ap_mat)
-    if (allocated(A2_mat)) deallocate(A2_mat)
-    if (allocated(H0c)) deallocate(H0c)
-   if (allocated(M)) deallocate(M)
-    deallocate(dcoef_dt_h0, dcoef_dt_m, coef_all, rhs_all)
     if (enable_derivative_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &

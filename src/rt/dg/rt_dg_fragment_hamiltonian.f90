@@ -2113,7 +2113,9 @@
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
     integer :: npts_local, npts_halo, ipt, nx_local, ny_local
+    integer :: n_basis_halo_max, npts_halo_max
     logical :: log_frag_progress, has_overlap
+    logical :: has_halo_work
     logical, parameter :: enable_momentum_probe = .false.
     real(8) :: hvol, integral
     real(8) :: momentum_gb
@@ -2236,6 +2238,7 @@
         nx_local = lx_hi - lx_lo + 1
         ny_local = ly_hi - ly_lo + 1
         allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
+        allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
         if (enable_momentum_probe) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
             " ifrag=", ifrag, " nbf=", nbf, " npts_local=", npts_local
@@ -2247,6 +2250,7 @@
             " phi_frag dim4=", size(dg_frag%phi_frag, 4), " ifrag=", ifrag, " ispin=", ispin
           stop "DG-Fragment RT: invalid basis-function count"
         end if
+        !$omp parallel do private(io,lz,ly,lx,ipt) schedule(static)
         do io = 1, nbf
           do lz = lz_lo, lz_hi
             do ly = ly_lo, ly_hi
@@ -2258,7 +2262,23 @@
             end do
           end do
         end do
+        !$omp end parallel do
         iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
+
+        n_basis_halo_max = 0
+        npts_halo_max = 0
+        do i_halo = 1, dg_frag%n_halo
+          if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+          jfrag = dg_frag%halo(i_halo)%ifrag_src
+          if (jfrag < 1) cycle
+          n_basis_halo_max = max(n_basis_halo_max, dg_frag%n_basis(jfrag, ispin))
+          l = dg_frag%halo(i_halo)%length
+          npts_halo_max = max(npts_halo_max, l(1) * l(2) * l(3))
+        end do
+        has_halo_work = (n_basis_halo_max > 0 .and. npts_halo_max > 0)
+        if (has_halo_work) then
+          allocate(grad_halo_2d(npts_halo_max, 3), halo_buf_2d(npts_halo_max, n_basis_halo_max), halo_proj(n_basis_halo_max, 3))
+        end if
 
         ! Loop over basis functions in fragment j (ket side)
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
@@ -2269,7 +2289,6 @@
               " ifrag=", ifrag, " jo=", jo
             flush(6)
           end if
-          allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
           if (enable_momentum_probe .and. jo == 1) then
             write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
               " ifrag=", ifrag, " stage=before-apply-gradient"
@@ -2386,7 +2405,7 @@
                 flush(6)
               end if
 
-              allocate(grad_halo_2d(npts_halo, 3), halo_buf_2d(npts_halo, n_basis_halo), halo_proj(n_basis_halo, 3))
+              if (.not. has_halo_work) cycle
               if (enable_momentum_probe .and. jo == 1) then
                 write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo-alloc"
                 flush(6)
@@ -2416,6 +2435,7 @@
                 end do
               end do
 
+              !$omp parallel do private(io,iz,iy,ix,ipt) schedule(static)
               do io = 1, n_basis_halo
                 do iz = 1, l(3)
                   do iy = 1, l(2)
@@ -2427,10 +2447,11 @@
                   end do
                 end do
               end do
+              !$omp end parallel do
 
               call cpu_time(t0)
-              call dgemm('T', 'N', n_basis_halo, 3, npts_halo, hvol, halo_buf_2d, npts_halo, &
-                grad_halo_2d, npts_halo, 0.0d0, halo_proj, n_basis_halo)
+              call dgemm('T', 'N', n_basis_halo, 3, npts_halo, hvol, halo_buf_2d, npts_halo_max, &
+                grad_halo_2d, npts_halo_max, 0.0d0, halo_proj, n_basis_halo_max)
               call cpu_time(t1)
               time_halo_integral = time_halo_integral + (t1 - t0)
 
@@ -2487,7 +2508,6 @@
                 !$omp end parallel do
               end if
 
-              deallocate(grad_halo_2d, halo_buf_2d, halo_proj)
             end do
             if (enable_momentum_probe .and. jo == 1) then
               write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
@@ -2496,13 +2516,16 @@
             end if
           end if
 
-          deallocate(grad_phi)
         end do  ! jo
         if (enable_momentum_probe) then
           write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
             " ifrag=", ifrag, " stage=after-jo-loop"
           flush(6)
         end if
+        if (allocated(grad_phi)) deallocate(grad_phi)
+        if (allocated(grad_halo_2d)) deallocate(grad_halo_2d)
+        if (allocated(halo_buf_2d)) deallocate(halo_buf_2d)
+        if (allocated(halo_proj)) deallocate(halo_proj)
         deallocate(phi_local_2d, grad_local_2d, self_proj)
       end do  ! ifrag
     end do  ! ispin
@@ -2827,6 +2850,7 @@
         nx_local = lx_hi - lx_lo + 1
         ny_local = ly_hi - ly_lo + 1
         allocate(phi_local_2d(npts_local, nbf), self_overlap(nbf, nbf))
+        !$omp parallel do private(io,lz,ly,lx,ipt) schedule(static)
         do io = 1, nbf
           do lz = lz_lo, lz_hi
             do ly = ly_lo, ly_hi
@@ -2838,6 +2862,7 @@
             end do
           end do
         end do
+        !$omp end parallel do
         call cpu_time(t0)
         call dgemm('T', 'N', nbf, nbf, npts_local, hvol, phi_local_2d, npts_local, &
                    phi_local_2d, npts_local, 0.0d0, self_overlap, nbf)

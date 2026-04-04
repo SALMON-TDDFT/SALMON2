@@ -5,6 +5,7 @@
     use salmon_global, only: yn_fix_func, theory
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
+    use timer, only: timer_begin, timer_end, LOG_CALC_TIME_PROPAGATION, LOG_CALC_RHO
     use rt_dg_fragment_ops, only: zero_nonowned_coefficients, apply_overlap_operator
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -34,6 +35,7 @@
       flush(6)
     end if
     call debug_coef_metric("entry")
+    call timer_begin(LOG_CALC_TIME_PROPAGATION)
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
       call time_evolution_rk(dg_frag, system, info, rt, itt, dt, &
@@ -44,6 +46,7 @@
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select
+    call timer_end(LOG_CALC_TIME_PROPAGATION)
     if (enable_iteration_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -74,9 +77,11 @@
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-update-density-hmat"
           flush(6)
         end if
+        call timer_begin(LOG_CALC_RHO)
         call update_density_and_hamiltonian(dg_frag, system, info, rt, itt, rt%Ac_tot(:,itt), &
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
+        call timer_end(LOG_CALC_RHO)
         if (enable_iteration_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-update-density-hmat"
@@ -100,7 +105,7 @@
     integer :: ispin_probe, n_frag_rows, n_pw, n_tot, nstate_probe, io
     complex(8), allocatable :: vec(:), svec(:)
     real(8) :: c2(3), cs2(3)
-    logical, parameter :: enable_coef_metric_probe = .true.
+    logical, parameter :: enable_coef_metric_probe = .false.
 
     if (.not. enable_coef_metric_probe) return
     if (itt /= 1) return

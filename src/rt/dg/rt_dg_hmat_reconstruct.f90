@@ -26,7 +26,7 @@
     real(8), allocatable :: partial_total(:), partial_block(:,:), reduced_block(:,:)
     logical :: use_block_reconstruct
     logical, save :: debug_static_seed_logged = .false.
-    logical, parameter :: enable_reconstruct_timing = .true.
+    logical, parameter :: enable_reconstruct_timing = .false.
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. associated(dg_frag%mg)) then

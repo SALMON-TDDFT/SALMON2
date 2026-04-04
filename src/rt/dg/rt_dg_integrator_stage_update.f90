@@ -25,11 +25,10 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
-    complex(8), allocatable :: H_frag_pw(:,:,:)
     integer :: n_frag, n_pw
     real(8) :: t_stage0, t_stage1
     logical, parameter :: enable_stage_update_trace = .false.
-    logical, parameter :: enable_stage_update_progress = .true.
+    logical, parameter :: enable_stage_update_progress = .false.
 
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat stage trace: rank=", dg_frag%id, &
@@ -46,9 +45,6 @@
       flush(6)
     end if
 
-    write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat stage trace: before-hartree rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
-    flush(6)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        density-hmat stage trace: stage=before-hartree"
       flush(6)
@@ -56,9 +52,6 @@
     call cpu_time(t_stage0)
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
-    write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat stage trace: after-hartree rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
-    flush(6)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
       flush(6)
@@ -117,11 +110,8 @@
         allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
       end if
 
-      allocate(H_frag_pw(n_frag, n_pw, dg_frag%nspin))
-      call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_frag_pw)
-      dg_frag%H_mat_frag_pw(:, :, :) = H_frag_pw(:, :, :)
+      call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
       call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
-      deallocate(H_frag_pw)
       if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
         write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-refresh"
         flush(6)

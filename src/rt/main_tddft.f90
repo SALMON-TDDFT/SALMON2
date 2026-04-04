@@ -339,29 +339,27 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     
     ! Write observable data (current and energy)
     ! DG-Fragment uses coefficient-space evolution, so observables are already computed
-    if (mod(itt, 1) == 0) then  ! Output at every timestep
-      ! Keep output fields consistent with conventional RT
-      system%vec_Ac(1:3) = rt%Ac_tot(1:3, itt)
-      system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3, itt)
-      system%vec_E(1:3) = rt%E_tot(1:3, itt)
-      system%vec_E_ext(1:3) = rt%E_ext(1:3, itt)
-      select case(iperiodic)
-      case(0)
-        ! Isolated system: output dipole moment
-        call write_rt_data_0d(itt, ofl, dt, system, rt)
-      case(3)
-        ! Periodic system: output current density
-        ! DG-Fragment current from calculate_observables
-        ! curr_e needs shape (3, 2) for two spins, use same current for both spins
-        call write_rt_data_3d(itt, ofl, dt, system, &
-                              reshape([dg_frag%current(1), dg_frag%current(2), dg_frag%current(3), &
-                                       dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)], [3,2]), &
-                              dg_frag%current(1:3))
-      end select
-      
-      ! Write energy data
-      call write_rt_energy_data(itt, ofl, dt, energy, md)
-    endif
+    ! Keep output fields consistent with conventional RT
+    system%vec_Ac(1:3) = rt%Ac_tot(1:3, itt)
+    system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3, itt)
+    system%vec_E(1:3) = rt%E_tot(1:3, itt)
+    system%vec_E_ext(1:3) = rt%E_ext(1:3, itt)
+    select case(iperiodic)
+    case(0)
+      ! Isolated system: output dipole moment
+      call write_rt_data_0d(itt, ofl, dt, system, rt)
+    case(3)
+      ! Periodic system: output current density
+      ! DG-Fragment current from calculate_observables
+      ! curr_e needs shape (3, 2) for two spins, use same current for both spins
+      call write_rt_data_3d(itt, ofl, dt, system, &
+                            reshape([dg_frag%current(1), dg_frag%current(2), dg_frag%current(3), &
+                                     dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)], [3,2]), &
+                            dg_frag%current(1:3))
+    end select
+    
+    ! Write energy data
+    call write_rt_energy_data(itt, ofl, dt, energy, md)
     
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. mod(itt, 10) == 0) then

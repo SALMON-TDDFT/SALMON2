@@ -2136,126 +2136,126 @@ contains
 !$omp end parallel do
   end subroutine pack_owned_coef
 
-  subroutine fetch_remote_coef_rows(dg_frag, ispin, row_ids, fetched)
-    use communication, only: comm_get_max
+  subroutine fetch_remote_coef_rows(dg_frag, ispin, row_ids, fetched, col_start, col_end)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ispin
     integer, intent(in) :: row_ids(:)
     complex(8), intent(out) :: fetched(:, :)
+    integer, intent(in), optional :: col_start, col_end
 
-    integer :: irow, global_row, owner_rank, owner_rank_min, owner_rank_max
-    integer :: progress_stride
-    complex(8), allocatable :: row_buf(:)
+    integer :: irow, global_row, owner_rank
+    integer :: nrows_req, nstate_req, owner, k, cnt, max_owner_rows
+    integer :: cstart, cend, owner_chunk_rows, chunk0, chunk1, chunk_cnt, slot_idx
+    integer, allocatable :: owner_counts(:), owner_offsets(:), owner_fill(:)
+    integer, allocatable :: owner_slot(:), owner_row(:)
+    complex(8), allocatable :: packed_rows(:,:)
     logical, parameter :: enable_coef_gather_trace = .false.
 
     fetched(:, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%coef_owner)) return
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (dg_frag%isize <= 0) return
 
-    allocate(row_buf(size(fetched, 2)))
-    progress_stride = max(1, size(row_ids) / 8)
+    nrows_req = min(size(row_ids), size(fetched, 1))
+    nstate_req = size(fetched, 2)
+    if (nrows_req <= 0 .or. nstate_req <= 0) return
+    cstart = 1
+    cend = nstate_req
+    if (present(col_start)) cstart = col_start
+    if (present(col_end)) cend = col_end
+    if (cstart < 1 .or. cend < cstart .or. cend > size(dg_frag%coef, 2)) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid state range in fetch_remote_coef_rows: rank=", dg_frag%id, &
+        " cstart=", cstart, " cend=", cend, " coef_cols=", size(dg_frag%coef, 2)
+      stop "DG-Fragment RT: invalid state range in fetch_remote_coef_rows"
+    end if
+    if (cend - cstart + 1 /= nstate_req) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] fetch_remote_coef_rows state-range mismatch: rank=", dg_frag%id, &
+        " nstate_req=", nstate_req, " cstart=", cstart, " cend=", cend
+      stop "DG-Fragment RT: state range/shape mismatch in fetch_remote_coef_rows"
+    end if
+
+    allocate(owner_counts(0:dg_frag%isize-1), owner_offsets(0:dg_frag%isize-1), owner_fill(0:dg_frag%isize-1))
+    allocate(owner_slot(nrows_req), owner_row(nrows_req))
+    owner_counts(:) = 0
+    owner_offsets(:) = 0
+    owner_fill(:) = 0
+    owner_slot(:) = 0
+    owner_row(:) = 0
+
     if (enable_coef_gather_trace .and. dg_frag%id == 0 .and. ispin == 1) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather trace: rank=", dg_frag%id, &
-        " ispin=", ispin, " nrows=", size(row_ids), " nstate=", size(fetched, 2)
+        " ispin=", ispin, " nrows=", nrows_req, " nstate=", nstate_req
       flush(6)
     end if
-    do irow = 1, min(size(row_ids), size(fetched, 1))
+
+    do irow = 1, nrows_req
       global_row = row_ids(irow)
-      row_buf(:) = (0.0d0, 0.0d0)
-      if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) then
-        fetched(irow, :) = row_buf(:)
-        cycle
-      end if
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-owner-check"
-        flush(6)
-      end if
+      if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
       owner_rank = dg_frag%coef_owner(global_row, ispin)
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " coef_owner_rows=", size(dg_frag%coef_owner, 1), &
-          " coef_rows=", size(dg_frag%coef, 1), " owner_rank_raw=", owner_rank
-        flush(6)
-      end if
-      if (owner_rank < 0) then
-        if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=owner-negative-cycle"
-          flush(6)
-        end if
-        fetched(irow, :) = row_buf(:)
-        cycle
-      end if
-      owner_rank_min = -owner_rank
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-owner-min"
-        flush(6)
-      end if
-      call comm_get_max(owner_rank_min, dg_frag%icomm)
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=after-owner-min"
-        flush(6)
-      end if
-      owner_rank_min = -owner_rank_min
-      owner_rank_max = owner_rank
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-owner-max"
-        flush(6)
-      end if
-      call comm_get_max(owner_rank_max, dg_frag%icomm)
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=after-owner-max"
-        flush(6)
-      end if
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " owner=", owner_rank, &
-          " owner_min=", owner_rank_min, " owner_max=", owner_rank_max
-        flush(6)
-      end if
-      if (owner_rank_min /= owner_rank_max) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] inconsistent coef owner across ranks: rank=", dg_frag%id, &
-          " ispin=", ispin, " row=", global_row, " owner_min=", owner_rank_min, " owner_max=", owner_rank_max
-        stop "DG-Fragment RT: inconsistent coef owner across ranks"
-      end if
+      if (owner_rank < 0) cycle
       if (owner_rank >= dg_frag%isize) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid coef owner rank: rank=", dg_frag%id, &
           " ispin=", ispin, " row=", global_row, " owner_rank=", owner_rank, " isize=", dg_frag%isize
         stop "DG-Fragment RT: invalid coef owner rank in fetch_remote_coef_rows"
       end if
-      if (owner_rank /= dg_frag%coef_owner(global_row, ispin)) then
-        write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] coef owner changed during fetch: rank=", dg_frag%id, &
-          " ispin=", ispin, " row=", global_row
-        stop "DG-Fragment RT: unstable coef owner in fetch_remote_coef_rows"
-      end if
-      if (owner_rank == dg_frag%id) row_buf(:) = dg_frag%coef(global_row, 1:size(fetched, 2), ispin)
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=before-bcast owner=", owner_rank
-        flush(6)
-      end if
-      call comm_bcast(row_buf, dg_frag%icomm, owner_rank)
-      if (enable_coef_gather_trace .and. irow == 1 .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather step: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " row=", global_row, " stage=after-bcast owner=", owner_rank
-        flush(6)
-      end if
-      fetched(irow, :) = row_buf(:)
-      if (enable_coef_gather_trace .and. dg_frag%id == 0 .and. ispin == 1) then
-        if (irow == 1 .or. irow == size(row_ids) .or. mod(irow, progress_stride) == 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        coef gather trace: row=", irow, &
-            "/", size(row_ids), " owner=", owner_rank
-          flush(6)
-        end if
-      end if
+      owner_counts(owner_rank) = owner_counts(owner_rank) + 1
     end do
-    deallocate(row_buf)
+
+    max_owner_rows = 0
+    do owner = 0, dg_frag%isize-1
+      if (owner_counts(owner) > max_owner_rows) max_owner_rows = owner_counts(owner)
+    end do
+    if (max_owner_rows <= 0) then
+      deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
+      return
+    end if
+
+    owner_offsets(0) = 1
+    do owner = 1, dg_frag%isize-1
+      owner_offsets(owner) = owner_offsets(owner-1) + owner_counts(owner-1)
+    end do
+
+    do irow = 1, nrows_req
+      global_row = row_ids(irow)
+      if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
+      owner_rank = dg_frag%coef_owner(global_row, ispin)
+      if (owner_rank < 0 .or. owner_rank >= dg_frag%isize) cycle
+      k = owner_offsets(owner_rank) + owner_fill(owner_rank)
+      owner_fill(owner_rank) = owner_fill(owner_rank) + 1
+      owner_slot(k) = irow
+      owner_row(k) = global_row
+    end do
+
+    allocate(packed_rows(max_owner_rows, nstate_req))
+    owner_chunk_rows = 128
+    do owner = 0, dg_frag%isize-1
+      cnt = owner_counts(owner)
+      if (cnt <= 0) cycle
+      do chunk0 = 1, cnt, owner_chunk_rows
+        chunk1 = min(cnt, chunk0 + owner_chunk_rows - 1)
+        chunk_cnt = chunk1 - chunk0 + 1
+        packed_rows(1:chunk_cnt, 1:nstate_req) = (0.0d0, 0.0d0)
+        if (owner == dg_frag%id) then
+          do k = 1, chunk_cnt
+            irow = owner_offsets(owner) + (chunk0 + k - 2)
+            global_row = owner_row(irow)
+            if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
+            packed_rows(k, 1:nstate_req) = dg_frag%coef(global_row, cstart:cend, ispin)
+          end do
+        end if
+        call comm_bcast(packed_rows(1:chunk_cnt, 1:nstate_req), dg_frag%icomm, owner)
+        do k = 1, chunk_cnt
+          irow = owner_offsets(owner) + (chunk0 + k - 2)
+          slot_idx = owner_slot(irow)
+          if (slot_idx < 1 .or. slot_idx > nrows_req) cycle
+          fetched(slot_idx, 1:nstate_req) = packed_rows(k, 1:nstate_req)
+        end do
+      end do
+    end do
+
+    deallocate(packed_rows)
+    deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
   end subroutine fetch_remote_coef_rows
 
   subroutine pack_owned_coef_pw(dg_frag, row_ids, packed)
@@ -2281,42 +2281,134 @@ contains
 !$omp end parallel do
   end subroutine pack_owned_coef_pw
 
-  subroutine fetch_remote_coef_pw_rows(dg_frag, row_ids, fetched)
+  subroutine fetch_remote_coef_pw_rows(dg_frag, row_ids, fetched, col_start, col_end, ispin_req)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: row_ids(:)
     complex(8), intent(out) :: fetched(:, :, :)
+    integer, intent(in), optional :: col_start, col_end
+    integer, intent(in), optional :: ispin_req
 
     integer :: irow, pw_row, owner_rank
-    complex(8), allocatable :: row_buf(:, :)
+    integer :: nrows_req, nstate_req, nspin_req, owner, k, cnt, max_owner_rows
+    integer :: cstart, cend, owner_chunk_rows, chunk0, chunk1, chunk_cnt, slot_idx
+    integer :: spin_sel
+    integer, allocatable :: owner_counts(:), owner_offsets(:), owner_fill(:)
+    integer, allocatable :: owner_slot(:), owner_row(:)
+    complex(8), allocatable :: packed_rows(:, :, :)
 
     fetched(:, :, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%coef_pw_owner)) return
     if (.not. allocated(dg_frag%coef_pw)) return
+    if (dg_frag%isize <= 0) return
 
-    allocate(row_buf(size(fetched, 2), size(fetched, 3)))
-    do irow = 1, min(size(row_ids), size(fetched, 1))
+    nrows_req = min(size(row_ids), size(fetched, 1))
+    nstate_req = size(fetched, 2)
+    nspin_req = size(fetched, 3)
+    if (nrows_req <= 0 .or. nstate_req <= 0 .or. nspin_req <= 0) return
+    cstart = 1
+    cend = nstate_req
+    if (present(col_start)) cstart = col_start
+    if (present(col_end)) cend = col_end
+    if (cstart < 1 .or. cend < cstart .or. cend > size(dg_frag%coef_pw, 2)) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid state range in fetch_remote_coef_pw_rows: rank=", dg_frag%id, &
+        " cstart=", cstart, " cend=", cend, " coef_pw_cols=", size(dg_frag%coef_pw, 2)
+      stop "DG-Fragment RT: invalid state range in fetch_remote_coef_pw_rows"
+    end if
+    if (cend - cstart + 1 /= nstate_req) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] fetch_remote_coef_pw_rows state-range mismatch: rank=", dg_frag%id, &
+        " nstate_req=", nstate_req, " cstart=", cstart, " cend=", cend
+      stop "DG-Fragment RT: state range/shape mismatch in fetch_remote_coef_pw_rows"
+    end if
+    spin_sel = 1
+    if (present(ispin_req)) then
+      spin_sel = ispin_req
+      if (spin_sel < 1 .or. spin_sel > dg_frag%nspin) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] invalid ispin_req in fetch_remote_coef_pw_rows: rank=", dg_frag%id, &
+          " ispin_req=", spin_sel, " nspin=", dg_frag%nspin
+        stop "DG-Fragment RT: invalid ispin_req in fetch_remote_coef_pw_rows"
+      end if
+    end if
+
+    allocate(owner_counts(0:dg_frag%isize-1), owner_offsets(0:dg_frag%isize-1), owner_fill(0:dg_frag%isize-1))
+    allocate(owner_slot(nrows_req), owner_row(nrows_req))
+    owner_counts(:) = 0
+    owner_offsets(:) = 0
+    owner_fill(:) = 0
+    owner_slot(:) = 0
+    owner_row(:) = 0
+
+    do irow = 1, nrows_req
       pw_row = row_ids(irow)
-      row_buf(:, :) = (0.0d0, 0.0d0)
-      if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) then
-        fetched(irow, :, :) = row_buf(:, :)
-        cycle
-      end if
+      if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
       owner_rank = dg_frag%coef_pw_owner(pw_row)
-      if (owner_rank < 0) then
-        fetched(irow, :, :) = row_buf(:, :)
-        cycle
-      end if
+      if (owner_rank < 0) cycle
       if (owner_rank >= dg_frag%isize) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid coef_pw owner rank: rank=", dg_frag%id, &
           " row=", pw_row, " owner_rank=", owner_rank, " isize=", dg_frag%isize
         stop "DG-Fragment RT: invalid coef_pw owner rank in fetch_remote_coef_pw_rows"
       end if
-      if (owner_rank == dg_frag%id) row_buf(:, :) = dg_frag%coef_pw(pw_row, 1:size(fetched, 2), 1:size(fetched, 3))
-      call comm_bcast(row_buf, dg_frag%icomm, owner_rank)
-      fetched(irow, :, :) = row_buf(:, :)
+      owner_counts(owner_rank) = owner_counts(owner_rank) + 1
     end do
-    deallocate(row_buf)
+
+    max_owner_rows = 0
+    do owner = 0, dg_frag%isize-1
+      if (owner_counts(owner) > max_owner_rows) max_owner_rows = owner_counts(owner)
+    end do
+    if (max_owner_rows <= 0) then
+      deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
+      return
+    end if
+
+    owner_offsets(0) = 1
+    do owner = 1, dg_frag%isize-1
+      owner_offsets(owner) = owner_offsets(owner-1) + owner_counts(owner-1)
+    end do
+
+    do irow = 1, nrows_req
+      pw_row = row_ids(irow)
+      if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
+      owner_rank = dg_frag%coef_pw_owner(pw_row)
+      if (owner_rank < 0 .or. owner_rank >= dg_frag%isize) cycle
+      k = owner_offsets(owner_rank) + owner_fill(owner_rank)
+      owner_fill(owner_rank) = owner_fill(owner_rank) + 1
+      owner_slot(k) = irow
+      owner_row(k) = pw_row
+    end do
+
+    allocate(packed_rows(max_owner_rows, nstate_req, nspin_req))
+    owner_chunk_rows = 128
+    do owner = 0, dg_frag%isize-1
+      cnt = owner_counts(owner)
+      if (cnt <= 0) cycle
+      do chunk0 = 1, cnt, owner_chunk_rows
+        chunk1 = min(cnt, chunk0 + owner_chunk_rows - 1)
+        chunk_cnt = chunk1 - chunk0 + 1
+        packed_rows(1:chunk_cnt, 1:nstate_req, 1:nspin_req) = (0.0d0, 0.0d0)
+        if (owner == dg_frag%id) then
+          do k = 1, chunk_cnt
+            irow = owner_offsets(owner) + (chunk0 + k - 2)
+            pw_row = owner_row(irow)
+            if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
+            if (present(ispin_req)) then
+              packed_rows(k, 1:nstate_req, 1) = dg_frag%coef_pw(pw_row, cstart:cend, spin_sel)
+            else
+              packed_rows(k, 1:nstate_req, 1:nspin_req) = dg_frag%coef_pw(pw_row, cstart:cend, 1:nspin_req)
+            end if
+          end do
+        end if
+        call comm_bcast(packed_rows(1:chunk_cnt, 1:nstate_req, 1:nspin_req), dg_frag%icomm, owner)
+        do k = 1, chunk_cnt
+          irow = owner_offsets(owner) + (chunk0 + k - 2)
+          slot_idx = owner_slot(irow)
+          if (slot_idx < 1 .or. slot_idx > nrows_req) cycle
+          fetched(slot_idx, 1:nstate_req, 1:nspin_req) = packed_rows(k, 1:nstate_req, 1:nspin_req)
+        end do
+      end do
+    end do
+
+    deallocate(packed_rows)
+    deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
   end subroutine fetch_remote_coef_pw_rows
 
   subroutine refresh_pw_coef_cache(dg_frag, nstate_use)
@@ -2371,18 +2463,20 @@ contains
     deallocate(pw_row_ids)
   end subroutine refresh_pw_coef_cache
 
-  subroutine gather_full_coef_view(dg_frag, ispin, n_frag_rows, nstate_use, coef_frag, coef_pw)
+  subroutine gather_full_coef_view(dg_frag, ispin, n_frag_rows, nstate_use, coef_frag, coef_pw, state_start, state_end)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: ispin
     integer, intent(in) :: n_frag_rows
     integer, intent(in) :: nstate_use
-    complex(8), allocatable, intent(out) :: coef_frag(:,:)
-    complex(8), allocatable, intent(out) :: coef_pw(:,:)
+    complex(8), allocatable, intent(inout) :: coef_frag(:,:)
+    complex(8), allocatable, intent(inout) :: coef_pw(:,:)
+    integer, intent(in), optional :: state_start, state_end
 
-    integer :: i, n_pw
-    integer, allocatable :: frag_row_ids(:), pw_row_ids(:)
-    complex(8), allocatable :: coef_pw_all(:,:,:)
+    integer :: i, n_pw, cstart, cend
+    integer, allocatable, save :: frag_row_ids(:), pw_row_ids(:)
+    complex(8), allocatable, save :: coef_pw_all(:,:,:)
+    integer :: ispin_eff
     logical, parameter :: enable_coef_gather_trace = .false.
 
     if (enable_coef_gather_trace .and. dg_frag%id == 0 .and. ispin == 1) then
@@ -2405,33 +2499,71 @@ contains
         " nstate_use=", nstate_use, " coef_cols=", size(dg_frag%coef, 2)
       stop "DG gather_full_coef_view invalid state count"
     end if
+    cstart = 1
+    cend = nstate_use
+    if (present(state_start)) cstart = state_start
+    if (present(state_end)) cend = state_end
+    if (cstart < 1 .or. cend < cstart .or. cend > size(dg_frag%coef, 2)) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] gather state-range invalid: rank=", dg_frag%id, &
+        " cstart=", cstart, " cend=", cend, " coef_cols=", size(dg_frag%coef, 2)
+      stop "DG gather_full_coef_view invalid state range"
+    end if
+    if (cend - cstart + 1 /= nstate_use) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] gather state-range/shape mismatch: rank=", dg_frag%id, &
+        " nstate_use=", nstate_use, " cstart=", cstart, " cend=", cend
+      stop "DG gather_full_coef_view state range/shape mismatch"
+    end if
 
-    allocate(coef_frag(max(0, n_frag_rows), max(0, nstate_use)))
+    if (.not. allocated(coef_frag)) then
+      allocate(coef_frag(max(0, n_frag_rows), max(0, nstate_use)))
+    else if (size(coef_frag, 1) /= max(0, n_frag_rows) .or. size(coef_frag, 2) /= max(0, nstate_use)) then
+      deallocate(coef_frag)
+      allocate(coef_frag(max(0, n_frag_rows), max(0, nstate_use)))
+    end if
     coef_frag(:, :) = (0.0d0, 0.0d0)
     if (n_frag_rows > 0 .and. nstate_use > 0) then
-      allocate(frag_row_ids(n_frag_rows))
+      if (.not. allocated(frag_row_ids)) then
+        allocate(frag_row_ids(n_frag_rows))
+      else if (size(frag_row_ids) /= n_frag_rows) then
+        deallocate(frag_row_ids)
+        allocate(frag_row_ids(n_frag_rows))
+      end if
       do i = 1, n_frag_rows
         frag_row_ids(i) = i
       end do
-      call fetch_remote_coef_rows(dg_frag, ispin, frag_row_ids, coef_frag)
-      deallocate(frag_row_ids)
+      call fetch_remote_coef_rows(dg_frag, ispin, frag_row_ids, coef_frag, cstart, cend)
     end if
 
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    allocate(coef_pw(max(0, n_pw), max(0, nstate_use)))
+    if (.not. allocated(coef_pw)) then
+      allocate(coef_pw(max(0, n_pw), max(0, nstate_use)))
+    else if (size(coef_pw, 1) /= max(0, n_pw) .or. size(coef_pw, 2) /= max(0, nstate_use)) then
+      deallocate(coef_pw)
+      allocate(coef_pw(max(0, n_pw), max(0, nstate_use)))
+    end if
     coef_pw(:, :) = (0.0d0, 0.0d0)
     if (n_pw > 0 .and. nstate_use > 0) then
-      allocate(pw_row_ids(n_pw))
+      if (.not. allocated(pw_row_ids)) then
+        allocate(pw_row_ids(n_pw))
+      else if (size(pw_row_ids) /= n_pw) then
+        deallocate(pw_row_ids)
+        allocate(pw_row_ids(n_pw))
+      end if
       do i = 1, n_pw
         pw_row_ids(i) = i
       end do
-      allocate(coef_pw_all(n_pw, nstate_use, dg_frag%nspin))
+      ispin_eff = min(max(ispin, 1), dg_frag%nspin)
+      if (.not. allocated(coef_pw_all)) then
+        allocate(coef_pw_all(n_pw, nstate_use, 1))
+      else if (size(coef_pw_all, 1) /= n_pw .or. size(coef_pw_all, 2) /= nstate_use .or. &
+               size(coef_pw_all, 3) /= 1) then
+        deallocate(coef_pw_all)
+        allocate(coef_pw_all(n_pw, nstate_use, 1))
+      end if
       coef_pw_all(:, :, :) = (0.0d0, 0.0d0)
-      call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_all)
-      coef_pw(:, :) = coef_pw_all(:, :, min(max(ispin, 1), dg_frag%nspin))
-      deallocate(coef_pw_all)
-      deallocate(pw_row_ids)
+      call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_all, cstart, cend, ispin_eff)
+      coef_pw(:, :) = coef_pw_all(:, :, 1)
     end if
   end subroutine gather_full_coef_view
 
@@ -3153,6 +3285,7 @@ contains
     real(8) :: gx, gy, gz
     real(8) :: nabt(4,3)
     integer :: ndom(3)
+    logical :: use_direct_halo_fd
 
     nabt = stencil%coef_nab
     ifrag = dg_frag%ifrag_start + i_local - 1
@@ -3163,87 +3296,76 @@ contains
     phi_ub1 = ubound(dg_frag%phi_frag, 1)
     phi_ub2 = ubound(dg_frag%phi_frag, 2)
     phi_ub3 = ubound(dg_frag%phi_frag, 3)
+    use_direct_halo_fd = all(dg_frag%nxyz_buffer(1:3) >= 4)
 
     grad_phi = 0.0d0
 
-    !$omp parallel do collapse(2) private(lx, ly, lz, ixg, iyg, izg, ix0, iy0, iz0, gx, gy, gz, &
-    !$omp& ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4, &
-    !$omp& iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4, &
-    !$omp& izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4) schedule(static)
-    do lz = 1, ndom(3)
-      do ly = 1, ndom(2)
-        !$omp simd private(gx, gy, gz)
-        do lx = 1, ndom(1)
-          ixg = modulo(dg_frag%ixyz_frag(1, ifrag) + lx - 2, dg_frag%lgnum_total(1)) + 1
-          iyg = modulo(dg_frag%ixyz_frag(2, ifrag) + ly - 2, dg_frag%lgnum_total(2)) + 1
-          izg = modulo(dg_frag%ixyz_frag(3, ifrag) + lz - 2, dg_frag%lgnum_total(3)) + 1
-          ix0 = map_global_to_phi_box_coord(ixg, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          iy0 = map_global_to_phi_box_coord(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iz0 = map_global_to_phi_box_coord(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) cycle
+    if (use_direct_halo_fd) then
+      !$omp parallel do collapse(2) private(lx, ly, lz, ixg, iyg, izg, ix0, iy0, iz0, gx, gy, gz, &
+      !$omp& ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4, &
+      !$omp& iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4, &
+      !$omp& izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4) schedule(static)
+      do lz = 1, ndom(3)
+        do ly = 1, ndom(2)
+          !$omp simd private(gx, gy, gz)
+          do lx = 1, ndom(1)
+            ixg = modulo(dg_frag%ixyz_frag(1, ifrag) + lx - 2, dg_frag%lgnum_total(1)) + 1
+            iyg = modulo(dg_frag%ixyz_frag(2, ifrag) + ly - 2, dg_frag%lgnum_total(2)) + 1
+            izg = modulo(dg_frag%ixyz_frag(3, ifrag) + lz - 2, dg_frag%lgnum_total(3)) + 1
+            ix0 = map_global_to_phi_box_coord(ixg, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+            iy0 = map_global_to_phi_box_coord(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+            iz0 = map_global_to_phi_box_coord(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
 
-          ixp1 = map_global_to_phi_box_coord(ixg + 1, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixm1 = map_global_to_phi_box_coord(ixg - 1, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixp2 = map_global_to_phi_box_coord(ixg + 2, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixm2 = map_global_to_phi_box_coord(ixg - 2, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixp3 = map_global_to_phi_box_coord(ixg + 3, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixm3 = map_global_to_phi_box_coord(ixg - 3, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixp4 = map_global_to_phi_box_coord(ixg + 4, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          ixm4 = map_global_to_phi_box_coord(ixg - 4, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          iyp1 = map_global_to_phi_box_coord(iyg + 1, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iym1 = map_global_to_phi_box_coord(iyg - 1, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iyp2 = map_global_to_phi_box_coord(iyg + 2, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iym2 = map_global_to_phi_box_coord(iyg - 2, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iyp3 = map_global_to_phi_box_coord(iyg + 3, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iym3 = map_global_to_phi_box_coord(iyg - 3, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iyp4 = map_global_to_phi_box_coord(iyg + 4, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          iym4 = map_global_to_phi_box_coord(iyg - 4, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          izp1 = map_global_to_phi_box_coord(izg + 1, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izm1 = map_global_to_phi_box_coord(izg - 1, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izp2 = map_global_to_phi_box_coord(izg + 2, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izm2 = map_global_to_phi_box_coord(izg - 2, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izp3 = map_global_to_phi_box_coord(izg + 3, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izm3 = map_global_to_phi_box_coord(izg - 3, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izp4 = map_global_to_phi_box_coord(izg + 4, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-          izm4 = map_global_to_phi_box_coord(izg - 4, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+            ixp1 = ix0 + 1
+            ixm1 = ix0 - 1
+            ixp2 = ix0 + 2
+            ixm2 = ix0 - 2
+            ixp3 = ix0 + 3
+            ixm3 = ix0 - 3
+            ixp4 = ix0 + 4
+            ixm4 = ix0 - 4
+            iyp1 = iy0 + 1
+            iym1 = iy0 - 1
+            iyp2 = iy0 + 2
+            iym2 = iy0 - 2
+            iyp3 = iy0 + 3
+            iym3 = iy0 - 3
+            iyp4 = iy0 + 4
+            iym4 = iy0 - 4
+            izp1 = iz0 + 1
+            izm1 = iz0 - 1
+            izp2 = iz0 + 2
+            izm2 = iz0 - 2
+            izp3 = iz0 + 3
+            izm3 = iz0 - 3
+            izp4 = iz0 + 4
+            izm4 = iz0 - 4
 
-          gx = 0.0d0
-          if (ixp1 > 0 .and. ixm1 > 0) gx = gx + nabt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local))
-          if (ixp2 > 0 .and. ixm2 > 0) gx = gx + nabt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local))
-          if (ixp3 > 0 .and. ixm3 > 0) gx = gx + nabt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local))
-          if (ixp4 > 0 .and. ixm4 > 0) gx = gx + nabt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+            gx = nabt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) - dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local)) + &
+                 nabt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) - dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local)) + &
+                 nabt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) - dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local)) + &
+                 nabt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) - dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
 
-          gy = 0.0d0
-          if (iyp1 > 0 .and. iym1 > 0) gy = gy + nabt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local))
-          if (iyp2 > 0 .and. iym2 > 0) gy = gy + nabt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local))
-          if (iyp3 > 0 .and. iym3 > 0) gy = gy + nabt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local))
-          if (iyp4 > 0 .and. iym4 > 0) gy = gy + nabt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
+            gy = nabt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) - dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local)) + &
+                 nabt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) - dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local)) + &
+                 nabt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) - dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local)) + &
+                 nabt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) - dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
 
-          gz = 0.0d0
-          if (izp1 > 0 .and. izm1 > 0) gz = gz + nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local))
-          if (izp2 > 0 .and. izm2 > 0) gz = gz + nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local))
-          if (izp3 > 0 .and. izm3 > 0) gz = gz + nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local))
-          if (izp4 > 0 .and. izm4 > 0) gz = gz + nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+            gz = nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) - dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local)) + &
+                 nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) - dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local)) + &
+                 nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) - dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local)) + &
+                 nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) - dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
 
-          grad_phi(lx, ly, lz, 1) = gx
-          grad_phi(lx, ly, lz, 2) = gy
-          grad_phi(lx, ly, lz, 3) = gz
+            grad_phi(lx, ly, lz, 1) = gx
+            grad_phi(lx, ly, lz, 2) = gy
+            grad_phi(lx, ly, lz, 3) = gz
+          end do
         end do
       end do
-    end do
-    !$omp end parallel do
+      !$omp end parallel do
+    else
+      stop "DG-Fragment RT: apply_gradient_to_basis requires nxyz_buffer>=4"
+    end if
 
   end subroutine apply_gradient_to_basis
 
