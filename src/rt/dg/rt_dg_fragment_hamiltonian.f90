@@ -434,7 +434,7 @@
     integer :: i_halo, jfrag, n_basis_halo
     integer :: l(3), halo_send_idx(3), halo_recv_idx(3)
     real(8) :: hvol
-    real(8) :: halo_integral_t, halo_integral_h, halo_integral_t_sum, halo_integral_h_sum, t_point, h_point
+    real(8) :: halo_integral_t, halo_integral_h, halo_integral_t_sum, halo_integral_h_sum, t_point, h_point, halo_val
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
@@ -1031,10 +1031,10 @@
                 do iy_chk = 1, l(2)
                   do ix_chk = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_chk, iy_chk, iz_chk, halo_send_idx, halo_recv_idx)
-                    call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_recv_idx, t_point)
-                    call apply_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, halo_recv_idx, h_point)
-                    halo_integral_t = halo_integral_t + dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1) * t_point * hvol
-                    halo_integral_h = halo_integral_h + dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1) * h_point * hvol
+                    call apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, halo_recv_idx, t_point, h_point)
+                    halo_val = dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1)
+                    halo_integral_t = halo_integral_t + halo_val * t_point * hvol
+                    halo_integral_h = halo_integral_h + halo_val * h_point * hvol
                   end do
                 end do
               end do
@@ -1521,14 +1521,9 @@
     
     integer :: gx, gy, gz, ifrag, lx, ly, lz
     integer :: ix0, iy0, iz0
-    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
-    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
-    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
     real(8) :: v, lap0
     real(8) :: lapt(4,3)
     integer :: ndom(3), loc_s(3), loc_e(3)
-    integer :: gx0, gx1, gy0, gy1, gz0, gz1
-    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     logical :: has_overlap
     
     ! Extract stencil coefficients
@@ -1559,12 +1554,6 @@
     call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
     T_phi = 0.0d0
     if (.not. has_overlap) return
-    p_lb1 = lbound(dg_frag%phi_frag, 1)
-    p_ub1 = ubound(dg_frag%phi_frag, 1)
-    p_lb2 = lbound(dg_frag%phi_frag, 2)
-    p_ub2 = ubound(dg_frag%phi_frag, 2)
-    p_lb3 = lbound(dg_frag%phi_frag, 3)
-    p_ub3 = ubound(dg_frag%phi_frag, 3)
     ! Note: phi_frag is allocated as (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, ...)
     ! where nb = nxyz_buffer = 4 for 4th-order stencil
     ! The interior domain is (1:nx, 1:ny, 1:nz), and halo provides data for stencil
@@ -1574,91 +1563,53 @@
     ! for all interior points without boundary restrictions.
     
     ! Apply kinetic operator using finite difference stencil.
-    ! The valid stencil footprint is determined pointwise via
-    ! map_global_to_phi_box_coord_ham(...); a fragment-local precheck would mix
-    ! coordinate systems because phi_frag is stored in phi-box coordinates.
+    ! With periodic halos already populated in phi_frag, convert each global
+    ! coordinate to its periodic interior index once, then use ix0+/-n offsets
+    ! directly for neighbor access.
     !
     ! Note: exchange_phi_frag_halo() must be called before this routine
-    
-    gx0 = dg_frag%ixyz_frag(1, ifrag) + loc_s(1) - 1
-    gx1 = dg_frag%ixyz_frag(1, ifrag) + loc_e(1) - 1
-    gy0 = dg_frag%ixyz_frag(2, ifrag) + loc_s(2) - 1
-    gy1 = dg_frag%ixyz_frag(2, ifrag) + loc_e(2) - 1
-    gz0 = dg_frag%ixyz_frag(3, ifrag) + loc_s(3) - 1
-    gz1 = dg_frag%ixyz_frag(3, ifrag) + loc_e(3) - 1
-!$omp parallel do private(lz, ly, lx, gz, gy, gx, ix0, iy0, iz0, &
-!$omp& ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4, &
-!$omp& iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4, &
-!$omp& izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4, v) schedule(static)
+
+!$omp parallel do private(lz, ly, lx, gz, gy, gx, ix0, iy0, iz0, v) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = dg_frag%ixyz_frag(3, ifrag) + lz - 1
       do ly = loc_s(2), loc_e(2)
         gy = dg_frag%ixyz_frag(2, ifrag) + ly - 1
-!$omp simd private(v, ix0, iy0, iz0, ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4, &
-!$omp& iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4, izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4)
+!$omp simd private(v, ix0, iy0, iz0)
         do lx = loc_s(1), loc_e(1)
           gx = dg_frag%ixyz_frag(1, ifrag) + lx - 1
-          ix0 = map_global_to_phi_box_coord_ham(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          iy0 = map_global_to_phi_box_coord_ham(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iz0 = map_global_to_phi_box_coord_ham(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) cycle
-          ixp1 = map_global_to_phi_box_coord_ham(gx + 1, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixm1 = map_global_to_phi_box_coord_ham(gx - 1, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixp2 = map_global_to_phi_box_coord_ham(gx + 2, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixm2 = map_global_to_phi_box_coord_ham(gx - 2, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixp3 = map_global_to_phi_box_coord_ham(gx + 3, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixm3 = map_global_to_phi_box_coord_ham(gx - 3, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixp4 = map_global_to_phi_box_coord_ham(gx + 4, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          ixm4 = map_global_to_phi_box_coord_ham(gx - 4, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          iyp1 = map_global_to_phi_box_coord_ham(gy + 1, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iym1 = map_global_to_phi_box_coord_ham(gy - 1, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iyp2 = map_global_to_phi_box_coord_ham(gy + 2, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iym2 = map_global_to_phi_box_coord_ham(gy - 2, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iyp3 = map_global_to_phi_box_coord_ham(gy + 3, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iym3 = map_global_to_phi_box_coord_ham(gy - 3, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iyp4 = map_global_to_phi_box_coord_ham(gy + 4, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          iym4 = map_global_to_phi_box_coord_ham(gy - 4, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          izp1 = map_global_to_phi_box_coord_ham(gz + 1, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izm1 = map_global_to_phi_box_coord_ham(gz - 1, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izp2 = map_global_to_phi_box_coord_ham(gz + 2, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izm2 = map_global_to_phi_box_coord_ham(gz - 2, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izp3 = map_global_to_phi_box_coord_ham(gz + 3, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izm3 = map_global_to_phi_box_coord_ham(gz - 3, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izp4 = map_global_to_phi_box_coord_ham(gz + 4, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          izm4 = map_global_to_phi_box_coord_ham(gz - 4, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          if (ixp1 == 0 .or. ixm1 == 0 .or. ixp2 == 0 .or. ixm2 == 0 .or. ixp3 == 0 .or. ixm3 == 0 .or. ixp4 == 0 .or. ixm4 == 0) cycle
-          if (iyp1 == 0 .or. iym1 == 0 .or. iyp2 == 0 .or. iym2 == 0 .or. iyp3 == 0 .or. iym3 == 0 .or. iyp4 == 0 .or. iym4 == 0) cycle
-          if (izp1 == 0 .or. izm1 == 0 .or. izp2 == 0 .or. izm2 == 0 .or. izp3 == 0 .or. izm3 == 0 .or. izp4 == 0 .or. izm4 == 0) cycle
+          ix0 = modulo(gx - 1, dg_frag%lgnum_total(1)) + 1
+          iy0 = modulo(gy - 1, dg_frag%lgnum_total(2)) + 1
+          iz0 = modulo(gz - 1, dg_frag%lgnum_total(3)) + 1
           ! Compute Laplacian using 4th-order finite difference
           ! Stencil accesses phi_frag(ix±4, iy±4, iz±4) which now includes halo
-          v = lapt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local)) + &
-              lapt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local)) + &
-              lapt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local)) + &
-              lapt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+          v = lapt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
+              lapt(2,1) * (dg_frag%phi_frag(ix0 + 2, iy0, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0 - 2, iy0, iz0, jo, i_local)) + &
+              lapt(3,1) * (dg_frag%phi_frag(ix0 + 3, iy0, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0 - 3, iy0, iz0, jo, i_local)) + &
+              lapt(4,1) * (dg_frag%phi_frag(ix0 + 4, iy0, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0 - 4, iy0, iz0, jo, i_local))
           
           v = v + &
-              lapt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local)) + &
-              lapt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local)) + &
-              lapt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local)) + &
-              lapt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
+              lapt(1,2) * (dg_frag%phi_frag(ix0, iy0 + 1, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0 - 1, iz0, jo, i_local)) + &
+              lapt(2,2) * (dg_frag%phi_frag(ix0, iy0 + 2, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0 - 2, iz0, jo, i_local)) + &
+              lapt(3,2) * (dg_frag%phi_frag(ix0, iy0 + 3, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0 - 3, iz0, jo, i_local)) + &
+              lapt(4,2) * (dg_frag%phi_frag(ix0, iy0 + 4, iz0, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0 - 4, iz0, jo, i_local))
           
           v = v + &
-              lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local)) + &
-              lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local)) + &
-              lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local)) + &
-              lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) + &
-                           dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+              lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 1, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 1, jo, i_local)) + &
+              lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 2, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 2, jo, i_local)) + &
+              lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 3, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 3, jo, i_local)) + &
+              lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 4, jo, i_local) + &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 4, jo, i_local))
           
           ! T|φ> = (-∇²/2)|φ> = lap0*φ - 0.5 * (sum of neighbor terms)
           T_phi(lx, ly, lz) = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
@@ -1745,95 +1696,65 @@
     real(8),                intent(out) :: grad_local_2d(:,:)
 
     integer :: lx, ly, lz, ifrag, ndom(3), nloc1, nloc2, ipt
-    integer :: ixg, iyg, izg
+    integer :: gxg, gyg, gzg
     integer :: ix0, iy0, iz0
-    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
-    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
-    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
-    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     real(8) :: nabt(4,3), gx, gy, gz
 
     nabt = stencil%coef_nab
     ifrag = dg_frag%ifrag_start + i_local - 1
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
     nloc1 = loc_e(1) - loc_s(1) + 1
     nloc2 = loc_e(2) - loc_s(2) + 1
-    phi_lb1 = lbound(dg_frag%phi_frag, 1)
-    phi_lb2 = lbound(dg_frag%phi_frag, 2)
-    phi_lb3 = lbound(dg_frag%phi_frag, 3)
-    phi_ub1 = ubound(dg_frag%phi_frag, 1)
-    phi_ub2 = ubound(dg_frag%phi_frag, 2)
-    phi_ub3 = ubound(dg_frag%phi_frag, 3)
-
-    !$omp parallel do private(lx, ly, lz, ipt, ixg, iyg, izg, ix0, iy0, iz0, gx, gy, gz, &
-    !$omp& ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4, &
-    !$omp& iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4, &
-    !$omp& izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4) schedule(static)
+    !$omp parallel do private(lx, ly, lz, ipt, gxg, gyg, gzg, gx, gy, gz, ix0, iy0, iz0) schedule(static)
     do lz = 1, ndom(3)
-      izg = modulo(dg_frag%ixyz_frag(3, ifrag) + lz - 2, mg%num(3)) + 1
       do ly = 1, ndom(2)
-        iyg = modulo(dg_frag%ixyz_frag(2, ifrag) + ly - 2, mg%num(2)) + 1
-        !$omp simd private(ipt, gx, gy, gz)
+        !$omp simd private(ipt, gxg, gyg, gzg, gx, gy, gz, ix0, iy0, iz0)
         do lx = 1, ndom(1)
-          ixg = modulo(dg_frag%ixyz_frag(1, ifrag) + lx - 2, mg%num(1)) + 1
-          ix0 = map_global_to_phi_box_coord_ham(ixg, phi_lb1, phi_ub1, mg%num(1))
-          iy0 = map_global_to_phi_box_coord_ham(iyg, phi_lb2, phi_ub2, mg%num(2))
-          iz0 = map_global_to_phi_box_coord_ham(izg, phi_lb3, phi_ub3, mg%num(3))
-          if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) cycle
-          ixp1 = map_global_to_phi_box_coord_ham(ixg + 1, phi_lb1, phi_ub1, mg%num(1))
-          ixm1 = map_global_to_phi_box_coord_ham(ixg - 1, phi_lb1, phi_ub1, mg%num(1))
-          ixp2 = map_global_to_phi_box_coord_ham(ixg + 2, phi_lb1, phi_ub1, mg%num(1))
-          ixm2 = map_global_to_phi_box_coord_ham(ixg - 2, phi_lb1, phi_ub1, mg%num(1))
-          ixp3 = map_global_to_phi_box_coord_ham(ixg + 3, phi_lb1, phi_ub1, mg%num(1))
-          ixm3 = map_global_to_phi_box_coord_ham(ixg - 3, phi_lb1, phi_ub1, mg%num(1))
-          ixp4 = map_global_to_phi_box_coord_ham(ixg + 4, phi_lb1, phi_ub1, mg%num(1))
-          ixm4 = map_global_to_phi_box_coord_ham(ixg - 4, phi_lb1, phi_ub1, mg%num(1))
-          iyp1 = map_global_to_phi_box_coord_ham(iyg + 1, phi_lb2, phi_ub2, mg%num(2))
-          iym1 = map_global_to_phi_box_coord_ham(iyg - 1, phi_lb2, phi_ub2, mg%num(2))
-          iyp2 = map_global_to_phi_box_coord_ham(iyg + 2, phi_lb2, phi_ub2, mg%num(2))
-          iym2 = map_global_to_phi_box_coord_ham(iyg - 2, phi_lb2, phi_ub2, mg%num(2))
-          iyp3 = map_global_to_phi_box_coord_ham(iyg + 3, phi_lb2, phi_ub2, mg%num(2))
-          iym3 = map_global_to_phi_box_coord_ham(iyg - 3, phi_lb2, phi_ub2, mg%num(2))
-          iyp4 = map_global_to_phi_box_coord_ham(iyg + 4, phi_lb2, phi_ub2, mg%num(2))
-          iym4 = map_global_to_phi_box_coord_ham(iyg - 4, phi_lb2, phi_ub2, mg%num(2))
-          izp1 = map_global_to_phi_box_coord_ham(izg + 1, phi_lb3, phi_ub3, mg%num(3))
-          izm1 = map_global_to_phi_box_coord_ham(izg - 1, phi_lb3, phi_ub3, mg%num(3))
-          izp2 = map_global_to_phi_box_coord_ham(izg + 2, phi_lb3, phi_ub3, mg%num(3))
-          izm2 = map_global_to_phi_box_coord_ham(izg - 2, phi_lb3, phi_ub3, mg%num(3))
-          izp3 = map_global_to_phi_box_coord_ham(izg + 3, phi_lb3, phi_ub3, mg%num(3))
-          izm3 = map_global_to_phi_box_coord_ham(izg - 3, phi_lb3, phi_ub3, mg%num(3))
-          izp4 = map_global_to_phi_box_coord_ham(izg + 4, phi_lb3, phi_ub3, mg%num(3))
-          izm4 = map_global_to_phi_box_coord_ham(izg - 4, phi_lb3, phi_ub3, mg%num(3))
+          gxg = dg_frag%ixyz_frag(1, ifrag) + lx - 1
+          gyg = dg_frag%ixyz_frag(2, ifrag) + ly - 1
+          gzg = dg_frag%ixyz_frag(3, ifrag) + lz - 1
+          ix0 = map_global_to_phi_box_coord_ham(gxg, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+          iy0 = map_global_to_phi_box_coord_ham(gyg, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+          iz0 = map_global_to_phi_box_coord_ham(gzg, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+          if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) then
+            gx = 0.0d0
+            gy = 0.0d0
+            gz = 0.0d0
+          else
+            gx = nabt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
+                 nabt(2,1) * (dg_frag%phi_frag(ix0 + 2, iy0, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0 - 2, iy0, iz0, jo, i_local)) + &
+                 nabt(3,1) * (dg_frag%phi_frag(ix0 + 3, iy0, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0 - 3, iy0, iz0, jo, i_local)) + &
+                 nabt(4,1) * (dg_frag%phi_frag(ix0 + 4, iy0, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0 - 4, iy0, iz0, jo, i_local))
 
-          gx = 0.0d0
-          if (ixp1 > 0 .and. ixm1 > 0) gx = gx + nabt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local))
-          if (ixp2 > 0 .and. ixm2 > 0) gx = gx + nabt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local))
-          if (ixp3 > 0 .and. ixm3 > 0) gx = gx + nabt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local))
-          if (ixp4 > 0 .and. ixm4 > 0) gx = gx + nabt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+            gy = nabt(1,2) * (dg_frag%phi_frag(ix0, iy0 + 1, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0 - 1, iz0, jo, i_local)) + &
+                 nabt(2,2) * (dg_frag%phi_frag(ix0, iy0 + 2, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0 - 2, iz0, jo, i_local)) + &
+                 nabt(3,2) * (dg_frag%phi_frag(ix0, iy0 + 3, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0 - 3, iz0, jo, i_local)) + &
+                 nabt(4,2) * (dg_frag%phi_frag(ix0, iy0 + 4, iz0, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0 - 4, iz0, jo, i_local))
 
-          gy = 0.0d0
-          if (iyp1 > 0 .and. iym1 > 0) gy = gy + nabt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local))
-          if (iyp2 > 0 .and. iym2 > 0) gy = gy + nabt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local))
-          if (iyp3 > 0 .and. iym3 > 0) gy = gy + nabt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local))
-          if (iyp4 > 0 .and. iym4 > 0) gy = gy + nabt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
-
-          gz = 0.0d0
-          if (izp1 > 0 .and. izm1 > 0) gz = gz + nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local))
-          if (izp2 > 0 .and. izm2 > 0) gz = gz + nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local))
-          if (izp3 > 0 .and. izm3 > 0) gz = gz + nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local))
-          if (izp4 > 0 .and. izm4 > 0) gz = gz + nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) - &
-                                                               dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+            gz = nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 1, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0, iz0 - 1, jo, i_local)) + &
+                 nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 2, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0, iz0 - 2, jo, i_local)) + &
+                 nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 3, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0, iz0 - 3, jo, i_local)) + &
+                 nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 4, jo, i_local) - &
+                              dg_frag%phi_frag(ix0, iy0, iz0 - 4, jo, i_local))
+          end if
 
           grad_phi(lx, ly, lz, 1) = gx
           grad_phi(lx, ly, lz, 2) = gy
@@ -1854,7 +1775,7 @@
 
   end subroutine apply_gradient_to_basis_ops_local_2d
 
-  subroutine apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, grad_vec)
+  subroutine apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, grad_x, grad_y, grad_z)
     use structures
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -1862,87 +1783,54 @@
     type(s_rgrid),          intent(in) :: mg
     type(s_stencil),        intent(in) :: stencil
     integer,                intent(in) :: phi_idx(3)
-    real(8),                intent(out) :: grad_vec(3)
+    real(8),                intent(out) :: grad_x, grad_y, grad_z
 
-    integer :: gx, gy, gz
-    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: ix0, iy0, iz0
-    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
-    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
-    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
+    integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
     real(8) :: nabt(4,3)
 
     nabt = stencil%coef_nab
-    phi_lb1 = lbound(dg_frag%phi_frag, 1)
-    phi_lb2 = lbound(dg_frag%phi_frag, 2)
-    phi_lb3 = lbound(dg_frag%phi_frag, 3)
-    phi_ub1 = ubound(dg_frag%phi_frag, 1)
-    phi_ub2 = ubound(dg_frag%phi_frag, 2)
-    phi_ub3 = ubound(dg_frag%phi_frag, 3)
-
-    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
-    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
-    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
-    ix0 = map_global_to_phi_box_coord_ham(gx, phi_lb1, phi_ub1, mg%num(1))
-    iy0 = map_global_to_phi_box_coord_ham(gy, phi_lb2, phi_ub2, mg%num(2))
-    iz0 = map_global_to_phi_box_coord_ham(gz, phi_lb3, phi_ub3, mg%num(3))
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
+    ix0 = map_global_to_phi_box_coord_ham(phi_idx(1), p_lb1, p_ub1, dg_frag%lgnum_total(1))
+    iy0 = map_global_to_phi_box_coord_ham(phi_idx(2), p_lb2, p_ub2, dg_frag%lgnum_total(2))
+    iz0 = map_global_to_phi_box_coord_ham(phi_idx(3), p_lb3, p_ub3, dg_frag%lgnum_total(3))
     if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) then
-      grad_vec(:) = 0.0d0
+      grad_x = 0.0d0
+      grad_y = 0.0d0
+      grad_z = 0.0d0
       return
     end if
+    grad_x = nabt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
+             nabt(2,1) * (dg_frag%phi_frag(ix0 + 2, iy0, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0 - 2, iy0, iz0, jo, i_local)) + &
+             nabt(3,1) * (dg_frag%phi_frag(ix0 + 3, iy0, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0 - 3, iy0, iz0, jo, i_local)) + &
+             nabt(4,1) * (dg_frag%phi_frag(ix0 + 4, iy0, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0 - 4, iy0, iz0, jo, i_local))
 
-    ixp1 = map_global_to_phi_box_coord_ham(gx + 1, phi_lb1, phi_ub1, mg%num(1))
-    ixm1 = map_global_to_phi_box_coord_ham(gx - 1, phi_lb1, phi_ub1, mg%num(1))
-    ixp2 = map_global_to_phi_box_coord_ham(gx + 2, phi_lb1, phi_ub1, mg%num(1))
-    ixm2 = map_global_to_phi_box_coord_ham(gx - 2, phi_lb1, phi_ub1, mg%num(1))
-    ixp3 = map_global_to_phi_box_coord_ham(gx + 3, phi_lb1, phi_ub1, mg%num(1))
-    ixm3 = map_global_to_phi_box_coord_ham(gx - 3, phi_lb1, phi_ub1, mg%num(1))
-    ixp4 = map_global_to_phi_box_coord_ham(gx + 4, phi_lb1, phi_ub1, mg%num(1))
-    ixm4 = map_global_to_phi_box_coord_ham(gx - 4, phi_lb1, phi_ub1, mg%num(1))
-    iyp1 = map_global_to_phi_box_coord_ham(gy + 1, phi_lb2, phi_ub2, mg%num(2))
-    iym1 = map_global_to_phi_box_coord_ham(gy - 1, phi_lb2, phi_ub2, mg%num(2))
-    iyp2 = map_global_to_phi_box_coord_ham(gy + 2, phi_lb2, phi_ub2, mg%num(2))
-    iym2 = map_global_to_phi_box_coord_ham(gy - 2, phi_lb2, phi_ub2, mg%num(2))
-    iyp3 = map_global_to_phi_box_coord_ham(gy + 3, phi_lb2, phi_ub2, mg%num(2))
-    iym3 = map_global_to_phi_box_coord_ham(gy - 3, phi_lb2, phi_ub2, mg%num(2))
-    iyp4 = map_global_to_phi_box_coord_ham(gy + 4, phi_lb2, phi_ub2, mg%num(2))
-    iym4 = map_global_to_phi_box_coord_ham(gy - 4, phi_lb2, phi_ub2, mg%num(2))
-    izp1 = map_global_to_phi_box_coord_ham(gz + 1, phi_lb3, phi_ub3, mg%num(3))
-    izm1 = map_global_to_phi_box_coord_ham(gz - 1, phi_lb3, phi_ub3, mg%num(3))
-    izp2 = map_global_to_phi_box_coord_ham(gz + 2, phi_lb3, phi_ub3, mg%num(3))
-    izm2 = map_global_to_phi_box_coord_ham(gz - 2, phi_lb3, phi_ub3, mg%num(3))
-    izp3 = map_global_to_phi_box_coord_ham(gz + 3, phi_lb3, phi_ub3, mg%num(3))
-    izm3 = map_global_to_phi_box_coord_ham(gz - 3, phi_lb3, phi_ub3, mg%num(3))
-    izp4 = map_global_to_phi_box_coord_ham(gz + 4, phi_lb3, phi_ub3, mg%num(3))
-    izm4 = map_global_to_phi_box_coord_ham(gz - 4, phi_lb3, phi_ub3, mg%num(3))
+    grad_y = nabt(1,2) * (dg_frag%phi_frag(ix0, iy0 + 1, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0 - 1, iz0, jo, i_local)) + &
+             nabt(2,2) * (dg_frag%phi_frag(ix0, iy0 + 2, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0 - 2, iz0, jo, i_local)) + &
+             nabt(3,2) * (dg_frag%phi_frag(ix0, iy0 + 3, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0 - 3, iz0, jo, i_local)) + &
+             nabt(4,2) * (dg_frag%phi_frag(ix0, iy0 + 4, iz0, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0 - 4, iz0, jo, i_local))
 
-    grad_vec(:) = 0.0d0
-    if (ixp1 > 0 .and. ixm1 > 0) grad_vec(1) = grad_vec(1) + nabt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local))
-    if (ixp2 > 0 .and. ixm2 > 0) grad_vec(1) = grad_vec(1) + nabt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local))
-    if (ixp3 > 0 .and. ixm3 > 0) grad_vec(1) = grad_vec(1) + nabt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local))
-    if (ixp4 > 0 .and. ixm4 > 0) grad_vec(1) = grad_vec(1) + nabt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
-
-    if (iyp1 > 0 .and. iym1 > 0) grad_vec(2) = grad_vec(2) + nabt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local))
-    if (iyp2 > 0 .and. iym2 > 0) grad_vec(2) = grad_vec(2) + nabt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local))
-    if (iyp3 > 0 .and. iym3 > 0) grad_vec(2) = grad_vec(2) + nabt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local))
-    if (iyp4 > 0 .and. iym4 > 0) grad_vec(2) = grad_vec(2) + nabt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
-
-    if (izp1 > 0 .and. izm1 > 0) grad_vec(3) = grad_vec(3) + nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local))
-    if (izp2 > 0 .and. izm2 > 0) grad_vec(3) = grad_vec(3) + nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local))
-    if (izp3 > 0 .and. izm3 > 0) grad_vec(3) = grad_vec(3) + nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local))
-    if (izp4 > 0 .and. izm4 > 0) grad_vec(3) = grad_vec(3) + nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) - &
-                                                                             dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+    grad_z = nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 1, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 1, jo, i_local)) + &
+             nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 2, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 2, jo, i_local)) + &
+             nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 3, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 3, jo, i_local)) + &
+             nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 4, jo, i_local) - &
+                           dg_frag%phi_frag(ix0, iy0, iz0 - 4, jo, i_local))
 
   end subroutine apply_gradient_at_phi_box_point
 
@@ -1959,9 +1847,6 @@
     integer :: gx, gy, gz
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: ix0, iy0, iz0
-    integer :: ixp1, ixm1, ixp2, ixm2, ixp3, ixm3, ixp4, ixm4
-    integer :: iyp1, iym1, iyp2, iym2, iyp3, iym3, iyp4, iym4
-    integer :: izp1, izm1, izp2, izm2, izp3, izm3, izp4, izm4
     real(8) :: lap0, lapt(4,3), v
 
     lap0 = stencil%coef_lap0
@@ -1976,68 +1861,60 @@
     gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
     gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
     gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
-    ix0 = map_global_to_phi_box_coord_ham(gx, phi_lb1, phi_ub1, mg%num(1))
-    iy0 = map_global_to_phi_box_coord_ham(gy, phi_lb2, phi_ub2, mg%num(2))
-    iz0 = map_global_to_phi_box_coord_ham(gz, phi_lb3, phi_ub3, mg%num(3))
-    if (ix0 == 0 .or. iy0 == 0 .or. iz0 == 0) then
+    ix0 = gx
+    iy0 = gy
+    iz0 = gz
+    if (ix0 - 4 < phi_lb1 .or. ix0 + 4 > phi_ub1 .or. &
+        iy0 - 4 < phi_lb2 .or. iy0 + 4 > phi_ub2 .or. &
+        iz0 - 4 < phi_lb3 .or. iz0 + 4 > phi_ub3) then
       t_val = 0.0d0
       return
     end if
 
-    ixp1 = map_global_to_phi_box_coord_ham(gx + 1, phi_lb1, phi_ub1, mg%num(1))
-    ixm1 = map_global_to_phi_box_coord_ham(gx - 1, phi_lb1, phi_ub1, mg%num(1))
-    ixp2 = map_global_to_phi_box_coord_ham(gx + 2, phi_lb1, phi_ub1, mg%num(1))
-    ixm2 = map_global_to_phi_box_coord_ham(gx - 2, phi_lb1, phi_ub1, mg%num(1))
-    ixp3 = map_global_to_phi_box_coord_ham(gx + 3, phi_lb1, phi_ub1, mg%num(1))
-    ixm3 = map_global_to_phi_box_coord_ham(gx - 3, phi_lb1, phi_ub1, mg%num(1))
-    ixp4 = map_global_to_phi_box_coord_ham(gx + 4, phi_lb1, phi_ub1, mg%num(1))
-    ixm4 = map_global_to_phi_box_coord_ham(gx - 4, phi_lb1, phi_ub1, mg%num(1))
-    iyp1 = map_global_to_phi_box_coord_ham(gy + 1, phi_lb2, phi_ub2, mg%num(2))
-    iym1 = map_global_to_phi_box_coord_ham(gy - 1, phi_lb2, phi_ub2, mg%num(2))
-    iyp2 = map_global_to_phi_box_coord_ham(gy + 2, phi_lb2, phi_ub2, mg%num(2))
-    iym2 = map_global_to_phi_box_coord_ham(gy - 2, phi_lb2, phi_ub2, mg%num(2))
-    iyp3 = map_global_to_phi_box_coord_ham(gy + 3, phi_lb2, phi_ub2, mg%num(2))
-    iym3 = map_global_to_phi_box_coord_ham(gy - 3, phi_lb2, phi_ub2, mg%num(2))
-    iyp4 = map_global_to_phi_box_coord_ham(gy + 4, phi_lb2, phi_ub2, mg%num(2))
-    iym4 = map_global_to_phi_box_coord_ham(gy - 4, phi_lb2, phi_ub2, mg%num(2))
-    izp1 = map_global_to_phi_box_coord_ham(gz + 1, phi_lb3, phi_ub3, mg%num(3))
-    izm1 = map_global_to_phi_box_coord_ham(gz - 1, phi_lb3, phi_ub3, mg%num(3))
-    izp2 = map_global_to_phi_box_coord_ham(gz + 2, phi_lb3, phi_ub3, mg%num(3))
-    izm2 = map_global_to_phi_box_coord_ham(gz - 2, phi_lb3, phi_ub3, mg%num(3))
-    izp3 = map_global_to_phi_box_coord_ham(gz + 3, phi_lb3, phi_ub3, mg%num(3))
-    izm3 = map_global_to_phi_box_coord_ham(gz - 3, phi_lb3, phi_ub3, mg%num(3))
-    izp4 = map_global_to_phi_box_coord_ham(gz + 4, phi_lb3, phi_ub3, mg%num(3))
-    izm4 = map_global_to_phi_box_coord_ham(gz - 4, phi_lb3, phi_ub3, mg%num(3))
-    if (ixp1 == 0 .or. ixm1 == 0 .or. ixp2 == 0 .or. ixm2 == 0 .or. ixp3 == 0 .or. ixm3 == 0 .or. ixp4 == 0 .or. ixm4 == 0) then
-      t_val = 0.0d0
-      return
-    end if
-    if (iyp1 == 0 .or. iym1 == 0 .or. iyp2 == 0 .or. iym2 == 0 .or. iyp3 == 0 .or. iym3 == 0 .or. iyp4 == 0 .or. iym4 == 0) then
-      t_val = 0.0d0
-      return
-    end if
-    if (izp1 == 0 .or. izm1 == 0 .or. izp2 == 0 .or. izm2 == 0 .or. izp3 == 0 .or. izm3 == 0 .or. izp4 == 0 .or. izm4 == 0) then
-      t_val = 0.0d0
-      return
-    end if
-
-    v = lapt(1,1) * (dg_frag%phi_frag(ixp1, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm1, iy0, iz0, jo, i_local)) + &
-        lapt(2,1) * (dg_frag%phi_frag(ixp2, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm2, iy0, iz0, jo, i_local)) + &
-        lapt(3,1) * (dg_frag%phi_frag(ixp3, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm3, iy0, iz0, jo, i_local)) + &
-        lapt(4,1) * (dg_frag%phi_frag(ixp4, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ixm4, iy0, iz0, jo, i_local))
+    v = lapt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
+        lapt(2,1) * (dg_frag%phi_frag(ix0 + 2, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 2, iy0, iz0, jo, i_local)) + &
+        lapt(3,1) * (dg_frag%phi_frag(ix0 + 3, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 3, iy0, iz0, jo, i_local)) + &
+        lapt(4,1) * (dg_frag%phi_frag(ix0 + 4, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 4, iy0, iz0, jo, i_local))
     v = v + &
-        lapt(1,2) * (dg_frag%phi_frag(ix0, iyp1, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym1, iz0, jo, i_local)) + &
-        lapt(2,2) * (dg_frag%phi_frag(ix0, iyp2, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym2, iz0, jo, i_local)) + &
-        lapt(3,2) * (dg_frag%phi_frag(ix0, iyp3, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym3, iz0, jo, i_local)) + &
-        lapt(4,2) * (dg_frag%phi_frag(ix0, iyp4, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iym4, iz0, jo, i_local))
+        lapt(1,2) * (dg_frag%phi_frag(ix0, iy0 + 1, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 1, iz0, jo, i_local)) + &
+        lapt(2,2) * (dg_frag%phi_frag(ix0, iy0 + 2, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 2, iz0, jo, i_local)) + &
+        lapt(3,2) * (dg_frag%phi_frag(ix0, iy0 + 3, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 3, iz0, jo, i_local)) + &
+        lapt(4,2) * (dg_frag%phi_frag(ix0, iy0 + 4, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 4, iz0, jo, i_local))
     v = v + &
-        lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, izp1, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm1, jo, i_local)) + &
-        lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, izp2, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm2, jo, i_local)) + &
-        lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, izp3, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm3, jo, i_local)) + &
-        lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, izp4, jo, i_local) + dg_frag%phi_frag(ix0, iy0, izm4, jo, i_local))
+        lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 1, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 1, jo, i_local)) + &
+        lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 2, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 2, jo, i_local)) + &
+        lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 3, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 3, jo, i_local)) + &
+        lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 4, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 4, jo, i_local))
 
     t_val = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
   end subroutine apply_kinetic_at_phi_box_point
+
+  subroutine apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, t_val, h_val)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer,                intent(in) :: i_local, jo
+    type(s_rgrid),          intent(in) :: mg
+    type(s_stencil),        intent(in) :: stencil
+    real(8),                intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer,                intent(in) :: phi_idx(3)
+    real(8),                intent(out) :: t_val, h_val
+
+    integer :: gx, gy, gz
+
+    call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, t_val)
+    h_val = t_val
+    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
+    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
+    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
+    if (gx < mg%is(1) .or. gx > mg%ie(1) .or. &
+        gy < mg%is(2) .or. gy > mg%ie(2) .or. &
+        gz < mg%is(3) .or. gz > mg%ie(3)) return
+    if (phi_idx(1) < lbound(dg_frag%phi_frag, 1) .or. phi_idx(1) > ubound(dg_frag%phi_frag, 1) .or. &
+        phi_idx(2) < lbound(dg_frag%phi_frag, 2) .or. phi_idx(2) > ubound(dg_frag%phi_frag, 2) .or. &
+        phi_idx(3) < lbound(dg_frag%phi_frag, 3) .or. phi_idx(3) > ubound(dg_frag%phi_frag, 3)) return
+    h_val = h_val + V_total(gx, gy, gz) * dg_frag%phi_frag(phi_idx(1), phi_idx(2), phi_idx(3), jo, i_local)
+  end subroutine apply_kinetic_and_hamiltonian_at_phi_box_point
 
   subroutine apply_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, h_val)
     use structures
@@ -2050,19 +1927,9 @@
     integer,                intent(in) :: phi_idx(3)
     real(8),                intent(out) :: h_val
 
-    integer :: gx, gy, gz
+    real(8) :: t_dummy
 
-    call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, h_val)
-    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
-    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
-    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
-    if (gx < mg%is(1) .or. gx > mg%ie(1) .or. &
-        gy < mg%is(2) .or. gy > mg%ie(2) .or. &
-        gz < mg%is(3) .or. gz > mg%ie(3)) return
-    if (phi_idx(1) < lbound(dg_frag%phi_frag, 1) .or. phi_idx(1) > ubound(dg_frag%phi_frag, 1) .or. &
-        phi_idx(2) < lbound(dg_frag%phi_frag, 2) .or. phi_idx(2) > ubound(dg_frag%phi_frag, 2) .or. &
-        phi_idx(3) < lbound(dg_frag%phi_frag, 3) .or. phi_idx(3) > ubound(dg_frag%phi_frag, 3)) return
-    h_val = h_val + V_total(gx, gy, gz) * dg_frag%phi_frag(phi_idx(1), phi_idx(2), phi_idx(3), jo, i_local)
+    call apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, t_dummy, h_val)
   end subroutine apply_hamiltonian_at_phi_box_point
 
   !=======================================================================
@@ -2107,7 +1974,7 @@
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
-    integer :: npts_local, npts_halo, ipt
+    integer :: npts_local, npts_halo, ipt, nx_local, ny_local
     logical :: log_frag_progress, has_overlap
     logical, parameter :: enable_momentum_probe = .false.
     real(8) :: hvol, integral
@@ -2228,6 +2095,8 @@
         ly_hi = phi_loc_e(2)
         lz_lo = phi_loc_s(3)
         lz_hi = phi_loc_e(3)
+        nx_local = lx_hi - lx_lo + 1
+        ny_local = ly_hi - ly_lo + 1
         allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
         if (enable_momentum_probe) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
@@ -2241,11 +2110,11 @@
           stop "DG-Fragment RT: invalid basis-function count"
         end if
         do io = 1, nbf
-          ipt = 0
           do lz = lz_lo, lz_hi
             do ly = ly_lo, ly_hi
+              !$omp simd private(ipt)
               do lx = lx_lo, lx_hi
-                ipt = ipt + 1
+                ipt = ((lz - lz_lo) * ny_local + (ly - ly_lo)) * nx_local + (lx - lx_lo) + 1
                 phi_local_2d(ipt, io) = dg_frag%phi_frag(lx, ly, lz, io, i_local)
               end do
             end do
@@ -2401,19 +2270,20 @@
                       flush(6)
                     end if
                     ipt = ipt + 1
-                    ! grad_phi is defined on the local fragment domain (1:ndom),
-                    ! so the source-side block indices are the valid local coordinates here.
-                    call apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_recv_idx, grad_halo_2d(ipt, 1:3))
+                    ! For stencil evaluation use source-side indices; recv-side halo points can
+                    ! sit at the outer ghost edge where +/-4 access may go out of bounds.
+                    call apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_send_idx, &
+                      grad_halo_2d(ipt, 1), grad_halo_2d(ipt, 2), grad_halo_2d(ipt, 3))
                   end do
                 end do
               end do
 
               do io = 1, n_basis_halo
-                ipt = 0
                 do iz = 1, l(3)
                   do iy = 1, l(2)
+                    !$omp simd private(ipt)
                     do ix = 1, l(1)
-                      ipt = ipt + 1
+                      ipt = ((iz - 1) * l(2) + (iy - 1)) * l(1) + ix
                       halo_buf_2d(ipt, io) = dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1)
                     end do
                   end do
@@ -2583,20 +2453,22 @@
         call cpu_time(t1)
         time_reduce_comm = time_reduce_comm + (t1 - t0)
         call cpu_time(t0)
-        offset_flat = 1
         do iblk = 1, dg_frag%n_momentum_blocks
           nrow = dg_frag%momentum_blocks(iblk)%nrow_max
           ncol = dg_frag%momentum_blocks(iblk)%ncol_max
+          offset_flat = 1
           do ispin = 1, dg_frag%nspin
             do jj = 1, ncol
               do ii = 1, nrow
+                !$omp simd
                 do idir = 1, 3
-                  dg_frag%momentum_blocks(iblk)%val(idir, ii, jj, ispin) = recv_flat(offset_flat)
-                  offset_flat = offset_flat + 1
+                  dg_frag%momentum_blocks(iblk)%val(idir, ii, jj, ispin) = recv_flat(offset_flat + &
+                    ((((ispin - 1) * ncol + (jj - 1)) * nrow + (ii - 1)) * 3 + (idir - 1)))
                 end do
               end do
             end do
           end do
+          offset_flat = offset_flat + 3 * nrow * ncol * dg_frag%nspin
         end do
         call cpu_time(t1)
         time_reduce_unpack = time_reduce_unpack + (t1 - t0)

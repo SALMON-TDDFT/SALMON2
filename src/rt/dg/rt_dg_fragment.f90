@@ -123,7 +123,7 @@ contains
   !=======================================================================
   ! Initialize DG-Fragment RT calculation
   !=======================================================================
-  subroutine init_dg_fragment_rt(dg_frag, system, rt, info, lg, mg)
+  subroutine init_dg_fragment_rt(dg_frag, system, rt, info, lg, mg, ppg)
     use structures
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
@@ -139,10 +139,14 @@ contains
     type(s_rt),             intent(in)    :: rt
     type(s_parallel_info),  intent(in)    :: info
     type(s_rgrid), target,  intent(in)    :: lg, mg
+    type(s_pp_grid),        intent(in)    :: ppg
     
     character(32), parameter :: bdir_frag='./data_dcdft/fragments/'
     character(256) :: filename
-    integer :: iunit, i, j, io, ispin, ifrag
+    integer :: iunit, i, j, io, ispin, ifrag, ia, ip
+    integer :: pp_buf(3)
+    integer, parameter :: momentum_stencil_buf = 4
+    real(8) :: abs_disp
     logical :: load_from_dcdft
     
     if (comm_is_root(info%id_rko)) then
@@ -265,9 +269,24 @@ contains
     ! Store fragment geometry information for halo exchange
     dg_frag%num_fragment(1:3) = num_fragment(1:3)
     dg_frag%lgnum_total(1:3) = lg%num(1:3)
-    dg_frag%nxyz_buffer(1:3) = num_rgrid_buffer(1:3)
+    pp_buf(1:3) = 0
+    if (allocated(ppg%mps) .and. allocated(ppg%rxyz)) then
+      do ia = 1, size(ppg%mps)
+        do ip = 1, ppg%mps(ia)
+          abs_disp = abs(ppg%rxyz(1, ip, ia))
+          if (system%hgs(1) > 0d0) pp_buf(1) = max(pp_buf(1), ceiling(abs_disp / system%hgs(1)))
+          abs_disp = abs(ppg%rxyz(2, ip, ia))
+          if (system%hgs(2) > 0d0) pp_buf(2) = max(pp_buf(2), ceiling(abs_disp / system%hgs(2)))
+          abs_disp = abs(ppg%rxyz(3, ip, ia))
+          if (system%hgs(3) > 0d0) pp_buf(3) = max(pp_buf(3), ceiling(abs_disp / system%hgs(3)))
+        end do
+      end do
+    end if
+    dg_frag%nxyz_buffer(1:3) = max(num_rgrid_buffer(1:3), momentum_stencil_buf)
+    dg_frag%nxyz_buffer(1:3) = max(dg_frag%nxyz_buffer(1:3), pp_buf(1:3))
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,3i5)') "  nxyz_buffer (runtime): ", dg_frag%nxyz_buffer(1:3)
+      write(*,'(1x,a,3i5)') "  nxyz_buffer (pp-derived): ", pp_buf(1:3)
     end if
     
     ! Allocate fragment geometry arrays
