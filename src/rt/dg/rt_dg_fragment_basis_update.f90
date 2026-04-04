@@ -608,6 +608,8 @@
     integer :: count_local, count_global
     integer :: info, lwork, irow, icol
     real(8) :: max_abs, sign_val
+    real(8) :: trace_q
+    logical :: used_procrustes
     real(8) :: work_query(1)
     external :: dgesvd
 
@@ -661,6 +663,7 @@
           if (sign_val < 0.0d0) ovlp(irow,:) = -ovlp(irow,:)
         end do
 
+        used_procrustes = .false.
         lwork = -1
         call dgesvd('A', 'A', nb, nb, ovlp, nb, S, U, nb, VT, nb, work_query, lwork, info)
         if (info == 0) then
@@ -670,6 +673,7 @@
           deallocate(work)
           if (info == 0) then
             ovlp(:,:) = matmul(U, VT)
+            used_procrustes = .true.
           else
             ovlp(:,:) = ovlp_orig(:,:)
           end if
@@ -677,16 +681,25 @@
           ovlp(:,:) = ovlp_orig(:,:)
         end if
 
-        rot_norm = 0.0d0
-        do j = 1, nb
+        if (used_procrustes) then
+          ! For orthogonal Q=U*VT, ||Q-I||_F^2 = 2*nb - 2*trace(Q).
+          trace_q = 0.0d0
           do i = 1, nb
-            if (i == j) then
-              rot_norm = rot_norm + (ovlp(j,i) - 1.0d0)**2
-            else
-              rot_norm = rot_norm + ovlp(j,i)**2
-            end if
+            trace_q = trace_q + ovlp(i, i)
           end do
-        end do
+          rot_norm = max(0.0d0, 2.0d0 * dble(nb) - 2.0d0 * trace_q)
+        else
+          rot_norm = 0.0d0
+          do j = 1, nb
+            do i = 1, nb
+              if (i == j) then
+                rot_norm = rot_norm + (ovlp(j,i) - 1.0d0)**2
+              else
+                rot_norm = rot_norm + ovlp(j,i)**2
+              end if
+            end do
+          end do
+        end if
         rot_norm = sqrt(rot_norm / dble(max(1, nb)))
         rot_local_sum = rot_local_sum + rot_norm
         count_local = count_local + 1
@@ -1128,24 +1141,52 @@
             iblk_fwd = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
             iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
             if (iblk_fwd <= 0 .and. iblk_rev <= 0) cycle
-            do idx_jo = 1, valid_local_count
-              jo = valid_local_ids(idx_jo)
-              do idx_io = 1, valid_halo_count
-                io = valid_halo_ids(idx_io)
-                if (iblk_fwd > 0) then
+            if (iblk_fwd > 0 .and. iblk_rev > 0) then
+              ! Update forward and reverse blocks in separate passes so each write path
+              ! can use a cache-friendly loop order for Fortran column-major layout.
+              do idx_jo = 1, valid_local_count
+                jo = valid_local_ids(idx_jo)
+                do idx_io = 1, valid_halo_count
+                  io = valid_halo_ids(idx_io)
                   dg_frag%H_mat_kinetic_blocks(iblk_fwd)%val(io, jo, ispin) = &
                     dg_frag%H_mat_kinetic_blocks(iblk_fwd)%val(io, jo, ispin) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
                   dg_frag%H_mat_blocks(iblk_fwd)%val(io, jo, ispin) = &
                     dg_frag%H_mat_blocks(iblk_fwd)%val(io, jo, ispin) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
-                end if
-                if (iblk_rev > 0) then
+                end do
+              end do
+              do idx_io = 1, valid_halo_count
+                io = valid_halo_ids(idx_io)
+                do idx_jo = 1, valid_local_count
+                  jo = valid_local_ids(idx_jo)
                   dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
                     dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
                   dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
                     dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
-                end if
+                end do
               end do
-            end do
+            else if (iblk_fwd > 0) then
+              do idx_jo = 1, valid_local_count
+                jo = valid_local_ids(idx_jo)
+                do idx_io = 1, valid_halo_count
+                  io = valid_halo_ids(idx_io)
+                  dg_frag%H_mat_kinetic_blocks(iblk_fwd)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk_fwd)%val(io, jo, ispin) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
+                  dg_frag%H_mat_blocks(iblk_fwd)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_blocks(iblk_fwd)%val(io, jo, ispin) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+                end do
+              end do
+            else
+              do idx_jo = 1, valid_local_count
+                jo = valid_local_ids(idx_jo)
+                do idx_io = 1, valid_halo_count
+                  io = valid_halo_ids(idx_io)
+                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_T_local(io, jo, ispin, i_halo, i_local)
+                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_H_local(io, jo, ispin, i_halo, i_local)
+                end do
+              end do
+            end if
           end do
         end do
       end do

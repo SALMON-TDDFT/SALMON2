@@ -286,10 +286,14 @@ contains
 
     integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
     integer :: nx, ny, nz
-    real(8) :: k_vec(3), r_vec(3), Lbox(3), sqrt_V
+    integer :: gx0, gy0, gz0
+    real(8) :: k_vec(3), Lbox(3), sqrt_V, inv_sqrt_V
     real(8) :: vol_elem
-    complex(8) :: pw_val, overlap_local
+    complex(8) :: pw_val, overlap_local, phase_yz
+    complex(8) :: step_x, step_y, step_z
+    complex(8) :: phase_x0, phase_y0, phase_z0
     complex(8), allocatable :: frag_block(:,:,:)
+    complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
 
     if (.not. dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
@@ -297,6 +301,7 @@ contains
     vol_elem = product(dg_frag%hgs(1:3))
     Lbox(1:3) = dg_frag%hgs(1:3) * dble(dg_frag%lgnum_total(1:3))
     sqrt_V = sqrt(product(Lbox))
+    inv_sqrt_V = 1.0d0 / sqrt_V
 
     S_complex = (0.0d0, 0.0d0)
 
@@ -310,6 +315,41 @@ contains
           nx = dg_frag%nxyz_domain(1, ifrag)
           ny = dg_frag%nxyz_domain(2, ifrag)
           nz = dg_frag%nxyz_domain(3, ifrag)
+          gx0 = dg_frag%ixyz_frag(1, ifrag)
+          gy0 = dg_frag%ixyz_frag(2, ifrag)
+          gz0 = dg_frag%ixyz_frag(3, ifrag)
+
+          if (.not. allocated(phase_x) .or. size(phase_x) < nx) then
+            if (allocated(phase_x)) deallocate(phase_x)
+            allocate(phase_x(nx))
+          end if
+          if (.not. allocated(phase_y) .or. size(phase_y) < ny) then
+            if (allocated(phase_y)) deallocate(phase_y)
+            allocate(phase_y(ny))
+          end if
+          if (.not. allocated(phase_z) .or. size(phase_z) < nz) then
+            if (allocated(phase_z)) deallocate(phase_z)
+            allocate(phase_z(nz))
+          end if
+
+          step_x = exp(cmplx(0.0d0, k_vec(1) * dg_frag%hgs(1), kind=8))
+          step_y = exp(cmplx(0.0d0, k_vec(2) * dg_frag%hgs(2), kind=8))
+          step_z = exp(cmplx(0.0d0, k_vec(3) * dg_frag%hgs(3), kind=8))
+          phase_x0 = exp(cmplx(0.0d0, k_vec(1) * dble(gx0) * dg_frag%hgs(1), kind=8))
+          phase_y0 = exp(cmplx(0.0d0, k_vec(2) * dble(gy0) * dg_frag%hgs(2), kind=8))
+          phase_z0 = exp(cmplx(0.0d0, k_vec(3) * dble(gz0) * dg_frag%hgs(3), kind=8))
+          phase_x(1) = phase_x0
+          do ix = 2, nx
+            phase_x(ix) = phase_x(ix-1) * step_x
+          end do
+          phase_y(1) = phase_y0
+          do iy = 2, ny
+            phase_y(iy) = phase_y(iy-1) * step_y
+          end do
+          phase_z(1) = phase_z0
+          do iz = 2, nz
+            phase_z(iz) = phase_z(iz-1) * step_z
+          end do
 
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
@@ -318,12 +358,9 @@ contains
 
             do iz = 1, nz
               do iy = 1, ny
+                phase_yz = phase_y(iy) * phase_z(iz)
                 do ix = 1, nx
-                  r_vec(1) = (dg_frag%ixyz_frag(1,ifrag) + ix - 1) * dg_frag%hgs(1)
-                  r_vec(2) = (dg_frag%ixyz_frag(2,ifrag) + iy - 1) * dg_frag%hgs(2)
-                  r_vec(3) = (dg_frag%ixyz_frag(3,ifrag) + iz - 1) * dg_frag%hgs(3)
-
-                  pw_val = exp(cmplx(0.0d0, sum(k_vec*r_vec), kind=8)) / sqrt_V
+                  pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
 
                   if (allocated(dg_frag%phi_frag_c)) then
                     overlap_local = overlap_local + &
@@ -341,6 +378,10 @@ contains
         end do
       end do
     end do
+
+    if (allocated(phase_x)) deallocate(phase_x)
+    if (allocated(phase_y)) deallocate(phase_y)
+    if (allocated(phase_z)) deallocate(phase_z)
 
     allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
     do ifrag = 1, dg_frag%n_frag
@@ -423,10 +464,14 @@ contains
 
     integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
     integer :: nx, ny, nz
-    real(8) :: k_vec(3), r_vec(3), Lbox(3), sqrt_V
+    integer :: gx, gy, gz, gx0, gy0, gz0
+    real(8) :: k_vec(3), Lbox(3), sqrt_V, inv_sqrt_V
     real(8) :: vol_elem, k_squared, V_total
-    complex(8) :: pw_val, pw_laplacian, hamiltonian_local
+    complex(8) :: pw_val, pw_laplacian, hamiltonian_local, phase_yz
+    complex(8) :: step_x, step_y, step_z
+    complex(8) :: phase_x0, phase_y0, phase_z0
     complex(8), allocatable :: frag_block(:,:,:)
+    complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
 
     if (.not. dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
@@ -434,6 +479,7 @@ contains
     vol_elem = product(dg_frag%hgs(1:3))
     Lbox(1:3) = dg_frag%hgs(1:3) * dble(dg_frag%lgnum_total(1:3))
     sqrt_V = sqrt(product(Lbox))
+    inv_sqrt_V = 1.0d0 / sqrt_V
 
     H_complex = (0.0d0, 0.0d0)
 
@@ -448,6 +494,41 @@ contains
           nx = dg_frag%nxyz_domain(1, ifrag)
           ny = dg_frag%nxyz_domain(2, ifrag)
           nz = dg_frag%nxyz_domain(3, ifrag)
+          gx0 = dg_frag%ixyz_frag(1, ifrag)
+          gy0 = dg_frag%ixyz_frag(2, ifrag)
+          gz0 = dg_frag%ixyz_frag(3, ifrag)
+
+          if (.not. allocated(phase_x) .or. size(phase_x) < nx) then
+            if (allocated(phase_x)) deallocate(phase_x)
+            allocate(phase_x(nx))
+          end if
+          if (.not. allocated(phase_y) .or. size(phase_y) < ny) then
+            if (allocated(phase_y)) deallocate(phase_y)
+            allocate(phase_y(ny))
+          end if
+          if (.not. allocated(phase_z) .or. size(phase_z) < nz) then
+            if (allocated(phase_z)) deallocate(phase_z)
+            allocate(phase_z(nz))
+          end if
+
+          step_x = exp(cmplx(0.0d0, k_vec(1) * dg_frag%hgs(1), kind=8))
+          step_y = exp(cmplx(0.0d0, k_vec(2) * dg_frag%hgs(2), kind=8))
+          step_z = exp(cmplx(0.0d0, k_vec(3) * dg_frag%hgs(3), kind=8))
+          phase_x0 = exp(cmplx(0.0d0, k_vec(1) * dble(gx0) * dg_frag%hgs(1), kind=8))
+          phase_y0 = exp(cmplx(0.0d0, k_vec(2) * dble(gy0) * dg_frag%hgs(2), kind=8))
+          phase_z0 = exp(cmplx(0.0d0, k_vec(3) * dble(gz0) * dg_frag%hgs(3), kind=8))
+          phase_x(1) = phase_x0
+          do ix = 2, nx
+            phase_x(ix) = phase_x(ix-1) * step_x
+          end do
+          phase_y(1) = phase_y0
+          do iy = 2, ny
+            phase_y(iy) = phase_y(iy-1) * step_y
+          end do
+          phase_z(1) = phase_z0
+          do iz = 2, nz
+            phase_z(iz) = phase_z(iz-1) * step_z
+          end do
 
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
@@ -455,24 +536,16 @@ contains
             hamiltonian_local = (0.0d0, 0.0d0)
 
             do iz = 1, nz
+              gz = gz0 + iz - 1
               do iy = 1, ny
+                gy = gy0 + iy - 1
+                phase_yz = phase_y(iy) * phase_z(iz)
                 do ix = 1, nx
-                  r_vec(1) = (dg_frag%ixyz_frag(1,ifrag) + ix - 1) * dg_frag%hgs(1)
-                  r_vec(2) = (dg_frag%ixyz_frag(2,ifrag) + iy - 1) * dg_frag%hgs(2)
-                  r_vec(3) = (dg_frag%ixyz_frag(3,ifrag) + iz - 1) * dg_frag%hgs(3)
-
-                  pw_val = exp(cmplx(0.0d0, sum(k_vec*r_vec), kind=8)) / sqrt_V
+                  gx = gx0 + ix - 1
+                  pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                   pw_laplacian = (k_squared / 2.0d0) * pw_val
 
-                  V_total = Vpsl%f(dg_frag%ixyz_frag(1,ifrag)+ix-1, &
-                                   dg_frag%ixyz_frag(2,ifrag)+iy-1, &
-                                   dg_frag%ixyz_frag(3,ifrag)+iz-1) + &
-                            Vh%f(dg_frag%ixyz_frag(1,ifrag)+ix-1, &
-                                 dg_frag%ixyz_frag(2,ifrag)+iy-1, &
-                                 dg_frag%ixyz_frag(3,ifrag)+iz-1) + &
-                            Vxc(ispin)%f(dg_frag%ixyz_frag(1,ifrag)+ix-1, &
-                                         dg_frag%ixyz_frag(2,ifrag)+iy-1, &
-                                         dg_frag%ixyz_frag(3,ifrag)+iz-1)
+                  V_total = Vpsl%f(gx, gy, gz) + Vh%f(gx, gy, gz) + Vxc(ispin)%f(gx, gy, gz)
 
                   if (allocated(dg_frag%phi_frag_c)) then
                     hamiltonian_local = hamiltonian_local + &
@@ -492,6 +565,10 @@ contains
         end do
       end do
     end do
+
+    if (allocated(phase_x)) deallocate(phase_x)
+    if (allocated(phase_y)) deallocate(phase_y)
+    if (allocated(phase_z)) deallocate(phase_z)
 
     allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
     do ifrag = 1, dg_frag%n_frag

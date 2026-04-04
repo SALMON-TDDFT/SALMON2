@@ -654,7 +654,7 @@
     real(8) :: hvol
     complex(8) :: integral
     real(8) :: max_p
-    logical :: has_overlap
+    logical :: has_overlap, use_phi_complex, use_halo_complex
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components)
     type(momentum_block_info), allocatable :: momentum_blocks_re(:), momentum_blocks_im(:)
     integer, allocatable :: momentum_block_map_local(:,:)
@@ -689,6 +689,7 @@
     
     ! Exchange halo regions before stencil operations
     call exchange_phi_frag_halo(dg_frag)
+    use_phi_complex = allocated(dg_frag%phi_frag_c)
     
     ! Loop over spin
     do ispin = 1, system%nspin
@@ -724,13 +725,12 @@
         lz_hi = phi_loc_e(3)
         
         ! Loop over basis functions in fragment j (ket side)
-        ! Note: Each thread allocates its own grad_phi to avoid race conditions
-        !$omp parallel do private(jo,io,idir,ix,iy,iz,integral,grad_phi) collapse(1)
-        do jo = 1, dg_frag%n_basis(ifrag, ispin)
-          
-          ! Allocate thread-local workspace for gradient
+        ! Allocate thread-local gradient workspace once per thread.
+        !$omp parallel private(grad_phi,jo,io,idir,ix,iy,iz,integral,lx,ly,lz,ig_i,ig_j)
           allocate(grad_phi(is(1):ie(1), is(2):ie(2), is(3):ie(3), 3))
-          
+        !$omp do schedule(static)
+        do jo = 1, dg_frag%n_basis(ifrag, ispin)
+
           ! Calculate gradient of phi_j using stencil
           call apply_gradient_to_basis_ops(dg_frag, i_local, jo, mg, stencil, grad_phi)
           
@@ -747,7 +747,7 @@
               ! Compute matrix element: p_ij = ∫ φ_i(r) * (∂φ_j/∂dir) dr
               ! Note: momentum operator uses p = -i∇; the -i is applied in time evolution
               integral = (0.0d0, 0.0d0)
-              if (allocated(dg_frag%phi_frag_c)) then
+              if (use_phi_complex) then
                 do lz = lz_lo, lz_hi
                   do ly = ly_lo, ly_hi
                     do lx = lx_lo, lx_hi
@@ -775,52 +775,57 @@
             end do  ! idir
           end do  ! io
           
-          ! Deallocate thread-local workspace
-          deallocate(grad_phi)
-          
         end do  ! jo
-        !$omp end parallel do
+        !$omp end do
+          deallocate(grad_phi)
+        !$omp end parallel
         
         ! Inter-fragment momentum blocks from halo regions.
         ! Use half-weight updates to avoid double counting since each neighbor pair
         ! appears from both destination fragments across the full communicator.
-        !$omp parallel do private(jo,i_halo,jfrag,n_basis_halo,l,d,ig_col,io,ig_row,idir,ix,iy,iz,integral,grad_phi) collapse(1)
-        do jo = 1, dg_frag%n_basis(ifrag, ispin)
+        !$omp parallel private(grad_phi,jo,i_halo,jfrag,n_basis_halo,l,d,ig_col,io,ig_row,idir,ix,iy,iz,integral,halo_send_idx,halo_recv_idx,use_halo_complex)
           allocate(grad_phi(is(1):ie(1), is(2):ie(2), is(3):ie(3), 3))
+        !$omp do schedule(static)
+        do jo = 1, dg_frag%n_basis(ifrag, ispin)
           call apply_gradient_to_basis_ops(dg_frag, i_local, jo, mg, stencil, grad_phi)
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
-          if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) then
-            deallocate(grad_phi)
-            cycle
-          end if
+          if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
 
           do i_halo = 1, dg_frag%n_halo
             if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
             jfrag = dg_frag%halo(i_halo)%ifrag_src
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
+            use_halo_complex = allocated(dg_frag%halo(i_halo)%buf_recv_c)
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)
               if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
               do idir = 1, 3
                 integral = (0.0d0, 0.0d0)
-                do iz = 1, l(3)
-                  do iy = 1, l(2)
-                    do ix = 1, l(1)
-                      call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
-                      if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
+                if (use_halo_complex) then
+                  do iz = 1, l(3)
+                    do iy = 1, l(2)
+                      do ix = 1, l(1)
+                        call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                         integral = integral + &
                           conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
                           cmplx(grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), idir), 0.0d0, kind=8) * hvol
-                      else
+                      end do
+                    end do
+                  end do
+                else
+                  do iz = 1, l(3)
+                    do iy = 1, l(2)
+                      do ix = 1, l(1)
+                        call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                         integral = integral + &
                           cmplx(dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1), 0.0d0, kind=8) * &
                           cmplx(grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), idir), 0.0d0, kind=8) * hvol
-                      end if
+                      end do
                     end do
                   end do
-                end do
+                end if
 
                 dg_frag%momentum_mat_c(idir, ig_row, ig_col, ispin) = &
                   dg_frag%momentum_mat_c(idir, ig_row, ig_col, ispin) + 0.5d0 * integral
@@ -829,10 +834,10 @@
               end do
             end do
           end do
-
-          deallocate(grad_phi)
         end do
-        !$omp end parallel do
+        !$omp end do
+          deallocate(grad_phi)
+        !$omp end parallel
 
       end do  ! ifrag
     end do  ! ispin
@@ -1816,13 +1821,14 @@
     type(s_dft_system),     intent(in)    :: system
     type(s_rgrid),          intent(in)    :: mg
 
-    integer :: ifrag, i_local, ispin, io, jo
+    integer :: ifrag, i_local, ispin, io, jo, nbf_local
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
     integer :: lx, ly, lz, iorg(3), ndom(3)
     integer :: ixg, iyg, izg, bx, by, bz
+    integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: n_eval, lwork, info_eig, n_blocks, icomm_reduce
-    logical :: use_complex_halo
+    logical :: use_complex_halo, use_complex_phi
     real(8) :: hvol, s_min, s_max, cond_est
     complex(8) :: integral
     complex(8) :: cwork_query(1)
@@ -1854,8 +1860,15 @@
     is = mg%is
     ie = mg%ie
     hvol = system%hvol
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
 
     call exchange_phi_frag_halo(dg_frag)
+    use_complex_phi = allocated(dg_frag%phi_frag_c)
 
     do ispin = 1, system%nspin
       i_local = 0
@@ -1863,12 +1876,14 @@
         i_local = i_local + 1
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        nbf_local = dg_frag%n_basis(ifrag, ispin)
+        if (nbf_local <= 0) cycle
 
-        do jo = 1, dg_frag%n_basis(ifrag, ispin)
+        do jo = 1, nbf_local
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
 
-          do io = 1, dg_frag%n_basis(ifrag, ispin)
+          do io = 1, nbf_local
             ig_row = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
             integral = (0.0d0, 0.0d0)
@@ -1878,11 +1893,11 @@
                 iyg = modulo(iorg(2) + ly - 2, mg%num(2)) + 1
                 do lx = 1, ndom(1)
                   ixg = modulo(iorg(1) + lx - 2, mg%num(1)) + 1
-                  bx = map_global_to_phi_box_coord_ham_soi(ixg, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-                  by = map_global_to_phi_box_coord_ham_soi(iyg, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-                  bz = map_global_to_phi_box_coord_ham_soi(izg, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+                  bx = map_global_to_phi_box_coord_ham_soi(ixg, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
+                  by = map_global_to_phi_box_coord_ham_soi(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+                  bz = map_global_to_phi_box_coord_ham_soi(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
                   if (bx == 0 .or. by == 0 .or. bz == 0) cycle
-                  if (allocated(dg_frag%phi_frag_c)) then
+                  if (use_complex_phi) then
                     integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * &
                                dg_frag%phi_frag_c(bx, by, bz, jo, i_local) * hvol
                   else
@@ -1901,7 +1916,7 @@
             if (jfrag < 1) cycle
             n_basis_halo = dg_frag%n_basis(jfrag, ispin)
             l = dg_frag%halo(i_halo)%length
-            use_complex_halo = allocated(dg_frag%halo(i_halo)%buf_recv_c) .and. allocated(dg_frag%phi_frag_c)
+            use_complex_halo = allocated(dg_frag%halo(i_halo)%buf_recv_c) .and. use_complex_phi
 
             do io = 1, n_basis_halo
               ig_row = dg_frag%index_basis(io, jfrag, ispin)

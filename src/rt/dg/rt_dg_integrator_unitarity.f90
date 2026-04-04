@@ -48,19 +48,26 @@
           v(1:n_frag) = coef_frag_all(1:n_frag, io)
           v(n_frag+1:n_tot) = coef_pw_all(1:n_pw, io)
 
-          do jo = 1, io - 1
-            u_prev(:) = (0.0d0, 0.0d0)
-            u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
-            u_prev(n_frag+1:n_tot) = coef_pw_all(1:n_pw, jo)
+          if (use_S) then
+            do jo = 1, io - 1
+              u_prev(:) = (0.0d0, 0.0d0)
+              u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
+              u_prev(n_frag+1:n_tot) = coef_pw_all(1:n_pw, jo)
 
-            if (use_S) then
               call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
               proj = sum(conjg(u_prev(:)) * Sv(:))
-            else
+              v(:) = v(:) - proj * u_prev(:)
+            end do
+          else
+            do jo = 1, io - 1
+              u_prev(:) = (0.0d0, 0.0d0)
+              u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
+              u_prev(n_frag+1:n_tot) = coef_pw_all(1:n_pw, jo)
+
               proj = sum(conjg(u_prev(:)) * v(:))
-            end if
-            v(:) = v(:) - proj * u_prev(:)
-          end do
+              v(:) = v(:) - proj * u_prev(:)
+            end do
+          end if
 
           if (use_S) then
             call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
@@ -110,18 +117,24 @@
           v(:) = (0.0d0, 0.0d0)
           v(1:n_frag) = coef_frag_all(1:n_frag, io)
 
-          do jo = 1, io - 1
-            u_prev(:) = (0.0d0, 0.0d0)
-            u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
+          if (use_S) then
+            do jo = 1, io - 1
+              u_prev(:) = (0.0d0, 0.0d0)
+              u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
 
-            if (use_S) then
               call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
               proj = sum(conjg(u_prev(:)) * Sv(:))
-            else
+              v(:) = v(:) - proj * u_prev(:)
+            end do
+          else
+            do jo = 1, io - 1
+              u_prev(:) = (0.0d0, 0.0d0)
+              u_prev(1:n_frag) = coef_frag_all(1:n_frag, jo)
+
               proj = sum(conjg(u_prev(:)) * v(:))
-            end if
-            v(:) = v(:) - proj * u_prev(:)
-          end do
+              v(:) = v(:) - proj * u_prev(:)
+            end do
+          end if
 
           if (use_S) then
             call apply_overlap_operator(dg_frag, ispin, v(:), Sv(:), .true.)
