@@ -429,6 +429,9 @@
     
     integer :: ifrag, ispin, io, jo, i_local, nbf, nbf_raw, ig_i, ig_j
     integer :: ifrag_chk, i_local_chk, ix_chk, iy_chk, iz_chk, istate_chk
+    integer :: nstate_chk_max, lg1_chk, lg2_chk, lg3_chk
+    integer :: phi_lb1_chk, phi_ub1_chk, phi_lb2_chk, phi_ub2_chk, phi_lb3_chk, phi_ub3_chk
+    integer :: iorg_chk(3), ndom_chk(3)
     integer :: gx, gy, gz, bx, by, bz
     integer :: ndom(3)
     integer :: i_halo, jfrag, n_basis_halo, n_basis_halo_max
@@ -489,6 +492,16 @@
     phi_checksum_after = 0.0d0
     phi_checksum_delta = 0.0d0
     phi_checksum_tol = 0.0d0
+    nstate_chk_max = min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
+    lg1_chk = dg_frag%lgnum_total(1)
+    lg2_chk = dg_frag%lgnum_total(2)
+    lg3_chk = dg_frag%lgnum_total(3)
+    phi_lb1_chk = lbound(dg_frag%phi_frag, 1)
+    phi_ub1_chk = ubound(dg_frag%phi_frag, 1)
+    phi_lb2_chk = lbound(dg_frag%phi_frag, 2)
+    phi_ub2_chk = ubound(dg_frag%phi_frag, 2)
+    phi_lb3_chk = lbound(dg_frag%phi_frag, 3)
+    phi_ub3_chk = ubound(dg_frag%phi_frag, 3)
     did_overlap_call = .false.
     
     ! Step 1: Calculate momentum matrix elements (transition moments)
@@ -505,17 +518,21 @@
       do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local_chk = i_local_chk + 1
         if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-        do istate_chk = 1, min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
-          do iz_chk = 1, dg_frag%nxyz_domain(3, ifrag_chk)
-            gz = modulo(dg_frag%ixyz_frag(3, ifrag_chk) + iz_chk - 2, dg_frag%lgnum_total(3)) + 1
-            do iy_chk = 1, dg_frag%nxyz_domain(2, ifrag_chk)
-              gy = modulo(dg_frag%ixyz_frag(2, ifrag_chk) + iy_chk - 2, dg_frag%lgnum_total(2)) + 1
-              do ix_chk = 1, dg_frag%nxyz_domain(1, ifrag_chk)
-                gx = modulo(dg_frag%ixyz_frag(1, ifrag_chk) + ix_chk - 2, dg_frag%lgnum_total(1)) + 1
-                bx = map_global_to_phi_box_coord_ham(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-                by = map_global_to_phi_box_coord_ham(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-                bz = map_global_to_phi_box_coord_ham(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
-                if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+        iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
+        ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
+        do istate_chk = 1, nstate_chk_max
+          do iz_chk = 1, ndom_chk(3)
+            gz = iorg_chk(3) + iz_chk - 1
+            bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
+            if (bz == 0) cycle
+            do iy_chk = 1, ndom_chk(2)
+              gy = iorg_chk(2) + iy_chk - 1
+              by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
+              if (by == 0) cycle
+              do ix_chk = 1, ndom_chk(1)
+                gx = iorg_chk(1) + ix_chk - 1
+                bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
+                if (bx == 0) cycle
                 phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
               end do
             end do
@@ -545,17 +562,21 @@
         do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local_chk = i_local_chk + 1
           if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-          do istate_chk = 1, min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
-            do iz_chk = 1, dg_frag%nxyz_domain(3, ifrag_chk)
-              gz = modulo(dg_frag%ixyz_frag(3, ifrag_chk) + iz_chk - 2, dg_frag%lgnum_total(3)) + 1
-              do iy_chk = 1, dg_frag%nxyz_domain(2, ifrag_chk)
-                gy = modulo(dg_frag%ixyz_frag(2, ifrag_chk) + iy_chk - 2, dg_frag%lgnum_total(2)) + 1
-                do ix_chk = 1, dg_frag%nxyz_domain(1, ifrag_chk)
-                  gx = modulo(dg_frag%ixyz_frag(1, ifrag_chk) + ix_chk - 2, dg_frag%lgnum_total(1)) + 1
-                  bx = map_global_to_phi_box_coord_ham(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-                  by = map_global_to_phi_box_coord_ham(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-                  bz = map_global_to_phi_box_coord_ham(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
-                  if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+          iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
+          ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
+          do istate_chk = 1, nstate_chk_max
+            do iz_chk = 1, ndom_chk(3)
+              gz = iorg_chk(3) + iz_chk - 1
+              bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
+              if (bz == 0) cycle
+              do iy_chk = 1, ndom_chk(2)
+                gy = iorg_chk(2) + iy_chk - 1
+                by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
+                if (by == 0) cycle
+                do ix_chk = 1, ndom_chk(1)
+                  gx = iorg_chk(1) + ix_chk - 1
+                  bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
+                  if (bx == 0) cycle
                   phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
                 end do
               end do
@@ -583,17 +604,21 @@
       do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local_chk = i_local_chk + 1
         if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-        do istate_chk = 1, min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
-          do iz_chk = 1, dg_frag%nxyz_domain(3, ifrag_chk)
-            gz = modulo(dg_frag%ixyz_frag(3, ifrag_chk) + iz_chk - 2, dg_frag%lgnum_total(3)) + 1
-            do iy_chk = 1, dg_frag%nxyz_domain(2, ifrag_chk)
-              gy = modulo(dg_frag%ixyz_frag(2, ifrag_chk) + iy_chk - 2, dg_frag%lgnum_total(2)) + 1
-              do ix_chk = 1, dg_frag%nxyz_domain(1, ifrag_chk)
-                gx = modulo(dg_frag%ixyz_frag(1, ifrag_chk) + ix_chk - 2, dg_frag%lgnum_total(1)) + 1
-                bx = map_global_to_phi_box_coord_ham(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-                by = map_global_to_phi_box_coord_ham(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-                bz = map_global_to_phi_box_coord_ham(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
-                if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+        iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
+        ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
+        do istate_chk = 1, nstate_chk_max
+          do iz_chk = 1, ndom_chk(3)
+            gz = iorg_chk(3) + iz_chk - 1
+            bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
+            if (bz == 0) cycle
+            do iy_chk = 1, ndom_chk(2)
+              gy = iorg_chk(2) + iy_chk - 1
+              by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
+              if (by == 0) cycle
+              do ix_chk = 1, ndom_chk(1)
+                gx = iorg_chk(1) + ix_chk - 1
+                bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
+                if (bx == 0) cycle
                 phi_checksum_after = phi_checksum_after + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
               end do
             end do
