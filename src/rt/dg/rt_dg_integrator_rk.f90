@@ -120,7 +120,8 @@
         flush(6)
       end if
       if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel private(jo)
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -128,8 +129,8 @@
             end do
           end do
         end do
-!$omp end parallel do
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp end do nowait
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
@@ -137,7 +138,8 @@
             end do
           end do
         end do
-!$omp end parallel do
+!$omp end do
+!$omp end parallel
       else
 !$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
@@ -192,7 +194,8 @@
 
       ! Stage 3
       if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel private(jo)
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -200,8 +203,8 @@
             end do
           end do
         end do
-!$omp end parallel do
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp end do nowait
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
@@ -209,7 +212,8 @@
             end do
           end do
         end do
-!$omp end parallel do
+!$omp end do
+!$omp end parallel
       else
 !$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
@@ -241,7 +245,8 @@
       ! Stage 4
       Ac_tot = rt%Ac_tot(:, itt+1)
       if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel private(jo)
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -249,8 +254,8 @@
             end do
           end do
         end do
-!$omp end parallel do
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp end do nowait
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
@@ -258,7 +263,8 @@
             end do
           end do
         end do
-!$omp end parallel do
+!$omp end do
+!$omp end parallel
       else
 !$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
@@ -289,7 +295,8 @@
 
       ! Final RK4 combination
       if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel private(jo)
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n
@@ -299,8 +306,8 @@
             end do
           end do
         end do
-!$omp end parallel do
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp end do nowait
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
@@ -310,7 +317,8 @@
             end do
           end do
         end do
-!$omp end parallel do
+!$omp end do
+!$omp end parallel
       else
 !$omp parallel do collapse(2) private(jo) schedule(static)
         do ispin = 1, dg_frag%nspin
@@ -367,7 +375,8 @@
           ! Update coefficients for next stage
           if (istage < dg_frag%rk_stages) then
             ! OpenMP parallelization for coefficient update
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel private(jo)
+!$omp do collapse(2) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
                 do jo = 1, n
@@ -377,8 +386,8 @@
                 end do
               end do
             end do
-!$omp end parallel do
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp end do nowait
+!$omp do collapse(2) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
                 do jo = 1, n_pw
@@ -390,7 +399,8 @@
                 end do
               end do
             end do
-!$omp end parallel do
+!$omp end do
+!$omp end parallel
             if (use_mixed_rt) then
               do ispin = 1, dg_frag%nspin
                 call sync_mixed_coef_from_raw(dg_frag, ispin)
@@ -450,7 +460,8 @@
       !
       ! BUG FIX (PW): final step for coef_pw was missing entirely; added here.
       associate(rs => dg_frag%rk_stages)
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel private(jo)
+!$omp do collapse(2) schedule(static)
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%nstate_tot
           do jo = 1, n
@@ -460,9 +471,9 @@
           end do
         end do
       end do
-!$omp end parallel do
+!$omp end do
       if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
             do jo = 1, n_pw
@@ -472,8 +483,9 @@
             end do
           end do
         end do
-!$omp end parallel do
+!$omp end do
       end if
+!$omp end parallel
       end associate
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
