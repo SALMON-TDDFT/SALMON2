@@ -2659,6 +2659,7 @@
             call cpu_time(t0)
             do lz = lz_lo, lz_hi
               do ly = ly_lo, ly_hi
+                !$omp simd reduction(+:integral)
                 do lx = lx_lo, lx_hi
                   integral = integral + dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
                              dg_frag%phi_frag(lx, ly, lz, jo, i_local) * hvol
