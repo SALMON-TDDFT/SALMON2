@@ -117,6 +117,8 @@
     real(8) :: g211_rank_buf_re_global, g211_rank_buf_im_global
     real(8) :: g211_pre_total_re, g211_pre_total_im
     real(8) :: phase_theta, phase_re, phase_im, g211_pred_re, g211_pred_im
+    real(8) :: g211_re_line, g211_im_line, rho_val
+    real(8), allocatable :: g211_cos_x(:), g211_sin_x(:)
     real(8), allocatable :: ifrag_charge_pre(:), ifrag_charge_applied(:), ifrag_charge_remote(:)
     real(8), allocatable :: ifrag_charge_pre_global_local(:), ifrag_charge_pre_global_sum(:)
     real(8), allocatable :: ifrag_g211_pre_re(:), ifrag_g211_pre_im(:)
@@ -2125,15 +2127,34 @@
       if (enable_density_stage_charge_probe) then
         g211_rank_buf_re_local = 0.0d0
         g211_rank_buf_im_local = 0.0d0
+        allocate(g211_cos_x(rho_x_lo:rho_x_hi), g211_sin_x(rho_x_lo:rho_x_hi))
+        !$omp parallel do private(theta) schedule(static)
+        do ixg = rho_x_lo, rho_x_hi
+          theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
+          g211_cos_x(ixg) = cos(theta)
+          g211_sin_x(ixg) = sin(theta)
+        end do
+        !$omp end parallel do
+
+        !$omp parallel do collapse(2) private(ixg, g211_re_line, g211_im_line, rho_val) &
+        !$omp& reduction(+:g211_rank_buf_re_local, g211_rank_buf_im_local) schedule(static)
         do izg = rho_z_lo, rho_z_hi
           do iyg = rho_y_lo, rho_y_hi
+            g211_re_line = 0.0d0
+            g211_im_line = 0.0d0
+            !$omp simd reduction(+:g211_re_line, g211_im_line)
             do ixg = rho_x_lo, rho_x_hi
-              theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
-              g211_rank_buf_re_local = g211_rank_buf_re_local + rho_rank_buf(ixg, iyg, izg, 0) * cos(theta)
-              g211_rank_buf_im_local = g211_rank_buf_im_local - rho_rank_buf(ixg, iyg, izg, 0) * sin(theta)
+              rho_val = rho_rank_buf(ixg, iyg, izg, 0)
+              g211_re_line = g211_re_line + rho_val * g211_cos_x(ixg)
+              g211_im_line = g211_im_line - rho_val * g211_sin_x(ixg)
             end do
+            g211_rank_buf_re_local = g211_rank_buf_re_local + g211_re_line
+            g211_rank_buf_im_local = g211_rank_buf_im_local + g211_im_line
           end do
         end do
+        !$omp end parallel do
+
+        deallocate(g211_cos_x, g211_sin_x)
         call comm_summation(g211_rank_buf_re_local, g211_rank_buf_re_global, dg_frag%icomm)
         call comm_summation(g211_rank_buf_im_local, g211_rank_buf_im_global, dg_frag%icomm)
         if (dg_frag%id == 0) then
