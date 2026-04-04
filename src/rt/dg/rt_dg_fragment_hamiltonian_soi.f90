@@ -26,7 +26,7 @@
     type(s_pp_grid),        intent(in)    :: ppg
     
     integer :: ifrag, ispin, io, jo, i_local, nbf, ig_i, ig_j
-    real(8) :: hvol
+    real(8) :: hvol, integral_re, integral_im, gval, phi_re, phi_im
     complex(8) :: integral_t, integral_h
     real(8) :: max_p
     real(8) :: Ac_zero(3)
@@ -284,13 +284,15 @@
     if (gx_lo > gx_hi .or. gy_lo > gy_hi .or. gz_lo > gz_hi) return
 !$omp parallel do private(gz, gy, gx, bx, by, bz) schedule(static)
     do gz = gz_lo, gz_hi
+      bz = map_global_to_phi_box_coord_ham_soi(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+      if (bz == 0) cycle
       do gy = gy_lo, gy_hi
+        by = map_global_to_phi_box_coord_ham_soi(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+        if (by == 0) cycle
 !$omp simd
         do gx = gx_lo, gx_hi
           bx = map_global_to_phi_box_coord_ham_soi(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          by = map_global_to_phi_box_coord_ham_soi(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          bz = map_global_to_phi_box_coord_ham_soi(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+          if (bx == 0) cycle
           if (allocated(dg_frag%phi_frag_c)) then
             H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
           else
@@ -372,12 +374,14 @@
     integral = (0.0d0, 0.0d0)
     if (gx_lo > gx_hi .or. gy_lo > gy_hi .or. gz_lo > gz_hi) return
     do gz = gz_lo, gz_hi
+      bz = map_global_to_phi_box_coord_ham_soi(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+      if (bz == 0) cycle
       do gy = gy_lo, gy_hi
+        by = map_global_to_phi_box_coord_ham_soi(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+        if (by == 0) cycle
         do gx = gx_lo, gx_hi
           bx = map_global_to_phi_box_coord_ham_soi(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-          by = map_global_to_phi_box_coord_ham_soi(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-          bz = map_global_to_phi_box_coord_ham_soi(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-          if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+          if (bx == 0) cycle
           if (allocated(dg_frag%phi_frag_c)) then
             integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
           else
@@ -726,7 +730,7 @@
         
         ! Loop over basis functions in fragment j (ket side)
         ! Allocate thread-local gradient workspace once per thread.
-        !$omp parallel private(grad_phi,jo,io,idir,ix,iy,iz,integral,lx,ly,lz,ig_i,ig_j)
+        !$omp parallel private(grad_phi,jo,io,idir,ix,iy,iz,integral,integral_re,integral_im,gval,phi_re,phi_im,lx,ly,lz,ig_i,ig_j)
           allocate(grad_phi(is(1):ie(1), is(2):ie(2), is(3):ie(3), 3))
         !$omp do schedule(static)
         do jo = 1, dg_frag%n_basis(ifrag, ispin)
@@ -748,25 +752,33 @@
               ! Note: momentum operator uses p = -i∇; the -i is applied in time evolution
               integral = (0.0d0, 0.0d0)
               if (use_phi_complex) then
+                integral_re = 0.0d0
+                integral_im = 0.0d0
                 do lz = lz_lo, lz_hi
                   do ly = ly_lo, ly_hi
+!$omp simd reduction(+:integral_re,integral_im) private(gval,phi_re,phi_im)
                     do lx = lx_lo, lx_hi
-                      integral = integral + &
-                        conjg(dg_frag%phi_frag_c(lx, ly, lz, io, i_local)) * &
-                        cmplx(grad_phi(lx, ly, lz, idir), 0.0d0, kind=8) * hvol
+                      gval = grad_phi(lx, ly, lz, idir) * hvol
+                      phi_re = real(dg_frag%phi_frag_c(lx, ly, lz, io, i_local), kind=8)
+                      phi_im = aimag(dg_frag%phi_frag_c(lx, ly, lz, io, i_local))
+                      integral_re = integral_re + phi_re * gval
+                      integral_im = integral_im - phi_im * gval
                     end do
                   end do
                 end do
+                integral = cmplx(integral_re, integral_im, kind=8)
               else
+                integral_re = 0.0d0
                 do lz = lz_lo, lz_hi
                   do ly = ly_lo, ly_hi
+!$omp simd reduction(+:integral_re) private(gval)
                     do lx = lx_lo, lx_hi
-                      integral = integral + &
-                        cmplx(dg_frag%phi_frag(lx, ly, lz, io, i_local), 0.0d0, kind=8) * &
-                        cmplx(grad_phi(lx, ly, lz, idir), 0.0d0, kind=8) * hvol
+                      gval = grad_phi(lx, ly, lz, idir) * hvol
+                      integral_re = integral_re + dg_frag%phi_frag(lx, ly, lz, io, i_local) * gval
                     end do
                   end do
                 end do
+                integral = cmplx(integral_re, 0.0d0, kind=8)
               end if
               
               ! Store in global momentum matrix
@@ -1888,15 +1900,17 @@
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
             integral = (0.0d0, 0.0d0)
             do lz = 1, ndom(3)
-              izg = modulo(iorg(3) + lz - 2, mg%num(3)) + 1
+              izg = iorg(3) + lz - 1
+              bz = map_global_to_phi_box_coord_ham_soi(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+              if (bz == 0) cycle
               do ly = 1, ndom(2)
-                iyg = modulo(iorg(2) + ly - 2, mg%num(2)) + 1
+                iyg = iorg(2) + ly - 1
+                by = map_global_to_phi_box_coord_ham_soi(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
+                if (by == 0) cycle
                 do lx = 1, ndom(1)
-                  ixg = modulo(iorg(1) + lx - 2, mg%num(1)) + 1
+                  ixg = iorg(1) + lx - 1
                   bx = map_global_to_phi_box_coord_ham_soi(ixg, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-                  by = map_global_to_phi_box_coord_ham_soi(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-                  bz = map_global_to_phi_box_coord_ham_soi(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
-                  if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+                  if (bx == 0) cycle
                   if (use_complex_phi) then
                     integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * &
                                dg_frag%phi_frag_c(bx, by, bz, jo, i_local) * hvol
