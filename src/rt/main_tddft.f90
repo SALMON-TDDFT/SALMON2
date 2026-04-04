@@ -283,9 +283,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
-    call init_dg_fragment_rt_soi(dg_frag, system, rt, info, lg, mg)
+    call init_dg_fragment_rt_soi(dg_frag, system, rt, info, lg, mg, ppg)
   else
-    call init_dg_fragment_rt_std(dg_frag, system, rt, info, lg, mg)
+    call init_dg_fragment_rt_std(dg_frag, system, rt, info, lg, mg, ppg)
   end if
   
   ! Calculate Hamiltonian matrix with initial potentials

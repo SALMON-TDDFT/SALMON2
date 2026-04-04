@@ -1116,8 +1116,8 @@ contains
       nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
       if (nbf <= 0) cycle
       call zgemm('N', 'N', nbf, nstate, ppg%Nlma, (1.0d0, 0.0d0), &
-                 uVphi_self(1:nbf, 1:ppg%Nlma, frag_slot), dg_frag%nstate_frag, &
-                 proj_weight, ppg%Nlma, (0.0d0, 0.0d0), contrib, dg_frag%nstate_frag)
+             uVphi_self(:, 1:ppg%Nlma, frag_slot), dg_frag%nstate_frag, &
+             proj_weight, ppg%Nlma, (0.0d0, 0.0d0), contrib, dg_frag%nstate_frag)
       do io = 1, nbf
         global_idx = dg_frag%index_basis(io, ifrag, ispin)
         if (global_idx < 1 .or. global_idx > size(y, 1)) cycle

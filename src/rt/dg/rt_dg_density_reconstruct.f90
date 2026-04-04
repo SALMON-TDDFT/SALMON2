@@ -39,7 +39,7 @@
     real(8) :: charge_budget_local(6), charge_budget_total(6)
     real(8) :: occ_factor
     real(8) :: phi_sample_probe
-    real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta
+    real(8) :: rx, ry, rz, boxL(3), inv_sqrt_vol, theta, inv_lgnum1
     real(8) :: t_total0, t_total1, t_cache0, t_cache1
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
     real(8) :: t_setup0, t_setup1, t_psi0, t_psi1, t_rho0, t_rho1
@@ -97,7 +97,7 @@
     logical, parameter :: use_dc_like_root_glue = .true.
     logical, parameter :: enable_density_reconstruct_trace = .false.
     logical, parameter :: enable_density_halfdrop_probe = .false.
-    logical, parameter :: enable_density_stage_charge_probe = .false.
+    logical, parameter :: enable_density_stage_charge_probe = .true.
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
     real(8) :: phi_col_norm_probe(3), phi_col_hvol_probe(3), phi_sdiag_probe(3)
     real(8) :: coef_map_local_probe(3,3), coef_map_global_probe(3,3), coef_map_diff_probe(3,3)
@@ -190,6 +190,7 @@
     end if
 
     if (.not. allocated(dg_frag%phi_frag)) return
+    inv_lgnum1 = 1.0d0 / dble(max(1, dg_frag%lgnum_total(1)))
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     allocate(ifrag_charge_pre(max(1, ifrag_count)), ifrag_charge_applied(max(1, ifrag_count)), ifrag_charge_remote(max(1, ifrag_count)))
@@ -1176,7 +1177,7 @@
                 g211_blk_handler_im = 0.0d0
                 do igrid = 1, npt_blk
                   if (owner_buf(igrid) < 0) cycle
-                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg_buf(igrid) - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg_buf(igrid) - 1) * inv_lgnum1
                   g211_blk_all_re = g211_blk_all_re + rho_blk(igrid) * cos(theta)
                   g211_blk_all_im = g211_blk_all_im - rho_blk(igrid) * sin(theta)
                   if (owner_buf(igrid) == dg_frag%id) then
@@ -1227,7 +1228,7 @@
                     rho_root_tmp(ixg, iyg, izg) = rho_root_tmp(ixg, iyg, izg) + rho_contrib
                     rho_s_root_tmp(ixg, iyg, izg, ispin) = rho_s_root_tmp(ixg, iyg, izg, ispin) + rho_contrib
                     if (enable_density_stage_charge_probe) then
-                      theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+                      theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
 !$omp atomic update
                       ifrag_charge_pre(i_local) = ifrag_charge_pre(i_local) + rho_contrib * system%hvol
 !$omp atomic update
@@ -1515,7 +1516,7 @@
                 g211_blk_handler_im = 0.0d0
                 do igrid = 1, npt_blk
                   if (owner_buf(igrid) < 0) cycle
-                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg_buf(igrid) - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg_buf(igrid) - 1) * inv_lgnum1
                   g211_blk_all_re = g211_blk_all_re + rho_blk_accum(igrid) * cos(theta)
                   g211_blk_all_im = g211_blk_all_im - rho_blk_accum(igrid) * sin(theta)
                   if (owner_buf(igrid) == dg_frag%id) then
@@ -1568,7 +1569,7 @@
                       rho_root_tmp(ixg, iyg, izg) = rho_root_tmp(ixg, iyg, izg) + rho_contrib
                       rho_s_root_tmp(ixg, iyg, izg, ispin) = rho_s_root_tmp(ixg, iyg, izg, ispin) + rho_contrib
                       if (enable_density_stage_charge_probe) then
-                        theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+                        theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
 !$omp atomic update
                         ifrag_charge_pre(i_local) = ifrag_charge_pre(i_local) + rho_contrib * system%hvol
 !$omp atomic update
@@ -1824,8 +1825,8 @@
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
-          ! Pass 1: write points whose owner is the current rank.
-!$omp parallel do collapse(3) private(iz, iy, ix, ixg, iyg, izg, owner_rank, bx, by, bz, ispin, theta) schedule(static)
+          ! Single pass: apply owner-local points directly and pack remote-owned points.
+!$omp parallel do collapse(3) private(iz, iy, ix, ixg, iyg, izg, owner_rank, slot, bx, by, bz, ispin, spin_offset, theta) schedule(static)
           do iz = 1, dg_frag%nxyz_domain(3, ifrag)
             do iy = 1, dg_frag%nxyz_domain(2, ifrag)
               do ix = 1, dg_frag%nxyz_domain(1, ifrag)
@@ -1833,60 +1834,48 @@
                 iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
                 izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
                 owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-                if (.not. target_rank_owned_by_handler(owner_rank)) cycle
-                bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
-                by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
-                bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
-                if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-                  rho_bf(bx, by, bz) = rho_root_sum(ixg, iyg, izg)
-                end if
-                if (enable_density_stage_charge_probe) then
-                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+                if (target_rank_owned_by_handler(owner_rank)) then
+                  bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
+                  by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
+                  bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
+                  if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
+                    rho_bf(bx, by, bz) = rho_root_sum(ixg, iyg, izg)
+                  end if
+                  if (enable_density_stage_charge_probe) then
+                    theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
 !$omp atomic update
-                  ifrag_charge_applied(i_local) = ifrag_charge_applied(i_local) + rho_root_sum(ixg, iyg, izg) * system%hvol
+                    ifrag_charge_applied(i_local) = ifrag_charge_applied(i_local) + rho_root_sum(ixg, iyg, izg) * system%hvol
 !$omp atomic update
-                  ifrag_g211_applied_re(i_local) = ifrag_g211_applied_re(i_local) + rho_root_sum(ixg, iyg, izg) * cos(theta)
+                    ifrag_g211_applied_re(i_local) = ifrag_g211_applied_re(i_local) + rho_root_sum(ixg, iyg, izg) * cos(theta)
 !$omp atomic update
-                  ifrag_g211_applied_im(i_local) = ifrag_g211_applied_im(i_local) - rho_root_sum(ixg, iyg, izg) * sin(theta)
-                end if
-                if (ixg >= rho_s_x_lo .and. ixg <= rho_s_x_hi .and. &
-                    iyg >= rho_s_y_lo .and. iyg <= rho_s_y_hi .and. &
-                    izg >= rho_s_z_lo .and. izg <= rho_s_z_hi) then
-                  do ispin = 1, system%nspin
-                    rho_s_bf(ixg, iyg, izg, ispin) = rho_s_root_sum(ixg, iyg, izg, ispin)
-                  end do
-                end if
-              end do
-            end do
-          end do
-!$omp end parallel do
-          ! Pass 2: pack points owned by remote ranks for all-to-all exchange.
-!$omp parallel do collapse(3) private(iz, iy, ix, ixg, iyg, izg, owner_rank, slot, ispin, spin_offset, theta) schedule(static)
-          do iz = 1, dg_frag%nxyz_domain(3, ifrag)
-            do iy = 1, dg_frag%nxyz_domain(2, ifrag)
-              do ix = 1, dg_frag%nxyz_domain(1, ifrag)
-                ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
-                iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
-                izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
-                owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-                if (target_rank_owned_by_handler(owner_rank)) cycle
-                slot = dg_frag%density_send_slot_map(ix, iy, iz, i_local)
-                if (slot <= 0) cycle
-                if (enable_density_stage_charge_probe) then
-                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+                    ifrag_g211_applied_im(i_local) = ifrag_g211_applied_im(i_local) - rho_root_sum(ixg, iyg, izg) * sin(theta)
+                  end if
+                  if (ixg >= rho_s_x_lo .and. ixg <= rho_s_x_hi .and. &
+                      iyg >= rho_s_y_lo .and. iyg <= rho_s_y_hi .and. &
+                      izg >= rho_s_z_lo .and. izg <= rho_s_z_hi) then
+                    do ispin = 1, system%nspin
+                      rho_s_bf(ixg, iyg, izg, ispin) = rho_s_root_sum(ixg, iyg, izg, ispin)
+                    end do
+                  end if
+                else
+                  slot = dg_frag%density_send_slot_map(ix, iy, iz, i_local)
+                  if (slot <= 0) cycle
+                  if (enable_density_stage_charge_probe) then
+                    theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
 !$omp atomic update
-                  ifrag_charge_remote(i_local) = ifrag_charge_remote(i_local) + rho_root_sum(ixg, iyg, izg) * system%hvol
+                    ifrag_charge_remote(i_local) = ifrag_charge_remote(i_local) + rho_root_sum(ixg, iyg, izg) * system%hvol
 !$omp atomic update
-                  ifrag_g211_remote_re(i_local) = ifrag_g211_remote_re(i_local) + rho_root_sum(ixg, iyg, izg) * cos(theta)
+                    ifrag_g211_remote_re(i_local) = ifrag_g211_remote_re(i_local) + rho_root_sum(ixg, iyg, izg) * cos(theta)
 !$omp atomic update
-                  ifrag_g211_remote_im(i_local) = ifrag_g211_remote_im(i_local) - rho_root_sum(ixg, iyg, izg) * sin(theta)
-                end if
-                if (allocated(rho_send(owner_rank)%f)) then
-                  rho_send(owner_rank)%f(slot, 1, 1) = rho_root_sum(ixg, iyg, izg)
-                  do ispin = 1, system%nspin
-                    spin_offset = ispin * dg_frag%density_send_count(owner_rank)
-                    rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_s_root_sum(ixg, iyg, izg, ispin)
-                  end do
+                    ifrag_g211_remote_im(i_local) = ifrag_g211_remote_im(i_local) - rho_root_sum(ixg, iyg, izg) * sin(theta)
+                  end if
+                  if (allocated(rho_send(owner_rank)%f)) then
+                    rho_send(owner_rank)%f(slot, 1, 1) = rho_root_sum(ixg, iyg, izg)
+                    do ispin = 1, system%nspin
+                      spin_offset = ispin * dg_frag%density_send_count(owner_rank)
+                      rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_s_root_sum(ixg, iyg, izg, ispin)
+                    end do
+                  end if
                 end if
               end do
             end do
@@ -2059,7 +2048,7 @@
         do izg = 1, dg_frag%lgnum_total(3)
           do iyg = 1, dg_frag%lgnum_total(2)
             do ixg = 1, dg_frag%lgnum_total(1)
-              theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+              theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
               g211_root_sum_re_local = g211_root_sum_re_local + rho_root_sum(ixg, iyg, izg) * cos(theta)
               g211_root_sum_im_local = g211_root_sum_im_local - rho_root_sum(ixg, iyg, izg) * sin(theta)
             end do
@@ -2139,7 +2128,7 @@
         do izg = rho_z_lo, rho_z_hi
           do iyg = rho_y_lo, rho_y_hi
             do ixg = rho_x_lo, rho_x_hi
-              theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) / dble(max(1, dg_frag%lgnum_total(1)))
+              theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
               g211_rank_buf_re_local = g211_rank_buf_re_local + rho_rank_buf(ixg, iyg, izg, 0) * cos(theta)
               g211_rank_buf_im_local = g211_rank_buf_im_local - rho_rank_buf(ixg, iyg, izg, 0) * sin(theta)
             end do
