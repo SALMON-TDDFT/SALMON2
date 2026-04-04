@@ -655,7 +655,7 @@
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: nrow, ncol, ii, jj
-    real(8) :: hvol
+    real(8) :: hvol, integral_re, integral_im, gval, phi_re, phi_im
     complex(8) :: integral
     real(8) :: max_p
     logical :: has_overlap, use_phi_complex, use_halo_complex

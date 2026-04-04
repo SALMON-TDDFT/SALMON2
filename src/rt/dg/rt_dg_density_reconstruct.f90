@@ -32,7 +32,7 @@
     integer :: ixg_min_probe, ixg_max_probe, owner_valid_probe, nprobe_cols, iprobe
     integer :: inv_weight_apply_count_local, inv_weight_apply_count_total
     integer :: inv_weight_alloc_local, inv_weight_alloc_total
-    integer, parameter :: grid_block_size = 512, state_block_size = 64, pw_block_size = 128
+    integer, parameter :: grid_block_size = 1024, state_block_size = 64, pw_block_size = 128
     complex(8), parameter :: zzero = (0.0d0, 0.0d0), zone = (1.0d0, 0.0d0)
     real(8) :: phi_i, rho_contrib, rho_raw_contrib, rho_accum, rho_mix_accum
     real(8) :: total_charge, total_charge_local, scale_rho, rho_sum_local
@@ -72,8 +72,8 @@
     real(8), allocatable :: rho_rank_buf(:,:,:,:), send_rank_buf(:,:,:,:)
     real(8), allocatable :: rho_root_tmp(:,:,:), rho_root_sum(:,:,:)
     real(8), allocatable :: rho_s_root_tmp(:,:,:,:), rho_s_root_sum(:,:,:,:)
-    real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), rho_blk_reduced(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:), &
-                            phase_blk_re(:,:), phase_blk_im(:,:), coef_pw_blk_re(:,:), coef_pw_blk_im(:,:), pw_tmp(:,:)
+    real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), rho_blk_reduced(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:)
+    real(8), allocatable :: coef_blk_ri(:,:), psi_blk_ri(:,:)
     real(8), allocatable :: density_mat_re(:,:), density_tmp(:,:)
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
     real(8), allocatable :: coef_re_frag(:,:)   ! (nbf_max, nocc_cache) real coef for current fragment
@@ -82,6 +82,8 @@
     real(8), allocatable :: coef_re_full(:,:,:)  ! (nbf_max, nocc_cache, nspin) upfront bcast coef (n_pw>0)
     real(8), allocatable :: coef_im_full(:,:,:)  ! (nbf_max, nocc_cache, nspin)
     real(8), allocatable :: rho_blk_partial(:)   ! (grid_block_size) partial rho for state slice
+    real(8), allocatable :: occ_cache(:), occ_sqrt_cache(:)
+    complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
     real(8) :: time_project_rho_reduce, time_project_phi_block_build
     integer :: io_s_frag, io_e_frag, nocc_loc, nocc_per_rank_loc
     integer :: nblocks_max, block_cache_idx, npt_cache, rem_xy
@@ -91,7 +93,7 @@
     integer :: rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi
     integer :: rho_s_x_lo, rho_s_x_hi, rho_s_y_lo, rho_s_y_hi, rho_s_z_lo, rho_s_z_hi
     integer :: root_comm
-    complex(8), allocatable :: phase_cache(:,:), coef_pw_blk(:,:)
+    complex(8), allocatable :: phase_cache(:,:), coef_pw_blk(:,:), pw_tmp_z(:,:)
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: transform_frag_spin(:,:,:), transform_pw_spin(:,:,:)
     integer, allocatable :: n_basis_mix_spin(:)
@@ -101,7 +103,7 @@
     logical, parameter :: use_dc_like_root_glue = .true.
     logical, parameter :: enable_density_reconstruct_trace = .false.
     logical, parameter :: enable_density_halfdrop_probe = .false.
-    logical, parameter :: enable_density_stage_charge_probe = .true.
+    logical, parameter :: enable_density_stage_charge_probe = .false.
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
     real(8) :: phi_col_norm_probe(3), phi_col_hvol_probe(3), phi_sdiag_probe(3)
     real(8) :: coef_map_local_probe(3,3), coef_map_global_probe(3,3), coef_map_diff_probe(3,3)
@@ -202,28 +204,30 @@
     inv_lgnum1 = 1.0d0 / dble(max(1, dg_frag%lgnum_total(1)))
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
-    allocate(ifrag_charge_pre(max(1, ifrag_count)), ifrag_charge_applied(max(1, ifrag_count)), ifrag_charge_remote(max(1, ifrag_count)))
-    allocate(ifrag_charge_pre_global_local(max(1, dg_frag%n_frag)), ifrag_charge_pre_global_sum(max(1, dg_frag%n_frag)))
-    allocate(ifrag_g211_pre_re(max(1, ifrag_count)), ifrag_g211_pre_im(max(1, ifrag_count)))
-    allocate(ifrag_g211_pre_re_global_local(max(1, dg_frag%n_frag)), ifrag_g211_pre_re_global_sum(max(1, dg_frag%n_frag)))
-    allocate(ifrag_g211_pre_im_global_local(max(1, dg_frag%n_frag)), ifrag_g211_pre_im_global_sum(max(1, dg_frag%n_frag)))
-    allocate(ifrag_g211_applied_re(max(1, ifrag_count)), ifrag_g211_applied_im(max(1, ifrag_count)))
-    allocate(ifrag_g211_remote_re(max(1, ifrag_count)), ifrag_g211_remote_im(max(1, ifrag_count)))
-    ifrag_charge_pre(:) = 0.0d0
-    ifrag_charge_applied(:) = 0.0d0
-    ifrag_charge_remote(:) = 0.0d0
-    ifrag_charge_pre_global_local(:) = 0.0d0
-    ifrag_charge_pre_global_sum(:) = 0.0d0
-    ifrag_g211_pre_re(:) = 0.0d0
-    ifrag_g211_pre_im(:) = 0.0d0
-    ifrag_g211_pre_re_global_local(:) = 0.0d0
-    ifrag_g211_pre_re_global_sum(:) = 0.0d0
-    ifrag_g211_pre_im_global_local(:) = 0.0d0
-    ifrag_g211_pre_im_global_sum(:) = 0.0d0
-    ifrag_g211_applied_re(:) = 0.0d0
-    ifrag_g211_applied_im(:) = 0.0d0
-    ifrag_g211_remote_re(:) = 0.0d0
-    ifrag_g211_remote_im(:) = 0.0d0
+    if (enable_density_stage_charge_probe) then
+      allocate(ifrag_charge_pre(max(1, ifrag_count)), ifrag_charge_applied(max(1, ifrag_count)), ifrag_charge_remote(max(1, ifrag_count)))
+      allocate(ifrag_charge_pre_global_local(max(1, dg_frag%n_frag)), ifrag_charge_pre_global_sum(max(1, dg_frag%n_frag)))
+      allocate(ifrag_g211_pre_re(max(1, ifrag_count)), ifrag_g211_pre_im(max(1, ifrag_count)))
+      allocate(ifrag_g211_pre_re_global_local(max(1, dg_frag%n_frag)), ifrag_g211_pre_re_global_sum(max(1, dg_frag%n_frag)))
+      allocate(ifrag_g211_pre_im_global_local(max(1, dg_frag%n_frag)), ifrag_g211_pre_im_global_sum(max(1, dg_frag%n_frag)))
+      allocate(ifrag_g211_applied_re(max(1, ifrag_count)), ifrag_g211_applied_im(max(1, ifrag_count)))
+      allocate(ifrag_g211_remote_re(max(1, ifrag_count)), ifrag_g211_remote_im(max(1, ifrag_count)))
+      ifrag_charge_pre(:) = 0.0d0
+      ifrag_charge_applied(:) = 0.0d0
+      ifrag_charge_remote(:) = 0.0d0
+      ifrag_charge_pre_global_local(:) = 0.0d0
+      ifrag_charge_pre_global_sum(:) = 0.0d0
+      ifrag_g211_pre_re(:) = 0.0d0
+      ifrag_g211_pre_im(:) = 0.0d0
+      ifrag_g211_pre_re_global_local(:) = 0.0d0
+      ifrag_g211_pre_re_global_sum(:) = 0.0d0
+      ifrag_g211_pre_im_global_local(:) = 0.0d0
+      ifrag_g211_pre_im_global_sum(:) = 0.0d0
+      ifrag_g211_applied_re(:) = 0.0d0
+      ifrag_g211_applied_im(:) = 0.0d0
+      ifrag_g211_remote_re(:) = 0.0d0
+      ifrag_g211_remote_im(:) = 0.0d0
+    end if
     g211_root_sum_re_local = 0.0d0
     g211_root_sum_im_local = 0.0d0
     g211_rank_buf_re_local = 0.0d0
@@ -254,17 +258,20 @@
     allocate(valid_remote_grid_ids(grid_block_size))
     allocate(basis_gid(dg_frag%nstate_frag), valid_basis_ids(dg_frag%nstate_frag))
     allocate(basis_gid_spin(nbf_max, system%nspin), valid_basis_ids_spin(nbf_max, system%nspin), valid_basis_count_spin(system%nspin))
-    allocate(basis_sdiag_probe(3, system%nspin, max(1, ifrag_count)))
-    allocate(phi_col_metric_total(3, system%nspin, max(1, ifrag_count)))
-    allocate(basis_smat_probe(3, 3, system%nspin, max(1, ifrag_count)))
-    allocate(phi_gram_total(3, 3, system%nspin, max(1, ifrag_count)))
-    allocate(phi_frag_metric_total(nbf_max, nbf_max, system%nspin, max(1, ifrag_count)))
-    allocate(basis_frag_metric_total(nbf_max, nbf_max, system%nspin, max(1, ifrag_count)))
-    phi_col_metric_total(:, :, :) = 0.0d0
-    basis_smat_probe(:, :, :, :) = 0.0d0
-    phi_gram_total(:, :, :, :) = 0.0d0
-    phi_frag_metric_total(:, :, :, :) = 0.0d0
-    basis_frag_metric_total(:, :, :, :) = 0.0d0
+    if (enable_density_reconstruct_trace) then
+      allocate(basis_sdiag_probe(3, system%nspin, max(1, ifrag_count)))
+      allocate(phi_col_metric_total(3, system%nspin, max(1, ifrag_count)))
+      allocate(basis_smat_probe(3, 3, system%nspin, max(1, ifrag_count)))
+      allocate(phi_gram_total(3, 3, system%nspin, max(1, ifrag_count)))
+      allocate(phi_frag_metric_total(nbf_max, nbf_max, system%nspin, max(1, ifrag_count)))
+      allocate(basis_frag_metric_total(nbf_max, nbf_max, system%nspin, max(1, ifrag_count)))
+      basis_sdiag_probe(:, :, :) = 0.0d0
+      phi_col_metric_total(:, :, :) = 0.0d0
+      basis_smat_probe(:, :, :, :) = 0.0d0
+      phi_gram_total(:, :, :, :) = 0.0d0
+      phi_frag_metric_total(:, :, :, :) = 0.0d0
+      basis_frag_metric_total(:, :, :, :) = 0.0d0
+    end if
     allocate(phi_blk(grid_block_size, dg_frag%nstate_frag))
     allocate(rho_blk(grid_block_size))
     allocate(rho_blk_accum(grid_block_size))
@@ -276,9 +283,8 @@
     nocc_cache = max(1, nocc_cache)
     allocate(coef_blk_re(nbf_max, state_block_size), coef_blk_im(nbf_max, state_block_size))
     allocate(psi_blk_re(grid_block_size, state_block_size), psi_blk_im(grid_block_size, state_block_size))
-    allocate(phase_blk_re(grid_block_size, pw_block_size), phase_blk_im(grid_block_size, pw_block_size))
-    allocate(coef_pw_blk_re(pw_block_size, state_block_size), coef_pw_blk_im(pw_block_size, state_block_size))
-    allocate(pw_tmp(grid_block_size, state_block_size))
+    allocate(coef_blk_ri(nbf_max, 2*state_block_size), psi_blk_ri(grid_block_size, 2*state_block_size))
+    allocate(pw_tmp_z(grid_block_size, state_block_size))
     allocate(density_mat_re(nbf_max, nbf_max), density_tmp(grid_block_size, nbf_max))
     allocate(coef_pw_blk(pw_block_size, state_block_size))
     ibuf_x = dg_frag%nxyz_buffer(1)
@@ -470,7 +476,7 @@
         " coef_mix=", allocated(dg_frag%coef_mix), " dim=", allocated(dg_frag%mixed_basis_dim)
       flush(6)
     end if
-    if (n_pw == 0) then
+    if (n_pw == 0 .and. enable_density_reconstruct_trace) then
       allocate(overlap_probe(dg_frag%n_mat_max, dg_frag%n_mat_max))
       allocate(overlap_vec(dg_frag%n_mat_max))
       overlap_probe(:, :) = (0.0d0, 0.0d0)
@@ -576,6 +582,8 @@
     allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
     allocate(coef_re_full(nbf_max, max(1, nocc_cache), system%nspin))
     allocate(coef_im_full(nbf_max, max(1, nocc_cache), system%nspin))
+    allocate(occ_cache(max(1, nocc_cache)), occ_sqrt_cache(max(1, nocc_cache)))
+    allocate(coef_c_full(nbf_max, max(1, nocc_cache)), coef_c_frag(nbf_max, max(1, nocc_cache)))
     call cpu_time(t_setup0)
     need_phi_cache_alloc = (.not. allocated(dg_frag%density_phi_block_cache))
     need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
@@ -717,6 +725,15 @@
             nbf = dg_frag%n_basis(ifrag, ispin)
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
+            occ_cache(1:nocc_spin) = 1.0d0
+            if (allocated(system%rocc)) then
+              do io = 1, nocc_spin
+                if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                  occ_cache(io) = max(0.0d0, system%rocc(io, 1, ispin))
+                end if
+              end do
+            end if
+            occ_sqrt_cache(1:nocc_spin) = sqrt(occ_cache(1:nocc_spin))
             valid_basis_count = valid_basis_count_spin(ispin)
             call cpu_time(t_dmat0)
             ! Step 3a: each rank contributes its owned rows, then icomm_frag assembles
@@ -724,12 +741,12 @@
             ! the fragment root no longer holds a full copy by itself.
             coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
             coef_im_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
+            coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
 !$omp parallel do private(io, idx_local, istate_frag) schedule(static)
             do io = 1, nocc_spin
               do idx_local = 1, valid_basis_count
                 istate_frag = valid_basis_ids_spin(idx_local, ispin)
-                coef_re_frag(istate_frag, io) = real(dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin), kind=8)
-                coef_im_frag(istate_frag, io) = aimag(dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin))
+                coef_c_full(istate_frag, io) = dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin)
               end do
             end do
 !$omp end parallel do
@@ -738,18 +755,14 @@
                 " stage=coef-expanded ifrag=", ifrag, " ispin=", ispin, " nocc=", nocc_spin
               flush(6)
             end if
-            coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = coef_re_frag(1:nbf_max, 1:nocc_spin)
-            coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = coef_im_frag(1:nbf_max, 1:nocc_spin)
             if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-              coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
-              coef_im_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
-              call comm_summation(coef_re_full(1:nbf, 1:nocc_spin, ispin), coef_re_frag(1:nbf, 1:nocc_spin), &
+              coef_c_frag(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
+              call comm_summation(coef_c_full(1:nbf, 1:nocc_spin), coef_c_frag(1:nbf, 1:nocc_spin), &
                                   nbf * nocc_spin, dg_frag%icomm_frag)
-              call comm_summation(coef_im_full(1:nbf, 1:nocc_spin, ispin), coef_im_frag(1:nbf, 1:nocc_spin), &
-                                  nbf * nocc_spin, dg_frag%icomm_frag)
-              coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = coef_re_frag(1:nbf_max, 1:nocc_spin)
-              coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = coef_im_frag(1:nbf_max, 1:nocc_spin)
+              coef_c_full(1:nbf_max, 1:nocc_spin) = coef_c_frag(1:nbf_max, 1:nocc_spin)
             end if
+            coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
+            coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = aimag(coef_c_full(1:nbf_max, 1:nocc_spin))
             ! Step 3b: each rank computes weighted C C^H on its state slice
             nocc_per_rank_loc = (nocc_spin + dg_frag%isize_frag - 1) / dg_frag%isize_frag
             io_s_frag = dg_frag%id_frag * nocc_per_rank_loc + 1
@@ -785,24 +798,14 @@
             D_partial_re(1:nbf_max, 1:nbf_max) = 0.0d0
             if (nocc_loc > 0 .and. nbf > 0) then
               nbatch = 0
-              coef_blk_re(1:nbf, 1:state_block_size) = 0.0d0
-              coef_blk_im(1:nbf, 1:state_block_size) = 0.0d0
               do io = io_s_frag, io_e_frag
                 nbatch = nbatch + 1
-                occ_factor = 1.0d0
-                if (allocated(system%rocc)) then
-                  if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
-                    occ_factor = max(0.0d0, system%rocc(io, 1, ispin))
-                  end if
-                end if
-                coef_blk_re(1:nbf, nbatch) = sqrt(occ_factor) * coef_re_full(1:nbf, io, ispin)
-                coef_blk_im(1:nbf, nbatch) = sqrt(occ_factor) * coef_im_full(1:nbf, io, ispin)
+                coef_blk_re(1:nbf, nbatch) = occ_sqrt_cache(io) * coef_re_full(1:nbf, io, ispin)
+                coef_blk_im(1:nbf, nbatch) = occ_sqrt_cache(io) * coef_im_full(1:nbf, io, ispin)
                 if (nbatch == state_block_size .or. io == io_e_frag) then
                   call dsyrk('U', 'N', nbf, nbatch, 1.0d0, coef_blk_re, nbf_max, 1.0d0, D_partial_re, nbf_max)
                   call dsyrk('U', 'N', nbf, nbatch, 1.0d0, coef_blk_im, nbf_max, 1.0d0, D_partial_re, nbf_max)
                   nbatch = 0
-                  coef_blk_re(1:nbf, 1:state_block_size) = 0.0d0
-                  coef_blk_im(1:nbf, 1:state_block_size) = 0.0d0
                 end if
               end do
             end if
@@ -947,25 +950,23 @@
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             valid_basis_count = valid_basis_count_spin(ispin)
+            coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
 !$omp parallel do private(io, idx_local, istate_frag) schedule(static)
             do io = 1, nocc_spin
               do idx_local = 1, valid_basis_count
                 istate_frag = valid_basis_ids_spin(idx_local, ispin)
-                coef_re_full(istate_frag, io, ispin) = real(dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin), kind=8)
-                coef_im_full(istate_frag, io, ispin) = aimag(dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin))
+                coef_c_full(istate_frag, io) = dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin)
               end do
             end do
 !$omp end parallel do
             if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-              coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
-              coef_im_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
-              call comm_summation(coef_re_full(1:nbf, 1:nocc_spin, ispin), coef_re_frag(1:nbf, 1:nocc_spin), &
+              coef_c_frag(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
+              call comm_summation(coef_c_full(1:nbf, 1:nocc_spin), coef_c_frag(1:nbf, 1:nocc_spin), &
                                   nbf * nocc_spin, dg_frag%icomm_frag)
-              call comm_summation(coef_im_full(1:nbf, 1:nocc_spin, ispin), coef_im_frag(1:nbf, 1:nocc_spin), &
-                                  nbf * nocc_spin, dg_frag%icomm_frag)
-              coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = coef_re_frag(1:nbf_max, 1:nocc_spin)
-              coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = coef_im_frag(1:nbf_max, 1:nocc_spin)
+              coef_c_full(1:nbf_max, 1:nocc_spin) = coef_c_frag(1:nbf_max, 1:nocc_spin)
             end if
+            coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
+            coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = aimag(coef_c_full(1:nbf_max, 1:nocc_spin))
           end do
           ! NOTE: coef_pw_full_cache is already populated on all ranks by refresh_pw_coef_cache
           ! (called before the fragment loop), so no bcast is needed here.
@@ -1169,8 +1170,8 @@
               n_basis_mix = n_basis_mix_spin(ispin)
               if (n_basis_mix <= 0) cycle
               call cpu_time(t_psi0)
-              call zgemm('N', 'N', npt_blk, n_basis_mix, nbf, zone, phi_blk, grid_block_size, &
-                transform_frag_spin(1, 1, ispin), dg_frag%nstate_frag, zzero, basis_mix_blk, grid_block_size)
+              basis_mix_blk(1:npt_blk, 1:n_basis_mix) = matmul(phi_blk(1:npt_blk, 1:nbf), &
+                transform_frag_spin(1:nbf, 1:n_basis_mix, ispin))
               if (n_pw > 0) then
                 call zgemm('N', 'N', npt_blk, n_basis_mix, n_pw, zone, phase_cache, grid_block_size, &
                   transform_pw_spin(1, 1, ispin), n_pw, zone, basis_mix_blk, grid_block_size)
@@ -1354,44 +1355,46 @@
               if (n_pw == 0) then
                 if (.not. allocated(rho_blk_partial)) allocate(rho_blk_partial(grid_block_size))
                 rho_blk_partial(1:npt_blk) = 0.0d0
-                nprobe_cols = min(3, nbf)
-                do iprobe = 1, nprobe_cols
-                  do igrid = 1, npt_blk
-                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
-                    if (slot_buf(igrid) > 0) cycle
-                    phi_col_metric_total(iprobe, ispin, i_local) = phi_col_metric_total(iprobe, ispin, i_local) + &
-                      phi_blk(igrid, iprobe) * phi_blk(igrid, iprobe) * system%hvol
-                  end do
-                  do io = 1, nprobe_cols
+                if (enable_density_reconstruct_trace) then
+                  nprobe_cols = min(3, nbf)
+                  do iprobe = 1, nprobe_cols
                     do igrid = 1, npt_blk
                       if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
                       if (slot_buf(igrid) > 0) cycle
-                      phi_gram_total(iprobe, io, ispin, i_local) = phi_gram_total(iprobe, io, ispin, i_local) + &
-                        phi_blk(igrid, iprobe) * phi_blk(igrid, io) * system%hvol
+                      phi_col_metric_total(iprobe, ispin, i_local) = phi_col_metric_total(iprobe, ispin, i_local) + &
+                        phi_blk(igrid, iprobe) * phi_blk(igrid, iprobe) * system%hvol
+                    end do
+                    do io = 1, nprobe_cols
+                      do igrid = 1, npt_blk
+                        if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                        if (slot_buf(igrid) > 0) cycle
+                        phi_gram_total(iprobe, io, ispin, i_local) = phi_gram_total(iprobe, io, ispin, i_local) + &
+                          phi_blk(igrid, iprobe) * phi_blk(igrid, io) * system%hvol
+                      end do
                     end do
                   end do
-                end do
-                do iprobe = 1, nbf
-                  do io = 1, nbf
-                    do igrid = 1, npt_blk
-                      if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
-                      if (slot_buf(igrid) > 0) cycle
-                      phi_frag_metric_total(iprobe, io, ispin, i_local) = phi_frag_metric_total(iprobe, io, ispin, i_local) + &
-                        phi_blk(igrid, iprobe) * phi_blk(igrid, io) * system%hvol
+                  do iprobe = 1, nbf
+                    do io = 1, nbf
+                      do igrid = 1, npt_blk
+                        if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                        if (slot_buf(igrid) > 0) cycle
+                        phi_frag_metric_total(iprobe, io, ispin, i_local) = phi_frag_metric_total(iprobe, io, ispin, i_local) + &
+                          phi_blk(igrid, iprobe) * phi_blk(igrid, io) * system%hvol
+                      end do
                     end do
                   end do
-                end do
+                end if
                 io_s_frag = 1
                 io_e_frag = nocc_spin
                 do io0 = io_s_frag, io_e_frag, state_block_size
                   nbatch = min(state_block_size, io_e_frag - io0 + 1)
                   call cpu_time(t_psi0)
-                  coef_blk_re(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
-                  coef_blk_im(1:nbf, 1:nbatch) = coef_im_full(1:nbf, io0:io0+nbatch-1, ispin)
-                  call dgemm('N', 'N', npt_blk, nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
-                             coef_blk_re, nbf_max, 0.0d0, psi_blk_re, grid_block_size)
-                  call dgemm('N', 'N', npt_blk, nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
-                             coef_blk_im, nbf_max, 0.0d0, psi_blk_im, grid_block_size)
+                  coef_blk_ri(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
+                  coef_blk_ri(1:nbf, nbatch+1:2*nbatch) = coef_im_full(1:nbf, io0:io0+nbatch-1, ispin)
+                  call dgemm('N', 'N', npt_blk, 2*nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
+                             coef_blk_ri, nbf_max, 0.0d0, psi_blk_ri, grid_block_size)
+                  psi_blk_re(1:npt_blk, 1:nbatch) = psi_blk_ri(1:npt_blk, 1:nbatch)
+                  psi_blk_im(1:npt_blk, 1:nbatch) = psi_blk_ri(1:npt_blk, nbatch+1:2*nbatch)
                   if (block_offset == first_block_offset .and. io0 == io_s_frag) then
                     phi_norm_probe = 0.0d0
                     psi_norm_probe = 0.0d0
@@ -1424,20 +1427,16 @@
                     if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
                     if (slot_buf(igrid) > 0) cycle
                     rho_accum = 0.0d0
+!$omp simd reduction(+:rho_accum)
                     do io = 1, nbatch
-                      occ_factor = 1.0d0
-                      if (allocated(system%rocc)) then
-                        if (io0 + io - 1 <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
-                          occ_factor = max(0.0d0, system%rocc(io0 + io - 1, 1, ispin))
-                        end if
-                      end if
+                      occ_factor = occ_cache(io0 + io - 1)
                       rho_accum = rho_accum + occ_factor * &
                         (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
                     end do
                     rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                   end do
 !$omp end parallel do
-                  if (io0 <= size(orbital_norm_probe_local)) then
+                  if (enable_density_reconstruct_trace .and. io0 <= size(orbital_norm_probe_local)) then
                     do io = 1, min(nbatch, size(orbital_norm_probe_local) - io0 + 1)
                       do igrid = 1, npt_blk
                         if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
@@ -1493,23 +1492,11 @@
                     ! direct access from full_cache on all ranks (no bcast)
                     coef_pw_blk(1:npw_blk, 1:nbatch) = &
                       dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
-                    phase_blk_re(1:npt_blk, 1:npw_blk) = real(phase_cache(1:npt_blk, ipw0:ipw0+npw_blk-1), kind=8)
-                    phase_blk_im(1:npt_blk, 1:npw_blk) = aimag(phase_cache(1:npt_blk, ipw0:ipw0+npw_blk-1))
-                    coef_pw_blk_re(1:npw_blk, 1:nbatch) = real(coef_pw_blk(1:npw_blk, 1:nbatch), kind=8)
-                    coef_pw_blk_im(1:npw_blk, 1:nbatch) = aimag(coef_pw_blk(1:npw_blk, 1:nbatch))
 
-                    call dgemm('N', 'N', npt_blk, nbatch, npw_blk, 1.0d0, phase_blk_re, grid_block_size, &
-                               coef_pw_blk_re, pw_block_size, 0.0d0, pw_tmp, grid_block_size)
-                    psi_blk_re(1:npt_blk, 1:nbatch) = psi_blk_re(1:npt_blk, 1:nbatch) + pw_tmp(1:npt_blk, 1:nbatch)
-                    call dgemm('N', 'N', npt_blk, nbatch, npw_blk, 1.0d0, phase_blk_im, grid_block_size, &
-                               coef_pw_blk_im, pw_block_size, 0.0d0, pw_tmp, grid_block_size)
-                    psi_blk_re(1:npt_blk, 1:nbatch) = psi_blk_re(1:npt_blk, 1:nbatch) - pw_tmp(1:npt_blk, 1:nbatch)
-                    call dgemm('N', 'N', npt_blk, nbatch, npw_blk, 1.0d0, phase_blk_re, grid_block_size, &
-                               coef_pw_blk_im, pw_block_size, 0.0d0, pw_tmp, grid_block_size)
-                    psi_blk_im(1:npt_blk, 1:nbatch) = psi_blk_im(1:npt_blk, 1:nbatch) + pw_tmp(1:npt_blk, 1:nbatch)
-                    call dgemm('N', 'N', npt_blk, nbatch, npw_blk, 1.0d0, phase_blk_im, grid_block_size, &
-                               coef_pw_blk_re, pw_block_size, 0.0d0, pw_tmp, grid_block_size)
-                    psi_blk_im(1:npt_blk, 1:nbatch) = psi_blk_im(1:npt_blk, 1:nbatch) + pw_tmp(1:npt_blk, 1:nbatch)
+                    call zgemm('N', 'N', npt_blk, nbatch, npw_blk, zone, phase_cache(1, ipw0), grid_block_size, &
+                               coef_pw_blk, pw_block_size, zzero, pw_tmp_z, grid_block_size)
+                    psi_blk_re(1:npt_blk, 1:nbatch) = psi_blk_re(1:npt_blk, 1:nbatch) + real(pw_tmp_z(1:npt_blk, 1:nbatch), kind=8)
+                    psi_blk_im(1:npt_blk, 1:nbatch) = psi_blk_im(1:npt_blk, 1:nbatch) + aimag(pw_tmp_z(1:npt_blk, 1:nbatch))
                   end do
                   call cpu_time(t_psi1)
                   time_project_psi = time_project_psi + (t_psi1 - t_psi0)
@@ -1652,6 +1639,24 @@
                       flush(6)
                       stop "DG-Fragment RT: density accum owner out of range"
                     end if
+                  if (dg_frag%density_send_count(owner_rank) <= 0) then
+                    if (owner_rank == dg_frag%id) cycle
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                      "DG density accum invalid send count: rank=", dg_frag%id, &
+                      " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                      " igrid=", igrid, " owner=", owner_rank, " nsend=", dg_frag%density_send_count(owner_rank)
+                    flush(6)
+                    stop "DG-Fragment RT: density accum invalid send count"
+                  end if
+                    if (dg_frag%density_send_count(owner_rank) <= 0) then
+                      if (owner_rank == dg_frag%id) cycle
+                      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                        "DG density accum invalid send count: rank=", dg_frag%id, &
+                        " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
+                        " igrid=", igrid, " owner=", owner_rank, " nsend=", dg_frag%density_send_count(owner_rank)
+                      flush(6)
+                      stop "DG-Fragment RT: density accum invalid send count"
+                    end if
                     if (.not. allocated(rho_send(owner_rank)%f)) then
                       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
                         "DG density accum send buffer missing: rank=", dg_frag%id, &
@@ -1692,7 +1697,7 @@
             end if
           end do
         end do
-        if (n_pw == 0) then
+        if (n_pw == 0 .and. enable_density_reconstruct_trace) then
           do ispin = 1, system%nspin
             phi_col_hvol_probe(:) = 0.0d0
             phi_sdiag_probe(:) = 0.0d0
@@ -1746,6 +1751,10 @@
     if (allocated(D_partial_re)) deallocate(D_partial_re)
     if (allocated(coef_re_full)) deallocate(coef_re_full)
     if (allocated(coef_im_full)) deallocate(coef_im_full)
+    if (allocated(coef_c_full)) deallocate(coef_c_full)
+    if (allocated(coef_c_frag)) deallocate(coef_c_frag)
+    if (allocated(occ_cache)) deallocate(occ_cache)
+    if (allocated(occ_sqrt_cache)) deallocate(occ_sqrt_cache)
     if (allocated(rho_blk_partial)) deallocate(rho_blk_partial)
     if (enable_density_reconstruct_trace .and. dg_frag%is_frag_root) then
       write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        density trace: rank=", dg_frag%id, &
@@ -2447,9 +2456,18 @@
 
     deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
     deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids)
-    deallocate(basis_gid, valid_basis_ids, basis_sdiag_probe, phi_col_metric_total, basis_smat_probe, phi_gram_total, phi_frag_metric_total, basis_frag_metric_total)
+    deallocate(basis_gid, valid_basis_ids)
+    if (allocated(basis_sdiag_probe)) deallocate(basis_sdiag_probe)
+    if (allocated(phi_col_metric_total)) deallocate(phi_col_metric_total)
+    if (allocated(basis_smat_probe)) deallocate(basis_smat_probe)
+    if (allocated(phi_gram_total)) deallocate(phi_gram_total)
+    if (allocated(phi_frag_metric_total)) deallocate(phi_frag_metric_total)
+    if (allocated(basis_frag_metric_total)) deallocate(basis_frag_metric_total)
     deallocate(phi_blk, rho_blk, rho_blk_accum, rho_blk_reduced, coef_blk_re, coef_blk_im, psi_blk_re, psi_blk_im, &
-      phase_blk_re, phase_blk_im, coef_pw_blk_re, coef_pw_blk_im, pw_tmp, density_mat_re, density_tmp)
+      density_mat_re, density_tmp)
+    if (allocated(coef_blk_ri)) deallocate(coef_blk_ri)
+    if (allocated(psi_blk_ri)) deallocate(psi_blk_ri)
+    if (allocated(pw_tmp_z)) deallocate(pw_tmp_z)
     if (allocated(phase_cache)) deallocate(phase_cache)
     if (allocated(kpw_hx)) deallocate(kpw_hx, kpw_hy, kpw_hz)
     if (allocated(density_mix)) deallocate(density_mix)
