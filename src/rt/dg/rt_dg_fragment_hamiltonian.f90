@@ -447,6 +447,9 @@
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
+    real(8), allocatable :: partial_th(:), reduced_th(:)
+    real(8), allocatable :: halo_partial_t(:), halo_partial_h(:), halo_reduced_t(:), halo_reduced_h(:)
+    real(8), allocatable :: halo_reduce_pair(:), halo_reduce_sum(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: loc_s_dbg(3), loc_e_dbg(3)
@@ -827,6 +830,7 @@
           stop "DG-Fragment RT: nbf_comm smaller than local nbf"
         end if
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
+        allocate(partial_th(2 * nbf_comm), reduced_th(2 * nbf_comm))
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s_dbg, loc_e_dbg, has_overlap_dbg)
         if (probe_subgroup) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0)') &
@@ -914,8 +918,11 @@
               " id_frag=", dg_frag%id_frag, " jo=", jo, " before-frag-reduce"
             flush(6)
           end if
-          call comm_summation(partial_t, reduced_t, nbf_comm, dg_frag%icomm_frag)
-          call comm_summation(partial_h, reduced_h, nbf_comm, dg_frag%icomm_frag)
+          partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
+          partial_th(nbf_comm + 1:2 * nbf_comm) = partial_h(1:nbf_comm)
+          call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
+          reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
+          reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
           if (jo_probe_small_frag2) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
               " id_frag=", dg_frag%id_frag, " jo=", jo, " reduced_t_abs=", sum(abs(reduced_t(1:nbf))), &
@@ -959,6 +966,7 @@
           flush(6)
         end if
         deallocate(partial_t, partial_h, reduced_t, reduced_h)
+        deallocate(partial_th, reduced_th)
         deallocate(T_phi, H_phi)
         if (allocated(T_phi) .or. allocated(H_phi)) then
           write(*,*) "[FATAL] hamiltonian deallocate(T_phi,H_phi) failed: rank=", dg_frag%id, &
@@ -1024,6 +1032,16 @@
             iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
             if (iblk <= 0 .and. iblk_rev <= 0) cycle
 
+            if (.not. allocated(halo_partial_t) .or. size(halo_partial_t) < n_basis_halo) then
+              if (allocated(halo_partial_t)) deallocate(halo_partial_t, halo_partial_h, halo_reduced_t, halo_reduced_h)
+              if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair, halo_reduce_sum)
+              allocate(halo_partial_t(n_basis_halo), halo_partial_h(n_basis_halo))
+              allocate(halo_reduced_t(n_basis_halo), halo_reduced_h(n_basis_halo))
+              allocate(halo_reduce_pair(2 * n_basis_halo), halo_reduce_sum(2 * n_basis_halo))
+            end if
+            halo_partial_t(1:n_basis_halo) = 0.0d0
+            halo_partial_h(1:n_basis_halo) = 0.0d0
+
             do io = 1, n_basis_halo
               halo_integral_t = 0.0d0
               halo_integral_h = 0.0d0
@@ -1038,11 +1056,21 @@
                   end do
                 end do
               end do
-              call comm_summation(halo_integral_t, halo_integral_t_sum, dg_frag%icomm_frag)
-              call comm_summation(halo_integral_h, halo_integral_h_sum, dg_frag%icomm_frag)
+              halo_partial_t(io) = halo_integral_t
+              halo_partial_h(io) = halo_integral_h
+            end do
 
-              if (.not. dg_frag%is_frag_root) cycle
+            halo_reduce_pair(1:n_basis_halo) = halo_partial_t(1:n_basis_halo)
+            halo_reduce_pair(n_basis_halo + 1:2 * n_basis_halo) = halo_partial_h(1:n_basis_halo)
+            call comm_summation(halo_reduce_pair, halo_reduce_sum, 2 * n_basis_halo, dg_frag%icomm_frag)
+            halo_reduced_t(1:n_basis_halo) = halo_reduce_sum(1:n_basis_halo)
+            halo_reduced_h(1:n_basis_halo) = halo_reduce_sum(n_basis_halo + 1:2 * n_basis_halo)
 
+            if (.not. dg_frag%is_frag_root) cycle
+
+            do io = 1, n_basis_halo
+              halo_integral_t_sum = halo_reduced_t(io)
+              halo_integral_h_sum = halo_reduced_h(io)
               if (iblk > 0) then
                 dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
                   dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
@@ -1065,6 +1093,8 @@
       if (allocated(H_diag_blocks(i_diag)%val)) deallocate(H_diag_blocks(i_diag)%val)
       if (allocated(H_kin_diag_blocks(i_diag)%val)) deallocate(H_kin_diag_blocks(i_diag)%val)
     end do
+    if (allocated(halo_partial_t)) deallocate(halo_partial_t, halo_partial_h, halo_reduced_t, halo_reduced_h)
+    if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair, halo_reduce_sum)
     if (allocated(H_diag_blocks)) deallocate(H_diag_blocks)
     if (allocated(H_kin_diag_blocks)) deallocate(H_kin_diag_blocks)
     ! CRITICAL: MPI aggregation of Hamiltonian matrix
@@ -1521,6 +1551,7 @@
     
     integer :: gx, gy, gz, ifrag, lx, ly, lz
     integer :: ix0, iy0, iz0
+    integer :: lgx, lgy, lgz
     real(8) :: v, lap0
     real(8) :: lapt(4,3)
     integer :: ndom(3), loc_s(3), loc_e(3)
@@ -1552,6 +1583,9 @@
       stop 1
     end if
     call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    lgx = dg_frag%lgnum_total(1)
+    lgy = dg_frag%lgnum_total(2)
+    lgz = dg_frag%lgnum_total(3)
     T_phi = 0.0d0
     if (.not. has_overlap) return
     ! Note: phi_frag is allocated as (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, ...)
@@ -1572,14 +1606,14 @@
 !$omp parallel do private(lz, ly, lx, gz, gy, gx, ix0, iy0, iz0, v) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = dg_frag%ixyz_frag(3, ifrag) + lz - 1
+      iz0 = modulo(gz - 1, lgz) + 1
       do ly = loc_s(2), loc_e(2)
         gy = dg_frag%ixyz_frag(2, ifrag) + ly - 1
-!$omp simd private(v, ix0, iy0, iz0)
+        iy0 = modulo(gy - 1, lgy) + 1
+!$omp simd private(v, ix0)
         do lx = loc_s(1), loc_e(1)
           gx = dg_frag%ixyz_frag(1, ifrag) + lx - 1
-          ix0 = modulo(gx - 1, dg_frag%lgnum_total(1)) + 1
-          iy0 = modulo(gy - 1, dg_frag%lgnum_total(2)) + 1
-          iz0 = modulo(gz - 1, dg_frag%lgnum_total(3)) + 1
+          ix0 = modulo(gx - 1, lgx) + 1
           ! Compute Laplacian using 4th-order finite difference
           ! Stencil accesses phi_frag(ix±4, iy±4, iz±4) which now includes halo
           v = lapt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) + &

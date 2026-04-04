@@ -412,6 +412,7 @@
     
     integer :: gx, gy, gz, ifrag
     integer :: ix0, iy0, iz0
+    integer :: lgx, lgy, lgz
     complex(8) :: v
     real(8) :: lap0
     real(8) :: lapt(4,3)
@@ -454,6 +455,9 @@
     gy_hi = min(iorg(2) + ndom(2) - 1, mg%ie(2))
     gz_lo = max(iorg(3), mg%is(3))
     gz_hi = min(iorg(3) + ndom(3) - 1, mg%ie(3))
+    lgx = dg_frag%lgnum_total(1)
+    lgy = dg_frag%lgnum_total(2)
+    lgz = dg_frag%lgnum_total(3)
     T_phi = (0.0d0, 0.0d0)
     use_complex_phi = allocated(dg_frag%phi_frag_c)
     
@@ -461,12 +465,12 @@
     if (use_complex_phi) then
 !$omp parallel do private(gz, gy, gx, v, ix0, iy0, iz0) schedule(static)
       do gz = gz_lo, gz_hi
+        iz0 = modulo(gz - 1, lgz) + 1
         do gy = gy_lo, gy_hi
+          iy0 = modulo(gy - 1, lgy) + 1
 !$omp simd private(v)
           do gx = gx_lo, gx_hi
-            ix0 = modulo(gx - 1, dg_frag%lgnum_total(1)) + 1
-            iy0 = modulo(gy - 1, dg_frag%lgnum_total(2)) + 1
-            iz0 = modulo(gz - 1, dg_frag%lgnum_total(3)) + 1
+            ix0 = modulo(gx - 1, lgx) + 1
 
             v = lapt(1,1) * (dg_frag%phi_frag_c(ix0 + 1, iy0, iz0, jo, i_local) + &
                              dg_frag%phi_frag_c(ix0 - 1, iy0, iz0, jo, i_local)) + &
@@ -502,12 +506,12 @@
     else
 !$omp parallel do private(gz, gy, gx, v, ix0, iy0, iz0) schedule(static)
       do gz = gz_lo, gz_hi
+        iz0 = modulo(gz - 1, lgz) + 1
         do gy = gy_lo, gy_hi
+          iy0 = modulo(gy - 1, lgy) + 1
 !$omp simd private(v)
           do gx = gx_lo, gx_hi
-            ix0 = modulo(gx - 1, dg_frag%lgnum_total(1)) + 1
-            iy0 = modulo(gy - 1, dg_frag%lgnum_total(2)) + 1
-            iz0 = modulo(gz - 1, dg_frag%lgnum_total(3)) + 1
+            ix0 = modulo(gx - 1, lgx) + 1
 
             v = cmplx(lapt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) + &
                                    dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
