@@ -2559,6 +2559,7 @@
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj, recv_ix, recv_iy, recv_iz
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: npts_local, nx_local, ny_local, ipt
     integer :: phi_loc_s(3), phi_loc_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
@@ -2567,6 +2568,7 @@
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
     real(8) :: frag_self_start, frag_halo_start
+    real(8), allocatable :: phi_local_2d(:,:), self_overlap(:,:)
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_mat)) return
@@ -2648,6 +2650,28 @@
           stop 1
         end if
 
+        if (nbf <= 0) cycle
+        npts_local = (lx_hi - lx_lo + 1) * (ly_hi - ly_lo + 1) * (lz_hi - lz_lo + 1)
+        nx_local = lx_hi - lx_lo + 1
+        ny_local = ly_hi - ly_lo + 1
+        allocate(phi_local_2d(npts_local, nbf), self_overlap(nbf, nbf))
+        do io = 1, nbf
+          do lz = lz_lo, lz_hi
+            do ly = ly_lo, ly_hi
+              !$omp simd private(ipt)
+              do lx = lx_lo, lx_hi
+                ipt = ((lz - lz_lo) * ny_local + (ly - ly_lo)) * nx_local + (lx - lx_lo) + 1
+                phi_local_2d(ipt, io) = dg_frag%phi_frag(lx, ly, lz, io, i_local)
+              end do
+            end do
+          end do
+        end do
+        call cpu_time(t0)
+        call dgemm('T', 'N', nbf, nbf, npts_local, hvol, phi_local_2d, npts_local, &
+                   phi_local_2d, npts_local, 0.0d0, self_overlap, nbf)
+        call cpu_time(t1)
+        time_self_integral = time_self_integral + (t1 - t0)
+
         do jo = 1, nbf
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
@@ -2655,19 +2679,7 @@
           do io = 1, nbf
             ig_row = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-            integral = 0.0d0
-            call cpu_time(t0)
-            do lz = lz_lo, lz_hi
-              do ly = ly_lo, ly_hi
-                !$omp simd reduction(+:integral)
-                do lx = lx_lo, lx_hi
-                  integral = integral + dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
-                             dg_frag%phi_frag(lx, ly, lz, jo, i_local) * hvol
-                end do
-              end do
-            end do
-            call cpu_time(t1)
-            time_self_integral = time_self_integral + (t1 - t0)
+            integral = self_overlap(io, jo)
             iblk = find_matrix_block(dg_frag%S_block_map, ifrag, ifrag)
             if (iblk > 0) then
               if (io <= size(dg_frag%S_mat_blocks(iblk)%val, 1) .and. &
@@ -2737,6 +2749,7 @@
           end do
 
         end do
+        deallocate(phi_local_2d, self_overlap)
       end do
     end do
 
