@@ -47,7 +47,7 @@
     logical, parameter :: enable_derivative_trace = .false.
     logical, parameter :: enable_derivative_progress = .false.
     logical, parameter :: enable_derivative_sanity_checks = .false.
-    logical, parameter :: enable_derivative_hotspot_probe = .true.
+    logical, parameter :: enable_derivative_hotspot_probe = .false.
     integer, parameter :: derivative_hotspot_probe_stride = 10
     integer, parameter :: state_block_size = 64
     

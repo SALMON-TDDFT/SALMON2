@@ -30,7 +30,7 @@
     real(8) :: dt_density, dt_hartree, dt_xc, dt_reconstruct, dt_mixed, dt_total
     logical, parameter :: enable_stage_update_trace = .false.
     logical, parameter :: enable_stage_update_progress = .false.
-    logical, parameter :: enable_stage_hotspot_probe = .true.
+    logical, parameter :: enable_stage_hotspot_probe = .false.
     integer, parameter :: hotspot_probe_stride = 10
 
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
