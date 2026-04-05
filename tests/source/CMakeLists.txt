@@ -18,6 +18,7 @@ set(STRESS_SOURCE_TESTS
   check_stress_convention_a_sign_flip.sh
   check_stress_xc_split.sh
   check_stress_pz_nlcc_density_gate.sh
+  check_prep_pp_dvg_ion_dg2_series.sh
   check_builtin_r2scan_registration.sh
   check_builtin_r2scan_loop_perf_structure.sh
   check_builtin_r2scan_operator_gate.sh

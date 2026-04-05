@@ -1444,9 +1444,11 @@ contains
     real(8) :: pressure_har_gpa
     real(8) :: pressure_har_shadow_gpa
     real(8) :: pressure_har_shadow_delta_gpa
-    real(8) :: pressure_loc_sr_gpa
+    real(8) :: pressure_loc_sr_grad_gpa
+    real(8) :: pressure_loc_sr_diag_gpa
+    real(8) :: pressure_loc_sr_total_gpa
     real(8) :: pressure_loc_sr_rs_gpa
-    real(8) :: pressure_loc_sr_shadow_delta_gpa
+    real(8) :: pressure_loc_sr_grad_delta_gpa
     logical :: terms_on, details_on, numerics_on
 
     file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
@@ -1630,16 +1632,19 @@ contains
            pressure_har_gpa = -stress_term_pressure_gpa(system%stress_har, au_pressure_gpa)
            pressure_har_shadow_gpa = -stress_term_pressure_gpa(system%stress_har_shadow, au_pressure_gpa)
            pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
-           pressure_loc_sr_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad + system%stress_loc_sr_diag, &
-                au_pressure_gpa)
+           pressure_loc_sr_grad_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa)
+           pressure_loc_sr_diag_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_diag, au_pressure_gpa)
+           pressure_loc_sr_total_gpa = pressure_loc_sr_grad_gpa + pressure_loc_sr_diag_gpa
            pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, au_pressure_gpa)
-           pressure_loc_sr_shadow_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_gpa
+           pressure_loc_sr_grad_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_grad_gpa
            write(fh,'(1x,"Tr(har_shadow)*V + E_h =",e16.8)') virial_har_shadow
            write(fh,'(1x,"P_har_shadow [GPa]     =",e16.8)') pressure_har_shadow_gpa
            write(fh,'(1x,"P_har_shadow - P_har [GPa] =",e16.8)') pressure_har_shadow_delta_gpa
-           write(fh,'(1x,"P_loc_sr [GPa]         =",e16.8)') pressure_loc_sr_gpa
+           write(fh,'(1x,"P_loc_sr_grad [GPa]    =",e16.8)') pressure_loc_sr_grad_gpa
+           write(fh,'(1x,"P_loc_sr_diag [GPa]    =",e16.8)') pressure_loc_sr_diag_gpa
+           write(fh,'(1x,"P_loc_sr_total [GPa]   =",e16.8)') pressure_loc_sr_total_gpa
            write(fh,'(1x,"P_loc_sr_rs [GPa]      =",e16.8)') pressure_loc_sr_rs_gpa
-           write(fh,'(1x,"P_loc_sr_rs - P_loc_sr [GPa] =",e16.8)') pressure_loc_sr_shadow_delta_gpa
+           write(fh,'(1x,"P_loc_sr_rs - P_loc_sr_grad [GPa] =",e16.8)') pressure_loc_sr_grad_delta_gpa
          end if
        end if
 
@@ -1677,9 +1682,9 @@ contains
     real(8) :: pressure_har_gpa
     real(8) :: pressure_har_shadow_gpa
     real(8) :: pressure_har_shadow_delta_gpa
-    real(8) :: pressure_loc_sr_gpa
+    real(8) :: pressure_loc_sr_grad_gpa
     real(8) :: pressure_loc_sr_rs_gpa
-    real(8) :: pressure_loc_sr_shadow_delta_gpa
+    real(8) :: pressure_loc_sr_grad_delta_gpa
     logical :: terms_on, details_on, numerics_on
 
     if(.not. comm_is_root(nproc_id_global)) return
@@ -1768,7 +1773,7 @@ contains
       call write_compact_column_header(fh, line_cols, col, 'int_rho_div_rdedd [a.u.]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_har_shadow [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_har_shadow_delta [GPa]'); col = col + 1
-      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_shadow_delta [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_grad_delta [GPa]'); col = col + 1
     end if
     call end_compact_column_header(fh)
 
@@ -1834,9 +1839,9 @@ contains
       pressure_har_gpa = -stress_term_pressure_gpa(system%stress_har, au_pressure_gpa)
       pressure_har_shadow_gpa = -stress_term_pressure_gpa(system%stress_har_shadow, au_pressure_gpa)
       pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
-      pressure_loc_sr_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)
+      pressure_loc_sr_grad_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa)
       pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, au_pressure_gpa)
-      pressure_loc_sr_shadow_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_gpa
+      pressure_loc_sr_grad_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_grad_gpa
       call write_data_token(fh, virial_kin)
       call write_data_token(fh, virial_har)
       call write_data_token(fh, virial_xc)
@@ -1851,7 +1856,7 @@ contains
       call write_data_token(fh, system%stress_xc_dbg_rho_div_rdedd)
       call write_data_token(fh, pressure_har_shadow_gpa)
       call write_data_token(fh, pressure_har_shadow_delta_gpa)
-      call write_data_token(fh, pressure_loc_sr_shadow_delta_gpa)
+      call write_data_token(fh, pressure_loc_sr_grad_delta_gpa)
     end if
     write(fh,*)
 
@@ -2111,9 +2116,9 @@ contains
     real(8) :: pressure_har_gpa
     real(8) :: pressure_har_shadow_gpa
     real(8) :: pressure_har_shadow_delta_gpa
-    real(8) :: pressure_loc_sr_gpa
+    real(8) :: pressure_loc_sr_grad_gpa
     real(8) :: pressure_loc_sr_rs_gpa
-    real(8) :: pressure_loc_sr_shadow_delta_gpa
+    real(8) :: pressure_loc_sr_grad_delta_gpa
     logical :: terms_on, details_on, numerics_on
 
     if(.not. comm_is_root(nproc_id_global)) return
@@ -2247,9 +2252,9 @@ contains
       pressure_har_gpa = -stress_term_pressure_gpa(system%stress_har, gpa)
       pressure_har_shadow_gpa = -stress_term_pressure_gpa(system%stress_har_shadow, gpa)
       pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
-      pressure_loc_sr_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad + system%stress_loc_sr_diag, gpa)
+      pressure_loc_sr_grad_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, gpa)
       pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, gpa)
-      pressure_loc_sr_shadow_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_gpa
+      pressure_loc_sr_grad_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_grad_gpa
       call write_data_token(ofl%fh_stress, virial_kin)
       call write_data_token(ofl%fh_stress, virial_har)
       call write_data_token(ofl%fh_stress, virial_xc)
@@ -2264,7 +2269,7 @@ contains
       call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rho_div_rdedd)
       call write_data_token(ofl%fh_stress, pressure_har_shadow_gpa)
       call write_data_token(ofl%fh_stress, pressure_har_shadow_delta_gpa)
-      call write_data_token(ofl%fh_stress, pressure_loc_sr_shadow_delta_gpa)
+      call write_data_token(ofl%fh_stress, pressure_loc_sr_grad_delta_gpa)
     end if
     write(ofl%fh_stress,*)
     flush(ofl%fh_stress)

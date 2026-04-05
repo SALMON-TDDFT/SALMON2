@@ -753,7 +753,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
               vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
               if(g2sq*r1 < 1d-2) then
                 s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
-                      * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/2520d0) * dr
+                      * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/1680d0) * dr
               else
                 s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
                       * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
@@ -919,7 +919,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
             vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
             if(g2sq*r1 < 1d-2) then
               s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
-                    * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/2520d0) * dr
+                    * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/1680d0) * dr
             else
               s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
                     * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
