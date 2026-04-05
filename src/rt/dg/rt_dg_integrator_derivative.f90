@@ -32,6 +32,7 @@
     complex(8) :: mfp
     real(8) :: huge_val
     real(8) :: t_coef_gather0, t_coef_gather1
+    real(8) :: t_deriv0, t_deriv1, dt_deriv, dt_gather_local
     logical :: found_nan
     integer :: nan_io, nan_jo
     real(8) :: max_abs_h0, max_abs_m
@@ -42,8 +43,11 @@
     character(len=32) :: env_mfp
     integer :: env_len, env_stat
     real(8), allocatable, save :: Ap_mat(:,:), A2_mat(:,:)
+    integer, save :: derivative_probe_call_id = 0
     logical, parameter :: enable_derivative_trace = .false.
     logical, parameter :: enable_derivative_progress = .false.
+    logical, parameter :: enable_derivative_hotspot_probe = .true.
+    integer, parameter :: derivative_hotspot_probe_stride = 10
     integer, parameter :: state_block_size = 64
     
     ! Time derivative in velocity gauge:
@@ -63,6 +67,8 @@
     
     dcoef_dt = (0.0d0, 0.0d0)
     if (present(dcoef_dt_pw)) dcoef_dt_pw = (0.0d0, 0.0d0)
+    call cpu_time(t_deriv0)
+    dt_gather_local = 0.0d0
     huge_val = huge(0.0d0) / 2.0d0
     
     ! Calculate A^2 (diamagnetic term)
@@ -326,6 +332,7 @@
         end do
       end if
       call cpu_time(t_coef_gather1)
+      dt_gather_local = dt_gather_local + (t_coef_gather1 - t_coef_gather0)
       if ((enable_derivative_trace .or. enable_derivative_progress) .and. dg_frag%id == 0 .and. ispin == 1) then
         write(*,'(1x,a,es12.4)') "        derivative trace: stage=spin1-after-full-coef-gather dt=", &
           t_coef_gather1 - t_coef_gather0
@@ -679,6 +686,16 @@
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        derivative trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
         " stage=", "exit"
+      flush(6)
+    end if
+
+    call cpu_time(t_deriv1)
+    dt_deriv = t_deriv1 - t_deriv0
+    derivative_probe_call_id = derivative_probe_call_id + 1
+    if (enable_derivative_hotspot_probe .and. dg_frag%id == 0 .and. mod(itt, derivative_hotspot_probe_stride) == 0) then
+      write(*,'(1x,a,i0,a,i0,3(a,1pe11.4))') "        derivative hotspot: itt=", itt, &
+        " call=", derivative_probe_call_id, " total=", dt_deriv, " gather=", dt_gather_local, &
+        " core=", dt_deriv - dt_gather_local
       flush(6)
     end if
 

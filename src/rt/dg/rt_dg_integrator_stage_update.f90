@@ -27,8 +27,11 @@
     type(s_dft_energy),     intent(inout) :: energy
     integer :: n_frag, n_pw
     real(8) :: t_stage0, t_stage1
+    real(8) :: dt_density, dt_hartree, dt_xc, dt_reconstruct, dt_mixed, dt_total
     logical, parameter :: enable_stage_update_trace = .false.
     logical, parameter :: enable_stage_update_progress = .false.
+    logical, parameter :: enable_stage_hotspot_probe = .true.
+    integer, parameter :: hotspot_probe_stride = 10
 
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat stage trace: rank=", dg_frag%id, &
@@ -40,8 +43,9 @@
     call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call cpu_time(t_stage1)
+    dt_density = t_stage1 - t_stage0
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", dt_density
       flush(6)
     end if
 
@@ -52,8 +56,9 @@
     call cpu_time(t_stage0)
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
+    dt_hartree = t_stage1 - t_stage0
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", dt_hartree
       flush(6)
     end if
 
@@ -65,8 +70,9 @@
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
+    dt_xc = t_stage1 - t_stage0
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", dt_xc
       flush(6)
     end if
 
@@ -83,11 +89,13 @@
     call cpu_time(t_stage0)
     call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     call cpu_time(t_stage1)
+    dt_reconstruct = t_stage1 - t_stage0
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", t_stage1 - t_stage0
+      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", dt_reconstruct
       flush(6)
     end if
 
+    dt_mixed = 0.0d0
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
       n_frag = dg_frag%n_mat_max
       n_pw = dg_frag%n_plane_waves
@@ -110,12 +118,23 @@
         allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
       end if
 
+      call cpu_time(t_stage0)
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
       call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
+      call cpu_time(t_stage1)
+      dt_mixed = t_stage1 - t_stage0
       if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
         write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-refresh"
         flush(6)
       end if
+    end if
+
+    dt_total = dt_density + dt_hartree + dt_xc + dt_reconstruct + dt_mixed
+    if (enable_stage_hotspot_probe .and. dg_frag%id == 0 .and. mod(itt, hotspot_probe_stride) == 0) then
+      write(*,'(1x,a,i0,6(a,1pe11.4))') "        stage hotspot: itt=", itt, &
+        " total=", dt_total, " dens=", dt_density, " hartree=", dt_hartree, &
+        " xc=", dt_xc, " recon=", dt_reconstruct, " mixed=", dt_mixed
+      flush(6)
     end if
 
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then

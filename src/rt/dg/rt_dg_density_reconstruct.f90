@@ -20,7 +20,7 @@
     integer :: nocc_spin, nocc_cache
     integer :: irank, slot, npts, idx_local, idx_remote
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count
-    integer :: igrid0, igrid, ngrid, npt_blk, io0, nbatch, tmp_idx, ipw0, npw_blk, ipw_loc
+    integer :: igrid0, igrid, ngrid, npt_blk, io0, io1, nbatch, nstate, tmp_idx, ipw0, npw_blk, ipw_loc
     integer :: total_send_pts, subgroup_root_rank, block_idx_global, self_slot_count, total_local_pts
     integer :: send_total_count, recv_total_count
     integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
@@ -32,7 +32,7 @@
     integer :: ixg_min_probe, ixg_max_probe, owner_valid_probe, nprobe_cols, iprobe
     integer :: inv_weight_apply_count_local, inv_weight_apply_count_total
     integer :: inv_weight_alloc_local, inv_weight_alloc_total
-    integer, parameter :: grid_block_size = 1024, state_block_size = 64, pw_block_size = 128
+    integer, parameter :: grid_block_size = 1024, state_block_size = 64, rho_state_block_size = 16, pw_block_size = 128
     complex(8), parameter :: zzero = (0.0d0, 0.0d0), zone = (1.0d0, 0.0d0)
     real(8) :: phi_i, rho_contrib, rho_raw_contrib, rho_accum, rho_mix_accum
     real(8) :: total_charge, total_charge_local, scale_rho, rho_sum_local
@@ -104,6 +104,9 @@
     logical, parameter :: enable_density_reconstruct_trace = .false.
     logical, parameter :: enable_density_halfdrop_probe = .false.
     logical, parameter :: enable_density_stage_charge_probe = .false.
+    logical, parameter :: enable_density_hotspot_probe = .true.
+    integer, parameter :: density_hotspot_probe_stride = 10
+    integer, save :: density_hotspot_call_id = 0
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
     real(8) :: phi_col_norm_probe(3), phi_col_hvol_probe(3), phi_sdiag_probe(3)
     real(8) :: coef_map_local_probe(3,3), coef_map_global_probe(3,3), coef_map_diff_probe(3,3)
@@ -335,6 +338,16 @@
       kpw_hx(1:n_pw) = dg_frag%k_pw(1, 1:n_pw) * dg_frag%hgs(1)
       kpw_hy(1:n_pw) = dg_frag%k_pw(2, 1:n_pw) * dg_frag%hgs(2)
       kpw_hz(1:n_pw) = dg_frag%k_pw(3, 1:n_pw) * dg_frag%hgs(3)
+    end if
+    if (enable_density_stage_charge_probe) then
+      allocate(g211_cos_x(1:dg_frag%lgnum_total(1)), g211_sin_x(1:dg_frag%lgnum_total(1)))
+!$omp parallel do private(theta) schedule(static)
+      do ixg = 1, dg_frag%lgnum_total(1)
+        theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
+        g211_cos_x(ixg) = cos(theta)
+        g211_sin_x(ixg) = sin(theta)
+      end do
+!$omp end parallel do
     end if
 
     ! Mixed-basis density reconstruction is only valid when PW channels exist.
@@ -1202,28 +1215,33 @@
               end if
 
               if (enable_density_stage_charge_probe .and. dg_frag%is_frag_root .and. block_offset == first_block_offset) then
-                count_primary_blk = count(owner_buf(1:npt_blk) >= 0)
-                count_owner_blk = count(owner_buf(1:npt_blk) == dg_frag%id)
+                count_primary_blk = 0
+                count_owner_blk = 0
                 count_handler_blk = 0
-                count_slot_remote_blk = count(slot_buf(1:npt_blk) > 0 .and. owner_buf(1:npt_blk) >= 0)
-                charge_blk_all = sum(rho_blk(1:npt_blk)) * system%hvol
-                charge_blk_owner = sum(rho_blk(1:npt_blk), mask=(owner_buf(1:npt_blk) == dg_frag%id)) * system%hvol
+                count_slot_remote_blk = valid_remote_grid_count
+                charge_blk_all = 0.0d0
+                charge_blk_owner = 0.0d0
                 charge_blk_handler = 0.0d0
-                charge_blk_slot0 = sum(rho_blk(1:npt_blk), mask=(owner_buf(1:npt_blk) == dg_frag%id .and. slot_buf(1:npt_blk) <= 0)) * system%hvol
+                charge_blk_slot0 = 0.0d0
                 g211_blk_all_re = 0.0d0
                 g211_blk_all_im = 0.0d0
                 g211_blk_owner_re = 0.0d0
                 g211_blk_owner_im = 0.0d0
                 g211_blk_handler_re = 0.0d0
                 g211_blk_handler_im = 0.0d0
-                do igrid = 1, npt_blk
-                  if (owner_buf(igrid) < 0) cycle
-                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg_buf(igrid) - 1) * inv_lgnum1
-                  phase_re = cos(theta)
-                  phase_im = sin(theta)
+                do idx_local = 1, local_grid_count
+                  igrid = local_grid_ids(idx_local)
+                  ixg = ixg_buf(igrid)
+                  phase_re = g211_cos_x(ixg)
+                  phase_im = g211_sin_x(ixg)
+                  count_primary_blk = count_primary_blk + 1
+                  charge_blk_all = charge_blk_all + rho_blk(igrid) * system%hvol
                   g211_blk_all_re = g211_blk_all_re + rho_blk(igrid) * phase_re
                   g211_blk_all_im = g211_blk_all_im - rho_blk(igrid) * phase_im
                   if (owner_buf(igrid) == dg_frag%id) then
+                    count_owner_blk = count_owner_blk + 1
+                    charge_blk_owner = charge_blk_owner + rho_blk(igrid) * system%hvol
+                    if (slot_buf(igrid) <= 0) charge_blk_slot0 = charge_blk_slot0 + rho_blk(igrid) * system%hvol
                     g211_blk_owner_re = g211_blk_owner_re + rho_blk(igrid) * phase_re
                     g211_blk_owner_im = g211_blk_owner_im - rho_blk(igrid) * phase_im
                   end if
@@ -1271,13 +1289,12 @@
                     rho_root_tmp(ixg, iyg, izg) = rho_root_tmp(ixg, iyg, izg) + rho_contrib
                     rho_s_root_tmp(ixg, iyg, izg, ispin) = rho_s_root_tmp(ixg, iyg, izg, ispin) + rho_contrib
                     if (enable_density_stage_charge_probe) then
-                      theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
 !$omp atomic update
                       ifrag_charge_pre(i_local) = ifrag_charge_pre(i_local) + rho_contrib * system%hvol
 !$omp atomic update
-                      ifrag_g211_pre_re(i_local) = ifrag_g211_pre_re(i_local) + rho_contrib * cos(theta)
+                      ifrag_g211_pre_re(i_local) = ifrag_g211_pre_re(i_local) + rho_contrib * g211_cos_x(ixg)
 !$omp atomic update
-                      ifrag_g211_pre_im(i_local) = ifrag_g211_pre_im(i_local) - rho_contrib * sin(theta)
+                      ifrag_g211_pre_im(i_local) = ifrag_g211_pre_im(i_local) - rho_contrib * g211_sin_x(ixg)
                     end if
                   else
                     bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
@@ -1400,9 +1417,8 @@
                     psi_norm_probe = 0.0d0
                     phi_col_norm_probe(:) = 0.0d0
                     nprobe_cols = min(3, nbf)
-                    do igrid = 1, npt_blk
-                      if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
-                      if (slot_buf(igrid) > 0) cycle
+                    do idx_local = 1, local_grid_count
+                      igrid = local_grid_ids(idx_local)
                       phi_norm_probe = phi_norm_probe + sum(phi_blk(igrid, 1:nbf) * phi_blk(igrid, 1:nbf))
                       psi_norm_probe = psi_norm_probe + sum(psi_blk_re(igrid, 1:nbatch) * psi_blk_re(igrid, 1:nbatch) + &
                                                            psi_blk_im(igrid, 1:nbatch) * psi_blk_im(igrid, 1:nbatch))
@@ -1423,24 +1439,21 @@
                   time_project_psi = time_project_psi + (t_psi1 - t_psi0)
                   call cpu_time(t_rho0)
 !$omp parallel do private(io, igrid, rho_accum, occ_factor) schedule(static)
-                  do igrid = 1, npt_blk
-                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
-                    if (slot_buf(igrid) > 0) cycle
-                    rho_accum = 0.0d0
+                    do igrid = 1, npt_blk
+                      rho_accum = 0.0d0
 !$omp simd reduction(+:rho_accum)
-                    do io = 1, nbatch
-                      occ_factor = occ_cache(io0 + io - 1)
-                      rho_accum = rho_accum + occ_factor * &
-                        (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
+                      do io = 1, nbatch
+                        occ_factor = occ_cache(io0 + io - 1)
+                        rho_accum = rho_accum + occ_factor * &
+                          (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
+                      end do
+                      rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                     end do
-                    rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
-                  end do
 !$omp end parallel do
                   if (enable_density_reconstruct_trace .and. io0 <= size(orbital_norm_probe_local)) then
                     do io = 1, min(nbatch, size(orbital_norm_probe_local) - io0 + 1)
-                      do igrid = 1, npt_blk
-                        if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
-                        if (slot_buf(igrid) > 0) cycle
+                      do idx_local = 1, local_grid_count
+                        igrid = local_grid_ids(idx_local)
                         orbital_norm_probe_local(io0 + io - 1) = orbital_norm_probe_local(io0 + io - 1) + &
                           (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
                            psi_blk_im(igrid, io) * psi_blk_im(igrid, io)) * system%hvol
@@ -1502,17 +1515,21 @@
                   time_project_psi = time_project_psi + (t_psi1 - t_psi0)
 
                   call cpu_time(t_rho0)
-!$omp parallel do private(io, igrid, rho_accum) schedule(static)
-                  do igrid = 1, npt_blk
-                    rho_accum = 0.0d0
+                  do io1 = 1, nbatch, rho_state_block_size
+                    nstate = min(rho_state_block_size, nbatch - io1 + 1)
+!$omp parallel do private(io, idx_local, igrid, rho_accum) schedule(static)
+                    do idx_local = 1, local_grid_count
+                      igrid = local_grid_ids(idx_local)
+                      rho_accum = 0.0d0
 !$omp simd reduction(+:rho_accum)
-                    do io = 1, nbatch
-                      rho_accum = rho_accum + psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
-                                  psi_blk_im(igrid, io) * psi_blk_im(igrid, io)
+                      do io = io1, io1 + nstate - 1
+                        rho_accum = rho_accum + psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
+                                    psi_blk_im(igrid, io) * psi_blk_im(igrid, io)
+                      end do
+                      rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                     end do
-                    rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
-                  end do
 !$omp end parallel do
+                  end do
                   call cpu_time(t_rho1)
                   time_project_rho = time_project_rho + (t_rho1 - t_rho0)
                 end do  ! io0
@@ -1529,34 +1546,41 @@
                 time_project_rho_reduce = time_project_rho_reduce + (t_rho1 - t_rho0)
               end if
               if (enable_density_stage_charge_probe .and. dg_frag%is_frag_root .and. block_offset == first_block_offset) then
-                count_primary_blk = count(owner_buf(1:npt_blk) >= 0)
-                count_owner_blk = count(owner_buf(1:npt_blk) == dg_frag%id)
+                count_primary_blk = 0
+                count_owner_blk = 0
                 count_handler_blk = 0
-                count_slot_remote_blk = count(slot_buf(1:npt_blk) > 0 .and. owner_buf(1:npt_blk) >= 0)
-                charge_blk_all = sum(rho_blk_accum(1:npt_blk)) * system%hvol
-                charge_blk_owner = sum(rho_blk_accum(1:npt_blk), mask=(owner_buf(1:npt_blk) == dg_frag%id)) * system%hvol
+                count_slot_remote_blk = valid_remote_grid_count
+                charge_blk_all = 0.0d0
+                charge_blk_owner = 0.0d0
                 charge_blk_handler = 0.0d0
-                charge_blk_slot0 = sum(rho_blk_accum(1:npt_blk), mask=(owner_buf(1:npt_blk) == dg_frag%id .and. slot_buf(1:npt_blk) <= 0)) * system%hvol
+                charge_blk_slot0 = 0.0d0
                 g211_blk_all_re = 0.0d0
                 g211_blk_all_im = 0.0d0
                 g211_blk_owner_re = 0.0d0
                 g211_blk_owner_im = 0.0d0
                 g211_blk_handler_re = 0.0d0
                 g211_blk_handler_im = 0.0d0
-                do igrid = 1, npt_blk
-                  if (owner_buf(igrid) < 0) cycle
-                  theta = 2.0d0 * acos(-1.0d0) * dble(ixg_buf(igrid) - 1) * inv_lgnum1
-                  g211_blk_all_re = g211_blk_all_re + rho_blk_accum(igrid) * cos(theta)
-                  g211_blk_all_im = g211_blk_all_im - rho_blk_accum(igrid) * sin(theta)
+                do idx_local = 1, local_grid_count
+                  igrid = local_grid_ids(idx_local)
+                  ixg = ixg_buf(igrid)
+                  phase_re = g211_cos_x(ixg)
+                  phase_im = g211_sin_x(ixg)
+                  count_primary_blk = count_primary_blk + 1
+                  charge_blk_all = charge_blk_all + rho_blk_accum(igrid) * system%hvol
+                  g211_blk_all_re = g211_blk_all_re + rho_blk_accum(igrid) * phase_re
+                  g211_blk_all_im = g211_blk_all_im - rho_blk_accum(igrid) * phase_im
                   if (owner_buf(igrid) == dg_frag%id) then
-                    g211_blk_owner_re = g211_blk_owner_re + rho_blk_accum(igrid) * cos(theta)
-                    g211_blk_owner_im = g211_blk_owner_im - rho_blk_accum(igrid) * sin(theta)
+                    count_owner_blk = count_owner_blk + 1
+                    charge_blk_owner = charge_blk_owner + rho_blk_accum(igrid) * system%hvol
+                    if (slot_buf(igrid) <= 0) charge_blk_slot0 = charge_blk_slot0 + rho_blk_accum(igrid) * system%hvol
+                    g211_blk_owner_re = g211_blk_owner_re + rho_blk_accum(igrid) * phase_re
+                    g211_blk_owner_im = g211_blk_owner_im - rho_blk_accum(igrid) * phase_im
                   end if
                   if (target_rank_owned_by_handler(owner_buf(igrid))) then
                     count_handler_blk = count_handler_blk + 1
                     charge_blk_handler = charge_blk_handler + rho_blk_accum(igrid) * system%hvol
-                    g211_blk_handler_re = g211_blk_handler_re + rho_blk_accum(igrid) * cos(theta)
-                    g211_blk_handler_im = g211_blk_handler_im - rho_blk_accum(igrid) * sin(theta)
+                    g211_blk_handler_re = g211_blk_handler_re + rho_blk_accum(igrid) * phase_re
+                    g211_blk_handler_im = g211_blk_handler_im - rho_blk_accum(igrid) * phase_im
                   end if
                 end do
                 write(*,*) "        density block ownership:", "branch=", "accum", "ifrag=", ifrag, "ispin=", ispin, &
@@ -1598,13 +1622,12 @@
                       rho_root_tmp(ixg, iyg, izg) = rho_root_tmp(ixg, iyg, izg) + rho_contrib
                       rho_s_root_tmp(ixg, iyg, izg, ispin) = rho_s_root_tmp(ixg, iyg, izg, ispin) + rho_contrib
                       if (enable_density_stage_charge_probe) then
-                        theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
 !$omp atomic update
                         ifrag_charge_pre(i_local) = ifrag_charge_pre(i_local) + rho_contrib * system%hvol
 !$omp atomic update
-                        ifrag_g211_pre_re(i_local) = ifrag_g211_pre_re(i_local) + rho_contrib * cos(theta)
+                        ifrag_g211_pre_re(i_local) = ifrag_g211_pre_re(i_local) + rho_contrib * g211_cos_x(ixg)
 !$omp atomic update
-                        ifrag_g211_pre_im(i_local) = ifrag_g211_pre_im(i_local) - rho_contrib * sin(theta)
+                        ifrag_g211_pre_im(i_local) = ifrag_g211_pre_im(i_local) - rho_contrib * g211_sin_x(ixg)
                       end if
                     else
                       bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
@@ -1639,15 +1662,6 @@
                       flush(6)
                       stop "DG-Fragment RT: density accum owner out of range"
                     end if
-                  if (dg_frag%density_send_count(owner_rank) <= 0) then
-                    if (owner_rank == dg_frag%id) cycle
-                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
-                      "DG density accum invalid send count: rank=", dg_frag%id, &
-                      " id_frag=", dg_frag%id_frag, " i_local=", i_local, &
-                      " igrid=", igrid, " owner=", owner_rank, " nsend=", dg_frag%density_send_count(owner_rank)
-                    flush(6)
-                    stop "DG-Fragment RT: density accum invalid send count"
-                  end if
                     if (dg_frag%density_send_count(owner_rank) <= 0) then
                       if (owner_rank == dg_frag%id) cycle
                       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -1873,16 +1887,6 @@
       end if
       call cpu_time(t_setup0)
       if (dg_frag%is_frag_root) then
-        if (enable_density_stage_charge_probe) then
-          allocate(g211_cos_x(1:dg_frag%lgnum_total(1)), g211_sin_x(1:dg_frag%lgnum_total(1)))
-!$omp parallel do private(theta) schedule(static)
-          do ixg = 1, dg_frag%lgnum_total(1)
-            theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
-            g211_cos_x(ixg) = cos(theta)
-            g211_sin_x(ixg) = sin(theta)
-          end do
-!$omp end parallel do
-        end if
         rho_bf_lb1 = lbound(rho_bf, 1)
         rho_bf_lb2 = lbound(rho_bf, 2)
         rho_bf_lb3 = lbound(rho_bf, 3)
@@ -1962,7 +1966,6 @@
             flush(6)
           end if
         end do
-        if (allocated(g211_cos_x)) deallocate(g211_cos_x, g211_sin_x)
       end if
       call cpu_time(t_setup1)
       time_comm_unpack = time_comm_unpack + (t_setup1 - t_setup0)
@@ -2122,9 +2125,8 @@
         do izg = 1, dg_frag%lgnum_total(3)
           do iyg = 1, dg_frag%lgnum_total(2)
             do ixg = 1, dg_frag%lgnum_total(1)
-              theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
-              g211_root_sum_re_local = g211_root_sum_re_local + rho_root_sum(ixg, iyg, izg) * cos(theta)
-              g211_root_sum_im_local = g211_root_sum_im_local - rho_root_sum(ixg, iyg, izg) * sin(theta)
+              g211_root_sum_re_local = g211_root_sum_re_local + rho_root_sum(ixg, iyg, izg) * g211_cos_x(ixg)
+              g211_root_sum_im_local = g211_root_sum_im_local - rho_root_sum(ixg, iyg, izg) * g211_sin_x(ixg)
             end do
           end do
         end do
@@ -2199,15 +2201,6 @@
       if (enable_density_stage_charge_probe) then
         g211_rank_buf_re_local = 0.0d0
         g211_rank_buf_im_local = 0.0d0
-        allocate(g211_cos_x(rho_x_lo:rho_x_hi), g211_sin_x(rho_x_lo:rho_x_hi))
-        !$omp parallel do private(theta) schedule(static)
-        do ixg = rho_x_lo, rho_x_hi
-          theta = 2.0d0 * acos(-1.0d0) * dble(ixg - 1) * inv_lgnum1
-          g211_cos_x(ixg) = cos(theta)
-          g211_sin_x(ixg) = sin(theta)
-        end do
-        !$omp end parallel do
-
         !$omp parallel do collapse(2) private(ixg, g211_re_line, g211_im_line, rho_val) &
         !$omp& reduction(+:g211_rank_buf_re_local, g211_rank_buf_im_local) schedule(static)
         do izg = rho_z_lo, rho_z_hi
@@ -2226,7 +2219,6 @@
         end do
         !$omp end parallel do
 
-        deallocate(g211_cos_x, g211_sin_x)
         call comm_summation(g211_rank_buf_re_local, g211_rank_buf_re_global, dg_frag%icomm)
         call comm_summation(g211_rank_buf_im_local, g211_rank_buf_im_global, dg_frag%icomm)
         if (dg_frag%id == 0) then
@@ -2476,6 +2468,7 @@
     if (allocated(transform_frag_spin)) deallocate(transform_frag_spin)
     if (allocated(transform_pw_spin)) deallocate(transform_pw_spin)
     if (allocated(n_basis_mix_spin)) deallocate(n_basis_mix_spin)
+    if (allocated(g211_cos_x)) deallocate(g211_cos_x, g211_sin_x)
     if (allocated(rho_root_tmp)) deallocate(rho_root_tmp, rho_root_sum, rho_s_root_tmp, rho_s_root_sum)
     if (allocated(ifrag_charge_pre)) deallocate(ifrag_charge_pre, ifrag_charge_applied, ifrag_charge_remote)
     if (allocated(ifrag_g211_pre_re)) deallocate(ifrag_g211_pre_re, ifrag_g211_pre_im)
@@ -2486,6 +2479,16 @@
     deallocate(rho_bf, rho_s_bf)
     deallocate(rho_send, rho_recv)
     call cpu_time(t_total1)
+    density_hotspot_call_id = density_hotspot_call_id + 1
+    if (enable_density_hotspot_probe .and. dg_frag%id == 0 .and. mod(density_hotspot_call_id, density_hotspot_probe_stride) == 0) then
+      write(*,'(1x,a,i0,6(a,1pe11.4))') "        density hotspot: call=", density_hotspot_call_id, &
+        " total=", t_total1 - t_total0, " cache=", time_cache, " project=", time_project, &
+        " comm=", time_comm, " norm=", time_norm, " proj_rho=", time_project_rho
+      write(*,'(1x,a,6(a,1pe11.4))') "        density hotspot detail:", &
+        " proj_psi=", time_project_psi, " proj_setup=", time_project_setup, " proj_grid=", time_project_grid_prep, &
+        " proj_phi=", time_project_phi_pack, " proj_dmat=", time_project_dmat_build, " proj_rho_reduce=", time_project_rho_reduce
+      flush(6)
+    end if
     if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
         "        density timing: total=", t_total1 - t_total0, " cache=", time_cache, &
