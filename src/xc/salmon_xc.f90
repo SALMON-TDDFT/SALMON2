@@ -39,7 +39,7 @@ module salmon_xc
 
   implicit none
 
-  real(8), parameter :: r2scan_vtau_damping_alpha = 0.5d0
+  real(8), parameter :: r2scan_vtau_damping_alpha = 0.3d0
 
 ! List of Exchange Correlation Functionals
   integer, parameter :: salmon_xctype_none  = 0

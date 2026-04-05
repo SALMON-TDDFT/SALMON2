@@ -6,7 +6,7 @@ xc_src="$repo_root/src/xc/salmon_xc.f90"
 cmake_lists="$repo_root/tests/source/CMakeLists.txt"
 
 grep -Fq 'check_builtin_r2scan_vtau_damping.sh' "$cmake_lists"
-grep -Fq 'r2scan_vtau_damping_alpha = 0.5d0' "$xc_src"
+grep -Fq 'r2scan_vtau_damping_alpha = 0.3d0' "$xc_src"
 grep -Fq "use salmon_global, only: yn_spinorbit, calc_mode" "$xc_src"
 grep -Fq "trim(calc_mode) == 'GS'" "$xc_src"
 grep -Fq 'allocate(vtau_prev_local(mg%num(1), mg%num(2), mg%num(3)))' "$xc_src"
