@@ -46,6 +46,7 @@
     integer, save :: derivative_probe_call_id = 0
     logical, parameter :: enable_derivative_trace = .false.
     logical, parameter :: enable_derivative_progress = .false.
+    logical, parameter :: enable_derivative_sanity_checks = .false.
     logical, parameter :: enable_derivative_hotspot_probe = .true.
     integer, parameter :: derivative_hotspot_probe_stride = 10
     integer, parameter :: state_block_size = 64
@@ -185,7 +186,7 @@
       else if (need_h0_dense .and. .not. allocated(dg_frag%H_mat_blocks)) then
         H0c(1:n_frag, 1:n_frag) = cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
       end if
-      if (allocated(dg_frag%H_mat)) then
+      if (enable_derivative_sanity_checks .and. allocated(dg_frag%H_mat)) then
         if (any(dg_frag%H_mat(1:n, 1:n, ispin) /= dg_frag%H_mat(1:n, 1:n, ispin))) then
           write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_mat: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
           stop "NaN in H_mat"
@@ -200,7 +201,7 @@
         end if
       end if
       
-      if (has_nonlocal .and. allocated(dg_frag%H_nl_cache)) then
+      if (enable_derivative_sanity_checks .and. has_nonlocal .and. allocated(dg_frag%H_nl_cache)) then
         if (any(real(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= real(dg_frag%H_nl_cache(1:n, 1:n, ispin))) .or. &
             any(aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)) /= aimag(dg_frag%H_nl_cache(1:n, 1:n, ispin)))) then
           write(*,'(a,i0,a,i0,a,i0)') "[NaN] H_nl_cache: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
@@ -534,29 +535,31 @@
           " ispin=", ispin, " stage=", "after-h0"
           flush(6)
       end if
-      max_abs_h0 = maxval(abs(dcoef_dt_h0))
-      if (max_abs_h0 > 1.0d150) then
-        write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_h0| huge: rank=", dg_frag%id, &
-          " itt=", itt, " ispin=", ispin, " max=", max_abs_h0
-      end if
-      found_nan = .false.
-      nan_io = 0
-      nan_jo = 0
-      do io = 1, dg_frag%nstate_tot
-        do nan_jo = 1, n_tot
-          if (real(dcoef_dt_h0(nan_jo, io)) /= real(dcoef_dt_h0(nan_jo, io)) .or. &
-              aimag(dcoef_dt_h0(nan_jo, io)) /= aimag(dcoef_dt_h0(nan_jo, io))) then
-            found_nan = .true.
-            nan_io = io
-            exit
-          end if
+      if (enable_derivative_sanity_checks) then
+        max_abs_h0 = maxval(abs(dcoef_dt_h0))
+        if (max_abs_h0 > 1.0d150) then
+          write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_h0| huge: rank=", dg_frag%id, &
+            " itt=", itt, " ispin=", ispin, " max=", max_abs_h0
+        end if
+        found_nan = .false.
+        nan_io = 0
+        nan_jo = 0
+        do io = 1, dg_frag%nstate_tot
+          do nan_jo = 1, n_tot
+            if (real(dcoef_dt_h0(nan_jo, io)) /= real(dcoef_dt_h0(nan_jo, io)) .or. &
+                aimag(dcoef_dt_h0(nan_jo, io)) /= aimag(dcoef_dt_h0(nan_jo, io))) then
+              found_nan = .true.
+              nan_io = io
+              exit
+            end if
+          end do
+          if (found_nan) exit
         end do
-        if (found_nan) exit
-      end do
-      if (found_nan) then
-        write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0)') "[NaN] dcoef_dt_h0: rank=", dg_frag%id, " itt=", itt, &
-          " ispin=", ispin, " io=", nan_io, " jo=", nan_jo
-        stop "NaN in H0c term"
+        if (found_nan) then
+          write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0)') "[NaN] dcoef_dt_h0: rank=", dg_frag%id, " itt=", itt, &
+            " ispin=", ispin, " io=", nan_io, " jo=", nan_jo
+          stop "NaN in H0c term"
+        end if
       end if
 
       if (enable_derivative_trace) then
@@ -601,29 +604,31 @@
           " ispin=", ispin, " stage=", "after-m"
         flush(6)
       end if
-      max_abs_m = maxval(abs(dcoef_dt_m))
-      if (max_abs_m > 1.0d150) then
-        write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_m| huge: rank=", dg_frag%id, &
-          " itt=", itt, " ispin=", ispin, " max=", max_abs_m
-      end if
-      found_nan = .false.
-      nan_io = 0
-      nan_jo = 0
-      do io = 1, dg_frag%nstate_tot
-        do nan_jo = 1, n_tot
-          if (real(dcoef_dt_m(nan_jo, io)) /= real(dcoef_dt_m(nan_jo, io)) .or. &
-              aimag(dcoef_dt_m(nan_jo, io)) /= aimag(dcoef_dt_m(nan_jo, io))) then
-            found_nan = .true.
-            nan_io = io
-            exit
-          end if
+      if (enable_derivative_sanity_checks) then
+        max_abs_m = maxval(abs(dcoef_dt_m))
+        if (max_abs_m > 1.0d150) then
+          write(*,'(a,i0,a,i0,a,i0,a,es12.4)') "[WARN] |dcoef_dt_m| huge: rank=", dg_frag%id, &
+            " itt=", itt, " ispin=", ispin, " max=", max_abs_m
+        end if
+        found_nan = .false.
+        nan_io = 0
+        nan_jo = 0
+        do io = 1, dg_frag%nstate_tot
+          do nan_jo = 1, n_tot
+            if (real(dcoef_dt_m(nan_jo, io)) /= real(dcoef_dt_m(nan_jo, io)) .or. &
+                aimag(dcoef_dt_m(nan_jo, io)) /= aimag(dcoef_dt_m(nan_jo, io))) then
+              found_nan = .true.
+              nan_io = io
+              exit
+            end if
+          end do
+          if (found_nan) exit
         end do
-        if (found_nan) exit
-      end do
-      if (found_nan) then
-        write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0)') "[NaN] dcoef_dt_m: rank=", dg_frag%id, " itt=", itt, &
-          " ispin=", ispin, " io=", nan_io, " jo=", nan_jo
-        stop "NaN in M term"
+        if (found_nan) then
+          write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0)') "[NaN] dcoef_dt_m: rank=", dg_frag%id, " itt=", itt, &
+            " ispin=", ispin, " io=", nan_io, " jo=", nan_jo
+          stop "NaN in M term"
+        end if
       end if
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m

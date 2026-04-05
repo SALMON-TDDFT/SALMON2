@@ -103,7 +103,7 @@
     logical, parameter :: use_dc_like_root_glue = .true.
     logical, parameter :: enable_density_reconstruct_trace = .false.
     logical, parameter :: enable_density_halfdrop_probe = .false.
-    logical, parameter :: enable_density_stage_charge_probe = .false.
+    logical, parameter :: enable_density_stage_charge_probe = .true.
     logical, parameter :: enable_density_hotspot_probe = .true.
     integer, parameter :: density_hotspot_probe_stride = 10
     integer, save :: density_hotspot_call_id = 0
@@ -1229,6 +1229,9 @@
                 g211_blk_owner_im = 0.0d0
                 g211_blk_handler_re = 0.0d0
                 g211_blk_handler_im = 0.0d0
+!$omp parallel do private(igrid, ixg, phase_re, phase_im) schedule(static) &
+!$omp& reduction(+:count_primary_blk, count_owner_blk, count_handler_blk, charge_blk_all, charge_blk_owner, charge_blk_handler, charge_blk_slot0, &
+!$omp& g211_blk_all_re, g211_blk_all_im, g211_blk_owner_re, g211_blk_owner_im, g211_blk_handler_re, g211_blk_handler_im)
                 do idx_local = 1, local_grid_count
                   igrid = local_grid_ids(idx_local)
                   ixg = ixg_buf(igrid)
@@ -1252,6 +1255,7 @@
                     g211_blk_handler_im = g211_blk_handler_im - rho_blk(igrid) * phase_im
                   end if
                 end do
+!$omp end parallel do
                 write(*,*) "        density block ownership:", "branch=", "mixed", "ifrag=", ifrag, "ispin=", ispin, &
                   "rank=", dg_frag%id, "id_frag=", dg_frag%id_frag, &
                   "npt=", npt_blk, "nprimary=", count_primary_blk, "nowner=", count_owner_blk, "nhandler=", count_handler_blk, "nremote=", count_slot_remote_blk, &
@@ -1560,6 +1564,9 @@
                 g211_blk_owner_im = 0.0d0
                 g211_blk_handler_re = 0.0d0
                 g211_blk_handler_im = 0.0d0
+!$omp parallel do private(igrid, ixg, phase_re, phase_im) schedule(static) &
+!$omp& reduction(+:count_primary_blk, count_owner_blk, count_handler_blk, charge_blk_all, charge_blk_owner, charge_blk_handler, charge_blk_slot0, &
+!$omp& g211_blk_all_re, g211_blk_all_im, g211_blk_owner_re, g211_blk_owner_im, g211_blk_handler_re, g211_blk_handler_im)
                 do idx_local = 1, local_grid_count
                   igrid = local_grid_ids(idx_local)
                   ixg = ixg_buf(igrid)
@@ -1583,6 +1590,7 @@
                     g211_blk_handler_im = g211_blk_handler_im - rho_blk_accum(igrid) * phase_im
                   end if
                 end do
+!$omp end parallel do
                 write(*,*) "        density block ownership:", "branch=", "accum", "ifrag=", ifrag, "ispin=", ispin, &
                   "rank=", dg_frag%id, "id_frag=", dg_frag%id_frag, &
                   "npt=", npt_blk, "nprimary=", count_primary_blk, "nowner=", count_owner_blk, "nhandler=", count_handler_blk, "nremote=", count_slot_remote_blk, &
@@ -2122,6 +2130,8 @@
       if (enable_density_stage_charge_probe .and. dg_frag%id == root_glue_rank) then
         g211_root_sum_re_local = 0.0d0
         g211_root_sum_im_local = 0.0d0
+!$omp parallel do collapse(3) private(ixg, iyg, izg) schedule(static) &
+!$omp& reduction(+:g211_root_sum_re_local, g211_root_sum_im_local)
         do izg = 1, dg_frag%lgnum_total(3)
           do iyg = 1, dg_frag%lgnum_total(2)
             do ixg = 1, dg_frag%lgnum_total(1)
@@ -2130,6 +2140,7 @@
             end do
           end do
         end do
+!$omp end parallel do
         write(*,*) "        density root-glue-g211 source:", "rank=", dg_frag%id, &
           "g211_re=", g211_root_sum_re_local, "g211_im=", g211_root_sum_im_local
         flush(6)
