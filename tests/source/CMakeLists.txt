@@ -1,6 +1,7 @@
 set(STRESS_SOURCE_TESTS
   check_stress_occupation_weight.sh
   check_stress_ewald_g_sign.sh
+  check_stress_ewald_rspace_sign.sh
   check_stress_output_control_keys.sh
   check_stress_virial_diagnostics.sh
   check_stress_decomp_tensor_table.sh

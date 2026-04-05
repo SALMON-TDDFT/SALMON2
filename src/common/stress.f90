@@ -1213,7 +1213,7 @@ contains
         rr = sum(rab(:)**2)
         if(rr > cutoff_r2) cycle
         r_abs = sqrt(rr)
-        fact = 0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) / (V * r_abs**3) &
+        fact = -0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) / (V * r_abs**3) &
              * (erfc_salmon(sqrt(aEwald)*r_abs) + exp_ewald_pref*r_abs*exp(-aEwald*rr))
         E_ewa_R_loc = E_ewa_R_loc + 0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) &
                    * erfc_salmon(sqrt(aEwald)*r_abs) / r_abs
