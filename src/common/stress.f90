@@ -222,12 +222,17 @@ contains
     type(s_poisson),         intent(in)    :: poisson
     type(s_dft_energy),      intent(in)    :: energy
     integer :: ix, iy, iz, a, b, ig_s(3), ig_e(3)
-    real(8) :: g(3), G2, coeff, strs(3,3), strs_sum(3,3), V
+    real(8) :: g(3), G2, coeff, strs(3,3), strs_sum(3,3), V, fourpi
 
     V = system%det_a
+    fourpi = 4d0 * pi
     strs = 0d0
     call get_g_bounds(fg, ig_s, ig_e)
 
+    !$omp parallel do collapse(2) default(none) &
+    !$omp   private(ix,iy,iz,a,b,g,G2,coeff) &
+    !$omp   shared(fg,poisson,ig_s,ig_e,fourpi) &
+    !$omp   reduction(+:strs)
     do iz = ig_s(3), ig_e(3)
     do iy = ig_s(2), ig_e(2)
     do ix = ig_s(1), ig_e(1)
@@ -236,7 +241,7 @@ contains
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
       G2 = g(1)**2 + g(2)**2 + g(3)**2
-      coeff = abs(poisson%zrhoG_ele(ix,iy,iz))**2 * (4d0*pi / G2**2)
+      coeff = abs(poisson%zrhoG_ele(ix,iy,iz))**2 * (fourpi / G2**2)
       do b = 1, 3
       do a = 1, 3
         strs(a,b) = strs(a,b) - coeff * g(a) * g(b)
@@ -245,6 +250,7 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
 
     call sum_stress_tensor(info%icomm_r, strs, strs_sum)
     do a = 1, 3
@@ -276,6 +282,7 @@ contains
     strs = 0d0
     box = 0d0
 
+    !$omp parallel do collapse(2) default(none) private(ix,iy,iz) shared(box,Vh,mg)
     do iz = mg%is(3), mg%ie(3)
     do iy = mg%is(2), mg%ie(2)
     do ix = mg%is(1), mg%ie(1)
@@ -283,11 +290,15 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
 
     if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
     call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, box, grad_vh)
 
-    ! Keep the diagnostic accumulation order deterministic across runs.
+    !$omp parallel do collapse(2) default(none) &
+    !$omp   private(ix,iy,iz,a,b) &
+    !$omp   shared(coeff,grad_vh,mg) &
+    !$omp   reduction(+:strs)
     do iz = mg%is(3), mg%ie(3)
     do iy = mg%is(2), mg%ie(2)
     do ix = mg%is(1), mg%ie(1)
@@ -299,6 +310,7 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
 
     call sum_stress_tensor(info%icomm_r, strs, strs_sum)
     strs_sum = strs_sum / V
@@ -364,6 +376,10 @@ contains
     E_vc_loc = 0d0
     E_x_loc = 0d0
     E_c_loc = 0d0
+    !$omp parallel do collapse(3) default(none) &
+    !$omp   private(ispin,ix,iy,iz,rho_xc,trho_xc,exc_x,exc_c,vxc_x,vxc_c) &
+    !$omp   shared(system,mg,ppn,rho_s) &
+    !$omp   reduction(+:E_x_loc,E_c_loc,E_vx_loc,E_vc_loc)
     do ispin = 1, system%nspin
       do iz = mg%is(3), mg%ie(3)
       do iy = mg%is(2), mg%ie(2)
@@ -383,6 +399,7 @@ contains
       end do
       end do
     end do
+    !$omp end parallel do
     E_x_loc = E_x_loc * system%Hvol
     E_c_loc = E_c_loc * system%Hvol
     E_vx_loc = E_vx_loc * system%Hvol
@@ -432,7 +449,7 @@ contains
     real(8) :: strs_grad_payload(3,3), strs_grad_payload_sum(3,3)
     real(8) :: strs_grad_vsigma(3,3), strs_grad_vsigma_sum(3,3)
     real(8) :: strs_tau(3,3), strs_tau_sum(3,3)
-    logical :: want_numerics_diag
+    logical :: want_numerics_diag, has_grho_payload
     real(8), allocatable :: rho_box(:,:,:)
     real(8), allocatable :: grho_local(:,:,:,:)
     complex(8), allocatable :: gtpsi(:,:,:,:)
@@ -448,11 +465,13 @@ contains
 
     V = system%det_a
     want_numerics_diag = (trim(yn_out_stress_numerics) == 'y')
+    has_grho_payload = allocated(system%xc_payload%grho%v)
     allocate(rho_box(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
     allocate(grho_local(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
 
     rho_box = 0d0
+    !$omp parallel do collapse(2) default(none) private(ix,iy,iz) shared(rho_box,rho_s,mg)
     do iz = mg%is(3), mg%ie(3)
     do iy = mg%is(2), mg%ie(2)
     do ix = mg%is(1), mg%ie(1)
@@ -460,6 +479,7 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
     if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rho_box)
     call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, rho_box, grho_local)
 
@@ -467,6 +487,10 @@ contains
     strs_grad = 0d0
     strs_grad_payload = 0d0
     strs_grad_vsigma = 0d0
+    !$omp parallel do collapse(2) default(none) &
+    !$omp   private(ix,iy,iz,a,b,rho_loc,vsigma_loc) &
+    !$omp   shared(system,Vxc,rho_s,grho_local,mg,has_grho_payload) &
+    !$omp   reduction(+:E_vxc_loc,strs_grad,strs_grad_payload,strs_grad_vsigma)
     do iz = mg%is(3), mg%ie(3)
     do iy = mg%is(2), mg%ie(2)
     do ix = mg%is(1), mg%ie(1)
@@ -477,7 +501,7 @@ contains
       do a = 1, 3
         strs_grad(a,b) = strs_grad(a,b) + system%Hvol * &
              system%xc_payload%rdedd%v(a, mg%idx(ix), mg%idy(iy), mg%idz(iz)) * grho_local(b,ix,iy,iz)
-        if (allocated(system%xc_payload%grho%v)) then
+        if (has_grho_payload) then
           strs_grad_payload(a,b) = strs_grad_payload(a,b) + system%Hvol * &
                system%xc_payload%rdedd%v(a, mg%idx(ix), mg%idy(iy), mg%idz(iz)) * &
                system%xc_payload%grho%v(b, ix, iy, iz)
@@ -489,6 +513,7 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
 
     strs_tau = 0d0
     im = 1
@@ -498,7 +523,10 @@ contains
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im), gtpsi, &
            mg%is_array, mg%ie_array, mg%is, mg%ie, mg%idx, mg%idy, mg%idz, stencil%coef_nab, system%rmatrix_B)
       rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-      !$omp parallel do collapse(2) private(ix,iy,iz,kAc,psi_r,w,a,b,vtau_loc) reduction(+:strs_tau)
+      !$omp parallel do collapse(2) default(none) &
+      !$omp   private(ix,iy,iz,kAc,psi_r,w,a,b,vtau_loc) &
+      !$omp   shared(mg,field_state,system,ik,tpsi,ispin,io,im,gtpsi,rtmp) &
+      !$omp   reduction(+:strs_tau)
       do iz = mg%is(3), mg%ie(3)
       do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
@@ -697,7 +725,6 @@ contains
     type(s_stress_field_state), intent(in)    :: field_state
     integer :: ix, iy, iz, ik, io, ispin, im, a, b
     real(8) :: rtmp, kAc(3), strs(3,3), strs_sum(3,3), V
-    real(8) :: psi_abs2
     complex(8) :: w(3), psi_r
     complex(8), allocatable :: gtpsi(:,:,:,:)
 
@@ -712,7 +739,10 @@ contains
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im), gtpsi, &
            mg%is_array, mg%ie_array, mg%is, mg%ie, mg%idx, mg%idy, mg%idz, stencil%coef_nab, system%rmatrix_B)
       rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-      !$omp parallel do collapse(2) private(ix,iy,iz,kAc,psi_r,w,a,b,psi_abs2) reduction(+:strs)
+      !$omp parallel do collapse(2) default(none) &
+      !$omp   private(ix,iy,iz,kAc,psi_r,w,a,b) &
+      !$omp   shared(mg,field_state,system,ik,tpsi,ispin,io,im,gtpsi,rtmp) &
+      !$omp   reduction(+:strs)
       do iz = mg%is(3), mg%ie(3)
       do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
@@ -726,7 +756,6 @@ contains
           kAc(3) = system%vec_k(3,ik) + field_state%Ac_uniform(3)
         end if
         psi_r = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-        psi_abs2 = abs(psi_r)**2
         w(1) = gtpsi(1,ix,iy,iz) + zi * kAc(1) * psi_r
         w(2) = gtpsi(2,ix,iy,iz) + zi * kAc(2) * psi_r
         w(3) = gtpsi(3,ix,iy,iz) + zi * kAc(3) * psi_r
@@ -765,7 +794,7 @@ contains
     real(8) :: g(3), r(3), G2, Gd, coeff_lr, coeff_lr_scr, scr_fac, strs(3,3), strs_sum(3,3), &
       & strs_grad_sum(3,3), strs_diag_sum(3,3), strs_sr(3,3), strs_lr(3,3), strs_lr_scr(3,3), &
       & strs_sr_sum(3,3), strs_lr_sum(3,3), strs_lr_scr_sum(3,3), E_sr, E_lr, E_sr_scr, E_lr_scr, &
-      & E_sr_loc, E_lr_loc, E_lr_scr_loc, V
+      & E_sr_loc, E_lr_loc, E_lr_scr_loc, V, cutoff_g2
     complex(8) :: rho_e, V_sr_sum, V_lr_sum, V_lr_scr_sum, dVsr_dG2_sum, phase
 
     V = system%det_a
@@ -776,8 +805,18 @@ contains
     E_sr_loc = 0d0
     E_lr_loc = 0d0
     E_lr_scr_loc = 0d0
+    cutoff_g2 = cutoff_g**2
     call get_g_bounds(fg, ig_s, ig_e)
+    if(.not. allocated(ppg%dVG_ion_dG2)) call fail_stress("calc_stress_loc: dVG_ion_dG2 is not allocated")
+    do ia = 1, system%nion
+      ik = kion(ia)
+      if(ik < 1 .or. ik > size(pp%zps)) call fail_stress("calc_stress_loc: invalid species index")
+    end do
 
+    !$omp parallel do collapse(2) default(none) &
+    !$omp   private(ix,iy,iz,ia,ik,a,b,g,r,G2,Gd,rho_e,V_sr_sum,V_lr_sum,V_lr_scr_sum,dVsr_dG2_sum,phase,scr_fac,coeff_lr,coeff_lr_scr) &
+    !$omp   shared(fg,ig_s,ig_e,poisson,ppg,pp,system,kion,cutoff_g2,aEwald) &
+    !$omp   reduction(+:strs_sr,strs_lr,strs_lr_scr,E_sr_loc,E_lr_loc,E_lr_scr_loc)
     do iz = ig_s(3), ig_e(3)
     do iy = ig_s(2), ig_e(2)
     do ix = ig_s(1), ig_e(1)
@@ -786,7 +825,7 @@ contains
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
       G2 = g(1)**2 + g(2)**2 + g(3)**2
-      if(G2 > cutoff_g**2) cycle
+      if(G2 > cutoff_g2) cycle
 
       rho_e = poisson%zrhoG_ele(ix,iy,iz)
       V_sr_sum = (0d0, 0d0)
@@ -796,8 +835,6 @@ contains
 
       do ia = 1, system%nion
         ik = kion(ia)
-        if(ik < 1 .or. ik > size(pp%zps)) call fail_stress("calc_stress_loc: invalid species index")
-        if(.not. allocated(ppg%dVG_ion_dG2)) call fail_stress("calc_stress_loc: dVG_ion_dG2 is not allocated")
         r(:) = system%Rion(1:3,ia)
         Gd = sum(g(:) * r(:))
         phase = dcmplx(cos(Gd), -sin(Gd))
@@ -824,6 +861,7 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
 
     call comm_summation(E_sr_loc, E_sr, info%icomm_r)
     call comm_summation(E_lr_loc, E_lr, info%icomm_r)
@@ -1095,6 +1133,7 @@ contains
     real(8) :: g(3), G2, fact, rr, r_abs, rab(3), r(3), Qtot, zps2, strs_G(3,3), strs_R(3,3), strs_G_sum(3,3), strs_R_sum(3,3), V
     real(8) :: strs_G_grad(3,3), strs_G_diag(3,3), strs_G_self(3,3), strs_G_grad_sum(3,3), strs_G_diag_sum(3,3)
     real(8) :: E_ewa_G_loc, E_ewa_R_loc, E_ewa_G_sum, E_ewa_R_sum
+    real(8) :: cutoff_r2, exp_ewald_pref
     complex(8) :: SG
 
     V = system%det_a
@@ -1105,6 +1144,8 @@ contains
     strs_G_self = 0d0
     E_ewa_G_loc = 0d0
     E_ewa_R_loc = 0d0
+    cutoff_r2 = cutoff_r**2
+    exp_ewald_pref = 2d0 * sqrt(aEwald/pi)
     Qtot = 0d0
     zps2 = 0d0
     do ia = 1, system%nion
@@ -1113,6 +1154,10 @@ contains
     end do
 
     call get_g_bounds(fg, ig_s, ig_e)
+    !$omp parallel do collapse(2) default(none) &
+    !$omp   private(ix,iy,iz,ia,a,b,g,G2,SG,fact) &
+    !$omp   shared(fg,ig_s,ig_e,system,pp,kion,V,aEwald) &
+    !$omp   reduction(+:strs_G_grad,strs_G_diag,E_ewa_G_loc)
     do iz = ig_s(3), ig_e(3)
     do iy = ig_s(2), ig_e(2)
     do ix = ig_s(1), ig_e(1)
@@ -1139,6 +1184,7 @@ contains
     end do
     end do
     end do
+    !$omp end parallel do
 
     strs_G = strs_G_grad + strs_G_diag
     call sum_stress_tensor(info%icomm_r, strs_G, strs_G_sum)
@@ -1149,6 +1195,10 @@ contains
       strs_G_self(a,a) = pi * Qtot**2 / (2d0*aEwald*V**2)
     end do
 
+    !$omp parallel do default(none) &
+    !$omp   private(iia,ia,ipair,ib,a,b,r,rab,rr,r_abs,fact) &
+    !$omp   shared(info,ewald,system,pp,kion,cutoff_r2,V,aEwald,exp_ewald_pref) &
+    !$omp   reduction(+:strs_R,E_ewa_R_loc)
     do iia = 1, info%nion_mg
       ia = info%ia_mg(iia)
       do ipair = 1, ewald%npair_bk(iia)
@@ -1164,10 +1214,10 @@ contains
         ib = ewald%bk(4,ipair,iia)
         rab = system%Rion(:,ia) - r(:) - system%Rion(:,ib)
         rr = sum(rab(:)**2)
-        if(rr > cutoff_r**2) cycle
+        if(rr > cutoff_r2) cycle
         r_abs = sqrt(rr)
         fact = 0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) / (V * r_abs**3) &
-             * (erfc_salmon(sqrt(aEwald)*r_abs) + 2d0*r_abs*sqrt(aEwald/pi)*exp(-aEwald*rr))
+             * (erfc_salmon(sqrt(aEwald)*r_abs) + exp_ewald_pref*r_abs*exp(-aEwald*rr))
         E_ewa_R_loc = E_ewa_R_loc + 0.5d0 * pp%zps(kion(ia)) * pp%zps(kion(ib)) &
                    * erfc_salmon(sqrt(aEwald)*r_abs) / r_abs
         do b = 1, 3
@@ -1177,6 +1227,7 @@ contains
         end do
       end do
     end do
+    !$omp end parallel do
 
     call comm_summation(strs_R, strs_R_sum, 9, info%icomm_r)
     call comm_summation(E_ewa_G_loc, E_ewa_G_sum, info%icomm_r)
