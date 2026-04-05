@@ -15,6 +15,19 @@ module stress_sub
 
 contains
 
+  subroutine fail_stress(message)
+    use communication, only: comm_is_root
+    use parallelization, only: end_parallel, nproc_id_global
+    implicit none
+    character(*), intent(in) :: message
+
+    if(comm_is_root(nproc_id_global)) then
+      write(*,"(A)") 'Error in stress: '//trim(message)
+    end if
+    call end_parallel
+    stop 1
+  end subroutine fail_stress
+
   subroutine prepare_stress_field_state(system, theory, field_state)
     use structures, only: s_dft_system
     implicit none
@@ -86,9 +99,11 @@ contains
     type(s_stress_field_state), intent(in)    :: field_state
     type(s_sendrecv_grid),      intent(inout), optional :: srg_scalar
 
-    if(PLUS_U_ON) stop "stress tensor is not supported with PLUS_U_ON"
-    if(system%nspin /= 1) stop "stress tensor supports only unpolarized calculations"
-    if(trim(xc) /= 'pz' .and. trim(xc) /= 'r2scan') stop "stress tensor supports only built-in xc='PZ' or xc='r2scan'"
+    if(PLUS_U_ON) call fail_stress("stress tensor is not supported with PLUS_U_ON")
+    if(system%nspin /= 1) call fail_stress("stress tensor supports only unpolarized calculations")
+    if(trim(xc) /= 'pz' .and. trim(xc) /= 'r2scan') then
+      call fail_stress("stress tensor supports only built-in xc='PZ' or xc='r2scan'")
+    end if
 
     if(info%if_divide_rspace) then
       if(.not. tpsi%update_zwf_overlap) then
@@ -319,8 +334,8 @@ contains
     case ('r2scan')
       call calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
     case default
-      if(xc_func%use_gradient) stop "stress tensor supports only built-in PZ or built-in r2SCAN XC"
-      stop "stress tensor supports only built-in xc='PZ' or xc='r2scan'"
+      if(xc_func%use_gradient) call fail_stress("stress tensor supports only built-in PZ or built-in r2SCAN XC")
+      call fail_stress("stress tensor supports only built-in xc='PZ' or xc='r2scan'")
     end select
   end subroutine calc_stress_xc
 
@@ -342,7 +357,7 @@ contains
     real(8) :: E_x_loc, E_c_loc, E_x, E_c
     real(8) :: V
 
-    if(xc_func%use_gradient) stop "stress tensor supports only built-in PZ LDA XC"
+    if(xc_func%use_gradient) call fail_stress("stress tensor supports only built-in PZ LDA XC")
 
     V = system%det_a
     E_vx_loc = 0d0
@@ -423,13 +438,13 @@ contains
     complex(8), allocatable :: gtpsi(:,:,:,:)
     complex(8) :: psi_r, w(3)
 
-    if (system%nspin /= 1) stop "r2scan stress supports only nspin=1"
-    if (.not. allocated(system%xc_payload%rdedd%v)) stop "r2scan stress requires rdedd payload"
-    if (.not. system%xc_payload%rdedd_has_shadow_values) stop "r2scan stress requires rdedd payload with shadow values"
-    if (.not. allocated(system%xc_payload%vtau%f)) stop "r2scan stress requires vtau payload"
-    if (.not. system%xc_payload%vtau_has_shadow_values) stop "r2scan stress requires vtau payload with shadow values"
-    if (.not. allocated(system%xc_payload%vsigma%f)) stop "r2scan stress requires vsigma payload"
-    if (.not. system%xc_payload%vsigma_has_shadow_values) stop "r2scan stress requires vsigma payload with shadow values"
+    if (system%nspin /= 1) call fail_stress("r2scan stress supports only nspin=1")
+    if (.not. allocated(system%xc_payload%rdedd%v)) call fail_stress("r2scan stress requires rdedd payload")
+    if (.not. system%xc_payload%rdedd_has_shadow_values) call fail_stress("r2scan stress requires rdedd payload with shadow values")
+    if (.not. allocated(system%xc_payload%vtau%f)) call fail_stress("r2scan stress requires vtau payload")
+    if (.not. system%xc_payload%vtau_has_shadow_values) call fail_stress("r2scan stress requires vtau payload with shadow values")
+    if (.not. allocated(system%xc_payload%vsigma%f)) call fail_stress("r2scan stress requires vsigma payload")
+    if (.not. system%xc_payload%vsigma_has_shadow_values) call fail_stress("r2scan stress requires vsigma payload with shadow values")
 
     V = system%det_a
     want_numerics_diag = (trim(yn_out_stress_numerics) == 'y')
@@ -781,8 +796,8 @@ contains
 
       do ia = 1, system%nion
         ik = kion(ia)
-        if(ik < 1 .or. ik > size(pp%zps)) stop "calc_stress_loc: invalid species index"
-        if(.not. allocated(ppg%dVG_ion_dG2)) stop "calc_stress_loc: dVG_ion_dG2 is not allocated"
+        if(ik < 1 .or. ik > size(pp%zps)) call fail_stress("calc_stress_loc: invalid species index")
+        if(.not. allocated(ppg%dVG_ion_dG2)) call fail_stress("calc_stress_loc: dVG_ion_dG2 is not allocated")
         r(:) = system%Rion(1:3,ia)
         Gd = sum(g(:) * r(:))
         phase = dcmplx(cos(Gd), -sin(Gd))

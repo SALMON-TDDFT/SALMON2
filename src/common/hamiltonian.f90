@@ -22,6 +22,19 @@ module hamiltonian
 
 contains
 
+subroutine fail_tau_operator(message)
+  use communication, only: comm_is_root
+  use parallelization, only: end_parallel, nproc_id_global
+  implicit none
+  character(*), intent(in) :: message
+
+  if(comm_is_root(nproc_id_global)) then
+    write(*,"(A)") 'Error in tau operator: '//trim(message)
+  end if
+  call end_parallel
+  stop 1
+end subroutine fail_tau_operator
+
 !===================================================================================================================================
 
 SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,xc_payload)
@@ -847,7 +860,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   complex(8) :: psi0, corr, lap_axis, dprod_axis, dpsi_axis
 
 #ifdef USE_OPENACC
-  stop "error: tau operator support is unavailable for OpenACC builds"
+  call fail_tau_operator("support is unavailable for OpenACC builds")
 #endif
   if (present(xc_payload)) then
     if (.not. xc_payload%use_tau_operator) return
@@ -855,23 +868,23 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
     return
   end if
   if (.not. allocated(xc_payload%vtau%f)) then
-    stop "error: tau operator payload is enabled without vtau field"
+    call fail_tau_operator("payload is enabled without vtau field")
   end if
   if (.not. xc_payload%vtau_has_shadow_values) then
-    stop "error: tau operator requires vtau shadow values to be prepared"
+    call fail_tau_operator("requires vtau shadow values to be prepared")
   end if
   if (allocated(system%Ac_micro%v)) then
-    stop "error: tau operator support is unavailable for single-scale Maxwell-TDDFT"
+    call fail_tau_operator("support is unavailable for single-scale Maxwell-TDDFT")
   end if
   if (lbound(xc_payload%vtau%f,1) > mg%is_array(1) .or. ubound(xc_payload%vtau%f,1) < mg%ie_array(1) .or. &
       lbound(xc_payload%vtau%f,2) > mg%is_array(2) .or. ubound(xc_payload%vtau%f,2) < mg%ie_array(2) .or. &
       lbound(xc_payload%vtau%f,3) > mg%is_array(3) .or. ubound(xc_payload%vtau%f,3) < mg%ie_array(3)) then
-    stop "error: tau operator requires vtau bounds compatible with mg%is_array:mg%ie_array"
+    call fail_tau_operator("requires vtau bounds compatible with mg%is_array:mg%ie_array")
   end if
 
   if (allocated(tpsi%rwf)) then
     if (.not. stencil%if_orthogonal) then
-      stop "error: nonorthogonal tau operator with real orbitals is unsupported"
+      call fail_tau_operator("nonorthogonal tau operator with real orbitals is unsupported")
     end if
 !$omp parallel do collapse(4) default(none) &
 !$omp          private(im,ik,io,ispin,iz,iy,ix,n,ixp,ixm,iyp,iym,izp,izm,a0,aplus,aminus,corr_r) &

@@ -2951,27 +2951,27 @@ contains
     end if
 
     if(yn_out_stress == 'y' .and. yn_periodic /= 'y') &
-      stop "yn_out_stress='y' requires yn_periodic='y'"
+      call fail_stress_input("yn_out_stress='y' requires yn_periodic='y'")
     if(yn_out_stress == 'y' .and. yn_jm /= 'n') &
-      stop "yn_out_stress='y' requires yn_jm='n'"
+      call fail_stress_input("yn_out_stress='y' requires yn_jm='n'")
     if(yn_out_stress == 'y' .and. yn_dc /= 'n') &
-      stop "yn_out_stress='y' requires yn_dc='n'"
+      call fail_stress_input("yn_out_stress='y' requires yn_dc='n'")
     if(yn_out_stress == 'y' .and. yn_spinorbit /= 'n') &
-      stop "yn_out_stress='y' requires yn_spinorbit='n'"
+      call fail_stress_input("yn_out_stress='y' requires yn_spinorbit='n'")
     if(yn_out_stress == 'y' .and. spin /= 'unpolarized') &
-      stop "yn_out_stress='y' requires spin='unpolarized'"
+      call fail_stress_input("yn_out_stress='y' requires spin='unpolarized'")
     select case(trim(stress_l_decomp))
     case('no','total','species','atom')
       continue
     case default
-      stop "stress_l_decomp must be 'no', 'total', 'species', or 'atom'"
+      call fail_stress_input("stress_l_decomp must be 'no', 'total', 'species', or 'atom'")
     end select
     if(trim(stress_l_decomp) /= 'no' .and. yn_out_stress_details /= 'y') &
-      stop "stress_l_decomp requires yn_out_stress_details='y' (yn_out_stress_details='y' is required)"
+      call fail_stress_input("stress_l_decomp requires yn_out_stress_details='y' (yn_out_stress_details='y' is required)")
     if(trim(stress_l_decomp) == 'atom') &
-      stop "stress_l_decomp='atom' is not implemented yet"
+      call fail_stress_input("stress_l_decomp='atom' is not implemented yet")
     if(yn_out_stress == 'y' .and. out_stress_step < 1) &
-      stop "out_stress_step must be >= 1"
+      call fail_stress_input("out_stress_step must be >= 1")
     
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
@@ -3041,10 +3041,10 @@ contains
     character(16) :: l_decomp_user
 
     if(yn_out_stress_decomp /= ' ') then
-      stop "yn_out_stress_decomp is no longer supported; use stress_output_level and yn_out_stress_terms/yn_out_stress_details"
+      call fail_stress_input("yn_out_stress_decomp is no longer supported; use stress_output_level and yn_out_stress_terms/yn_out_stress_details")
     end if
     if(trim(stress_fd_detail) /= '__unset__') then
-      stop "stress_fd_detail is no longer supported; use stress_output_level"
+      call fail_stress_input("stress_fd_detail is no longer supported; use stress_output_level")
     end if
 
     terms_user = yn_out_stress_terms
@@ -3074,7 +3074,7 @@ contains
       yn_out_stress_numerics = 'y'
       stress_l_decomp = 'total'
     case default
-      stop "stress_output_level must be 'low', 'middle', or 'high'"
+      call fail_stress_input("stress_output_level must be 'low', 'middle', or 'high'")
     end select
 
     if(terms_user /= ' ') then
@@ -3094,7 +3094,7 @@ contains
       case('no','total','species','atom')
         stress_l_decomp = trim(l_decomp_user)
       case default
-        stop "stress_l_decomp must be 'no', 'total', 'species', or 'atom'"
+        call fail_stress_input("stress_l_decomp must be 'no', 'total', 'species', or 'atom'")
       end select
     end if
   end subroutine normalize_stress_output_controls
@@ -3105,10 +3105,22 @@ contains
     character(1), intent(in) :: value
 
     if(value /= 'y' .and. value /= 'n') then
-      write(*,"(A)") trim(name)//" must be 'y' or 'n'"
-      stop 1
+      call fail_stress_input(trim(name)//" must be 'y' or 'n'")
     end if
   end subroutine normalize_stress_yn_override
+
+  subroutine fail_stress_input(message)
+    use communication, only: comm_is_root
+    use parallelization, only: end_parallel, nproc_id_global
+    implicit none
+    character(*), intent(in) :: message
+
+    if(comm_is_root(nproc_id_global)) then
+      write(*,"(A)") 'Error in input: '//trim(message)
+    end if
+    call end_parallel
+    stop 1
+  end subroutine fail_stress_input
 
   subroutine yyynnn_argument_check(str)
     implicit none
