@@ -3105,7 +3105,8 @@ contains
     character(1), intent(in) :: value
 
     if(value /= 'y' .and. value /= 'n') then
-      stop trim(name)//" must be 'y' or 'n'"
+      write(*,"(A)") trim(name)//" must be 'y' or 'n'"
+      stop 1
     end if
   end subroutine normalize_stress_yn_override
 
