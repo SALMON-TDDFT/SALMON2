@@ -193,7 +193,7 @@ contains
         end do
       ! dc%nxyz_domain: # of grid points for each domain
       ! dc%nxyz_buffer: # of grid points for the buffer region
-        if(mod(num_rgrid(n),num_fragment(n))==0) then
+        if(mod(num_rgrid(n),num_fragment(n))==0 .or. yn_dc_fragment_optimization == 'y') then
           dc%nxyz_domain(n) = num_rgrid(n) / num_fragment(n)
           dc%nxyz_buffer(n) = num_rgrid_buffer(n)
           dr = al(n)/dble(num_rgrid(n))

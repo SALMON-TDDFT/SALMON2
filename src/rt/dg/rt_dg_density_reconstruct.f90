@@ -100,11 +100,11 @@
     complex(8), allocatable :: coef_probe_full(:,:), coef_probe_pw(:,:), overlap_probe(:,:), overlap_vec(:)
     integer, allocatable :: subgroup_self_ixg_tmp(:), subgroup_self_iyg_tmp(:), subgroup_self_izg_tmp(:)
     integer, allocatable :: root_rank_ids(:)
-    logical, parameter :: use_dc_like_root_glue = .true.
+    logical, parameter :: use_dc_like_root_glue = .false.
     logical, parameter :: enable_density_reconstruct_trace = .false.
     logical, parameter :: enable_density_halfdrop_probe = .false.
-    logical, parameter :: enable_density_stage_charge_probe = .true.
-    logical, parameter :: enable_density_hotspot_probe = .true.
+    logical, parameter :: enable_density_stage_charge_probe = .false.
+    logical, parameter :: enable_density_hotspot_probe = .false.
     integer, parameter :: density_hotspot_probe_stride = 10
     integer, save :: density_hotspot_call_id = 0
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
@@ -1318,9 +1318,9 @@
                   end if
                 end do
 !$omp end do nowait
+              if (.not. use_dc_like_root_glue) then
 !$omp do schedule(static)
                 do idx_remote = 1, valid_remote_grid_count
-                  if (use_dc_like_root_glue) cycle
                   if (.not. dg_frag%is_frag_root) cycle
                   igrid = valid_remote_grid_ids(idx_remote)
                   owner_rank = owner_buf(igrid)
@@ -1367,6 +1367,7 @@
                   rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                 end do
 !$omp end do
+              end if
 !$omp end parallel
               call cpu_time(t_rho1)
               time_project_rho = time_project_rho + (t_rho1 - t_rho0)
@@ -1655,9 +1656,9 @@
                     end if
                   end do
 !$omp end do nowait
+                if (.not. use_dc_like_root_glue) then
 !$omp do schedule(static)
                   do idx_remote = 1, valid_remote_grid_count
-                    if (use_dc_like_root_glue) cycle
                     if (.not. dg_frag%is_frag_root) cycle
                     igrid = valid_remote_grid_ids(idx_remote)
                     owner_rank = owner_buf(igrid)
@@ -1713,6 +1714,7 @@
                     rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                   end do
 !$omp end do
+                end if
 !$omp end parallel
                 call cpu_time(t_rho1)
                 time_project_rho = time_project_rho + (t_rho1 - t_rho0)
@@ -2121,94 +2123,8 @@
         end if
       end if
     else
-      ix_lo_rank = rho_x_lo
-      ix_hi_rank = rho_x_hi
-      iy_lo_rank = rho_y_lo
-      iy_hi_rank = rho_y_hi
-      iz_lo_rank = rho_z_lo
-      iz_hi_rank = rho_z_hi
-      if (enable_density_stage_charge_probe .and. dg_frag%id == root_glue_rank) then
-        g211_root_sum_re_local = 0.0d0
-        g211_root_sum_im_local = 0.0d0
-!$omp parallel do collapse(3) private(ixg, iyg, izg) schedule(static) &
-!$omp& reduction(+:g211_root_sum_re_local, g211_root_sum_im_local)
-        do izg = 1, dg_frag%lgnum_total(3)
-          do iyg = 1, dg_frag%lgnum_total(2)
-            do ixg = 1, dg_frag%lgnum_total(1)
-              g211_root_sum_re_local = g211_root_sum_re_local + rho_root_sum(ixg, iyg, izg) * g211_cos_x(ixg)
-              g211_root_sum_im_local = g211_root_sum_im_local - rho_root_sum(ixg, iyg, izg) * g211_sin_x(ixg)
-            end do
-          end do
-        end do
-!$omp end parallel do
-        write(*,*) "        density root-glue-g211 source:", "rank=", dg_frag%id, &
-          "g211_re=", g211_root_sum_re_local, "g211_im=", g211_root_sum_im_local
-        flush(6)
-      end if
-      allocate(rho_rank_buf(ix_lo_rank:ix_hi_rank, iy_lo_rank:iy_hi_rank, iz_lo_rank:iz_hi_rank, 0:system%nspin))
-      rho_rank_buf(:, :, :, :) = 0.0d0
-      if (dg_frag%id == root_glue_rank) then
-        do irank = 0, dg_frag%isize - 1
-          ix_lo_rank = dg_frag%mg%is_all(1, irank)
-          ix_hi_rank = dg_frag%mg%ie_all(1, irank)
-          iy_lo_rank = dg_frag%mg%is_all(2, irank)
-          iy_hi_rank = dg_frag%mg%ie_all(2, irank)
-          iz_lo_rank = dg_frag%mg%is_all(3, irank)
-          iz_hi_rank = dg_frag%mg%ie_all(3, irank)
-          if (irank == dg_frag%id) then
-!$omp parallel do collapse(3) private(izg, iyg, ixg) schedule(static)
-            do izg = iz_lo_rank, iz_hi_rank
-              do iyg = iy_lo_rank, iy_hi_rank
-                do ixg = ix_lo_rank, ix_hi_rank
-                  rho_rank_buf(ixg, iyg, izg, 0) = rho_root_sum(ixg, iyg, izg)
-                end do
-              end do
-            end do
-!$omp end parallel do
-            if (system%nspin >= 1) then
-!$omp parallel do collapse(4) private(ispin, izg, iyg, ixg) schedule(static)
-              do ispin = 1, system%nspin
-                do izg = iz_lo_rank, iz_hi_rank
-                  do iyg = iy_lo_rank, iy_hi_rank
-                    do ixg = ix_lo_rank, ix_hi_rank
-                      rho_rank_buf(ixg, iyg, izg, ispin) = rho_s_root_sum(ixg, iyg, izg, ispin)
-                    end do
-                  end do
-                end do
-              end do
-!$omp end parallel do
-            end if
-          else
-            allocate(send_rank_buf(ix_lo_rank:ix_hi_rank, iy_lo_rank:iy_hi_rank, iz_lo_rank:iz_hi_rank, 0:system%nspin))
-!$omp parallel do collapse(3) private(izg, iyg, ixg) schedule(static)
-            do izg = iz_lo_rank, iz_hi_rank
-              do iyg = iy_lo_rank, iy_hi_rank
-                do ixg = ix_lo_rank, ix_hi_rank
-                  send_rank_buf(ixg, iyg, izg, 0) = rho_root_sum(ixg, iyg, izg)
-                end do
-              end do
-            end do
-!$omp end parallel do
-            if (system%nspin >= 1) then
-!$omp parallel do collapse(4) private(ispin, izg, iyg, ixg) schedule(static)
-              do ispin = 1, system%nspin
-                do izg = iz_lo_rank, iz_hi_rank
-                  do iyg = iy_lo_rank, iy_hi_rank
-                    do ixg = ix_lo_rank, ix_hi_rank
-                      send_rank_buf(ixg, iyg, izg, ispin) = rho_s_root_sum(ixg, iyg, izg, ispin)
-                    end do
-                  end do
-                end do
-              end do
-!$omp end parallel do
-            end if
-            call comm_send(send_rank_buf, irank, 7101, dg_frag%icomm)
-            deallocate(send_rank_buf)
-          end if
-        end do
-      else if (root_glue_rank >= 0) then
-        call comm_recv(rho_rank_buf, root_glue_rank, 7101, dg_frag%icomm)
-      end if
+      ! Current non-DC communication path already materializes authoritative
+      ! mg-local density in rho_bf/rho_s_bf via alltoallv + unpack above.
       if (enable_density_stage_charge_probe) then
         g211_rank_buf_re_local = 0.0d0
         g211_rank_buf_im_local = 0.0d0
@@ -2220,7 +2136,7 @@
             g211_im_line = 0.0d0
             !$omp simd reduction(+:g211_re_line, g211_im_line)
             do ixg = rho_x_lo, rho_x_hi
-              rho_val = rho_rank_buf(ixg, iyg, izg, 0)
+              rho_val = rho_bf(ixg, iyg, izg)
               g211_re_line = g211_re_line + rho_val * g211_cos_x(ixg)
               g211_im_line = g211_im_line - rho_val * g211_sin_x(ixg)
             end do
@@ -2230,6 +2146,11 @@
         end do
         !$omp end parallel do
 
+        if (dg_frag%id == 0) then
+          write(*,*) "        density root-glue-g211 source:", "rank=", dg_frag%id, &
+            "g211_re=", g211_rank_buf_re_local, "g211_im=", g211_rank_buf_im_local
+          flush(6)
+        end if
         call comm_summation(g211_rank_buf_re_local, g211_rank_buf_re_global, dg_frag%icomm)
         call comm_summation(g211_rank_buf_im_local, g211_rank_buf_im_global, dg_frag%icomm)
         if (dg_frag%id == 0) then
@@ -2238,34 +2159,6 @@
           flush(6)
         end if
       end if
-!$omp parallel do collapse(3) private(izg, iyg, ixg, bx, by, bz) schedule(static)
-      do izg = rho_z_lo, rho_z_hi
-        do iyg = rho_y_lo, rho_y_hi
-          do ixg = rho_x_lo, rho_x_hi
-            bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
-            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-              rho_bf(bx, by, bz) = rho_rank_buf(ixg, iyg, izg, 0)
-            end if
-          end do
-        end do
-      end do
-!$omp end parallel do
-      if (system%nspin >= 1) then
-!$omp parallel do collapse(4) private(ispin, izg, iyg, ixg) schedule(static)
-        do ispin = 1, system%nspin
-          do izg = rho_z_lo, rho_z_hi
-            do iyg = rho_y_lo, rho_y_hi
-              do ixg = rho_x_lo, rho_x_hi
-                rho_s_bf(ixg, iyg, izg, ispin) = rho_rank_buf(ixg, iyg, izg, ispin)
-              end do
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
-      deallocate(rho_rank_buf)
     end if
     deallocate(send_counts, recv_counts, send_displs, recv_displs)
     call cpu_time(t_comm1)
@@ -2490,7 +2383,7 @@
     deallocate(rho_bf, rho_s_bf)
     deallocate(rho_send, rho_recv)
     call cpu_time(t_total1)
-    density_hotspot_call_id = density_hotspot_call_id + 1
+    if (enable_density_hotspot_probe) density_hotspot_call_id = density_hotspot_call_id + 1
     if (enable_density_hotspot_probe .and. dg_frag%id == 0 .and. mod(density_hotspot_call_id, density_hotspot_probe_stride) == 0) then
       write(*,'(1x,a,i0,6(a,1pe11.4))') "        density hotspot: call=", density_hotspot_call_id, &
         " total=", t_total1 - t_total0, " cache=", time_cache, " project=", time_project, &
