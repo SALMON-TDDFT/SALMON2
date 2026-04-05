@@ -93,7 +93,15 @@ if (options.libxc_installdir is not None):
 
 dict = {}
 if options.arch is not None:
-  dict['CMAKE_TOOLCHAIN_FILE']     = options.arch.lower()
+  arch = options.arch.lower()
+  toolchain = arch
+  if not os.path.isabs(toolchain):
+    if not toolchain.endswith('.cmake'):
+      toolchain = toolchain + '.cmake'
+    candidate = os.path.join(SOURCE_DIR, 'platforms', toolchain)
+    if os.path.exists(candidate):
+      toolchain = candidate
+  dict['CMAKE_TOOLCHAIN_FILE']     = toolchain
 if options.prefix is not None:
   dict['CMAKE_INSTALL_PREFIX']     = options.prefix
 dict['CMAKE_BUILD_TYPE']           = debug_or_release(options.debug)

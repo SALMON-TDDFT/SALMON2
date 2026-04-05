@@ -69,6 +69,15 @@ contains
     ! Calculate total number of auxiliary functions
     ! s: 1 function, p: 3 functions, d: 5 functions per exponent
     aux_basis%n_atom = natom
+    if (natom <= 0) then
+      aux_basis%n_aux = 0
+      allocate(aux_basis%atom_index(0))
+      allocate(aux_basis%l_quantum(0))
+      allocate(aux_basis%m_quantum(0))
+      allocate(aux_basis%alpha(0))
+      allocate(aux_basis%center(3, 0))
+      return
+    end if
     aux_basis%n_aux = natom * (n_exp_s * 1 + n_exp_p * 3 + n_exp_d * 5)
     
     ! Allocate arrays

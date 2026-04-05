@@ -185,6 +185,7 @@ use band_dft_sub
 use init_gs, only: init_wf
 use jellium, only: make_rho_jm
 use lcfo, only: init_conventional_from_dcdft
+use lcfo_soi_init, only: init_conventional_from_dcdft_soi
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -269,7 +270,11 @@ real(8) :: rNe0,rNe
       call init_wf(lg,mg,system,info,spsi)
     else
     ! conventional DFT but wavefunctions are reconstructed from DC-LCFO data
-      call init_conventional_from_dcdft(lg,mg,system,info,spsi)
+      if(yn_spinorbit=='y') then
+        call init_conventional_from_dcdft_soi(lg,mg,system,info,spsi)
+      else
+        call init_conventional_from_dcdft(lg,mg,system,info,spsi)
+      end if
     end if
     select case(method_init_density)
     case('pp','pp_magdir')

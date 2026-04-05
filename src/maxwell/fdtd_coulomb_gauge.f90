@@ -25,7 +25,9 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,method_singlescale,yn_symmetrized_stencil
+  use optical_vortex_field, only: calc_optical_vortex_Ac_ext, calc_optical_vortex_EB_ext
+  use salmon_global, only: dt,method_singlescale,yn_symmetrized_stencil, &
+    & yn_optical_vortex,optical_vortex_center_x,optical_vortex_center_y
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use communication, only: comm_is_root, comm_summation
@@ -48,7 +50,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   real(8) :: Hvol,hgs(3),dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
   real(8),dimension(3) :: out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
-  real(8) :: e_poy1,e_poy2,rtmp1(6),rtmp2(6)
+  real(8) :: e_poy1,e_poy2,rtmp1(6),rtmp2(6),light_lz_wrk(3),light_lz_all(3)
 
   call timer_begin(LOG_SS_FDTD_CALC)
 
@@ -301,9 +303,15 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   Energy_em = e_em
   fw%Energy_joule = fw%Energy_joule + dt*e_joule
   fw%Energy_poynting = fw%Energy_poynting + dt*e_poynting
+  if(yn_optical_vortex=='y') then
+    call calc_light_lz_flux
+    fw%light_lz_flux = light_lz_all
+    fw%light_lz_cum = fw%light_lz_cum + dt * light_lz_all
+  end if
 
   if(comm_is_root(info%id_rko)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
-    dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,fw%curr_ave,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule
+    dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,fw%curr_ave,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule, &
+    fw%light_lz_flux, fw%light_lz_cum
     
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -380,24 +388,106 @@ contains
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
-  subroutine pulse(t,r,A_ext)
+  subroutine pulse(t,r,x,y,A_ext)
     use em_field, only: calc_Ac_ext
     implicit none
-    real(8),intent(in)  :: t,r
+    real(8),intent(in)  :: t,r,x,y
     real(8),intent(out) :: A_ext(3)
     !
     real(8) :: tt
 
     tt = t - r/cspeed_au
-    call calc_Ac_ext(tt,A_ext)
+    if(yn_optical_vortex=='y') then
+      call calc_optical_vortex_Ac_ext(tt, x, y, lg%num(1), lg%num(2), hgs, A_ext)
+    else
+      call calc_Ac_ext(tt,A_ext)
+    end if
 
     return
   end subroutine pulse
+
+  subroutine calc_light_lz_flux
+    implicit none
+    integer :: ix, iy
+    real(8) :: x, y, area, coef_lz, center_x, center_y
+    real(8) :: E_tot(3), B_tot(3), E_inc(3), B_inc(3), E_ref(3), B_ref(3), S(3)
+
+    light_lz_wrk = 0d0
+    area = hgs(1) * hgs(2)
+    ! Lz flux through a z-normal plane is c times the angular-momentum density:
+    !   j_Lz = c * (r x S / c^2)_z = (r x S)_z / c
+    coef_lz = 1d0 / cspeed_au
+    center_x = optical_vortex_center_x
+    center_y = optical_vortex_center_y
+    if (center_x < -1d20) center_x = 0.5d0 * lg%num(1) * hgs(1)
+    if (center_y < -1d20) center_y = 0.5d0 * lg%num(2) * hgs(2)
+
+    if (mg%is(3) == lg%is(3)) then
+!$omp parallel do private(ix,iy,x,y,E_tot,B_tot,E_inc,B_inc,E_ref,B_ref,S) reduction(+:light_lz_wrk)
+      do iy = mg%is(2), mg%ie(2)
+        do ix = mg%is(1), mg%ie(1)
+          x = (dble(ix) - 0.5d0) * hgs(1) - center_x
+          y = (dble(iy) - 0.5d0) * hgs(2) - center_y
+          call calc_boundary_em(ix, iy, lg%is(3), E_tot, B_tot)
+          if (yn_optical_vortex == 'y') then
+            call calc_optical_vortex_EB_ext(dble(itt) * dt, 0d0, x + center_x, y + center_y, &
+              & lg%num(1), lg%num(2), hgs, dt, E_inc, B_inc)
+          else
+            E_inc = 0d0
+            B_inc = 0d0
+          end if
+          E_ref = E_tot - E_inc
+          B_ref = B_tot - B_inc
+          S = (cspeed_au / (4d0 * pi)) * vec_cross(E_inc, B_inc)
+          light_lz_wrk(1) = light_lz_wrk(1) + (x * S(2) - y * S(1)) * coef_lz * area
+          S = (cspeed_au / (4d0 * pi)) * vec_cross(E_ref, B_ref)
+          light_lz_wrk(2) = light_lz_wrk(2) + (x * S(2) - y * S(1)) * coef_lz * area
+        end do
+      end do
+    end if
+
+    if (mg%ie(3) == lg%ie(3)) then
+!$omp parallel do private(ix,iy,x,y,E_tot,B_tot,S) reduction(+:light_lz_wrk)
+      do iy = mg%is(2), mg%ie(2)
+        do ix = mg%is(1), mg%ie(1)
+          x = (dble(ix) - 0.5d0) * hgs(1) - center_x
+          y = (dble(iy) - 0.5d0) * hgs(2) - center_y
+          call calc_boundary_em(ix, iy, lg%ie(3), E_tot, B_tot)
+          S = (cspeed_au / (4d0 * pi)) * vec_cross(E_tot, B_tot)
+          light_lz_wrk(3) = light_lz_wrk(3) + (x * S(2) - y * S(1)) * coef_lz * area
+        end do
+      end do
+    end if
+
+    call comm_summation(light_lz_wrk, light_lz_all, 3, info%icomm_r)
+  end subroutine calc_light_lz_flux
+
+  pure function vec_cross(a, b) result(c)
+    implicit none
+    real(8), intent(in) :: a(3), b(3)
+    real(8) :: c(3)
+
+    c(1) = a(2) * b(3) - a(3) * b(2)
+    c(2) = a(3) * b(1) - a(1) * b(3)
+    c(3) = a(1) * b(2) - a(2) * b(1)
+  end function vec_cross
+
+  subroutine calc_boundary_em(ix, iy, iz, E_out, B_out)
+    implicit none
+    integer, intent(in) :: ix, iy, iz
+    real(8), intent(out) :: E_out(3), B_out(3)
+    real(8) :: dA_dt(3)
+
+    dA_dt(:) = (fw%vec_Ac_m(1,ix,iy,iz,:) - fw%vec_Ac_old(:,ix,iy,iz)) / dt
+    E_out(:) = fw%grad_Vh(:,ix,iy,iz) - dA_dt(:)
+    B_out(:) = cspeed_au * fw%rot_Ac(:,ix,iy,iz)
+  end subroutine calc_boundary_em
   
 !-----------------------------------------------------------------------------------------------------------------------------------
   
   subroutine fdtd
     implicit none
+    real(8) :: xpos,ypos
 
     call timer_begin(LOG_SS_FDTD_CALC)
     do ii=1,mstep
@@ -466,18 +556,21 @@ contains
 
     ! external field
       tm = ( dble(itt-1) + dble(ii-1)/dble(mstep) ) *dt
-      call pulse(tm,0d0,   Aext0_old)
-      call pulse(tm,Hgs(3),Aext1_old)
-      call pulse(tm+dt_m,0d0,   Aext0)
-      call pulse(tm+dt_m,Hgs(3),Aext1)
+      call pulse(tm,Hgs(3),0.5d0*lg%num(1)*Hgs(1),0.5d0*lg%num(2)*Hgs(2),Aext1)
       out_Aext = Aext1
 
     ! z axis: Mur absorbing boundary condition
       coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
       if(mg%is(3)==lg%is(3))then
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
+    !$OMP parallel do collapse(2) private(ix,iy,iz,xpos,ypos,Aext0_old,Aext1_old,Aext0,Aext1)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
+        xpos = (dble(ix) - 0.5d0) * Hgs(1)
+        ypos = (dble(iy) - 0.5d0) * Hgs(2)
+        call pulse(tm,0d0,   xpos,ypos,Aext0_old)
+        call pulse(tm,Hgs(3),xpos,ypos,Aext1_old)
+        call pulse(tm+dt_m,0d0,   xpos,ypos,Aext0)
+        call pulse(tm+dt_m,Hgs(3),xpos,ypos,Aext1)
         ! absorbing boundary condition with the incident field vec_Ac_ext
           fw%vec_Ac_boundary_bottom(ix,iy,1:3) = Aext0 &
                                           + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - Aext1_old )  &
@@ -558,10 +651,10 @@ contains
 
     ! external field
       tm = ( dble(itt-1) + dble(ii-1)/dble(mstep) ) *dt
-      call pulse(tm,0d0,   Aext0_old)
-      call pulse(tm,Hgs(3),Aext1_old)
-      call pulse(tm+dt_m,0d0,   Aext0)
-      call pulse(tm+dt_m,Hgs(3),Aext1)
+      call pulse(tm,0d0,0.5d0*lg%num(1)*Hgs(1),0.5d0*lg%num(2)*Hgs(2),Aext0_old)
+      call pulse(tm,Hgs(3),0.5d0*lg%num(1)*Hgs(1),0.5d0*lg%num(2)*Hgs(2),Aext1_old)
+      call pulse(tm+dt_m,0d0,0.5d0*lg%num(1)*Hgs(1),0.5d0*lg%num(2)*Hgs(2),Aext0)
+      call pulse(tm+dt_m,Hgs(3),0.5d0*lg%num(1)*Hgs(1),0.5d0*lg%num(2)*Hgs(2),Aext1)
       out_Aext = Aext1
 
     ! z axis: Mur absorbing boundary condition
@@ -808,6 +901,8 @@ subroutine init_singlescale(mg,lg,info,hgs,matrix_B,rho,Vh,srg_scalar,fw,Ac,div_
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
   fw%curr_ave = 0d0
+  fw%light_lz_flux = 0d0
+  fw%light_lz_cum = 0d0
 
   call set_bn(bnmat)
   do jj=1,3
@@ -903,7 +998,13 @@ subroutine init_singlescale(mg,lg,info,hgs,matrix_B,rho,Vh,srg_scalar,fw,Ac,div_
      & 15, "E_poynting(z=0)", "a.u.", &
      & 16, "E_poynting(z=L)", "a.u.", &
      & 17, "E_em",            "a.u.", &
-     & 18, "E_joule",         "a.u."
+     & 18, "E_joule",         "a.u.", &
+     & 19, "Lz_inc_flux(z=0)", "a.u.", &
+     & 20, "Lz_ref_flux(z=0)", "a.u.", &
+     & 21, "Lz_tra_flux(z=L)", "a.u.", &
+     & 22, "Lz_inc_cum", "a.u.", &
+     & 23, "Lz_ref_cum", "a.u.", &
+     & 24, "Lz_tra_cum", "a.u."
 
 !  ! for spatial distribution of excitation energy
 !    write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)

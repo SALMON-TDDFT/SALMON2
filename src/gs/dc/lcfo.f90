@@ -19,6 +19,7 @@
 
 #include "config.h"
 module lcfo
+  use dc_fragment_geometry, only: get_fragment_domain
   implicit none
   
   private
@@ -104,6 +105,7 @@ contains
       use salmon_global, only: num_fragment
       implicit none
       integer :: lx,ly,lz
+      integer :: nxyz_domain(3)
       integer,dimension(3) :: nh,ir1,ir2,d
       integer :: id_tmp(dc%n_frag)
       
@@ -111,10 +113,11 @@ contains
       if(dc%id_frag==0) id_tmp(dc%i_frag) = dc%id_tot + 1
       call comm_summation(id_tmp,id_array,dc%n_frag,dc%icomm_tot)
       id_array = id_array - 1
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       
       nh = 0
       do n=1,3 ! x,y,z
-        if(dc%nxyz_buffer(n) > dc%nxyz_domain(n)) stop "DC-LCFO: buffer > domain"
+        if(dc%nxyz_buffer(n) > nxyz_domain(n)) stop "DC-LCFO: buffer > domain"
         if(num_fragment(n) > 1) nh(n) = 1
       end do
       
@@ -131,13 +134,13 @@ contains
         ! dc%ixyz_frag: r-grid index of the fragment origin
           ir1(1:3) = dc%ixyz_frag(1:3,ifrag) ! position of fragment ifrag
         ! dst neighbor (+)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*dc%nxyz_domain(1:3) ! neighbor fragment
+          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*nxyz_domain(1:3) ! neighbor fragment
           d(1:3) = mod( ir1(1:3) - ir2(1:3) , dc%lg_tot%num(1:3) )
           if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_dst < 0) then
             halo(i)%id_dst = id_array(ifrag) ! process ID of the communication destination
           end if
         ! src neighbor (-)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*dc%nxyz_domain(1:3) ! neighbor fragment
+          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*nxyz_domain(1:3) ! neighbor fragment
           d(1:3) = mod( ir1(1:3) - ir2(1:3) , dc%lg_tot%num(1:3) )
           if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_src < 0) then
             halo(i)%id_src = id_array(ifrag) ! process ID of the communication source
@@ -154,17 +157,17 @@ contains
         do n=1,3 ! x,y,z
           select case (halo(i)%dvec(n))
           case(0)
-            halo(i)%length(n) = dc%nxyz_domain(n)
+            halo(i)%length(n) = nxyz_domain(n)
             halo(i)%dsp_send(n) = 0
             halo(i)%dsp_recv(n) = 0
           case(1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
-            halo(i)%dsp_send(n) = dc%nxyz_domain(n) - dc%nxyz_buffer(n)
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n) + dc%nxyz_buffer(n)
+            halo(i)%dsp_send(n) = nxyz_domain(n) - dc%nxyz_buffer(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n) + dc%nxyz_buffer(n)
           case(-1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
             halo(i)%dsp_send(n) = 0
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n)
           end select
         end do
       end do
@@ -176,11 +179,14 @@ contains
       use salmon_global, only: energy_cut,lambda_cut
       implicit none
       integer :: nb(nspin),itmp(dc%n_frag,nspin)
+      integer :: nxyz_domain(3)
       real(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
       
-      allocate(f_basis  (dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
-      allocate(wrk_array(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      
+      allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
       
     ! f_basis <-- | \bar{\phi} > (projected fragment orbitals)
       wrk_array = 0d0
@@ -189,7 +195,7 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        if( ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. iz <= dc%nxyz_domain(3) &
+        if( ix <= nxyz_domain(1) .and. iy <= nxyz_domain(2) .and. iz <= nxyz_domain(3) &
         & .and. energy%esp(io,1,ispin) - system%mu < energy_cut ) then ! energy cutoff
           wrk_array(ix,iy,iz,ispin,io) = spsi%rwf(ix,iy,iz,ispin,io,1,1) ! | \phi > @ core domain
         end if
@@ -198,7 +204,7 @@ contains
       end do
       end do
       end do
-      call comm_summation(wrk_array,f_basis,product(dc%nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
+      call comm_summation(wrk_array,f_basis,product(nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
       
     ! mat_S <-- S_{ij} = < \bar{\phi}_i | \bar{\phi}_j > (overlap matrix)
       do ispin=1,nspin
@@ -419,12 +425,7 @@ contains
         call eigen_dsyev(mat_H,esp_tot(1:n,ispin),mat_V)
         if(dc%id_frag==0) then
           ifrag = dc%i_frag
-          coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,ispin) = 0d0
-          if (n < dc%nstate_tot .and. dc%id_tot==0) then
-            write(*,'(1x,a,i0,a,i0,a)') '[WARN] n_mat < nstate_tot in diag_lapack: n_mat=', n, &
-              ' nstate_tot=', dc%nstate_tot, ' (truncating coefficients)'
-          end if
-          do i=1,min(n,dc%nstate_tot)
+          do i=1,dc%nstate_tot
           do jo=1,n_basis(ifrag,ispin) ; j = index_basis(jo,ifrag,ispin)
             coef_wf(jo,i,ispin) = mat_V(j,i) ! coefficients of the wavefunctions
           end do
@@ -543,6 +544,7 @@ contains
       use inputoutput, only: uenergy_from_au
       implicit none
       integer :: iunit,i_halo
+      integer :: nxyz_domain(3)
       character(256) :: filename
       
     ! total system data
@@ -583,9 +585,10 @@ contains
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bf ! base_directory==./data_dcdft/fragments/dc%i_frag/
         open(iunit,file=filename,form='unformatted',access='stream')
-        write(iunit) dc%nxyz_domain(1:3),nspin,dc%nstate_frag
+        call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+        write(iunit) nxyz_domain(1:3),nspin,dc%nstate_frag
         write(iunit) n_basis(dc%i_frag,1:nspin) ! # of basis functions
-        write(iunit) f_basis(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3) &
+        write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3) &
         & ,1:nspin,1:dc%nstate_frag) ! basis functions | lambda >
         close(iunit)
       ! local hamiltonian matrix
@@ -676,7 +679,7 @@ contains
   subroutine init_conventional_from_dcdft(lg,mg,system,info,spsi)
     use communication, only: comm_is_root, comm_summation, comm_bcast
     use filesystem, only: get_filehandle
-    use salmon_global,only: num_fragment
+    use salmon_global,only: num_fragment, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -687,103 +690,101 @@ contains
     character(32),parameter :: bdir_frag='./data_dcdft/fragments/'
     character(256) :: filename
     integer :: iunit, n_frag, nspin, nstate_frag, nstate_tot
-    integer :: n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
     integer :: i,j,jfrag,ispin,io,jo,ix,iy,iz,ix_tot,iy_tot,iz_tot,n
     integer,dimension(3) :: lgnum_frag,lgnum_tmp,nxyz_domain
     !
     integer,allocatable :: n_mat(:),n_basis(:,:),index_basis(:,:,:),jxyz_tot(:,:)
     real(8),allocatable :: f_basis(:,:,:,:,:),coef_wf(:,:,:),wrk1(:,:,:),wrk2(:,:,:)
-
+    
     nspin = system%nspin
     n_frag = product(num_fragment)
     nstate_tot = 0 ! initial
-
+    
     if(comm_is_root(info%id_rko)) then
-      write(*,*) "start init_conventional_from_dcdft"
-      write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "start init_conventional_from_dcdft"
+      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(*,*) "start init_dg_fragment_from_dcdft"
+      else
+        write(*,*) "start init_from_dcdft"
+      end if
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
+      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(*,*) "yn_dg_fragment_from_dcdft==y : DG-Fragment RT basis states are reconstructed from DC-LCFO data"
+      else
+        write(*,*) "wavefunctions are reconstructed from DC-LCFO data"
+      end if
       write(*,*) "read from ./data_dcdft directory"
     end if
-
-    if(info%isize_rko < 1) stop "yn_conventional_from_dcdft=y: invalid MPI size."
-
-    ! Read header once from fragment 1 (owner rank: mod(1-1,isize)=0)
-    if(info%id_rko == mod(1-1, info%isize_rko)) then
+    
+  ! read fragment data ./data_dcdft/fragments/000001, 000002, ...  
+    if(info%isize_rko < n_frag) stop "yn_conventional_from_dcdft=y: MPI size is too small."
+    n = info%isize_rko / n_frag
+    jfrag = -1
+    do j=1,n_frag
+      if( j*n == (info%id_rko+1) ) then
+        jfrag = j
+        exit
+      end if
+    end do
+    if(jfrag > 0) then ! myrank (info%id_rko) <--> jfrag
+    ! coefficients of the wavefunctions
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_wf
       open(iunit,file=filename,form='unformatted',access='stream')
-      read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+      read(iunit) n_frag, nspin, nstate_frag, nstate_tot
+      if( n_frag /= product(num_fragment) .or. nspin /= system%nspin ) stop "data_dcdft: input mismatch"
+      allocate(n_mat(nspin))
+      allocate(n_basis(n_frag,nspin))
+      allocate(index_basis(nstate_frag,n_frag,nspin))
+      allocate(coef_wf(nstate_frag,nstate_tot,nspin))
+      read(iunit) n_mat(1:nspin)
+      read(iunit) n_basis(1:n_frag,1:nspin)
+      read(iunit) index_basis(1:nstate_frag,1:n_frag,1:nspin)
+      read(iunit) coef_wf(1:nstate_frag,1:nstate_tot,1:nspin)
+      close(iunit)    
+    ! r-grid index
+      iunit = get_filehandle()
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_rg
+      open(iunit,file=filename,form='unformatted',access='stream')
+      read(iunit) lgnum_frag(1:3), lgnum_tmp(1:3)
+      if( any( lgnum_tmp /= lg%num ) ) stop "data_dcdft: input mismatch (lg)"
+      allocate(jxyz_tot(maxval(lgnum_frag),3))
+      do n=1,3 ! x,y,z
+        read(iunit) jxyz_tot(1:lgnum_frag(n),n)
+      end do
       close(iunit)
-      if( n_frag_file /= n_frag .or. nspin_file /= nspin ) stop "data_dcdft: input mismatch"
-      nstate_tot = nstate_tot_file
+    ! basis functions | lambda >
+      iunit = get_filehandle()
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
+      open(iunit,file=filename,form='unformatted',access='stream')
+      read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
+      read(iunit) lgnum_tmp(1:nspin) ! dummy
+      if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
+        stop "data_dcdft: input mismatch (basis_functions.bin)"
+      end if
+      allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
+      read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag)
+      close(iunit)
     end if
-    call comm_bcast(nstate_tot, info%icomm_rko)
-
+    
   ! r-grid wavefunctions
     allocate(wrk1(lg%num(1),lg%num(2),lg%num(3)))
     allocate(wrk2(lg%num(1),lg%num(2),lg%num(3)))
     do ispin=1,nspin
     do io=1,system%no
       wrk1 = 0d0
-      if(io <= nstate_tot) then
-        do jfrag=1,n_frag
-          ! Cyclic ownership: supports both MPI >= n_frag and MPI < n_frag
-          if(mod(jfrag-1, info%isize_rko) /= info%id_rko) cycle
-
-          ! coefficients of the wavefunctions
-          iunit = get_filehandle()
-          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_wf
-          open(iunit,file=filename,form='unformatted',access='stream')
-          read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
-          if( n_frag_file /= n_frag .or. nspin_file /= nspin .or. nstate_tot_file /= nstate_tot ) stop "data_dcdft: input mismatch"
-          nstate_frag = nstate_frag_file
-          allocate(n_mat(nspin))
-          allocate(n_basis(n_frag,nspin))
-          allocate(index_basis(nstate_frag,n_frag,nspin))
-          allocate(coef_wf(nstate_frag,nstate_tot,nspin))
-          read(iunit) n_mat(1:nspin)
-          read(iunit) n_basis(1:n_frag,1:nspin)
-          read(iunit) index_basis(1:nstate_frag,1:n_frag,1:nspin)
-          read(iunit) coef_wf(1:nstate_frag,1:nstate_tot,1:nspin)
-          close(iunit)
-
-          ! r-grid index
-          iunit = get_filehandle()
-          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_rg
-          open(iunit,file=filename,form='unformatted',access='stream')
-          read(iunit) lgnum_frag(1:3), lgnum_tmp(1:3)
-          if( any( lgnum_tmp /= lg%num ) ) stop "data_dcdft: input mismatch (lg)"
-          allocate(jxyz_tot(maxval(lgnum_frag),3))
-          do n=1,3 ! x,y,z
-            read(iunit) jxyz_tot(1:lgnum_frag(n),n)
-          end do
-          close(iunit)
-
-          ! basis functions | lambda >
-          iunit = get_filehandle()
-          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
-          open(iunit,file=filename,form='unformatted',access='stream')
-          read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
-          read(iunit) lgnum_tmp(1:nspin) ! dummy
-          if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
-            stop "data_dcdft: input mismatch (basis_functions.bin)"
-          end if
-          allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
-          read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag)
-          close(iunit)
-
-          do jo=1,n_basis(jfrag,ispin) ; j = index_basis(jo,jfrag,ispin)
-          do iz=1,nxyz_domain(3); iz_tot = jxyz_tot(iz,3)
-          do iy=1,nxyz_domain(2); iy_tot = jxyz_tot(iy,2)
-          do ix=1,nxyz_domain(1); ix_tot = jxyz_tot(ix,1)
-            wrk1(ix_tot,iy_tot,iz_tot) = wrk1(ix_tot,iy_tot,iz_tot) &
-            & + f_basis(ix,iy,iz,ispin,jo) * coef_wf(jo,io,ispin)
-          end do
-          end do
-          end do
-          end do
-
-          deallocate(n_mat,n_basis,index_basis,jxyz_tot,coef_wf,f_basis)
-
+      if(jfrag > 0 .and. io <= nstate_tot) then ! myrank (info%id_rko) <--> jfrag
+        do jo=1,n_basis(jfrag,ispin) ; j = index_basis(jo,jfrag,ispin)
+        do iz=1,nxyz_domain(3); iz_tot = jxyz_tot(iz,3)
+        do iy=1,nxyz_domain(2); iy_tot = jxyz_tot(iy,2)
+        do ix=1,nxyz_domain(1); ix_tot = jxyz_tot(ix,1)
+          wrk1(ix_tot,iy_tot,iz_tot) = wrk1(ix_tot,iy_tot,iz_tot) &
+          & + f_basis(ix,iy,iz,ispin,jo) * coef_wf(jo,io,ispin)
+        end do
+        end do
+        end do
         end do
       end if
       call comm_summation(wrk1,wrk2,product(lg%num(1:3)),info%icomm_rko)
@@ -810,9 +811,16 @@ contains
     end do
 
     if(comm_is_root(info%id_rko)) then
-      write(*,*) "end init_conventional_from_dcdft"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "end init_conventional_from_dcdft"
+      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(*,*) "end init_dg_fragment_from_dcdft"
+      else
+        write(*,*) "end init_from_dcdft"
+      end if
     end if
-
+    
+    if(jfrag > 0) deallocate(n_mat,n_basis,index_basis,jxyz_tot,coef_wf,f_basis)
     deallocate(wrk1,wrk2)
   end subroutine init_conventional_from_dcdft
   

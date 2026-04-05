@@ -180,11 +180,14 @@ contains
     is = is_grid
     ie = ie_grid
     
-    ! Create local phi_grid array from phi_frag
+    ! Create local phi_grid array from phi_frag interior (1:nxyz_domain).
+    ! phi_frag includes halo regions (indices 1-nb:nxyz+nb); use explicit
+    ! is:ie indices to extract only the interior without shape mismatch.
     allocate(phi_grid(is(1):ie(1), is(2):ie(2), is(3):ie(3), n_basis))
-    
+
     do io = 1, n_basis
-      phi_grid(:, :, :, io) = phi_frag(:, :, :, io, ifrag_local)
+      phi_grid(is(1):ie(1), is(2):ie(2), is(3):ie(3), io) = &
+        phi_frag(is(1):ie(1), is(2):ie(2), is(3):ie(3), io, ifrag_local)
     end do
     
     ! Assume first n_occ states are occupied

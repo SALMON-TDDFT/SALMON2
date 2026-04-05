@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_dg_fragment
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -317,7 +318,11 @@ contains
       & time_integrator_dg_fragment, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
-      & k_cutoff_plane_wave
+      & k_cutoff_plane_wave, &
+      & yn_dg_subspace_diag, &
+      & dg_subspace_extra_states, &
+      & dg_subspace_pw_vectors, &
+      & dg_subspace_fallback_cond
 
     namelist/scf/ &
       & method_init_wf, &
@@ -379,7 +384,13 @@ contains
       & yn_symmetrized_stencil, &
       & yn_put_wall_z_boundary, &
       & wall_height, &
-      & wall_width
+      & wall_width, &
+      & yn_optical_vortex, &
+      & optical_vortex_charge, &
+      & optical_vortex_polarization, &
+      & optical_vortex_radius, &
+      & optical_vortex_center_x, &
+      & optical_vortex_center_y
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -512,6 +523,13 @@ contains
       & out_estatic_rt_step, &
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
+      & yn_out_lcm_rt, &
+      & out_lcm_rt_step, &
+      & yn_out_lz_rt, &
+      & out_lz_rt_step, &
+      & yn_dg_hse_ace, &
+      & dg_hse_ace_max_age, &
+      & dg_hse_ace_coef_thresh, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
@@ -608,12 +626,27 @@ contains
       & nproc_rgrid_tot, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
+      & yn_dc_fragment_optimization, &
       & nstate_frag, &
+      & lcfo_frag_cache_size, &
       & energy_cut, &
       & lambda_cut, &
       & yn_adaptive_basis, &
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft
+
+    namelist/dg_fragment/ &
+      & yn_dg_fragment_rt, &
+      & yn_dg_frag, &
+      & eps_dg_frag, &
+      & yn_adaptive_basis_dg, &
+      & niter_dg_frag_rt_max, &
+      & yn_adaptive_basis, &
+      & basis_update_threshold, &
+      & yn_dg_fragment_from_dcdft, &
+      & dg_nmat_cap_mode, &
+      & dg_nmat_cap_fixed, &
+      & dg_nmat_cap_multiple
 
 !! == default for &unit ==
     unit_system='au'
@@ -752,6 +785,10 @@ contains
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
     k_cutoff_plane_wave = 0.5d0
+    yn_dg_subspace_diag = 'n'
+    dg_subspace_extra_states = 8
+    dg_subspace_pw_vectors = 4
+    dg_subspace_fallback_cond = 1.0d10
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -813,6 +850,12 @@ contains
     yn_put_wall_z_boundary = 'n'
     wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
     wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
+    yn_optical_vortex = 'n'
+    optical_vortex_charge = 0
+    optical_vortex_polarization = 'linear_x'
+    optical_vortex_radius = -1d0
+    optical_vortex_center_x = -1d30
+    optical_vortex_center_y = -1d30
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -951,6 +994,13 @@ contains
     out_estatic_rt_step = 50
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
+    yn_out_lcm_rt       = 'n'
+    out_lcm_rt_step     = 100
+    yn_out_lz_rt        = 'n'
+    out_lz_rt_step      = 100
+    yn_dg_hse_ace          = 'n'
+    dg_hse_ace_max_age     = 20
+    dg_hse_ace_coef_thresh = 5.0d-3
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
@@ -1043,13 +1093,22 @@ contains
     nproc_rgrid_tot = 1
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
+    yn_dc_fragment_optimization = 'n'
     nstate_frag = 0
+    lcfo_frag_cache_size = 1
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
+    yn_dg_frag = 'n'
+    eps_dg_frag = 1.0d-10
+    yn_adaptive_basis_dg = 'n'
+    niter_dg_frag_rt_max = 0
     yn_adaptive_basis = 'n'
     basis_update_threshold = 0.1d0  ! 0.1 a.u. (~2.7 eV)
     yn_dg_fragment_from_dcdft = 'n'
+    dg_nmat_cap_mode = 'none'
+    dg_nmat_cap_fixed = 0
+    dg_nmat_cap_multiple = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1129,6 +1188,8 @@ contains
       
       read(fh_namelist, nml=dc, iostat=inml_dc)
       rewind(fh_namelist)
+      read(fh_namelist, nml=dg_fragment, iostat=inml_dg_fragment)
+      rewind(fh_namelist)
 
       close(fh_namelist)
     end if
@@ -1154,6 +1215,7 @@ contains
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
+    call string_lowercase(optical_vortex_polarization)
     call string_lowercase(boundary_em(1,1))
     call string_lowercase(boundary_em(1,2))
     call string_lowercase(boundary_em(2,1))
@@ -1304,6 +1366,11 @@ contains
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
+    call comm_bcast(yn_dg_subspace_diag,nproc_group_global)
+    call comm_bcast(dg_subspace_extra_states,nproc_group_global)
+    call comm_bcast(dg_subspace_pw_vectors,nproc_group_global)
+    call comm_bcast(dg_subspace_fallback_cond,nproc_group_global)
+    k_cutoff_plane_wave = k_cutoff_plane_wave * uenergy_to_au
     call comm_bcast(time_integrator_dg_fragment,nproc_group_global)
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
@@ -1407,8 +1474,17 @@ contains
     call comm_bcast(yn_put_wall_z_boundary,nproc_group_global)
     call comm_bcast(wall_height           ,nproc_group_global)
     call comm_bcast(wall_width            ,nproc_group_global)
+    call comm_bcast(yn_optical_vortex     ,nproc_group_global)
+    call comm_bcast(optical_vortex_charge ,nproc_group_global)
+    call comm_bcast(optical_vortex_polarization,nproc_group_global)
+    call comm_bcast(optical_vortex_radius ,nproc_group_global)
+    call comm_bcast(optical_vortex_center_x,nproc_group_global)
+    call comm_bcast(optical_vortex_center_y,nproc_group_global)
     wall_height = wall_height * uenergy_to_au
     wall_width  = wall_width  * ulength_to_au
+    optical_vortex_radius   = optical_vortex_radius * ulength_to_au
+    optical_vortex_center_x = optical_vortex_center_x * ulength_to_au
+    optical_vortex_center_y = optical_vortex_center_y * ulength_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1580,6 +1656,13 @@ contains
     call comm_bcast(out_estatic_rt_step ,nproc_group_global)
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_lcm_rt       ,nproc_group_global)
+    call comm_bcast(out_lcm_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_lz_rt        ,nproc_group_global)
+    call comm_bcast(out_lz_rt_step      ,nproc_group_global)
+    call comm_bcast(yn_dg_hse_ace          ,nproc_group_global)
+    call comm_bcast(dg_hse_ace_max_age     ,nproc_group_global)
+    call comm_bcast(dg_hse_ace_coef_thresh ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
@@ -1682,15 +1765,24 @@ contains
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
+    call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
 !! == bcast for dg_fragment
+    call comm_bcast(yn_dg_frag, nproc_group_global)
+    call comm_bcast(eps_dg_frag, nproc_group_global)
+    call comm_bcast(yn_adaptive_basis_dg, nproc_group_global)
+    call comm_bcast(niter_dg_frag_rt_max, nproc_group_global)
     call comm_bcast(yn_adaptive_basis, nproc_group_global)
     call comm_bcast(basis_update_threshold, nproc_group_global)
     basis_update_threshold = basis_update_threshold * uenergy_to_au
     call comm_bcast(yn_dg_fragment_from_dcdft, nproc_group_global)
+    call comm_bcast(dg_nmat_cap_mode, nproc_group_global)
+    call comm_bcast(dg_nmat_cap_fixed, nproc_group_global)
+    call comm_bcast(dg_nmat_cap_multiple, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2203,6 +2295,13 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc_cg_basis_update', yn_dc_cg_basis_update
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'k_cutoff_plane_wave', k_cutoff_plane_wave
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_subspace_diag', yn_dg_subspace_diag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_extra_states', dg_subspace_extra_states
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_pw_vectors', dg_subspace_pw_vectors
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_subspace_fallback_cond', dg_subspace_fallback_cond
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
@@ -2287,6 +2386,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_optical_vortex', yn_optical_vortex
+      write(fh_variables_log, '("#",4X,A,"=",I0)') 'optical_vortex_charge', optical_vortex_charge
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'optical_vortex_polarization', optical_vortex_polarization
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_radius', optical_vortex_radius
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_center_x', optical_vortex_center_x
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_center_y', optical_vortex_center_y
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
@@ -2498,6 +2603,13 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lcm_rt', yn_out_lcm_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lcm_rt_step', out_lcm_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lz_rt', yn_out_lz_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lz_rt_step', out_lz_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_hse_ace', yn_dg_hse_ace
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_hse_ace_max_age', dg_hse_ace_max_age
+      write(fh_variables_log, '("#",4X,A,"=",ES15.7)') 'dg_hse_ace_coef_thresh', dg_hse_ace_coef_thresh
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
@@ -2642,12 +2754,16 @@ contains
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
+      if(inml_dg_fragment >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dg_fragment', inml_dg_fragment
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
       
@@ -2713,6 +2829,9 @@ contains
     call yn_argument_check(yn_out_elf_rt)
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
+    call yn_argument_check(yn_out_lcm_rt)
+    call yn_argument_check(yn_out_lz_rt)
+    call yn_argument_check(yn_dg_hse_ace)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
@@ -2747,6 +2866,7 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+    call yn_argument_check(yn_dc_fragment_optimization)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
@@ -2903,6 +3023,24 @@ contains
       case default
         stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
       end select
+      if(yn_optical_vortex=='y') then
+        if(method_singlescale/='3d') stop "yn_optical_vortex='y' requires method_singlescale='3d'"
+        if(optical_vortex_radius<=0d0) stop "optical_vortex_radius must be positive when yn_optical_vortex='y'"
+        if(omega1<=0d0) stop "omega1 must be positive when yn_optical_vortex='y'"
+        if(tw1<=0d0) stop "tw1 must be positive when yn_optical_vortex='y'"
+        select case(trim(optical_vortex_polarization))
+        case('linear_x','linear_y','left_circular','right_circular')
+          continue
+        case default
+          stop "optical_vortex_polarization must be linear_x, linear_y, left_circular, or right_circular"
+        end select
+        select case(trim(ae_shape1))
+        case('Acos2','Acos3','Acos4','Acos6','Acos8')
+          continue
+        case default
+          stop "yn_optical_vortex='y' currently supports ae_shape1 = Acos2, Acos3, Acos4, Acos6, or Acos8"
+        end select
+      end if
     end if
 
     if(theory=='multi_scale_maxwell_tddft') then
@@ -2948,7 +3086,19 @@ contains
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if
-    
+    if(yn_out_lcm_rt=='y' .and. out_lcm_rt_step<=0) then
+      stop "out_lcm_rt_step must be positive when yn_out_lcm_rt=y"
+    end if
+    if(yn_out_lz_rt=='y' .and. out_lz_rt_step<=0) then
+      stop "out_lz_rt_step must be positive when yn_out_lz_rt=y"
+    end if
+    if(yn_dg_hse_ace=='y' .and. dg_hse_ace_max_age < 1) then
+      stop "dg_hse_ace_max_age must be >= 1 when yn_dg_hse_ace=y"
+    end if
+    if(yn_dg_hse_ace=='y' .and. dg_hse_ace_coef_thresh <= 0.0d0) then
+      stop "dg_hse_ace_coef_thresh must be positive when yn_dg_hse_ace=y"
+    end if
+
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"

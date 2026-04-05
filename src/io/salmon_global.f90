@@ -160,7 +160,11 @@ module salmon_global
   ! Plane wave basis mixing for DG-Fragment RT
   character(1)   :: yn_plane_wave_basis         ! Enable plane wave mixing (default: 'n')
   integer        :: n_plane_waves_dg             ! Number of plane waves (default: 50)
-  real(8)        :: k_cutoff_plane_wave          ! Cutoff wave number in a.u.^-1 (default: 0.5)
+  real(8)        :: k_cutoff_plane_wave          ! Cutoff energy for PW selection in unit_energy (default: 0.5)
+  character(1)   :: yn_dg_subspace_diag          ! Use DG subspace diagonalization for basis updates
+  integer        :: dg_subspace_extra_states     ! Extra fragment states kept in the trial subspace
+  integer        :: dg_subspace_pw_vectors       ! Number of PW helper vectors appended to the trial subspace
+  real(8)        :: dg_subspace_fallback_cond    ! Fallback threshold for projected overlap conditioning
 
 !! &scf
   character(8)   :: method_init_wf
@@ -222,6 +226,12 @@ module salmon_global
   character(1)   :: yn_put_wall_z_boundary
   real(8)        :: wall_height
   real(8)        :: wall_width
+  character(1)   :: yn_optical_vortex
+  integer        :: optical_vortex_charge
+  character(16)  :: optical_vortex_polarization
+  real(8)        :: optical_vortex_radius
+  real(8)        :: optical_vortex_center_x
+  real(8)        :: optical_vortex_center_y
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -353,6 +363,13 @@ module salmon_global
   integer        :: out_estatic_rt_step
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
+  character(1)   :: yn_out_lcm_rt
+  integer        :: out_lcm_rt_step
+  character(1)   :: yn_out_lz_rt
+  integer        :: out_lz_rt_step
+  character(1)   :: yn_dg_hse_ace
+  integer        :: dg_hse_ace_max_age
+  real(8)        :: dg_hse_ace_coef_thresh
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps
   integer        :: out_gs_sgm_eps_mu_nu(2)
@@ -458,13 +475,23 @@ character(256),allocatable :: atom_name(:)
   integer        :: nproc_rgrid_tot(3)
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag
+  character(1)   :: yn_dc_fragment_optimization
   integer        :: nstate_frag
+  integer        :: lcfo_frag_cache_size
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   
   !! &dg_fragment (DG-Fragment RT-TDDFT)
+  ! Legacy entries kept for backward-compatible parsing of existing inputs.
+  character(1)   :: yn_dg_frag
+  real(8)        :: eps_dg_frag
+  character(1)   :: yn_adaptive_basis_dg
+  integer        :: niter_dg_frag_rt_max
   character(1)   :: yn_adaptive_basis
   real(8)        :: basis_update_threshold
   character(1)   :: yn_dg_fragment_from_dcdft  ! Initialize DG-Fragment RT from DC-LCFO data
+  character(16)  :: dg_nmat_cap_mode
+  integer        :: dg_nmat_cap_fixed
+  real(8)        :: dg_nmat_cap_multiple
 
 end module salmon_global

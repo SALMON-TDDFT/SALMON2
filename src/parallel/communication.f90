@@ -54,6 +54,7 @@ module communication
   public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
   public :: comm_alltoall
+  public :: comm_alltoallv
   public :: comm_get_min
   public :: comm_get_max
 
@@ -238,6 +239,11 @@ module communication
   interface comm_alltoall
     ! 1-D array
     module procedure comm_alltoall_array1d_complex
+  end interface
+
+  interface comm_alltoallv
+    ! 1-D array
+    module procedure comm_alltoallv_array1d_double
   end interface
 
   interface comm_get_min
@@ -828,7 +834,8 @@ contains
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
+    integer, parameter :: allreduce_chunk_size = 1000000
+    integer :: ierr, npid_debug, nprocs_debug, i1, i2, nchunk
 #ifdef USE_OPENACC
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
@@ -839,10 +846,48 @@ contains
       return
     endif
 #endif
+    if (N >= 20000000) then
+      call comm_get_groupinfo(ngroup, npid_debug, nprocs_debug)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+        " nprocs=", nprocs_debug, " ngroup=", ngroup, " N=", N, " stage=", "entry"
+      flush(6)
+    end if
     if (present(dest)) then
+      if (N >= 20000000) then
+        write(*,'(1x,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+          " dest=", dest, " stage=", "before-reduce"
+        flush(6)
+      end if
       MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
+      if (N >= 20000000) then
+        write(*,'(1x,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+          " ierr=", ierr, " stage=", "after-reduce"
+        flush(6)
+      end if
     else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
+      if (N >= 20000000) then
+        write(*,'(1x,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+          " stage=", "before-allreduce"
+        flush(6)
+      end if
+      if (N >= 20000000) then
+        do i1 = 1, N, allreduce_chunk_size
+          i2 = min(i1 + allreduce_chunk_size - 1, N)
+          nchunk = i2 - i1 + 1
+          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+            " offset=", i1, " count=", nchunk, " stage=", "before-allreduce-chunk"
+          flush(6)
+          MPI_ERROR_CHECK(call MPI_Allreduce(invalue(i1:i2), outvalue(i1:i2), nchunk, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
+          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+            " offset=", i1, " ierr=", ierr, " stage=", "after-allreduce-chunk"
+          flush(6)
+        end do
+        write(*,'(1x,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
+          " ierr=", ierr, " stage=", "after-allreduce"
+        flush(6)
+      else
+        MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
+      end if
     end if
   end subroutine
 
@@ -1552,6 +1597,24 @@ contains
     call MPI_Alltoall(invalue,  ncount,          MPI_DOUBLE_COMPLEX, &
                       outvalue, ncount,          MPI_DOUBLE_COMPLEX, &
                       ngroup, ierr)
+    call error_check(ierr)
+  end subroutine
+
+  subroutine comm_alltoallv_array1d_double(invalue, sendcounts, sdispls, outvalue, recvcounts, rdispls, ngroup)
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(in)  :: invalue(:)
+    integer, intent(in)  :: sendcounts(:)
+    integer, intent(in)  :: sdispls(:)
+    real(8), intent(out) :: outvalue(:)
+    integer, intent(in)  :: recvcounts(:)
+    integer, intent(in)  :: rdispls(:)
+    integer, intent(in)  :: ngroup
+    integer :: ierr
+
+    call MPI_Alltoallv(invalue, sendcounts, sdispls, MPI_DOUBLE_PRECISION, &
+                       outvalue, recvcounts, rdispls, MPI_DOUBLE_PRECISION, &
+                       ngroup, ierr)
     call error_check(ierr)
   end subroutine
 

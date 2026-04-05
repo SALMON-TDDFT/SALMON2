@@ -289,7 +289,7 @@ end subroutine init_dft_system
 subroutine init_process_distribution(system,icomm1,info)
   use structures, only: s_parallel_info,s_dft_system
   use parallelization, only: nproc_id_global, nproc_group_global
-  use salmon_global, only: theory
+  use salmon_global, only: theory, yn_dg_fragment_rt
   use communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
@@ -316,11 +316,14 @@ subroutine init_process_distribution(system,icomm1,info)
     ! Process distribution is explicitly specified by user.
   end if
 
-  if (comm_is_root(nproc_id_global)) then
-    if_stop = .not. check_numcpu(icomm1, info)
+  if_stop = .false.
+  if (yn_dg_fragment_rt /= 'y') then
+    if (comm_is_root(nproc_id_global)) then
+      if_stop = .not. check_numcpu(icomm1, info)
+    end if
+    call comm_bcast(if_stop, nproc_group_global)
+    if (if_stop) stop 'fail: check_numcpu'
   end if
-  call comm_bcast(if_stop, nproc_group_global)
-  if (if_stop) stop 'fail: check_numcpu'
 
 #ifdef USE_SCALAPACK
   info%flag_blacs_gridinit = .false.
@@ -573,9 +576,11 @@ subroutine init_grid_parallel(info,lg,mg)
   if ( allocated(mg%idx) ) deallocate(mg%idx)
   if ( allocated(mg%idy) ) deallocate(mg%idy)
   if ( allocated(mg%idz) ) deallocate(mg%idz)
+  if ( allocated(mg%coordinate) ) deallocate(mg%coordinate)
   allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
           ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
-          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)) &
+          ,mg%coordinate(minval(mg%is_overlap(1:3)):maxval(mg%ie_overlap(1:3)),3))
 
   if(yn_periodic=='y' .and. product(nproc_domain_orbital)==1) then
     if((.not. quiet) .and. comm_is_root(myrank)) &
@@ -604,6 +609,16 @@ subroutine init_grid_parallel(info,lg,mg)
       mg%idz(j) = j
     end do
   end if
+
+  do j=mg%is_overlap(1),mg%ie_overlap(1)
+    mg%coordinate(j,1) = lg%coordinate(mg%idx(j),1)
+  end do
+  do j=mg%is_overlap(2),mg%ie_overlap(2)
+    mg%coordinate(j,2) = lg%coordinate(mg%idy(j),2)
+  end do
+  do j=mg%is_overlap(3),mg%ie_overlap(3)
+    mg%coordinate(j,3) = lg%coordinate(mg%idz(j),3)
+  end do
 
   if(mg%num(1)<nd .or.mg%num(2)<nd .or.mg%num(3)<nd)then
     stop "The system is small. Please use less number of processors."

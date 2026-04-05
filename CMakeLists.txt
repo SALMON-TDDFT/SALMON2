@@ -24,6 +24,19 @@ project(SALMON
         LANGUAGES Fortran C
         )
 
+if(DEFINED CMAKE_Fortran_FLAGS_DEBUG)
+  set(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG}" CACHE STRING "Fortran debug flags" FORCE)
+endif()
+if(DEFINED CMAKE_Fortran_FLAGS_RELEASE)
+  set(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE}" CACHE STRING "Fortran release flags" FORCE)
+endif()
+if(DEFINED CMAKE_C_FLAGS_DEBUG)
+  set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}" CACHE STRING "C debug flags" FORCE)
+endif()
+if(DEFINED CMAKE_C_FLAGS_RELEASE)
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}" CACHE STRING "C release flags" FORCE)
+endif()
+
 message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
 message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
@@ -61,8 +74,12 @@ include_directories(${CMAKE_BINARY_DIR})
 #set(CMAKE_Fortran_PREPROCESS_SOURCE ON)
 #set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -ffree-form -x f95-cpp-input")
 
-# More conservative approach: only add -cpp flag for preprocessing
-set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
+# Respect platform-specific preprocessing flags when provided by the toolchain.
+if(DEFINED Fortran_PP_FLAGS)
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${Fortran_PP_FLAGS}")
+else()
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
+endif()
 
 include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 

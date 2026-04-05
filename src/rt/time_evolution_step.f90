@@ -20,7 +20,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
-  use communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast, comm_get_max
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
   use writefield
   use timer
@@ -74,9 +74,22 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_ofile) :: ofl
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
+  integer, parameter :: n_gprobe = 3
+  integer, parameter :: gprobe_idx(3, n_gprobe) = reshape((/ 1,1,1, 2,1,1, 3,1,1 /), (/3, n_gprobe/))
+  integer :: iprobe
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
+  real(8) :: rho_vh_local, rho_vh_sum, rho_vxc_local, rho_vxc_sum, rho_vpsl_local, rho_vpsl_sum
+  real(8) :: rho2_local, rho2_sum
+  real(8) :: rho_max_local(1), rho_max_sum(1)
+  real(8) :: rho_g2_local, rho_g2_sum, sysvol
+  real(8) :: rho_gmax_local(1), rho_gmax_sum(1)
+  complex(8) :: rho_e
+  real(8) :: rho_gprobe_re_local(n_gprobe), rho_gprobe_re_sum(n_gprobe)
+  real(8) :: rho_gprobe_im_local(n_gprobe), rho_gprobe_im_sum(n_gprobe)
+  logical, parameter :: enable_full_energy_component_probe = .false.
+  logical, parameter :: enable_full_rhog_probe = .false.
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
@@ -346,6 +359,77 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
+    if (enable_full_energy_component_probe .and. comm_is_root(info%id_rko) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+        "        full-energy-components: itt=", itt, " E_tot=", energy%E_tot, " E_kin=", energy%E_kin, &
+        " E_h=", energy%E_h, " E_ion=", energy%E_ion_loc + energy%E_ion_nloc, &
+        " E_xc=", energy%E_xc, " E_ion_ion=", energy%E_ion_ion
+      flush(6)
+    end if
+    if (enable_full_rhog_probe .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      rho_vh_local = 0.0d0
+      rho_vxc_local = 0.0d0
+      rho_vpsl_local = 0.0d0
+      rho2_local = 0.0d0
+      rho_max_local(1) = 0.0d0
+      rho_g2_local = 0.0d0
+      rho_gmax_local(1) = 0.0d0
+      rho_gprobe_re_local(:) = 0.0d0
+      rho_gprobe_im_local(:) = 0.0d0
+      sysvol = system%det_a
+      do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+          do ix = mg%is(1), mg%ie(1)
+            rho_max_local(1) = max(rho_max_local(1), rho%f(ix, iy, iz))
+            rho2_local = rho2_local + rho%f(ix, iy, iz) * rho%f(ix, iy, iz)
+            rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
+            rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
+            rho_e = poisson%zrhoG_ele(ix, iy, iz)
+            rho_g2_local = rho_g2_local + sysvol * fg%coef(ix, iy, iz) * abs(rho_e)**2
+            rho_gmax_local(1) = max(rho_gmax_local(1), abs(rho_e))
+            do iprobe = 1, n_gprobe
+              if (ix == gprobe_idx(1, iprobe) .and. iy == gprobe_idx(2, iprobe) .and. iz == gprobe_idx(3, iprobe)) then
+                rho_gprobe_re_local(iprobe) = real(rho_e)
+                rho_gprobe_im_local(iprobe) = aimag(rho_e)
+              end if
+            end do
+            do is = 1, system%nspin
+              rho_vxc_local = rho_vxc_local + rho_s(is)%f(ix, iy, iz) * Vxc(is)%f(ix, iy, iz)
+            end do
+          end do
+        end do
+      end do
+      rho_vh_local = rho_vh_local * system%Hvol
+      rho_vxc_local = rho_vxc_local * system%Hvol
+      rho_vpsl_local = rho_vpsl_local * system%Hvol
+      rho2_local = rho2_local * system%Hvol
+      call comm_summation(rho_vh_local, rho_vh_sum, info%icomm_r)
+      call comm_summation(rho_vxc_local, rho_vxc_sum, info%icomm_r)
+      call comm_summation(rho_vpsl_local, rho_vpsl_sum, info%icomm_r)
+      call comm_summation(rho2_local, rho2_sum, info%icomm_r)
+      call comm_summation(rho_g2_local, rho_g2_sum, info%icomm_r)
+      call comm_summation(rho_gprobe_re_local, rho_gprobe_re_sum, n_gprobe, info%icomm_r)
+      call comm_summation(rho_gprobe_im_local, rho_gprobe_im_sum, n_gprobe, info%icomm_r)
+      call comm_get_max(rho_max_local, rho_max_sum, 1, info%icomm_r)
+      call comm_get_max(rho_gmax_local, rho_gmax_sum, 1, info%icomm_r)
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+          "        full-potential-overlap: itt=", itt, " rhoVh=", rho_vh_sum, &
+          " rhoVxc=", rho_vxc_sum, " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &
+          " rhoG2=", rho_g2_sum, " rhoGmax=", rho_gmax_sum(1)
+        write(*,'(1x,a,i0,6(a,1pe14.6),3(a,1pe14.6))') &
+          "        full-rhoG-probe: itt=", itt, &
+          " g111_re=", rho_gprobe_re_sum(1), " g111_im=", rho_gprobe_im_sum(1), &
+          " g211_re=", rho_gprobe_re_sum(2), " g211_im=", rho_gprobe_im_sum(2), &
+          " g311_re=", rho_gprobe_re_sum(3), " g311_im=", rho_gprobe_im_sum(3), &
+          " g111_abs=", sqrt(rho_gprobe_re_sum(1)**2 + rho_gprobe_im_sum(1)**2), &
+          " g211_abs=", sqrt(rho_gprobe_re_sum(2)**2 + rho_gprobe_im_sum(2)**2), &
+          " g311_abs=", sqrt(rho_gprobe_re_sum(3)**2 + rho_gprobe_im_sum(3)**2)
+        write(*,'(1x,a,i0,3(a,1pe14.6))') "        full-rhoG-probe-gvec: itt=", itt, &
+          " g211_gx=", fg%vec_G(1, 2, 1, 1), " g211_gy=", fg%vec_G(2, 2, 1, 1), " g211_gz=", fg%vec_G(3, 2, 1, 1)
+        flush(6)
+      end if
+    end if
 
     if(singlescale%flag_use) then
       call timer_begin(LOG_CALC_SINGLESCALE)

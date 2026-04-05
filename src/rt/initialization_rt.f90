@@ -56,7 +56,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
-  use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft, yn_spinorbit
+  use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft, yn_spinorbit, &
+                           nproc_rgrid, nproc_rgrid_tot
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
@@ -101,6 +102,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
+  integer :: nproc_rgrid_tmp(3)
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
@@ -195,7 +197,16 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   call nvtxStartRange('READ_GS_DATA', __LINE__)
   
+  if (yn_dg_fragment_rt == 'y') then
+    nproc_rgrid_tmp = nproc_rgrid
+    nproc_rgrid = nproc_rgrid_tot
+  end if
+
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+
+  if (yn_dg_fragment_rt == 'y') then
+    nproc_rgrid = nproc_rgrid_tmp
+  end if
   
   call init_code_optimization
   

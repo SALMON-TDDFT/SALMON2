@@ -17,6 +17,7 @@
 
 #include "config.h"
 module lcfo_soi
+  use dc_fragment_geometry, only: get_fragment_domain
   implicit none
 
   private
@@ -98,6 +99,7 @@ contains
       use salmon_global, only: num_fragment
       implicit none
       integer :: lx,ly,lz
+      integer :: nxyz_domain(3)
       integer,dimension(3) :: nh,ir1,ir2,d
       integer :: id_tmp(dc%n_frag)
 
@@ -105,10 +107,11 @@ contains
       if(dc%id_frag==0) id_tmp(dc%i_frag) = dc%id_tot + 1
       call comm_summation(id_tmp,id_array,dc%n_frag,dc%icomm_tot)
       id_array = id_array - 1
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
 
       nh = 0
       do n=1,3
-        if(dc%nxyz_buffer(n) > dc%nxyz_domain(n)) stop "DC-LCFO(SOI): buffer > domain"
+        if(dc%nxyz_buffer(n) > nxyz_domain(n)) stop "DC-LCFO(SOI): buffer > domain"
         if(num_fragment(n) > 1) nh(n) = 1
       end do
 
@@ -123,13 +126,13 @@ contains
         halo(i)%id_src = -1
         do ifrag=1,dc%n_frag
           ir1(1:3) = dc%ixyz_frag(1:3,ifrag)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*dc%nxyz_domain(1:3)
+          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*nxyz_domain(1:3)
           d(1:3) = mod(ir1(1:3) - ir2(1:3), dc%lg_tot%num(1:3))
           if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_dst < 0) then
             halo(i)%id_dst = id_array(ifrag)
           end if
 
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*dc%nxyz_domain(1:3)
+          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*nxyz_domain(1:3)
           d(1:3) = mod(ir1(1:3) - ir2(1:3), dc%lg_tot%num(1:3))
           if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_src < 0) then
             halo(i)%id_src = id_array(ifrag)
@@ -146,17 +149,17 @@ contains
         do n=1,3
           select case (halo(i)%dvec(n))
           case(0)
-            halo(i)%length(n) = dc%nxyz_domain(n)
+            halo(i)%length(n) = nxyz_domain(n)
             halo(i)%dsp_send(n) = 0
             halo(i)%dsp_recv(n) = 0
           case(1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
-            halo(i)%dsp_send(n) = dc%nxyz_domain(n) - dc%nxyz_buffer(n)
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n) + dc%nxyz_buffer(n)
+            halo(i)%dsp_send(n) = nxyz_domain(n) - dc%nxyz_buffer(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n) + dc%nxyz_buffer(n)
           case(-1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
             halo(i)%dsp_send(n) = 0
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n)
           end select
         end do
       end do
@@ -167,15 +170,18 @@ contains
       use salmon_global, only: energy_cut,lambda_cut,yn_spinorbit
       implicit none
       integer :: nb(nspin),itmp(dc%n_frag,nspin)
+      integer :: nxyz_domain(3)
       logical :: use_spinor_basis, include_orb
       complex(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       complex(8),dimension(dc%nstate_frag,dc%nstate_frag) :: mat_S_spinor,mat_U_spinor
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
       real(8),dimension(dc%nstate_frag) :: lambda_spinor
       complex(8) :: ztmp
+      
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
 
-      allocate(f_basis  (dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
-      allocate(wrk_array(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
+      allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
       use_spinor_basis = (yn_spinorbit=='y' .and. nspin>1)
 
       wrk_array = (0d0,0d0)
@@ -187,7 +193,7 @@ contains
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            if(ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. iz <= dc%nxyz_domain(3)) then
+            if(ix <= nxyz_domain(1) .and. iy <= nxyz_domain(2) .and. iz <= nxyz_domain(3)) then
               wrk_array(ix,iy,iz,ispin,io) = spsi%zwf(ix,iy,iz,ispin,io,1,1)
             end if
           end do
@@ -201,7 +207,7 @@ contains
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          if(ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. iz <= dc%nxyz_domain(3) &
+          if(ix <= nxyz_domain(1) .and. iy <= nxyz_domain(2) .and. iz <= nxyz_domain(3) &
           & .and. energy%esp(io,1,ispin) - system%mu < energy_cut) then
             wrk_array(ix,iy,iz,ispin,io) = spsi%zwf(ix,iy,iz,ispin,io,1,1)
           end if
@@ -211,7 +217,7 @@ contains
         end do
         end do
       end if
-      call comm_summation(wrk_array,f_basis,product(dc%nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
+      call comm_summation(wrk_array,f_basis,product(nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
 
       if(use_spinor_basis) then
         do io=1,dc%nstate_frag
@@ -537,6 +543,7 @@ contains
       use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
       implicit none
       integer :: iunit,i_halo
+      integer :: nxyz_domain(3)
       character(256) :: filename
       real(8) :: esp_out
 
@@ -584,9 +591,10 @@ contains
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bf_soi
         open(iunit,file=filename,form='unformatted',access='stream')
-        write(iunit) dc%nxyz_domain(1:3),nspin,dc%nstate_frag
+        call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+        write(iunit) nxyz_domain(1:3),nspin,dc%nstate_frag
         write(iunit) n_basis(dc%i_frag,1:nspin)
-        write(iunit) f_basis(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3),1:nspin,1:dc%nstate_frag)
+        write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:dc%nstate_frag)
         close(iunit)
 
         iunit = get_filehandle()

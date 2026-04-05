@@ -469,3 +469,11 @@ DG-Fragment RT can be combined with:
 
 For questions and support, please contact the SALMON developers:
 https://salmon-tddft.jp/
+
+## Performance Reporting Rule for RT-DG Changes
+
+For every RT-DG code change, report both metrics together:
+- `total calculation time,`
+- `hamiltonian module -> stencil`
+
+Comparisons missing either metric are treated as invalid.

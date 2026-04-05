@@ -39,7 +39,8 @@ contains
   !--------------------------------------------------------------------------------------!
   subroutine init_hse_ri_fragment(ri_data, phi_frag, lg, mg, ng, hvol, &
                                   natom, atom_coords, atom_types, hse_omega, &
-                                  use_cd_ri, cd_ri_threshold)
+                                  use_cd_ri, cd_ri_threshold, &
+                                  is_frag, ie_frag)
     implicit none
     type(hse_ri_data_t), intent(inout) :: ri_data
     type(s_rgrid), intent(in) :: lg                         ! Local grid info
@@ -52,11 +53,13 @@ contains
     real(8), intent(in) :: hse_omega                        ! HSE screening parameter
     logical, intent(in), optional :: use_cd_ri              ! Use CD-RI (default: .false.)
     real(8), intent(in), optional :: cd_ri_threshold        ! CD-RI threshold (default: 1.0d-8)
-    real(8), intent(in) :: phi_frag(lg%is(1):lg%ie(1), &
-                                    lg%is(2):lg%ie(2), &
-                                    lg%is(3):lg%ie(3), ng)  ! Basis functions on grid
+    ! is_frag/ie_frag: fragment-interior grid bounds (1:nxyz_domain, excluding halo).
+    ! Previously phi_frag used lg%is:lg%ie (global grid) as explicit-shape bounds, which
+    ! caused a shape mismatch: the actual array has fragment-local size nxyz_domain+2*nb.
+    integer, intent(in) :: is_frag(3)                       ! Interior lower bounds (typically [1,1,1])
+    integer, intent(in) :: ie_frag(3)                       ! Interior upper bounds (nxyz_domain)
+    real(8), intent(in) :: phi_frag(:,:,:,:)                ! Basis functions on grid (assumed-shape)
     
-    integer :: i, j, P
     real(8) :: threshold
     
     ! Store dimensions
@@ -78,6 +81,19 @@ contains
     ! Initialize auxiliary basis
     call init_auxiliary_basis(ri_data%aux_basis, natom, atom_coords, atom_types)
     ri_data%n_aux = get_n_auxiliary(ri_data%aux_basis)
+
+    if (ri_data%n_aux <= 0) then
+      allocate(ri_data%B_ijP(ri_data%n_basis, ri_data%n_basis, 0))
+      if (ri_data%use_cd_ri) then
+        ri_data%n_chol = 0
+        allocate(ri_data%L_PK(0, 0))
+      else
+        allocate(ri_data%V_inv_PQ(0, 0))
+      end if
+      ri_data%initialized = .true.
+      write(*, '(A, I0, A)') 'Initializing RI-HSE: N_basis=', ri_data%n_basis, ', N_aux=0 (vacuum fragment)'
+      return
+    end if
     
     write(*, '(A, I0, A, I0, A, F0.2)') &
       'Initializing RI-HSE: N_basis=', ri_data%n_basis, &
@@ -92,7 +108,8 @@ contains
     write(*, '(A)') 'Computing 3-index integrals B_ijP...'
     call compute_3index_integrals(ri_data%B_ijP, phi_frag, lg, mg, &
                                   ri_data%n_basis, ri_data%aux_basis, &
-                                  ri_data%n_aux, hvol, hse_omega)
+                                  ri_data%n_aux, hvol, hse_omega, &
+                                  is_frag, ie_frag)
     
     ! Calculate and invert Coulomb matrix: V_PQ = (P|Q)
     if (ri_data%use_cd_ri) then
@@ -123,15 +140,18 @@ contains
   ! = ∫∫ φ_i(r1) φ_j(r1) × [1/|r1-r2|] × χ_P(r2) dr1 dr2
   !--------------------------------------------------------------------------------------!
   subroutine compute_3index_integrals(B_ijP, phi_frag, lg, mg, n_basis, &
-                                      aux_basis, n_aux, hvol, hse_omega)
+                                      aux_basis, n_aux, hvol, hse_omega, &
+                                      is_frag, ie_frag)
     implicit none
     real(8), intent(out) :: B_ijP(:,:,:)           ! (n_basis, n_basis, n_aux)
-    real(8), intent(in) :: phi_frag(:,:,:,:)       ! Basis functions on grid
+    real(8), intent(in) :: phi_frag(:,:,:,:)       ! Basis functions on grid (assumed-shape)
     type(s_rgrid), intent(in) :: lg, mg
     integer, intent(in) :: n_basis, n_aux
     type(auxiliary_basis_t), intent(in) :: aux_basis
     real(8), intent(in) :: hvol
     real(8), intent(in) :: hse_omega
+    integer, intent(in) :: is_frag(3)              ! Fragment interior lower bounds
+    integer, intent(in) :: ie_frag(3)              ! Fragment interior upper bounds
     
     integer :: i, j, P
     integer :: ix1, iy1, iz1, ix2, iy2, iz2
@@ -162,10 +182,10 @@ contains
           
           integral_val = 0.0d0
           
-          ! Double loop over grid points
-          do iz1 = lg%is(3), lg%ie(3)
-            do iy1 = lg%is(2), lg%ie(2)
-              do ix1 = lg%is(1), lg%ie(1)
+          ! Double loop over fragment interior grid points (is_frag:ie_frag, excluding halo)
+          do iz1 = is_frag(3), ie_frag(3)
+            do iy1 = is_frag(2), ie_frag(2)
+              do ix1 = is_frag(1), ie_frag(1)
                 
                 ! Get r1 and basis function values
                 r1(1) = mg%coordinate(ix1, 1)
@@ -187,9 +207,9 @@ contains
                   cycle
                 end if
                 
-                do iz2 = lg%is(3), lg%ie(3)
-                  do iy2 = lg%is(2), lg%ie(2)
-                    do ix2 = lg%is(1), lg%ie(1)
+                do iz2 = is_frag(3), ie_frag(3)
+                  do iy2 = is_frag(2), ie_frag(2)
+                    do ix2 = is_frag(1), ie_frag(1)
                       
                       ! Get r2 and auxiliary function value
                       r2(1) = mg%coordinate(ix2, 1)
@@ -202,7 +222,7 @@ contains
                       if (distance < 1.0d-10) then
                         cycle
                       else
-                        coulomb_kernel = erfc(hse_omega * distance) / distance
+                        coulomb_kernel = derfc(hse_omega * distance) / distance
                       end if
                       
                       chi_P_r2 = calc_auxiliary_function(aux_basis, P, r2)
@@ -277,7 +297,7 @@ contains
     end do
     
     ! Compute off-diagonal elements with center-based SR kernel approximation
-    !$omp parallel do collapse(2) private(P,Q,center_distance)
+    !$omp parallel do private(P,Q,center_distance)
     do Q = 1, n_aux
       do P = 1, Q-1
         center_distance = sqrt((aux_basis%center(1,P) - aux_basis%center(1,Q))**2 + &
@@ -286,7 +306,7 @@ contains
         if (center_distance < 1.0d-12) then
           V_PQ(P, Q) = 0.5d0 * (V_PQ(P, P) + V_PQ(Q, Q))
         else
-          V_PQ(P, Q) = erfc(hse_omega * center_distance) / center_distance
+          V_PQ(P, Q) = derfc(hse_omega * center_distance) / center_distance
         end if
         
         V_PQ(Q, P) = V_PQ(P, Q)  ! Symmetry
@@ -354,7 +374,7 @@ contains
     end do
     
     ! Off-diagonal elements with center-based SR kernel approximation
-    !$omp parallel do collapse(2) private(P,Q,center_distance)
+    !$omp parallel do private(P,Q,center_distance)
     do Q = 1, n_aux
       do P = 1, Q-1
         center_distance = sqrt((aux_basis%center(1,P) - aux_basis%center(1,Q))**2 + &
@@ -363,7 +383,7 @@ contains
         if (center_distance < 1.0d-12) then
           V_PQ(P, Q) = 0.5d0 * (V_PQ(P, P) + V_PQ(Q, Q))
         else
-          V_PQ(P, Q) = erfc(hse_omega * center_distance) / center_distance
+          V_PQ(P, Q) = derfc(hse_omega * center_distance) / center_distance
         end if
         V_PQ(Q, P) = V_PQ(P, Q)
       end do
@@ -397,21 +417,38 @@ contains
       end if
     end do
     
-    ! Step 4: Extract significant Cholesky vectors
+    ! Step 4: Compute first n_chol columns of L^{-1} (inverse Cholesky vectors).
+    !
+    ! BUG FIX: the previous code stored L_PK = L (Cholesky factor), so in
+    ! calc_exact_exchange_hse_ri the contraction gave:
+    !   Σ_K C_ijK*C_klK = Σ_{PQ} B_ijP*(LL^T)_PQ*B_klQ = Σ_PQ B_ijP*V_PQ*B_klQ
+    ! which uses V (not V^{-1}).  The correct RI formula requires:
+    !   Σ_K C_ijK*C_klK = Σ_{PQ} B_ijP*V^{-1}_PQ*B_klQ
+    !
+    ! Fix: store L_PK = L^{-1}[:,1:n_chol] (first n_chol columns of L^{-1}).
+    ! With V = L*L^T:  V^{-1} = L^{-T}*L^{-1}
+    ! Then Σ_K (B*L^{-1})_ijK*(B*L^{-1})_klK = Σ_{PQ} B_ijP*(L^{-1}*L^{-T})_PQ*B_klQ
+    !                                          = Σ_{PQ} B_ijP*V^{-1}_PQ*B_klQ  ✓
+    !
+    ! The dgemm in calc_exact_exchange_hse_ri (C = B_ijP * L_PK) is unchanged;
+    ! only the meaning of L_PK changes from L columns to L^{-1} columns.
     if (n_chol == 0) then
       write(*, '(A)') 'WARNING: No Cholesky vectors above threshold, using at least 1'
       n_chol = 1
     end if
-    
+
     allocate(L_PK(n_aux, n_chol))
+    L_PK = 0.0d0
+    ! Set RHS = first n_chol columns of identity matrix
     do K = 1, n_chol
-      do P = K, n_aux  ! Lower triangular
-        L_PK(P, K) = L_full(P, K)
-      end do
-      do P = 1, K-1  ! Upper part is zero
-        L_PK(P, K) = 0.0d0
-      end do
+      L_PK(K, K) = 1.0d0
     end do
+    ! Solve L * L_PK = I[:,1:n_chol]  =>  L_PK = L^{-1}[:,1:n_chol]
+    call dtrtrs('L', 'N', 'N', n_aux, n_chol, L_full, n_aux, L_PK, n_aux, info)
+    if (info /= 0) then
+      write(*, '(A, I0)') 'ERROR: Cholesky inverse (dtrtrs) failed, info=', info
+      stop
+    end if
     
     ! Report memory savings
     write(*, '(A, F8.3, A, F8.3, A, F6.2, A)') &
@@ -458,7 +495,7 @@ contains
     integer, intent(in) :: n_occ
     
     integer :: n_basis, n_aux
-    integer :: i, j, k, l, P, Q
+    integer :: i, j, k, l, Q
     real(8), allocatable:: C_klQ(:,:,:)                ! Intermediate array
     real(8) :: v_x_ij
     
@@ -469,6 +506,11 @@ contains
     
     n_basis = ri_data%n_basis
     n_aux = ri_data%n_aux
+
+    if (n_aux <= 0 .or. n_basis <= 0) then
+      v_x(:, :) = 0.0d0
+      return
+    end if
     
     ! Branch: CD-RI or standard RI
     if (ri_data%use_cd_ri) then

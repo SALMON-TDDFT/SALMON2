@@ -74,7 +74,7 @@ dkms.conf
 
 ### CMake ###
 CMakeCache.txt
-CMakeFiles
+/CMakeFiles/
 CMakeScripts
 Testing
 Makefile
@@ -82,6 +82,10 @@ cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
+
+# Keep SALMON source cmakefiles tracked (case-insensitive filesystem safety)
+!/cmakefiles/
+!/cmakefiles/*.cmake
 
 ### Fortran ###
 # Prerequisites
@@ -149,3 +153,6 @@ samples/**/comparison.dat
 samples/**/conv_*.dat
 samples/**/current_*.dat
 samples/**/hybrid_bench_*.summary
+
+# Local git worktrees
+/.worktrees/

@@ -73,6 +73,9 @@ module structures
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
     real(8) :: E_U
     real(8) :: E_tot0 ! total energy @ t=0
+    real(8) :: elec_num
+    real(8) :: elec_num_raw
+    real(8) :: pw_weight_raw
   end type s_dft_energy
 
   type s_ewald_ion_ion
@@ -473,8 +476,10 @@ module structures
   type s_dcdft
   ! summation
     integer :: n_frag ! # of fragments (subsystems)
+    logical :: optimized_fragment_geometry
     integer :: nxyz_domain(3) ! # of r-grid points for the core domain
     integer :: nxyz_buffer(3) ! # of r-grid points for the buffer region
+    integer,allocatable :: nxyz_domain_frag(:,:) ! per-fragment core-domain sizes
     integer,allocatable :: ixyz_frag(:,:) ! r-grid index of the fragment origin
     real(8),allocatable :: rxyz_frag(:,:) ! position of the fragment origin
   ! total system
@@ -528,7 +533,7 @@ module structures
   type s_singlescale
     logical :: flag_use
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),curr_ave(3)
+    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),curr_ave(3),light_lz_flux(3),light_lz_cum(3)
     real(8),allocatable :: vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
     & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
     & ,current4pi(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
@@ -725,6 +730,7 @@ contains
     DEAL(rg%idx)
     DEAL(rg%idy)
     DEAL(rg%idz)
+    DEAL(rg%coordinate)
   end subroutine deallocate_rgrid
 
   subroutine deallocate_orbital(psi)

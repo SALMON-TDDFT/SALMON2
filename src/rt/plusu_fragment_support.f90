@@ -67,15 +67,21 @@ contains
     dm = (0.0d0, 0.0d0)
     
     ! Calculate density matrix: dm(j,k) = sum_i occ(i) * c_j^*(i) * c_k(i)
-    ! This gives occupation of fragment basis states
-    !$omp parallel do collapse(2) private(io,jo,ko,occ_factor)
+    ! This gives occupation of fragment basis states.
+    !
+    ! BUG FIX: the previous loop parallelized over (ispin,io) with collapse(2).
+    ! Multiple io-threads wrote to dm(jo,ko,ispin) without synchronization => data race.
+    ! Additionally, "cycle" inside the collapsed (ispin,io) loop had ambiguous semantics.
+    !
+    ! Fix: parallelize over (ispin,jo) — each thread owns a unique dm(jo,:,ispin) row,
+    ! so no race condition. The io accumulation is sequential within each thread.
+    !$omp parallel do collapse(2) private(io,ko,occ_factor) schedule(static)
     do ispin = 1, nspin
-      do io = 1, nstate_tot
-        if (rocc(io, ispin) < 1.0d-10) cycle
-        occ_factor = rocc(io, ispin)
-        
-        do jo = 1, nstate_frag
-          do ko = 1, nstate_frag
+      do jo = 1, nstate_frag
+        do ko = 1, nstate_frag
+          do io = 1, nstate_tot
+            if (rocc(io, ispin) < 1.0d-10) cycle
+            occ_factor = rocc(io, ispin)
             dm(jo, ko, ispin) = dm(jo, ko, ispin) + &
                                 occ_factor * conjg(coef(jo, io, ispin)) * coef(ko, io, ispin)
           end do
