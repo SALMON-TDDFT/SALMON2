@@ -1419,8 +1419,9 @@ contains
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname,nstate,nelec_spin,unit_system, &
-                                   yn_jm, yn_out_stress, yn_out_stress_decomp, yn_periodic, yn_stress_loc_fd, &
-                                   stress_fd_detail, base_directory, xc
+                                   yn_jm, yn_out_stress, yn_periodic, &
+                                   yn_out_stress_terms, yn_out_stress_details, yn_out_stress_numerics, &
+                                   stress_l_decomp, base_directory, xc
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1432,43 +1433,21 @@ contains
     type(s_pp_info)   ,intent(in) :: pp
     !
     integer :: fh,is,p1,p2,p5,iob,jj,ik,ikoa,iatom,ix
-    integer :: stress_detail_level
     character(100) :: file_gs_info
-    real(8) :: stress_gpa(3,3)
-    real(8) :: term_gpa(3,3)
-    real(8) :: pressure_gpa
     real(8) :: virial_kin
     real(8) :: virial_har
     real(8) :: virial_har_shadow
     real(8) :: virial_xc
-    real(8) :: virial_nl
-    real(8) :: virial_nl_grad
-    real(8) :: virial_total
-    real(8) :: virial_known_trace
-    real(8) :: virial_known_rhs
     real(8) :: virial_known_residual
-    real(8) :: virial_loc_ewa
-    real(8) :: virial_remainder_after_known
-    real(8) :: virial_loc
-    real(8) :: virial_loc_grad
-    real(8) :: virial_loc_diag
-    real(8) :: virial_loc_sr_grad
-    real(8) :: virial_loc_lr_grad
     real(8) :: virial_loc_lr_residual
     real(8) :: virial_ewa
-    real(8) :: virial_ewa_g_grad
-    real(8) :: virial_ewa_g_diag_self
-    real(8) :: virial_ewa_r
-    real(8) :: virial_ewa_energy_residual
-    real(8) :: e_kin_from_stress
-    real(8) :: pressure_term_gpa
-    real(8) :: pressure_nl_diag_gpa
     real(8) :: pressure_har_gpa
     real(8) :: pressure_har_shadow_gpa
     real(8) :: pressure_har_shadow_delta_gpa
     real(8) :: pressure_loc_sr_gpa
     real(8) :: pressure_loc_sr_rs_gpa
     real(8) :: pressure_loc_sr_shadow_delta_gpa
+    logical :: terms_on, details_on, numerics_on
 
     file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
@@ -1548,30 +1527,69 @@ contains
        end if
 
        if(yn_out_stress == 'y') then
-         select case(trim(stress_fd_detail))
-         case('low')
-           stress_detail_level = 1
-         case('middle')
-           stress_detail_level = 2
-         case('high')
-           stress_detail_level = 3
-         case default
-           stress_detail_level = 3
-         end select
+         terms_on = (yn_out_stress_terms == 'y')
+         details_on = (yn_out_stress_details == 'y')
+         numerics_on = (yn_out_stress_numerics == 'y')
 
-         stress_gpa = system%stress_tensor * au_pressure_gpa
-         call cleanup_stress_tensor_for_output(stress_gpa)
-         pressure_gpa = -sum((/stress_gpa(1,1), stress_gpa(2,2), stress_gpa(3,3)/)) / 3d0
+         call write_total_stress_summary_gpa(fh, system%stress_tensor, au_pressure_gpa)
 
-         if(stress_detail_level == 1) then
+         if(terms_on) then
            write(fh,*)
-           write(fh,*) "Stress tensor [GPa]"
-           write(fh,'(1x,"xx yy zz =",3e16.8)') stress_gpa(1,1), stress_gpa(2,2), stress_gpa(3,3)
-           write(fh,'(1x,"xy yz xz =",3e16.8)') stress_gpa(1,2), stress_gpa(2,3), stress_gpa(1,3)
-           write(fh,'(1x,"pressure =",e16.8)') pressure_gpa
+           write(fh,*) "Stress decomposition tensor [GPa]"
+           write(fh,'(1x,a18,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+           call write_stress_tensor_row_gpa(fh, 'Kinetic',  system%stress_kin,    au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Hartree',  system%stress_har,    au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'XC',       system%stress_xc,     au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Local',    system%stress_loc,    au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl,     au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ewald',    system%stress_ewa,    au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Total',    system%stress_tensor, au_pressure_gpa)
          end if
 
-         if(stress_detail_level >= 2) then
+         if(details_on) then
+           write(fh,*)
+           write(fh,*) "Stress decomposition detail [GPa]"
+           write(fh,'(1x,a18,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+           call write_stress_tensor_row_gpa(fh, 'XC', system%stress_xc, au_pressure_gpa)
+           if(trim(xc) == 'r2scan') then
+             call write_stress_tensor_row_gpa(fh, 'XC-local', system%stress_xc_local, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'XC-grad', system%stress_xc_grad, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'XC-tau', system%stress_xc_tau, au_pressure_gpa)
+           else
+             call write_stress_tensor_row_gpa(fh, 'X', system%stress_x, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'C', system%stress_c, au_pressure_gpa)
+           end if
+           call write_stress_tensor_row_gpa(fh, 'Local', system%stress_loc, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Local-SR', &
+                system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Local-LR', &
+                system%stress_loc_lr_grad + system%stress_loc_lr_diag, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl, au_pressure_gpa)
+           if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
+             call write_nl_l_channel_tensor_rows_gpa(fh, system%stress_nl_l, au_pressure_gpa)
+           if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
+             call write_nl_species_l_channel_tensor_rows_gpa(fh, pp, system%stress_nl_species_l, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ewald', system%stress_ewa, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ewald-G', system%stress_ewa_g, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ewald-R', system%stress_ewa_r, au_pressure_gpa)
+         end if
+
+         if(numerics_on) then
+           write(fh,*)
+           write(fh,*) "Stress implementation detail [GPa]"
+           write(fh,'(1x,a18,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
+           if(trim(xc) == 'r2scan') then
+             call write_stress_tensor_row_gpa(fh, 'XC-grad-payload', system%stress_xc_grad_payload, au_pressure_gpa)
+             call write_stress_tensor_row_gpa(fh, 'XC-grad-vsigma', system%stress_xc_grad_vsigma, au_pressure_gpa)
+           end if
+           call write_stress_tensor_row_gpa(fh, 'Loc-SR-scr', &
+                system%stress_loc_sr_scr_grad + system%stress_loc_sr_scr_diag, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Loc-LR-scr', &
+                system%stress_loc_lr_scr_grad + system%stress_loc_lr_scr_diag, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ew-G-grad', system%stress_ewa_g_grad, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ew-G-diag', system%stress_ewa_g_diag, au_pressure_gpa)
+           call write_stress_tensor_row_gpa(fh, 'Ew-G-self', system%stress_ewa_g_self, au_pressure_gpa)
+
            write(fh,*)
            write(fh,*) "Stress residual diagnostics [Hartree]"
            virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
@@ -1588,22 +1606,9 @@ contains
            write(fh,'(1x,"Tr(loc_lr)*V + E_lr      =",e16.8)') virial_loc_lr_residual
            write(fh,'(1x,"Tr(ewa)*V + E_ion_ion    =",e16.8)') virial_ewa
            write(fh,'(1x,"Residual_kin_har_xc    =",e16.8)') virial_known_residual
-         end if
-         if(stress_fd_detail == 'high') then
+
            write(fh,*)
            write(fh,*) "XC payload diagnostics [a.u.]"
-           write(fh,'(1x,"max|rdedd_payload-rdedd_xc_refresh| =",e16.8)') &
-                system%stress_xc_dbg_rdedd_refresh_maxdiff
-           write(fh,'(1x,"max|grho_payload-grho_xc_refresh|   =",e16.8)') &
-                system%stress_xc_dbg_grho_refresh_maxdiff
-           write(fh,'(1x,"max|rho_box-rho_direct|            =",e16.8)') &
-                system%stress_xc_dbg_rho_box_direct_maxdiff
-           write(fh,'(1x,"max|rho_box-rho_direct| active     =",e16.8)') &
-                system%stress_xc_dbg_rho_box_direct_active_maxdiff
-           write(fh,'(1x,"max|grho_local_early-grho_direct|  =",e16.8)') &
-                system%stress_xc_dbg_grho_direct_local_early_maxdiff
-           write(fh,'(1x,"max|grho_local_bulk-grho_direct|   =",e16.8)') &
-                system%stress_xc_dbg_grho_direct_local_bulk_maxdiff
            write(fh,'(1x,"max|grho_payload-grho_local|        =",e16.8)') &
                 system%stress_xc_dbg_grho_local_payload_maxdiff
            write(fh,'(1x,"max|grho_payload-grho_direct|       =",e16.8)') &
@@ -1620,6 +1625,7 @@ contains
                 system%stress_xc_dbg_rdedd_dot_grho_local + system%stress_xc_dbg_rho_div_rdedd
            write(fh,'(1x,"int rdedd.grho_payload + rho div(rdedd) dV =",e16.8)') &
                 system%stress_xc_dbg_rdedd_dot_grho_payload + system%stress_xc_dbg_rho_div_rdedd
+
            write(fh,*)
            write(fh,*) "Alternate implementation checks [GPa/Hartree]"
            virial_har_shadow = stress_tensor_trace(system%stress_har_shadow) * system%det_a + energy%E_h
@@ -1637,77 +1643,21 @@ contains
            write(fh,'(1x,"P_loc_sr_rs [GPa]      =",e16.8)') pressure_loc_sr_rs_gpa
            write(fh,'(1x,"P_loc_sr_rs - P_loc_sr [GPa] =",e16.8)') pressure_loc_sr_shadow_delta_gpa
          end if
-
-         if(yn_out_stress_decomp == 'y') then
-           write(fh,*)
-           if(stress_detail_level == 1) then
-             write(fh,*) "Stress decomposition pressure [GPa]"
-             term_gpa = system%stress_kin * au_pressure_gpa
-             call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"Kinetic    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-             term_gpa = system%stress_har * au_pressure_gpa
-             call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"Hartree    =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-             term_gpa = system%stress_xc * au_pressure_gpa
-             call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"XC         =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-             term_gpa = system%stress_loc * au_pressure_gpa
-             call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"Local      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-             term_gpa = system%stress_nl * au_pressure_gpa
-             call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"Nonlocal   =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-             term_gpa = system%stress_ewa * au_pressure_gpa
-             call cleanup_stress_tensor_for_output(term_gpa)
-             write(fh,'(1x,"Ewald      =",e16.8)') -sum((/term_gpa(1,1),term_gpa(2,2),term_gpa(3,3)/)) / 3d0
-           else
-             write(fh,*) "Stress decomposition tensor [GPa]"
-             write(fh,'(1x,a12,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
-             call write_stress_tensor_row_gpa(fh, 'Kinetic',  system%stress_kin, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Hartree',  system%stress_har, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'XC',       system%stress_xc,  au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Local',    system%stress_loc, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl,  au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Ewald',    system%stress_ewa, au_pressure_gpa)
-             call write_stress_tensor_row_gpa(fh, 'Total',    system%stress_tensor, au_pressure_gpa)
-             if(stress_detail_level == 3) then
-               write(fh,*)
-               write(fh,*) "Stress decomposition detail [GPa]"
-               write(fh,'(1x,a12,1x,7a16)') 'sector', 'xx', 'yy', 'zz', 'xy', 'yz', 'xz', 'P'
-               call write_stress_tensor_row_gpa(fh, '  XC', system%stress_xc, au_pressure_gpa)
-               if(trim(xc) == 'r2scan') then
-                 call write_stress_tensor_row_gpa(fh, '    XC-local', system%stress_xc_local, au_pressure_gpa)
-                 call write_stress_tensor_row_gpa(fh, '    XC-grad',  system%stress_xc_grad,  au_pressure_gpa)
-                 call write_stress_tensor_row_gpa(fh, 'XC-grad-pyld', system%stress_xc_grad_payload, au_pressure_gpa)
-                 call write_stress_tensor_row_gpa(fh, '    XC-grad-vsigma', system%stress_xc_grad_vsigma, au_pressure_gpa)
-                 call write_stress_tensor_row_gpa(fh, '    XC-tau',   system%stress_xc_tau,   au_pressure_gpa)
-               else
-                 call write_stress_tensor_row_gpa(fh, '    X', system%stress_x, au_pressure_gpa)
-                 call write_stress_tensor_row_gpa(fh, '    C', system%stress_c, au_pressure_gpa)
-               end if
-               call write_stress_tensor_row_gpa(fh, '  Local', system%stress_loc, au_pressure_gpa)
-               call write_stress_tensor_row_gpa(fh, '    Local-SR', &
-                    system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)
-               call write_stress_tensor_row_gpa(fh, '    Local-LR', &
-                    system%stress_loc_lr_grad + system%stress_loc_lr_diag, au_pressure_gpa)
-               call write_stress_tensor_row_gpa(fh, '  Nonlocal', system%stress_nl, au_pressure_gpa)
-               if(allocated(system%stress_nl_l)) call write_nl_l_channel_tensor_rows_gpa(fh, system%stress_nl_l, au_pressure_gpa)
-             end if
-           end if
-         end if
        end if
 
        close(fh)
     endif
 
     ! Write sector-resolved energy data for FD validation
-    call write_stress_energy_data(Miter, system, energy)
+    call write_stress_energy_data(Miter, system, energy, pp)
 
   end subroutine write_info_data
 
-  subroutine write_stress_energy_data(Miter, system, energy)
+  subroutine write_stress_energy_data(Miter, system, energy, pp)
     use structures
-    use salmon_global,   only: sysname, base_directory, yn_out_stress, stress_fd_detail
+    use salmon_global,   only: sysname, base_directory, yn_out_stress, stress_output_level, &
+                               yn_out_stress_terms, yn_out_stress_details, yn_out_stress_numerics, &
+                               stress_l_decomp, xc
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
     use filesystem,      only: open_filehandle
@@ -1716,87 +1666,220 @@ contains
     integer,            intent(in) :: Miter
     type(s_dft_system), intent(in) :: system
     type(s_dft_energy), intent(in) :: energy
-    integer :: fh, i
+    type(s_pp_info),    intent(in) :: pp
+    integer :: fh, col, line_cols
     character(256) :: fname
-    real(8) :: e_sr, e_lr, e_ewa_g, e_ewa_r
-    real(8) :: p(13)
+    real(8) :: p_total
+    real(8) :: virial_kin
+    real(8) :: virial_har
+    real(8) :: virial_xc
+    real(8) :: virial_loc_lr_residual
+    real(8) :: virial_ewa
+    real(8) :: virial_known_residual
+    real(8) :: pressure_har_gpa
+    real(8) :: pressure_har_shadow_gpa
+    real(8) :: pressure_har_shadow_delta_gpa
+    real(8) :: pressure_loc_sr_gpa
+    real(8) :: pressure_loc_sr_rs_gpa
+    real(8) :: pressure_loc_sr_shadow_delta_gpa
+    logical :: terms_on, details_on, numerics_on
 
     if(.not. comm_is_root(nproc_id_global)) return
     if(yn_out_stress /= 'y') return
 
+    terms_on = (yn_out_stress_terms == 'y')
+    details_on = (yn_out_stress_details == 'y')
+    numerics_on = (yn_out_stress_numerics == 'y')
+
     fname = trim(base_directory)//trim(sysname)//'_stress_energy.data'
     fh = open_filehandle(trim(fname))
 
-    write(fh,'(a)') '# SALMON stress energy decomposition'
-    write(fh,'(a)') '# stress_fd_detail = '//stress_fd_detail
-    write(fh,'(a)') '# col  1: iter'
-    write(fh,'(a)') '# col  2: E_total [eV]'
-    write(fh,'(a)') '# col  3: E_kin [Ha]'
-    write(fh,'(a)') '# col  4: E_har [Ha]'
-    write(fh,'(a)') '# col  5: E_xc [Ha]'
-    write(fh,'(a)') '# col  6: E_ion_loc [Ha]'
-    write(fh,'(a)') '# col  7: E_ion_nloc [Ha]'
-    write(fh,'(a)') '# col  8: E_ion_ion [Ha]'
-    write(fh,'(a)') '#'
-    write(fh,'(a)') '# col  9: E_loc_sr [Ha]        (middle+, else 0)'
-    write(fh,'(a)') '# col 10: E_loc_lr [Ha]        (middle+, else 0)'
-    write(fh,'(a)') '# col 11: E_ewa_G [Ha]         (middle+, else 0)'
-    write(fh,'(a)') '# col 12: E_ewa_R [Ha]         (middle+, else 0)'
-    write(fh,'(a)') '#'
-    write(fh,'(a)') '# col 13: P_kin [GPa]          (high, else 0)'
-    write(fh,'(a)') '# col 14: P_har [GPa]          (high, else 0)'
-    write(fh,'(a)') '# col 15: P_xc [GPa]           (high, else 0)'
-    write(fh,'(a)') '# col 16: P_loc_sr_grad [GPa]  (high, else 0)'
-    write(fh,'(a)') '# col 17: P_loc_sr_diag [GPa]  (high, else 0)'
-    write(fh,'(a)') '# col 18: P_loc_lr_grad [GPa]  (high, else 0)'
-    write(fh,'(a)') '# col 19: P_loc_lr_diag [GPa]  (high, else 0)'
-    write(fh,'(a)') '# col 20: P_ewa_G_grad [GPa]   (high, else 0)'
-    write(fh,'(a)') '# col 21: P_ewa_G_diag [GPa]   (high, else 0)'
-    write(fh,'(a)') '# col 22: P_ewa_G_self [GPa]   (high, else 0)'
-    write(fh,'(a)') '# col 23: P_ewa_R [GPa]        (high, else 0)'
-    write(fh,'(a)') '# col 24: P_nl [GPa]           (high, else 0)'
-    write(fh,'(a)') '# col 25: P_total [GPa]        (high, else 0)'
-    write(fh,'(a)') '#'
+10  format("#",1X,A,":",1X,A)
+    write(fh,10) 'Stress energy', 'Ground-state stress decomposition'
+    write(fh,10) 'P_total', '-Tr(stress)/3'
+    if(terms_on) write(fh,10) 'E_*/P_*', 'Physical decomposition terms'
+    if(details_on) write(fh,10) 'detail_*', 'Detailed physical pressure terms'
+    if(numerics_on) write(fh,10) 'numeric_*', 'Numerical diagnostics'
+    if(details_on .and. trim(stress_l_decomp) /= 'no') &
+      write(fh,10) 'P_nl_*', 'Nonlocal projector l-channel contributions'
+    col = 1
+    line_cols = 0
+    call begin_compact_column_header(fh)
+    call write_compact_column_header(fh, line_cols, col, 'iter'); col = col + 1
+    call write_compact_column_header(fh, line_cols, col, 'E_total [eV]'); col = col + 1
+    call write_compact_column_header(fh, line_cols, col, 'P_total [GPa]'); col = col + 1
 
-    if(stress_fd_detail == 'middle' .or. stress_fd_detail == 'high') then
-      e_sr    = system%stress_loc_sr_energy
-      e_lr    = system%stress_loc_lr_energy
-      e_ewa_g = system%stress_ewa_energy_G
-      e_ewa_r = system%stress_ewa_energy_R
-    else
-      e_sr = 0d0
-      e_lr = 0d0
-      e_ewa_g = 0d0
-      e_ewa_r = 0d0
+    if(terms_on) then
+      call write_compact_column_header(fh, line_cols, col, 'E_kin [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_har [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_xc [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_ion_loc [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_ion_nloc [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_ion_ion [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_kin [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_har [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_xc [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_nl [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_ewa [GPa]'); col = col + 1
     end if
 
-    p = 0d0
-    if(stress_fd_detail == 'high') then
-      p(1)  = -stress_term_pressure_gpa(system%stress_kin,           au_pressure_gpa)
-      p(2)  = -stress_term_pressure_gpa(system%stress_har,           au_pressure_gpa)
-      p(3)  = -stress_term_pressure_gpa(system%stress_xc,            au_pressure_gpa)
-      p(4)  = -stress_term_pressure_gpa(system%stress_loc_sr_grad,   au_pressure_gpa)
-      p(5)  = -stress_term_pressure_gpa(system%stress_loc_sr_diag,   au_pressure_gpa)
-      p(6)  = -stress_term_pressure_gpa(system%stress_loc_lr_grad,   au_pressure_gpa)
-      p(7)  = -stress_term_pressure_gpa(system%stress_loc_lr_diag,   au_pressure_gpa)
-      p(8)  = -stress_term_pressure_gpa(system%stress_ewa_g_grad,    au_pressure_gpa)
-      p(9)  = -stress_term_pressure_gpa(system%stress_ewa_g_diag,    au_pressure_gpa)
-      p(10) = -stress_term_pressure_gpa(system%stress_ewa_g_self,    au_pressure_gpa)
-      p(11) = -stress_term_pressure_gpa(system%stress_ewa_r,         au_pressure_gpa)
-      p(12) = -stress_term_pressure_gpa(system%stress_nl,            au_pressure_gpa)
-      p(13) = -stress_term_pressure_gpa(system%stress_tensor,        au_pressure_gpa)
+    if(details_on) then
+      call write_compact_column_header(fh, line_cols, col, 'E_loc_sr [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_loc_lr [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_ewa_G [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'E_ewa_R [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_grad [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_diag [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_lr_grad [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_lr_diag [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_ewa_G [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_ewa_R [GPa]'); col = col + 1
+      if(trim(xc) == 'r2scan') then
+        call write_compact_column_header(fh, line_cols, col, 'P_xc_local [GPa]'); col = col + 1
+        call write_compact_column_header(fh, line_cols, col, 'P_xc_grad [GPa]'); col = col + 1
+        call write_compact_column_header(fh, line_cols, col, 'P_xc_tau [GPa]'); col = col + 1
+      else
+        call write_compact_column_header(fh, line_cols, col, 'P_x [GPa]'); col = col + 1
+        call write_compact_column_header(fh, line_cols, col, 'P_c [GPa]'); col = col + 1
+      end if
+      if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
+        call write_nl_l_pressure_column_headers(fh, line_cols, col, system%stress_nl_l)
+      if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
+        call write_nl_species_l_pressure_column_headers(fh, line_cols, col, pp, system%stress_nl_species_l)
     end if
 
-    write(fh, '(i6,11e20.12,13f20.8)') &
-      Miter, &
-      energy%E_tot * au_energy_ev, &
-      energy%E_kin, energy%E_h, energy%E_xc, &
-      energy%E_ion_loc, energy%E_ion_nloc, energy%E_ion_ion, &
-      e_sr, e_lr, e_ewa_g, e_ewa_r, &
-      (p(i), i=1,13)
+    if(numerics_on) then
+      if(trim(xc) == 'r2scan') then
+        call write_compact_column_header(fh, line_cols, col, 'P_xc_grad_payload [GPa]'); col = col + 1
+        call write_compact_column_header(fh, line_cols, col, 'P_xc_grad_vsigma [GPa]'); col = col + 1
+      end if
+      call write_compact_column_header(fh, line_cols, col, 'P_ewa_G_grad [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_ewa_G_diag [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_ewa_G_self [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'V_kin_residual [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'V_har_residual [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'V_xc_residual [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'V_loc_lr_residual [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'V_ewa_residual [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'V_known_residual [Ha]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'max_grho_payload_local [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'max_grho_payload_direct [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'max_grho_direct_local [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'int_rdedd_grho_local [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'int_rdedd_grho_payload [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'int_rho_div_rdedd [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_har_shadow [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_har_shadow_delta [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_shadow_delta [GPa]'); col = col + 1
+    end if
+    call end_compact_column_header(fh)
+
+    p_total = -stress_term_pressure_gpa(system%stress_tensor, au_pressure_gpa)
+    write(fh,'(i10)',advance='no') Miter
+    call write_data_token(fh, energy%E_tot * au_energy_ev)
+    call write_data_token(fh, p_total)
+
+    if(terms_on) then
+      call write_data_token(fh, energy%E_kin)
+      call write_data_token(fh, energy%E_h)
+      call write_data_token(fh, energy%E_xc)
+      call write_data_token(fh, energy%E_ion_loc)
+      call write_data_token(fh, energy%E_ion_nloc)
+      call write_data_token(fh, energy%E_ion_ion)
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_kin, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_har, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_nl, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_ewa, au_pressure_gpa))
+    end if
+
+    if(details_on) then
+      call write_data_token(fh, system%stress_loc_sr_energy)
+      call write_data_token(fh, system%stress_loc_lr_energy)
+      call write_data_token(fh, system%stress_ewa_energy_G)
+      call write_data_token(fh, system%stress_ewa_energy_R)
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_diag, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_lr_grad, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_lr_diag, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_ewa_g, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_ewa_r, au_pressure_gpa))
+      if(trim(xc) == 'r2scan') then
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_local, au_pressure_gpa))
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_grad, au_pressure_gpa))
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_tau, au_pressure_gpa))
+      else
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_x, au_pressure_gpa))
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_c, au_pressure_gpa))
+      end if
+      if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
+        call write_nl_l_pressure_values(fh, system%stress_nl_l, au_pressure_gpa)
+      if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
+        call write_nl_species_l_pressure_values(fh, system%stress_nl_species_l, au_pressure_gpa)
+    end if
+
+    if(numerics_on) then
+      if(trim(xc) == 'r2scan') then
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_grad_payload, au_pressure_gpa))
+        call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_grad_vsigma, au_pressure_gpa))
+      end if
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_ewa_g_grad, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_ewa_g_diag, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_ewa_g_self, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs, au_pressure_gpa))
+      virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
+      virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
+      virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+      virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) * &
+                               system%det_a + system%stress_loc_lr_energy
+      virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a + energy%E_ion_ion
+      virial_known_residual = virial_kin + virial_har + virial_xc
+      pressure_har_gpa = -stress_term_pressure_gpa(system%stress_har, au_pressure_gpa)
+      pressure_har_shadow_gpa = -stress_term_pressure_gpa(system%stress_har_shadow, au_pressure_gpa)
+      pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
+      pressure_loc_sr_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad + system%stress_loc_sr_diag, au_pressure_gpa)
+      pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, au_pressure_gpa)
+      pressure_loc_sr_shadow_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_gpa
+      call write_data_token(fh, virial_kin)
+      call write_data_token(fh, virial_har)
+      call write_data_token(fh, virial_xc)
+      call write_data_token(fh, virial_loc_lr_residual)
+      call write_data_token(fh, virial_ewa)
+      call write_data_token(fh, virial_known_residual)
+      call write_data_token(fh, system%stress_xc_dbg_grho_local_payload_maxdiff)
+      call write_data_token(fh, system%stress_xc_dbg_grho_direct_payload_maxdiff)
+      call write_data_token(fh, system%stress_xc_dbg_grho_direct_local_maxdiff)
+      call write_data_token(fh, system%stress_xc_dbg_rdedd_dot_grho_local)
+      call write_data_token(fh, system%stress_xc_dbg_rdedd_dot_grho_payload)
+      call write_data_token(fh, system%stress_xc_dbg_rho_div_rdedd)
+      call write_data_token(fh, pressure_har_shadow_gpa)
+      call write_data_token(fh, pressure_har_shadow_delta_gpa)
+      call write_data_token(fh, pressure_loc_sr_shadow_delta_gpa)
+    end if
+    write(fh,*)
 
     close(fh)
   end subroutine write_stress_energy_data
+
+  subroutine write_total_stress_summary_gpa(fh, strs, au_pressure_gpa)
+    implicit none
+    integer,      intent(in) :: fh
+    real(8),      intent(in) :: strs(3,3), au_pressure_gpa
+    real(8) :: strs_gpa(3,3), pressure_gpa
+
+    strs_gpa = strs * au_pressure_gpa
+    call cleanup_stress_tensor_for_output(strs_gpa)
+    pressure_gpa = -stress_tensor_trace(strs_gpa) / 3d0
+
+    write(fh,*)
+    write(fh,*) "Stress tensor [GPa]"
+    write(fh,'(1x,"xx yy zz =",3e16.8)') strs_gpa(1,1), strs_gpa(2,2), strs_gpa(3,3)
+    write(fh,'(1x,"xy yz xz =",3e16.8)') strs_gpa(1,2), strs_gpa(2,3), strs_gpa(1,3)
+    write(fh,'(1x,"pressure =",e16.8)') pressure_gpa
+  end subroutine write_total_stress_summary_gpa
 
   subroutine cleanup_stress_tensor_for_output(strs)
     implicit none
@@ -1817,7 +1900,7 @@ contains
     strs_gpa = 0.5d0 * (strs + transpose(strs)) * au_pressure_gpa
     call cleanup_stress_tensor_for_output(strs_gpa)
     pressure_gpa = -stress_tensor_trace(strs_gpa) / 3d0
-    write(fh,'(1x,a12,7e16.8)') label, strs_gpa(1,1), strs_gpa(2,2), strs_gpa(3,3), &
+    write(fh,'(1x,a18,7e16.8)') label, strs_gpa(1,1), strs_gpa(2,2), strs_gpa(3,3), &
          strs_gpa(1,2), strs_gpa(2,3), strs_gpa(1,3), pressure_gpa
   end subroutine write_stress_tensor_row_gpa
 
@@ -1835,29 +1918,240 @@ contains
     end do
   end subroutine write_nl_l_channel_tensor_rows_gpa
 
-  character(12) function nl_l_channel_label(ll)
+  subroutine write_nl_species_l_channel_tensor_rows_gpa(fh, pp, stress_nl_species_l, au_pressure_gpa)
+    use structures
+    implicit none
+    integer,          intent(in) :: fh
+    type(s_pp_info),  intent(in) :: pp
+    real(8),          intent(in) :: stress_nl_species_l(:,:,:,:), au_pressure_gpa
+    integer :: ielem, ll
+    real(8) :: strs(3,3)
+
+    do ielem = lbound(stress_nl_species_l,1), ubound(stress_nl_species_l,1)
+      do ll = lbound(stress_nl_species_l,2), ubound(stress_nl_species_l,2)
+        strs = stress_nl_species_l(ielem,ll,:,:)
+        if(maxval(abs(strs)) < 1d-14) cycle
+        call write_stress_tensor_row_gpa(fh, nl_species_l_channel_label(pp, ielem, ll), strs, au_pressure_gpa)
+      end do
+    end do
+  end subroutine write_nl_species_l_channel_tensor_rows_gpa
+
+  real(8) function stress_nl_l_total_pressure_gpa(stress_nl_l, gpa)
+    implicit none
+    real(8), intent(in) :: stress_nl_l(0:,:,:)
+    real(8), intent(in) :: gpa
+    integer :: ll
+
+    stress_nl_l_total_pressure_gpa = 0d0
+    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
+      stress_nl_l_total_pressure_gpa = stress_nl_l_total_pressure_gpa - &
+           stress_term_pressure_gpa(stress_nl_l(ll,:,:), gpa)
+    end do
+  end function stress_nl_l_total_pressure_gpa
+
+  subroutine begin_compact_column_header(fh)
+    implicit none
+    integer, intent(in) :: fh
+
+    write(fh,'(a)',advance='no') '#'
+  end subroutine begin_compact_column_header
+
+  subroutine write_compact_column_header(fh, line_cols, col, label)
+    implicit none
+    integer,      intent(in)    :: fh, col
+    integer,      intent(inout) :: line_cols
+    character(*), intent(in)    :: label
+    integer, parameter :: columns_per_line = 8
+
+    if(line_cols >= columns_per_line) then
+      write(fh,*)
+      write(fh,'(a)',advance='no') '#'
+      line_cols = 0
+    end if
+    write(fh,'(1x,i0,":",a)',advance='no') col, trim(label)
+    line_cols = line_cols + 1
+  end subroutine write_compact_column_header
+
+  subroutine end_compact_column_header(fh)
+    implicit none
+    integer, intent(in) :: fh
+
+    write(fh,*)
+  end subroutine end_compact_column_header
+
+  subroutine write_data_token(fh, value)
+    implicit none
+    integer, intent(in) :: fh
+    real(8), intent(in) :: value
+
+    write(fh,'(1x,e23.15e3)',advance='no') value
+  end subroutine write_data_token
+
+  subroutine write_stress_tensor_tokens_gpa(fh, strs, au_pressure_gpa)
+    implicit none
+    integer, intent(in) :: fh
+    real(8), intent(in) :: strs(3,3), au_pressure_gpa
+    real(8) :: strs_gpa(3,3)
+
+    strs_gpa = 0.5d0 * (strs + transpose(strs)) * au_pressure_gpa
+    call cleanup_stress_tensor_for_output(strs_gpa)
+    call write_data_token(fh, strs_gpa(1,1))
+    call write_data_token(fh, strs_gpa(2,2))
+    call write_data_token(fh, strs_gpa(3,3))
+    call write_data_token(fh, strs_gpa(1,2))
+    call write_data_token(fh, strs_gpa(2,3))
+    call write_data_token(fh, strs_gpa(1,3))
+    call write_data_token(fh, -stress_tensor_trace(strs_gpa) / 3d0)
+  end subroutine write_stress_tensor_tokens_gpa
+
+  subroutine write_nl_l_pressure_column_headers(fh, line_cols, col, stress_nl_l)
+    implicit none
+    integer, intent(in)    :: fh
+    integer, intent(inout) :: line_cols, col
+    real(8), intent(in)    :: stress_nl_l(0:,:,:)
+    integer :: ll
+    character(32) :: label
+
+    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
+      write(label,'("P_nl_",a," [GPa]")') trim(nl_l_channel_suffix(ll))
+      call write_compact_column_header(fh, line_cols, col, label)
+      col = col + 1
+    end do
+  end subroutine write_nl_l_pressure_column_headers
+
+  subroutine write_nl_l_pressure_column_headers_from_pp(fh, line_cols, col, pp)
+    use structures
+    implicit none
+    integer,         intent(in)    :: fh
+    integer,         intent(inout) :: line_cols, col
+    type(s_pp_info), intent(in)    :: pp
+    integer :: ll
+    character(32) :: label
+
+    do ll = 0, pp%lmax
+      write(label,'("P_nl_",a," [GPa]")') trim(nl_l_channel_suffix(ll))
+      call write_compact_column_header(fh, line_cols, col, label)
+      col = col + 1
+    end do
+  end subroutine write_nl_l_pressure_column_headers_from_pp
+
+  subroutine write_nl_species_l_pressure_column_headers(fh, line_cols, col, pp, stress_nl_species_l)
+    use structures
+    implicit none
+    integer,         intent(in)    :: fh
+    integer,         intent(inout) :: line_cols, col
+    type(s_pp_info), intent(in)    :: pp
+    real(8),         intent(in)    :: stress_nl_species_l(:,:,:,:)
+    integer :: ielem, ll
+    character(48) :: label
+
+    do ielem = lbound(stress_nl_species_l,1), ubound(stress_nl_species_l,1)
+      do ll = lbound(stress_nl_species_l,2), ubound(stress_nl_species_l,2)
+        write(label,'("P_nl_",a,"_",a," [GPa]")') trim(pp%atom_symbol(ielem)), trim(nl_l_channel_suffix(ll))
+        call write_compact_column_header(fh, line_cols, col, label)
+        col = col + 1
+      end do
+    end do
+  end subroutine write_nl_species_l_pressure_column_headers
+
+  subroutine write_nl_species_l_pressure_column_headers_from_pp(fh, line_cols, col, pp)
+    use structures
+    implicit none
+    integer,         intent(in)    :: fh
+    integer,         intent(inout) :: line_cols, col
+    type(s_pp_info), intent(in)    :: pp
+    integer :: ielem, ll
+    character(48) :: label
+
+    do ielem = 1, size(pp%atom_symbol)
+      do ll = 0, pp%lmax
+        write(label,'("P_nl_",a,"_",a," [GPa]")') trim(pp%atom_symbol(ielem)), trim(nl_l_channel_suffix(ll))
+        call write_compact_column_header(fh, line_cols, col, label)
+        col = col + 1
+      end do
+    end do
+  end subroutine write_nl_species_l_pressure_column_headers_from_pp
+
+  subroutine write_nl_l_pressure_values(fh, stress_nl_l, au_pressure_gpa)
+    implicit none
+    integer, intent(in) :: fh
+    real(8), intent(in) :: stress_nl_l(0:,:,:), au_pressure_gpa
+    integer :: ll
+
+    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
+      call write_data_token(fh, -stress_term_pressure_gpa(stress_nl_l(ll,:,:), au_pressure_gpa))
+    end do
+  end subroutine write_nl_l_pressure_values
+
+  subroutine write_nl_species_l_pressure_values(fh, stress_nl_species_l, au_pressure_gpa)
+    implicit none
+    integer, intent(in) :: fh
+    real(8), intent(in) :: stress_nl_species_l(:,:,:,:), au_pressure_gpa
+    integer :: ielem, ll
+
+    do ielem = lbound(stress_nl_species_l,1), ubound(stress_nl_species_l,1)
+      do ll = lbound(stress_nl_species_l,2), ubound(stress_nl_species_l,2)
+        call write_data_token(fh, -stress_term_pressure_gpa(stress_nl_species_l(ielem,ll,:,:), au_pressure_gpa))
+      end do
+    end do
+  end subroutine write_nl_species_l_pressure_values
+
+  character(18) function nl_l_channel_label(ll)
     implicit none
     integer, intent(in) :: ll
 
     select case(ll)
     case(0)
-      nl_l_channel_label = '    NL-s'
+      nl_l_channel_label = 'NL-s'
     case(1)
-      nl_l_channel_label = '    NL-p'
+      nl_l_channel_label = 'NL-p'
     case(2)
-      nl_l_channel_label = '    NL-d'
+      nl_l_channel_label = 'NL-d'
     case(3)
-      nl_l_channel_label = '    NL-f'
+      nl_l_channel_label = 'NL-f'
     case(4)
-      nl_l_channel_label = '    NL-g'
+      nl_l_channel_label = 'NL-g'
     case(5)
-      nl_l_channel_label = '    NL-h'
+      nl_l_channel_label = 'NL-h'
     case(6)
-      nl_l_channel_label = '    NL-i'
+      nl_l_channel_label = 'NL-i'
     case default
-      write(nl_l_channel_label,'("    NL-l",i0)') ll
+      write(nl_l_channel_label,'("NL-l",i0)') ll
     end select
   end function nl_l_channel_label
+
+  character(8) function nl_l_channel_suffix(ll)
+    implicit none
+    integer, intent(in) :: ll
+
+    select case(ll)
+    case(0)
+      nl_l_channel_suffix = 's'
+    case(1)
+      nl_l_channel_suffix = 'p'
+    case(2)
+      nl_l_channel_suffix = 'd'
+    case(3)
+      nl_l_channel_suffix = 'f'
+    case(4)
+      nl_l_channel_suffix = 'g'
+    case(5)
+      nl_l_channel_suffix = 'h'
+    case(6)
+      nl_l_channel_suffix = 'i'
+    case default
+      write(nl_l_channel_suffix,'("l",i0)') ll
+    end select
+  end function nl_l_channel_suffix
+
+  character(18) function nl_species_l_channel_label(pp, ielem, ll)
+    use structures
+    implicit none
+    type(s_pp_info), intent(in) :: pp
+    integer, intent(in) :: ielem, ll
+
+    write(nl_species_l_channel_label,'(a,"-",a)') trim(pp%atom_symbol(ielem)), trim(nl_l_channel_label(ll))
+  end function nl_species_l_channel_label
 
   pure real(8) function stress_tensor_trace(strs)
     implicit none
@@ -1866,9 +2160,10 @@ contains
     stress_tensor_trace = strs(1,1) + strs(2,2) + strs(3,3)
   end function stress_tensor_trace
 
-  subroutine write_stress_rt(iter, ofl, dt, system)
+  subroutine write_stress_rt(iter, ofl, dt, system, energy, pp)
     use structures
-    use salmon_global,   only: yn_out_stress_decomp
+    use salmon_global,   only: stress_output_level, yn_out_stress_terms, yn_out_stress_details, &
+                               yn_out_stress_numerics, stress_l_decomp, xc
     use inputoutput,     only: au_pressure_gpa, t_unit_time
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
@@ -1878,42 +2173,179 @@ contains
     type(s_ofile),      intent(inout) :: ofl
     real(8),            intent(in)    :: dt
     type(s_dft_system), intent(in)    :: system
-    real(8) :: time_out, pres, gpa
-    real(8) :: s(3,3), term_gpa(3,3)
+    type(s_dft_energy), intent(in)    :: energy
+    type(s_pp_info),    intent(in)    :: pp
+    integer :: col, line_cols
+    real(8) :: time_out, gpa
+    real(8) :: virial_kin
+    real(8) :: virial_har
+    real(8) :: virial_xc
+    real(8) :: virial_loc_lr_residual
+    real(8) :: virial_ewa
+    real(8) :: virial_known_residual
+    real(8) :: pressure_har_gpa
+    real(8) :: pressure_har_shadow_gpa
+    real(8) :: pressure_har_shadow_delta_gpa
+    real(8) :: pressure_loc_sr_gpa
+    real(8) :: pressure_loc_sr_rs_gpa
+    real(8) :: pressure_loc_sr_shadow_delta_gpa
+    logical :: terms_on, details_on, numerics_on
 
     if(.not. comm_is_root(nproc_id_global)) return
     gpa = au_pressure_gpa
+    terms_on = (yn_out_stress_terms == 'y')
+    details_on = (yn_out_stress_details == 'y')
+    numerics_on = (yn_out_stress_numerics == 'y')
 
     if(iter < 0) then
       ofl%fh_stress = open_filehandle(trim(ofl%file_stress_data), status='replace')
-      write(ofl%fh_stress,'(a)') "# Stress tensor time series  [time: " // trim(t_unit_time%name) // ", stress: GPa]"
-      if(yn_out_stress_decomp == 'n') then
-        write(ofl%fh_stress,'(a)') "# col: time s_xx s_yy s_zz s_xy s_yz s_xz pressure"
-      else
-        write(ofl%fh_stress,'(a)') "# col: time s_xx s_yy s_zz s_xy s_yz s_xz pressure p_kin p_har p_xc p_loc p_nl p_ewa"
+10    format("#",1X,A,":",1X,A)
+      write(ofl%fh_stress,10) "Stress", "Stress tensor time series"
+      write(ofl%fh_stress,10) "Pressure", "-Tr(stress)/3"
+      if(terms_on) write(ofl%fh_stress,10) "p_*", "Physical pressure contributions"
+      if(details_on) write(ofl%fh_stress,10) "detail_*", "Detailed physical pressure terms"
+      if(numerics_on) write(ofl%fh_stress,10) "numeric_*", "Numerical diagnostics"
+      if(details_on .and. trim(stress_l_decomp) /= 'no') &
+        write(ofl%fh_stress,10) "p_nl_*", "Nonlocal projector l-channel contributions"
+      col = 1
+      line_cols = 0
+      call begin_compact_column_header(ofl%fh_stress)
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 'time ['//trim(t_unit_time%name)//']'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 's_xx [GPa]'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 's_yy [GPa]'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 's_zz [GPa]'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 's_xy [GPa]'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 's_yz [GPa]'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 's_xz [GPa]'); col = col + 1
+      call write_compact_column_header(ofl%fh_stress, line_cols, col, 'pressure [GPa]'); col = col + 1
+      if(terms_on) then
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_kin [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_nl [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_ewa [GPa]'); col = col + 1
       end if
+      if(details_on) then
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_grad [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_diag [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_lr_grad [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_lr_diag [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_ewa_g [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_ewa_r [GPa]'); col = col + 1
+        if(trim(xc) == 'r2scan') then
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_local [GPa]'); col = col + 1
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_grad [GPa]'); col = col + 1
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_tau [GPa]'); col = col + 1
+        else
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_x [GPa]'); col = col + 1
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_c [GPa]'); col = col + 1
+        end if
+        if(trim(stress_l_decomp) /= 'no') &
+          call write_nl_l_pressure_column_headers_from_pp(ofl%fh_stress, line_cols, col, pp)
+        if(trim(stress_l_decomp) == 'species') &
+          call write_nl_species_l_pressure_column_headers_from_pp(ofl%fh_stress, line_cols, col, pp)
+      end if
+      if(numerics_on) then
+        if(trim(xc) == 'r2scan') then
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_grad_payload [GPa]'); col = col + 1
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_grad_vsigma [GPa]'); col = col + 1
+        end if
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_ewa_g_grad [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_ewa_g_diag [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_ewa_g_self [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_kin_residual [Ha]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_har_residual [Ha]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_xc_residual [Ha]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_loc_lr_residual [Ha]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_ewa_residual [Ha]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_known_residual [Ha]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'max_grho_payload_local [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'max_grho_payload_direct [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'max_grho_direct_local [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'int_rdedd_grho_local [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'int_rdedd_grho_payload [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'int_rho_div_rdedd [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har_shadow [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har_shadow_delta [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_shadow_delta [GPa]'); col = col + 1
+      end if
+      call end_compact_column_header(ofl%fh_stress)
       flush(ofl%fh_stress)
       return
     end if
 
     time_out = iter * dt * t_unit_time%conv
-    s = system%stress_tensor * gpa
-    call cleanup_stress_tensor_for_output(s)
-    pres = -(s(1,1) + s(2,2) + s(3,3)) / 3d0
-
-    if(yn_out_stress_decomp == 'n') then
-      write(ofl%fh_stress,'(8e16.8)') time_out, s(1,1), s(2,2), s(3,3), s(1,2), s(2,3), s(1,3), pres
-    else
-      term_gpa = system%stress_kin * gpa
-      call cleanup_stress_tensor_for_output(term_gpa)
-      write(ofl%fh_stress,'(14e16.8)') time_out, s(1,1), s(2,2), s(3,3), s(1,2), s(2,3), s(1,3), pres, &
-           -(term_gpa(1,1)+term_gpa(2,2)+term_gpa(3,3))/3d0, &
-           -stress_term_pressure_gpa(system%stress_har, gpa), &
-           -stress_term_pressure_gpa(system%stress_xc, gpa), &
-           -stress_term_pressure_gpa(system%stress_loc, gpa), &
-           -stress_term_pressure_gpa(system%stress_nl, gpa), &
-           -stress_term_pressure_gpa(system%stress_ewa, gpa)
+    write(ofl%fh_stress,'(e23.15e3)',advance='no') time_out
+    call write_stress_tensor_tokens_gpa(ofl%fh_stress, system%stress_tensor, gpa)
+    if(terms_on) then
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_kin, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_har, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_nl, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_ewa, gpa))
     end if
+    if(details_on) then
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_grad, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_diag, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_lr_grad, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_lr_diag, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_ewa_g, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_ewa_r, gpa))
+      if(trim(xc) == 'r2scan') then
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_local, gpa))
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_grad, gpa))
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_tau, gpa))
+      else
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_x, gpa))
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_c, gpa))
+      end if
+      if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
+        call write_nl_l_pressure_values(ofl%fh_stress, system%stress_nl_l, gpa)
+      if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
+        call write_nl_species_l_pressure_values(ofl%fh_stress, system%stress_nl_species_l, gpa)
+    end if
+    if(numerics_on) then
+      if(trim(xc) == 'r2scan') then
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_grad_payload, gpa))
+        call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_grad_vsigma, gpa))
+      end if
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_ewa_g_grad, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_ewa_g_diag, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_ewa_g_self, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs, gpa))
+      virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
+      virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
+      virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+      virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) * system%det_a + &
+                               system%stress_loc_lr_energy
+      virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a + energy%E_ion_ion
+      virial_known_residual = virial_kin + virial_har + virial_xc
+      pressure_har_gpa = -stress_term_pressure_gpa(system%stress_har, gpa)
+      pressure_har_shadow_gpa = -stress_term_pressure_gpa(system%stress_har_shadow, gpa)
+      pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
+      pressure_loc_sr_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad + system%stress_loc_sr_diag, gpa)
+      pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, gpa)
+      pressure_loc_sr_shadow_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_gpa
+      call write_data_token(ofl%fh_stress, virial_kin)
+      call write_data_token(ofl%fh_stress, virial_har)
+      call write_data_token(ofl%fh_stress, virial_xc)
+      call write_data_token(ofl%fh_stress, virial_loc_lr_residual)
+      call write_data_token(ofl%fh_stress, virial_ewa)
+      call write_data_token(ofl%fh_stress, virial_known_residual)
+      call write_data_token(ofl%fh_stress, system%stress_xc_dbg_grho_local_payload_maxdiff)
+      call write_data_token(ofl%fh_stress, system%stress_xc_dbg_grho_direct_payload_maxdiff)
+      call write_data_token(ofl%fh_stress, system%stress_xc_dbg_grho_direct_local_maxdiff)
+      call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rdedd_dot_grho_local)
+      call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rdedd_dot_grho_payload)
+      call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rho_div_rdedd)
+      call write_data_token(ofl%fh_stress, pressure_har_shadow_gpa)
+      call write_data_token(ofl%fh_stress, pressure_har_shadow_delta_gpa)
+      call write_data_token(ofl%fh_stress, pressure_loc_sr_shadow_delta_gpa)
+    end if
+    write(ofl%fh_stress,*)
     flush(ofl%fh_stress)
   end subroutine write_stress_rt
 

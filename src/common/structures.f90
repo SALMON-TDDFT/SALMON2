@@ -82,11 +82,6 @@ module structures
     real(8) :: stress_x(3,3)
     real(8) :: stress_c(3,3)
     real(8) :: stress_loc(3,3)
-    real(8) :: stress_loc_fd(3,3)
-    real(8) :: stress_loc_grad(3,3)
-    real(8) :: stress_loc_diag(3,3)
-    real(8) :: stress_loc_fullobj_grad(3,3)
-    real(8) :: stress_loc_fullobj_diag(3,3)
     real(8) :: stress_loc_sr_grad(3,3)
     real(8) :: stress_loc_lr_grad(3,3)
     real(8) :: stress_loc_sr_diag(3,3)
@@ -98,15 +93,14 @@ module structures
     real(8) :: stress_loc_lr_scr_diag(3,3)
     real(8) :: stress_loc_sr_rs(3,3)      ! real-space SR local stress shadow (Nielsen-Martin Eq.30b)
     real(8) :: stress_nl(3,3)
-    real(8),allocatable :: stress_nl_l(:,:,:)
+    real(8),allocatable :: stress_nl_l(:,:,:)           ! (0:lmax,3,3), total nonlocal l decomposition
+    real(8),allocatable :: stress_nl_species_l(:,:,:,:) ! (1:nelem,0:lmax,3,3), species-resolved nonlocal l decomposition
     real(8) :: stress_ewa(3,3)
     real(8) :: stress_loc_sr_energy
     real(8) :: stress_loc_lr_energy
     real(8) :: stress_loc_sr_scr_energy
     real(8) :: stress_loc_lr_scr_energy
     real(8) :: stress_xc_e_vxc
-    real(8) :: stress_x_e_vx
-    real(8) :: stress_c_e_vc
     real(8) :: stress_ewa_g(3,3)
     real(8) :: stress_ewa_r(3,3)
     real(8) :: stress_ewa_g_grad(3,3)
@@ -114,18 +108,9 @@ module structures
     real(8) :: stress_ewa_g_self(3,3)
     real(8) :: stress_ewa_energy_G
     real(8) :: stress_ewa_energy_R
-    real(8) :: stress_kin_dbg_grad2
-    real(8) :: stress_kin_dbg_cross
-    real(8) :: stress_kin_dbg_k2
-    real(8) :: stress_xc_dbg_rdedd_refresh_maxdiff
-    real(8) :: stress_xc_dbg_grho_refresh_maxdiff
     real(8) :: stress_xc_dbg_grho_local_payload_maxdiff
     real(8) :: stress_xc_dbg_grho_direct_payload_maxdiff
     real(8) :: stress_xc_dbg_grho_direct_local_maxdiff
-    real(8) :: stress_xc_dbg_rho_box_direct_maxdiff
-    real(8) :: stress_xc_dbg_rho_box_direct_active_maxdiff
-    real(8) :: stress_xc_dbg_grho_direct_local_early_maxdiff
-    real(8) :: stress_xc_dbg_grho_direct_local_bulk_maxdiff
     real(8) :: stress_xc_dbg_rdedd_dot_grho_local
     real(8) :: stress_xc_dbg_rdedd_dot_grho_payload
     real(8) :: stress_xc_dbg_rho_div_rdedd
@@ -789,6 +774,8 @@ contains
     DEAL(system%Rion)
     DEAL(system%Velocity)
     DEAL(system%Force)
+    DEAL(system%stress_nl_l)
+    DEAL(system%stress_nl_species_l)
   end subroutine deallocate_dft_system
 
   subroutine deallocate_dft_energy(energy)

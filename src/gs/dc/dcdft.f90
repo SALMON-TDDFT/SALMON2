@@ -423,7 +423,7 @@ contains
     use communication, only: comm_summation
     use salmon_xc, only: exchange_correlation
     implicit none
-    type(s_dft_system),   intent(in)    :: system
+    type(s_dft_system),   intent(inout) :: system
     type(s_rgrid),        intent(in)    :: mg
     type(s_parallel_info),intent(in)    :: info
     type(s_stencil),      intent(in)    :: stencil

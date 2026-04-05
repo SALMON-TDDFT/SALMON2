@@ -502,6 +502,11 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_stress, &
+      & stress_output_level, &
+      & yn_out_stress_terms, &
+      & yn_out_stress_details, &
+      & yn_out_stress_numerics, &
+      & stress_l_decomp, &
       & yn_out_stress_decomp, &
       & yn_stress_loc_fd, &
       & stress_fd_detail, &
@@ -932,9 +937,14 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_stress       = 'n'
-    yn_out_stress_decomp = 'n'
+    stress_output_level = 'high'
+    yn_out_stress_terms = ' '
+    yn_out_stress_details = ' '
+    yn_out_stress_numerics = ' '
+    stress_l_decomp = '__unset__'
+    yn_out_stress_decomp = ' '
     yn_stress_loc_fd    = 'n'
-    stress_fd_detail    = 'high'
+    stress_fd_detail    = '__unset__'
     out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -1551,6 +1561,11 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_stress       ,nproc_group_global)
+    call comm_bcast(stress_output_level ,nproc_group_global)
+    call comm_bcast(yn_out_stress_terms ,nproc_group_global)
+    call comm_bcast(yn_out_stress_details,nproc_group_global)
+    call comm_bcast(yn_out_stress_numerics,nproc_group_global)
+    call comm_bcast(stress_l_decomp     ,nproc_group_global)
     call comm_bcast(yn_out_stress_decomp,nproc_group_global)
     call comm_bcast(yn_stress_loc_fd    ,nproc_group_global)
     call comm_bcast(stress_fd_detail    ,nproc_group_global)
@@ -1663,6 +1678,7 @@ contains
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
+    call normalize_stress_output_controls
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2469,9 +2485,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress', yn_out_stress
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_decomp', yn_out_stress_decomp
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'stress_output_level', stress_output_level
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_terms', yn_out_stress_terms
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_details', yn_out_stress_details
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_numerics', yn_out_stress_numerics
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'stress_l_decomp', trim(stress_l_decomp)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stress_loc_fd', yn_stress_loc_fd
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'stress_fd_detail', stress_fd_detail
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
@@ -2691,7 +2710,9 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_stress)
-    call yn_argument_check(yn_out_stress_decomp)
+    call yn_argument_check(yn_out_stress_terms)
+    call yn_argument_check(yn_out_stress_details)
+    call yn_argument_check(yn_out_stress_numerics)
     call yn_argument_check(yn_stress_loc_fd)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
@@ -2939,22 +2960,16 @@ contains
       stop "yn_out_stress='y' requires yn_spinorbit='n'"
     if(yn_out_stress == 'y' .and. spin /= 'unpolarized') &
       stop "yn_out_stress='y' requires spin='unpolarized'"
-    if(yn_out_stress_decomp == 'y' .and. yn_out_stress /= 'y') &
-      stop "yn_out_stress_decomp='y' requires yn_out_stress='y'"
-    if(yn_out_stress == 'y') then
-      select case(trim(stress_fd_detail))
-      case('A')
-        stress_fd_detail = 'low'
-      case('B')
-        stress_fd_detail = 'middle'
-      case('C')
-        stress_fd_detail = 'high'
-      case('low','middle','high')
-        continue
-      case default
-        stop "stress_fd_detail must be 'low', 'middle', or 'high' (aliases: 'A', 'B', 'C')"
-      end select
-    end if
+    select case(trim(stress_l_decomp))
+    case('no','total','species','atom')
+      continue
+    case default
+      stop "stress_l_decomp must be 'no', 'total', 'species', or 'atom'"
+    end select
+    if(trim(stress_l_decomp) /= 'no' .and. yn_out_stress_details /= 'y') &
+      stop "stress_l_decomp requires yn_out_stress_details='y' (yn_out_stress_details='y' is required)"
+    if(trim(stress_l_decomp) == 'atom') &
+      stop "stress_l_decomp='atom' is not implemented yet"
     if(yn_out_stress == 'y' .and. out_stress_step < 1) &
       stop "out_stress_step must be >= 1"
     
@@ -3018,6 +3033,81 @@ contains
       stop
     end if
   end subroutine yn_argument_check
+
+  subroutine normalize_stress_output_controls
+    use misc_routines, only: string_lowercase
+    implicit none
+    character(1)  :: terms_user, details_user, numerics_user
+    character(16) :: l_decomp_user
+
+    if(yn_out_stress_decomp /= ' ') then
+      stop "yn_out_stress_decomp is no longer supported; use stress_output_level and yn_out_stress_terms/yn_out_stress_details"
+    end if
+    if(trim(stress_fd_detail) /= '__unset__') then
+      stop "stress_fd_detail is no longer supported; use stress_output_level"
+    end if
+
+    terms_user = yn_out_stress_terms
+    details_user = yn_out_stress_details
+    numerics_user = yn_out_stress_numerics
+    l_decomp_user = stress_l_decomp
+    call string_lowercase(stress_output_level)
+    call string_lowercase(l_decomp_user)
+    call string_lowercase(terms_user)
+    call string_lowercase(details_user)
+    call string_lowercase(numerics_user)
+
+    select case(trim(stress_output_level))
+    case('low')
+      yn_out_stress_terms = 'n'
+      yn_out_stress_details = 'n'
+      yn_out_stress_numerics = 'n'
+      stress_l_decomp = 'no'
+    case('middle')
+      yn_out_stress_terms = 'y'
+      yn_out_stress_details = 'n'
+      yn_out_stress_numerics = 'n'
+      stress_l_decomp = 'no'
+    case('high')
+      yn_out_stress_terms = 'y'
+      yn_out_stress_details = 'y'
+      yn_out_stress_numerics = 'y'
+      stress_l_decomp = 'total'
+    case default
+      stop "stress_output_level must be 'low', 'middle', or 'high'"
+    end select
+
+    if(terms_user /= ' ') then
+      call normalize_stress_yn_override('yn_out_stress_terms', terms_user)
+      yn_out_stress_terms = terms_user
+    end if
+    if(details_user /= ' ') then
+      call normalize_stress_yn_override('yn_out_stress_details', details_user)
+      yn_out_stress_details = details_user
+    end if
+    if(numerics_user /= ' ') then
+      call normalize_stress_yn_override('yn_out_stress_numerics', numerics_user)
+      yn_out_stress_numerics = numerics_user
+    end if
+    if(trim(l_decomp_user) /= '__unset__') then
+      select case(trim(l_decomp_user))
+      case('no','total','species','atom')
+        stress_l_decomp = trim(l_decomp_user)
+      case default
+        stop "stress_l_decomp must be 'no', 'total', 'species', or 'atom'"
+      end select
+    end if
+  end subroutine normalize_stress_output_controls
+
+  subroutine normalize_stress_yn_override(name, value)
+    implicit none
+    character(*), intent(in) :: name
+    character(1), intent(in) :: value
+
+    if(value /= 'y' .and. value /= 'n') then
+      stop trim(name)//" must be 'y' or 'n'"
+    end if
+  end subroutine normalize_stress_yn_override
 
   subroutine yyynnn_argument_check(str)
     implicit none

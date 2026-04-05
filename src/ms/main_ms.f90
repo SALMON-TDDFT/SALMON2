@@ -517,7 +517,7 @@ subroutine emit_multiscale_initial_stress()
                                          energy, V_local, spsi_in, spsi_out, tpsi, field_state)
         call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, &
                          spsi_in, ewald, energy, xc_func, rho_s, Vxc, field_state)
-        call write_stress_rt(stress_label_iter, ofl, dt, system)
+        call write_stress_rt(stress_label_iter, ofl, dt, system, energy, pp)
     end do
 
     nproc_group_global = ms%icomm_ms_world

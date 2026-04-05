@@ -37,7 +37,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, update_vlocal
   use fdtd_coulomb_gauge, only: fdtd_singlescale,fourier_singlescale
   use sendrecv_grid, only: update_overlap_complex8
-  use salmon_xc, only: exchange_correlation,salmon_xctype_tbmbj
+  use salmon_xc, only: exchange_correlation, salmon_xctype_tbmbj
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
@@ -386,7 +386,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
                                      energy, V_local, spsi_out, tpsi, spsi_in, field_state)
     call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, &
                      spsi_out, ewald, energy, xc_func, rho_s, Vxc, field_state)
-    call write_stress_rt(itt, ofl, dt, system)
+    call write_stress_rt(itt, ofl, dt, system, energy, pp)
   end if
   
   call timer_end(LOG_WRITE_RT_INFOS)

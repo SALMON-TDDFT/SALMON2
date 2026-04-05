@@ -337,9 +337,14 @@ module salmon_global
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
   character(1)   :: yn_out_stress        = 'n'
-  character(1)   :: yn_out_stress_decomp = 'n'
+  character(6)   :: stress_output_level  = 'high'
+  character(1)   :: yn_out_stress_terms  = ' '
+  character(1)   :: yn_out_stress_details = ' '
+  character(1)   :: yn_out_stress_numerics = ' '
+  character(16)  :: stress_l_decomp      = '__unset__'
+  character(1)   :: yn_out_stress_decomp = ' '
   character(1)   :: yn_stress_loc_fd     = 'n'
-  character(6)   :: stress_fd_detail     = 'high'
+  character(16)  :: stress_fd_detail     = '__unset__'
   integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps

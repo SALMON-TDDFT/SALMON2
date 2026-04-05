@@ -81,7 +81,7 @@ contains
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx
     implicit none
-    type(s_dft_system)      ,intent(in) :: system
+    type(s_dft_system)      ,intent(inout), target :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
     type(s_rgrid)           ,intent(in) :: mg
     type(s_sendrecv_grid)               :: srg_scalar, srg
@@ -94,7 +94,7 @@ contains
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
     type(s_scalar)          ,optional   :: eexc
-    type(s_xc_operator_payload), intent(out), optional :: xc_payload
+    type(s_xc_operator_payload), intent(inout), optional, target :: xc_payload
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
@@ -107,19 +107,23 @@ contains
     real(8),allocatable :: rdedd_tmp(:,:,:,:),rdedd(:,:,:),drdedd_tmp(:,:,:,:),drdedd(:,:,:)
     real(8),allocatable :: delr_s(:,:,:,:,:),j_s(:,:,:,:,:),tau_s(:,:,:,:)
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
+    type(s_xc_operator_payload), pointer :: payload
+    logical :: use_payload
     
     call nvtxStartRange('exchange_correlation', __LINE__)
 
+    use_payload = present(xc_payload) .or. (xc_func%xctype(1) == salmon_xctype_r2scan)
+    nullify(payload)
     if (present(xc_payload)) then
-      xc_payload%use_tau_operator = .false.
-      xc_payload%use_laplacian_operator = .false.
-      xc_payload%vtau_has_shadow_values = .false.
-      xc_payload%rdedd_has_shadow_values = .false.
-      xc_payload%vsigma_has_shadow_values = .false.
-      if (allocated(xc_payload%vtau%f)) deallocate(xc_payload%vtau%f)
-      if (allocated(xc_payload%vsigma%f)) deallocate(xc_payload%vsigma%f)
-      if (allocated(xc_payload%grho%v)) deallocate(xc_payload%grho%v)
-      if (allocated(xc_payload%rdedd%v)) deallocate(xc_payload%rdedd%v)
+      payload => xc_payload
+    else if (xc_func%xctype(1) == salmon_xctype_r2scan) then
+      payload => system%xc_payload
+    end if
+
+    if (use_payload) then
+      call reset_xc_operator_payload(payload)
+    else if (xc_operator_payload_is_active(system%xc_payload)) then
+      call reset_xc_operator_payload(system%xc_payload)
     end if
     
     nspin = system%nspin
@@ -305,27 +309,45 @@ contains
     if (xc_func%use_gradient) then
 !      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
-               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=xc_payload) 
+        if (use_payload) then
+          call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                 &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=payload)
+        else
+          call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                 &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc)
+        end if
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
-        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, & 
-         & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc, payload=xc_payload) 
+        if (use_payload) then
+          call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, &
+           & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc, payload=payload)
+        else
+          call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, &
+           & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc)
+        end if
 !               &     rlrho_s=lrho_s, tau_s=tau_s, rj_s=j_s, rho_nlcc=ppn%rho_nlcc)
       endif 
     else
       if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc, payload=xc_payload)
+        if (use_payload) then
+          call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc, payload=payload)
+        else
+          call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+        end if
       else if(nspin==2)then
-        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc, payload=xc_payload)
+        if (use_payload) then
+          call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc, payload=payload)
+        else
+          call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
+        end if
       end if
     end if
 
-    if (present(xc_payload)) then
-      call finalize_xc_payload(xc_payload)
+    if (use_payload) then
+      call finalize_xc_payload(payload)
       if (xc_func%use_gradient .and. nspin == 1) then
-        allocate(xc_payload%grho%v(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-        xc_payload%grho%v = grho
+        allocate(payload%grho%v(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+        payload%grho%v = grho
       end if
     end if
 
@@ -334,9 +356,9 @@ contains
     if(nspin==1)then
       drdedd=0.d0
       drdedd_tmp=0.d0
-      if (present(xc_payload)) then
-        allocate(xc_payload%rdedd%v(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
-        xc_payload%rdedd%v = 0d0
+      if (use_payload) then
+        allocate(payload%rdedd%v(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+        payload%rdedd%v = 0d0
       end if
       do idir=1,3 
         rdedd=0.d0
@@ -348,7 +370,7 @@ contains
         enddo
         enddo
         if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rdedd)
-        if (present(xc_payload)) xc_payload%rdedd%v(idir,:,:,:) = rdedd
+        if (use_payload) payload%rdedd%v(idir,:,:,:) = rdedd
         call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rdedd,drdedd_tmp)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -358,7 +380,7 @@ contains
         enddo
         enddo
       enddo
-      if (present(xc_payload)) xc_payload%rdedd_has_shadow_values = .true.
+      if (use_payload) payload%rdedd_has_shadow_values = .true.
     elseif(nspin==2)then
       drdedd_s=0.d0
       drdedd_tmp=0.d0
@@ -628,50 +650,30 @@ contains
   end subroutine exchange_correlation
 
 
-  subroutine copy_xc_operator_payload(dst, src)
+  subroutine reset_xc_operator_payload(payload)
     implicit none
-    type(s_xc_operator_payload), intent(inout) :: dst
-    type(s_xc_operator_payload), intent(in) :: src
+    type(s_xc_operator_payload), intent(inout) :: payload
 
-    dst%use_tau_operator = src%use_tau_operator
-    dst%use_laplacian_operator = src%use_laplacian_operator
-    dst%vtau_has_shadow_values = src%vtau_has_shadow_values
-    dst%rdedd_has_shadow_values = src%rdedd_has_shadow_values
-    dst%vsigma_has_shadow_values = src%vsigma_has_shadow_values
+    payload%use_tau_operator = .false.
+    payload%use_laplacian_operator = .false.
+    payload%vtau_has_shadow_values = .false.
+    payload%rdedd_has_shadow_values = .false.
+    payload%vsigma_has_shadow_values = .false.
+    if (allocated(payload%vtau%f)) deallocate(payload%vtau%f)
+    if (allocated(payload%vsigma%f)) deallocate(payload%vsigma%f)
+    if (allocated(payload%grho%v)) deallocate(payload%grho%v)
+    if (allocated(payload%rdedd%v)) deallocate(payload%rdedd%v)
+  end subroutine reset_xc_operator_payload
 
-    if (allocated(dst%vtau%f)) deallocate(dst%vtau%f)
-    if (allocated(dst%vsigma%f)) deallocate(dst%vsigma%f)
-    if (allocated(dst%grho%v)) deallocate(dst%grho%v)
-    if (allocated(dst%rdedd%v)) deallocate(dst%rdedd%v)
+  logical function xc_operator_payload_is_active(payload)
+    implicit none
+    type(s_xc_operator_payload), intent(in) :: payload
 
-    if (allocated(src%vtau%f)) then
-      allocate(dst%vtau%f(lbound(src%vtau%f,1):ubound(src%vtau%f,1), &
-                          lbound(src%vtau%f,2):ubound(src%vtau%f,2), &
-                          lbound(src%vtau%f,3):ubound(src%vtau%f,3)))
-      dst%vtau%f = src%vtau%f
-    end if
-
-    if (allocated(src%vsigma%f)) then
-      allocate(dst%vsigma%f(lbound(src%vsigma%f,1):ubound(src%vsigma%f,1), &
-                            lbound(src%vsigma%f,2):ubound(src%vsigma%f,2), &
-                            lbound(src%vsigma%f,3):ubound(src%vsigma%f,3)))
-      dst%vsigma%f = src%vsigma%f
-    end if
-
-    if (allocated(src%grho%v)) then
-      allocate(dst%grho%v(3, lbound(src%grho%v,2):ubound(src%grho%v,2), &
-                              lbound(src%grho%v,3):ubound(src%grho%v,3), &
-                              lbound(src%grho%v,4):ubound(src%grho%v,4)))
-      dst%grho%v = src%grho%v
-    end if
-
-    if (allocated(src%rdedd%v)) then
-      allocate(dst%rdedd%v(3, lbound(src%rdedd%v,2):ubound(src%rdedd%v,2), &
-                              lbound(src%rdedd%v,3):ubound(src%rdedd%v,3), &
-                              lbound(src%rdedd%v,4):ubound(src%rdedd%v,4)))
-      dst%rdedd%v = src%rdedd%v
-    end if
-  end subroutine copy_xc_operator_payload
+    xc_operator_payload_is_active = payload%use_tau_operator .or. payload%use_laplacian_operator .or. &
+         payload%vtau_has_shadow_values .or. payload%rdedd_has_shadow_values .or. payload%vsigma_has_shadow_values .or. &
+         allocated(payload%vtau%f) .or. allocated(payload%vsigma%f) .or. &
+         allocated(payload%grho%v) .or. allocated(payload%rdedd%v)
+  end function xc_operator_payload_is_active
 
 
   subroutine print_xc_info()
@@ -1434,7 +1436,6 @@ contains
 
 
     subroutine exec_builtin_r2scan()
-      use salmon_global, only: calc_mode
       implicit none
       real(8) :: rho_1d(nl)
       real(8) :: rho_s_1d(nl)
@@ -1451,7 +1452,6 @@ contains
       real(8) :: grho_norm
       integer :: ix, iy, iz, idir
 
-      if (trim(calc_mode) /= 'GS') stop "r2SCAN supports only GS calculations"
       if (xc%ispin /= 0) stop "r2SCAN supports only nspin=1"
 
       rho_1d = reshape(rho, (/nl/))

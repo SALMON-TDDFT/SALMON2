@@ -17,6 +17,7 @@ NSCF=200
 RUN_PZ=1
 RUN_R2SCAN_GS=1
 RUN_R2SCAN_STRESS=1
+STRESS_OUTPUT_LEVEL="high"
 
 usage() {
   cat <<EOF
@@ -31,6 +32,7 @@ Options:
   --grid INT             num_rgrid value per axis (default: 16)
   --kgrid INT            num_kgrid value per axis (default: 4)
   --nscf INT             Number of SCF iterations (default: 200)
+  --stress-output-level LEVEL   Stress output level: low, middle, or high (default: high)
   --skip-pz              Skip primitive PZ stress control run
   --skip-r2scan-gs       Skip primitive r2scan GS run
   --skip-r2scan-stress   Skip primitive r2scan stress run
@@ -47,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --grid) GRID="$2"; shift 2 ;;
     --kgrid) KGRID="$2"; shift 2 ;;
     --nscf) NSCF="$2"; shift 2 ;;
+    --stress-output-level) STRESS_OUTPUT_LEVEL="$2"; shift 2 ;;
     --skip-pz) RUN_PZ=0; shift ;;
     --skip-r2scan-gs) RUN_R2SCAN_GS=0; shift ;;
     --skip-r2scan-stress) RUN_R2SCAN_STRESS=0; shift ;;
@@ -54,6 +57,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
+
+case "$STRESS_OUTPUT_LEVEL" in
+  low|middle|high) ;;
+  *) echo "ERROR: unsupported stress output level: $STRESS_OUTPUT_LEVEL" >&2; usage; exit 1 ;;
+esac
 
 require_file() {
   local path="$1"
@@ -138,8 +146,7 @@ write_input() {
       echo
       echo "&analysis"
       echo "  yn_out_stress = 'y'"
-      echo "  yn_out_stress_decomp = 'y'"
-      echo "  stress_fd_detail = 'C'"
+      echo "  stress_output_level = '${STRESS_OUTPUT_LEVEL}'"
       echo "  out_stress_step = 1"
       echo "/"
     fi

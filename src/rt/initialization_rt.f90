@@ -91,7 +91,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
   type(s_ofile) :: ofile
-  
   integer :: iob, i1,iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
@@ -372,7 +371,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   !(header of SYSname_rt_energy.data)
   call write_rt_energy_data(-1,ofl,dt,energy,md)
-  if(yn_out_stress == 'y') call write_stress_rt(-1, ofl, dt, system)
+  if(yn_out_stress == 'y') call write_stress_rt(-1, ofl, dt, system, energy, pp)
   
   if(yn_spinorbit=='y') then
   !(header in SYSname_rt_spin.data)
@@ -517,7 +516,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                                      energy, V_local, spsi_in, spsi_out, tpsi, field_state)
     call calc_stress(system, pp, fg, info, mg, stencil, poisson, srg, ppg, ppn, &
                      spsi_in, ewald, energy, xc_func, rho_s, Vxc, field_state)
-    call write_stress_rt(stress_label_iter, ofl, dt, system)
+    call write_stress_rt(stress_label_iter, ofl, dt, system, energy, pp)
   end if
   
   call timer_end(LOG_INIT_TIME_PROPAGATION)

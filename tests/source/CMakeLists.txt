@@ -1,9 +1,13 @@
 set(STRESS_SOURCE_TESTS
   check_stress_occupation_weight.sh
   check_stress_ewald_g_sign.sh
-  check_stress_fd_detail_levels.sh
+  check_stress_output_control_keys.sh
   check_stress_virial_diagnostics.sh
   check_stress_decomp_tensor_table.sh
+  check_stress_field_inventory_redesign.sh
+  check_stress_output_level_profiles_redesign.sh
+  check_stress_energy_schema_redesign.sh
+  check_stress_rt_output_schema_redesign.sh
   check_stress_nl_factor_gate.sh
   check_stress_hartree_shadow.sh
   check_stress_local_sr_rs_shadow.sh
@@ -14,9 +18,11 @@ set(STRESS_SOURCE_TESTS
   check_stress_xc_split.sh
   check_builtin_r2scan_registration.sh
   check_builtin_r2scan_operator_gate.sh
+  check_builtin_r2scan_rt_ms_enablement.sh
   check_builtin_r2scan_nonorth_tau_operator.sh
   check_builtin_r2scan_nonorth_tau_operator_no_slice_temps.sh
   check_builtin_r2scan_primitive_smoke.sh
+  check_bulk_si_rt_ms_stress_smoke_tool.sh
   check_nonorth_stress_keeps_orthogonal_branch.sh
   check_primitive_nonorth_stress_fd_tool.sh
   check_builtin_r2scan_stress_payload_consistency.sh
