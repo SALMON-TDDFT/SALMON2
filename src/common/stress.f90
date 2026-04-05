@@ -386,10 +386,7 @@ contains
       do ix = mg%is(1), mg%ie(1)
         rho_xc = rho_s(ispin)%f(ix,iy,iz)
         trho_xc = rho_xc
-        if(allocated(ppn%rho_nlcc)) then
-          rho_xc = rho_xc + 0.5d0 * ppn%rho_nlcc(ix,iy,iz)
-          trho_xc = trho_xc + ppn%rho_nlcc(ix,iy,iz)
-        end if
+        if(allocated(ppn%rho_nlcc)) trho_xc = trho_xc + ppn%rho_nlcc(ix,iy,iz)
         call calc_builtin_pz_xc_split(trho_xc, exc_x, exc_c, vxc_x, vxc_c)
         E_x_loc = E_x_loc + trho_xc * exc_x
         E_c_loc = E_c_loc + trho_xc * exc_c
