@@ -80,12 +80,12 @@ module builtin_r2scan
 
 contains
 
-  subroutine exc_cor_r2scan(nl, rho, rho_s, grho_s, tau_s, eexc, vxc, vtau, vgrad)
+  subroutine exc_cor_r2scan(nl, rho, rho_s, grho_norm, tau_s, eexc, vxc, vtau, vgrad)
     implicit none
     integer, intent(in) :: nl
     real(8), intent(in) :: rho(nl)
     real(8), intent(in) :: rho_s(nl)
-    real(8), intent(in) :: grho_s(nl,3)
+    real(8), intent(in) :: grho_norm(nl)
     real(8), intent(in) :: tau_s(nl)
     real(8), intent(out) :: eexc(nl)
     real(8), intent(out) :: vxc(nl)
@@ -93,17 +93,20 @@ contains
     real(8), intent(out) :: vgrad(nl)
     integer :: i
 
+!$omp parallel do default(none) &
+!$omp shared(nl, rho, rho_s, grho_norm, tau_s, eexc, vxc, vtau, vgrad) private(i)
     do i = 1, nl
-      call eval_r2scan_point(rho(i), rho_s(i), grho_s(i,:), tau_s(i), &
+      call eval_r2scan_point(rho(i), rho_s(i), grho_norm(i), tau_s(i), &
            eexc(i), vxc(i), vtau(i), vgrad(i))
     end do
+!$omp end parallel do
   end subroutine exc_cor_r2scan
 
-  subroutine eval_r2scan_point(rho, rho_s, grho_s, tau_s, eexc, vxc, vtau, vgrad)
+  subroutine eval_r2scan_point(rho, rho_s, grho_norm, tau_s, eexc, vxc, vtau, vgrad)
     implicit none
     real(8), intent(in) :: rho
     real(8), intent(in) :: rho_s
-    real(8), intent(in) :: grho_s(3)
+    real(8), intent(in) :: grho_norm
     real(8), intent(in) :: tau_s
     real(8), intent(out) :: eexc
     real(8), intent(out) :: vxc
@@ -142,7 +145,7 @@ contains
     rr = max(rho, rho_total_from_spin)
     if (rr <= rho_floor) return
 
-    grad = two * sqrt(max(0d0, dot_product(grho_s, grho_s)))
+    grad = max(grho_norm, 0d0)
     sigma = grad * grad
     tau = max(two * tau_s, 0d0)
 

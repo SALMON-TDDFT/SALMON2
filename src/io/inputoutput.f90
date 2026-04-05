@@ -2961,10 +2961,10 @@ contains
     if(yn_out_stress == 'y' .and. spin /= 'unpolarized') &
       call fail_stress_input("yn_out_stress='y' requires spin='unpolarized'")
     select case(trim(stress_l_decomp))
-    case('no','total','species','atom')
+    case('no','species','atom')
       continue
     case default
-      call fail_stress_input("stress_l_decomp must be 'no', 'total', 'species', or 'atom'")
+      call fail_stress_input("stress_l_decomp must be 'no', 'species', or 'atom'")
     end select
     if(trim(stress_l_decomp) /= 'no' .and. yn_out_stress_details /= 'y') &
       call fail_stress_input("stress_l_decomp requires yn_out_stress_details='y' (yn_out_stress_details='y' is required)")
@@ -3072,7 +3072,7 @@ contains
       yn_out_stress_terms = 'y'
       yn_out_stress_details = 'y'
       yn_out_stress_numerics = 'y'
-      stress_l_decomp = 'total'
+      stress_l_decomp = 'species'
     case default
       call fail_stress_input("stress_output_level must be 'low', 'middle', or 'high'")
     end select
@@ -3091,10 +3091,10 @@ contains
     end if
     if(trim(l_decomp_user) /= '__unset__') then
       select case(trim(l_decomp_user))
-      case('no','total','species','atom')
+      case('no','species','atom')
         stress_l_decomp = trim(l_decomp_user)
       case default
-        call fail_stress_input("stress_l_decomp must be 'no', 'total', 'species', or 'atom'")
+        call fail_stress_input("stress_l_decomp must be 'no', 'species', or 'atom'")
       end select
     end if
   end subroutine normalize_stress_output_controls

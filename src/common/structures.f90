@@ -93,7 +93,6 @@ module structures
     real(8) :: stress_loc_lr_scr_diag(3,3)
     real(8) :: stress_loc_sr_rs(3,3)      ! real-space SR local stress shadow (Nielsen-Martin Eq.30b)
     real(8) :: stress_nl(3,3)
-    real(8),allocatable :: stress_nl_l(:,:,:)           ! (0:lmax,3,3), total nonlocal l decomposition
     real(8),allocatable :: stress_nl_species_l(:,:,:,:) ! (1:nelem,0:lmax,3,3), species-resolved nonlocal l decomposition
     real(8) :: stress_ewa(3,3)
     real(8) :: stress_loc_sr_energy
@@ -774,7 +773,6 @@ contains
     DEAL(system%Rion)
     DEAL(system%Velocity)
     DEAL(system%Force)
-    DEAL(system%stress_nl_l)
     DEAL(system%stress_nl_species_l)
   end subroutine deallocate_dft_system
 

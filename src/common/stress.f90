@@ -112,7 +112,6 @@ contains
       end if
     end if
 
-    if(allocated(system%stress_nl_l)) deallocate(system%stress_nl_l)
     if(allocated(system%stress_nl_species_l)) deallocate(system%stress_nl_species_l)
 
     system%stress_kin = 0d0
@@ -927,35 +926,21 @@ contains
     complex(8) :: psi_r, w(3), r_uVpsi_b(3), uVpsi_ilma
     complex(8), allocatable :: gtpsi(:,:,:,:), uVpsibox(:,:,:,:,:), uVpsibox2(:,:,:,:,:)
     integer, allocatable :: ll_of_ilma(:), species_of_ilma(:)
-    real(8), allocatable :: strs_l(:,:,:), strs_l_sum(:,:,:), e_nl_l(:), e_nl_l_sum(:)
     real(8), allocatable :: strs_species_l(:,:,:,:), strs_species_l_sum(:,:,:,:), e_nl_species_l(:,:), e_nl_species_l_sum(:,:)
-    logical :: want_l_detail, want_l_species
+    logical :: want_l_species
 
     V = system%det_a
     im = 1
     strs = 0d0
-    want_l_detail = (trim(yn_out_stress_details) == 'y') .and. &
-                    (trim(stress_l_decomp) == 'total' .or. trim(stress_l_decomp) == 'species')
     want_l_species = (trim(stress_l_decomp) == 'species')
 
-    if(want_l_detail) then
-      if(want_l_species) then
-        call build_nl_l_channel_map(pp, kion, ppg%nlma, ll_of_ilma, lmax_nl, species_of_ilma)
-      else
-        call build_nl_l_channel_map(pp, kion, ppg%nlma, ll_of_ilma, lmax_nl)
-      end if
-      allocate(strs_l(0:lmax_nl,3,3), strs_l_sum(0:lmax_nl,3,3))
-      allocate(e_nl_l(0:lmax_nl), e_nl_l_sum(0:lmax_nl))
-      strs_l = 0d0
-      e_nl_l = 0d0
-
-      if(want_l_species) then
-        nspecies = size(pp%zps)
-        allocate(strs_species_l(1:nspecies,0:lmax_nl,3,3), strs_species_l_sum(1:nspecies,0:lmax_nl,3,3))
-        allocate(e_nl_species_l(1:nspecies,0:lmax_nl), e_nl_species_l_sum(1:nspecies,0:lmax_nl))
-        strs_species_l = 0d0
-        e_nl_species_l = 0d0
-      end if
+    if(want_l_species) then
+      call build_nl_l_channel_map(pp, kion, ppg%nlma, ll_of_ilma, lmax_nl, species_of_ilma)
+      nspecies = size(pp%zps)
+      allocate(strs_species_l(1:nspecies,0:lmax_nl,3,3), strs_species_l_sum(1:nspecies,0:lmax_nl,3,3))
+      allocate(e_nl_species_l(1:nspecies,0:lmax_nl), e_nl_species_l_sum(1:nspecies,0:lmax_nl))
+      strs_species_l = 0d0
+      e_nl_species_l = 0d0
     end if
 
     allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
@@ -976,14 +961,11 @@ contains
       do ilma = 1, ppg%nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi_ilma = uVpsibox2(ispin, io, ik, im, ilma)
-        if(want_l_detail) then
+        if(want_l_species) then
           ll = ll_of_ilma(ilma)
+          ispec = species_of_ilma(ilma)
           nl_energy_part = rtmp * dble(conjg(uVpsi_ilma) * uVpsi_ilma) / ppg%rinv_uvu(ilma)
-          e_nl_l(ll) = e_nl_l(ll) + nl_energy_part
-          if(want_l_species) then
-            ispec = species_of_ilma(ilma)
-            e_nl_species_l(ispec,ll) = e_nl_species_l(ispec,ll) + nl_energy_part
-          end if
+          e_nl_species_l(ispec,ll) = e_nl_species_l(ispec,ll) + nl_energy_part
         end if
         do a = 1, 3
           r_uVpsi_b = (0d0, 0d0)
@@ -1011,11 +993,8 @@ contains
           do b = 1, 3
             contrib = 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
             strs(a,b) = strs(a,b) + contrib
-            if(want_l_detail) then
-              strs_l(ll,a,b) = strs_l(ll,a,b) + contrib
-              if(want_l_species) then
-                strs_species_l(ispec,ll,a,b) = strs_species_l(ispec,ll,a,b) + contrib
-              end if
+            if(want_l_species) then
+              strs_species_l(ispec,ll,a,b) = strs_species_l(ispec,ll,a,b) + contrib
             end if
           end do
         end do
@@ -1029,13 +1008,9 @@ contains
     if(allocated(uVpsibox2)) deallocate(uVpsibox2)
 
     call comm_summation(strs, strs_sum, 9, info%icomm_rko)
-    if(want_l_detail) then
-      call comm_summation(strs_l, strs_l_sum, size(strs_l), info%icomm_rko)
-      call comm_summation(e_nl_l, e_nl_l_sum, size(e_nl_l), info%icomm_rko)
-      if(want_l_species) then
-        call comm_summation(strs_species_l, strs_species_l_sum, size(strs_species_l), info%icomm_rko)
-        call comm_summation(e_nl_species_l, e_nl_species_l_sum, size(e_nl_species_l), info%icomm_rko)
-      end if
+    if(want_l_species) then
+      call comm_summation(strs_species_l, strs_species_l_sum, size(strs_species_l), info%icomm_rko)
+      call comm_summation(e_nl_species_l, e_nl_species_l_sum, size(e_nl_species_l), info%icomm_rko)
     end if
     strs_sum = strs_sum / V
     do a = 1, 3
@@ -1043,29 +1018,18 @@ contains
     end do
     system%stress_nl = -strs_sum
 
-    if(want_l_detail) then
-      allocate(system%stress_nl_l(0:lmax_nl,3,3))
-      system%stress_nl_l = -strs_l_sum / V
-      do ll = 0, lmax_nl
-        do a = 1, 3
-          system%stress_nl_l(ll,a,a) = system%stress_nl_l(ll,a,a) - e_nl_l_sum(ll) / V
+    if(want_l_species) then
+      allocate(system%stress_nl_species_l(1:nspecies,0:lmax_nl,3,3))
+      system%stress_nl_species_l = -strs_species_l_sum / V
+      do ispec = 1, nspecies
+        do ll = 0, lmax_nl
+          do a = 1, 3
+            system%stress_nl_species_l(ispec,ll,a,a) = system%stress_nl_species_l(ispec,ll,a,a) - e_nl_species_l_sum(ispec,ll) / V
+          end do
         end do
       end do
 
-      if(want_l_species) then
-        allocate(system%stress_nl_species_l(1:nspecies,0:lmax_nl,3,3))
-        system%stress_nl_species_l = -strs_species_l_sum / V
-        do ispec = 1, nspecies
-          do ll = 0, lmax_nl
-            do a = 1, 3
-              system%stress_nl_species_l(ispec,ll,a,a) = system%stress_nl_species_l(ispec,ll,a,a) - e_nl_species_l_sum(ispec,ll) / V
-            end do
-          end do
-        end do
-      end if
-
-      deallocate(strs_l, strs_l_sum, e_nl_l, e_nl_l_sum, ll_of_ilma)
-      if(want_l_species) deallocate(strs_species_l, strs_species_l_sum, e_nl_species_l, e_nl_species_l_sum, species_of_ilma)
+      deallocate(strs_species_l, strs_species_l_sum, e_nl_species_l, e_nl_species_l_sum, ll_of_ilma, species_of_ilma)
     end if
   end subroutine calc_stress_nl
 

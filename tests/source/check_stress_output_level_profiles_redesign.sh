@@ -28,8 +28,8 @@ grep -Fq "call write_stress_tensor_row_gpa(fh, 'XC-grad'" "$write_f90"
 grep -Fq "call write_stress_tensor_row_gpa(fh, 'XC-tau'" "$write_f90"
 grep -Fq "call write_stress_tensor_row_gpa(fh, 'Local-SR'" "$write_f90"
 grep -Fq "call write_stress_tensor_row_gpa(fh, 'Local-LR'" "$write_f90"
-grep -Fq 'call write_nl_l_channel_tensor_rows_gpa(' "$write_f90"
 grep -Fq 'call write_nl_species_l_channel_tensor_rows_gpa(' "$write_f90"
 
 assert_absent 'stress_detail_level' "$write_f90"
 assert_absent 'Stress decomposition pressure [GPa]'
+assert_absent 'call write_nl_l_channel_tensor_rows_gpa('

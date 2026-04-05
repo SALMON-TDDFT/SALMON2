@@ -19,7 +19,9 @@ set(STRESS_SOURCE_TESTS
   check_stress_xc_split.sh
   check_stress_pz_nlcc_density_gate.sh
   check_builtin_r2scan_registration.sh
+  check_builtin_r2scan_loop_perf_structure.sh
   check_builtin_r2scan_operator_gate.sh
+  check_builtin_r2scan_vtau_damping.sh
   check_builtin_r2scan_rt_ms_enablement.sh
   check_builtin_r2scan_nonorth_tau_operator.sh
   check_builtin_r2scan_nonorth_tau_operator_no_slice_temps.sh

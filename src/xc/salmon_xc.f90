@@ -39,6 +39,8 @@ module salmon_xc
 
   implicit none
 
+  real(8), parameter :: r2scan_vtau_damping_alpha = 0.5d0
+
 ! List of Exchange Correlation Functionals
   integer, parameter :: salmon_xctype_none  = 0
   integer, parameter :: salmon_xctype_pz    = 1
@@ -77,7 +79,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit, calc_mode
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx
     implicit none
@@ -107,8 +109,9 @@ contains
     real(8),allocatable :: rdedd_tmp(:,:,:,:),rdedd(:,:,:),drdedd_tmp(:,:,:,:),drdedd(:,:,:)
     real(8),allocatable :: delr_s(:,:,:,:,:),j_s(:,:,:,:,:),tau_s(:,:,:,:)
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
+    real(8),allocatable :: vtau_prev_local(:,:,:)
     type(s_xc_operator_payload), pointer :: payload
-    logical :: use_payload
+    logical :: use_payload, use_vtau_damping
     
     call nvtxStartRange('exchange_correlation', __LINE__)
 
@@ -118,6 +121,15 @@ contains
       payload => xc_payload
     else if (xc_func%xctype(1) == salmon_xctype_r2scan) then
       payload => system%xc_payload
+    end if
+
+    use_vtau_damping = use_payload .and. (xc_func%xctype(1) == salmon_xctype_r2scan) .and. &
+         (trim(calc_mode) == 'GS')
+    if (use_vtau_damping) then
+      if (payload%use_tau_operator .and. allocated(payload%vtau%f)) then
+        allocate(vtau_prev_local(mg%num(1), mg%num(2), mg%num(3)))
+        vtau_prev_local = payload%vtau%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+      end if
     end if
 
     if (use_payload) then
@@ -344,12 +356,21 @@ contains
     end if
 
     if (use_payload) then
+      if (use_vtau_damping) then
+        if (allocated(vtau_prev_local) .and. payload%use_tau_operator .and. allocated(payload%vtau%f)) then
+          payload%vtau%f = r2scan_vtau_damping_alpha * payload%vtau%f &
+               + (1d0 - r2scan_vtau_damping_alpha) * vtau_prev_local
+          deallocate(vtau_prev_local)
+        end if
+      end if
       call finalize_xc_payload(payload)
       if (xc_func%use_gradient .and. nspin == 1) then
         allocate(payload%grho%v(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
         payload%grho%v = grho
       end if
     end if
+
+    if (allocated(vtau_prev_local)) deallocate(vtau_prev_local)
 
 !!!!To include the sigma contribution to GGA Vxc potential !!!!!!!
     if (xc_func%use_gradient) then
@@ -1439,7 +1460,6 @@ contains
       implicit none
       real(8) :: rho_1d(nl)
       real(8) :: rho_s_1d(nl)
-      real(8) :: grho_s_1d(nl, 3)
       real(8) :: tau_s_1d(nl)
       real(8) :: eexc_1d(nl)
       real(8) :: vexc_1d(nl)
@@ -1447,10 +1467,8 @@ contains
       real(8) :: vgrad_1d(nl)
       real(8) :: vsigma_1d(nl)
       real(8) :: grho_norm_1d(nl)
-      real(8) :: vgrad_3d(nx, ny, nz)
       real(8) :: rho_safe
-      real(8) :: grho_norm
-      integer :: ix, iy, iz, idir
+      integer :: i, ix, iy, iz, idir
 
       if (xc%ispin /= 0) stop "r2SCAN supports only nspin=1"
 
@@ -1461,24 +1479,28 @@ contains
       end if
 #endif
       rho_s_1d = rho_1d * 0.5d0
-      grho_s_1d = reshape(grho(:, :, :, :), (/nl, 3/)) * 0.5d0
+      grho_norm_1d = reshape(sqrt(grho(:,:,:,1)**2 + grho(:,:,:,2)**2 + grho(:,:,:,3)**2), (/nl/))
       tau_s_1d = reshape(tau(:, :, :), (/nl/)) * 0.5d0
 
-      call exc_cor_r2scan(nl, rho_1d, rho_s_1d, grho_s_1d, tau_s_1d, eexc_1d, vexc_1d, vtau_1d, vgrad_1d)
+      call exc_cor_r2scan(nl, rho_1d, rho_s_1d, grho_norm_1d, tau_s_1d, eexc_1d, vexc_1d, vtau_1d, vgrad_1d)
 
       if (present(vxc)) then
         vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
       end if
 
       if (present(exc)) then
+!$omp parallel do collapse(2) default(none) private(ix, iy, iz, i, rho_safe) &
+!$omp shared(nx, ny, nz, rho_1d, eexc_1d, exc)
         do iz = 1, nz
         do iy = 1, ny
         do ix = 1, nx
-          rho_safe = max(rho_1d((iz-1) * nx * ny + (iy-1) * nx + ix), 1d-18)
-          exc(ix,iy,iz) = exc(ix,iy,iz) + eexc_1d((iz-1) * nx * ny + (iy-1) * nx + ix) / rho_safe
+          i = (iz-1) * nx * ny + (iy-1) * nx + ix
+          rho_safe = max(rho_1d(i), 1d-18)
+          exc(ix,iy,iz) = exc(ix,iy,iz) + eexc_1d(i) / rho_safe
         end do
         end do
         end do
+!$omp end parallel do
       end if
 
       if (present(eexc)) then
@@ -1486,18 +1508,21 @@ contains
       end if
 
       if (present(rdedd)) then
-        vgrad_3d = reshape(vgrad_1d, (/nx, ny, nz/))
+!$omp parallel do collapse(2) default(none) private(ix, iy, iz, idir, i) &
+!$omp shared(nx, ny, nz, rdedd, vgrad_1d, grho_norm_1d, grho)
         do iz = 1, nz
         do iy = 1, ny
         do ix = 1, nx
-          grho_norm = sqrt(grho(ix,iy,iz,1)**2 + grho(ix,iy,iz,2)**2 + grho(ix,iy,iz,3)**2)
-          if (grho_norm <= 1d-18) cycle
+          i = (iz-1) * nx * ny + (iy-1) * nx + ix
+          if (grho_norm_1d(i) <= grad_floor) cycle
           do idir = 1, 3
-            rdedd(ix,iy,iz,idir) = rdedd(ix,iy,iz,idir) - vgrad_3d(ix,iy,iz) * grho(ix,iy,iz,idir) / grho_norm
+            rdedd(ix,iy,iz,idir) = rdedd(ix,iy,iz,idir) - &
+                 vgrad_1d(i) * grho(ix,iy,iz,idir) / grho_norm_1d(i)
           end do
         end do
         end do
         end do
+!$omp end parallel do
       end if
 
       if (present(payload)) then
@@ -1510,7 +1535,6 @@ contains
         allocate(payload%vtau%f(nx, ny, nz))
         allocate(payload%vsigma%f(nx, ny, nz))
         payload%vtau%f = reshape(vtau_1d, (/nx, ny, nz/))
-        grho_norm_1d = reshape(sqrt(grho(:,:,:,1)**2 + grho(:,:,:,2)**2 + grho(:,:,:,3)**2), (/nl/))
         vsigma_1d = 0d0
         where (grho_norm_1d > grad_floor)
           vsigma_1d = 0.5d0 * vgrad_1d / grho_norm_1d

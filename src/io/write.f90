@@ -1565,8 +1565,6 @@ contains
            call write_stress_tensor_row_gpa(fh, 'Local-LR', &
                 system%stress_loc_lr_grad + system%stress_loc_lr_diag, au_pressure_gpa)
            call write_stress_tensor_row_gpa(fh, 'Nonlocal', system%stress_nl, au_pressure_gpa)
-           if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
-             call write_nl_l_channel_tensor_rows_gpa(fh, system%stress_nl_l, au_pressure_gpa)
            if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
              call write_nl_species_l_channel_tensor_rows_gpa(fh, pp, system%stress_nl_species_l, au_pressure_gpa)
            call write_stress_tensor_row_gpa(fh, 'Ewald', system%stress_ewa, au_pressure_gpa)
@@ -1700,8 +1698,8 @@ contains
     if(terms_on) write(fh,10) 'E_*/P_*', 'Physical decomposition terms'
     if(details_on) write(fh,10) 'detail_*', 'Detailed physical pressure terms'
     if(numerics_on) write(fh,10) 'numeric_*', 'Numerical diagnostics'
-    if(details_on .and. trim(stress_l_decomp) /= 'no') &
-      write(fh,10) 'P_nl_*', 'Nonlocal projector l-channel contributions'
+    if(details_on .and. trim(stress_l_decomp) == 'species') &
+      write(fh,10) 'P_nl_*', 'Nonlocal projector l-channel contributions by species'
     col = 1
     line_cols = 0
     call begin_compact_column_header(fh)
@@ -1743,8 +1741,6 @@ contains
         call write_compact_column_header(fh, line_cols, col, 'P_x [GPa]'); col = col + 1
         call write_compact_column_header(fh, line_cols, col, 'P_c [GPa]'); col = col + 1
       end if
-      if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
-        call write_nl_l_pressure_column_headers(fh, line_cols, col, system%stress_nl_l)
       if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
         call write_nl_species_l_pressure_column_headers(fh, line_cols, col, pp, system%stress_nl_species_l)
     end if
@@ -1815,8 +1811,6 @@ contains
         call write_data_token(fh, -stress_term_pressure_gpa(system%stress_x, au_pressure_gpa))
         call write_data_token(fh, -stress_term_pressure_gpa(system%stress_c, au_pressure_gpa))
       end if
-      if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
-        call write_nl_l_pressure_values(fh, system%stress_nl_l, au_pressure_gpa)
       if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
         call write_nl_species_l_pressure_values(fh, system%stress_nl_species_l, au_pressure_gpa)
     end if
@@ -1904,20 +1898,6 @@ contains
          strs_gpa(1,2), strs_gpa(2,3), strs_gpa(1,3), pressure_gpa
   end subroutine write_stress_tensor_row_gpa
 
-  subroutine write_nl_l_channel_tensor_rows_gpa(fh, stress_nl_l, au_pressure_gpa)
-    implicit none
-    integer,      intent(in) :: fh
-    real(8),      intent(in) :: stress_nl_l(0:,:,:), au_pressure_gpa
-    integer :: ll
-    real(8) :: strs(3,3)
-
-    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
-      strs = stress_nl_l(ll,:,:)
-      if(maxval(abs(strs)) < 1d-14) cycle
-      call write_stress_tensor_row_gpa(fh, nl_l_channel_label(ll), strs, au_pressure_gpa)
-    end do
-  end subroutine write_nl_l_channel_tensor_rows_gpa
-
   subroutine write_nl_species_l_channel_tensor_rows_gpa(fh, pp, stress_nl_species_l, au_pressure_gpa)
     use structures
     implicit none
@@ -1935,19 +1915,6 @@ contains
       end do
     end do
   end subroutine write_nl_species_l_channel_tensor_rows_gpa
-
-  real(8) function stress_nl_l_total_pressure_gpa(stress_nl_l, gpa)
-    implicit none
-    real(8), intent(in) :: stress_nl_l(0:,:,:)
-    real(8), intent(in) :: gpa
-    integer :: ll
-
-    stress_nl_l_total_pressure_gpa = 0d0
-    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
-      stress_nl_l_total_pressure_gpa = stress_nl_l_total_pressure_gpa - &
-           stress_term_pressure_gpa(stress_nl_l(ll,:,:), gpa)
-    end do
-  end function stress_nl_l_total_pressure_gpa
 
   subroutine begin_compact_column_header(fh)
     implicit none
@@ -2004,37 +1971,6 @@ contains
     call write_data_token(fh, -stress_tensor_trace(strs_gpa) / 3d0)
   end subroutine write_stress_tensor_tokens_gpa
 
-  subroutine write_nl_l_pressure_column_headers(fh, line_cols, col, stress_nl_l)
-    implicit none
-    integer, intent(in)    :: fh
-    integer, intent(inout) :: line_cols, col
-    real(8), intent(in)    :: stress_nl_l(0:,:,:)
-    integer :: ll
-    character(32) :: label
-
-    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
-      write(label,'("P_nl_",a," [GPa]")') trim(nl_l_channel_suffix(ll))
-      call write_compact_column_header(fh, line_cols, col, label)
-      col = col + 1
-    end do
-  end subroutine write_nl_l_pressure_column_headers
-
-  subroutine write_nl_l_pressure_column_headers_from_pp(fh, line_cols, col, pp)
-    use structures
-    implicit none
-    integer,         intent(in)    :: fh
-    integer,         intent(inout) :: line_cols, col
-    type(s_pp_info), intent(in)    :: pp
-    integer :: ll
-    character(32) :: label
-
-    do ll = 0, pp%lmax
-      write(label,'("P_nl_",a," [GPa]")') trim(nl_l_channel_suffix(ll))
-      call write_compact_column_header(fh, line_cols, col, label)
-      col = col + 1
-    end do
-  end subroutine write_nl_l_pressure_column_headers_from_pp
-
   subroutine write_nl_species_l_pressure_column_headers(fh, line_cols, col, pp, stress_nl_species_l)
     use structures
     implicit none
@@ -2071,17 +2007,6 @@ contains
       end do
     end do
   end subroutine write_nl_species_l_pressure_column_headers_from_pp
-
-  subroutine write_nl_l_pressure_values(fh, stress_nl_l, au_pressure_gpa)
-    implicit none
-    integer, intent(in) :: fh
-    real(8), intent(in) :: stress_nl_l(0:,:,:), au_pressure_gpa
-    integer :: ll
-
-    do ll = lbound(stress_nl_l,1), ubound(stress_nl_l,1)
-      call write_data_token(fh, -stress_term_pressure_gpa(stress_nl_l(ll,:,:), au_pressure_gpa))
-    end do
-  end subroutine write_nl_l_pressure_values
 
   subroutine write_nl_species_l_pressure_values(fh, stress_nl_species_l, au_pressure_gpa)
     implicit none
@@ -2205,8 +2130,8 @@ contains
       if(terms_on) write(ofl%fh_stress,10) "p_*", "Physical pressure contributions"
       if(details_on) write(ofl%fh_stress,10) "detail_*", "Detailed physical pressure terms"
       if(numerics_on) write(ofl%fh_stress,10) "numeric_*", "Numerical diagnostics"
-      if(details_on .and. trim(stress_l_decomp) /= 'no') &
-        write(ofl%fh_stress,10) "p_nl_*", "Nonlocal projector l-channel contributions"
+      if(details_on .and. trim(stress_l_decomp) == 'species') &
+        write(ofl%fh_stress,10) "p_nl_*", "Nonlocal projector l-channel contributions by species"
       col = 1
       line_cols = 0
       call begin_compact_column_header(ofl%fh_stress)
@@ -2241,8 +2166,6 @@ contains
           call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_x [GPa]'); col = col + 1
           call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_c [GPa]'); col = col + 1
         end if
-        if(trim(stress_l_decomp) /= 'no') &
-          call write_nl_l_pressure_column_headers_from_pp(ofl%fh_stress, line_cols, col, pp)
         if(trim(stress_l_decomp) == 'species') &
           call write_nl_species_l_pressure_column_headers_from_pp(ofl%fh_stress, line_cols, col, pp)
       end if
@@ -2302,8 +2225,6 @@ contains
         call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_x, gpa))
         call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_c, gpa))
       end if
-      if(allocated(system%stress_nl_l) .and. trim(stress_l_decomp) /= 'no') &
-        call write_nl_l_pressure_values(ofl%fh_stress, system%stress_nl_l, gpa)
       if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
         call write_nl_species_l_pressure_values(ofl%fh_stress, system%stress_nl_species_l, gpa)
     end if

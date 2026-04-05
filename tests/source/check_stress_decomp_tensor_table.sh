@@ -18,8 +18,16 @@ grep -Fq "call write_stress_tensor_row_gpa(fh, 'Local'" "$write_f90"
 grep -Fq "call write_stress_tensor_row_gpa(fh, 'Local-SR'" "$write_f90"
 grep -Fq "call write_stress_tensor_row_gpa(fh, 'Local-LR'" "$write_f90"
 grep -Fq "call write_stress_tensor_row_gpa(fh, 'Nonlocal'" "$write_f90"
-grep -Fq 'call write_nl_l_channel_tensor_rows_gpa(' "$write_f90"
 grep -Fq 'call write_nl_species_l_channel_tensor_rows_gpa(' "$write_f90"
-grep -Fq 'real(8),allocatable :: stress_nl_l(:,:,:)' "$repo_root/src/common/structures.f90"
 grep -Fq 'real(8),allocatable :: stress_nl_species_l(:,:,:,:)' "$repo_root/src/common/structures.f90"
 grep -Fq 'if(pp%inorm(l,ik) == 0) cycle' "$repo_root/src/common/stress.f90"
+
+if rg -F -q 'call write_nl_l_channel_tensor_rows_gpa(' "$write_f90"; then
+  echo "writer still exposes total-l nonlocal tensor rows" >&2
+  exit 1
+fi
+
+if rg -F -q 'real(8),allocatable :: stress_nl_l(:,:,:)' "$repo_root/src/common/structures.f90"; then
+  echo "total-l nonlocal stress field still exists" >&2
+  exit 1
+fi
