@@ -152,6 +152,9 @@ module salmon_global
   integer        :: ncg,ncg_init
   character(16)  :: method_mixing
   real(8)        :: mixrate
+  character(1)   :: yn_tau_mixing
+  real(8)        :: tau_mixrate
+  real(8)        :: tau_metric_weight
   integer        :: nmemory_mb
   real(8)        :: alpha_mb
   integer        :: nmemory_p

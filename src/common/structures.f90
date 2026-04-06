@@ -504,11 +504,15 @@ module structures
 
   type s_mixing
     logical :: flag_mix_zero
+    logical :: use_tau_mixing = .false.
+    logical :: tau_history_ready = .false.
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
+    type(s_scalar),allocatable :: tau_in(:), tau_out(:)
     type(s_scalar),allocatable :: Vh_in(:), Vh_out(:), Vxc_in(:,:), Vxc_out(:,:)
     type(s_scalar) :: Vtau_in, Vtau_out
     real(8) :: mixrate, alpha_mb, beta_p
+    real(8) :: tau_mixrate, tau_metric_weight
     real(8) :: convergence_value_prev
   end type s_mixing
 

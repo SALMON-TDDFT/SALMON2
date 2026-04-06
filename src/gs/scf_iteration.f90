@@ -78,7 +78,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
-  use salmon_xc, only: exchange_correlation
+  use salmon_xc, only: exchange_correlation, calc_tau_from_orbitals, salmon_xctype_tbmbj
   use noncollinear_module, only: simple_mixing_so
   use hamiltonian, only: update_vlocal
   implicit none
@@ -101,6 +101,24 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   type(s_dft_energy),     intent(inout) :: energy
   !
   integer :: j
+  logical :: do_tau_mixing
+  logical :: tau_work_ready
+  type(s_scalar) :: tau_work
+
+  do_tau_mixing = mixing%use_tau_mixing .and. xc_func%use_kinetic_energy
+  tau_work_ready = .false.
+
+  if (do_tau_mixing) then
+    if (system%nspin /= 1) stop "tau mixing currently supports only nspin=1"
+    if (xc_func%xctype(1) == salmon_xctype_tbmbj) then
+      stop "tau mixing for TB-mBJ is not implemented yet; disable yn_tau_mixing or choose another XC"
+    end if
+    if (method_mixing == 'broyden' .or. method_mixing == 'pulay') then
+      call allocate_scalar(mg, tau_work)
+      call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau_work%f)
+      tau_work_ready = .true.
+    end if
+  end if
 
   select case(method_mixing)
   case ('simple')
@@ -109,9 +127,17 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
     if(yn_spinorbit=='n') stop 'yn_spinorbit must be y when method_mixing=simple_dm'
     call simple_mixing_so(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
   case ('broyden')
-    call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter,mixing)
+    if (do_tau_mixing) then
+      call wrapper_broyden(info%icomm_r,mg,system,rho_s,tau_work,iter,mixing)
+    else
+      call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter=iter,mixing=mixing)
+    end if
   case ('pulay')
-    call pulay(mg,info,system,rho_s,iter,mixing)
+    if (do_tau_mixing) then
+      call pulay(mg,info,system,rho_s,tau_work,iter,mixing)
+    else
+      call pulay(mg,info,system,rho_s,iter=iter,mixing=mixing)
+    end if
   case ('simple_potential')
     ! Nothing is done here since Hartree and XC potentials are mixed instead of density
   case default
@@ -128,14 +154,24 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   call timer_begin(LOG_CALC_HARTREE)
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call timer_end(LOG_CALC_HARTREE)
+
+  if (do_tau_mixing .and. .not. tau_work_ready) then
+    call allocate_scalar(mg, tau_work)
+    call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau_work%f)
+    call simple_mixing_tau(mg,1.d0-mixing%tau_mixrate,mixing%tau_mixrate,tau_work,mixing)
+    tau_work_ready = .true.
+  end if
   
   if(yn_dc=='n') then
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+    if (do_tau_mixing) then
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc, &
+                                tau_override=tau_work)
+    else
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+    end if
     call timer_end(LOG_CALC_EXC_COR)
-
-    call mix_xc_operator_payload(mg,system,1.d0-mixing%mixrate,mixing%mixrate,mixing)
 
     if(method_mixing=='simple_potential')then
       call simple_mixing_potential(mg,system,1.d0-mixing%mixrate,mixing%mixrate,Vh,Vxc,mixing)
@@ -144,6 +180,8 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,Vlocal)
     
   end if
+
+  if (tau_work_ready) call deallocate_scalar(tau_work)
   
 end subroutine update_density_and_potential
 

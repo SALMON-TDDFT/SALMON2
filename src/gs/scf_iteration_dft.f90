@@ -45,7 +45,7 @@ use code_optimization
 use initialization_sub
 use occupation
 use prep_pp_sub
-use mixing_sub, only: check_mixing_half, copy_density
+use mixing_sub, only: check_mixing_half, copy_density, copy_tau_history
 use checkpoint_restart_sub
 use total_energy
 use init_gs, only: init_wf
@@ -176,6 +176,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
      call copy_density(Miter,system%nspin,mg,rho_s,mixing)
+     call copy_tau_history(mg,mixing)
      call timer_begin(LOG_CALC_RHO)
      call calc_density(system,rho_s,spsi,info,mg)
      call timer_end(LOG_CALC_RHO)
@@ -184,6 +185,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    else if(yn_dc=='y') then
    ! Divide-and-Conquer method
      call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
+     call copy_tau_history(dc%mg_tot,mixing)
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
        call ne2mu_dcdft(mg,info,energy,spsi,dc,system)

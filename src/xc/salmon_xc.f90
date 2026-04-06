@@ -72,7 +72,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc, xc_payload)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc, xc_payload, tau_override)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -95,6 +95,7 @@ contains
     real(8)                             :: E_xc
     type(s_scalar)          ,optional   :: eexc
     type(s_xc_operator_payload), intent(inout), optional, target :: xc_payload
+    type(s_scalar)          ,optional, intent(in) :: tau_override
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
@@ -202,27 +203,31 @@ contains
        rdedd     =0.d0
        drdedd_tmp=0.d0
        if(nspin==1)then
-         allocate (delr(mg%num(1), mg%num(2), mg%num(3) ,3), &
-                   j   (mg%num(1), mg%num(2), mg%num(3) ,3), &
-                   tau (mg%num(1), mg%num(2), mg%num(3)) )
+         allocate (delr(mg%num(1), mg%num(2), mg%num(3) ,3))
          allocate (rdedd_tmp(mg%num(1), mg%num(2), mg%num(3),3), &
                    drdedd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
          delr = 0.d0
-         j = 0.d0
-         tau = 0.d0
          rdedd_tmp =0.d0
          drdedd    =0.d0
+         if (xc_func%use_kinetic_energy) then
+           allocate (j(mg%num(1), mg%num(2), mg%num(3) ,3), &
+                     tau(mg%num(1), mg%num(2), mg%num(3)) )
+           j = 0.d0
+           tau = 0.d0
+         end if
        elseif(nspin==2)then
-         allocate (delr_s(mg%num(1), mg%num(2), mg%num(3),2,3), &
-                   j_s   (mg%num(1), mg%num(2), mg%num(3),2,3), &
-                   tau_s (mg%num(1), mg%num(2), mg%num(3),2) )
+         allocate (delr_s(mg%num(1), mg%num(2), mg%num(3),2,3))
          allocate (rdedd_tmp_s(mg%num(1), mg%num(2), mg%num(3),2,3), &
                    drdedd_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2))
          delr_s = 0.d0 
-         j_s = 0.d0
-         tau_s = 0.d0
          rdedd_tmp_s =0.d0
          drdedd_s    =0.d0
+         if (xc_func%use_kinetic_energy) then
+           allocate (j_s(mg%num(1), mg%num(2), mg%num(3),2,3), &
+                     tau_s(mg%num(1), mg%num(2), mg%num(3),2) )
+           j_s = 0.d0
+           tau_s = 0.d0
+         end if
        endif
     endif
 
@@ -252,7 +257,26 @@ contains
       end do
 !$omp end parallel do
 
-      call calc_tau
+      if (xc_func%use_kinetic_energy) then
+        if (xc_func%xctype(1) == salmon_xctype_tbmbj) then
+          if (present(tau_override)) then
+            stop "tau_override for TB-mBJ is not implemented in exchange_correlation"
+          end if
+          call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau,j)
+        else if (present(tau_override)) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+          do iz=1,mg%num(3)
+          do iy=1,mg%num(2)
+          do ix=1,mg%num(1)
+            tau(ix,iy,iz) = tau_override%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+          end do
+          end do
+          end do
+!$omp end parallel do
+        else
+          call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau)
+        end if
+      end if
 
     elseif(nspin==2)then
 !$omp parallel do collapse(2) private(ix,iy,iz)
@@ -309,12 +333,32 @@ contains
     if (xc_func%use_gradient) then
 !      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       if(nspin==1)then
-        if (use_payload) then
-          call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
-                 &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=payload)
+        if (xc_func%use_kinetic_energy) then
+          if (xc_func%xctype(1) == salmon_xctype_tbmbj) then
+            if (use_payload) then
+              call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                     &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=payload)
+            else
+              call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                     &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc)
+            end if
+          else
+            if (use_payload) then
+              call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                     &     rlrho=lrho, tau=tau, rho_nlcc=ppn%rho_nlcc, payload=payload)
+            else
+              call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                     &     rlrho=lrho, tau=tau, rho_nlcc=ppn%rho_nlcc)
+            end if
+          end if
         else
-          call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
-                 &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc)
+          if (use_payload) then
+            call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                   &     rlrho=lrho, rho_nlcc=ppn%rho_nlcc, payload=payload)
+          else
+            call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+                   &     rlrho=lrho, rho_nlcc=ppn%rho_nlcc)
+          end if
         end if
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
@@ -567,87 +611,103 @@ contains
       end if
     end subroutine finalize_xc_payload
 
-    subroutine calc_tau
-      use sendrecv_grid, only: update_overlap_complex8
-      use math_constants,only : zi
-      use stencil_sub, only: calc_gradient_psi
-      implicit none
-      integer :: im,ik,io,ispin
-      real(8) :: k(3),occ
-      complex(8) :: zs(3),p
-      real(8) :: j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
-               & j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
-               & tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
-               & tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-      complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1) &
-                         & ,mg%is_array(2):mg%ie_array(2) &
-                         & ,mg%is_array(3):mg%ie_array(3))
-                         
-      if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ exchange_correlation"
-      im = 1
-      
-      tau_tmp1 = 0d0
-      j_tmp1 = 0d0
-
-      if(allocated(spsi%rwf)) then
-         if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
-         if(.not.allocated(spsi%zwf)) &
-              allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1) &
-                               ,mg%is_array(2):mg%ie_array(2) &
-                               ,mg%is_array(3):mg%ie_array(3) &
-                               ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-         spsi%zwf = dcmplx(spsi%rwf)
-      else
-         if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
-      endif
-
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-      do ispin=1,Nspin
-
-      ! gtpsi = (nabla) psi
-        call calc_gradient_psi(spsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-            
-        occ = system%rocc(io,ik,ispin)*system%wtk(ik)
-        k(1:3) = system%vec_k(1:3,ik)
-!$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi* k(1:3)* p
-          tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
-          j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
-        end do
-        end do
-        end do
-!$omp end parallel do
-        
-      end do
-      end do
-      end do
-      
-      call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
-      call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
-      
-!$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=1,mg%num(3)
-      do iy=1,mg%num(2)
-      do ix=1,mg%num(1)
-        j(ix,iy,iz,1:3) = j_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1,1:3)
-        tau(ix,iy,iz) = tau_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
-      end do
-      end do
-      end do
-!$omp end parallel do
-
-      if(allocated(spsi%rwf)) deallocate(spsi%zwf)
-  
-      return
-    end subroutine calc_tau
-    
   end subroutine exchange_correlation
+
+  subroutine calc_tau_from_orbitals(system, mg, info, srg, stencil, spsi, tau, rj)
+    use communication, only: comm_summation
+    use sendrecv_grid, only: update_overlap_real8, update_overlap_complex8
+    use math_constants,only : zi
+    use stencil_sub, only: calc_gradient_psi
+    use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_sendrecv_grid, s_stencil, s_orbital
+    implicit none
+    type(s_dft_system), intent(in) :: system
+    type(s_rgrid), intent(in) :: mg
+    type(s_parallel_info), intent(in) :: info
+    type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_stencil), intent(in) :: stencil
+    type(s_orbital), intent(inout) :: spsi
+    real(8), intent(out) :: tau(mg%num(1),mg%num(2),mg%num(3))
+    real(8), intent(out), optional :: rj(mg%num(1),mg%num(2),mg%num(3),3)
+    integer :: im,ik,io,ispin,ix,iy,iz
+    real(8) :: k(3),occ
+    complex(8) :: zs(3),p
+    logical :: need_rj
+    real(8), allocatable :: tau_tmp1(:,:,:), tau_tmp2(:,:,:)
+    real(8), allocatable :: j_tmp1(:,:,:,:), j_tmp2(:,:,:,:)
+    complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+
+    if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_tau_from_orbitals"
+    im = 1
+    need_rj = present(rj)
+
+    allocate(tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    tau_tmp1 = 0d0
+    tau_tmp2 = 0d0
+
+    if (need_rj) then
+      allocate(j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
+      allocate(j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
+      j_tmp1 = 0d0
+      j_tmp2 = 0d0
+    end if
+
+    if(allocated(spsi%rwf)) then
+       if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
+       if(.not.allocated(spsi%zwf)) &
+            allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1), &
+                             mg%is_array(2):mg%ie_array(2), &
+                             mg%is_array(3):mg%ie_array(3), &
+                             system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+       spsi%zwf = dcmplx(spsi%rwf)
+    else
+       if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
+    endif
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+      call calc_gradient_psi(spsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie, &
+           mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+
+      occ = system%rocc(io,ik,ispin)*system%wtk(ik)
+      k(1:3) = system%vec_k(1:3,ik)
+!$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi * k(1:3) * p
+        tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
+        if (need_rj) j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end do
+    end do
+    end do
+
+    call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+    if (need_rj) call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+    do ix=1,mg%num(1)
+      tau(ix,iy,iz) = tau_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+      if (need_rj) rj(ix,iy,iz,1:3) = j_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1,1:3)
+    end do
+    end do
+    end do
+!$omp end parallel do
+
+    if(allocated(spsi%rwf)) deallocate(spsi%zwf)
+    if (need_rj) then
+      deallocate(j_tmp2, j_tmp1)
+    end if
+    deallocate(tau_tmp2, tau_tmp1)
+  end subroutine calc_tau_from_orbitals
 
 
   subroutine reset_xc_operator_payload(payload)

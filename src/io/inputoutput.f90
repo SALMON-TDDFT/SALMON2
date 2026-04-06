@@ -316,6 +316,9 @@ contains
       & ncg_init, &
       & method_mixing, &
       & mixrate, &
+      & yn_tau_mixing, &
+      & tau_mixrate, &
+      & tau_metric_weight, &
       & nmemory_mb, &
       & alpha_mb, &
       & nmemory_p, &
@@ -745,6 +748,9 @@ contains
     ncg_init      = 4
     method_mixing = 'broyden'
     mixrate       = 0.5d0
+    yn_tau_mixing = 'n'
+    tau_mixrate   = -1d0
+    tau_metric_weight = 1d-4
     nmemory_mb    = 8
     alpha_mb      = 0.75d0
     nmemory_p     = 4
@@ -1143,6 +1149,7 @@ contains
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
     call string_lowercase(method_mixing)
+    call string_lowercase(yn_tau_mixing)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
@@ -1293,6 +1300,10 @@ contains
     call comm_bcast(ncg_init                ,nproc_group_global)
     call comm_bcast(method_mixing           ,nproc_group_global)
     call comm_bcast(mixrate                 ,nproc_group_global)
+    call comm_bcast(yn_tau_mixing           ,nproc_group_global)
+    call comm_bcast(tau_mixrate             ,nproc_group_global)
+    call comm_bcast(tau_metric_weight       ,nproc_group_global)
+    if (tau_mixrate < 0d0) tau_mixrate = 0.1d0 * mixrate
     call comm_bcast(nmemory_mb              ,nproc_group_global)
     call comm_bcast(alpha_mb                ,nproc_group_global)
     call comm_bcast(nmemory_p               ,nproc_group_global)
@@ -2199,6 +2210,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing', method_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'mixrate', mixrate
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_tau_mixing', yn_tau_mixing
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tau_mixrate', tau_mixrate
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tau_metric_weight', tau_metric_weight
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_mb', nmemory_mb
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_p', nmemory_p
@@ -2948,6 +2962,31 @@ contains
 
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
+    end if
+
+    select case(yn_tau_mixing)
+    case('y','n')
+      continue
+    case default
+      stop "yn_tau_mixing must be 'y' or 'n'"
+    end select
+    if (tau_mixrate < 0d0 .or. tau_mixrate > 1d0) then
+      stop "tau_mixrate must satisfy 0 <= tau_mixrate <= 1"
+    end if
+    if (tau_metric_weight <= 0d0) then
+      stop "tau_metric_weight must be positive"
+    end if
+    if (yn_tau_mixing == 'y' .and. spin /= 'unpolarized') then
+      stop "tau mixing currently supports only spin='unpolarized'"
+    end if
+    if (yn_tau_mixing == 'y' .and. yn_spinorbit /= 'n') then
+      stop "tau mixing currently requires yn_spinorbit='n'"
+    end if
+    if (yn_tau_mixing == 'y' .and. method_mixing == 'simple_dm') then
+      stop "tau mixing does not support method_mixing='simple_dm'"
+    end if
+    if (yn_tau_mixing == 'y' .and. yn_dc == 'y') then
+      stop "tau mixing does not support yn_dc='y'"
     end if
 
     if(yn_out_stress == 'y' .and. yn_periodic /= 'y') &
