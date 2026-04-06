@@ -92,3 +92,24 @@ warning 比較 (clean-first, -Warray-temporaries):
 - 妥当性チェック通過
 - 改善率 >= 3%
 - B1 採用
+
+## 7. Step 3 (最終確認: 採用構成=A+B1)
+
+最終3-run (OMP=10):
+- run_final_AB1_1: exit=0, end SALMON=yes, fatal/signal=no, real=0.55
+- run_final_AB1_2: exit=0, end SALMON=yes, fatal/signal=no, real=0.34
+- run_final_AB1_3: exit=0, end SALMON=yes, fatal/signal=no, real=0.29
+
+集計:
+- median_final_AB1 = 0.34 s
+- improvement_vs_baseline = (0.41 - 0.34) / 0.41 * 100 = 17.07%
+- improvement_vs_A = (0.36 - 0.34) / 0.36 * 100 = 5.56%
+- improvement_vs_B1 = (0.33 - 0.34) / 0.33 * 100 = -3.03%
+
+OMP=2 安定性:
+- run_final_AB1_omp2_1: exit=0, end SALMON=yes, fatal/signal=no, real=0.30
+
+判定:
+- 妥当性チェック全通過
+- OMP=2 安定性確認通過
+- Step 3 完了
