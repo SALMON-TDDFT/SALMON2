@@ -36,6 +36,9 @@ set(STRESS_SOURCE_TESTS
   check_builtin_r2scan_stress_gradient_trace_diag.sh
   check_builtin_r2scan_stress_vsigma_diag.sh
   check_builtin_r2scan_stress_guard.sh
+  check_tau_mixing_input_keys.sh
+  check_tau_mixing_broyden_pack.sh
+  check_tau_mixing_xc_override.sh
 )
 
 foreach(test_script IN LISTS STRESS_SOURCE_TESTS)
