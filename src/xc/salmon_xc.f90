@@ -22,7 +22,7 @@
 #endif
 
 module salmon_xc
-  use structures, only: s_xc_functional, s_xc_operator_payload
+  use structures, only: s_xc_functional, s_xc_operator_payload, s_xc_aux_fields
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
@@ -72,7 +72,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc, xc_payload, tau_override)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc, xc_payload, aux_override)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -95,7 +95,7 @@ contains
     real(8)                             :: E_xc
     type(s_scalar)          ,optional   :: eexc
     type(s_xc_operator_payload), intent(inout), optional, target :: xc_payload
-    type(s_scalar)          ,optional, intent(in) :: tau_override
+    type(s_xc_aux_fields)   ,optional, intent(in) :: aux_override
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
@@ -259,22 +259,51 @@ contains
 
       if (xc_func%use_kinetic_energy) then
         if (xc_func%xctype(1) == salmon_xctype_tbmbj) then
-          if (present(tau_override)) then
-            stop "tau_override for TB-mBJ is not implemented in exchange_correlation"
+          if ((present(aux_override) .and. aux_override%use_tau) .and. (present(aux_override) .and. aux_override%use_j)) then
+            continue
+          else if (present(aux_override) .and. aux_override%use_tau) then
+            call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,rj=j)
+          else if (present(aux_override) .and. aux_override%use_j) then
+            call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=tau)
+          else
+            call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=tau,rj=j)
           end if
-          call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau,j)
-        else if (present(tau_override)) then
+
+          if (present(aux_override) .and. aux_override%use_tau) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+            do iz=1,mg%num(3)
+            do iy=1,mg%num(2)
+            do ix=1,mg%num(1)
+              tau(ix,iy,iz) = aux_override%tau%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+            end do
+            end do
+            end do
+!$omp end parallel do
+          end if
+
+          if (present(aux_override) .and. aux_override%use_j) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+            do iz=1,mg%num(3)
+            do iy=1,mg%num(2)
+            do ix=1,mg%num(1)
+              j(ix,iy,iz,1:3) = aux_override%j%v(1:3,mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+            end do
+            end do
+            end do
+!$omp end parallel do
+          end if
+        else if (present(aux_override) .and. aux_override%use_tau) then
 !$omp parallel do collapse(2) private(iz,iy,ix)
           do iz=1,mg%num(3)
           do iy=1,mg%num(2)
           do ix=1,mg%num(1)
-            tau(ix,iy,iz) = tau_override%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+            tau(ix,iy,iz) = aux_override%tau%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
           end do
           end do
           end do
 !$omp end parallel do
         else
-          call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau)
+          call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=tau)
         end if
       end if
 
@@ -626,24 +655,28 @@ contains
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_stencil), intent(in) :: stencil
     type(s_orbital), intent(inout) :: spsi
-    real(8), intent(out) :: tau(mg%num(1),mg%num(2),mg%num(3))
+    real(8), intent(out), optional :: tau(mg%num(1),mg%num(2),mg%num(3))
     real(8), intent(out), optional :: rj(mg%num(1),mg%num(2),mg%num(3),3)
     integer :: im,ik,io,ispin,ix,iy,iz
     real(8) :: k(3),occ
     complex(8) :: zs(3),p
-    logical :: need_rj
+    logical :: need_tau, need_rj
     real(8), allocatable :: tau_tmp1(:,:,:), tau_tmp2(:,:,:)
     real(8), allocatable :: j_tmp1(:,:,:,:), j_tmp2(:,:,:,:)
     complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_tau_from_orbitals"
     im = 1
+    need_tau = present(tau)
     need_rj = present(rj)
+    if (.not. need_tau .and. .not. need_rj) stop "error: calc_tau_from_orbitals requires tau and/or rj"
 
-    allocate(tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    tau_tmp1 = 0d0
-    tau_tmp2 = 0d0
+    if (need_tau) then
+      allocate(tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      tau_tmp1 = 0d0
+      tau_tmp2 = 0d0
+    end if
 
     if (need_rj) then
       allocate(j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
@@ -678,7 +711,7 @@ contains
       do ix=mg%is(1),mg%ie(1)
         p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
         zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi * k(1:3) * p
-        tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
+        if (need_tau) tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
         if (need_rj) j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
       end do
       end do
@@ -688,14 +721,14 @@ contains
     end do
     end do
 
-    call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+    if (need_tau) call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
     if (need_rj) call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=1,mg%num(3)
     do iy=1,mg%num(2)
     do ix=1,mg%num(1)
-      tau(ix,iy,iz) = tau_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+      if (need_tau) tau(ix,iy,iz) = tau_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       if (need_rj) rj(ix,iy,iz,1:3) = j_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1,1:3)
     end do
     end do
@@ -706,7 +739,7 @@ contains
     if (need_rj) then
       deallocate(j_tmp2, j_tmp1)
     end if
-    deallocate(tau_tmp2, tau_tmp1)
+    if (need_tau) deallocate(tau_tmp2, tau_tmp1)
   end subroutine calc_tau_from_orbitals
 
 

@@ -102,21 +102,37 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   !
   integer :: j
   logical :: do_tau_mixing
-  logical :: tau_work_ready
-  type(s_scalar) :: tau_work
+  logical :: do_j_mixing
+  logical :: aux_work_ready
 
-  do_tau_mixing = mixing%use_tau_mixing .and. xc_func%use_kinetic_energy
-  tau_work_ready = .false.
+  do_tau_mixing = mixing%use_aux_tau .and. xc_func%use_kinetic_energy
+  do_j_mixing = mixing%use_aux_j .and. xc_func%xctype(1) == salmon_xctype_tbmbj
+  aux_work_ready = .false.
 
-  if (do_tau_mixing) then
-    if (system%nspin /= 1) stop "tau mixing currently supports only nspin=1"
-    if (xc_func%xctype(1) == salmon_xctype_tbmbj) then
-      stop "tau mixing for TB-mBJ is not implemented yet; disable yn_tau_mixing or choose another XC"
-    end if
+  if (mixing%use_aux_mixing .and. (mixing%tau_mixrate > 0d0 .or. mixing%j_mixrate > 0d0) .and. .not. xc_func%use_kinetic_energy) then
+    stop "aux mixing requested but active XC does not use auxiliary fields"
+  end if
+
+  if (do_tau_mixing .or. do_j_mixing) then
+    if (system%nspin /= 1) stop "aux mixing currently supports only nspin=1"
+    call ensure_aux_mixing_storage(mg, mixing)
     if (method_mixing == 'broyden' .or. method_mixing == 'pulay') then
-      call allocate_scalar(mg, tau_work)
-      call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau_work%f)
-      tau_work_ready = .true.
+      if (do_tau_mixing .and. do_j_mixing) then
+        call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=mixing%tau_work%f,rj=mixing%aux_work%j%v)
+      else if (do_j_mixing) then
+        call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,rj=mixing%aux_work%j%v)
+      else
+        call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=mixing%tau_work%f)
+      end if
+      mixing%aux_work%use_tau = do_tau_mixing
+      if (do_tau_mixing) mixing%aux_work%tau%f = mixing%tau_work%f
+      mixing%aux_work%use_j = do_j_mixing
+      if (do_j_mixing) then
+        do j=1,3
+          mixing%j_work(j)%f = mixing%aux_work%j%v(j,:,:,:)
+        end do
+      end if
+      aux_work_ready = .true.
     end if
   end if
 
@@ -127,14 +143,22 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
     if(yn_spinorbit=='n') stop 'yn_spinorbit must be y when method_mixing=simple_dm'
     call simple_mixing_so(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
   case ('broyden')
-    if (do_tau_mixing) then
-      call wrapper_broyden(info%icomm_r,mg,system,rho_s,tau_work,iter,mixing)
+    if (do_tau_mixing .and. do_j_mixing) then
+      call wrapper_broyden(info%icomm_r,mg,system,rho_s,tau=mixing%tau_work,j=mixing%j_work,iter=iter,mixing=mixing)
+    else if (do_tau_mixing) then
+      call wrapper_broyden(info%icomm_r,mg,system,rho_s,tau=mixing%tau_work,iter=iter,mixing=mixing)
+    else if (do_j_mixing) then
+      call wrapper_broyden(info%icomm_r,mg,system,rho_s,j=mixing%j_work,iter=iter,mixing=mixing)
     else
       call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter=iter,mixing=mixing)
     end if
   case ('pulay')
-    if (do_tau_mixing) then
-      call pulay(mg,info,system,rho_s,tau_work,iter,mixing)
+    if (do_tau_mixing .and. do_j_mixing) then
+      call pulay(mg,info,system,rho_s,tau=mixing%tau_work,j=mixing%j_work,iter=iter,mixing=mixing)
+    else if (do_tau_mixing) then
+      call pulay(mg,info,system,rho_s,tau=mixing%tau_work,iter=iter,mixing=mixing)
+    else if (do_j_mixing) then
+      call pulay(mg,info,system,rho_s,j=mixing%j_work,iter=iter,mixing=mixing)
     else
       call pulay(mg,info,system,rho_s,iter=iter,mixing=mixing)
     end if
@@ -155,19 +179,41 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call timer_end(LOG_CALC_HARTREE)
 
-  if (do_tau_mixing .and. .not. tau_work_ready) then
-    call allocate_scalar(mg, tau_work)
-    call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau_work%f)
-    call simple_mixing_tau(mg,1.d0-mixing%tau_mixrate,mixing%tau_mixrate,tau_work,mixing)
-    tau_work_ready = .true.
+  if ((do_tau_mixing .or. do_j_mixing) .and. .not. aux_work_ready) then
+    if (do_tau_mixing .and. do_j_mixing) then
+      call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=mixing%tau_work%f,rj=mixing%aux_work%j%v)
+    else if (do_j_mixing) then
+      call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,rj=mixing%aux_work%j%v)
+    else
+      call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=mixing%tau_work%f)
+    end if
+    if (do_tau_mixing) call simple_mixing_tau(mg,1.d0-mixing%tau_mixrate,mixing%tau_mixrate,mixing%tau_work,mixing)
+    if (do_j_mixing) call simple_mixing_j(mg,1.d0-mixing%j_mixrate,mixing%j_mixrate,mixing%j_work,mixing)
+    mixing%aux_work%use_tau = do_tau_mixing
+    if (do_tau_mixing) mixing%aux_work%tau%f = mixing%tau_work%f
+    mixing%aux_work%use_j = do_j_mixing
+    if (do_j_mixing) then
+      do j=1,3
+        mixing%j_work(j)%f = mixing%aux_work%j%v(j,:,:,:)
+      end do
+    end if
+    aux_work_ready = .true.
   end if
   
   if(yn_dc=='n') then
 
     call timer_begin(LOG_CALC_EXC_COR)
-    if (do_tau_mixing) then
+    if (do_tau_mixing .or. do_j_mixing) then
+      mixing%aux_work%use_tau = do_tau_mixing
+      if (do_tau_mixing) mixing%aux_work%tau%f = mixing%tau_work%f
+      mixing%aux_work%use_j = do_j_mixing
+      if (do_j_mixing) then
+        do j=1,3
+          mixing%aux_work%j%v(j,:,:,:) = mixing%j_work(j)%f
+        end do
+      end if
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc, &
-                                tau_override=tau_work)
+                                aux_override=mixing%aux_work)
     else
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
     end if
@@ -181,8 +227,6 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
     
   end if
 
-  if (tau_work_ready) call deallocate_scalar(tau_work)
-  
 end subroutine update_density_and_potential
 
 end module scf_iteration_sub

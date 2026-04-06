@@ -55,6 +55,13 @@ module structures
     type(s_vector) :: rdedd
   end type s_xc_operator_payload
 
+  type s_xc_aux_fields
+    logical :: use_tau = .false.
+    logical :: use_j = .false.
+    type(s_scalar) :: tau
+    type(s_vector) :: j
+  end type s_xc_aux_fields
+
   type s_dft_system
     logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
@@ -504,15 +511,24 @@ module structures
 
   type s_mixing
     logical :: flag_mix_zero
-    logical :: use_tau_mixing = .false.
+    logical :: use_aux_mixing = .false.
+    logical :: use_aux_tau = .false.
+    logical :: use_aux_j = .false.
     logical :: tau_history_ready = .false.
+    logical :: j_history_ready = .false.
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
     type(s_scalar),allocatable :: tau_in(:), tau_out(:)
+    type(s_scalar),allocatable :: jx_in(:), jx_out(:), jy_in(:), jy_out(:), jz_in(:), jz_out(:)
     type(s_scalar),allocatable :: Vh_in(:), Vh_out(:), Vxc_in(:,:), Vxc_out(:,:)
-    type(s_scalar) :: Vtau_in, Vtau_out
     real(8) :: mixrate, alpha_mb, beta_p
     real(8) :: tau_mixrate, tau_metric_weight
+    real(8) :: j_mixrate, j_metric_weight
+    type(s_scalar) :: tau_work
+    type(s_scalar) :: j_work(3)
+    type(s_xc_aux_fields) :: aux_work
+    integer :: aux_vector_size = 0
+    real(8), allocatable :: aux_vec(:), aux_vec_in(:,:), aux_vec_out(:,:), aux_vec_x(:), aux_vec_y(:)
     real(8) :: convergence_value_prev
   end type s_mixing
 
@@ -701,6 +717,19 @@ contains
     end do
   end subroutine allocate_vector_with_ovlp
 
+  subroutine allocate_xc_aux_fields(rg,use_tau,use_j,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    logical,intent(in) :: use_tau, use_j
+    type(s_xc_aux_fields),intent(inout) :: field
+
+    call deallocate_xc_aux_fields(field)
+    field%use_tau = use_tau
+    field%use_j = use_j
+    if (use_tau) call allocate_scalar(rg, field%tau)
+    if (use_j) call allocate_vector(rg, field%j)
+  end subroutine allocate_xc_aux_fields
+
   subroutine allocate_orbital_real(nspin,mg,info,psi)
     implicit none
     integer                 ,intent(in) :: nspin
@@ -853,5 +882,13 @@ contains
     type(s_vector) :: x
     DEAL(x%v)
   end subroutine deallocate_vector
+
+  subroutine deallocate_xc_aux_fields(x)
+    type(s_xc_aux_fields),intent(inout) :: x
+    call deallocate_scalar(x%tau)
+    call deallocate_vector(x%j)
+    x%use_tau = .false.
+    x%use_j = .false.
+  end subroutine deallocate_xc_aux_fields
 
 end module structures
