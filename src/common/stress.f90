@@ -13,6 +13,14 @@ module stress_sub
     real(8) :: Ac_uniform(3) = 0d0
   end type s_stress_field_state
 
+  real(8), allocatable, target, save :: stress_rho_box_work(:,:,:)
+  real(8), allocatable, target, save :: stress_grho_work(:,:,:,:)
+  complex(8), allocatable, target, save :: stress_gtpsi_work(:,:,:,:)
+  integer, save :: stress_work_is_array(3) = 0
+  integer, save :: stress_work_ie_array(3) = -1
+  integer, save :: stress_work_is(3) = 0
+  integer, save :: stress_work_ie(3) = -1
+
 contains
 
   subroutine fail_stress(message)
@@ -27,6 +35,35 @@ contains
     call end_parallel
     stop 1
   end subroutine fail_stress
+
+  subroutine ensure_r2scan_stress_workspace(mg)
+    use structures, only: s_rgrid
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    logical :: resize_needed
+
+    resize_needed = any(stress_work_is_array /= mg%is_array) .or. any(stress_work_ie_array /= mg%ie_array) .or. &
+         any(stress_work_is /= mg%is) .or. any(stress_work_ie /= mg%ie)
+    if (resize_needed) then
+      if (allocated(stress_rho_box_work)) deallocate(stress_rho_box_work)
+      if (allocated(stress_grho_work)) deallocate(stress_grho_work)
+      if (allocated(stress_gtpsi_work)) deallocate(stress_gtpsi_work)
+      stress_work_is_array = mg%is_array
+      stress_work_ie_array = mg%ie_array
+      stress_work_is = mg%is
+      stress_work_ie = mg%ie
+    end if
+
+    if (.not. allocated(stress_rho_box_work)) then
+      allocate(stress_rho_box_work(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+    end if
+    if (.not. allocated(stress_grho_work)) then
+      allocate(stress_grho_work(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    end if
+    if (.not. allocated(stress_gtpsi_work)) then
+      allocate(stress_gtpsi_work(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+    end if
+  end subroutine ensure_r2scan_stress_workspace
 
   subroutine prepare_stress_field_state(system, theory, field_state)
     use structures, only: s_dft_system
@@ -446,9 +483,9 @@ contains
     real(8) :: strs_grad_vsigma(3,3), strs_grad_vsigma_sum(3,3)
     real(8) :: strs_tau(3,3), strs_tau_sum(3,3)
     logical :: want_numerics_diag, has_grho_payload
-    real(8), allocatable :: rho_box(:,:,:)
-    real(8), allocatable :: grho_local(:,:,:,:)
-    complex(8), allocatable :: gtpsi(:,:,:,:)
+    real(8), pointer :: rho_box(:,:,:)
+    real(8), pointer :: grho_local(:,:,:,:)
+    complex(8), pointer :: gtpsi(:,:,:,:)
     complex(8) :: psi_r, w(3)
 
     if (system%nspin /= 1) call fail_stress("r2scan stress supports only nspin=1")
@@ -462,9 +499,10 @@ contains
     V = system%det_a
     want_numerics_diag = (trim(yn_out_stress_numerics) == 'y')
     has_grho_payload = allocated(system%xc_payload%grho%v)
-    allocate(rho_box(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
-    allocate(grho_local(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
+    call ensure_r2scan_stress_workspace(mg)
+    rho_box => stress_rho_box_work
+    grho_local => stress_grho_work
+    gtpsi => stress_gtpsi_work
 
     rho_box = 0d0
     !$omp parallel do collapse(2) default(none) private(ix,iy,iz) shared(rho_box,rho_s,mg)
@@ -590,10 +628,6 @@ contains
         call calc_r2scan_high_diagnostics(system, info, mg, stencil, srg_scalar, rho_s, grho_local)
       end if
     end if
-
-    deallocate(gtpsi)
-    deallocate(grho_local)
-    deallocate(rho_box)
   end subroutine calc_stress_xc_builtin_r2scan
 
   subroutine calc_r2scan_high_diagnostics(system, info, mg, stencil, srg_scalar, rho_s, grho_local)
@@ -958,47 +992,8 @@ contains
            mg%is_array, mg%ie_array, mg%is, mg%ie, mg%idx, mg%idy, mg%idz, stencil%coef_nab, system%rmatrix_B)
       rtmp = system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
-      do ilma = 1, ppg%nlma
-        ia = ppg%ia_tbl(ilma)
-        uVpsi_ilma = uVpsibox2(ispin, io, ik, im, ilma)
-        if(want_l_species) then
-          ll = ll_of_ilma(ilma)
-          ispec = species_of_ilma(ilma)
-          nl_energy_part = rtmp * dble(conjg(uVpsi_ilma) * uVpsi_ilma) / ppg%rinv_uvu(ilma)
-          e_nl_species_l(ispec,ll) = e_nl_species_l(ispec,ll) + nl_energy_part
-        end if
-        do a = 1, 3
-          r_uVpsi_b = (0d0, 0d0)
-          ! Follow-up micro-optimization: kAc(1:3) is rebuilt inside the tensor-row loop
-          ! even though only kAc(a) is consumed on each pass.
-          do j = 1, ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            if(field_state%use_micro_ac) then
-              kAc(1) = system%vec_k(1,ik) + system%Ac_micro%v(1,ix,iy,iz)
-              kAc(2) = system%vec_k(2,ik) + system%Ac_micro%v(2,ix,iy,iz)
-              kAc(3) = system%vec_k(3,ik) + system%Ac_micro%v(3,ix,iy,iz)
-            else
-              kAc(1) = system%vec_k(1,ik) + field_state%Ac_uniform(1)
-              kAc(2) = system%vec_k(2,ik) + field_state%Ac_uniform(2)
-              kAc(3) = system%vec_k(3,ik) + field_state%Ac_uniform(3)
-            end if
-            psi_r = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-            w(a) = gtpsi(a,ix,iy,iz) + zi * kAc(a) * psi_r
-            do b = 1, 3
-              r_uVpsi_b(b) = r_uVpsi_b(b) + ppg%rxyz(b,j,ia) * conjg(ppg%zekr_uV(j,ilma,ik)) * w(a)
-            end do
-          end do
-          do b = 1, 3
-            contrib = 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
-            strs(a,b) = strs(a,b) + contrib
-            if(want_l_species) then
-              strs_species_l(ispec,ll,a,b) = strs_species_l(ispec,ll,a,b) + contrib
-            end if
-          end do
-        end do
-      end do
+      call accumulate_stress_nl_orbital(system, info, mg, ppg, tpsi, field_state, ik, io, ispin, im, gtpsi, &
+           uVpsibox2, rtmp, want_l_species, ll_of_ilma, species_of_ilma, strs, strs_species_l, e_nl_species_l)
     end do
     end do
     end do
@@ -1032,6 +1027,106 @@ contains
       deallocate(strs_species_l, strs_species_l_sum, e_nl_species_l, e_nl_species_l_sum, ll_of_ilma, species_of_ilma)
     end if
   end subroutine calc_stress_nl
+
+  subroutine accumulate_stress_nl_orbital(system, info, mg, ppg, tpsi, field_state, ik, io, ispin, im, gtpsi, &
+                                          uVpsibox2, rtmp, want_l_species, ll_of_ilma, species_of_ilma, &
+                                          strs, strs_species_l, e_nl_species_l)
+    use structures
+    use math_constants, only: zi
+    implicit none
+    type(s_dft_system),         intent(in)    :: system
+    type(s_parallel_info),      intent(in)    :: info
+    type(s_rgrid),              intent(in)    :: mg
+    type(s_pp_grid),            intent(in)    :: ppg
+    type(s_orbital),            intent(inout) :: tpsi
+    type(s_stress_field_state), intent(in)    :: field_state
+    integer,                    intent(in)    :: ik, io, ispin, im
+    complex(8),                 intent(in)    :: gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
+    complex(8),                 intent(in)    :: uVpsibox2(system%nspin, info%io_s:info%io_e, info%ik_s:info%ik_e, info%im_s:info%im_e, ppg%nlma)
+    real(8),                    intent(in)    :: rtmp
+    logical,                    intent(in)    :: want_l_species
+    integer,                    intent(in), optional :: ll_of_ilma(:), species_of_ilma(:)
+    real(8),                    intent(inout) :: strs(3,3)
+    real(8),                    intent(inout), optional :: strs_species_l(:,:,:,:), e_nl_species_l(:,:)
+    integer :: ilma, ia, j, a, b, ix, iy, iz, ll, ispec
+    integer :: nspecies_local, lmax_local
+    real(8) :: contrib, nl_energy_part
+    real(8) :: kAc(3), kAc_uniform(3)
+    real(8) :: strs_thread(3,3)
+    real(8), allocatable :: strs_species_thread(:,:,:,:), e_nl_species_thread(:,:)
+    complex(8) :: psi_r, w_a, r_uVpsi_b(3), uVpsi_ilma, projector
+
+    kAc_uniform = system%vec_k(:,ik) + field_state%Ac_uniform(:)
+    if (want_l_species) then
+      if (.not. present(ll_of_ilma) .or. .not. present(species_of_ilma) .or. .not. present(strs_species_l) .or. .not. present(e_nl_species_l)) then
+        call fail_stress("species-l nonlocal stress requires l-channel maps")
+      end if
+    end if
+
+!$omp parallel default(none) &
+!$omp shared(system,mg,ppg,tpsi,field_state,ik,io,ispin,im,gtpsi,uVpsibox2,rtmp,want_l_species,ll_of_ilma,species_of_ilma) &
+!$omp shared(strs,strs_species_l,e_nl_species_l,kAc_uniform) &
+!$omp private(ilma,ia,j,a,b,ix,iy,iz,ll,ispec,contrib,nl_energy_part,kAc,psi_r,w_a,r_uVpsi_b,uVpsi_ilma,projector) &
+!$omp private(strs_thread,strs_species_thread,e_nl_species_thread,nspecies_local,lmax_local)
+    strs_thread = 0d0
+    if (want_l_species) then
+      nspecies_local = size(strs_species_l, 1)
+      lmax_local = ubound(strs_species_l, 2)
+      allocate(strs_species_thread(1:nspecies_local, 0:lmax_local, 3, 3))
+      allocate(e_nl_species_thread(1:nspecies_local, 0:lmax_local))
+      strs_species_thread = 0d0
+      e_nl_species_thread = 0d0
+    end if
+!$omp do schedule(static)
+    do ilma = 1, ppg%nlma
+      ia = ppg%ia_tbl(ilma)
+      uVpsi_ilma = uVpsibox2(ispin, io, ik, im, ilma)
+      if (want_l_species) then
+        ll = ll_of_ilma(ilma)
+        ispec = species_of_ilma(ilma)
+        nl_energy_part = rtmp * dble(conjg(uVpsi_ilma) * uVpsi_ilma) / ppg%rinv_uvu(ilma)
+        e_nl_species_thread(ispec,ll) = e_nl_species_thread(ispec,ll) + nl_energy_part
+      end if
+      do a = 1, 3
+        r_uVpsi_b = (0d0, 0d0)
+        do j = 1, ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          if (field_state%use_micro_ac) then
+            kAc(1) = system%vec_k(1,ik) + system%Ac_micro%v(1,ix,iy,iz)
+            kAc(2) = system%vec_k(2,ik) + system%Ac_micro%v(2,ix,iy,iz)
+            kAc(3) = system%vec_k(3,ik) + system%Ac_micro%v(3,ix,iy,iz)
+          else
+            kAc = kAc_uniform
+          end if
+          psi_r = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          w_a = gtpsi(a,ix,iy,iz) + zi * kAc(a) * psi_r
+          projector = conjg(ppg%zekr_uV(j,ilma,ik))
+          do b = 1, 3
+            r_uVpsi_b(b) = r_uVpsi_b(b) + ppg%rxyz(b,j,ia) * projector * w_a
+          end do
+        end do
+        do b = 1, 3
+          contrib = 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
+          strs_thread(a,b) = strs_thread(a,b) + contrib
+          if (want_l_species) strs_species_thread(ispec,ll,a,b) = strs_species_thread(ispec,ll,a,b) + contrib
+        end do
+      end do
+    end do
+!$omp end do
+!$omp critical(stress_nl_orbital_accum)
+    strs = strs + strs_thread
+    if (want_l_species) then
+      strs_species_l = strs_species_l + strs_species_thread
+      e_nl_species_l = e_nl_species_l + e_nl_species_thread
+    end if
+!$omp end critical(stress_nl_orbital_accum)
+    if (want_l_species) then
+      deallocate(strs_species_thread, e_nl_species_thread)
+    end if
+!$omp end parallel
+  end subroutine accumulate_stress_nl_orbital
 
   subroutine build_nl_l_channel_map(pp, kion, nlma, ll_of_ilma, lmax_nl, species_of_ilma)
     use structures

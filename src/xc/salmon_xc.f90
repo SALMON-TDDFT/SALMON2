@@ -68,6 +68,17 @@ module salmon_xc
   real(8),allocatable :: vexc_1d(:)
   real(8),allocatable :: vexc_sp_1d(:,:)
 
+  real(8), allocatable, save :: tau_thread_work(:,:,:,:)
+  real(8), allocatable, save :: tau_reduce_work(:,:,:)
+  real(8), allocatable, save :: tau_comm_work(:,:,:)
+  real(8), allocatable, save :: j_thread_work(:,:,:,:,:)
+  real(8), allocatable, save :: j_reduce_work(:,:,:,:)
+  real(8), allocatable, save :: j_comm_work(:,:,:,:)
+  integer, save :: aux_thread_is(3) = 0
+  integer, save :: aux_thread_ie(3) = -1
+  integer, save :: aux_thread_num(3) = 0
+  integer, save :: aux_thread_count = 0
+
 contains
 
 
@@ -648,6 +659,9 @@ contains
     use math_constants,only : zi
     use stencil_sub, only: calc_gradient_psi
     use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_sendrecv_grid, s_stencil, s_orbital
+#ifdef _OPENMP
+    use omp_lib, only: omp_get_max_threads, omp_get_thread_num
+#endif
     implicit none
     type(s_dft_system), intent(in) :: system
     type(s_rgrid), intent(in) :: mg
@@ -657,12 +671,10 @@ contains
     type(s_orbital), intent(inout) :: spsi
     real(8), intent(out), optional :: tau(mg%num(1),mg%num(2),mg%num(3))
     real(8), intent(out), optional :: rj(mg%num(1),mg%num(2),mg%num(3),3)
-    integer :: im,ik,io,ispin,ix,iy,iz
-    real(8) :: k(3),occ
+    integer :: im,ik,io,ispin,ix,iy,iz,ithread,nthreads
+    real(8) :: k(3),occ,jx,jy,jz
     complex(8) :: zs(3),p
     logical :: need_tau, need_rj
-    real(8), allocatable :: tau_tmp1(:,:,:), tau_tmp2(:,:,:)
-    real(8), allocatable :: j_tmp1(:,:,:,:), j_tmp2(:,:,:,:)
     complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_tau_from_orbitals"
@@ -670,20 +682,12 @@ contains
     need_tau = present(tau)
     need_rj = present(rj)
     if (.not. need_tau .and. .not. need_rj) stop "error: calc_tau_from_orbitals requires tau and/or rj"
-
-    if (need_tau) then
-      allocate(tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-      allocate(tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-      tau_tmp1 = 0d0
-      tau_tmp2 = 0d0
-    end if
-
-    if (need_rj) then
-      allocate(j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
-      allocate(j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
-      j_tmp1 = 0d0
-      j_tmp2 = 0d0
-    end if
+#ifdef _OPENMP
+    nthreads = omp_get_max_threads()
+#else
+    nthreads = 1
+#endif
+    call init_aux_field_workspace(mg, nthreads, need_tau, need_rj)
 
     if(allocated(spsi%rwf)) then
        if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
@@ -697,6 +701,15 @@ contains
        if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
     endif
 
+!$omp parallel default(none) &
+!$omp shared(system,mg,info,stencil,spsi,need_tau,need_rj,im,tau_thread_work,j_thread_work) &
+!$omp private(ik,io,ispin,ix,iy,iz,zs,p,occ,k,gtpsi,ithread,jx,jy,jz)
+#ifdef _OPENMP
+    ithread = omp_get_thread_num() + 1
+#else
+    ithread = 1
+#endif
+!$omp do collapse(2) schedule(static)
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,system%nspin
@@ -705,42 +718,205 @@ contains
 
       occ = system%rocc(io,ik,ispin)*system%wtk(ik)
       k(1:3) = system%vec_k(1:3,ik)
-!$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
         p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
         zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi * k(1:3) * p
-        if (need_tau) tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
-        if (need_rj) j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
+        if (need_tau) tau_thread_work(ix,iy,iz,ithread) = tau_thread_work(ix,iy,iz,ithread) + &
+             (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
+        if (need_rj) then
+          jx = aimag(conjg(p) * zs(1)) * occ
+          jy = aimag(conjg(p) * zs(2)) * occ
+          jz = aimag(conjg(p) * zs(3)) * occ
+          j_thread_work(ix,iy,iz,1,ithread) = j_thread_work(ix,iy,iz,1,ithread) + jx
+          j_thread_work(ix,iy,iz,2,ithread) = j_thread_work(ix,iy,iz,2,ithread) + jy
+          j_thread_work(ix,iy,iz,3,ithread) = j_thread_work(ix,iy,iz,3,ithread) + jz
+        end if
       end do
       end do
       end do
-!$omp end parallel do
     end do
     end do
     end do
+!$omp end do
+!$omp end parallel
 
-    if (need_tau) call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
-    if (need_rj) call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
-
-!$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=1,mg%num(3)
-    do iy=1,mg%num(2)
-    do ix=1,mg%num(1)
-      if (need_tau) tau(ix,iy,iz) = tau_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
-      if (need_rj) rj(ix,iy,iz,1:3) = j_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1,1:3)
-    end do
-    end do
-    end do
-!$omp end parallel do
+    call merge_aux_field_workspace(mg, info, nthreads, need_tau, need_rj)
+    if (need_tau .and. need_rj) then
+      call copy_aux_field_local_box(mg, tau=tau, rj=rj)
+    else if (need_tau) then
+      call copy_aux_field_local_box(mg, tau=tau)
+    else
+      call copy_aux_field_local_box(mg, rj=rj)
+    end if
 
     if(allocated(spsi%rwf)) deallocate(spsi%zwf)
-    if (need_rj) then
-      deallocate(j_tmp2, j_tmp1)
-    end if
-    if (need_tau) deallocate(tau_tmp2, tau_tmp1)
   end subroutine calc_tau_from_orbitals
+
+  subroutine init_aux_field_workspace(mg, nthreads, need_tau, need_rj)
+    use structures, only: s_rgrid
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    integer, intent(in) :: nthreads
+    logical, intent(in) :: need_tau, need_rj
+
+    call ensure_aux_field_thread_workspace(mg, nthreads, need_tau, need_rj)
+    if (need_tau) then
+      tau_thread_work = 0d0
+      tau_reduce_work = 0d0
+      tau_comm_work = 0d0
+    end if
+    if (need_rj) then
+      j_thread_work = 0d0
+      j_reduce_work = 0d0
+      j_comm_work = 0d0
+    end if
+  end subroutine init_aux_field_workspace
+
+  subroutine merge_aux_field_workspace(mg, info, nthreads, need_tau, need_rj)
+    use communication, only: comm_summation
+    use structures, only: s_rgrid, s_parallel_info
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    type(s_parallel_info), intent(in) :: info
+    integer, intent(in) :: nthreads
+    logical, intent(in) :: need_tau, need_rj
+    integer :: ix, iy, iz, ithread
+
+    if (need_tau) then
+      do ithread = 1, nthreads
+        do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+        do ix = mg%is(1), mg%ie(1)
+          tau_reduce_work(ix,iy,iz) = tau_reduce_work(ix,iy,iz) + tau_thread_work(ix,iy,iz,ithread)
+        end do
+        end do
+        end do
+      end do
+      call comm_summation(tau_reduce_work, tau_comm_work, mg%num(1) * mg%num(2) * mg%num(3), info%icomm_ko)
+    end if
+
+    if (need_rj) then
+      do ithread = 1, nthreads
+        do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+        do ix = mg%is(1), mg%ie(1)
+          j_reduce_work(ix,iy,iz,1) = j_reduce_work(ix,iy,iz,1) + j_thread_work(ix,iy,iz,1,ithread)
+          j_reduce_work(ix,iy,iz,2) = j_reduce_work(ix,iy,iz,2) + j_thread_work(ix,iy,iz,2,ithread)
+          j_reduce_work(ix,iy,iz,3) = j_reduce_work(ix,iy,iz,3) + j_thread_work(ix,iy,iz,3,ithread)
+        end do
+        end do
+        end do
+      end do
+      call comm_summation(j_reduce_work, j_comm_work, mg%num(1) * mg%num(2) * mg%num(3) * 3, info%icomm_ko)
+    end if
+  end subroutine merge_aux_field_workspace
+
+  subroutine copy_aux_field_local_box(mg, tau, rj)
+    use structures, only: s_rgrid
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    real(8), intent(out), optional :: tau(mg%num(1),mg%num(2),mg%num(3))
+    real(8), intent(out), optional :: rj(mg%num(1),mg%num(2),mg%num(3),3)
+    integer :: ix, iy, iz
+
+!$omp parallel do collapse(2) private(ix,iy,iz)
+    do iz = 1, mg%num(3)
+    do iy = 1, mg%num(2)
+    do ix = 1, mg%num(1)
+      if (present(tau)) tau(ix,iy,iz) = tau_comm_work(mg%is(1)+ix-1, mg%is(2)+iy-1, mg%is(3)+iz-1)
+      if (present(rj)) then
+        rj(ix,iy,iz,1) = j_comm_work(mg%is(1)+ix-1, mg%is(2)+iy-1, mg%is(3)+iz-1, 1)
+        rj(ix,iy,iz,2) = j_comm_work(mg%is(1)+ix-1, mg%is(2)+iy-1, mg%is(3)+iz-1, 2)
+        rj(ix,iy,iz,3) = j_comm_work(mg%is(1)+ix-1, mg%is(2)+iy-1, mg%is(3)+iz-1, 3)
+      end if
+    end do
+    end do
+    end do
+!$omp end parallel do
+  end subroutine copy_aux_field_local_box
+
+  subroutine ensure_aux_field_thread_workspace(mg, nthreads, need_tau, need_rj)
+    use structures, only: s_rgrid
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    integer, intent(in) :: nthreads
+    logical, intent(in) :: need_tau, need_rj
+    logical :: resize_needed
+
+    resize_needed = any(aux_thread_is /= mg%is) .or. any(aux_thread_ie /= mg%ie) .or. any(aux_thread_num /= mg%num) .or. &
+         aux_thread_count /= nthreads
+    if (resize_needed) then
+      if (allocated(tau_thread_work)) deallocate(tau_thread_work)
+      if (allocated(tau_reduce_work)) deallocate(tau_reduce_work)
+      if (allocated(tau_comm_work)) deallocate(tau_comm_work)
+      if (allocated(j_thread_work)) deallocate(j_thread_work)
+      if (allocated(j_reduce_work)) deallocate(j_reduce_work)
+      if (allocated(j_comm_work)) deallocate(j_comm_work)
+      aux_thread_is = mg%is
+      aux_thread_ie = mg%ie
+      aux_thread_num = mg%num
+      aux_thread_count = nthreads
+    end if
+
+    if (need_tau .and. .not. allocated(tau_thread_work)) then
+      allocate(tau_thread_work(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nthreads))
+      allocate(tau_reduce_work(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(tau_comm_work(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    end if
+
+    if (need_rj .and. .not. allocated(j_thread_work)) then
+      allocate(j_thread_work(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3,nthreads))
+      allocate(j_reduce_work(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
+      allocate(j_comm_work(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
+    end if
+  end subroutine ensure_aux_field_thread_workspace
+
+  subroutine pack_tbmbj_aux_fields(nx, ny, nz, rho, rho_nlcc, grho, rlrho, tau, rj, &
+                                   rho_1d, rho_s_1d, grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d)
+    implicit none
+    integer, intent(in) :: nx, ny, nz
+    real(8), intent(in) :: rho(nx, ny, nz)
+    real(8), intent(in), optional :: rho_nlcc(nx, ny, nz)
+    real(8), intent(in) :: grho(nx, ny, nz, 3)
+    real(8), intent(in) :: rlrho(nx, ny, nz)
+    real(8), intent(in) :: tau(nx, ny, nz)
+    real(8), intent(in) :: rj(nx, ny, nz, 3)
+    real(8), intent(out) :: rho_1d(nx * ny * nz)
+    real(8), intent(out) :: rho_s_1d(nx * ny * nz)
+    real(8), intent(out) :: grho_s_1d(nx * ny * nz, 3)
+    real(8), intent(out) :: rlrho_s_1d(nx * ny * nz)
+    real(8), intent(out) :: tau_s_1d(nx * ny * nz)
+    real(8), intent(out) :: j_s_1d(nx * ny * nz, 3)
+    integer :: ix, iy, iz, i
+    real(8) :: rho_total
+
+!$omp parallel do collapse(2) default(none) private(ix,iy,iz,i,rho_total) &
+!$omp shared(nx,ny,nz,rho,rho_nlcc,grho,rlrho,tau,rj,rho_1d,rho_s_1d,grho_s_1d,rlrho_s_1d,tau_s_1d,j_s_1d)
+    do iz = 1, nz
+    do iy = 1, ny
+    do ix = 1, nx
+      i = ix + (iy - 1) * nx + (iz - 1) * nx * ny
+      rho_total = rho(ix,iy,iz)
+#ifndef SALMON_DEBUG_NEGLECT_NLCC
+      if (present(rho_nlcc)) rho_total = rho_total + rho_nlcc(ix,iy,iz)
+#endif
+      rho_1d(i) = rho(ix,iy,iz)
+      rho_s_1d(i) = 0.5d0 * rho_total
+      grho_s_1d(i,1) = 0.5d0 * grho(ix,iy,iz,1)
+      grho_s_1d(i,2) = 0.5d0 * grho(ix,iy,iz,2)
+      grho_s_1d(i,3) = 0.5d0 * grho(ix,iy,iz,3)
+      rlrho_s_1d(i) = 0.5d0 * rlrho(ix,iy,iz)
+      tau_s_1d(i) = 0.5d0 * tau(ix,iy,iz)
+      j_s_1d(i,1) = 0.5d0 * rj(ix,iy,iz,1)
+      j_s_1d(i,2) = 0.5d0 * rj(ix,iy,iz,2)
+      j_s_1d(i,3) = 0.5d0 * rj(ix,iy,iz,3)
+    end do
+    end do
+    end do
+!$omp end parallel do
+  end subroutine pack_tbmbj_aux_fields
 
 
   subroutine reset_xc_operator_payload(payload)
@@ -1494,18 +1670,14 @@ contains
       real(8) :: vexc_1d(nl)
       call nvtxStartRange('exec_builtin_tbmbj', __LINE__)
 
-      rho_1d = reshape(rho, (/nl/))
-      rho_s_1d = rho_1d * 0.5
-#ifndef SALMON_DEBUG_NEGLECT_NLCC
       if (present(rho_nlcc)) then
-        rho_s_1d = rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
-      endif
-#endif
-
-      grho_s_1d = reshape(grho(:, :, :, :), (/nl, 3/)) * 0.5
-      rlrho_s_1d = reshape(rlrho(:, :, :), (/nl/)) * 0.5
-      tau_s_1d = reshape(tau(:, :, :), (/nl/)) * 0.5
-      j_s_1d = reshape(rj(:, :, :, :), (/nl, 3/)) * 0.5
+        call pack_tbmbj_aux_fields(nx, ny, nz, rho, rho_nlcc, grho, rlrho, tau, rj, &
+             rho_1d, rho_s_1d, grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d)
+      else
+        call pack_tbmbj_aux_fields(nx, ny, nz, rho, grho=grho, rlrho=rlrho, tau=tau, rj=rj, &
+             rho_1d=rho_1d, rho_s_1d=rho_s_1d, grho_s_1d=grho_s_1d, rlrho_s_1d=rlrho_s_1d, &
+             tau_s_1d=tau_s_1d, j_s_1d=j_s_1d)
+      end if
 
       !call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d, Hxyz, aLxyz)
       call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d)

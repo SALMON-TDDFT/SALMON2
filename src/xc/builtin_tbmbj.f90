@@ -54,6 +54,8 @@ contains
     !    c=1d0
     ! end select
     
+!$omp parallel do default(none) shared(nl, rho, rho_s, grho_s, lrho_s, tau_s, j_s, cval, c, eexc, vexc) &
+!$omp private(i, tau_s_jrho, D_s_jrho, Q_s, rhs, x_s, b_s, Vx_BR, Vx_MBJ, trho, rs, rhos, ec, dec_drhoa, dec_drhob)
     do i=1,NL
       tau_s_jrho=tau_s(i)-(j_s(i,1)**2+j_s(i,2)**2+j_s(i,3)**2)/rho_s(i)/2
       D_s_jrho=2*tau_s_jrho-0.25d0*(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rho_s(i)
@@ -74,6 +76,7 @@ contains
       Eexc(i)=Eexc(i)+ec
       Eexc(i)=Eexc(i)*trho
     enddo
+!$omp end parallel do
     return
   End Subroutine exc_cor_tbmbj
 
