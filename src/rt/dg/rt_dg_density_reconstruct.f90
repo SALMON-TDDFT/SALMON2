@@ -74,6 +74,7 @@
     real(8), allocatable :: coef_re_full(:,:,:)  ! (nbf_max, nocc_cache, nspin) upfront bcast coef (n_pw>0)
     real(8), allocatable :: coef_im_full(:,:,:)  ! (nbf_max, nocc_cache, nspin)
     real(8), allocatable :: rho_blk_partial(:)   ! (grid_block_size) partial rho for state slice
+    real(8), allocatable :: rho_remote_contrib(:)
     real(8), allocatable :: occ_cache(:), occ_sqrt_cache(:)
     complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
     real(8) :: time_project_rho_reduce, time_project_phi_block_build
@@ -211,6 +212,7 @@
     allocate(rho_blk(grid_block_size))
     allocate(rho_blk_accum(grid_block_size))
     allocate(rho_blk_reduced(grid_block_size))
+    allocate(rho_remote_contrib(grid_block_size))
     nocc_cache = 0
     if (allocated(dg_frag%nocc_spin)) then
       nocc_cache = maxval(dg_frag%nocc_spin(1:system%nspin))
@@ -1264,6 +1266,7 @@
               end if
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
+              rho_remote_contrib(1:valid_remote_grid_count) = 0.0d0
 !$omp parallel private(igrid, owner_rank, ixg, iyg, izg, bx, by, bz, rho_contrib, rho_raw_contrib, slot, theta)
 !$omp do schedule(static)
                   do igrid = 1, npt_blk
@@ -1337,8 +1340,6 @@
                       stop "DG-Fragment RT: density accum slot out of range"
                     end if
                     rho_contrib = rho_blk_accum(igrid)
-!$omp atomic update
-                    rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
                     spin_offset = ispin * dg_frag%density_send_count(owner_rank)
                     if (spin_offset + slot < 1 .or. spin_offset + slot > size(rho_send(owner_rank)%f, 1)) then
                       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -1349,11 +1350,20 @@
                       flush(6)
                       stop "DG-Fragment RT: density accum spin slot out of range"
                     end if
-!$omp atomic update
-                    rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
+                    rho_remote_contrib(idx_remote) = rho_contrib
                   end do
 !$omp end do
 !$omp end parallel
+
+                do idx_remote = 1, valid_remote_grid_count
+                  igrid = valid_remote_grid_ids(idx_remote)
+                  owner_rank = owner_buf(igrid)
+                  slot = slot_buf(igrid)
+                  rho_contrib = rho_remote_contrib(idx_remote)
+                  rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
+                  spin_offset = ispin * dg_frag%density_send_count(owner_rank)
+                  rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
+                end do
                 call cpu_time(t_rho1)
                 time_project_rho = time_project_rho + (t_rho1 - t_rho0)
             end if
