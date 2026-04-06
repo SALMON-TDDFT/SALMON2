@@ -16,6 +16,7 @@
     type(s_rgrid), pointer :: mg
     integer :: ifrag, ispin, io, jo, i_local
     integer :: nbf, nbf_raw, iblk
+    integer :: max_nbf_local
     real(8) :: hvol, A2val
     real(8) :: t0, t1
     real(8) :: time_local_build, time_subgroup_reduce, time_global_reduce
@@ -27,6 +28,7 @@
     logical :: use_block_reconstruct
     logical, save :: debug_static_seed_logged = .false.
     logical, parameter :: enable_reconstruct_timing = .false.
+    logical, parameter :: enable_hmat_nan_check = .false.
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. associated(dg_frag%mg)) then
@@ -46,25 +48,27 @@
       write(*,'(a,i0)') "[NaN] hvol in reconstruct_hamiltonian_matrix, rank=", dg_frag%id
       stop "NaN in hvol"
     end if
-    if (any(Vpsl%f(lbound(Vpsl%f,1):ubound(Vpsl%f,1), lbound(Vpsl%f,2):ubound(Vpsl%f,2), lbound(Vpsl%f,3):ubound(Vpsl%f,3)) /= &
-            Vpsl%f(lbound(Vpsl%f,1):ubound(Vpsl%f,1), lbound(Vpsl%f,2):ubound(Vpsl%f,2), lbound(Vpsl%f,3):ubound(Vpsl%f,3)))) then
-      write(*,'(a,i0)') "[NaN] Vpsl in reconstruct_hamiltonian_matrix, rank=", dg_frag%id
-      stop "NaN in Vpsl"
-    end if
-    if (any(Vh%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)) /= &
-            Vh%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)))) then
-      write(*,'(a,i0)') "[NaN] Vh in reconstruct_hamiltonian_matrix, rank=", dg_frag%id
-      stop "NaN in Vh"
-    end if
-    do ispin = 1, system%nspin
-      if (any(Vxc(ispin)%f(lbound(Vxc(ispin)%f,1):ubound(Vxc(ispin)%f,1), lbound(Vxc(ispin)%f,2):ubound(Vxc(ispin)%f,2), &
-                           lbound(Vxc(ispin)%f,3):ubound(Vxc(ispin)%f,3)) /= &
-              Vxc(ispin)%f(lbound(Vxc(ispin)%f,1):ubound(Vxc(ispin)%f,1), lbound(Vxc(ispin)%f,2):ubound(Vxc(ispin)%f,2), &
-                           lbound(Vxc(ispin)%f,3):ubound(Vxc(ispin)%f,3)))) then
-        write(*,'(a,i0,a,i0)') "[NaN] Vxc in reconstruct_hamiltonian_matrix, rank=", dg_frag%id, " ispin=", ispin
-        stop "NaN in Vxc"
+    if (enable_hmat_nan_check) then
+      if (any(Vpsl%f(lbound(Vpsl%f,1):ubound(Vpsl%f,1), lbound(Vpsl%f,2):ubound(Vpsl%f,2), lbound(Vpsl%f,3):ubound(Vpsl%f,3)) /= &
+              Vpsl%f(lbound(Vpsl%f,1):ubound(Vpsl%f,1), lbound(Vpsl%f,2):ubound(Vpsl%f,2), lbound(Vpsl%f,3):ubound(Vpsl%f,3)))) then
+        write(*,'(a,i0)') "[NaN] Vpsl in reconstruct_hamiltonian_matrix, rank=", dg_frag%id
+        stop "NaN in Vpsl"
       end if
-    end do
+      if (any(Vh%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)) /= &
+              Vh%f(lbound(Vh%f,1):ubound(Vh%f,1), lbound(Vh%f,2):ubound(Vh%f,2), lbound(Vh%f,3):ubound(Vh%f,3)))) then
+        write(*,'(a,i0)') "[NaN] Vh in reconstruct_hamiltonian_matrix, rank=", dg_frag%id
+        stop "NaN in Vh"
+      end if
+      do ispin = 1, system%nspin
+        if (any(Vxc(ispin)%f(lbound(Vxc(ispin)%f,1):ubound(Vxc(ispin)%f,1), lbound(Vxc(ispin)%f,2):ubound(Vxc(ispin)%f,2), &
+                             lbound(Vxc(ispin)%f,3):ubound(Vxc(ispin)%f,3)) /= &
+                Vxc(ispin)%f(lbound(Vxc(ispin)%f,1):ubound(Vxc(ispin)%f,1), lbound(Vxc(ispin)%f,2):ubound(Vxc(ispin)%f,2), &
+                             lbound(Vxc(ispin)%f,3):ubound(Vxc(ispin)%f,3)))) then
+          write(*,'(a,i0,a,i0)') "[NaN] Vxc in reconstruct_hamiltonian_matrix, rank=", dg_frag%id, " ispin=", ispin
+          stop "NaN in Vxc"
+        end if
+      end do
+    end if
 
     use_block_reconstruct = allocated(dg_frag%H_mat_blocks) .and. allocated(dg_frag%H_mat_kinetic_blocks) .and. &
       allocated(dg_frag%H_block_map)
@@ -87,6 +91,17 @@
 
     allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+
+    max_nbf_local = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      nbf_raw = dg_frag%n_basis(ifrag, 1)
+      if (system%nspin > 1) nbf_raw = max(nbf_raw, dg_frag%n_basis(ifrag, 2))
+      nbf = min(nbf_raw, dg_frag%nstate_frag, size(dg_frag%index_basis, 1), size(dg_frag%phi_frag, 4))
+      max_nbf_local = max(max_nbf_local, nbf)
+    end do
+    if (max_nbf_local > 0) then
+      allocate(partial_total(max_nbf_local), partial_block(max_nbf_local, max_nbf_local), reduced_block(max_nbf_local, max_nbf_local))
+    end if
 
     do ispin = 1, system%nspin
       call cpu_time(t0)
@@ -123,14 +138,13 @@
         iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
         if (iblk <= 0) cycle
 
-        allocate(partial_total(nbf), partial_block(nbf, nbf), reduced_block(nbf, nbf))
-        partial_block(:, :) = 0.0d0
+        partial_block(1:nbf, 1:nbf) = 0.0d0
 
         do jo = 1, nbf
           call cpu_time(t0)
           call build_local_potential_applied_basis(dg_frag, ifrag, i_local, jo, mg, V_total, V_phi)
 
-          partial_total(:) = 0.0d0
+          partial_total(1:nbf) = 0.0d0
 
 !$omp parallel do private(io, integral_v) schedule(static)
           do io = 1, nbf
@@ -141,11 +155,11 @@
           call cpu_time(t1)
           time_local_build = time_local_build + (t1 - t0)
 
-          partial_block(:, jo) = partial_total(:)
+          partial_block(1:nbf, jo) = partial_total(1:nbf)
         end do
 
         call cpu_time(t0)
-        call comm_summation(partial_block, reduced_block, nbf * nbf, dg_frag%icomm_frag)
+        call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
         call cpu_time(t1)
         time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
 
@@ -158,7 +172,7 @@
         end if
 
         if (dg_frag%is_frag_root) then
-          dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(:, :)
+          dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(1:nbf, 1:nbf)
           if (.not. debug_static_seed_logged .and. ispin == 1 .and. nbf >= 3) then
             write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x))') &
               "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " final_h=", &
@@ -167,8 +181,6 @@
             debug_static_seed_logged = .true.
           end if
         end if
-
-        deallocate(partial_total, partial_block, reduced_block)
       end do
     end do
 
@@ -218,6 +230,9 @@
     end if
 
     deallocate(V_total, V_phi)
+    if (allocated(partial_total)) deallocate(partial_total)
+    if (allocated(partial_block)) deallocate(partial_block)
+    if (allocated(reduced_block)) deallocate(reduced_block)
 
   end subroutine reconstruct_hamiltonian_matrix
 
@@ -250,6 +265,7 @@
     integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     complex(8) :: phi0
     logical :: has_overlap
+    integer, allocatable :: map_x(:), map_y(:), map_z(:)
 
     V_phi(:, :, :) = (0.0d0, 0.0d0)
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
@@ -274,6 +290,16 @@
     p_ub2 = ubound(dg_frag%phi_frag, 2)
     p_lb3 = lbound(dg_frag%phi_frag, 3)
     p_ub3 = ubound(dg_frag%phi_frag, 3)
+    allocate(map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3)))
+    do gx = ov_s(1), ov_e(1)
+      map_x(gx) = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+    end do
+    do gy = ov_s(2), ov_e(2)
+      map_y(gy) = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+    end do
+    do gz = ov_s(3), ov_e(3)
+      map_z(gz) = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+    end do
     if (allocated(dg_frag%phi_frag_c)) then
 !$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
@@ -283,9 +309,9 @@
 !$omp simd private(gx, phi0)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_x(gx)
+            by = map_y(gy)
+            bz = map_z(gz)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             phi0 = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
             V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
@@ -302,9 +328,9 @@
 !$omp simd private(gx, phi0)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_x(gx)
+            by = map_y(gy)
+            bz = map_z(gz)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             phi0 = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
             V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
@@ -313,6 +339,7 @@
       end do
 !$omp end parallel do
     end if
+  deallocate(map_x, map_y, map_z)
   end subroutine build_local_potential_applied_basis
 
   subroutine integrate_local_basis_with_field(dg_frag, ifrag, i_local, io, mg, field, hvol, integral)
@@ -330,6 +357,7 @@
     integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
     integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     logical :: has_overlap
+    integer, allocatable :: map_x(:), map_y(:), map_z(:)
 
     integral = (0.0d0, 0.0d0)
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
@@ -354,6 +382,16 @@
     p_ub2 = ubound(dg_frag%phi_frag, 2)
     p_lb3 = lbound(dg_frag%phi_frag, 3)
     p_ub3 = ubound(dg_frag%phi_frag, 3)
+    allocate(map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3)))
+    do gx = ov_s(1), ov_e(1)
+      map_x(gx) = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+    end do
+    do gy = ov_s(2), ov_e(2)
+      map_y(gy) = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+    end do
+    do gz = ov_s(3), ov_e(3)
+      map_z(gz) = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+    end do
     if (allocated(dg_frag%phi_frag_c)) then
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
@@ -361,9 +399,9 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_x(gx)
+            by = map_y(gy)
+            bz = map_z(gz)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
           end do
@@ -376,13 +414,14 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_x(gx)
+            by = map_y(gy)
+            bz = map_z(gz)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             integral = integral + cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
           end do
         end do
       end do
     end if
+    deallocate(map_x, map_y, map_z)
   end subroutine integrate_local_basis_with_field

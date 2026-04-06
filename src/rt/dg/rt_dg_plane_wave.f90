@@ -285,8 +285,9 @@ contains
     complex(8), intent(out) :: S_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
 
     integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
-    integer :: nx, ny, nz
-    integer :: gx0, gy0, gz0
+    integer :: nx, ny, nz, nx_max, ny_max, nz_max
+    integer :: gx, gy, gz, gx0, gy0, gz0, bx, by, bz
+    integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
     real(8) :: k_vec(3), Lbox(3), sqrt_V, inv_sqrt_V
     real(8) :: vol_elem
     complex(8) :: pw_val, overlap_local, phase_yz
@@ -294,14 +295,29 @@ contains
     complex(8) :: phase_x0, phase_y0, phase_z0
     complex(8), allocatable :: frag_block(:,:,:)
     complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
+    logical :: use_complex_basis
 
     if (.not. dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
+
+    if (dg_frag%ifrag_start > dg_frag%ifrag_end) return
 
     vol_elem = product(dg_frag%hgs(1:3))
     Lbox(1:3) = dg_frag%hgs(1:3) * dble(dg_frag%lgnum_total(1:3))
     sqrt_V = sqrt(product(Lbox))
     inv_sqrt_V = 1.0d0 / sqrt_V
+    use_complex_basis = allocated(dg_frag%phi_frag_c)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
+
+    nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
 
     S_complex = (0.0d0, 0.0d0)
 
@@ -318,19 +334,6 @@ contains
           gx0 = dg_frag%ixyz_frag(1, ifrag)
           gy0 = dg_frag%ixyz_frag(2, ifrag)
           gz0 = dg_frag%ixyz_frag(3, ifrag)
-
-          if (.not. allocated(phase_x) .or. size(phase_x) < nx) then
-            if (allocated(phase_x)) deallocate(phase_x)
-            allocate(phase_x(nx))
-          end if
-          if (.not. allocated(phase_y) .or. size(phase_y) < ny) then
-            if (allocated(phase_y)) deallocate(phase_y)
-            allocate(phase_y(ny))
-          end if
-          if (.not. allocated(phase_z) .or. size(phase_z) < nz) then
-            if (allocated(phase_z)) deallocate(phase_z)
-            allocate(phase_z(nz))
-          end if
 
           step_x = exp(cmplx(0.0d0, k_vec(1) * dg_frag%hgs(1), kind=8))
           step_y = exp(cmplx(0.0d0, k_vec(2) * dg_frag%hgs(2), kind=8))
@@ -356,22 +359,47 @@ contains
             if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
             overlap_local = (0.0d0, 0.0d0)
 
-            do iz = 1, nz
-              do iy = 1, ny
-                phase_yz = phase_y(iy) * phase_z(iz)
-                do ix = 1, nx
-                  pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
-
-                  if (allocated(dg_frag%phi_frag_c)) then
+            if (use_complex_basis) then
+              do iz = 1, nz
+                gz = gz0 + iz - 1
+                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                if (bz < p_lb3 .or. bz > p_ub3) cycle
+                do iy = 1, ny
+                  gy = gy0 + iy - 1
+                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  if (by < p_lb2 .or. by > p_ub2) cycle
+                  phase_yz = phase_y(iy) * phase_z(iz)
+                  do ix = 1, nx
+                    gx = gx0 + ix - 1
+                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    if (bx < p_lb1 .or. bx > p_ub1) cycle
+                    pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     overlap_local = overlap_local + &
-                         conjg(dg_frag%phi_frag_c(ix,iy,iz,io,i_local)) * pw_val * vol_elem
-                  else
-                    overlap_local = overlap_local + &
-                         dg_frag%phi_frag(ix,iy,iz,io,i_local) * conjg(pw_val) * vol_elem
-                  end if
+                         conjg(dg_frag%phi_frag_c(bx,by,bz,io,i_local)) * pw_val * vol_elem
+                  end do
                 end do
               end do
-            end do
+            else
+              do iz = 1, nz
+                gz = gz0 + iz - 1
+                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                if (bz < p_lb3 .or. bz > p_ub3) cycle
+                do iy = 1, ny
+                  gy = gy0 + iy - 1
+                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  if (by < p_lb2 .or. by > p_ub2) cycle
+                  phase_yz = phase_y(iy) * phase_z(iz)
+                  do ix = 1, nx
+                    gx = gx0 + ix - 1
+                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    if (bx < p_lb1 .or. bx > p_ub1) cycle
+                    pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
+                    overlap_local = overlap_local + &
+                         dg_frag%phi_frag(bx,by,bz,io,i_local) * conjg(pw_val) * vol_elem
+                  end do
+                end do
+              end do
+            end if
 
             S_complex(ig, ipw, ispin) = S_complex(ig, ipw, ispin) + overlap_local
           end do
@@ -433,14 +461,16 @@ contains
 
     do ispin = 1, dg_frag%nspin
       integral_local = 0.0d0
-      do iz = dg_frag%lg%is(3), dg_frag%lg%ie(3)
-        do iy = dg_frag%lg%is(2), dg_frag%lg%ie(2)
-          do ix = dg_frag%lg%is(1), dg_frag%lg%ie(1)
+!$omp parallel do collapse(3) private(ix,iy,iz) reduction(+:integral_local) schedule(static)
+      do iz = lbound(Vpsl%f, 3), ubound(Vpsl%f, 3)
+        do iy = lbound(Vpsl%f, 2), ubound(Vpsl%f, 2)
+          do ix = lbound(Vpsl%f, 1), ubound(Vpsl%f, 1)
             integral_local = integral_local + &
                  (Vpsl%f(ix,iy,iz) + Vh%f(ix,iy,iz) + Vxc(ispin)%f(ix,iy,iz)) * vol_elem
           end do
         end do
       end do
+!$omp end parallel do
       integral_all(ispin) = integral_local
     end do
 
@@ -463,8 +493,10 @@ contains
     complex(8),             intent(out)   :: H_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
 
     integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
-    integer :: nx, ny, nz
-    integer :: gx, gy, gz, gx0, gy0, gz0
+    integer :: nx, ny, nz, nx_max, ny_max, nz_max
+    integer :: gx, gy, gz, gx0, gy0, gz0, bx, by, bz, vx, vy, vz
+    integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
+    integer :: v_lb1, v_lb2, v_lb3, v_ub1, v_ub2, v_ub3
     real(8) :: k_vec(3), Lbox(3), sqrt_V, inv_sqrt_V
     real(8) :: vol_elem, k_squared, V_total
     complex(8) :: pw_val, pw_laplacian, hamiltonian_local, phase_yz
@@ -472,14 +504,35 @@ contains
     complex(8) :: phase_x0, phase_y0, phase_z0
     complex(8), allocatable :: frag_block(:,:,:)
     complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
+    logical :: use_complex_basis
 
     if (.not. dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
+
+    if (dg_frag%ifrag_start > dg_frag%ifrag_end) return
 
     vol_elem = product(dg_frag%hgs(1:3))
     Lbox(1:3) = dg_frag%hgs(1:3) * dble(dg_frag%lgnum_total(1:3))
     sqrt_V = sqrt(product(Lbox))
     inv_sqrt_V = 1.0d0 / sqrt_V
+    use_complex_basis = allocated(dg_frag%phi_frag_c)
+    p_lb1 = lbound(dg_frag%phi_frag, 1)
+    p_lb2 = lbound(dg_frag%phi_frag, 2)
+    p_lb3 = lbound(dg_frag%phi_frag, 3)
+    p_ub1 = ubound(dg_frag%phi_frag, 1)
+    p_ub2 = ubound(dg_frag%phi_frag, 2)
+    p_ub3 = ubound(dg_frag%phi_frag, 3)
+    v_lb1 = lbound(Vpsl%f, 1)
+    v_lb2 = lbound(Vpsl%f, 2)
+    v_lb3 = lbound(Vpsl%f, 3)
+    v_ub1 = ubound(Vpsl%f, 1)
+    v_ub2 = ubound(Vpsl%f, 2)
+    v_ub3 = ubound(Vpsl%f, 3)
+
+    nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
 
     H_complex = (0.0d0, 0.0d0)
 
@@ -497,19 +550,6 @@ contains
           gx0 = dg_frag%ixyz_frag(1, ifrag)
           gy0 = dg_frag%ixyz_frag(2, ifrag)
           gz0 = dg_frag%ixyz_frag(3, ifrag)
-
-          if (.not. allocated(phase_x) .or. size(phase_x) < nx) then
-            if (allocated(phase_x)) deallocate(phase_x)
-            allocate(phase_x(nx))
-          end if
-          if (.not. allocated(phase_y) .or. size(phase_y) < ny) then
-            if (allocated(phase_y)) deallocate(phase_y)
-            allocate(phase_y(ny))
-          end if
-          if (.not. allocated(phase_z) .or. size(phase_z) < nz) then
-            if (allocated(phase_z)) deallocate(phase_z)
-            allocate(phase_z(nz))
-          end if
 
           step_x = exp(cmplx(0.0d0, k_vec(1) * dg_frag%hgs(1), kind=8))
           step_y = exp(cmplx(0.0d0, k_vec(2) * dg_frag%hgs(2), kind=8))
@@ -535,30 +575,67 @@ contains
             if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
             hamiltonian_local = (0.0d0, 0.0d0)
 
-            do iz = 1, nz
-              gz = gz0 + iz - 1
-              do iy = 1, ny
-                gy = gy0 + iy - 1
-                phase_yz = phase_y(iy) * phase_z(iz)
-                do ix = 1, nx
-                  gx = gx0 + ix - 1
-                  pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
-                  pw_laplacian = (k_squared / 2.0d0) * pw_val
+            if (use_complex_basis) then
+              do iz = 1, nz
+                gz = gz0 + iz - 1
+                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                if (bz < p_lb3 .or. bz > p_ub3) cycle
+                do iy = 1, ny
+                  gy = gy0 + iy - 1
+                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  if (by < p_lb2 .or. by > p_ub2) cycle
+                  phase_yz = phase_y(iy) * phase_z(iz)
+                  do ix = 1, nx
+                    gx = gx0 + ix - 1
+                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    if (bx < p_lb1 .or. bx > p_ub1) cycle
+                    vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
+                    if (vx < v_lb1 .or. vx > v_ub1) cycle
+                    vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
+                    if (vy < v_lb2 .or. vy > v_ub2) cycle
+                    vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
+                    if (vz < v_lb3 .or. vz > v_ub3) cycle
+                    pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
+                    pw_laplacian = (k_squared / 2.0d0) * pw_val
+                    V_total = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc(ispin)%f(vx, vy, vz)
 
-                  V_total = Vpsl%f(gx, gy, gz) + Vh%f(gx, gy, gz) + Vxc(ispin)%f(gx, gy, gz)
-
-                  if (allocated(dg_frag%phi_frag_c)) then
                     hamiltonian_local = hamiltonian_local + &
-                         conjg(dg_frag%phi_frag_c(ix,iy,iz,io,i_local)) * &
+                         conjg(dg_frag%phi_frag_c(bx,by,bz,io,i_local)) * &
                          (pw_laplacian + V_total * pw_val) * vol_elem
-                  else
-                    hamiltonian_local = hamiltonian_local + &
-                         dg_frag%phi_frag(ix,iy,iz,io,i_local) * &
-                         conjg(pw_laplacian + V_total * pw_val) * vol_elem
-                  end if
+                  end do
                 end do
               end do
-            end do
+            else
+              do iz = 1, nz
+                gz = gz0 + iz - 1
+                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                if (bz < p_lb3 .or. bz > p_ub3) cycle
+                do iy = 1, ny
+                  gy = gy0 + iy - 1
+                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  if (by < p_lb2 .or. by > p_ub2) cycle
+                  phase_yz = phase_y(iy) * phase_z(iz)
+                  do ix = 1, nx
+                    gx = gx0 + ix - 1
+                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    if (bx < p_lb1 .or. bx > p_ub1) cycle
+                    vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
+                    if (vx < v_lb1 .or. vx > v_ub1) cycle
+                    vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
+                    if (vy < v_lb2 .or. vy > v_ub2) cycle
+                    vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
+                    if (vz < v_lb3 .or. vz > v_ub3) cycle
+                    pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
+                    pw_laplacian = (k_squared / 2.0d0) * pw_val
+                    V_total = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc(ispin)%f(vx, vy, vz)
+
+                    hamiltonian_local = hamiltonian_local + &
+                         dg_frag%phi_frag(bx,by,bz,io,i_local) * &
+                         conjg(pw_laplacian + V_total * pw_val) * vol_elem
+                  end do
+                end do
+              end do
+            end if
 
             H_complex(ig, ipw, ispin) = H_complex(ig, ipw, ispin) + hamiltonian_local
           end do
@@ -667,7 +744,6 @@ contains
     real(8), allocatable :: eigenvalues_tmp(:), eval_s(:), rwork(:), work(:)
     real(8), allocatable :: S_eff(:,:), S_eff_work(:,:), eval_eff(:), work_eff(:)
     real(8), allocatable :: A_qr(:,:), tau_qr(:), work_qr(:)
-    complex(8), allocatable :: coef_mixed(:,:,:)
     complex(8), allocatable :: S_frag_pw(:,:,:)  ! Complex overlap matrix
     complex(8), allocatable :: H_frag_pw(:,:,:)  ! Hamiltonian coupling matrix
     integer, allocatable :: jpvt(:), keep_idx(:)
@@ -772,8 +848,6 @@ contains
     end if
     dg_frag%H_mat_frag_pw(1:n_frag,1:n_pw,1:dg_frag%nspin) = H_frag_pw(1:n_frag,1:n_pw,1:dg_frag%nspin)
     call build_mixed_hamiltonian(dg_frag, dg_frag%lg, Vh, Vxc, Vpsl, Ac_tot, S_frag_pw, H_frag_pw)
-
-    allocate(coef_mixed(n_total, dg_frag%nstate_tot, dg_frag%nspin))
 
     do ispin = 1, dg_frag%nspin
       lda = n_total
@@ -989,16 +1063,13 @@ contains
       end do
       call sync_raw_coef_from_mixed(dg_frag, ispin)
 
-      coef_mixed(:, :, ispin) = (0.0d0, 0.0d0)
-      coef_mixed(:, :, ispin) = dg_frag%mixed_transform(1:n_total, 1:n_total, ispin)
-
       deallocate(H_work, S_work, eigenvalues_tmp, eval_s, X, H_ortho, tmp_mat, eigvec, S_rebuild, work_c, rwork)
       deallocate(S_eff, S_eff_work, eval_eff)
     end do
 
     dg_frag%mixed_basis_ready = .true.
 
-    deallocate(coef_mixed, S_frag_pw, H_frag_pw)
+    deallocate(S_frag_pw, H_frag_pw)
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "Mixed basis diagonalization complete"
@@ -1079,5 +1150,18 @@ contains
 
     deallocate(k_new, coef_new, Sfp_new, Hfp_new, Hpp_new)
   end subroutine compact_plane_wave_basis
+
+  !=======================================================================
+  ! Map global periodic grid index to this rank's phi-box coordinate.
+  ! If the point is not represented in the local box, caller must skip it.
+  !=======================================================================
+  pure integer function map_global_to_phi_box_coord_pw(ig, phi_lo, phi_hi, lgnum) result(local_idx)
+    implicit none
+    integer, intent(in) :: ig, phi_lo, phi_hi, lgnum
+
+    local_idx = modulo(ig - 1, lgnum) + 1
+    if (local_idx < phi_lo) local_idx = local_idx + lgnum
+    if (local_idx > phi_hi) local_idx = local_idx - lgnum
+  end function map_global_to_phi_box_coord_pw
 
 end module rt_dg_plane_wave

@@ -957,11 +957,8 @@ contains
     integer :: jrank, first_match, nfrag_ranks, hint_group, rank_group
     integer :: xlo, xhi, ylo, yhi, zlo, zhi
 
-    owner = dg_frag%id
+    owner = -1
     first_match = -1
-    if (ixg >= dg_frag%rank_core_lo(1) .and. ixg <= dg_frag%rank_core_hi(1) .and. &
-        iyg >= dg_frag%rank_core_lo(2) .and. iyg <= dg_frag%rank_core_hi(2) .and. &
-        izg >= dg_frag%rank_core_lo(3) .and. izg <= dg_frag%rank_core_hi(3)) return
     nfrag_ranks = max(1, dg_frag%isize_frag)
     hint_group = -1
     if (present(hint_rank)) hint_group = max(0, hint_rank) / nfrag_ranks
@@ -984,7 +981,11 @@ contains
         end if
       end if
     end do
-    if (first_match >= 0) owner = first_match
+    if (first_match >= 0) then
+      owner = first_match
+    else
+      owner = dg_frag%id
+    end if
   end function find_density_grid_owner
 
   !=======================================================================

@@ -142,7 +142,7 @@
             end do
           end do
         end do
-!$omp end do nowait
+!$omp end do
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
@@ -219,7 +219,7 @@
             end do
           end do
         end do
-!$omp end do nowait
+!$omp end do
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
@@ -273,7 +273,7 @@
             end do
           end do
         end do
-!$omp end do nowait
+!$omp end do
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
@@ -328,7 +328,7 @@
             end do
           end do
         end do
-!$omp end do nowait
+!$omp end do
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
@@ -413,7 +413,7 @@
                 end do
               end do
             end do
-!$omp end do nowait
+!$omp end do
 !$omp do collapse(2) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot

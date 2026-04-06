@@ -35,23 +35,15 @@
     real(8), allocatable :: H_mat_prev(:,:,:)
     integer :: n_metric
     logical :: use_hmat_complex
-    logical, parameter :: skip_hmat_rebuild = .false.
     real(8) :: t_stage0, t_stage1
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct
-    logical, parameter :: enable_density_hmat_trace = .false.
-    logical, parameter :: enable_density_hmat_progress = .false.
+    logical, parameter :: enable_update_trace = .false.
 
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
     ! - Photovoltaic effects
     ! - Catalytic reactions under light
     ! - Laser excitation and ionization
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "entry"
-      flush(6)
-    end if
     time_density = 0.0d0
     time_hartree = 0.0d0
     time_xc = 0.0d0
@@ -67,76 +59,34 @@
       end if
       return
     end if
-    ! Step 1: Calculate electron density from fragment basis coefficients
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "before-density"
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-begin"
       flush(6)
     end if
+    ! Step 1: Calculate electron density from fragment basis coefficients
     call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call cpu_time(t_stage1)
     time_density = time_density + (t_stage1 - t_stage0)
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "after-density", " dt=", time_density
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-end"
       flush(6)
-    end if
-      ! --- NaNチェック: rho ---
-      block
-        integer :: ix, iy, iz, nan_count
-        nan_count = 0
-!$omp parallel do collapse(3) reduction(+:nan_count) schedule(static)
-        do ix = mg%is(1), mg%ie(1)
-          do iy = mg%is(2), mg%ie(2)
-            do iz = mg%is(3), mg%ie(3)
-              if (rho%f(ix,iy,iz) /= rho%f(ix,iy,iz)) then
-                nan_count = nan_count + 1
-              end if
-            end do
-          end do
-        end do
-!$omp end parallel do
-        if (nan_count > 0) then
-          write(*,'(1x,a,i0)') '[CHECK] rho NaN count = ', nan_count
-        end if
-      end block
-    if (any(rho%f /= rho%f)) then
-      write(*,'(1x,a,i0,a,i0)') "[FATAL] DG-RT invalid density (NaN), rank=", &
-                               nproc_id_global, ", itt=", itt
-      stop "DG-RT density became NaN"
     end if
     
     ! Step 2: Update Hartree potential from new density
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat trace: before-hartree rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
-      flush(6)
-    end if
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "before-hartree"
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-begin"
       flush(6)
     end if
     call cpu_time(t_stage0)
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
     time_hartree = time_hartree + (t_stage1 - t_stage0)
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density-hmat trace: after-hartree rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt
-      flush(6)
-    end if
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "after-hartree", " dt=", time_hartree
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-end"
       flush(6)
     end if
     if (any(Vh%f /= Vh%f)) then
@@ -156,10 +106,8 @@
     !            Current implementation: calculated on full grid for simplicity
     ! Note: For meta-GGA functionals, spsi (wavefunctions) would be needed for τ and j
     !       DG-Fragment RT currently supports LDA/GGA functionals
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "before-xc"
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-begin"
       flush(6)
     end if
     call cpu_time(t_stage0)
@@ -167,10 +115,8 @@
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
     time_xc = time_xc + (t_stage1 - t_stage0)
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "after-xc", " dt=", time_xc
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-end"
       flush(6)
     end if
     
@@ -205,23 +151,17 @@
       end if
     end if
 
-    if (.not. skip_hmat_rebuild) then
-      if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-          " stage=", "before-reconstruct"
-        flush(6)
-      end if
-      call cpu_time(t_stage0)
-      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
-      call cpu_time(t_stage1)
-      time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
-      if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a,a,1pe12.4)') "        density-hmat trace: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-          " stage=", "after-reconstruct", " dt=", time_reconstruct
-        flush(6)
-      end if
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-begin"
+      flush(6)
+    end if
+    call cpu_time(t_stage0)
+    call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+    call cpu_time(t_stage1)
+    time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
+    if (enable_update_trace .and. itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-end"
+      flush(6)
     end if
     
     ! Step 6: Check FIELD-FREE Hamiltonian change and trigger adaptive basis update if needed
@@ -273,16 +213,5 @@
       if (allocated(H_mat_prev)) deallocate(H_mat_prev)
       if (allocated(H_mat_prev_c)) deallocate(H_mat_prev_c)
     end if
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "exit"
-      flush(6)
-    end if
-    if ((enable_density_hmat_trace .or. enable_density_hmat_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        density-hmat timing: density=", time_density, &
-        " hartree=", time_hartree, " xc=", time_xc, " reconstruct=", time_reconstruct
-      flush(6)
-    end if
-    
+
   end subroutine update_density_and_hamiltonian

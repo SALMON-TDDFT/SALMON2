@@ -749,7 +749,10 @@ contains
       write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_rg
       open(iunit,file=filename,form='unformatted',access='stream')
       read(iunit) lgnum_frag(1:3), lgnum_tmp(1:3)
-      if( any( lgnum_tmp /= lg%num ) ) stop "data_dcdft: input mismatch (lg)"
+      if( any( lgnum_tmp /= lg%num ) ) then
+        write(*,*) 'data_dcdft lg mismatch: file lgnum_tmp=', lgnum_tmp, ' expected lg%num=', lg%num
+        stop "data_dcdft: input mismatch (lg)"
+      end if
       allocate(jxyz_tot(maxval(lgnum_frag),3))
       do n=1,3 ! x,y,z
         read(iunit) jxyz_tot(1:lgnum_frag(n),n)
