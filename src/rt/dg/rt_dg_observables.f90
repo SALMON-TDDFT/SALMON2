@@ -126,12 +126,12 @@
             if (.not. allocated(op_mat)) allocate(op_mat(n, n))
             op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
             call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                       coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+                       coef_all, n_tot, (0.0d0, 0.0d0), tmp_all, n_tot)
           else
             if (.not. allocated(op_mat)) allocate(op_mat(n, n))
             op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
             call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                       coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+                       coef_all, n_tot, (0.0d0, 0.0d0), tmp_all, n_tot)
           end if
           do jo = 1, n_pw
             kpw_dir = dg_frag%k_pw(idir, jo)
@@ -143,7 +143,12 @@
               tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) - conjg(mfp) * coef_all(io, 1:nocc)
             end do
           end do
-          current_tmp = sum(aimag(conjg(coef_all(1:n_tot, 1:nocc)) * tmp_all(1:n_tot, 1:nocc)))
+          current_tmp = 0.0d0
+          do io = 1, nocc
+            do ib = 1, n_tot
+              current_tmp = current_tmp + aimag(conjg(coef_all(ib, io)) * tmp_all(ib, io))
+            end do
+          end do
         else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
           call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_frag_all(1:n, 1:nocc), tmp_mat)
@@ -151,7 +156,7 @@
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
           call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                     coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+                     coef_frag_all, n, (0.0d0, 0.0d0), tmp_mat, n)
         else
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
@@ -161,7 +166,12 @@
         
         if (.not. use_mixed_current) then
           ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
-          current_tmp = sum(aimag(conjg(coef_frag_all(1:n, 1:nocc)) * tmp_mat(1:n, 1:nocc)))
+          current_tmp = 0.0d0
+          do io = 1, nocc
+            do ib = 1, n
+              current_tmp = current_tmp + aimag(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
+            end do
+          end do
         end if
         current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
       end do
@@ -241,7 +251,7 @@
                 op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
               end if
               call zgemm('N', 'N', n, nocc, n, minus_i * Ac_tot(idir), op_mat, n, &
-                         coef_all(1:n, 1:nocc), n, (1.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+                         coef_all, n_tot, (1.0d0, 0.0d0), tmp_all, n_tot)
             end do
           end if
           do jo = 1, n_pw
@@ -399,16 +409,20 @@
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
         energy_tmp = 0.0d0
         do io = 1, nocc
-          energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
+          do ib = 1, n_tot
+            energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_all(ib, io)) * tmp_all(ib, io))
+          end do
         end do
       else
         if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
         call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                   coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+             coef_frag_all, n, (0.0d0, 0.0d0), tmp_mat, n)
         end if
         energy_tmp = 0.0d0
         do io = 1, nocc
-          energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
+          do ib = 1, n
+            energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
+          end do
         end do
       end if
         energy_local = energy_local + energy_tmp

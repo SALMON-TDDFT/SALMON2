@@ -57,3 +57,38 @@ OMP=2 安定性:
 - 施策Aは採用可能。
 - baseline 比で中央値改善を確認 (7.32%)。
 - 次段として施策B (array temporary 警告経路の個別解消) へ進む。
+
+## 6. Step 2 (施策B: B1 実施結果)
+
+対象:
+- src/rt/dg/rt_dg_observables.f90
+
+変更要点 (B1b):
+- zgemm 呼び出しで配列スライスを直接渡す形をやめ、
+	全配列 + 正しい leading dimension を指定する形へ変更。
+- これにより array temporary 生成警告の高頻度箇所を削減。
+
+warning 比較 (clean-first, -Warray-temporaries):
+- rt_dg_observables.f90 合計: 44 -> 12
+- ホットスポット:
+	- line 129: 8 -> 0
+	- line 134: 8 -> 0
+	- line 159: 4 -> 0
+	- line 164: 0 -> 4 (行シフト由来)
+	- line 254: 0 -> 0
+
+性能評価 (A採用構成を土台):
+- run_B1b_1: exit=0, end SALMON=yes, fatal/signal=no, real=1.71
+- run_B1b_2: exit=0, end SALMON=yes, fatal/signal=no, real=0.33
+- run_B1b_3: exit=0, end SALMON=yes, fatal/signal=no, real=0.33
+- median_B1b = 0.33 s
+- improvement_vs_A = (0.36 - 0.33) / 0.36 * 100 = 8.33%
+
+安定性確認 (OMP=2):
+- run_B1b_omp2_1: exit=0, end SALMON=yes, fatal/signal=no, real=0.61
+
+判定:
+- warning 経路削減あり
+- 妥当性チェック通過
+- 改善率 >= 3%
+- B1 採用
