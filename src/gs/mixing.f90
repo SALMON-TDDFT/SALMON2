@@ -161,6 +161,43 @@ end subroutine simple_mixing_potential
 
 !===================================================================================================================================
 
+subroutine mix_xc_operator_payload(mg,system,c1,c2,mixing)
+  use structures, only: s_rgrid, s_dft_system, s_mixing
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(inout) :: system
+  real(8),intent(in) :: c1,c2
+  type(s_mixing),intent(inout) :: mixing
+  integer :: is(3), ie(3)
+
+  if (.not. system%xc_payload%use_tau_operator) return
+  if (.not. allocated(system%xc_payload%vtau%f)) stop 'error: vtau mixing requested without vtau payload'
+
+  is = lbound(system%xc_payload%vtau%f)
+  ie = ubound(system%xc_payload%vtau%f)
+
+  if (allocated(mixing%Vtau_in%f)) then
+    if (any(lbound(mixing%Vtau_in%f) /= is) .or. any(ubound(mixing%Vtau_in%f) /= ie)) then
+      deallocate(mixing%Vtau_in%f)
+      if (allocated(mixing%Vtau_out%f)) deallocate(mixing%Vtau_out%f)
+    end if
+  end if
+
+  if (.not. allocated(mixing%Vtau_in%f)) then
+    allocate(mixing%Vtau_in%f(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
+    allocate(mixing%Vtau_out%f(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
+    mixing%Vtau_in%f = system%xc_payload%vtau%f
+    mixing%Vtau_out%f = system%xc_payload%vtau%f
+    return
+  end if
+
+  mixing%Vtau_out%f = system%xc_payload%vtau%f
+  system%xc_payload%vtau%f = c1*mixing%Vtau_in%f + c2*mixing%Vtau_out%f
+  mixing%Vtau_in%f = system%xc_payload%vtau%f
+end subroutine mix_xc_operator_payload
+
+!===================================================================================================================================
+
 subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
   use broyden_sub

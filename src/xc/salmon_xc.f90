@@ -39,8 +39,6 @@ module salmon_xc
 
   implicit none
 
-  real(8), parameter :: r2scan_vtau_damping_alpha = 0.5d0
-
 ! List of Exchange Correlation Functionals
   integer, parameter :: salmon_xctype_none  = 0
   integer, parameter :: salmon_xctype_pz    = 1
@@ -79,7 +77,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit, calc_mode
+    use salmon_global, only: yn_spinorbit
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx
     implicit none
@@ -109,9 +107,8 @@ contains
     real(8),allocatable :: rdedd_tmp(:,:,:,:),rdedd(:,:,:),drdedd_tmp(:,:,:,:),drdedd(:,:,:)
     real(8),allocatable :: delr_s(:,:,:,:,:),j_s(:,:,:,:,:),tau_s(:,:,:,:)
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
-    real(8),allocatable :: vtau_prev_local(:,:,:)
     type(s_xc_operator_payload), pointer :: payload
-    logical :: use_payload, use_vtau_damping
+    logical :: use_payload
     
     call nvtxStartRange('exchange_correlation', __LINE__)
 
@@ -121,15 +118,6 @@ contains
       payload => xc_payload
     else if (xc_func%xctype(1) == salmon_xctype_r2scan) then
       payload => system%xc_payload
-    end if
-
-    use_vtau_damping = use_payload .and. (xc_func%xctype(1) == salmon_xctype_r2scan) .and. &
-         (trim(calc_mode) == 'GS')
-    if (use_vtau_damping) then
-      if (payload%use_tau_operator .and. allocated(payload%vtau%f)) then
-        allocate(vtau_prev_local(mg%num(1), mg%num(2), mg%num(3)))
-        vtau_prev_local = payload%vtau%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-      end if
     end if
 
     if (use_payload) then
@@ -356,21 +344,12 @@ contains
     end if
 
     if (use_payload) then
-      if (use_vtau_damping) then
-        if (allocated(vtau_prev_local) .and. payload%use_tau_operator .and. allocated(payload%vtau%f)) then
-          payload%vtau%f = r2scan_vtau_damping_alpha * payload%vtau%f &
-               + (1d0 - r2scan_vtau_damping_alpha) * vtau_prev_local
-          deallocate(vtau_prev_local)
-        end if
-      end if
       call finalize_xc_payload(payload)
       if (xc_func%use_gradient .and. nspin == 1) then
         allocate(payload%grho%v(3, mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
         payload%grho%v = grho
       end if
     end if
-
-    if (allocated(vtau_prev_local)) deallocate(vtau_prev_local)
 
 !!!!To include the sigma contribution to GGA Vxc potential !!!!!!!
     if (xc_func%use_gradient) then
