@@ -1010,8 +1010,10 @@
                 do iy = 1, l(2)
                   do ix = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
+                    ! T_phi/H_phi live on the owned mg-local box only; use source-side indices
+                    ! for the operator-applied ket to avoid sampling outside that core range.
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               T_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol
+                               T_phi(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3)) * hvol
                   end do
                 end do
               end do
@@ -1022,7 +1024,7 @@
                   do ix = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               H_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol
+                               H_phi(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3)) * hvol
                   end do
                 end do
               end do

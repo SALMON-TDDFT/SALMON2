@@ -919,11 +919,13 @@
                   do ix = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                     if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
+                      ! H_phi is built only on the owned mg-local box; sample the ket on the
+                      ! source-side edge rather than the recv-side ghost coordinates.
                       integral = integral + conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
-                                 H_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol
+                                 H_phi(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3)) * hvol
                     else
                       integral = integral + cmplx(dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1), 0.0d0, kind=8) * &
-                                 H_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)) * hvol
+                                 H_phi(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3)) * hvol
                     end if
                   end do
                 end do

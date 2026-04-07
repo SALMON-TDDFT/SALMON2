@@ -822,7 +822,7 @@
                         call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                         integral = integral + &
                           conjg(dg_frag%halo(i_halo)%buf_recv_c(ix, iy, iz, io, 1)) * &
-                          cmplx(grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), idir), 0.0d0, kind=8) * hvol
+                          cmplx(grad_phi(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), idir), 0.0d0, kind=8) * hvol
                       end do
                     end do
                   end do
@@ -833,7 +833,7 @@
                         call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
                         integral = integral + &
                           cmplx(dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1), 0.0d0, kind=8) * &
-                          cmplx(grad_phi(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), idir), 0.0d0, kind=8) * hvol
+                          cmplx(grad_phi(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), idir), 0.0d0, kind=8) * hvol
                       end do
                     end do
                   end do

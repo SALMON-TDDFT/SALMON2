@@ -5,7 +5,7 @@
     use timer, only: timer_begin, timer_end, LOG_CALC_CURRENT
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
                     apply_mixed_hamiltonian, mixed_fp_coupling_active, copy_matrix_blocks_to_complex_dense, &
-                    gather_full_coef_view
+                    gather_full_coef_view, apply_overlap_operator
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -20,12 +20,22 @@
     integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot, max_nocc
     integer :: ifrag, jfrag, ib, jb, i_idx, j_idx
     integer :: iblk, nrow_blk, ncol_blk, n_diag_block_ids, idb
+    integer :: env_len, env_status, probe_stride, probe_nprint
+    integer :: transition_stride
+    character(len=64) :: env_val
     logical :: do_interface_check
+    logical :: enable_orbital_probe
+    logical :: enable_transition_probe
+    logical :: enable_electron_probe
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
     real(8) :: current_tmp, energy_tmp, pw_weight_local, kpw_dir
+    real(8) :: current_io, energy_io
+    real(8) :: occ_i
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
+    real(8) :: elec_coef_local, elec_plain_local
+    real(8) :: elec_coef_sum, elec_plain_sum
     real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
     real(8) :: energy_static_sum, energy_kin_sum, energy_nl_sum, energy_ap_sum, energy_a2_sum
     real(8) :: energy_kin_rs_sum, energy_one_rs_sum
@@ -40,6 +50,7 @@
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:), coef_frag_view(:,:), coef_pw_view(:,:)
     complex(8), allocatable :: tmp_probe(:,:), dense_probe_mat(:,:), dense_probe_out(:,:)
+    complex(8), allocatable :: overlap_vec(:)
     logical :: has_nonlocal, use_hmat_complex, use_mixed_current
     logical :: require_dense_nl
     logical :: use_spatial_A
@@ -47,6 +58,11 @@
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     integer, allocatable :: diag_block_ids(:)
     real(8), allocatable :: occ_weight(:)
+    real(8), allocatable :: current_orb_local(:), current_orb_sum(:)
+    real(8), allocatable :: energy_orb_local(:), energy_orb_sum(:)
+    real(8) :: current_diag_local(3), current_offdiag_local(3)
+    real(8) :: current_diag_sum(3), current_offdiag_sum(3)
+    complex(8) :: current_blk_total, current_blk_diag, current_elem
     complex(8) :: mfp
     real(8), parameter :: unit_dir(3,3) = reshape((/ &
       1.0d0, 0.0d0, 0.0d0, &
@@ -57,6 +73,8 @@
     current_local = 0.0d0
     energy_local = 0.0d0
     pw_weight_local = 0.0d0
+    elec_coef_local = 0.0d0
+    elec_plain_local = 0.0d0
     energy_static_local = 0.0d0
     energy_kin_local = 0.0d0
     energy_nl_local = 0.0d0
@@ -69,6 +87,8 @@
     kinetic_apply_diff_local = 0.0d0
     energy_kin_rs_sum = 0.0d0
     energy_one_rs_sum = 0.0d0
+    current_diag_local(:) = 0.0d0
+    current_offdiag_local(:) = 0.0d0
 
     n = dg_frag%n_mat_max
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
@@ -88,14 +108,68 @@
     n_tot = n + n_pw
     max_nocc = max(1, maxval(dg_frag%nocc_spin(1:dg_frag%nspin)))
 
+    enable_orbital_probe = .false.
+    probe_stride = 1
+    probe_nprint = 20
+    enable_transition_probe = .false.
+    enable_electron_probe = .false.
+    transition_stride = 1
+    call get_environment_variable("SALMON_DG_ORBITAL_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_orbital_probe = .true.
+      end if
+    end if
+    if (enable_orbital_probe) then
+      call get_environment_variable("SALMON_DG_ORBITAL_PROBE_STRIDE", env_val, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_val(1:env_len), *, iostat=env_status) probe_stride
+        if (env_status /= 0 .or. probe_stride < 1) probe_stride = 1
+      end if
+      call get_environment_variable("SALMON_DG_ORBITAL_PROBE_N", env_val, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_val(1:env_len), *, iostat=env_status) probe_nprint
+        if (env_status /= 0 .or. probe_nprint < 1) probe_nprint = 20
+      end if
+    end if
+    call get_environment_variable("SALMON_DG_TRANSITION_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_transition_probe = .true.
+      end if
+    end if
+    call get_environment_variable("SALMON_DG_ELECTRON_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_electron_probe = .true.
+      end if
+    end if
+    if (enable_transition_probe) then
+      call get_environment_variable("SALMON_DG_TRANSITION_PROBE_STRIDE", env_val, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_val(1:env_len), *, iostat=env_status) transition_stride
+        if (env_status /= 0 .or. transition_stride < 1) transition_stride = 1
+      end if
+    end if
+
     allocate(tmp_mat(n, max_nocc))
     if (enable_energy_component_probe) allocate(tmp_probe(n, max_nocc))
     allocate(coef_frag_all(n, max_nocc))
     allocate(occ_weight(max_nocc))
+    if (enable_orbital_probe) then
+      allocate(current_orb_local(3 * max_nocc), current_orb_sum(3 * max_nocc))
+      allocate(energy_orb_local(max_nocc), energy_orb_sum(max_nocc))
+      current_orb_local(:) = 0.0d0
+      energy_orb_local(:) = 0.0d0
+    end if
     if (n_pw > 0) then
       allocate(coef_pw_all(n_pw, max_nocc))
       allocate(coef_all(n_tot, max_nocc), tmp_all(n_tot, max_nocc))
     end if
+    if (enable_electron_probe) allocate(overlap_vec(n_tot))
     minus_i = cmplx(0.0d0, -1.0d0, kind=8)
 
     ! Current calculation via momentum operator matrix (velocity gauge)
@@ -149,9 +223,13 @@
           end do
           current_tmp = 0.0d0
           do io = 1, nocc
+            current_io = 0.0d0
             do ib = 1, n_tot
-              current_tmp = current_tmp + aimag(conjg(coef_all(ib, io)) * tmp_all(ib, io))
+              current_io = current_io + aimag(conjg(coef_all(ib, io)) * tmp_all(ib, io))
             end do
+            current_tmp = current_tmp + current_io
+            if (enable_orbital_probe) current_orb_local((idir - 1) * max_nocc + io) = &
+              current_orb_local((idir - 1) * max_nocc + io) - 2.0d0 * current_io
           end do
         else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
@@ -172,10 +250,54 @@
           ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
           current_tmp = 0.0d0
           do io = 1, nocc
+            current_io = 0.0d0
             do ib = 1, n
-              current_tmp = current_tmp + aimag(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
+              current_io = current_io + aimag(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
             end do
+            current_tmp = current_tmp + current_io
+            if (enable_orbital_probe) current_orb_local((idir - 1) * max_nocc + io) = &
+              current_orb_local((idir - 1) * max_nocc + io) - 2.0d0 * current_io
           end do
+        end if
+        if (enable_transition_probe .and. n_pw == 0 .and. (.not. use_mixed_current)) then
+          if (allocated(dg_frag%momentum_blocks)) then
+            current_blk_total = (0.0d0, 0.0d0)
+            current_blk_diag = (0.0d0, 0.0d0)
+            do iblk = 1, dg_frag%n_momentum_blocks
+              ifrag = dg_frag%momentum_blocks(iblk)%ifrag_row
+              jfrag = dg_frag%momentum_blocks(iblk)%ifrag_col
+              if (ifrag <= 0 .or. ifrag > dg_frag%n_frag) cycle
+              if (jfrag <= 0 .or. jfrag > dg_frag%n_frag) cycle
+              nrow_blk = dg_frag%n_basis(ifrag, ispin)
+              ncol_blk = dg_frag%n_basis(jfrag, ispin)
+              if (nrow_blk <= 0 .or. ncol_blk <= 0) cycle
+              do io = 1, nocc
+                occ_i = 1.0d0
+                if (allocated(system%rocc)) then
+                  if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                    occ_i = max(0.0d0, system%rocc(io, 1, ispin))
+                  end if
+                end if
+                if (occ_i <= 0.0d0) cycle
+                do ib = 1, nrow_blk
+                  i_idx = dg_frag%index_basis(ib, ifrag, ispin)
+                  if (i_idx < 1 .or. i_idx > n) cycle
+                  do jb = 1, ncol_blk
+                    j_idx = dg_frag%index_basis(jb, jfrag, ispin)
+                    if (j_idx < 1 .or. j_idx > n) cycle
+                    current_elem = occ_i * conjg(coef_frag_all(i_idx, io)) * &
+                      dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin) * coef_frag_all(j_idx, io)
+                    current_blk_total = current_blk_total + current_elem
+                    if (ifrag == jfrag .and. ib == jb) then
+                      current_blk_diag = current_blk_diag + current_elem
+                    end if
+                  end do
+                end do
+              end do
+            end do
+            current_diag_local(idir) = current_diag_local(idir) - 2.0d0 * aimag(current_blk_diag)
+            current_offdiag_local(idir) = current_offdiag_local(idir) - 2.0d0 * aimag(current_blk_total - current_blk_diag)
+          end if
         end if
         current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
       end do
@@ -213,6 +335,23 @@
         tmp_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
         coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
         coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
+      end if
+      if (enable_electron_probe) then
+        do io = 1, nocc
+          if (n_pw > 0) then
+            call apply_overlap_operator(dg_frag, ispin, coef_all(1:n_tot, io), overlap_vec, .true.)
+            elec_coef_local = elec_coef_local + occ_weight(io) * &
+              real(sum(conjg(coef_all(1:n_tot, io)) * overlap_vec(1:n_tot)))
+            elec_plain_local = elec_plain_local + occ_weight(io) * &
+              real(sum(conjg(coef_all(1:n_tot, io)) * coef_all(1:n_tot, io)))
+          else
+            call apply_overlap_operator(dg_frag, ispin, coef_frag_all(1:n, io), overlap_vec(1:n), .true.)
+            elec_coef_local = elec_coef_local + occ_weight(io) * &
+              real(sum(conjg(coef_frag_all(1:n, io)) * overlap_vec(1:n)))
+            elec_plain_local = elec_plain_local + occ_weight(io) * &
+              real(sum(conjg(coef_frag_all(1:n, io)) * coef_frag_all(1:n, io)))
+          end if
+        end do
       end if
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
       if (allocated(op_mat)) op_mat(:, :) = (0.0d0, 0.0d0)
@@ -416,9 +555,12 @@
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
         energy_tmp = 0.0d0
         do io = 1, nocc
+          energy_io = 0.0d0
           do ib = 1, n_tot
-            energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_all(ib, io)) * tmp_all(ib, io))
+            energy_io = energy_io + occ_weight(io) * real(conjg(coef_all(ib, io)) * tmp_all(ib, io))
           end do
+          energy_tmp = energy_tmp + energy_io
+          if (enable_orbital_probe) energy_orb_local(io) = energy_orb_local(io) + energy_io
         end do
       else
         if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
@@ -427,9 +569,12 @@
         end if
         energy_tmp = 0.0d0
         do io = 1, nocc
+          energy_io = 0.0d0
           do ib = 1, n
-            energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
+            energy_io = energy_io + occ_weight(io) * real(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
           end do
+          energy_tmp = energy_tmp + energy_io
+          if (enable_orbital_probe) energy_orb_local(io) = energy_orb_local(io) + energy_io
         end do
       end if
         energy_local = energy_local + energy_tmp
@@ -495,6 +640,7 @@
     if (allocated(coef_pw_view)) deallocate(coef_pw_view)
     if (allocated(coef_all)) deallocate(coef_all)
     if (allocated(tmp_all)) deallocate(tmp_all)
+    if (allocated(overlap_vec)) deallocate(overlap_vec)
     ! Cache retained for reuse
 
   1000 continue
@@ -513,10 +659,27 @@
 
     ! MPI aggregation: sum local contributions from all ranks
     call comm_summation(current_local, dg_frag%current, 3, dg_frag%icomm)
+    if (enable_transition_probe) then
+      call comm_summation(current_diag_local, current_diag_sum, 3, dg_frag%icomm)
+      call comm_summation(current_offdiag_local, current_offdiag_sum, 3, dg_frag%icomm)
+    end if
     call comm_summation(energy_local, dg_frag%total_energy, dg_frag%icomm)
     call comm_summation(pw_weight_local, dg_frag%pw_weight_raw, dg_frag%icomm)
+    if (enable_electron_probe) then
+      call comm_summation(elec_coef_local, elec_coef_sum, dg_frag%icomm)
+      call comm_summation(elec_plain_local, elec_plain_sum, dg_frag%icomm)
+    end if
+    if (enable_orbital_probe) then
+      call comm_summation(current_orb_local, current_orb_sum, 3 * max_nocc, dg_frag%icomm)
+      call comm_summation(energy_orb_local, energy_orb_sum, max_nocc, dg_frag%icomm)
+    end if
     frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
     dg_frag%total_energy = dg_frag%total_energy / frag_reduce_factor
+    if (enable_electron_probe) then
+      elec_coef_sum = elec_coef_sum / frag_reduce_factor
+      elec_plain_sum = elec_plain_sum / frag_reduce_factor
+    end if
+    if (enable_orbital_probe) energy_orb_sum(:) = energy_orb_sum(:) / frag_reduce_factor
     if (enable_energy_component_probe) then
       call comm_summation(energy_static_local, energy_static_sum, dg_frag%icomm)
       call comm_summation(energy_kin_local, energy_kin_sum, dg_frag%icomm)
@@ -545,6 +708,11 @@
     ! Current and PW weight are replicated over all ranks, so these remain world-averaged.
     dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
     dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
+    if (enable_transition_probe) then
+      current_diag_sum(:) = current_diag_sum(:) / real(max(1, dg_frag%isize), 8)
+      current_offdiag_sum(:) = current_offdiag_sum(:) / real(max(1, dg_frag%isize), 8)
+    end if
+    if (enable_orbital_probe) current_orb_sum(:) = current_orb_sum(:) / real(max(1, dg_frag%isize), 8)
     if (enable_energy_component_probe) then
       kinetic_diag_abs_sum = kinetic_diag_abs_sum / real(max(1, dg_frag%isize), 8)
       kinetic_offdiag_abs_sum = kinetic_offdiag_abs_sum / real(max(1, dg_frag%isize), 8)
@@ -598,6 +766,44 @@
     ! Normalize by global grid count exactly as conventional calc_current().
     ! This avoids decomposition-dependent scaling from local/grid-view differences.
     dg_frag%current(:) = dg_frag%current(:) / dble(system%ngrid)
+    if (enable_orbital_probe) current_orb_sum(:) = current_orb_sum(:) / dble(system%ngrid)
+    if (enable_transition_probe) then
+      current_diag_sum(:) = current_diag_sum(:) / dble(system%ngrid)
+      current_offdiag_sum(:) = current_offdiag_sum(:) / dble(system%ngrid)
+    end if
+
+    if (enable_orbital_probe .and. dg_frag%id == 0) then
+      if (mod(itt - 1, probe_stride) == 0) then
+        write(*,'(1x,a,i0,a)') "        orbital-probe: itt=", itt, " (io, E, Jx, Jy, Jz)"
+        do io = 1, min(max_nocc, probe_nprint)
+          write(*,'(1x,i6,4(1x,1pe14.6))') io, energy_orb_sum(io), current_orb_sum(io), &
+            current_orb_sum(max_nocc + io), current_orb_sum(2 * max_nocc + io)
+        end do
+        flush(6)
+      end if
+    end if
+    if (enable_transition_probe .and. dg_frag%id == 0) then
+      if (mod(itt - 1, transition_stride) == 0) then
+        write(*,'(1x,a,i0,a,3(1x,1pe14.6),a,3(1x,1pe14.6),a,3(1x,1pe14.6))') &
+          "        transition-probe: itt=", itt, " Jdiag=", current_diag_sum(1), current_diag_sum(2), current_diag_sum(3), &
+          " Joffdiag=", current_offdiag_sum(1), current_offdiag_sum(2), current_offdiag_sum(3), &
+          " Jtotal=", dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)
+        flush(6)
+      end if
+    end if
+    if (enable_electron_probe .and. dg_frag%id == 0) then
+      if (itt == 1 .or. mod(itt, 10) == 0) then
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+          "        electron-probe: itt=", itt, " Ne_coef_S=", elec_coef_sum, " Ne_coef_2=", elec_plain_sum, &
+          " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+        flush(6)
+      end if
+    end if
+
+    if (allocated(current_orb_local)) deallocate(current_orb_local)
+    if (allocated(current_orb_sum)) deallocate(current_orb_sum)
+    if (allocated(energy_orb_local)) deallocate(energy_orb_local)
+    if (allocated(energy_orb_sum)) deallocate(energy_orb_sum)
     
     ! Store in rt structure for output
     rt%curr(:, itt) = dg_frag%current(:)

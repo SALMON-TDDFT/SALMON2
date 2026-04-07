@@ -638,12 +638,6 @@
               end do
             end do
 !$omp end parallel do
-            if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-              coef_c_frag(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-              call comm_summation(coef_c_full(1:nbf, 1:nocc_spin), coef_c_frag(1:nbf, 1:nocc_spin), &
-                                  nbf * nocc_spin, dg_frag%icomm_frag)
-              coef_c_full(1:nbf_max, 1:nocc_spin) = coef_c_frag(1:nbf_max, 1:nocc_spin)
-            end if
             coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
             coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = aimag(coef_c_full(1:nbf_max, 1:nocc_spin))
             ! Step 3b: each rank computes weighted C C^H on its state slice
@@ -805,12 +799,6 @@
               end do
             end do
 !$omp end parallel do
-            if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-              coef_c_frag(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-              call comm_summation(coef_c_full(1:nbf, 1:nocc_spin), coef_c_frag(1:nbf, 1:nocc_spin), &
-                                  nbf * nocc_spin, dg_frag%icomm_frag)
-              coef_c_full(1:nbf_max, 1:nocc_spin) = coef_c_frag(1:nbf_max, 1:nocc_spin)
-            end if
             coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
             coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = aimag(coef_c_full(1:nbf_max, 1:nocc_spin))
           end do
@@ -1011,7 +999,7 @@
                   ixg = ixg_buf(igrid)
                   iyg = iyg_buf(igrid)
                   izg = izg_buf(igrid)
-                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                    if (owner_buf(igrid) /= dg_frag%id) cycle
                     if (ixg < rho_s_x_lo .or. ixg > rho_s_x_hi .or. &
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
@@ -1268,7 +1256,7 @@
                     ixg = ixg_buf(igrid)
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
-                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                    if (owner_buf(igrid) /= dg_frag%id) cycle
                     if (ixg < rho_s_x_lo .or. ixg > rho_s_x_hi .or. &
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle

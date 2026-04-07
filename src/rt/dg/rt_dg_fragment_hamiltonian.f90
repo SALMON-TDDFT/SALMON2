@@ -1114,7 +1114,9 @@
                 do ix_chk = 1, l(1)
                   ipt = ((iz_chk - 1) * l(2) + (iy_chk - 1)) * l(1) + ix_chk
                   call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_chk, iy_chk, iz_chk, halo_send_idx, halo_recv_idx)
-                  call apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, halo_recv_idx, t_point, h_point)
+                  ! Match the momentum path: evaluate stencil-based operators on the
+                  ! source-side edge rather than the recv-side outer ghost cells.
+                  call apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, halo_send_idx, t_point, h_point)
                   halo_t_point_buf(ipt) = t_point
                   halo_h_point_buf(ipt) = h_point
                 end do
@@ -2884,71 +2886,10 @@
               dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = integral
             end if
           end do
-          do i_halo = 1, dg_frag%n_halo
-            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-            jfrag = dg_frag%halo(i_halo)%ifrag_src
-            if (jfrag < 1) cycle
-            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
-            l = dg_frag%halo(i_halo)%length
-            if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
-              write(*,*) "[FATAL] overlap halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
-              stop 1
-            end if
-            if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
-              write(*,*) "[FATAL] overlap halo basis exceeds buf dim4: rank=", dg_frag%id, &
-                " i_halo=", i_halo, " n_basis_halo=", n_basis_halo, " buf_dim4=", size(dg_frag%halo(i_halo)%buf_recv, 4)
-              stop 1
-            end if
-            if (n_basis_halo > size(dg_frag%index_basis, 1)) then
-              write(*,*) "[FATAL] overlap halo basis exceeds index_basis dim1: rank=", dg_frag%id, &
-                " i_halo=", i_halo, " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, &
-                " index_basis_dim1=", size(dg_frag%index_basis, 1)
-              stop 1
-            end if
-            iblk = find_matrix_block(dg_frag%S_block_map, jfrag, ifrag)
-            iblk_rev = find_matrix_block(dg_frag%S_block_map, ifrag, jfrag)
-
-            do io = 1, n_basis_halo
-              ig_row = dg_frag%index_basis(io, jfrag, ispin)
-              if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-              integral = 0.0d0
-              call cpu_time(t0)
-              do iz = 1, l(3)
-                do iy = 1, l(2)
-                  do ix = 1, l(1)
-                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
-                    integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               dg_frag%phi_frag(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local) * hvol
-                  end do
-                end do
-              end do
-              call cpu_time(t1)
-              time_halo_integral = time_halo_integral + (t1 - t0)
-                if (iblk > 0 .and. iblk_rev > 0) then
-                  if (io <= size(dg_frag%S_mat_blocks(iblk)%val, 1) .and. &
-                      jo <= size(dg_frag%S_mat_blocks(iblk)%val, 2) .and. &
-                      jo <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 1) .and. &
-                      io <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 2)) then
-                    dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = &
-                      dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * integral
-                    dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                      dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * integral
-                  end if
-                else if (iblk > 0) then
-                  if (io <= size(dg_frag%S_mat_blocks(iblk)%val, 1) .and. &
-                      jo <= size(dg_frag%S_mat_blocks(iblk)%val, 2)) then
-                    dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = &
-                      dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * integral
-                  end if
-                else if (iblk_rev > 0) then
-                  if (jo <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 1) .and. &
-                      io <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 2)) then
-                    dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                      dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * integral
-                  end if
-                end if
-            end do
-          end do
+          ! Overlap is a core-domain metric.
+          ! Halo values are temporary stencil/projector references only and must
+          ! not contribute directly to S_ij. Off-diagonal fragment blocks remain
+          ! zero unless they are supported by core-domain ownership on some rank.
 
         end do
         deallocate(phi_local_2d, self_overlap)
