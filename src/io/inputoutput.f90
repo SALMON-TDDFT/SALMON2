@@ -329,6 +329,7 @@ contains
       & update_mixing_ratio, &
       & method_mixing_preconditioner, &
       & q0_mixing_preconditioner, &
+      & alpha_mixing_preconditioner, &
       & nscf, &
       & yn_subspace_diagonalization, &
       & convergence, &
@@ -765,6 +766,7 @@ contains
     update_mixing_ratio = 3.d0
     method_mixing_preconditioner = 'none'
     q0_mixing_preconditioner = 1.d0
+    alpha_mixing_preconditioner = -1.d0
     nscf          = 300
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
@@ -1322,6 +1324,7 @@ contains
     call comm_bcast(update_mixing_ratio     ,nproc_group_global)
     call comm_bcast(method_mixing_preconditioner,nproc_group_global)
     call comm_bcast(q0_mixing_preconditioner,nproc_group_global)
+    call comm_bcast(alpha_mixing_preconditioner,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
@@ -2235,6 +2238,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing_preconditioner', method_mixing_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'q0_mixing_preconditioner', q0_mixing_preconditioner
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mixing_preconditioner', alpha_mixing_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
@@ -3004,6 +3008,12 @@ contains
     case default
       stop "method_mixing_preconditioner must be 'none' or 'kerker'"
     end select
+    if (alpha_mixing_preconditioner == 0d0) then
+      stop "alpha_mixing_preconditioner must be positive"
+    end if
+    if (alpha_mixing_preconditioner > 0d0 .and. abs(q0_mixing_preconditioner - 1d0) > 1d-12) then
+      stop "specify only one of q0_mixing_preconditioner or alpha_mixing_preconditioner"
+    end if
     if (q0_mixing_preconditioner <= 0d0) then
       stop "q0_mixing_preconditioner must be positive"
     end if

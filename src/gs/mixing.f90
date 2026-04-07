@@ -106,7 +106,7 @@ subroutine apply_density_preconditioner(lg,mg,info,fg,poisson,mixing,rho_in1,rho
   type(s_parallel_info),intent(in) :: info
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_poisson),intent(inout) :: poisson
-  type(s_mixing),intent(in) :: mixing
+  type(s_mixing),intent(inout) :: mixing
   type(s_scalar),intent(in) :: rho_in1
   type(s_scalar),intent(inout) :: rho_out1
   type(s_scalar),intent(in),optional :: rho_in2
@@ -114,7 +114,7 @@ subroutine apply_density_preconditioner(lg,mg,info,fg,poisson,mixing,rho_in1,rho
   type(s_scalar) :: rho_delta_charge, rho_delta_spin, screened_charge
   logical :: has_spin2
   integer :: ix, iy, iz
-  real(8) :: q0_factor
+  real(8) :: effective_q0, q0_factor
 
   if (.not. mixing%use_density_preconditioner) return
   if (trim(mixing%method_mixing_preconditioner) /= 'kerker') return
@@ -124,7 +124,8 @@ subroutine apply_density_preconditioner(lg,mg,info,fg,poisson,mixing,rho_in1,rho
     stop 'apply_density_preconditioner requires both spin channels'
   end if
 
-  q0_factor = mixing%q0_mixing_preconditioner**2 / (4.d0*pi)
+  call resolve_density_preconditioner_q0(info,fg,mixing,effective_q0)
+  q0_factor = effective_q0**2 / (4.d0*pi)
 
   call allocate_scalar(mg,rho_delta_charge)
   call allocate_scalar(mg,screened_charge)
@@ -153,7 +154,7 @@ subroutine apply_density_preconditioner(lg,mg,info,fg,poisson,mixing,rho_in1,rho
     end do
   end if
 
-  call solve_screened_density_residual(lg,mg,info,fg,poisson,mixing%q0_mixing_preconditioner,rho_delta_charge,screened_charge)
+  call solve_screened_density_residual(lg,mg,info,fg,poisson,effective_q0,rho_delta_charge,screened_charge)
 
   if (has_spin2) then
 !$omp parallel do private(iz,iy,ix) collapse(2)
@@ -184,6 +185,52 @@ subroutine apply_density_preconditioner(lg,mg,info,fg,poisson,mixing,rho_in1,rho
   call deallocate_scalar(screened_charge)
   call deallocate_scalar(rho_delta_charge)
 end subroutine apply_density_preconditioner
+
+!===================================================================================================================================
+
+subroutine resolve_density_preconditioner_q0(info,fg,mixing,effective_q0)
+  use communication, only: comm_get_max_array1d_double
+  use structures, only: s_parallel_info, s_reciprocal_grid, s_mixing
+  implicit none
+  type(s_parallel_info),intent(in) :: info
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_mixing),intent(inout) :: mixing
+  real(8),intent(out) :: effective_q0
+  integer :: ix, iy, iz
+  real(8) :: g2, inv_g2_max_local
+  real(8) :: inv_g2_max_in(1), inv_g2_max_out(1)
+
+  if (mixing%alpha_mixing_preconditioner > 0d0) then
+    if (mixing%resolved_q0_mixing_preconditioner > 0d0) then
+      effective_q0 = mixing%resolved_q0_mixing_preconditioner
+      return
+    end if
+
+    inv_g2_max_local = 0d0
+!$omp parallel do private(iz,iy,ix,g2) collapse(2) reduction(max:inv_g2_max_local)
+    do iz=lbound(fg%vec_G,4),ubound(fg%vec_G,4)
+    do iy=lbound(fg%vec_G,3),ubound(fg%vec_G,3)
+    do ix=lbound(fg%vec_G,2),ubound(fg%vec_G,2)
+      g2 = fg%vec_G(1,ix,iy,iz)**2 + fg%vec_G(2,ix,iy,iz)**2 + fg%vec_G(3,ix,iy,iz)**2
+      if (g2 > 0d0) inv_g2_max_local = max(inv_g2_max_local, 1d0 / g2)
+    end do
+    end do
+    end do
+
+    inv_g2_max_in(1) = inv_g2_max_local
+    call comm_get_max_array1d_double(inv_g2_max_in,inv_g2_max_out,1,info%icomm_r)
+    if (inv_g2_max_out(1) <= 0d0) then
+      stop "failed to determine |q_min| for density-mixing preconditioner"
+    end if
+
+    mixing%resolved_q0_mixing_preconditioner = mixing%alpha_mixing_preconditioner / sqrt(inv_g2_max_out(1))
+    effective_q0 = mixing%resolved_q0_mixing_preconditioner
+    return
+  end if
+
+  mixing%resolved_q0_mixing_preconditioner = mixing%q0_mixing_preconditioner
+  effective_q0 = mixing%resolved_q0_mixing_preconditioner
+end subroutine resolve_density_preconditioner_q0
 
 !===================================================================================================================================
 
@@ -1316,7 +1363,7 @@ end subroutine
 
 subroutine init_mixing(nspin,mg,mixing)
   use salmon_global, only: mixrate,alpha_mb,beta_p,yn_aux_mixing,tau_mixrate,tau_metric_weight,j_mixrate,j_metric_weight, &
-                           method_mixing_preconditioner,q0_mixing_preconditioner
+                           method_mixing_preconditioner,q0_mixing_preconditioner,alpha_mixing_preconditioner
   use structures
   implicit none
   integer      ,intent(in) :: nspin
@@ -1330,6 +1377,12 @@ subroutine init_mixing(nspin,mg,mixing)
   mixing%beta_p=beta_p
   mixing%method_mixing_preconditioner = method_mixing_preconditioner
   mixing%q0_mixing_preconditioner = q0_mixing_preconditioner
+  mixing%alpha_mixing_preconditioner = alpha_mixing_preconditioner
+  if (alpha_mixing_preconditioner > 0d0) then
+    mixing%resolved_q0_mixing_preconditioner = 0d0
+  else
+    mixing%resolved_q0_mixing_preconditioner = q0_mixing_preconditioner
+  end if
   mixing%use_density_preconditioner = (trim(method_mixing_preconditioner) /= 'none')
   mixing%use_aux_mixing = (yn_aux_mixing == 'y')
   mixing%use_aux_tau = mixing%use_aux_mixing .and. (tau_mixrate > 0d0)
@@ -1552,7 +1605,7 @@ end subroutine check_mixing_half
 
 subroutine reset_mixing_rate(mixing)
   use salmon_global, only: mixrate, alpha_mb, beta_p, tau_mixrate, j_mixrate, &
-                           method_mixing_preconditioner, q0_mixing_preconditioner
+                           method_mixing_preconditioner, q0_mixing_preconditioner, alpha_mixing_preconditioner
   use structures, only: s_mixing
   implicit none
   type(s_mixing), intent(inout) :: mixing
@@ -1562,6 +1615,12 @@ subroutine reset_mixing_rate(mixing)
   mixing%beta_p   = beta_p
   mixing%method_mixing_preconditioner = method_mixing_preconditioner
   mixing%q0_mixing_preconditioner = q0_mixing_preconditioner
+  mixing%alpha_mixing_preconditioner = alpha_mixing_preconditioner
+  if (alpha_mixing_preconditioner > 0d0) then
+    mixing%resolved_q0_mixing_preconditioner = 0d0
+  else
+    mixing%resolved_q0_mixing_preconditioner = q0_mixing_preconditioner
+  end if
   mixing%use_density_preconditioner = (trim(method_mixing_preconditioner) /= 'none')
   mixing%tau_mixrate = tau_mixrate
   mixing%j_mixrate = j_mixrate

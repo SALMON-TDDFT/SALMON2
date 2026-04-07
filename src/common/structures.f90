@@ -525,6 +525,8 @@ module structures
     real(8) :: mixrate, alpha_mb, beta_p
     character(16) :: method_mixing_preconditioner = 'none'
     real(8) :: q0_mixing_preconditioner = 0d0
+    real(8) :: alpha_mixing_preconditioner = -1d0
+    real(8) :: resolved_q0_mixing_preconditioner = 0d0
     real(8) :: tau_mixrate, tau_metric_weight
     real(8) :: j_mixrate, j_metric_weight
     type(s_scalar) :: tau_work
