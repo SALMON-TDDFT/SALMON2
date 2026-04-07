@@ -88,8 +88,10 @@ type(s_dcdft),optional :: dc
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
-type(s_scalar) :: rho_old,Vlocal_old
+logical :: have_tau_residual, tau_residual_ready, energy_residual_ready
+type(s_scalar) :: rho_old,Vlocal_old,tau_old
 real(8) :: rNe
+real(8) :: tau_residual, dE_iter, energy_old
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
@@ -307,11 +309,15 @@ DFT_Iteration : do iter=Miter+1,nscf
       case('norm_pot')     ; write(*,203) Miter, sum1
       case('norm_pot_dng') ; write(*,204) Miter, sum1
       end select
+      if (energy_residual_ready) write(*,205) Miter, dE_iter
+      if (have_tau_residual .and. tau_residual_ready) write(*,206) Miter, tau_residual
 200   format(1x,"iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
 201   format(1x,"iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
 202   format(1x,"iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
 203   format(1x,"iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2             = ",i6,e15.8)
 204   format(1x,"iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
+205   format(1x,"iter and |E_i-E_i-1| [Ha]                           = ",i6,e15.8)
+206   format(1x,"iter and int_x|tau_i(x)-tau_i-1(x)|dx/nelec [Ha] = ",i6,e15.8)
 
       if(yn_spinorbit=='y') then
         write(*,'(1x,"Magnetization= ",3(e15.8,2x))') magnetization(1:3)
@@ -369,6 +375,17 @@ DFT_Iteration : do iter=Miter+1,nscf
      end do
      end do
      end do
+     if (have_tau_residual .and. allocated(mixing%tau_work%f)) then
+!$OMP parallel do private(iz,iy,ix)
+       do iz=mg%is(3),mg%ie(3)
+       do iy=mg%is(2),mg%ie(2)
+       do ix=mg%is(1),mg%ie(1)
+          tau_old%f(ix,iy,iz) = mixing%tau_work%f(ix,iy,iz)
+       end do
+       end do
+       end do
+       tau_residual_ready = .true.
+     end if
    else
    ! DC method
 !$OMP parallel do private(iz,iy,ix)
@@ -380,6 +397,8 @@ DFT_Iteration : do iter=Miter+1,nscf
      end do
      end do
    end if
+   energy_old = energy%E_tot
+   energy_residual_ready = .true.
 
    end if !calc_mode/=DFT_BAND
 
@@ -417,6 +436,13 @@ contains
   subroutine init_convergence_check()
     implicit none
     
+    have_tau_residual = mixing%use_aux_tau .and. yn_dc == 'n'
+    tau_residual_ready = .false.
+    energy_residual_ready = .false.
+    tau_residual = 0d0
+    dE_iter = 0d0
+    energy_old = 0d0
+
     if(system%nspin==1) then
       rNe = dble(nelec)
     else if(system%nspin==2)then
@@ -426,9 +452,10 @@ contains
         rNe = dble(nelec)
       end if
     end if
-    
+
     call allocate_scalar(mg,rho_old)
     call allocate_scalar(mg,Vlocal_old)
+    if (have_tau_residual) call allocate_scalar(mg,tau_old)
 
     !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -436,6 +463,7 @@ contains
     do ix=mg%is(1),mg%ie(1)
        rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
        Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
+       if (have_tau_residual) tau_old%f(ix,iy,iz) = 0d0
     end do
     end do
     end do
@@ -456,7 +484,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     type(s_scalar)       ,intent(in) :: rho,V_local(system%nspin)
     !
-    real(8) :: sum0
+    real(8) :: sum0, sum_tau0
     
     select case(convergence)
     case('rho_dne')
@@ -500,6 +528,28 @@ contains
         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
     end select
+
+    if (energy_residual_ready) then
+      dE_iter = abs(energy%E_tot - energy_old)
+    else
+      dE_iter = 0d0
+    end if
+
+    if (have_tau_residual .and. tau_residual_ready .and. allocated(mixing%tau_work%f)) then
+      sum_tau0 = 0d0
+      !$OMP parallel do reduction(+:sum_tau0) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        sum_tau0 = sum_tau0 + abs(mixing%tau_work%f(ix,iy,iz)-tau_old%f(ix,iy,iz))
+      end do
+      end do
+      end do
+      call comm_summation(sum_tau0,tau_residual,info%icomm_r)
+      tau_residual = tau_residual*system%Hvol/rNe
+    else
+      tau_residual = 0d0
+    end if
   end subroutine convergence_check
 
 end subroutine scf_iteration_dft
