@@ -327,6 +327,8 @@ contains
       & beta_p, &
       & yn_auto_mixing, &
       & update_mixing_ratio, &
+      & method_mixing_preconditioner, &
+      & q0_mixing_preconditioner, &
       & nscf, &
       & yn_subspace_diagonalization, &
       & convergence, &
@@ -761,6 +763,8 @@ contains
     beta_p        = 0.75d0
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
+    method_mixing_preconditioner = 'none'
+    q0_mixing_preconditioner = 1.d0
     nscf          = 300
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
@@ -1316,6 +1320,8 @@ contains
     call comm_bcast(beta_p                  ,nproc_group_global)
     call comm_bcast(yn_auto_mixing          ,nproc_group_global)
     call comm_bcast(update_mixing_ratio     ,nproc_group_global)
+    call comm_bcast(method_mixing_preconditioner,nproc_group_global)
+    call comm_bcast(q0_mixing_preconditioner,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
@@ -2227,6 +2233,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing_preconditioner', method_mixing_preconditioner
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'q0_mixing_preconditioner', q0_mixing_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
@@ -2989,6 +2997,15 @@ contains
     end if
     if (j_metric_weight <= 0d0) then
       stop "j_metric_weight must be positive"
+    end if
+    select case(trim(method_mixing_preconditioner))
+    case('none','kerker')
+      continue
+    case default
+      stop "method_mixing_preconditioner must be 'none' or 'kerker'"
+    end select
+    if (q0_mixing_preconditioner <= 0d0) then
+      stop "q0_mixing_preconditioner must be positive"
     end if
     if (yn_aux_mixing == 'y' .and. spin /= 'unpolarized') then
       stop "aux mixing currently supports only spin='unpolarized'"

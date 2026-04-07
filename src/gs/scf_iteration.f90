@@ -74,7 +74,7 @@ end subroutine solve_orbitals
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc,yn_periodic
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
@@ -109,6 +109,15 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   do_j_mixing = mixing%use_aux_j .and. xc_func%xctype(1) == salmon_xctype_tbmbj
   aux_work_ready = .false.
 
+  if (trim(mixing%method_mixing_preconditioner) == 'kerker') then
+    if (yn_periodic /= 'y') then
+      stop "method_mixing_preconditioner='kerker' currently requires yn_periodic='y'"
+    end if
+    if (method_mixing == 'simple_potential') then
+      stop "method_mixing_preconditioner='kerker' does not support method_mixing='simple_potential'"
+    end if
+  end if
+
   if (mixing%use_aux_mixing .and. (mixing%tau_mixrate > 0d0 .or. mixing%j_mixrate > 0d0) .and. .not. xc_func%use_kinetic_energy) then
     stop "aux mixing requested but active XC does not use auxiliary fields"
   end if
@@ -141,29 +150,29 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
 
   select case(method_mixing)
   case ('simple')
-    call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
+    call simple_mixing(lg,mg,info,fg,poisson,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
   case ('simple_dm')
     if(yn_spinorbit=='n') stop 'yn_spinorbit must be y when method_mixing=simple_dm'
     call simple_mixing_so(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
   case ('broyden')
     if (do_tau_mixing .and. do_j_mixing) then
-      call wrapper_broyden(info%icomm_r,mg,system,rho_s,tau=mixing%tau_work,j=mixing%j_work,iter=iter,mixing=mixing)
+      call wrapper_broyden(info%icomm_r,lg,mg,info,fg,poisson,system,rho_s,tau=mixing%tau_work,j=mixing%j_work,iter=iter,mixing=mixing)
     else if (do_tau_mixing) then
-      call wrapper_broyden(info%icomm_r,mg,system,rho_s,tau=mixing%tau_work,iter=iter,mixing=mixing)
+      call wrapper_broyden(info%icomm_r,lg,mg,info,fg,poisson,system,rho_s,tau=mixing%tau_work,iter=iter,mixing=mixing)
     else if (do_j_mixing) then
-      call wrapper_broyden(info%icomm_r,mg,system,rho_s,j=mixing%j_work,iter=iter,mixing=mixing)
+      call wrapper_broyden(info%icomm_r,lg,mg,info,fg,poisson,system,rho_s,j=mixing%j_work,iter=iter,mixing=mixing)
     else
-      call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter=iter,mixing=mixing)
+      call wrapper_broyden(info%icomm_r,lg,mg,info,fg,poisson,system,rho_s,iter=iter,mixing=mixing)
     end if
   case ('pulay')
     if (do_tau_mixing .and. do_j_mixing) then
-      call pulay(mg,info,system,rho_s,tau=mixing%tau_work,j=mixing%j_work,iter=iter,mixing=mixing)
+      call pulay(lg,mg,info,fg,poisson,system,rho_s,tau=mixing%tau_work,j=mixing%j_work,iter=iter,mixing=mixing)
     else if (do_tau_mixing) then
-      call pulay(mg,info,system,rho_s,tau=mixing%tau_work,iter=iter,mixing=mixing)
+      call pulay(lg,mg,info,fg,poisson,system,rho_s,tau=mixing%tau_work,iter=iter,mixing=mixing)
     else if (do_j_mixing) then
-      call pulay(mg,info,system,rho_s,j=mixing%j_work,iter=iter,mixing=mixing)
+      call pulay(lg,mg,info,fg,poisson,system,rho_s,j=mixing%j_work,iter=iter,mixing=mixing)
     else
-      call pulay(mg,info,system,rho_s,iter=iter,mixing=mixing)
+      call pulay(lg,mg,info,fg,poisson,system,rho_s,iter=iter,mixing=mixing)
     end if
   case ('simple_potential')
     ! Nothing is done here since Hartree and XC potentials are mixed instead of density

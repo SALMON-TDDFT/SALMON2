@@ -19,10 +19,13 @@ module mixing_sub
 contains
 
 !===================================================================================================================================
-subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
-  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing  
+subroutine simple_mixing(lg,mg,info,fg,poisson,system,c1,c2,rho_s,mixing)
+  use structures, only: s_rgrid, s_parallel_info, s_reciprocal_grid, s_poisson, s_dft_system, s_scalar, s_mixing
   implicit none
-  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(in) :: lg, mg
+  type(s_parallel_info),intent(in) :: info
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_poisson),intent(inout) :: poisson
   type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: c1,c2
   type(s_scalar),intent(inout) :: rho_s(system%nspin)
@@ -39,6 +42,10 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
     end do
     end do
     end do
+    if (mixing%use_density_preconditioner) then
+      call apply_density_preconditioner(lg,mg,info,fg,poisson,mixing, &
+           mixing%rho_in(mixing%num_rho_stock),mixing%rho_out(mixing%num_rho_stock))
+    end if
   elseif(system%nspin == 2)then
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
@@ -49,6 +56,11 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
     end do
     end do
     end do
+    if (mixing%use_density_preconditioner) then
+      call apply_density_preconditioner(lg,mg,info,fg,poisson,mixing, &
+           mixing%rho_s_in(mixing%num_rho_stock,1),mixing%rho_s_out(mixing%num_rho_stock,1), &
+           rho_in2=mixing%rho_s_in(mixing%num_rho_stock,2),rho_out2=mixing%rho_s_out(mixing%num_rho_stock,2))
+    end if
   end if
   
   !rho = c1*rho + c2*matmul( psi**2, occ )
@@ -84,6 +96,184 @@ subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   
 end subroutine simple_mixing
 !===================================================================================================================================
+
+subroutine apply_density_preconditioner(lg,mg,info,fg,poisson,mixing,rho_in1,rho_out1,rho_in2,rho_out2)
+  use structures, only: s_rgrid, s_parallel_info, s_reciprocal_grid, s_poisson, s_scalar, s_mixing, &
+                        allocate_scalar, deallocate_scalar
+  use math_constants, only: pi
+  implicit none
+  type(s_rgrid),intent(in) :: lg, mg
+  type(s_parallel_info),intent(in) :: info
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_poisson),intent(inout) :: poisson
+  type(s_mixing),intent(in) :: mixing
+  type(s_scalar),intent(in) :: rho_in1
+  type(s_scalar),intent(inout) :: rho_out1
+  type(s_scalar),intent(in),optional :: rho_in2
+  type(s_scalar),intent(inout),optional :: rho_out2
+  type(s_scalar) :: rho_delta_charge, rho_delta_spin, screened_charge
+  logical :: has_spin2
+  integer :: ix, iy, iz
+  real(8) :: q0_factor
+
+  if (.not. mixing%use_density_preconditioner) return
+  if (trim(mixing%method_mixing_preconditioner) /= 'kerker') return
+
+  has_spin2 = present(rho_in2) .and. present(rho_out2)
+  if (present(rho_in2) .neqv. present(rho_out2)) then
+    stop 'apply_density_preconditioner requires both spin channels'
+  end if
+
+  q0_factor = mixing%q0_mixing_preconditioner**2 / (4.d0*pi)
+
+  call allocate_scalar(mg,rho_delta_charge)
+  call allocate_scalar(mg,screened_charge)
+  if (has_spin2) call allocate_scalar(mg,rho_delta_spin)
+
+  if (has_spin2) then
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho_delta_charge%f(ix,iy,iz) = (rho_out1%f(ix,iy,iz)-rho_in1%f(ix,iy,iz)) &
+                                   + (rho_out2%f(ix,iy,iz)-rho_in2%f(ix,iy,iz))
+      rho_delta_spin%f(ix,iy,iz) = (rho_out1%f(ix,iy,iz)-rho_in1%f(ix,iy,iz)) &
+                                 - (rho_out2%f(ix,iy,iz)-rho_in2%f(ix,iy,iz))
+    end do
+    end do
+    end do
+  else
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho_delta_charge%f(ix,iy,iz) = rho_out1%f(ix,iy,iz)-rho_in1%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end if
+
+  call solve_screened_density_residual(lg,mg,info,fg,poisson,mixing%q0_mixing_preconditioner,rho_delta_charge,screened_charge)
+
+  if (has_spin2) then
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho_out1%f(ix,iy,iz) = rho_in1%f(ix,iy,iz) &
+                           + 0.5d0 * (rho_delta_charge%f(ix,iy,iz) - q0_factor*screened_charge%f(ix,iy,iz) &
+                                    + rho_delta_spin%f(ix,iy,iz))
+      rho_out2%f(ix,iy,iz) = rho_in2%f(ix,iy,iz) &
+                           + 0.5d0 * (rho_delta_charge%f(ix,iy,iz) - q0_factor*screened_charge%f(ix,iy,iz) &
+                                    - rho_delta_spin%f(ix,iy,iz))
+    end do
+    end do
+    end do
+  else
+!$omp parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho_out1%f(ix,iy,iz) = rho_in1%f(ix,iy,iz) + rho_delta_charge%f(ix,iy,iz) - q0_factor*screened_charge%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end if
+
+  if (has_spin2) call deallocate_scalar(rho_delta_spin)
+  call deallocate_scalar(screened_charge)
+  call deallocate_scalar(rho_delta_charge)
+end subroutine apply_density_preconditioner
+
+!===================================================================================================================================
+
+subroutine solve_screened_density_residual(lg,mg,info,fg,poisson,q0,rho_delta,screened_charge)
+  use structures, only: s_rgrid, s_parallel_info, s_reciprocal_grid, s_poisson, s_scalar
+  use inputoutput, only: yn_ffte
+#ifdef USE_FFTW
+  use inputoutput, only: yn_fftw
+#endif
+  use poisson_periodic, only: poisson_ft, poisson_ffte
+#ifdef USE_FFTW
+  use poisson_periodic, only: poisson_fftw
+#endif
+  implicit none
+  type(s_rgrid),intent(in) :: lg, mg
+  type(s_parallel_info),intent(in) :: info
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_poisson),intent(inout) :: poisson
+  real(8),intent(in) :: q0
+  type(s_scalar),intent(in) :: rho_delta
+  type(s_scalar),intent(inout) :: screened_charge
+
+  call set_screened_poisson_kernel(fg,q0)
+#ifdef USE_FFTW
+  select case(yn_fftw)
+  case('n')
+#endif
+    select case(yn_ffte)
+    case('n')
+      call poisson_ft(lg,mg,info,fg,rho_delta,screened_charge,poisson)
+    case('y')
+      call poisson_ffte(lg,mg,info,fg,rho_delta,screened_charge,poisson)
+    end select
+#ifdef USE_FFTW
+  case('y')
+    call poisson_fftw(lg,mg,info,fg,rho_delta,screened_charge,poisson)
+  end select
+#endif
+  call restore_poisson_kernel(fg)
+end subroutine solve_screened_density_residual
+
+!===================================================================================================================================
+
+subroutine set_screened_poisson_kernel(fg,q0)
+  use structures, only: s_reciprocal_grid
+  use math_constants, only: pi
+  implicit none
+  type(s_reciprocal_grid),intent(inout) :: fg
+  real(8),intent(in) :: q0
+  integer :: ix, iy, iz
+  real(8) :: g2
+
+!$omp parallel do private(iz,iy,ix,g2) collapse(2)
+  do iz=lbound(fg%coef,3),ubound(fg%coef,3)
+  do iy=lbound(fg%coef,2),ubound(fg%coef,2)
+  do ix=lbound(fg%coef,1),ubound(fg%coef,1)
+    g2 = fg%vec_G(1,ix,iy,iz)**2 + fg%vec_G(2,ix,iy,iz)**2 + fg%vec_G(3,ix,iy,iz)**2
+    fg%coef(ix,iy,iz) = 4.d0*pi / (g2 + q0**2)
+  end do
+  end do
+  end do
+end subroutine set_screened_poisson_kernel
+
+!===================================================================================================================================
+
+subroutine restore_poisson_kernel(fg)
+  use structures, only: s_reciprocal_grid
+  use math_constants, only: pi
+  implicit none
+  type(s_reciprocal_grid),intent(inout) :: fg
+  integer :: ix, iy, iz
+  real(8) :: g2
+
+!$omp parallel do private(iz,iy,ix,g2) collapse(2)
+  do iz=lbound(fg%coef,3),ubound(fg%coef,3)
+  do iy=lbound(fg%coef,2),ubound(fg%coef,2)
+  do ix=lbound(fg%coef,1),ubound(fg%coef,1)
+    if (fg%if_Gzero(ix,iy,iz)) then
+      fg%coef(ix,iy,iz) = 0.d0
+    else
+      g2 = fg%vec_G(1,ix,iy,iz)**2 + fg%vec_G(2,ix,iy,iz)**2 + fg%vec_G(3,ix,iy,iz)**2
+      fg%coef(ix,iy,iz) = 4.d0*pi / g2
+    end if
+  end do
+  end do
+  end do
+end subroutine restore_poisson_kernel
+
+!===================================================================================================================================
+
 subroutine simple_mixing_potential(mg,system,c1,c2,Vh,Vxc,mixing)
   use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing  
   implicit none
@@ -498,12 +688,16 @@ end subroutine unpack_aux_mixing_vector
 
 !===================================================================================================================================
 
-subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
-  use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
+subroutine wrapper_broyden(comm,lg,mg,info,fg,poisson,system,rho_s,tau,j,iter,mixing)
+  use structures, only: s_rgrid,s_parallel_info,s_reciprocal_grid,s_poisson,s_dft_system,s_scalar,s_mixing, &
+                        allocate_scalar,deallocate_scalar
   use broyden_sub
   implicit none
   integer,intent(in) :: comm
-  type(s_rgrid) :: mg
+  type(s_rgrid),intent(in) :: lg, mg
+  type(s_parallel_info),intent(in) :: info
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_poisson),intent(inout) :: poisson
   type(s_dft_system),intent(in) :: system
   type(s_scalar),intent(inout) :: rho_s(system%nspin)
   type(s_scalar),intent(inout),optional :: tau
@@ -514,10 +708,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
   integer :: i
   integer :: nxyz, vec_size
   real(8) :: tau_scale, j_scale
-  logical :: use_tau_block, use_j_block, seed_aux_only
+  logical :: use_tau_block, use_j_block, seed_aux_only, use_preconditioned_current
   real(8) :: vecr(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: vecr_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),mixing%num_rho_stock+1)
   real(8) :: vecr_out(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),mixing%num_rho_stock+1)
+  type(s_scalar) :: rho_pre(2)
 
 #ifdef USE_OPENACC
 !$acc data copyin(mixing)
@@ -525,6 +720,22 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
 
   use_tau_block = mixing%use_aux_tau .and. present(tau) .and. system%nspin == 1
   use_j_block = mixing%use_aux_j .and. present(j) .and. system%nspin == 1
+  use_preconditioned_current = mixing%use_density_preconditioner
+
+  if (use_preconditioned_current) then
+    call allocate_scalar(mg,rho_pre(1))
+    call copy_scalar_output(mg,rho_s(1),rho_pre(1))
+    if (system%nspin == 2) then
+      call allocate_scalar(mg,rho_pre(2))
+      call copy_scalar_output(mg,rho_s(2),rho_pre(2))
+      call apply_density_preconditioner(lg,mg,info,fg,poisson,mixing, &
+           mixing%rho_s_in(mixing%num_rho_stock,1),rho_pre(1), &
+           rho_in2=mixing%rho_s_in(mixing%num_rho_stock,2),rho_out2=rho_pre(2))
+    else
+      call apply_density_preconditioner(lg,mg,info,fg,poisson,mixing, &
+           mixing%rho_in(mixing%num_rho_stock),rho_pre(1))
+    end if
+  end if
 
   if (use_tau_block .or. use_j_block) then
     call ensure_aux_mixing_storage(mg, mixing)
@@ -555,9 +766,15 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
       end if
 
       if (use_tau_block .and. use_j_block) then
-        call pack_aux_mixing_vector(mg,rho_s(1),mixing%aux_vec,tau_scale,j_scale, &
-             tau=mixing%tau_out(mixing%num_rho_stock),jx=mixing%jx_out(mixing%num_rho_stock), &
-             jy=mixing%jy_out(mixing%num_rho_stock),jz=mixing%jz_out(mixing%num_rho_stock))
+        if (use_preconditioned_current) then
+          call pack_aux_mixing_vector(mg,rho_pre(1),mixing%aux_vec,tau_scale,j_scale, &
+               tau=mixing%tau_out(mixing%num_rho_stock),jx=mixing%jx_out(mixing%num_rho_stock), &
+               jy=mixing%jy_out(mixing%num_rho_stock),jz=mixing%jz_out(mixing%num_rho_stock))
+        else
+          call pack_aux_mixing_vector(mg,rho_s(1),mixing%aux_vec,tau_scale,j_scale, &
+               tau=mixing%tau_out(mixing%num_rho_stock),jx=mixing%jx_out(mixing%num_rho_stock), &
+               jy=mixing%jy_out(mixing%num_rho_stock),jz=mixing%jz_out(mixing%num_rho_stock))
+        end if
         do i=1,mixing%num_rho_stock+1
           call pack_aux_mixing_vector(mg,mixing%rho_in(i),mixing%aux_vec_in(:,i),tau_scale,j_scale, &
                tau=mixing%tau_in(i),jx=mixing%jx_in(i),jy=mixing%jy_in(i),jz=mixing%jz_in(i))
@@ -565,14 +782,23 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
                tau=mixing%tau_out(i),jx=mixing%jx_out(i),jy=mixing%jy_out(i),jz=mixing%jz_out(i))
         end do
       else if (use_tau_block) then
-        call pack_aux_mixing_vector(mg,rho_s(1),mixing%aux_vec,tau_scale,j_scale,tau=mixing%tau_out(mixing%num_rho_stock))
+        if (use_preconditioned_current) then
+          call pack_aux_mixing_vector(mg,rho_pre(1),mixing%aux_vec,tau_scale,j_scale,tau=mixing%tau_out(mixing%num_rho_stock))
+        else
+          call pack_aux_mixing_vector(mg,rho_s(1),mixing%aux_vec,tau_scale,j_scale,tau=mixing%tau_out(mixing%num_rho_stock))
+        end if
         do i=1,mixing%num_rho_stock+1
           call pack_aux_mixing_vector(mg,mixing%rho_in(i),mixing%aux_vec_in(:,i),tau_scale,j_scale,tau=mixing%tau_in(i))
           call pack_aux_mixing_vector(mg,mixing%rho_out(i),mixing%aux_vec_out(:,i),tau_scale,j_scale,tau=mixing%tau_out(i))
         end do
       else
-        call pack_aux_mixing_vector(mg,rho_s(1),mixing%aux_vec,tau_scale,j_scale, &
-             jx=mixing%jx_out(mixing%num_rho_stock),jy=mixing%jy_out(mixing%num_rho_stock),jz=mixing%jz_out(mixing%num_rho_stock))
+        if (use_preconditioned_current) then
+          call pack_aux_mixing_vector(mg,rho_pre(1),mixing%aux_vec,tau_scale,j_scale, &
+               jx=mixing%jx_out(mixing%num_rho_stock),jy=mixing%jy_out(mixing%num_rho_stock),jz=mixing%jz_out(mixing%num_rho_stock))
+        else
+          call pack_aux_mixing_vector(mg,rho_s(1),mixing%aux_vec,tau_scale,j_scale, &
+               jx=mixing%jx_out(mixing%num_rho_stock),jy=mixing%jy_out(mixing%num_rho_stock),jz=mixing%jz_out(mixing%num_rho_stock))
+        end if
         do i=1,mixing%num_rho_stock+1
           call pack_aux_mixing_vector(mg,mixing%rho_in(i),mixing%aux_vec_in(:,i),tau_scale,j_scale, &
                jx=mixing%jx_in(i),jy=mixing%jy_in(i),jz=mixing%jz_in(i))
@@ -607,6 +833,10 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
                jx=mixing%jx_out(i),jy=mixing%jy_out(i),jz=mixing%jz_out(i))
         end do
       end if
+      if (use_preconditioned_current) then
+        call deallocate_scalar(rho_pre(1))
+        if (system%nspin == 2) call deallocate_scalar(rho_pre(2))
+      end if
       return
     end if
   end if
@@ -621,7 +851,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-       vecr(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
+       if (use_preconditioned_current) then
+         vecr(ix,iy,iz)=rho_pre(1)%f(ix,iy,iz)
+       else
+         vecr(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
+       end if
     end do
     end do
     end do
@@ -682,7 +916,11 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         vecr(ix,iy,iz)=rho_s(is)%f(ix,iy,iz)
+         if (use_preconditioned_current) then
+           vecr(ix,iy,iz)=rho_pre(is)%f(ix,iy,iz)
+         else
+           vecr(ix,iy,iz)=rho_s(is)%f(ix,iy,iz)
+         end if
       end do
       end do
       end do
@@ -731,17 +969,25 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
 !$acc end data
 #endif
 
+  if (use_preconditioned_current) then
+    call deallocate_scalar(rho_pre(1))
+    if (system%nspin == 2) call deallocate_scalar(rho_pre(2))
+  end if
+
 end subroutine wrapper_broyden
 
 !===================================================================================================================================
 
-subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
+subroutine pulay(lg,mg,info,fg,poisson,system,rho_s,tau,j,iter,mixing)
   use salmon_global, only: nmemory_p
-  use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_scalar,s_mixing,allocate_scalar,deallocate_scalar
+  use structures, only: s_rgrid,s_parallel_info,s_reciprocal_grid,s_poisson,s_dft_system,s_scalar,s_mixing, &
+                        allocate_scalar,deallocate_scalar
   use communication, only: comm_summation
   implicit none
-  type(s_rgrid),intent(in)            :: mg
+  type(s_rgrid),intent(in)            :: lg, mg
   type(s_parallel_info),intent(in) :: info
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_poisson),intent(inout) :: poisson
   type(s_dft_system),intent(in)       :: system
   type(s_scalar),intent(inout)        :: rho_s(system%nspin)
   type(s_scalar),intent(inout),optional :: tau
@@ -768,7 +1014,7 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
 
   if(iter==1.or.nmemory_p==1)then
 
-    call simple_mixing(mg,system,1.d0-mixing%beta_p,mixing%beta_p,rho_s,mixing)
+    call simple_mixing(lg,mg,info,fg,poisson,system,1.d0-mixing%beta_p,mixing%beta_p,rho_s,mixing)
     if (use_tau_block) then
       call simple_mixing_tau(mg,1.d0-mixing%beta_p,mixing%beta_p,tau,mixing)
     end if
@@ -790,6 +1036,11 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
       end do
       end do
       end do
+
+      if (mixing%use_density_preconditioner) then
+        call apply_density_preconditioner(lg,mg,info,fg,poisson,mixing, &
+             mixing%rho_in(mixing%num_rho_stock),mixing%rho_out(mixing%num_rho_stock))
+      end if
 
       if (use_tau_block) call copy_scalar_output(mg,tau,mixing%tau_out(mixing%num_rho_stock))
       if (use_j_block) then
@@ -922,6 +1173,11 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
       end do
       end do
       end do
+      if (mixing%use_density_preconditioner) then
+        call apply_density_preconditioner(lg,mg,info,fg,poisson,mixing, &
+             mixing%rho_s_in(mixing%num_rho_stock,1),mixing%rho_s_out(mixing%num_rho_stock,1), &
+             rho_in2=mixing%rho_s_in(mixing%num_rho_stock,2),rho_out2=mixing%rho_s_out(mixing%num_rho_stock,2))
+      end if
     end if
   
   !rho = c1*rho + c2*matmul( psi**2, occ )
@@ -1059,7 +1315,8 @@ end subroutine
 !===================================================================================================================================
 
 subroutine init_mixing(nspin,mg,mixing)
-  use salmon_global, only: mixrate,alpha_mb,beta_p,yn_aux_mixing,tau_mixrate,tau_metric_weight,j_mixrate,j_metric_weight
+  use salmon_global, only: mixrate,alpha_mb,beta_p,yn_aux_mixing,tau_mixrate,tau_metric_weight,j_mixrate,j_metric_weight, &
+                           method_mixing_preconditioner,q0_mixing_preconditioner
   use structures
   implicit none
   integer      ,intent(in) :: nspin
@@ -1071,6 +1328,9 @@ subroutine init_mixing(nspin,mg,mixing)
   mixing%mixrate=mixrate
   mixing%alpha_mb=alpha_mb
   mixing%beta_p=beta_p
+  mixing%method_mixing_preconditioner = method_mixing_preconditioner
+  mixing%q0_mixing_preconditioner = q0_mixing_preconditioner
+  mixing%use_density_preconditioner = (trim(method_mixing_preconditioner) /= 'none')
   mixing%use_aux_mixing = (yn_aux_mixing == 'y')
   mixing%use_aux_tau = mixing%use_aux_mixing .and. (tau_mixrate > 0d0)
   mixing%use_aux_j = mixing%use_aux_mixing .and. (j_mixrate > 0d0)
@@ -1291,7 +1551,8 @@ subroutine check_mixing_half(Miter,convergence_value,mixing)
 end subroutine check_mixing_half
 
 subroutine reset_mixing_rate(mixing)
-  use salmon_global, only: mixrate, alpha_mb, beta_p, tau_mixrate, j_mixrate
+  use salmon_global, only: mixrate, alpha_mb, beta_p, tau_mixrate, j_mixrate, &
+                           method_mixing_preconditioner, q0_mixing_preconditioner
   use structures, only: s_mixing
   implicit none
   type(s_mixing), intent(inout) :: mixing
@@ -1299,6 +1560,9 @@ subroutine reset_mixing_rate(mixing)
   mixing%mixrate  = mixrate
   mixing%alpha_mb = alpha_mb
   mixing%beta_p   = beta_p
+  mixing%method_mixing_preconditioner = method_mixing_preconditioner
+  mixing%q0_mixing_preconditioner = q0_mixing_preconditioner
+  mixing%use_density_preconditioner = (trim(method_mixing_preconditioner) /= 'none')
   mixing%tau_mixrate = tau_mixrate
   mixing%j_mixrate = j_mixrate
   mixing%convergence_value_prev = 1.d10

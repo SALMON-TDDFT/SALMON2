@@ -163,6 +163,8 @@ module salmon_global
   real(8)        :: beta_p
   character(1)   :: yn_auto_mixing
   real(8)        :: update_mixing_ratio
+  character(16)  :: method_mixing_preconditioner
+  real(8)        :: q0_mixing_preconditioner
   integer        :: nscf
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence

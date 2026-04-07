@@ -514,6 +514,7 @@ module structures
     logical :: use_aux_mixing = .false.
     logical :: use_aux_tau = .false.
     logical :: use_aux_j = .false.
+    logical :: use_density_preconditioner = .false.
     logical :: tau_history_ready = .false.
     logical :: j_history_ready = .false.
     integer :: num_rho_stock
@@ -522,6 +523,8 @@ module structures
     type(s_scalar),allocatable :: jx_in(:), jx_out(:), jy_in(:), jy_out(:), jz_in(:), jz_out(:)
     type(s_scalar),allocatable :: Vh_in(:), Vh_out(:), Vxc_in(:,:), Vxc_out(:,:)
     real(8) :: mixrate, alpha_mb, beta_p
+    character(16) :: method_mixing_preconditioner = 'none'
+    real(8) :: q0_mixing_preconditioner = 0d0
     real(8) :: tau_mixrate, tau_metric_weight
     real(8) :: j_mixrate, j_metric_weight
     type(s_scalar) :: tau_work
