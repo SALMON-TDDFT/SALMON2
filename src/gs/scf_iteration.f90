@@ -20,7 +20,7 @@ module scf_iteration_sub
 contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
-            &   miter,nscf_init_no_diagonal)
+            &   miter,nscf_init_no_diagonal,ncg_override)
   use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
   use structures
   use timer
@@ -39,6 +39,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   type(s_scalar),         intent(in)    :: vlocal(system%nspin)
   integer,                intent(in)    :: miter
   integer,                intent(in)    :: nscf_init_no_diagonal
+  integer,      optional, intent(in)    :: ncg_override
   !
   integer :: nncg
 
@@ -46,6 +47,9 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     nncg = ncg_init
   else
     nncg = ncg
+  end if
+  if (present(ncg_override) .and. miter > 1) then
+    nncg = ncg_override
   end if
   
 ! subspace diagonalization

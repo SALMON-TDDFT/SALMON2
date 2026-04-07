@@ -89,9 +89,11 @@ logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
 logical :: have_tau_residual, tau_residual_ready, energy_residual_ready
+logical :: metric_converged, energy_converged
 type(s_scalar) :: rho_old,Vlocal_old,tau_old
 real(8) :: rNe
 real(8) :: tau_residual, dE_iter, energy_old
+integer :: adaptive_ncg
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
@@ -151,7 +153,9 @@ sum1=1d9
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
-   if( sum1 < threshold ) then
+   call update_scf_controls(metric_converged, energy_converged, adaptive_ncg)
+
+   if( metric_converged .and. energy_converged ) then
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
@@ -175,7 +179,8 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
-   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
+   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter, &
+            nscf_init_no_diagonal,ncg_override=adaptive_ncg)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
      call copy_density(Miter,system%nspin,mg,rho_s,mixing)
      call copy_aux_history(mg,mixing)
@@ -442,6 +447,9 @@ contains
     tau_residual = 0d0
     dE_iter = 0d0
     energy_old = 0d0
+    metric_converged = .false.
+    energy_converged = .true.
+    adaptive_ncg = ncg
 
     if(system%nspin==1) then
       rNe = dble(nelec)
@@ -476,6 +484,37 @@ contains
     end if
     
   end subroutine init_convergence_check
+
+  subroutine update_scf_controls(metric_ok, energy_ok, adaptive_ncg_out)
+    use salmon_global, only: yn_dual_convergence, energy_threshold, yn_adaptive_ncg, &
+                             ncg, ncg_adaptive_threshold, ncg_adaptive_energy_threshold, &
+                             ncg_adaptive_step
+    implicit none
+    logical, intent(out) :: metric_ok, energy_ok
+    integer, intent(out) :: adaptive_ncg_out
+    logical :: use_rho_gate, use_energy_gate, enable_adaptive_ncg
+
+    metric_ok = sum1 < threshold
+    energy_ok = .true.
+    if (yn_dual_convergence == 'y') then
+      ! Optional rho_dne + |dE| gate for VASP-like operational criteria.
+      energy_ok = energy_residual_ready .and. dE_iter < energy_threshold
+    end if
+
+    adaptive_ncg_out = ncg
+    enable_adaptive_ncg = yn_adaptive_ncg == 'y' .and. Miter > 1
+    if (.not. enable_adaptive_ncg) return
+
+    use_rho_gate = ncg_adaptive_threshold > 0d0
+    use_energy_gate = ncg_adaptive_energy_threshold > 0d0
+    if (use_energy_gate) then
+      use_energy_gate = energy_residual_ready
+    end if
+    if ((.not. use_rho_gate .or. sum1 <= ncg_adaptive_threshold) .and. &
+        (.not. use_energy_gate .or. dE_iter <= ncg_adaptive_energy_threshold)) then
+      adaptive_ncg_out = ncg + ncg_adaptive_step
+    end if
+  end subroutine update_scf_controls
 
   subroutine convergence_check(lg,mg,system,info,rho,V_local)
     implicit none

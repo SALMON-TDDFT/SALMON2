@@ -334,6 +334,12 @@ contains
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
+      & yn_dual_convergence, &
+      & energy_threshold, &
+      & yn_adaptive_ncg, &
+      & ncg_adaptive_threshold, &
+      & ncg_adaptive_energy_threshold, &
+      & ncg_adaptive_step, &
       & nscf_init_redistribution, &
       & nscf_init_no_diagonal, &
       & nscf_init_mix_zero, &
@@ -771,6 +777,12 @@ contains
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
+    yn_dual_convergence = 'n'
+    energy_threshold = -1d0  ! Ha
+    yn_adaptive_ncg = 'n'
+    ncg_adaptive_threshold = -1d0
+    ncg_adaptive_energy_threshold = -1d0  ! Ha
+    ncg_adaptive_step = 1
     nscf_init_redistribution = 10
     nscf_init_no_diagonal= 10
     nscf_init_mix_zero   = -1
@@ -1329,6 +1341,12 @@ contains
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
     call comm_bcast(threshold               ,nproc_group_global)
+    call comm_bcast(yn_dual_convergence     ,nproc_group_global)
+    call comm_bcast(energy_threshold        ,nproc_group_global)
+    call comm_bcast(yn_adaptive_ncg         ,nproc_group_global)
+    call comm_bcast(ncg_adaptive_threshold  ,nproc_group_global)
+    call comm_bcast(ncg_adaptive_energy_threshold,nproc_group_global)
+    call comm_bcast(ncg_adaptive_step       ,nproc_group_global)
     if(threshold.lt.-0.5d0) then !<-- when not input value
       select case(convergence)
       case('rho_dne')
@@ -2243,6 +2261,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dual_convergence', yn_dual_convergence
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_threshold', energy_threshold
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_adaptive_ncg', yn_adaptive_ncg
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ncg_adaptive_threshold', ncg_adaptive_threshold
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ncg_adaptive_energy_threshold', ncg_adaptive_energy_threshold
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_adaptive_step', ncg_adaptive_step
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
@@ -2990,6 +3014,31 @@ contains
     case default
       stop "yn_aux_mixing must be 'y' or 'n'"
     end select
+    select case(yn_dual_convergence)
+    case('y','n')
+      continue
+    case default
+      stop "yn_dual_convergence must be 'y' or 'n'"
+    end select
+    if (yn_dual_convergence == 'y' .and. energy_threshold <= 0d0) then
+      stop "energy_threshold must be positive when yn_dual_convergence='y'"
+    end if
+    select case(yn_adaptive_ncg)
+    case('y','n')
+      continue
+    case default
+      stop "yn_adaptive_ncg must be 'y' or 'n'"
+    end select
+    if (yn_adaptive_ncg == 'y' .and. method_min /= 'cg') then
+      stop "yn_adaptive_ncg currently supports method_min='cg' only"
+    end if
+    if (yn_adaptive_ncg == 'y' .and. ncg_adaptive_step <= 0) then
+      stop "ncg_adaptive_step must be positive when yn_adaptive_ncg='y'"
+    end if
+    if (yn_adaptive_ncg == 'y' .and. ncg_adaptive_threshold <= 0d0 &
+        .and. ncg_adaptive_energy_threshold <= 0d0) then
+      stop "set ncg_adaptive_threshold and/or ncg_adaptive_energy_threshold when yn_adaptive_ncg='y'"
+    end if
     if (tau_mixrate < 0d0 .or. tau_mixrate > 1d0) then
       stop "tau_mixrate must satisfy 0 <= tau_mixrate <= 1"
     end if

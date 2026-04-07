@@ -170,6 +170,12 @@ module salmon_global
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
+  character(1)   :: yn_dual_convergence
+  real(8)        :: energy_threshold
+  character(1)   :: yn_adaptive_ncg
+  real(8)        :: ncg_adaptive_threshold
+  real(8)        :: ncg_adaptive_energy_threshold
+  integer        :: ncg_adaptive_step
   integer        :: nscf_init_redistribution
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
