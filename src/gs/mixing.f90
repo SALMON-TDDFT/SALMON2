@@ -872,7 +872,7 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
       mixing%aux_vec(:) = mixing%aux_vec_x(:) + mixing%beta_p * (mixing%aux_vec_y(:) - mixing%aux_vec_x(:))
 
       ivec = 0
-!$omp parallel do private(iz,iy,ix,ivec) collapse(2)
+!$omp parallel do private(iz,iy,ix,ivec,offset) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
