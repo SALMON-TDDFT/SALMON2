@@ -1179,6 +1179,7 @@ contains
     
     character(32), parameter :: binfile_wf = "wavefunctions.bin"
     character(32), parameter :: binfile_bf = "basis_functions.bin"
+    character(32), parameter :: binfile_bfb = "basis_functions_buffered.bin"
     character(32), parameter :: binfile_rg = "rgrid_index.bin"
     character(256) :: filename
     integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
@@ -1188,6 +1189,7 @@ contains
     integer :: n_mat_tmp(2)   ! nspin is expected to be 1 or 2
     integer :: ifrag_count, i_local, io, global_idx
     integer :: nxyz_domain(3), nxyz_alloc(3), nxyz_new(3), lgnum_frag(3), lgnum_total(3)
+    integer :: nxyz_file_buffer(3), nxyz_file_box(3)
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
@@ -1197,8 +1199,9 @@ contains
     integer :: n_mat_cap, n_mat_cap_env, ienv
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: env_status, env_len
-    character(len=64) :: env_n_mat_cap
+    character(len=64) :: env_n_mat_cap, env_use_buffered_basis
     logical :: warned_spin_discard
+    logical :: use_buffered_basis
     real(8) :: cap_avg, weight_best
     real(8) :: coef_file_probe(3), coef_global_probe(3)
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
@@ -1630,6 +1633,15 @@ contains
     nb = dg_frag%nxyz_buffer(1)  ! Assume uniform buffer width (4 for 4th-order stencil)
     nxyz_alloc = 0
     warned_spin_discard = .false.
+    use_buffered_basis = .false.
+    env_use_buffered_basis = ""
+    call get_environment_variable("SALMON_DG_USE_BUFFERED_BASIS", env_use_buffered_basis, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_use_buffered_basis(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        use_buffered_basis = .true.
+      end select
+    end if
     
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -1656,18 +1668,34 @@ contains
       
       ! Read basis functions
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      if (use_buffered_basis) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bfb
+      else
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      end if
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
-      read(iunit) nxyz_domain(1:3), nspin_file, nstate_frag_file
+      if (use_buffered_basis) then
+        read(iunit) nxyz_domain(1:3), nxyz_file_buffer(1:3), nxyz_file_box(1:3), nspin_file, nstate_frag_file
+        if (any(nxyz_file_box(1:3) /= nxyz_domain(1:3) + 2 * nxyz_file_buffer(1:3))) then
+          write(*,'(1x,a,i0,a,3i6)') "Error: invalid buffered basis box header at ifrag=", ifrag, &
+                                     " nxyz_box=", nxyz_file_box(1:3)
+          stop "DG-Fragment RT: invalid buffered basis header"
+        end if
+        if (allocated(n_basis_frag)) deallocate(n_basis_frag)
+        allocate(n_basis_frag(max(1, nspin_file)))
+        n_basis_frag = 0
+      else
+        read(iunit) nxyz_domain(1:3), nspin_file, nstate_frag_file
+        if (allocated(n_basis_frag)) deallocate(n_basis_frag)
+        allocate(n_basis_frag(nspin_file))
+        read(iunit) n_basis_frag(1:nspin_file)
+      end if
       if (nspin_file < 1) then
         write(*,'(1x,a,i0,a,i0)') "Error: invalid nspin_file in basis_functions header at ifrag=", ifrag, &
                                    " nspin_file=", nspin_file
         stop "DG-Fragment RT: invalid nspin_file"
       end if
-      if (allocated(n_basis_frag)) deallocate(n_basis_frag)
-      allocate(n_basis_frag(nspin_file))
-      read(iunit) n_basis_frag(1:nspin_file)
       
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
@@ -1692,38 +1720,73 @@ contains
                                          " nspin_file=", nspin_file, " nstate_frag_file=", nstate_frag_file
           stop "DG-Fragment RT: invalid basis_functions header"
         end if
-        allocate(phi_tmp(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
+        if (use_buffered_basis) then
+          allocate(phi_tmp(nxyz_file_box(1), nxyz_file_box(2), nxyz_file_box(3)))
+        else
+          allocate(phi_tmp(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
+        end if
         
         do ispin = 1, nspin_file
           do n = 1, nstate_frag_file
-            ! Read basis function for interior domain (1:nx, 1:ny, 1:nz)
-            read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+            if (use_buffered_basis) then
+              read(iunit) phi_tmp(1:nxyz_file_box(1), 1:nxyz_file_box(2), 1:nxyz_file_box(3))
+            else
+              ! Read basis function for interior domain (1:nx, 1:ny, 1:nz)
+              read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+            end if
             
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
-              do iz = 1, nxyz_domain(3)
-                izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
-                if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
-                if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
-                if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
-                do iy = 1, nxyz_domain(2)
-                  iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
-                  if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
-                  if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
-                  if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
-                  do ix = 1, nxyz_domain(1)
-                    ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
-                    if (ixg_store < dg_frag%mg%is(1) .or. ixg_store > dg_frag%mg%ie(1)) cycle
-                    dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+              if (use_buffered_basis) then
+                do iz = 1, nxyz_file_box(3)
+                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) - nxyz_file_buffer(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                  if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
+                  if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
+                  if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
+                  do iy = 1, nxyz_file_box(2)
+                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) - nxyz_file_buffer(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
+                    if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
+                    do ix = 1, nxyz_file_box(1)
+                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) - nxyz_file_buffer(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
+                      if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
+                      dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+                    end do
                   end do
                 end do
-              end do
+              else
+                do iz = 1, nxyz_domain(3)
+                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                  if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
+                  if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
+                  if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
+                  do iy = 1, nxyz_domain(2)
+                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
+                    if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
+                    do ix = 1, nxyz_domain(1)
+                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                      if (ixg_store < dg_frag%mg%is(1) .or. ixg_store > dg_frag%mg%ie(1)) cycle
+                      dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+                    end do
+                  end do
+                end do
+              end if
             end if
           end do
         end do
 
         if (nspin_file > 1 .and. .not. warned_spin_discard .and. comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a)') "[WARN] basis_functions.bin has nspin_file=", nspin_file, &
-                                 "; using spin-1 basis only in phi_frag"
+          if (use_buffered_basis) then
+            write(*,'(1x,a,i0,a)') "[WARN] basis_functions_buffered.bin has nspin_file=", nspin_file, &
+                                   "; using spin-1 basis only in phi_frag"
+          else
+            write(*,'(1x,a,i0,a)') "[WARN] basis_functions.bin has nspin_file=", nspin_file, &
+                                   "; using spin-1 basis only in phi_frag"
+          end if
           warned_spin_discard = .true.
         end if
         
@@ -1759,8 +1822,16 @@ contains
     deallocate(n_basis_tmp, index_basis_tmp, coef_local)
     
     if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a)') "Fragment basis data loaded (coefficients + real-space basis)"
+      if (use_buffered_basis) then
+        write(*,'(1x,a)') "Fragment basis data loaded (coefficients + buffered real-space basis)"
+      else
+        write(*,'(1x,a)') "Fragment basis data loaded (coefficients + real-space basis)"
+      end if
       write(*,'(1x,a,i0,a,i0,a,i0)') "  Domain size: ", nxyz_domain(1), " x ", nxyz_domain(2), " x ", nxyz_domain(3)
+      if (use_buffered_basis) then
+        write(*,'(1x,a,3i5)') "  Buffered basis half-width: ", nxyz_file_buffer(1:3)
+        write(*,'(1x,a,3i5)') "  Buffered basis box size: ", nxyz_file_box(1:3)
+      end if
       write(*,'(1x,a,i0)') "  Number of basis functions per fragment: ", dg_frag%nstate_frag
       write(*,'(1x,a,i0)') "  Number of fragments loaded: ", ifrag_count
     end if

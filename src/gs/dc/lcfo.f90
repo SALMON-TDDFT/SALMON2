@@ -28,6 +28,7 @@ module lcfo
   character(32),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
+  &                          binfile_bfb = "basis_functions_buffered.bin", &
   &                          binfile_hl = "hamiltonian_local.bin"
   
 contains
@@ -539,13 +540,15 @@ contains
 #endif
     
     subroutine output
+      use communication, only: comm_summation
       use salmon_global, only: base_directory, sysname, unit_energy
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
       implicit none
       integer :: iunit,i_halo
-      integer :: nxyz_domain(3)
+      integer :: nxyz_domain(3), nxyz_box(3)
       character(256) :: filename
+      real(8), allocatable :: buffered_basis(:,:,:,:,:), wrk_buffer(:,:,:,:,:)
       
     ! total system data
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
@@ -591,6 +594,34 @@ contains
         write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3) &
         & ,1:nspin,1:dc%nstate_frag) ! basis functions | lambda >
         close(iunit)
+      ! buffered fragment KS orbitals on the full DC fragment box
+        if (.not. allocated(spsi%rwf)) stop "DC-LCFO: buffered basis export requires real fragment orbitals"
+        nxyz_box(1:3) = nxyz_domain(1:3) + 2 * dc%nxyz_buffer(1:3)
+        allocate(buffered_basis(nxyz_box(1), nxyz_box(2), nxyz_box(3), nspin, dc%nstate_frag))
+        allocate(wrk_buffer(nxyz_box(1), nxyz_box(2), nxyz_box(3), nspin, dc%nstate_frag))
+        wrk_buffer = 0d0
+        do io = info%io_s, info%io_e
+        do ispin = 1, nspin
+        do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+        do ix = mg%is(1), mg%ie(1)
+          if (ix <= nxyz_box(1) .and. iy <= nxyz_box(2) .and. iz <= nxyz_box(3)) then
+            wrk_buffer(ix, iy, iz, ispin, io) = spsi%rwf(ix, iy, iz, ispin, io, 1, 1)
+          end if
+        end do
+        end do
+        end do
+        end do
+        end do
+        call comm_summation(wrk_buffer, buffered_basis, product(nxyz_box) * nspin * dc%nstate_frag, info%icomm_rko)
+
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_bfb
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) nxyz_domain(1:3), dc%nxyz_buffer(1:3), nxyz_box(1:3), nspin, dc%nstate_frag
+        write(iunit) buffered_basis(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3),1:nspin,1:dc%nstate_frag)
+        close(iunit)
+        deallocate(buffered_basis, wrk_buffer)
       ! local hamiltonian matrix
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_hl
