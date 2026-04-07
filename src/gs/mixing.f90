@@ -371,6 +371,26 @@ end subroutine damp_scalar_output
 
 !===================================================================================================================================
 
+subroutine copy_scalar_output(mg,field,field_out)
+  use structures, only: s_rgrid, s_scalar
+  implicit none
+  type(s_rgrid), intent(in) :: mg
+  type(s_scalar), intent(in) :: field
+  type(s_scalar), intent(inout) :: field_out
+  integer :: ix, iy, iz
+
+!$omp parallel do private(iz,iy,ix) collapse(2)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    field_out%f(ix,iy,iz) = field%f(ix,iy,iz)
+  end do
+  end do
+  end do
+end subroutine copy_scalar_output
+
+!===================================================================================================================================
+
 subroutine ensure_aux_vector_workspace(mixing,vec_size)
   use structures, only: s_mixing
   implicit none
@@ -408,15 +428,16 @@ subroutine pack_aux_mixing_vector(mg,rho,vec,tau_scale,j_scale,tau,jx,jy,jz)
   real(8), intent(out) :: vec(:)
   real(8), intent(in) :: tau_scale, j_scale
   type(s_scalar), intent(in), optional :: tau, jx, jy, jz
-  integer :: ix, iy, iz, i, nxyz, offset
+  integer :: ix, iy, iz, i, nxyz, nxy, offset
 
+  nxy = mg%num(1)*mg%num(2)
   nxyz = mg%num(1)*mg%num(2)*mg%num(3)
 
-  i = 0
+!$omp parallel do collapse(2) private(ix,iy,iz,i,offset)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    i = i + 1
+    i = (iz-mg%is(3))*nxy + (iy-mg%is(2))*mg%num(1) + (ix-mg%is(1)) + 1
     vec(i) = rho%f(ix,iy,iz)
     offset = nxyz
     if (present(tau)) then
@@ -433,6 +454,7 @@ subroutine pack_aux_mixing_vector(mg,rho,vec,tau_scale,j_scale,tau,jx,jy,jz)
   end do
   end do
   end do
+!$omp end parallel do
 end subroutine pack_aux_mixing_vector
 
 !===================================================================================================================================
@@ -445,15 +467,16 @@ subroutine unpack_aux_mixing_vector(mg,vec,tau_scale,j_scale,rho,tau,jx,jy,jz)
   real(8), intent(in) :: tau_scale, j_scale
   type(s_scalar), intent(inout) :: rho
   type(s_scalar), intent(inout), optional :: tau, jx, jy, jz
-  integer :: ix, iy, iz, i, nxyz, offset
+  integer :: ix, iy, iz, i, nxyz, nxy, offset
 
+  nxy = mg%num(1)*mg%num(2)
   nxyz = mg%num(1)*mg%num(2)*mg%num(3)
 
-  i = 0
+!$omp parallel do collapse(2) private(ix,iy,iz,i,offset)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    i = i + 1
+    i = (iz-mg%is(3))*nxy + (iy-mg%is(2))*mg%num(1) + (ix-mg%is(1)) + 1
     rho%f(ix,iy,iz) = vec(i)
     offset = nxyz
     if (present(tau)) then
@@ -470,6 +493,7 @@ subroutine unpack_aux_mixing_vector(mg,vec,tau_scale,j_scale,rho,tau,jx,jy,jz)
   end do
   end do
   end do
+!$omp end parallel do
 end subroutine unpack_aux_mixing_vector
 
 !===================================================================================================================================
@@ -523,9 +547,7 @@ subroutine wrapper_broyden(comm,mg,system,rho_s,tau,j,iter,mixing)
       if (use_j_block) vec_size = vec_size + 3*nxyz
       call ensure_aux_vector_workspace(mixing,vec_size)
 
-      if (use_tau_block) then
-        call damp_scalar_output(mg,mixing%tau_in(mixing%num_rho_stock),tau,mixing%tau_out(mixing%num_rho_stock),mixing%tau_mixrate)
-      end if
+      if (use_tau_block) call copy_scalar_output(mg,tau,mixing%tau_out(mixing%num_rho_stock))
       if (use_j_block) then
         call damp_scalar_output(mg,mixing%jx_in(mixing%num_rho_stock),j(1),mixing%jx_out(mixing%num_rho_stock),mixing%j_mixrate)
         call damp_scalar_output(mg,mixing%jy_in(mixing%num_rho_stock),j(2),mixing%jy_out(mixing%num_rho_stock),mixing%j_mixrate)
@@ -748,7 +770,7 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
 
     call simple_mixing(mg,system,1.d0-mixing%beta_p,mixing%beta_p,rho_s,mixing)
     if (use_tau_block) then
-      call simple_mixing_tau(mg,1.d0-mixing%tau_mixrate,mixing%tau_mixrate,tau,mixing)
+      call simple_mixing_tau(mg,1.d0-mixing%beta_p,mixing%beta_p,tau,mixing)
     end if
     if (use_j_block) then
       call simple_mixing_j(mg,1.d0-mixing%j_mixrate,mixing%j_mixrate,j,mixing)
@@ -769,9 +791,7 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
       end do
       end do
 
-      if (use_tau_block) then
-        call damp_scalar_output(mg,mixing%tau_in(mixing%num_rho_stock),tau,mixing%tau_out(mixing%num_rho_stock),mixing%tau_mixrate)
-      end if
+      if (use_tau_block) call copy_scalar_output(mg,tau,mixing%tau_out(mixing%num_rho_stock))
       if (use_j_block) then
         call damp_scalar_output(mg,mixing%jx_in(mixing%num_rho_stock),j(1),mixing%jx_out(mixing%num_rho_stock),mixing%j_mixrate)
         call damp_scalar_output(mg,mixing%jy_in(mixing%num_rho_stock),j(2),mixing%jy_out(mixing%num_rho_stock),mixing%j_mixrate)
@@ -779,7 +799,7 @@ subroutine pulay(mg,info,system,rho_s,tau,j,iter,mixing)
       end if
 
       if ((use_tau_block .and. .not. mixing%tau_history_ready) .or. (use_j_block .and. .not. mixing%j_history_ready)) then
-        call simple_mixing_tau(mg,1.d0-mixing%tau_mixrate,mixing%tau_mixrate,tau,mixing)
+        if (use_tau_block) call simple_mixing_tau(mg,1.d0-mixing%beta_p,mixing%beta_p,tau,mixing)
         if (use_j_block) call simple_mixing_j(mg,1.d0-mixing%j_mixrate,mixing%j_mixrate,j,mixing)
         return
       end if

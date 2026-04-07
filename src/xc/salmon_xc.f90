@@ -783,32 +783,45 @@ contains
     integer, intent(in) :: nthreads
     logical, intent(in) :: need_tau, need_rj
     integer :: ix, iy, iz, ithread
+    real(8) :: tau_sum, jx_sum, jy_sum, jz_sum
 
     if (need_tau) then
-      do ithread = 1, nthreads
-        do iz = mg%is(3), mg%ie(3)
-        do iy = mg%is(2), mg%ie(2)
-        do ix = mg%is(1), mg%ie(1)
-          tau_reduce_work(ix,iy,iz) = tau_reduce_work(ix,iy,iz) + tau_thread_work(ix,iy,iz,ithread)
+!$omp parallel do collapse(2) private(ix,iy,iz,ithread,tau_sum)
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        tau_sum = 0d0
+        do ithread = 1, nthreads
+          tau_sum = tau_sum + tau_thread_work(ix,iy,iz,ithread)
         end do
-        end do
-        end do
+        tau_reduce_work(ix,iy,iz) = tau_sum
       end do
+      end do
+      end do
+!$omp end parallel do
       call comm_summation(tau_reduce_work, tau_comm_work, mg%num(1) * mg%num(2) * mg%num(3), info%icomm_ko)
     end if
 
     if (need_rj) then
-      do ithread = 1, nthreads
-        do iz = mg%is(3), mg%ie(3)
-        do iy = mg%is(2), mg%ie(2)
-        do ix = mg%is(1), mg%ie(1)
-          j_reduce_work(ix,iy,iz,1) = j_reduce_work(ix,iy,iz,1) + j_thread_work(ix,iy,iz,1,ithread)
-          j_reduce_work(ix,iy,iz,2) = j_reduce_work(ix,iy,iz,2) + j_thread_work(ix,iy,iz,2,ithread)
-          j_reduce_work(ix,iy,iz,3) = j_reduce_work(ix,iy,iz,3) + j_thread_work(ix,iy,iz,3,ithread)
+!$omp parallel do collapse(2) private(ix,iy,iz,ithread,jx_sum,jy_sum,jz_sum)
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        jx_sum = 0d0
+        jy_sum = 0d0
+        jz_sum = 0d0
+        do ithread = 1, nthreads
+          jx_sum = jx_sum + j_thread_work(ix,iy,iz,1,ithread)
+          jy_sum = jy_sum + j_thread_work(ix,iy,iz,2,ithread)
+          jz_sum = jz_sum + j_thread_work(ix,iy,iz,3,ithread)
         end do
-        end do
-        end do
+        j_reduce_work(ix,iy,iz,1) = jx_sum
+        j_reduce_work(ix,iy,iz,2) = jy_sum
+        j_reduce_work(ix,iy,iz,3) = jz_sum
       end do
+      end do
+      end do
+!$omp end parallel do
       call comm_summation(j_reduce_work, j_comm_work, mg%num(1) * mg%num(2) * mg%num(3) * 3, info%icomm_ko)
     end if
   end subroutine merge_aux_field_workspace

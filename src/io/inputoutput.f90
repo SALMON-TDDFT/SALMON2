@@ -2999,8 +2999,14 @@ contains
     if (yn_aux_mixing == 'y' .and. method_mixing == 'simple_dm') then
       stop "aux mixing does not support method_mixing='simple_dm'"
     end if
+    if (yn_aux_mixing == 'y' .and. tau_mixrate > 0d0 .and. method_mixing == 'simple_potential') then
+      stop "aux mixing with tau does not support method_mixing='simple_potential'"
+    end if
     if (yn_aux_mixing == 'y' .and. yn_dc == 'y') then
       stop "aux mixing does not support yn_dc='y'"
+    end if
+    if (yn_aux_mixing == 'y' .and. j_mixrate > 0d0 .and. trim(xc) == 'tbmbj') then
+      stop "TB-mBJ aux mixing does not support j_mixrate > 0"
     end if
 
     if(yn_out_stress == 'y' .and. yn_periodic /= 'y') &

@@ -112,6 +112,9 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   if (mixing%use_aux_mixing .and. (mixing%tau_mixrate > 0d0 .or. mixing%j_mixrate > 0d0) .and. .not. xc_func%use_kinetic_energy) then
     stop "aux mixing requested but active XC does not use auxiliary fields"
   end if
+  if (mixing%use_aux_tau .and. method_mixing == 'simple_potential') then
+    stop "aux mixing with tau does not support method_mixing='simple_potential'"
+  end if
 
   if (do_tau_mixing .or. do_j_mixing) then
     if (system%nspin /= 1) stop "aux mixing currently supports only nspin=1"
@@ -187,7 +190,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
     else
       call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=mixing%tau_work%f)
     end if
-    if (do_tau_mixing) call simple_mixing_tau(mg,1.d0-mixing%tau_mixrate,mixing%tau_mixrate,mixing%tau_work,mixing)
+    if (do_tau_mixing) call simple_mixing_tau(mg,1.d0-mixing%mixrate,mixing%mixrate,mixing%tau_work,mixing)
     if (do_j_mixing) call simple_mixing_j(mg,1.d0-mixing%j_mixrate,mixing%j_mixrate,mixing%j_work,mixing)
     mixing%aux_work%use_tau = do_tau_mixing
     if (do_tau_mixing) mixing%aux_work%tau%f = mixing%tau_work%f
