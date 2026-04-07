@@ -1712,9 +1712,7 @@ contains
                   if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
                   do ix = 1, nxyz_domain(1)
                     ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
-                    if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
-                    if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
-                    if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
+                    if (ixg_store < dg_frag%mg%is(1) .or. ixg_store > dg_frag%mg%ie(1)) cycle
                     dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
                   end do
                 end do

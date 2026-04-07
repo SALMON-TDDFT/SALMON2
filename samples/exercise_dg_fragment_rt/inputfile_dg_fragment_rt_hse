@@ -82,7 +82,7 @@
   propagator = 'middlepoint'
   yn_fix_func = 'n'
   yn_dg_fragment_rt = 'y'               ! Enable DG-Fragment RT-TDDFT
-  time_integrator_dg_fragment = 'ssprk3'
+  time_integrator_dg_fragment = 'rk4'
   yn_plane_wave_basis = 'y'             ! Enable plane wave mixing (optional)
   n_plane_waves_dg = 50
   k_cutoff_plane_wave = 0.5d0
@@ -132,4 +132,3 @@
   yn_adaptive_basis = 'n'
   basis_update_threshold = 0.1d0
 /
-

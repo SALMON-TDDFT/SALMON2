@@ -62,7 +62,7 @@
   basis_update_threshold = 0.1
   
   ! Time integrator
-  time_integrator_dg_fragment = 'ssprk3'
+  time_integrator_dg_fragment = 'rk4'
   
   ! Basis update method
   yn_dc_cg_basis_update = 'y'
@@ -80,4 +80,3 @@
   'H'  0.0d0  0.0d0  -0.7d0  1
   'H'  0.0d0  0.0d0   0.7d0  1
 /
-

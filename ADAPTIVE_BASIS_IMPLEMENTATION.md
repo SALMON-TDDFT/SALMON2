@@ -757,15 +757,19 @@ Target Goals:
 **Selection Criteria:**
 
 1. **Standard RT Simulations (fs~ps)**
-   - **→ SSPRK3 recommended** (default)
-   - Reason: Optimal balance of stability and accuracy, computational efficiency
+   - **→ RK4 recommended** (default)
+   - Reason: Mainline integrator, consistent with the reference implementation
 
 2. **High Precision Required**
    - **→ RK4 recommended**
    - Condition: Use sufficiently small Δt
    - Example: Observables with high nonlinear sensitivity
 
-3. **Ultra-Long Simulations (ns order)**
+3. **Additional Stability Margin**
+   - **→ SSPRK3 as an alternative**
+   - Reason: Can be useful for exploratory runs when a more dissipative scheme is acceptable
+
+4. **Ultra-Long Simulations (ns order)**
    - **→ AETRS recommended** (after implementation)
    - Reason: Time-reversal symmetry and energy conservation
 

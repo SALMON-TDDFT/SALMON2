@@ -51,7 +51,7 @@
 
 &propagation
   yn_dg_fragment_rt = 'y'
-  time_integrator_dg_fragment = 'ssprk3'
+  time_integrator_dg_fragment = 'rk4'
   yn_fix_func = 'n'
 /
 

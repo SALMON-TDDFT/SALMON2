@@ -72,7 +72,7 @@
 
 &propagation
   yn_dg_fragment_rt = 'y'           ! Enable DG-Fragment RT method
-  time_integrator_dg_fragment = 'ssprk3'  ! 'ssprk3', 'rk4', or 'aetrs'
+  time_integrator_dg_fragment = 'rk4'     ! 'rk4', 'ssprk3', or 'aetrs'
   propagator = 'middlepoint'        ! used for standard RT if yn_dg_fragment_rt='n'
 /
 
@@ -107,10 +107,10 @@
 !    - Complex coefficients for proper phase evolution: c(t) = |c|exp(i\u03c6)
 !
 ! 2. Time integrators:
-!    - 'ssprk3': Strong Stability Preserving Runge-Kutta 3rd order
-!                (Recommended for most cases, stable and accurate)
 !    - 'rk4':    Classical Runge-Kutta 4th order
-!                (Higher accuracy but may require smaller dt)
+!                (Default/mainline choice for DG-Fragment RT)
+!    - 'ssprk3': Strong Stability Preserving Runge-Kutta 3rd order
+!                (Alternative when additional stability is preferred)
 !    - 'aetrs':  Enforced Time-Reversal Symmetry
 !                (Preserves symmetry, experimental in fragment basis)
 !

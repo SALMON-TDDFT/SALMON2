@@ -128,7 +128,7 @@
   basis_update_threshold = 0.1   ! eV
   
   ! Time integrator (optional)
-  time_integrator_dg_fragment = 'ssprk3'  ! 'ssprk3', 'rk4', 'aetrs'
+  time_integrator_dg_fragment = 'rk4'     ! 'rk4', 'ssprk3', 'aetrs'
   
   ! Basis update method (NEW parameter)
   yn_dc_cg_basis_update = 'y'  ! 'y': DC-CG method (recommended)

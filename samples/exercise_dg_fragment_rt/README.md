@@ -116,21 +116,21 @@ mpirun -np 8 salmon < inputfile_dg_fragment_rt
 ```fortran
 &propagation
   yn_dg_fragment_rt = 'y'                ! Enable DG-Fragment RT method
-  time_integrator_dg_fragment = 'ssprk3' ! Time integrator
+  time_integrator_dg_fragment = 'rk4'    ! Time integrator
 /
 ```
 
 ### Time Integrator Options
 
-1. **'ssprk3'** (Recommended)
-   - Strong Stability Preserving Runge-Kutta 3rd order
-   - Good balance of accuracy and stability
-   - Suitable for most systems
-
-2. **'rk4'**
+1. **'rk4'** (Default / Mainline)
    - Classical Runge-Kutta 4th order
-   - Higher accuracy but may require smaller time step
-   - Use for high-precision calculations
+   - Default internal setting for DG-Fragment RT
+   - Recommended baseline, consistent with the reference implementation
+
+2. **'ssprk3'**
+   - Strong Stability Preserving Runge-Kutta 3rd order
+   - Alternative when stronger damping/stability is preferred
+   - May still be useful for exploratory runs
 
 3. **'aetrs'**
    - Enforced Time-Reversal Symmetry
@@ -269,7 +269,7 @@ Enable adaptive basis update in RT input file:
 ### Completed Features
 - ✓ Velocity gauge formulation with A·p and A²/2 terms
 - ✓ **Complex coefficient time evolution**: Proper quantum mechanical phase evolution
-- ✓ Time integrators: SSPRK3 (default), RK4
+- ✓ Time integrators: RK4 (default/mainline), SSPRK3
 - ✓ Fragment basis coefficient time evolution
 - ✓ Current density calculation and output
 - ✓ Total energy calculation and output

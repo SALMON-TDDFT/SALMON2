@@ -104,12 +104,12 @@ basis_update_threshold = 0.1  ! eV
 
 ### Time Integrator
 ```fortran
-time_integrator_dg_fragment = 'ssprk3'
+time_integrator_dg_fragment = 'rk4'
 ```
 
 **Options:**
-- `'ssprk3'`: Strong-stability preserving RK3 (recommended, stable)
-- `'rk4'`: Classical Runge-Kutta 4th order (accurate)
+- `'rk4'`: Classical Runge-Kutta 4th order (default, mainline)
+- `'ssprk3'`: Strong-stability preserving RK3 (alternative)
 - `'aetrs'`: Adiabatic exact two-level (under development)
 
 ### Basis Update Method

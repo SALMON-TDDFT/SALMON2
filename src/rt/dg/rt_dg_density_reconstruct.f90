@@ -55,6 +55,7 @@
     integer, allocatable :: basis_gid_spin(:,:), valid_basis_ids_spin(:,:), valid_basis_count_spin(:)
     real(8), allocatable :: basis_sdiag_probe(:,:,:)
     real(8), allocatable :: phi_col_metric_total(:,:,:)
+    real(8), allocatable :: phi_col_full_metric_total(:,:,:)
     real(8), allocatable :: basis_smat_probe(:,:,:,:)
     real(8), allocatable :: phi_gram_total(:,:,:,:)
     real(8), allocatable :: phi_frag_metric_total(:,:,:,:)
@@ -91,7 +92,9 @@
     integer, allocatable :: n_basis_mix_spin(:)
     complex(8), allocatable :: coef_probe_full(:,:), coef_probe_pw(:,:), overlap_probe(:,:), overlap_vec(:)
     integer, allocatable :: subgroup_self_ixg_tmp(:), subgroup_self_iyg_tmp(:), subgroup_self_izg_tmp(:)
-    logical, parameter :: enable_density_reconstruct_trace = .false.
+    logical :: enable_density_reconstruct_trace
+    integer :: env_len, env_status
+    character(len=64) :: env_val
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
     real(8) :: phi_col_norm_probe(3), phi_col_hvol_probe(3), phi_sdiag_probe(3)
     real(8) :: coef_map_local_probe(3,3), coef_map_global_probe(3,3), coef_map_diff_probe(3,3)
@@ -101,6 +104,9 @@
     real(8) :: overlap_self_probe(2,3), overlap_cross_probe(3)
     real(8) :: frag_trace_probe, frag_state_trace_probe(3)
     real(8) :: frag_state_real_probe(3)
+    real(8) :: phi_col_full_local(3), phi_col_full_global(3)
+    real(8) :: block_charge_direct, block_charge_psi
+    real(8) :: rho_direct_probe, coeff_re_probe, coeff_im_probe
     real(8) :: charge_root_tmp_global, charge_root_sum_global
     real(8) :: charge_weighted_total_global, charge_weighted_total_pre_norm
     real(8) :: charge_blk_all, charge_blk_owner, charge_blk_handler, charge_blk_slot0
@@ -114,6 +120,15 @@
     real(8) :: g211_re_line, g211_im_line, rho_val
     real(8), allocatable :: g211_cos_x(:), g211_sin_x(:)
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
+
+    enable_density_reconstruct_trace = .false.
+    call get_environment_variable("SALMON_DG_DENSITY_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_density_reconstruct_trace = .true.
+      end if
+    end if
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
@@ -196,12 +211,14 @@
     if (enable_density_reconstruct_trace) then
       allocate(basis_sdiag_probe(3, system%nspin, max(1, ifrag_count)))
       allocate(phi_col_metric_total(3, system%nspin, max(1, ifrag_count)))
+      allocate(phi_col_full_metric_total(3, system%nspin, max(1, ifrag_count)))
       allocate(basis_smat_probe(3, 3, system%nspin, max(1, ifrag_count)))
       allocate(phi_gram_total(3, 3, system%nspin, max(1, ifrag_count)))
       allocate(phi_frag_metric_total(nbf_max, nbf_max, system%nspin, max(1, ifrag_count)))
       allocate(basis_frag_metric_total(nbf_max, nbf_max, system%nspin, max(1, ifrag_count)))
       basis_sdiag_probe(:, :, :) = 0.0d0
       phi_col_metric_total(:, :, :) = 0.0d0
+      phi_col_full_metric_total(:, :, :) = 0.0d0
       basis_smat_probe(:, :, :, :) = 0.0d0
       phi_gram_total(:, :, :, :) = 0.0d0
       phi_frag_metric_total(:, :, :, :) = 0.0d0
@@ -558,6 +575,38 @@
         " invalid=", need_phi_cache_invalid, " resize=", need_phi_cache_resize, " dt=", time_cache_phi_block_refresh
       flush(6)
     end if
+    if (enable_density_reconstruct_trace .and. n_pw == 0) then
+      do i_local = 1, ifrag_count
+        ifrag = dg_frag%ifrag_start + i_local - 1
+        do ispin = 1, system%nspin
+          nprobe_cols = min(3, dg_frag%n_basis(ifrag, ispin))
+          if (nprobe_cols <= 0) cycle
+          phi_col_full_local(:) = 0.0d0
+          do iz = max(dg_frag%frag_core_lo(3, ifrag), mg%is(3)), min(dg_frag%frag_core_hi(3, ifrag), mg%ie(3))
+            bz = map_global_to_phi_box_coord_ham(iz, phi_lb3, phi_ub3, phi_lg3)
+            if (bz == 0) cycle
+            do iy = max(dg_frag%frag_core_lo(2, ifrag), mg%is(2)), min(dg_frag%frag_core_hi(2, ifrag), mg%ie(2))
+              by = map_global_to_phi_box_coord_ham(iy, phi_lb2, phi_ub2, phi_lg2)
+              if (by == 0) cycle
+              do ix = max(dg_frag%frag_core_lo(1, ifrag), mg%is(1)), min(dg_frag%frag_core_hi(1, ifrag), mg%ie(1))
+                bx = map_global_to_phi_box_coord_ham(ix, phi_lb1, phi_ub1, phi_lg1)
+                if (bx == 0) cycle
+                do iprobe = 1, nprobe_cols
+                  phi_col_full_local(iprobe) = phi_col_full_local(iprobe) + &
+                    dg_frag%phi_frag(bx, by, bz, iprobe, i_local) * dg_frag%phi_frag(bx, by, bz, iprobe, i_local) * system%hvol
+                end do
+              end do
+            end do
+          end do
+          if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+            call comm_summation(phi_col_full_local(1:nprobe_cols), phi_col_full_global(1:nprobe_cols), nprobe_cols, dg_frag%icomm_frag)
+            phi_col_full_metric_total(1:nprobe_cols, ispin, i_local) = phi_col_full_global(1:nprobe_cols)
+          else
+            phi_col_full_metric_total(1:nprobe_cols, ispin, i_local) = phi_col_full_local(1:nprobe_cols)
+          end if
+        end do
+      end do
+    end if
     call cpu_time(t_project0)
       i_local = 0
       block_idx_global = 0
@@ -825,7 +874,7 @@
           valid_remote_grid_count = 0
           call cpu_time(t_setup0)
           if (allocated(dg_frag%density_send_slot_map)) then
-            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, n_pw == 0)
+            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .false.)
           else
             slot_buf(1:npt_blk) = 0
             call prepare_grid_buffers_owner_map_no_slot(i_local, igrid0, npt_blk, nxyz)
@@ -864,6 +913,7 @@
           end if
           do igrid = 1, npt_blk
             if (owner_buf(igrid) < 0) cycle
+            if (n_pw == 0 .and. owner_buf(igrid) /= dg_frag%id) cycle
             local_grid_count = local_grid_count + 1
             if (local_grid_count > grid_block_size) then
               write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] density local_grid_count overflow: rank=", dg_frag%id, &
@@ -1171,20 +1221,35 @@
                   call cpu_time(t_rho1)
                   time_project_rho = time_project_rho + (t_rho1 - t_rho0)
                 end do
-                if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-                  call cpu_time(t_setup0)
-                  call comm_summation(rho_blk_partial(1:npt_blk), rho_blk_reduced(1:npt_blk), npt_blk, dg_frag%icomm_frag)
-                  rho_blk_accum(1:npt_blk) = rho_blk_reduced(1:npt_blk)
-                  call cpu_time(t_setup1)
-                  time_project_rho_reduce = time_project_rho_reduce + (t_setup1 - t_setup0)
-                else
-                  rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
-                end if
+                rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
                 if (enable_density_reconstruct_trace .and. block_offset == first_block_offset) then
                   rho_probe_charge = sum(rho_blk_accum(1:npt_blk)) * system%hvol
                   write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') "        density frag probe: rank=", dg_frag%id, &
                     " ifrag=", ifrag, " ispin=", ispin, " first_block_charge=", rho_probe_charge
                   flush(6)
+                  if (dg_frag%is_frag_root) then
+                    block_charge_psi = 0.0d0
+                    block_charge_direct = 0.0d0
+                    do idx_local = 1, local_grid_count
+                      igrid = local_grid_ids(idx_local)
+                      block_charge_psi = block_charge_psi + rho_blk_accum(igrid)
+                      rho_direct_probe = 0.0d0
+                      do iprobe = 1, nbf
+                        coeff_re_probe = 0.0d0
+                        coeff_im_probe = 0.0d0
+                        do io = 1, nbf
+                          coeff_re_probe = coeff_re_probe + D_frag_re(iprobe, io, ispin) * phi_blk(igrid, io)
+                        end do
+                        rho_direct_probe = rho_direct_probe + phi_blk(igrid, iprobe) * coeff_re_probe
+                      end do
+                      block_charge_direct = block_charge_direct + rho_direct_probe
+                    end do
+                    block_charge_psi = block_charge_psi * system%hvol
+                    block_charge_direct = block_charge_direct * system%hvol
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "        density block-check: rank=", dg_frag%id, &
+                      " ifrag=", ifrag, " ispin=", ispin, " psi=", block_charge_psi, " direct=", block_charge_direct
+                    flush(6)
+                  end if
                 end if
               else
                 ! n_pw > 0: state-distributed loop, no per-batch bcast
@@ -1252,7 +1317,7 @@
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
                   do igrid = 1, npt_blk
-                    if (.not. dg_frag%is_frag_root) cycle
+                    if (n_pw > 0 .and. .not. dg_frag%is_frag_root) cycle
                     ixg = ixg_buf(igrid)
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
@@ -1281,6 +1346,7 @@
                     rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
                   end do
                   do idx_remote = 1, valid_remote_grid_count
+                    if (n_pw == 0) cycle
                     if (.not. dg_frag%is_frag_root) cycle
                     igrid = valid_remote_grid_ids(idx_remote)
                     owner_rank = owner_buf(igrid)
@@ -1369,9 +1435,10 @@
               end do
             end do
             if (enable_density_reconstruct_trace) then
-              write(*,'(1x,a,i0,a,i0,a,i0,a,3(1pe12.4,1x),a,3(1pe12.4,1x))') "        density phi-metric probe: rank=", dg_frag%id, &
+              write(*,'(1x,a,i0,a,i0,a,i0,a,3(1pe12.4,1x),a,3(1pe12.4,1x),a,3(1pe12.4,1x))') "        density phi-metric probe: rank=", dg_frag%id, &
                 " ifrag=", ifrag, " ispin=", ispin, " hvol_cols=", phi_col_hvol_probe(1), phi_col_hvol_probe(2), phi_col_hvol_probe(3), &
-                " sdiag=", phi_sdiag_probe(1), phi_sdiag_probe(2), phi_sdiag_probe(3)
+                " full_cols=", phi_col_full_metric_total(1,ispin,i_local), phi_col_full_metric_total(2,ispin,i_local), &
+                phi_col_full_metric_total(3,ispin,i_local), " sdiag=", phi_sdiag_probe(1), phi_sdiag_probe(2), phi_sdiag_probe(3)
               flush(6)
               write(*,'(1x,a,i0,a,i0,a,i0,a,3(1pe12.4,1x),a,3(1pe12.4,1x))') "        density phi-gram probe: rank=", dg_frag%id, &
                 " ifrag=", ifrag, " ispin=", ispin, " g12g13g23=", phi_gram_total(1,2,ispin,i_local), phi_gram_total(1,3,ispin,i_local), &
@@ -1696,6 +1763,7 @@
     deallocate(basis_gid, valid_basis_ids)
     if (allocated(basis_sdiag_probe)) deallocate(basis_sdiag_probe)
     if (allocated(phi_col_metric_total)) deallocate(phi_col_metric_total)
+    if (allocated(phi_col_full_metric_total)) deallocate(phi_col_full_metric_total)
     if (allocated(basis_smat_probe)) deallocate(basis_smat_probe)
     if (allocated(phi_gram_total)) deallocate(phi_gram_total)
     if (allocated(phi_frag_metric_total)) deallocate(phi_frag_metric_total)
