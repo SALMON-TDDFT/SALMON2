@@ -4,7 +4,8 @@
     use communication, only: comm_summation
     use timer, only: timer_begin, timer_end, LOG_CALC_CURRENT
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
-                                  apply_mixed_hamiltonian, mixed_fp_coupling_active, copy_matrix_blocks_to_complex_dense
+                    apply_mixed_hamiltonian, mixed_fp_coupling_active, copy_matrix_blocks_to_complex_dense, &
+                    gather_full_coef_view
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -37,7 +38,7 @@
     real(8) :: frag_reduce_factor
     complex(8) :: minus_i
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:), coef_frag_view(:,:), coef_pw_view(:,:)
     complex(8), allocatable :: tmp_probe(:,:), dense_probe_mat(:,:), dense_probe_out(:,:)
     logical :: has_nonlocal, use_hmat_complex, use_mixed_current
     logical :: require_dense_nl
@@ -107,9 +108,12 @@
       nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
       if (nocc <= 0) cycle
       use_mixed_current = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
-      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
-        coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+        call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_view, coef_pw_view, 1, nocc)
+        coef_frag_all(1:n, 1:nocc) = coef_frag_view(1:n, 1:nocc)
+        coef_pw_all(1:n_pw, 1:nocc) = coef_pw_view(1:n_pw, 1:nocc)
+      else
+        coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
       end if
       if (n_pw > 0) then
         coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
@@ -197,9 +201,12 @@
       do io = 1, nocc
         occ_weight(io) = system%rocc(io, 1, ispin)
       end do
-      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
       if (n_pw > 0) then
-        coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+        call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_view, coef_pw_view, 1, nocc)
+        coef_frag_all(1:n, 1:nocc) = coef_frag_view(1:n, 1:nocc)
+        coef_pw_all(1:n_pw, 1:nocc) = coef_pw_view(1:n_pw, 1:nocc)
+      else
+        coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
       end if
       if (n_pw > 0) then
         coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
@@ -432,7 +439,8 @@
         do ispin = 1, dg_frag%nspin
           nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
           if (nocc <= 0) cycle
-          coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+          call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_view, coef_pw_view, 1, nocc)
+          coef_pw_all(1:n_pw, 1:nocc) = coef_pw_view(1:n_pw, 1:nocc)
           pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, 1:nocc))**2)
         end do
       end if
@@ -483,6 +491,8 @@
     if (allocated(occ_weight)) deallocate(occ_weight)
     if (allocated(coef_frag_all)) deallocate(coef_frag_all)
     if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+    if (allocated(coef_frag_view)) deallocate(coef_frag_view)
+    if (allocated(coef_pw_view)) deallocate(coef_pw_view)
     if (allocated(coef_all)) deallocate(coef_all)
     if (allocated(tmp_all)) deallocate(tmp_all)
     ! Cache retained for reuse

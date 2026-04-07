@@ -45,6 +45,13 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     use_mixed_rt = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%coef_mix))
+    if (enable_rk_trace .and. itt == 1 .and. dg_frag%id == 0) then
+      write(*,'(1x,a,l1,a,i0,a,l1,a,i0,a,i0,a,i0)') "        rk basis probe: use_pw=", &
+        dg_frag%use_plane_wave_basis, " n_plane_waves=", dg_frag%n_plane_waves, " coef_pw_alloc=", &
+        allocated(dg_frag%coef_pw), " coef_pw_dim1=", merge(size(dg_frag%coef_pw,1), 0, allocated(dg_frag%coef_pw)), &
+        " n_mat_max=", n, " nstate_tot=", dg_frag%nstate_tot
+      flush(6)
+    end if
     
     ! Reuse RK stage arrays across calls to reduce per-step allocation overhead.
     if (.not. allocated(k)) then
@@ -394,9 +401,23 @@
             Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
           end if
 
+          if (enable_rk_trace) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+              " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+              " stage=", istage, " phase=", "ssprk-before-derivative(mixed)"
+            flush(6)
+          end if
+
           ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
           ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
           call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,istage), k_pw(:,:,:,istage))
+
+          if (enable_rk_trace) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+              " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+              " stage=", istage, " phase=", "ssprk-after-derivative(mixed)"
+            flush(6)
+          end if
 
           ! Update coefficients for next stage
           if (istage < dg_frag%rk_stages) then
@@ -435,6 +456,12 @@
                 call sync_raw_coef_from_mixed(dg_frag, ispin)
               end do
             end if
+            if (enable_rk_trace) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+                " stage=", istage, " phase=", "ssprk-after-update(mixed)"
+              flush(6)
+            end if
           end if
         end do
       else
@@ -448,9 +475,23 @@
             Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
           end if
 
+          if (enable_rk_trace) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+              " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+              " stage=", istage, " phase=", "ssprk-before-derivative"
+            flush(6)
+          end if
+
           ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
           ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
           call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,istage))
+
+          if (enable_rk_trace) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+              " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+              " stage=", istage, " phase=", "ssprk-after-derivative"
+            flush(6)
+          end if
 
           ! Update coefficients for next stage
           if (istage < dg_frag%rk_stages) then
@@ -472,6 +513,12 @@
                 call sync_mixed_coef_from_raw(dg_frag, ispin)
                 call sync_raw_coef_from_mixed(dg_frag, ispin)
               end do
+            end if
+            if (enable_rk_trace) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
+                " stage=", istage, " phase=", "ssprk-after-update"
+              flush(6)
             end if
           end if
         end do

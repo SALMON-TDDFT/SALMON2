@@ -74,7 +74,6 @@
     real(8), allocatable :: coef_re_full(:,:,:)  ! (nbf_max, nocc_cache, nspin) upfront bcast coef (n_pw>0)
     real(8), allocatable :: coef_im_full(:,:,:)  ! (nbf_max, nocc_cache, nspin)
     real(8), allocatable :: rho_blk_partial(:)   ! (grid_block_size) partial rho for state slice
-    real(8), allocatable :: rho_remote_contrib(:)
     real(8), allocatable :: occ_cache(:), occ_sqrt_cache(:)
     complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
     real(8) :: time_project_rho_reduce, time_project_phi_block_build
@@ -212,7 +211,6 @@
     allocate(rho_blk(grid_block_size))
     allocate(rho_blk_accum(grid_block_size))
     allocate(rho_blk_reduced(grid_block_size))
-    allocate(rho_remote_contrib(grid_block_size))
     nocc_cache = 0
     if (allocated(dg_frag%nocc_spin)) then
       nocc_cache = maxval(dg_frag%nocc_spin(1:system%nspin))
@@ -369,13 +367,11 @@
       call cpu_time(t_cache0)
       need_pw_cache_alloc = (.not. allocated(dg_frag%coef_pw_full_cache))
       need_pw_cache_expand = (.not. need_pw_cache_alloc) .and. dg_frag%coef_pw_full_cache_nstate < nocc_cache
-      if (need_pw_cache_alloc .or. need_pw_cache_expand) then
-        call refresh_pw_coef_cache(dg_frag, nocc_cache)
-        rebuilt_pw_cache = .true.
-      end if
+      call refresh_pw_coef_cache(dg_frag, nocc_cache)
+      rebuilt_pw_cache = (need_pw_cache_alloc .or. need_pw_cache_expand)
       call cpu_time(t_cache1)
       time_cache = time_cache + (t_cache1 - t_cache0)
-      if (rebuilt_pw_cache) time_cache_pw_refresh = time_cache_pw_refresh + (t_cache1 - t_cache0)
+      time_cache_pw_refresh = time_cache_pw_refresh + (t_cache1 - t_cache0)
     end if
     if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,a,1pe12.4)') "        density trace: stage=after-pw-cache dt=", "", time_cache
@@ -1236,14 +1232,15 @@
                   call cpu_time(t_rho0)
                   do io1 = 1, nbatch, rho_state_block_size
                     nstate = min(rho_state_block_size, nbatch - io1 + 1)
-!$omp parallel do private(io, idx_local, igrid, rho_accum) schedule(static)
+!$omp parallel do private(io, idx_local, igrid, rho_accum, occ_factor) schedule(static)
                     do idx_local = 1, local_grid_count
                       igrid = local_grid_ids(idx_local)
                       rho_accum = 0.0d0
 !$omp simd reduction(+:rho_accum)
                       do io = io1, io1 + nstate - 1
-                        rho_accum = rho_accum + psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
-                                    psi_blk_im(igrid, io) * psi_blk_im(igrid, io)
+                        occ_factor = occ_cache(io0 + io - 1)
+                        rho_accum = rho_accum + occ_factor * (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
+                                    psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
                       end do
                       rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                     end do
@@ -1266,9 +1263,6 @@
               end if
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
-              rho_remote_contrib(1:valid_remote_grid_count) = 0.0d0
-!$omp parallel private(igrid, owner_rank, ixg, iyg, izg, bx, by, bz, rho_contrib, rho_raw_contrib, slot, theta)
-!$omp do schedule(static)
                   do igrid = 1, npt_blk
                     if (.not. dg_frag%is_frag_root) cycle
                     ixg = ixg_buf(igrid)
@@ -1298,8 +1292,6 @@
                     rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
                     rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
                   end do
-!$omp end do nowait
-!$omp do schedule(static)
                   do idx_remote = 1, valid_remote_grid_count
                     if (.not. dg_frag%is_frag_root) cycle
                     igrid = valid_remote_grid_ids(idx_remote)
@@ -1340,6 +1332,10 @@
                       stop "DG-Fragment RT: density accum slot out of range"
                     end if
                     rho_contrib = rho_blk_accum(igrid)
+                    if (allocated(dg_frag%density_inv_weight_local)) then
+                      rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg_buf(igrid), iyg_buf(igrid), izg_buf(igrid))
+                    end if
+                    rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
                     spin_offset = ispin * dg_frag%density_send_count(owner_rank)
                     if (spin_offset + slot < 1 .or. spin_offset + slot > size(rho_send(owner_rank)%f, 1)) then
                       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -1350,20 +1346,8 @@
                       flush(6)
                       stop "DG-Fragment RT: density accum spin slot out of range"
                     end if
-                    rho_remote_contrib(idx_remote) = rho_contrib
+                    rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                   end do
-!$omp end do
-!$omp end parallel
-
-                do idx_remote = 1, valid_remote_grid_count
-                  igrid = valid_remote_grid_ids(idx_remote)
-                  owner_rank = owner_buf(igrid)
-                  slot = slot_buf(igrid)
-                  rho_contrib = rho_remote_contrib(idx_remote)
-                  rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
-                  spin_offset = ispin * dg_frag%density_send_count(owner_rank)
-                  rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
-                end do
                 call cpu_time(t_rho1)
                 time_project_rho = time_project_rho + (t_rho1 - t_rho0)
             end if

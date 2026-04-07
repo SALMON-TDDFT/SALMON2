@@ -55,8 +55,11 @@
     end if
     call debug_coef_metric("after-time-evolution")
 
-    ! Probe: bypass local-only unitarity stabilization to test whether it
-    ! over-normalizes distributed coefficients before density reconstruction.
+    ! Keep coefficient normalization after each propagation step for mixed DG+PW runs.
+    ! Pure-DG path keeps the legacy flow to avoid unnecessary overlap-side effects.
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw) .and. dg_frag%n_plane_waves > 0) then
+      call stabilize_coeff_unitarity(dg_frag, itt)
+    end if
     call debug_coef_metric("after-unitarity")
 
     ! Self-consistent update of density and Hamiltonian (if enabled)

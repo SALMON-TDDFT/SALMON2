@@ -1350,17 +1350,39 @@ contains
     logical, intent(in) :: use_prop
 
     integer :: n_dim, n_rhs, icol, iter, max_iter
+    integer :: n_frag, n_pw, n_tot, info_direct
     real(8) :: rhs_norm, res_norm
     real(8), parameter :: diag_floor = 1.0d-10, tol_rel = 1.0d-10
     complex(8), allocatable :: r(:,:), z(:,:), p(:,:), ap(:,:)
     real(8), allocatable :: diag(:), tol_abs(:), rho(:), rho_new(:), denom(:)
     complex(8), allocatable :: alpha(:), beta(:)
     logical, allocatable :: active(:)
+    complex(8), allocatable :: mat_full(:,:), rhs_full(:,:)
+    integer, allocatable :: ipiv_full(:)
 
     n_dim = size(rhs, 1)
     n_rhs = size(rhs, 2)
     sol(:, :) = (0.0d0, 0.0d0)
     if (n_dim <= 0 .or. n_rhs <= 0) return
+
+    n_frag = dg_frag%n_mat_max
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+
+    ! For mixed DG+PW overlap systems, direct solve is more robust than CG.
+    if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin) .and. n_dim == n_tot) then
+      allocate(mat_full(n_dim, n_dim), rhs_full(n_dim, n_rhs), ipiv_full(n_dim))
+      call copy_overlap_operator_to_dense(dg_frag, ispin, use_prop, mat_full)
+      rhs_full(:, :) = rhs(:, :)
+      call zgesv(n_dim, n_rhs, mat_full, n_dim, ipiv_full, rhs_full, n_dim, info_direct)
+      if (info_direct == 0) then
+        sol(:, :) = rhs_full(:, :)
+        deallocate(mat_full, rhs_full, ipiv_full)
+        return
+      end if
+      deallocate(mat_full, rhs_full, ipiv_full)
+    end if
 
     allocate(diag(n_dim), r(n_dim, n_rhs), z(n_dim, n_rhs), p(n_dim, n_rhs), ap(n_dim, n_rhs))
     allocate(tol_abs(n_rhs), rho(n_rhs), rho_new(n_rhs), denom(n_rhs))
