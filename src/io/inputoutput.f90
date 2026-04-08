@@ -3135,6 +3135,8 @@ contains
       & stop "DG-Fragment RT (yn_dg_fragment_rt=y): num_fragment must be specified (must match DC-LCFO calculation)"
       if(nstate_frag == 0) &
       & stop "DG-Fragment RT (yn_dg_fragment_rt=y): nstate_frag must be specified (must match DC-LCFO calculation)"
+      if(nproc_ob /= 1) &
+      & stop "DG-Fragment RT (yn_dg_fragment_rt=y): nproc_ob must be 1. Current stage-1 DG implementation supports only np = n_frag * product(nproc_rgrid)."
       if(time_integrator_dg_fragment/='ssprk3' .and. &
          time_integrator_dg_fragment/='rk4' .and. &
          time_integrator_dg_fragment/='aetrs') &
