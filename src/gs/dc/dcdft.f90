@@ -176,7 +176,10 @@ contains
       integer :: iatom,iatom_frag
       integer :: kion_frag(natom,dc%n_frag),natom_frag(dc%n_frag)
       integer :: nxyz_domain(3), nxyz_domain_frag(3)
+      integer :: pp_buf(3)
+      integer, parameter :: momentum_stencil_buf = 4
       real(8) :: dr
+      real(8) :: abs_disp
       real(8) :: r1(3),r2(3),r(3)
       real(8) :: ldomain(3),lbuffer(3),ldomain_frag(3)
       real(8) :: rion_frag(3,natom,dc%n_frag)
@@ -185,6 +188,20 @@ contains
       ldomain(1:3) = al(1:3) / dble(num_fragment(1:3))
       dc%optimized_fragment_geometry = .false.
       
+      pp_buf(1:3) = 0
+      if (allocated(dc%ppg_tot%mps) .and. allocated(dc%ppg_tot%rxyz)) then
+        do iatom = 1, size(dc%ppg_tot%mps)
+          do i = 1, dc%ppg_tot%mps(iatom)
+            abs_disp = abs(dc%ppg_tot%rxyz(1, i, iatom))
+            if (dc%system_tot%hgs(1) > 0d0) pp_buf(1) = max(pp_buf(1), ceiling(abs_disp / dc%system_tot%hgs(1)))
+            abs_disp = abs(dc%ppg_tot%rxyz(2, i, iatom))
+            if (dc%system_tot%hgs(2) > 0d0) pp_buf(2) = max(pp_buf(2), ceiling(abs_disp / dc%system_tot%hgs(2)))
+            abs_disp = abs(dc%ppg_tot%rxyz(3, i, iatom))
+            if (dc%system_tot%hgs(3) > 0d0) pp_buf(3) = max(pp_buf(3), ceiling(abs_disp / dc%system_tot%hgs(3)))
+          end do
+        end do
+      end if
+
       do n=1,3 ! x,y,z
       ! rion --> rion = [0:al] (total system)
         do i=1,natom
@@ -195,13 +212,23 @@ contains
       ! dc%nxyz_buffer: # of grid points for the buffer region
         if(mod(num_rgrid(n),num_fragment(n))==0) then
           dc%nxyz_domain(n) = num_rgrid(n) / num_fragment(n)
-          dc%nxyz_buffer(n) = num_rgrid_buffer(n)
+          if (num_fragment(n) > 1) then
+            dc%nxyz_buffer(n) = max(num_rgrid_buffer(n), momentum_stencil_buf)
+            dc%nxyz_buffer(n) = max(dc%nxyz_buffer(n), pp_buf(n))
+          else
+            ! Non-fragmented directions use ordinary box PBC, not fragment buffer.
+            dc%nxyz_buffer(n) = 0
+          end if
           dr = al(n)/dble(num_rgrid(n))
           lbuffer(n) = dr * dc%nxyz_buffer(n) ! length of the buffer region
         else
           stop "DC method (yn_dc=y): mod(num_rgrid,num_fragment) /= 0"
         end if
       end do ! n=x,y,z
+      if(dc%id_frag==0) then
+        write(*,'(1x,a,3i5)') "DC nxyz_buffer (runtime): ", dc%nxyz_buffer(1:3)
+        write(*,'(1x,a,3i5)') "DC nxyz_buffer (pp-derived): ", pp_buf(1:3)
+      end if
 
       if (yn_dc_fragment_optimization == 'y') then
         call build_optimized_fragment_geometry(num_fragment, num_rgrid, al, natom, rion)

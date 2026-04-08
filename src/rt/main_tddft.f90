@@ -425,7 +425,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   real(8) :: rho_gprobe_re_local(n_gprobe), rho_gprobe_im_local(n_gprobe)
   real(8) :: rho_gprobe_re_sum(n_gprobe), rho_gprobe_im_sum(n_gprobe)
   real(8) :: rho_gprobe_re_sum_r(n_gprobe), rho_gprobe_im_sum_r(n_gprobe)
-  real(8) :: E_wrk(3), E_sum(3), etmp, sysvol, g(3), r(3), Gd
+  real(8) :: E_wrk(3), E_sum(3), E_sum_r(3), etmp, sysvol, g(3), r(3), Gd
   complex(8) :: rho_e, rho_i
 
   rho_vh_local = 0.0d0
@@ -439,6 +439,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   rho_gprobe_im_local(:) = 0.0d0
   E_wrk(:) = 0.0d0
   E_sum(:) = 0.0d0
+  E_sum_r(:) = 0.0d0
   etmp = 0.0d0
 
   do iz = mg%is(3), mg%ie(3)
@@ -503,6 +504,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
 
   call comm_summation(etmp, E_wrk(3), info%icomm_ko)
   call comm_summation(E_wrk, E_sum, 3, dg_frag%icomm)
+  call comm_summation(E_wrk, E_sum_r, 3, info%icomm_r)
   call comm_summation(rho_g2_local, rho_g2_sum, dg_frag%icomm)
   call comm_summation(rho_g2_local, rho_g2_sum_r, info%icomm_r)
   call comm_summation(rho_gprobe_re_local, rho_gprobe_re_sum, n_gprobe, dg_frag%icomm)
@@ -511,6 +513,18 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   call comm_summation(rho_gprobe_im_local, rho_gprobe_im_sum_r, n_gprobe, info%icomm_r)
   call comm_get_max(rho_gmax_local, rho_gmax_sum, 1, dg_frag%icomm)
   call comm_get_max(rho_gmax_local, rho_gmax_sum_r, 1, info%icomm_r)
+
+  if (dg_frag%isize_frag > 1) then
+    rho_vh_sum = rho_vh_sum_r
+    rho_vxc_sum = rho_vxc_sum_r
+    rho_vpsl_sum = rho_vpsl_sum_r
+    rho2_sum = rho2_sum_r
+    rho_g2_sum = rho_g2_sum_r
+    rho_gprobe_re_sum(:) = rho_gprobe_re_sum_r(:)
+    rho_gprobe_im_sum(:) = rho_gprobe_im_sum_r(:)
+    rho_gmax_sum(1) = rho_gmax_sum_r(1)
+    E_sum(:) = E_sum_r(:)
+  end if
 
   energy%E_kin = dg_frag%energy_kinetic
   energy%E_ion_nloc = dg_frag%energy_nonlocal

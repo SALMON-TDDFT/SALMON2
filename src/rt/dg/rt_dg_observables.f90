@@ -33,6 +33,7 @@
     real(8) :: current_tmp, energy_tmp, pw_weight_local, kpw_dir
     real(8) :: current_io, energy_io
     real(8) :: occ_i
+    real(8) :: charge_trace_spin
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
     real(8) :: elec_coef_local, elec_plain_local
@@ -93,8 +94,6 @@
     energy_nl_rs_sum = 0.0d0
     current_diag_local(:) = 0.0d0
     current_offdiag_local(:) = 0.0d0
-    use_energy_components = enable_energy_component_probe .or. dg_frag%use_buffered_basis
-
     n = dg_frag%n_mat_max
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
 
@@ -111,6 +110,7 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n + n_pw
+    use_energy_components = enable_energy_component_probe .or. (n_pw == 0)
     active_state_cap = max(1, min(dg_frag%nstate_tot, n))
     if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
       max_nocc = active_state_cap
@@ -200,7 +200,7 @@
       if (nocc <= 0) cycle
       occ_weight(:) = 0.0d0
       do io = 1, nocc
-        if (allocated(dg_frag%occ_state)) then
+        if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
           if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
             occ_weight(io) = max(0.0d0, dg_frag%occ_state(io, ispin))
           end if
@@ -208,6 +208,7 @@
           occ_weight(io) = system%rocc(io, 1, ispin)
         end if
       end do
+      charge_trace_spin = sum(occ_weight(1:nocc))
       use_mixed_current = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
       call gather_full_coef_view(dg_frag, ispin, n, nocc, coef_frag_view, coef_pw_view, 1, nocc)
       coef_frag_all(1:n, 1:nocc) = coef_frag_view(1:n, 1:nocc)
@@ -298,7 +299,7 @@
               if (nrow_blk <= 0 .or. ncol_blk <= 0) cycle
               do io = 1, nocc
                 occ_i = 1.0d0
-                if (allocated(dg_frag%occ_state)) then
+                if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
                   if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
                     occ_i = max(0.0d0, dg_frag%occ_state(io, ispin))
                   end if
@@ -330,6 +331,9 @@
         end if
         current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
       end do
+      ! Match conventional RT / SSBE velocity-gauge current:
+      ! add the diamagnetic contribution A * Tr[rho].
+      current_local(1:3) = current_local(1:3) + Ac_tot(1:3) * charge_trace_spin
     end do
     call timer_end(LOG_CALC_CURRENT)
     
@@ -354,7 +358,7 @@
       if (nocc <= 0) cycle
       occ_weight(:) = 0.0d0
       do io = 1, nocc
-        if (allocated(dg_frag%occ_state)) then
+        if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
           if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
             occ_weight(io) = max(0.0d0, dg_frag%occ_state(io, ispin))
           end if
@@ -949,7 +953,7 @@
       end if
       do io = 1, nocc
         occ_i = 1.0d0
-        if (allocated(dg_frag%occ_state)) then
+        if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
           if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
             occ_i = max(0.0d0, dg_frag%occ_state(io, ispin))
           end if
@@ -1480,7 +1484,7 @@
         end do
       else
         do io = 1, nocc
-          if (allocated(dg_frag%occ_state)) then
+          if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
             occ_probe = dg_frag%occ_state(io, ispin)
           else
             occ_probe = system%rocc(io, 1, ispin)

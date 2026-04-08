@@ -671,7 +671,7 @@
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             occ_cache(1:nocc_spin) = 1.0d0
-            if (allocated(dg_frag%occ_state)) then
+            if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
               do io = 1, nocc_spin
                 if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
                   occ_cache(io) = max(0.0d0, dg_frag%occ_state(io, ispin))
@@ -685,6 +685,15 @@
               end do
             end if
             occ_sqrt_cache(1:nocc_spin) = sqrt(occ_cache(1:nocc_spin))
+            if (enable_density_reconstruct_trace) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,3(1pe12.4,1x),a,3(1pe12.4,1x),a,l1)') &
+                "        density occ probe: rank=", dg_frag%id, " ifrag=", ifrag, " ispin=", ispin, &
+                " occ=", occ_cache(1), occ_cache(min(2,nocc_spin)), occ_cache(min(3,nocc_spin)), &
+                " rocc=", system%rocc(1,1,ispin), system%rocc(min(2,size(system%rocc,1)),1,ispin), &
+                        system%rocc(min(3,size(system%rocc,1)),1,ispin), &
+                " buffered=", dg_frag%use_buffered_basis
+              flush(6)
+            end if
             valid_basis_count = valid_basis_count_spin(ispin)
             call cpu_time(t_dmat0)
             ! Step 3a: build the fragment-local coefficient view from the full

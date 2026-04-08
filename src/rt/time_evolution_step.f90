@@ -88,8 +88,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   complex(8) :: rho_e
   real(8) :: rho_gprobe_re_local(n_gprobe), rho_gprobe_re_sum(n_gprobe)
   real(8) :: rho_gprobe_im_local(n_gprobe), rho_gprobe_im_sum(n_gprobe)
-  logical, parameter :: enable_full_energy_component_probe = .false.
-  logical, parameter :: enable_full_rhog_probe = .false.
+  logical, parameter :: enable_full_energy_component_probe = .true.
+  logical, parameter :: enable_full_rhog_probe = .true.
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
@@ -360,9 +360,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     if (enable_full_energy_component_probe .and. comm_is_root(info%id_rko) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
-      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
         "        full-energy-components: itt=", itt, " E_tot=", energy%E_tot, " E_kin=", energy%E_kin, &
-        " E_h=", energy%E_h, " E_ion=", energy%E_ion_loc + energy%E_ion_nloc, &
+        " E_h=", energy%E_h, " E_ion_loc=", energy%E_ion_loc, " E_ion_nloc=", energy%E_ion_nloc, &
         " E_xc=", energy%E_xc, " E_ion_ion=", energy%E_ion_ion
       flush(6)
     end if
