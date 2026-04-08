@@ -39,7 +39,7 @@
     real(8) :: elec_coef_sum, elec_plain_sum
     real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
     real(8) :: energy_static_sum, energy_kin_sum, energy_nl_sum, energy_ap_sum, energy_a2_sum
-    real(8) :: energy_kin_rs_sum, energy_one_rs_sum
+    real(8) :: energy_kin_rs_sum, energy_one_rs_sum, energy_nl_rs_sum
     real(8) :: energy_kin_diag_local, energy_kin_offdiag_local
     real(8) :: energy_kin_diag_sum, energy_kin_offdiag_sum
     real(8) :: kinetic_diag_abs_local, kinetic_offdiag_abs_local
@@ -90,6 +90,7 @@
     kinetic_apply_diff_local = 0.0d0
     energy_kin_rs_sum = 0.0d0
     energy_one_rs_sum = 0.0d0
+    energy_nl_rs_sum = 0.0d0
     current_diag_local(:) = 0.0d0
     current_offdiag_local(:) = 0.0d0
     use_energy_components = enable_energy_component_probe .or. dg_frag%use_buffered_basis
@@ -697,7 +698,7 @@
     
     if (n_pw == 0) then
       call compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, &
-                                          energy_kin_local, energy_local, energy_kin_rs_sum, energy_one_rs_sum)
+                                          energy_kin_local, energy_local, energy_kin_rs_sum, energy_one_rs_sum, energy_nl_rs_sum)
     end if
 
     if (enable_energy_component_probe .and. n_pw == 0 .and. (itt == 1 .or. itt == 40)) then
@@ -756,6 +757,8 @@
       if (dg_frag%use_buffered_basis .and. n_pw == 0) then
         energy_kin_sum = energy_kin_rs_sum
         energy_kin_avg = energy_kin_rs_sum
+        energy_nl_sum = energy_nl_rs_sum
+        energy_nl_avg = energy_nl_rs_sum
       end if
     end if
 
@@ -1323,9 +1326,9 @@
     end if
   end subroutine integrate_local_basis_with_field_local
 
-  subroutine compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, energy_kin_mat, energy_one_mat, kin_sum_out, one_sum_out)
+  subroutine compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, energy_kin_mat, energy_one_mat, kin_sum_out, one_sum_out, nl_sum_out)
     use structures
-    use communication, only: comm_summation, comm_is_root
+    use communication, only: comm_summation, comm_is_root, COMM_GROUP_NULL
     use parallelization, only: nproc_id_global
     use rt_dg_fragment_ops, only: apply_nonlocal_pp_projector_batch
     implicit none
@@ -1339,7 +1342,7 @@
     type(s_scalar),         intent(in)    :: Vh, Vpsl
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
     real(8),                intent(in)    :: energy_kin_mat, energy_one_mat
-    real(8),                intent(out)   :: kin_sum_out, one_sum_out
+    real(8),                intent(out)   :: kin_sum_out, one_sum_out, nl_sum_out
 
     integer :: ispin, io, ifrag, i_local, jo, nbf, ig_j, nocc
     integer :: core_s(3), core_e(3), ov_s(3), ov_e(3)
@@ -1347,10 +1350,11 @@
     logical :: has_overlap
     real(8), allocatable :: V_total(:,:,:)
     complex(8), allocatable :: T_phi(:,:,:), H_phi(:,:,:)
-    complex(8), allocatable :: psi_frag(:,:,:), tpsi_frag(:,:,:), hpsi_frag(:,:,:)
+    complex(8), allocatable :: psi_frag(:,:,:), tpsi_frag(:,:,:), hpsi_frag(:,:,:), vnlpsi_frag(:,:,:)
     complex(8), allocatable :: coef_probe(:,:), nl_probe(:,:)
     complex(8) :: coeff, ztmp, phi_val
-    real(8) :: kin_local, one_local, kin_sum, one_sum
+    real(8) :: kin_local, one_local, kin_sum, one_sum, nl_sum
+    real(8) :: kin_frag_sum, one_frag_sum
     real(8) :: frag_reduce_factor
     real(8) :: occ_probe
     logical :: use_buffered_direct_orbitals
@@ -1359,6 +1363,7 @@
 
     kin_sum_out = 0.0d0
     one_sum_out = 0.0d0
+    nl_sum_out = 0.0d0
     if (dg_frag%use_plane_wave_basis) return
     if (.not. dg_frag%has_real_space_basis) return
     if (dg_frag%n_mat_max <= 0) return
@@ -1387,6 +1392,7 @@
       allocate(psi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
       allocate(tpsi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
       allocate(hpsi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(vnlpsi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
       allocate(coef_probe(dg_frag%n_mat_max, 1), nl_probe(dg_frag%n_mat_max, 1))
 
       if (use_buffered_direct_orbitals) then
@@ -1400,7 +1406,6 @@
           ov_s(:) = max(core_s(:), mg%is(:))
           ov_e(:) = min(core_e(:), mg%ie(:))
           has_overlap = all(ov_s(:) <= ov_e(:))
-          if (.not. has_overlap) cycle
           allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           do jo = 1, nbf
@@ -1408,53 +1413,71 @@
             if (ig_j < 1 .or. ig_j > dg_frag%nstate_tot) cycle
             occ_probe = dg_frag%occ_state(ig_j, ispin)
             if (occ_probe <= 0.0d0) cycle
+            psi_frag(:, :, :) = (0.0d0, 0.0d0)
             call build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
 
-            ztmp = (0.0d0, 0.0d0)
-            do gz = ov_s(3), ov_e(3)
-              do gy = ov_s(2), ov_e(2)
-                do gx = ov_s(1), ov_e(1)
+            do gz = mg%is(3), mg%ie(3)
+              do gy = mg%is(2), mg%ie(2)
+                do gx = mg%is(1), mg%ie(1)
                   ixg = gx
                   iyg = gy
                   izg = gz
                   call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
                   if (phi_val == (0.0d0, 0.0d0)) cycle
-                  ztmp = ztmp + conjg(phi_val) * T_phi(ixg, iyg, izg)
+                  psi_frag(ixg, iyg, izg) = phi_val
                 end do
               end do
             end do
-            kin_local = kin_local + occ_probe * real(ztmp, kind=8) * system%hvol
-            if (allocated(kin_state_local)) kin_state_local(ig_j) = kin_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
 
-            ztmp = (0.0d0, 0.0d0)
-            do gz = ov_s(3), ov_e(3)
-              do gy = ov_s(2), ov_e(2)
-                do gx = ov_s(1), ov_e(1)
-                  ixg = gx
-                  iyg = gy
-                  izg = gz
-                  call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
-                  if (phi_val == (0.0d0, 0.0d0)) cycle
-                  ztmp = ztmp + conjg(phi_val) * H_phi(ixg, iyg, izg)
+            if (has_overlap) then
+              ztmp = (0.0d0, 0.0d0)
+              do gz = ov_s(3), ov_e(3)
+                do gy = ov_s(2), ov_e(2)
+                  do gx = ov_s(1), ov_e(1)
+                    ixg = gx
+                    iyg = gy
+                    izg = gz
+                    call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                    if (phi_val == (0.0d0, 0.0d0)) cycle
+                    ztmp = ztmp + conjg(phi_val) * T_phi(ixg, iyg, izg)
+                  end do
                 end do
               end do
-            end do
-            one_local = one_local + occ_probe * real(ztmp, kind=8) * system%hvol
-            if (allocated(one_state_local)) one_state_local(ig_j) = one_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
+              kin_local = kin_local + occ_probe * real(ztmp, kind=8) * system%hvol
+              if (allocated(kin_state_local)) kin_state_local(ig_j) = kin_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
+
+              ztmp = (0.0d0, 0.0d0)
+              do gz = ov_s(3), ov_e(3)
+                do gy = ov_s(2), ov_e(2)
+                  do gx = ov_s(1), ov_e(1)
+                    ixg = gx
+                    iyg = gy
+                    izg = gz
+                    call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                    if (phi_val == (0.0d0, 0.0d0)) cycle
+                    ztmp = ztmp + conjg(phi_val) * H_phi(ixg, iyg, izg)
+                  end do
+                end do
+              end do
+              one_local = one_local + occ_probe * real(ztmp, kind=8) * system%hvol
+              if (allocated(one_state_local)) one_state_local(ig_j) = one_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
+            end if
+
+            call apply_nonlocal_pp_realspace_probe(dg_frag, mg, ppg, system, Ac_tot, psi_frag, vnlpsi_frag)
+            if (has_overlap) then
+              ztmp = (0.0d0, 0.0d0)
+              do gz = ov_s(3), ov_e(3)
+                do gy = ov_s(2), ov_e(2)
+                  do gx = ov_s(1), ov_e(1)
+                    ztmp = ztmp + conjg(psi_frag(gx, gy, gz)) * vnlpsi_frag(gx, gy, gz)
+                  end do
+                end do
+              end do
+              if (allocated(nl_state_local)) nl_state_local(ig_j) = nl_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
+            end if
           end do
           deallocate(T_phi, H_phi)
         end do
-        if (allocated(nl_state_local)) then
-          do ig_j = 1, dg_frag%nstate_tot
-            occ_probe = dg_frag%occ_state(ig_j, ispin)
-            if (occ_probe <= 0.0d0) cycle
-            coef_probe(:, :) = (0.0d0, 0.0d0)
-            nl_probe(:, :) = (0.0d0, 0.0d0)
-            coef_probe(ig_j, 1) = (1.0d0, 0.0d0)
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_probe, nl_probe)
-            nl_state_local(ig_j) = occ_probe * real(nl_probe(ig_j, 1), kind=8)
-          end do
-        end if
       else
         do io = 1, nocc
           if (allocated(dg_frag%occ_state)) then
@@ -1526,21 +1549,51 @@
         end do
       end if
 
-      deallocate(psi_frag, tpsi_frag, hpsi_frag, V_total, coef_probe, nl_probe)
+      deallocate(psi_frag, tpsi_frag, hpsi_frag, vnlpsi_frag, V_total, coef_probe, nl_probe)
     end do
 
-    call comm_summation(kin_local, kin_sum, dg_frag%icomm)
-    call comm_summation(one_local, one_sum, dg_frag%icomm)
-    frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
-    kin_sum = kin_sum / frag_reduce_factor
-    one_sum = one_sum / frag_reduce_factor
+    if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+      call comm_summation(kin_local, kin_frag_sum, dg_frag%icomm_frag)
+      call comm_summation(one_local, one_frag_sum, dg_frag%icomm_frag)
+      if (.not. dg_frag%is_frag_root) then
+        kin_frag_sum = 0.0d0
+        one_frag_sum = 0.0d0
+      end if
+      call comm_summation(kin_frag_sum, kin_sum, dg_frag%icomm)
+      call comm_summation(one_frag_sum, one_sum, dg_frag%icomm)
+      frag_reduce_factor = 1.0d0
+    else
+      call comm_summation(kin_local, kin_sum, dg_frag%icomm)
+      call comm_summation(one_local, one_sum, dg_frag%icomm)
+      frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
+      kin_sum = kin_sum / frag_reduce_factor
+      one_sum = one_sum / frag_reduce_factor
+    end if
     if (allocated(kin_state_local)) then
-      call comm_summation(kin_state_local, kin_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
-      call comm_summation(one_state_local, one_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
-      call comm_summation(nl_state_local, nl_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
-      kin_state_sum(:) = kin_state_sum(:) / frag_reduce_factor
-      one_state_sum(:) = one_state_sum(:) / frag_reduce_factor
-      nl_state_sum(:) = nl_state_sum(:) / frag_reduce_factor
+      if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+        call comm_summation(kin_state_local, kin_state_sum, dg_frag%nstate_tot, dg_frag%icomm_frag)
+        call comm_summation(one_state_local, one_state_sum, dg_frag%nstate_tot, dg_frag%icomm_frag)
+        call comm_summation(nl_state_local, nl_state_sum, dg_frag%nstate_tot, dg_frag%icomm_frag)
+        if (.not. dg_frag%is_frag_root) then
+          kin_state_sum(:) = 0.0d0
+          one_state_sum(:) = 0.0d0
+          nl_state_sum(:) = 0.0d0
+        end if
+        call comm_summation(kin_state_sum, kin_state_local, dg_frag%nstate_tot, dg_frag%icomm)
+        call comm_summation(one_state_sum, one_state_local, dg_frag%nstate_tot, dg_frag%icomm)
+        call comm_summation(nl_state_sum, nl_state_local, dg_frag%nstate_tot, dg_frag%icomm)
+        kin_state_sum(:) = kin_state_local(:)
+        one_state_sum(:) = one_state_local(:)
+        nl_state_sum(:) = nl_state_local(:)
+      else
+        call comm_summation(kin_state_local, kin_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
+        call comm_summation(one_state_local, one_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
+        call comm_summation(nl_state_local, nl_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
+        kin_state_sum(:) = kin_state_sum(:) / frag_reduce_factor
+        one_state_sum(:) = one_state_sum(:) / frag_reduce_factor
+        nl_state_sum(:) = nl_state_sum(:) / frag_reduce_factor
+      end if
+      nl_sum = sum(nl_state_sum)
       if (dg_frag%id == 0) then
         do io = 1, dg_frag%nstate_tot
           if (io <= size(dg_frag%occ_state, 1)) then
@@ -1557,4 +1610,84 @@
     end if
     kin_sum_out = kin_sum
     one_sum_out = one_sum
+    nl_sum_out = nl_sum
   end subroutine compute_realspace_energy_probe
+
+  subroutine apply_nonlocal_pp_realspace_probe(dg_frag, mg, ppg, system, Ac_tot, psi_frag, vnlpsi_frag)
+    use structures
+    use communication, only: comm_summation
+    use salmon_global, only: theory
+    use math_constants, only: zi
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_rgrid),          intent(in) :: mg
+    type(s_pp_grid),        intent(in) :: ppg
+    type(s_dft_system),     intent(in) :: system
+    real(8),                intent(in) :: Ac_tot(3)
+    complex(8),             intent(in) :: psi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    complex(8),             intent(out):: vnlpsi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+
+    integer :: ilma, ia, j, ix, iy, iz
+    real(8) :: xcoord, ycoord, zcoord, phase
+    real(8) :: A_local(3)
+    logical :: use_micro_A
+    complex(8) :: proj_amp, proj_val, phase_factor
+    complex(8), allocatable :: proj_local(:), proj_global(:)
+
+    vnlpsi_frag(:, :, :) = (0.0d0, 0.0d0)
+    if (ppg%Nlma <= 0 .or. .not. allocated(ppg%uV)) return
+
+    allocate(proj_local(ppg%Nlma), proj_global(ppg%Nlma))
+    proj_local(:) = (0.0d0, 0.0d0)
+    proj_global(:) = (0.0d0, 0.0d0)
+    use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
+
+    do ilma = 1, ppg%Nlma
+      ia = ppg%ia_tbl(ilma)
+      proj_amp = (0.0d0, 0.0d0)
+      do j = 1, ppg%mps(ia)
+        ix = ppg%jxyz(1, j, ia)
+        iy = ppg%jxyz(2, j, ia)
+        iz = ppg%jxyz(3, j, ia)
+        if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+        xcoord = ppg%rxyz(1, j, ia)
+        ycoord = ppg%rxyz(2, j, ia)
+        zcoord = ppg%rxyz(3, j, ia)
+        if (use_micro_A) then
+          A_local(1:3) = system%Ac_micro%v(1:3, ix, iy, iz)
+        else
+          A_local(1:3) = Ac_tot(1:3)
+        end if
+        phase = A_local(1) * xcoord + A_local(2) * ycoord + A_local(3) * zcoord
+        phase_factor = ppg%uV(j, ilma) * exp(-zi * phase)
+        proj_amp = proj_amp + conjg(phase_factor) * psi_frag(ix, iy, iz)
+      end do
+      proj_local(ilma) = proj_amp
+    end do
+
+    call comm_summation(proj_local, proj_global, ppg%Nlma, dg_frag%icomm_frag)
+
+    do ilma = 1, ppg%Nlma
+      ia = ppg%ia_tbl(ilma)
+      proj_val = ppg%rinv_uvu(ilma) * proj_global(ilma)
+      do j = 1, ppg%mps(ia)
+        ix = ppg%jxyz(1, j, ia)
+        iy = ppg%jxyz(2, j, ia)
+        iz = ppg%jxyz(3, j, ia)
+        if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+        xcoord = ppg%rxyz(1, j, ia)
+        ycoord = ppg%rxyz(2, j, ia)
+        zcoord = ppg%rxyz(3, j, ia)
+        if (use_micro_A) then
+          A_local(1:3) = system%Ac_micro%v(1:3, ix, iy, iz)
+        else
+          A_local(1:3) = Ac_tot(1:3)
+        end if
+        phase = A_local(1) * xcoord + A_local(2) * ycoord + A_local(3) * zcoord
+        phase_factor = ppg%uV(j, ilma) * exp(-zi * phase)
+        vnlpsi_frag(ix, iy, iz) = vnlpsi_frag(ix, iy, iz) + proj_val * phase_factor
+      end do
+    end do
+
+    deallocate(proj_local, proj_global)
+  end subroutine apply_nonlocal_pp_realspace_probe

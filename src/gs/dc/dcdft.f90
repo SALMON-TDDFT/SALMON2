@@ -684,6 +684,7 @@ contains
     use structures
     use communication, only: comm_summation
     use Total_Energy, only: calc_Total_Energy_periodic
+    use nonlocal_potential, only: dpseudo, zpseudo
     use salmon_global, only: kion !!!!!! future work: remove (kion --> system%kion)
     implicit none
     type(s_rgrid),        intent(in) :: mg
@@ -704,7 +705,8 @@ contains
     logical :: enable_dc_orbital_energy_probe
     integer :: env_len, env_status
     character(len=64) :: env_val
-    real(8) :: kin_orb, nl_orb
+    real(8) :: kin_orb, nl_orb, nl_direct_orb
+    type(s_orbital) :: vnlpsi
 
     enable_dc_orbital_energy_probe = .false.
     call get_environment_variable("SALMON_DC_ORBITAL_ENERGY_PROBE", env_val, length=env_len, status=env_status)
@@ -712,6 +714,17 @@ contains
       if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
           env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
         enable_dc_orbital_energy_probe = .true.
+      end if
+    end if
+    if (enable_dc_orbital_energy_probe) then
+      if (allocated(spsi%rwf)) then
+        call allocate_orbital_real(system%nspin, mg, info, vnlpsi)
+        vnlpsi%rwf = 0d0
+        call dpseudo(spsi, vnlpsi, info, system%nspin, dc%ppg_tot)
+      else if (allocated(spsi%zwf)) then
+        call allocate_orbital_complex(system%nspin, mg, info, vnlpsi)
+        vnlpsi%zwf = (0d0,0d0)
+        call zpseudo(spsi, vnlpsi, info, system%nspin, dc%ppg_tot)
       end if
     end if
     
@@ -787,9 +800,12 @@ contains
                    - (sttpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
               + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
                       * spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) ) ) )
-          write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+          nl_direct_orb = system%rocc(io,1,ispin) * system%hvol &
+                 * sum( spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+                    * vnlpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) )
+          write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
             "DC orbital energy: ifrag=", dc%i_frag, " ispin=", ispin, " io=", io, &
-            " kin=", kin_orb, " nloc=", nl_orb
+            " kin=", kin_orb, " nloc=", nl_orb, " nloc_direct=", nl_direct_orb
         end do
         end do
       else if (allocated(spsi%zwf)) then
@@ -805,13 +821,20 @@ contains
               + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
                 * spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) ) )
           nl_orb = system%rocc(io,1,ispin) * dble(ztmp) * system%hvol
-          write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+          ztmp = sum( conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) &
+              * vnlpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) )
+          nl_direct_orb = system%rocc(io,1,ispin) * dble(ztmp) * system%hvol
+          write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
             "DC orbital energy: ifrag=", dc%i_frag, " ispin=", ispin, " io=", io, &
-            " kin=", kin_orb, " nloc=", nl_orb
+            " kin=", kin_orb, " nloc=", nl_orb, " nloc_direct=", nl_direct_orb
         end do
         end do
       end if
       flush(6)
+    end if
+    if (enable_dc_orbital_energy_probe) then
+      if (allocated(vnlpsi%rwf)) deallocate(vnlpsi%rwf)
+      if (allocated(vnlpsi%zwf)) deallocate(vnlpsi%zwf)
     end if
     
   ! summation in each fragment
