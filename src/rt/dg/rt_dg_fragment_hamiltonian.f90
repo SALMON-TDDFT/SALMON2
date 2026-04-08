@@ -81,11 +81,62 @@
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_ham
 
+  integer function map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, ig, lb, ub
+    integer :: ig_wrap, support_lo, support_len
+
+    if (dg_frag%use_buffered_basis) then
+      support_lo = dg_frag%basis_support_lo(axis, ifrag)
+      support_len = dg_frag%basis_support_hi(axis, ifrag) - dg_frag%basis_support_lo(axis, ifrag) + 1
+      ig_wrap = support_lo + modulo(ig - support_lo, support_len)
+      iloc = map_global_to_phi_box_coord_ham(ig_wrap, lb, ub, dg_frag%lgnum_total(axis))
+    else
+      iloc = map_global_to_phi_box_coord_ham(ig, lb, ub, dg_frag%lgnum_total(axis))
+    end if
+  end function map_global_to_phi_box_coord_ham_fragment
+
   integer function wrap_support_local_index(iloc, nloc) result(iwrap)
     implicit none
     integer, intent(in) :: iloc, nloc
     iwrap = modulo(iloc - 1, nloc) + 1
   end function wrap_support_local_index
+
+  subroutine fill_buffered_support_local_box(dg_frag, ifrag, i_local, jo, iorg, nsup, phi_local)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, jo
+    integer, intent(in) :: iorg(3), nsup(3)
+    real(8), intent(out) :: phi_local(-4:,-4:,-4:)
+    integer :: lx, ly, lz, sx, sy, sz
+    integer :: gx, gy, gz, bx, by, bz
+    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
+
+    phi_lb1 = lbound(dg_frag%phi_frag, 1)
+    phi_lb2 = lbound(dg_frag%phi_frag, 2)
+    phi_lb3 = lbound(dg_frag%phi_frag, 3)
+    phi_ub1 = ubound(dg_frag%phi_frag, 1)
+    phi_ub2 = ubound(dg_frag%phi_frag, 2)
+    phi_ub3 = ubound(dg_frag%phi_frag, 3)
+
+    do lz = -4, nsup(3) + 4
+      sz = wrap_support_local_index(lz, nsup(3))
+      gz = iorg(3) + sz - 1
+      bz = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 3, gz, phi_lb3, phi_ub3)
+      do ly = -4, nsup(2) + 4
+        sy = wrap_support_local_index(ly, nsup(2))
+        gy = iorg(2) + sy - 1
+        by = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 2, gy, phi_lb2, phi_ub2)
+        do lx = -4, nsup(1) + 4
+          sx = wrap_support_local_index(lx, nsup(1))
+          gx = iorg(1) + sx - 1
+          bx = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 1, gx, phi_lb1, phi_ub1)
+          phi_local(lx, ly, lz) = dg_frag%phi_frag(bx, by, bz, jo, i_local)
+        end do
+      end do
+    end do
+  end subroutine fill_buffered_support_local_box
 
   integer function find_momentum_block(dg_frag, ifrag_row, ifrag_col) result(iblk)
     implicit none
@@ -1570,9 +1621,9 @@
 !$omp simd private(bx, by, bz)
         do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
-          bx = map_global_to_phi_box_coord_ham(gx, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
-          by = map_global_to_phi_box_coord_ham(gy, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
-          bz = map_global_to_phi_box_coord_ham(gz, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
+          bx = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 1, gx, phi_lb1, phi_ub1)
+          by = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 2, gy, phi_lb2, phi_ub2)
+          bz = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 3, gz, phi_lb3, phi_ub3)
           if (bx == 0 .or. by == 0 .or. bz == 0) cycle
           H_phi(gx, gy, gz) = H_phi(gx, gy, gz) + V_total(gx, gy, gz) * dg_frag%phi_frag(bx, by, bz, jo, i_local)
         end do
@@ -1608,9 +1659,9 @@
     complex(8), intent(out) :: phi_val
     integer :: bx, by, bz
 
-    bx = map_global_to_phi_box_coord_ham(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-    by = map_global_to_phi_box_coord_ham(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-    bz = map_global_to_phi_box_coord_ham(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+    bx = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 1, gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1))
+    by = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 2, gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2))
+    bz = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 3, gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3))
     if (bx == 0 .or. by == 0 .or. bz == 0) then
       phi_val = (0.0d0, 0.0d0)
       return
@@ -1629,7 +1680,7 @@
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, i_local, io
     type(s_rgrid), intent(in) :: mg
-    real(8), intent(in) :: field(:,:,:)
+    real(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in) :: hvol
     real(8), intent(out) :: integral
     real(8) :: partial
@@ -1657,16 +1708,10 @@
       iorg(:) = dg_frag%ixyz_frag(:, ifrag)
       nsup(:) = dg_frag%nxyz_domain(:, ifrag)
     end if
+    call get_fragment_basis_owned_range(dg_frag, ifrag, mg, iorg, nsup, loc_s, loc_e, has_overlap)
     if (.not. has_overlap) then
       integral = 0.0d0
       return
-    end if
-    if (loc_s(1) < lbound(field, 1) .or. loc_e(1) > ubound(field, 1) .or. &
-        loc_s(2) < lbound(field, 2) .or. loc_e(2) > ubound(field, 2) .or. &
-        loc_s(3) < lbound(field, 3) .or. loc_e(3) > ubound(field, 3)) then
-      write(*,*) "[FATAL] integrate local range exceeds field bounds: rank=", dg_frag%id, &
-        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, " field_shape=", shape(field)
-      stop 1
     end if
     f_lb1 = lbound(dg_frag%phi_frag, 1)
     f_ub1 = ubound(dg_frag%phi_frag, 1)
@@ -1680,6 +1725,13 @@
     gy1 = iorg(2) + loc_e(2) - 1
     gz0 = iorg(3) + loc_s(3) - 1
     gz1 = iorg(3) + loc_e(3) - 1
+    if (gx0 < lbound(field, 1) .or. gx1 > ubound(field, 1) .or. &
+        gy0 < lbound(field, 2) .or. gy1 > ubound(field, 2) .or. &
+        gz0 < lbound(field, 3) .or. gz1 > ubound(field, 3)) then
+      write(*,*) "[FATAL] integrate global range exceeds field bounds: rank=", dg_frag%id, &
+        " ifrag=", ifrag, " g0=", gx0, gy0, gz0, " g1=", gx1, gy1, gz1, " field_shape=", shape(field)
+      stop 1
+    end if
     partial = 0.0d0
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
@@ -1688,11 +1740,11 @@
         !$omp simd reduction(+:partial) private(bx, by, bz)
         do lx = loc_s(1), loc_e(1)
           gx = iorg(1) + lx - 1
-          bx = map_global_to_phi_box_coord_ham(gx, f_lb1, f_ub1, dg_frag%lgnum_total(1))
-          by = map_global_to_phi_box_coord_ham(gy, f_lb2, f_ub2, dg_frag%lgnum_total(2))
-          bz = map_global_to_phi_box_coord_ham(gz, f_lb3, f_ub3, dg_frag%lgnum_total(3))
+          bx = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 1, gx, f_lb1, f_ub1)
+          by = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 2, gy, f_lb2, f_ub2)
+          bz = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 3, gz, f_lb3, f_ub3)
           if (bx == 0 .or. by == 0 .or. bz == 0) cycle
-          partial = partial + dg_frag%phi_frag(bx, by, bz, io, i_local) * field(lx, ly, lz) * hvol
+          partial = partial + dg_frag%phi_frag(bx, by, bz, io, i_local) * field(gx, gy, gz) * hvol
         end do
       end do
     end do
@@ -1726,10 +1778,8 @@
     real(8) :: lapt(4,3)
     integer :: iorg(3), nsup(3), loc_s(3), loc_e(3)
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
-    integer :: sxp1, sxm1, sxp2, sxm2, sxp3, sxm3, sxp4, sxm4
-    integer :: syp1, sym1, syp2, sym2, syp3, sym3, syp4, sym4
-    integer :: szp1, szm1, szp2, szm2, szp3, szm3, szp4, szm4
     logical :: has_overlap
+    real(8), allocatable :: phi_local(:,:,:)
     
     ! Extract stencil coefficients
     lap0 = stencil%coef_lap0
@@ -1767,6 +1817,10 @@
     phi_ub3 = ubound(dg_frag%phi_frag, 3)
     T_phi = 0.0d0
     if (.not. has_overlap) return
+    if (dg_frag%use_buffered_basis) then
+      allocate(phi_local(-4:nsup(1)+4, -4:nsup(2)+4, -4:nsup(3)+4))
+      call fill_buffered_support_local_box(dg_frag, ifrag, i_local, jo, iorg, nsup, phi_local)
+    end if
     ! Note: phi_frag is allocated as (1-nb:nx+nb, 1-nb:ny+nb, 1-nb:nz+nb, ...)
     ! where nb = nxyz_buffer = 4 for 4th-order stencil
     ! The interior domain is (1:nx, 1:ny, 1:nz), and halo provides data for stencil
@@ -1794,44 +1848,20 @@
           gx = iorg(1) + lx - 1
           ix0 = modulo(gx - 1, lgx) + 1
           if (dg_frag%use_buffered_basis) then
-            sxp1 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx + 1, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxm1 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx - 1, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxp2 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx + 2, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxm2 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx - 2, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxp3 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx + 3, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxm3 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx - 3, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxp4 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx + 4, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            sxm4 = map_global_to_phi_box_coord_ham(iorg(1) + wrap_support_local_index(lx - 4, nsup(1)) - 1, phi_lb1, phi_ub1, lgx)
-            syp1 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly + 1, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            sym1 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly - 1, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            syp2 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly + 2, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            sym2 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly - 2, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            syp3 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly + 3, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            sym3 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly - 3, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            syp4 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly + 4, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            sym4 = map_global_to_phi_box_coord_ham(iorg(2) + wrap_support_local_index(ly - 4, nsup(2)) - 1, phi_lb2, phi_ub2, lgy)
-            szp1 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz + 1, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szm1 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz - 1, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szp2 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz + 2, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szm2 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz - 2, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szp3 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz + 3, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szm3 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz - 3, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szp4 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz + 4, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            szm4 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz - 4, nsup(3)) - 1, phi_lb3, phi_ub3, lgz)
-            v = lapt(1,1) * (dg_frag%phi_frag(sxp1, iy0, iz0, jo, i_local) + dg_frag%phi_frag(sxm1, iy0, iz0, jo, i_local)) + &
-                lapt(2,1) * (dg_frag%phi_frag(sxp2, iy0, iz0, jo, i_local) + dg_frag%phi_frag(sxm2, iy0, iz0, jo, i_local)) + &
-                lapt(3,1) * (dg_frag%phi_frag(sxp3, iy0, iz0, jo, i_local) + dg_frag%phi_frag(sxm3, iy0, iz0, jo, i_local)) + &
-                lapt(4,1) * (dg_frag%phi_frag(sxp4, iy0, iz0, jo, i_local) + dg_frag%phi_frag(sxm4, iy0, iz0, jo, i_local))
+            v = lapt(1,1) * (phi_local(lx + 1, ly, lz) + phi_local(lx - 1, ly, lz)) + &
+                lapt(2,1) * (phi_local(lx + 2, ly, lz) + phi_local(lx - 2, ly, lz)) + &
+                lapt(3,1) * (phi_local(lx + 3, ly, lz) + phi_local(lx - 3, ly, lz)) + &
+                lapt(4,1) * (phi_local(lx + 4, ly, lz) + phi_local(lx - 4, ly, lz))
             v = v + &
-                lapt(1,2) * (dg_frag%phi_frag(ix0, syp1, iz0, jo, i_local) + dg_frag%phi_frag(ix0, sym1, iz0, jo, i_local)) + &
-                lapt(2,2) * (dg_frag%phi_frag(ix0, syp2, iz0, jo, i_local) + dg_frag%phi_frag(ix0, sym2, iz0, jo, i_local)) + &
-                lapt(3,2) * (dg_frag%phi_frag(ix0, syp3, iz0, jo, i_local) + dg_frag%phi_frag(ix0, sym3, iz0, jo, i_local)) + &
-                lapt(4,2) * (dg_frag%phi_frag(ix0, syp4, iz0, jo, i_local) + dg_frag%phi_frag(ix0, sym4, iz0, jo, i_local))
+                lapt(1,2) * (phi_local(lx, ly + 1, lz) + phi_local(lx, ly - 1, lz)) + &
+                lapt(2,2) * (phi_local(lx, ly + 2, lz) + phi_local(lx, ly - 2, lz)) + &
+                lapt(3,2) * (phi_local(lx, ly + 3, lz) + phi_local(lx, ly - 3, lz)) + &
+                lapt(4,2) * (phi_local(lx, ly + 4, lz) + phi_local(lx, ly - 4, lz))
             v = v + &
-                lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, szp1, jo, i_local) + dg_frag%phi_frag(ix0, iy0, szm1, jo, i_local)) + &
-                lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, szp2, jo, i_local) + dg_frag%phi_frag(ix0, iy0, szm2, jo, i_local)) + &
-                lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, szp3, jo, i_local) + dg_frag%phi_frag(ix0, iy0, szm3, jo, i_local)) + &
-                lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, szp4, jo, i_local) + dg_frag%phi_frag(ix0, iy0, szm4, jo, i_local))
+                lapt(1,3) * (phi_local(lx, ly, lz + 1) + phi_local(lx, ly, lz - 1)) + &
+                lapt(2,3) * (phi_local(lx, ly, lz + 2) + phi_local(lx, ly, lz - 2)) + &
+                lapt(3,3) * (phi_local(lx, ly, lz + 3) + phi_local(lx, ly, lz - 3)) + &
+                lapt(4,3) * (phi_local(lx, ly, lz + 4) + phi_local(lx, ly, lz - 4))
           else
             ! Compute Laplacian using 4th-order finite difference
             ! Stencil accesses phi_frag(ix±4, iy±4, iz±4) which now includes halo
@@ -1864,12 +1894,17 @@
           end if
           
           ! T|φ> = (-∇²/2)|φ> = lap0*φ - 0.5 * (sum of neighbor terms)
-          T_phi(gx, gy, gz) = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
+          if (dg_frag%use_buffered_basis) then
+            T_phi(gx, gy, gz) = lap0 * phi_local(lx, ly, lz) - 0.5d0 * v
+          else
+            T_phi(gx, gy, gz) = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
+          end if
           
         end do
       end do
     end do
 !$omp end parallel do
+    if (allocated(phi_local)) deallocate(phi_local)
     
   end subroutine apply_kinetic_to_basis
 

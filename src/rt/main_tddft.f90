@@ -245,7 +245,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
                             calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix, &
-                            print_initial_electron_probe_std => print_initial_electron_probe
+                            print_initial_electron_probe_std => print_initial_electron_probe, &
+                            calculate_observables_std => calculate_observables
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -310,6 +311,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   end if
   if (yn_spinorbit /= 'y') then
     call print_initial_electron_probe_std(dg_frag, system, mg, rho)
+    call calculate_observables_std(dg_frag, system, mg, stencil, ppg, rt, Mit, Vh, Vxc, Vpsl)
+    call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, Mit)
   end if
 
   ! Time evolution loop
@@ -513,11 +516,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   energy%E_ion_nloc = dg_frag%energy_nonlocal
   energy%E_h = E_sum(1)
   energy%E_ion_loc = E_sum(2) + E_sum(3)
-  if (dg_frag%use_buffered_basis) then
-    energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
-  else
-    energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
-  end if
+  energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
   if (comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
     write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
       "        dg-energy-helper: itt=", itt, " E_one=", dg_frag%total_energy, " rhoVh=", rho_vh_sum, " rhoVxc=", rho_vxc_sum, &

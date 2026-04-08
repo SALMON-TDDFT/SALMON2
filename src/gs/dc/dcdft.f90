@@ -701,6 +701,19 @@ contains
     integer,dimension(3) :: is,ie
     real(8) :: E_tmp,E_local(2),E_sum(2)
     complex(8) :: ztmp
+    logical :: enable_dc_orbital_energy_probe
+    integer :: env_len, env_status
+    character(len=64) :: env_val
+    real(8) :: kin_orb, nl_orb
+
+    enable_dc_orbital_energy_probe = .false.
+    call get_environment_variable("SALMON_DC_ORBITAL_ENERGY_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_dc_orbital_energy_probe = .true.
+      end if
+    end if
     
     is(1:3) = mg%is(1:3)
     ie(1:3) = min(mg%ie(1:3),dc%nxyz_domain(1:3)) ! core region only
@@ -759,6 +772,47 @@ contains
       stop "calc_total_energy_dcdft: neither rwf nor zwf is allocated (E_ion_nloc)."
     end if
     E_local(2) = E_tmp
+
+    if (enable_dc_orbital_energy_probe .and. dc%id_frag == 0) then
+      if (allocated(spsi%rwf)) then
+        do ispin=1,system%Nspin
+        do io=info%io_s,info%io_e
+          if (system%rocc(io,1,ispin) <= 0d0) cycle
+          kin_orb = system%rocc(io,1,ispin) &
+                  * sum(  spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+                      * sttpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) ) * system%Hvol
+          nl_orb = system%rocc(io,1,ispin) * system%hvol &
+                 * sum( spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+                    * (shpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+                   - (sttpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+              + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
+                      * spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) ) ) )
+          write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+            "DC orbital energy: ifrag=", dc%i_frag, " ispin=", ispin, " io=", io, &
+            " kin=", kin_orb, " nloc=", nl_orb
+        end do
+        end do
+      else if (allocated(spsi%zwf)) then
+        do ispin=1,system%Nspin
+        do io=info%io_s,info%io_e
+          if (system%rocc(io,1,ispin) <= 0d0) cycle
+          ztmp = sum( conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) &
+              * sttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) )
+          kin_orb = system%rocc(io,1,ispin) * dble(ztmp) * system%Hvol
+          ztmp = sum( conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) &
+              * (shpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+              - (sttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+              + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
+                * spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) ) )
+          nl_orb = system%rocc(io,1,ispin) * dble(ztmp) * system%hvol
+          write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+            "DC orbital energy: ifrag=", dc%i_frag, " ispin=", ispin, " io=", io, &
+            " kin=", kin_orb, " nloc=", nl_orb
+        end do
+        end do
+      end if
+      flush(6)
+    end if
     
   ! summation in each fragment
     call comm_summation(E_local,E_sum,2,info%icomm_rko)
@@ -778,6 +832,18 @@ contains
     
     call calc_Total_Energy_periodic(dc%mg_tot,ewald,dc%system_tot,dc%info_tot,pp,dc%ppg_tot &
       & ,dc%fg_tot,dc%poisson_tot,rion_update,energy)
+    if (dc%id_tot == 0) then
+      write(*,'(1x,a,7(a,1pe14.6))') &
+        "DC energy components:", &
+        " E_kin=", energy%E_kin, &
+        " E_h=", energy%E_h, &
+        " E_ion_loc=", energy%E_ion_loc, &
+        " E_ion_nloc=", energy%E_ion_nloc, &
+        " E_xc=", energy%E_xc, &
+        " E_ion_ion=", energy%E_ion_ion, &
+        " E_tot=", energy%E_tot
+      flush(6)
+    end if
       
   ! override (total --> fragment)
     deallocate(kion)

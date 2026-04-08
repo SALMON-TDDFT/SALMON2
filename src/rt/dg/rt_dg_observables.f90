@@ -62,6 +62,7 @@
     real(8), allocatable :: occ_weight(:)
     real(8), allocatable :: current_orb_local(:), current_orb_sum(:)
     real(8), allocatable :: energy_orb_local(:), energy_orb_sum(:)
+    real(8), allocatable :: nl_state_local(:), nl_state_sum(:)
     real(8) :: current_diag_local(3), current_offdiag_local(3)
     real(8) :: current_diag_sum(3), current_offdiag_sum(3)
     complex(8) :: current_blk_total, current_blk_diag, current_elem
@@ -503,12 +504,16 @@
               end do
             end if
             if (has_nonlocal) then
-              if (allocated(dg_frag%H_nl_cache)) then
+              if (allocated(dg_frag%H_nl_cache) .and. .not. dg_frag%use_buffered_basis) then
                 if (use_energy_components) then
                   tmp_probe(:, :) = matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
                   do io = 1, nocc
                     energy_nl_local = energy_nl_local + occ_weight(io) * &
                       sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                    if (allocated(nl_state_local)) then
+                      nl_state_local(io) = nl_state_local(io) + occ_weight(io) * &
+                        sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                    end if
                   end do
                 end if
                 tmp_mat(:, :) = tmp_mat(:, :) + &
@@ -521,6 +526,10 @@
                   do io = 1, nocc
                     energy_nl_local = energy_nl_local + occ_weight(io) * &
                       sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                    if (allocated(nl_state_local)) then
+                      nl_state_local(io) = nl_state_local(io) + occ_weight(io) * &
+                        sum(real(conjg(coef_frag_all(1:n, io)) * tmp_probe(1:n, io)))
+                    end if
                   end do
                 end if
                 call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
@@ -687,7 +696,7 @@
   1000 continue
     
     if (n_pw == 0) then
-      call compute_realspace_energy_probe(dg_frag, system, mg, stencil, itt, Vh, Vxc, Vpsl, &
+      call compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, &
                                           energy_kin_local, energy_local, energy_kin_rs_sum, energy_one_rs_sum)
     end if
 
@@ -798,10 +807,17 @@
     dg_frag%energy_Ap = 0.0d0
     dg_frag%energy_A2 = 0.0d0
     if (use_energy_components) then
-      dg_frag%energy_kinetic = energy_kin_sum
+      if (dg_frag%use_buffered_basis .and. n_pw == 0) then
+        dg_frag%energy_kinetic = energy_kin_rs_sum
+      else
+        dg_frag%energy_kinetic = energy_kin_sum
+      end if
       dg_frag%energy_nonlocal = energy_nl_sum
       dg_frag%energy_Ap = energy_ap_sum
       dg_frag%energy_A2 = energy_a2_sum
+    end if
+    if (dg_frag%use_buffered_basis .and. n_pw == 0) then
+      dg_frag%total_energy = energy_one_rs_sum
     end if
 
     if (n_pw == 0 .and. (itt == 1 .or. itt == 40)) then
@@ -1129,6 +1145,22 @@
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_obs
 
+  integer function map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, ig, lb, ub
+    integer :: ig_wrap, support_lo, support_len
+
+    if (dg_frag%use_buffered_basis) then
+      support_lo = dg_frag%basis_support_lo(axis, ifrag)
+      support_len = dg_frag%basis_support_hi(axis, ifrag) - dg_frag%basis_support_lo(axis, ifrag) + 1
+      ig_wrap = support_lo + modulo(ig - support_lo, support_len)
+      iloc = map_global_to_phi_box_coord_obs(ig_wrap, lb, ub, dg_frag%lgnum_total(axis))
+    else
+      iloc = map_global_to_phi_box_coord_obs(ig, lb, ub, dg_frag%lgnum_total(axis))
+    end if
+  end function map_global_to_phi_box_coord_obs_fragment
+
   subroutine build_local_potential_applied_basis_local(dg_frag, ifrag, i_local, jo, mg, V_total, V_phi)
     use structures
     implicit none
@@ -1182,9 +1214,9 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
+            by = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
+            bz = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             phi0 = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
             V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
@@ -1200,9 +1232,9 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
+            by = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
+            bz = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             phi0 = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
             V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
@@ -1265,9 +1297,9 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
+            by = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
+            bz = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
           end do
@@ -1280,9 +1312,9 @@
           gy = ov_s(2) + (ly - ly_lo)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_global_to_phi_box_coord_obs(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-            by = map_global_to_phi_box_coord_obs(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-            bz = map_global_to_phi_box_coord_obs(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            bx = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
+            by = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
+            bz = map_global_to_phi_box_coord_obs_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             integral = integral + cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
           end do
@@ -1291,15 +1323,18 @@
     end if
   end subroutine integrate_local_basis_with_field_local
 
-  subroutine compute_realspace_energy_probe(dg_frag, system, mg, stencil, itt, Vh, Vxc, Vpsl, energy_kin_mat, energy_one_mat, kin_sum_out, one_sum_out)
+  subroutine compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, energy_kin_mat, energy_one_mat, kin_sum_out, one_sum_out)
     use structures
     use communication, only: comm_summation, comm_is_root
     use parallelization, only: nproc_id_global
+    use rt_dg_fragment_ops, only: apply_nonlocal_pp_projector_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
     type(s_rgrid),          intent(in)    :: mg
     type(s_stencil),        intent(in)    :: stencil
+    type(s_pp_grid),        intent(in)    :: ppg
+    real(8),                intent(in)    :: Ac_tot(3)
     integer,                intent(in)    :: itt
     type(s_scalar),         intent(in)    :: Vh, Vpsl
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
@@ -1307,17 +1342,20 @@
     real(8),                intent(out)   :: kin_sum_out, one_sum_out
 
     integer :: ispin, io, ifrag, i_local, jo, nbf, ig_j, nocc
-    integer :: iorg(3), ndom(3)
-    integer :: loc_s(3), loc_e(3), gx, gy, gz, ixg, iyg, izg
+    integer :: core_s(3), core_e(3), ov_s(3), ov_e(3)
+    integer :: gx, gy, gz, ixg, iyg, izg
     logical :: has_overlap
-    complex(8), allocatable :: psi(:,:,:), tpsi(:,:,:), hpsi(:,:,:)
     real(8), allocatable :: V_total(:,:,:)
     complex(8), allocatable :: T_phi(:,:,:), H_phi(:,:,:)
-    complex(8) :: coeff, ztmp
+    complex(8), allocatable :: psi_frag(:,:,:), tpsi_frag(:,:,:), hpsi_frag(:,:,:)
+    complex(8), allocatable :: coef_probe(:,:), nl_probe(:,:)
+    complex(8) :: coeff, ztmp, phi_val
     real(8) :: kin_local, one_local, kin_sum, one_sum
     real(8) :: frag_reduce_factor
     real(8) :: occ_probe
+    logical :: use_buffered_direct_orbitals
     real(8), allocatable :: kin_state_local(:), kin_state_sum(:), one_state_local(:), one_state_sum(:)
+    real(8), allocatable :: nl_state_local(:), nl_state_sum(:)
 
     kin_sum_out = 0.0d0
     one_sum_out = 0.0d0
@@ -1327,14 +1365,17 @@
 
     kin_local = 0.0d0
     one_local = 0.0d0
-    if (dg_frag%use_buffered_basis .and. (itt == 1 .or. itt == 40)) then
+    if (dg_frag%use_buffered_basis .and. (itt == 0 .or. itt == 1 .or. itt == 40)) then
       allocate(kin_state_local(dg_frag%nstate_tot), kin_state_sum(dg_frag%nstate_tot))
       allocate(one_state_local(dg_frag%nstate_tot), one_state_sum(dg_frag%nstate_tot))
+      allocate(nl_state_local(dg_frag%nstate_tot), nl_state_sum(dg_frag%nstate_tot))
       kin_state_local(:) = 0.0d0
       one_state_local(:) = 0.0d0
+      nl_state_local(:) = 0.0d0
     end if
 
     do ispin = 1, dg_frag%nspin
+      use_buffered_direct_orbitals = dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)
       if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
         nocc = dg_frag%nstate_tot
       else
@@ -1343,89 +1384,176 @@
       if (nocc <= 0) cycle
       allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
       call build_total_potential_grid_local(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      allocate(psi(1:dg_frag%lgnum_total(1), 1:dg_frag%lgnum_total(2), 1:dg_frag%lgnum_total(3)))
-      allocate(tpsi(1:dg_frag%lgnum_total(1), 1:dg_frag%lgnum_total(2), 1:dg_frag%lgnum_total(3)))
-      allocate(hpsi(1:dg_frag%lgnum_total(1), 1:dg_frag%lgnum_total(2), 1:dg_frag%lgnum_total(3)))
+      allocate(psi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(tpsi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(hpsi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      allocate(coef_probe(dg_frag%n_mat_max, 1), nl_probe(dg_frag%n_mat_max, 1))
 
-      do io = 1, nocc
-        psi(:, :, :) = (0.0d0, 0.0d0)
-        tpsi(:, :, :) = (0.0d0, 0.0d0)
-        hpsi(:, :, :) = (0.0d0, 0.0d0)
+      if (use_buffered_direct_orbitals) then
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
           nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
           if (nbf <= 0) cycle
-          if (dg_frag%use_buffered_basis) then
-            iorg(:) = dg_frag%basis_support_lo(:, ifrag)
-            ndom(:) = dg_frag%basis_support_hi(:, ifrag) - dg_frag%basis_support_lo(:, ifrag) + 1
-          else
-            iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-            ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-          end if
-          loc_s(:) = max(iorg(:), mg%is(:)) - iorg(:) + 1
-          loc_e(:) = min(iorg(:) + ndom(:) - 1, mg%ie(:)) - iorg(:) + 1
-          has_overlap = all(loc_s(:) <= loc_e(:))
+          core_s(:) = dg_frag%ixyz_frag(:, ifrag)
+          core_e(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+          ov_s(:) = max(core_s(:), mg%is(:))
+          ov_e(:) = min(core_e(:), mg%ie(:))
+          has_overlap = all(ov_s(:) <= ov_e(:))
           if (.not. has_overlap) cycle
           allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           do jo = 1, nbf
             ig_j = dg_frag%index_basis(jo, ifrag, ispin)
-            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-            coeff = dg_frag%coef(ig_j, io, ispin)
-            if (abs(coeff) == 0.0d0) cycle
+            if (ig_j < 1 .or. ig_j > dg_frag%nstate_tot) cycle
+            occ_probe = dg_frag%occ_state(ig_j, ispin)
+            if (occ_probe <= 0.0d0) cycle
             call build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-            do gz = loc_s(3), loc_e(3)
-              do gy = loc_s(2), loc_e(2)
-                do gx = loc_s(1), loc_e(1)
-                  ixg = iorg(1) + gx - 1
-                  iyg = iorg(2) + gy - 1
-                  izg = iorg(3) + gz - 1
-                  call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, &
-                    ixg, iyg, izg, ztmp)
-                  if (ztmp == (0.0d0, 0.0d0)) cycle
-                  psi(ixg, iyg, izg) = psi(ixg, iyg, izg) + coeff * ztmp
-                  tpsi(ixg, iyg, izg) = tpsi(ixg, iyg, izg) + coeff * T_phi(ixg, iyg, izg)
-                  hpsi(ixg, iyg, izg) = hpsi(ixg, iyg, izg) + coeff * H_phi(ixg, iyg, izg)
+
+            ztmp = (0.0d0, 0.0d0)
+            do gz = ov_s(3), ov_e(3)
+              do gy = ov_s(2), ov_e(2)
+                do gx = ov_s(1), ov_e(1)
+                  ixg = gx
+                  iyg = gy
+                  izg = gz
+                  call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                  if (phi_val == (0.0d0, 0.0d0)) cycle
+                  ztmp = ztmp + conjg(phi_val) * T_phi(ixg, iyg, izg)
                 end do
               end do
             end do
+            kin_local = kin_local + occ_probe * real(ztmp, kind=8) * system%hvol
+            if (allocated(kin_state_local)) kin_state_local(ig_j) = kin_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
+
+            ztmp = (0.0d0, 0.0d0)
+            do gz = ov_s(3), ov_e(3)
+              do gy = ov_s(2), ov_e(2)
+                do gx = ov_s(1), ov_e(1)
+                  ixg = gx
+                  iyg = gy
+                  izg = gz
+                  call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                  if (phi_val == (0.0d0, 0.0d0)) cycle
+                  ztmp = ztmp + conjg(phi_val) * H_phi(ixg, iyg, izg)
+                end do
+              end do
+            end do
+            one_local = one_local + occ_probe * real(ztmp, kind=8) * system%hvol
+            if (allocated(one_state_local)) one_state_local(ig_j) = one_state_local(ig_j) + occ_probe * real(ztmp, kind=8) * system%hvol
           end do
           deallocate(T_phi, H_phi)
         end do
-        ztmp = sum(conjg(psi) * tpsi)
-        if (allocated(dg_frag%occ_state)) then
-          occ_probe = dg_frag%occ_state(io, ispin)
-        else
-          occ_probe = system%rocc(io, 1, ispin)
+        if (allocated(nl_state_local)) then
+          do ig_j = 1, dg_frag%nstate_tot
+            occ_probe = dg_frag%occ_state(ig_j, ispin)
+            if (occ_probe <= 0.0d0) cycle
+            coef_probe(:, :) = (0.0d0, 0.0d0)
+            nl_probe(:, :) = (0.0d0, 0.0d0)
+            coef_probe(ig_j, 1) = (1.0d0, 0.0d0)
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_probe, nl_probe)
+            nl_state_local(ig_j) = occ_probe * real(nl_probe(ig_j, 1), kind=8)
+          end do
         end if
-        kin_local = kin_local + occ_probe * real(ztmp, kind=8) * system%hvol
-        if (allocated(kin_state_local)) kin_state_local(io) = kin_state_local(io) + occ_probe * real(ztmp, kind=8) * system%hvol
-        ztmp = sum(conjg(psi) * hpsi)
-        one_local = one_local + occ_probe * real(ztmp, kind=8) * system%hvol
-        if (allocated(one_state_local)) one_state_local(io) = one_state_local(io) + occ_probe * real(ztmp, kind=8) * system%hvol
-      end do
+      else
+        do io = 1, nocc
+          if (allocated(dg_frag%occ_state)) then
+            occ_probe = dg_frag%occ_state(io, ispin)
+          else
+            occ_probe = system%rocc(io, 1, ispin)
+          end if
+          if (occ_probe <= 0.0d0) cycle
+          i_local = 0
+          do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+            i_local = i_local + 1
+            nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+            if (nbf <= 0) cycle
+            core_s(:) = dg_frag%ixyz_frag(:, ifrag)
+            core_e(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+            ov_s(:) = max(core_s(:), mg%is(:))
+            ov_e(:) = min(core_e(:), mg%ie(:))
+            has_overlap = all(ov_s(:) <= ov_e(:))
+            if (.not. has_overlap) cycle
+            psi_frag(:, :, :) = (0.0d0, 0.0d0)
+            tpsi_frag(:, :, :) = (0.0d0, 0.0d0)
+            hpsi_frag(:, :, :) = (0.0d0, 0.0d0)
+            allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+            allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+            do jo = 1, nbf
+              ig_j = dg_frag%index_basis(jo, ifrag, ispin)
+              if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
+              coeff = dg_frag%coef(ig_j, io, ispin)
+              if (abs(coeff) == 0.0d0) cycle
+              call build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
+              do gz = ov_s(3), ov_e(3)
+                do gy = ov_s(2), ov_e(2)
+                  do gx = ov_s(1), ov_e(1)
+                    ixg = gx
+                    iyg = gy
+                    izg = gz
+                    call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                    if (phi_val == (0.0d0, 0.0d0)) cycle
+                    psi_frag(ixg, iyg, izg) = psi_frag(ixg, iyg, izg) + coeff * phi_val
+                    tpsi_frag(ixg, iyg, izg) = tpsi_frag(ixg, iyg, izg) + coeff * T_phi(ixg, iyg, izg)
+                    hpsi_frag(ixg, iyg, izg) = hpsi_frag(ixg, iyg, izg) + coeff * H_phi(ixg, iyg, izg)
+                  end do
+                end do
+              end do
+            end do
+            deallocate(T_phi, H_phi)
+            ztmp = (0.0d0, 0.0d0)
+            do gz = ov_s(3), ov_e(3)
+              do gy = ov_s(2), ov_e(2)
+                do gx = ov_s(1), ov_e(1)
+                  ztmp = ztmp + conjg(psi_frag(gx, gy, gz)) * tpsi_frag(gx, gy, gz)
+                end do
+              end do
+            end do
+            kin_local = kin_local + occ_probe * real(ztmp, kind=8) * system%hvol
+            if (allocated(kin_state_local)) kin_state_local(io) = kin_state_local(io) + occ_probe * real(ztmp, kind=8) * system%hvol
 
-      deallocate(psi, tpsi, hpsi, V_total)
+            ztmp = (0.0d0, 0.0d0)
+            do gz = ov_s(3), ov_e(3)
+              do gy = ov_s(2), ov_e(2)
+                do gx = ov_s(1), ov_e(1)
+                  ztmp = ztmp + conjg(psi_frag(gx, gy, gz)) * hpsi_frag(gx, gy, gz)
+                end do
+              end do
+            end do
+            one_local = one_local + occ_probe * real(ztmp, kind=8) * system%hvol
+            if (allocated(one_state_local)) one_state_local(io) = one_state_local(io) + occ_probe * real(ztmp, kind=8) * system%hvol
+          end do
+        end do
+      end if
+
+      deallocate(psi_frag, tpsi_frag, hpsi_frag, V_total, coef_probe, nl_probe)
     end do
 
     call comm_summation(kin_local, kin_sum, dg_frag%icomm)
     call comm_summation(one_local, one_sum, dg_frag%icomm)
+    frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
+    kin_sum = kin_sum / frag_reduce_factor
+    one_sum = one_sum / frag_reduce_factor
     if (allocated(kin_state_local)) then
       call comm_summation(kin_state_local, kin_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
       call comm_summation(one_state_local, one_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
+      call comm_summation(nl_state_local, nl_state_sum, dg_frag%nstate_tot, dg_frag%icomm)
+      kin_state_sum(:) = kin_state_sum(:) / frag_reduce_factor
+      one_state_sum(:) = one_state_sum(:) / frag_reduce_factor
+      nl_state_sum(:) = nl_state_sum(:) / frag_reduce_factor
       if (dg_frag%id == 0) then
         do io = 1, dg_frag%nstate_tot
           if (io <= size(dg_frag%occ_state, 1)) then
             if (dg_frag%occ_state(io, 1) <= 0.0d0) cycle
-            write(*,'(1x,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+            write(*,'(1x,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
               "        buffered-rs-energy-state: itt=", itt, " io=", io, &
-              " occ=", dg_frag%occ_state(io, 1), " kin=", kin_state_sum(io), " one=", one_state_sum(io)
+              " occ=", dg_frag%occ_state(io, 1), " kin=", kin_state_sum(io), " one=", one_state_sum(io), &
+              " nloc=", nl_state_sum(io)
           end if
         end do
         flush(6)
       end if
-      deallocate(kin_state_local, kin_state_sum, one_state_local, one_state_sum)
+      deallocate(kin_state_local, kin_state_sum, one_state_local, one_state_sum, nl_state_local, nl_state_sum)
     end if
     kin_sum_out = kin_sum
     one_sum_out = one_sum

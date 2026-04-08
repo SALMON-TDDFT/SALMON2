@@ -31,7 +31,7 @@
   select case(theory)
   case('dft','dft_band')              ; call main_dft
   case('dft_md')                      ; call main_dft_md
-  case('tddft_response','tddft_pulse'); call main_tddft
+  case('tddft','tddft_response','tddft_pulse'); call main_tddft
   case('dft_k_expand')                ; call main_dft_k_expand !convert DFT/k-points data to supercell/gammma DFT
   case('single_scale_maxwell_tddft'  ); call main_tddft
   case('multi_scale_maxwell_tddft'   ); call main_ms
@@ -64,7 +64,7 @@ contains
        calc_mode='GS'
     case('dft_band')
        calc_mode='DFT_BAND'
-    case('tddft_response','tddft_pulse')
+    case('tddft','tddft_response','tddft_pulse')
        calc_mode='RT'
     case('multi_scale_maxwell_tddft')
        calc_mode='RT'

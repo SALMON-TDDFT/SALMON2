@@ -98,7 +98,7 @@ module rt_dg_fragment
   private
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
-  public :: diagnose_density_from_fragments, print_initial_electron_probe
+  public :: diagnose_density_from_fragments, print_initial_electron_probe, calculate_observables
   public :: s_dg_fragment_rt, halo_info
   
   ! Types and data structures are defined in rt_dg_fragment_types
@@ -1802,7 +1802,10 @@ contains
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
       if (use_buffered_basis) then
-        dg_frag%basis_support_lo(1:3, ifrag) = dg_frag%ixyz_frag(1:3, ifrag) - nxyz_file_buffer(1:3)
+        ! DC fragment-box data are written in fragment-local grid order starting
+        ! from the core origin jxyz_tot(1,:) and then wrapping positive-side
+        ! buffer points; they are not stored with a left-shifted origin.
+        dg_frag%basis_support_lo(1:3, ifrag) = dg_frag%ixyz_frag(1:3, ifrag)
         dg_frag%basis_support_hi(1:3, ifrag) = dg_frag%basis_support_lo(1:3, ifrag) + nxyz_file_box(1:3) - 1
       else
         dg_frag%basis_support_lo(1:3, ifrag) = dg_frag%ixyz_frag(1:3, ifrag)
@@ -1847,17 +1850,17 @@ contains
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
               if (use_buffered_basis) then
                 do iz = 1, nxyz_file_box(3)
-                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) - nxyz_file_buffer(3) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
                   if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
                   if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
                   if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
                   do iy = 1, nxyz_file_box(2)
-                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) - nxyz_file_buffer(2) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
                     if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
                     if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
                     if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
                     do ix = 1, nxyz_file_box(1)
-                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) - nxyz_file_buffer(1) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
                       if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
                       if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
                       if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
