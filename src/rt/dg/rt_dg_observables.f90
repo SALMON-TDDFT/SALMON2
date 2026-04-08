@@ -66,6 +66,7 @@
     real(8), allocatable :: nl_state_local(:), nl_state_sum(:)
     real(8) :: current_diag_local(3), current_offdiag_local(3)
     real(8) :: current_diag_sum(3), current_offdiag_sum(3)
+    real(8) :: current_nl_rs_sum(3)
     complex(8) :: current_blk_total, current_blk_diag, current_elem
     complex(8) :: mfp
     real(8), parameter :: unit_dir(3,3) = reshape((/ &
@@ -94,6 +95,7 @@
     energy_nl_rs_sum = 0.0d0
     current_diag_local(:) = 0.0d0
     current_offdiag_local(:) = 0.0d0
+    current_nl_rs_sum(:) = 0.0d0
     n = dg_frag%n_mat_max
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
 
@@ -701,6 +703,8 @@
   1000 continue
     
     if (n_pw == 0) then
+      call compute_realspace_nonlocal_current_probe(dg_frag, system, mg, ppg, Ac_tot, current_nl_rs_sum)
+      current_local(1:3) = current_local(1:3) + current_nl_rs_sum(1:3)
       call compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, &
                                           energy_kin_local, energy_local, energy_kin_rs_sum, energy_one_rs_sum, energy_nl_rs_sum)
     end if
@@ -1616,6 +1620,192 @@
     one_sum_out = one_sum
     nl_sum_out = nl_sum
   end subroutine compute_realspace_energy_probe
+
+  subroutine compute_realspace_nonlocal_current_probe(dg_frag, system, mg, ppg, Ac_tot, current_nl_out)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    type(s_rgrid),          intent(in)    :: mg
+    type(s_pp_grid),        intent(in)    :: ppg
+    real(8),                intent(in)    :: Ac_tot(3)
+    real(8),                intent(out)   :: current_nl_out(3)
+
+    integer :: ispin, io, ifrag, i_local, jo, nbf, ig_j, nocc
+    integer :: gx, gy, gz, ixg, iyg, izg
+    logical :: use_buffered_direct_orbitals
+    complex(8), allocatable :: psi_frag(:,:,:)
+    complex(8) :: coeff, phi_val
+    real(8) :: occ_probe
+    real(8) :: current_local(3), current_state(3)
+
+    current_nl_out(:) = 0.0d0
+    if (dg_frag%use_plane_wave_basis) return
+    if (.not. dg_frag%has_real_space_basis) return
+    if (dg_frag%n_mat_max <= 0) return
+
+    do ispin = 1, dg_frag%nspin
+      use_buffered_direct_orbitals = dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)
+      if (use_buffered_direct_orbitals) then
+        nocc = dg_frag%nstate_tot
+      else
+        nocc = dg_frag%nocc_spin(ispin)
+      end if
+      if (nocc <= 0) cycle
+
+      allocate(psi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+
+      if (use_buffered_direct_orbitals) then
+        i_local = 0
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = i_local + 1
+          nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+          if (nbf <= 0) cycle
+          do jo = 1, nbf
+            ig_j = dg_frag%index_basis(jo, ifrag, ispin)
+            if (ig_j < 1 .or. ig_j > dg_frag%nstate_tot) cycle
+            occ_probe = dg_frag%occ_state(ig_j, ispin)
+            if (occ_probe <= 0.0d0) cycle
+            psi_frag(:, :, :) = (0.0d0, 0.0d0)
+            do gz = mg%is(3), mg%ie(3)
+              do gy = mg%is(2), mg%ie(2)
+                do gx = mg%is(1), mg%ie(1)
+                  ixg = gx
+                  iyg = gy
+                  izg = gz
+                  call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                  if (phi_val == (0.0d0, 0.0d0)) cycle
+                  psi_frag(ixg, iyg, izg) = phi_val
+                end do
+              end do
+            end do
+            call calc_current_nonlocal_realspace_probe(dg_frag, mg, ppg, system, Ac_tot, psi_frag, current_state)
+            current_nl_out(:) = current_nl_out(:) + occ_probe * current_state(:)
+          end do
+        end do
+      else
+        do io = 1, nocc
+          occ_probe = system%rocc(io, 1, ispin)
+          if (occ_probe <= 0.0d0) cycle
+          psi_frag(:, :, :) = (0.0d0, 0.0d0)
+          i_local = 0
+          do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+            i_local = i_local + 1
+            nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+            if (nbf <= 0) cycle
+            do jo = 1, nbf
+              ig_j = dg_frag%index_basis(jo, ifrag, ispin)
+              if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
+              coeff = dg_frag%coef(ig_j, io, ispin)
+              if (abs(coeff) == 0.0d0) cycle
+              do gz = mg%is(3), mg%ie(3)
+                do gy = mg%is(2), mg%ie(2)
+                  do gx = mg%is(1), mg%ie(1)
+                    ixg = gx
+                    iyg = gy
+                    izg = gz
+                    call get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, ixg, iyg, izg, phi_val)
+                    if (phi_val == (0.0d0, 0.0d0)) cycle
+                    psi_frag(ixg, iyg, izg) = psi_frag(ixg, iyg, izg) + coeff * phi_val
+                  end do
+                end do
+              end do
+            end do
+          end do
+          call calc_current_nonlocal_realspace_probe(dg_frag, mg, ppg, system, Ac_tot, psi_frag, current_state)
+          current_nl_out(:) = current_nl_out(:) + occ_probe * current_state(:)
+        end do
+      end if
+
+      deallocate(psi_frag)
+    end do
+  end subroutine compute_realspace_nonlocal_current_probe
+
+  subroutine calc_current_nonlocal_realspace_probe(dg_frag, mg, ppg, system, Ac_tot, psi_frag, jw_frag)
+    use structures
+    use communication, only: comm_summation
+    use salmon_global, only: theory
+    use math_constants, only: zi
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_rgrid),          intent(in) :: mg
+    type(s_pp_grid),        intent(in) :: ppg
+    type(s_dft_system),     intent(in) :: system
+    real(8),                intent(in) :: Ac_tot(3)
+    complex(8),             intent(in) :: psi_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8),                intent(out):: jw_frag(3)
+
+    integer :: ilocal, ilma, ia, j, ix, iy, iz
+    real(8) :: xcoord, ycoord, zcoord, phase
+    real(8) :: A_local(3)
+    logical :: use_micro_A
+    complex(8) :: proj_amp, uVpsi, phase_factor
+    complex(8) :: uVpsi_r(3)
+    complex(8), allocatable :: proj_local(:), proj_global(:)
+
+    jw_frag(:) = 0.0d0
+    if (ppg%Nlma <= 0 .or. .not. allocated(ppg%uV)) return
+
+    allocate(proj_local(ppg%Nlma), proj_global(ppg%Nlma))
+    proj_local(:) = (0.0d0, 0.0d0)
+    proj_global(:) = (0.0d0, 0.0d0)
+    use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
+
+    do ilma = 1, ppg%Nlma
+      ia = ppg%ia_tbl(ilma)
+      proj_amp = (0.0d0, 0.0d0)
+      do j = 1, ppg%mps(ia)
+        ix = ppg%jxyz(1, j, ia)
+        iy = ppg%jxyz(2, j, ia)
+        iz = ppg%jxyz(3, j, ia)
+        if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+        xcoord = ppg%rxyz(1, j, ia)
+        ycoord = ppg%rxyz(2, j, ia)
+        zcoord = ppg%rxyz(3, j, ia)
+        if (use_micro_A) then
+          A_local(1:3) = system%Ac_micro%v(1:3, ix, iy, iz)
+        else
+          A_local(1:3) = Ac_tot(1:3)
+        end if
+        phase = A_local(1) * xcoord + A_local(2) * ycoord + A_local(3) * zcoord
+        phase_factor = ppg%uV(j, ilma) * exp(-zi * phase)
+        proj_amp = proj_amp + conjg(phase_factor) * psi_frag(ix, iy, iz)
+      end do
+      proj_local(ilma) = proj_amp
+    end do
+
+    call comm_summation(proj_local, proj_global, ppg%Nlma, dg_frag%icomm_frag)
+
+    do ilocal = 1, ppg%ilocal_nlma
+      ilma = ppg%ilocal_nlma2ilma(ilocal)
+      ia = ppg%ilocal_nlma2ia(ilocal)
+      uVpsi_r(:) = (0.0d0, 0.0d0)
+      do j = 1, ppg%mps(ia)
+        ix = ppg%jxyz(1, j, ia)
+        iy = ppg%jxyz(2, j, ia)
+        iz = ppg%jxyz(3, j, ia)
+        if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+        xcoord = ppg%rxyz(1, j, ia)
+        ycoord = ppg%rxyz(2, j, ia)
+        zcoord = ppg%rxyz(3, j, ia)
+        if (use_micro_A) then
+          A_local(1:3) = system%Ac_micro%v(1:3, ix, iy, iz)
+        else
+          A_local(1:3) = Ac_tot(1:3)
+        end if
+        phase = A_local(1) * xcoord + A_local(2) * ycoord + A_local(3) * zcoord
+        phase_factor = ppg%uV(j, ilma) * exp(-zi * phase)
+        uVpsi_r(1) = uVpsi_r(1) + conjg(phase_factor) * xcoord * psi_frag(ix, iy, iz)
+        uVpsi_r(2) = uVpsi_r(2) + conjg(phase_factor) * ycoord * psi_frag(ix, iy, iz)
+        uVpsi_r(3) = uVpsi_r(3) + conjg(phase_factor) * zcoord * psi_frag(ix, iy, iz)
+      end do
+      uVpsi = ppg%rinv_uvu(ilma) * proj_global(ilma)
+      jw_frag(:) = jw_frag(:) + aimag(conjg(uVpsi_r(:)) * uVpsi)
+    end do
+
+    jw_frag(:) = 2.0d0 * jw_frag(:)
+    deallocate(proj_local, proj_global)
+  end subroutine calc_current_nonlocal_realspace_probe
 
   subroutine apply_nonlocal_pp_realspace_probe(dg_frag, mg, ppg, system, Ac_tot, psi_frag, vnlpsi_frag)
     use structures
