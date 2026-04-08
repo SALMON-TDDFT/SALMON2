@@ -57,7 +57,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use dip, only: calc_dip
   use sendrecv_grid
   use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft, yn_spinorbit, &
-                           nproc_rgrid, nproc_rgrid_tot
+                           nproc_rgrid, nproc_rgrid_tot, num_fragment
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
@@ -102,7 +102,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
-  integer :: nproc_rgrid_tmp(3)
+  integer :: nproc_rgrid_tmp(3), nproc_rgrid_rt(3)
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
@@ -199,7 +199,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   if (yn_dg_fragment_rt == 'y') then
     nproc_rgrid_tmp = nproc_rgrid
-    nproc_rgrid = nproc_rgrid_tot
+    nproc_rgrid_rt = nproc_rgrid
+    nproc_rgrid(1:3) = nproc_rgrid_rt(1:3) * max(1, num_fragment(1:3))
   end if
 
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)

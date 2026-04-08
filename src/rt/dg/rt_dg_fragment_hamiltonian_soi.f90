@@ -13,7 +13,7 @@
     use structures
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
-    use rt_dg_plane_wave, only: prepare_mixed_basis_startup
+    use rt_dg_plane_wave, only: diagonalize_mixed_basis
     use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, copy_matrix_blocks_metric_to_complex_dense, &
       symmetrize_real_matrix_blocks
     implicit none
@@ -175,7 +175,10 @@
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  [init] Building mixed basis at startup (A=0)"
       end if
-      call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
+      call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
+      if (.not. dg_frag%mixed_basis_ready) then
+        stop "DG+PW SOI startup requires mixed_basis_ready after diagonalize_mixed_basis"
+      end if
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     end if
 

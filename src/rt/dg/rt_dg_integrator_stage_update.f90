@@ -25,7 +25,6 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
-    integer :: n_frag, n_pw
     real(8) :: t_stage0, t_stage1
     logical, parameter :: enable_stage_update_trace = .false.
     logical, parameter :: enable_stage_update_progress = .false.
@@ -89,29 +88,13 @@
     end if
 
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
-      n_frag = dg_frag%n_mat_max
-      n_pw = dg_frag%n_plane_waves
-
-      if (.not. allocated(dg_frag%S_mat_frag_pw)) then
-        allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-        call compute_fragment_pw_overlap(dg_frag, dg_frag%S_mat_frag_pw)
-      else if (size(dg_frag%S_mat_frag_pw,1) /= n_frag .or. size(dg_frag%S_mat_frag_pw,2) /= n_pw .or. &
-               size(dg_frag%S_mat_frag_pw,3) /= dg_frag%nspin) then
-        deallocate(dg_frag%S_mat_frag_pw)
-        allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-        call compute_fragment_pw_overlap(dg_frag, dg_frag%S_mat_frag_pw)
+      if (.not. dg_frag%mixed_basis_ready) then
+        stop "DG+PW runtime requires mixed_basis_ready before stage Hamiltonian update"
       end if
-
-      if (.not. allocated(dg_frag%H_mat_frag_pw)) then
-        allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-      else if (size(dg_frag%H_mat_frag_pw,1) /= n_frag .or. size(dg_frag%H_mat_frag_pw,2) /= n_pw .or. &
-               size(dg_frag%H_mat_frag_pw,3) /= dg_frag%nspin) then
-        deallocate(dg_frag%H_mat_frag_pw)
-        allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+      call diagonalize_mixed_basis_pw(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
+      if (.not. dg_frag%mixed_basis_ready) then
+        stop "DG+PW stage update requires mixed_basis_ready after diagonalize_mixed_basis"
       end if
-
-      call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
-      call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
       if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
         write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-refresh"
         flush(6)

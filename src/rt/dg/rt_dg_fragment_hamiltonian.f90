@@ -1353,16 +1353,18 @@
       write(*,*) "  [3/3] Non-local PP handled in time evolution (A-dependent)"
     end if
 
-    ! Build initial mixed basis once (fragment + PW) with A=0.
-    ! This is the first rollout of the mixed-basis orthogonalization path:
-    ! initialization uses the mixed diagonalization, while later RT updates
-    ! still fall back to the existing mixed refresh path.
+    ! DG+PW must start from the orthogonalized mixed basis. Do not allow
+    ! raw fragment/PW runtime propagation to begin from an uninitialized
+    ! mixed representation.
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
       Ac_zero(:) = 0.0d0
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  [init] Diagonalizing mixed basis at startup (A=0)"
       end if
       call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
+      if (.not. dg_frag%mixed_basis_ready) then
+        stop "DG+PW startup requires mixed_basis_ready after diagonalize_mixed_basis"
+      end if
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     end if
 
