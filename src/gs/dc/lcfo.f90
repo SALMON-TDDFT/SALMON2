@@ -26,6 +26,8 @@ module lcfo
   public :: dc_lcfo, init_conventional_from_dcdft
   
   character(32),parameter :: binfile_wf = "wavefunctions.bin", &
+  &                          binfile_wfb = "wavefunctions_buffered.bin", &
+  &                          binfile_occb = "occupations_buffered.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
   &                          binfile_bfb = "basis_functions_buffered.bin", &
@@ -540,15 +542,21 @@ contains
 #endif
     
     subroutine output
-      use communication, only: comm_summation
+      use communication, only: comm_summation, comm_isend, comm_irecv, comm_wait_all
       use salmon_global, only: base_directory, sysname, unit_energy
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
       implicit none
       integer :: iunit,i_halo
       integer :: nxyz_domain(3), nxyz_box(3)
+      integer :: nstate_tot_buffered
       character(256) :: filename
       real(8), allocatable :: buffered_basis(:,:,:,:,:), wrk_buffer(:,:,:,:,:)
+      real(8), allocatable :: coef_wf_buffered(:,:,:)
+      real(8) :: occ_buffered_local(dc%nstate_frag,system%nspin)
+      integer :: n_mat_buffered(system%nspin)
+      integer :: n_basis_buffered(dc%n_frag,system%nspin)
+      integer :: index_basis_buffered(dc%nstate_frag,dc%n_frag,system%nspin)
       
     ! total system data
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
@@ -575,6 +583,18 @@ contains
       
     ! fragment data
       if(dc%id_frag==0) then
+      n_basis_buffered = 0
+      index_basis_buffered = 0
+      do ispin = 1, nspin
+        n_mat_buffered(ispin) = dc%n_frag * dc%nstate_frag
+        do ifrag = 1, dc%n_frag
+          n_basis_buffered(ifrag, ispin) = dc%nstate_frag
+          do io = 1, dc%nstate_frag
+            index_basis_buffered(io, ifrag, ispin) = (ifrag - 1) * dc%nstate_frag + io
+          end do
+        end do
+      end do
+      nstate_tot_buffered = dc%n_frag * dc%nstate_frag
       ! r-grid index
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_rg ! base_directory==./data_dcdft/fragments/dc%i_frag/
@@ -643,6 +663,37 @@ contains
           write(iunit) index_basis(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
           write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
           close(iunit)
+
+        ! buffered DG initialization: treat buffered fragment KS orbitals as the
+        ! state basis itself and carry fragment-local DC occupations separately.
+          allocate(coef_wf_buffered(dc%nstate_frag, nstate_tot_buffered, nspin))
+          coef_wf_buffered = 0d0
+          occ_buffered_local(:, :) = 0d0
+          do ispin = 1, nspin
+            do jo = 1, dc%nstate_frag
+              i = index_basis_buffered(jo, dc%i_frag, ispin)
+              if (i >= 1 .and. i <= nstate_tot_buffered) coef_wf_buffered(jo, i, ispin) = 1d0
+              occ_buffered_local(jo, ispin) = system%rocc(jo, 1, ispin)
+            end do
+          end do
+
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_wfb
+          open(iunit,file=filename,form='unformatted',access='stream')
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, nstate_tot_buffered
+          write(iunit) n_mat_buffered(1:nspin)
+          write(iunit) n_basis_buffered(1:dc%n_frag,1:nspin)
+          write(iunit) index_basis_buffered(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
+          write(iunit) coef_wf_buffered(1:dc%nstate_frag,1:nstate_tot_buffered,1:nspin)
+          close(iunit)
+
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_occb
+          open(iunit,file=filename,form='unformatted',access='stream')
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, nstate_tot_buffered
+          write(iunit) occ_buffered_local(1:dc%nstate_frag,1:nspin)
+          close(iunit)
+          deallocate(coef_wf_buffered)
         end if
       end if
       

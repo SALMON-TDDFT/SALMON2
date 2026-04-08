@@ -343,7 +343,11 @@
         density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = (0.0d0, 0.0d0)
         do io = 1, nocc_spin
           occ_factor = 1.0d0
-          if (allocated(system%rocc)) then
+          if (allocated(dg_frag%occ_state)) then
+            if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
+              occ_factor = max(0.0d0, dg_frag%occ_state(io, ispin))
+            end if
+          else if (allocated(system%rocc)) then
             if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
               occ_factor = max(0.0d0, system%rocc(io, 1, ispin))
             end if
@@ -456,7 +460,11 @@
       end do
       do io = 1, dg_frag%nocc_spin(1)
         occ_factor = 1.0d0
-        if (allocated(system%rocc)) then
+        if (allocated(dg_frag%occ_state)) then
+          if (io <= size(dg_frag%occ_state, 1) .and. 1 <= size(dg_frag%occ_state, 2)) then
+            occ_factor = max(0.0d0, dg_frag%occ_state(io, 1))
+          end if
+        else if (allocated(system%rocc)) then
           if (io <= size(system%rocc, 1) .and. 1 <= size(system%rocc, 3)) then
             occ_factor = max(0.0d0, system%rocc(io, 1, 1))
           end if
@@ -663,7 +671,13 @@
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             occ_cache(1:nocc_spin) = 1.0d0
-            if (allocated(system%rocc)) then
+            if (allocated(dg_frag%occ_state)) then
+              do io = 1, nocc_spin
+                if (io <= size(dg_frag%occ_state, 1) .and. ispin <= size(dg_frag%occ_state, 2)) then
+                  occ_cache(io) = max(0.0d0, dg_frag%occ_state(io, ispin))
+                end if
+              end do
+            else if (allocated(system%rocc)) then
               do io = 1, nocc_spin
                 if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
                   occ_cache(io) = max(0.0d0, system%rocc(io, 1, ispin))
@@ -673,17 +687,21 @@
             occ_sqrt_cache(1:nocc_spin) = sqrt(occ_cache(1:nocc_spin))
             valid_basis_count = valid_basis_count_spin(ispin)
             call cpu_time(t_dmat0)
-            ! Step 3a: each rank contributes its owned rows, then icomm_frag assembles
-            ! the complete coefficient matrix. After zero_nonowned_coefficients(),
-            ! the fragment root no longer holds a full copy by itself.
+            ! Step 3a: build the fragment-local coefficient view from the full
+            ! distributed coefficient matrix. Owner-distributed rows alone are
+            ! insufficient here because D = C C^H needs cross terms between rows
+            ! owned by different subgroup ranks.
             coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
             coef_im_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
             coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-!$omp parallel do private(io, idx_local, istate_frag) schedule(static)
+            call gather_full_coef_view(dg_frag, ispin, dg_frag%n_mat_max, nocc_spin, coef_probe_full, coef_probe_pw, 1, nocc_spin)
+!$omp parallel do private(io, idx_local, istate_frag, ig_i) schedule(static)
             do io = 1, nocc_spin
               do idx_local = 1, valid_basis_count
                 istate_frag = valid_basis_ids_spin(idx_local, ispin)
-                coef_c_full(istate_frag, io) = dg_frag%coef(basis_gid_spin(istate_frag, ispin), io, ispin)
+                ig_i = basis_gid_spin(istate_frag, ispin)
+                if (ig_i < 1 .or. ig_i > size(coef_probe_full, 1)) cycle
+                coef_c_full(istate_frag, io) = coef_probe_full(ig_i, io)
               end do
             end do
 !$omp end parallel do

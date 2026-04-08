@@ -122,6 +122,7 @@ module rt_dg_fragment_types
     complex(8), allocatable :: coef(:,:,:)        ! (nstate_frag, nstate_tot, nspin)
     complex(8), allocatable :: coef_new(:,:,:)    ! for time propagation
     complex(8), allocatable :: coef_work(:,:,:)   ! work array
+    real(8), allocatable :: occ_state(:,:)        ! (nstate_tot, nspin), DG-owned occupation weights
     integer, allocatable :: coef_owner(:,:)       ! (n_mat_max, nspin), owning rank of each fragment-basis row
     integer :: owned_coef_start = 0               ! first owned fragment-basis row (contiguous hint)
     integer :: owned_coef_end = -1                ! last owned fragment-basis row (contiguous hint)
@@ -197,6 +198,7 @@ module rt_dg_fragment_types
     real(8) :: elec_num_raw                    ! total electrons before rho normalization
     real(8) :: rho_scale_factor                ! density renormalization factor
     real(8) :: pw_weight_raw                   ! simple diagnostic: sum |coef_pw|^2 over occupied states
+    logical :: use_buffered_basis = .false.    ! buffered DC fragment-orbital mode
 
     ! Fragment geometry information
     integer :: num_fragment(3)                 ! Fragment division in each direction (from salmon_global)
@@ -206,6 +208,8 @@ module rt_dg_fragment_types
     integer, allocatable :: frag_core_hi(:,:)  ! (3, n_frag) unwrapped fragment-core upper bounds
     integer, allocatable :: frag_buf_lo(:,:)   ! (3, n_frag) unwrapped fragment buffer-box lower bounds
     integer, allocatable :: frag_buf_hi(:,:)   ! (3, n_frag) unwrapped fragment buffer-box upper bounds
+    integer, allocatable :: basis_support_lo(:,:) ! (3, n_frag) unwrapped real-space basis support lower bounds
+    integer, allocatable :: basis_support_hi(:,:) ! (3, n_frag) unwrapped real-space basis support upper bounds
     integer :: rank_core_lo(3) = 0             ! unwrapped owner box lower bounds on this MPI rank
     integer :: rank_core_hi(3) = -1            ! unwrapped owner box upper bounds on this MPI rank
     integer :: rank_buf_lo(3) = 0              ! unwrapped local phi/rho buffer-box lower bounds on this MPI rank
