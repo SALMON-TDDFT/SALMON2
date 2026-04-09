@@ -1,6 +1,6 @@
   subroutine reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     use structures
-    use communication, only: comm_summation
+    use communication, only: comm_summation, comm_get_groupinfo
     use salmon_global, only: theory
     use salmon_global, only: yn_hse
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, zero_nonlocal_h_matrix_blocks
@@ -15,6 +15,7 @@
 
     type(s_rgrid), pointer :: mg
     integer :: ifrag, ispin, io, jo, i_local
+    integer :: frag_rank, frag_size
     integer :: nbf, nbf_raw, iblk
     integer :: max_nbf_local
     integer :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
@@ -24,7 +25,7 @@
     real(8) :: time_halo_exchange, time_potential_build, time_post_reduce_cleanup, time_block_hermitize
     complex(8) :: integral_v
     real(8), allocatable :: V_total(:,:,:)
-    complex(8), allocatable :: V_phi(:,:,:)
+    complex(8), allocatable :: V_phi_thread(:,:,:)
     real(8), allocatable :: partial_block(:,:), reduced_block(:,:)
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: use_block_reconstruct
@@ -39,6 +40,7 @@
       stop "reconstruct_hamiltonian_matrix requires dg_frag%mg"
     end if
     mg => dg_frag%mg
+    call comm_get_groupinfo(dg_frag%icomm_frag, frag_rank, frag_size)
     time_local_build = 0.0d0
     time_subgroup_reduce = 0.0d0
     time_global_reduce = 0.0d0
@@ -94,8 +96,6 @@
     end do
 
     allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    allocate(V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-
     max_nbf_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       nbf_raw = dg_frag%n_basis(ifrag, 1)
@@ -154,20 +154,24 @@
 
         partial_block(1:nbf, 1:nbf) = 0.0d0
 
-        do jo = 1, nbf
+!$omp parallel private(io, jo, integral_v, t0, t1, V_phi_thread) reduction(+:time_local_build)
+        allocate(V_phi_thread(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+!$omp do schedule(static)
+  do jo = frag_rank + 1, nbf, frag_size
           call cpu_time(t0)
-          call build_local_potential_applied_basis(dg_frag, i_local, jo, mg, V_total, V_phi, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
+          call build_local_potential_applied_basis(dg_frag, i_local, jo, mg, V_total, V_phi_thread, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
 
-!$omp parallel do private(io, integral_v) schedule(static)
           do io = jo, nbf
-            call integrate_local_basis_with_field(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
+            call integrate_local_basis_with_field(dg_frag, i_local, io, mg, V_phi_thread, hvol, integral_v, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
             partial_block(io, jo) = real(integral_v, kind=8)
             if (io /= jo) partial_block(jo, io) = partial_block(io, jo)
           end do
-!$omp end parallel do
           call cpu_time(t1)
           time_local_build = time_local_build + (t1 - t0)
         end do
+!$omp end do
+        if (allocated(V_phi_thread)) deallocate(V_phi_thread)
+!$omp end parallel
 
         call cpu_time(t0)
         call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
@@ -244,7 +248,7 @@
       flush(6)
     end if
 
-    deallocate(V_total, V_phi)
+    deallocate(V_total)
     if (allocated(partial_block)) deallocate(partial_block)
     if (allocated(reduced_block)) deallocate(reduced_block)
 
