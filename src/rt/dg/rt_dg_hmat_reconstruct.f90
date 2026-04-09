@@ -17,15 +17,16 @@
     integer :: ifrag, ispin, io, jo, i_local
     integer :: frag_rank, frag_size
     integer :: nbf, nbf_raw, iblk
+    integer :: npts, nrem
     integer :: max_nbf_local
     integer :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
     real(8) :: hvol, A2val
     real(8) :: t0, t1
     real(8) :: time_local_build, time_subgroup_reduce, time_global_reduce
     real(8) :: time_halo_exchange, time_potential_build, time_post_reduce_cleanup, time_block_hermitize
-    complex(8) :: integral_v
+    complex(8) :: alpha_blas, beta_blas
     real(8), allocatable :: V_total(:,:,:)
-    complex(8), allocatable :: V_phi_thread(:,:,:)
+    complex(8), allocatable :: V_phi_thread(:,:,:), phi_basis_mat(:,:), V_vec_thread(:), integral_vec_thread(:)
     real(8), allocatable :: partial_block(:,:), reduced_block(:,:)
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: use_block_reconstruct
@@ -34,6 +35,7 @@
     logical, save :: debug_map_cache_logged = .false.
     logical, parameter :: enable_reconstruct_timing = .false.
     logical, parameter :: enable_hmat_nan_check = .false.
+    external :: zgemv
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. associated(dg_frag%mg)) then
@@ -153,25 +155,41 @@
         end if
 
         partial_block(1:nbf, 1:nbf) = 0.0d0
+        npts = size(map_x) * size(map_y) * size(map_z)
+        allocate(phi_basis_mat(npts, nbf))
+        call pack_fragment_basis_matrix(dg_frag, i_local, nbf, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z, phi_basis_mat)
+        alpha_blas = cmplx(hvol, 0.0d0, kind=8)
+        beta_blas = (0.0d0, 0.0d0)
 
-!$omp parallel private(io, jo, integral_v, t0, t1, V_phi_thread) reduction(+:time_local_build)
+!$omp parallel private(io, jo, nrem, t0, t1, V_phi_thread, V_vec_thread, integral_vec_thread) reduction(+:time_local_build)
         allocate(V_phi_thread(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-!$omp do schedule(static)
-  do jo = frag_rank + 1, nbf, frag_size
-          call cpu_time(t0)
+        allocate(V_vec_thread(npts), integral_vec_thread(nbf))
+!$omp do schedule(guided,1)
+        do jo = frag_rank + 1, nbf, frag_size
+          if (enable_reconstruct_timing) call cpu_time(t0)
           call build_local_potential_applied_basis(dg_frag, i_local, jo, mg, V_total, V_phi_thread, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
+          call pack_overlap_field_to_vector(mg, V_phi_thread, ov_s, ov_e, V_vec_thread)
 
-          do io = jo, nbf
-            call integrate_local_basis_with_field(dg_frag, i_local, io, mg, V_phi_thread, hvol, integral_v, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
-            partial_block(io, jo) = real(integral_v, kind=8)
-            if (io /= jo) partial_block(jo, io) = partial_block(io, jo)
-          end do
-          call cpu_time(t1)
-          time_local_build = time_local_build + (t1 - t0)
+          nrem = nbf - jo + 1
+          if (nrem > 0) then
+            call zgemv('C', npts, nrem, alpha_blas, phi_basis_mat(1, jo), npts, V_vec_thread, 1, beta_blas, integral_vec_thread(jo), 1)
+            do io = jo, nbf
+              partial_block(io, jo) = real(integral_vec_thread(io), kind=8)
+              if (io /= jo) partial_block(jo, io) = partial_block(io, jo)
+            end do
+          end if
+          if (enable_reconstruct_timing) then
+            call cpu_time(t1)
+            time_local_build = time_local_build + (t1 - t0)
+          end if
         end do
 !$omp end do
+        if (allocated(integral_vec_thread)) deallocate(integral_vec_thread)
+        if (allocated(V_vec_thread)) deallocate(V_vec_thread)
         if (allocated(V_phi_thread)) deallocate(V_phi_thread)
 !$omp end parallel
+
+        if (allocated(phi_basis_mat)) deallocate(phi_basis_mat)
 
         call cpu_time(t0)
         call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
@@ -339,7 +357,6 @@
     lz_lo = loc_s(3)
     lz_hi = loc_e(3)
     if (allocated(dg_frag%phi_frag_c)) then
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         do ly = ly_lo, ly_hi
@@ -356,9 +373,7 @@
           end do
         end do
       end do
-!$omp end parallel do
     else
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         do ly = ly_lo, ly_hi
@@ -375,9 +390,93 @@
           end do
         end do
       end do
-!$omp end parallel do
     end if
   end subroutine build_local_potential_applied_basis
+
+  subroutine pack_fragment_basis_matrix(dg_frag, i_local, nbf, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z, phi_mat)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: i_local, nbf
+    integer, intent(in) :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
+    integer, intent(in) :: map_x(:), map_y(:), map_z(:)
+    complex(8), intent(out) :: phi_mat(:, :)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz, io, ip
+
+    lx_lo = loc_s(1)
+    lx_hi = loc_e(1)
+    ly_lo = loc_s(2)
+    ly_hi = loc_e(2)
+    lz_lo = loc_s(3)
+    lz_hi = loc_e(3)
+
+    if (allocated(dg_frag%phi_frag_c)) then
+      do io = 1, nbf
+        ip = 0
+        do lz = lz_lo, lz_hi
+          gz = ov_s(3) + (lz - lz_lo)
+          do ly = ly_lo, ly_hi
+            gy = ov_s(2) + (ly - ly_lo)
+            do lx = lx_lo, lx_hi
+              gx = ov_s(1) + (lx - lx_lo)
+              ip = ip + 1
+              bx = map_x(gx - ov_s(1) + 1)
+              by = map_y(gy - ov_s(2) + 1)
+              bz = map_z(gz - ov_s(3) + 1)
+              if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
+                phi_mat(ip, io) = dg_frag%phi_frag_c(bx, by, bz, io, i_local)
+              else
+                phi_mat(ip, io) = (0.0d0, 0.0d0)
+              end if
+            end do
+          end do
+        end do
+      end do
+    else
+      do io = 1, nbf
+        ip = 0
+        do lz = lz_lo, lz_hi
+          gz = ov_s(3) + (lz - lz_lo)
+          do ly = ly_lo, ly_hi
+            gy = ov_s(2) + (ly - ly_lo)
+            do lx = lx_lo, lx_hi
+              gx = ov_s(1) + (lx - lx_lo)
+              ip = ip + 1
+              bx = map_x(gx - ov_s(1) + 1)
+              by = map_y(gy - ov_s(2) + 1)
+              bz = map_z(gz - ov_s(3) + 1)
+              if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
+                phi_mat(ip, io) = cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8)
+              else
+                phi_mat(ip, io) = (0.0d0, 0.0d0)
+              end if
+            end do
+          end do
+        end do
+      end do
+    end if
+  end subroutine pack_fragment_basis_matrix
+
+  subroutine pack_overlap_field_to_vector(mg, field, ov_s, ov_e, vec)
+    use structures
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    complex(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer, intent(in) :: ov_s(3), ov_e(3)
+    complex(8), intent(out) :: vec(:)
+    integer :: gx, gy, gz, ip
+
+    ip = 0
+    do gz = ov_s(3), ov_e(3)
+      do gy = ov_s(2), ov_e(2)
+        do gx = ov_s(1), ov_e(1)
+          ip = ip + 1
+          vec(ip) = field(gx, gy, gz)
+        end do
+      end do
+    end do
+  end subroutine pack_overlap_field_to_vector
 
   subroutine integrate_local_basis_with_field(dg_frag, i_local, io, mg, field, hvol, integral, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
     use structures
@@ -392,8 +491,12 @@
     integer, intent(in) :: map_x(:), map_y(:), map_z(:)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
+    real(8) :: sum_re, sum_im
+    complex(8) :: term
 
     integral = (0.0d0, 0.0d0)
+    sum_re = 0.0d0
+    sum_im = 0.0d0
     lx_lo = loc_s(1)
     lx_hi = loc_e(1)
     ly_lo = loc_s(2)
@@ -405,13 +508,17 @@
         gz = ov_s(3) + (lz - lz_lo)
         do ly = ly_lo, ly_hi
           gy = ov_s(2) + (ly - ly_lo)
+!$omp simd private(gx, bx, by, bz, term) reduction(+:sum_re, sum_im)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
             bx = map_x(gx - ov_s(1) + 1)
             by = map_y(gy - ov_s(2) + 1)
             bz = map_z(gz - ov_s(3) + 1)
-            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
-            integral = integral + conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
+            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
+              term = conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
+              sum_re = sum_re + real(term, kind=8)
+              sum_im = sum_im + aimag(term)
+            end if
           end do
         end do
       end do
@@ -420,15 +527,20 @@
         gz = ov_s(3) + (lz - lz_lo)
         do ly = ly_lo, ly_hi
           gy = ov_s(2) + (ly - ly_lo)
+!$omp simd private(gx, bx, by, bz, term) reduction(+:sum_re, sum_im)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
             bx = map_x(gx - ov_s(1) + 1)
             by = map_y(gy - ov_s(2) + 1)
             bz = map_z(gz - ov_s(3) + 1)
-            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
-            integral = integral + cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
+            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
+              term = cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
+              sum_re = sum_re + real(term, kind=8)
+              sum_im = sum_im + aimag(term)
+            end if
           end do
         end do
       end do
     end if
+    integral = cmplx(sum_re, sum_im, kind=8)
   end subroutine integrate_local_basis_with_field
