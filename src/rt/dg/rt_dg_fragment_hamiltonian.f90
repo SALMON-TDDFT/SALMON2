@@ -491,7 +491,7 @@
     integer :: iorg_chk(3), ndom_chk(3)
     integer :: gx, gy, gz, bx, by, bz
     integer :: ndom(3)
-    integer :: i_halo, jfrag, n_basis_halo, n_basis_halo_max
+    integer :: i_halo, i_halo_active, jfrag, n_basis_halo, n_basis_halo_max, n_active_halo
     integer :: l(3), halo_send_idx(3), halo_recv_idx(3)
     integer :: face_axis, face_dir
     integer :: npts_halo, ipt
@@ -516,6 +516,8 @@
     real(8), allocatable :: halo_partial_t(:), halo_partial_h(:), halo_reduced_t(:), halo_reduced_h(:)
     real(8), allocatable :: halo_reduce_pair(:), halo_reduce_sum(:)
     real(8), allocatable :: halo_t_point_buf(:), halo_h_point_buf(:)
+    integer, allocatable :: halo_active_list(:), halo_active_nbf(:), halo_active_iblk(:), halo_active_iblk_rev(:)
+    integer, allocatable :: halo_active_face_axis(:), halo_active_face_dir(:), halo_active_face_idx_local(:), halo_active_face_idx_remote(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: loc_s_dbg(3), loc_e_dbg(3)
@@ -1123,14 +1125,61 @@
         nbf = min(nbf_raw, dg_frag%nstate_frag)
         if (nbf <= 0) cycle
 
+        n_active_halo = 0
         n_basis_halo_max = 0
-        do i_halo = 1, dg_frag%n_halo
-          if (dg_frag%use_buffered_basis) cycle
-          if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-          jfrag = dg_frag%halo(i_halo)%ifrag_src
-          if (jfrag < 1) cycle
-          n_basis_halo_max = max(n_basis_halo_max, dg_frag%n_basis(jfrag, ispin))
-        end do
+        if (.not. dg_frag%use_buffered_basis) then
+          do i_halo = 1, dg_frag%n_halo
+            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+            jfrag = dg_frag%halo(i_halo)%ifrag_src
+            if (jfrag < 1) cycle
+            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            if (n_basis_halo <= 0) cycle
+            if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
+            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
+            iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
+            if (iblk <= 0 .and. iblk_rev <= 0) cycle
+            n_active_halo = n_active_halo + 1
+            n_basis_halo_max = max(n_basis_halo_max, n_basis_halo)
+          end do
+        end if
+
+        if (allocated(halo_active_list)) deallocate(halo_active_list)
+        if (allocated(halo_active_nbf)) deallocate(halo_active_nbf)
+        if (allocated(halo_active_iblk)) deallocate(halo_active_iblk)
+        if (allocated(halo_active_iblk_rev)) deallocate(halo_active_iblk_rev)
+        if (allocated(halo_active_face_axis)) deallocate(halo_active_face_axis)
+        if (allocated(halo_active_face_dir)) deallocate(halo_active_face_dir)
+        if (allocated(halo_active_face_idx_local)) deallocate(halo_active_face_idx_local)
+        if (allocated(halo_active_face_idx_remote)) deallocate(halo_active_face_idx_remote)
+
+        if (n_active_halo > 0) then
+          allocate(halo_active_list(n_active_halo), halo_active_nbf(n_active_halo), halo_active_iblk(n_active_halo), halo_active_iblk_rev(n_active_halo))
+          allocate(halo_active_face_axis(n_active_halo), halo_active_face_dir(n_active_halo), halo_active_face_idx_local(n_active_halo), halo_active_face_idx_remote(n_active_halo))
+          i_halo_active = 0
+          do i_halo = 1, dg_frag%n_halo
+            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+            jfrag = dg_frag%halo(i_halo)%ifrag_src
+            if (jfrag < 1) cycle
+            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            if (n_basis_halo <= 0) cycle
+            if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
+            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
+            iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
+            if (iblk <= 0 .and. iblk_rev <= 0) cycle
+            i_halo_active = i_halo_active + 1
+            halo_active_list(i_halo_active) = i_halo
+            halo_active_nbf(i_halo_active) = n_basis_halo
+            halo_active_iblk(i_halo_active) = iblk
+            halo_active_iblk_rev(i_halo_active) = iblk_rev
+            call get_halo_face_axis_dir(dg_frag%halo(i_halo), face_axis, face_dir)
+            halo_active_face_axis(i_halo_active) = face_axis
+            halo_active_face_dir(i_halo_active) = face_dir
+            l = dg_frag%halo(i_halo)%length
+            halo_active_face_idx_local(i_halo_active) = get_local_face_boundary_index(l(face_axis), face_dir)
+            halo_active_face_idx_remote(i_halo_active) = get_remote_face_boundary_index(l(face_axis), face_dir)
+          end do
+        end if
+
         if (n_basis_halo_max > 0) then
           need_halo_alloc = .false.
           if (.not. allocated(halo_partial_t)) need_halo_alloc = .true.
@@ -1161,19 +1210,16 @@
         end if
 
         do jo = 1, nbf
-          do i_halo = 1, dg_frag%n_halo
-            if (dg_frag%use_buffered_basis) cycle
-            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-            jfrag = dg_frag%halo(i_halo)%ifrag_src
-            if (jfrag < 1) cycle
-            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
-            if (n_basis_halo <= 0) cycle
+          do i_halo_active = 1, n_active_halo
+            i_halo = halo_active_list(i_halo_active)
+            n_basis_halo = halo_active_nbf(i_halo_active)
+            iblk = halo_active_iblk(i_halo_active)
+            iblk_rev = halo_active_iblk_rev(i_halo_active)
+            face_axis = halo_active_face_axis(i_halo_active)
+            face_dir = halo_active_face_dir(i_halo_active)
+            face_idx_local = halo_active_face_idx_local(i_halo_active)
+            face_idx_remote = halo_active_face_idx_remote(i_halo_active)
             l = dg_frag%halo(i_halo)%length
-            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
-            iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
-            if (iblk <= 0 .and. iblk_rev <= 0) cycle
-            if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
-            call get_halo_face_axis_dir(dg_frag%halo(i_halo), face_axis, face_dir)
 
             ! Legacy off-diagonal coupling path.
             !
@@ -1194,8 +1240,6 @@
 
             face_area = get_dg_face_area_element(dg_frag%hgs, face_axis)
             face_penalty_alpha = get_dg_face_penalty_coefficient(dg_frag%hgs, face_axis)
-            face_idx_local = get_local_face_boundary_index(l(face_axis), face_dir)
-            face_idx_remote = get_remote_face_boundary_index(l(face_axis), face_dir)
 
             !$omp parallel do private(io,halo_integral_t,halo_integral_h,ix_face,iy_face,iz_face,halo_send_idx,halo_recv_idx,phi_local_face,phi_remote_face,dphi_local_n,dphi_remote_n) schedule(static)
             do io = 1, n_basis_halo
@@ -1310,6 +1354,15 @@
             end if
           end do
         end do
+
+        if (allocated(halo_active_list)) deallocate(halo_active_list)
+        if (allocated(halo_active_nbf)) deallocate(halo_active_nbf)
+        if (allocated(halo_active_iblk)) deallocate(halo_active_iblk)
+        if (allocated(halo_active_iblk_rev)) deallocate(halo_active_iblk_rev)
+        if (allocated(halo_active_face_axis)) deallocate(halo_active_face_axis)
+        if (allocated(halo_active_face_dir)) deallocate(halo_active_face_dir)
+        if (allocated(halo_active_face_idx_local)) deallocate(halo_active_face_idx_local)
+        if (allocated(halo_active_face_idx_remote)) deallocate(halo_active_face_idx_remote)
       end do
     end do
 
