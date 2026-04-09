@@ -416,10 +416,11 @@ contains
 
     if (use_mixed_basis) then
       if (comm_is_root(dg_frag%icomm)) then
-        write(*,*) "Warning: Mixed basis diagonalization requires potentials (Vh, Vxc, Vpsl)"
-        write(*,*) "         Falling back to fragment-only diagonalization"
+        write(*,*) "ERROR: diagonalize_and_update_basis cannot be used for DG+PW."
+        write(*,*) "       Mixed-basis updates require diagonalize_mixed_basis with current potentials."
+        write(*,*) "       Refusing raw fragment-only fallback during DG+PW basis update."
       end if
-      use_mixed_basis = .false.
+      stop "DG+PW basis update requires mixed-basis diagonalization"
     end if
 
     do ispin = 1, dg_frag%nspin

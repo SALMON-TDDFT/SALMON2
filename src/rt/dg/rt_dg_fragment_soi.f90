@@ -268,6 +268,9 @@ contains
     allocate(dg_frag%nxyz_domain(3, dg_frag%n_frag))
     allocate(dg_frag%ixyz_frag(3, dg_frag%n_frag))
     allocate(dg_frag%id_array(dg_frag%n_frag))
+    do ifrag = 1, dg_frag%n_frag
+      dg_frag%id_array(ifrag) = (ifrag - 1) * dg_frag%nproc_frag
+    end do
     dg_frag%lg => lg
     dg_frag%mg => mg
     dg_frag%hgs = system%hgs
@@ -290,19 +293,12 @@ contains
       dg_frag%n_mat_max = maxval(dg_frag%n_mat)
     end if
     
-    ! Initialize halo communication structures
-    if (dg_frag%has_real_space_basis) then
-      call init_halo_communication(dg_frag, info)
-    end if
-    
-    ! Perform initial halo exchange to fill ghost cells
-    ! This ensures phi_frag halo regions contain correct neighbor data
-    ! Skip if phi_frag was not loaded
-    if (dg_frag%has_real_space_basis) then
-      call exchange_phi_frag_halo(dg_frag)
-      if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a)') "Initial halo exchange completed for phi_frag"
-      end if
+    ! Fragment real-space basis is evaluated on its own periodic core+buffer box.
+    ! Inter-fragment coupling is handled by matrix assembly, so skip phi halo exchange.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
+    if (comm_is_root(info%id_rko)) then
+      write(*,'(1x,a)') "Fragment halo exchange disabled: phi_frag uses fragment-box periodic support"
     end if
     
     ! Note: has_real_space_basis flag is set in read_fragment_basis_data()

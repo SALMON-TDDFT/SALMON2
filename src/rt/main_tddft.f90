@@ -332,6 +332,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     energy%elec_num = dg_frag%elec_num_scaled
     energy%elec_num_raw = dg_frag%elec_num_raw
     energy%pw_weight_raw = dg_frag%pw_weight_raw
+    energy%E_onebody_mix = dg_frag%total_energy_mix
 
     if (theory == 'single_scale_maxwell_tddft') then
       singlescale%E_electron = energy%E_tot
@@ -351,6 +352,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3, itt)
     system%vec_E(1:3) = rt%E_tot(1:3, itt)
     system%vec_E_ext(1:3) = rt%E_ext(1:3, itt)
+    energy%E_work_elec = energy%E_work_elec - dot_product(rt%E_tot(1:3, itt), dg_frag%current(1:3)) * system%det_a * dt
     select case(iperiodic)
     case(0)
       ! Isolated system: output dipole moment

@@ -30,6 +30,9 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
     logical :: needs_basis_update
+    integer :: env_len, env_status
+    character(len=64) :: env_val
+    logical :: enable_density_call_probe
     complex(8), allocatable :: H_mat_metric(:,:,:)
     complex(8), allocatable :: H_mat_prev_c(:,:,:)
     real(8), allocatable :: H_mat_prev(:,:,:)
@@ -48,6 +51,14 @@
     time_hartree = 0.0d0
     time_xc = 0.0d0
     time_reconstruct = 0.0d0
+    enable_density_call_probe = .false.
+    call get_environment_variable("SALMON_DG_ELECTRON_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_density_call_probe = .true.
+      end if
+    end if
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
@@ -66,6 +77,11 @@
     ! Step 1: Calculate electron density from fragment basis coefficients
     call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+    if (enable_density_call_probe .and. comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6)') "        density-call-probe(step-end): itt=", itt, &
+        " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     call cpu_time(t_stage1)
     time_density = time_density + (t_stage1 - t_stage0)
     if (enable_update_trace .and. itt == 1) then

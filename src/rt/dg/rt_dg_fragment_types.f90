@@ -190,6 +190,7 @@ module rt_dg_fragment_types
     real(8) :: dipole_moment(3)                ! total dipole moment
     real(8) :: current(3)                      ! current density
     real(8) :: total_energy                    ! total energy
+    real(8) :: total_energy_mix                ! one-body energy from canonical mixed-basis density matrix
     real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
     real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block
     real(8) :: energy_Ap                       ! occupied expectation of -i A.p term

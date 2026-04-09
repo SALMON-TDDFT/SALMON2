@@ -1,5 +1,5 @@
   subroutine stabilize_coeff_unitarity(dg_frag, itt)
-    use rt_dg_fragment_ops, only: apply_overlap_operator, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: apply_overlap_operator, gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: itt
@@ -36,12 +36,7 @@
       if (n <= 0 .or. nstab <= 0) cycle
 
       allocate(v(n), Sv(n), u_prev(n))
-      allocate(coef_frag_all(n_frag, nstab))
-      coef_frag_all(:, :) = dg_frag%coef(1:n_frag, 1:nstab, ispin)
-      if (n_pw > 0) then
-        allocate(coef_pw_all(n_pw, nstab))
-        coef_pw_all(:, :) = dg_frag%coef_pw(1:n_pw, 1:nstab, ispin)
-      end if
+      call gather_full_coef_view(dg_frag, ispin, n_frag, nstab, coef_frag_all, coef_pw_all, 1, nstab)
       if (n_pw > 0) then
         do io = 1, nstab
           v(:) = (0.0d0, 0.0d0)

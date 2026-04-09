@@ -830,6 +830,8 @@ contains
          write(uid,10) "Ne_raw", "Total electrons before DG rho renormalization"
          write(uid,10) "Ne_raw-Ne0", "Deviation of pre-renormalization electron number"
          write(uid,10) "PW_weight_raw", "Simple sum of |coef_pw|^2 over occupied states"
+         write(uid,10) "E_work_elec", "Electronic work energy int(-E·J dt)"
+         write(uid,10) "E_onebody_mix", "One-body energy from canonical mixed-basis density matrix"
        end if
        if(yn_md=='y') then
        write(uid,10) "Tion", "Kinetic energy of ions"
@@ -868,8 +870,10 @@ contains
          write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
         & icolumn+1, "Ne_raw", "none", &
         & icolumn+2, "Ne_raw-Ne0", "none", &
-        & icolumn+3, "PW_weight_raw", "none"
-         icolumn = icolumn + 3
+        & icolumn+3, "PW_weight_raw", "none", &
+        & icolumn+4, "E_work_elec", trim(t_unit_energy%name), &
+        & icolumn+5, "E_onebody_mix", trim(t_unit_energy%name)
+         icolumn = icolumn + 5
        end if
 
        if(yn_md=='y') then
@@ -910,6 +914,8 @@ contains
          write(uid, "(99(1X,E23.15E3))",advance='no') &
             & dble(nelec), &
             & 0d0, &
+            & 0d0, &
+            & 0d0, &
             & 0d0
        end if
        if(yn_md=='y') then
@@ -948,7 +954,9 @@ contains
             write(uid, "(99(1X,E23.15E3))",advance='no') &
                & energy%elec_num_raw, &
                & (energy%elec_num_raw - dble(nelec)), &
-               & energy%pw_weight_raw
+               & energy%pw_weight_raw, &
+               & energy%E_work_elec * t_unit_energy%conv, &
+               & energy%E_onebody_mix * t_unit_energy%conv
           end if
           if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &

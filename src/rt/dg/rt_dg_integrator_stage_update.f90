@@ -6,6 +6,7 @@
     use salmon_xc, only: s_xc_functional, exchange_correlation
     use poisson_dg_distributed, only: hartree_dg_distributed
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
+    use rt_dg_plane_wave, only: compute_fragment_pw_hamiltonian, build_mixed_hamiltonian
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -25,9 +26,22 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
+    complex(8), allocatable :: H_frag_pw(:,:,:)
     real(8) :: t_stage0, t_stage1
+    integer :: env_len, env_status
+    character(len=64) :: env_val
+    logical :: enable_density_call_probe
     logical, parameter :: enable_stage_update_trace = .false.
     logical, parameter :: enable_stage_update_progress = .false.
+
+    enable_density_call_probe = .false.
+    call get_environment_variable("SALMON_DG_ELECTRON_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_density_call_probe = .true.
+      end if
+    end if
 
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat stage trace: rank=", dg_frag%id, &
@@ -39,6 +53,11 @@
     call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call cpu_time(t_stage1)
+    if (enable_density_call_probe .and. dg_frag%id == 0 .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", t_stage1 - t_stage0
       flush(6)
@@ -91,12 +110,24 @@
       if (.not. dg_frag%mixed_basis_ready) then
         stop "DG+PW runtime requires mixed_basis_ready before stage Hamiltonian update"
       end if
-      call diagonalize_mixed_basis_pw(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
-      if (.not. dg_frag%mixed_basis_ready) then
-        stop "DG+PW stage update requires mixed_basis_ready after diagonalize_mixed_basis"
+      if (.not. allocated(dg_frag%S_mat_frag_pw)) then
+        stop "DG+PW stage update requires precomputed S_mat_frag_pw"
       end if
+      allocate(H_frag_pw(dg_frag%n_mat_max, dg_frag%n_plane_waves, dg_frag%nspin))
+      call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_frag_pw)
+      if (.not. allocated(dg_frag%H_mat_frag_pw)) then
+        allocate(dg_frag%H_mat_frag_pw(dg_frag%n_mat_max, dg_frag%n_plane_waves, dg_frag%nspin))
+      else if (size(dg_frag%H_mat_frag_pw, 1) /= dg_frag%n_mat_max .or. &
+               size(dg_frag%H_mat_frag_pw, 2) /= dg_frag%n_plane_waves .or. &
+               size(dg_frag%H_mat_frag_pw, 3) /= dg_frag%nspin) then
+        deallocate(dg_frag%H_mat_frag_pw)
+        allocate(dg_frag%H_mat_frag_pw(dg_frag%n_mat_max, dg_frag%n_plane_waves, dg_frag%nspin))
+      end if
+      dg_frag%H_mat_frag_pw(:, :, :) = H_frag_pw(:, :, :)
+      call build_mixed_hamiltonian(dg_frag, dg_frag%lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, H_frag_pw)
+      deallocate(H_frag_pw)
       if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-refresh"
+        write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-hmat-refresh"
         flush(6)
       end if
     end if

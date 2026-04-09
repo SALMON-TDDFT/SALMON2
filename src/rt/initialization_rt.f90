@@ -351,6 +351,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
+  energy%E_work_elec = 0.0d0
+  energy%E_onebody_mix = 0.0d0
   
   call timer_begin(LOG_INIT_RT)
   

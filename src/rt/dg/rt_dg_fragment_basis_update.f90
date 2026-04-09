@@ -307,7 +307,7 @@
     use parallelization, only: nproc_id_global
     use communication, only: comm_sync_all
     use rt_dg_fragment_parallel, only: setup_fragment_system, finalize_fragment_parallel
-    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, sync_mixed_coef_from_raw, sync_raw_coef_from_mixed, &
+    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, sync_raw_coef_from_mixed, &
       zero_nonlocal_h_matrix_blocks
     use rt_dg_plane_wave, only: diagonalize_mixed_basis
     implicit none
@@ -428,7 +428,6 @@
         call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
         call project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
         do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
         dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
@@ -532,15 +531,15 @@
   ! updated mixed basis obtained by diagonalize_mixed_basis_pw.
   !=======================================================================
   subroutine project_coefficients_mixed_state(dg_frag, coef_old, coef_pw_old)
-    use rt_dg_fragment_ops, only: copy_overlap_operator_to_dense, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: copy_overlap_operator_to_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(in) :: coef_old(:,:,:)
     complex(8), intent(in), optional :: coef_pw_old(:,:,:)
 
-    integer :: ispin, n_frag, n_pw, n_tot, nst, ipw_local
-    complex(8), allocatable :: U_new(:,:), C_old(:,:), C_new(:,:)
-    complex(8), allocatable :: Sm(:,:), tmp(:,:), A(:,:)
+    integer :: ispin, n_frag, n_pw, n_tot, nst, n_basis
+    complex(8), allocatable :: U_new(:,:), C_old(:,:), coef_mix_new(:,:)
+    complex(8), allocatable :: Sm(:,:), tmp(:,:)
     complex(8), parameter :: zone = (1.0d0, 0.0d0), zzero = (0.0d0, 0.0d0)
 
     n_frag = dg_frag%n_mat_max
@@ -550,34 +549,34 @@
     nst = dg_frag%nstate_tot
     if (n_tot <= 0 .or. nst <= 0) return
 
-    allocate(U_new(n_tot, nst), C_old(n_tot, nst), C_new(n_tot, nst))
-    allocate(Sm(n_tot, n_tot), tmp(n_tot, nst), A(nst, nst))
-
     do ispin = 1, dg_frag%nspin
-      U_new(:, :) = zzero
-      C_old(:, :) = zzero
-      C_new(:, :) = zzero
-      Sm(:, :) = zzero
+      if (.not. allocated(dg_frag%mixed_basis_dim)) cycle
+      n_basis = min(dg_frag%mixed_basis_dim(ispin), n_tot)
+      if (n_basis <= 0) cycle
 
-      U_new(1:n_frag, :) = dg_frag%coef(1:n_frag, 1:nst, ispin)
-      if (n_pw > 0) U_new(n_frag+1:n_tot, :) = dg_frag%coef_pw(1:n_pw, 1:nst, ispin)
+      allocate(U_new(n_tot, n_basis), C_old(n_tot, nst), coef_mix_new(n_basis, nst))
+      allocate(Sm(n_tot, n_tot), tmp(n_tot, nst))
+
+      U_new(:, :) = dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin)
+      C_old(:, :) = zzero
+      coef_mix_new(:, :) = zzero
+      Sm(:, :) = zzero
 
       C_old(1:n_frag, :) = coef_old(1:n_frag, 1:nst, ispin)
       if (present(coef_pw_old) .and. n_pw > 0) C_old(n_frag+1:n_tot, :) = coef_pw_old(1:n_pw, 1:nst, ispin)
 
       call copy_overlap_operator_to_dense(dg_frag, ispin, .true., Sm)
 
-      ! A = U_new^† S C_old, then C_new = U_new A
+      ! Reproject directly into the canonical mixed basis and derive raw arrays
+      ! only from that authoritative state.
       call zgemm('N', 'N', n_tot, nst, n_tot, zone, Sm, n_tot, C_old, n_tot, zzero, tmp, n_tot)
-      call zgemm('C', 'N', nst, nst, n_tot, zone, U_new, n_tot, tmp, n_tot, zzero, A, nst)
-      call zgemm('N', 'N', n_tot, nst, nst, zone, U_new, n_tot, A, nst, zzero, C_new, n_tot)
+      call zgemm('C', 'N', n_basis, nst, n_tot, zone, U_new, n_tot, tmp, n_tot, zzero, coef_mix_new, n_basis)
 
-      dg_frag%coef(1:n_frag, 1:nst, ispin) = C_new(1:n_frag, 1:nst)
-      if (n_pw > 0) dg_frag%coef_pw(1:n_pw, 1:nst, ispin) = C_new(n_frag+1:n_tot, 1:nst)
+      dg_frag%coef_mix(:, :, ispin) = zzero
+      dg_frag%coef_mix(1:n_basis, 1:nst, ispin) = coef_mix_new(:, :)
+
+      deallocate(U_new, C_old, coef_mix_new, Sm, tmp)
     end do
-    call zero_nonowned_coefficients(dg_frag)
-
-    deallocate(U_new, C_old, C_new, Sm, tmp, A)
   end subroutine project_coefficients_mixed_state
 
   !=======================================================================

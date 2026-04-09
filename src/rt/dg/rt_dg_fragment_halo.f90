@@ -520,6 +520,19 @@
       dg_frag%halo_ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_recv, &
                                                   dg_frag%halo(i_halo)%id_src, &
                                                   itag_recv, dg_frag%icomm)
+      if (enable_halo_trace) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,5(i0,1x),a,5(i0,1x))') &
+          "halo trace: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, " i_halo=", i_halo, &
+          " src=", dg_frag%halo(i_halo)%id_src, " dst=", dg_frag%halo(i_halo)%id_dst, &
+          " tagS=", itag_send, " tagR=", itag_recv, &
+          " send_shape=", size(dg_frag%halo(i_halo)%buf_send,1), size(dg_frag%halo(i_halo)%buf_send,2), &
+                          size(dg_frag%halo(i_halo)%buf_send,3), size(dg_frag%halo(i_halo)%buf_send,4), &
+                          size(dg_frag%halo(i_halo)%buf_send,5), &
+          " recv_shape=", size(dg_frag%halo(i_halo)%buf_recv,1), size(dg_frag%halo(i_halo)%buf_recv,2), &
+                          size(dg_frag%halo(i_halo)%buf_recv,3), size(dg_frag%halo(i_halo)%buf_recv,4), &
+                          size(dg_frag%halo(i_halo)%buf_recv,5)
+        call flush(6)
+      end if
       if (diag_second_halo_root .or. diag_fourth_halo_root) then
         write(*,'(1x,a,i0,a,i0)') "        halo root diag req: i_halo=", i_halo, " ireq_recv=", dg_frag%halo_ireq_recv(i_halo)
         call flush(6)

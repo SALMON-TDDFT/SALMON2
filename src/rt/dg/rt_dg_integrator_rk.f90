@@ -5,7 +5,7 @@
     use salmon_global, only: yn_fix_func
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw, sync_raw_coef_from_mixed
+    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -86,7 +86,6 @@
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
       end if
       if (enable_rk_trace) then
@@ -176,7 +175,6 @@
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
       end if
       if (yn_fix_func == 'n') then
@@ -253,7 +251,6 @@
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
       end if
       if (yn_fix_func == 'n') then
@@ -307,7 +304,6 @@
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
       end if
       if (yn_fix_func == 'n') then
@@ -366,7 +362,6 @@
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
       end if
       if (yn_fix_func == 'n') then
@@ -453,7 +448,6 @@
             if (use_mixed_rt) then
               do ispin = 1, dg_frag%nspin
                 call sync_mixed_coef_from_raw(dg_frag, ispin)
-                call sync_raw_coef_from_mixed(dg_frag, ispin)
               end do
             end if
             if (enable_rk_trace) then
@@ -511,7 +505,6 @@
             if (use_mixed_rt) then
               do ispin = 1, dg_frag%nspin
                 call sync_mixed_coef_from_raw(dg_frag, ispin)
-                call sync_raw_coef_from_mixed(dg_frag, ispin)
               end do
             end if
             if (enable_rk_trace) then
@@ -568,7 +561,6 @@
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
       end if
       if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)

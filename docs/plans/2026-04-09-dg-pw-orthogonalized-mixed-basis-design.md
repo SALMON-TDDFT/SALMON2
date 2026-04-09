@@ -118,3 +118,43 @@ Warnings are not sufficient here because silent fallback recreates the represent
 - This is a representation cleanup, not a request to solve all remaining superlattice physics issues.
 - For solids, this design is closer to the original intended use: orthogonalized hybrid basis for metallic or delocalized response.
 - The immediate success criterion is consistency of runtime representation, not perfect agreement on every one-body energy term in superlattice stress tests.
+
+## DG Hamiltonian Eq.(4) Mapping Note
+
+The SC'25 DG-TDDFT paper describes the DG Hamiltonian in Eq.(4) as a sum of:
+
+1. volume kinetic term
+2. volume local-potential term
+3. nonlocal pseudopotential term
+4. DG face terms (average/jump and penalty terms)
+
+The current SALMON implementation matches that structure only partially.
+
+### What is already consistent
+
+- The block sparsity pattern uses `3^Dim` nearest-neighbor adjacency.
+  In 3D, this means up to 27 row-block couplings including self.
+- Diagonal fragment blocks are built from volume kinetic and local-potential integrals.
+- Off-diagonal DG surface coupling is treated only for face-neighbor pairs, which is consistent with the paper's statement that the boundary integral terms affect edge-adjacent blocks only in the block graph sense of DG interfaces.
+
+### What is not identical to the paper-level Hamiltonian assembly
+
+- The nonlocal PP contribution is not fully assembled into `H_mat` as a persistent DG Hamiltonian block matrix.
+  Instead, it is applied later during propagation / observable evaluation through projector application paths.
+- Therefore, the runtime one-body operator is mathematically closer to
+  `H_local_blocks + H_face_blocks + on-the-fly nonlocal application`
+  than to a single monolithic Eq.(4) matrix assembled once.
+
+### Important code-status note
+
+`src/rt/dg/rt_dg_fragment_hamiltonian.f90` still contains legacy comments around the missing/next-stage face-term assembly.
+The present code does inject SIPG-like face terms for face-neighbor halo pairs, but the comments are more conservative than the current implementation state.
+This should be cleaned up later so that code comments and actual assembly path say the same thing.
+
+### Practical interpretation
+
+- For discussions about 27-neighbor communication/block structure, the current implementation is broadly aligned with the paper.
+- For discussions about whether the Hamiltonian matrix is assembled exactly as Eq.(4), the answer is still "not completely":
+  the nonlocal term is handled outside the stored DG Hamiltonian blocks.
+
+This distinction matters when comparing energy definitions, current evaluation, and block-level diagnostics against the paper description.

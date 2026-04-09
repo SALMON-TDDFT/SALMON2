@@ -33,6 +33,32 @@ module rt_dg_plane_wave
 
 contains
 
+  subroutine get_fragment_pw_support_axis(dg_frag, ifrag, axis, origin, npts)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis
+    integer, intent(out) :: origin, npts
+
+    if (dg_frag%use_buffered_basis .and. dg_frag%num_fragment(axis) > 1) then
+      origin = dg_frag%basis_support_lo(axis, ifrag)
+      npts = dg_frag%basis_support_hi(axis, ifrag) - dg_frag%basis_support_lo(axis, ifrag) + 1
+    else
+      origin = dg_frag%ixyz_frag(axis, ifrag)
+      npts = dg_frag%nxyz_domain(axis, ifrag)
+    end if
+  end subroutine get_fragment_pw_support_axis
+
+  integer function map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, ig, lb, ub
+    integer :: support_lo, support_len, ig_wrap
+
+    call get_fragment_pw_support_axis(dg_frag, ifrag, axis, support_lo, support_len)
+    ig_wrap = support_lo + modulo(ig - support_lo, support_len)
+    iloc = map_global_to_phi_box_coord_pw(ig_wrap, lb, ub, dg_frag%lgnum_total(axis))
+  end function map_global_to_phi_box_coord_pw_fragment
+
   subroutine assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, mat)
     use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
     implicit none
@@ -314,9 +340,17 @@ contains
     p_ub2 = ubound(dg_frag%phi_frag, 2)
     p_ub3 = ubound(dg_frag%phi_frag, 3)
 
-    nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
-    ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
-    nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    nx_max = 0
+    ny_max = 0
+    nz_max = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      call get_fragment_pw_support_axis(dg_frag, ifrag, 1, gx0, nx)
+      call get_fragment_pw_support_axis(dg_frag, ifrag, 2, gy0, ny)
+      call get_fragment_pw_support_axis(dg_frag, ifrag, 3, gz0, nz)
+      nx_max = max(nx_max, nx)
+      ny_max = max(ny_max, ny)
+      nz_max = max(nz_max, nz)
+    end do
     allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
 
     S_complex = (0.0d0, 0.0d0)
@@ -328,12 +362,9 @@ contains
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
-          nx = dg_frag%nxyz_domain(1, ifrag)
-          ny = dg_frag%nxyz_domain(2, ifrag)
-          nz = dg_frag%nxyz_domain(3, ifrag)
-          gx0 = dg_frag%ixyz_frag(1, ifrag)
-          gy0 = dg_frag%ixyz_frag(2, ifrag)
-          gz0 = dg_frag%ixyz_frag(3, ifrag)
+          call get_fragment_pw_support_axis(dg_frag, ifrag, 1, gx0, nx)
+          call get_fragment_pw_support_axis(dg_frag, ifrag, 2, gy0, ny)
+          call get_fragment_pw_support_axis(dg_frag, ifrag, 3, gz0, nz)
 
           step_x = exp(cmplx(0.0d0, k_vec(1) * dg_frag%hgs(1), kind=8))
           step_y = exp(cmplx(0.0d0, k_vec(2) * dg_frag%hgs(2), kind=8))
@@ -362,16 +393,16 @@ contains
             if (use_complex_basis) then
               do iz = 1, nz
                 gz = gz0 + iz - 1
-                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                bz = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
                 do iy = 1, ny
                   gy = gy0 + iy - 1
-                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  by = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
                   do ix = 1, nx
                     gx = gx0 + ix - 1
-                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    bx = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     overlap_local = overlap_local + &
@@ -382,16 +413,16 @@ contains
             else
               do iz = 1, nz
                 gz = gz0 + iz - 1
-                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                bz = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
                 do iy = 1, ny
                   gy = gy0 + iy - 1
-                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  by = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
                   do ix = 1, nx
                     gx = gx0 + ix - 1
-                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    bx = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     overlap_local = overlap_local + &
@@ -529,9 +560,17 @@ contains
     v_ub2 = ubound(Vpsl%f, 2)
     v_ub3 = ubound(Vpsl%f, 3)
 
-    nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
-    ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
-    nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
+    nx_max = 0
+    ny_max = 0
+    nz_max = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      call get_fragment_pw_support_axis(dg_frag, ifrag, 1, gx0, nx)
+      call get_fragment_pw_support_axis(dg_frag, ifrag, 2, gy0, ny)
+      call get_fragment_pw_support_axis(dg_frag, ifrag, 3, gz0, nz)
+      nx_max = max(nx_max, nx)
+      ny_max = max(ny_max, ny)
+      nz_max = max(nz_max, nz)
+    end do
     allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
 
     H_complex = (0.0d0, 0.0d0)
@@ -544,12 +583,9 @@ contains
         i_local = 0
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = i_local + 1
-          nx = dg_frag%nxyz_domain(1, ifrag)
-          ny = dg_frag%nxyz_domain(2, ifrag)
-          nz = dg_frag%nxyz_domain(3, ifrag)
-          gx0 = dg_frag%ixyz_frag(1, ifrag)
-          gy0 = dg_frag%ixyz_frag(2, ifrag)
-          gz0 = dg_frag%ixyz_frag(3, ifrag)
+          call get_fragment_pw_support_axis(dg_frag, ifrag, 1, gx0, nx)
+          call get_fragment_pw_support_axis(dg_frag, ifrag, 2, gy0, ny)
+          call get_fragment_pw_support_axis(dg_frag, ifrag, 3, gz0, nz)
 
           step_x = exp(cmplx(0.0d0, k_vec(1) * dg_frag%hgs(1), kind=8))
           step_y = exp(cmplx(0.0d0, k_vec(2) * dg_frag%hgs(2), kind=8))
@@ -578,16 +614,16 @@ contains
             if (use_complex_basis) then
               do iz = 1, nz
                 gz = gz0 + iz - 1
-                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                bz = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
                 do iy = 1, ny
                   gy = gy0 + iy - 1
-                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  by = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
                   do ix = 1, nx
                     gx = gx0 + ix - 1
-                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    bx = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
                     vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
                     if (vx < v_lb1 .or. vx > v_ub1) cycle
@@ -608,16 +644,16 @@ contains
             else
               do iz = 1, nz
                 gz = gz0 + iz - 1
-                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                bz = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 3, gz, p_lb3, p_ub3)
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
                 do iy = 1, ny
                   gy = gy0 + iy - 1
-                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  by = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 2, gy, p_lb2, p_ub2)
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
                   do ix = 1, nx
                     gx = gx0 + ix - 1
-                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    bx = map_global_to_phi_box_coord_pw_fragment(dg_frag, ifrag, 1, gx, p_lb1, p_ub1)
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
                     vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
                     if (vx < v_lb1 .or. vx > v_ub1) cycle

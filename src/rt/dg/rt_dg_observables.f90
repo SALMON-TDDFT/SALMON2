@@ -17,7 +17,7 @@
     type(s_scalar),         intent(in)    :: Vh, Vpsl
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
     
-    integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot, max_nocc
+    integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot, max_nocc, n_mix
     integer :: active_state_cap
     integer :: ifrag, jfrag, ib, jb, i_idx, j_idx
     integer :: iblk, nrow_blk, ncol_blk, n_diag_block_ids, idb
@@ -31,11 +31,11 @@
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
     real(8) :: current_tmp, energy_tmp, pw_weight_local, kpw_dir
-    real(8) :: current_io, energy_io
+    real(8) :: current_io, energy_io, energy_mix_io
     real(8) :: occ_i
     real(8) :: charge_trace_spin
     real(8) :: Ac_tot(3), A_squared
-    real(8) :: current_local(3), energy_local
+    real(8) :: current_local(3), energy_local, energy_mix_local
     real(8) :: elec_coef_local, elec_plain_local
     real(8) :: elec_coef_sum, elec_plain_sum
     real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
@@ -73,10 +73,14 @@
       1.0d0, 0.0d0, 0.0d0, &
       0.0d0, 1.0d0, 0.0d0, &
       0.0d0, 0.0d0, 1.0d0 /), (/3, 3/))
+
+    Ac_tot = rt%Ac_tot(:, itt)
+
     ! Calculate local observables (only for assigned fragments)
     ! MPI aggregation will sum across all ranks
     current_local = 0.0d0
     energy_local = 0.0d0
+    energy_mix_local = 0.0d0
     pw_weight_local = 0.0d0
     elec_coef_local = 0.0d0
     elec_plain_local = 0.0d0
@@ -107,6 +111,7 @@
     if (n <= 0) then
       current_local = 0.0d0
       energy_local = 0.0d0
+      energy_mix_local = 0.0d0
       goto 1000
     end if
     n_pw = 0
@@ -340,7 +345,6 @@
     call timer_end(LOG_CALC_CURRENT)
     
       ! Get vector potential at current time for energy calculation
-      Ac_tot = rt%Ac_tot(:, itt)
       A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
       
       require_dense_nl = (.not. allocated(dg_frag%H_mat_blocks)) .or. &
@@ -630,6 +634,61 @@
         end do
       end if
         energy_local = energy_local + energy_tmp
+
+      if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. &
+          dg_frag%mixed_basis_ready .and. allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_transform) .and. &
+          .not. use_spatial_A) then
+        n_mix = min(dg_frag%mixed_basis_dim(ispin), size(dg_frag%coef_mix, 1), size(dg_frag%mixed_transform, 2))
+        if (n_mix > 0) then
+          coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
+          coef_all(1:n_tot, 1:nocc) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_mix, ispin), &
+                                             dg_frag%coef_mix(1:n_mix, 1:nocc, ispin))
+          tmp_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
+          call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
+          if (has_nonlocal) then
+            if (allocated(dg_frag%H_nl_cache) .and. ((.not. allocated(dg_frag%H_mat_blocks)) .or. use_hmat_complex)) then
+              tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
+                matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_all(1:n, 1:nocc))
+            else
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n, 1:nocc), &
+                tmp_all(1:n, 1:nocc))
+            end if
+          end if
+          tmp_all(1:n_tot, 1:nocc) = tmp_all(1:n_tot, 1:nocc) + 0.5d0 * A_squared * coef_all(1:n_tot, 1:nocc)
+          if (allocated(dg_frag%momentum_blocks)) then
+            call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
+          else
+            do idir = 1, 3
+              if (allocated(dg_frag%momentum_mat_c)) then
+                if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+                op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
+              else
+                if (.not. allocated(op_mat)) allocate(op_mat(n, n))
+                op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
+              end if
+              call zgemm('N', 'N', n, nocc, n, minus_i * Ac_tot(idir), op_mat, n, &
+                         coef_all, n_tot, (1.0d0, 0.0d0), tmp_all, n_tot)
+            end do
+          end if
+          do jo = 1, n_pw
+            kpw_dir = dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo))
+            mfp = cmplx(0.0d0, kpw_dir, kind=8)
+            tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + minus_i * mfp * coef_all(n+jo, 1:nocc)
+            do io = 1, n
+              mfp = cmplx(0.0d0, kpw_dir, kind=8) * dg_frag%S_mat_frag_pw(io, jo, ispin)
+              tmp_all(io, 1:nocc) = tmp_all(io, 1:nocc) + minus_i * mfp * coef_all(n+jo, 1:nocc)
+              tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) + minus_i * (-conjg(mfp)) * coef_all(io, 1:nocc)
+            end do
+          end do
+          do io = 1, nocc
+            energy_mix_io = 0.0d0
+            do ib = 1, n_tot
+              energy_mix_io = energy_mix_io + occ_weight(io) * real(conjg(coef_all(ib, io)) * tmp_all(ib, io))
+            end do
+            energy_mix_local = energy_mix_local + energy_mix_io
+          end do
+        end if
+      end if
       end do
 
       if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) then
@@ -723,6 +782,7 @@
       call comm_summation(current_offdiag_local, current_offdiag_sum, 3, dg_frag%icomm)
     end if
     call comm_summation(energy_local, dg_frag%total_energy, dg_frag%icomm)
+    call comm_summation(energy_mix_local, dg_frag%total_energy_mix, dg_frag%icomm)
     call comm_summation(pw_weight_local, dg_frag%pw_weight_raw, dg_frag%icomm)
     if (enable_electron_probe) then
       call comm_summation(elec_coef_local, elec_coef_sum, dg_frag%icomm)
@@ -734,6 +794,7 @@
     end if
     frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
     dg_frag%total_energy = dg_frag%total_energy / frag_reduce_factor
+    dg_frag%total_energy_mix = dg_frag%total_energy_mix / frag_reduce_factor
     if (enable_electron_probe) then
       elec_coef_sum = elec_coef_sum / frag_reduce_factor
       elec_plain_sum = elec_plain_sum / frag_reduce_factor
@@ -831,10 +892,6 @@
       dg_frag%total_energy = energy_one_rs_sum
     end if
 
-    if (n_pw == 0 .and. (itt == 1 .or. itt == 40)) then
-      call debug_vloc_block_probe(dg_frag, system, mg, stencil, Vh, Vxc, Vpsl, itt)
-    end if
-    
     ! Normalize by global grid count exactly as conventional calc_current().
     ! This avoids decomposition-dependent scaling from local/grid-view differences.
     dg_frag%current(:) = dg_frag%current(:) / dble(system%ngrid)
@@ -882,7 +939,6 @@
     if (allocated(current_orb_sum)) deallocate(current_orb_sum)
     if (allocated(energy_orb_local)) deallocate(energy_orb_local)
     if (allocated(energy_orb_sum)) deallocate(energy_orb_sum)
-    
     ! Store in rt structure for output
     rt%curr(:, itt) = dg_frag%current(:)
     
@@ -906,6 +962,7 @@
     real(8) :: elec_coef_sum, elec_plain_sum, elec_rho_sum, occ_i
     integer, allocatable :: occ_idx_report(:)
     real(8), allocatable :: occ_val_report(:), occ_sdiag_report(:), occ_c2_report(:)
+    real(8), allocatable :: occ_frag_report(:), occ_pw_report(:)
     complex(8), allocatable :: coef_all(:,:), coef_frag_all(:,:), coef_pw_all(:,:), overlap_vec(:), overlap_dense(:,:)
     complex(8), allocatable :: coef_frag_view(:,:), coef_pw_view(:,:)
 
@@ -937,10 +994,13 @@
     elec_rho_local = sum(rho%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))) * system%hvol
     nocc_report = 0
     allocate(occ_idx_report(8), occ_val_report(8), occ_sdiag_report(8), occ_c2_report(8))
+    allocate(occ_frag_report(8), occ_pw_report(8))
     occ_idx_report(:) = 0
     occ_val_report(:) = 0.0d0
     occ_sdiag_report(:) = 0.0d0
     occ_c2_report(:) = 0.0d0
+    occ_frag_report(:) = 0.0d0
+    occ_pw_report(:) = 0.0d0
 
     do ispin = 1, dg_frag%nspin
       if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
@@ -974,6 +1034,15 @@
           coef_all(1:n, 1) = coef_frag_view(1:n, io)
           coef_all(n+1:n_tot, 1) = coef_pw_view(1:n_pw, io)
           call apply_overlap_operator(dg_frag, ispin, coef_all(1:n_tot, 1), overlap_vec(1:n_tot), .true.)
+          if (dg_frag%id == 0 .and. nocc_report < size(occ_idx_report)) then
+            nocc_report = nocc_report + 1
+            occ_idx_report(nocc_report) = io
+            occ_val_report(nocc_report) = occ_i
+            occ_sdiag_report(nocc_report) = real(sum(conjg(coef_all(1:n_tot, 1)) * overlap_vec(1:n_tot)))
+            occ_c2_report(nocc_report) = real(sum(conjg(coef_all(1:n_tot, 1)) * coef_all(1:n_tot, 1)))
+            occ_frag_report(nocc_report) = real(sum(conjg(coef_all(1:n, 1)) * overlap_vec(1:n)), kind=8)
+            occ_pw_report(nocc_report) = real(sum(conjg(coef_all(n+1:n_tot, 1)) * overlap_vec(n+1:n_tot)), kind=8)
+          end if
           elec_coef_local = elec_coef_local + occ_i * real(sum(conjg(coef_all(1:n_tot, 1)) * overlap_vec(1:n_tot)))
           elec_plain_local = elec_plain_local + occ_i * real(sum(conjg(coef_all(1:n_tot, 1)) * coef_all(1:n_tot, 1)))
         else
@@ -1009,9 +1078,10 @@
           "        electron-probe-t0: Ne_coef_S=", elec_coef_sum, " Ne_coef_2=", elec_plain_sum, " Ne_rho=", elec_rho_sum
       end if
       do io = 1, nocc_report
-        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
           "        electron-probe-t0 occ-state=", occ_idx_report(io), " occ=", occ_val_report(io), &
-          " sdiag=", occ_sdiag_report(io), " c2=", occ_c2_report(io)
+          " sdiag=", occ_sdiag_report(io), " c2=", occ_c2_report(io), &
+          " frag_w=", occ_frag_report(io), " pw_w=", occ_pw_report(io)
       end do
       flush(6)
     end if
@@ -1027,6 +1097,8 @@
     if (allocated(occ_val_report)) deallocate(occ_val_report)
     if (allocated(occ_sdiag_report)) deallocate(occ_sdiag_report)
     if (allocated(occ_c2_report)) deallocate(occ_c2_report)
+    if (allocated(occ_frag_report)) deallocate(occ_frag_report)
+    if (allocated(occ_pw_report)) deallocate(occ_pw_report)
   end subroutine print_initial_electron_probe
 
   subroutine debug_vloc_block_probe(dg_frag, system, mg, stencil, Vh, Vxc, Vpsl, itt)

@@ -300,6 +300,9 @@ contains
     dg_frag%ixyz_frag = 0
     dg_frag%basis_support_lo = 0
     dg_frag%basis_support_hi = -1
+    do ifrag = 1, dg_frag%n_frag
+      dg_frag%id_array(ifrag) = (ifrag - 1) * dg_frag%nproc_frag
+    end do
     dg_frag%lg => lg
     dg_frag%mg => mg
     dg_frag%hgs = system%hgs
@@ -322,21 +325,16 @@ contains
       dg_frag%n_mat_max = maxval(dg_frag%n_mat)
     end if
     
-    ! Initialize halo communication structures
-    if (dg_frag%has_real_space_basis) then
-      call init_halo_communication(dg_frag, info)
-      call rebuild_coef_owner_map(dg_frag, "post-halo-init")
-      call zero_nonowned_coefficients(dg_frag)
-    end if
-    
-    ! Perform initial halo exchange to fill ghost cells
-    ! This ensures phi_frag halo regions contain correct neighbor data
-    ! Skip if phi_frag was not loaded
-    if (dg_frag%has_real_space_basis) then
-      call exchange_phi_frag_halo(dg_frag)
-      if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a)') "Initial halo exchange completed for phi_frag"
-      end if
+    ! DG fragment real-space basis is evaluated on the fragment box
+    ! (core+buffer when available) with periodic wrap inside that box.
+    ! Neighbor-fragment information should enter through DG coupling terms,
+    ! not through direct ghost exchange of phi_frag.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
+    call rebuild_coef_owner_map(dg_frag, "post-halo-skip")
+    call zero_nonowned_coefficients(dg_frag)
+    if (comm_is_root(info%id_rko)) then
+      write(*,'(1x,a)') "Fragment halo exchange disabled: phi_frag uses fragment-box periodic support"
     end if
     
     ! Note: has_real_space_basis flag is set in read_fragment_basis_data()
