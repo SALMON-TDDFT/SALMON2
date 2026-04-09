@@ -402,7 +402,8 @@
     integer, intent(in) :: map_x(:), map_y(:), map_z(:)
     complex(8), intent(out) :: phi_mat(:, :)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
-    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz, io, ip
+    integer :: nx, ny
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz, io, ip, idx_base
 
     lx_lo = loc_s(1)
     lx_hi = loc_e(1)
@@ -410,17 +411,20 @@
     ly_hi = loc_e(2)
     lz_lo = loc_s(3)
     lz_hi = loc_e(3)
+    nx = lx_hi - lx_lo + 1
+    ny = ly_hi - ly_lo + 1
 
     if (allocated(dg_frag%phi_frag_c)) then
       do io = 1, nbf
-        ip = 0
         do lz = lz_lo, lz_hi
           gz = ov_s(3) + (lz - lz_lo)
           do ly = ly_lo, ly_hi
             gy = ov_s(2) + (ly - ly_lo)
+            idx_base = ((lz - lz_lo) * ny + (ly - ly_lo)) * nx + 1
+!$omp simd private(gx, bx, by, bz, ip)
             do lx = lx_lo, lx_hi
               gx = ov_s(1) + (lx - lx_lo)
-              ip = ip + 1
+              ip = idx_base + (lx - lx_lo)
               bx = map_x(gx - ov_s(1) + 1)
               by = map_y(gy - ov_s(2) + 1)
               bz = map_z(gz - ov_s(3) + 1)
@@ -435,14 +439,15 @@
       end do
     else
       do io = 1, nbf
-        ip = 0
         do lz = lz_lo, lz_hi
           gz = ov_s(3) + (lz - lz_lo)
           do ly = ly_lo, ly_hi
             gy = ov_s(2) + (ly - ly_lo)
+            idx_base = ((lz - lz_lo) * ny + (ly - ly_lo)) * nx + 1
+!$omp simd private(gx, bx, by, bz, ip)
             do lx = lx_lo, lx_hi
               gx = ov_s(1) + (lx - lx_lo)
-              ip = ip + 1
+              ip = idx_base + (lx - lx_lo)
               bx = map_x(gx - ov_s(1) + 1)
               by = map_y(gy - ov_s(2) + 1)
               bz = map_z(gz - ov_s(3) + 1)
@@ -465,13 +470,16 @@
     complex(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     integer, intent(in) :: ov_s(3), ov_e(3)
     complex(8), intent(out) :: vec(:)
-    integer :: gx, gy, gz, ip
+    integer :: nx
+    integer :: gx, gy, gz, ip, idx_base
 
-    ip = 0
+    nx = ov_e(1) - ov_s(1) + 1
     do gz = ov_s(3), ov_e(3)
       do gy = ov_s(2), ov_e(2)
+        idx_base = ((gz - ov_s(3)) * (ov_e(2) - ov_s(2) + 1) + (gy - ov_s(2))) * nx + 1
+!$omp simd private(ip)
         do gx = ov_s(1), ov_e(1)
-          ip = ip + 1
+          ip = idx_base + (gx - ov_s(1))
           vec(ip) = field(gx, gy, gz)
         end do
       end do
