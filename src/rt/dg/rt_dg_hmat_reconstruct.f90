@@ -25,7 +25,7 @@
     complex(8) :: integral_v
     real(8), allocatable :: V_total(:,:,:)
     complex(8), allocatable :: V_phi(:,:,:)
-    real(8), allocatable :: partial_total(:), partial_block(:,:), reduced_block(:,:)
+    real(8), allocatable :: partial_block(:,:), reduced_block(:,:)
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: use_block_reconstruct
     logical :: has_overlap
@@ -104,7 +104,7 @@
       max_nbf_local = max(max_nbf_local, nbf)
     end do
     if (max_nbf_local > 0) then
-      allocate(partial_total(max_nbf_local), partial_block(max_nbf_local, max_nbf_local), reduced_block(max_nbf_local, max_nbf_local))
+      allocate(partial_block(max_nbf_local, max_nbf_local), reduced_block(max_nbf_local, max_nbf_local))
     end if
 
     do ispin = 1, system%nspin
@@ -158,18 +158,15 @@
           call cpu_time(t0)
           call build_local_potential_applied_basis(dg_frag, i_local, jo, mg, V_total, V_phi, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
 
-          partial_total(1:nbf) = 0.0d0
-
 !$omp parallel do private(io, integral_v) schedule(static)
-          do io = 1, nbf
+          do io = jo, nbf
             call integrate_local_basis_with_field(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
-            partial_total(io) = real(integral_v, kind=8)
+            partial_block(io, jo) = real(integral_v, kind=8)
+            if (io /= jo) partial_block(jo, io) = partial_block(io, jo)
           end do
 !$omp end parallel do
           call cpu_time(t1)
           time_local_build = time_local_build + (t1 - t0)
-
-          partial_block(1:nbf, jo) = partial_total(1:nbf)
         end do
 
         call cpu_time(t0)
@@ -248,7 +245,6 @@
     end if
 
     deallocate(V_total, V_phi)
-    if (allocated(partial_total)) deallocate(partial_total)
     if (allocated(partial_block)) deallocate(partial_block)
     if (allocated(reduced_block)) deallocate(reduced_block)
 
