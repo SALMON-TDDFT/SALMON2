@@ -133,6 +133,7 @@ module salmon_global
   integer        :: num_kgrid(3)
   character(256) :: file_kw
   real(8)        :: dk_shift(3)
+  character(1)   :: yn_gamma_centered
 
 !! &tgrid
   integer        :: nt

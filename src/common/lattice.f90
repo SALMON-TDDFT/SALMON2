@@ -103,18 +103,17 @@ SUBROUTINE init_kvector(num_kgrid,system)
   use sym_kvector, only: init_sym_kvector
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
-  use salmon_global, only: file_kw, dk_shift
+  use salmon_global, only: file_kw, dk_shift, yn_gamma_centered
   implicit none
-  integer            :: num_kgrid(3)
   type(s_dft_system) :: system
-  !
-  integer :: ix,iy,iz, i,iu
-  integer :: ik,nk
-  real(8) :: shift_k(3),B(3,3)  !,k(3)
+  integer :: num_kgrid(3)
+  integer :: eo_kgrid(3)
+  integer :: i,iu,ik,nk,nk0
+  integer :: ik1,ik2,ik3
+  real(8) :: B(3,3)
   real(8),allocatable :: k(:,:), wtk(:)
 
   B = system%primitive_b
-  shift_k(1:3) = 0.5d0
 
   ! Read from file_kw
   if(file_kw /= 'none') then
@@ -139,17 +138,65 @@ SUBROUTINE init_kvector(num_kgrid,system)
      num_kgrid(:) = -1 
 
   else
-     nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
-     allocate( k(3,nk), wtk(nk) )
-     do ik=1,nk
-        ix=mod(ik-1,num_kgrid(1))+1
-        iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
-        iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
-        k(1,ik) = (dble(ix)-shift_k(1)+dk_shift(1))/dble(num_kgrid(1))-0.5d0
-        k(2,ik) = (dble(iy)-shift_k(2)+dk_shift(2))/dble(num_kgrid(2))-0.5d0
-        k(3,ik) = (dble(iz)-shift_k(3)+dk_shift(3))/dble(num_kgrid(3))-0.5d0
-     end do
-     wtk(:)  = 1d0/dble(nk)
+
+      if( yn_gamma_centered == 'n' ) then
+
+        nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+        allocate( k(3,nk), wtk(nk) )
+        wtk(:) = 1d0/dble(nk)
+
+        ik = 0
+        do ik3 = 1, num_kgrid(3)
+        do ik2 = 1, num_kgrid(2)
+        do ik1 = 1, num_kgrid(1)
+          ik = ik + 1
+          k(1,ik) = (dble(ik1)-0.5d0+dk_shift(1))/dble(num_kgrid(1))-0.5d0
+          k(2,ik) = (dble(ik2)-0.5d0+dk_shift(2))/dble(num_kgrid(2))-0.5d0
+          k(3,ik) = (dble(ik3)-0.5d0+dk_shift(3))/dble(num_kgrid(3))-0.5d0
+        enddo
+        enddo
+        enddo
+
+! originally adopted until 2026.04, with shift_k(:)=0.5d0
+!    do ik=1,nk
+!        ix=mod(ik-1,num_kgrid(1))+1
+!        iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
+!        iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
+!        k(1,ik) = (dble(ix)-shift_k(1)+dk_shift(1))/dble(num_kgrid(1))-0.5d0
+!        k(2,ik) = (dble(iy)-shift_k(2)+dk_shift(2))/dble(num_kgrid(2))-0.5d0
+!        k(3,ik) = (dble(iz)-shift_k(3)+dk_shift(3))/dble(num_kgrid(3))-0.5d0
+!     end do
+!     wtk(:)  = 1d0/dble(nk)
+
+      else ! yn_gamma_centered = 'y'
+
+        nk0 = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+        eo_kgrid(:) = mod(num_kgrid(:),2)
+        nk = (num_kgrid(1)+1-eo_kgrid(1))*(num_kgrid(2)+1-eo_kgrid(2))*(num_kgrid(3)+1-eo_kgrid(3))
+!         for even num_kgrid, both ends are included for k-grid
+
+        allocate( k(3,nk), wtk(nk) )
+        wtk(:)  = 1d0/dble(nk0)
+
+        ik = 0
+        do ik3 = eo_kgrid(3),num_kgrid(3)
+        do ik2 = eo_kgrid(2),num_kgrid(2)
+        do ik1 = eo_kgrid(1),num_kgrid(1)
+          ik = ik + 1
+          k(1,ik) = (dble(ik1)-0.5d0*eo_kgrid(1))/dble(num_kgrid(1))-0.5d0
+          k(2,ik) = (dble(ik2)-0.5d0*eo_kgrid(2))/dble(num_kgrid(2))-0.5d0
+          k(3,ik) = (dble(ik3)-0.5d0*eo_kgrid(3))/dble(num_kgrid(3))-0.5d0
+          if(eo_kgrid(1) == 0 .and. (ik1 == 0 .or. ik1 == num_kgrid(1))) wtk(ik) = wtk(ik)/2d0
+          if(eo_kgrid(2) == 0 .and. (ik2 == 0 .or. ik2 == num_kgrid(2))) wtk(ik) = wtk(ik)/2d0
+          if(eo_kgrid(3) == 0 .and. (ik3 == 0 .or. ik3 == num_kgrid(3))) wtk(ik) = wtk(ik)/2d0
+        enddo
+        enddo
+        enddo
+        if (comm_is_root(nproc_id_global)) then
+          write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'k-point gamma-centered, nk=', nk, 'sum(wtk)=', sum(wtk)
+        end if
+
+      end if
 
   endif
 

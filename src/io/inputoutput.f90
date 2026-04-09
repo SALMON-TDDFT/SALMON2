@@ -293,7 +293,8 @@ contains
     namelist/kgrid/ &
       & num_kgrid, &
       & file_kw, &
-      & dk_shift
+      & dk_shift, &
+      & yn_gamma_centered
 
     namelist/tgrid/ &
       & nt, &
@@ -716,6 +717,7 @@ contains
     num_kgrid = 1
     file_kw   = 'none'
     dk_shift = 0d0
+    yn_gamma_centered = 'n'
 !! == default for &tgrid
     nt = 0
     dt = 0
@@ -1253,6 +1255,7 @@ contains
     call comm_bcast(num_kgrid,nproc_group_global)
     call comm_bcast(file_kw  ,nproc_group_global)
     call comm_bcast(dk_shift ,nproc_group_global)
+    call comm_bcast(yn_gamma_centered,nproc_group_global)
 !! == bcast for &tgrid
     call comm_bcast(nt,nproc_group_global)
     call comm_bcast(dt,nproc_group_global)
@@ -2143,6 +2146,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
+      write(fh_variables_log, '("#",4x,A,"=",A)') 'yn_gamma_centered', yn_gamma_centered
 
       if(inml_tgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
