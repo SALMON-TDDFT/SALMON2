@@ -1320,7 +1320,7 @@ contains
     use structures
     use math_constants, only: pi
     use communication,  only: comm_summation
-    use salmon_global,  only: kion
+    use salmon_global,  only: kion, method_loc_sr_derivative
     implicit none
     type(s_dft_system),    intent(inout) :: system
     type(s_pp_info),       intent(in)    :: pp
@@ -1373,7 +1373,14 @@ contains
 
         ! Linear interpolation of V_loc and dV_loc/dr
         vloc_r = v_lo + ratio * (v_hi - v_lo)
-        dvloc_r = dv_lo + ratio * (dv_hi - dv_lo)
+        select case(trim(method_loc_sr_derivative))
+        case('table')
+          dvloc_r = dv_lo + ratio * (dv_hi - dv_lo)
+        case('slope')
+          dvloc_r = (v_hi - v_lo) / (r_hi - r_lo)
+        case default
+          call fail_stress("method_loc_sr_derivative must be 'table' or 'slope'")
+        end select
 
         ! V'_sr(r) = dV_loc/dr - Z/r^2
         ! (V_sr = V_loc + Z/r, so V'_sr = V'_loc - Z/r^2)
