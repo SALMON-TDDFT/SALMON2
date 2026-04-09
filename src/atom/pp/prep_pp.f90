@@ -658,7 +658,7 @@ subroutine write_vloctbl_derivative_diagnostics(pp)
       & r_at_max_seg_mid, mean_abs_seg_mid_diff
 
     if (.not. quiet) then
-      write(*, '(A,1X,I0,1X,A,1X,A,1X,A,1X,A,1X,3(A,ES12.4E3))') &
+      write(*, '(A,1X,I0,1X,A,1X,A,1X,A,1X,3(A,ES12.4E3))') &
         & 'pp-deriv-check', ik, trim(pp%atom_symbol(ik)), trim(ps_format(ik)), nlcc_label, &
         & 'node=', max_abs_node_diff, ' seg_mid=', max_abs_seg_mid_diff, &
         & ' seg_end=', max_abs_seg_end_diff
