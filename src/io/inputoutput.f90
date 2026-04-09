@@ -524,6 +524,7 @@ contains
       & yn_out_stress_decomp, &
       & yn_stress_loc_fd, &
       & stress_fd_detail, &
+      & method_loc_sr_derivative, &
       & out_stress_step, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
@@ -973,6 +974,7 @@ contains
     yn_out_stress_decomp = ' '
     yn_stress_loc_fd    = 'n'
     stress_fd_detail    = '__unset__'
+    method_loc_sr_derivative = 'table'
     out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -1613,6 +1615,7 @@ contains
     call comm_bcast(yn_out_stress_decomp,nproc_group_global)
     call comm_bcast(yn_stress_loc_fd    ,nproc_group_global)
     call comm_bcast(stress_fd_detail    ,nproc_group_global)
+    call comm_bcast(method_loc_sr_derivative,nproc_group_global)
     call comm_bcast(out_stress_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
@@ -2549,6 +2552,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_stress_numerics', yn_out_stress_numerics
       write(fh_variables_log, '("#",4X,A,"=",A)') 'stress_l_decomp', trim(stress_l_decomp)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stress_loc_fd', yn_stress_loc_fd
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_loc_sr_derivative', trim(method_loc_sr_derivative)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
@@ -3191,6 +3195,7 @@ contains
     call string_lowercase(terms_user)
     call string_lowercase(details_user)
     call string_lowercase(numerics_user)
+    call string_lowercase(method_loc_sr_derivative)
 
     select case(trim(stress_output_level))
     case('low')
@@ -3210,6 +3215,13 @@ contains
       stress_l_decomp = 'species'
     case default
       call fail_stress_input("stress_output_level must be 'low', 'middle', or 'high'")
+    end select
+
+    select case(trim(method_loc_sr_derivative))
+    case('table','slope')
+      continue
+    case default
+      call fail_stress_input("method_loc_sr_derivative must be 'table' or 'slope'")
     end select
 
     if(terms_user /= ' ') then
