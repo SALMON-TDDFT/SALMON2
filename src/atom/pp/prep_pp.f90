@@ -164,6 +164,10 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   end select
   call timer_end(LOG_INIT_PS_CALC_VPSL)
 
+  if (property == 'initial') then
+    call write_vloctbl_derivative_diagnostics(pp)
+  end if
+
   call timer_begin(LOG_INIT_PS_UVPSI)
   call init_uvpsi_summation(ppg,info%icomm_r)
   call init_uvpsi_table(ppg)
@@ -529,6 +533,144 @@ contains
   end subroutine calc_uv
 
 end subroutine init_ps
+
+!===================================================================================================================================
+
+subroutine write_vloctbl_derivative_diagnostics(pp)
+  use communication, only: comm_is_root
+  use filesystem, only: open_filehandle
+  use parallelization, only: nproc_id_global
+  use salmon_global, only: base_directory, ps_format, quiet, sysname
+  use structures, only: s_pp_info
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer :: fh, i, ik, nlcc_flag, nr
+  real(8), allocatable :: d_num(:)
+  real(8) :: d_mid, d_seg, dr, dr_max, dr_min, max_abs_node_diff
+  real(8) :: max_abs_seg_end_diff, max_abs_seg_mid_diff, mean_abs_seg_mid_diff
+  real(8) :: r1, r2, r3, r4, r_at_max_node, r_at_max_seg_end, r_at_max_seg_mid
+  real(8) :: r_mid, slope, sum_abs_seg_mid_diff, v_lo, v_hi
+  logical :: has_nlcc
+  character(256) :: filename
+  character(7) :: nlcc_label
+
+  if (.not. comm_is_root(nproc_id_global)) return
+
+  filename = trim(base_directory)//trim(sysname)//'_pp_local_derivative_check.data'
+  fh = open_filehandle(filename, status="replace")
+  write(fh, '("#",1X,A)') 'Local-potential derivative diagnostics'
+  write(fh, '("#",1X,A)') 'Compare stored dvloctbl against fresh node-wise finite differences and interval slopes'
+  write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+    & 1, "ik", "none", &
+    & 2, "symbol", "none", &
+    & 3, "ps_format", "none", &
+    & 4, "nlcc", "none", &
+    & 5, "nrloc", "none", &
+    & 6, "rps", "a.u.", &
+    & 7, "dr_min", "a.u.", &
+    & 8, "dr_max", "a.u.", &
+    & 9, "max_abs_node_diff", "Ha/a.u.", &
+    & 10, "r_at_max_node", "a.u.", &
+    & 11, "max_abs_seg_end_diff", "Ha/a.u.", &
+    & 12, "r_at_max_seg_end", "a.u.", &
+    & 13, "max_abs_seg_mid_diff", "Ha/a.u.", &
+    & 14, "r_at_max_seg_mid", "a.u.", &
+    & 15, "mean_abs_seg_mid_diff", "Ha/a.u."
+
+  do ik = 1, size(pp%atom_symbol)
+    nr = pp%nrloc(ik)
+    if (nr < 3) cycle
+
+    allocate(d_num(nr))
+    d_num = 0d0
+
+    do i = 2, nr - 1
+      r1 = pp%rad(i+1,ik) - pp%rad(i,ik)
+      r2 = pp%rad(i+1,ik) - pp%rad(i+2,ik)
+      r3 = pp%rad(i+2,ik) - pp%rad(i,ik)
+      r4 = r1 / r2
+      d_num(i) = (r4 + 1d0) * (pp%vloctbl(i,ik) - pp%vloctbl(i-1,ik)) / r1 &
+               - (pp%vloctbl(i+1,ik) - pp%vloctbl(i-1,ik)) / r3 * r4
+    end do
+    d_num(1) = d_num(2) - (d_num(3) - d_num(2)) / (pp%rad(3,ik) - pp%rad(2,ik)) &
+             * (pp%rad(2,ik) - pp%rad(1,ik))
+    if (nr < ubound(pp%rad,1)) then
+      d_num(nr) = d_num(nr-1) + (d_num(nr-1) - d_num(nr-2)) / (pp%rad(nr,ik) - pp%rad(nr-1,ik)) &
+                * (pp%rad(nr+1,ik) - pp%rad(nr,ik))
+    else
+      d_num(nr) = d_num(nr-1)
+    end if
+
+    dr_min = huge(1d0)
+    dr_max = 0d0
+    max_abs_node_diff = 0d0
+    max_abs_seg_end_diff = 0d0
+    max_abs_seg_mid_diff = 0d0
+    r_at_max_node = pp%rad(1,ik)
+    r_at_max_seg_end = 0.5d0 * (pp%rad(1,ik) + pp%rad(2,ik))
+    r_at_max_seg_mid = r_at_max_seg_end
+    sum_abs_seg_mid_diff = 0d0
+
+    do i = 1, nr
+      if (abs(pp%dvloctbl(i,ik) - d_num(i)) > max_abs_node_diff) then
+        max_abs_node_diff = abs(pp%dvloctbl(i,ik) - d_num(i))
+        r_at_max_node = pp%rad(i,ik)
+      end if
+    end do
+
+    do i = 1, nr - 1
+      dr = pp%rad(i+1,ik) - pp%rad(i,ik)
+      if (dr <= 0d0) cycle
+      dr_min = min(dr_min, dr)
+      dr_max = max(dr_max, dr)
+      v_lo = pp%vloctbl(i,ik)
+      v_hi = pp%vloctbl(i+1,ik)
+      slope = (v_hi - v_lo) / dr
+      d_seg = max(abs(pp%dvloctbl(i,ik) - slope), abs(pp%dvloctbl(i+1,ik) - slope))
+      d_mid = abs(0.5d0 * (pp%dvloctbl(i,ik) + pp%dvloctbl(i+1,ik)) - slope)
+      r_mid = 0.5d0 * (pp%rad(i,ik) + pp%rad(i+1,ik))
+      if (d_seg > max_abs_seg_end_diff) then
+        max_abs_seg_end_diff = d_seg
+        r_at_max_seg_end = r_mid
+      end if
+      if (d_mid > max_abs_seg_mid_diff) then
+        max_abs_seg_mid_diff = d_mid
+        r_at_max_seg_mid = r_mid
+      end if
+      sum_abs_seg_mid_diff = sum_abs_seg_mid_diff + d_mid
+    end do
+
+    if (dr_min == huge(1d0)) dr_min = 0d0
+    mean_abs_seg_mid_diff = sum_abs_seg_mid_diff / max(1, nr - 1)
+    has_nlcc = maxval(abs(pp%rho_nlcc_tbl(:,ik))) > 0d0
+    nlcc_flag = 0
+    if (has_nlcc) nlcc_flag = 1
+    if (has_nlcc) then
+      nlcc_label = 'nlcc'
+    else
+      nlcc_label = 'no-nlcc'
+    end if
+
+    write(fh, '(I4,1X,A2,1X,A16,1X,I1,1X,I8,1X,10(ES23.15E3,1X))') &
+      & ik, trim(pp%atom_symbol(ik)), trim(ps_format(ik)), nlcc_flag, nr, &
+      & pp%rps(ik), dr_min, dr_max, max_abs_node_diff, r_at_max_node, &
+      & max_abs_seg_end_diff, r_at_max_seg_end, max_abs_seg_mid_diff, &
+      & r_at_max_seg_mid, mean_abs_seg_mid_diff
+
+    if (.not. quiet) then
+      write(*, '(A,1X,I0,1X,A,1X,A,1X,A,1X,A,1X,3(A,ES12.4E3))') &
+        & 'pp-deriv-check', ik, trim(pp%atom_symbol(ik)), trim(ps_format(ik)), nlcc_label, &
+        & 'node=', max_abs_node_diff, ' seg_mid=', max_abs_seg_mid_diff, &
+        & ' seg_end=', max_abs_seg_end_diff
+    end if
+
+    deallocate(d_num)
+  end do
+
+  close(fh)
+  if (.not. quiet) write(*, '(A,1X,A)') 'wrote local-potential derivative diagnostics:', trim(filename)
+
+end subroutine write_vloctbl_derivative_diagnostics
 
 !===================================================================================================================================
 
