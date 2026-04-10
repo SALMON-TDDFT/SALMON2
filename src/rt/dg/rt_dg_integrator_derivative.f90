@@ -1,6 +1,6 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
-    use salmon_global, only: theory
+    use salmon_global, only: theory, yn_spinorbit
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, &
                                   apply_nonlocal_pp_projector_batch, &
                                   apply_nonlocal_pp_projector_batch_so, apply_mixed_hamiltonian, &
@@ -71,7 +71,7 @@
 
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
     has_so_nonlocal = (allocated(ppg%uv_so) .and. allocated(dg_frag%phi_frag_c) .and. dg_frag%nspin == 2)
-    has_spin_mix = (dg_frag%nspin == 2 .and. allocated(dg_frag%H_mat_spin_mix))
+    has_spin_mix = (yn_spinorbit == 'y' .and. dg_frag%nspin == 2 .and. allocated(dg_frag%H_mat_spin_mix))
     
     n = dg_frag%n_mat_max
     if (n <= 0) return

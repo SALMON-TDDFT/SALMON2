@@ -3,7 +3,9 @@
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
+    use salmon_global, only: yn_spinorbit
     use salmon_xc, only: s_xc_functional, exchange_correlation
+    use noncollinear_module, only: calc_rho_ud_noncollinear, copy_vxc_mat_noncollinear
     use poisson_dg_distributed, only: hartree_dg_distributed
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use rt_dg_plane_wave, only: compute_fragment_pw_hamiltonian, build_mixed_hamiltonian
@@ -28,6 +30,7 @@
     type(s_dft_energy),     intent(inout) :: energy
     complex(8), allocatable :: H_frag_pw(:,:,:)
     real(8) :: t_stage0, t_stage1
+    logical :: has_vxc_mat
     integer :: env_len, env_status
     character(len=64) :: env_val
     logical :: enable_density_call_probe
@@ -52,6 +55,18 @@
 
     call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+    if (allocated(dg_frag%rho_frag)) dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
+    if (allocated(dg_frag%rho_s_frag)) then
+      dg_frag%rho_s_frag(:, :, :, :) = 0.0d0
+      dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = rho_s(1:system%nspin)%f
+    end if
+    if (allocated(dg_frag%rho_ud_frag)) dg_frag%rho_ud_frag(:, :, :) = (0.0d0, 0.0d0)
+    if (yn_spinorbit == 'y' .and. allocated(dg_frag%rho_ud_frag)) then
+      call calc_rho_ud_noncollinear(rt%tpsi0, system, info, mg, dg_frag%rho_ud_frag)
+      if (abs(dg_frag%rho_scale_factor - 1.0d0) > 1.0d-14) then
+        dg_frag%rho_ud_frag(:, :, :) = dg_frag%rho_ud_frag(:, :, :) * dg_frag%rho_scale_factor
+      end if
+    end if
     call cpu_time(t_stage1)
     if (enable_density_call_probe .and. dg_frag%id == 0 .and. (itt == 1 .or. mod(itt, 10) == 0)) then
       write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
@@ -82,6 +97,21 @@
     call cpu_time(t_stage0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
+    if (allocated(dg_frag%Vxc_frag)) then
+      dg_frag%Vxc_frag(:, :, :, :) = 0.0d0
+      dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = Vxc(1:system%nspin)%f
+    end if
+    if (allocated(dg_frag%Vxc_mat_frag)) then
+      dg_frag%Vxc_mat_frag(:, :, :, :, :) = (0.0d0, 0.0d0)
+      if (system%nspin >= 1) dg_frag%Vxc_mat_frag(:, :, :, 1, 1) = cmplx(Vxc(1)%f(:, :, :), 0.0d0, kind=8)
+      if (system%nspin >= 2) dg_frag%Vxc_mat_frag(:, :, :, 2, 2) = cmplx(Vxc(2)%f(:, :, :), 0.0d0, kind=8)
+      if (yn_spinorbit == 'y' .and. system%nspin == 1) then
+        dg_frag%Vxc_mat_frag(:, :, :, 2, 2) = dg_frag%Vxc_mat_frag(:, :, :, 1, 1)
+      end if
+      if (yn_spinorbit == 'y') then
+        call copy_vxc_mat_noncollinear(mg, dg_frag%Vxc_mat_frag, has_vxc_mat)
+      end if
+    end if
     call cpu_time(t_stage1)
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0

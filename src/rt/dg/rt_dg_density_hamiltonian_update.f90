@@ -93,8 +93,11 @@
       dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = rho_s(1:system%nspin)%f
     end if
     if (allocated(dg_frag%rho_ud_frag)) dg_frag%rho_ud_frag(:, :, :) = (0.0d0, 0.0d0)
-    if (yn_spinorbit == 'y' .and. system%nspin >= 2 .and. allocated(dg_frag%rho_ud_frag)) then
+    if (yn_spinorbit == 'y' .and. allocated(dg_frag%rho_ud_frag)) then
       call calc_rho_ud_noncollinear(rt%tpsi0, system, info, mg, dg_frag%rho_ud_frag)
+      if (abs(dg_frag%rho_scale_factor - 1.0d0) > 1.0d-14) then
+        dg_frag%rho_ud_frag(:, :, :) = dg_frag%rho_ud_frag(:, :, :) * dg_frag%rho_scale_factor
+      end if
     end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-end"
@@ -154,7 +157,7 @@
       if (yn_spinorbit == 'y' .and. system%nspin == 1) then
         dg_frag%Vxc_mat_frag(:, :, :, 2, 2) = dg_frag%Vxc_mat_frag(:, :, :, 1, 1)
       end if
-      if (yn_spinorbit == 'y' .and. system%nspin >= 2) then
+      if (yn_spinorbit == 'y') then
         call copy_vxc_mat_noncollinear(mg, dg_frag%Vxc_mat_frag, has_vxc_mat)
       end if
     end if
