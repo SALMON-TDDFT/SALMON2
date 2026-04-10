@@ -14,6 +14,7 @@ module noncollinear_module
   public :: simple_mixing_so
   public :: calc_rho_ud_noncollinear
   public :: copy_vxc_mat_noncollinear
+  public :: sync_noncollinear_state_from_rho
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -23,6 +24,46 @@ module noncollinear_module
   complex(8),allocatable :: dmat_old(:,:,:,:,:) ! for mixing of GS
 
 contains
+
+  subroutine sync_noncollinear_state_from_rho(rho, system, mg)
+    use structures, only : s_scalar, s_dft_system, s_rgrid
+    implicit none
+    type(s_scalar), intent(in) :: rho(system%nspin)
+    type(s_dft_system), intent(in) :: system
+    type(s_rgrid), intent(in) :: mg
+    integer :: m1, m2, m3, n1, n2, n3
+
+    m1 = mg%is(1); n1 = mg%ie(1)
+    m2 = mg%is(2); n2 = mg%ie(2)
+    m3 = mg%is(3); n3 = mg%ie(3)
+
+    if (allocated(den_mat)) then
+      if (lbound(den_mat,1) /= m1 .or. ubound(den_mat,1) /= n1 .or. &
+          lbound(den_mat,2) /= m2 .or. ubound(den_mat,2) /= n2 .or. &
+          lbound(den_mat,3) /= m3 .or. ubound(den_mat,3) /= n3) then
+        deallocate(den_mat)
+      end if
+    end if
+    if (.not. allocated(den_mat)) allocate(den_mat(m1:n1,m2:n2,m3:n3,2,2))
+    den_mat = zero
+
+    den_mat(:,:,:,1,1) = cmplx(rho(1)%f(m1:n1,m2:n2,m3:n3), 0.0d0, kind=8)
+    if (system%nspin >= 2) then
+      den_mat(:,:,:,2,2) = cmplx(rho(2)%f(m1:n1,m2:n2,m3:n3), 0.0d0, kind=8)
+    else
+      den_mat(:,:,:,2,2) = den_mat(:,:,:,1,1)
+    end if
+
+    if (allocated(rot_ang)) then
+      if (lbound(rot_ang,1) /= m1 .or. ubound(rot_ang,1) /= n1 .or. &
+          lbound(rot_ang,2) /= m2 .or. ubound(rot_ang,2) /= n2 .or. &
+          lbound(rot_ang,3) /= m3 .or. ubound(rot_ang,3) /= n3) then
+        deallocate(rot_ang)
+      end if
+    end if
+    if (.not. allocated(rot_ang)) allocate(rot_ang(m1:n1,m2:n2,m3:n3,2))
+    rot_ang = 0.0d0
+  end subroutine sync_noncollinear_state_from_rho
 
   subroutine calc_dm_noncollinear( psi, system, info, mg )
     use structures, only : s_dft_system, s_parallel_info, s_rgrid, s_orbital

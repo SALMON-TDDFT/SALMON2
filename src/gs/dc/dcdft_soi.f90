@@ -239,6 +239,7 @@ contains
   subroutine calc_rho_total_dcdft_soi(nspin,lg,mg,info,rho_s,dc)
     use structures
     use dcdft, only: calc_rho_total_dcdft
+    use noncollinear_module, only: sync_noncollinear_state_from_rho
     implicit none
     integer,              intent(in) :: nspin
     type(s_rgrid),        intent(in) :: lg,mg
@@ -247,6 +248,7 @@ contains
     type(s_dcdft)                    :: dc
 
     call calc_rho_total_dcdft(nspin,lg,mg,info,rho_s,dc)
+    call sync_noncollinear_state_from_rho(dc%rho_tot_s, dc%system_tot, dc%mg_tot)
   end subroutine calc_rho_total_dcdft_soi
 
   subroutine calc_vlocal_fragment_dcdft_soi(nspin,mg,vloc,dc)
