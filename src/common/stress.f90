@@ -852,7 +852,7 @@ contains
     use structures
     use math_constants, only: pi, zi
     use communication,  only: comm_summation
-    use salmon_global,  only: aEwald, cutoff_g, kion
+    use salmon_global,  only: aEwald, cutoff_g, kion, yn_out_stress_numerics
     implicit none
     type(s_dft_system),      intent(inout) :: system
     type(s_pp_info),         intent(in)    :: pp
@@ -975,7 +975,136 @@ contains
     system%stress_loc_sr_scr_energy = E_sr_scr
     system%stress_loc_lr_scr_energy = E_lr_scr
     system%stress_loc = -strs_sum
+    if(yn_out_stress_numerics == 'y') then
+      call calc_local_sr_gspace_diagnostics(system, pp, fg, info, ppg, cutoff_g2)
+    else
+      system%stress_loc_sr_gspace_dvg_maxdiff = 0d0
+      system%stress_loc_sr_gspace_dvg_meandiff = 0d0
+      system%stress_loc_sr_gspace_dvg_g_at_max = 0d0
+    end if
   end subroutine calc_stress_loc
+
+  subroutine calc_local_sr_gspace_diagnostics(system, pp, fg, info, ppg, cutoff_g2)
+    use communication, only: comm_get_max_array1d_double, comm_summation
+    use salmon_global, only: kion
+    use structures
+    implicit none
+    type(s_dft_system),      intent(inout) :: system
+    type(s_pp_info),         intent(in)    :: pp
+    type(s_reciprocal_grid), intent(in)    :: fg
+    type(s_parallel_info),   intent(in)    :: info
+    type(s_pp_grid),         intent(in)    :: ppg
+    real(8),                 intent(in)    :: cutoff_g2
+    integer :: ix, iy, iz, ik, ia
+    real(8) :: gvec(3), gmag, h, deriv_num, diff_abs
+    real(8) :: diff_sum_local, diff_sum_global, count_local, count_global
+    real(8) :: maxdiff_in(1), maxdiff_out(1), g_at_max_local, g_at_max_global, g_pick_local
+    logical :: species_used
+
+    diff_sum_local = 0d0
+    count_local = 0d0
+    maxdiff_in(1) = 0d0
+    g_at_max_local = 0d0
+
+    do ik = 1, size(pp%zps)
+      species_used = .false.
+      do ia = 1, system%nion
+        if(kion(ia) == ik) then
+          species_used = .true.
+          exit
+        end if
+      end do
+      if(.not. species_used) cycle
+
+      do iz = lbound(fg%if_Gzero,3), ubound(fg%if_Gzero,3)
+      do iy = lbound(fg%if_Gzero,2), ubound(fg%if_Gzero,2)
+      do ix = lbound(fg%if_Gzero,1), ubound(fg%if_Gzero,1)
+        if(fg%if_Gzero(ix,iy,iz)) cycle
+        gvec(1) = fg%vec_G(1,ix,iy,iz)
+        gvec(2) = fg%vec_G(2,ix,iy,iz)
+        gvec(3) = fg%vec_G(3,ix,iy,iz)
+        gmag = sqrt(gvec(1)**2 + gvec(2)**2 + gvec(3)**2)
+        if(gmag**2 > cutoff_g2) cycle
+
+        h = max(1d-4, 1d-2 * gmag)
+        deriv_num = numerical_dvg_dg2_from_vg(pp, ik, gmag, h)
+        diff_abs = abs(ppg%dVG_ion_dG2(ix,iy,iz,ik) - deriv_num)
+        diff_sum_local = diff_sum_local + diff_abs
+        count_local = count_local + 1d0
+        if(diff_abs > maxdiff_in(1)) then
+          maxdiff_in(1) = diff_abs
+          g_at_max_local = gmag
+        end if
+      end do
+      end do
+      end do
+    end do
+
+    call comm_get_max_array1d_double(maxdiff_in, maxdiff_out, 1, info%icomm_r)
+    call comm_summation(diff_sum_local, diff_sum_global, info%icomm_r)
+    call comm_summation(count_local, count_global, info%icomm_r)
+    g_pick_local = 0d0
+    if(maxdiff_in(1) > 0d0 .and. abs(maxdiff_in(1) - maxdiff_out(1)) <= max(1d-12, 1d-10 * maxdiff_out(1))) then
+      g_pick_local = g_at_max_local
+    end if
+    call comm_summation(g_pick_local, g_at_max_global, info%icomm_r)
+
+    system%stress_loc_sr_gspace_dvg_maxdiff = maxdiff_out(1)
+    if(count_global > 0d0) then
+      system%stress_loc_sr_gspace_dvg_meandiff = diff_sum_global / count_global
+    else
+      system%stress_loc_sr_gspace_dvg_meandiff = 0d0
+    end if
+    system%stress_loc_sr_gspace_dvg_g_at_max = g_at_max_global
+  end subroutine calc_local_sr_gspace_diagnostics
+
+  pure real(8) function numerical_dvg_dg2_from_vg(pp, ik, gmag, h) result(dvg_num)
+    use structures
+    implicit none
+    type(s_pp_info), intent(in) :: pp
+    integer,         intent(in) :: ik
+    real(8),         intent(in) :: gmag, h
+    real(8) :: g_lo, g_hi, v_lo, v_hi, denom
+
+    g_lo = max(0d0, gmag - h)
+    g_hi = gmag + h
+    v_lo = eval_local_sr_vg_from_table(pp, ik, g_lo)
+    v_hi = eval_local_sr_vg_from_table(pp, ik, g_hi)
+    denom = g_hi**2 - g_lo**2
+    if(denom <= 0d0) then
+      dvg_num = 0d0
+    else
+      dvg_num = (v_hi - v_lo) / denom
+    end if
+  end function numerical_dvg_dg2_from_vg
+
+  pure real(8) function eval_local_sr_vg_from_table(pp, ik, gmag) result(vg)
+    use structures
+    use math_constants, only: pi
+    implicit none
+    type(s_pp_info), intent(in) :: pp
+    integer,         intent(in) :: ik
+    real(8),         intent(in) :: gmag
+    integer :: i
+    real(8) :: r1, dr, vloc_av
+
+    vg = 0d0
+    if(gmag == 0d0) then
+      do i = 2, pp%nrloc(ik)
+        r1 = 0.5d0 * (pp%rad(i,ik) + pp%rad(i-1,ik))
+        dr = pp%rad(i,ik) - pp%rad(i-1,ik)
+        vloc_av = 0.5d0 * (pp%vloctbl(i,ik) + pp%vloctbl(i-1,ik))
+        vg = vg + 4d0 * pi * (r1**2 * vloc_av + r1 * pp%zps(ik)) * dr
+      end do
+    else
+      do i = 2, pp%nrloc(ik)
+        r1 = 0.5d0 * (pp%rad(i,ik) + pp%rad(i-1,ik))
+        dr = pp%rad(i,ik) - pp%rad(i-1,ik)
+        vloc_av = 0.5d0 * (pp%vloctbl(i,ik) + pp%vloctbl(i-1,ik))
+        vg = vg + 4d0 * pi * sin(gmag * r1) / gmag * (r1 * vloc_av + pp%zps(ik)) * dr
+      end do
+    end if
+  end function eval_local_sr_vg_from_table
 
   subroutine calc_stress_nl(system, pp, info, mg, stencil, ppg, tpsi, energy, field_state)
     use structures

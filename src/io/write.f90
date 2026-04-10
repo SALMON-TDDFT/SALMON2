@@ -1781,6 +1781,9 @@ contains
       call write_compact_column_header(fh, line_cols, col, 'int_rdedd_grho_local [a.u.]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'int_rdedd_grho_payload [a.u.]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'int_rho_div_rdedd [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'G_loc_sr_dVG_maxdiff [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'G_loc_sr_dVG_meandiff [a.u.]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'G_loc_sr_dVG_g_at_max [a.u.^-1]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_har_shadow [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_har_shadow_delta [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_grad_delta [GPa]'); col = col + 1
@@ -1876,6 +1879,9 @@ contains
       call write_data_token(fh, system%stress_xc_dbg_rdedd_dot_grho_local)
       call write_data_token(fh, system%stress_xc_dbg_rdedd_dot_grho_payload)
       call write_data_token(fh, system%stress_xc_dbg_rho_div_rdedd)
+      call write_data_token(fh, system%stress_loc_sr_gspace_dvg_maxdiff)
+      call write_data_token(fh, system%stress_loc_sr_gspace_dvg_meandiff)
+      call write_data_token(fh, system%stress_loc_sr_gspace_dvg_g_at_max)
       call write_data_token(fh, pressure_har_shadow_gpa)
       call write_data_token(fh, pressure_har_shadow_delta_gpa)
       call write_data_token(fh, pressure_loc_sr_grad_delta_gpa)
@@ -2227,6 +2233,9 @@ contains
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'int_rdedd_grho_local [a.u.]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'int_rdedd_grho_payload [a.u.]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'int_rho_div_rdedd [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'g_loc_sr_dVG_maxdiff [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'g_loc_sr_dVG_meandiff [a.u.]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'g_loc_sr_dVG_g_at_max [a.u.^-1]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har_shadow [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har_shadow_delta [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_shadow_delta [GPa]'); col = col + 1
@@ -2311,6 +2320,9 @@ contains
       call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rdedd_dot_grho_local)
       call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rdedd_dot_grho_payload)
       call write_data_token(ofl%fh_stress, system%stress_xc_dbg_rho_div_rdedd)
+      call write_data_token(ofl%fh_stress, system%stress_loc_sr_gspace_dvg_maxdiff)
+      call write_data_token(ofl%fh_stress, system%stress_loc_sr_gspace_dvg_meandiff)
+      call write_data_token(ofl%fh_stress, system%stress_loc_sr_gspace_dvg_g_at_max)
       call write_data_token(ofl%fh_stress, pressure_har_shadow_gpa)
       call write_data_token(ofl%fh_stress, pressure_har_shadow_delta_gpa)
       call write_data_token(ofl%fh_stress, pressure_loc_sr_grad_delta_gpa)

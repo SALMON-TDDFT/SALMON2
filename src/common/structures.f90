@@ -126,6 +126,9 @@ module structures
     real(8) :: stress_xc_dbg_rdedd_dot_grho_local
     real(8) :: stress_xc_dbg_rdedd_dot_grho_payload
     real(8) :: stress_xc_dbg_rho_div_rdedd
+    real(8) :: stress_loc_sr_gspace_dvg_maxdiff = 0d0
+    real(8) :: stress_loc_sr_gspace_dvg_meandiff = 0d0
+    real(8) :: stress_loc_sr_gspace_dvg_g_at_max = 0d0
     type(s_xc_operator_payload) :: xc_payload
     integer,allocatable :: kion(:)       ! (1:nion)), atomic species
   ! external field
