@@ -35,7 +35,7 @@ contains
   subroutine ne2mu_dcdft_soi(mg,info,energy,spsi,dc,system)
     use structures
     use communication, only: comm_summation
-    use salmon_global, only: temperature
+    use salmon_global, only: temperature, yn_spinorbit
     implicit none
     type(s_rgrid),        intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -47,6 +47,7 @@ contains
     real(8) :: wspin,emax,emin
     real(8) :: ne_each(system%no,system%nspin)
     real(8),dimension(system%no,system%nspin,dc%n_frag) :: rocc,esp,ne_frag_orb,wrk1,wrk2
+    logical :: use_duplicate_spin_channels
 
     if(system%nspin==1) then
       wspin = 2d0
@@ -65,6 +66,11 @@ contains
     end if
     call comm_summation(wrk1,esp,        system%no*system%nspin*dc%n_frag,dc%icomm_tot)
     call comm_summation(wrk2,ne_frag_orb,system%no*system%nspin*dc%n_frag,dc%icomm_tot)
+
+    use_duplicate_spin_channels = .false.
+    if (yn_spinorbit == 'y' .and. system%nspin == 2) then
+      call detect_duplicate_spin_channels(esp, use_duplicate_spin_channels)
+    end if
 
     emin = minval(esp)
     emax = maxval(esp)
@@ -147,9 +153,23 @@ contains
         end do
         end do
       end if
-      ! SO mode: two spin components are duplicate copy in current DC occupation model.
-      neout = neout*0.5d0
+      ! In legacy SOI mode two spin channels can be duplicated copies; halve only in that case.
+      if (use_duplicate_spin_channels) neout = neout*0.5d0
     end subroutine mu2ne
+
+    subroutine detect_duplicate_spin_channels(esp_in, is_duplicate)
+      implicit none
+      real(8), intent(in) :: esp_in(system%no,system%nspin,dc%n_frag)
+      logical, intent(out) :: is_duplicate
+      real(8) :: max_diff
+
+      max_diff = maxval(abs(esp_in(:,1,:) - esp_in(:,2,:)))
+      is_duplicate = (max_diff < 1.0d-10)
+
+      if (dc%id_tot == 0 .and. .not. is_duplicate) then
+        write(*,'(1x,a,1x,es12.4)') '[DC-SOI] non-duplicate spin channels detected in ne2mu_dcdft_soi, max |esp_up-esp_dn| =', max_diff
+      end if
+    end subroutine detect_duplicate_spin_channels
 
     subroutine ne2mu_core(nein,emax,emin,muout)
       implicit none
