@@ -355,14 +355,18 @@ contains
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%rho_s_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
+    allocate(dg_frag%rho_ud_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%Vh_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%Vxc_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
+    allocate(dg_frag%Vxc_mat_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), 2, 2))
     
     ! Initialize to zero
     dg_frag%rho_frag = 0.0d0
     dg_frag%rho_s_frag = 0.0d0
+    dg_frag%rho_ud_frag = (0.0d0, 0.0d0)
     dg_frag%Vh_frag = 0.0d0
     dg_frag%Vxc_frag = 0.0d0
+    dg_frag%Vxc_mat_frag = (0.0d0, 0.0d0)
     
     ! Initialize adaptive basis update functionality
     ! (Experimental feature for strong-field regimes where mean-field changes significantly)
@@ -385,6 +389,8 @@ contains
     ! Allocate Hamiltonian tracking arrays (always allocated for monitoring)
     allocate(dg_frag%H_mat_old(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
     dg_frag%H_mat_old = (0.0d0, 0.0d0)
+    allocate(dg_frag%H_mat_spin_mix(dg_frag%nstate_frag, dg_frag%nstate_frag))
+    dg_frag%H_mat_spin_mix = (0.0d0, 0.0d0)
     
     ! Allocate overlap matrix only if adaptive basis is enabled
     if (dg_frag%yn_adaptive_basis) then
@@ -2399,12 +2405,19 @@ contains
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
     if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
+    if (allocated(dg_frag%rho_frag)) deallocate(dg_frag%rho_frag)
+    if (allocated(dg_frag%rho_s_frag)) deallocate(dg_frag%rho_s_frag)
+    if (allocated(dg_frag%rho_ud_frag)) deallocate(dg_frag%rho_ud_frag)
+    if (allocated(dg_frag%Vh_frag)) deallocate(dg_frag%Vh_frag)
+    if (allocated(dg_frag%Vxc_frag)) deallocate(dg_frag%Vxc_frag)
+    if (allocated(dg_frag%Vxc_mat_frag)) deallocate(dg_frag%Vxc_mat_frag)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
     if (allocated(dg_frag%rk_beta)) deallocate(dg_frag%rk_beta)
     if (allocated(dg_frag%rk_gamma)) deallocate(dg_frag%rk_gamma)
     if (allocated(dg_frag%H_mat_old)) deallocate(dg_frag%H_mat_old)
+    if (allocated(dg_frag%H_mat_spin_mix)) deallocate(dg_frag%H_mat_spin_mix)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
     if (allocated(dg_frag%eigenvalues)) deallocate(dg_frag%eigenvalues)
     if (allocated(dg_frag%basis_overlap)) deallocate(dg_frag%basis_overlap)

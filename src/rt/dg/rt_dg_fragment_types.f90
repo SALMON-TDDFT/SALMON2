@@ -285,11 +285,14 @@ module rt_dg_fragment_types
     ! Density and potentials (allocated internally)
     real(8), allocatable :: rho_frag(:,:,:)        ! electron density on grid
     real(8), allocatable :: rho_s_frag(:,:,:,:)    ! spin-resolved density (ix,iy,iz,ispin)
+    complex(8), allocatable :: rho_ud_frag(:,:,:)  ! spinor off-diagonal density rho_{12}(ix,iy,iz)
     real(8), allocatable :: Vh_frag(:,:,:)         ! Hartree potential
     real(8), allocatable :: Vxc_frag(:,:,:,:)      ! XC potential (ix,iy,iz,ispin)
+    complex(8), allocatable :: Vxc_mat_frag(:,:,:,:,:) ! XC matrix (ix,iy,iz,2,2) for SOI/noncollinear
 
     ! Self-consistent basis update (adaptive basis)
     complex(8), allocatable :: H_mat_old(:,:,:)    ! Previous Hamiltonian matrix (nstate,nstate,nspin)
+    complex(8), allocatable :: H_mat_spin_mix(:,:)  ! Spin-mixing Hamiltonian H_up,down in fragment basis
     real(8), allocatable :: H_mat_kinetic(:,:,:)   ! Kinetic part only (constant, nstate,nstate,nspin)
     real(8) :: hamiltonian_change_norm             ! ||H_new - H_old|| Frobenius norm
     real(8) :: basis_update_threshold              ! Threshold for basis update (default: 0.1 a.u.)

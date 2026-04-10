@@ -2032,6 +2032,14 @@
       flush(6)
     end if
 
+    if (allocated(dg_frag%rho_frag)) dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
+    if (allocated(dg_frag%rho_s_frag)) then
+      do ispin = 1, system%nspin
+        dg_frag%rho_s_frag(:, :, :, ispin) = rho_s(ispin)%f(:, :, :)
+      end do
+    end if
+    if (allocated(dg_frag%rho_ud_frag)) dg_frag%rho_ud_frag(:, :, :) = (0.0d0, 0.0d0)
+
     call cpu_time(t_cleanup0)
     deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
     deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids)

@@ -21,7 +21,7 @@
     integer :: n, n_frag, n_pw, n_tot
     real(8) :: A_squared
     complex(8), parameter :: zi = (0.0d0, 1.0d0)  ! imaginary unit
-    logical :: has_nonlocal, has_so_nonlocal, use_hmat_complex
+    logical :: has_nonlocal, has_so_nonlocal, has_spin_mix, use_hmat_complex
     logical :: need_h0_dense, need_m_dense
     complex(8), allocatable, save :: H0c(:,:), M(:,:), dcoef_dt_h0(:,:), dcoef_dt_m(:,:)
     complex(8), allocatable, save :: coef_all(:,:), rhs_all(:,:)
@@ -71,6 +71,7 @@
 
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
     has_so_nonlocal = (allocated(ppg%uv_so) .and. allocated(dg_frag%phi_frag_c) .and. dg_frag%nspin == 2)
+    has_spin_mix = (dg_frag%nspin == 2 .and. allocated(dg_frag%H_mat_spin_mix))
     
     n = dg_frag%n_mat_max
     if (n <= 0) return
@@ -236,7 +237,7 @@
         coef_all(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
         if (n_pw > 0) coef_all(n_frag+1:n_tot, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
       end do
-      if (has_so_nonlocal) then
+      if (has_so_nonlocal .or. has_spin_mix) then
         ispin_other = 3 - ispin
         if (.not. allocated(coef_frag_other)) then
           allocate(coef_frag_other(max(0, n_frag), max(0, dg_frag%nstate_tot)))
@@ -369,6 +370,16 @@
         call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, -zi, H0c, n_tot, &
                    coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
 
+      end if
+
+      if (has_spin_mix .and. n_frag > 0) then
+        if (ispin == 1) then
+          call zgemm('N', 'N', n_frag, dg_frag%nstate_tot, n_frag, -zi, dg_frag%H_mat_spin_mix(1:n_frag, 1:n_frag), n_frag, &
+                     coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), n_frag, (1.0d0, 0.0d0), dcoef_dt_h0(1:n_frag, 1:dg_frag%nstate_tot), n_tot)
+        else
+          call zgemm('C', 'N', n_frag, dg_frag%nstate_tot, n_frag, -zi, dg_frag%H_mat_spin_mix(1:n_frag, 1:n_frag), n_frag, &
+                     coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), n_frag, (1.0d0, 0.0d0), dcoef_dt_h0(1:n_frag, 1:dg_frag%nstate_tot), n_tot)
+        end if
       end if
 
 

@@ -12,6 +12,8 @@ module noncollinear_module
   public :: calc_magnetization_decomposed
   public :: calc_spin_current
   public :: simple_mixing_so
+  public :: calc_rho_ud_noncollinear
+  public :: copy_vxc_mat_noncollinear
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -257,6 +259,63 @@ contains
 !$acc end kernels
 #endif
   end subroutine op_xc_noncollinear
+
+  subroutine calc_rho_ud_noncollinear(psi, system, info, mg, rho_ud)
+    use structures, only : s_orbital, s_dft_system, s_parallel_info, s_rgrid
+    use communication, only : comm_summation
+    implicit none
+    type(s_orbital), intent(in) :: psi
+    type(s_dft_system), intent(in) :: system
+    type(s_parallel_info), intent(in) :: info
+    type(s_rgrid), intent(in) :: mg
+    complex(8), intent(out) :: rho_ud(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer :: io, ik, im, ix, iy, iz
+    real(8) :: occ
+    complex(8), allocatable :: rho_tmp(:,:,:)
+
+    rho_ud = zero
+#ifdef USE_OPENACC
+!$acc kernels
+#else
+!$omp parallel do collapse(3) default(shared) private(im,ik,io,occ,iz,iy,ix) reduction(+:rho_ud)
+#endif
+    do im = info%im_s, info%im_e
+    do ik = info%ik_s, info%ik_e
+    do io = info%io_s, info%io_e
+      occ = system%rocc(io, ik, 1) * system%wtk(ik)
+      if (abs(occ) < 1.0d-15) cycle
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        rho_ud(ix,iy,iz) = rho_ud(ix,iy,iz) + occ * psi%zwf(ix,iy,iz,1,io,ik,im) * conjg(psi%zwf(ix,iy,iz,2,io,ik,im))
+      end do
+      end do
+      end do
+    end do
+    end do
+    end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#endif
+
+    allocate(rho_tmp(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    rho_tmp(:, :, :) = rho_ud(:, :, :)
+    call comm_summation(rho_tmp, rho_ud, size(rho_tmp), info%icomm_ko)
+    deallocate(rho_tmp)
+  end subroutine calc_rho_ud_noncollinear
+
+  subroutine copy_vxc_mat_noncollinear(mg, vxc_out, has_vxc_mat)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid), intent(in) :: mg
+    complex(8), intent(out) :: vxc_out(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), 2, 2)
+    logical, intent(out) :: has_vxc_mat
+
+    vxc_out(:, :, :, :, :) = zero
+    has_vxc_mat = allocated(vxc_mat)
+    if (.not. has_vxc_mat) return
+    vxc_out(:, :, :, :, :) = vxc_mat(:, :, :, :, :)
+  end subroutine copy_vxc_mat_noncollinear
 
 ! for GS calculation
   subroutine simple_mixing_so(mg,system,c1,c2,rho_s,mixing)

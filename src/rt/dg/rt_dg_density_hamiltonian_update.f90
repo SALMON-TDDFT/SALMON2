@@ -3,7 +3,9 @@
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
+    use salmon_global, only: yn_spinorbit
     use salmon_xc, only: s_xc_functional, exchange_correlation
+    use noncollinear_module, only: calc_rho_ud_noncollinear, copy_vxc_mat_noncollinear
     use poisson_dg_distributed, only: hartree_dg_distributed
     use hamiltonian, only: update_vlocal
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
@@ -30,6 +32,7 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
     logical :: needs_basis_update
+    logical :: has_vxc_mat
     integer :: env_len, env_status
     character(len=64) :: env_val
     logical :: enable_density_call_probe
@@ -84,6 +87,15 @@
     end if
     call cpu_time(t_stage1)
     time_density = time_density + (t_stage1 - t_stage0)
+    if (allocated(dg_frag%rho_frag)) dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
+    if (allocated(dg_frag%rho_s_frag)) then
+      dg_frag%rho_s_frag(:, :, :, :) = 0.0d0
+      dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = rho_s(1:system%nspin)%f
+    end if
+    if (allocated(dg_frag%rho_ud_frag)) dg_frag%rho_ud_frag(:, :, :) = (0.0d0, 0.0d0)
+    if (yn_spinorbit == 'y' .and. system%nspin >= 2 .and. allocated(dg_frag%rho_ud_frag)) then
+      call calc_rho_ud_noncollinear(rt%tpsi0, system, info, mg, dg_frag%rho_ud_frag)
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-end"
       flush(6)
@@ -131,6 +143,21 @@
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
     time_xc = time_xc + (t_stage1 - t_stage0)
+    if (allocated(dg_frag%Vxc_frag)) then
+      dg_frag%Vxc_frag(:, :, :, :) = 0.0d0
+      dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = Vxc(1:system%nspin)%f
+    end if
+    if (allocated(dg_frag%Vxc_mat_frag)) then
+      dg_frag%Vxc_mat_frag(:, :, :, :, :) = (0.0d0, 0.0d0)
+      if (system%nspin >= 1) dg_frag%Vxc_mat_frag(:, :, :, 1, 1) = cmplx(Vxc(1)%f(:, :, :), 0.0d0, kind=8)
+      if (system%nspin >= 2) dg_frag%Vxc_mat_frag(:, :, :, 2, 2) = cmplx(Vxc(2)%f(:, :, :), 0.0d0, kind=8)
+      if (yn_spinorbit == 'y' .and. system%nspin == 1) then
+        dg_frag%Vxc_mat_frag(:, :, :, 2, 2) = dg_frag%Vxc_mat_frag(:, :, :, 1, 1)
+      end if
+      if (yn_spinorbit == 'y' .and. system%nspin >= 2) then
+        call copy_vxc_mat_noncollinear(mg, dg_frag%Vxc_mat_frag, has_vxc_mat)
+      end if
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-end"
       flush(6)

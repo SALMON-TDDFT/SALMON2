@@ -13,6 +13,7 @@
     use structures
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
+    use salmon_global, only: yn_spinorbit
     use rt_dg_plane_wave, only: diagonalize_mixed_basis
     use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, copy_matrix_blocks_metric_to_complex_dense, &
       symmetrize_real_matrix_blocks
@@ -103,6 +104,18 @@
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      if (yn_spinorbit == 'y' .and. allocated(dg_frag%Vxc_mat_frag) .and. ispin <= 2) then
+!$omp parallel do collapse(3) private(i_local,jo,io) schedule(static)
+        do i_local = mg%is(3), mg%ie(3)
+          do jo = mg%is(2), mg%ie(2)
+            do io = mg%is(1), mg%ie(1)
+              V_total(io, jo, i_local) = V_total(io, jo, i_local) - Vxc(ispin)%f(io, jo, i_local) + &
+                                        real(dg_frag%Vxc_mat_frag(io, jo, i_local, ispin, ispin), kind=8)
+            end do
+          end do
+        end do
+!$omp end parallel do
+      end if
       
       ! Loop over fragments assigned to this rank
       i_local = 0
