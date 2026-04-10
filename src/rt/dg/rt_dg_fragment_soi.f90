@@ -632,7 +632,10 @@ contains
     character(*), intent(in) :: bdir_frag
     
     character(32), parameter :: binfile_wf = "wavefunctions_soi.bin"
+    character(32), parameter :: binfile_wfb = "wavefunctions_buffered_soi.bin"
     character(32), parameter :: binfile_bf = "basis_functions_soi.bin"
+    character(32), parameter :: binfile_bfb = "basis_functions_buffered_soi.bin"
+    character(32), parameter :: binfile_occb = "occupations_buffered_soi.bin"
     character(32), parameter :: binfile_rg = "rgrid_index_soi.bin"
     character(256) :: filename
     integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
@@ -642,6 +645,7 @@ contains
     integer :: n_mat_tmp(2)   ! nspin is expected to be 1 or 2
     integer :: ifrag_count, i_local, io, global_idx
     integer :: nxyz_domain(3), nxyz_alloc(3), nxyz_new(3), lgnum_frag(3), lgnum_total(3)
+    integer :: nxyz_file_buffer(3), nxyz_file_box(3)
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
@@ -651,17 +655,40 @@ contains
     integer :: n_mat_cap, n_mat_cap_env, ienv
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: env_status, env_len
-    character(len=64) :: env_n_mat_cap
+    character(len=64) :: env_n_mat_cap, env_use_buffered_basis
     logical :: warned_spin_discard, warned_imag_discard
+    logical :: use_buffered_basis, have_buffered_coef
     real(8) :: cap_avg, weight_best
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
     
+    use_buffered_basis = .false.
+    env_use_buffered_basis = ""
+    env_status = 1
+    env_len = 0
+    call get_environment_variable("SALMON_DG_USE_BUFFERED_BASIS", env_use_buffered_basis, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_use_buffered_basis(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        use_buffered_basis = .true.
+      end select
+    end if
+    dg_frag%use_buffered_basis = use_buffered_basis
+    have_buffered_coef = .false.
+
     ! Step 1: Root reads metadata from first fragment and broadcasts
     if (comm_is_root(dg_frag%id)) then
       ifrag = 1
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+      if (use_buffered_basis) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wfb
+        inquire(file=filename, exist=have_buffered_coef)
+        if (.not. have_buffered_coef) then
+          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+        end if
+      else
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+      end if
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
@@ -716,7 +743,15 @@ contains
     ! index_basis maps local->global indices across ALL fragments; every rank
     ! needs the full table or ranks > 0 will produce zero/NaN current.
     iunit = get_filehandle()
-    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+    if (use_buffered_basis) then
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wfb
+      inquire(file=filename, exist=have_buffered_coef)
+      if (.not. have_buffered_coef) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+      end if
+    else
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+    end if
     open(iunit, file=filename, form='unformatted', access='stream', status='old')
     read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
     read(iunit) n_mat_tmp(1:dg_frag%nspin)
@@ -853,7 +888,15 @@ contains
       i_local = i_local + 1
       
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+      if (use_buffered_basis) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wfb
+        inquire(file=filename, exist=have_buffered_coef)
+        if (.not. have_buffered_coef) then
+          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+        end if
+      else
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+      end if
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       
@@ -1078,18 +1121,38 @@ contains
       
       ! Read basis functions
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      if (use_buffered_basis) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bfb
+        inquire(file=filename, exist=have_buffered_coef)
+        if (.not. have_buffered_coef) then
+          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+        end if
+      else
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      end if
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
-      read(iunit) nxyz_domain(1:3), nspin_file, nstate_frag_file
+      if (use_buffered_basis .and. have_buffered_coef) then
+        read(iunit) nxyz_domain(1:3), nxyz_file_buffer(1:3), nxyz_file_box(1:3), nspin_file, nstate_frag_file
+        if (any(nxyz_file_box(1:3) /= nxyz_domain(1:3) + 2 * nxyz_file_buffer(1:3))) then
+          write(*,'(1x,a,i0,a,3i6)') "Error: invalid buffered SOI basis box header at ifrag=", ifrag, &
+                                     " nxyz_box=", nxyz_file_box(1:3)
+          stop "DG-Fragment RT-SOI: invalid buffered basis header"
+        end if
+        if (allocated(n_basis_frag)) deallocate(n_basis_frag)
+        allocate(n_basis_frag(max(1, nspin_file)))
+        n_basis_frag = 0
+      else
+        read(iunit) nxyz_domain(1:3), nspin_file, nstate_frag_file
+        if (allocated(n_basis_frag)) deallocate(n_basis_frag)
+        allocate(n_basis_frag(nspin_file))
+        read(iunit) n_basis_frag(1:nspin_file)
+      end if
       if (nspin_file < 1) then
         write(*,'(1x,a,i0,a,i0)') "Error: invalid nspin_file in basis_functions header at ifrag=", ifrag, &
                                    " nspin_file=", nspin_file
         stop "DG-Fragment RT: invalid nspin_file"
       end if
-      if (allocated(n_basis_frag)) deallocate(n_basis_frag)
-      allocate(n_basis_frag(nspin_file))
-      read(iunit) n_basis_frag(1:nspin_file)
       
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
@@ -1119,41 +1182,77 @@ contains
                                          " nspin_file=", nspin_file, " nstate_frag_file=", nstate_frag_file
           stop "DG-Fragment RT: invalid basis_functions header"
         end if
-        allocate(phi_tmp(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
+        if (use_buffered_basis .and. have_buffered_coef) then
+          allocate(phi_tmp(nxyz_file_box(1), nxyz_file_box(2), nxyz_file_box(3)))
+        else
+          allocate(phi_tmp(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
+        end if
         
         do ispin = 1, nspin_file
           do n = 1, nstate_frag_file
-            ! Read basis function for interior domain (1:nx, 1:ny, 1:nz)
-            read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+            if (use_buffered_basis .and. have_buffered_coef) then
+              read(iunit) phi_tmp(1:nxyz_file_box(1), 1:nxyz_file_box(2), 1:nxyz_file_box(3))
+            else
+              ! Read basis function for interior domain (1:nx, 1:ny, 1:nz)
+              read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+            end if
             
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
-              do iz = 1, nxyz_domain(3)
-                izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
-                if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
-                if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
-                if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
-                do iy = 1, nxyz_domain(2)
-                  iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
-                  if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
-                  if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
-                  if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
-                  do ix = 1, nxyz_domain(1)
-                    ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
-                    if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
-                    if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
-                    if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
-                    dg_frag%phi_frag_c(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
-                    dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = real(phi_tmp(ix, iy, iz))
+              if (use_buffered_basis .and. have_buffered_coef) then
+                do iz = 1, nxyz_file_box(3)
+                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                  if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
+                  if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
+                  if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
+                  do iy = 1, nxyz_file_box(2)
+                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
+                    if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
+                    do ix = 1, nxyz_file_box(1)
+                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
+                      if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
+                      dg_frag%phi_frag_c(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+                      dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = real(phi_tmp(ix, iy, iz))
+                    end do
                   end do
                 end do
-              end do
+              else
+                do iz = 1, nxyz_domain(3)
+                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                  if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
+                  if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
+                  if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
+                  do iy = 1, nxyz_domain(2)
+                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
+                    if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
+                    if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
+                    do ix = 1, nxyz_domain(1)
+                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
+                      if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
+                      dg_frag%phi_frag_c(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+                      dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = real(phi_tmp(ix, iy, iz))
+                    end do
+                  end do
+                end do
+              end if
             end if
           end do
         end do
 
         if (nspin_file > 1 .and. .not. warned_spin_discard .and. comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a)') "[WARN] basis_functions_soi.bin has nspin_file=", nspin_file, &
-                                 "; using spin-1 basis only in phi_frag"
+          if (use_buffered_basis .and. have_buffered_coef) then
+            write(*,'(1x,a,i0,a)') "[WARN] basis_functions_buffered_soi.bin has nspin_file=", nspin_file, &
+                                   "; using spin-1 basis only in phi_frag"
+          else
+            write(*,'(1x,a,i0,a)') "[WARN] basis_functions_soi.bin has nspin_file=", nspin_file, &
+                                   "; using spin-1 basis only in phi_frag"
+          end if
           warned_spin_discard = .true.
         end if
         if (.not. warned_imag_discard .and. comm_is_root(dg_frag%id)) then
@@ -1193,10 +1292,24 @@ contains
     deallocate(n_basis_tmp, index_basis_tmp, coef_local)
     
     if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a)') "Fragment basis data loaded (coefficients + real-space basis)"
+      if (use_buffered_basis) then
+        write(*,'(1x,a)') "Fragment basis data loaded (coefficients + buffered real-space basis)"
+        if (have_buffered_coef) then
+          write(*,'(1x,a)') "  Buffered coefficient file: wavefunctions_buffered_soi.bin"
+        else
+          write(*,'(1x,a)') "  Buffered coefficient file not found; using wavefunctions_soi.bin"
+        end if
+      else
+        write(*,'(1x,a)') "Fragment basis data loaded (coefficients + real-space basis)"
+      end if
       write(*,'(1x,a,i0,a,i0,a,i0)') "  Domain size: ", nxyz_domain(1), " x ", nxyz_domain(2), " x ", nxyz_domain(3)
+      if (use_buffered_basis .and. have_buffered_coef) then
+        write(*,'(1x,a,3i5)') "  Buffered basis half-width: ", nxyz_file_buffer(1:3)
+        write(*,'(1x,a,3i5)') "  Buffered basis box size: ", nxyz_file_box(1:3)
+      end if
       write(*,'(1x,a,i0)') "  Number of basis functions per fragment: ", dg_frag%nstate_frag
       write(*,'(1x,a,i0)') "  Number of fragments loaded: ", ifrag_count
+      write(*,'(1x,a,l1)') "  Buffered basis enabled: ", dg_frag%use_buffered_basis
     end if
     
   end subroutine read_fragment_basis_data
