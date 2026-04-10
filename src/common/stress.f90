@@ -459,6 +459,10 @@ contains
     E_c_loc = E_c_loc * system%Hvol
     E_vx_loc = E_vx_loc * system%Hvol
     E_vc_loc = E_vc_loc * system%Hvol
+    E_x_val_loc = E_x_val_loc * system%Hvol
+    E_c_val_loc = E_c_val_loc * system%Hvol
+    E_vx_val_loc = E_vx_val_loc * system%Hvol
+    E_vc_val_loc = E_vc_val_loc * system%Hvol
     call comm_summation(E_x_loc, E_x, info%icomm_r)
     call comm_summation(E_c_loc, E_c, info%icomm_r)
     call comm_summation(E_vx_loc, E_vx, info%icomm_r)
