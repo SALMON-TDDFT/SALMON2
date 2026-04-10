@@ -377,6 +377,19 @@
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical :: enable_reduce_trace
+    character(16) :: env_reduce_trace
+    integer :: env_status
+
+    enable_reduce_trace = .false.
+    env_reduce_trace = ''
+    call get_environment_variable('SALMON_DG_HMAT_REDUCE_TRACE', env_reduce_trace, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_reduce_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_reduce_trace = .true.
+      end select
+    end if
 
     max_block_size = 0
     total_active_size = 0
@@ -407,7 +420,7 @@
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -450,7 +463,7 @@
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
@@ -1470,6 +1483,19 @@
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
     integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
+    logical :: enable_reduce_trace
+    character(16) :: env_reduce_trace
+    integer :: env_status
+
+    enable_reduce_trace = .false.
+    env_reduce_trace = ''
+    call get_environment_variable('SALMON_DG_HMAT_REDUCE_TRACE', env_reduce_trace, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_reduce_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_reduce_trace = .true.
+      end select
+    end if
 
     max_block_size = 0
     total_active_size = 0
@@ -1503,7 +1529,7 @@
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -1572,7 +1598,7 @@
 
     deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)

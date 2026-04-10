@@ -98,7 +98,7 @@ contains
 
     lg_frag = mg_parent
     call init_grid_parallel(info_frag, lg_frag, mg_frag)
-    if (dg_frag%id == 0) then
+    if (enable_fragment_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        hartree trace: frag-grid-after-init-grid-parallel"
       flush(6)
     end if

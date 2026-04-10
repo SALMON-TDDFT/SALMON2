@@ -429,6 +429,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   real(8) :: rho_gprobe_re_sum_r(n_gprobe), rho_gprobe_im_sum_r(n_gprobe)
   real(8) :: E_wrk(3), E_sum(3), E_sum_r(3), etmp, sysvol, g(3), r(3), Gd
   complex(8) :: rho_e, rho_i
+  logical, parameter :: enable_dg_energy_helper_trace = .false.
 
   rho_vh_local = 0.0d0
   rho_vxc_local = 0.0d0
@@ -533,7 +534,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   energy%E_h = E_sum(1)
   energy%E_ion_loc = E_sum(2) + E_sum(3)
   energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
-  if (comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+  if (enable_dg_energy_helper_trace .and. comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
     write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
       "        dg-energy-helper: itt=", itt, " E_one=", dg_frag%total_energy, " rhoVh=", rho_vh_sum, " rhoVxc=", rho_vxc_sum, &
       " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &

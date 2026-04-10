@@ -747,7 +747,7 @@ contains
       flush(6)
     end if
 
-    if (dg_frag%id_frag == 0) then
+    if (enable_density_owner_map_probe .and. dg_frag%id_frag == 0) then
       nsend_nonzero = count(dg_frag%density_send_count > 0)
       nrecv_nonzero = count(recv_count > 0)
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &

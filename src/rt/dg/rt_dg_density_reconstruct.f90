@@ -38,7 +38,15 @@
     real(8) :: t_total0, t_total1, t_cache0, t_cache1
     real(8) :: t_project0, t_project1, t_comm0, t_comm1, t_norm0, t_norm1
     real(8) :: t_setup0, t_setup1, t_psi0, t_psi1, t_rho0, t_rho1
+    real(8) :: t_copy0, t_copy1, t_cleanup0, t_cleanup1
+    real(8) :: t_post_split0, t_post_split1, t_post_dealloc0, t_post_dealloc1
+    real(8) :: t_post_owner0, t_post_owner1, t_post_remote0, t_post_remote1
     real(8) :: time_cache, time_project, time_comm, time_norm
+    real(8) :: time_copy, time_cleanup
+    real(8) :: time_unaccounted
+    real(8) :: time_preproject, time_postproject_precomm, time_postcomm_prenorm
+    real(8) :: time_post_split_pw, time_post_dealloc, time_post_precomm_other
+    real(8) :: time_post_owner_accum, time_post_remote_pack, time_post_precomm_residual
     real(8) :: time_comm_subgroup_reduce, time_comm_pack, time_comm_exchange, time_comm_unpack
     real(8) :: time_project_setup, time_project_psi, time_project_rho
     real(8) :: time_project_grid_prep, time_project_phi_pack, time_project_overhead
@@ -95,6 +103,7 @@
     complex(8), allocatable :: coef_probe_full(:,:), coef_probe_pw(:,:), overlap_probe(:,:), overlap_vec(:)
     integer, allocatable :: subgroup_self_ixg_tmp(:), subgroup_self_iyg_tmp(:), subgroup_self_izg_tmp(:)
     logical :: enable_density_reconstruct_trace
+    logical :: enable_density_split_charge_probe
     integer :: env_len, env_status
     character(len=64) :: env_val
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
@@ -131,11 +140,19 @@
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
 
     enable_density_reconstruct_trace = .false.
+    enable_density_split_charge_probe = .false.
     call get_environment_variable("SALMON_DG_DENSITY_TRACE", env_val, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
       if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
           env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
         enable_density_reconstruct_trace = .true.
+      end if
+    end if
+    call get_environment_variable("SALMON_DG_DENSITY_SPLIT_CHARGE_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_density_split_charge_probe = .true.
       end if
     end if
 
@@ -148,6 +165,18 @@
     time_project = 0.0d0
     time_comm = 0.0d0
     time_norm = 0.0d0
+    time_copy = 0.0d0
+    time_cleanup = 0.0d0
+    time_unaccounted = 0.0d0
+    time_preproject = 0.0d0
+    time_postproject_precomm = 0.0d0
+    time_postcomm_prenorm = 0.0d0
+    time_post_split_pw = 0.0d0
+    time_post_dealloc = 0.0d0
+    time_post_precomm_other = 0.0d0
+    time_post_owner_accum = 0.0d0
+    time_post_remote_pack = 0.0d0
+    time_post_precomm_residual = 0.0d0
     time_comm_subgroup_reduce = 0.0d0
     time_comm_pack = 0.0d0
     time_comm_exchange = 0.0d0
@@ -1347,7 +1376,7 @@
                   time_project_rho = time_project_rho + (t_rho1 - t_rho0)
                 end do
                 rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
-                if (split_pw_density) then
+                if (split_pw_density .and. enable_density_split_charge_probe) then
                   charge_fragment_preowner_local = charge_fragment_preowner_local + sum(rho_blk_accum(1:npt_blk)) * system%hvol
                 end if
                 if (enable_density_reconstruct_trace .and. block_offset == first_block_offset) then
@@ -1387,15 +1416,13 @@
                 do io0 = io_s_frag, io_e_frag, state_block_size
                   nbatch = min(state_block_size, io_e_frag - io0 + 1)
 
-                  ! copy coef from upfront buffer (no bcast)
-                  coef_blk_re(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
-                  coef_blk_im(1:nbf, 1:nbatch) = coef_im_full(1:nbf, io0:io0+nbatch-1, ispin)
-
                   call cpu_time(t_psi0)
-                  call dgemm('N', 'N', npt_blk, nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
-                             coef_blk_re, nbf_max, 0.0d0, psi_blk_re, grid_block_size)
-                  call dgemm('N', 'N', npt_blk, nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
-                             coef_blk_im, nbf_max, 0.0d0, psi_blk_im, grid_block_size)
+                  coef_blk_ri(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
+                  coef_blk_ri(1:nbf, nbatch+1:2*nbatch) = coef_im_full(1:nbf, io0:io0+nbatch-1, ispin)
+                  call dgemm('N', 'N', npt_blk, 2*nbatch, nbf, 1.0d0, phi_blk, grid_block_size, &
+                             coef_blk_ri, nbf_max, 0.0d0, psi_blk_ri, grid_block_size)
+                  psi_blk_re(1:npt_blk, 1:nbatch) = psi_blk_ri(1:npt_blk, 1:nbatch)
+                  psi_blk_im(1:npt_blk, 1:nbatch) = psi_blk_ri(1:npt_blk, nbatch+1:2*nbatch)
                   do ipw0 = 1, n_pw, pw_block_size
                     npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
                     ! direct access from full_cache on all ranks (no bcast)
@@ -1411,22 +1438,19 @@
                   time_project_psi = time_project_psi + (t_psi1 - t_psi0)
 
                   call cpu_time(t_rho0)
-                  do io1 = 1, nbatch, rho_state_block_size
-                    nstate = min(rho_state_block_size, nbatch - io1 + 1)
 !$omp parallel do private(io, idx_local, igrid, rho_accum, occ_factor) schedule(static)
-                    do idx_local = 1, local_grid_count
-                      igrid = local_grid_ids(idx_local)
-                      rho_accum = 0.0d0
+                  do idx_local = 1, local_grid_count
+                    igrid = local_grid_ids(idx_local)
+                    rho_accum = 0.0d0
 !$omp simd reduction(+:rho_accum)
-                      do io = io1, io1 + nstate - 1
-                        occ_factor = occ_cache(io0 + io - 1)
-                        rho_accum = rho_accum + occ_factor * (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
-                                    psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
-                      end do
-                      rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
+                    do io = 1, nbatch
+                      occ_factor = occ_cache(io0 + io - 1)
+                      rho_accum = rho_accum + occ_factor * (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
+                                  psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
                     end do
-!$omp end parallel do
+                    rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                   end do
+!$omp end parallel do
                   call cpu_time(t_rho1)
                   time_project_rho = time_project_rho + (t_rho1 - t_rho0)
                 end do  ! io0
@@ -1444,6 +1468,7 @@
               end if
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
+                  call cpu_time(t_post_owner0)
                   do igrid = 1, npt_blk
                     if ((n_pw > 0 .and. .not. split_pw_density) .and. .not. dg_frag%is_frag_root) cycle
                     ixg = ixg_buf(igrid)
@@ -1454,7 +1479,7 @@
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
                     rho_raw_contrib = rho_blk_accum(igrid)
-                    if (split_pw_density) charge_fragment_postowner_local = charge_fragment_postowner_local + rho_raw_contrib * system%hvol
+                    if (split_pw_density .and. enable_density_split_charge_probe) charge_fragment_postowner_local = charge_fragment_postowner_local + rho_raw_contrib * system%hvol
                     rho_contrib = rho_raw_contrib
                     if (allocated(dg_frag%density_inv_weight_local)) then
                       rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
@@ -1480,11 +1505,14 @@
                     end if
                     rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib + rho_mix_accum
                     rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib + rho_mix_accum
-                    if (split_pw_density) then
+                    if (split_pw_density .and. enable_density_split_charge_probe) then
                       charge_fragment_local = charge_fragment_local + rho_contrib * system%hvol
                       charge_cross_local = charge_cross_local + rho_mix_accum * system%hvol
                     end if
                   end do
+                  call cpu_time(t_post_owner1)
+                  time_post_owner_accum = time_post_owner_accum + (t_post_owner1 - t_post_owner0)
+                  call cpu_time(t_post_remote0)
                   do idx_remote = 1, valid_remote_grid_count
                     if (n_pw == 0 .or. split_pw_density) cycle
                     if (.not. dg_frag%is_frag_root) cycle
@@ -1542,6 +1570,8 @@
                     end if
                     rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                   end do
+                  call cpu_time(t_post_remote1)
+                  time_post_remote_pack = time_post_remote_pack + (t_post_remote1 - t_post_remote0)
                 call cpu_time(t_rho1)
                 time_project_rho = time_project_rho + (t_rho1 - t_rho0)
             end if
@@ -1596,6 +1626,7 @@
       end do
     call cpu_time(t_project1)
     time_project = time_project + (t_project1 - t_project0)
+    call cpu_time(t_post_split0)
     if (split_pw_density) then
       do ispin = 1, system%nspin
         nocc_spin = dg_frag%nocc_spin(ispin)
@@ -1669,12 +1700,16 @@
             izg = iz_buf(igrid)
             rho_bf(ixg, iyg, izg) = rho_bf(ixg, iyg, izg) + rho_blk_accum(igrid)
             rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_blk_accum(igrid)
-            charge_pw_local = charge_pw_local + rho_blk_accum(igrid) * system%hvol
+            if (enable_density_split_charge_probe) charge_pw_local = charge_pw_local + rho_blk_accum(igrid) * system%hvol
           end do
           igrid0 = igrid0 + npt_blk
         end do
       end do
     end if
+    call cpu_time(t_post_split1)
+    time_post_split_pw = time_post_split_pw + (t_post_split1 - t_post_split0)
+
+    call cpu_time(t_post_dealloc0)
     if (allocated(D_frag_re)) deallocate(D_frag_re)
     if (allocated(coef_re_frag)) deallocate(coef_re_frag)
     if (allocated(coef_im_frag)) deallocate(coef_im_frag)
@@ -1687,6 +1722,8 @@
     if (allocated(occ_sqrt_cache)) deallocate(occ_sqrt_cache)
     if (allocated(rho_blk_partial)) deallocate(rho_blk_partial)
     if (allocated(rho_blk_cross_partial)) deallocate(rho_blk_cross_partial)
+    call cpu_time(t_post_dealloc1)
+    time_post_dealloc = time_post_dealloc + (t_post_dealloc1 - t_post_dealloc0)
     if (enable_density_reconstruct_trace .and. dg_frag%is_frag_root) then
       write(*,'(1x,a,i0,a,i0,a,1pe12.4)') "        density trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " stage=after-project dt=", time_project
@@ -1698,7 +1735,7 @@
         " rho_red=", time_project_rho_reduce
       flush(6)
     end if
-    if (split_pw_density .and. enable_density_reconstruct_trace) then
+    if (split_pw_density .and. enable_density_reconstruct_trace .and. enable_density_split_charge_probe) then
       call comm_summation(charge_fragment_local, charge_fragment_global, dg_frag%icomm)
       call comm_summation(charge_cross_local, charge_cross_global, dg_frag%icomm)
       call comm_summation(charge_pw_local, charge_pw_global, dg_frag%icomm)
@@ -1862,6 +1899,7 @@
       write(*,'(1x,a)') "        density trace: stage=before-normalize"
       flush(6)
     end if
+    call cpu_time(t_copy0)
     ! rho_bf -> rho_s boundary: only the authoritative mg-local density is
     ! materialized below for downstream Hartree/XC/reconstruct consumers.
     if (lbound(rho%f, 1) /= rho_x_lo .or. ubound(rho%f, 1) /= rho_x_hi .or. &
@@ -1893,6 +1931,8 @@
       end if
       rho_s(ispin)%f(:, :, :) = rho_s_bf(:, :, :, ispin)
     end do
+    call cpu_time(t_copy1)
+    time_copy = time_copy + (t_copy1 - t_copy0)
     if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        density trace: stage=after-rho-copy"
       flush(6)
@@ -1992,6 +2032,7 @@
       flush(6)
     end if
 
+    call cpu_time(t_cleanup0)
     deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
     deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids)
     deallocate(basis_gid, valid_basis_ids)
@@ -2020,11 +2061,30 @@
     if (allocated(g211_cos_x)) deallocate(g211_cos_x, g211_sin_x)
     deallocate(rho_bf, rho_s_bf)
     deallocate(rho_send, rho_recv)
+    call cpu_time(t_cleanup1)
+    time_cleanup = time_cleanup + (t_cleanup1 - t_cleanup0)
     call cpu_time(t_total1)
+    time_unaccounted = (t_total1 - t_total0) - (time_cache + time_project + time_comm + time_norm + time_copy + time_cleanup)
+    time_preproject = max(0.0d0, t_project0 - t_total0)
+    time_postproject_precomm = max(0.0d0, t_comm0 - t_project1)
+    time_post_precomm_other = max(0.0d0, time_postproject_precomm - time_post_split_pw - time_post_dealloc)
+    time_post_precomm_residual = max(0.0d0, time_post_precomm_other - time_post_owner_accum - time_post_remote_pack)
+    time_postcomm_prenorm = max(0.0d0, t_norm0 - t_comm1)
     if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
         "        density timing: total=", t_total1 - t_total0, " cache=", time_cache, &
         " project=", time_project, " comm=", time_comm, " norm=", time_norm
+      write(*,'(1x,a,3(a,1pe12.4))') "        density timing extra:", &
+        " copy=", time_copy, " cleanup=", time_cleanup, " unaccounted=", time_unaccounted
+      write(*,'(1x,a,3(a,1pe12.4))') "        density timing phase:", &
+        " pre_project=", time_preproject, " post_project_pre_comm=", time_postproject_precomm, &
+        " post_comm_pre_norm=", time_postcomm_prenorm
+      write(*,'(1x,a,3(a,1pe12.4))') "        density timing phase2:", &
+        " split_pw=", time_post_split_pw, " dealloc=", time_post_dealloc, &
+        " precomm_other=", time_post_precomm_other
+      write(*,'(1x,a,3(a,1pe12.4))') "        density timing phase3:", &
+        " owner_accum=", time_post_owner_accum, " remote_pack=", time_post_remote_pack, &
+        " residual=", time_post_precomm_residual
       write(*,'(1x,a,4(a,1pe12.4),2(a,l1))') "        density cache timing:", &
         " pw_refresh=", time_cache_pw_refresh, " phi_blk_build=", time_cache_phi_block_refresh, &
         " cache_total=", time_cache + time_cache_phi_block_refresh, " step_total=", time_cache_pw_refresh + time_cache_phi_block_refresh, &

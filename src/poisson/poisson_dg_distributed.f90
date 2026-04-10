@@ -61,13 +61,17 @@ contains
     type(s_scalar),          intent(inout) :: Vh
 
     character(16) :: env_hse_sr
+    character(16) :: env_hartree_trace
     logical :: use_hse_sr_hartree
+    logical :: enable_hartree_trace
     integer :: env_status
     integer :: ix, iy, iz
     real(8) :: z, z0, Vwall_z
 
     env_hse_sr = ''
     use_hse_sr_hartree = .false.
+    env_hartree_trace = ''
+    enable_hartree_trace = .false.
     call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
     if (env_status == 0) then
       select case(trim(adjustl(env_hse_sr)))
@@ -79,7 +83,15 @@ contains
       stop 'poisson_dg_distributed: hse_omega must be > 0 when SALMON_HSE_SR_HARTREE is enabled'
     end if
 
-    if (dg_frag%id == 0) then
+    call get_environment_variable('SALMON_DG_HARTREE_TRACE', env_hartree_trace, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_hartree_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_hartree_trace = .true.
+      end select
+    end if
+
+    if (enable_hartree_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,4(a,i0))') "        hartree trace: using-parent-localrho-main", &
         " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
       flush(6)
