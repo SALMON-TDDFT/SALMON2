@@ -1676,6 +1676,8 @@ contains
     real(8) :: virial_kin
     real(8) :: virial_har
     real(8) :: virial_xc
+    real(8) :: virial_xc_valence
+    real(8) :: virial_xc_nlcc
     real(8) :: virial_loc_lr_residual
     real(8) :: virial_ewa
     real(8) :: virial_known_residual
@@ -1745,6 +1747,10 @@ contains
       else
         call write_compact_column_header(fh, line_cols, col, 'P_x [GPa]'); col = col + 1
         call write_compact_column_header(fh, line_cols, col, 'P_c [GPa]'); col = col + 1
+        if(trim(xc) == 'pz') then
+          call write_compact_column_header(fh, line_cols, col, 'P_xc_valence [GPa]'); col = col + 1
+          call write_compact_column_header(fh, line_cols, col, 'P_xc_nlcc [GPa]'); col = col + 1
+        end if
       end if
       if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
         call write_nl_species_l_pressure_column_headers(fh, line_cols, col, pp, system%stress_nl_species_l)
@@ -1762,6 +1768,10 @@ contains
       call write_compact_column_header(fh, line_cols, col, 'V_kin_residual [Ha]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_har_residual [Ha]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_xc_residual [Ha]'); col = col + 1
+      if(trim(xc) == 'pz') then
+        call write_compact_column_header(fh, line_cols, col, 'V_xc_valence_residual [Ha]'); col = col + 1
+        call write_compact_column_header(fh, line_cols, col, 'V_xc_nlcc_residual [Ha]'); col = col + 1
+      end if
       call write_compact_column_header(fh, line_cols, col, 'V_loc_lr_residual [Ha]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_ewa_residual [Ha]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_known_residual [Ha]'); col = col + 1
@@ -1815,6 +1825,10 @@ contains
       else
         call write_data_token(fh, -stress_term_pressure_gpa(system%stress_x, au_pressure_gpa))
         call write_data_token(fh, -stress_term_pressure_gpa(system%stress_c, au_pressure_gpa))
+        if(trim(xc) == 'pz') then
+          call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_valence, au_pressure_gpa))
+          call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_nlcc, au_pressure_gpa))
+        end if
       end if
       if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
         call write_nl_species_l_pressure_values(fh, system%stress_nl_species_l, au_pressure_gpa)
@@ -1832,6 +1846,10 @@ contains
       virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
       virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
       virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+      virial_xc_valence = stress_tensor_trace(system%stress_xc_valence) * system%det_a + &
+                          3d0 * (system%stress_xc_e_vxc_valence - system%stress_xc_energy_valence)
+      virial_xc_nlcc = stress_tensor_trace(system%stress_xc_nlcc) * system%det_a + &
+                       3d0 * (system%stress_xc_e_vxc_nlcc - system%stress_xc_energy_nlcc)
       virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) * &
                                system%det_a + system%stress_loc_lr_energy
       virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a + energy%E_ion_ion
@@ -1845,6 +1863,10 @@ contains
       call write_data_token(fh, virial_kin)
       call write_data_token(fh, virial_har)
       call write_data_token(fh, virial_xc)
+      if(trim(xc) == 'pz') then
+        call write_data_token(fh, virial_xc_valence)
+        call write_data_token(fh, virial_xc_nlcc)
+      end if
       call write_data_token(fh, virial_loc_lr_residual)
       call write_data_token(fh, virial_ewa)
       call write_data_token(fh, virial_known_residual)
@@ -2110,6 +2132,8 @@ contains
     real(8) :: virial_kin
     real(8) :: virial_har
     real(8) :: virial_xc
+    real(8) :: virial_xc_valence
+    real(8) :: virial_xc_nlcc
     real(8) :: virial_loc_lr_residual
     real(8) :: virial_ewa
     real(8) :: virial_known_residual
@@ -2170,6 +2194,10 @@ contains
         else
           call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_x [GPa]'); col = col + 1
           call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_c [GPa]'); col = col + 1
+          if(trim(xc) == 'pz') then
+            call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_valence [GPa]'); col = col + 1
+            call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_xc_nlcc [GPa]'); col = col + 1
+          end if
         end if
         if(trim(stress_l_decomp) == 'species') &
           call write_nl_species_l_pressure_column_headers_from_pp(ofl%fh_stress, line_cols, col, pp)
@@ -2186,6 +2214,10 @@ contains
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_kin_residual [Ha]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_har_residual [Ha]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_xc_residual [Ha]'); col = col + 1
+        if(trim(xc) == 'pz') then
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_xc_valence_residual [Ha]'); col = col + 1
+          call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_xc_nlcc_residual [Ha]'); col = col + 1
+        end if
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_loc_lr_residual [Ha]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_ewa_residual [Ha]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_known_residual [Ha]'); col = col + 1
@@ -2229,6 +2261,10 @@ contains
       else
         call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_x, gpa))
         call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_c, gpa))
+        if(trim(xc) == 'pz') then
+          call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_valence, gpa))
+          call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_xc_nlcc, gpa))
+        end if
       end if
       if(allocated(system%stress_nl_species_l) .and. trim(stress_l_decomp) == 'species') &
         call write_nl_species_l_pressure_values(ofl%fh_stress, system%stress_nl_species_l, gpa)
@@ -2245,6 +2281,10 @@ contains
       virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
       virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
       virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+      virial_xc_valence = stress_tensor_trace(system%stress_xc_valence) * system%det_a + &
+                          3d0 * (system%stress_xc_e_vxc_valence - system%stress_xc_energy_valence)
+      virial_xc_nlcc = stress_tensor_trace(system%stress_xc_nlcc) * system%det_a + &
+                       3d0 * (system%stress_xc_e_vxc_nlcc - system%stress_xc_energy_nlcc)
       virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) * system%det_a + &
                                system%stress_loc_lr_energy
       virial_ewa = stress_tensor_trace(system%stress_ewa) * system%det_a + energy%E_ion_ion
@@ -2258,6 +2298,10 @@ contains
       call write_data_token(ofl%fh_stress, virial_kin)
       call write_data_token(ofl%fh_stress, virial_har)
       call write_data_token(ofl%fh_stress, virial_xc)
+      if(trim(xc) == 'pz') then
+        call write_data_token(ofl%fh_stress, virial_xc_valence)
+        call write_data_token(ofl%fh_stress, virial_xc_nlcc)
+      end if
       call write_data_token(ofl%fh_stress, virial_loc_lr_residual)
       call write_data_token(ofl%fh_stress, virial_ewa)
       call write_data_token(ofl%fh_stress, virial_known_residual)

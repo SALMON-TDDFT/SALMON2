@@ -88,6 +88,8 @@ module structures
     real(8) :: stress_xc_tau(3,3)
     real(8) :: stress_x(3,3)
     real(8) :: stress_c(3,3)
+    real(8) :: stress_xc_valence(3,3)
+    real(8) :: stress_xc_nlcc(3,3)
     real(8) :: stress_loc(3,3)
     real(8) :: stress_loc_sr_grad(3,3)
     real(8) :: stress_loc_lr_grad(3,3)
@@ -107,6 +109,10 @@ module structures
     real(8) :: stress_loc_sr_scr_energy
     real(8) :: stress_loc_lr_scr_energy
     real(8) :: stress_xc_e_vxc
+    real(8) :: stress_xc_energy_valence
+    real(8) :: stress_xc_energy_nlcc
+    real(8) :: stress_xc_e_vxc_valence
+    real(8) :: stress_xc_e_vxc_nlcc
     real(8) :: stress_ewa_g(3,3)
     real(8) :: stress_ewa_r(3,3)
     real(8) :: stress_ewa_g_grad(3,3)

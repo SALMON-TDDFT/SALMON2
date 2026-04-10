@@ -162,6 +162,8 @@ contains
     system%stress_xc_tau = 0d0
     system%stress_x = 0d0
     system%stress_c = 0d0
+    system%stress_xc_valence = 0d0
+    system%stress_xc_nlcc = 0d0
     system%stress_loc = 0d0
     system%stress_loc_sr_grad = 0d0
     system%stress_loc_lr_grad = 0d0
@@ -178,6 +180,10 @@ contains
     system%stress_loc_sr_scr_energy = 0d0
     system%stress_loc_lr_scr_energy = 0d0
     system%stress_xc_e_vxc = 0d0
+    system%stress_xc_energy_valence = 0d0
+    system%stress_xc_energy_nlcc = 0d0
+    system%stress_xc_e_vxc_valence = 0d0
+    system%stress_xc_e_vxc_nlcc = 0d0
     system%stress_ewa_g = 0d0
     system%stress_ewa_r = 0d0
     system%stress_ewa_g_grad = 0d0
@@ -208,6 +214,8 @@ contains
     call symmetrize_stress_term(system%stress_xc_grad_payload)
     call symmetrize_stress_term(system%stress_xc_grad_vsigma)
     call symmetrize_stress_term(system%stress_xc_tau)
+    call symmetrize_stress_term(system%stress_xc_valence)
+    call symmetrize_stress_term(system%stress_xc_nlcc)
     call symmetrize_stress_term(system%stress_loc)
     call symmetrize_stress_term(system%stress_nl)
     call symmetrize_stress_term(system%stress_ewa)
@@ -401,8 +409,13 @@ contains
     integer :: ix, iy, iz, ispin, a
     real(8) :: rho_xc, trho_xc
     real(8) :: exc_x, exc_c, vxc_x, vxc_c
+    real(8) :: exc_x_val, exc_c_val, vxc_x_val, vxc_c_val
     real(8) :: E_vx_loc, E_vc_loc, E_vx, E_vc
     real(8) :: E_x_loc, E_c_loc, E_x, E_c
+    real(8) :: E_vx_val_loc, E_vc_val_loc, E_vx_val, E_vc_val
+    real(8) :: E_x_val_loc, E_c_val_loc, E_x_val, E_c_val
+    real(8) :: E_xc_total, E_xc_valence, E_xc_nlcc
+    real(8) :: E_vxc_total, E_vxc_valence, E_vxc_nlcc
     real(8) :: V
 
     if(xc_func%use_gradient) call fail_stress("stress tensor supports only built-in PZ LDA XC")
@@ -412,10 +425,14 @@ contains
     E_vc_loc = 0d0
     E_x_loc = 0d0
     E_c_loc = 0d0
+    E_vx_val_loc = 0d0
+    E_vc_val_loc = 0d0
+    E_x_val_loc = 0d0
+    E_c_val_loc = 0d0
     !$omp parallel do collapse(3) default(none) &
-    !$omp   private(ispin,ix,iy,iz,rho_xc,trho_xc,exc_x,exc_c,vxc_x,vxc_c) &
+    !$omp   private(ispin,ix,iy,iz,rho_xc,trho_xc,exc_x,exc_c,vxc_x,vxc_c,exc_x_val,exc_c_val,vxc_x_val,vxc_c_val) &
     !$omp   shared(system,mg,ppn,rho_s) &
-    !$omp   reduction(+:E_x_loc,E_c_loc,E_vx_loc,E_vc_loc)
+    !$omp   reduction(+:E_x_loc,E_c_loc,E_vx_loc,E_vc_loc,E_x_val_loc,E_c_val_loc,E_vx_val_loc,E_vc_val_loc)
     do ispin = 1, system%nspin
       do iz = mg%is(3), mg%ie(3)
       do iy = mg%is(2), mg%ie(2)
@@ -424,10 +441,15 @@ contains
         trho_xc = rho_xc
         if(allocated(ppn%rho_nlcc)) trho_xc = trho_xc + ppn%rho_nlcc(ix,iy,iz)
         call calc_builtin_pz_xc_split(trho_xc, exc_x, exc_c, vxc_x, vxc_c)
+        call calc_builtin_pz_xc_split(rho_xc, exc_x_val, exc_c_val, vxc_x_val, vxc_c_val)
         E_x_loc = E_x_loc + trho_xc * exc_x
         E_c_loc = E_c_loc + trho_xc * exc_c
         E_vx_loc = E_vx_loc + rho_xc * vxc_x
         E_vc_loc = E_vc_loc + rho_xc * vxc_c
+        E_x_val_loc = E_x_val_loc + rho_xc * exc_x_val
+        E_c_val_loc = E_c_val_loc + rho_xc * exc_c_val
+        E_vx_val_loc = E_vx_val_loc + rho_xc * vxc_x_val
+        E_vc_val_loc = E_vc_val_loc + rho_xc * vxc_c_val
       end do
       end do
       end do
@@ -441,16 +463,35 @@ contains
     call comm_summation(E_c_loc, E_c, info%icomm_r)
     call comm_summation(E_vx_loc, E_vx, info%icomm_r)
     call comm_summation(E_vc_loc, E_vc, info%icomm_r)
+    call comm_summation(E_x_val_loc, E_x_val, info%icomm_r)
+    call comm_summation(E_c_val_loc, E_c_val, info%icomm_r)
+    call comm_summation(E_vx_val_loc, E_vx_val, info%icomm_r)
+    call comm_summation(E_vc_val_loc, E_vc_val, info%icomm_r)
+
+    E_xc_total = E_x + E_c
+    E_xc_valence = E_x_val + E_c_val
+    E_xc_nlcc = E_xc_total - E_xc_valence
+    E_vxc_total = E_vx + E_vc
+    E_vxc_valence = E_vx_val + E_vc_val
+    E_vxc_nlcc = E_vxc_total - E_vxc_valence
 
     system%stress_x = 0d0
     system%stress_c = 0d0
     system%stress_xc = 0d0
+    system%stress_xc_valence = 0d0
+    system%stress_xc_nlcc = 0d0
     do a = 1, 3
       system%stress_x(a,a) = -(E_vx - E_x) / V
       system%stress_c(a,a) = -(E_vc - E_c) / V
+      system%stress_xc_valence(a,a) = -(E_vxc_valence - E_xc_valence) / V
     end do
     system%stress_xc = system%stress_x + system%stress_c
+    system%stress_xc_nlcc = system%stress_xc - system%stress_xc_valence
     system%stress_xc_e_vxc = E_vx + E_vc
+    system%stress_xc_energy_valence = E_xc_valence
+    system%stress_xc_energy_nlcc = E_xc_nlcc
+    system%stress_xc_e_vxc_valence = E_vxc_valence
+    system%stress_xc_e_vxc_nlcc = E_vxc_nlcc
   end subroutine calc_stress_xc_builtin_pz
 
   subroutine calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
