@@ -70,7 +70,8 @@
     end if
 
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
-    has_so_nonlocal = (allocated(ppg%uv_so) .and. allocated(dg_frag%phi_frag_c) .and. dg_frag%nspin == 2)
+    ! SOI projector path supports both real and complex fragment basis via cached complex views.
+    has_so_nonlocal = (allocated(ppg%uv_so) .and. dg_frag%nspin == 2)
     has_spin_mix = (yn_spinorbit == 'y' .and. dg_frag%nspin == 2 .and. allocated(dg_frag%H_mat_spin_mix))
     
     n = dg_frag%n_mat_max
