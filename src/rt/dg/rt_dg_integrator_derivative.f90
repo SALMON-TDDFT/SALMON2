@@ -71,7 +71,7 @@
 
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
     ! SOI projector path supports both real and complex fragment basis via cached complex views.
-    has_so_nonlocal = (allocated(ppg%uv_so) .and. dg_frag%nspin == 2)
+    has_so_nonlocal = (allocated(ppg%uv_so) .and. yn_spinorbit == 'y' .and. dg_frag%nspin == 2)
     has_spin_mix = (yn_spinorbit == 'y' .and. dg_frag%nspin == 2 .and. allocated(dg_frag%H_mat_spin_mix))
     
     n = dg_frag%n_mat_max
@@ -327,10 +327,10 @@
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-          if (has_so_nonlocal) then
-            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          end if
+        end if
+        if (has_so_nonlocal) then
+          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
         end if
         dcoef_dt_h0(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :) + 0.5d0 * A_squared * coef_all(1:n_tot, :)
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
@@ -340,10 +340,10 @@
 
         if (has_nonlocal) then
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-          if (has_so_nonlocal) then
-            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          end if
+        end if
+        if (has_so_nonlocal) then
+          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
         end if
         dcoef_dt_h0(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :) + 0.5d0 * A_squared * coef_all(1:n_tot, :)
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
@@ -356,20 +356,26 @@
         end if
 
         if (has_nonlocal) then
-
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_h0)
-          if (has_so_nonlocal) then
-            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          end if
-
+        end if
+        if (has_so_nonlocal) then
+          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
         end if
         dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + 0.5d0 * A_squared * coef_all(1:n_frag, :)
         dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
       else
 
-        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, -zi, H0c, n_tot, &
+        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), H0c, n_tot, &
                    coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
+        if (has_nonlocal) then
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+        end if
+        if (has_so_nonlocal) then
+          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
+        end if
+        dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
 
       end if
 
