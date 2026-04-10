@@ -1,6 +1,6 @@
   subroutine reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     use structures
-    use communication, only: comm_summation, comm_get_groupinfo
+    use communication, only: comm_summation
     use salmon_global, only: theory
     use salmon_global, only: yn_hse
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, zero_nonlocal_h_matrix_blocks
@@ -15,35 +15,33 @@
 
     type(s_rgrid), pointer :: mg
     integer :: ifrag, ispin, io, jo, i_local
-    integer :: frag_rank, frag_size
     integer :: nbf, nbf_raw, iblk
-    integer :: npts, nrem
     integer :: max_nbf_local
-    integer :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
-    real(8) :: hvol, A2val
+    integer :: frag_rank, frag_size
+    integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
+    integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
+    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
+    real(8) :: hvol, A2val, hij_avg
     real(8) :: t0, t1
     real(8) :: time_local_build, time_subgroup_reduce, time_global_reduce
     real(8) :: time_halo_exchange, time_potential_build, time_post_reduce_cleanup, time_block_hermitize
-    complex(8) :: alpha_blas, beta_blas
+    complex(8) :: integral_v
     real(8), allocatable :: V_total(:,:,:)
-    complex(8), allocatable :: phi_basis_mat(:,:), V_vec_thread(:), integral_vec_thread(:)
-    real(8), allocatable :: partial_block(:,:), reduced_block(:,:)
+    complex(8), allocatable :: V_phi(:,:,:)
+    real(8), allocatable :: partial_total(:), partial_block(:,:), reduced_block(:,:)
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
-    logical :: use_block_reconstruct
     logical :: has_overlap
+    logical :: use_block_reconstruct
     logical, save :: debug_static_seed_logged = .false.
-    logical, save :: debug_map_cache_logged = .false.
-    logical, parameter :: enable_reconstruct_probe = .false.
     logical, parameter :: enable_reconstruct_timing = .false.
     logical, parameter :: enable_hmat_nan_check = .false.
-    external :: zgemv
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. associated(dg_frag%mg)) then
       stop "reconstruct_hamiltonian_matrix requires dg_frag%mg"
     end if
     mg => dg_frag%mg
-    call comm_get_groupinfo(dg_frag%icomm_frag, frag_rank, frag_size)
     time_local_build = 0.0d0
     time_subgroup_reduce = 0.0d0
     time_global_reduce = 0.0d0
@@ -99,6 +97,8 @@
     end do
 
     allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    allocate(V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+
     max_nbf_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       nbf_raw = dg_frag%n_basis(ifrag, 1)
@@ -107,8 +107,11 @@
       max_nbf_local = max(max_nbf_local, nbf)
     end do
     if (max_nbf_local > 0) then
-      allocate(partial_block(max_nbf_local, max_nbf_local), reduced_block(max_nbf_local, max_nbf_local))
+      allocate(partial_total(max_nbf_local), partial_block(max_nbf_local, max_nbf_local), reduced_block(max_nbf_local, max_nbf_local))
     end if
+
+    frag_size = max(1, dg_frag%isize_frag)
+    frag_rank = modulo(dg_frag%id_frag, frag_size)
 
     do ispin = 1, system%nspin
       call cpu_time(t0)
@@ -145,56 +148,74 @@
         iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
         if (iblk <= 0) cycle
 
-        call prepare_fragment_overlap_map(dg_frag, ifrag, mg, has_overlap, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
-        if (.not. has_overlap) cycle
-        if (enable_reconstruct_probe .and. .not. debug_map_cache_logged .and. (dg_frag%id == 0 .or. dg_frag%id == 7)) then
-          write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
-            "        hmat-map-cache: rank=", dg_frag%id, " ifrag=", ifrag, " ov_s=", ov_s(1), ov_s(2), ov_s(3), &
-            " ov_e=", ov_e(1), ov_e(2), ov_e(3), " lens=", size(map_x), size(map_y), size(map_z)
-          flush(6)
-          if (dg_frag%id == 7) debug_map_cache_logged = .true.
+        partial_block(1:nbf, 1:nbf) = 0.0d0
+
+        iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+        ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        g_s(:) = iorg(:)
+        g_e(:) = iorg(:) + ndom(:) - 1
+        ov_s(:) = max(g_s(:), mg%is(:))
+        ov_e(:) = min(g_e(:), mg%ie(:))
+        has_overlap = all(ov_s(:) <= ov_e(:))
+        if (has_overlap) then
+          loc_s(:) = ov_s(:) - iorg(:) + 1
+          loc_e(:) = ov_e(:) - iorg(:) + 1
+          lx_lo = loc_s(1)
+          lx_hi = loc_e(1)
+          ly_lo = loc_s(2)
+          ly_hi = loc_e(2)
+          lz_lo = loc_s(3)
+          lz_hi = loc_e(3)
+          p_lb1 = lbound(dg_frag%phi_frag, 1)
+          p_ub1 = ubound(dg_frag%phi_frag, 1)
+          p_lb2 = lbound(dg_frag%phi_frag, 2)
+          p_ub2 = ubound(dg_frag%phi_frag, 2)
+          p_lb3 = lbound(dg_frag%phi_frag, 3)
+          p_ub3 = ubound(dg_frag%phi_frag, 3)
+          allocate(map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3)))
+          do io = ov_s(1), ov_e(1)
+            map_x(io) = map_global_to_phi_box_coord_reconstruct(io, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+          end do
+          do io = ov_s(2), ov_e(2)
+            map_y(io) = map_global_to_phi_box_coord_reconstruct(io, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+          end do
+          do io = ov_s(3), ov_e(3)
+            map_z(io) = map_global_to_phi_box_coord_reconstruct(io, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+          end do
         end if
 
-        partial_block(1:nbf, 1:nbf) = 0.0d0
-        npts = size(map_x) * size(map_y) * size(map_z)
-        allocate(phi_basis_mat(npts, nbf))
-        call pack_fragment_basis_matrix(dg_frag, i_local, nbf, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z, phi_basis_mat)
-        alpha_blas = cmplx(hvol, 0.0d0, kind=8)
-        beta_blas = (0.0d0, 0.0d0)
-
-!$omp parallel private(io, jo, nrem, t0, t1, V_vec_thread, integral_vec_thread) reduction(+:time_local_build)
-        allocate(V_vec_thread(npts), integral_vec_thread(nbf))
-!$omp do schedule(guided,1)
         do jo = frag_rank + 1, nbf, frag_size
-          if (enable_reconstruct_timing) call cpu_time(t0)
-    call build_local_potential_applied_basis_packed(dg_frag, i_local, jo, mg, V_total, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z, V_vec_thread)
+          if (.not. has_overlap) cycle
 
-          nrem = nbf - jo + 1
-          if (nrem > 0) then
-            call zgemv('C', npts, nrem, alpha_blas, phi_basis_mat(1, jo), npts, V_vec_thread, 1, beta_blas, integral_vec_thread(jo), 1)
-            do io = jo, nbf
-              partial_block(io, jo) = real(integral_vec_thread(io), kind=8)
-              if (io /= jo) partial_block(jo, io) = partial_block(io, jo)
-            end do
-          end if
-          if (enable_reconstruct_timing) then
-            call cpu_time(t1)
-            time_local_build = time_local_build + (t1 - t0)
-          end if
+          call cpu_time(t0)
+          call build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
+            lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
+
+          partial_total(1:nbf) = 0.0d0
+
+!$omp parallel do private(io, integral_v) schedule(static)
+          do io = 1, nbf
+            call integrate_local_basis_with_field_mapped(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, &
+              lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
+            partial_total(io) = real(integral_v, kind=8)
+          end do
+!$omp end parallel do
+          call cpu_time(t1)
+          time_local_build = time_local_build + (t1 - t0)
+
+          partial_block(1:nbf, jo) = partial_total(1:nbf)
         end do
-!$omp end do
-        if (allocated(integral_vec_thread)) deallocate(integral_vec_thread)
-        if (allocated(V_vec_thread)) deallocate(V_vec_thread)
-!$omp end parallel
 
-        if (allocated(phi_basis_mat)) deallocate(phi_basis_mat)
+        if (allocated(map_x)) deallocate(map_x)
+        if (allocated(map_y)) deallocate(map_y)
+        if (allocated(map_z)) deallocate(map_z)
 
         call cpu_time(t0)
         call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
         call cpu_time(t1)
         time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
 
-        if (enable_reconstruct_probe .and. .not. debug_static_seed_logged .and. dg_frag%is_frag_root .and. ispin == 1 .and. nbf >= 3) then
+        if (.not. debug_static_seed_logged .and. dg_frag%is_frag_root .and. ispin == 1 .and. nbf >= 3) then
           write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
             "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " seed_t=", &
             dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin), &
@@ -204,7 +225,7 @@
 
         if (dg_frag%is_frag_root) then
           dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(1:nbf, 1:nbf)
-          if (enable_reconstruct_probe .and. .not. debug_static_seed_logged .and. ispin == 1 .and. nbf >= 3) then
+          if (.not. debug_static_seed_logged .and. ispin == 1 .and. nbf >= 3) then
             write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x))') &
               "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " final_h=", &
               dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin)
@@ -212,10 +233,6 @@
             debug_static_seed_logged = .true.
           end if
         end if
-
-        if (allocated(map_x)) deallocate(map_x)
-        if (allocated(map_y)) deallocate(map_y)
-        if (allocated(map_z)) deallocate(map_z)
       end do
     end do
 
@@ -247,10 +264,12 @@
         if (dg_frag%H_mat_blocks(iblk)%ifrag_row /= dg_frag%H_mat_blocks(iblk)%ifrag_col) cycle
         nbf = dg_frag%n_basis(dg_frag%H_mat_blocks(iblk)%ifrag_row, ispin)
         do jo = 1, nbf
+!$omp simd private(hij_avg)
           do io = jo + 1, nbf
-            dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = 0.5d0 * &
-              (dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin))
-            dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin) = dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin)
+            hij_avg = 0.5d0 * (dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + &
+                               dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin))
+            dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = hij_avg
+            dg_frag%H_mat_blocks(iblk)%val(jo, io, ispin) = hij_avg
           end do
         end do
       end do
@@ -264,7 +283,8 @@
       flush(6)
     end if
 
-    deallocate(V_total)
+    deallocate(V_total, V_phi)
+    if (allocated(partial_total)) deallocate(partial_total)
     if (allocated(partial_block)) deallocate(partial_block)
     if (allocated(reduced_block)) deallocate(reduced_block)
 
@@ -284,267 +304,68 @@
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_reconstruct
 
-  subroutine prepare_fragment_overlap_map(dg_frag, ifrag, mg, has_overlap, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag
-    type(s_rgrid), intent(in) :: mg
-    logical, intent(out) :: has_overlap
-    integer, intent(out) :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
-    integer, allocatable, intent(out) :: map_x(:), map_y(:), map_z(:)
-    integer :: iorg(3), ndom(3)
-    integer :: g_s(3), g_e(3)
-    integer :: gx, gy, gz
-    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
-
-    if (allocated(map_x)) deallocate(map_x)
-    if (allocated(map_y)) deallocate(map_y)
-    if (allocated(map_z)) deallocate(map_z)
-
-    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    g_s(:) = iorg(:)
-    g_e(:) = iorg(:) + ndom(:) - 1
-    ov_s(:) = max(g_s(:), mg%is(:))
-    ov_e(:) = min(g_e(:), mg%ie(:))
-    has_overlap = all(ov_s(:) <= ov_e(:))
-    if (.not. has_overlap) return
-
-    loc_s(:) = ov_s(:) - iorg(:) + 1
-    loc_e(:) = ov_e(:) - iorg(:) + 1
-
-    p_lb1 = lbound(dg_frag%phi_frag, 1)
-    p_ub1 = ubound(dg_frag%phi_frag, 1)
-    p_lb2 = lbound(dg_frag%phi_frag, 2)
-    p_ub2 = ubound(dg_frag%phi_frag, 2)
-    p_lb3 = lbound(dg_frag%phi_frag, 3)
-    p_ub3 = ubound(dg_frag%phi_frag, 3)
-
-    allocate(map_x(ov_e(1) - ov_s(1) + 1), map_y(ov_e(2) - ov_s(2) + 1), map_z(ov_e(3) - ov_s(3) + 1))
-    do gx = ov_s(1), ov_e(1)
-      map_x(gx - ov_s(1) + 1) = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
-    end do
-    do gy = ov_s(2), ov_e(2)
-      map_y(gy - ov_s(2) + 1) = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
-    end do
-    do gz = ov_s(3), ov_e(3)
-      map_z(gz - ov_s(3) + 1) = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-    end do
-  end subroutine prepare_fragment_overlap_map
-
-  subroutine build_local_potential_applied_basis_packed(dg_frag, i_local, jo, mg, V_total, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z, V_vec)
+  subroutine build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
+      lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
     use structures
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: i_local, jo
     type(s_rgrid), intent(in) :: mg
     real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    complex(8), intent(out) :: V_vec(:)
-    integer, intent(in) :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
-    integer, intent(in) :: map_x(:), map_y(:), map_z(:)
-    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
-    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz, ip, idx_base
-    integer :: nx, ny, nz, npts_expected
-    integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3, p_ub4, p_ub5
+    complex(8), intent(out) :: V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    integer, intent(in) :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer, intent(in) :: ov_s(3), ov_e(3)
+    integer, intent(in) :: map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3))
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
     complex(8) :: phi0
 
-    lx_lo = loc_s(1)
-    lx_hi = loc_e(1)
-    ly_lo = loc_s(2)
-    ly_hi = loc_e(2)
-    lz_lo = loc_s(3)
-    lz_hi = loc_e(3)
-    nx = ov_e(1) - ov_s(1) + 1
-    ny = ov_e(2) - ov_s(2) + 1
-    nz = ov_e(3) - ov_s(3) + 1
-    npts_expected = nx * ny * nz
-
-    if (size(V_vec) /= npts_expected) then
-      write(*,'(a,4(i0,1x))') '[FATAL] reconstruct packed size mismatch: size(V_vec), nx, ny, nz = ', &
-        size(V_vec), nx, ny, nz
-      stop 'build_local_potential_applied_basis_packed size mismatch'
-    end if
-
-    V_vec(:) = (0.0d0, 0.0d0)
-
+    V_phi(:, :, :) = (0.0d0, 0.0d0)
     if (allocated(dg_frag%phi_frag_c)) then
-      p_lb1 = lbound(dg_frag%phi_frag_c, 1)
-      p_ub1 = ubound(dg_frag%phi_frag_c, 1)
-      p_lb2 = lbound(dg_frag%phi_frag_c, 2)
-      p_ub2 = ubound(dg_frag%phi_frag_c, 2)
-      p_lb3 = lbound(dg_frag%phi_frag_c, 3)
-      p_ub3 = ubound(dg_frag%phi_frag_c, 3)
-      p_ub4 = ubound(dg_frag%phi_frag_c, 4)
-      p_ub5 = ubound(dg_frag%phi_frag_c, 5)
-      if (jo < 1 .or. jo > p_ub4 .or. i_local < 1 .or. i_local > p_ub5) then
-        write(*,'(a,4(i0,1x))') '[FATAL] reconstruct basis index out of range (complex): jo, ub4, i_local, ub5 = ', &
-          jo, p_ub4, i_local, p_ub5
-        stop 'build_local_potential_applied_basis_packed basis index range error'
-      end if
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
+        bz = map_z(gz)
+        if (bz == 0) cycle
         do ly = ly_lo, ly_hi
           gy = ov_s(2) + (ly - ly_lo)
-          idx_base = ((gz - ov_s(3)) * ny + (gy - ov_s(2))) * nx + 1
-!$omp simd private(gx, phi0, bx, by, bz, ip)
+          by = map_y(gy)
+          if (by == 0) cycle
+!$omp simd private(gx, bx, phi0)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            ip = idx_base + (gx - ov_s(1))
-            bx = map_x(gx - ov_s(1) + 1)
-            by = map_y(gy - ov_s(2) + 1)
-            bz = map_z(gz - ov_s(3) + 1)
-            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-              if (bx < p_lb1 .or. bx > p_ub1 .or. by < p_lb2 .or. by > p_ub2 .or. bz < p_lb3 .or. bz > p_ub3) then
-                write(*,'(a,6(i0,1x))') '[FATAL] reconstruct mapped coord out of range (complex): bx,by,bz,lb1,ub1,ub2 = ', &
-                  bx, by, bz, p_lb1, p_ub1, p_ub2
-                stop 'build_local_potential_applied_basis_packed mapped coord range error (complex)'
-              end if
-              phi0 = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
-              V_vec(ip) = V_total(gx, gy, gz) * phi0
-            else
-              V_vec(ip) = (0.0d0, 0.0d0)
-            end if
+            bx = map_x(gx)
+            if (bx == 0) cycle
+            phi0 = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
+            V_phi(gx, gy, gz) = V_total(gx, gy, gz) * phi0
           end do
         end do
       end do
+!$omp end parallel do
     else
-      p_lb1 = lbound(dg_frag%phi_frag, 1)
-      p_ub1 = ubound(dg_frag%phi_frag, 1)
-      p_lb2 = lbound(dg_frag%phi_frag, 2)
-      p_ub2 = ubound(dg_frag%phi_frag, 2)
-      p_lb3 = lbound(dg_frag%phi_frag, 3)
-      p_ub3 = ubound(dg_frag%phi_frag, 3)
-      p_ub4 = ubound(dg_frag%phi_frag, 4)
-      p_ub5 = ubound(dg_frag%phi_frag, 5)
-      if (jo < 1 .or. jo > p_ub4 .or. i_local < 1 .or. i_local > p_ub5) then
-        write(*,'(a,4(i0,1x))') '[FATAL] reconstruct basis index out of range (real): jo, ub4, i_local, ub5 = ', &
-          jo, p_ub4, i_local, p_ub5
-        stop 'build_local_potential_applied_basis_packed basis index range error'
-      end if
+!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
+        bz = map_z(gz)
+        if (bz == 0) cycle
         do ly = ly_lo, ly_hi
           gy = ov_s(2) + (ly - ly_lo)
-          idx_base = ((gz - ov_s(3)) * ny + (gy - ov_s(2))) * nx + 1
-!$omp simd private(gx, phi0, bx, by, bz, ip)
+          by = map_y(gy)
+          if (by == 0) cycle
+!$omp simd private(gx, bx)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            ip = idx_base + (gx - ov_s(1))
-            bx = map_x(gx - ov_s(1) + 1)
-            by = map_y(gy - ov_s(2) + 1)
-            bz = map_z(gz - ov_s(3) + 1)
-            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-              if (bx < p_lb1 .or. bx > p_ub1 .or. by < p_lb2 .or. by > p_ub2 .or. bz < p_lb3 .or. bz > p_ub3) then
-                write(*,'(a,6(i0,1x))') '[FATAL] reconstruct mapped coord out of range (real): bx,by,bz,lb1,ub1,ub2 = ', &
-                  bx, by, bz, p_lb1, p_ub1, p_ub2
-                stop 'build_local_potential_applied_basis_packed mapped coord range error (real)'
-              end if
-              phi0 = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
-              V_vec(ip) = V_total(gx, gy, gz) * phi0
-            else
-              V_vec(ip) = (0.0d0, 0.0d0)
-            end if
+            bx = map_x(gx)
+            if (bx == 0) cycle
+            V_phi(gx, gy, gz) = cmplx(V_total(gx, gy, gz) * dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
           end do
         end do
       end do
+!$omp end parallel do
     end if
-  end subroutine build_local_potential_applied_basis_packed
+  end subroutine build_local_potential_applied_basis_mapped
 
-  subroutine pack_fragment_basis_matrix(dg_frag, i_local, nbf, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z, phi_mat)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: i_local, nbf
-    integer, intent(in) :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
-    integer, intent(in) :: map_x(:), map_y(:), map_z(:)
-    complex(8), intent(out) :: phi_mat(:, :)
-    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
-    integer :: nx, ny
-    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz, io, ip, idx_base
-
-    lx_lo = loc_s(1)
-    lx_hi = loc_e(1)
-    ly_lo = loc_s(2)
-    ly_hi = loc_e(2)
-    lz_lo = loc_s(3)
-    lz_hi = loc_e(3)
-    nx = lx_hi - lx_lo + 1
-    ny = ly_hi - ly_lo + 1
-
-    if (allocated(dg_frag%phi_frag_c)) then
-      do io = 1, nbf
-        do lz = lz_lo, lz_hi
-          gz = ov_s(3) + (lz - lz_lo)
-          do ly = ly_lo, ly_hi
-            gy = ov_s(2) + (ly - ly_lo)
-            idx_base = ((lz - lz_lo) * ny + (ly - ly_lo)) * nx + 1
-!$omp simd private(gx, bx, by, bz, ip)
-            do lx = lx_lo, lx_hi
-              gx = ov_s(1) + (lx - lx_lo)
-              ip = idx_base + (lx - lx_lo)
-              bx = map_x(gx - ov_s(1) + 1)
-              by = map_y(gy - ov_s(2) + 1)
-              bz = map_z(gz - ov_s(3) + 1)
-              if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-                phi_mat(ip, io) = dg_frag%phi_frag_c(bx, by, bz, io, i_local)
-              else
-                phi_mat(ip, io) = (0.0d0, 0.0d0)
-              end if
-            end do
-          end do
-        end do
-      end do
-    else
-      do io = 1, nbf
-        do lz = lz_lo, lz_hi
-          gz = ov_s(3) + (lz - lz_lo)
-          do ly = ly_lo, ly_hi
-            gy = ov_s(2) + (ly - ly_lo)
-            idx_base = ((lz - lz_lo) * ny + (ly - ly_lo)) * nx + 1
-!$omp simd private(gx, bx, by, bz, ip)
-            do lx = lx_lo, lx_hi
-              gx = ov_s(1) + (lx - lx_lo)
-              ip = idx_base + (lx - lx_lo)
-              bx = map_x(gx - ov_s(1) + 1)
-              by = map_y(gy - ov_s(2) + 1)
-              bz = map_z(gz - ov_s(3) + 1)
-              if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-                phi_mat(ip, io) = cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8)
-              else
-                phi_mat(ip, io) = (0.0d0, 0.0d0)
-              end if
-            end do
-          end do
-        end do
-      end do
-    end if
-  end subroutine pack_fragment_basis_matrix
-
-  subroutine pack_overlap_field_to_vector(mg, field, ov_s, ov_e, vec)
-    use structures
-    implicit none
-    type(s_rgrid), intent(in) :: mg
-    complex(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    integer, intent(in) :: ov_s(3), ov_e(3)
-    complex(8), intent(out) :: vec(:)
-    integer :: nx
-    integer :: gx, gy, gz, ip, idx_base
-
-    nx = ov_e(1) - ov_s(1) + 1
-    do gz = ov_s(3), ov_e(3)
-      do gy = ov_s(2), ov_e(2)
-        idx_base = ((gz - ov_s(3)) * (ov_e(2) - ov_s(2) + 1) + (gy - ov_s(2))) * nx + 1
-!$omp simd private(ip)
-        do gx = ov_s(1), ov_e(1)
-          ip = idx_base + (gx - ov_s(1))
-          vec(ip) = field(gx, gy, gz)
-        end do
-      end do
-    end do
-  end subroutine pack_overlap_field_to_vector
-
-  subroutine integrate_local_basis_with_field(dg_frag, i_local, io, mg, field, hvol, integral, loc_s, loc_e, ov_s, ov_e, map_x, map_y, map_z)
+  subroutine integrate_local_basis_with_field_mapped(dg_frag, i_local, io, mg, field, hvol, integral, &
+      lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
     use structures
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -553,60 +374,63 @@
     complex(8), intent(in) :: field(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
     real(8), intent(in) :: hvol
     complex(8), intent(out) :: integral
-    integer, intent(in) :: loc_s(3), loc_e(3), ov_s(3), ov_e(3)
-    integer, intent(in) :: map_x(:), map_y(:), map_z(:)
-    integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer, intent(in) :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer, intent(in) :: ov_s(3), ov_e(3)
+    integer, intent(in) :: map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3))
     integer :: lx, ly, lz, gx, gy, gz, bx, by, bz
-    real(8) :: sum_re, sum_im
-    complex(8) :: term
+    real(8) :: acc_re, acc_im, pr, pi, fr, fi, phi_r
 
     integral = (0.0d0, 0.0d0)
-    sum_re = 0.0d0
-    sum_im = 0.0d0
-    lx_lo = loc_s(1)
-    lx_hi = loc_e(1)
-    ly_lo = loc_s(2)
-    ly_hi = loc_e(2)
-    lz_lo = loc_s(3)
-    lz_hi = loc_e(3)
     if (allocated(dg_frag%phi_frag_c)) then
+      acc_re = 0.0d0
+      acc_im = 0.0d0
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
+        bz = map_z(gz)
+        if (bz == 0) cycle
         do ly = ly_lo, ly_hi
           gy = ov_s(2) + (ly - ly_lo)
-!$omp simd private(gx, bx, by, bz, term) reduction(+:sum_re, sum_im)
+          by = map_y(gy)
+          if (by == 0) cycle
+!$omp simd reduction(+:acc_re,acc_im) private(gx,bx,pr,pi,fr,fi)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_x(gx - ov_s(1) + 1)
-            by = map_y(gy - ov_s(2) + 1)
-            bz = map_z(gz - ov_s(3) + 1)
-            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-              term = conjg(dg_frag%phi_frag_c(bx, by, bz, io, i_local)) * field(gx, gy, gz) * hvol
-              sum_re = sum_re + real(term, kind=8)
-              sum_im = sum_im + aimag(term)
-            end if
+            bx = map_x(gx)
+            if (bx == 0) cycle
+            pr = real(dg_frag%phi_frag_c(bx, by, bz, io, i_local), kind=8)
+            pi = aimag(dg_frag%phi_frag_c(bx, by, bz, io, i_local))
+            fr = real(field(gx, gy, gz), kind=8)
+            fi = aimag(field(gx, gy, gz))
+            acc_re = acc_re + (pr * fr + pi * fi) * hvol
+            acc_im = acc_im + (pr * fi - pi * fr) * hvol
           end do
         end do
       end do
+      integral = cmplx(acc_re, acc_im, kind=8)
     else
+      acc_re = 0.0d0
+      acc_im = 0.0d0
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
+        bz = map_z(gz)
+        if (bz == 0) cycle
         do ly = ly_lo, ly_hi
           gy = ov_s(2) + (ly - ly_lo)
-!$omp simd private(gx, bx, by, bz, term) reduction(+:sum_re, sum_im)
+          by = map_y(gy)
+          if (by == 0) cycle
+!$omp simd reduction(+:acc_re,acc_im) private(gx,bx,phi_r,fr,fi)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
-            bx = map_x(gx - ov_s(1) + 1)
-            by = map_y(gy - ov_s(2) + 1)
-            bz = map_z(gz - ov_s(3) + 1)
-            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-              term = cmplx(dg_frag%phi_frag(bx, by, bz, io, i_local), 0.0d0, kind=8) * field(gx, gy, gz) * hvol
-              sum_re = sum_re + real(term, kind=8)
-              sum_im = sum_im + aimag(term)
-            end if
+            bx = map_x(gx)
+            if (bx == 0) cycle
+            phi_r = dg_frag%phi_frag(bx, by, bz, io, i_local)
+            fr = real(field(gx, gy, gz), kind=8)
+            fi = aimag(field(gx, gy, gz))
+            acc_re = acc_re + phi_r * fr * hvol
+            acc_im = acc_im + phi_r * fi * hvol
           end do
         end do
       end do
+      integral = cmplx(acc_re, acc_im, kind=8)
     end if
-    integral = cmplx(sum_re, sum_im, kind=8)
-  end subroutine integrate_local_basis_with_field
+  end subroutine integrate_local_basis_with_field_mapped

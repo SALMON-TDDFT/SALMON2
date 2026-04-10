@@ -28,7 +28,8 @@
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
     complex(8), allocatable :: coef_frag_other(:,:), coef_pw_other(:,:)
     complex(8), allocatable, save :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
-    complex(8), allocatable, save :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:)
+    complex(8), allocatable, save :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:), tmp_mix(:,:)
+    complex(8), allocatable, save :: mfp_vec(:), coef_pw_scaled(:,:), tmp_fp_fw(:,:), tmp_fp_bw(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
     real(8) :: t_coef_gather0, t_coef_gather1
@@ -181,17 +182,24 @@
           end do
         end if
         if (need_m_dense .and. n_pw > 0) then
+          if (.not. allocated(mfp_vec)) then
+            allocate(mfp_vec(n_pw))
+          else if (size(mfp_vec, 1) /= n_pw) then
+            deallocate(mfp_vec)
+            allocate(mfp_vec(n_pw))
+          end if
+!$omp simd
           do io = 1, n_pw
-            M(n_frag+io, n_frag+io) = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
+            mfp_vec(io) = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
+            M(n_frag+io, n_frag+io) = mfp_vec(io)
           end do
           if (.not. disable_mfp .and. mixed_fp_coupling_active(dg_frag, ispin)) then
+!$omp parallel do schedule(static) private(jo)
             do jo = 1, n_pw
-              do io = 1, n_frag
-                mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo)) * dg_frag%S_mat_frag_pw(io, jo, ispin)
-                M(io, n_frag+jo) = mfp
-                M(n_frag+jo, io) = -conjg(mfp)
-              end do
+              M(1:n_frag, n_frag+jo) = mfp_vec(jo) * dg_frag%S_mat_frag_pw(1:n_frag, jo, ispin)
+              M(n_frag+jo, 1:n_frag) = -conjg(M(1:n_frag, n_frag+jo))
             end do
+!$omp end parallel do
           end if
         end if
       end if
@@ -292,20 +300,28 @@
       if (use_mixed_basis .and. n_basis > 0) then
 
         if (.not. allocated(rhs_mix)) then
-          allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
+          allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis), &
+                   tmp_mix(n_tot, n_basis))
         else if (size(rhs_mix, 1) /= n_basis .or. size(rhs_mix, 2) /= dg_frag%nstate_tot .or. &
                  size(raw_rhs, 1) /= n_tot .or. size(raw_rhs, 2) /= dg_frag%nstate_tot .or. &
-                 size(op_mix, 1) /= n_basis .or. size(op_mix, 2) /= n_basis) then
-          deallocate(rhs_mix, raw_rhs, op_mix)
-          allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis))
+                 size(op_mix, 1) /= n_basis .or. size(op_mix, 2) /= n_basis .or. &
+                 size(tmp_mix, 1) /= n_tot .or. size(tmp_mix, 2) /= n_basis) then
+          deallocate(rhs_mix, raw_rhs, op_mix, tmp_mix)
+          allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis), &
+                   tmp_mix(n_tot, n_basis))
         end if
         rhs_mix(:, :) = (0.0d0, 0.0d0)
         raw_rhs(:, :) = (0.0d0, 0.0d0)
-        op_mix(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), &
-                              matmul(H0c(1:n_tot, 1:n_tot), dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin)))
+        call zgemm('N', 'N', n_tot, n_basis, n_tot, (1.0d0, 0.0d0), H0c, n_tot, &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, (0.0d0, 0.0d0), tmp_mix, n_tot)
+        call zgemm('C', 'N', n_basis, n_basis, n_tot, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, tmp_mix, n_tot, &
+                   (0.0d0, 0.0d0), op_mix, n_basis)
         call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, -zi, op_mix, n_basis, &
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
-        raw_rhs(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), rhs_mix)
+        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, rhs_mix, n_basis, &
+                   (0.0d0, 0.0d0), raw_rhs, n_tot)
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
           call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
@@ -314,9 +330,7 @@
                  coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
           end if
         end if
-        do io = 1, n_tot
-          dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
-        end do
+        dcoef_dt_h0(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :) + 0.5d0 * A_squared * coef_all(1:n_tot, :)
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
 
@@ -329,9 +343,7 @@
                  coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
           end if
         end if
-        do io = 1, n_tot
-          dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
-        end do
+        dcoef_dt_h0(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :) + 0.5d0 * A_squared * coef_all(1:n_tot, :)
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
 
@@ -350,9 +362,7 @@
           end if
 
         end if
-        do io = 1, n_frag
-          dcoef_dt_h0(io, :) = dcoef_dt_h0(io, :) + 0.5d0 * A_squared * coef_all(io, :)
-        end do
+        dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + 0.5d0 * A_squared * coef_all(1:n_frag, :)
         dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
       else
 
@@ -364,28 +374,66 @@
 
       if (use_mixed_basis .and. n_basis > 0) then
         rhs_mix(:, :) = (0.0d0, 0.0d0)
-        op_mix(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), &
-                              matmul(M(1:n_tot, 1:n_tot), dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin)))
+        call zgemm('N', 'N', n_tot, n_basis, n_tot, (1.0d0, 0.0d0), M, n_tot, &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, (0.0d0, 0.0d0), tmp_mix, n_tot)
+        call zgemm('C', 'N', n_basis, n_basis, n_tot, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, tmp_mix, n_tot, &
+                   (0.0d0, 0.0d0), op_mix, n_basis)
         call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), op_mix, n_basis, &
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
-        raw_rhs(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), rhs_mix)
+        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, rhs_mix, n_basis, &
+                   (0.0d0, 0.0d0), raw_rhs, n_tot)
         dcoef_dt_m(:, :) = raw_rhs(:, :)
       else if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
         dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
         call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
         if (n_pw > 0) then
+          if (.not. allocated(mfp_vec)) then
+            allocate(mfp_vec(n_pw))
+          else if (size(mfp_vec, 1) /= n_pw) then
+            deallocate(mfp_vec)
+            allocate(mfp_vec(n_pw))
+          end if
+!$omp parallel do schedule(static) private(io)
           do io = 1, n_pw
-            mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
-            dcoef_dt_m(n_frag+io, :) = dcoef_dt_m(n_frag+io, :) + mfp * coef_all(n_frag+io, :)
+            mfp_vec(io) = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, io))
+            dcoef_dt_m(n_frag+io, :) = dcoef_dt_m(n_frag+io, :) + mfp_vec(io) * coef_all(n_frag+io, :)
           end do
+!$omp end parallel do
           if (.not. disable_mfp .and. mixed_fp_coupling_active(dg_frag, ispin)) then
+            if (.not. allocated(coef_pw_scaled)) then
+              allocate(coef_pw_scaled(n_pw, dg_frag%nstate_tot), tmp_fp_bw(n_pw, dg_frag%nstate_tot))
+            else if (size(coef_pw_scaled, 1) /= n_pw .or. size(coef_pw_scaled, 2) /= dg_frag%nstate_tot) then
+              deallocate(coef_pw_scaled, tmp_fp_bw)
+              allocate(coef_pw_scaled(n_pw, dg_frag%nstate_tot), tmp_fp_bw(n_pw, dg_frag%nstate_tot))
+            end if
+            if (.not. allocated(tmp_fp_fw)) then
+              allocate(tmp_fp_fw(n_frag, dg_frag%nstate_tot))
+            else if (size(tmp_fp_fw, 1) /= n_frag .or. size(tmp_fp_fw, 2) /= dg_frag%nstate_tot) then
+              deallocate(tmp_fp_fw)
+              allocate(tmp_fp_fw(n_frag, dg_frag%nstate_tot))
+            end if
+
+!$omp parallel do schedule(static) private(jo)
             do jo = 1, n_pw
-              mfp = zi * dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo))
-              do io = 1, n_frag
-                dcoef_dt_m(io, :) = dcoef_dt_m(io, :) + mfp * dg_frag%S_mat_frag_pw(io, jo, ispin) * coef_all(n_frag+jo, :)
-                dcoef_dt_m(n_frag+jo, :) = dcoef_dt_m(n_frag+jo, :) - conjg(mfp * dg_frag%S_mat_frag_pw(io, jo, ispin)) * coef_all(io, :)
-              end do
+              coef_pw_scaled(jo, :) = mfp_vec(jo) * coef_all(n_frag+jo, :)
             end do
+!$omp end parallel do
+
+            call zgemm('N', 'N', n_frag, dg_frag%nstate_tot, n_pw, (1.0d0, 0.0d0), &
+                       dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), n_frag, &
+                       coef_pw_scaled, n_pw, (0.0d0, 0.0d0), tmp_fp_fw, n_frag)
+            dcoef_dt_m(1:n_frag, :) = dcoef_dt_m(1:n_frag, :) + tmp_fp_fw(1:n_frag, :)
+
+            call zgemm('C', 'N', n_pw, dg_frag%nstate_tot, n_frag, (1.0d0, 0.0d0), &
+                       dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), n_frag, &
+                       coef_all, n_tot, (0.0d0, 0.0d0), tmp_fp_bw, n_pw)
+!$omp parallel do schedule(static) private(jo)
+            do jo = 1, n_pw
+              dcoef_dt_m(n_frag+jo, :) = dcoef_dt_m(n_frag+jo, :) - conjg(mfp_vec(jo)) * tmp_fp_bw(jo, :)
+            end do
+!$omp end parallel do
           end if
         end if
       else
