@@ -24,8 +24,11 @@ module lcfo_soi
   public :: dc_lcfo_soi
 
   character(32),parameter :: binfile_wf_soi = "wavefunctions_soi.bin", &
+  &                          binfile_wfb_soi = "wavefunctions_buffered_soi.bin", &
+  &                          binfile_occb_soi = "occupations_buffered_soi.bin", &
   &                          binfile_rg_soi = "rgrid_index_soi.bin", &
   &                          binfile_bf_soi = "basis_functions_soi.bin", &
+  &                          binfile_bfb_soi = "basis_functions_buffered_soi.bin", &
   &                          binfile_hl_soi = "hamiltonian_local_soi.bin"
 
 contains
@@ -538,14 +541,22 @@ contains
 
     subroutine output
       use salmon_global, only: base_directory, sysname, unit_energy
+      use communication, only: comm_summation
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
       use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
       implicit none
       integer :: iunit,i_halo
-      integer :: nxyz_domain(3)
+      integer :: nxyz_domain(3), nxyz_box(3)
+      integer :: nstate_tot_buffered
       character(256) :: filename
       real(8) :: esp_out
+      complex(8), allocatable :: buffered_basis(:,:,:,:,:), wrk_buffer(:,:,:,:,:)
+      complex(8), allocatable :: coef_wf_buffered(:,:,:)
+      real(8) :: occ_buffered_local(dc%nstate_frag,system%nspin)
+      integer :: n_mat_buffered(system%nspin)
+      integer :: n_basis_buffered(dc%n_frag,system%nspin)
+      integer :: index_basis_buffered(dc%nstate_frag,dc%n_frag,system%nspin)
 
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
         iunit = get_filehandle()
@@ -579,6 +590,19 @@ contains
       end if
 
       if(dc%id_frag==0) then
+        n_basis_buffered = 0
+        index_basis_buffered = 0
+        do ispin = 1, nspin
+          n_mat_buffered(ispin) = dc%n_frag * dc%nstate_frag
+          do ifrag = 1, dc%n_frag
+            n_basis_buffered(ifrag, ispin) = dc%nstate_frag
+            do io = 1, dc%nstate_frag
+              index_basis_buffered(io, ifrag, ispin) = (ifrag - 1) * dc%nstate_frag + io
+            end do
+          end do
+        end do
+        nstate_tot_buffered = dc%n_frag * dc%nstate_frag
+
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_rg_soi
         open(iunit,file=filename,form='unformatted',access='stream')
@@ -596,6 +620,33 @@ contains
         write(iunit) n_basis(dc%i_frag,1:nspin)
         write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:dc%nstate_frag)
         close(iunit)
+
+        nxyz_box(1:3) = nxyz_domain(1:3) + 2 * dc%nxyz_buffer(1:3)
+        allocate(buffered_basis(nxyz_box(1), nxyz_box(2), nxyz_box(3), nspin, dc%nstate_frag))
+        allocate(wrk_buffer(nxyz_box(1), nxyz_box(2), nxyz_box(3), nspin, dc%nstate_frag))
+        wrk_buffer = (0.0d0, 0.0d0)
+        do io = info%io_s, info%io_e
+        do ispin = 1, nspin
+        do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+        do ix = mg%is(1), mg%ie(1)
+          if (ix <= nxyz_box(1) .and. iy <= nxyz_box(2) .and. iz <= nxyz_box(3)) then
+            wrk_buffer(ix, iy, iz, ispin, io) = spsi%zwf(ix, iy, iz, ispin, io, 1, 1)
+          end if
+        end do
+        end do
+        end do
+        end do
+        end do
+        call comm_summation(wrk_buffer, buffered_basis, product(nxyz_box) * nspin * dc%nstate_frag, info%icomm_rko)
+
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_bfb_soi
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) nxyz_domain(1:3), dc%nxyz_buffer(1:3), nxyz_box(1:3), nspin, dc%nstate_frag
+        write(iunit) buffered_basis(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3),1:nspin,1:dc%nstate_frag)
+        close(iunit)
+        deallocate(buffered_basis, wrk_buffer)
 
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_hl_soi
@@ -617,6 +668,35 @@ contains
           write(iunit) index_basis(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
           write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
           close(iunit)
+
+          allocate(coef_wf_buffered(dc%nstate_frag, nstate_tot_buffered, nspin))
+          coef_wf_buffered = (0.0d0, 0.0d0)
+          occ_buffered_local(:, :) = 0.0d0
+          do ispin = 1, nspin
+            do jo = 1, dc%nstate_frag
+              i = index_basis_buffered(jo, dc%i_frag, ispin)
+              if (i >= 1 .and. i <= nstate_tot_buffered) coef_wf_buffered(jo, i, ispin) = (1.0d0, 0.0d0)
+              occ_buffered_local(jo, ispin) = system%rocc(jo, 1, ispin)
+            end do
+          end do
+
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_wfb_soi
+          open(iunit,file=filename,form='unformatted',access='stream')
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, nstate_tot_buffered
+          write(iunit) n_mat_buffered(1:nspin)
+          write(iunit) n_basis_buffered(1:dc%n_frag,1:nspin)
+          write(iunit) index_basis_buffered(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
+          write(iunit) coef_wf_buffered(1:dc%nstate_frag,1:nstate_tot_buffered,1:nspin)
+          close(iunit)
+
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_occb_soi
+          open(iunit,file=filename,form='unformatted',access='stream')
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, nstate_tot_buffered
+          write(iunit) occ_buffered_local(1:dc%nstate_frag,1:nspin)
+          close(iunit)
+          deallocate(coef_wf_buffered)
         end if
       end if
     end subroutine output
