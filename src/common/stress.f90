@@ -173,6 +173,8 @@ contains
     system%stress_loc_lr_scr_grad = 0d0
     system%stress_loc_sr_scr_diag = 0d0
     system%stress_loc_lr_scr_diag = 0d0
+    system%stress_loc_sr_rs = 0d0
+    system%stress_loc_sr_rs_bins = 0d0
     system%stress_nl = 0d0
     system%stress_ewa = 0d0
     system%stress_loc_sr_energy = 0d0
@@ -1487,18 +1489,38 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_pp_grid),       intent(in)    :: ppg
     type(s_scalar),        intent(in)    :: rho_s(:)
-    integer  :: ia, ik, j, a, b, ix, iy, iz, intr, ispin, nspin
-    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, u_r, du_r
+    integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr, ispin, nspin, bin_idx
+    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, u_r, du_r, r1, r2, r3
     real(8)  :: V, hvol
-    real(8)  :: strs(3,3), strs_sum(3,3)
+    real(8)  :: contrib, strs(3,3), strs_sum(3,3), strs_bins(3,3,4), strs_bins_sum(3,3,4)
 
     V = system%det_a
     hvol = system%Hvol
     nspin = system%nspin
     strs = 0d0
+    strs_bins = 0d0
 
     do ia = 1, system%nion
       ik = kion(ia)
+      i1 = 0
+      i2 = 0
+      i3 = 0
+      do ib = 1, pp%nrloc(ik)
+        if(pp%rad(ib,ik) <= 0d0) cycle
+        if(i1 == 0) then
+          i1 = ib
+        else if(i2 == 0) then
+          i2 = ib
+        else
+          i3 = ib
+          exit
+        end if
+      end do
+      if(i1 == 0 .or. i2 == 0 .or. i3 == 0) stop 'calc_stress_loc_sr_rs: need three positive radial points'
+      r1 = pp%rad(i1,ik)
+      r2 = pp%rad(i2,ik)
+      r3 = pp%rad(i3,ik)
+
       do j = 1, ppg%mps(ia)
         ix = ppg%jxyz(1,j,ia)
         iy = ppg%jxyz(2,j,ia)
@@ -1522,11 +1544,22 @@ contains
         call eval_local_sr_shared_u(pp,ik,r_abs,u_r,du_r,intr)
         ! V_sr(r) = u(r) / r, so V'_sr(r) = (u'(r) * r - u(r)) / r^2
         dvsr_dr = (du_r * r_abs - u_r) * r_inv**2
+        contrib = -rho_val * dvsr_dr * r_inv * hvol
+
+        bin_idx = 4
+        if(r_abs < r1) then
+          bin_idx = 1
+        else if(r_abs < r2) then
+          bin_idx = 2
+        else if(r_abs < r3) then
+          bin_idx = 3
+        end if
 
         ! Accumulate: -rho * V'_sr * s_a * s_b / |s| * hvol
         do b = 1, 3
         do a = 1, 3
-          strs(a,b) = strs(a,b) - rho_val * dvsr_dr * s(a) * s(b) * r_inv * hvol
+          strs(a,b) = strs(a,b) + contrib * s(a) * s(b)
+          strs_bins(a,b,bin_idx) = strs_bins(a,b,bin_idx) + contrib * s(a) * s(b)
         end do
         end do
       end do
@@ -1534,7 +1567,11 @@ contains
 
     ! Use icomm_r (not icomm_rko): this is a density-only sum with no k/orbital loops.
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
+    call comm_summation(strs_bins, strs_bins_sum, size(strs_bins), info%icomm_r)
     system%stress_loc_sr_rs = -strs_sum / V
+    do ib = 1, 4
+      system%stress_loc_sr_rs_bins(:,:,ib) = -strs_bins_sum(:,:,ib) / V
+    end do
 
   contains
 
