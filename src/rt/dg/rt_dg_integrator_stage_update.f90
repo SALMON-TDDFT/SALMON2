@@ -31,7 +31,7 @@
     complex(8), allocatable :: H_frag_pw(:,:,:)
     real(8) :: t_stage0, t_stage1
     logical :: has_vxc_mat
-    integer :: env_len, env_status
+    integer :: env_len, env_status, ispin
     character(len=64) :: env_val
     logical :: enable_density_call_probe
     logical, parameter :: enable_stage_update_trace = .false.
@@ -58,7 +58,9 @@
     if (allocated(dg_frag%rho_frag)) dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
     if (allocated(dg_frag%rho_s_frag)) then
       dg_frag%rho_s_frag(:, :, :, :) = 0.0d0
-      dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = rho_s(1:system%nspin)%f
+      do ispin = 1, system%nspin
+        dg_frag%rho_s_frag(:, :, :, ispin) = rho_s(ispin)%f(:, :, :)
+      end do
     end if
     if (allocated(dg_frag%rho_ud_frag)) dg_frag%rho_ud_frag(:, :, :) = (0.0d0, 0.0d0)
     if (yn_spinorbit == 'y' .and. allocated(dg_frag%rho_ud_frag)) then
@@ -99,7 +101,9 @@
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     if (allocated(dg_frag%Vxc_frag)) then
       dg_frag%Vxc_frag(:, :, :, :) = 0.0d0
-      dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = Vxc(1:system%nspin)%f
+      do ispin = 1, system%nspin
+        dg_frag%Vxc_frag(:, :, :, ispin) = Vxc(ispin)%f(:, :, :)
+      end do
     end if
     if (allocated(dg_frag%Vxc_mat_frag)) then
       dg_frag%Vxc_mat_frag(:, :, :, :, :) = (0.0d0, 0.0d0)

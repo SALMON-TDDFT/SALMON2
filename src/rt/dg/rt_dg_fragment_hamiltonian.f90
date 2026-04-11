@@ -377,6 +377,7 @@
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical :: packed_diag
     logical :: enable_reduce_trace
     character(16) :: env_reduce_trace
     integer :: env_status
@@ -398,7 +399,12 @@
         nrow = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
         ncol = dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin)
         if (nrow <= 0 .or. ncol <= 0) cycle
-        block_size = nrow * ncol
+        packed_diag = (blocks(iblk)%ifrag_row == blocks(iblk)%ifrag_col) .and. (nrow == ncol)
+        if (packed_diag) then
+          block_size = nrow * (nrow + 1) / 2
+        else
+          block_size = nrow * ncol
+        end if
         max_block_size = max(max_block_size, block_size)
         total_active_size = total_active_size + block_size
       end do
@@ -427,37 +433,60 @@
       flush(6)
     end if
 
-    if (max_block_size_global <= 0) return
-    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+    if (total_active_size <= 0) return
+    allocate(send_block(total_active_size), recv_block(total_active_size))
 
+    offset_flat = 1
     do iblk = 1, size(blocks)
       do ispin = 1, dg_frag%nspin
         nrow = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
         ncol = dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin)
         if (nrow <= 0 .or. ncol <= 0) cycle
-        block_size = nrow * ncol
-        offset_flat = 1
+        packed_diag = (blocks(iblk)%ifrag_row == blocks(iblk)%ifrag_col) .and. (nrow == ncol)
         do jj = 1, ncol
-          do ii = 1, nrow
-            send_block(offset_flat) = blocks(iblk)%val(ii, jj, ispin)
-            offset_flat = offset_flat + 1
-          end do
+          if (packed_diag) then
+            do ii = 1, min(jj, nrow)
+              send_block(offset_flat) = blocks(iblk)%val(ii, jj, ispin)
+              offset_flat = offset_flat + 1
+            end do
+          else
+            do ii = 1, nrow
+              send_block(offset_flat) = blocks(iblk)%val(ii, jj, ispin)
+              offset_flat = offset_flat + 1
+            end do
+          end if
         end do
+      end do
+    end do
 
-        chunk_begin = 1
-        do while (chunk_begin <= block_size)
-          chunk_count = min(reduce_chunk_size, block_size - chunk_begin + 1)
-          call comm_summation(send_block(chunk_begin:chunk_begin + chunk_count - 1), &
-                              recv_block(chunk_begin:chunk_begin + chunk_count - 1), chunk_count, icomm_reduce)
-          chunk_begin = chunk_begin + chunk_count
-        end do
+    chunk_begin = 1
+    do while (chunk_begin <= total_active_size)
+      chunk_count = min(reduce_chunk_size, total_active_size - chunk_begin + 1)
+      call comm_summation(send_block(chunk_begin:chunk_begin + chunk_count - 1), &
+                          recv_block(chunk_begin:chunk_begin + chunk_count - 1), chunk_count, icomm_reduce)
+      chunk_begin = chunk_begin + chunk_count
+    end do
 
-        offset_flat = 1
+    offset_flat = 1
+    do iblk = 1, size(blocks)
+      do ispin = 1, dg_frag%nspin
+        nrow = dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin)
+        ncol = dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin)
+        if (nrow <= 0 .or. ncol <= 0) cycle
+        packed_diag = (blocks(iblk)%ifrag_row == blocks(iblk)%ifrag_col) .and. (nrow == ncol)
         do jj = 1, ncol
-          do ii = 1, nrow
-            blocks(iblk)%val(ii, jj, ispin) = recv_block(offset_flat)
-            offset_flat = offset_flat + 1
-          end do
+          if (packed_diag) then
+            do ii = 1, min(jj, nrow)
+              blocks(iblk)%val(ii, jj, ispin) = recv_block(offset_flat)
+              if (ii /= jj) blocks(iblk)%val(jj, ii, ispin) = recv_block(offset_flat)
+              offset_flat = offset_flat + 1
+            end do
+          else
+            do ii = 1, nrow
+              blocks(iblk)%val(ii, jj, ispin) = recv_block(offset_flat)
+              offset_flat = offset_flat + 1
+            end do
+          end if
         end do
       end do
     end do

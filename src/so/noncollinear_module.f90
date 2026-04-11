@@ -28,7 +28,7 @@ contains
   subroutine sync_noncollinear_state_from_rho(rho, system, mg)
     use structures, only : s_scalar, s_dft_system, s_rgrid
     implicit none
-    type(s_scalar), intent(in) :: rho(system%nspin)
+    type(s_scalar), intent(in) :: rho(:)
     type(s_dft_system), intent(in) :: system
     type(s_rgrid), intent(in) :: mg
     integer :: m1, m2, m3, n1, n2, n3

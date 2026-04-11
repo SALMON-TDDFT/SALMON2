@@ -216,7 +216,7 @@
           partial_total(1:nbf) = 0.0d0
 
 !$omp parallel do private(io, integral_v) schedule(static)
-          do io = 1, nbf
+          do io = 1, jo
             call integrate_local_basis_with_field_mapped(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, &
               lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
             partial_total(io) = real(integral_v, kind=8)
@@ -236,6 +236,12 @@
         call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
         call cpu_time(t1)
         time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
+
+        do jo = 1, nbf
+          do io = jo + 1, nbf
+            reduced_block(io, jo) = reduced_block(jo, io)
+          end do
+        end do
 
         if (.not. debug_static_seed_logged .and. dg_frag%is_frag_root .and. ispin == 1 .and. nbf >= 3) then
           write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
@@ -545,12 +551,12 @@
             pi = aimag(dg_frag%phi_frag_c(bx, by, bz, io, i_local))
             fr = real(field(gx, gy, gz), kind=8)
             fi = aimag(field(gx, gy, gz))
-            acc_re = acc_re + (pr * fr + pi * fi) * hvol
-            acc_im = acc_im + (pr * fi - pi * fr) * hvol
+	            acc_re = acc_re + (pr * fr + pi * fi) * hvol
+	            acc_im = acc_im + (pr * fi - pi * fr) * hvol
           end do
         end do
       end do
-      integral = cmplx(acc_re, acc_im, kind=8)
+	      integral = cmplx(acc_re, acc_im, kind=8)
     else
       acc_re = 0.0d0
       acc_im = 0.0d0
@@ -570,11 +576,11 @@
             phi_r = dg_frag%phi_frag(bx, by, bz, io, i_local)
             fr = real(field(gx, gy, gz), kind=8)
             fi = aimag(field(gx, gy, gz))
-            acc_re = acc_re + phi_r * fr * hvol
-            acc_im = acc_im + phi_r * fi * hvol
+	            acc_re = acc_re + phi_r * fr * hvol
+	            acc_im = acc_im + phi_r * fi * hvol
           end do
         end do
       end do
-      integral = cmplx(acc_re, acc_im, kind=8)
+	      integral = cmplx(acc_re, acc_im, kind=8)
     end if
   end subroutine integrate_local_basis_with_field_mapped

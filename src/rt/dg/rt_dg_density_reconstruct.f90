@@ -62,6 +62,7 @@
     integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     integer, allocatable :: basis_gid_spin(:,:), valid_basis_ids_spin(:,:), valid_basis_count_spin(:)
+    integer, allocatable :: phi_map_x(:), phi_map_y(:), phi_map_z(:)
     real(8), allocatable :: basis_sdiag_probe(:,:,:)
     real(8), allocatable :: phi_col_metric_total(:,:,:)
     real(8), allocatable :: phi_col_full_metric_total(:,:,:)
@@ -87,6 +88,7 @@
     real(8), allocatable :: rho_blk_cross_partial(:)
     real(8), allocatable :: occ_cache(:), occ_sqrt_cache(:)
     complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
+    complex(8), allocatable :: coef_full_cache(:,:,:), coef_pw_view_cache(:,:,:)
     real(8) :: time_project_rho_reduce, time_project_phi_block_build
     integer :: io_s_frag, io_e_frag, nocc_loc, nocc_per_rank_loc
     integer :: nblocks_max, block_cache_idx, npt_cache, rem_xy
@@ -628,6 +630,23 @@
     allocate(coef_im_full(nbf_max, max(1, nocc_cache), system%nspin))
     allocate(occ_cache(max(1, nocc_cache)), occ_sqrt_cache(max(1, nocc_cache)))
     allocate(coef_c_full(nbf_max, max(1, nocc_cache)), coef_c_frag(nbf_max, max(1, nocc_cache)))
+    allocate(coef_full_cache(max(1, dg_frag%n_mat_max), max(1, nocc_cache), system%nspin))
+    coef_full_cache(:, :, :) = (0.0d0, 0.0d0)
+    if (n_pw > 0) then
+      allocate(coef_pw_view_cache(max(1, n_pw), max(1, nocc_cache), system%nspin))
+      coef_pw_view_cache(:, :, :) = (0.0d0, 0.0d0)
+    end if
+    do ispin = 1, system%nspin
+      nocc_spin = dg_frag%nocc_spin(ispin)
+      if (nocc_spin <= 0) cycle
+      call gather_full_coef_view(dg_frag, ispin, dg_frag%n_mat_max, nocc_spin, coef_probe_full, coef_probe_pw, 1, nocc_spin)
+      coef_full_cache(1:dg_frag%n_mat_max, 1:nocc_spin, ispin) = coef_probe_full(1:dg_frag%n_mat_max, 1:nocc_spin)
+      if (n_pw > 0 .and. allocated(coef_pw_view_cache) .and. allocated(coef_probe_pw)) then
+        coef_pw_view_cache(1:n_pw, 1:nocc_spin, ispin) = coef_probe_pw(1:n_pw, 1:nocc_spin)
+      end if
+    end do
+    if (allocated(coef_probe_full)) deallocate(coef_probe_full)
+    if (allocated(coef_probe_pw)) deallocate(coef_probe_pw)
     call cpu_time(t_setup0)
     need_phi_cache_alloc = (.not. allocated(dg_frag%density_phi_block_cache))
     need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
@@ -650,6 +669,16 @@
       phi_lg1 = dg_frag%lgnum_total(1)
       phi_lg2 = dg_frag%lgnum_total(2)
       phi_lg3 = dg_frag%lgnum_total(3)
+      allocate(phi_map_x(phi_lg1), phi_map_y(phi_lg2), phi_map_z(phi_lg3))
+      do ixg = 1, phi_lg1
+        phi_map_x(ixg) = map_global_to_phi_box_coord_ham(ixg, phi_lb1, phi_ub1, phi_lg1)
+      end do
+      do iyg = 1, phi_lg2
+        phi_map_y(iyg) = map_global_to_phi_box_coord_ham(iyg, phi_lb2, phi_ub2, phi_lg2)
+      end do
+      do izg = 1, phi_lg3
+        phi_map_z(izg) = map_global_to_phi_box_coord_ham(izg, phi_lb3, phi_ub3, phi_lg3)
+      end do
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
@@ -663,9 +692,9 @@
             ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
             iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
             izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
-            bx = map_global_to_phi_box_coord_ham(ixg, phi_lb1, phi_ub1, phi_lg1)
-            by = map_global_to_phi_box_coord_ham(iyg, phi_lb2, phi_ub2, phi_lg2)
-            bz = map_global_to_phi_box_coord_ham(izg, phi_lb3, phi_ub3, phi_lg3)
+            bx = phi_map_x(modulo(ixg - 1, phi_lg1) + 1)
+            by = phi_map_y(modulo(iyg - 1, phi_lg2) + 1)
+            bz = phi_map_z(modulo(izg - 1, phi_lg3) + 1)
             if (bx == 0 .or. by == 0 .or. bz == 0) cycle
             do istate_frag = 1, dg_frag%nstate_frag
               dg_frag%density_phi_block_cache(igrid, istate_frag, block_cache_idx, i_local) = &
@@ -675,6 +704,7 @@
 !$omp end parallel do
         end do
       end do
+      deallocate(phi_map_x, phi_map_y, phi_map_z)
       dg_frag%density_phi_block_size = grid_block_size
       dg_frag%density_phi_block_cache_valid = .true.
       rebuilt_phi_block_cache = .true.
@@ -808,14 +838,13 @@
             coef_re_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
             coef_im_frag(1:nbf_max, 1:nocc_spin) = 0.0d0
             coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-            call gather_full_coef_view(dg_frag, ispin, dg_frag%n_mat_max, nocc_spin, coef_probe_full, coef_probe_pw, 1, nocc_spin)
 !$omp parallel do private(io, idx_local, istate_frag, ig_i) schedule(static)
             do io = 1, nocc_spin
               do idx_local = 1, valid_basis_count
                 istate_frag = valid_basis_ids_spin(idx_local, ispin)
                 ig_i = basis_gid_spin(istate_frag, ispin)
-                if (ig_i < 1 .or. ig_i > size(coef_probe_full, 1)) cycle
-                coef_c_full(istate_frag, io) = coef_probe_full(ig_i, io)
+                if (ig_i < 1 .or. ig_i > size(coef_full_cache, 1)) cycle
+                coef_c_full(istate_frag, io) = coef_full_cache(ig_i, io, ispin)
               end do
             end do
 !$omp end parallel do
@@ -973,13 +1002,12 @@
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             valid_basis_count = valid_basis_count_spin(ispin)
             coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-            call gather_full_coef_view(dg_frag, ispin, dg_frag%n_mat_max, nocc_spin, coef_probe_full, coef_probe_pw, 1, nocc_spin)
 !$omp parallel do private(io, idx_local, istate_frag) schedule(static)
             do io = 1, nocc_spin
               do idx_local = 1, valid_basis_count
                 istate_frag = valid_basis_ids_spin(idx_local, ispin)
-                if (basis_gid_spin(istate_frag, ispin) < 1 .or. basis_gid_spin(istate_frag, ispin) > size(coef_probe_full, 1)) cycle
-                coef_c_full(istate_frag, io) = coef_probe_full(basis_gid_spin(istate_frag, ispin), io)
+                if (basis_gid_spin(istate_frag, ispin) < 1 .or. basis_gid_spin(istate_frag, ispin) > size(coef_full_cache, 1)) cycle
+                coef_c_full(istate_frag, io) = coef_full_cache(basis_gid_spin(istate_frag, ispin), io, ispin)
               end do
             end do
 !$omp end parallel do
@@ -1718,6 +1746,8 @@
     if (allocated(coef_im_full)) deallocate(coef_im_full)
     if (allocated(coef_c_full)) deallocate(coef_c_full)
     if (allocated(coef_c_frag)) deallocate(coef_c_frag)
+    if (allocated(coef_full_cache)) deallocate(coef_full_cache)
+    if (allocated(coef_pw_view_cache)) deallocate(coef_pw_view_cache)
     if (allocated(occ_cache)) deallocate(occ_cache)
     if (allocated(occ_sqrt_cache)) deallocate(occ_sqrt_cache)
     if (allocated(rho_blk_partial)) deallocate(rho_blk_partial)
