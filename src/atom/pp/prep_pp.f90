@@ -166,6 +166,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
 
   if (property == 'initial') then
     call write_vloctbl_derivative_diagnostics(pp)
+    call write_local_sr_u_diagnostics(pp)
   end if
 
   call timer_begin(LOG_INIT_PS_UVPSI)
@@ -742,6 +743,117 @@ real(8) function integrate_local_sr_dvg_dg2_shell(pp, ik, gmag, npt_loc_sr_aux_2
     end do
   end do
 end function integrate_local_sr_dvg_dg2_shell
+
+!===================================================================================================================================
+
+subroutine write_local_sr_u_diagnostics(pp)
+  use communication, only: comm_is_root
+  use filesystem, only: open_filehandle
+  use parallelization, only: nproc_id_global
+  use salmon_global, only: base_directory, ps_format, sysname
+  use structures, only: s_pp_info
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer :: fh, i, i1, i2, i3, ik, nlcc_flag, nr, seg
+  real(8) :: a1, a3, rsw, r1, r2, r3, r_at_max_du_jump, dr_jump
+  real(8) :: u_r1, u_r2, u_r3, u_switch_poly, du_switch_poly
+  real(8) :: u_switch_seg, du_switch_seg, delta_u_switch, delta_du_switch
+  real(8) :: u_at_rps, du_tail, max_abs_du_jump
+  logical :: has_nlcc
+  character(256) :: filename
+
+  if (.not. comm_is_root(nproc_id_global)) return
+
+  filename = trim(base_directory)//trim(sysname)//'_pp_local_sr_u_summary.data'
+  fh = open_filehandle(filename, status="replace")
+  write(fh, '("#",1X,A)') 'Local-SR shared-u property summary'
+  write(fh, '("#",1X,A)') 'u(r) = r * V_sr(r) = r * V_loc(r) + Z'
+  write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+    & 1, "ik", "none", &
+    & 2, "symbol", "none", &
+    & 3, "ps_format", "none", &
+    & 4, "nlcc", "none", &
+    & 5, "nrps", "none", &
+    & 6, "nrloc", "none", &
+    & 7, "rps", "a.u.", &
+    & 8, "r1", "a.u.", &
+    & 9, "r2", "a.u.", &
+    & 10, "r3", "a.u.", &
+    & 11, "r_switch", "a.u.", &
+    & 12, "a1", "Ha", &
+    & 13, "a3", "Ha/a.u.^2", &
+    & 14, "u_r1", "Ha*a.u.", &
+    & 15, "u_r2", "Ha*a.u.", &
+    & 16, "u_r3", "Ha*a.u.", &
+    & 17, "delta_u_switch", "Ha*a.u.", &
+    & 18, "delta_du_switch", "Ha", &
+    & 19, "u_at_rps", "Ha*a.u.", &
+    & 20, "du_tail", "Ha", &
+    & 21, "max_abs_du_jump", "Ha", &
+    & 22, "r_at_max_du_jump", "a.u."
+
+  do ik = 1, size(pp%atom_symbol)
+    nr = pp%nrps(ik)
+    if (nr < 3) cycle
+
+    i1 = 0
+    i2 = 0
+    i3 = 0
+    do i = 1, nr
+      if (pp%rad(i,ik) <= 0d0) cycle
+      if (i1 == 0) then
+        i1 = i
+      else if (i2 == 0) then
+        i2 = i
+      else
+        i3 = i
+        exit
+      end if
+    end do
+    if (i1 == 0 .or. i2 == 0 .or. i3 == 0) cycle
+
+    r1 = pp%rad(i1,ik)
+    r2 = pp%rad(i2,ik)
+    r3 = pp%rad(i3,ik)
+    u_r1 = pp%u_sr_tbl(i1,ik)
+    u_r2 = pp%u_sr_tbl(i2,ik)
+    u_r3 = pp%u_sr_tbl(i3,ik)
+
+    a1 = pp%u_sr_origin_coef(1,1,ik)
+    a3 = pp%u_sr_origin_coef(2,1,ik)
+    rsw = pp%r_sr_origin_switch(ik)
+    u_switch_poly = a1*rsw + a3*rsw**3
+    du_switch_poly = a1 + 3d0*a3*rsw**2
+    call eval_local_sr_shared_u(pp, ik, rsw, u_switch_seg, du_switch_seg)
+    delta_u_switch = u_switch_seg - u_switch_poly
+    delta_du_switch = du_switch_seg - du_switch_poly
+
+    seg = max(1, min(pp%nrloc(ik)-1, nr-1))
+    u_at_rps = pp%u_sr_tbl(pp%nrloc(ik),ik)
+    du_tail = pp%du_sr_seg(seg,ik)
+
+    max_abs_du_jump = 0d0
+    r_at_max_du_jump = pp%rad(i2,ik)
+    do i = 2, nr - 1
+      dr_jump = abs(pp%du_sr_seg(i,ik) - pp%du_sr_seg(i-1,ik))
+      if (dr_jump > max_abs_du_jump) then
+        max_abs_du_jump = dr_jump
+        r_at_max_du_jump = pp%rad(i,ik)
+      end if
+    end do
+
+    has_nlcc = maxval(abs(pp%rho_nlcc_tbl(:,ik))) > 0d0
+    nlcc_flag = 0
+    if (has_nlcc) nlcc_flag = 1
+
+    write(fh,'(1X,I4,1X,A8,1X,A10,1X,I1,1X,I6,1X,I6,16(1X,ES23.15E3))') &
+      & ik, trim(pp%atom_symbol(ik)), trim(ps_format(ik)), nlcc_flag, pp%nrps(ik), pp%nrloc(ik), &
+      & pp%rps(ik), r1, r2, r3, rsw, a1, a3, u_r1, u_r2, u_r3, delta_u_switch, delta_du_switch, &
+      & u_at_rps, du_tail, max_abs_du_jump, r_at_max_du_jump
+  end do
+
+  close(fh)
+end subroutine write_local_sr_u_diagnostics
 
 !===================================================================================================================================
 
