@@ -362,6 +362,8 @@ module salmon_global
   character(16)  :: method_loc_sr_derivative = 'table'
   character(16)  :: method_loc_sr_origin = 'poly3'
   integer        :: npt_loc_sr_aux_2pi = 0
+  real(8)        :: probe_loc_sr_fit_u1_scale = 1d0
+  real(8)        :: probe_loc_sr_fit_du12_scale = 1d0
   integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps

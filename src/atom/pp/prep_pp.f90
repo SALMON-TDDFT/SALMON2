@@ -537,13 +537,13 @@ end subroutine init_ps
 !===================================================================================================================================
 
 subroutine build_local_sr_shared_u(pp, ik)
-  use salmon_global, only: method_loc_sr_origin
+  use salmon_global, only: method_loc_sr_origin, probe_loc_sr_fit_du12_scale, probe_loc_sr_fit_u1_scale
   use structures, only: s_pp_info
   implicit none
   type(s_pp_info), intent(inout) :: pp
   integer, intent(in) :: ik
   integer :: i, i1, i2, nr, switch_idx
-  real(8) :: a1, a3, denom, dr, r1, r2, u1, u2, v1, v2
+  real(8) :: a1, a3, denom, dr, r1, r2, u1_fit, u1_raw, u2_fit, u2_raw, v1, v2
 
   nr = pp%nrps(ik)
   if (nr < 3) stop 'build_local_sr_shared_u: need at least 3 radial points'
@@ -582,8 +582,10 @@ subroutine build_local_sr_shared_u(pp, ik)
 
   r1 = pp%rad(i1,ik)
   r2 = pp%rad(i2,ik)
-  u1 = pp%u_sr_tbl(i1,ik)
-  u2 = pp%u_sr_tbl(i2,ik)
+  u1_raw = pp%u_sr_tbl(i1,ik)
+  u2_raw = pp%u_sr_tbl(i2,ik)
+  u1_fit = probe_loc_sr_fit_u1_scale * u1_raw
+  u2_fit = u1_raw + probe_loc_sr_fit_du12_scale * (u2_raw - u1_raw)
   select case(trim(method_loc_sr_origin))
   case('poly3')
     switch_idx = 3
@@ -591,12 +593,12 @@ subroutine build_local_sr_shared_u(pp, ik)
     pp%r_sr_origin_switch(ik) = pp%rad(switch_idx,ik)
     denom = r1 * r2 * (r2*r2 - r1*r1)
     if (abs(denom) <= tiny(1d0)) stop 'build_local_sr_shared_u: degenerate origin fit'
-    a3 = (u2 * r1 - u1 * r2) / denom
-    a1 = (u1 - a3 * r1**3) / r1
+    a3 = (u2_fit * r1 - u1_fit * r2) / denom
+    a1 = (u1_fit - a3 * r1**3) / r1
   case('vsr_linear')
     if (abs(r2 - r1) <= tiny(1d0)) stop 'build_local_sr_shared_u: degenerate vsr extrapolation'
-    v1 = u1 / r1
-    v2 = u2 / r2
+    v1 = u1_fit / r1
+    v2 = u2_fit / r2
     a1 = v1 - (v2 - v1) * r1 / (r2 - r1)
     a3 = 0d0
     pp%r_sr_origin_switch(ik) = r1

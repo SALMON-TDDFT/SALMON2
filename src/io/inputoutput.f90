@@ -527,6 +527,8 @@ contains
       & method_loc_sr_derivative, &
       & method_loc_sr_origin, &
       & npt_loc_sr_aux_2pi, &
+      & probe_loc_sr_fit_u1_scale, &
+      & probe_loc_sr_fit_du12_scale, &
       & out_stress_step, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
@@ -979,6 +981,8 @@ contains
     method_loc_sr_derivative = 'table'
     method_loc_sr_origin = 'poly3'
     npt_loc_sr_aux_2pi = 0
+    probe_loc_sr_fit_u1_scale = 1d0
+    probe_loc_sr_fit_du12_scale = 1d0
     out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -1622,6 +1626,8 @@ contains
     call comm_bcast(method_loc_sr_derivative,nproc_group_global)
     call comm_bcast(method_loc_sr_origin,nproc_group_global)
     call comm_bcast(npt_loc_sr_aux_2pi  ,nproc_group_global)
+    call comm_bcast(probe_loc_sr_fit_u1_scale,nproc_group_global)
+    call comm_bcast(probe_loc_sr_fit_du12_scale,nproc_group_global)
     call comm_bcast(out_stress_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
@@ -2561,6 +2567,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_loc_sr_derivative', trim(method_loc_sr_derivative)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_loc_sr_origin', trim(method_loc_sr_origin)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'npt_loc_sr_aux_2pi', npt_loc_sr_aux_2pi
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'probe_loc_sr_fit_u1_scale', probe_loc_sr_fit_u1_scale
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'probe_loc_sr_fit_du12_scale', probe_loc_sr_fit_du12_scale
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
@@ -2740,7 +2748,7 @@ contains
     use communication
     implicit none
     integer :: i,round_phi
-    real(8) :: udp_phi  ! udp: under dicimal point
+    real(8) :: loc_sr_probe_tol, udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
@@ -3121,6 +3129,14 @@ contains
       call fail_stress_input("out_stress_step must be >= 1")
     if(npt_loc_sr_aux_2pi < 0) &
       call fail_stress_input("npt_loc_sr_aux_2pi must be >= 0")
+    if(probe_loc_sr_fit_u1_scale <= 0d0) &
+      call fail_stress_input("probe_loc_sr_fit_u1_scale must be > 0d0")
+    if(probe_loc_sr_fit_du12_scale <= 0d0) &
+      call fail_stress_input("probe_loc_sr_fit_du12_scale must be > 0d0")
+    loc_sr_probe_tol = 1d-12
+    if(abs(probe_loc_sr_fit_u1_scale - 1d0) > loc_sr_probe_tol .and. &
+       abs(probe_loc_sr_fit_du12_scale - 1d0) > loc_sr_probe_tol) &
+      call fail_stress_input("probe_loc_sr_fit_u1_scale and probe_loc_sr_fit_du12_scale cannot be combined in one run")
     
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
