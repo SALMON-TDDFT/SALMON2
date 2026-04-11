@@ -247,9 +247,13 @@ module salmon_pp
 
     allocate(pp%rad(nrmax,nelem))
     allocate(pp%radnl(nrmax,nelem))
-    
+
     allocate(pp%vloctbl(nrmax,nelem))
     allocate(pp%dvloctbl(nrmax,nelem))
+    allocate(pp%u_sr_tbl(nrmax,nelem)); pp%u_sr_tbl=0.0d0
+    allocate(pp%du_sr_seg(nrmax,nelem)); pp%du_sr_seg=0.0d0
+    allocate(pp%u_sr_origin_coef(2,1,nelem)); pp%u_sr_origin_coef=0.0d0
+    allocate(pp%r_sr_origin_switch(nelem)); pp%r_sr_origin_switch=0.0d0
     allocate(pp%udvtbl(nrmax,0:2*lmax+1,nelem)); pp%udvtbl=0.0d0
     allocate(pp%dudvtbl(nrmax,0:2*lmax+1,nelem)); pp%dudvtbl=0.0d0
     

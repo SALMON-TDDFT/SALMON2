@@ -34,6 +34,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
+  use prep_pp_sub, only: build_local_sr_shared_u
   use read_ps_upf_module, only: read_ps_upf
   use read_paw_upf_module, only: read_paw_upf
   implicit none
@@ -231,6 +232,8 @@ subroutine input_pp(pp,hx,hy,hz)
         stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
 
+      call build_local_sr_shared_u(pp, ik)
+
       pp%upp_f(:,:,ik)=pp%upp(:,:)
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
@@ -262,6 +265,10 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%radnl,nproc_group_global)
   call comm_bcast(pp%vloctbl,nproc_group_global)
   call comm_bcast(pp%dvloctbl,nproc_group_global)
+  call comm_bcast(pp%u_sr_tbl,nproc_group_global)
+  call comm_bcast(pp%du_sr_seg,nproc_group_global)
+  call comm_bcast(pp%u_sr_origin_coef,nproc_group_global)
+  call comm_bcast(pp%r_sr_origin_switch,nproc_group_global)
   call comm_bcast(pp%udvtbl,nproc_group_global)
   call comm_bcast(pp%dudvtbl,nproc_group_global)
   call comm_bcast(pp%upp_f,nproc_group_global)

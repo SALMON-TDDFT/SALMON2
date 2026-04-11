@@ -1085,27 +1085,28 @@ contains
   pure real(8) function eval_local_sr_vg_from_table(pp, ik, gmag) result(vg)
     use structures
     use math_constants, only: pi
+    use prep_pp_sub, only: eval_local_sr_shared_u
     implicit none
     type(s_pp_info), intent(in) :: pp
     integer,         intent(in) :: ik
     real(8),         intent(in) :: gmag
     integer :: i
-    real(8) :: r1, dr, vloc_av
+    real(8) :: r1, dr, u_r, du_r
 
     vg = 0d0
     if(gmag == 0d0) then
       do i = 2, pp%nrloc(ik)
         r1 = 0.5d0 * (pp%rad(i,ik) + pp%rad(i-1,ik))
         dr = pp%rad(i,ik) - pp%rad(i-1,ik)
-        vloc_av = 0.5d0 * (pp%vloctbl(i,ik) + pp%vloctbl(i-1,ik))
-        vg = vg + 4d0 * pi * (r1**2 * vloc_av + r1 * pp%zps(ik)) * dr
+        call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
+        vg = vg + 4d0 * pi * r1 * u_r * dr
       end do
     else
       do i = 2, pp%nrloc(ik)
         r1 = 0.5d0 * (pp%rad(i,ik) + pp%rad(i-1,ik))
         dr = pp%rad(i,ik) - pp%rad(i-1,ik)
-        vloc_av = 0.5d0 * (pp%vloctbl(i,ik) + pp%vloctbl(i-1,ik))
-        vg = vg + 4d0 * pi * sin(gmag * r1) / gmag * (r1 * vloc_av + pp%zps(ik)) * dr
+        call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
+        vg = vg + 4d0 * pi * sin(gmag * r1) / gmag * u_r * dr
       end do
     end if
   end function eval_local_sr_vg_from_table
@@ -1494,7 +1495,8 @@ contains
     use structures
     use math_constants, only: pi
     use communication,  only: comm_summation
-    use salmon_global,  only: kion, method_loc_sr_derivative
+    use salmon_global,  only: kion
+    use prep_pp_sub, only: eval_local_sr_shared_u
     implicit none
     type(s_dft_system),    intent(inout) :: system
     type(s_pp_info),       intent(in)    :: pp
@@ -1503,10 +1505,9 @@ contains
     type(s_pp_grid),       intent(in)    :: ppg
     type(s_scalar),        intent(in)    :: rho_s(:)
     integer  :: ia, ik, j, a, b, ix, iy, iz, intr, ispin, nspin
-    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, vloc_r, dvloc_r
-    real(8)  :: ratio, V, hvol
+    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, u_r, du_r
+    real(8)  :: V, hvol
     real(8)  :: strs(3,3), strs_sum(3,3)
-    real(8)  :: r_lo, r_hi, v_lo, v_hi, dv_lo, dv_hi
 
     V = system%det_a
     hvol = system%Hvol
@@ -1532,33 +1533,12 @@ contains
           rho_val = rho_val + rho_s(ispin)%f(ix,iy,iz)
         end do
 
-        ! Interpolate V_loc(r) and dV_loc/dr from the PP table.
-        ! Find radial interval by bisection in pp%rad.
         call find_radial_index(r_abs, pp%rad(:,ik), pp%nrloc(ik), intr)
-        if(intr < 2 .or. intr >= pp%nrloc(ik)) cycle
+        if(intr < 1 .or. intr >= pp%nrloc(ik)) cycle
 
-        r_lo = pp%rad(intr, ik)
-        r_hi = pp%rad(intr+1, ik)
-        v_lo = pp%vloctbl(intr, ik)
-        v_hi = pp%vloctbl(intr+1, ik)
-        dv_lo = pp%dvloctbl(intr, ik)
-        dv_hi = pp%dvloctbl(intr+1, ik)
-        ratio = (r_abs - r_lo) / (r_hi - r_lo)
-
-        ! Linear interpolation of V_loc and dV_loc/dr
-        vloc_r = v_lo + ratio * (v_hi - v_lo)
-        select case(trim(method_loc_sr_derivative))
-        case('table')
-          dvloc_r = dv_lo + ratio * (dv_hi - dv_lo)
-        case('slope')
-          dvloc_r = (v_hi - v_lo) / (r_hi - r_lo)
-        case default
-          call fail_stress("method_loc_sr_derivative must be 'table' or 'slope'")
-        end select
-
-        ! V'_sr(r) = dV_loc/dr - Z/r^2
-        ! (V_sr = V_loc + Z/r, so V'_sr = V'_loc - Z/r^2)
-        dvsr_dr = dvloc_r - dble(pp%zps(ik)) * r_inv**2
+        call eval_local_sr_shared_u(pp,ik,r_abs,u_r,du_r,intr)
+        ! V_sr(r) = u(r) / r, so V'_sr(r) = (u'(r) * r - u(r)) / r^2
+        dvsr_dr = (du_r * r_abs - u_r) * r_inv**2
 
         ! Accumulate: -rho * V'_sr * s_a * s_b / |s| * hvol
         do b = 1, 3

@@ -536,6 +536,110 @@ end subroutine init_ps
 
 !===================================================================================================================================
 
+subroutine build_local_sr_shared_u(pp, ik)
+  use structures, only: s_pp_info
+  implicit none
+  type(s_pp_info), intent(inout) :: pp
+  integer, intent(in) :: ik
+  integer :: i, i1, i2, nr, switch_idx
+  real(8) :: a1, a3, denom, dr, r1, r2, u1, u2
+
+  nr = pp%nrps(ik)
+  if (nr < 3) stop 'build_local_sr_shared_u: need at least 3 radial points'
+
+  pp%u_sr_tbl(:,ik) = 0d0
+  pp%du_sr_seg(:,ik) = 0d0
+  pp%u_sr_origin_coef(:,:,ik) = 0d0
+  pp%r_sr_origin_switch(ik) = 0d0
+
+  do i = 1, nr
+    pp%u_sr_tbl(i,ik) = pp%rad(i,ik) * pp%vloctbl(i,ik) + dble(pp%zps(ik))
+  end do
+
+  do i = 1, nr - 1
+    dr = pp%rad(i+1,ik) - pp%rad(i,ik)
+    if (dr > 0d0) then
+      pp%du_sr_seg(i,ik) = (pp%u_sr_tbl(i+1,ik) - pp%u_sr_tbl(i,ik)) / dr
+    else
+      pp%du_sr_seg(i,ik) = 0d0
+    end if
+  end do
+  if (nr > 1) pp%du_sr_seg(nr,ik) = pp%du_sr_seg(nr-1,ik)
+
+  switch_idx = 3
+  if (nr < switch_idx) stop 'build_local_sr_shared_u: invalid origin switch'
+  pp%r_sr_origin_switch(ik) = pp%rad(switch_idx,ik)
+
+  i1 = 0
+  i2 = 0
+  do i = 1, switch_idx
+    if (pp%rad(i,ik) <= 0d0) cycle
+    if (i1 == 0) then
+      i1 = i
+    else
+      i2 = i
+      exit
+    end if
+  end do
+  if (i1 == 0 .or. i2 == 0) stop 'build_local_sr_shared_u: unable to fit origin polynomial'
+
+  r1 = pp%rad(i1,ik)
+  r2 = pp%rad(i2,ik)
+  u1 = pp%u_sr_tbl(i1,ik)
+  u2 = pp%u_sr_tbl(i2,ik)
+  denom = r1 * r2 * (r2*r2 - r1*r1)
+  if (abs(denom) <= tiny(1d0)) stop 'build_local_sr_shared_u: degenerate origin fit'
+
+  a3 = (u2 * r1 - u1 * r2) / denom
+  a1 = (u1 - a3 * r1**3) / r1
+  pp%u_sr_origin_coef(1,1,ik) = a1
+  pp%u_sr_origin_coef(2,1,ik) = a3
+end subroutine build_local_sr_shared_u
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+pure subroutine eval_local_sr_shared_u(pp, ik, r, u_r, du_r, intr)
+  use structures, only: s_pp_info
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer, intent(in) :: ik
+  real(8), intent(in) :: r
+  real(8), intent(out) :: u_r, du_r
+  integer, intent(in), optional :: intr
+  integer :: i, seg
+  real(8) :: a1, a3, rsw
+
+  a1 = pp%u_sr_origin_coef(1,1,ik)
+  a3 = pp%u_sr_origin_coef(2,1,ik)
+  rsw = pp%r_sr_origin_switch(ik)
+
+  if (r < rsw) then
+    u_r = a1*r + a3*r*r*r
+    du_r = a1 + 3d0*a3*r*r
+    return
+  end if
+
+  if (present(intr)) then
+    seg = intr
+  else
+    seg = 1
+    do i = 1, pp%nrps(ik) - 1
+      if (r < pp%rad(i+1,ik)) exit
+      seg = i
+    end do
+  end if
+  if (pp%nrps(ik) > 1) then
+    seg = max(1, min(seg, pp%nrps(ik)-1))
+  else
+    seg = 1
+  end if
+
+  u_r = pp%u_sr_tbl(seg,ik) + pp%du_sr_seg(seg,ik) * (r - pp%rad(seg,ik))
+  du_r = pp%du_sr_seg(seg,ik)
+end subroutine eval_local_sr_shared_u
+
+!===================================================================================================================================
+
 subroutine write_vloctbl_derivative_diagnostics(pp)
   use communication, only: comm_is_root
   use filesystem, only: open_filehandle
@@ -718,7 +822,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   integer :: ifgx_s,ifgx_e
   integer :: ifgy_s,ifgy_e
   integer :: ifgz_s,ifgz_e
-  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
+  real(8) :: g(3),gd,s,g2sq,r1,dr,u_r,du_r
   complex(8) :: tmp_exp
   complex(8),allocatable :: vtmp1(:,:,:,:),vtmp2(:,:,:,:)
 
@@ -844,7 +948,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
 
 
   !$omp parallel
-  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
       do ik=1,nelem
         do iz=ifgz_s,ifgz_e
         do iy=ifgy_s,ifgy_e
@@ -858,15 +962,15 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
             do i=2,pp%nrloc(ik)
               r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
               dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-              vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-              s=s+4d0*pi*(r1**2*vloc_av+r1*pp%zps(ik))*dr
+              call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
+              s=s+4d0*pi*r1*u_r*dr
             end do
           else
             do i=2,pp%nrloc(ik)
               r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
               dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-              vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-              s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
+              call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
+              s=s+4d0*pi*sin(g2sq*r1)/g2sq*u_r*dr !Vloc - coulomb
             end do
           end if
           ppg%zVG_ion(ix,iy,iz,ik) = s
@@ -878,7 +982,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   !$omp end parallel
 
       if(yn_out_stress == 'y') then
-  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
         do ik=1,nelem
           do iz=ifgz_s,ifgz_e
           do iy=ifgy_s,ifgy_e
@@ -892,12 +996,12 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
             do i=2,pp%nrloc(ik)
               r1 = 0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
               dr = pp%rad(i,ik)-pp%rad(i-1,ik)
-              vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+              call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
               if(g2sq*r1 < 1d-2) then
-                s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+                s = s + 4d0*pi*u_r &
                       * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/1680d0) * dr
               else
-                s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+                s = s + 4d0*pi*u_r &
                       * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
               end if
             end do
@@ -994,7 +1098,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   character(17)          ,intent(in) :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
-  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
+  real(8) :: g(3),gd,s,g2sq,r1,dr,u_r,du_r
   complex(8) :: tmp_exp
   complex(8) :: vtmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
   complex(8) :: vtmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
@@ -1010,7 +1114,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
 
     ppg%zVG_ion = 0d0
   !$omp parallel
-  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
     do ik=1,nelem
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1024,15 +1128,15 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
           do i=2,pp%nrloc(ik)
             r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
             dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-            vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-            s=s+4d0*pi*(r1**2*vloc_av+r1*pp%zps(ik))*dr
+            call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
+            s=s+4d0*pi*r1*u_r*dr
           end do
         else
           do i=2,pp%nrloc(ik)
             r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
             dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-            vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-            s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
+            call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
+            s=s+4d0*pi*sin(g2sq*r1)/g2sq*u_r*dr !Vloc - coulomb
           end do
         end if
         ppg%zVG_ion(ix,iy,iz,ik) = s
@@ -1044,7 +1148,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   !$omp end parallel
 
     if(yn_out_stress == 'y') then
-  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
       do ik=1,nelem
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -1058,12 +1162,12 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
           do i=2,pp%nrloc(ik)
             r1 = 0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
             dr = pp%rad(i,ik)-pp%rad(i-1,ik)
-            vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+            call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
             if(g2sq*r1 < 1d-2) then
-              s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+              s = s + 4d0*pi*u_r &
                     * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/1680d0) * dr
             else
-              s = s + 4d0*pi*(r1*vloc_av + pp%zps(ik)) &
+              s = s + 4d0*pi*u_r &
                     * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
             end if
           end do
