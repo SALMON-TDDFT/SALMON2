@@ -1062,7 +1062,7 @@ contains
     system%stress_loc_sr_gspace_dvg_g_at_max = g_at_max_global
   end subroutine calc_local_sr_gspace_diagnostics
 
-  pure real(8) function numerical_dvg_dg2_from_vg(pp, ik, gmag, h) result(dvg_num)
+  real(8) function numerical_dvg_dg2_from_vg(pp, ik, gmag, h) result(dvg_num)
     use structures
     implicit none
     type(s_pp_info), intent(in) :: pp
@@ -1082,33 +1082,16 @@ contains
     end if
   end function numerical_dvg_dg2_from_vg
 
-  pure real(8) function eval_local_sr_vg_from_table(pp, ik, gmag) result(vg)
+  real(8) function eval_local_sr_vg_from_table(pp, ik, gmag) result(vg)
     use structures
-    use math_constants, only: pi
-    use prep_pp_sub, only: eval_local_sr_shared_u
+    use salmon_global, only: npt_loc_sr_aux_2pi
+    use prep_pp_sub, only: integrate_local_sr_vg_shell
     implicit none
     type(s_pp_info), intent(in) :: pp
     integer,         intent(in) :: ik
     real(8),         intent(in) :: gmag
-    integer :: i
-    real(8) :: r1, dr, u_r, du_r
 
-    vg = 0d0
-    if(gmag == 0d0) then
-      do i = 2, pp%nrloc(ik)
-        r1 = 0.5d0 * (pp%rad(i,ik) + pp%rad(i-1,ik))
-        dr = pp%rad(i,ik) - pp%rad(i-1,ik)
-        call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-        vg = vg + 4d0 * pi * r1 * u_r * dr
-      end do
-    else
-      do i = 2, pp%nrloc(ik)
-        r1 = 0.5d0 * (pp%rad(i,ik) + pp%rad(i-1,ik))
-        dr = pp%rad(i,ik) - pp%rad(i-1,ik)
-        call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-        vg = vg + 4d0 * pi * sin(gmag * r1) / gmag * u_r * dr
-      end do
-    end if
+    vg = integrate_local_sr_vg_shell(pp, ik, gmag, npt_loc_sr_aux_2pi)
   end function eval_local_sr_vg_from_table
 
   subroutine calc_stress_nl(system, pp, info, mg, stencil, ppg, tpsi, energy, field_state)

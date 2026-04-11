@@ -537,12 +537,13 @@ end subroutine init_ps
 !===================================================================================================================================
 
 subroutine build_local_sr_shared_u(pp, ik)
+  use salmon_global, only: method_loc_sr_origin
   use structures, only: s_pp_info
   implicit none
   type(s_pp_info), intent(inout) :: pp
   integer, intent(in) :: ik
   integer :: i, i1, i2, nr, switch_idx
-  real(8) :: a1, a3, denom, dr, r1, r2, u1, u2
+  real(8) :: a1, a3, denom, dr, r1, r2, u1, u2, v1, v2
 
   nr = pp%nrps(ik)
   if (nr < 3) stop 'build_local_sr_shared_u: need at least 3 radial points'
@@ -566,13 +567,9 @@ subroutine build_local_sr_shared_u(pp, ik)
   end do
   if (nr > 1) pp%du_sr_seg(nr,ik) = pp%du_sr_seg(nr-1,ik)
 
-  switch_idx = 3
-  if (nr < switch_idx) stop 'build_local_sr_shared_u: invalid origin switch'
-  pp%r_sr_origin_switch(ik) = pp%rad(switch_idx,ik)
-
   i1 = 0
   i2 = 0
-  do i = 1, switch_idx
+  do i = 1, nr
     if (pp%rad(i,ik) <= 0d0) cycle
     if (i1 == 0) then
       i1 = i
@@ -587,11 +584,25 @@ subroutine build_local_sr_shared_u(pp, ik)
   r2 = pp%rad(i2,ik)
   u1 = pp%u_sr_tbl(i1,ik)
   u2 = pp%u_sr_tbl(i2,ik)
-  denom = r1 * r2 * (r2*r2 - r1*r1)
-  if (abs(denom) <= tiny(1d0)) stop 'build_local_sr_shared_u: degenerate origin fit'
-
-  a3 = (u2 * r1 - u1 * r2) / denom
-  a1 = (u1 - a3 * r1**3) / r1
+  select case(trim(method_loc_sr_origin))
+  case('poly3')
+    switch_idx = 3
+    if (nr < switch_idx) stop 'build_local_sr_shared_u: invalid origin switch'
+    pp%r_sr_origin_switch(ik) = pp%rad(switch_idx,ik)
+    denom = r1 * r2 * (r2*r2 - r1*r1)
+    if (abs(denom) <= tiny(1d0)) stop 'build_local_sr_shared_u: degenerate origin fit'
+    a3 = (u2 * r1 - u1 * r2) / denom
+    a1 = (u1 - a3 * r1**3) / r1
+  case('vsr_linear')
+    if (abs(r2 - r1) <= tiny(1d0)) stop 'build_local_sr_shared_u: degenerate vsr extrapolation'
+    v1 = u1 / r1
+    v2 = u2 / r2
+    a1 = v1 - (v2 - v1) * r1 / (r2 - r1)
+    a3 = 0d0
+    pp%r_sr_origin_switch(ik) = r1
+  case default
+    stop 'build_local_sr_shared_u: unsupported method_loc_sr_origin'
+  end select
   pp%u_sr_origin_coef(1,1,ik) = a1
   pp%u_sr_origin_coef(2,1,ik) = a3
 end subroutine build_local_sr_shared_u
@@ -637,6 +648,98 @@ pure subroutine eval_local_sr_shared_u(pp, ik, r, u_r, du_r, intr)
   u_r = pp%u_sr_tbl(seg,ik) + pp%du_sr_seg(seg,ik) * (r - pp%rad(seg,ik))
   du_r = pp%du_sr_seg(seg,ik)
 end subroutine eval_local_sr_shared_u
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+real(8) function local_sr_aux_target_dr(gmag, npt_loc_sr_aux_2pi) result(dr_target)
+  use math_constants, only: pi
+  implicit none
+  real(8), intent(in) :: gmag
+  integer, intent(in) :: npt_loc_sr_aux_2pi
+
+  if (npt_loc_sr_aux_2pi <= 0 .or. gmag <= 0d0) then
+    dr_target = huge(1d0)
+  else
+    dr_target = 2d0*pi / (dble(npt_loc_sr_aux_2pi) * gmag)
+  end if
+end function local_sr_aux_target_dr
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+real(8) function integrate_local_sr_vg_shell(pp, ik, gmag, npt_loc_sr_aux_2pi) result(vg)
+  use structures, only: s_pp_info
+  use math_constants, only: pi
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer, intent(in) :: ik
+  real(8), intent(in) :: gmag
+  integer, intent(in) :: npt_loc_sr_aux_2pi
+  integer :: i, isub, nsub
+  real(8) :: r_lo, r_hi, r_mid, dr_seg, dr_sub, dr_target, u_r, du_r
+
+  vg = 0d0
+  do i = 2, pp%nrloc(ik)
+    r_lo = pp%rad(i-1,ik)
+    r_hi = pp%rad(i,ik)
+    dr_seg = r_hi - r_lo
+    if (dr_seg <= 0d0) cycle
+    nsub = 1
+    if (npt_loc_sr_aux_2pi > 0 .and. gmag > 0d0) then
+      dr_target = local_sr_aux_target_dr(gmag, npt_loc_sr_aux_2pi)
+      nsub = max(1, ceiling(dr_seg / dr_target))
+    end if
+    dr_sub = dr_seg / dble(nsub)
+    do isub = 1, nsub
+      r_mid = r_lo + (dble(isub) - 0.5d0) * dr_sub
+      call eval_local_sr_shared_u(pp,ik,r_mid,u_r,du_r,i-1)
+      if (gmag == 0d0) then
+        vg = vg + 4d0*pi*r_mid*u_r*dr_sub
+      else
+        vg = vg + 4d0*pi*sin(gmag*r_mid)/gmag*u_r*dr_sub
+      end if
+    end do
+  end do
+end function integrate_local_sr_vg_shell
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+real(8) function integrate_local_sr_dvg_dg2_shell(pp, ik, gmag, npt_loc_sr_aux_2pi) result(dvg)
+  use structures, only: s_pp_info
+  use math_constants, only: pi
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer, intent(in) :: ik
+  real(8), intent(in) :: gmag
+  integer, intent(in) :: npt_loc_sr_aux_2pi
+  integer :: i, isub, nsub
+  real(8) :: r_lo, r_hi, r_mid, dr_seg, dr_sub, dr_target, u_r, du_r, x
+
+  dvg = 0d0
+  if (gmag <= 0d0) return
+
+  do i = 2, pp%nrloc(ik)
+    r_lo = pp%rad(i-1,ik)
+    r_hi = pp%rad(i,ik)
+    dr_seg = r_hi - r_lo
+    if (dr_seg <= 0d0) cycle
+    nsub = 1
+    if (npt_loc_sr_aux_2pi > 0) then
+      dr_target = local_sr_aux_target_dr(gmag, npt_loc_sr_aux_2pi)
+      nsub = max(1, ceiling(dr_seg / dr_target))
+    end if
+    dr_sub = dr_seg / dble(nsub)
+    do isub = 1, nsub
+      r_mid = r_lo + (dble(isub) - 0.5d0) * dr_sub
+      call eval_local_sr_shared_u(pp,ik,r_mid,u_r,du_r,i-1)
+      x = gmag * r_mid
+      if (x < 1d-2) then
+        dvg = dvg + 4d0*pi*u_r * r_mid**3 * (-1d0/6d0 + x**2/60d0 - x**4/1680d0) * dr_sub
+      else
+        dvg = dvg + 4d0*pi*u_r * (x*cos(x) - sin(x)) / (2d0*gmag**3) * dr_sub
+      end if
+    end do
+  end do
+end function integrate_local_sr_dvg_dg2_shell
 
 !===================================================================================================================================
 
@@ -799,7 +902,7 @@ END SUBROUTINE dealloc_init_ps
 
 SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   use structures
-  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_out_stress, yn_spinorbit
+  use salmon_global,only : natom, kion, quiet, method_poisson, nelem, yn_ffte, yn_out_stress, yn_spinorbit, npt_loc_sr_aux_2pi
 #ifdef USE_FFTW
   use salmon_global,only : yn_fftw
 #endif
@@ -822,7 +925,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   integer :: ifgx_s,ifgx_e
   integer :: ifgy_s,ifgy_e
   integer :: ifgz_s,ifgz_e
-  real(8) :: g(3),gd,s,g2sq,r1,dr,u_r,du_r
+  real(8) :: g(3),gd,g2sq
   complex(8) :: tmp_exp
   complex(8),allocatable :: vtmp1(:,:,:,:),vtmp2(:,:,:,:)
 
@@ -948,7 +1051,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
 
 
   !$omp parallel
-  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
+  !$omp do private(ik,ix,iy,iz,g,g2sq) collapse(3)
       do ik=1,nelem
         do iz=ifgz_s,ifgz_e
         do iy=ifgy_s,ifgy_e
@@ -957,23 +1060,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
           g(2) = fg%vec_G(2,ix,iy,iz)
           g(3) = fg%vec_G(3,ix,iy,iz)
           g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
-          s=0.d0
-          if (fg%if_Gzero(ix,iy,iz)) then
-            do i=2,pp%nrloc(ik)
-              r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-              dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-              call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-              s=s+4d0*pi*r1*u_r*dr
-            end do
-          else
-            do i=2,pp%nrloc(ik)
-              r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-              dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-              call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-              s=s+4d0*pi*sin(g2sq*r1)/g2sq*u_r*dr !Vloc - coulomb
-            end do
-          end if
-          ppg%zVG_ion(ix,iy,iz,ik) = s
+          ppg%zVG_ion(ix,iy,iz,ik) = integrate_local_sr_vg_shell(pp, ik, g2sq, npt_loc_sr_aux_2pi)
         end do
         end do
         end do
@@ -982,7 +1069,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
   !$omp end parallel
 
       if(yn_out_stress == 'y') then
-  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq) collapse(3)
         do ik=1,nelem
           do iz=ifgz_s,ifgz_e
           do iy=ifgy_s,ifgy_e
@@ -992,20 +1079,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
             g(2) = fg%vec_G(2,ix,iy,iz)
             g(3) = fg%vec_G(3,ix,iy,iz)
             g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
-            s = 0d0
-            do i=2,pp%nrloc(ik)
-              r1 = 0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-              dr = pp%rad(i,ik)-pp%rad(i-1,ik)
-              call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-              if(g2sq*r1 < 1d-2) then
-                s = s + 4d0*pi*u_r &
-                      * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/1680d0) * dr
-              else
-                s = s + 4d0*pi*u_r &
-                      * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
-              end if
-            end do
-            ppg%dVG_ion_dG2(ix,iy,iz,ik) = s
+            ppg%dVG_ion_dG2(ix,iy,iz,ik) = integrate_local_sr_dvg_dg2_shell(pp, ik, g2sq, npt_loc_sr_aux_2pi)
           end do
           end do
           end do
@@ -1082,7 +1156,7 @@ END SUBROUTINE calc_Vpsl_isolated
 !===================================================================================================================================
 
 subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
-  use salmon_global,only : nelem, kion, yn_ffte, yn_out_stress
+  use salmon_global,only : nelem, kion, yn_ffte, yn_out_stress, npt_loc_sr_aux_2pi
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
@@ -1098,7 +1172,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   character(17)          ,intent(in) :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
-  real(8) :: g(3),gd,s,g2sq,r1,dr,u_r,du_r
+  real(8) :: g(3),gd,g2sq
   complex(8) :: tmp_exp
   complex(8) :: vtmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
   complex(8) :: vtmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
@@ -1114,7 +1188,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
 
     ppg%zVG_ion = 0d0
   !$omp parallel
-  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
+  !$omp do private(ik,ix,iy,iz,g,g2sq) collapse(3)
     do ik=1,nelem
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1123,23 +1197,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
         g(2) = fg%vec_G(2,ix,iy,iz)
         g(3) = fg%vec_G(3,ix,iy,iz)
         g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
-        s=0.d0
-        if (fg%if_Gzero(ix,iy,iz)) then
-          do i=2,pp%nrloc(ik)
-            r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-            dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-            call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-            s=s+4d0*pi*r1*u_r*dr
-          end do
-        else
-          do i=2,pp%nrloc(ik)
-            r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-            dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-            call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-            s=s+4d0*pi*sin(g2sq*r1)/g2sq*u_r*dr !Vloc - coulomb
-          end do
-        end if
-        ppg%zVG_ion(ix,iy,iz,ik) = s
+        ppg%zVG_ion(ix,iy,iz,ik) = integrate_local_sr_vg_shell(pp, ik, g2sq, npt_loc_sr_aux_2pi)
       end do
       end do
       end do
@@ -1148,7 +1206,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   !$omp end parallel
 
     if(yn_out_stress == 'y') then
-  !$omp parallel do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,u_r,du_r) collapse(3)
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq) collapse(3)
       do ik=1,nelem
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -1158,20 +1216,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
           g(2) = fg%vec_G(2,ix,iy,iz)
           g(3) = fg%vec_G(3,ix,iy,iz)
           g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
-          s = 0d0
-          do i=2,pp%nrloc(ik)
-            r1 = 0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-            dr = pp%rad(i,ik)-pp%rad(i-1,ik)
-            call eval_local_sr_shared_u(pp,ik,r1,u_r,du_r,i-1)
-            if(g2sq*r1 < 1d-2) then
-              s = s + 4d0*pi*u_r &
-                    * r1**3 * (-1d0/6d0 + (g2sq*r1)**2/60d0 - (g2sq*r1)**4/1680d0) * dr
-            else
-              s = s + 4d0*pi*u_r &
-                    * (g2sq*r1*cos(g2sq*r1) - sin(g2sq*r1)) / (2d0*g2sq**3) * dr
-            end if
-          end do
-          ppg%dVG_ion_dG2(ix,iy,iz,ik) = s
+          ppg%dVG_ion_dG2(ix,iy,iz,ik) = integrate_local_sr_dvg_dg2_shell(pp, ik, g2sq, npt_loc_sr_aux_2pi)
         end do
         end do
         end do

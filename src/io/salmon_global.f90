@@ -360,6 +360,8 @@ module salmon_global
   character(1)   :: yn_stress_loc_fd     = 'n'
   character(16)  :: stress_fd_detail     = '__unset__'
   character(16)  :: method_loc_sr_derivative = 'table'
+  character(16)  :: method_loc_sr_origin = 'poly3'
+  integer        :: npt_loc_sr_aux_2pi = 0
   integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_gs_sgm_eps
