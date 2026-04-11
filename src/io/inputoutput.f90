@@ -2750,6 +2750,7 @@ contains
   subroutine check_bad_input
     use parallelization
     use communication
+    use misc_routines, only: string_lowercase
     implicit none
     integer :: i,round_phi
     real(8) :: loc_sr_probe_tol, udp_phi  ! udp: under dicimal point
