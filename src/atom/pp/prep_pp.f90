@@ -612,6 +612,55 @@ end subroutine build_local_sr_shared_u
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
+subroutine build_local_sr_shared_u_stress_spline(pp, ik)
+  use salmon_math, only: spline
+  use structures, only: s_pp_info
+  implicit none
+  type(s_pp_info), intent(inout) :: pp
+  integer, intent(in) :: ik
+  integer :: i, nk
+  real(8) :: xn(0:pp%nrmax), yn(0:pp%nrmax)
+  real(8) :: an(0:pp%nrmax-1), bn(0:pp%nrmax-1), cn(0:pp%nrmax-1), dn(0:pp%nrmax-1)
+
+  pp%nr_u_sr_stress(ik) = 0
+  pp%rad_u_sr_stress(:,ik) = 0d0
+  pp%u_sr_stress_tbl(:,ik) = 0d0
+  pp%u_sr_stress_a(:,ik) = 0d0
+  pp%u_sr_stress_b(:,ik) = 0d0
+  pp%u_sr_stress_c(:,ik) = 0d0
+  pp%u_sr_stress_d(:,ik) = 0d0
+
+  xn = 0d0
+  yn = 0d0
+  an = 0d0
+  bn = 0d0
+  cn = 0d0
+  dn = 0d0
+  xn(0) = 0d0
+  yn(0) = 0d0
+  nk = 1
+
+  do i = 1, pp%nrloc(ik)
+    if (pp%rad(i,ik) <= 0d0) cycle
+    if (pp%rad(i,ik) <= xn(nk-1)) stop 'build_local_sr_shared_u_stress_spline: radial grid must be strictly increasing'
+    xn(nk) = pp%rad(i,ik)
+    yn(nk) = pp%rad(i,ik) * pp%vloctbl(i,ik) + dble(pp%zps(ik))
+    nk = nk + 1
+  end do
+  if (nk < 3) stop 'build_local_sr_shared_u_stress_spline: need origin plus 2 positive local radial points'
+
+  pp%nr_u_sr_stress(ik) = nk
+  pp%rad_u_sr_stress(0:nk-1,ik) = xn(0:nk-1)
+  pp%u_sr_stress_tbl(0:nk-1,ik) = yn(0:nk-1)
+  call spline(nk, xn(0:nk-1), yn(0:nk-1), an(0:nk-2), bn(0:nk-2), cn(0:nk-2), dn(0:nk-2))
+  pp%u_sr_stress_a(0:nk-2,ik) = an(0:nk-2)
+  pp%u_sr_stress_b(0:nk-2,ik) = bn(0:nk-2)
+  pp%u_sr_stress_c(0:nk-2,ik) = cn(0:nk-2)
+  pp%u_sr_stress_d(0:nk-2,ik) = dn(0:nk-2)
+end subroutine build_local_sr_shared_u_stress_spline
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
 pure subroutine eval_local_sr_shared_u(pp, ik, r, u_r, du_r, intr)
   use structures, only: s_pp_info
   implicit none
@@ -651,6 +700,60 @@ pure subroutine eval_local_sr_shared_u(pp, ik, r, u_r, du_r, intr)
   u_r = pp%u_sr_tbl(seg,ik) + pp%du_sr_seg(seg,ik) * (r - pp%rad(seg,ik))
   du_r = pp%du_sr_seg(seg,ik)
 end subroutine eval_local_sr_shared_u
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+pure subroutine eval_local_sr_shared_u_stress(pp, ik, r, u_r, du_r, intr)
+  use structures, only: s_pp_info
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer, intent(in) :: ik
+  real(8), intent(in) :: r
+  real(8), intent(out) :: u_r, du_r
+  integer, intent(in), optional :: intr
+  integer :: i, nk, seg
+  real(8) :: dx
+
+  nk = pp%nr_u_sr_stress(ik)
+  if (nk < 2) then
+    u_r = 0d0
+    du_r = 0d0
+    return
+  end if
+
+  if (r <= 0d0) then
+    u_r = 0d0
+    du_r = pp%u_sr_stress_c(0,ik)
+    return
+  end if
+
+  if (present(intr)) then
+    seg = max(1, min(intr, nk-1))
+    if (r < pp%rad_u_sr_stress(seg-1,ik) .or. (seg < nk-1 .and. r >= pp%rad_u_sr_stress(seg,ik))) then
+      seg = nk - 1
+      do i = 1, nk - 1
+        if (r < pp%rad_u_sr_stress(i,ik)) then
+          seg = i
+          exit
+        end if
+      end do
+    end if
+  else
+    seg = nk - 1
+    do i = 1, nk - 1
+      if (r < pp%rad_u_sr_stress(i,ik)) then
+        seg = i
+        exit
+      end if
+    end do
+  end if
+
+  dx = r - pp%rad_u_sr_stress(seg-1,ik)
+  u_r = ((pp%u_sr_stress_a(seg-1,ik) * dx + pp%u_sr_stress_b(seg-1,ik)) * dx + pp%u_sr_stress_c(seg-1,ik)) * dx &
+    & + pp%u_sr_stress_d(seg-1,ik)
+  du_r = (3d0 * pp%u_sr_stress_a(seg-1,ik) * dx + 2d0 * pp%u_sr_stress_b(seg-1,ik)) * dx &
+    & + pp%u_sr_stress_c(seg-1,ik)
+end subroutine eval_local_sr_shared_u_stress
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -743,6 +846,88 @@ real(8) function integrate_local_sr_dvg_dg2_shell(pp, ik, gmag, npt_loc_sr_aux_2
     end do
   end do
 end function integrate_local_sr_dvg_dg2_shell
+
+!===================================================================================================================================
+
+real(8) function integrate_local_sr_vg_shell_stress(pp, ik, gmag, npt_loc_sr_aux_2pi) result(vg)
+  use structures, only: s_pp_info
+  use math_constants, only: pi
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer, intent(in) :: ik
+  real(8), intent(in) :: gmag
+  integer, intent(in) :: npt_loc_sr_aux_2pi
+  integer :: i, isub, nk, nsub
+  real(8) :: r_lo, r_hi, r_mid, dr_seg, dr_sub, dr_target, u_r, du_r
+
+  vg = 0d0
+  nk = pp%nr_u_sr_stress(ik)
+  if (nk < 2) return
+
+  do i = 1, nk - 1
+    r_lo = pp%rad_u_sr_stress(i-1,ik)
+    r_hi = pp%rad_u_sr_stress(i,ik)
+    dr_seg = r_hi - r_lo
+    if (dr_seg <= 0d0) cycle
+    nsub = 1
+    if (npt_loc_sr_aux_2pi > 0 .and. gmag > 0d0) then
+      dr_target = local_sr_aux_target_dr(gmag, npt_loc_sr_aux_2pi)
+      nsub = max(1, ceiling(dr_seg / dr_target))
+    end if
+    dr_sub = dr_seg / dble(nsub)
+    do isub = 1, nsub
+      r_mid = r_lo + (dble(isub) - 0.5d0) * dr_sub
+      call eval_local_sr_shared_u_stress(pp,ik,r_mid,u_r,du_r,i)
+      if (gmag == 0d0) then
+        vg = vg + 4d0*pi*r_mid*u_r*dr_sub
+      else
+        vg = vg + 4d0*pi*sin(gmag*r_mid)/gmag*u_r*dr_sub
+      end if
+    end do
+  end do
+end function integrate_local_sr_vg_shell_stress
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+real(8) function integrate_local_sr_dvg_dg2_shell_stress(pp, ik, gmag, npt_loc_sr_aux_2pi) result(dvg)
+  use structures, only: s_pp_info
+  use math_constants, only: pi
+  implicit none
+  type(s_pp_info), intent(in) :: pp
+  integer, intent(in) :: ik
+  real(8), intent(in) :: gmag
+  integer, intent(in) :: npt_loc_sr_aux_2pi
+  integer :: i, isub, nk, nsub
+  real(8) :: r_lo, r_hi, r_mid, dr_seg, dr_sub, dr_target, u_r, du_r, x
+
+  dvg = 0d0
+  if (gmag <= 0d0) return
+  nk = pp%nr_u_sr_stress(ik)
+  if (nk < 2) return
+
+  do i = 1, nk - 1
+    r_lo = pp%rad_u_sr_stress(i-1,ik)
+    r_hi = pp%rad_u_sr_stress(i,ik)
+    dr_seg = r_hi - r_lo
+    if (dr_seg <= 0d0) cycle
+    nsub = 1
+    if (npt_loc_sr_aux_2pi > 0) then
+      dr_target = local_sr_aux_target_dr(gmag, npt_loc_sr_aux_2pi)
+      nsub = max(1, ceiling(dr_seg / dr_target))
+    end if
+    dr_sub = dr_seg / dble(nsub)
+    do isub = 1, nsub
+      r_mid = r_lo + (dble(isub) - 0.5d0) * dr_sub
+      call eval_local_sr_shared_u_stress(pp,ik,r_mid,u_r,du_r,i)
+      x = gmag * r_mid
+      if (x < 1d-2) then
+        dvg = dvg + 4d0*pi*u_r * r_mid**3 * (-1d0/6d0 + x**2/60d0 - x**4/1680d0) * dr_sub
+      else
+        dvg = dvg + 4d0*pi*u_r * (x*cos(x) - sin(x)) / (2d0*gmag**3) * dr_sub
+      end if
+    end do
+  end do
+end function integrate_local_sr_dvg_dg2_shell_stress
 
 !===================================================================================================================================
 
@@ -1157,6 +1342,8 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
       allocate(ppg%zrhoG_ion(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e)  & ! rho_ion(G)
             & ,ppg%zVG_ion  (ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,nelem)) ! V_ion(G)
       if(yn_out_stress == 'y') then
+        allocate(ppg%zVG_ion_stress(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,nelem))
+        ppg%zVG_ion_stress = 0d0
         allocate(ppg%dVG_ion_dG2(ifgx_s:ifgx_e,ifgy_s:ifgy_e,ifgz_s:ifgz_e,nelem))
         ppg%dVG_ion_dG2 = 0d0
       end if
@@ -1188,12 +1375,28 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,info,pp,fg,vpsl,ppg,property)
           do iz=ifgz_s,ifgz_e
           do iy=ifgy_s,ifgy_e
           do ix=ifgx_s,ifgx_e
+            g(1) = fg%vec_G(1,ix,iy,iz)
+            g(2) = fg%vec_G(2,ix,iy,iz)
+            g(3) = fg%vec_G(3,ix,iy,iz)
+            g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
+            ppg%zVG_ion_stress(ix,iy,iz,ik) = integrate_local_sr_vg_shell_stress(pp, ik, g2sq, npt_loc_sr_aux_2pi)
+          end do
+          end do
+          end do
+        end do
+  !$omp end parallel do
+
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq) collapse(3)
+        do ik=1,nelem
+          do iz=ifgz_s,ifgz_e
+          do iy=ifgy_s,ifgy_e
+          do ix=ifgx_s,ifgx_e
             if(fg%if_Gzero(ix,iy,iz)) cycle
             g(1) = fg%vec_G(1,ix,iy,iz)
             g(2) = fg%vec_G(2,ix,iy,iz)
             g(3) = fg%vec_G(3,ix,iy,iz)
             g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
-            ppg%dVG_ion_dG2(ix,iy,iz,ik) = integrate_local_sr_dvg_dg2_shell(pp, ik, g2sq, npt_loc_sr_aux_2pi)
+            ppg%dVG_ion_dG2(ix,iy,iz,ik) = integrate_local_sr_dvg_dg2_shell_stress(pp, ik, g2sq, npt_loc_sr_aux_2pi)
           end do
           end do
           end do
@@ -1296,6 +1499,8 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
     allocate(ppg%zrhoG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) & ! rho_ion(G)
           & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) ! V_ion(G)
     if(yn_out_stress == 'y') then
+      allocate(ppg%zVG_ion_stress(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem))
+      ppg%zVG_ion_stress = 0d0
       allocate(ppg%dVG_ion_dG2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem))
       ppg%dVG_ion_dG2 = 0d0
     end if
@@ -1325,12 +1530,28 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
+          g(1) = fg%vec_G(1,ix,iy,iz)
+          g(2) = fg%vec_G(2,ix,iy,iz)
+          g(3) = fg%vec_G(3,ix,iy,iz)
+          g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
+          ppg%zVG_ion_stress(ix,iy,iz,ik) = integrate_local_sr_vg_shell_stress(pp, ik, g2sq, npt_loc_sr_aux_2pi)
+        end do
+        end do
+        end do
+      end do
+  !$omp end parallel do
+
+  !$omp parallel do private(ik,ix,iy,iz,g,g2sq) collapse(3)
+      do ik=1,nelem
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
           if(fg%if_Gzero(ix,iy,iz)) cycle
           g(1) = fg%vec_G(1,ix,iy,iz)
           g(2) = fg%vec_G(2,ix,iy,iz)
           g(3) = fg%vec_G(3,ix,iy,iz)
           g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
-          ppg%dVG_ion_dG2(ix,iy,iz,ik) = integrate_local_sr_dvg_dg2_shell(pp, ik, g2sq, npt_loc_sr_aux_2pi)
+          ppg%dVG_ion_dG2(ix,iy,iz,ik) = integrate_local_sr_dvg_dg2_shell_stress(pp, ik, g2sq, npt_loc_sr_aux_2pi)
         end do
         end do
         end do

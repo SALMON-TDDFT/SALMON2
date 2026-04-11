@@ -310,6 +310,13 @@ module structures
     real(8),allocatable :: du_sr_seg(:,:)
     real(8),allocatable :: u_sr_origin_coef(:,:,:)
     real(8),allocatable :: r_sr_origin_switch(:)
+    integer,allocatable :: nr_u_sr_stress(:)
+    real(8),allocatable :: rad_u_sr_stress(:,:)
+    real(8),allocatable :: u_sr_stress_tbl(:,:)
+    real(8),allocatable :: u_sr_stress_a(:,:)
+    real(8),allocatable :: u_sr_stress_b(:,:)
+    real(8),allocatable :: u_sr_stress_c(:,:)
+    real(8),allocatable :: u_sr_stress_d(:,:)
     real(8),allocatable :: udvtbl(:,:,:)
     real(8),allocatable :: dudvtbl(:,:,:)
     real(8),allocatable :: rho_pp_tbl(:,:)
@@ -347,6 +354,7 @@ module structures
     !
     complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential in G-space
     real(8),allocatable :: dVG_ion_dG2(:,:,:,:) ! dV_sr/d(G^2), same shape as zVG_ion
+    complex(8),allocatable :: zVG_ion_stress(:,:,:,:) ! stress-only local-SR pseudopotential in G-space
     real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)
@@ -871,6 +879,13 @@ contains
     DEAL(pp%du_sr_seg)
     DEAL(pp%u_sr_origin_coef)
     DEAL(pp%r_sr_origin_switch)
+    DEAL(pp%nr_u_sr_stress)
+    DEAL(pp%rad_u_sr_stress)
+    DEAL(pp%u_sr_stress_tbl)
+    DEAL(pp%u_sr_stress_a)
+    DEAL(pp%u_sr_stress_b)
+    DEAL(pp%u_sr_stress_c)
+    DEAL(pp%u_sr_stress_d)
     DEAL(pp%udvtbl)
     DEAL(pp%dudvtbl)
     DEAL(pp%rho_nlcc_tbl)
@@ -895,6 +910,7 @@ contains
     DEAL(ppg%zrhoG_ion)
     DEAL(ppg%zVG_ion)
     DEAL(ppg%dVG_ion_dG2)
+    DEAL(ppg%zVG_ion_stress)
     DEAL(ppg%uv_so)
   end subroutine deallocate_pp_grid
 

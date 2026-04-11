@@ -886,6 +886,7 @@ contains
     E_lr_scr_loc = 0d0
     cutoff_g2 = cutoff_g**2
     call get_g_bounds(fg, ig_s, ig_e)
+    if(.not. allocated(ppg%zVG_ion_stress)) call fail_stress("calc_stress_loc: zVG_ion_stress is not allocated")
     if(.not. allocated(ppg%dVG_ion_dG2)) call fail_stress("calc_stress_loc: dVG_ion_dG2 is not allocated")
     do ia = 1, system%nion
       ik = kion(ia)
@@ -917,7 +918,7 @@ contains
         r(:) = system%Rion(1:3,ia)
         Gd = sum(g(:) * r(:))
         phase = dcmplx(cos(Gd), -sin(Gd))
-        V_sr_sum = V_sr_sum + ppg%zVG_ion(ix,iy,iz,ik) * phase
+        V_sr_sum = V_sr_sum + ppg%zVG_ion_stress(ix,iy,iz,ik) * phase
         V_lr_sum = V_lr_sum - (4d0*pi / G2) * pp%zps(ik) * phase
         dVsr_dG2_sum = dVsr_dG2_sum + ppg%dVG_ion_dG2(ix,iy,iz,ik) * phase
       end do
@@ -1089,13 +1090,13 @@ contains
   real(8) function eval_local_sr_vg_from_table(pp, ik, gmag) result(vg)
     use structures
     use salmon_global, only: npt_loc_sr_aux_2pi
-    use prep_pp_sub, only: integrate_local_sr_vg_shell
+    use prep_pp_sub, only: integrate_local_sr_vg_shell_stress
     implicit none
     type(s_pp_info), intent(in) :: pp
     integer,         intent(in) :: ik
     real(8),         intent(in) :: gmag
 
-    vg = integrate_local_sr_vg_shell(pp, ik, gmag, npt_loc_sr_aux_2pi)
+    vg = integrate_local_sr_vg_shell_stress(pp, ik, gmag, npt_loc_sr_aux_2pi)
   end function eval_local_sr_vg_from_table
 
   subroutine calc_stress_nl(system, pp, info, mg, stencil, ppg, tpsi, energy, field_state)
@@ -1486,7 +1487,7 @@ contains
     use salmon_global,  only: base_directory, kion, sysname, &
                               yn_out_loc_sr_rs_sampled_dump
     use inputoutput,    only: au_pressure_gpa
-    use prep_pp_sub, only: eval_local_sr_shared_u
+    use prep_pp_sub, only: eval_local_sr_shared_u_stress
     implicit none
     type(s_dft_system),    intent(inout) :: system
     type(s_pp_info),       intent(in)    :: pp
@@ -1494,7 +1495,7 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_pp_grid),       intent(in)    :: ppg
     type(s_scalar),        intent(in)    :: rho_s(:)
-    integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr, ispin, nspin, bin_idx
+    integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr_legacy, intr_stress, ispin, nspin, bin_idx
     integer  :: fh_sampled_dump
     real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr_current, dvsr_dr_legacy
     real(8)  :: u_r, du_r, r1, r2, r3
@@ -1551,10 +1552,10 @@ contains
           rho_val = rho_val + rho_s(ispin)%f(ix,iy,iz)
         end do
 
-        call find_radial_index(r_abs, pp%rad(:,ik), pp%nrloc(ik), intr)
-        if(intr < 1 .or. intr >= pp%nrloc(ik)) cycle
+        call find_radial_index(r_abs, pp%rad_u_sr_stress(:,ik), pp%nr_u_sr_stress(ik), intr_stress)
+        if(intr_stress < 1 .or. intr_stress >= pp%nr_u_sr_stress(ik)) cycle
 
-        call eval_local_sr_shared_u(pp,ik,r_abs,u_r,du_r,intr)
+        call eval_local_sr_shared_u_stress(pp,ik,r_abs,u_r,du_r,intr_stress)
         ! V_sr(r) = u(r) / r, so V'_sr(r) = (u'(r) * r - u(r)) / r^2
         dvsr_dr_current = (du_r * r_abs - u_r) * r_inv**2
         contrib = -rho_val * dvsr_dr_current * r_inv * hvol
@@ -1569,7 +1570,8 @@ contains
         end if
 
         if(dump_sampled) then
-          call legacy_loc_sr_dvsr_from_table_currentdump(pp, ik, r_abs, intr, &
+          call find_radial_index(r_abs, pp%rad(:,ik), pp%nrloc(ik), intr_legacy)
+          call legacy_loc_sr_dvsr_from_table_currentdump(pp, ik, r_abs, intr_legacy, &
                dvsr_dr_legacy, legacy_ok)
           if(legacy_ok) then
             contrib_legacy = -rho_val * dvsr_dr_legacy * r_inv * hvol
@@ -1577,7 +1579,7 @@ contains
             dvsr_dr_legacy = 0d0
             contrib_legacy = 0d0
           end if
-          call dump_loc_sr_rs_sampled_points(ia, ik, j, intr, ix, iy, iz, s, bin_idx, r_abs, rho_val, &
+          call dump_loc_sr_rs_sampled_points(ia, ik, j, intr_legacy, ix, iy, iz, s, bin_idx, r_abs, rho_val, &
                dvsr_dr_current, dvsr_dr_legacy, contrib, contrib_legacy, legacy_ok)
         end if
 
