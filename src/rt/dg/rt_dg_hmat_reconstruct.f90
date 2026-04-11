@@ -357,7 +357,6 @@
           partial_block_c(1:nbf_up, jo) = partial_total_c(1:nbf_up)
         end do
 
-        partial_block_c(1:nbf_up, 1:nbf_dn) = (0.0d0, 0.0d0)
         call comm_summation(partial_block_c(1:nbf_up, 1:nbf_dn), reduced_block_c_im(1:nbf_up, 1:nbf_dn), nbf_up * nbf_dn, dg_frag%icomm_frag)
 
         if (dg_frag%is_frag_root) then
