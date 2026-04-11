@@ -529,6 +529,7 @@ contains
       & npt_loc_sr_aux_2pi, &
       & probe_loc_sr_fit_u1_scale, &
       & probe_loc_sr_fit_du12_scale, &
+      & yn_out_loc_sr_rs_sampled_dump, &
       & out_stress_step, &
       & yn_out_tm, &
       & yn_out_gs_sgm_eps, &
@@ -983,6 +984,7 @@ contains
     npt_loc_sr_aux_2pi = 0
     probe_loc_sr_fit_u1_scale = 1d0
     probe_loc_sr_fit_du12_scale = 1d0
+    yn_out_loc_sr_rs_sampled_dump = 'n'
     out_stress_step     = 100
     yn_out_tm           = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -1628,6 +1630,7 @@ contains
     call comm_bcast(npt_loc_sr_aux_2pi  ,nproc_group_global)
     call comm_bcast(probe_loc_sr_fit_u1_scale,nproc_group_global)
     call comm_bcast(probe_loc_sr_fit_du12_scale,nproc_group_global)
+    call comm_bcast(yn_out_loc_sr_rs_sampled_dump,nproc_group_global)
     call comm_bcast(out_stress_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
@@ -2569,6 +2572,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'npt_loc_sr_aux_2pi', npt_loc_sr_aux_2pi
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'probe_loc_sr_fit_u1_scale', probe_loc_sr_fit_u1_scale
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'probe_loc_sr_fit_du12_scale', probe_loc_sr_fit_du12_scale
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_loc_sr_rs_sampled_dump', yn_out_loc_sr_rs_sampled_dump
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
@@ -3137,6 +3141,8 @@ contains
     if(abs(probe_loc_sr_fit_u1_scale - 1d0) > loc_sr_probe_tol .and. &
        abs(probe_loc_sr_fit_du12_scale - 1d0) > loc_sr_probe_tol) &
       call fail_stress_input("probe_loc_sr_fit_u1_scale and probe_loc_sr_fit_du12_scale cannot be combined in one run")
+    call string_lowercase(yn_out_loc_sr_rs_sampled_dump)
+    call normalize_stress_yn_override('yn_out_loc_sr_rs_sampled_dump', yn_out_loc_sr_rs_sampled_dump)
     
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"

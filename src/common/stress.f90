@@ -1480,9 +1480,12 @@ contains
   !----------------------------------------------------------------------------
   subroutine calc_stress_loc_sr_rs(system, pp, info, mg, ppg, rho_s)
     use structures
-    use math_constants, only: pi
     use communication,  only: comm_summation
-    use salmon_global,  only: kion
+    use filesystem,     only: open_filehandle
+    use parallelization, only: nproc_id_global
+    use salmon_global,  only: base_directory, kion, sysname, &
+                              yn_out_loc_sr_rs_sampled_dump
+    use inputoutput,    only: au_pressure_gpa
     use prep_pp_sub, only: eval_local_sr_shared_u
     implicit none
     type(s_dft_system),    intent(inout) :: system
@@ -1492,16 +1495,23 @@ contains
     type(s_pp_grid),       intent(in)    :: ppg
     type(s_scalar),        intent(in)    :: rho_s(:)
     integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr, ispin, nspin, bin_idx
-    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, u_r, du_r, r1, r2, r3
+    integer  :: fh_sampled_dump
+    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr_current, dvsr_dr_legacy
+    real(8)  :: u_r, du_r, r1, r2, r3
     real(8)  :: V, hvol
-    real(8)  :: contrib
+    real(8)  :: contrib, contrib_legacy
     real(8)  :: strs(3,3), strs_sum(3,3), strs_bins(3,3,4), strs_bins_sum(3,3,4)
+    logical  :: dump_sampled, legacy_ok
+    character(256) :: file_sampled_dump
 
     V = system%det_a
     hvol = system%Hvol
     nspin = system%nspin
     strs = 0d0
     strs_bins = 0d0
+    dump_sampled = (yn_out_loc_sr_rs_sampled_dump == 'y')
+    fh_sampled_dump = -1
+    if(dump_sampled) call open_loc_sr_rs_sampled_dump()
 
     do ia = 1, system%nion
       ik = kion(ia)
@@ -1546,8 +1556,8 @@ contains
 
         call eval_local_sr_shared_u(pp,ik,r_abs,u_r,du_r,intr)
         ! V_sr(r) = u(r) / r, so V'_sr(r) = (u'(r) * r - u(r)) / r^2
-        dvsr_dr = (du_r * r_abs - u_r) * r_inv**2
-        contrib = -rho_val * dvsr_dr * r_inv * hvol
+        dvsr_dr_current = (du_r * r_abs - u_r) * r_inv**2
+        contrib = -rho_val * dvsr_dr_current * r_inv * hvol
 
         bin_idx = 4
         if(r_abs < r1) then
@@ -1556,6 +1566,19 @@ contains
           bin_idx = 2
         else if(r_abs < r3) then
           bin_idx = 3
+        end if
+
+        if(dump_sampled) then
+          call legacy_loc_sr_dvsr_from_table_currentdump(pp, ik, r_abs, intr, &
+               dvsr_dr_legacy, legacy_ok)
+          if(legacy_ok) then
+            contrib_legacy = -rho_val * dvsr_dr_legacy * r_inv * hvol
+          else
+            dvsr_dr_legacy = 0d0
+            contrib_legacy = 0d0
+          end if
+          call dump_loc_sr_rs_sampled_points(ia, ik, j, intr, ix, iy, iz, s, bin_idx, r_abs, rho_val, &
+               dvsr_dr_current, dvsr_dr_legacy, contrib, contrib_legacy, legacy_ok)
         end if
 
         ! Accumulate: -rho * V'_sr * s_a * s_b / |s| * hvol
@@ -1575,9 +1598,45 @@ contains
     do ib = 1, 4
       system%stress_loc_sr_rs_bins(:,:,ib) = -strs_bins_sum(:,:,ib) / V
     end do
+    if(fh_sampled_dump >= 0) close(fh_sampled_dump)
     call calc_stress_loc_sr_rs_legacy_compare(system, pp, info, mg, ppg, rho_s)
 
   contains
+
+    subroutine open_loc_sr_rs_sampled_dump()
+      implicit none
+      character(16) :: rank_label
+      write(rank_label,'(I6.6)') nproc_id_global
+      file_sampled_dump = trim(base_directory)//trim(sysname)//'_loc_sr_rs_sampled_rank' &
+                        // trim(rank_label)//'.data'
+      fh_sampled_dump = open_filehandle(trim(file_sampled_dump), status='replace')
+      write(fh_sampled_dump,'(a)') '# Local-SR sampled current-vs-legacy dV_sr/dr dump'
+      write(fh_sampled_dump,'(a)') '# rank ia ik j intr ix iy iz bin legacy_ok sx sy sz r_abs rho dvsr_dr_current dvsr_dr_legacy'
+      write(fh_sampled_dump,'(a)') '# delta_dvsr_dr pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
+    end subroutine open_loc_sr_rs_sampled_dump
+
+    subroutine dump_loc_sr_rs_sampled_points(ia, ik, j, intr, ix, iy, iz, s, bin_idx, r_abs, rho_val, &
+         dvsr_dr_current, dvsr_dr_legacy, contrib_current, contrib_legacy, legacy_ok)
+      implicit none
+      integer, intent(in) :: ia, ik, j, intr, ix, iy, iz, bin_idx
+      real(8), intent(in) :: s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy
+      real(8), intent(in) :: contrib_current, contrib_legacy
+      logical, intent(in) :: legacy_ok
+      integer :: legacy_ok_int
+      real(8) :: delta_dvsr_dr, pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+
+      delta_dvsr_dr = dvsr_dr_current - dvsr_dr_legacy
+      pressure_current_gpa = contrib_current * r_abs * r_abs * au_pressure_gpa / (3d0 * V)
+      pressure_legacy_gpa = contrib_legacy * r_abs * r_abs * au_pressure_gpa / (3d0 * V)
+      delta_pressure_gpa = pressure_current_gpa - pressure_legacy_gpa
+      legacy_ok_int = 0
+      if(legacy_ok) legacy_ok_int = 1
+
+      write(fh_sampled_dump,*) &
+           nproc_id_global, ia, ik, j, intr, ix, iy, iz, bin_idx, &
+           legacy_ok_int, s(1), s(2), s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy, delta_dvsr_dr, &
+           pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+    end subroutine dump_loc_sr_rs_sampled_points
 
     subroutine find_radial_index(r, rad, nr, idx)
       implicit none
@@ -1598,6 +1657,32 @@ contains
       end do
       idx = lo
     end subroutine find_radial_index
+
+    subroutine legacy_loc_sr_dvsr_from_table_currentdump(pp, ik, r, intr, dvsr_dr_legacy, ok)
+      implicit none
+      type(s_pp_info), intent(in) :: pp
+      integer, intent(in) :: ik, intr
+      real(8), intent(in) :: r
+      real(8), intent(out) :: dvsr_dr_legacy
+      logical, intent(out) :: ok
+      real(8) :: r_lo, r_hi, dv_lo, dv_hi, ratio, dvloc_r
+
+      ok = .false.
+      dvsr_dr_legacy = 0d0
+      if(intr < 2 .or. intr >= pp%nrloc(ik)) return
+
+      r_lo = pp%rad(intr, ik)
+      r_hi = pp%rad(intr+1, ik)
+      if(r_hi <= r_lo) return
+
+      dv_lo = pp%dvloctbl(intr, ik)
+      dv_hi = pp%dvloctbl(intr+1, ik)
+      ratio = (r - r_lo) / (r_hi - r_lo)
+      dvloc_r = dv_lo + ratio * (dv_hi - dv_lo)
+
+      dvsr_dr_legacy = dvloc_r - dble(pp%zps(ik)) / (r * r)
+      ok = .true.
+    end subroutine legacy_loc_sr_dvsr_from_table_currentdump
 
   end subroutine calc_stress_loc_sr_rs
 
