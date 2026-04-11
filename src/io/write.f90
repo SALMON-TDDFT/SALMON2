@@ -1449,7 +1449,11 @@ contains
     real(8) :: pressure_loc_sr_total_gpa
     real(8) :: pressure_loc_sr_rs_gpa
     real(8) :: pressure_loc_sr_rs_bin_gpa(4)
+    real(8) :: pressure_loc_sr_rs_legacy_gpa
+    real(8) :: pressure_loc_sr_rs_legacy_bin_gpa(4)
     real(8) :: pressure_loc_sr_grad_delta_gpa
+    real(8) :: pressure_loc_sr_legacy_grad_delta_gpa
+    real(8) :: pressure_loc_sr_sharedu_legacy_delta_gpa
     logical :: terms_on, details_on, numerics_on
 
     file_gs_info = trim(base_directory)//trim(sysname)//"_info.data"
@@ -1641,7 +1645,14 @@ contains
            pressure_loc_sr_rs_bin_gpa(2) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,2), au_pressure_gpa)
            pressure_loc_sr_rs_bin_gpa(3) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,3), au_pressure_gpa)
            pressure_loc_sr_rs_bin_gpa(4) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,4), au_pressure_gpa)
+           pressure_loc_sr_rs_legacy_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy, au_pressure_gpa)
+           pressure_loc_sr_rs_legacy_bin_gpa(1) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,1), au_pressure_gpa)
+           pressure_loc_sr_rs_legacy_bin_gpa(2) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,2), au_pressure_gpa)
+           pressure_loc_sr_rs_legacy_bin_gpa(3) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,3), au_pressure_gpa)
+           pressure_loc_sr_rs_legacy_bin_gpa(4) = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,4), au_pressure_gpa)
            pressure_loc_sr_grad_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_grad_gpa
+           pressure_loc_sr_legacy_grad_delta_gpa = pressure_loc_sr_rs_legacy_gpa - pressure_loc_sr_grad_gpa
+           pressure_loc_sr_sharedu_legacy_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_rs_legacy_gpa
            write(fh,'(1x,"Tr(har_shadow)*V + E_h =",e16.8)') virial_har_shadow
            write(fh,'(1x,"P_har_shadow [GPa]     =",e16.8)') pressure_har_shadow_gpa
            write(fh,'(1x,"P_har_shadow - P_har [GPa] =",e16.8)') pressure_har_shadow_delta_gpa
@@ -1653,7 +1664,14 @@ contains
            write(fh,'(1x,"P_loc_sr_rs_bin2 [GPa] =",e16.8)') pressure_loc_sr_rs_bin_gpa(2)
            write(fh,'(1x,"P_loc_sr_rs_bin3 [GPa] =",e16.8)') pressure_loc_sr_rs_bin_gpa(3)
            write(fh,'(1x,"P_loc_sr_rs_bin4 [GPa] =",e16.8)') pressure_loc_sr_rs_bin_gpa(4)
+           write(fh,'(1x,"P_loc_sr_rs_legacy [GPa] =",e16.8)') pressure_loc_sr_rs_legacy_gpa
+           write(fh,'(1x,"P_loc_sr_rs_legacy_bin1 [GPa] =",e16.8)') pressure_loc_sr_rs_legacy_bin_gpa(1)
+           write(fh,'(1x,"P_loc_sr_rs_legacy_bin2 [GPa] =",e16.8)') pressure_loc_sr_rs_legacy_bin_gpa(2)
+           write(fh,'(1x,"P_loc_sr_rs_legacy_bin3 [GPa] =",e16.8)') pressure_loc_sr_rs_legacy_bin_gpa(3)
+           write(fh,'(1x,"P_loc_sr_rs_legacy_bin4 [GPa] =",e16.8)') pressure_loc_sr_rs_legacy_bin_gpa(4)
            write(fh,'(1x,"P_loc_sr_rs - P_loc_sr_grad [GPa] =",e16.8)') pressure_loc_sr_grad_delta_gpa
+           write(fh,'(1x,"P_loc_sr_rs_legacy - P_loc_sr_grad [GPa] =",e16.8)') pressure_loc_sr_legacy_grad_delta_gpa
+           write(fh,'(1x,"P_loc_sr_rs - P_loc_sr_rs_legacy [GPa] =",e16.8)') pressure_loc_sr_sharedu_legacy_delta_gpa
          end if
        end if
 
@@ -1695,7 +1713,10 @@ contains
     real(8) :: pressure_har_shadow_delta_gpa
     real(8) :: pressure_loc_sr_grad_gpa
     real(8) :: pressure_loc_sr_rs_gpa
+    real(8) :: pressure_loc_sr_rs_legacy_gpa
     real(8) :: pressure_loc_sr_grad_delta_gpa
+    real(8) :: pressure_loc_sr_legacy_grad_delta_gpa
+    real(8) :: pressure_loc_sr_sharedu_legacy_delta_gpa
     logical :: terms_on, details_on, numerics_on
 
     if(.not. comm_is_root(nproc_id_global)) return
@@ -1778,6 +1799,11 @@ contains
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_bin2 [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_bin3 [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_bin4 [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy_bin1 [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy_bin2 [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy_bin3 [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy_bin4 [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_kin_residual [Ha]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_har_residual [Ha]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'V_xc_residual [Ha]'); col = col + 1
@@ -1800,6 +1826,8 @@ contains
       call write_compact_column_header(fh, line_cols, col, 'P_har_shadow [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_har_shadow_delta [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_grad_delta [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy_grad_delta [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_sharedu_legacy_delta [GPa]'); col = col + 1
     end if
     call end_compact_column_header(fh)
 
@@ -1863,6 +1891,11 @@ contains
       call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,2), au_pressure_gpa))
       call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,3), au_pressure_gpa))
       call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,4), au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy, au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,1), au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,2), au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,3), au_pressure_gpa))
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,4), au_pressure_gpa))
       virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
       virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
       virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
@@ -1879,7 +1912,10 @@ contains
       pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
       pressure_loc_sr_grad_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, au_pressure_gpa)
       pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, au_pressure_gpa)
+      pressure_loc_sr_rs_legacy_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy, au_pressure_gpa)
       pressure_loc_sr_grad_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_grad_gpa
+      pressure_loc_sr_legacy_grad_delta_gpa = pressure_loc_sr_rs_legacy_gpa - pressure_loc_sr_grad_gpa
+      pressure_loc_sr_sharedu_legacy_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_rs_legacy_gpa
       call write_data_token(fh, virial_kin)
       call write_data_token(fh, virial_har)
       call write_data_token(fh, virial_xc)
@@ -1902,6 +1938,8 @@ contains
       call write_data_token(fh, pressure_har_shadow_gpa)
       call write_data_token(fh, pressure_har_shadow_delta_gpa)
       call write_data_token(fh, pressure_loc_sr_grad_delta_gpa)
+      call write_data_token(fh, pressure_loc_sr_legacy_grad_delta_gpa)
+      call write_data_token(fh, pressure_loc_sr_sharedu_legacy_delta_gpa)
     end if
     write(fh,*)
 
@@ -2165,7 +2203,10 @@ contains
     real(8) :: pressure_har_shadow_delta_gpa
     real(8) :: pressure_loc_sr_grad_gpa
     real(8) :: pressure_loc_sr_rs_gpa
+    real(8) :: pressure_loc_sr_rs_legacy_gpa
     real(8) :: pressure_loc_sr_grad_delta_gpa
+    real(8) :: pressure_loc_sr_legacy_grad_delta_gpa
+    real(8) :: pressure_loc_sr_sharedu_legacy_delta_gpa
     logical :: terms_on, details_on, numerics_on
 
     if(.not. comm_is_root(nproc_id_global)) return
@@ -2238,6 +2279,11 @@ contains
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_bin2 [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_bin3 [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_bin4 [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_legacy [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_legacy_bin1 [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_legacy_bin2 [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_legacy_bin3 [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_rs_legacy_bin4 [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_kin_residual [Ha]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_har_residual [Ha]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'v_xc_residual [Ha]'); col = col + 1
@@ -2260,6 +2306,8 @@ contains
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har_shadow [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_har_shadow_delta [GPa]'); col = col + 1
         call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_shadow_delta [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_legacy_shadow_delta [GPa]'); col = col + 1
+        call write_compact_column_header(ofl%fh_stress, line_cols, col, 'p_loc_sr_sharedu_legacy_delta [GPa]'); col = col + 1
       end if
       call end_compact_column_header(ofl%fh_stress)
       flush(ofl%fh_stress)
@@ -2312,6 +2360,11 @@ contains
       call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,2), gpa))
       call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,3), gpa))
       call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_bins(:,:,4), gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy, gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,1), gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,2), gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,3), gpa))
+      call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,4), gpa))
       virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
       virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
       virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
@@ -2328,7 +2381,10 @@ contains
       pressure_har_shadow_delta_gpa = pressure_har_shadow_gpa - pressure_har_gpa
       pressure_loc_sr_grad_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_grad, gpa)
       pressure_loc_sr_rs_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs, gpa)
+      pressure_loc_sr_rs_legacy_gpa = -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy, gpa)
       pressure_loc_sr_grad_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_grad_gpa
+      pressure_loc_sr_legacy_grad_delta_gpa = pressure_loc_sr_rs_legacy_gpa - pressure_loc_sr_grad_gpa
+      pressure_loc_sr_sharedu_legacy_delta_gpa = pressure_loc_sr_rs_gpa - pressure_loc_sr_rs_legacy_gpa
       call write_data_token(ofl%fh_stress, virial_kin)
       call write_data_token(ofl%fh_stress, virial_har)
       call write_data_token(ofl%fh_stress, virial_xc)
@@ -2351,6 +2407,8 @@ contains
       call write_data_token(ofl%fh_stress, pressure_har_shadow_gpa)
       call write_data_token(ofl%fh_stress, pressure_har_shadow_delta_gpa)
       call write_data_token(ofl%fh_stress, pressure_loc_sr_grad_delta_gpa)
+      call write_data_token(ofl%fh_stress, pressure_loc_sr_legacy_grad_delta_gpa)
+      call write_data_token(ofl%fh_stress, pressure_loc_sr_sharedu_legacy_delta_gpa)
     end if
     write(ofl%fh_stress,*)
     flush(ofl%fh_stress)

@@ -102,6 +102,8 @@ module structures
     real(8) :: stress_loc_lr_scr_diag(3,3)
     real(8) :: stress_loc_sr_rs(3,3)      ! real-space SR local stress shadow (Nielsen-Martin Eq.30b)
     real(8) :: stress_loc_sr_rs_bins(3,3,4)
+    real(8) :: stress_loc_sr_rs_legacy(3,3)
+    real(8) :: stress_loc_sr_rs_legacy_bins(3,3,4)
     real(8) :: stress_nl(3,3)
     real(8),allocatable :: stress_nl_species_l(:,:,:,:) ! (1:nelem,0:lmax,3,3), species-resolved nonlocal l decomposition
     real(8) :: stress_ewa(3,3)

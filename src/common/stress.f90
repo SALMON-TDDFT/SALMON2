@@ -175,6 +175,8 @@ contains
     system%stress_loc_lr_scr_diag = 0d0
     system%stress_loc_sr_rs = 0d0
     system%stress_loc_sr_rs_bins = 0d0
+    system%stress_loc_sr_rs_legacy = 0d0
+    system%stress_loc_sr_rs_legacy_bins = 0d0
     system%stress_nl = 0d0
     system%stress_ewa = 0d0
     system%stress_loc_sr_energy = 0d0
@@ -1492,7 +1494,8 @@ contains
     integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr, ispin, nspin, bin_idx
     real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr, u_r, du_r, r1, r2, r3
     real(8)  :: V, hvol
-    real(8)  :: contrib, strs(3,3), strs_sum(3,3), strs_bins(3,3,4), strs_bins_sum(3,3,4)
+    real(8)  :: contrib
+    real(8)  :: strs(3,3), strs_sum(3,3), strs_bins(3,3,4), strs_bins_sum(3,3,4)
 
     V = system%det_a
     hvol = system%Hvol
@@ -1572,6 +1575,7 @@ contains
     do ib = 1, 4
       system%stress_loc_sr_rs_bins(:,:,ib) = -strs_bins_sum(:,:,ib) / V
     end do
+    call calc_stress_loc_sr_rs_legacy_compare(system, pp, info, mg, ppg, rho_s)
 
   contains
 
@@ -1596,5 +1600,145 @@ contains
     end subroutine find_radial_index
 
   end subroutine calc_stress_loc_sr_rs
+
+  subroutine calc_stress_loc_sr_rs_legacy_compare(system, pp, info, mg, ppg, rho_s)
+    use structures
+    use communication,  only: comm_summation
+    use salmon_global,  only: kion
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_pp_info),       intent(in)    :: pp
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_pp_grid),       intent(in)    :: ppg
+    type(s_scalar),        intent(in)    :: rho_s(:)
+    integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr, ispin, nspin, bin_idx
+    real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr_legacy, r1, r2, r3
+    real(8)  :: V, hvol, contrib_legacy
+    real(8)  :: strs_legacy(3,3), strs_legacy_sum(3,3), strs_legacy_bins(3,3,4), strs_legacy_bins_sum(3,3,4)
+    logical  :: legacy_ok
+
+    V = system%det_a
+    hvol = system%Hvol
+    nspin = system%nspin
+    strs_legacy = 0d0
+    strs_legacy_bins = 0d0
+
+    do ia = 1, system%nion
+      ik = kion(ia)
+      i1 = 0
+      i2 = 0
+      i3 = 0
+      do ib = 1, pp%nrloc(ik)
+        if(pp%rad(ib,ik) <= 0d0) cycle
+        if(i1 == 0) then
+          i1 = ib
+        else if(i2 == 0) then
+          i2 = ib
+        else
+          i3 = ib
+          exit
+        end if
+      end do
+      if(i1 == 0 .or. i2 == 0 .or. i3 == 0) stop 'calc_stress_loc_sr_rs_legacy_compare: need three positive radial points'
+      r1 = pp%rad(i1,ik)
+      r2 = pp%rad(i2,ik)
+      r3 = pp%rad(i3,ik)
+
+      do j = 1, ppg%mps(ia)
+        ix = ppg%jxyz(1,j,ia)
+        iy = ppg%jxyz(2,j,ia)
+        iz = ppg%jxyz(3,j,ia)
+        s(1) = ppg%rxyz(1,j,ia)
+        s(2) = ppg%rxyz(2,j,ia)
+        s(3) = ppg%rxyz(3,j,ia)
+        r_abs = sqrt(s(1)**2 + s(2)**2 + s(3)**2)
+        if(r_abs < 1d-12) cycle
+        r_inv = 1d0 / r_abs
+
+        rho_val = 0d0
+        do ispin = 1, nspin
+          rho_val = rho_val + rho_s(ispin)%f(ix,iy,iz)
+        end do
+
+        call find_radial_index(r_abs, pp%rad(:,ik), pp%nrloc(ik), intr)
+        call legacy_loc_sr_dvsr_from_table(pp, ik, r_abs, intr, dvsr_dr_legacy, legacy_ok)
+        if(.not. legacy_ok) cycle
+        contrib_legacy = -rho_val * dvsr_dr_legacy * r_inv * hvol
+
+        bin_idx = 4
+        if(r_abs < r1) then
+          bin_idx = 1
+        else if(r_abs < r2) then
+          bin_idx = 2
+        else if(r_abs < r3) then
+          bin_idx = 3
+        end if
+
+        do b = 1, 3
+        do a = 1, 3
+          strs_legacy(a,b) = strs_legacy(a,b) + contrib_legacy * s(a) * s(b)
+          strs_legacy_bins(a,b,bin_idx) = strs_legacy_bins(a,b,bin_idx) + contrib_legacy * s(a) * s(b)
+        end do
+        end do
+      end do
+    end do
+
+    call comm_summation(strs_legacy, strs_legacy_sum, 9, info%icomm_r)
+    call comm_summation(strs_legacy_bins, strs_legacy_bins_sum, size(strs_legacy_bins), info%icomm_r)
+    system%stress_loc_sr_rs_legacy = -strs_legacy_sum / V
+    do ib = 1, 4
+      system%stress_loc_sr_rs_legacy_bins(:,:,ib) = -strs_legacy_bins_sum(:,:,ib) / V
+    end do
+
+  contains
+
+    subroutine find_radial_index(r, rad, nr, idx)
+      implicit none
+      real(8), intent(in)  :: r
+      real(8), intent(in)  :: rad(:)
+      integer, intent(in)  :: nr
+      integer, intent(out) :: idx
+      integer :: lo, hi, mid
+      lo = 1
+      hi = nr
+      do while(hi - lo > 1)
+        mid = (lo + hi) / 2
+        if(rad(mid) <= r) then
+          lo = mid
+        else
+          hi = mid
+        end if
+      end do
+      idx = lo
+    end subroutine find_radial_index
+
+    subroutine legacy_loc_sr_dvsr_from_table(pp, ik, r, intr, dvsr_dr_legacy, ok)
+      implicit none
+      type(s_pp_info), intent(in) :: pp
+      integer, intent(in) :: ik, intr
+      real(8), intent(in) :: r
+      real(8), intent(out) :: dvsr_dr_legacy
+      logical, intent(out) :: ok
+      real(8) :: r_lo, r_hi, dv_lo, dv_hi, ratio, dvloc_r
+
+      ok = .false.
+      dvsr_dr_legacy = 0d0
+      if(intr < 2 .or. intr >= pp%nrloc(ik)) return
+
+      r_lo = pp%rad(intr, ik)
+      r_hi = pp%rad(intr+1, ik)
+      if(r_hi <= r_lo) return
+
+      dv_lo = pp%dvloctbl(intr, ik)
+      dv_hi = pp%dvloctbl(intr+1, ik)
+      ratio = (r - r_lo) / (r_hi - r_lo)
+      dvloc_r = dv_lo + ratio * (dv_hi - dv_lo)
+
+      dvsr_dr_legacy = dvloc_r - dble(pp%zps(ik)) / (r * r)
+      ok = .true.
+    end subroutine legacy_loc_sr_dvsr_from_table
+
+  end subroutine calc_stress_loc_sr_rs_legacy_compare
 
 end module stress_sub
