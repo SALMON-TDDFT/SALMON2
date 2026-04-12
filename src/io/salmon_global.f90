@@ -367,6 +367,7 @@ module salmon_global
   character(1)   :: yn_out_loc_sr_rs_sampled_dump = 'n'
   character(1)   :: yn_out_loc_sr_rs_subdiv_probe = 'n'
   integer        :: num_loc_sr_rs_subdiv_probe = 2
+  character(16)  :: mode_loc_sr_rs_subdiv_probe_rho = 'center'
   character(1)   :: yn_out_loc_sr_grad_sampled_dump = 'n'
   integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm

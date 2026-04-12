@@ -1543,15 +1543,16 @@ contains
   ! The LR Coulomb gradient and diagonal terms must be added from the existing
   ! G-space computation to form the total local stress.
   !----------------------------------------------------------------------------
-  subroutine calc_stress_loc_sr_rs(system, pp, info, mg, ppg, rho_s)
+  subroutine calc_stress_loc_sr_rs(system, pp, info, mg, ppg, rho_s, srg_scalar)
     use structures
     use communication,  only: comm_summation
     use filesystem,     only: open_filehandle
     use salmon_global,  only: base_directory, kion, sysname, &
                               yn_out_loc_sr_rs_sampled_dump, yn_out_loc_sr_rs_subdiv_probe, &
-                              num_loc_sr_rs_subdiv_probe
+                              num_loc_sr_rs_subdiv_probe, mode_loc_sr_rs_subdiv_probe_rho
     use inputoutput,    only: au_pressure_gpa
     use prep_pp_sub, only: eval_local_sr_shared_u_stress
+    use sendrecv_grid, only: update_overlap_real8
     implicit none
     type(s_dft_system),    intent(inout) :: system
     type(s_pp_info),       intent(in)    :: pp
@@ -1559,6 +1560,7 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_pp_grid),       intent(in)    :: ppg
     type(s_scalar),        intent(in)    :: rho_s(:)
+    type(s_sendrecv_grid), intent(inout), optional :: srg_scalar
     integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr_legacy, intr_stress, ispin, nspin, bin_idx
     integer  :: probe_subdiv_n
     integer  :: fh_sampled_dump
@@ -1569,8 +1571,10 @@ contains
     real(8)  :: probe_tensor(3,3)
     real(8)  :: strs(3,3), strs_sum(3,3), strs_probe(3,3), strs_probe_sum(3,3)
     real(8)  :: strs_bins(3,3,4), strs_bins_sum(3,3,4)
-    logical  :: dump_sampled, legacy_ok, probe_rs_subdiv
+    real(8), pointer :: probe_rho_box(:,:,:)
+    logical  :: dump_sampled, legacy_ok, probe_rs_subdiv, probe_rho_trilinear
     character(256) :: file_sampled_dump
+    character(16) :: probe_rho_mode
 
     V = system%det_a
     hvol = system%Hvol
@@ -1578,9 +1582,32 @@ contains
     strs = 0d0
     strs_probe = 0d0
     strs_bins = 0d0
+    nullify(probe_rho_box)
     probe_rs_subdiv = (yn_out_loc_sr_rs_subdiv_probe == 'y')
     probe_subdiv_n = 1
     if(probe_rs_subdiv) probe_subdiv_n = num_loc_sr_rs_subdiv_probe
+    probe_rho_mode = trim(mode_loc_sr_rs_subdiv_probe_rho)
+    probe_rho_trilinear = probe_rs_subdiv .and. probe_rho_mode == 'trilinear'
+    if(probe_rho_trilinear) then
+      call ensure_r2scan_stress_workspace(mg)
+      probe_rho_box => stress_rho_box_work
+      probe_rho_box = 0d0
+      !$omp parallel do collapse(2) default(none) private(ix,iy,iz,ispin) shared(probe_rho_box,rho_s,mg,nspin)
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        do ispin = 1, nspin
+          probe_rho_box(ix,iy,iz) = probe_rho_box(ix,iy,iz) + rho_s(ispin)%f(ix,iy,iz)
+        end do
+      end do
+      end do
+      end do
+      !$omp end parallel do
+      if(info%if_divide_rspace) then
+        if(.not. present(srg_scalar)) call fail_stress("trilinear rho probe requires srg_scalar")
+        call update_overlap_real8(srg_scalar, mg, probe_rho_box)
+      end if
+    end if
     dump_sampled = (yn_out_loc_sr_rs_sampled_dump == 'y' .and. info%id_k == 0 .and. info%id_o == 0)
     fh_sampled_dump = -1
     if(dump_sampled) call open_loc_sr_rs_sampled_dump()
@@ -1631,7 +1658,7 @@ contains
         dvsr_dr_current = (du_r * r_abs - u_r) * r_inv**2
         contrib = -rho_val * dvsr_dr_current * r_inv * hvol
         if(probe_rs_subdiv) then
-          call calc_loc_sr_rs_subdiv_probe_point(ik, s, rho_val, probe_subdiv_n, probe_tensor, pressure_probe_gpa)
+          call calc_loc_sr_rs_subdiv_probe_point(ik, ix, iy, iz, s, rho_val, probe_subdiv_n, probe_tensor, pressure_probe_gpa)
         else
           probe_tensor = 0d0
           do b = 1, 3
@@ -1690,15 +1717,16 @@ contains
 
   contains
 
-    subroutine calc_loc_sr_rs_subdiv_probe_point(ik, s_center, rho_center, probe_subdiv_n, tensor_probe, pressure_probe_gpa)
+    subroutine calc_loc_sr_rs_subdiv_probe_point(ik, ix_center, iy_center, iz_center, s_center, rho_center, probe_subdiv_n, tensor_probe, pressure_probe_gpa)
       implicit none
-      integer, intent(in) :: ik, probe_subdiv_n
+      integer, intent(in) :: ik, ix_center, iy_center, iz_center, probe_subdiv_n
       real(8), intent(in) :: s_center(3), rho_center
       real(8), intent(out) :: tensor_probe(3,3), pressure_probe_gpa
       integer :: isx, isy, isz, a, b
+      real(8) :: fx, fy, fz
       real(8) :: du_shift, dv_shift, dw_shift
       real(8) :: s_probe(3), r_probe, r_probe_inv, r_probe2
-      real(8) :: u_probe, du_probe, dvsr_dr_probe, contrib_probe_sub
+      real(8) :: u_probe, du_probe, dvsr_dr_probe, contrib_probe_sub, rho_probe_sub
       real(8) :: subdiv_count_inv, subcell_weight
 
       tensor_probe = 0d0
@@ -1707,11 +1735,14 @@ contains
       subcell_weight = hvol * subdiv_count_inv**3
 
       do isx = 1, probe_subdiv_n
-        du_shift = ((dble(isx) - 0.5d0) * subdiv_count_inv - 0.5d0) * system%hgs(1)
+        fx = (dble(isx) - 0.5d0) * subdiv_count_inv
+        du_shift = (fx - 0.5d0) * system%hgs(1)
         do isy = 1, probe_subdiv_n
-          dv_shift = ((dble(isy) - 0.5d0) * subdiv_count_inv - 0.5d0) * system%hgs(2)
+          fy = (dble(isy) - 0.5d0) * subdiv_count_inv
+          dv_shift = (fy - 0.5d0) * system%hgs(2)
           do isz = 1, probe_subdiv_n
-            dw_shift = ((dble(isz) - 0.5d0) * subdiv_count_inv - 0.5d0) * system%hgs(3)
+            fz = (dble(isz) - 0.5d0) * subdiv_count_inv
+            dw_shift = (fz - 0.5d0) * system%hgs(3)
             s_probe(1) = s_center(1) + system%rmatrix_a(1,1) * du_shift + system%rmatrix_a(1,2) * dv_shift + &
                          system%rmatrix_a(1,3) * dw_shift
             s_probe(2) = s_center(2) + system%rmatrix_a(2,1) * du_shift + system%rmatrix_a(2,2) * dv_shift + &
@@ -1725,7 +1756,9 @@ contains
             r_probe_inv = 1d0 / r_probe
             call eval_local_sr_shared_u_stress(pp, ik, r_probe, u_probe, du_probe)
             dvsr_dr_probe = (du_probe * r_probe - u_probe) * r_probe_inv**2
-            contrib_probe_sub = -rho_center * dvsr_dr_probe * r_probe_inv * subcell_weight
+            rho_probe_sub = rho_center
+            if(probe_rho_trilinear) rho_probe_sub = sample_probe_rho_trilinear(ix_center, iy_center, iz_center, fx, fy, fz)
+            contrib_probe_sub = -rho_probe_sub * dvsr_dr_probe * r_probe_inv * subcell_weight
             do b = 1, 3
             do a = 1, 3
               tensor_probe(a,b) = tensor_probe(a,b) + contrib_probe_sub * s_probe(a) * s_probe(b)
@@ -1736,6 +1769,51 @@ contains
         end do
       end do
     end subroutine calc_loc_sr_rs_subdiv_probe_point
+
+    real(8) function sample_probe_rho_trilinear(ix_center, iy_center, iz_center, fx, fy, fz)
+      implicit none
+      integer, intent(in) :: ix_center, iy_center, iz_center
+      real(8), intent(in) :: fx, fy, fz
+      integer :: ix0, ix1, iy0, iy1, iz0, iz1
+      real(8) :: tx, ty, tz
+
+      call select_probe_rho_axis(ix_center, fx, 1, ix0, ix1, tx)
+      call select_probe_rho_axis(iy_center, fy, 2, iy0, iy1, ty)
+      call select_probe_rho_axis(iz_center, fz, 3, iz0, iz1, tz)
+
+      sample_probe_rho_trilinear = &
+           (1d0 - tx) * ((1d0 - ty) * ((1d0 - tz) * probe_rho_box(ix0,iy0,iz0) + tz * probe_rho_box(ix0,iy0,iz1)) + &
+                         ty         * ((1d0 - tz) * probe_rho_box(ix0,iy1,iz0) + tz * probe_rho_box(ix0,iy1,iz1))) + &
+           tx         * ((1d0 - ty) * ((1d0 - tz) * probe_rho_box(ix1,iy0,iz0) + tz * probe_rho_box(ix1,iy0,iz1)) + &
+                         ty         * ((1d0 - tz) * probe_rho_box(ix1,iy1,iz0) + tz * probe_rho_box(ix1,iy1,iz1)))
+    end function sample_probe_rho_trilinear
+
+    subroutine select_probe_rho_axis(ic, frac_cell, idir, i0, i1, t)
+      implicit none
+      integer, intent(in) :: ic, idir
+      real(8), intent(in) :: frac_cell
+      integer, intent(out) :: i0, i1
+      real(8), intent(out) :: t
+      integer :: ngrid_axis
+
+      if(frac_cell < 0.5d0) then
+        i0 = ic - 1
+        i1 = ic
+        t = frac_cell + 0.5d0
+      else
+        i0 = ic
+        i1 = ic + 1
+        t = frac_cell - 0.5d0
+      end if
+
+      if(.not. info%if_divide_rspace) then
+        ngrid_axis = mg%num(idir)
+        if(i0 < mg%is(idir)) i0 = i0 + ngrid_axis
+        if(i0 > mg%ie(idir)) i0 = i0 - ngrid_axis
+        if(i1 < mg%is(idir)) i1 = i1 + ngrid_axis
+        if(i1 > mg%ie(idir)) i1 = i1 - ngrid_axis
+      end if
+    end subroutine select_probe_rho_axis
 
     subroutine open_loc_sr_rs_sampled_dump()
       implicit none
@@ -1750,6 +1828,7 @@ contains
       write(fh_sampled_dump,'(a)') '# delta_dvsr_dr pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
       if(probe_rs_subdiv) then
         write(fh_sampled_dump,'(a,i0)') '# probe_subdiv_n = ', probe_subdiv_n
+        write(fh_sampled_dump,'(a,a)') '# probe_rho_mode = ', trim(probe_rho_mode)
         write(fh_sampled_dump,'(a)') '# pressure_probe_gpa delta_pressure_probe_current_gpa'
       end if
     end subroutine open_loc_sr_rs_sampled_dump
