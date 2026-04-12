@@ -860,7 +860,13 @@ contains
     use structures
     use math_constants, only: pi, zi
     use communication,  only: comm_summation
-    use salmon_global,  only: aEwald, cutoff_g, kion, yn_out_stress_numerics
+    use filesystem,     only: open_filehandle
+    use inputoutput,    only: au_pressure_gpa
+    use parallelization, only: nproc_id_global
+    use prep_pp_sub,    only: integrate_local_sr_dvg_dg2_shell
+    use salmon_global,  only: aEwald, base_directory, cutoff_g, kion, &
+                              npt_loc_sr_aux_2pi, sysname, yn_out_loc_sr_grad_sampled_dump, &
+                              yn_out_stress_numerics
     implicit none
     type(s_dft_system),      intent(inout) :: system
     type(s_pp_info),         intent(in)    :: pp
@@ -869,12 +875,16 @@ contains
     type(s_rgrid),           intent(in)    :: mg
     type(s_pp_grid),         intent(in)    :: ppg
     type(s_poisson),         intent(in)    :: poisson
-    integer :: ix, iy, iz, ia, ik, a, b, ig_s(3), ig_e(3)
+    integer :: ix, iy, iz, ia, ik, a, b, ig_s(3), ig_e(3), fh_grad_dump
     real(8) :: g(3), r(3), G2, Gd, coeff_lr, coeff_lr_scr, scr_fac, strs(3,3), strs_sum(3,3), &
       & strs_grad_sum(3,3), strs_diag_sum(3,3), strs_sr(3,3), strs_lr(3,3), strs_lr_scr(3,3), &
       & strs_sr_sum(3,3), strs_lr_sum(3,3), strs_lr_scr_sum(3,3), E_sr, E_lr, E_sr_scr, E_lr_scr, &
-      & E_sr_loc, E_lr_loc, E_lr_scr_loc, V, cutoff_g2
-    complex(8) :: rho_e, V_sr_sum, V_lr_sum, V_lr_scr_sum, dVsr_dG2_sum, phase
+      & E_sr_loc, E_lr_loc, E_lr_scr_loc, V, cutoff_g2, gmag, legacy_dvg_dg2, pressure_factor, &
+      & pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+    complex(8) :: rho_e, V_sr_sum, V_lr_sum, V_lr_scr_sum, dVsr_dG2_sum, dVsr_dG2_current, &
+      & dVsr_dG2_legacy, phase
+    logical :: dump_grad
+    character(256) :: file_grad_dump
 
     V = system%det_a
     strs = 0d0
@@ -885,6 +895,7 @@ contains
     E_lr_loc = 0d0
     E_lr_scr_loc = 0d0
     cutoff_g2 = cutoff_g**2
+    pressure_factor = au_pressure_gpa / (3d0 * V)
     call get_g_bounds(fg, ig_s, ig_e)
     if(.not. allocated(ppg%zVG_ion_stress)) call fail_stress("calc_stress_loc: zVG_ion_stress is not allocated")
     if(.not. allocated(ppg%dVG_ion_dG2)) call fail_stress("calc_stress_loc: dVG_ion_dG2 is not allocated")
@@ -892,11 +903,19 @@ contains
       ik = kion(ia)
       if(ik < 1 .or. ik > size(pp%zps)) call fail_stress("calc_stress_loc: invalid species index")
     end do
+    dump_grad = (yn_out_loc_sr_grad_sampled_dump == 'y')
+    fh_grad_dump = -1
+    if(dump_grad) call open_loc_sr_grad_sampled_dump()
 
     !$omp parallel do collapse(2) default(none) &
-    !$omp   private(ix,iy,iz,ia,ik,a,b,g,r,G2,Gd,rho_e,V_sr_sum,V_lr_sum,V_lr_scr_sum,dVsr_dG2_sum,phase,scr_fac,coeff_lr,coeff_lr_scr) &
-    !$omp   shared(fg,ig_s,ig_e,poisson,ppg,pp,system,kion,cutoff_g2,aEwald) &
-    !$omp   reduction(+:strs_sr,strs_lr,strs_lr_scr,E_sr_loc,E_lr_loc,E_lr_scr_loc)
+    !$omp& private(ix,iy,iz,ia,ik,a,b,g,r,G2,gmag,Gd,rho_e, &
+    !$omp&         V_sr_sum,V_lr_sum,V_lr_scr_sum,dVsr_dG2_sum, &
+    !$omp&         dVsr_dG2_current,dVsr_dG2_legacy,phase,scr_fac, &
+    !$omp&         coeff_lr,coeff_lr_scr,legacy_dvg_dg2, &
+    !$omp&         pressure_current_gpa,pressure_legacy_gpa,delta_pressure_gpa) &
+    !$omp& shared(fg,ig_s,ig_e,poisson,ppg,pp,system,kion,cutoff_g2, &
+    !$omp&        aEwald,dump_grad,fh_grad_dump,npt_loc_sr_aux_2pi,pressure_factor) &
+    !$omp& reduction(+:strs_sr,strs_lr,strs_lr_scr,E_sr_loc,E_lr_loc,E_lr_scr_loc)
     do iz = ig_s(3), ig_e(3)
     do iy = ig_s(2), ig_e(2)
     do ix = ig_s(1), ig_e(1)
@@ -905,6 +924,7 @@ contains
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
       G2 = g(1)**2 + g(2)**2 + g(3)**2
+      gmag = sqrt(G2)
       if(G2 > cutoff_g2) cycle
 
       rho_e = poisson%zrhoG_ele(ix,iy,iz)
@@ -912,6 +932,7 @@ contains
       V_lr_sum = (0d0, 0d0)
       V_lr_scr_sum = (0d0, 0d0)
       dVsr_dG2_sum = (0d0, 0d0)
+      dVsr_dG2_legacy = (0d0, 0d0)
 
       do ia = 1, system%nion
         ik = kion(ia)
@@ -921,6 +942,10 @@ contains
         V_sr_sum = V_sr_sum + ppg%zVG_ion_stress(ix,iy,iz,ik) * phase
         V_lr_sum = V_lr_sum - (4d0*pi / G2) * pp%zps(ik) * phase
         dVsr_dG2_sum = dVsr_dG2_sum + ppg%dVG_ion_dG2(ix,iy,iz,ik) * phase
+        if(dump_grad) then
+          legacy_dvg_dg2 = integrate_local_sr_dvg_dg2_shell(pp, ik, gmag, npt_loc_sr_aux_2pi)
+          dVsr_dG2_legacy = dVsr_dG2_legacy + legacy_dvg_dg2 * phase
+        end if
       end do
 
       E_sr_loc = E_sr_loc + dble(conjg(rho_e) * V_sr_sum)
@@ -930,6 +955,16 @@ contains
       E_lr_scr_loc = E_lr_scr_loc + dble(conjg(rho_e) * V_lr_scr_sum)
       coeff_lr = -2d0 * dble(conjg(rho_e) * V_lr_sum) / G2
       coeff_lr_scr = -2d0 * dble(conjg(rho_e) * V_lr_scr_sum) / G2 * (1d0 + G2 / (4d0 * aEwald))
+      if(dump_grad) then
+        dVsr_dG2_current = dVsr_dG2_sum
+        pressure_current_gpa = -2d0 * dble(conjg(rho_e) * dVsr_dG2_current) * G2 * pressure_factor
+        pressure_legacy_gpa = -2d0 * dble(conjg(rho_e) * dVsr_dG2_legacy) * G2 * pressure_factor
+        delta_pressure_gpa = pressure_current_gpa - pressure_legacy_gpa
+        !$omp critical(loc_sr_grad_sampled_dump_io)
+        call dump_loc_sr_grad_sampled_points(ix, iy, iz, g, gmag, rho_e, dVsr_dG2_current, dVsr_dG2_legacy, &
+             pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa)
+        !$omp end critical(loc_sr_grad_sampled_dump_io)
+      end if
 
       do b = 1, 3
       do a = 1, 3
@@ -984,6 +1019,7 @@ contains
     system%stress_loc_sr_scr_energy = E_sr_scr
     system%stress_loc_lr_scr_energy = E_lr_scr
     system%stress_loc = -strs_sum
+    if(fh_grad_dump >= 0) close(fh_grad_dump)
     if(yn_out_stress_numerics == 'y') then
       call calc_local_sr_gspace_diagnostics(system, pp, fg, info, ppg, cutoff_g2)
     else
@@ -991,6 +1027,34 @@ contains
       system%stress_loc_sr_gspace_dvg_meandiff = 0d0
       system%stress_loc_sr_gspace_dvg_g_at_max = 0d0
     end if
+
+  contains
+
+    subroutine open_loc_sr_grad_sampled_dump()
+      implicit none
+      character(16) :: rank_label
+
+      write(rank_label,'(I6.6)') nproc_id_global
+      file_grad_dump = trim(base_directory)//trim(sysname)//'_loc_sr_grad_sampled_rank'//trim(rank_label)//'.data'
+      fh_grad_dump = open_filehandle(trim(file_grad_dump), status='replace')
+      write(fh_grad_dump,'(a)') '# Local-SR sampled current-vs-legacy dV_sr/dG^2 dump'
+      write(fh_grad_dump,'(a)') '# rank ix iy iz gx gy gz g_abs rho_e_re rho_e_im dVsr_dG2_current_re dVsr_dG2_current_im'
+      write(fh_grad_dump,'(a)') '# dVsr_dG2_legacy_re dVsr_dG2_legacy_im'
+      write(fh_grad_dump,'(a)') '# pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
+    end subroutine open_loc_sr_grad_sampled_dump
+
+    subroutine dump_loc_sr_grad_sampled_points(ix, iy, iz, g, g_abs, rho_e, dVsr_dG2_current, dVsr_dG2_legacy, &
+         pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa)
+      implicit none
+      integer, intent(in) :: ix, iy, iz
+      real(8), intent(in) :: g(3), g_abs, pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+      complex(8), intent(in) :: rho_e, dVsr_dG2_current, dVsr_dG2_legacy
+
+      write(fh_grad_dump,*) nproc_id_global, ix, iy, iz, g(1), g(2), g(3), g_abs, &
+           dble(rho_e), aimag(rho_e), dble(dVsr_dG2_current), aimag(dVsr_dG2_current), &
+           dble(dVsr_dG2_legacy), aimag(dVsr_dG2_legacy), &
+           pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+    end subroutine dump_loc_sr_grad_sampled_points
   end subroutine calc_stress_loc
 
   subroutine calc_local_sr_gspace_diagnostics(system, pp, fg, info, ppg, cutoff_g2)
