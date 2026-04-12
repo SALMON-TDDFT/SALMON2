@@ -365,6 +365,7 @@ module salmon_global
   real(8)        :: probe_loc_sr_fit_u1_scale = 1d0
   real(8)        :: probe_loc_sr_fit_du12_scale = 1d0
   character(1)   :: yn_out_loc_sr_rs_sampled_dump = 'n'
+  character(1)   :: yn_out_loc_sr_rs_subdiv_probe = 'n'
   character(1)   :: yn_out_loc_sr_grad_sampled_dump = 'n'
   integer        :: out_stress_step      = 100
   character(1)   :: yn_out_tm

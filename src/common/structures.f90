@@ -101,6 +101,7 @@ module structures
     real(8) :: stress_loc_sr_scr_diag(3,3)
     real(8) :: stress_loc_lr_scr_diag(3,3)
     real(8) :: stress_loc_sr_rs(3,3)      ! real-space SR local stress shadow (Nielsen-Martin Eq.30b)
+    real(8) :: stress_loc_sr_rs_subdiv_probe(3,3)
     real(8) :: stress_loc_sr_rs_bins(3,3,4)
     real(8) :: stress_loc_sr_rs_legacy(3,3)
     real(8) :: stress_loc_sr_rs_legacy_bins(3,3,4)

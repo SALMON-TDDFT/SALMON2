@@ -1548,7 +1548,7 @@ contains
     use communication,  only: comm_summation
     use filesystem,     only: open_filehandle
     use salmon_global,  only: base_directory, kion, sysname, &
-                              yn_out_loc_sr_rs_sampled_dump
+                              yn_out_loc_sr_rs_sampled_dump, yn_out_loc_sr_rs_subdiv_probe
     use inputoutput,    only: au_pressure_gpa
     use prep_pp_sub, only: eval_local_sr_shared_u_stress
     implicit none
@@ -1563,16 +1563,20 @@ contains
     real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr_current, dvsr_dr_legacy
     real(8)  :: u_r, du_r, r1, r2, r3
     real(8)  :: V, hvol
-    real(8)  :: contrib, contrib_legacy
-    real(8)  :: strs(3,3), strs_sum(3,3), strs_bins(3,3,4), strs_bins_sum(3,3,4)
-    logical  :: dump_sampled, legacy_ok
+    real(8)  :: contrib, contrib_legacy, pressure_probe_gpa
+    real(8)  :: probe_tensor(3,3)
+    real(8)  :: strs(3,3), strs_sum(3,3), strs_probe(3,3), strs_probe_sum(3,3)
+    real(8)  :: strs_bins(3,3,4), strs_bins_sum(3,3,4)
+    logical  :: dump_sampled, legacy_ok, probe_rs_subdiv
     character(256) :: file_sampled_dump
 
     V = system%det_a
     hvol = system%Hvol
     nspin = system%nspin
     strs = 0d0
+    strs_probe = 0d0
     strs_bins = 0d0
+    probe_rs_subdiv = (yn_out_loc_sr_rs_subdiv_probe == 'y')
     dump_sampled = (yn_out_loc_sr_rs_sampled_dump == 'y' .and. info%id_k == 0 .and. info%id_o == 0)
     fh_sampled_dump = -1
     if(dump_sampled) call open_loc_sr_rs_sampled_dump()
@@ -1622,6 +1626,17 @@ contains
         ! V_sr(r) = u(r) / r, so V'_sr(r) = (u'(r) * r - u(r)) / r^2
         dvsr_dr_current = (du_r * r_abs - u_r) * r_inv**2
         contrib = -rho_val * dvsr_dr_current * r_inv * hvol
+        if(probe_rs_subdiv) then
+          call calc_loc_sr_rs_subdiv_probe_point(ik, s, rho_val, probe_tensor, pressure_probe_gpa)
+        else
+          probe_tensor = 0d0
+          do b = 1, 3
+          do a = 1, 3
+            probe_tensor(a,b) = contrib * s(a) * s(b)
+          end do
+          end do
+          pressure_probe_gpa = contrib * r_abs * r_abs * au_pressure_gpa / (3d0 * V)
+        end if
 
         bin_idx = 4
         if(r_abs < r1) then
@@ -1643,13 +1658,14 @@ contains
             contrib_legacy = 0d0
           end if
           call dump_loc_sr_rs_sampled_points(ia, ik, j, intr_legacy, ix, iy, iz, s, bin_idx, r_abs, rho_val, &
-               dvsr_dr_current, dvsr_dr_legacy, contrib, contrib_legacy, legacy_ok)
+               dvsr_dr_current, dvsr_dr_legacy, contrib, contrib_legacy, pressure_probe_gpa, legacy_ok)
         end if
 
         ! Accumulate: -rho * V'_sr * s_a * s_b / |s| * hvol
         do b = 1, 3
         do a = 1, 3
           strs(a,b) = strs(a,b) + contrib * s(a) * s(b)
+          strs_probe(a,b) = strs_probe(a,b) + probe_tensor(a,b)
           strs_bins(a,b,bin_idx) = strs_bins(a,b,bin_idx) + contrib * s(a) * s(b)
         end do
         end do
@@ -1658,8 +1674,10 @@ contains
 
     ! Use icomm_r (not icomm_rko): this is a density-only sum with no k/orbital loops.
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
+    call comm_summation(strs_probe, strs_probe_sum, 9, info%icomm_r)
     call comm_summation(strs_bins, strs_bins_sum, size(strs_bins), info%icomm_r)
     system%stress_loc_sr_rs = -strs_sum / V
+    system%stress_loc_sr_rs_subdiv_probe = -strs_probe_sum / V
     do ib = 1, 4
       system%stress_loc_sr_rs_bins(:,:,ib) = -strs_bins_sum(:,:,ib) / V
     end do
@@ -1667,6 +1685,50 @@ contains
     call calc_stress_loc_sr_rs_legacy_compare(system, pp, info, mg, ppg, rho_s)
 
   contains
+
+    subroutine calc_loc_sr_rs_subdiv_probe_point(ik, s_center, rho_center, tensor_probe, pressure_probe_gpa)
+      implicit none
+      integer, intent(in) :: ik
+      real(8), intent(in) :: s_center(3), rho_center
+      real(8), intent(out) :: tensor_probe(3,3), pressure_probe_gpa
+      integer :: isx, isy, isz, a, b
+      real(8) :: du_shift, dv_shift, dw_shift
+      real(8) :: s_probe(3), r_probe, r_probe_inv, r_probe2
+      real(8) :: u_probe, du_probe, dvsr_dr_probe, contrib_probe_sub
+
+      tensor_probe = 0d0
+      pressure_probe_gpa = 0d0
+
+      do isx = -1, 1, 2
+        du_shift = 0.25d0 * dble(isx) * system%hgs(1)
+        do isy = -1, 1, 2
+          dv_shift = 0.25d0 * dble(isy) * system%hgs(2)
+          do isz = -1, 1, 2
+            dw_shift = 0.25d0 * dble(isz) * system%hgs(3)
+            s_probe(1) = s_center(1) + system%rmatrix_a(1,1) * du_shift + system%rmatrix_a(1,2) * dv_shift + &
+                         system%rmatrix_a(1,3) * dw_shift
+            s_probe(2) = s_center(2) + system%rmatrix_a(2,1) * du_shift + system%rmatrix_a(2,2) * dv_shift + &
+                         system%rmatrix_a(2,3) * dw_shift
+            s_probe(3) = s_center(3) + system%rmatrix_a(3,1) * du_shift + system%rmatrix_a(3,2) * dv_shift + &
+                         system%rmatrix_a(3,3) * dw_shift
+            r_probe2 = s_probe(1)**2 + s_probe(2)**2 + s_probe(3)**2
+            if(r_probe2 < 1d-24) cycle
+            r_probe = sqrt(r_probe2)
+            if(r_probe >= pp%rps(ik)) cycle
+            r_probe_inv = 1d0 / r_probe
+            call eval_local_sr_shared_u_stress(pp, ik, r_probe, u_probe, du_probe)
+            dvsr_dr_probe = (du_probe * r_probe - u_probe) * r_probe_inv**2
+            contrib_probe_sub = -rho_center * dvsr_dr_probe * r_probe_inv * (hvol / 8d0)
+            do b = 1, 3
+            do a = 1, 3
+              tensor_probe(a,b) = tensor_probe(a,b) + contrib_probe_sub * s_probe(a) * s_probe(b)
+            end do
+            end do
+            pressure_probe_gpa = pressure_probe_gpa + contrib_probe_sub * r_probe2 * au_pressure_gpa / (3d0 * V)
+          end do
+        end do
+      end do
+    end subroutine calc_loc_sr_rs_subdiv_probe_point
 
     subroutine open_loc_sr_rs_sampled_dump()
       implicit none
@@ -1679,29 +1741,41 @@ contains
       write(fh_sampled_dump,'(a)') '# rank means icomm_r rank; only id_k=0 and id_o=0 write files'
       write(fh_sampled_dump,'(a)') '# rank ia ik j intr ix iy iz bin legacy_ok sx sy sz r_abs rho dvsr_dr_current dvsr_dr_legacy'
       write(fh_sampled_dump,'(a)') '# delta_dvsr_dr pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
+      if(probe_rs_subdiv) then
+        write(fh_sampled_dump,'(a)') '# pressure_probe_gpa delta_pressure_probe_current_gpa'
+      end if
     end subroutine open_loc_sr_rs_sampled_dump
 
     subroutine dump_loc_sr_rs_sampled_points(ia, ik, j, intr, ix, iy, iz, s, bin_idx, r_abs, rho_val, &
-         dvsr_dr_current, dvsr_dr_legacy, contrib_current, contrib_legacy, legacy_ok)
+         dvsr_dr_current, dvsr_dr_legacy, contrib_current, contrib_legacy, pressure_probe_gpa, legacy_ok)
       implicit none
       integer, intent(in) :: ia, ik, j, intr, ix, iy, iz, bin_idx
       real(8), intent(in) :: s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy
-      real(8), intent(in) :: contrib_current, contrib_legacy
+      real(8), intent(in) :: contrib_current, contrib_legacy, pressure_probe_gpa
       logical, intent(in) :: legacy_ok
       integer :: legacy_ok_int
       real(8) :: delta_dvsr_dr, pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+      real(8) :: delta_pressure_probe_current_gpa
 
       delta_dvsr_dr = dvsr_dr_current - dvsr_dr_legacy
       pressure_current_gpa = contrib_current * r_abs * r_abs * au_pressure_gpa / (3d0 * V)
       pressure_legacy_gpa = contrib_legacy * r_abs * r_abs * au_pressure_gpa / (3d0 * V)
       delta_pressure_gpa = pressure_current_gpa - pressure_legacy_gpa
+      delta_pressure_probe_current_gpa = pressure_probe_gpa - pressure_current_gpa
       legacy_ok_int = 0
       if(legacy_ok) legacy_ok_int = 1
 
-      write(fh_sampled_dump,*) &
-           info%id_r, ia, ik, j, intr, ix, iy, iz, bin_idx, &
-           legacy_ok_int, s(1), s(2), s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy, delta_dvsr_dr, &
-           pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+      if(probe_rs_subdiv) then
+        write(fh_sampled_dump,*) &
+             info%id_r, ia, ik, j, intr, ix, iy, iz, bin_idx, &
+             legacy_ok_int, s(1), s(2), s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy, delta_dvsr_dr, &
+             pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa, pressure_probe_gpa, delta_pressure_probe_current_gpa
+      else
+        write(fh_sampled_dump,*) &
+             info%id_r, ia, ik, j, intr, ix, iy, iz, bin_idx, &
+             legacy_ok_int, s(1), s(2), s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy, delta_dvsr_dr, &
+             pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
+      end if
     end subroutine dump_loc_sr_rs_sampled_points
 
     subroutine find_radial_index(r, rad, nr, idx)
