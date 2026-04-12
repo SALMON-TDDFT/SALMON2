@@ -531,6 +531,7 @@ contains
       & probe_loc_sr_fit_du12_scale, &
       & yn_out_loc_sr_rs_sampled_dump, &
       & yn_out_loc_sr_rs_subdiv_probe, &
+      & num_loc_sr_rs_subdiv_probe, &
       & yn_out_loc_sr_grad_sampled_dump, &
       & out_stress_step, &
       & yn_out_tm, &
@@ -988,6 +989,7 @@ contains
     probe_loc_sr_fit_du12_scale = 1d0
     yn_out_loc_sr_rs_sampled_dump = 'n'
     yn_out_loc_sr_rs_subdiv_probe = 'n'
+    num_loc_sr_rs_subdiv_probe = 2
     yn_out_loc_sr_grad_sampled_dump = 'n'
     out_stress_step     = 100
     yn_out_tm           = 'n'
@@ -1636,6 +1638,7 @@ contains
     call comm_bcast(probe_loc_sr_fit_du12_scale,nproc_group_global)
     call comm_bcast(yn_out_loc_sr_rs_sampled_dump,nproc_group_global)
     call comm_bcast(yn_out_loc_sr_rs_subdiv_probe,nproc_group_global)
+    call comm_bcast(num_loc_sr_rs_subdiv_probe,nproc_group_global)
     call comm_bcast(yn_out_loc_sr_grad_sampled_dump,nproc_group_global)
     call comm_bcast(out_stress_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
@@ -2580,6 +2583,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'probe_loc_sr_fit_du12_scale', probe_loc_sr_fit_du12_scale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_loc_sr_rs_sampled_dump', yn_out_loc_sr_rs_sampled_dump
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_loc_sr_rs_subdiv_probe', yn_out_loc_sr_rs_subdiv_probe
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_loc_sr_rs_subdiv_probe', num_loc_sr_rs_subdiv_probe
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_loc_sr_grad_sampled_dump', yn_out_loc_sr_grad_sampled_dump
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_stress_step', out_stress_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
@@ -3154,6 +3158,8 @@ contains
     call normalize_stress_yn_override('yn_out_loc_sr_rs_sampled_dump', yn_out_loc_sr_rs_sampled_dump)
     call string_lowercase(yn_out_loc_sr_rs_subdiv_probe)
     call normalize_stress_yn_override('yn_out_loc_sr_rs_subdiv_probe', yn_out_loc_sr_rs_subdiv_probe)
+    if(num_loc_sr_rs_subdiv_probe < 1) &
+      call fail_stress_input("num_loc_sr_rs_subdiv_probe must be >= 1")
     call string_lowercase(yn_out_loc_sr_grad_sampled_dump)
     call normalize_stress_yn_override('yn_out_loc_sr_grad_sampled_dump', yn_out_loc_sr_grad_sampled_dump)
     

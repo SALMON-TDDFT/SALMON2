@@ -1548,7 +1548,8 @@ contains
     use communication,  only: comm_summation
     use filesystem,     only: open_filehandle
     use salmon_global,  only: base_directory, kion, sysname, &
-                              yn_out_loc_sr_rs_sampled_dump, yn_out_loc_sr_rs_subdiv_probe
+                              yn_out_loc_sr_rs_sampled_dump, yn_out_loc_sr_rs_subdiv_probe, &
+                              num_loc_sr_rs_subdiv_probe
     use inputoutput,    only: au_pressure_gpa
     use prep_pp_sub, only: eval_local_sr_shared_u_stress
     implicit none
@@ -1559,6 +1560,7 @@ contains
     type(s_pp_grid),       intent(in)    :: ppg
     type(s_scalar),        intent(in)    :: rho_s(:)
     integer  :: ia, ib, ik, j, a, b, ix, iy, iz, i1, i2, i3, intr_legacy, intr_stress, ispin, nspin, bin_idx
+    integer  :: probe_subdiv_n
     integer  :: fh_sampled_dump
     real(8)  :: s(3), r_abs, r_inv, rho_val, dvsr_dr_current, dvsr_dr_legacy
     real(8)  :: u_r, du_r, r1, r2, r3
@@ -1577,6 +1579,8 @@ contains
     strs_probe = 0d0
     strs_bins = 0d0
     probe_rs_subdiv = (yn_out_loc_sr_rs_subdiv_probe == 'y')
+    probe_subdiv_n = 1
+    if(probe_rs_subdiv) probe_subdiv_n = num_loc_sr_rs_subdiv_probe
     dump_sampled = (yn_out_loc_sr_rs_sampled_dump == 'y' .and. info%id_k == 0 .and. info%id_o == 0)
     fh_sampled_dump = -1
     if(dump_sampled) call open_loc_sr_rs_sampled_dump()
@@ -1627,7 +1631,7 @@ contains
         dvsr_dr_current = (du_r * r_abs - u_r) * r_inv**2
         contrib = -rho_val * dvsr_dr_current * r_inv * hvol
         if(probe_rs_subdiv) then
-          call calc_loc_sr_rs_subdiv_probe_point(ik, s, rho_val, probe_tensor, pressure_probe_gpa)
+          call calc_loc_sr_rs_subdiv_probe_point(ik, s, rho_val, probe_subdiv_n, probe_tensor, pressure_probe_gpa)
         else
           probe_tensor = 0d0
           do b = 1, 3
@@ -1686,25 +1690,28 @@ contains
 
   contains
 
-    subroutine calc_loc_sr_rs_subdiv_probe_point(ik, s_center, rho_center, tensor_probe, pressure_probe_gpa)
+    subroutine calc_loc_sr_rs_subdiv_probe_point(ik, s_center, rho_center, probe_subdiv_n, tensor_probe, pressure_probe_gpa)
       implicit none
-      integer, intent(in) :: ik
+      integer, intent(in) :: ik, probe_subdiv_n
       real(8), intent(in) :: s_center(3), rho_center
       real(8), intent(out) :: tensor_probe(3,3), pressure_probe_gpa
       integer :: isx, isy, isz, a, b
       real(8) :: du_shift, dv_shift, dw_shift
       real(8) :: s_probe(3), r_probe, r_probe_inv, r_probe2
       real(8) :: u_probe, du_probe, dvsr_dr_probe, contrib_probe_sub
+      real(8) :: subdiv_count_inv, subcell_weight
 
       tensor_probe = 0d0
       pressure_probe_gpa = 0d0
+      subdiv_count_inv = 1d0 / dble(probe_subdiv_n)
+      subcell_weight = hvol * subdiv_count_inv**3
 
-      do isx = -1, 1, 2
-        du_shift = 0.25d0 * dble(isx) * system%hgs(1)
-        do isy = -1, 1, 2
-          dv_shift = 0.25d0 * dble(isy) * system%hgs(2)
-          do isz = -1, 1, 2
-            dw_shift = 0.25d0 * dble(isz) * system%hgs(3)
+      do isx = 1, probe_subdiv_n
+        du_shift = ((dble(isx) - 0.5d0) * subdiv_count_inv - 0.5d0) * system%hgs(1)
+        do isy = 1, probe_subdiv_n
+          dv_shift = ((dble(isy) - 0.5d0) * subdiv_count_inv - 0.5d0) * system%hgs(2)
+          do isz = 1, probe_subdiv_n
+            dw_shift = ((dble(isz) - 0.5d0) * subdiv_count_inv - 0.5d0) * system%hgs(3)
             s_probe(1) = s_center(1) + system%rmatrix_a(1,1) * du_shift + system%rmatrix_a(1,2) * dv_shift + &
                          system%rmatrix_a(1,3) * dw_shift
             s_probe(2) = s_center(2) + system%rmatrix_a(2,1) * du_shift + system%rmatrix_a(2,2) * dv_shift + &
@@ -1718,7 +1725,7 @@ contains
             r_probe_inv = 1d0 / r_probe
             call eval_local_sr_shared_u_stress(pp, ik, r_probe, u_probe, du_probe)
             dvsr_dr_probe = (du_probe * r_probe - u_probe) * r_probe_inv**2
-            contrib_probe_sub = -rho_center * dvsr_dr_probe * r_probe_inv * (hvol / 8d0)
+            contrib_probe_sub = -rho_center * dvsr_dr_probe * r_probe_inv * subcell_weight
             do b = 1, 3
             do a = 1, 3
               tensor_probe(a,b) = tensor_probe(a,b) + contrib_probe_sub * s_probe(a) * s_probe(b)
@@ -1742,6 +1749,7 @@ contains
       write(fh_sampled_dump,'(a)') '# rank ia ik j intr ix iy iz bin legacy_ok sx sy sz r_abs rho dvsr_dr_current dvsr_dr_legacy'
       write(fh_sampled_dump,'(a)') '# delta_dvsr_dr pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
       if(probe_rs_subdiv) then
+        write(fh_sampled_dump,'(a,i0)') '# probe_subdiv_n = ', probe_subdiv_n
         write(fh_sampled_dump,'(a)') '# pressure_probe_gpa delta_pressure_probe_current_gpa'
       end if
     end subroutine open_loc_sr_rs_sampled_dump
