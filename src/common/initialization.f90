@@ -286,10 +286,10 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(system,icomm1,info)
+  subroutine init_process_distribution(system,icomm1,info)
   use structures, only: s_parallel_info,s_dft_system
   use parallelization, only: nproc_id_global, nproc_group_global
-  use salmon_global, only: theory, yn_dg_fragment_rt
+    use salmon_global, only: theory, yn_dg_fragment_rt, yn_dc, yn_dc_lcfo
   use communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
@@ -317,7 +317,7 @@ subroutine init_process_distribution(system,icomm1,info)
   end if
 
   if_stop = .false.
-  if (yn_dg_fragment_rt /= 'y') then
+    if (.false.) then
     if (comm_is_root(nproc_id_global)) then
       if_stop = .not. check_numcpu(icomm1, info)
     end if

@@ -45,6 +45,9 @@
     integer :: env_len, env_stat
     real(8), allocatable, save :: Ap_mat(:,:), A2_mat(:,:)
     integer, parameter :: state_block_size = 64
+    logical :: enable_deriv_trace
+    character(len=32) :: env_deriv_trace
+    integer :: env_trace_len, env_trace_stat
     
     ! Time derivative in velocity gauge:
     !   d/dt c_i = -i * (H_0_ij + A^2(t)/2 * delta_ij) * c_j - A(t)·<i|∇|j> * c_j
@@ -60,6 +63,21 @@
     call cpu_time(t_deriv0)
     dt_gather_local = 0.0d0
     huge_val = huge(0.0d0) / 2.0d0
+
+    enable_deriv_trace = .false.
+    env_deriv_trace = ''
+    call get_environment_variable('SALMON_DG_DERIV_TRACE', env_deriv_trace, length=env_trace_len, status=env_trace_stat)
+    if (env_trace_stat == 0 .and. env_trace_len > 0) then
+      if (env_deriv_trace(1:1) == '1' .or. env_deriv_trace(1:1) == 'y' .or. env_deriv_trace(1:1) == 'Y' .or. &
+          env_deriv_trace(1:1) == 't' .or. env_deriv_trace(1:1) == 'T') then
+        enable_deriv_trace = .true.
+      end if
+    end if
+    if (enable_deriv_trace .and. itt <= 2) then
+      write(*,'(1x,a,i0,a,i0,a,3(1x,1pe12.4))') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+        " Ac_tot=", Ac_tot(1), Ac_tot(2), Ac_tot(3)
+      flush(6)
+    end if
     
     ! Calculate A^2 (diamagnetic term)
     A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
@@ -114,6 +132,11 @@
     end if
 
     do ispin = 1, dg_frag%nspin
+      if (enable_deriv_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+          " ispin=", ispin, " stage=spin-begin n_frag=", n_frag
+        flush(6)
+      end if
       ! Build H0c = H_0 + V_NL(A) + A^2/2
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
       use_mixed_basis = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
@@ -267,6 +290,11 @@
       end if
       call cpu_time(t_coef_gather1)
       dt_gather_local = dt_gather_local + (t_coef_gather1 - t_coef_gather0)
+      if (enable_deriv_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+          " ispin=", ispin, " stage=after-coef-gather"
+        flush(6)
+      end if
 
       if (use_mixed_basis .and. n_basis > 0) then
         if (.not. allocated(coef_mix_all)) then
@@ -388,6 +416,11 @@
                      coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), n_frag, (1.0d0, 0.0d0), dcoef_dt_h0(1:n_frag, 1:dg_frag%nstate_tot), n_tot)
         end if
       end if
+      if (enable_deriv_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+          " ispin=", ispin, " stage=after-h0-term"
+        flush(6)
+      end if
 
 
       if (use_mixed_basis .and. n_basis > 0) then
@@ -458,6 +491,11 @@
         call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), M, n_tot, &
                    coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_m, n_tot)
       end if
+      if (enable_deriv_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+          " ispin=", ispin, " stage=after-m-term"
+        flush(6)
+      end if
 
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m
@@ -486,6 +524,11 @@
         end if
 
       end if
+      if (enable_deriv_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+          " ispin=", ispin, " stage=after-overlap-solve"
+        flush(6)
+      end if
 
       do io = 1, n_frag
         if (.not. allocated(dg_frag%coef_owner)) exit
@@ -498,6 +541,11 @@
           if (dg_frag%coef_pw_owner(io) /= dg_frag%id) cycle
           dcoef_dt_pw(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+io, :)
         end do
+      end if
+      if (enable_deriv_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
+          " ispin=", ispin, " stage=spin-end"
+        flush(6)
       end if
     end do
 

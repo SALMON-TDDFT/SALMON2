@@ -282,6 +282,19 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
+  logical :: enable_main_trace
+  character(len=32) :: env_main_trace
+  integer :: env_main_len, env_main_stat
+
+  enable_main_trace = .false.
+  env_main_trace = ''
+  call get_environment_variable('SALMON_DG_MAIN_TRACE', env_main_trace, length=env_main_len, status=env_main_stat)
+  if (env_main_stat == 0 .and. env_main_len > 0) then
+    if (env_main_trace(1:1) == '1' .or. env_main_trace(1:1) == 'y' .or. env_main_trace(1:1) == 'Y' .or. &
+        env_main_trace(1:1) == 't' .or. env_main_trace(1:1) == 'T') then
+      enable_main_trace = .true.
+    end if
+  end if
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -310,9 +323,29 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, 'dg-initial-density')
   end if
   if (yn_spinorbit /= 'y') then
+    if (enable_main_trace) then
+      write(*,'(1x,a,a)') "        main-trace: stage=", "before-initial-electron-probe"
+      flush(6)
+    end if
     call print_initial_electron_probe_std(dg_frag, system, mg, rho)
+    if (enable_main_trace) then
+      write(*,'(1x,a,a)') "        main-trace: stage=", "after-initial-electron-probe"
+      flush(6)
+      write(*,'(1x,a,a)') "        main-trace: stage=", "before-initial-observables"
+      flush(6)
+    end if
     call calculate_observables_std(dg_frag, system, mg, stencil, ppg, rt, Mit, Vh, Vxc, Vpsl)
+    if (enable_main_trace) then
+      write(*,'(1x,a,a)') "        main-trace: stage=", "after-initial-observables"
+      flush(6)
+      write(*,'(1x,a,a)') "        main-trace: stage=", "before-initial-update-dg-energy"
+      flush(6)
+    end if
     call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, Mit)
+    if (enable_main_trace) then
+      write(*,'(1x,a,a)') "        main-trace: stage=", "after-initial-update-dg-energy"
+      flush(6)
+    end if
   end if
 
   ! Time evolution loop
@@ -328,7 +361,15 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     end if
     
     ! Reconstruct the DFT total energy from the DG one-body expectation.
+    if (enable_main_trace .and. itt <= 2) then
+      write(*,'(1x,a,i0,a,a)') "        main-trace: itt=", itt, " stage=", "before-update-dg-energy"
+      flush(6)
+    end if
     call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
+    if (enable_main_trace .and. itt <= 2) then
+      write(*,'(1x,a,i0,a,a)') "        main-trace: itt=", itt, " stage=", "after-update-dg-energy"
+      flush(6)
+    end if
     energy%elec_num = dg_frag%elec_num_scaled
     energy%elec_num_raw = dg_frag%elec_num_raw
     energy%pw_weight_raw = dg_frag%pw_weight_raw
@@ -361,14 +402,30 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       ! Periodic system: output current density
       ! DG-Fragment current from calculate_observables
       ! curr_e needs shape (3, 2) for two spins, use same current for both spins
+      if (enable_main_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,a)') "        main-trace: itt=", itt, " stage=", "before-write-rt-data-3d"
+        flush(6)
+      end if
       call write_rt_data_3d(itt, ofl, dt, system, &
                             reshape([dg_frag%current(1), dg_frag%current(2), dg_frag%current(3), &
                                      dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)], [3,2]), &
                             dg_frag%current(1:3))
+      if (enable_main_trace .and. itt <= 2) then
+        write(*,'(1x,a,i0,a,a)') "        main-trace: itt=", itt, " stage=", "after-write-rt-data-3d"
+        flush(6)
+      end if
     end select
     
     ! Write energy data
+    if (enable_main_trace .and. itt <= 2) then
+      write(*,'(1x,a,i0,a,a)') "        main-trace: itt=", itt, " stage=", "before-write-rt-energy"
+      flush(6)
+    end if
     call write_rt_energy_data(itt, ofl, dt, energy, md)
+    if (enable_main_trace .and. itt <= 2) then
+      write(*,'(1x,a,i0,a,a)') "        main-trace: itt=", itt, " stage=", "after-write-rt-energy"
+      flush(6)
+    end if
     
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. mod(itt, 10) == 0) then

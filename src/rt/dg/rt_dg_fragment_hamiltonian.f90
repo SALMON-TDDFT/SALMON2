@@ -540,13 +540,12 @@
     integer :: face_idx_local, face_idx_remote
     integer :: ix_face, iy_face, iz_face
     real(8) :: hvol
-    real(8) :: halo_integral_t, halo_integral_h, halo_integral_t_sum, halo_integral_h_sum, t_point, h_point, halo_val
+    real(8) :: halo_integral_t, halo_integral_h, halo_integral_m, halo_integral_m_avgavg, halo_integral_m_avgjump
+    real(8) :: halo_integral_t_sum, halo_integral_h_sum, halo_integral_m_sum, t_point, h_point, halo_val
     real(8) :: face_area, face_penalty_alpha, phi_local_face, phi_remote_face, dphi_local_n, dphi_remote_n
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
-    real(8) :: phi_checksum_before, phi_checksum_after, phi_checksum_delta, phi_checksum_tol
-    logical :: did_overlap_call
     integer :: is(3), ie(3)
     integer(8) :: byte_count
     integer(8) :: i_halo_chk
@@ -555,7 +554,7 @@
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     real(8), allocatable :: partial_th(:), reduced_th(:)
-    real(8), allocatable :: halo_partial_t(:), halo_partial_h(:), halo_reduced_t(:), halo_reduced_h(:)
+    real(8), allocatable :: halo_partial_t(:), halo_partial_h(:), halo_partial_m(:), halo_reduced_t(:), halo_reduced_h(:), halo_reduced_m(:)
     real(8), allocatable :: halo_reduce_pair(:), halo_reduce_sum(:)
     real(8), allocatable :: halo_t_point_buf(:), halo_h_point_buf(:)
     integer, allocatable :: halo_active_list(:), halo_active_nbf(:), halo_active_iblk(:), halo_active_iblk_rev(:)
@@ -593,10 +592,6 @@
       write(*,*) "=== Preparing Hamiltonian Matrix ==="
     end if
 
-    phi_checksum_before = 0.0d0
-    phi_checksum_after = 0.0d0
-    phi_checksum_delta = 0.0d0
-    phi_checksum_tol = 0.0d0
     nstate_chk_max = min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
     lg1_chk = dg_frag%lgnum_total(1)
     lg2_chk = dg_frag%lgnum_total(2)
@@ -607,7 +602,6 @@
     phi_ub2_chk = ubound(dg_frag%phi_frag, 2)
     phi_lb3_chk = lbound(dg_frag%phi_frag, 3)
     phi_ub3_chk = ubound(dg_frag%phi_frag, 3)
-    did_overlap_call = .false.
     
     ! Step 1: Calculate momentum matrix elements (transition moments)
     ! Required for velocity gauge A·p coupling
@@ -618,35 +612,7 @@
       end if
       call calculate_momentum_matrix(dg_frag, system, mg, stencil)
 
-      phi_checksum_before = 0.0d0
-      i_local_chk = 0
-      do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local_chk = i_local_chk + 1
-        if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-        iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
-        ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
-        do istate_chk = 1, nstate_chk_max
-          do iz_chk = 1, ndom_chk(3)
-            gz = iorg_chk(3) + iz_chk - 1
-            bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
-            if (bz == 0) cycle
-            do iy_chk = 1, ndom_chk(2)
-              gy = iorg_chk(2) + iy_chk - 1
-              by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
-              if (by == 0) cycle
-              do ix_chk = 1, ndom_chk(1)
-                gx = iorg_chk(1) + ix_chk - 1
-                bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
-                if (bx == 0) cycle
-                phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
-              end do
-            end do
-          end do
-        end do
-      end do
-
       call calculate_overlap_matrix(dg_frag, system, mg)
-      did_overlap_call = .true.
       if (enable_hamiltonian_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
@@ -662,35 +628,7 @@
       end if
       if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_blocks) .and. &
           .not. allocated(dg_frag%S_mat_prop_blocks)) then
-        phi_checksum_before = 0.0d0
-        i_local_chk = 0
-        do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
-          i_local_chk = i_local_chk + 1
-          if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-          iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
-          ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
-          do istate_chk = 1, nstate_chk_max
-            do iz_chk = 1, ndom_chk(3)
-              gz = iorg_chk(3) + iz_chk - 1
-              bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
-              if (bz == 0) cycle
-              do iy_chk = 1, ndom_chk(2)
-                gy = iorg_chk(2) + iy_chk - 1
-                by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
-                if (by == 0) cycle
-                do ix_chk = 1, ndom_chk(1)
-                  gx = iorg_chk(1) + ix_chk - 1
-                  bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
-                  if (bx == 0) cycle
-                  phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
-                end do
-              end do
-            end do
-          end do
-        end do
-
         call calculate_overlap_matrix(dg_frag, system, mg)
-        did_overlap_call = .true.
         if (enable_hamiltonian_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
@@ -699,60 +637,6 @@
       end if
     end if
 
-    if (did_overlap_call) then
-      if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)) then
-        write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=checksum-before-loop"
-        flush(6)
-      end if
-      phi_checksum_after = 0.0d0
-      i_local_chk = 0
-      do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local_chk = i_local_chk + 1
-        if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-        iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
-        ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
-        do istate_chk = 1, nstate_chk_max
-          do iz_chk = 1, ndom_chk(3)
-            gz = iorg_chk(3) + iz_chk - 1
-            bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
-            if (bz == 0) cycle
-            do iy_chk = 1, ndom_chk(2)
-              gy = iorg_chk(2) + iy_chk - 1
-              by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
-              if (by == 0) cycle
-              do ix_chk = 1, ndom_chk(1)
-                gx = iorg_chk(1) + ix_chk - 1
-                bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
-                if (bx == 0) cycle
-                phi_checksum_after = phi_checksum_after + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
-              end do
-            end do
-          end do
-        end do
-      end do
-      if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)) then
-        write(*,'(1x,a,i0,a,1pe12.4)') "        overlap-probe: rank=", dg_frag%id, &
-          " stage=checksum-after-loop value=", phi_checksum_after
-        flush(6)
-      end if
-      phi_checksum_delta = abs(phi_checksum_after - phi_checksum_before)
-      phi_checksum_tol = max(1.0d-12, 1.0d-12 * max(abs(phi_checksum_before), abs(phi_checksum_after)))
-      if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)) then
-        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        overlap-probe: rank=", dg_frag%id, &
-          " stage=checksum-delta before=", phi_checksum_before, " after=", phi_checksum_after, " delta=", phi_checksum_delta
-        flush(6)
-      end if
-      write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        overlap phi checksum: rank=", &
-        dg_frag%id, " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-        " before=", phi_checksum_before, " after=", phi_checksum_after, " delta=", phi_checksum_delta
-      flush(6)
-      if (phi_checksum_delta > phi_checksum_tol) then
-        write(*,'(1x,a,1pe12.4,a,1pe12.4)') "[FATAL] overlap modified interior phi_frag: delta=", &
-          phi_checksum_delta, " tol=", phi_checksum_tol
-        stop 1
-      end if
-    end if
-    
     ! Step 2: Allocate Hamiltonian matrix
     !
     ! Current Eq.(4) mapping in this routine:
@@ -1174,7 +1058,7 @@
             if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
             jfrag = dg_frag%halo(i_halo)%ifrag_src
             if (jfrag < 1) cycle
-            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            n_basis_halo = min(dg_frag%n_basis(jfrag, ispin), dg_frag%nstate_frag)
             if (n_basis_halo <= 0) cycle
             if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
             iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
@@ -1202,8 +1086,13 @@
             if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
             jfrag = dg_frag%halo(i_halo)%ifrag_src
             if (jfrag < 1) cycle
-            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+            n_basis_halo = min(dg_frag%n_basis(jfrag, ispin), dg_frag%nstate_frag)
             if (n_basis_halo <= 0) cycle
+            if (.not. allocated(dg_frag%halo(i_halo)%buf_recv)) cycle
+            if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
+              n_basis_halo = size(dg_frag%halo(i_halo)%buf_recv, 4)
+              if (n_basis_halo <= 0) cycle
+            end if
             if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
             iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
             iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
@@ -1226,28 +1115,34 @@
           need_halo_alloc = .false.
           if (.not. allocated(halo_partial_t)) need_halo_alloc = .true.
           if (.not. allocated(halo_partial_h)) need_halo_alloc = .true.
+          if (.not. allocated(halo_partial_m)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduced_t)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduced_h)) need_halo_alloc = .true.
+          if (.not. allocated(halo_reduced_m)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduce_pair)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduce_sum)) need_halo_alloc = .true.
           if (.not. need_halo_alloc) then
             if (size(halo_partial_t) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_partial_h) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_partial_m) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_reduced_t) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_reduced_h) < n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduce_pair) < 2 * n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduce_sum) < 2 * n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduced_m) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduce_pair) < 3 * n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduce_sum) < 3 * n_basis_halo_max) need_halo_alloc = .true.
           end if
           if (need_halo_alloc) then
             if (allocated(halo_partial_t)) deallocate(halo_partial_t)
             if (allocated(halo_partial_h)) deallocate(halo_partial_h)
+            if (allocated(halo_partial_m)) deallocate(halo_partial_m)
             if (allocated(halo_reduced_t)) deallocate(halo_reduced_t)
             if (allocated(halo_reduced_h)) deallocate(halo_reduced_h)
+            if (allocated(halo_reduced_m)) deallocate(halo_reduced_m)
             if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair)
             if (allocated(halo_reduce_sum)) deallocate(halo_reduce_sum)
-            allocate(halo_partial_t(n_basis_halo_max), halo_partial_h(n_basis_halo_max))
-            allocate(halo_reduced_t(n_basis_halo_max), halo_reduced_h(n_basis_halo_max))
-            allocate(halo_reduce_pair(2 * n_basis_halo_max), halo_reduce_sum(2 * n_basis_halo_max))
+            allocate(halo_partial_t(n_basis_halo_max), halo_partial_h(n_basis_halo_max), halo_partial_m(n_basis_halo_max))
+            allocate(halo_reduced_t(n_basis_halo_max), halo_reduced_h(n_basis_halo_max), halo_reduced_m(n_basis_halo_max))
+            allocate(halo_reduce_pair(3 * n_basis_halo_max), halo_reduce_sum(3 * n_basis_halo_max))
           end if
         end if
 
@@ -1265,12 +1160,13 @@
 
             ! Legacy off-diagonal coupling path.
             !
-            ! This currently accumulates halo-backed volume-style fragment
-            ! couplings. The missing DG kinetic face terms from Eq.(4),
-            !   1) <phi_i>^* <grad phi_j>
-            !   2) <grad phi_i>^* [phi_j]
-            !   3) alpha [phi_i]^* [phi_j]
-            ! should be injected here using the same neighbor/halo metadata.
+            ! This accumulates the SIPG face contribution for fragment-neighbor
+            ! couplings. 
+            !
+            ! The remaining field dependence is carried by
+            !   - the bulk A·∇ operator via momentum_blocks/momentum_mat
+            !   - the A^2/2 term in the local potential path
+            !   - the nonlocal projector path handled separately.
             !
             ! Only face-neighbor halos correspond to the surface integrals in
             ! Eq.(4). Edge/corner halos remain available for stencil support
@@ -1279,14 +1175,18 @@
 
             halo_partial_t(1:n_basis_halo) = 0.0d0
             halo_partial_h(1:n_basis_halo) = 0.0d0
+            halo_partial_m(1:n_basis_halo) = 0.0d0
 
             face_area = get_dg_face_area_element(dg_frag%hgs, face_axis)
             face_penalty_alpha = get_dg_face_penalty_coefficient(dg_frag%hgs, face_axis)
 
-            !$omp parallel do private(io,halo_integral_t,halo_integral_h,ix_face,iy_face,iz_face,halo_send_idx,halo_recv_idx,phi_local_face,phi_remote_face,dphi_local_n,dphi_remote_n) schedule(static)
+            !$omp parallel do private(io,halo_integral_t,halo_integral_h,halo_integral_m,halo_integral_m_avgavg,halo_integral_m_avgjump,ix_face,iy_face,iz_face,halo_send_idx,halo_recv_idx,phi_local_face,phi_remote_face,dphi_local_n,dphi_remote_n) schedule(static)
             do io = 1, n_basis_halo
               halo_integral_t = 0.0d0
               halo_integral_h = 0.0d0
+              halo_integral_m = 0.0d0
+              halo_integral_m_avgavg = 0.0d0
+              halo_integral_m_avgjump = 0.0d0
               select case (face_axis)
               case (1)
                 do iz_face = 1, l(3)
@@ -1309,6 +1209,10 @@
                     halo_integral_t = halo_integral_t + &
                       (0.5d0 * (phi_remote_face * dphi_local_n - dphi_remote_n * phi_local_face) - &
                        face_penalty_alpha * phi_remote_face * phi_local_face) * face_area
+                    ! Intentionally split the face A-coupling into avg-avg and avg-jump halves
+                    ! so the summed contribution keeps the original total strength.
+                    halo_integral_m_avgavg = halo_integral_m_avgavg + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
+                    halo_integral_m_avgjump = halo_integral_m_avgjump + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
                   end do
                 end do
               case (2)
@@ -1324,6 +1228,10 @@
                     halo_integral_t = halo_integral_t + &
                       (0.5d0 * (phi_remote_face * dphi_local_n - dphi_remote_n * phi_local_face) - &
                        face_penalty_alpha * phi_remote_face * phi_local_face) * face_area
+                    ! Intentionally split the face A-coupling into avg-avg and avg-jump halves
+                    ! so the summed contribution keeps the original total strength.
+                    halo_integral_m_avgavg = halo_integral_m_avgavg + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
+                    halo_integral_m_avgjump = halo_integral_m_avgjump + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
                   end do
                 end do
               case (3)
@@ -1339,58 +1247,114 @@
                     halo_integral_t = halo_integral_t + &
                       (0.5d0 * (phi_remote_face * dphi_local_n - dphi_remote_n * phi_local_face) - &
                        face_penalty_alpha * phi_remote_face * phi_local_face) * face_area
+                    ! Intentionally split the face A-coupling into avg-avg and avg-jump halves
+                    ! so the summed contribution keeps the original total strength.
+                    halo_integral_m_avgavg = halo_integral_m_avgavg + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
+                    halo_integral_m_avgjump = halo_integral_m_avgjump + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
                   end do
                 end do
               end select
+              ! dH/dA(face) = avg-avg term + avg-jump term on each interface.
+              halo_integral_m = halo_integral_m_avgavg + halo_integral_m_avgjump
               halo_integral_h = halo_integral_t
               halo_partial_t(io) = halo_integral_t
               halo_partial_h(io) = halo_integral_h
+              halo_partial_m(io) = halo_integral_m
             end do
             !$omp end parallel do
 
             halo_reduce_pair(1:n_basis_halo) = halo_partial_t(1:n_basis_halo)
             halo_reduce_pair(n_basis_halo + 1:2 * n_basis_halo) = halo_partial_h(1:n_basis_halo)
-            call comm_summation(halo_reduce_pair, halo_reduce_sum, 2 * n_basis_halo, dg_frag%icomm_frag)
+            halo_reduce_pair(2 * n_basis_halo + 1:3 * n_basis_halo) = halo_partial_m(1:n_basis_halo)
+            call comm_summation(halo_reduce_pair, halo_reduce_sum, 3 * n_basis_halo, dg_frag%icomm_frag)
             halo_reduced_t(1:n_basis_halo) = halo_reduce_sum(1:n_basis_halo)
             halo_reduced_h(1:n_basis_halo) = halo_reduce_sum(n_basis_halo + 1:2 * n_basis_halo)
+            halo_reduced_m(1:n_basis_halo) = halo_reduce_sum(2 * n_basis_halo + 1:3 * n_basis_halo)
 
             if (.not. dg_frag%is_frag_root) cycle
 
             if (iblk > 0 .and. iblk_rev > 0) then
-              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum) schedule(static)
+              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum,halo_integral_m_sum) schedule(static)
               do io = 1, n_basis_halo
                 halo_integral_t_sum = halo_reduced_t(io)
                 halo_integral_h_sum = halo_reduced_h(io)
-                dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
-                dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
+                halo_integral_m_sum = halo_reduced_m(io)
+                if (io <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 1) .and. &
+                    jo <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 2) .and. &
+                    io <= size(dg_frag%H_mat_blocks(iblk)%val, 1) .and. &
+                    jo <= size(dg_frag%H_mat_blocks(iblk)%val, 2) .and. &
+                    jo <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 1) .and. &
+                    io <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 2) .and. &
+                    jo <= size(dg_frag%H_mat_blocks(iblk_rev)%val, 1) .and. &
+                    io <= size(dg_frag%H_mat_blocks(iblk_rev)%val, 2)) then
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
+                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
+                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
+                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
+                end if
+                if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
+                  if (io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
+                      jo <= size(dg_frag%momentum_blocks(iblk)%val, 3) .and. &
+                      jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
+                      io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
+                    dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) = &
+                      dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) + 0.5d0 * halo_integral_m_sum
+                    dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) = &
+                      dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) - 0.5d0 * halo_integral_m_sum
+                  end if
+                end if
               end do
               !$omp end parallel do
             else if (iblk > 0) then
-              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum) schedule(static)
+              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum,halo_integral_m_sum) schedule(static)
               do io = 1, n_basis_halo
                 halo_integral_t_sum = halo_reduced_t(io)
                 halo_integral_h_sum = halo_reduced_h(io)
-                dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
+                halo_integral_m_sum = halo_reduced_m(io)
+                if (io <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 1) .and. &
+                    jo <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 2) .and. &
+                    io <= size(dg_frag%H_mat_blocks(iblk)%val, 1) .and. &
+                    jo <= size(dg_frag%H_mat_blocks(iblk)%val, 2)) then
+                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
+                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                    dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
+                end if
+                if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
+                  if (io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
+                      jo <= size(dg_frag%momentum_blocks(iblk)%val, 3)) then
+                    dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) = &
+                      dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) + 0.5d0 * halo_integral_m_sum
+                  end if
+                end if
               end do
               !$omp end parallel do
             else
-              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum) schedule(static)
+              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum,halo_integral_m_sum) schedule(static)
               do io = 1, n_basis_halo
                 halo_integral_t_sum = halo_reduced_t(io)
                 halo_integral_h_sum = halo_reduced_h(io)
-                dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
+                halo_integral_m_sum = halo_reduced_m(io)
+                if (jo <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 1) .and. &
+                    io <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 2) .and. &
+                    jo <= size(dg_frag%H_mat_blocks(iblk_rev)%val, 1) .and. &
+                    io <= size(dg_frag%H_mat_blocks(iblk_rev)%val, 2)) then
+                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
+                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
+                    dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
+                end if
+                if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
+                  if (jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
+                      io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
+                    dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) = &
+                      dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) - 0.5d0 * halo_integral_m_sum
+                  end if
+                end if
               end do
               !$omp end parallel do
             end if
@@ -1412,7 +1376,7 @@
       if (allocated(H_diag_blocks(i_diag)%val)) deallocate(H_diag_blocks(i_diag)%val)
       if (allocated(H_kin_diag_blocks(i_diag)%val)) deallocate(H_kin_diag_blocks(i_diag)%val)
     end do
-    if (allocated(halo_partial_t)) deallocate(halo_partial_t, halo_partial_h, halo_reduced_t, halo_reduced_h)
+    if (allocated(halo_partial_t)) deallocate(halo_partial_t, halo_partial_h, halo_partial_m, halo_reduced_t, halo_reduced_h, halo_reduced_m)
     if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair, halo_reduce_sum)
     if (allocated(halo_t_point_buf)) deallocate(halo_t_point_buf, halo_h_point_buf)
     if (allocated(H_diag_blocks)) deallocate(H_diag_blocks)
@@ -2686,11 +2650,14 @@
     ie = mg%ie
     hvol = system%hvol
     
-    ! Exchange halo regions before stencil operations
-    call cpu_time(t0)
-    call exchange_phi_frag_halo(dg_frag)
-    call cpu_time(t1)
-    time_halo_exchange = time_halo_exchange + (t1 - t0)
+    ! Buffered basis already carries its own periodic support, so neighbor halo
+    ! exchange is only needed for the raw fragment-domain path.
+    if (.not. dg_frag%use_buffered_basis) then
+      call cpu_time(t0)
+      call exchange_phi_frag_halo(dg_frag)
+      call cpu_time(t1)
+      time_halo_exchange = time_halo_exchange + (t1 - t0)
+    end if
     if (enable_momentum_probe) then
       write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo"
       flush(6)

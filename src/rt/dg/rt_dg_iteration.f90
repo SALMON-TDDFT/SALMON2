@@ -26,7 +26,19 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
-    logical, parameter :: enable_iteration_trace = .false.
+    logical :: enable_iteration_trace
+    character(len=64) :: env_trace
+    integer :: env_trace_len, env_trace_status
+
+    enable_iteration_trace = .false.
+    env_trace = ''
+    call get_environment_variable("SALMON_DG_ITER_TRACE", env_trace, length=env_trace_len, status=env_trace_status)
+    if (env_trace_status == 0 .and. env_trace_len > 0) then
+      if (env_trace(1:1) == '1' .or. env_trace(1:1) == 'y' .or. env_trace(1:1) == 'Y' .or. &
+          env_trace(1:1) == 't' .or. env_trace(1:1) == 'T') then
+        enable_iteration_trace = .true.
+      end if
+    end if
     ! Time evolution in fragment basis coefficient space
     if (enable_iteration_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
@@ -94,7 +106,17 @@
     end if
     
     ! Calculate observables
+    if (enable_iteration_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-calc-observables"
+      flush(6)
+    end if
     call calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl)
+    if (enable_iteration_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-calc-observables"
+      flush(6)
+    end if
 
     if (trim(theory) == 'single_scale_maxwell_tddft') then
       call calculate_microscopic_current_dg(dg_frag, system, mg, stencil, rt%j_e)

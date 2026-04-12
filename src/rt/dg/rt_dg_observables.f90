@@ -3,6 +3,7 @@
     use structures
     use communication, only: comm_summation
     use timer, only: timer_begin, timer_end, LOG_CALC_CURRENT
+    use sym_vector_sub, only: sym_vector_xyz
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
                     apply_mixed_hamiltonian, mixed_fp_coupling_active, copy_matrix_blocks_to_complex_dense, &
                     gather_full_coef_view, apply_overlap_operator, copy_overlap_operator_to_dense
@@ -28,6 +29,8 @@
     logical :: enable_orbital_probe
     logical :: enable_transition_probe
     logical :: enable_electron_probe
+    logical :: enable_obs_trace
+    logical :: enable_realspace_probe
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
     real(8) :: current_tmp, energy_tmp, pw_weight_local, kpw_dir
@@ -35,7 +38,7 @@
     real(8) :: occ_i
     real(8) :: charge_trace_spin
     real(8) :: Ac_tot(3), A_squared
-    real(8) :: current_local(3), energy_local, energy_mix_local
+    real(8) :: current_local(3), current_para_local(3), current_dia_local(3), energy_local, energy_mix_local
     real(8) :: elec_coef_local, elec_plain_local
     real(8) :: elec_coef_sum, elec_plain_sum
     real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
@@ -79,6 +82,8 @@
     ! Calculate local observables (only for assigned fragments)
     ! MPI aggregation will sum across all ranks
     current_local = 0.0d0
+    current_para_local = 0.0d0
+    current_dia_local = 0.0d0
     energy_local = 0.0d0
     energy_mix_local = 0.0d0
     pw_weight_local = 0.0d0
@@ -117,7 +122,7 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n + n_pw
-    use_energy_components = enable_energy_component_probe .or. (n_pw == 0)
+    use_energy_components = enable_energy_component_probe
     active_state_cap = max(1, min(dg_frag%nstate_tot, n))
     if (dg_frag%use_buffered_basis .and. allocated(dg_frag%occ_state)) then
       max_nocc = active_state_cap
@@ -130,6 +135,8 @@
     probe_nprint = 20
     enable_transition_probe = .false.
     enable_electron_probe = .false.
+    enable_obs_trace = .false.
+    enable_realspace_probe = .false.
     transition_stride = 1
     call get_environment_variable("SALMON_DG_ORBITAL_PROBE", env_val, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
@@ -164,6 +171,20 @@
         enable_electron_probe = .true.
       end if
     end if
+    call get_environment_variable("SALMON_DG_OBS_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_obs_trace = .true.
+      end if
+    end if
+    call get_environment_variable("SALMON_DG_REALSPACE_PROBE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_realspace_probe = .true.
+      end if
+    end if
     if (enable_transition_probe) then
       call get_environment_variable("SALMON_DG_TRANSITION_PROBE_STRIDE", env_val, length=env_len, status=env_status)
       if (env_status == 0 .and. env_len > 0) then
@@ -191,6 +212,11 @@
       if (n_pw == 0) allocate(overlap_dense(n, n))
     end if
     minus_i = cmplx(0.0d0, -1.0d0, kind=8)
+
+    if (enable_obs_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a)') "        obs-trace: rank=", dg_frag%id, " itt=", itt, " n=", n, " stage=setup-done"
+      flush(6)
+    end if
 
     ! Current calculation via momentum operator matrix (velocity gauge)
     ! Following conventional RT implementation in density_matrix.f90:
@@ -279,7 +305,7 @@
         end if
         
         if (.not. use_mixed_current) then
-          ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
+          ! Factor -2.0: -1 for operator sign convention, 2 for Im[psi*grad psi] normalization
           current_tmp = 0.0d0
           do io = 1, nocc
             if (occ_weight(io) <= 0.0d0) cycle
@@ -288,8 +314,10 @@
               current_io = current_io + aimag(conjg(coef_frag_all(ib, io)) * tmp_mat(ib, io))
             end do
             current_tmp = current_tmp + occ_weight(io) * current_io
-            if (enable_orbital_probe) current_orb_local((idir - 1) * max_nocc + io) = &
-              current_orb_local((idir - 1) * max_nocc + io) - 2.0d0 * occ_weight(io) * current_io
+            if (enable_orbital_probe) then
+              current_orb_local((idir - 1) * max_nocc + io) = &
+                current_orb_local((idir - 1) * max_nocc + io) - 2.0d0 * occ_weight(io) * current_io
+            end if
           end do
         end if
         if (enable_transition_probe .and. n_pw == 0 .and. (.not. use_mixed_current)) then
@@ -301,8 +329,10 @@
               jfrag = dg_frag%momentum_blocks(iblk)%ifrag_col
               if (ifrag <= 0 .or. ifrag > dg_frag%n_frag) cycle
               if (jfrag <= 0 .or. jfrag > dg_frag%n_frag) cycle
-              nrow_blk = dg_frag%n_basis(ifrag, ispin)
-              ncol_blk = dg_frag%n_basis(jfrag, ispin)
+              nrow_blk = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                             size(dg_frag%momentum_blocks(iblk)%val, 2))
+              ncol_blk = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%index_basis, 1), &
+                             size(dg_frag%momentum_blocks(iblk)%val, 3))
               if (nrow_blk <= 0 .or. ncol_blk <= 0) cycle
               do io = 1, nocc
                 occ_i = 1.0d0
@@ -336,13 +366,17 @@
             current_offdiag_local(idir) = current_offdiag_local(idir) - 2.0d0 * aimag(current_blk_total - current_blk_diag)
           end if
         end if
-        current_local(idir) = current_local(idir) - 2.0d0 * current_tmp
+        current_para_local(idir) = current_para_local(idir) - 2.0d0 * current_tmp
       end do
-      ! Match conventional RT / SSBE velocity-gauge current:
-      ! add the diamagnetic contribution A * Tr[rho].
-      current_local(1:3) = current_local(1:3) + Ac_tot(1:3) * charge_trace_spin
+      current_dia_local(1:3) = current_dia_local(1:3) + Ac_tot(1:3) * charge_trace_spin
     end do
+    current_local(1:3) = current_para_local(1:3) + current_dia_local(1:3)
     call timer_end(LOG_CALC_CURRENT)
+    if (enable_obs_trace) then
+      write(*,'(1x,a,i0,a,i0,a,3(1x,1pe12.4),a)') "        obs-trace: rank=", dg_frag%id, " itt=", itt, &
+        " current_local=", current_local(1), current_local(2), current_local(3), " stage=current-done"
+      flush(6)
+    end if
     
       ! Get vector potential at current time for energy calculation
       A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
@@ -761,7 +795,7 @@
 
   1000 continue
     
-    if (n_pw == 0) then
+    if (n_pw == 0 .and. enable_realspace_probe) then
       call compute_realspace_nonlocal_current_probe(dg_frag, system, mg, ppg, Ac_tot, current_nl_rs_sum)
       current_local(1:3) = current_local(1:3) + current_nl_rs_sum(1:3)
       call compute_realspace_energy_probe(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, Vh, Vxc, Vpsl, &
@@ -800,6 +834,9 @@
       elec_plain_sum = elec_plain_sum / frag_reduce_factor
     end if
     if (enable_orbital_probe) energy_orb_sum(:) = energy_orb_sum(:) / frag_reduce_factor
+    ! Observables are currently evaluated from full gathered coefficient views on each rank.
+    ! The world reduction therefore sums replicated current contributions and must be averaged back.
+    dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
     if (use_energy_components) then
       call comm_summation(energy_static_local, energy_static_sum, dg_frag%icomm)
       call comm_summation(energy_kin_local, energy_kin_sum, dg_frag%icomm)
@@ -831,8 +868,7 @@
       end if
     end if
 
-    ! Current and PW weight are replicated over all ranks, so these remain world-averaged.
-    dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
+    ! PW weight is replicated over all ranks after the world reduction.
     dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
     if (enable_transition_probe) then
       current_diag_sum(:) = current_diag_sum(:) / real(max(1, dg_frag%isize), 8)
@@ -892,13 +928,15 @@
       dg_frag%total_energy = energy_one_rs_sum
     end if
 
-    ! Normalize by global grid count exactly as conventional calc_current().
-    ! This avoids decomposition-dependent scaling from local/grid-view differences.
-    dg_frag%current(:) = dg_frag%current(:) / dble(system%ngrid)
-    if (enable_orbital_probe) current_orb_sum(:) = current_orb_sum(:) / dble(system%ngrid)
+    ! DG momentum matrices already include hvol in their matrix elements, so the
+    ! coefficient contraction yields a cell-integrated current. Normalize by the
+    ! simulation-cell volume to obtain the current density.
+    dg_frag%current(:) = dg_frag%current(:) / system%det_a
+    call sym_vector_xyz(dg_frag%current)
+    if (enable_orbital_probe) current_orb_sum(:) = current_orb_sum(:) / system%det_a
     if (enable_transition_probe) then
-      current_diag_sum(:) = current_diag_sum(:) / dble(system%ngrid)
-      current_offdiag_sum(:) = current_offdiag_sum(:) / dble(system%ngrid)
+      current_diag_sum(:) = current_diag_sum(:) / system%det_a
+      current_offdiag_sum(:) = current_offdiag_sum(:) / system%det_a
     end if
 
     if (enable_orbital_probe .and. dg_frag%id == 0) then

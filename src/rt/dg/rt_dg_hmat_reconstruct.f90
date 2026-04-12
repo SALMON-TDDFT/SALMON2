@@ -38,7 +38,6 @@
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: has_overlap
     logical :: use_block_reconstruct
-    logical, save :: debug_static_seed_logged = .false.
     logical, parameter :: enable_reconstruct_timing = .false.
     logical, parameter :: enable_hmat_nan_check = .false.
 
@@ -243,23 +242,8 @@
           end do
         end do
 
-        if (.not. debug_static_seed_logged .and. dg_frag%is_frag_root .and. ispin == 1 .and. nbf >= 3) then
-          write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
-            "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " seed_t=", &
-            dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin), &
-            " add_block=", reduced_block(1,1), reduced_block(2,2), reduced_block(3,3)
-          flush(6)
-        end if
-
         if (dg_frag%is_frag_root) then
           dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(1:nbf, 1:nbf)
-          if (.not. debug_static_seed_logged .and. ispin == 1 .and. nbf >= 3) then
-            write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x))') &
-              "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " final_h=", &
-              dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin)
-            flush(6)
-            debug_static_seed_logged = .true.
-          end if
         end if
       end do
     end do

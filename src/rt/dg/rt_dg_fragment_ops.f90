@@ -1720,8 +1720,10 @@ contains
 !$omp parallel do schedule(static) private(iblk, nrow, ncol, valid_row_count, valid_col_count, ib, jb, idir, idx_ib, idx_jb, row_idx, col_idx, row_gid, col_gid, valid_row_ids, valid_col_ids)
     do iblk = 1, dg_frag%n_momentum_blocks
       if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
-      nrow = dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
-      ncol = dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin), &
+             size(dg_frag%index_basis, 1), size(dg_frag%momentum_blocks(iblk)%val, 2))
+      ncol = min(dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_col, ispin), &
+             size(dg_frag%index_basis, 1), size(dg_frag%momentum_blocks(iblk)%val, 3))
       if (nrow <= 0 .or. ncol <= 0) cycle
       valid_row_count = 0
       do ib = 1, nrow
@@ -1856,8 +1858,8 @@ contains
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
       do ispin = 1, dg_frag%nspin
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
         if (nrow <= 0 .or. ncol <= 0) cycle
         valid_row_count = 0
         do ii = 1, nrow
@@ -2824,8 +2826,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -2912,8 +2914,8 @@ contains
           flush(6)
           stop "invalid complex block col fragment"
         end if
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
         if (nrow <= 0 .or. ncol <= 0) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] inactive complex block dimensions: rank=", dg_frag%id, &
             " ispin=", ispin, " iblk=", iblk, " nrow=", nrow, " ncol=", ncol
@@ -2974,8 +2976,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3038,8 +3040,8 @@ contains
         ifrag_col = blocks(iblk)%ifrag_col
         if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
         if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
         if (nrow <= 0 .or. ncol <= 0) cycle
 
         valid_row_count = 0
@@ -3081,8 +3083,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3138,8 +3140,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3195,8 +3197,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3464,8 +3466,10 @@ contains
 
         ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
         ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), &
+             size(dg_frag%momentum_blocks(iblk)%val, 2))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), &
+             size(dg_frag%momentum_blocks(iblk)%val, 3))
         if (nrow <= 0 .or. ncol <= 0) cycle
 
         valid_row_count = 0
