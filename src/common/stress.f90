@@ -862,7 +862,6 @@ contains
     use communication,  only: comm_summation
     use filesystem,     only: open_filehandle
     use inputoutput,    only: au_pressure_gpa
-    use parallelization, only: nproc_id_global
     use prep_pp_sub,    only: integrate_local_sr_dvg_dg2_shell
     use salmon_global,  only: aEwald, base_directory, cutoff_g, kion, &
                               npt_loc_sr_aux_2pi, sysname, yn_out_loc_sr_grad_sampled_dump, &
@@ -903,7 +902,7 @@ contains
       ik = kion(ia)
       if(ik < 1 .or. ik > size(pp%zps)) call fail_stress("calc_stress_loc: invalid species index")
     end do
-    dump_grad = (yn_out_loc_sr_grad_sampled_dump == 'y')
+    dump_grad = (yn_out_loc_sr_grad_sampled_dump == 'y' .and. info%id_k == 0 .and. info%id_o == 0)
     fh_grad_dump = -1
     if(dump_grad) call open_loc_sr_grad_sampled_dump()
 
@@ -957,8 +956,8 @@ contains
       coeff_lr_scr = -2d0 * dble(conjg(rho_e) * V_lr_scr_sum) / G2 * (1d0 + G2 / (4d0 * aEwald))
       if(dump_grad) then
         dVsr_dG2_current = dVsr_dG2_sum
-        pressure_current_gpa = -2d0 * dble(conjg(rho_e) * dVsr_dG2_current) * G2 * pressure_factor
-        pressure_legacy_gpa = -2d0 * dble(conjg(rho_e) * dVsr_dG2_legacy) * G2 * pressure_factor
+        pressure_current_gpa = 2d0 * dble(conjg(rho_e) * dVsr_dG2_current) * G2 * pressure_factor
+        pressure_legacy_gpa = 2d0 * dble(conjg(rho_e) * dVsr_dG2_legacy) * G2 * pressure_factor
         delta_pressure_gpa = pressure_current_gpa - pressure_legacy_gpa
         !$omp critical(loc_sr_grad_sampled_dump_io)
         call dump_loc_sr_grad_sampled_points(ix, iy, iz, g, gmag, rho_e, dVsr_dG2_current, dVsr_dG2_legacy, &
@@ -1034,10 +1033,11 @@ contains
       implicit none
       character(16) :: rank_label
 
-      write(rank_label,'(I6.6)') nproc_id_global
+      write(rank_label,'(I6.6)') info%id_r
       file_grad_dump = trim(base_directory)//trim(sysname)//'_loc_sr_grad_sampled_rank'//trim(rank_label)//'.data'
       fh_grad_dump = open_filehandle(trim(file_grad_dump), status='replace')
       write(fh_grad_dump,'(a)') '# Local-SR sampled current-vs-legacy dV_sr/dG^2 dump'
+      write(fh_grad_dump,'(a)') '# rank means icomm_r rank; only id_k=0 and id_o=0 write files'
       write(fh_grad_dump,'(a)') '# rank ix iy iz gx gy gz g_abs rho_e_re rho_e_im dVsr_dG2_current_re dVsr_dG2_current_im'
       write(fh_grad_dump,'(a)') '# dVsr_dG2_legacy_re dVsr_dG2_legacy_im'
       write(fh_grad_dump,'(a)') '# pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
@@ -1050,7 +1050,7 @@ contains
       real(8), intent(in) :: g(3), g_abs, pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
       complex(8), intent(in) :: rho_e, dVsr_dG2_current, dVsr_dG2_legacy
 
-      write(fh_grad_dump,*) nproc_id_global, ix, iy, iz, g(1), g(2), g(3), g_abs, &
+      write(fh_grad_dump,*) info%id_r, ix, iy, iz, g(1), g(2), g(3), g_abs, &
            dble(rho_e), aimag(rho_e), dble(dVsr_dG2_current), aimag(dVsr_dG2_current), &
            dble(dVsr_dG2_legacy), aimag(dVsr_dG2_legacy), &
            pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
@@ -1547,7 +1547,6 @@ contains
     use structures
     use communication,  only: comm_summation
     use filesystem,     only: open_filehandle
-    use parallelization, only: nproc_id_global
     use salmon_global,  only: base_directory, kion, sysname, &
                               yn_out_loc_sr_rs_sampled_dump
     use inputoutput,    only: au_pressure_gpa
@@ -1574,7 +1573,7 @@ contains
     nspin = system%nspin
     strs = 0d0
     strs_bins = 0d0
-    dump_sampled = (yn_out_loc_sr_rs_sampled_dump == 'y')
+    dump_sampled = (yn_out_loc_sr_rs_sampled_dump == 'y' .and. info%id_k == 0 .and. info%id_o == 0)
     fh_sampled_dump = -1
     if(dump_sampled) call open_loc_sr_rs_sampled_dump()
 
@@ -1672,11 +1671,12 @@ contains
     subroutine open_loc_sr_rs_sampled_dump()
       implicit none
       character(16) :: rank_label
-      write(rank_label,'(I6.6)') nproc_id_global
+      write(rank_label,'(I6.6)') info%id_r
       file_sampled_dump = trim(base_directory)//trim(sysname)//'_loc_sr_rs_sampled_rank' &
                         // trim(rank_label)//'.data'
       fh_sampled_dump = open_filehandle(trim(file_sampled_dump), status='replace')
       write(fh_sampled_dump,'(a)') '# Local-SR sampled current-vs-legacy dV_sr/dr dump'
+      write(fh_sampled_dump,'(a)') '# rank means icomm_r rank; only id_k=0 and id_o=0 write files'
       write(fh_sampled_dump,'(a)') '# rank ia ik j intr ix iy iz bin legacy_ok sx sy sz r_abs rho dvsr_dr_current dvsr_dr_legacy'
       write(fh_sampled_dump,'(a)') '# delta_dvsr_dr pressure_current_gpa pressure_legacy_gpa delta_pressure_gpa'
     end subroutine open_loc_sr_rs_sampled_dump
@@ -1699,7 +1699,7 @@ contains
       if(legacy_ok) legacy_ok_int = 1
 
       write(fh_sampled_dump,*) &
-           nproc_id_global, ia, ik, j, intr, ix, iy, iz, bin_idx, &
+           info%id_r, ia, ik, j, intr, ix, iy, iz, bin_idx, &
            legacy_ok_int, s(1), s(2), s(3), r_abs, rho_val, dvsr_dr_current, dvsr_dr_legacy, delta_dvsr_dr, &
            pressure_current_gpa, pressure_legacy_gpa, delta_pressure_gpa
     end subroutine dump_loc_sr_rs_sampled_points
