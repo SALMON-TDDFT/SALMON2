@@ -213,6 +213,7 @@ contains
     use salmon_global, only: yn_jm,yn_spinorbit
     use sendrecv_grid, only: update_overlap_complex8
     use communication, only: comm_summation
+    use parallelization, only: nproc_id_global
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use pseudo_pt_current_so, only: calc_current_nonlocal_so &
                                   , calc_current_nonlocal_rdivided_so
@@ -268,7 +269,12 @@ contains
     real(8) :: curr(3,system%nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io,nspin,ngrid
+    integer :: env_len, env_status, current_exc_trace_stride
+    character(len=64) :: env_val
+    logical :: enable_current_exc_trace
     real(8),dimension(3) :: wrk1,wrk2,wrk3,wrk4,wrk_plusU
+    real(8),dimension(3) :: wrk1_k, wrk2_k, wrk4_dia, wrk4_dia_sum
+    real(8),dimension(3) :: curr_dia, curr_exc
     real(8) :: BT(3,3),kAc(3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
@@ -282,6 +288,22 @@ contains
 
     nspin = system%nspin
     ngrid = system%ngrid
+    enable_current_exc_trace = .false.
+    current_exc_trace_stride = 1
+    call get_environment_variable("SALMON_FULL_CURRENT_EXC_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_current_exc_trace = .true.
+      end if
+    end if
+    if (enable_current_exc_trace) then
+      call get_environment_variable("SALMON_FULL_CURRENT_EXC_TRACE_STRIDE", env_val, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_val(1:env_len), *, iostat=env_status) current_exc_trace_stride
+        if (env_status /= 0 .or. current_exc_trace_stride < 1) current_exc_trace_stride = 1
+      end if
+    end if
 
     BT = transpose(system%rmatrix_B)
     call timer_end(LOG_CURRENT_CALC)
@@ -304,6 +326,7 @@ contains
     do ispin=1,nspin
       call timer_begin(LOG_CURRENT_CALC)
       wrk4 = 0d0
+      wrk4_dia = 0d0
 #if defined(USE_OPENACC)
       jx = 0d0
       jy = 0d0
@@ -397,10 +420,10 @@ contains
       wrk4(3) = jz
 #else
 !$omp parallel do collapse(2) default(none) &
-!$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,wrk_plusU,uVpsi) &
+!$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,wrk_plusU,uVpsi,wrk1_k,wrk2_k) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
-!$omp             shared(yn_spinorbit,PLUS_U_ON) &
-!$omp             reduction(+:wrk4) if(current_omp_mode)
+!$omp             shared(yn_spinorbit,PLUS_U_ON,enable_current_exc_trace) &
+!$omp             reduction(+:wrk4,wrk4_dia) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -408,6 +431,11 @@ contains
         call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
                             ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
         wrk2 = matmul(BT,wrk2)
+        if (enable_current_exc_trace) then
+          call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
+                              ,system%vec_k(1:3,ik),psi%zwf(:,:,:,ispin,io,ik,im),wrk1_k,wrk2_k)
+          wrk4_dia = wrk4_dia + (wrk1 - wrk1_k) * system%rocc(io,ik,ispin) * system%wtk(ik)
+        end if
 
         if ( yn_jm == 'n' ) then
           if ( yn_spinorbit=='y' ) then
@@ -450,12 +478,35 @@ contains
 
       call timer_begin(LOG_CURRENT_COMM_COLL)
       call comm_summation(wrk4,wrk1,3,info%icomm_rko)
+      if (enable_current_exc_trace) then
+        call comm_summation(wrk4_dia,wrk4_dia_sum,3,info%icomm_rko)
+      else
+        wrk4_dia_sum = 0d0
+      end if
 
       curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      if (enable_current_exc_trace) then
+        curr_dia(:) = wrk4_dia_sum(:) / dble(ngrid)
+        curr_exc(:) = curr(:,ispin,im) - curr_dia(:)
+      end if
       call timer_end(LOG_CURRENT_COMM_COLL)
 
       call timer_begin(LOG_CURRENT_CALC)
       call sym_vector_xyz( curr(:,ispin,im) )
+      if (enable_current_exc_trace) then
+        call sym_vector_xyz(curr_dia)
+        call sym_vector_xyz(curr_exc)
+        if (nproc_id_global == 0) then
+          if (im == info%im_s .or. mod(im - info%im_s, current_exc_trace_stride) == 0) then
+            write(*,'(1x,a,i0,a,i0,a,3(1x,1pe14.6),a,3(1x,1pe14.6),a,3(1x,1pe14.6))') &
+              "        full-current-exc-trace: im=", im, " spin=", ispin, &
+              " total=", curr(1,ispin,im), curr(2,ispin,im), curr(3,ispin,im), &
+              " dia=", curr_dia(1), curr_dia(2), curr_dia(3), &
+              " exc=", curr_exc(1), curr_exc(2), curr_exc(3)
+            flush(6)
+          end if
+        end if
+      end if
       call timer_end(LOG_CURRENT_CALC)
     end do
     end do

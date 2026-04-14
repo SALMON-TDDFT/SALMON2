@@ -256,8 +256,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use sendrecv_grid, only: s_sendrecv_grid
   use salmon_xc, only: s_xc_functional
   use write_sub
-  use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit
+  use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, iperiodic
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
+  use em_field, only: calc_emfields
   use hamiltonian, only: update_kvector_nonlocalpt_microAc
   implicit none
   integer,                intent(in)    :: Mit
@@ -282,6 +283,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
+  real(8) :: curr_dg_tmp(3,system%nspin)
   logical :: enable_main_trace
   character(len=32) :: env_main_trace
   integer :: env_main_len, env_main_stat
@@ -384,6 +386,12 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       end if
       if (yn_jm == 'n') call update_kvector_nonlocalpt_microAc(info%ik_s, info%ik_e, system, ppg)
       rt%curr(1:3, itt) = singlescale%curr_ave(1:3)
+    end if
+
+    if (theory /= 'single_scale_maxwell_tddft' .and. iperiodic == 3) then
+      curr_dg_tmp(:, :) = 0.0d0
+      curr_dg_tmp(1:3, 1) = dg_frag%current(1:3)
+      call calc_emfields(itt, system%nspin, curr_dg_tmp, rt)
     end if
     
     ! Write observable data (current and energy)

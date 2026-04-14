@@ -299,6 +299,7 @@ module rt_dg_fragment_types
     integer :: nbasis_update_count                 ! Number of times basis was updated
     integer :: last_basis_update_step              ! RT step index when last basis update was triggered
     logical :: yn_adaptive_basis                   ! Flag: enable adaptive basis updates
+    logical :: puredg_lowdin_applied = .false.     ! One-time startup Lowdin orthonormalization for PureDG
 
     ! Overlap matrix for basis projection (DC-LCFO returns real basis, no gauge rotation needed)
     real(8), allocatable :: basis_overlap(:,:,:)   ! <phi_new|phi_old> overlap matrix (real, no SVD)

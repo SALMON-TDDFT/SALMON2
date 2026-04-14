@@ -145,8 +145,10 @@ contains
     character(32), parameter :: bdir_frag='./data_dcdft/fragments/'
     character(256) :: filename
     integer :: iunit, i, j, io, ispin, ifrag, ia, ip
+    integer, allocatable :: id_tmp(:)
     integer :: pp_buf(3)
     integer, parameter :: momentum_stencil_buf = 4
+    integer :: nproc_frag_axis(3), frag_coord(3), local_coord(3)
     real(8) :: abs_disp
     logical :: load_from_dcdft
     
@@ -226,8 +228,8 @@ contains
       stop "DG-Fragment RT stage-1 requires np = n_frag * product(nproc_rgrid)"
     end if
 
-    dg_frag%ifrag_group = dg_frag%id / dg_frag%nproc_frag + 1
-    dg_frag%id_frag = mod(dg_frag%id, dg_frag%nproc_frag)
+    dg_frag%ifrag_group = dg_frag%id / max(1, dg_frag%nproc_frag) + 1
+    dg_frag%id_frag = modulo(dg_frag%id, max(1, dg_frag%nproc_frag))
     dg_frag%isize_frag = dg_frag%nproc_frag
     dg_frag%is_frag_root = (dg_frag%id_frag == 0)
     dg_frag%icomm_frag = comm_create_group(dg_frag%icomm, dg_frag%ifrag_group - 1, dg_frag%id_frag)
@@ -300,9 +302,18 @@ contains
     dg_frag%ixyz_frag = 0
     dg_frag%basis_support_lo = 0
     dg_frag%basis_support_hi = -1
-    do ifrag = 1, dg_frag%n_frag
-      dg_frag%id_array(ifrag) = (ifrag - 1) * dg_frag%nproc_frag
-    end do
+    allocate(id_tmp(dg_frag%n_frag))
+    id_tmp = 0
+    if (dg_frag%id_frag == 0) id_tmp(dg_frag%ifrag_group) = dg_frag%id + 1
+    call comm_summation(id_tmp, dg_frag%id_array, dg_frag%n_frag, dg_frag%icomm)
+    dg_frag%id_array = dg_frag%id_array - 1
+    if (any(dg_frag%id_array < 0)) then
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a)') "[FATAL] DG-Fragment RT: failed to build fragment root-rank map (id_array)."
+      end if
+      stop "DG-Fragment RT: invalid id_array"
+    end if
+    deallocate(id_tmp)
     dg_frag%lg => lg
     dg_frag%mg => mg
     dg_frag%hgs = system%hgs
@@ -310,6 +321,25 @@ contains
     ! Read fragment basis data from DC-LCFO calculation if requested
     if (load_from_dcdft) then
       call read_fragment_basis_data(dg_frag, bdir_frag)
+        call trace_fragment_assignment_overlap(dg_frag)
+      if (allocated(dg_frag%occ_state) .and. allocated(system%rocc)) then
+        ! Keep DG occupations tied to propagated orbital indices, not basis/eigenstate labels.
+        dg_frag%occ_state(:, :) = 0.0d0
+        do ispin = 1, dg_frag%nspin
+          do io = 1, min(dg_frag%nstate_tot, size(system%rocc, 1))
+            if (ispin <= size(system%rocc, 3)) then
+              dg_frag%occ_state(io, ispin) = max(0.0d0, system%rocc(io, 1, ispin))
+            end if
+          end do
+          dg_frag%nocc_spin(ispin) = 0
+          do io = 1, dg_frag%nstate_tot
+            if (dg_frag%occ_state(io, ispin) > 0.0d0) dg_frag%nocc_spin(ispin) = io
+          end do
+        end do
+        if (comm_is_root(info%id_rko)) then
+          write(*,'(1x,a)') "DG occupancy initialization: using system%rocc on orbital index (all DG modes)"
+        end if
+      end if
     else
       if (comm_is_root(info%id_rko)) then
         write(*,'(1x,a)') "WARNING: yn_dg_fragment_from_dcdft='n'"
@@ -345,6 +375,8 @@ contains
     
     ! Allocate only ESP array (independent of basis function count)
     allocate(dg_frag%esp(dg_frag%nstate_tot, dg_frag%nspin))
+    dg_frag%esp(:, :) = 0.0d0
+    if (load_from_dcdft) call load_buffered_fragment_esp(dg_frag, bdir_frag)
     
     ! Initialize RK coefficients
     call init_rk_coefficients(dg_frag)
@@ -966,14 +998,11 @@ contains
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ixg, iyg, izg
     integer, intent(in), optional :: hint_rank
-    integer :: jrank, first_match, nfrag_ranks, hint_group, rank_group
+    integer :: jrank, first_match
     integer :: xlo, xhi, ylo, yhi, zlo, zhi
 
     owner = -1
     first_match = -1
-    nfrag_ranks = max(1, dg_frag%isize_frag)
-    hint_group = -1
-    if (present(hint_rank)) hint_group = max(0, hint_rank) / nfrag_ranks
     do jrank = 0, dg_frag%isize - 1
       xlo = dg_frag%mg%is_all(1, jrank)
       xhi = dg_frag%mg%ie_all(1, jrank)
@@ -985,12 +1014,11 @@ contains
       zhi = dg_frag%mg%ie_all(3, jrank)
       if (izg < zlo .or. izg > zhi) cycle
       if (first_match < 0) first_match = jrank
-      if (hint_group >= 0) then
-        rank_group = jrank / nfrag_ranks
-        if (rank_group == hint_group) then
-          owner = jrank
-          return
-        end if
+        if (present(hint_rank)) then
+          if (jrank == hint_rank) then
+            owner = jrank
+            return
+          end if
       end if
     end do
     if (first_match >= 0) then
@@ -1168,11 +1196,11 @@ contains
     integer :: rem
 
     rem = ifrag - 1
-    idx(1) = mod(rem, dg_frag%num_fragment(1)) + 1
-    rem = rem / dg_frag%num_fragment(1)
+    idx(3) = mod(rem, dg_frag%num_fragment(3)) + 1
+    rem = rem / dg_frag%num_fragment(3)
     idx(2) = mod(rem, dg_frag%num_fragment(2)) + 1
     rem = rem / dg_frag%num_fragment(2)
-    idx(3) = mod(rem, dg_frag%num_fragment(3)) + 1
+    idx(1) = mod(rem, dg_frag%num_fragment(1)) + 1
   end function fragment_cartesian_index
 
 #include "rt_dg_fragment_halo.f90"
@@ -1214,9 +1242,9 @@ contains
     integer :: n_mat_cap, n_mat_cap_env, ienv
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: env_status, env_len
-    character(len=64) :: env_n_mat_cap, env_use_buffered_basis
+    character(len=64) :: env_n_mat_cap, env_use_buffered_basis, env_meta_trace
     logical :: warned_spin_discard
-    logical :: use_buffered_basis, have_buffered_coef, have_buffered_occ_any
+    logical :: use_buffered_basis, have_buffered_coef, have_buffered_occ_any, enable_meta_trace
     real(8) :: cap_avg, weight_best
     real(8) :: coef_file_probe(3), coef_global_probe(3)
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
@@ -1236,6 +1264,15 @@ contains
     dg_frag%use_buffered_basis = use_buffered_basis
     have_buffered_coef = .false.
     have_buffered_occ_any = .false.
+    enable_meta_trace = .false.
+    env_meta_trace = ""
+    call get_environment_variable("SALMON_DG_BASIS_META_TRACE", env_meta_trace, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_meta_trace(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        enable_meta_trace = .true.
+      end select
+    end if
     
     ! Step 1: Root reads metadata from first fragment and broadcasts
     if (comm_is_root(dg_frag%id)) then
@@ -1320,11 +1357,22 @@ contains
     read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
     close(iunit)
     
-    ! Step 3: Gather metadata (now consistent across all ranks)
+    ! Step 3: Gather metadata as stored in wavefunctions header tables.
     dg_frag%n_basis = n_basis_tmp
     dg_frag%index_basis = index_basis_tmp
     dg_frag%n_mat(1:dg_frag%nspin) = n_mat_tmp(1:dg_frag%nspin)
     dg_frag%n_mat_max = maxval(n_mat_tmp(1:dg_frag%nspin))
+    if (enable_meta_trace .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "[META-TRACE] DG basis metadata summary"
+      do ifrag = 1, dg_frag%n_frag
+        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x))') "[META-TRACE] ifrag=", ifrag, &
+          " n_basis(spin1)=", dg_frag%n_basis(ifrag, 1), &
+          " index1=", dg_frag%index_basis(1, ifrag, 1), " index2-4=", &
+          dg_frag%index_basis(min(2,dg_frag%nstate_frag), ifrag, 1), &
+          dg_frag%index_basis(min(3,dg_frag%nstate_frag), ifrag, 1), &
+          dg_frag%index_basis(min(4,dg_frag%nstate_frag), ifrag, 1)
+      end do
+    end if
     if (use_buffered_basis .and. dg_frag%id == 0) then
       write(*,'(1x,a,99(1x,i0))') "[INFO] Buffered metadata n_mat(file)=", dg_frag%n_mat(1:dg_frag%nspin)
     end if
@@ -1545,9 +1593,29 @@ contains
       end if
     end do
 
-    if (use_buffered_basis .and. have_buffered_occ_any) then
-      call comm_summation(occ_state_local, occ_state_sum, dg_frag%nstate_tot * dg_frag%nspin, dg_frag%icomm)
-      dg_frag%occ_state(:, :) = occ_state_sum(:, :)
+    if (use_buffered_basis) then
+      if (have_buffered_occ_any) then
+        call comm_summation(occ_state_local, occ_state_sum, dg_frag%nstate_tot * dg_frag%nspin, dg_frag%icomm)
+        dg_frag%occ_state(:, :) = occ_state_sum(:, :)
+      end if
+
+      ! Fallback when buffered occb is missing/empty: use occupied-state count.
+      do ispin = 1, dg_frag%nspin
+        if (maxval(dg_frag%occ_state(:, ispin)) <= 0.0d0) then
+          nocc_eff = max(0, min(dg_frag%nstate_tot, dg_frag%nocc_spin(ispin)))
+          if (nocc_eff == 0) then
+            if (dg_frag%nspin == 1) then
+              nocc_eff = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
+            else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
+              nocc_eff = min(dg_frag%nstate_tot, nelec_spin(ispin))
+            else
+              nocc_eff = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
+            end if
+          end if
+          if (nocc_eff > 0) dg_frag%occ_state(1:nocc_eff, ispin) = 1.0d0
+        end if
+      end do
+
       dg_frag%nocc_spin(:) = 0
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%nstate_tot
@@ -1874,18 +1942,20 @@ contains
                 end do
               else
                 do iz = 1, nxyz_domain(3)
-                  izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+                  izg_store = jxyz_tot(iz, 3)
                   if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
                   if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
                   if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
                   do iy = 1, nxyz_domain(2)
-                    iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                    iyg_store = jxyz_tot(iy, 2)
                     if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
                     if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
                     if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
                     do ix = 1, nxyz_domain(1)
-                      ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
-                      if (ixg_store < dg_frag%mg%is(1) .or. ixg_store > dg_frag%mg%ie(1)) cycle
+                      ixg_store = jxyz_tot(ix, 1)
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
+                      if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
+                      if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
                       dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
                     end do
                   end do
@@ -1916,13 +1986,12 @@ contains
     if (allocated(jxyz_tot)) deallocate(jxyz_tot)
     if (allocated(n_basis_frag)) deallocate(n_basis_frag)
     
-    ! CRITICAL: Share fragment geometry metadata across all ranks for Halo initialization
-    ! id_array is not initialized yet here, so reconstruct owner rank using
-    ! the same block distribution rule as distribute_fragments().
+    ! CRITICAL: Share fragment geometry metadata across all ranks for Halo initialization.
+    ! Use the runtime-collected root map (id_array) to match DC-style ownership.
     block
       integer :: owner_rank
       do ifrag = 1, dg_frag%n_frag
-        owner_rank = get_fragment_group_root_rank(ifrag, dg_frag%nproc_frag)
+        owner_rank = dg_frag%id_array(ifrag)
         call comm_bcast(dg_frag%ixyz_frag(1:3, ifrag), dg_frag%icomm, owner_rank)
         call comm_bcast(dg_frag%nxyz_domain(1:3, ifrag), dg_frag%icomm, owner_rank)
       end do
@@ -1959,6 +2028,241 @@ contains
     end if
     
   end subroutine read_fragment_basis_data
+
+  subroutine infer_fragment_group_from_metadata(dg_frag, mg, bdir_frag, ifrag_group)
+    use filesystem, only: get_filehandle
+    use structures, only: s_rgrid
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_rgrid), intent(in) :: mg
+    character(*), intent(in) :: bdir_frag
+    integer, intent(out) :: ifrag_group
+
+    character(32), parameter :: binfile_rg = "rgrid_index.bin"
+    character(32), parameter :: binfile_bf = "basis_functions.bin"
+    character(32), parameter :: binfile_bfb = "basis_functions_buffered.bin"
+    character(256) :: filename
+    character(len=64) :: env_use_buffered_basis
+    integer :: env_status, env_len
+    logical :: use_buffered_basis, file_exists
+    integer :: iunit, ifrag, nspin_file, nstate_frag_file
+    integer :: nxyz_domain(3), nxyz_file_buffer(3), nxyz_file_box(3)
+    integer :: lgnum_frag(3), lgnum_total(3)
+    integer :: nxyz_alloc(3), nxyz_max
+    integer, allocatable :: jxyz_tot(:,:)
+    integer :: ixyz_frag(3), ov_axis(3), overlap_vol
+    integer :: best_ifrag, best_overlap
+    integer :: fallback_ifrag
+
+    use_buffered_basis = .false.
+    env_use_buffered_basis = ""
+    env_status = 1
+    env_len = 0
+    call get_environment_variable("SALMON_DG_USE_BUFFERED_BASIS", env_use_buffered_basis, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_use_buffered_basis(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        use_buffered_basis = .true.
+      end select
+    end if
+    fallback_ifrag = dg_frag%id / max(1, dg_frag%nproc_frag) + 1
+    best_ifrag = fallback_ifrag
+    best_overlap = -1
+
+    do ifrag = 1, dg_frag%n_frag
+      iunit = get_filehandle()
+      if (use_buffered_basis) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bfb
+        inquire(file=filename, exist=file_exists)
+        if (.not. file_exists) then
+          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+        end if
+      else
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      end if
+      open(iunit, file=filename, form='unformatted', access='stream', status='old')
+      if (use_buffered_basis) then
+        read(iunit) nxyz_domain(1:3), nxyz_file_buffer(1:3), nxyz_file_box(1:3), nspin_file, nstate_frag_file
+      else
+        read(iunit) nxyz_domain(1:3), nspin_file, nstate_frag_file
+      end if
+      close(iunit)
+
+      iunit = get_filehandle()
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_rg
+      open(iunit, file=filename, form='unformatted', access='stream', status='old')
+      read(iunit) lgnum_frag(1:3), lgnum_total(1:3)
+      nxyz_alloc(1:3) = lgnum_frag(1:3)
+      nxyz_max = maxval(nxyz_alloc)
+      allocate(jxyz_tot(nxyz_max, 3))
+      jxyz_tot(:, :) = 0
+      read(iunit) jxyz_tot(1:nxyz_alloc(1), 1)
+      read(iunit) jxyz_tot(1:nxyz_alloc(2), 2)
+      read(iunit) jxyz_tot(1:nxyz_alloc(3), 3)
+      close(iunit)
+
+      ixyz_frag(1:3) = jxyz_tot(1, 1:3)
+      deallocate(jxyz_tot)
+
+      ov_axis(1) = periodic_axis_overlap(ixyz_frag(1), nxyz_domain(1), mg%is(1), mg%ie(1), lgnum_total(1))
+      ov_axis(2) = periodic_axis_overlap(ixyz_frag(2), nxyz_domain(2), mg%is(2), mg%ie(2), lgnum_total(2))
+      ov_axis(3) = periodic_axis_overlap(ixyz_frag(3), nxyz_domain(3), mg%is(3), mg%ie(3), lgnum_total(3))
+      overlap_vol = ov_axis(1) * ov_axis(2) * ov_axis(3)
+
+      if (overlap_vol > best_overlap) then
+        best_overlap = overlap_vol
+        best_ifrag = ifrag
+      end if
+    end do
+
+    if (best_overlap <= 0) then
+      ifrag_group = fallback_ifrag
+    else
+      ifrag_group = best_ifrag
+    end if
+  end subroutine infer_fragment_group_from_metadata
+
+  integer function periodic_axis_overlap(start_idx, nlen, local_s, local_e, ltot) result(ov)
+    implicit none
+    integer, intent(in) :: start_idx, nlen, local_s, local_e, ltot
+    integer :: shift, seg_s, seg_e
+
+    ov = 0
+    do shift = -1, 1
+      seg_s = start_idx + shift * ltot
+      seg_e = seg_s + nlen - 1
+      ov = max(ov, max(0, min(seg_e, local_e) - max(seg_s, local_s) + 1))
+    end do
+  end function periodic_axis_overlap
+
+  subroutine trace_fragment_assignment_overlap(dg_frag)
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+
+    character(32) :: env_trace
+    integer :: env_len, env_status
+    logical :: enable_trace
+    integer :: ifrag, ov(3), assigned_overlap, overlap_vol
+    integer :: best_ifrag, best_overlap
+
+    env_trace = ''
+    call get_environment_variable("SALMON_DG_ASSIGNMENT_TRACE", env_trace, length=env_len, status=env_status)
+    enable_trace = .false.
+    if (env_status == 0 .and. env_len > 0) then
+      select case (env_trace(1:1))
+      case ('1', 'y', 'Y', 't', 'T')
+        enable_trace = .true.
+      end select
+    end if
+    if (.not. enable_trace) return
+    if (.not. allocated(dg_frag%ixyz_frag) .or. .not. allocated(dg_frag%nxyz_domain)) return
+
+    assigned_overlap = 0
+    best_ifrag = 0
+    best_overlap = -1
+    do ifrag = 1, dg_frag%n_frag
+      ov(1) = periodic_axis_overlap(dg_frag%ixyz_frag(1, ifrag), dg_frag%nxyz_domain(1, ifrag), dg_frag%mg%is(1), dg_frag%mg%ie(1), dg_frag%lgnum_total(1))
+      ov(2) = periodic_axis_overlap(dg_frag%ixyz_frag(2, ifrag), dg_frag%nxyz_domain(2, ifrag), dg_frag%mg%is(2), dg_frag%mg%ie(2), dg_frag%lgnum_total(2))
+      ov(3) = periodic_axis_overlap(dg_frag%ixyz_frag(3, ifrag), dg_frag%nxyz_domain(3, ifrag), dg_frag%mg%is(3), dg_frag%mg%ie(3), dg_frag%lgnum_total(3))
+      overlap_vol = ov(1) * ov(2) * ov(3)
+      if (ifrag == dg_frag%ifrag_group) assigned_overlap = overlap_vol
+      if (overlap_vol > best_overlap) then
+        best_overlap = overlap_vol
+        best_ifrag = ifrag
+      end if
+    end do
+
+    write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0,a,i0)') &
+         "dg-assign-trace: rank=", dg_frag%id, " assigned_ifrag=", dg_frag%ifrag_group, &
+         " mg_is=", dg_frag%mg%is(1), dg_frag%mg%is(2), dg_frag%mg%is(3), &
+         " mg_ie=", dg_frag%mg%ie(1), dg_frag%mg%ie(2), dg_frag%mg%ie(3), &
+         " assigned_overlap=", assigned_overlap, " best_ifrag=", best_ifrag, " best_overlap=", best_overlap
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') "[INFO] SALMON_DG_ASSIGNMENT_TRACE enabled"
+    end if
+  end subroutine trace_fragment_assignment_overlap
+
+  subroutine load_buffered_fragment_esp(dg_frag, bdir_frag)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root, comm_summation
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: bdir_frag
+
+    character(32), parameter :: binfile_esb = "eigenvalues_buffered.bin"
+    character(32), parameter :: binfile_esb_legacy = "esp_buffered.bin"
+    character(256) :: filename
+    integer :: iunit, ifrag, ispin, io, global_idx
+    integer :: n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+    integer :: io_max, ispin_max, iostat_open, n_nonzero
+    logical :: file_exists, loaded_any
+    real(8), allocatable :: esp_local(:,:), esp_sum(:,:), esp_tmp(:,:)
+
+    if (.not. dg_frag%use_buffered_basis) return
+    if (.not. allocated(dg_frag%esp)) return
+
+    allocate(esp_local(dg_frag%nstate_tot, dg_frag%nspin))
+    allocate(esp_sum(dg_frag%nstate_tot, dg_frag%nspin))
+    esp_local(:, :) = 0.0d0
+    esp_sum(:, :) = 0.0d0
+    loaded_any = .false.
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_esb
+      inquire(file=filename, exist=file_exists)
+      if (.not. file_exists) then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_esb_legacy
+        inquire(file=filename, exist=file_exists)
+      end if
+      if (.not. file_exists) cycle
+
+      iunit = get_filehandle()
+      open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+      if (iostat_open /= 0) cycle
+      read(iunit, iostat=iostat_open) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+      if (iostat_open /= 0 .or. nspin_file < 1 .or. nstate_frag_file < 1) then
+        close(iunit)
+        cycle
+      end if
+      allocate(esp_tmp(nstate_frag_file, nspin_file))
+      esp_tmp(:, :) = 0.0d0
+      read(iunit, iostat=iostat_open) esp_tmp(1:nstate_frag_file, 1:nspin_file)
+      close(iunit)
+      if (iostat_open /= 0) then
+        deallocate(esp_tmp)
+        cycle
+      end if
+
+      loaded_any = .true.
+      ispin_max = min(dg_frag%nspin, nspin_file)
+      do ispin = 1, ispin_max
+        io_max = min(dg_frag%nstate_frag, nstate_frag_file, dg_frag%n_basis(ifrag, ispin))
+        do io = 1, io_max
+          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          if (global_idx >= 1 .and. global_idx <= dg_frag%nstate_tot) then
+            esp_local(global_idx, ispin) = esp_tmp(io, ispin)
+          end if
+        end do
+      end do
+      deallocate(esp_tmp)
+    end do
+
+    if (loaded_any) then
+      call comm_summation(esp_local, esp_sum, dg_frag%nstate_tot * dg_frag%nspin, dg_frag%icomm)
+      dg_frag%esp(:, :) = esp_sum(:, :)
+      if (comm_is_root(dg_frag%id)) then
+        n_nonzero = count(abs(dg_frag%esp(:, :)) > 1.0d-14)
+        write(*,'(1x,a,i0,a,i0)') "[INFO] Buffered esp loaded: nonzero=", n_nonzero, &
+          " total=", dg_frag%nstate_tot * dg_frag%nspin
+      end if
+    else
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') "[INFO] Buffered esp file not found; startup Rayleigh initialization will be used"
+      end if
+    end if
+
+    deallocate(esp_local, esp_sum)
+  end subroutine load_buffered_fragment_esp
 
   !=======================================================================
   ! Initialize Runge-Kutta coefficients

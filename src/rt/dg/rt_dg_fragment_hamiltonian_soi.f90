@@ -2035,3 +2035,13 @@
     if (allocated(S_block_map_local)) deallocate(S_block_map_local)
 
   end subroutine calculate_overlap_matrix
+
+  subroutine print_startup_eigen_residual_puredg(dg_frag, stage_label, update_esp)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: stage_label
+    logical, intent(in), optional :: update_esp
+
+    ! SOI path currently does not use the PureDG startup residual diagnostic.
+    if (present(update_esp)) continue
+  end subroutine print_startup_eigen_residual_puredg

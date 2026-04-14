@@ -542,7 +542,9 @@
     real(8) :: hvol
     real(8) :: halo_integral_t, halo_integral_h, halo_integral_m, halo_integral_m_avgavg, halo_integral_m_avgjump
     real(8) :: halo_integral_t_sum, halo_integral_h_sum, halo_integral_m_sum, t_point, h_point, halo_val
-    real(8) :: face_area, face_penalty_alpha, phi_local_face, phi_remote_face, dphi_local_n, dphi_remote_n
+    real(8) :: face_area, face_penalty_alpha, phi_local_face, phi_remote_face, phi_face_avg, phi_face_jump
+    real(8) :: dphi_local_n, dphi_remote_n, dphi_flux_n, dphi_face_avg, dphi_face_jump
+    real(8) :: sipg_ab_sum, sipg_ab_cap, sipg_ab_scale, sipg_ab_ref, sipg_ab_norm
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
@@ -555,6 +557,7 @@
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     real(8), allocatable :: partial_th(:), reduced_th(:)
     real(8), allocatable :: halo_partial_t(:), halo_partial_h(:), halo_partial_m(:), halo_reduced_t(:), halo_reduced_h(:), halo_reduced_m(:)
+    real(8), allocatable :: halo_partial_a(:), halo_partial_b(:), halo_partial_c(:), halo_reduced_a(:), halo_reduced_b(:), halo_reduced_c(:)
     real(8), allocatable :: halo_reduce_pair(:), halo_reduce_sum(:)
     real(8), allocatable :: halo_t_point_buf(:), halo_h_point_buf(:)
     integer, allocatable :: halo_active_list(:), halo_active_nbf(:), halo_active_iblk(:), halo_active_iblk_rev(:)
@@ -563,6 +566,7 @@
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: loc_s_dbg(3), loc_e_dbg(3)
     integer :: n_metric
+    integer :: env_status, sipg_trace_rank, sipg_trace_jmax, env_len
     logical :: release_dense_fragment_ops
     logical :: has_overlap_dbg
     logical :: probe_rank_main, probe_rank_352_396, probe_small_frag2
@@ -572,6 +576,17 @@
     logical, parameter :: enable_step2_probe = .false.
     complex(8), allocatable :: H_metric_ref(:,:)
     real(8) :: partial_t_abs, partial_h_abs
+    real(8) :: halo_integral_a_sum, halo_integral_b_sum, halo_integral_c_sum
+    real(8) :: sipg_h_face_a, sipg_h_face_b, sipg_h_face_c
+    real(8) :: sipg_terms_local(3), sipg_terms_sum(3)
+    character(len=32) :: env_sipg_face_trace, env_sipg_trace_allpairs
+    character(len=32) :: env_sipg_trace_rank, env_sipg_trace_jmax
+    character(len=32) :: env_sipg_disable_b_term, env_sipg_disable_c_term, env_sipg_enable_halo, env_sipg_use_avg_trace, env_sipg_use_flux_form
+    character(len=32) :: env_sipg_use_weak_form, env_sipg_ab_norm_max
+    logical :: enable_sipg_face_trace, sipg_trace_allpairs, sipg_trace_pair
+    logical :: sipg_disable_b_term, sipg_disable_c_term, sipg_enable_fragment_halo_exchange, sipg_use_avg_trace, sipg_use_flux_form
+    logical :: sipg_use_weak_form
+    real(8) :: sipg_ab_norm_max
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
@@ -579,6 +594,102 @@
     probe_rank_352_396 = enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)
     probe_small_frag2 = enable_step2_probe .and. dg_frag%n_frag == 2 .and. dg_frag%id <= 3
 
+    env_sipg_face_trace = ''
+    env_sipg_trace_allpairs = ''
+    env_sipg_trace_rank = ''
+    env_sipg_trace_jmax = ''
+    env_sipg_disable_b_term = ''
+    env_sipg_disable_c_term = ''
+    env_sipg_enable_halo = ''
+    env_sipg_use_avg_trace = ''
+    env_sipg_use_flux_form = ''
+    env_sipg_use_weak_form = ''
+    env_sipg_ab_norm_max = ''
+    enable_sipg_face_trace = .false.
+    sipg_trace_allpairs = .false.
+    sipg_trace_rank = -1
+    sipg_trace_jmax = 1
+    sipg_disable_b_term = .false.
+    sipg_disable_c_term = .false.
+    sipg_enable_fragment_halo_exchange = .false.
+    sipg_use_avg_trace = .false.
+    sipg_use_flux_form = .false.
+    sipg_use_weak_form = .false.
+    sipg_ab_norm_max = -1.0d0
+
+    call get_environment_variable('SALMON_DG_SIPG_FACE_TRACE', env_sipg_face_trace, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_face_trace)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        enable_sipg_face_trace = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_TRACE_ALLPAIRS', env_sipg_trace_allpairs, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_trace_allpairs)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_trace_allpairs = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_TRACE_RANK', env_sipg_trace_rank, status=env_status)
+    if (env_status == 0 .and. len_trim(env_sipg_trace_rank) > 0) then
+      read(env_sipg_trace_rank, *, iostat=env_status) sipg_trace_rank
+      if (env_status /= 0) sipg_trace_rank = -1
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_TRACE_JMAX', env_sipg_trace_jmax, status=env_status)
+    if (env_status == 0 .and. len_trim(env_sipg_trace_jmax) > 0) then
+      read(env_sipg_trace_jmax, *, iostat=env_status) sipg_trace_jmax
+      if (env_status /= 0 .or. sipg_trace_jmax < 1) sipg_trace_jmax = 1
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_DISABLE_B_TERM', env_sipg_disable_b_term, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_disable_b_term)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_disable_b_term = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_DISABLE_C_TERM', env_sipg_disable_c_term, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_disable_c_term)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_disable_c_term = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE', env_sipg_enable_halo, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_enable_halo)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_enable_fragment_halo_exchange = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_USE_AVG_TRACE', env_sipg_use_avg_trace, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_use_avg_trace)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_use_avg_trace = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_USE_FLUX_FORM', env_sipg_use_flux_form, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_use_flux_form)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_use_flux_form = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_SIPG_USE_WEAK_FORM', env_sipg_use_weak_form, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_sipg_use_weak_form)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        sipg_use_weak_form = .true.
+      end select
+    end if
+    env_status = 1
+    env_len = 0
+    call get_environment_variable('SALMON_DG_SIPG_AB_NORM_MAX', env_sipg_ab_norm_max, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_sipg_ab_norm_max, *, iostat=env_status) sipg_ab_norm_max
+      if (env_status /= 0) sipg_ab_norm_max = -1.0d0
+    end if
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
         allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
@@ -753,6 +864,15 @@
       flush(6)
     end if
     
+    ! Optionally enable halo exchange only for Step2 SIPG coupling diagnostics.
+    ! This avoids changing Step1 momentum behavior unless explicitly requested.
+    if (sipg_enable_fragment_halo_exchange .and. dg_frag%n_halo <= 0) then
+      call init_halo_communication(dg_frag)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') "Fragment halo exchange enabled for Step2 by SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE"
+      end if
+    end if
+
     ! Exchange halo regions between fragments before stencil operations
     ! This ensures accurate Laplacian calculation at fragment boundaries
     call exchange_phi_frag_halo(dg_frag)
@@ -1116,39 +1236,60 @@
           if (.not. allocated(halo_partial_t)) need_halo_alloc = .true.
           if (.not. allocated(halo_partial_h)) need_halo_alloc = .true.
           if (.not. allocated(halo_partial_m)) need_halo_alloc = .true.
+          if (.not. allocated(halo_partial_a)) need_halo_alloc = .true.
+          if (.not. allocated(halo_partial_b)) need_halo_alloc = .true.
+          if (.not. allocated(halo_partial_c)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduced_t)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduced_h)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduced_m)) need_halo_alloc = .true.
+          if (.not. allocated(halo_reduced_a)) need_halo_alloc = .true.
+          if (.not. allocated(halo_reduced_b)) need_halo_alloc = .true.
+          if (.not. allocated(halo_reduced_c)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduce_pair)) need_halo_alloc = .true.
           if (.not. allocated(halo_reduce_sum)) need_halo_alloc = .true.
           if (.not. need_halo_alloc) then
             if (size(halo_partial_t) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_partial_h) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_partial_m) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_partial_a) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_partial_b) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_partial_c) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_reduced_t) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_reduced_h) < n_basis_halo_max) need_halo_alloc = .true.
             if (size(halo_reduced_m) < n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduce_pair) < 3 * n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduce_sum) < 3 * n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduced_a) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduced_b) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduced_c) < n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduce_pair) < 6 * n_basis_halo_max) need_halo_alloc = .true.
+            if (size(halo_reduce_sum) < 6 * n_basis_halo_max) need_halo_alloc = .true.
           end if
           if (need_halo_alloc) then
             if (allocated(halo_partial_t)) deallocate(halo_partial_t)
             if (allocated(halo_partial_h)) deallocate(halo_partial_h)
             if (allocated(halo_partial_m)) deallocate(halo_partial_m)
+            if (allocated(halo_partial_a)) deallocate(halo_partial_a)
+            if (allocated(halo_partial_b)) deallocate(halo_partial_b)
+            if (allocated(halo_partial_c)) deallocate(halo_partial_c)
             if (allocated(halo_reduced_t)) deallocate(halo_reduced_t)
             if (allocated(halo_reduced_h)) deallocate(halo_reduced_h)
             if (allocated(halo_reduced_m)) deallocate(halo_reduced_m)
+            if (allocated(halo_reduced_a)) deallocate(halo_reduced_a)
+            if (allocated(halo_reduced_b)) deallocate(halo_reduced_b)
+            if (allocated(halo_reduced_c)) deallocate(halo_reduced_c)
             if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair)
             if (allocated(halo_reduce_sum)) deallocate(halo_reduce_sum)
             allocate(halo_partial_t(n_basis_halo_max), halo_partial_h(n_basis_halo_max), halo_partial_m(n_basis_halo_max))
+            allocate(halo_partial_a(n_basis_halo_max), halo_partial_b(n_basis_halo_max), halo_partial_c(n_basis_halo_max))
             allocate(halo_reduced_t(n_basis_halo_max), halo_reduced_h(n_basis_halo_max), halo_reduced_m(n_basis_halo_max))
-            allocate(halo_reduce_pair(3 * n_basis_halo_max), halo_reduce_sum(3 * n_basis_halo_max))
+            allocate(halo_reduced_a(n_basis_halo_max), halo_reduced_b(n_basis_halo_max), halo_reduced_c(n_basis_halo_max))
+            allocate(halo_reduce_pair(6 * n_basis_halo_max), halo_reduce_sum(6 * n_basis_halo_max))
           end if
         end if
 
         do jo = 1, nbf
           do i_halo_active = 1, n_active_halo
             i_halo = halo_active_list(i_halo_active)
+            jfrag = dg_frag%halo(i_halo)%ifrag_src
             n_basis_halo = halo_active_nbf(i_halo_active)
             iblk = halo_active_iblk(i_halo_active)
             iblk_rev = halo_active_iblk_rev(i_halo_active)
@@ -1176,15 +1317,27 @@
             halo_partial_t(1:n_basis_halo) = 0.0d0
             halo_partial_h(1:n_basis_halo) = 0.0d0
             halo_partial_m(1:n_basis_halo) = 0.0d0
+            halo_partial_a(1:n_basis_halo) = 0.0d0
+            halo_partial_b(1:n_basis_halo) = 0.0d0
+            halo_partial_c(1:n_basis_halo) = 0.0d0
+            sipg_trace_pair = enable_sipg_face_trace .and. ispin == 1 .and. jo <= sipg_trace_jmax
+            if (sipg_trace_rank >= 0) sipg_trace_pair = sipg_trace_pair .and. dg_frag%id == sipg_trace_rank
+            if (.not. sipg_trace_allpairs) then
+              sipg_trace_pair = sipg_trace_pair .and. &
+                ((ifrag == 6 .and. jfrag == 8) .or. (ifrag == 8 .and. jfrag == 6))
+            end if
 
             face_area = get_dg_face_area_element(dg_frag%hgs, face_axis)
             face_penalty_alpha = get_dg_face_penalty_coefficient(dg_frag%hgs, face_axis)
 
-            !$omp parallel do private(io,halo_integral_t,halo_integral_h,halo_integral_m,halo_integral_m_avgavg,halo_integral_m_avgjump,ix_face,iy_face,iz_face,halo_send_idx,halo_recv_idx,phi_local_face,phi_remote_face,dphi_local_n,dphi_remote_n) schedule(static)
+            !$omp parallel do private(io,halo_integral_t,halo_integral_h,halo_integral_m,halo_integral_m_avgavg,halo_integral_m_avgjump,halo_integral_a_sum,halo_integral_b_sum,halo_integral_c_sum,ix_face,iy_face,iz_face,halo_send_idx,halo_recv_idx,phi_local_face,phi_remote_face,phi_face_avg,phi_face_jump,dphi_local_n,dphi_remote_n,dphi_flux_n,dphi_face_avg,dphi_face_jump,sipg_h_face_a,sipg_h_face_b,sipg_h_face_c,sipg_ab_sum,sipg_ab_cap,sipg_ab_scale,sipg_ab_ref,sipg_ab_norm) schedule(static)
             do io = 1, n_basis_halo
               halo_integral_t = 0.0d0
               halo_integral_h = 0.0d0
               halo_integral_m = 0.0d0
+              halo_integral_a_sum = 0.0d0
+              halo_integral_b_sum = 0.0d0
+              halo_integral_c_sum = 0.0d0
               halo_integral_m_avgavg = 0.0d0
               halo_integral_m_avgjump = 0.0d0
               select case (face_axis)
@@ -1192,10 +1345,12 @@
                 do iz_face = 1, l(3)
                   do iy_face = 1, l(2)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), face_idx_local, iy_face, iz_face, halo_send_idx, halo_recv_idx)
-                    phi_local_face = dg_frag%phi_frag(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), jo, i_local)
+                    phi_local_face = face_trace_value_local(dg_frag, i_local, jo, face_axis, face_dir, &
+                      halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
                     dphi_local_n = one_sided_face_derivative_local(dg_frag, i_local, jo, face_axis, face_dir, &
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
-                    phi_remote_face = dg_frag%halo(i_halo)%buf_recv(face_idx_remote, iy_face, iz_face, io, 1)
+                    phi_remote_face = face_trace_value_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                      face_idx_remote, iy_face, iz_face)
                     dphi_remote_n = one_sided_face_derivative_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
                       face_idx_remote, iy_face, iz_face, dg_frag%hgs)
                     ! SIPG off-diagonal face term using explicit average/jump roles:
@@ -1206,9 +1361,47 @@
                     !   +0.5 * phi_remote * dphi_local_n
                     !   -0.5 * dphi_remote_n * phi_local
                     !   -alpha * phi_remote * phi_local
-                    halo_integral_t = halo_integral_t + &
-                      (0.5d0 * (phi_remote_face * dphi_local_n - dphi_remote_n * phi_local_face) - &
-                       face_penalty_alpha * phi_remote_face * phi_local_face) * face_area
+                    if (sipg_disable_b_term) then
+                      ! A-only mode: always use the pure-A definition and bypass
+                      ! weak/avg/flux mixed reconstructions.
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
+                      sipg_h_face_b = 0.0d0
+                    else if (sipg_use_weak_form) then
+                      phi_face_avg = 0.5d0 * (phi_local_face + phi_remote_face)
+                      phi_face_jump = phi_remote_face - phi_local_face
+                      dphi_face_avg = 0.5d0 * (dphi_local_n + dphi_remote_n)
+                      dphi_face_jump = dphi_local_n - dphi_remote_n
+                      sipg_h_face_a = 0.5d0 * phi_face_avg * dphi_face_jump * face_area
+                      sipg_h_face_b = 0.5d0 * phi_face_jump * dphi_face_avg * face_area
+                    else if (sipg_use_flux_form) then
+                      dphi_flux_n = 0.5d0 * (dphi_local_n + dphi_remote_n)
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_flux_n * face_area
+                      sipg_h_face_b = -0.5d0 * phi_local_face * dphi_flux_n * face_area
+                    else if (sipg_use_avg_trace) then
+                      phi_face_avg = 0.5d0 * (phi_local_face + phi_remote_face)
+                      sipg_h_face_a = 0.5d0 * phi_face_avg * dphi_local_n * face_area
+                      sipg_h_face_b = -0.5d0 * dphi_remote_n * phi_face_avg * face_area
+                    else
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
+                      sipg_h_face_b = -0.5d0 * dphi_remote_n * phi_local_face * face_area
+                    end if
+                    sipg_h_face_c = -face_penalty_alpha * phi_remote_face * phi_local_face * face_area
+                    if (sipg_ab_norm_max > 0.0d0) then
+                      sipg_ab_norm = abs(sipg_h_face_a) + abs(sipg_h_face_b)
+                      sipg_ab_ref = 0.5d0 * (abs(phi_remote_face) * abs(dphi_local_n) + &
+                                            abs(phi_local_face) * abs(dphi_remote_n)) * face_area
+                      sipg_ab_cap = sipg_ab_norm_max * max(sipg_ab_ref, 1.0d-30)
+                      if (sipg_ab_norm > sipg_ab_cap) then
+                        sipg_ab_scale = sipg_ab_cap / sipg_ab_norm
+                        sipg_h_face_a = sipg_h_face_a * sipg_ab_scale
+                        sipg_h_face_b = sipg_h_face_b * sipg_ab_scale
+                      end if
+                    end if
+                    if (sipg_disable_c_term) sipg_h_face_c = 0.0d0
+                    halo_integral_t = halo_integral_t + sipg_h_face_a + sipg_h_face_b + sipg_h_face_c
+                    halo_integral_a_sum = halo_integral_a_sum + sipg_h_face_a
+                    halo_integral_b_sum = halo_integral_b_sum + sipg_h_face_b
+                    halo_integral_c_sum = halo_integral_c_sum + sipg_h_face_c
                     ! Intentionally split the face A-coupling into avg-avg and avg-jump halves
                     ! so the summed contribution keeps the original total strength.
                     halo_integral_m_avgavg = halo_integral_m_avgavg + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
@@ -1219,15 +1412,53 @@
                 do iz_face = 1, l(3)
                   do ix_face = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_face, face_idx_local, iz_face, halo_send_idx, halo_recv_idx)
-                    phi_local_face = dg_frag%phi_frag(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), jo, i_local)
+                    phi_local_face = face_trace_value_local(dg_frag, i_local, jo, face_axis, face_dir, &
+                      halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
                     dphi_local_n = one_sided_face_derivative_local(dg_frag, i_local, jo, face_axis, face_dir, &
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
-                    phi_remote_face = dg_frag%halo(i_halo)%buf_recv(ix_face, face_idx_remote, iz_face, io, 1)
+                    phi_remote_face = face_trace_value_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                      ix_face, face_idx_remote, iz_face)
                     dphi_remote_n = one_sided_face_derivative_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
                       ix_face, face_idx_remote, iz_face, dg_frag%hgs)
-                    halo_integral_t = halo_integral_t + &
-                      (0.5d0 * (phi_remote_face * dphi_local_n - dphi_remote_n * phi_local_face) - &
-                       face_penalty_alpha * phi_remote_face * phi_local_face) * face_area
+                    if (sipg_disable_b_term) then
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
+                      sipg_h_face_b = 0.0d0
+                    else if (sipg_use_weak_form) then
+                      phi_face_avg = 0.5d0 * (phi_local_face + phi_remote_face)
+                      phi_face_jump = phi_remote_face - phi_local_face
+                      dphi_face_avg = 0.5d0 * (dphi_local_n + dphi_remote_n)
+                      dphi_face_jump = dphi_local_n - dphi_remote_n
+                      sipg_h_face_a = 0.5d0 * phi_face_avg * dphi_face_jump * face_area
+                      sipg_h_face_b = 0.5d0 * phi_face_jump * dphi_face_avg * face_area
+                    else if (sipg_use_flux_form) then
+                      dphi_flux_n = 0.5d0 * (dphi_local_n + dphi_remote_n)
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_flux_n * face_area
+                      sipg_h_face_b = -0.5d0 * phi_local_face * dphi_flux_n * face_area
+                    else if (sipg_use_avg_trace) then
+                      phi_face_avg = 0.5d0 * (phi_local_face + phi_remote_face)
+                      sipg_h_face_a = 0.5d0 * phi_face_avg * dphi_local_n * face_area
+                      sipg_h_face_b = -0.5d0 * dphi_remote_n * phi_face_avg * face_area
+                    else
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
+                      sipg_h_face_b = -0.5d0 * dphi_remote_n * phi_local_face * face_area
+                    end if
+                    sipg_h_face_c = -face_penalty_alpha * phi_remote_face * phi_local_face * face_area
+                    if (sipg_ab_norm_max > 0.0d0) then
+                      sipg_ab_norm = abs(sipg_h_face_a) + abs(sipg_h_face_b)
+                      sipg_ab_ref = 0.5d0 * (abs(phi_remote_face) * abs(dphi_local_n) + &
+                                            abs(phi_local_face) * abs(dphi_remote_n)) * face_area
+                      sipg_ab_cap = sipg_ab_norm_max * max(sipg_ab_ref, 1.0d-30)
+                      if (sipg_ab_norm > sipg_ab_cap) then
+                        sipg_ab_scale = sipg_ab_cap / sipg_ab_norm
+                        sipg_h_face_a = sipg_h_face_a * sipg_ab_scale
+                        sipg_h_face_b = sipg_h_face_b * sipg_ab_scale
+                      end if
+                    end if
+                    if (sipg_disable_c_term) sipg_h_face_c = 0.0d0
+                    halo_integral_t = halo_integral_t + sipg_h_face_a + sipg_h_face_b + sipg_h_face_c
+                    halo_integral_a_sum = halo_integral_a_sum + sipg_h_face_a
+                    halo_integral_b_sum = halo_integral_b_sum + sipg_h_face_b
+                    halo_integral_c_sum = halo_integral_c_sum + sipg_h_face_c
                     ! Intentionally split the face A-coupling into avg-avg and avg-jump halves
                     ! so the summed contribution keeps the original total strength.
                     halo_integral_m_avgavg = halo_integral_m_avgavg + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
@@ -1238,15 +1469,53 @@
                 do iy_face = 1, l(2)
                   do ix_face = 1, l(1)
                     call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_face, iy_face, face_idx_local, halo_send_idx, halo_recv_idx)
-                    phi_local_face = dg_frag%phi_frag(halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), jo, i_local)
+                    phi_local_face = face_trace_value_local(dg_frag, i_local, jo, face_axis, face_dir, &
+                      halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
                     dphi_local_n = one_sided_face_derivative_local(dg_frag, i_local, jo, face_axis, face_dir, &
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
-                    phi_remote_face = dg_frag%halo(i_halo)%buf_recv(ix_face, iy_face, face_idx_remote, io, 1)
+                    phi_remote_face = face_trace_value_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                      ix_face, iy_face, face_idx_remote)
                     dphi_remote_n = one_sided_face_derivative_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
                       ix_face, iy_face, face_idx_remote, dg_frag%hgs)
-                    halo_integral_t = halo_integral_t + &
-                      (0.5d0 * (phi_remote_face * dphi_local_n - dphi_remote_n * phi_local_face) - &
-                       face_penalty_alpha * phi_remote_face * phi_local_face) * face_area
+                    if (sipg_disable_b_term) then
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
+                      sipg_h_face_b = 0.0d0
+                    else if (sipg_use_weak_form) then
+                      phi_face_avg = 0.5d0 * (phi_local_face + phi_remote_face)
+                      phi_face_jump = phi_remote_face - phi_local_face
+                      dphi_face_avg = 0.5d0 * (dphi_local_n + dphi_remote_n)
+                      dphi_face_jump = dphi_local_n - dphi_remote_n
+                      sipg_h_face_a = 0.5d0 * phi_face_avg * dphi_face_jump * face_area
+                      sipg_h_face_b = 0.5d0 * phi_face_jump * dphi_face_avg * face_area
+                    else if (sipg_use_flux_form) then
+                      dphi_flux_n = 0.5d0 * (dphi_local_n + dphi_remote_n)
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_flux_n * face_area
+                      sipg_h_face_b = -0.5d0 * phi_local_face * dphi_flux_n * face_area
+                    else if (sipg_use_avg_trace) then
+                      phi_face_avg = 0.5d0 * (phi_local_face + phi_remote_face)
+                      sipg_h_face_a = 0.5d0 * phi_face_avg * dphi_local_n * face_area
+                      sipg_h_face_b = -0.5d0 * dphi_remote_n * phi_face_avg * face_area
+                    else
+                      sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
+                      sipg_h_face_b = -0.5d0 * dphi_remote_n * phi_local_face * face_area
+                    end if
+                    sipg_h_face_c = -face_penalty_alpha * phi_remote_face * phi_local_face * face_area
+                    if (sipg_ab_norm_max > 0.0d0) then
+                      sipg_ab_norm = abs(sipg_h_face_a) + abs(sipg_h_face_b)
+                      sipg_ab_ref = 0.5d0 * (abs(phi_remote_face) * abs(dphi_local_n) + &
+                                            abs(phi_local_face) * abs(dphi_remote_n)) * face_area
+                      sipg_ab_cap = sipg_ab_norm_max * max(sipg_ab_ref, 1.0d-30)
+                      if (sipg_ab_norm > sipg_ab_cap) then
+                        sipg_ab_scale = sipg_ab_cap / sipg_ab_norm
+                        sipg_h_face_a = sipg_h_face_a * sipg_ab_scale
+                        sipg_h_face_b = sipg_h_face_b * sipg_ab_scale
+                      end if
+                    end if
+                    if (sipg_disable_c_term) sipg_h_face_c = 0.0d0
+                    halo_integral_t = halo_integral_t + sipg_h_face_a + sipg_h_face_b + sipg_h_face_c
+                    halo_integral_a_sum = halo_integral_a_sum + sipg_h_face_a
+                    halo_integral_b_sum = halo_integral_b_sum + sipg_h_face_b
+                    halo_integral_c_sum = halo_integral_c_sum + sipg_h_face_c
                     ! Intentionally split the face A-coupling into avg-avg and avg-jump halves
                     ! so the summed contribution keeps the original total strength.
                     halo_integral_m_avgavg = halo_integral_m_avgavg + 0.5d0 * dble(face_dir) * phi_remote_face * phi_local_face * face_area
@@ -1260,16 +1529,38 @@
               halo_partial_t(io) = halo_integral_t
               halo_partial_h(io) = halo_integral_h
               halo_partial_m(io) = halo_integral_m
+              halo_partial_a(io) = halo_integral_a_sum
+              halo_partial_b(io) = halo_integral_b_sum
+              halo_partial_c(io) = halo_integral_c_sum
             end do
             !$omp end parallel do
 
             halo_reduce_pair(1:n_basis_halo) = halo_partial_t(1:n_basis_halo)
             halo_reduce_pair(n_basis_halo + 1:2 * n_basis_halo) = halo_partial_h(1:n_basis_halo)
             halo_reduce_pair(2 * n_basis_halo + 1:3 * n_basis_halo) = halo_partial_m(1:n_basis_halo)
-            call comm_summation(halo_reduce_pair, halo_reduce_sum, 3 * n_basis_halo, dg_frag%icomm_frag)
+            halo_reduce_pair(3 * n_basis_halo + 1:4 * n_basis_halo) = halo_partial_a(1:n_basis_halo)
+            halo_reduce_pair(4 * n_basis_halo + 1:5 * n_basis_halo) = halo_partial_b(1:n_basis_halo)
+            halo_reduce_pair(5 * n_basis_halo + 1:6 * n_basis_halo) = halo_partial_c(1:n_basis_halo)
+            call comm_summation(halo_reduce_pair, halo_reduce_sum, 6 * n_basis_halo, dg_frag%icomm_frag)
             halo_reduced_t(1:n_basis_halo) = halo_reduce_sum(1:n_basis_halo)
             halo_reduced_h(1:n_basis_halo) = halo_reduce_sum(n_basis_halo + 1:2 * n_basis_halo)
             halo_reduced_m(1:n_basis_halo) = halo_reduce_sum(2 * n_basis_halo + 1:3 * n_basis_halo)
+            halo_reduced_a(1:n_basis_halo) = halo_reduce_sum(3 * n_basis_halo + 1:4 * n_basis_halo)
+            halo_reduced_b(1:n_basis_halo) = halo_reduce_sum(4 * n_basis_halo + 1:5 * n_basis_halo)
+            halo_reduced_c(1:n_basis_halo) = halo_reduce_sum(5 * n_basis_halo + 1:6 * n_basis_halo)
+
+            if (sipg_trace_pair) then
+              sipg_terms_local(1) = sum(halo_reduced_a(1:n_basis_halo))
+              sipg_terms_local(2) = sum(halo_reduced_b(1:n_basis_halo))
+              sipg_terms_local(3) = sum(halo_reduced_c(1:n_basis_halo))
+              call comm_summation(sipg_terms_local, sipg_terms_sum, 3, dg_frag%icomm_frag)
+              if (dg_frag%is_frag_root) then
+                write(*,'(1x,a,2(a,i0),2(a,i0),4(a,1pe12.4))') '        sipg-face-trace:', &
+                  ' ifrag=', ifrag, ' jfrag=', jfrag, ' axis=', face_axis, ' dir=', face_dir, &
+                  ' A=', sipg_terms_sum(1), ' B=', sipg_terms_sum(2), &
+                  ' C=', sipg_terms_sum(3), ' T=', sum(sipg_terms_sum)
+              end if
+            end if
 
             if (.not. dg_frag%is_frag_root) cycle
 
@@ -1377,6 +1668,7 @@
       if (allocated(H_kin_diag_blocks(i_diag)%val)) deallocate(H_kin_diag_blocks(i_diag)%val)
     end do
     if (allocated(halo_partial_t)) deallocate(halo_partial_t, halo_partial_h, halo_partial_m, halo_reduced_t, halo_reduced_h, halo_reduced_m)
+    if (allocated(halo_partial_a)) deallocate(halo_partial_a, halo_partial_b, halo_partial_c, halo_reduced_a, halo_reduced_b, halo_reduced_c)
     if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair, halo_reduce_sum)
     if (allocated(halo_t_point_buf)) deallocate(halo_t_point_buf, halo_h_point_buf)
     if (allocated(H_diag_blocks)) deallocate(H_diag_blocks)
@@ -1425,6 +1717,12 @@
         stop "DG+PW startup requires mixed_basis_ready after diagonalize_mixed_basis"
       end if
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    else if (.not. dg_frag%puredg_lowdin_applied) then
+      call print_startup_eigen_residual_puredg(dg_frag, "pre-lowdin", .true.)
+      call apply_startup_lowdin_puredg(dg_frag)
+      call print_startup_eigen_residual_puredg(dg_frag, "post-lowdin")
+      call apply_startup_stationary_projection_puredg(dg_frag)
+      call print_startup_eigen_residual_puredg(dg_frag, "post-stationary")
     end if
 
     ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
@@ -1460,6 +1758,349 @@
     end if
     
   end subroutine calculate_hamiltonian_matrix
+
+  !=======================================================================
+  ! One-time startup Lowdin orthonormalization for PureDG coefficients
+  !   C <- C (C^\dagger S C)^(-1/2)
+  !=======================================================================
+  subroutine apply_startup_lowdin_puredg(dg_frag)
+    use communication, only: comm_is_root
+    use rt_dg_fragment_ops, only: apply_overlap_operator, gather_full_coef_view, zero_nonowned_coefficients
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ispin, n_frag, n_tot, nst, j, io
+    integer :: info, lwork
+    real(8), parameter :: eps_eval = 1.0d-12
+    real(8), allocatable :: eval(:), rwork(:)
+    complex(8), allocatable :: C(:,:), SC(:,:), M(:,:), U(:,:), M_invhalf(:,:)
+    complex(8), allocatable :: work(:), coef_frag_all(:,:), coef_pw_all(:,:)
+    external :: zheev
+
+    if (dg_frag%use_plane_wave_basis) return
+    if (dg_frag%puredg_lowdin_applied) return
+
+    n_frag = dg_frag%n_mat_max
+    n_tot = n_frag
+    nst = min(dg_frag%nstate_tot, n_tot)
+    if (n_tot <= 0 .or. nst <= 0) then
+      dg_frag%puredg_lowdin_applied = .true.
+      return
+    end if
+
+    do ispin = 1, dg_frag%nspin
+      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+
+      allocate(C(n_tot, nst), SC(n_tot, nst), M(nst, nst), U(nst, nst), M_invhalf(nst, nst))
+      allocate(eval(nst), rwork(max(1, 3 * nst - 2)))
+
+      C(:, :) = coef_frag_all(1:n_frag, 1:nst)
+      do io = 1, nst
+        call apply_overlap_operator(dg_frag, ispin, C(:, io), SC(:, io), .true.)
+      end do
+      M(:, :) = matmul(conjg(transpose(C)), SC)
+
+      U(:, :) = M(:, :)
+      lwork = -1
+      allocate(work(1))
+      call ZHEEV('V', 'U', nst, U, nst, eval, work, lwork, rwork, info)
+      lwork = int(real(work(1), kind=8)) + 1
+      deallocate(work)
+      allocate(work(lwork))
+      call ZHEEV('V', 'U', nst, U, nst, eval, work, lwork, rwork, info)
+      if (info /= 0) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup Lowdin failed: ispin=", ispin, " info=", info
+        end if
+        deallocate(C, SC, M, U, M_invhalf, eval, rwork, work)
+        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+        cycle
+      end if
+
+      M_invhalf(:, :) = (0.0d0, 0.0d0)
+      do j = 1, nst
+        if (eval(j) > eps_eval) then
+          M_invhalf(:, j) = U(:, j) / sqrt(eval(j))
+        end if
+      end do
+      M_invhalf(:, :) = matmul(M_invhalf, conjg(transpose(U)))
+      C(:, :) = matmul(C, M_invhalf)
+
+      dg_frag%coef(1:n_frag, 1:nst, ispin) = C(:, :)
+
+      deallocate(C, SC, M, U, M_invhalf, eval, rwork, work)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+    end do
+
+    call zero_nonowned_coefficients(dg_frag)
+    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    dg_frag%puredg_lowdin_applied = .true.
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') "[INFO] Applied one-time PureDG startup Lowdin orthonormalization"
+    end if
+  end subroutine apply_startup_lowdin_puredg
+
+  !=======================================================================
+  ! One-time startup stationary projection for PureDG coefficients
+  !   1) Build dense H and S in DG coefficient space
+  !   2) Solve generalized EVP H c = e S c via Lowdin transform
+  !   3) Replace startup coefficients with S-orthonormal eigenvectors
+  !=======================================================================
+  subroutine apply_startup_stationary_projection_puredg(dg_frag)
+    use communication, only: comm_is_root
+    use rt_dg_fragment_ops, only: gather_full_coef_view, copy_matrix_blocks_metric_to_complex_dense, &
+                                  copy_overlap_operator_to_dense, zero_nonowned_coefficients
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ispin, n_frag, nst, nocc, info, lwork, j, nev
+    real(8), parameter :: eps_s = 1.0d-12
+    real(8) :: eval_s_min, eval_s_max
+    real(8), allocatable :: eval_s(:), eval_h(:), rwork(:)
+    complex(8), allocatable :: h_dense(:,:), s_dense(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
+    complex(8), allocatable :: work(:), coef_frag_all(:,:), coef_pw_all(:,:)
+    external :: zheev
+
+    if (dg_frag%use_plane_wave_basis) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%esp)) return
+
+    n_frag = dg_frag%n_mat_max
+    nst = min(dg_frag%nstate_tot, n_frag, size(dg_frag%esp, 1))
+    if (n_frag <= 0 .or. nst <= 0) return
+
+    do ispin = 1, dg_frag%nspin
+      nocc = nst
+      if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
+        nocc = min(nst, max(0, dg_frag%nocc_spin(ispin)))
+      end if
+      if (nocc <= 0) cycle
+
+      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+
+      nev = nocc
+      allocate(h_dense(nst, nst), s_dense(nst, nst), x_lowdin(nst, nst), h_ortho(nst, nst), u_h(nst, nst), c_eig(nst, nst))
+      allocate(eval_s(nst), eval_h(nst), rwork(max(1, 3 * nst - 2)))
+
+      h_dense(:, :) = (0.0d0, 0.0d0)
+      s_dense(:, :) = (0.0d0, 0.0d0)
+      call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, nst, h_dense)
+      call copy_overlap_operator_to_dense(dg_frag, ispin, .true., s_dense)
+
+      ! Lowdin transform matrix X = U * diag(s^{-1/2})
+      x_lowdin(:, :) = s_dense(:, :)
+      lwork = -1
+      allocate(work(1))
+      call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
+      lwork = int(real(work(1), kind=8)) + 1
+      deallocate(work)
+      allocate(work(lwork))
+      call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
+      if (info /= 0) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (S diagonalization failed): ispin=", ispin, " info=", info
+        end if
+        deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+        cycle
+      end if
+
+      eval_s_min = huge(1.0d0)
+      eval_s_max = 0.0d0
+      do j = 1, nst
+        eval_s_max = max(eval_s_max, eval_s(j))
+        if (eval_s(j) > eps_s) then
+          x_lowdin(:, j) = x_lowdin(:, j) / sqrt(eval_s(j))
+          eval_s_min = min(eval_s_min, eval_s(j))
+        else
+          x_lowdin(:, j) = (0.0d0, 0.0d0)
+        end if
+      end do
+
+      ! H_ortho = X^H H X and diagonalize
+      h_ortho(:, :) = matmul(conjg(transpose(x_lowdin)), matmul(h_dense, x_lowdin))
+      u_h(:, :) = h_ortho(:, :)
+      deallocate(work)
+      lwork = -1
+      allocate(work(1))
+      call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
+      lwork = int(real(work(1), kind=8)) + 1
+      deallocate(work)
+      allocate(work(lwork))
+      call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
+      if (info /= 0) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (H_ortho diagonalization failed): ispin=", ispin, " info=", info
+        end if
+        deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+        cycle
+      end if
+
+      c_eig(:, :) = matmul(x_lowdin, u_h)
+
+      ! Keep startup projection on occupied manifold only.
+      ! This avoids reshuffling non-occupied channels at t=0.
+      dg_frag%coef(1:n_frag, 1:nev, ispin) = c_eig(1:n_frag, 1:nev)
+      dg_frag%esp(1:nev, ispin) = eval_h(1:nev)
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup stationary projection applied: ispin=", ispin, &
+          " nocc=", nev, " S-eig(min,max)=", eval_s_min, ", ", eval_s_max
+      end if
+
+      deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+    end do
+
+    call zero_nonowned_coefficients(dg_frag)
+    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+  end subroutine apply_startup_stationary_projection_puredg
+
+  subroutine print_startup_eigen_residual_puredg(dg_frag, stage_label, update_esp)
+    use communication, only: comm_is_root
+    use rt_dg_fragment_ops, only: gather_full_coef_view, copy_matrix_blocks_metric_to_complex_dense, &
+                                  copy_overlap_operator_to_dense
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: stage_label
+    logical, intent(in), optional :: update_esp
+
+    integer :: ispin, io, nst, n_frag, nocc
+    integer :: env_len, env_status, trace_n
+    character(32) :: env_val
+    logical :: enable_trace
+    logical :: do_update_esp
+    real(8) :: res_abs, max_res, avg_res, accum_res
+    real(8) :: max_rel, rel_res, denom, eig_eff, eig_file, num_h, den_s
+    integer :: io_max, zero_eig_count, filled_esp_count
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: h_dense(:,:), s_dense(:,:)
+    complex(8), allocatable :: c_occ(:,:), h_c(:,:), s_c(:,:), r_c(:,:)
+
+    if (dg_frag%use_plane_wave_basis) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%esp)) return
+
+    enable_trace = .false.
+    trace_n = 6
+    env_val = ''
+    call get_environment_variable("SALMON_DG_EIG_RESIDUAL_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_val(1:env_len))))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_trace = .true.
+      end select
+    end if
+    if (.not. enable_trace) return
+
+    do_update_esp = .false.
+    if (present(update_esp)) do_update_esp = update_esp
+
+    call get_environment_variable("SALMON_DG_EIG_RESIDUAL_TRACE_N", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_val(1:env_len), *, iostat=env_status) trace_n
+      if (env_status /= 0 .or. trace_n < 1) trace_n = 6
+    end if
+
+    n_frag = dg_frag%n_mat_max
+    nst = min(dg_frag%nstate_tot, n_frag, size(dg_frag%esp, 1))
+    if (n_frag <= 0 .or. nst <= 0) return
+
+    allocate(h_dense(nst, nst), s_dense(nst, nst))
+    do ispin = 1, dg_frag%nspin
+      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+
+      nocc = nst
+      if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
+        nocc = min(nst, max(0, dg_frag%nocc_spin(ispin)))
+      end if
+      if (nocc <= 0) then
+        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+        cycle
+      end if
+
+      h_dense(:, :) = (0.0d0, 0.0d0)
+      s_dense(:, :) = (0.0d0, 0.0d0)
+      call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, nst, h_dense)
+      call copy_overlap_operator_to_dense(dg_frag, ispin, .true., s_dense)
+
+      allocate(c_occ(nst, nocc), h_c(nst, nocc), s_c(nst, nocc), r_c(nst, nocc))
+      c_occ(:, :) = coef_frag_all(1:nst, 1:nocc)
+      h_c(:, :) = matmul(h_dense, c_occ)
+      s_c(:, :) = matmul(s_dense, c_occ)
+
+      max_res = 0.0d0
+      max_rel = 0.0d0
+      accum_res = 0.0d0
+      io_max = 1
+      zero_eig_count = 0
+      filled_esp_count = 0
+      do io = 1, nocc
+        eig_file = dg_frag%esp(io, ispin)
+        eig_eff = eig_file
+        if (abs(eig_file) < 1.0d-14) then
+          num_h = real(sum(conjg(c_occ(:, io)) * h_c(:, io)))
+          den_s = real(sum(conjg(c_occ(:, io)) * s_c(:, io)))
+          if (abs(den_s) > 1.0d-20) then
+            eig_eff = num_h / den_s
+            if (do_update_esp) then
+              dg_frag%esp(io, ispin) = eig_eff
+              filled_esp_count = filled_esp_count + 1
+            end if
+          end if
+          zero_eig_count = zero_eig_count + 1
+        end if
+        r_c(:, io) = h_c(:, io) - eig_eff * s_c(:, io)
+        res_abs = sqrt(sum(abs(r_c(:, io))**2))
+        denom = sqrt(sum(abs(h_c(:, io))**2)) + sqrt(sum(abs(eig_eff * s_c(:, io))**2)) + 1.0d-30
+        rel_res = res_abs / denom
+        accum_res = accum_res + res_abs
+        if (res_abs > max_res) then
+          max_res = res_abs
+          max_rel = rel_res
+          io_max = io
+        end if
+      end do
+      avg_res = accum_res / dble(nocc)
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,1x,a,1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,i0,a,1pe12.4,a,1pe12.4)') &
+          "[DG-EIG-RES]", trim(stage_label), "ispin=", ispin, " nocc=", nocc, &
+          " zero_esp=", zero_eig_count, " max_abs=", max_res, " avg_abs=", avg_res, " state_max=", io_max, &
+          " eig=", dg_frag%esp(io_max, ispin), " rel_max=", max_rel
+        if (do_update_esp) then
+          write(*,'(1x,a,1x,a,1x,a,i0,a,i0)') "[DG-EIG-RES]", trim(stage_label), &
+            "ispin=", ispin, " filled_esp=", filled_esp_count
+        end if
+        do io = 1, min(nocc, trace_n)
+          eig_file = dg_frag%esp(io, ispin)
+          eig_eff = eig_file
+          if (abs(eig_file) < 1.0d-14) then
+            num_h = real(sum(conjg(c_occ(:, io)) * h_c(:, io)))
+            den_s = real(sum(conjg(c_occ(:, io)) * s_c(:, io)))
+            if (abs(den_s) > 1.0d-20) eig_eff = num_h / den_s
+          end if
+          write(*,'(1x,a,1x,a,1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') &
+            "[DG-EIG-RES-STATE]", trim(stage_label), "ispin=", ispin, " io=", io, &
+            " abs=", sqrt(sum(abs(r_c(:, io))**2)), " eig=", eig_eff
+        end do
+      end if
+
+      deallocate(c_occ, h_c, s_c, r_c)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+    end do
+
+    deallocate(h_dense, s_dense)
+  end subroutine print_startup_eigen_residual_puredg
 
   subroutine reduce_matrix_fragment_blocks(dg_frag, mat, label, icomm_reduce)
     use communication, only: comm_is_root, comm_summation, comm_get_max
@@ -2153,58 +2794,59 @@
     end if
   end function get_remote_face_boundary_index
 
+  real(8) function face_trace_value_local(dg_frag, i_local, jo, axis, face_dir, idx1, idx2, idx3) result(phi_face)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: i_local, jo, axis, face_dir
+    integer, intent(in) :: idx1, idx2, idx3
+    if (axis < 1 .or. axis > 3) stop "DG-Fragment RT: invalid local face axis"
+    if (abs(face_dir) /= 1) stop "DG-Fragment RT: invalid local face direction"
+    phi_face = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
+  end function face_trace_value_local
+
+  real(8) function face_trace_value_halo(buf_recv, length, io, axis, face_dir, idx1, idx2, idx3) result(phi_face)
+    implicit none
+    real(8), intent(in) :: buf_recv(:,:,:,:,:)
+    integer, intent(in) :: length(3), io, axis, face_dir
+    integer, intent(in) :: idx1, idx2, idx3
+    if (axis < 1 .or. axis > 3) stop "DG-Fragment RT: invalid halo face axis"
+    if (abs(face_dir) /= 1) stop "DG-Fragment RT: invalid halo face direction"
+    if (idx1 < 1 .or. idx1 > length(1)) stop "DG-Fragment RT: invalid halo face idx1"
+    if (idx2 < 1 .or. idx2 > length(2)) stop "DG-Fragment RT: invalid halo face idx2"
+    if (idx3 < 1 .or. idx3 > length(3)) stop "DG-Fragment RT: invalid halo face idx3"
+    phi_face = buf_recv(idx1, idx2, idx3, io, 1)
+  end function face_trace_value_halo
+
   real(8) function one_sided_face_derivative_local(dg_frag, i_local, jo, axis, face_dir, idx1, idx2, idx3) result(dphi_dn)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: i_local, jo, axis, face_dir
     integer, intent(in) :: idx1, idx2, idx3
-    real(8) :: f0, f1, f2, f3, h
+    real(8) :: f0, f1, f2, h
 
     select case (axis)
     case (1)
-      if (face_dir > 0) then
-        f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
-        f1 = dg_frag%phi_frag(idx1-1, idx2, idx3, jo, i_local)
-        f2 = dg_frag%phi_frag(idx1-2, idx2, idx3, jo, i_local)
-        f3 = dg_frag%phi_frag(idx1-3, idx2, idx3, jo, i_local)
-      else
-        f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
-        f1 = dg_frag%phi_frag(idx1+1, idx2, idx3, jo, i_local)
-        f2 = dg_frag%phi_frag(idx1+2, idx2, idx3, jo, i_local)
-        f3 = dg_frag%phi_frag(idx1+3, idx2, idx3, jo, i_local)
-      end if
+      f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
+      f1 = dg_frag%phi_frag(idx1-face_dir, idx2, idx3, jo, i_local)
+      f2 = dg_frag%phi_frag(idx1-2*face_dir, idx2, idx3, jo, i_local)
       h = dg_frag%hgs(1)
     case (2)
-      if (face_dir > 0) then
-        f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
-        f1 = dg_frag%phi_frag(idx1, idx2-1, idx3, jo, i_local)
-        f2 = dg_frag%phi_frag(idx1, idx2-2, idx3, jo, i_local)
-        f3 = dg_frag%phi_frag(idx1, idx2-3, idx3, jo, i_local)
-      else
-        f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
-        f1 = dg_frag%phi_frag(idx1, idx2+1, idx3, jo, i_local)
-        f2 = dg_frag%phi_frag(idx1, idx2+2, idx3, jo, i_local)
-        f3 = dg_frag%phi_frag(idx1, idx2+3, idx3, jo, i_local)
-      end if
+      f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
+      f1 = dg_frag%phi_frag(idx1, idx2-face_dir, idx3, jo, i_local)
+      f2 = dg_frag%phi_frag(idx1, idx2-2*face_dir, idx3, jo, i_local)
       h = dg_frag%hgs(2)
     case (3)
-      if (face_dir > 0) then
-        f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
-        f1 = dg_frag%phi_frag(idx1, idx2, idx3-1, jo, i_local)
-        f2 = dg_frag%phi_frag(idx1, idx2, idx3-2, jo, i_local)
-        f3 = dg_frag%phi_frag(idx1, idx2, idx3-3, jo, i_local)
-      else
-        f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
-        f1 = dg_frag%phi_frag(idx1, idx2, idx3+1, jo, i_local)
-        f2 = dg_frag%phi_frag(idx1, idx2, idx3+2, jo, i_local)
-        f3 = dg_frag%phi_frag(idx1, idx2, idx3+3, jo, i_local)
-      end if
+      f0 = dg_frag%phi_frag(idx1, idx2, idx3, jo, i_local)
+      f1 = dg_frag%phi_frag(idx1, idx2, idx3-face_dir, jo, i_local)
+      f2 = dg_frag%phi_frag(idx1, idx2, idx3-2*face_dir, jo, i_local)
       h = dg_frag%hgs(3)
     case default
       stop "DG-Fragment RT: invalid local face axis"
     end select
 
-    dphi_dn = (11.0d0 * f0 - 18.0d0 * f1 + 9.0d0 * f2 - 2.0d0 * f3) / (6.0d0 * h)
+    ! Local samples are taken into element interior (opposite to outward normal),
+    ! so the outward-normal derivative is the sign-flipped inward one-sided value.
+    dphi_dn = (3.0d0 * f0 - 4.0d0 * f1 + f2) / (2.0d0 * h)
   end function one_sided_face_derivative_local
 
   real(8) function one_sided_face_derivative_halo(buf_recv, length, io, axis, face_dir, idx1, idx2, idx3, hgs) result(dphi_dn)
@@ -2213,48 +2855,47 @@
     integer, intent(in) :: length(3), io, axis, face_dir
     integer, intent(in) :: idx1, idx2, idx3
     real(8), intent(in) :: hgs(3)
-    real(8) :: f0, f1, f2, f3, h
-    integer :: i0, i1, i2, i3
+    real(8) :: f0, f1, f2, h
+    integer :: i0, i1, i2
 
     select case (axis)
     case (1)
       if (face_dir > 0) then
-        i0 = 1; i1 = 2; i2 = 3; i3 = 4
+        i0 = 1; i1 = 2; i2 = 3
       else
-        i0 = length(1); i1 = length(1)-1; i2 = length(1)-2; i3 = length(1)-3
+        i0 = length(1); i1 = length(1)-1; i2 = length(1)-2
       end if
       f0 = buf_recv(i0, idx2, idx3, io, 1)
       f1 = buf_recv(i1, idx2, idx3, io, 1)
       f2 = buf_recv(i2, idx2, idx3, io, 1)
-      f3 = buf_recv(i3, idx2, idx3, io, 1)
       h = hgs(1)
     case (2)
       if (face_dir > 0) then
-        i0 = 1; i1 = 2; i2 = 3; i3 = 4
+        i0 = 1; i1 = 2; i2 = 3
       else
-        i0 = length(2); i1 = length(2)-1; i2 = length(2)-2; i3 = length(2)-3
+        i0 = length(2); i1 = length(2)-1; i2 = length(2)-2
       end if
       f0 = buf_recv(idx1, i0, idx3, io, 1)
       f1 = buf_recv(idx1, i1, idx3, io, 1)
       f2 = buf_recv(idx1, i2, idx3, io, 1)
-      f3 = buf_recv(idx1, i3, idx3, io, 1)
       h = hgs(2)
     case (3)
       if (face_dir > 0) then
-        i0 = 1; i1 = 2; i2 = 3; i3 = 4
+        i0 = 1; i1 = 2; i2 = 3
       else
-        i0 = length(3); i1 = length(3)-1; i2 = length(3)-2; i3 = length(3)-3
+        i0 = length(3); i1 = length(3)-1; i2 = length(3)-2
       end if
       f0 = buf_recv(idx1, idx2, i0, io, 1)
       f1 = buf_recv(idx1, idx2, i1, io, 1)
       f2 = buf_recv(idx1, idx2, i2, io, 1)
-      f3 = buf_recv(idx1, idx2, i3, io, 1)
       h = hgs(3)
     case default
       stop "DG-Fragment RT: invalid halo face axis"
     end select
 
-    dphi_dn = (11.0d0 * f0 - 18.0d0 * f1 + 9.0d0 * f2 - 2.0d0 * f3) / (6.0d0 * h)
+    ! Halo samples are ordered from interface into remote interior,
+    ! aligned with local outward normal; use matching 2nd-order one-sided form.
+    dphi_dn = (-3.0d0 * f0 + 4.0d0 * f1 - f2) / (2.0d0 * h)
   end function one_sided_face_derivative_halo
 
   subroutine apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)

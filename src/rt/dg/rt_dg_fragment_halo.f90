@@ -61,6 +61,33 @@
     end if
   end function get_fragment_owner_rank
 
+  integer function get_neighbor_fragment_index(ifrag, dvec, num_fragment) result(jfrag)
+    implicit none
+    integer, intent(in) :: ifrag, dvec(3), num_fragment(3)
+    integer :: ix, iy, iz, jx, jy, jz, nyz
+
+    if (ifrag < 1) then
+      jfrag = -1
+      return
+    end if
+    if (any(num_fragment <= 0)) then
+      jfrag = -1
+      return
+    end if
+
+    ! SALMON fragment linearization is z-fast, then y, then x.
+    nyz = num_fragment(2) * num_fragment(3)
+    iz = mod(ifrag - 1, num_fragment(3)) + 1
+    iy = mod((ifrag - 1) / num_fragment(3), num_fragment(2)) + 1
+    ix = (ifrag - 1) / nyz + 1
+
+    jx = modulo((ix - 1) + dvec(1), num_fragment(1)) + 1
+    jy = modulo((iy - 1) + dvec(2), num_fragment(2)) + 1
+    jz = modulo((iz - 1) + dvec(3), num_fragment(3)) + 1
+
+    jfrag = jz + num_fragment(3) * ((jy - 1) + num_fragment(2) * (jx - 1))
+  end function get_neighbor_fragment_index
+
 
   logical function halo_axis_matches_direction(lo_ref, hi_ref, lo_nei, hi_nei, ngrid, dir) result(matches)
     implicit none
@@ -202,12 +229,11 @@
   ! Initialize halo communication structures for fragment boundaries
   ! Following lcfo.f90 halo exchange pattern with periodic boundaries
   !=======================================================================
-  subroutine init_halo_communication(dg_frag, info)
+  subroutine init_halo_communication(dg_frag)
     use structures
     use communication, only: comm_summation, comm_is_root
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    type(s_parallel_info),  intent(in)    :: info
 
     integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag, neighbor_root_rank
     integer :: d(3)
@@ -273,31 +299,26 @@
         dg_frag%halo(i)%ifrag_src = -1
         dg_frag%halo(i)%ifrag_dst = ifrag
 
-        do jfrag = 1, dg_frag%n_frag
-          if (.not. fragment_matches_direction(dg_frag, ifrag, jfrag, dg_frag%halo(i)%dvec)) cycle
+        jfrag = get_neighbor_fragment_index(ifrag, dg_frag%halo(i)%dvec, dg_frag%num_fragment)
+        if (jfrag < 1 .or. jfrag > dg_frag%n_frag) then
+          write(*,'(a,i0,a,3(i0,a),a,i0)') &
+            "[ERROR] DG-Fragment RT: invalid neighbor index for ifrag=", ifrag, " dir=(", &
+            dg_frag%halo(i)%dvec(1), ",", dg_frag%halo(i)%dvec(2), ",", dg_frag%halo(i)%dvec(3), &
+            ") jfrag=", jfrag
+          stop "DG-Fragment RT: invalid halo neighbor index"
+        end if
 
-          neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
-          if (dg_frag%id_array(jfrag) /= neighbor_root_rank) then
-            write(*,'(a,i0,a,i0,a,i0,a,i0)') &
-              "[ERROR] DG-Fragment RT: inconsistent fragment root rank for ifrag=", ifrag, &
-              " jfrag=", jfrag, " stored=", dg_frag%id_array(jfrag), " expected=", neighbor_root_rank
-            stop "DG-Fragment RT: inconsistent fragment-group root rank"
-          end if
+        neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
+        if (dg_frag%id_array(jfrag) /= neighbor_root_rank) then
+          write(*,'(a,i0,a,i0,a,i0,a,i0)') &
+            "[ERROR] DG-Fragment RT: inconsistent fragment root rank for ifrag=", ifrag, &
+            " jfrag=", jfrag, " stored=", dg_frag%id_array(jfrag), " expected=", neighbor_root_rank
+          stop "DG-Fragment RT: inconsistent fragment-group root rank"
+        end if
 
-          if (dg_frag%halo(i)%id_dst < 0) then
-            dg_frag%halo(i)%id_dst = neighbor_root_rank + dg_frag%id_frag
-          end if
-          if (dg_frag%halo(i)%id_src < 0) then
-            dg_frag%halo(i)%id_src = neighbor_root_rank + dg_frag%id_frag
-            dg_frag%halo(i)%ifrag_src = jfrag
-          else if (dg_frag%halo(i)%ifrag_src /= jfrag) then
-            write(*,'(a,i0,a,3(i0,a),a,i0,a,i0)') &
-              "[ERROR] DG-Fragment RT: ambiguous halo source for ifrag=", ifrag, " dir=(", &
-              dg_frag%halo(i)%dvec(1), ",", dg_frag%halo(i)%dvec(2), ",", dg_frag%halo(i)%dvec(3), &
-              ") first=", dg_frag%halo(i)%ifrag_src, " second=", jfrag
-            stop "DG-Fragment RT: ambiguous halo source fragment"
-          end if
-        end do
+        dg_frag%halo(i)%id_dst = neighbor_root_rank + dg_frag%id_frag
+        dg_frag%halo(i)%id_src = neighbor_root_rank + dg_frag%id_frag
+        dg_frag%halo(i)%ifrag_src = jfrag
 
         if (dg_frag%halo(i)%id_dst < 0 .or. dg_frag%halo(i)%id_src < 0) then
           write(*,'(a,i2,a,i2,a,i2,a,i2,a,i3,a,i3)') &

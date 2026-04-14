@@ -87,6 +87,11 @@
     call cpu_time(t_stage0)
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
+    if (enable_density_call_probe .and. dg_frag%id == 0 .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,a,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " stage=", "after-hartree", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
       flush(6)
@@ -117,6 +122,11 @@
       end if
     end if
     call cpu_time(t_stage1)
+    if (enable_density_call_probe .and. dg_frag%id == 0 .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,a,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " stage=", "after-xc", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0
       flush(6)
@@ -135,6 +145,11 @@
     call cpu_time(t_stage0)
     call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     call cpu_time(t_stage1)
+    if (enable_density_call_probe .and. dg_frag%id == 0 .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,a,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " stage=", "after-reconstruct", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
       write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", t_stage1 - t_stage0
       flush(6)

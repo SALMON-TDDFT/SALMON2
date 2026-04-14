@@ -118,6 +118,11 @@
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t_stage1)
     time_hartree = time_hartree + (t_stage1 - t_stage0)
+    if (enable_density_call_probe .and. comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,a,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " stage=", "after-hartree", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-end"
       flush(6)
@@ -148,6 +153,11 @@
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
     time_xc = time_xc + (t_stage1 - t_stage0)
+    if (enable_density_call_probe .and. comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,a,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " stage=", "after-xc", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if (allocated(dg_frag%Vxc_frag)) then
       dg_frag%Vxc_frag(:, :, :, :) = 0.0d0
       do ispin = 1, system%nspin
@@ -209,6 +219,11 @@
     call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     call cpu_time(t_stage1)
     time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
+    if (enable_density_call_probe .and. comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,a,a,1pe14.6,a,1pe14.6)') "        density-call-probe(stage): itt=", itt, &
+        " stage=", "after-reconstruct", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
+      flush(6)
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-end"
       flush(6)
