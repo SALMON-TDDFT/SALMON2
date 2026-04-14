@@ -12,6 +12,8 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin)
 
     integer :: ifrag, io, jo, i_local, ispin
+    integer :: ifrag_basis
+    integer :: ifrag_root_target
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, bx, by, bz, owner_rank
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
@@ -443,6 +445,24 @@
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
+        ifrag_basis = ifrag
+        if (allocated(dg_frag%id_array_spatial) .and. allocated(dg_frag%id_array_file)) then
+          if (ifrag >= 1 .and. ifrag <= size(dg_frag%id_array_spatial)) then
+            ifrag_root_target = dg_frag%id_array_spatial(ifrag)
+            do jo = 1, dg_frag%n_frag
+              if (jo <= size(dg_frag%id_array_file) .and. dg_frag%id_array_file(jo) == ifrag_root_target) then
+                ifrag_basis = jo
+                exit
+              end if
+            end do
+          end if
+        else if (allocated(dg_frag%ifrag_file_of_spatial)) then
+          if (ifrag >= 1 .and. ifrag <= size(dg_frag%ifrag_file_of_spatial)) then
+            if (dg_frag%ifrag_file_of_spatial(ifrag) >= 1 .and. dg_frag%ifrag_file_of_spatial(ifrag) <= dg_frag%n_frag) then
+              ifrag_basis = dg_frag%ifrag_file_of_spatial(ifrag)
+            end if
+          end if
+        end if
         frag_trace_sumspin = 0.0d0
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
         ngrid = nxyz(1) * nxyz(2) * nxyz(3)
@@ -815,10 +835,10 @@
         coef_re_full(:, :, :) = 0.0d0
         coef_im_full(:, :, :) = 0.0d0
         do ispin = 1, system%nspin
-          nbf = dg_frag%n_basis(ifrag, ispin)
+          nbf = dg_frag%n_basis(ifrag_basis, ispin)
           if (nbf <= 0) cycle
           do istate_frag = 1, nbf
-            basis_gid(istate_frag) = dg_frag%index_basis(istate_frag, ifrag, ispin)
+            basis_gid(istate_frag) = dg_frag%index_basis(istate_frag, ifrag_basis, ispin)
             if (basis_gid(istate_frag) < 1 .or. basis_gid(istate_frag) > dg_frag%n_mat_max) cycle
             valid_basis_count_spin(ispin) = valid_basis_count_spin(ispin) + 1
             basis_gid_spin(istate_frag, ispin) = basis_gid(istate_frag)
@@ -829,13 +849,13 @@
           call cpu_time(t_setup0)
           n_basis_mix_spin(:) = 0
           do ispin = 1, system%nspin
-            nbf = dg_frag%n_basis(ifrag, ispin)
+            nbf = dg_frag%n_basis(ifrag_basis, ispin)
             n_basis_mix = min(dg_frag%mixed_basis_dim(ispin), max_mixed_basis)
             n_basis_mix_spin(ispin) = n_basis_mix
             if (nbf <= 0 .or. n_basis_mix <= 0) cycle
             transform_frag_spin(1:nbf, 1:n_basis_mix, ispin) = (0.0d0, 0.0d0)
             do istate_frag = 1, nbf
-              ig_i = dg_frag%index_basis(istate_frag, ifrag, ispin)
+              ig_i = dg_frag%index_basis(istate_frag, ifrag_basis, ispin)
               if (ig_i < 1 .or. ig_i > n_frag) cycle
               transform_frag_spin(istate_frag, 1:n_basis_mix, ispin) = dg_frag%mixed_transform(ig_i, 1:n_basis_mix, ispin)
             end do
@@ -850,7 +870,7 @@
         D_frag_re(:,:,:) = 0.0d0
         if (n_pw == 0 .or. split_pw_density) then
           do ispin = 1, system%nspin
-            nbf = dg_frag%n_basis(ifrag, ispin)
+            nbf = dg_frag%n_basis(ifrag_basis, ispin)
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             occ_cache(1:nocc_spin) = 1.0d0
@@ -1079,7 +1099,7 @@
           coef_re_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
           coef_im_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
           do ispin = 1, system%nspin
-            nbf = dg_frag%n_basis(ifrag, ispin)
+            nbf = dg_frag%n_basis(ifrag_basis, ispin)
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             valid_basis_count = valid_basis_count_spin(ispin)
@@ -1211,7 +1231,7 @@
 
           do ispin = 1, system%nspin
             nocc_spin = dg_frag%nocc_spin(ispin)
-            nbf = dg_frag%n_basis(ifrag, ispin)
+            nbf = dg_frag%n_basis(ifrag_basis, ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             valid_basis_count = valid_basis_count_spin(ispin)
 

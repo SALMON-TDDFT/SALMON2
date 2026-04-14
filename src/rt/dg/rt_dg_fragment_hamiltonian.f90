@@ -1718,10 +1718,13 @@
       end if
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     else if (.not. dg_frag%puredg_lowdin_applied) then
+      call print_startup_coef_metric_puredg(dg_frag, "pre-lowdin")
       call print_startup_eigen_residual_puredg(dg_frag, "pre-lowdin", .true.)
       call apply_startup_lowdin_puredg(dg_frag)
+      call print_startup_coef_metric_puredg(dg_frag, "post-lowdin")
       call print_startup_eigen_residual_puredg(dg_frag, "post-lowdin")
       call apply_startup_stationary_projection_puredg(dg_frag)
+      call print_startup_coef_metric_puredg(dg_frag, "post-stationary")
       call print_startup_eigen_residual_puredg(dg_frag, "post-stationary")
     end if
 
@@ -1962,6 +1965,56 @@
     call zero_nonowned_coefficients(dg_frag)
     dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
   end subroutine apply_startup_stationary_projection_puredg
+
+  subroutine print_startup_coef_metric_puredg(dg_frag, stage_label)
+    use communication, only: comm_is_root, comm_summation
+    use rt_dg_fragment_ops, only: apply_overlap_operator
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    character(*), intent(in) :: stage_label
+
+    integer :: ispin, io, nst, nfrag
+    real(8) :: occ
+    complex(8), allocatable :: cvec(:), svec(:)
+    real(8) :: metric_local, metric_global
+    character(32) :: env_trace
+    integer :: env_len, env_status
+    logical :: enable_trace
+
+    env_trace = ''
+    call get_environment_variable("SALMON_DG_STARTUP_COEF_TRACE", env_trace, length=env_len, status=env_status)
+    enable_trace = .false.
+    if (env_status == 0 .and. env_len > 0) then
+      select case (env_trace(1:1))
+      case ('1', 'y', 'Y', 't', 'T')
+        enable_trace = .true.
+      end select
+    end if
+    if (.not. enable_trace) return
+
+    nfrag = dg_frag%n_mat_max
+    nst = min(dg_frag%nstate_tot, size(dg_frag%coef, 2))
+    if (nfrag <= 0 .or. nst <= 0) return
+
+    allocate(cvec(nfrag), svec(nfrag))
+    metric_local = 0.0d0
+    do ispin = 1, dg_frag%nspin
+      do io = 1, nst
+        if (.not. allocated(dg_frag%occ_state)) cycle
+        if (io > size(dg_frag%occ_state, 1) .or. ispin > size(dg_frag%occ_state, 2)) cycle
+        occ = dg_frag%occ_state(io, ispin)
+        if (occ <= 0.0d0) cycle
+        cvec(:) = dg_frag%coef(1:nfrag, io, ispin)
+        call apply_overlap_operator(dg_frag, ispin, cvec, svec, .true.)
+        metric_local = metric_local + occ * real(sum(conjg(cvec) * svec), kind=8)
+      end do
+    end do
+    call comm_summation(metric_local, metric_global, 1, dg_frag%icomm)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,a,a,1pe14.6)') "[STARTUP-COEF] stage=", trim(stage_label), " Ne_coef_S=", metric_global
+    end if
+    deallocate(cvec, svec)
+  end subroutine print_startup_coef_metric_puredg
 
   subroutine print_startup_eigen_residual_puredg(dg_frag, stage_label, update_esp)
     use communication, only: comm_is_root

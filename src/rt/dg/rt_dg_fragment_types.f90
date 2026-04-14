@@ -157,6 +157,8 @@ module rt_dg_fragment_types
     logical :: overlap_prop_root_authoritative = .false.
     integer, allocatable :: n_basis(:,:)       ! (n_frag, nspin), spin-resolved active basis count per fragment
     integer, allocatable :: index_basis(:,:,:) ! (nstate_frag, n_frag, nspin), spin-resolved local->global basis map
+    integer, allocatable :: n_basis_file(:,:)       ! (n_frag, nspin), file-ordered basis count per fragment
+    integer, allocatable :: index_basis_file(:,:,:) ! (nstate_frag, n_frag, nspin), file-ordered local->global map
     integer, allocatable :: n_mat(:)           ! (nspin), spin-resolved projected-matrix dimension
     integer :: n_mat_max                       ! max projected-matrix dimension over spin channels
 
@@ -217,7 +219,12 @@ module rt_dg_fragment_types
     integer :: rank_buf_hi(3) = -1             ! unwrapped local phi/rho buffer-box upper bounds on this MPI rank
     integer, allocatable :: jxyz_tot(:,:)      ! r-grid mapping
     integer :: nxyz_buffer(3)                  ! # of halo points (4 for 4th-order stencil)
-    integer, allocatable :: id_array(:)        ! (n_frag) MPI rank owning each fragment
+    integer, allocatable :: id_array(:)        ! legacy alias: spatial fragment root-rank map
+    integer, allocatable :: ifrag_file_of_spatial(:) ! (n_frag) runtime spatial ifrag -> file ifrag
+    integer, allocatable :: ifrag_spatial_of_file(:) ! (n_frag) file ifrag -> runtime spatial ifrag
+    integer, allocatable :: id_array_spatial(:)      ! (n_frag) MPI rank owning each spatial fragment
+    integer, allocatable :: id_array_file(:)         ! (n_frag) MPI rank owning each file fragment
+    logical :: mapping_valid = .false.
     integer, allocatable :: density_owner_map(:,:,:,:) ! local-fragment interior grid -> owner rank
     logical, allocatable :: density_primary_local_map(:,:,:,:) ! local-fragment interior grid -> primary fragment selection
     integer, allocatable :: density_ixg_map(:,:,:,:)   ! local-fragment interior grid -> wrapped global x index

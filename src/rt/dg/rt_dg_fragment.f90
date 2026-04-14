@@ -228,8 +228,15 @@ contains
       stop "DG-Fragment RT stage-1 requires np = n_frag * product(nproc_rgrid)"
     end if
 
-    dg_frag%ifrag_group = dg_frag%id / max(1, dg_frag%nproc_frag) + 1
-    dg_frag%id_frag = modulo(dg_frag%id, max(1, dg_frag%nproc_frag))
+    nproc_frag_axis(1:3) = max(1, nproc_rgrid(1:3))
+    frag_coord(1:3) = info%iaddress(1:3) / nproc_frag_axis(1:3)
+    local_coord(1:3) = modulo(info%iaddress(1:3), nproc_frag_axis(1:3))
+    if (any(frag_coord(1:3) < 0) .or. frag_coord(1) >= num_fragment(1) .or. &
+        frag_coord(2) >= num_fragment(2) .or. frag_coord(3) >= num_fragment(3)) then
+      stop "DG-Fragment RT: invalid fragment coordinates from iaddress"
+    end if
+    dg_frag%ifrag_group = ((frag_coord(1) * num_fragment(2) + frag_coord(2)) * num_fragment(3) + frag_coord(3)) + 1
+    dg_frag%id_frag = local_coord(1) + nproc_frag_axis(1) * (local_coord(2) + nproc_frag_axis(2) * local_coord(3))
     dg_frag%isize_frag = dg_frag%nproc_frag
     dg_frag%is_frag_root = (dg_frag%id_frag == 0)
     dg_frag%icomm_frag = comm_create_group(dg_frag%icomm, dg_frag%ifrag_group - 1, dg_frag%id_frag)
@@ -298,6 +305,10 @@ contains
     allocate(dg_frag%basis_support_lo(3, dg_frag%n_frag))
     allocate(dg_frag%basis_support_hi(3, dg_frag%n_frag))
     allocate(dg_frag%id_array(dg_frag%n_frag))
+    allocate(dg_frag%ifrag_file_of_spatial(dg_frag%n_frag))
+    allocate(dg_frag%ifrag_spatial_of_file(dg_frag%n_frag))
+    allocate(dg_frag%id_array_spatial(dg_frag%n_frag))
+    allocate(dg_frag%id_array_file(dg_frag%n_frag))
     dg_frag%nxyz_domain = 0
     dg_frag%ixyz_frag = 0
     dg_frag%basis_support_lo = 0
@@ -314,13 +325,23 @@ contains
       stop "DG-Fragment RT: invalid id_array"
     end if
     deallocate(id_tmp)
+
+    call init_fragment_id_mapping_defaults(dg_frag)
+    call validate_fragment_id_mapping(dg_frag, "init-default")
     dg_frag%lg => lg
     dg_frag%mg => mg
     dg_frag%hgs = system%hgs
     
     ! Read fragment basis data from DC-LCFO calculation if requested
     if (load_from_dcdft) then
+      call prebuild_fragment_mapping_from_local_probe(dg_frag, mg, bdir_frag)
+      call validate_fragment_id_mapping(dg_frag, "pre-read")
       call read_fragment_basis_data(dg_frag, bdir_frag)
+      call apply_fragment_mapping_to_metadata(dg_frag, "post-read-prebuilt")
+      ! Keep pre-read spatial<->file mapping as authoritative in this phase.
+      ! Post-read overlap rebuild is deferred until coefficient/file ownership paths
+      ! are fully separated.
+      call validate_fragment_id_mapping(dg_frag, "post-read")
         call trace_fragment_assignment_overlap(dg_frag)
       if (allocated(dg_frag%occ_state) .and. allocated(system%rocc)) then
         ! Keep DG occupations tied to propagated orbital indices, not basis/eigenstate labels.
@@ -514,6 +535,7 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
     integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
+    integer :: file_ifrag, root_rank_frag
     integer :: subgroup_target_rank, subgroup_self_count
     integer :: ifrag_count
     integer :: nx_max, ny_max, nz_max
@@ -627,6 +649,7 @@ contains
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
+      root_rank_frag = dg_frag%id_array_spatial(ifrag)
       primary_count_local = 0
       primary_owned_local = 0
       primary_remote_local = 0
@@ -641,11 +664,11 @@ contains
             dg_frag%density_iyg_map(ix, iy, iz, i_local) = iyg
             dg_frag%density_izg_map(ix, iy, iz, i_local) = izg
             dg_frag%density_primary_local_map(ix, iy, iz, i_local) = .true.
-            source_rank = dg_frag%id_array(ifrag)
-            subgroup_target_rank = source_rank - dg_frag%id_array(ifrag)
+            source_rank = root_rank_frag
+            subgroup_target_rank = source_rank - root_rank_frag
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
-              source_rank = get_fragment_grid_sender_rank(dg_frag%id_array(ifrag), dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
-              subgroup_target_rank = source_rank - dg_frag%id_array(ifrag)
+              source_rank = get_fragment_grid_sender_rank(source_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+              subgroup_target_rank = source_rank - root_rank_frag
               if (subgroup_target_rank < 0 .or. subgroup_target_rank > dg_frag%isize_frag - 1) then
                 write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
                      "[FATAL] density subgroup target out of range: rank=", dg_frag%id, &
@@ -662,7 +685,7 @@ contains
                   dg_frag%density_subgroup_send_count(subgroup_target_rank)
               end if
             end if
-            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, dg_frag%id_array(ifrag))
+            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
               primary_count_local = primary_count_local + 1
@@ -672,9 +695,8 @@ contains
                 primary_remote_local = primary_remote_local + 1
               end if
             end if
-            source_rank = dg_frag%id_array(ifrag)
-            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= source_rank .and. &
-                dg_frag%is_frag_root) then
+            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. source_rank == dg_frag%id .and. &
+                owner_rank /= source_rank) then
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
               dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
             end if
@@ -744,15 +766,15 @@ contains
     self_source_owned_pts = 0
     self_source_total_pts = 0
     do ifrag = 1, dg_frag%n_frag
-      source_root_rank = dg_frag%id_array(ifrag)
+      source_root_rank = dg_frag%id_array_spatial(ifrag)
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
         izg = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag) + iz - 1, dg_frag%lgnum_total(3))
         do iy = 1, dg_frag%nxyz_domain(2, ifrag)
           iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
-            source_rank = source_root_rank
-            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
+            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (source_rank == dg_frag%id) then
               self_source_total_pts = self_source_total_pts + 1
               if (owner_rank == dg_frag%id) self_source_owned_pts = self_source_owned_pts + 1
@@ -861,16 +883,16 @@ contains
 
     recv_cursor = 0
     do ifrag = 1, dg_frag%n_frag
-      source_root_rank = dg_frag%id_array(ifrag)
+      source_root_rank = dg_frag%id_array_spatial(ifrag)
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
         izg = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag) + iz - 1, dg_frag%lgnum_total(3))
         do iy = 1, dg_frag%nxyz_domain(2, ifrag)
           iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
-            source_rank = source_root_rank
+            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
             if (source_rank == dg_frag%id) cycle
-            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
+            owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank == dg_frag%id) then
               recv_cursor(source_rank) = recv_cursor(source_rank) + 1
               dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
@@ -1224,7 +1246,7 @@ contains
     character(32), parameter :: binfile_occb = "occupations_buffered.bin"
     character(32), parameter :: binfile_rg = "rgrid_index.bin"
     character(256) :: filename
-    integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
+    integer :: iunit, ifrag, file_ifrag, ispin, n_frag_file, nspin_file
     integer :: nstate_frag_file, nstate_tot_file
     integer, allocatable :: n_basis_tmp(:,:), index_basis_tmp(:,:,:)
     real(8), allocatable :: coef_local(:,:,:,:), coef_tmp(:,:,:)  ! local coef buffers
@@ -1328,8 +1350,12 @@ contains
     
     ! Allocate arrays
     allocate(dg_frag%n_basis(dg_frag%n_frag, dg_frag%nspin))
+    allocate(dg_frag%n_basis_file(dg_frag%n_frag, dg_frag%nspin))
     if (.not. allocated(dg_frag%index_basis)) then
       allocate(dg_frag%index_basis(dg_frag%nstate_frag, dg_frag%n_frag, dg_frag%nspin))
+    end if
+    if (.not. allocated(dg_frag%index_basis_file)) then
+      allocate(dg_frag%index_basis_file(dg_frag%nstate_frag, dg_frag%n_frag, dg_frag%nspin))
     end if
     if (.not. allocated(dg_frag%n_mat)) then
       allocate(dg_frag%n_mat(dg_frag%nspin))
@@ -1342,13 +1368,15 @@ contains
     ! needs the full table or ranks > 0 will produce zero/NaN current.
     iunit = get_filehandle()
     if (use_buffered_basis) then
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wfb
+      file_ifrag = map_spatial_to_file_ifrag(dg_frag, 1)
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wfb
       inquire(file=filename, exist=have_buffered_coef)
       if (.not. have_buffered_coef) then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
       end if
     else
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+      file_ifrag = map_spatial_to_file_ifrag(dg_frag, 1)
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
     end if
     open(iunit, file=filename, form='unformatted', access='stream', status='old')
     read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
@@ -1358,6 +1386,8 @@ contains
     close(iunit)
     
     ! Step 3: Gather metadata as stored in wavefunctions header tables.
+    dg_frag%n_basis_file = n_basis_tmp
+    dg_frag%index_basis_file = index_basis_tmp
     dg_frag%n_basis = n_basis_tmp
     dg_frag%index_basis = index_basis_tmp
     dg_frag%n_mat(1:dg_frag%nspin) = n_mat_tmp(1:dg_frag%nspin)
@@ -1535,16 +1565,17 @@ contains
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
+      file_ifrag = map_spatial_to_file_ifrag(dg_frag, ifrag)
       
       iunit = get_filehandle()
       if (use_buffered_basis) then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wfb
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wfb
         inquire(file=filename, exist=have_buffered_coef)
         if (.not. have_buffered_coef) then
-          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
         end if
       else
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
       end if
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
@@ -1568,7 +1599,7 @@ contains
       close(iunit)
 
       if (use_buffered_basis) then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_occb
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_occb
         inquire(file=filename, exist=have_buffered_coef)
         if (have_buffered_coef) have_buffered_occ_any = .true.
         if (have_buffered_coef .and. dg_frag%id_frag == 0) then
@@ -1581,8 +1612,8 @@ contains
           read(iunit) occ_tmp(1:dg_frag%nstate_frag, 1:dg_frag%nspin)
           close(iunit)
           do ispin = 1, dg_frag%nspin
-            do io = 1, min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
-              global_idx = dg_frag%index_basis(io, ifrag, ispin)
+            do io = 1, min(dg_frag%n_basis_file(file_ifrag, ispin), dg_frag%nstate_frag)
+              global_idx = dg_frag%index_basis_file(io, file_ifrag, ispin)
               if (global_idx >= 1 .and. global_idx <= dg_frag%nstate_tot) then
                 occ_state_local(global_idx, ispin) = occ_tmp(io, ispin)
               end if
@@ -1779,12 +1810,13 @@ contains
     ! Map fragment-local indices to global indices using index_basis
     do i_local = 1, ifrag_count
       ifrag = dg_frag%ifrag_start + i_local - 1
+      file_ifrag = map_spatial_to_file_ifrag(dg_frag, ifrag)
       do ispin = 1, dg_frag%nspin
         ! For each local basis function io in fragment ifrag,
         ! map it to global basis index: global_idx = index_basis(io, ifrag, ispin)
-        nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+        nbasis_iter = min(dg_frag%n_basis_file(file_ifrag, ispin), dg_frag%nstate_frag)
         do io = 1, nbasis_iter
-          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          global_idx = dg_frag%index_basis_file(io, file_ifrag, ispin)
           if (global_idx > 0 .and. global_idx <= dg_frag%n_mat_max) then
             ! Copy coefficient for this global basis function
             dg_frag%coef(global_idx, 1:dg_frag%nstate_tot, ispin) = &
@@ -1820,10 +1852,11 @@ contains
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
+      file_ifrag = map_spatial_to_file_ifrag(dg_frag, ifrag)
       
       ! Read grid index mapping
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_rg
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_rg
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       read(iunit) lgnum_frag(1:3), lgnum_total(1:3)
@@ -1843,9 +1876,9 @@ contains
       ! Read basis functions
       iunit = get_filehandle()
       if (use_buffered_basis) then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bfb
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_bfb
       else
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_bf
       end if
       
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
@@ -2144,7 +2177,7 @@ contains
     integer :: env_len, env_status
     logical :: enable_trace
     integer :: ifrag, ov(3), assigned_overlap, overlap_vol
-    integer :: best_ifrag, best_overlap
+    integer :: best_spatial_ifrag, best_file_ifrag, best_overlap
 
     env_trace = ''
     call get_environment_variable("SALMON_DG_ASSIGNMENT_TRACE", env_trace, length=env_len, status=env_status)
@@ -2159,7 +2192,7 @@ contains
     if (.not. allocated(dg_frag%ixyz_frag) .or. .not. allocated(dg_frag%nxyz_domain)) return
 
     assigned_overlap = 0
-    best_ifrag = 0
+    best_spatial_ifrag = 0
     best_overlap = -1
     do ifrag = 1, dg_frag%n_frag
       ov(1) = periodic_axis_overlap(dg_frag%ixyz_frag(1, ifrag), dg_frag%nxyz_domain(1, ifrag), dg_frag%mg%is(1), dg_frag%mg%ie(1), dg_frag%lgnum_total(1))
@@ -2169,15 +2202,17 @@ contains
       if (ifrag == dg_frag%ifrag_group) assigned_overlap = overlap_vol
       if (overlap_vol > best_overlap) then
         best_overlap = overlap_vol
-        best_ifrag = ifrag
+        best_spatial_ifrag = ifrag
       end if
     end do
 
-    write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0,a,i0)') &
+    best_file_ifrag = map_spatial_to_file_ifrag(dg_frag, best_spatial_ifrag)
+        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0,a,i0)') &
          "dg-assign-trace: rank=", dg_frag%id, " assigned_ifrag=", dg_frag%ifrag_group, &
+          " best_spatial_ifrag=", best_spatial_ifrag, &
          " mg_is=", dg_frag%mg%is(1), dg_frag%mg%is(2), dg_frag%mg%is(3), &
          " mg_ie=", dg_frag%mg%ie(1), dg_frag%mg%ie(2), dg_frag%mg%ie(3), &
-         " assigned_overlap=", assigned_overlap, " best_ifrag=", best_ifrag, " best_overlap=", best_overlap
+         " assigned_overlap=", assigned_overlap, " best_ifrag=", best_file_ifrag, " best_overlap=", best_overlap
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a)') "[INFO] SALMON_DG_ASSIGNMENT_TRACE enabled"
     end if
@@ -2193,7 +2228,7 @@ contains
     character(32), parameter :: binfile_esb = "eigenvalues_buffered.bin"
     character(32), parameter :: binfile_esb_legacy = "esp_buffered.bin"
     character(256) :: filename
-    integer :: iunit, ifrag, ispin, io, global_idx
+    integer :: iunit, ifrag, file_ifrag, ispin, io, global_idx
     integer :: n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
     integer :: io_max, ispin_max, iostat_open, n_nonzero
     logical :: file_exists, loaded_any
@@ -2208,10 +2243,11 @@ contains
     esp_sum(:, :) = 0.0d0
     loaded_any = .false.
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_esb
+      file_ifrag = map_spatial_to_file_ifrag(dg_frag, ifrag)
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_esb
       inquire(file=filename, exist=file_exists)
       if (.not. file_exists) then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_esb_legacy
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_esb_legacy
         inquire(file=filename, exist=file_exists)
       end if
       if (.not. file_exists) cycle
@@ -2236,9 +2272,9 @@ contains
       loaded_any = .true.
       ispin_max = min(dg_frag%nspin, nspin_file)
       do ispin = 1, ispin_max
-        io_max = min(dg_frag%nstate_frag, nstate_frag_file, dg_frag%n_basis(ifrag, ispin))
+        io_max = min(dg_frag%nstate_frag, nstate_frag_file, dg_frag%n_basis_file(file_ifrag, ispin))
         do io = 1, io_max
-          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          global_idx = dg_frag%index_basis_file(io, file_ifrag, ispin)
           if (global_idx >= 1 .and. global_idx <= dg_frag%nstate_tot) then
             esp_local(global_idx, ispin) = esp_tmp(io, ispin)
           end if
@@ -2655,7 +2691,9 @@ contains
     end if
     if (allocated(dg_frag%S_block_map)) deallocate(dg_frag%S_block_map)
     if (allocated(dg_frag%n_basis)) deallocate(dg_frag%n_basis)
+    if (allocated(dg_frag%n_basis_file)) deallocate(dg_frag%n_basis_file)
     if (allocated(dg_frag%index_basis)) deallocate(dg_frag%index_basis)
+    if (allocated(dg_frag%index_basis_file)) deallocate(dg_frag%index_basis_file)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
     if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
     if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
@@ -2679,6 +2717,10 @@ contains
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
+    if (allocated(dg_frag%ifrag_file_of_spatial)) deallocate(dg_frag%ifrag_file_of_spatial)
+    if (allocated(dg_frag%ifrag_spatial_of_file)) deallocate(dg_frag%ifrag_spatial_of_file)
+    if (allocated(dg_frag%id_array_spatial)) deallocate(dg_frag%id_array_spatial)
+    if (allocated(dg_frag%id_array_file)) deallocate(dg_frag%id_array_file)
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
     if (allocated(dg_frag%density_primary_local_map)) deallocate(dg_frag%density_primary_local_map)
     if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
@@ -2767,6 +2809,376 @@ contains
     end if
   end function get_fragment_group_root_rank
 
+  subroutine init_fragment_id_mapping_defaults(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: ifrag
+
+    if (.not. allocated(dg_frag%id_array)) then
+      dg_frag%mapping_valid = .false.
+      return
+    end if
+    if (.not. allocated(dg_frag%ifrag_file_of_spatial)) then
+      dg_frag%mapping_valid = .false.
+      return
+    end if
+    if (.not. allocated(dg_frag%ifrag_spatial_of_file)) then
+      dg_frag%mapping_valid = .false.
+      return
+    end if
+    if (.not. allocated(dg_frag%id_array_spatial)) then
+      dg_frag%mapping_valid = .false.
+      return
+    end if
+    if (.not. allocated(dg_frag%id_array_file)) then
+      dg_frag%mapping_valid = .false.
+      return
+    end if
+
+    do ifrag = 1, dg_frag%n_frag
+      dg_frag%ifrag_file_of_spatial(ifrag) = ifrag
+      dg_frag%ifrag_spatial_of_file(ifrag) = ifrag
+      dg_frag%id_array_spatial(ifrag) = dg_frag%id_array(ifrag)
+      dg_frag%id_array_file(ifrag) = dg_frag%id_array(ifrag)
+    end do
+    dg_frag%mapping_valid = .true.
+  end subroutine init_fragment_id_mapping_defaults
+
+  subroutine validate_fragment_id_mapping(dg_frag, stage_label)
+    use communication, only: comm_get_max
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    character(*), intent(in) :: stage_label
+
+    integer :: ifrag, file_ifrag, spatial_ifrag
+    integer :: bad_local, bad_global
+
+    if (.not. allocated(dg_frag%ifrag_file_of_spatial)) return
+    if (.not. allocated(dg_frag%ifrag_spatial_of_file)) return
+    if (.not. allocated(dg_frag%id_array_spatial)) return
+    if (.not. allocated(dg_frag%id_array_file)) return
+
+    bad_local = 0
+    do ifrag = 1, dg_frag%n_frag
+      file_ifrag = dg_frag%ifrag_file_of_spatial(ifrag)
+      if (file_ifrag < 1 .or. file_ifrag > dg_frag%n_frag) then
+        bad_local = bad_local + 1
+        cycle
+      end if
+      spatial_ifrag = dg_frag%ifrag_spatial_of_file(file_ifrag)
+      if (spatial_ifrag /= ifrag) bad_local = bad_local + 1
+    end do
+
+    bad_global = bad_local
+    call comm_get_max(bad_global, dg_frag%icomm)
+    if (bad_global > 0) then
+      write(*,'(1x,a,a,a,i0,a,i0)') "[FATAL] invalid fragment ID mapping: stage=", trim(stage_label), &
+        " rank=", dg_frag%id, " bad_local=", bad_local
+      stop "DG-Fragment RT: invalid fragment ID mapping"
+    end if
+  end subroutine validate_fragment_id_mapping
+
+  subroutine build_fragment_id_mapping_from_overlap(dg_frag, stage_label)
+    use communication, only: comm_summation, comm_get_max
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: stage_label
+
+    integer :: ifrag, spatial_ifrag, file_ifrag
+    integer :: ov_axis(3), overlap_vol, best_ifrag, best_overlap
+    integer :: bad_local, bad_global
+    integer :: env_status, env_len
+    character(len=64) :: env_trace
+    logical :: enable_mapping_trace
+    integer, allocatable :: map_local(:), map_sum(:), inv_seen(:)
+    integer, allocatable :: root_spatial_local(:), root_spatial_sum(:)
+
+    enable_mapping_trace = .false.
+    env_trace = ""
+    call get_environment_variable("SALMON_DG_MAPPING_TRACE", env_trace, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_trace(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        enable_mapping_trace = .true.
+      end select
+    end if
+
+    if (.not. allocated(dg_frag%ifrag_file_of_spatial)) return
+    if (.not. allocated(dg_frag%ifrag_spatial_of_file)) return
+    if (.not. allocated(dg_frag%id_array_spatial)) return
+    if (.not. allocated(dg_frag%id_array_file)) return
+    if (.not. allocated(dg_frag%id_array)) return
+
+    allocate(map_local(dg_frag%n_frag), map_sum(dg_frag%n_frag))
+    allocate(inv_seen(dg_frag%n_frag))
+    allocate(root_spatial_local(dg_frag%n_frag), root_spatial_sum(dg_frag%n_frag))
+    map_local = 0
+    map_sum = 0
+    inv_seen = 0
+    root_spatial_local = 0
+    root_spatial_sum = 0
+
+    if (dg_frag%is_frag_root) then
+      spatial_ifrag = dg_frag%ifrag_group
+      best_ifrag = spatial_ifrag
+      best_overlap = -1
+      do ifrag = 1, dg_frag%n_frag
+        ov_axis(1) = periodic_axis_overlap(dg_frag%ixyz_frag(1, ifrag), dg_frag%nxyz_domain(1, ifrag), &
+          dg_frag%mg%is(1), dg_frag%mg%ie(1), dg_frag%lgnum_total(1))
+        ov_axis(2) = periodic_axis_overlap(dg_frag%ixyz_frag(2, ifrag), dg_frag%nxyz_domain(2, ifrag), &
+          dg_frag%mg%is(2), dg_frag%mg%ie(2), dg_frag%lgnum_total(2))
+        ov_axis(3) = periodic_axis_overlap(dg_frag%ixyz_frag(3, ifrag), dg_frag%nxyz_domain(3, ifrag), &
+          dg_frag%mg%is(3), dg_frag%mg%ie(3), dg_frag%lgnum_total(3))
+        overlap_vol = ov_axis(1) * ov_axis(2) * ov_axis(3)
+        if (overlap_vol > best_overlap) then
+          best_overlap = overlap_vol
+          best_ifrag = ifrag
+        end if
+      end do
+
+      if (spatial_ifrag >= 1 .and. spatial_ifrag <= dg_frag%n_frag) then
+        map_local(spatial_ifrag) = best_ifrag
+        root_spatial_local(spatial_ifrag) = dg_frag%id + 1
+      end if
+    end if
+
+    call comm_summation(map_local, map_sum, dg_frag%n_frag, dg_frag%icomm)
+    call comm_summation(root_spatial_local, root_spatial_sum, dg_frag%n_frag, dg_frag%icomm)
+
+    bad_local = 0
+    dg_frag%ifrag_file_of_spatial(:) = 0
+    dg_frag%ifrag_spatial_of_file(:) = 0
+    do spatial_ifrag = 1, dg_frag%n_frag
+      file_ifrag = map_sum(spatial_ifrag)
+      dg_frag%ifrag_file_of_spatial(spatial_ifrag) = file_ifrag
+      if (file_ifrag < 1 .or. file_ifrag > dg_frag%n_frag) then
+        bad_local = bad_local + 1
+      else
+        inv_seen(file_ifrag) = inv_seen(file_ifrag) + 1
+        dg_frag%ifrag_spatial_of_file(file_ifrag) = spatial_ifrag
+      end if
+      dg_frag%id_array_spatial(spatial_ifrag) = root_spatial_sum(spatial_ifrag) - 1
+    end do
+
+    do file_ifrag = 1, dg_frag%n_frag
+      if (inv_seen(file_ifrag) /= 1) bad_local = bad_local + 1
+      spatial_ifrag = dg_frag%ifrag_spatial_of_file(file_ifrag)
+      if (spatial_ifrag >= 1 .and. spatial_ifrag <= dg_frag%n_frag) then
+        dg_frag%id_array_file(file_ifrag) = dg_frag%id_array_spatial(spatial_ifrag)
+      else
+        dg_frag%id_array_file(file_ifrag) = -1
+      end if
+    end do
+
+    bad_global = bad_local
+    call comm_get_max(bad_global, dg_frag%icomm)
+    if (bad_global > 0) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,a,a,i0)') "[WARN] fragment ID mapping fallback to identity: stage=", trim(stage_label), &
+          " bad_global=", bad_global
+      end if
+      call init_fragment_id_mapping_defaults(dg_frag)
+    end if
+
+    if (enable_mapping_trace .and. dg_frag%id == 0) then
+      write(*,'(1x,a,a)') "[MAP-TRACE] fragment mapping stage=", trim(stage_label)
+      do spatial_ifrag = 1, dg_frag%n_frag
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[MAP-TRACE] spatial_ifrag=", spatial_ifrag, &
+          " file_ifrag=", dg_frag%ifrag_file_of_spatial(spatial_ifrag), &
+          " root_spatial=", dg_frag%id_array_spatial(spatial_ifrag), &
+          " root_file=", dg_frag%id_array_file(dg_frag%ifrag_file_of_spatial(spatial_ifrag))
+      end do
+    end if
+
+    dg_frag%id_array(:) = dg_frag%id_array_spatial(:)
+    deallocate(map_local, map_sum, inv_seen, root_spatial_local, root_spatial_sum)
+  end subroutine build_fragment_id_mapping_from_overlap
+
+  subroutine prebuild_fragment_mapping_from_local_probe(dg_frag, mg, bdir_frag)
+    use communication, only: comm_summation, comm_get_max
+    use structures, only: s_rgrid
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_rgrid), intent(in) :: mg
+    character(*), intent(in) :: bdir_frag
+
+    integer :: local_file_ifrag, spatial_ifrag, file_ifrag
+    integer :: bad_local, bad_global
+    integer :: env_status, env_len
+    character(len=64) :: env_trace
+    logical :: enable_mapping_trace
+    integer, allocatable :: map_local(:), map_sum(:), inv_seen(:)
+
+    enable_mapping_trace = .false.
+    env_trace = ""
+    call get_environment_variable("SALMON_DG_MAPPING_TRACE", env_trace, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_trace(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        enable_mapping_trace = .true.
+      end select
+    end if
+
+    if (.not. allocated(dg_frag%ifrag_file_of_spatial)) return
+    if (.not. allocated(dg_frag%ifrag_spatial_of_file)) return
+    if (.not. allocated(dg_frag%id_array_spatial)) return
+    if (.not. allocated(dg_frag%id_array_file)) return
+    if (.not. allocated(dg_frag%id_array)) return
+
+    allocate(map_local(dg_frag%n_frag), map_sum(dg_frag%n_frag), inv_seen(dg_frag%n_frag))
+    map_local = 0
+    map_sum = 0
+    inv_seen = 0
+
+    local_file_ifrag = dg_frag%ifrag_group
+    call infer_fragment_group_from_metadata(dg_frag, mg, bdir_frag, local_file_ifrag)
+    if (dg_frag%ifrag_group >= 1 .and. dg_frag%ifrag_group <= dg_frag%n_frag) then
+      map_local(dg_frag%ifrag_group) = local_file_ifrag
+    end if
+    call comm_summation(map_local, map_sum, dg_frag%n_frag, dg_frag%icomm)
+
+    bad_local = 0
+    dg_frag%ifrag_file_of_spatial(:) = 0
+    dg_frag%ifrag_spatial_of_file(:) = 0
+    do spatial_ifrag = 1, dg_frag%n_frag
+      file_ifrag = map_sum(spatial_ifrag)
+      dg_frag%ifrag_file_of_spatial(spatial_ifrag) = file_ifrag
+      if (file_ifrag < 1 .or. file_ifrag > dg_frag%n_frag) then
+        bad_local = bad_local + 1
+      else
+        inv_seen(file_ifrag) = inv_seen(file_ifrag) + 1
+        dg_frag%ifrag_spatial_of_file(file_ifrag) = spatial_ifrag
+      end if
+    end do
+
+    do file_ifrag = 1, dg_frag%n_frag
+      if (inv_seen(file_ifrag) /= 1) bad_local = bad_local + 1
+    end do
+
+    bad_global = bad_local
+    call comm_get_max(bad_global, dg_frag%icomm)
+    if (bad_global > 0) then
+      call init_fragment_id_mapping_defaults(dg_frag)
+      deallocate(map_local, map_sum, inv_seen)
+      return
+    end if
+
+    dg_frag%id_array_spatial(:) = dg_frag%id_array(:)
+    do file_ifrag = 1, dg_frag%n_frag
+      spatial_ifrag = dg_frag%ifrag_spatial_of_file(file_ifrag)
+      dg_frag%id_array_file(file_ifrag) = get_fragment_group_root_rank(file_ifrag, dg_frag%isize_frag)
+    end do
+    dg_frag%mapping_valid = .true.
+
+    if (enable_mapping_trace .and. dg_frag%id == 0) then
+      write(*,'(1x,a)') "[MAP-TRACE] fragment mapping stage=pre-read"
+      do spatial_ifrag = 1, dg_frag%n_frag
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[MAP-TRACE] spatial_ifrag=", spatial_ifrag, &
+          " file_ifrag=", dg_frag%ifrag_file_of_spatial(spatial_ifrag), &
+          " root_spatial=", dg_frag%id_array_spatial(spatial_ifrag), &
+          " root_file=", dg_frag%id_array_file(dg_frag%ifrag_file_of_spatial(spatial_ifrag))
+      end do
+    end if
+
+    deallocate(map_local, map_sum, inv_seen)
+  end subroutine prebuild_fragment_mapping_from_local_probe
+
+  subroutine apply_fragment_mapping_to_metadata(dg_frag, stage_label)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: stage_label
+
+    integer :: spatial_ifrag, file_ifrag
+    integer, allocatable :: n_basis_tmp(:,:), index_basis_tmp(:,:,:)
+    integer, allocatable :: ixyz_tmp(:,:), nxyz_tmp(:,:)
+    integer, allocatable :: support_lo_tmp(:,:), support_hi_tmp(:,:)
+
+    if (.not. dg_frag%mapping_valid) return
+    if (.not. allocated(dg_frag%ifrag_file_of_spatial)) return
+    if (.not. allocated(dg_frag%n_basis_file)) return
+    if (.not. allocated(dg_frag%index_basis_file)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (.not. allocated(dg_frag%ixyz_frag)) return
+    if (.not. allocated(dg_frag%nxyz_domain)) return
+
+    allocate(n_basis_tmp(size(dg_frag%n_basis, 1), size(dg_frag%n_basis, 2)))
+    allocate(index_basis_tmp(size(dg_frag%index_basis, 1), size(dg_frag%index_basis, 2), size(dg_frag%index_basis, 3)))
+    allocate(ixyz_tmp(size(dg_frag%ixyz_frag, 1), size(dg_frag%ixyz_frag, 2)))
+    allocate(nxyz_tmp(size(dg_frag%nxyz_domain, 1), size(dg_frag%nxyz_domain, 2)))
+
+    n_basis_tmp(:, :) = 0
+    index_basis_tmp(:, :, :) = 0
+    ixyz_tmp(:, :) = 0
+    nxyz_tmp(:, :) = 0
+
+    if (allocated(dg_frag%basis_support_lo) .and. allocated(dg_frag%basis_support_hi)) then
+      allocate(support_lo_tmp(size(dg_frag%basis_support_lo, 1), size(dg_frag%basis_support_lo, 2)))
+      allocate(support_hi_tmp(size(dg_frag%basis_support_hi, 1), size(dg_frag%basis_support_hi, 2)))
+      support_lo_tmp(:, :) = 0
+      support_hi_tmp(:, :) = -1
+    end if
+
+    do spatial_ifrag = 1, dg_frag%n_frag
+      file_ifrag = dg_frag%ifrag_file_of_spatial(spatial_ifrag)
+      if (file_ifrag < 1 .or. file_ifrag > dg_frag%n_frag) cycle
+      n_basis_tmp(spatial_ifrag, :) = dg_frag%n_basis_file(file_ifrag, :)
+      index_basis_tmp(:, spatial_ifrag, :) = dg_frag%index_basis_file(:, file_ifrag, :)
+      ixyz_tmp(:, spatial_ifrag) = dg_frag%ixyz_frag(:, file_ifrag)
+      nxyz_tmp(:, spatial_ifrag) = dg_frag%nxyz_domain(:, file_ifrag)
+      if (allocated(dg_frag%basis_support_lo) .and. allocated(dg_frag%basis_support_hi)) then
+        support_lo_tmp(:, spatial_ifrag) = dg_frag%basis_support_lo(:, file_ifrag)
+        support_hi_tmp(:, spatial_ifrag) = dg_frag%basis_support_hi(:, file_ifrag)
+      end if
+    end do
+
+    dg_frag%n_basis(:, :) = n_basis_tmp(:, :)
+    dg_frag%index_basis(:, :, :) = index_basis_tmp(:, :, :)
+    dg_frag%ixyz_frag(:, :) = ixyz_tmp(:, :)
+    dg_frag%nxyz_domain(:, :) = nxyz_tmp(:, :)
+    if (allocated(dg_frag%basis_support_lo) .and. allocated(dg_frag%basis_support_hi)) then
+      dg_frag%basis_support_lo(:, :) = support_lo_tmp(:, :)
+      dg_frag%basis_support_hi(:, :) = support_hi_tmp(:, :)
+      deallocate(support_lo_tmp, support_hi_tmp)
+    end if
+
+    deallocate(n_basis_tmp, index_basis_tmp, ixyz_tmp, nxyz_tmp)
+  end subroutine apply_fragment_mapping_to_metadata
+
+  integer function map_spatial_to_file_ifrag(dg_frag, spatial_ifrag) result(file_ifrag)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: spatial_ifrag
+
+    if (spatial_ifrag < 1 .or. spatial_ifrag > dg_frag%n_frag) then
+      file_ifrag = spatial_ifrag
+      return
+    end if
+
+    if (dg_frag%mapping_valid .and. allocated(dg_frag%ifrag_file_of_spatial)) then
+      file_ifrag = dg_frag%ifrag_file_of_spatial(spatial_ifrag)
+      if (file_ifrag >= 1 .and. file_ifrag <= dg_frag%n_frag) return
+    end if
+    file_ifrag = spatial_ifrag
+  end function map_spatial_to_file_ifrag
+
+  integer function map_file_to_spatial_ifrag(dg_frag, file_ifrag) result(spatial_ifrag)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: file_ifrag
+
+    if (file_ifrag < 1 .or. file_ifrag > dg_frag%n_frag) then
+      spatial_ifrag = file_ifrag
+      return
+    end if
+
+    if (dg_frag%mapping_valid .and. allocated(dg_frag%ifrag_spatial_of_file)) then
+      spatial_ifrag = dg_frag%ifrag_spatial_of_file(file_ifrag)
+      if (spatial_ifrag >= 1 .and. spatial_ifrag <= dg_frag%n_frag) return
+    end if
+    spatial_ifrag = file_ifrag
+  end function map_file_to_spatial_ifrag
+
   subroutine validate_coef_owner_map(dg_frag, stage_label)
     use communication, only: comm_get_max
     implicit none
@@ -2819,10 +3231,10 @@ contains
 
     integer :: ispin, ifrag, io, global_idx, nbasis_iter
 
-    if (.not. allocated(dg_frag%id_array)) then
-      write(*,'(1x,a,a,a,i0)') "[FATAL] id_array is not allocated before coef owner build: stage=", &
+    if (.not. allocated(dg_frag%id_array_file)) then
+      write(*,'(1x,a,a,a,i0)') "[FATAL] id_array_file is not allocated before coef owner build: stage=", &
         trim(stage_label), " rank=", dg_frag%id
-      stop "DG-Fragment RT: missing id_array before coef owner build"
+      stop "DG-Fragment RT: missing id_array_file before coef owner build"
     end if
 
     if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
@@ -2836,7 +3248,7 @@ contains
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
           if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
           dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+            dg_frag%id_array_file(ifrag), dg_frag%isize_frag, io, nbasis_iter)
         end do
       end do
     end do
