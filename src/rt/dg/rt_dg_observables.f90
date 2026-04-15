@@ -82,7 +82,7 @@
     real(8), allocatable :: para_block_signed_local(:,:), para_block_signed_sum(:,:)
     real(8), allocatable :: para_block_abs_local(:,:), para_block_abs_sum(:,:)
     real(8) :: para_block_best_abs, para_block_total_abs
-    integer :: para_block_best_iblk, nblk_use
+    integer :: para_block_best_iblk
     complex(8) :: minus_i
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:), coef_frag_view(:,:), coef_pw_view(:,:)
@@ -554,8 +554,7 @@
         end if
         if (do_para_decomp_sample .or. do_para_block_sample) then
           if (allocated(dg_frag%momentum_blocks)) then
-            nblk_use = min(dg_frag%n_momentum_blocks, size(dg_frag%momentum_blocks))
-            do iblk = 1, nblk_use
+            do iblk = 1, dg_frag%n_momentum_blocks
               ifrag = dg_frag%momentum_blocks(iblk)%ifrag_row
               jfrag = dg_frag%momentum_blocks(iblk)%ifrag_col
               if (ifrag <= 0 .or. ifrag > dg_frag%n_frag) cycle
@@ -603,8 +602,7 @@
           if (allocated(dg_frag%momentum_blocks)) then
             current_blk_total = (0.0d0, 0.0d0)
             current_blk_diag = (0.0d0, 0.0d0)
-            nblk_use = min(dg_frag%n_momentum_blocks, size(dg_frag%momentum_blocks))
-            do iblk = 1, nblk_use
+            do iblk = 1, dg_frag%n_momentum_blocks
               ifrag = dg_frag%momentum_blocks(iblk)%ifrag_row
               jfrag = dg_frag%momentum_blocks(iblk)%ifrag_col
               if (ifrag <= 0 .or. ifrag > dg_frag%n_frag) cycle
@@ -1217,13 +1215,11 @@
       para_block_signed_sum(:, :) = para_block_signed_sum(:, :) / real(max(1, dg_frag%isize), 8)
       para_block_abs_sum(:, :) = para_block_abs_sum(:, :) / real(max(1, dg_frag%isize), 8)
       if (dg_frag%id == 0 .and. (itt == 0 .or. itt == 1 .or. mod(itt - 1, para_decomp_trace_stride) == 0)) then
-        nblk_use = 0
-        if (allocated(dg_frag%momentum_blocks)) nblk_use = min(dg_frag%n_momentum_blocks, size(dg_frag%momentum_blocks))
         do idir = 1, 3
           para_block_best_abs = -1.0d0
           para_block_best_iblk = 0
           para_block_total_abs = 0.0d0
-          do iblk = 1, nblk_use
+          do iblk = 1, dg_frag%n_momentum_blocks
             para_block_abs_sum(idir, iblk) = para_block_abs_sum(idir, iblk) / system%det_a
             para_block_signed_sum(idir, iblk) = para_block_signed_sum(idir, iblk) / system%det_a
             para_block_total_abs = para_block_total_abs + para_block_abs_sum(idir, iblk)
@@ -1232,7 +1228,7 @@
               para_block_best_iblk = iblk
             end if
           end do
-          if (para_block_best_iblk > 0 .and. para_block_best_iblk <= nblk_use) then
+          if (para_block_best_iblk > 0 .and. para_block_best_iblk <= dg_frag%n_momentum_blocks) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
               "        dg-para-block-trace: itt=", itt, " idir=", idir, " iblk=", para_block_best_iblk, &
               " ifrag_row=", dg_frag%momentum_blocks(para_block_best_iblk)%ifrag_row, &

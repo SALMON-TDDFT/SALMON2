@@ -1708,7 +1708,7 @@ contains
     real(8), intent(in) :: scale_vec(3)
     complex(8), intent(inout) :: mat(:, :)
 
-    integer :: iblk, idir, ib, jb, row_idx, col_idx, n_frag, nblk_use
+    integer :: iblk, idir, ib, jb, row_idx, col_idx, n_frag
     integer :: nrow, ncol, idx_ib, idx_jb, valid_row_count, valid_col_count
     integer :: ifrag_row, ifrag_col
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
@@ -1717,16 +1717,11 @@ contains
     mat(:, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%momentum_blocks)) return
     if (.not. allocated(dg_frag%index_basis)) return
-    nblk_use = min(dg_frag%n_momentum_blocks, size(dg_frag%momentum_blocks))
-    if (nblk_use <= 0) return
     n_frag = dg_frag%n_mat_max
 !$omp parallel do schedule(static) private(iblk, nrow, ncol, valid_row_count, valid_col_count, ib, jb, idir, idx_ib, idx_jb, row_idx, col_idx, ifrag_row, ifrag_col, row_gid, col_gid, valid_row_ids, valid_col_ids)
-    do iblk = 1, nblk_use
-      if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
+    do iblk = 1, dg_frag%n_momentum_blocks
       ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
       ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
-      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
-      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
       nrow = min(dg_frag%n_basis(ifrag_row, ispin), &
              size(dg_frag%index_basis, 1), size(dg_frag%momentum_blocks(iblk)%val, 2))
       ncol = min(dg_frag%n_basis(ifrag_col, ispin), &
@@ -3449,7 +3444,7 @@ contains
     complex(8),             intent(in) :: x(:,:)
     complex(8),             intent(inout) :: y(:,:)
 
-    integer :: iblk, idir, ib, jb, row_idx, col_idx, nstate, nblk_use, istate
+    integer :: iblk, idir, ib, jb, row_idx, col_idx, nstate, istate
     integer :: active_dir_count, valid_row_count, valid_col_count, idx_dir, idx_ib, idx_jb
     integer :: ifrag_row, ifrag_col, nrow, ncol
     integer :: active_dirs(3), valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
@@ -3457,14 +3452,11 @@ contains
     real(8) :: scale
 
     if (.not. allocated(dg_frag%momentum_blocks)) return
-    nblk_use = min(dg_frag%n_momentum_blocks, size(dg_frag%momentum_blocks))
-    if (nblk_use <= 0) return
     nstate = min(size(x, 2), size(y, 2))
 
 !$omp parallel do private(istate,iblk,idir,scale,jb,col_idx,ib,row_idx,active_dir_count,valid_row_count,valid_col_count,idx_dir,idx_ib,idx_jb,ifrag_row,ifrag_col,nrow,ncol,active_dirs,valid_row_ids,valid_col_ids,row_gid,col_gid) schedule(static)
     do istate = 1, nstate
-      do iblk = 1, nblk_use
-        if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
+      do iblk = 1, dg_frag%n_momentum_blocks
         active_dir_count = 0
         do idir = 1, 3
           if (abs(scale_vec(idir)) < 1.0d-30) cycle
@@ -3475,10 +3467,6 @@ contains
 
         ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
         ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
-           ! Guard invalid block metadata. This path is skipped for no-kick cases,
-           ! so invalid fragment ids can surface only when A·p is active.
-           if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
-           if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
         nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), &
              size(dg_frag%momentum_blocks(iblk)%val, 2))
         ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), &
