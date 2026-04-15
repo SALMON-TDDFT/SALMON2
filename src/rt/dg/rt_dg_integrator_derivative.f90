@@ -48,7 +48,6 @@
     logical :: enable_deriv_trace
     character(len=32) :: env_deriv_trace
     integer :: env_trace_len, env_trace_stat
-    logical, save :: first_derivative_diag_done = .false.
     
     ! Time derivative in velocity gauge:
     !   d/dt c_i = -i * (H_0_ij + A^2(t)/2 * delta_ij) * c_j - A(t)·<i|∇|j> * c_j
@@ -80,11 +79,6 @@
       flush(6)
     end if
 
-    if (.not. first_derivative_diag_done .and. itt == 1) then
-      call print_startup_eigen_residual_puredg(dg_frag, "pre-first-derivative")
-      first_derivative_diag_done = .true.
-    end if
-    
     ! Calculate A^2 (diamagnetic term)
     A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
     if (A_squared /= A_squared) then

@@ -568,6 +568,8 @@
     integer :: n_metric
     integer :: env_status, sipg_trace_rank, sipg_trace_jmax, env_len
     logical :: release_dense_fragment_ops
+    logical :: enable_startup_lowdin
+    logical :: enable_startup_stationary_projection
     logical :: has_overlap_dbg
     logical :: probe_rank_main, probe_rank_352_396, probe_small_frag2
     logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup, need_halo_alloc
@@ -583,6 +585,7 @@
     character(len=32) :: env_sipg_trace_rank, env_sipg_trace_jmax
     character(len=32) :: env_sipg_disable_b_term, env_sipg_disable_c_term, env_sipg_enable_halo, env_sipg_use_avg_trace, env_sipg_use_flux_form
     character(len=32) :: env_sipg_use_weak_form, env_sipg_ab_norm_max
+    character(len=32) :: env_startup_lowdin, env_startup_stationary_projection
     logical :: enable_sipg_face_trace, sipg_trace_allpairs, sipg_trace_pair
     logical :: sipg_disable_b_term, sipg_disable_c_term, sipg_enable_fragment_halo_exchange, sipg_use_avg_trace, sipg_use_flux_form
     logical :: sipg_use_weak_form
@@ -616,6 +619,10 @@
     sipg_use_flux_form = .false.
     sipg_use_weak_form = .false.
     sipg_ab_norm_max = -1.0d0
+    enable_startup_lowdin = .false.
+    enable_startup_stationary_projection = .false.
+    env_startup_lowdin = ''
+    env_startup_stationary_projection = ''
 
     call get_environment_variable('SALMON_DG_SIPG_FACE_TRACE', env_sipg_face_trace, status=env_status)
     if (env_status == 0) then
@@ -690,6 +697,21 @@
       read(env_sipg_ab_norm_max, *, iostat=env_status) sipg_ab_norm_max
       if (env_status /= 0) sipg_ab_norm_max = -1.0d0
     end if
+    call get_environment_variable('SALMON_DG_STARTUP_LOWDIN', env_startup_lowdin, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_startup_lowdin)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        enable_startup_lowdin = .true.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_STARTUP_STATIONARY_PROJECTION', env_startup_stationary_projection, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_startup_stationary_projection)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        enable_startup_stationary_projection = .true.
+      end select
+    end if
+    if (.not. enable_startup_lowdin) enable_startup_stationary_projection = .false.
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
         allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
@@ -1718,14 +1740,17 @@
       end if
       dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     else if (.not. dg_frag%puredg_lowdin_applied) then
-      call print_startup_coef_metric_puredg(dg_frag, "pre-lowdin")
-      call print_startup_eigen_residual_puredg(dg_frag, "pre-lowdin", .true.)
-      call apply_startup_lowdin_puredg(dg_frag)
-      call print_startup_coef_metric_puredg(dg_frag, "post-lowdin")
-      call print_startup_eigen_residual_puredg(dg_frag, "post-lowdin")
-      call apply_startup_stationary_projection_puredg(dg_frag)
-      call print_startup_coef_metric_puredg(dg_frag, "post-stationary")
-      call print_startup_eigen_residual_puredg(dg_frag, "post-stationary")
+      if (enable_startup_lowdin) then
+        call apply_startup_lowdin_puredg(dg_frag)
+        if (enable_startup_stationary_projection) then
+          call apply_startup_stationary_projection_puredg(dg_frag)
+        end if
+      else if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') "[INFO] PureDG startup Lowdin/stationary projection disabled (set SALMON_DG_STARTUP_LOWDIN=1 to enable)"
+        write(*,'(1x,a)') "[INFO] To additionally enable stationary projection, set SALMON_DG_STARTUP_STATIONARY_PROJECTION=1"
+      end if
+      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+      dg_frag%puredg_lowdin_applied = .true.
     end if
 
     ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
@@ -1965,195 +1990,6 @@
     call zero_nonowned_coefficients(dg_frag)
     dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
   end subroutine apply_startup_stationary_projection_puredg
-
-  subroutine print_startup_coef_metric_puredg(dg_frag, stage_label)
-    use communication, only: comm_is_root, comm_summation
-    use rt_dg_fragment_ops, only: apply_overlap_operator
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    character(*), intent(in) :: stage_label
-
-    integer :: ispin, io, nst, nfrag
-    real(8) :: occ
-    complex(8), allocatable :: cvec(:), svec(:)
-    real(8) :: metric_local, metric_global
-    character(32) :: env_trace
-    integer :: env_len, env_status
-    logical :: enable_trace
-
-    env_trace = ''
-    call get_environment_variable("SALMON_DG_STARTUP_COEF_TRACE", env_trace, length=env_len, status=env_status)
-    enable_trace = .false.
-    if (env_status == 0 .and. env_len > 0) then
-      select case (env_trace(1:1))
-      case ('1', 'y', 'Y', 't', 'T')
-        enable_trace = .true.
-      end select
-    end if
-    if (.not. enable_trace) return
-
-    nfrag = dg_frag%n_mat_max
-    nst = min(dg_frag%nstate_tot, size(dg_frag%coef, 2))
-    if (nfrag <= 0 .or. nst <= 0) return
-
-    allocate(cvec(nfrag), svec(nfrag))
-    metric_local = 0.0d0
-    do ispin = 1, dg_frag%nspin
-      do io = 1, nst
-        if (.not. allocated(dg_frag%occ_state)) cycle
-        if (io > size(dg_frag%occ_state, 1) .or. ispin > size(dg_frag%occ_state, 2)) cycle
-        occ = dg_frag%occ_state(io, ispin)
-        if (occ <= 0.0d0) cycle
-        cvec(:) = dg_frag%coef(1:nfrag, io, ispin)
-        call apply_overlap_operator(dg_frag, ispin, cvec, svec, .true.)
-        metric_local = metric_local + occ * real(sum(conjg(cvec) * svec), kind=8)
-      end do
-    end do
-    call comm_summation(metric_local, metric_global, 1, dg_frag%icomm)
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,a,a,1pe14.6)') "[STARTUP-COEF] stage=", trim(stage_label), " Ne_coef_S=", metric_global
-    end if
-    deallocate(cvec, svec)
-  end subroutine print_startup_coef_metric_puredg
-
-  subroutine print_startup_eigen_residual_puredg(dg_frag, stage_label, update_esp)
-    use communication, only: comm_is_root
-    use rt_dg_fragment_ops, only: gather_full_coef_view, copy_matrix_blocks_metric_to_complex_dense, &
-                                  copy_overlap_operator_to_dense
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    character(*), intent(in) :: stage_label
-    logical, intent(in), optional :: update_esp
-
-    integer :: ispin, io, nst, n_frag, nocc
-    integer :: env_len, env_status, trace_n
-    character(32) :: env_val
-    logical :: enable_trace
-    logical :: do_update_esp
-    real(8) :: res_abs, max_res, avg_res, accum_res
-    real(8) :: max_rel, rel_res, denom, eig_eff, eig_file, num_h, den_s
-    integer :: io_max, zero_eig_count, filled_esp_count
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
-    complex(8), allocatable :: h_dense(:,:), s_dense(:,:)
-    complex(8), allocatable :: c_occ(:,:), h_c(:,:), s_c(:,:), r_c(:,:)
-
-    if (dg_frag%use_plane_wave_basis) return
-    if (.not. allocated(dg_frag%H_mat_blocks)) return
-    if (.not. allocated(dg_frag%esp)) return
-
-    enable_trace = .false.
-    trace_n = 6
-    env_val = ''
-    call get_environment_variable("SALMON_DG_EIG_RESIDUAL_TRACE", env_val, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      select case(trim(adjustl(env_val(1:env_len))))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_trace = .true.
-      end select
-    end if
-    if (.not. enable_trace) return
-
-    do_update_esp = .false.
-    if (present(update_esp)) do_update_esp = update_esp
-
-    call get_environment_variable("SALMON_DG_EIG_RESIDUAL_TRACE_N", env_val, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_val(1:env_len), *, iostat=env_status) trace_n
-      if (env_status /= 0 .or. trace_n < 1) trace_n = 6
-    end if
-
-    n_frag = dg_frag%n_mat_max
-    nst = min(dg_frag%nstate_tot, n_frag, size(dg_frag%esp, 1))
-    if (n_frag <= 0 .or. nst <= 0) return
-
-    allocate(h_dense(nst, nst), s_dense(nst, nst))
-    do ispin = 1, dg_frag%nspin
-      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
-
-      nocc = nst
-      if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
-        nocc = min(nst, max(0, dg_frag%nocc_spin(ispin)))
-      end if
-      if (nocc <= 0) then
-        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-        cycle
-      end if
-
-      h_dense(:, :) = (0.0d0, 0.0d0)
-      s_dense(:, :) = (0.0d0, 0.0d0)
-      call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, nst, h_dense)
-      call copy_overlap_operator_to_dense(dg_frag, ispin, .true., s_dense)
-
-      allocate(c_occ(nst, nocc), h_c(nst, nocc), s_c(nst, nocc), r_c(nst, nocc))
-      c_occ(:, :) = coef_frag_all(1:nst, 1:nocc)
-      h_c(:, :) = matmul(h_dense, c_occ)
-      s_c(:, :) = matmul(s_dense, c_occ)
-
-      max_res = 0.0d0
-      max_rel = 0.0d0
-      accum_res = 0.0d0
-      io_max = 1
-      zero_eig_count = 0
-      filled_esp_count = 0
-      do io = 1, nocc
-        eig_file = dg_frag%esp(io, ispin)
-        eig_eff = eig_file
-        if (abs(eig_file) < 1.0d-14) then
-          num_h = real(sum(conjg(c_occ(:, io)) * h_c(:, io)))
-          den_s = real(sum(conjg(c_occ(:, io)) * s_c(:, io)))
-          if (abs(den_s) > 1.0d-20) then
-            eig_eff = num_h / den_s
-            if (do_update_esp) then
-              dg_frag%esp(io, ispin) = eig_eff
-              filled_esp_count = filled_esp_count + 1
-            end if
-          end if
-          zero_eig_count = zero_eig_count + 1
-        end if
-        r_c(:, io) = h_c(:, io) - eig_eff * s_c(:, io)
-        res_abs = sqrt(sum(abs(r_c(:, io))**2))
-        denom = sqrt(sum(abs(h_c(:, io))**2)) + sqrt(sum(abs(eig_eff * s_c(:, io))**2)) + 1.0d-30
-        rel_res = res_abs / denom
-        accum_res = accum_res + res_abs
-        if (res_abs > max_res) then
-          max_res = res_abs
-          max_rel = rel_res
-          io_max = io
-        end if
-      end do
-      avg_res = accum_res / dble(nocc)
-
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,1x,a,1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,i0,a,1pe12.4,a,1pe12.4)') &
-          "[DG-EIG-RES]", trim(stage_label), "ispin=", ispin, " nocc=", nocc, &
-          " zero_esp=", zero_eig_count, " max_abs=", max_res, " avg_abs=", avg_res, " state_max=", io_max, &
-          " eig=", dg_frag%esp(io_max, ispin), " rel_max=", max_rel
-        if (do_update_esp) then
-          write(*,'(1x,a,1x,a,1x,a,i0,a,i0)') "[DG-EIG-RES]", trim(stage_label), &
-            "ispin=", ispin, " filled_esp=", filled_esp_count
-        end if
-        do io = 1, min(nocc, trace_n)
-          eig_file = dg_frag%esp(io, ispin)
-          eig_eff = eig_file
-          if (abs(eig_file) < 1.0d-14) then
-            num_h = real(sum(conjg(c_occ(:, io)) * h_c(:, io)))
-            den_s = real(sum(conjg(c_occ(:, io)) * s_c(:, io)))
-            if (abs(den_s) > 1.0d-20) eig_eff = num_h / den_s
-          end if
-          write(*,'(1x,a,1x,a,1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') &
-            "[DG-EIG-RES-STATE]", trim(stage_label), "ispin=", ispin, " io=", io, &
-            " abs=", sqrt(sum(abs(r_c(:, io))**2)), " eig=", eig_eff
-        end do
-      end if
-
-      deallocate(c_occ, h_c, s_c, r_c)
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-    end do
-
-    deallocate(h_dense, s_dense)
-  end subroutine print_startup_eigen_residual_puredg
 
   subroutine reduce_matrix_fragment_blocks(dg_frag, mat, label, icomm_reduce)
     use communication, only: comm_is_root, comm_summation, comm_get_max

@@ -251,7 +251,6 @@ module rt_dg_fragment_types
     integer, allocatable :: current_valid_izg(:,:)              ! valid wrapped global z indices for microscopic current
     type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
     real(8), allocatable :: density_weight_local(:,:,:) ! static overlap count on local grid
-    real(8), allocatable :: density_inv_weight_local(:,:,:) ! inverse of static overlap count on local grid
     real(8), allocatable :: density_phi_block_cache(:,:,:,:) ! block-packed basis (block_size,nstate_frag,nblock_max,ifrag_local)
     integer, allocatable :: density_phi_block_count(:)       ! block count per local fragment
     integer :: density_phi_block_size = 0

@@ -13,7 +13,6 @@
 
     integer :: ifrag, io, jo, i_local, ispin
     integer :: ifrag_basis
-    integer :: ifrag_root_target
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, bx, by, bz, owner_rank
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
@@ -110,6 +109,7 @@
     integer, allocatable :: subgroup_self_ixg_tmp(:), subgroup_self_iyg_tmp(:), subgroup_self_izg_tmp(:)
     logical :: enable_density_reconstruct_trace
     logical :: enable_density_split_charge_probe
+    logical :: enable_density_renormalize
     integer :: env_len, env_status
     character(len=64) :: env_val
     real(8) :: coef_norm_probe, rho_probe_charge, phi_norm_probe, psi_norm_probe
@@ -150,11 +150,13 @@
     real(8) :: g211_pre_total_re, g211_pre_total_im
     real(8) :: phase_theta, phase_re, phase_im, g211_pred_re, g211_pred_im
     real(8) :: g211_re_line, g211_im_line, rho_val
+    real(8) :: charge_mismatch_abs, charge_mismatch_tol
     real(8), allocatable :: g211_cos_x(:), g211_sin_x(:)
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
 
     enable_density_reconstruct_trace = .false.
     enable_density_split_charge_probe = .false.
+    enable_density_renormalize = .false.
     call get_environment_variable("SALMON_DG_DENSITY_TRACE", env_val, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
       if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
@@ -169,6 +171,13 @@
         enable_density_split_charge_probe = .true.
       end if
     end if
+    call get_environment_variable("SALMON_DG_ALLOW_DENSITY_RENORMALIZE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_density_renormalize = .true.
+      end if
+    end if
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
@@ -180,10 +189,6 @@
     time_comm = 0.0d0
     time_norm = 0.0d0
     time_copy = 0.0d0
-    time_cleanup = 0.0d0
-    time_unaccounted = 0.0d0
-    time_preproject = 0.0d0
-    time_postproject_precomm = 0.0d0
     time_postcomm_prenorm = 0.0d0
     time_post_split_pw = 0.0d0
     time_post_dealloc = 0.0d0
@@ -196,15 +201,9 @@
     time_comm_exchange = 0.0d0
     time_comm_unpack = 0.0d0
     time_project_setup = 0.0d0
-    time_project_psi = 0.0d0
-    time_project_rho = 0.0d0
-    time_project_grid_prep = 0.0d0
     time_project_phi_pack = 0.0d0
     time_project_overhead = 0.0d0
     time_project_dmat_build = 0.0d0
-    time_project_rho_reduce = 0.0d0
-    time_project_phi_block_build = 0.0d0
-    time_cache_pw_refresh = 0.0d0
     time_cache_phi_block_refresh = 0.0d0
     orbital_norm_probe_local(:) = 0.0d0
     orbital_norm_probe_total(:) = 0.0d0
@@ -445,24 +444,6 @@
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
-        ifrag_basis = ifrag
-        if (allocated(dg_frag%id_array_spatial) .and. allocated(dg_frag%id_array_file)) then
-          if (ifrag >= 1 .and. ifrag <= size(dg_frag%id_array_spatial)) then
-            ifrag_root_target = dg_frag%id_array_spatial(ifrag)
-            do jo = 1, dg_frag%n_frag
-              if (jo <= size(dg_frag%id_array_file) .and. dg_frag%id_array_file(jo) == ifrag_root_target) then
-                ifrag_basis = jo
-                exit
-              end if
-            end do
-          end if
-        else if (allocated(dg_frag%ifrag_file_of_spatial)) then
-          if (ifrag >= 1 .and. ifrag <= size(dg_frag%ifrag_file_of_spatial)) then
-            if (dg_frag%ifrag_file_of_spatial(ifrag) >= 1 .and. dg_frag%ifrag_file_of_spatial(ifrag) <= dg_frag%n_frag) then
-              ifrag_basis = dg_frag%ifrag_file_of_spatial(ifrag)
-            end if
-          end if
-        end if
         frag_trace_sumspin = 0.0d0
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
         ngrid = nxyz(1) * nxyz(2) * nxyz(3)
@@ -817,6 +798,7 @@
       block_idx_global = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
+        ifrag_basis = ifrag
         frag_trace_sumspin = 0.0d0
         frag_charge_sumspin = 0.0d0
         frag_coeff_occ_norm_sumspin = 0.0d0
@@ -1325,9 +1307,6 @@
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
                   rho_raw_contrib = rho_blk(igrid)
                   rho_contrib = rho_raw_contrib
-                  if (allocated(dg_frag%density_inv_weight_local)) then
-                    rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-                  end if
                   bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
                   by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
                   bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
@@ -1617,15 +1596,9 @@
                     rho_raw_contrib = rho_blk_accum(igrid)
                     if (split_pw_density .and. enable_density_split_charge_probe) charge_fragment_postowner_local = charge_fragment_postowner_local + rho_raw_contrib * system%hvol
                     rho_contrib = rho_raw_contrib
-                    if (allocated(dg_frag%density_inv_weight_local)) then
-                      rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-                    end if
                     rho_mix_accum = 0.0d0
                     if (split_pw_density) then
                       rho_mix_accum = rho_blk_cross_partial(igrid)
-                      if (allocated(dg_frag%density_inv_weight_local)) then
-                        rho_mix_accum = rho_mix_accum * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-                      end if
                     end if
                     frag_owner_charge_sumspin = frag_owner_charge_sumspin + (rho_contrib + rho_mix_accum) * system%hvol
                     bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
@@ -1691,9 +1664,6 @@
                       stop "DG-Fragment RT: density accum slot out of range"
                     end if
                     rho_contrib = rho_blk_accum(igrid)
-                    if (allocated(dg_frag%density_inv_weight_local)) then
-                      rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg_buf(igrid), iyg_buf(igrid), izg_buf(igrid))
-                    end if
                     frag_remote_send_sumspin = frag_remote_send_sumspin + rho_contrib * system%hvol
                     rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
                     spin_offset = ispin * dg_frag%density_send_count(owner_rank)
@@ -1766,7 +1736,7 @@
           write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        density frag coef consistency: rank=", dg_frag%id, &
             " ifrag=", ifrag, " occ_c2_sumspin=", frag_coeff_occ_norm_sumspin, &
             " D_diag_sumspin=", frag_d_diag_sumspin, " TrSD_sumspin=", frag_trace_sumspin
-          write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        density frag comm split: rank=", dg_frag%id, &
+          write(*,'(1x,a,i0,a,i0,a,1pe20.12,a,1pe20.12,a,1pe20.12)') "        density frag comm split: rank=", dg_frag%id, &
             " ifrag=", ifrag, " owner_apply=", frag_owner_charge_sumspin, &
             " remote_send=", frag_remote_send_sumspin, " total=", frag_owner_charge_sumspin + frag_remote_send_sumspin
           flush(6)
@@ -2007,9 +1977,6 @@
       end if
       rho_raw_contrib = rho_recv(irank)%f(slot, 1, 1)
       rho_contrib = rho_raw_contrib
-      if (allocated(dg_frag%density_inv_weight_local)) then
-        rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-      end if
       rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
       do ispin = 1, system%nspin
         spin_offset = ispin * npts
@@ -2022,9 +1989,6 @@
           stop "DG-Fragment RT: density unpack spin slot bounds"
         end if
         rho_contrib = rho_recv(irank)%f(spin_offset + slot, 1, 1)
-        if (allocated(dg_frag%density_inv_weight_local)) then
-          rho_contrib = rho_contrib * dg_frag%density_inv_weight_local(ixg, iyg, izg)
-        end if
         rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
       end do
       end do
@@ -2151,10 +2115,24 @@
     end if
     dg_frag%elec_num_raw = total_charge
     dg_frag%rho_scale_factor = 1.0d0
+    charge_mismatch_abs = abs(total_charge - target_charge)
+    charge_mismatch_tol = max(1.0d-8, 1.0d-2 * max(1.0d0, target_charge))
+    if (.not. enable_density_renormalize .and. total_charge > 1.0d-14 .and. total_charge == total_charge) then
+      if (charge_mismatch_abs > charge_mismatch_tol) then
+        if (dg_frag%id == 0) then
+          write(*,'(1x,a)') "[FATAL] DG density charge mismatch detected before renormalization."
+          write(*,'(1x,a,3(1pe14.6,1x),a,l1)') "        charge raw/target/diff=", total_charge, target_charge, &
+            total_charge - target_charge, " allow_renorm=", enable_density_renormalize
+          write(*,'(1x,a)') "        set SALMON_DG_ALLOW_DENSITY_RENORMALIZE=1 only for temporary comparison runs"
+          flush(6)
+        end if
+        stop "DG-Fragment RT: density charge mismatch before renormalization"
+      end if
+    end if
     if (total_charge > 1.0d-14 .and. total_charge == total_charge) then
       scale_rho = target_charge / total_charge
       dg_frag%rho_scale_factor = scale_rho
-      if (abs(scale_rho - 1.0d0) > 1.0d-14) then
+      if (enable_density_renormalize .and. abs(scale_rho - 1.0d0) > 1.0d-14) then
         if (system%nspin == 1) then
 !$omp parallel do collapse(3) private(ix,iy,iz,rho_sum_local) schedule(static)
           do iz = rho_z_lo, rho_z_hi

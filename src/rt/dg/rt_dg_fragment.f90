@@ -337,12 +337,7 @@ contains
       call prebuild_fragment_mapping_from_local_probe(dg_frag, mg, bdir_frag)
       call validate_fragment_id_mapping(dg_frag, "pre-read")
       call read_fragment_basis_data(dg_frag, bdir_frag)
-      call apply_fragment_mapping_to_metadata(dg_frag, "post-read-prebuilt")
-      ! Keep pre-read spatial<->file mapping as authoritative in this phase.
-      ! Post-read overlap rebuild is deferred until coefficient/file ownership paths
-      ! are fully separated.
       call validate_fragment_id_mapping(dg_frag, "post-read")
-        call trace_fragment_assignment_overlap(dg_frag)
       if (allocated(dg_frag%occ_state) .and. allocated(system%rocc)) then
         ! Keep DG occupations tied to propagated orbital indices, not basis/eigenstate labels.
         dg_frag%occ_state(:, :) = 0.0d0
@@ -530,12 +525,10 @@ contains
   end subroutine init_dg_fragment_rt
 
   subroutine build_density_grid_owner_maps(dg_frag)
-    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
-    integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
-    integer :: file_ifrag, root_rank_frag
+    integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, file_ifrag, root_rank_frag, i
     integer :: subgroup_target_rank, subgroup_self_count
     integer :: ifrag_count
     integer :: nx_max, ny_max, nz_max
@@ -543,8 +536,30 @@ contains
     integer :: primary_count_local, primary_owned_local, primary_remote_local
     integer :: local_send_pts, local_recv_pts, global_send_pts, global_recv_pts
     integer :: self_source_owned_pts, self_source_total_pts, global_self_source_owned_pts, global_self_source_total_pts
+    integer :: env_status, env_len
     integer, allocatable :: recv_count(:), recv_cursor(:)
+    character(len=64) :: env_mode
     logical, parameter :: enable_density_owner_map_probe = .false.
+    logical :: use_root_only_sender
+
+    use_root_only_sender = .true.
+    env_mode = ""
+    call get_environment_variable("SALMON_DG_DENSITY_SOURCE_ROOT_ONLY", env_mode, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_mode(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        use_root_only_sender = .true.
+      case('n','N','no','NO','false','FALSE','0')
+        use_root_only_sender = .false.
+      end select
+    end if
+    if (dg_frag%id == 0) then
+      if (use_root_only_sender) then
+        write(*,'(1x,a)') "[INFO] Density source mode: fragment-root-only sender"
+      else
+        write(*,'(1x,a)') "[INFO] Density source mode: distributed per-grid sender"
+      end if
+    end if
 
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
     if (allocated(dg_frag%density_primary_local_map)) deallocate(dg_frag%density_primary_local_map)
@@ -552,7 +567,6 @@ contains
     if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
     if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
-    if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
     if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
@@ -667,7 +681,9 @@ contains
             source_rank = root_rank_frag
             subgroup_target_rank = source_rank - root_rank_frag
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
-              source_rank = get_fragment_grid_sender_rank(source_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+              if (.not. use_root_only_sender) then
+                source_rank = get_fragment_grid_sender_rank(source_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+              end if
               subgroup_target_rank = source_rank - root_rank_frag
               if (subgroup_target_rank < 0 .or. subgroup_target_rank > dg_frag%isize_frag - 1) then
                 write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -773,7 +789,10 @@ contains
           iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
-            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            source_rank = source_root_rank
+            if (.not. use_root_only_sender) then
+              source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            end if
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (source_rank == dg_frag%id) then
               self_source_total_pts = self_source_total_pts + 1
@@ -890,7 +909,10 @@ contains
           iyg = wrap_global_grid_index(dg_frag%frag_core_lo(2, ifrag) + iy - 1, dg_frag%lgnum_total(2))
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
-            source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            source_rank = source_root_rank
+            if (.not. use_root_only_sender) then
+              source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+            end if
             if (source_rank == dg_frag%id) cycle
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg)
             if (owner_rank == dg_frag%id) then
@@ -1263,12 +1285,13 @@ contains
     integer :: nbasis_iter
     integer :: n_mat_cap, n_mat_cap_env, ienv
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
+    integer :: nocc_diag, nocc_diag_spin
     integer :: env_status, env_len
-    character(len=64) :: env_n_mat_cap, env_use_buffered_basis, env_meta_trace
+    character(len=64) :: env_n_mat_cap, env_use_buffered_basis, env_disable_basis_cap
     logical :: warned_spin_discard
-    logical :: use_buffered_basis, have_buffered_coef, have_buffered_occ_any, enable_meta_trace
+    logical :: use_buffered_basis, have_buffered_coef, have_buffered_occ_any
+    logical :: disable_basis_cap
     real(8) :: cap_avg, weight_best
-    real(8) :: coef_file_probe(3), coef_global_probe(3)
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
 
@@ -1286,14 +1309,18 @@ contains
     dg_frag%use_buffered_basis = use_buffered_basis
     have_buffered_coef = .false.
     have_buffered_occ_any = .false.
-    enable_meta_trace = .false.
-    env_meta_trace = ""
-    call get_environment_variable("SALMON_DG_BASIS_META_TRACE", env_meta_trace, length=env_len, status=env_status)
+    disable_basis_cap = .false.
+    env_disable_basis_cap = ""
+    call get_environment_variable("SALMON_DG_DISABLE_BASIS_CAP", env_disable_basis_cap, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
-      select case(trim(adjustl(env_meta_trace(1:env_len))))
+      select case(trim(adjustl(env_disable_basis_cap(1:env_len))))
       case('y','Y','yes','YES','true','TRUE','1')
-        enable_meta_trace = .true.
+        disable_basis_cap = .true.
       end select
+    end if
+    if (dg_frag%id == 0 .and. disable_basis_cap) then
+      write(*,'(1x,a)') "[INFO] DG basis cap is disabled by SALMON_DG_DISABLE_BASIS_CAP"
+      flush(6)
     end if
     
     ! Step 1: Root reads metadata from first fragment and broadcasts
@@ -1392,17 +1419,6 @@ contains
     dg_frag%index_basis = index_basis_tmp
     dg_frag%n_mat(1:dg_frag%nspin) = n_mat_tmp(1:dg_frag%nspin)
     dg_frag%n_mat_max = maxval(n_mat_tmp(1:dg_frag%nspin))
-    if (enable_meta_trace .and. dg_frag%id == 0) then
-      write(*,'(1x,a)') "[META-TRACE] DG basis metadata summary"
-      do ifrag = 1, dg_frag%n_frag
-        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x))') "[META-TRACE] ifrag=", ifrag, &
-          " n_basis(spin1)=", dg_frag%n_basis(ifrag, 1), &
-          " index1=", dg_frag%index_basis(1, ifrag, 1), " index2-4=", &
-          dg_frag%index_basis(min(2,dg_frag%nstate_frag), ifrag, 1), &
-          dg_frag%index_basis(min(3,dg_frag%nstate_frag), ifrag, 1), &
-          dg_frag%index_basis(min(4,dg_frag%nstate_frag), ifrag, 1)
-      end do
-    end if
     if (use_buffered_basis .and. dg_frag%id == 0) then
       write(*,'(1x,a,99(1x,i0))') "[INFO] Buffered metadata n_mat(file)=", dg_frag%n_mat(1:dg_frag%nspin)
     end if
@@ -1560,43 +1576,45 @@ contains
     coef_local = 0.0d0
     occ_state_local(:, :) = 0.0d0
     occ_state_sum(:, :) = 0.0d0
-    coef_file_probe(:) = 0.0d0
-    coef_global_probe(:) = 0.0d0
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
       file_ifrag = map_spatial_to_file_ifrag(dg_frag, ifrag)
-      
-      iunit = get_filehandle()
-      if (use_buffered_basis) then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wfb
-        inquire(file=filename, exist=have_buffered_coef)
-        if (.not. have_buffered_coef) then
+
+      if (dg_frag%id_frag == 0) then
+        iunit = get_filehandle()
+        if (use_buffered_basis) then
+          write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wfb
+          inquire(file=filename, exist=have_buffered_coef)
+          if (.not. have_buffered_coef) then
+            write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
+          end if
+        else
           write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
         end if
-      else
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_wf
-      end if
-      
-      open(iunit, file=filename, form='unformatted', access='stream', status='old')
-      
-      ! Read header
-      read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
-      
-      ! Read metadata blocks
-      read(iunit) n_mat_tmp(1:dg_frag%nspin)
-      read(iunit) n_basis_tmp(1:dg_frag%n_frag, 1:dg_frag%nspin)
-      read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
 
-      ! Read coefficient block with file dimensions and map into runtime dimensions
-      allocate(coef_tmp(dg_frag%nstate_frag, nstate_tot_file, dg_frag%nspin))
-      coef_tmp = 0.0d0
-      read(iunit) coef_tmp(1:dg_frag%nstate_frag, 1:nstate_tot_file, 1:dg_frag%nspin)
-      coef_local(1:dg_frag%nstate_frag, 1:min(dg_frag%nstate_tot, nstate_tot_file), 1:dg_frag%nspin, i_local) = &
-        coef_tmp(1:dg_frag%nstate_frag, 1:min(dg_frag%nstate_tot, nstate_tot_file), 1:dg_frag%nspin)
-      deallocate(coef_tmp)
-      
-      close(iunit)
+        open(iunit, file=filename, form='unformatted', access='stream', status='old')
+
+        ! Read header
+        read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+
+        ! Read metadata blocks
+        read(iunit) n_mat_tmp(1:dg_frag%nspin)
+        read(iunit) n_basis_tmp(1:dg_frag%n_frag, 1:dg_frag%nspin)
+        read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
+
+        ! Read coefficient block with file dimensions and map into runtime dimensions
+        allocate(coef_tmp(dg_frag%nstate_frag, nstate_tot_file, dg_frag%nspin))
+        coef_tmp = 0.0d0
+        read(iunit) coef_tmp(1:dg_frag%nstate_frag, 1:nstate_tot_file, 1:dg_frag%nspin)
+        coef_local(1:dg_frag%nstate_frag, 1:min(dg_frag%nstate_tot, nstate_tot_file), 1:dg_frag%nspin, i_local) = &
+          coef_tmp(1:dg_frag%nstate_frag, 1:min(dg_frag%nstate_tot, nstate_tot_file), 1:dg_frag%nspin)
+        deallocate(coef_tmp)
+
+        close(iunit)
+      end if
+
+      call comm_bcast(coef_local(:, :, :, i_local), dg_frag%icomm_frag, 0)
 
       if (use_buffered_basis) then
         write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_occb
@@ -1623,6 +1641,7 @@ contains
         end if
       end if
     end do
+
 
     if (use_buffered_basis) then
       if (have_buffered_occ_any) then
@@ -1655,18 +1674,9 @@ contains
       end do
     end if
 
-    if (dg_frag%id == 0) then
-      do io = 1, min(3, dg_frag%nstate_tot)
-        coef_file_probe(io) = sum(abs(coef_local(:, io, 1:dg_frag%nspin, 1:ifrag_count))**2)
-      end do
-      write(*,'(1x,a,3(1pe12.4,1x))') "        coef init probe: file-local c2=", &
-        coef_file_probe(1), coef_file_probe(2), coef_file_probe(3)
-      flush(6)
-    end if
-
     deallocate(occ_state_local, occ_state_sum)
 
-    if ((.not. use_buffered_basis) .and. n_mat_cap < 1 .and. trim(dg_nmat_cap_mode) == 'occ_multiple' .and. dg_nmat_cap_multiple > 0.0d0) then
+    if ((.not. disable_basis_cap) .and. (.not. use_buffered_basis) .and. n_mat_cap < 1 .and. trim(dg_nmat_cap_mode) == 'occ_multiple' .and. dg_nmat_cap_multiple > 0.0d0) then
       if (dg_frag%nspin == 1) then
         nocc_max = max(1, min((nelec + 1) / 2, dg_frag%nstate_tot))
       else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
@@ -1825,19 +1835,6 @@ contains
         end do
       end do
     end do
-
-    if (dg_frag%id == 0) then
-      do io = 1, min(3, dg_frag%nstate_tot)
-        coef_global_probe(io) = sum(abs(dg_frag%coef(:, io, 1:dg_frag%nspin))**2)
-      end do
-      write(*,'(1x,a,3(1pe12.4,1x))') "        coef init probe: global c2=", &
-        coef_global_probe(1), coef_global_probe(2), coef_global_probe(3)
-      if (use_buffered_basis) then
-        write(*,'(1x,a,3(1pe12.4,1x))') "        occ init probe=", &
-          dg_frag%occ_state(1,1), dg_frag%occ_state(min(2,dg_frag%nstate_tot),1), dg_frag%occ_state(min(3,dg_frag%nstate_tot),1)
-      end if
-      flush(6)
-    end if
 
     ! Keep coefficients only on the owning fragment ranks.
 
@@ -2167,56 +2164,6 @@ contains
       ov = max(ov, max(0, min(seg_e, local_e) - max(seg_s, local_s) + 1))
     end do
   end function periodic_axis_overlap
-
-  subroutine trace_fragment_assignment_overlap(dg_frag)
-    use communication, only: comm_is_root
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-
-    character(32) :: env_trace
-    integer :: env_len, env_status
-    logical :: enable_trace
-    integer :: ifrag, ov(3), assigned_overlap, overlap_vol
-    integer :: best_spatial_ifrag, best_file_ifrag, best_overlap
-
-    env_trace = ''
-    call get_environment_variable("SALMON_DG_ASSIGNMENT_TRACE", env_trace, length=env_len, status=env_status)
-    enable_trace = .false.
-    if (env_status == 0 .and. env_len > 0) then
-      select case (env_trace(1:1))
-      case ('1', 'y', 'Y', 't', 'T')
-        enable_trace = .true.
-      end select
-    end if
-    if (.not. enable_trace) return
-    if (.not. allocated(dg_frag%ixyz_frag) .or. .not. allocated(dg_frag%nxyz_domain)) return
-
-    assigned_overlap = 0
-    best_spatial_ifrag = 0
-    best_overlap = -1
-    do ifrag = 1, dg_frag%n_frag
-      ov(1) = periodic_axis_overlap(dg_frag%ixyz_frag(1, ifrag), dg_frag%nxyz_domain(1, ifrag), dg_frag%mg%is(1), dg_frag%mg%ie(1), dg_frag%lgnum_total(1))
-      ov(2) = periodic_axis_overlap(dg_frag%ixyz_frag(2, ifrag), dg_frag%nxyz_domain(2, ifrag), dg_frag%mg%is(2), dg_frag%mg%ie(2), dg_frag%lgnum_total(2))
-      ov(3) = periodic_axis_overlap(dg_frag%ixyz_frag(3, ifrag), dg_frag%nxyz_domain(3, ifrag), dg_frag%mg%is(3), dg_frag%mg%ie(3), dg_frag%lgnum_total(3))
-      overlap_vol = ov(1) * ov(2) * ov(3)
-      if (ifrag == dg_frag%ifrag_group) assigned_overlap = overlap_vol
-      if (overlap_vol > best_overlap) then
-        best_overlap = overlap_vol
-        best_spatial_ifrag = ifrag
-      end if
-    end do
-
-    best_file_ifrag = map_spatial_to_file_ifrag(dg_frag, best_spatial_ifrag)
-        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0,a,i0)') &
-         "dg-assign-trace: rank=", dg_frag%id, " assigned_ifrag=", dg_frag%ifrag_group, &
-          " best_spatial_ifrag=", best_spatial_ifrag, &
-         " mg_is=", dg_frag%mg%is(1), dg_frag%mg%is(2), dg_frag%mg%is(3), &
-         " mg_ie=", dg_frag%mg%ie(1), dg_frag%mg%ie(2), dg_frag%mg%ie(3), &
-         " assigned_overlap=", assigned_overlap, " best_ifrag=", best_file_ifrag, " best_overlap=", best_overlap
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a)') "[INFO] SALMON_DG_ASSIGNMENT_TRACE enabled"
-    end if
-  end subroutine trace_fragment_assignment_overlap
 
   subroutine load_buffered_fragment_esp(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
@@ -2746,7 +2693,6 @@ contains
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
     if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
-    if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
@@ -2964,7 +2910,7 @@ contains
       if (inv_seen(file_ifrag) /= 1) bad_local = bad_local + 1
       spatial_ifrag = dg_frag%ifrag_spatial_of_file(file_ifrag)
       if (spatial_ifrag >= 1 .and. spatial_ifrag <= dg_frag%n_frag) then
-        dg_frag%id_array_file(file_ifrag) = dg_frag%id_array_spatial(spatial_ifrag)
+        dg_frag%id_array_file(file_ifrag) = get_fragment_group_root_rank(file_ifrag, dg_frag%isize_frag)
       else
         dg_frag%id_array_file(file_ifrag) = -1
       end if
@@ -2997,12 +2943,19 @@ contains
   subroutine prebuild_fragment_mapping_from_local_probe(dg_frag, mg, bdir_frag)
     use communication, only: comm_summation, comm_get_max
     use structures, only: s_rgrid
+    use filesystem, only: get_filehandle
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_rgrid), intent(in) :: mg
     character(*), intent(in) :: bdir_frag
 
+    character(32), parameter :: binfile_rg = "rgrid_index.bin"
+    character(256) :: filename
     integer :: local_file_ifrag, spatial_ifrag, file_ifrag
+    integer :: iunit, n, ix
+    integer :: lgnum_frag(3), lgnum_total(3), ixyz_file(3), nxyz_file(3)
+    integer :: ov(3), overlap_vol, best_overlap
+    integer, allocatable :: jxyz_tot(:,:)
     integer :: bad_local, bad_global
     integer :: env_status, env_len
     character(len=64) :: env_trace
@@ -3029,12 +2982,51 @@ contains
     map_local = 0
     map_sum = 0
     inv_seen = 0
+    allocate(jxyz_tot(max(1, maxval(dg_frag%lgnum_total)), 3))
+    jxyz_tot = 0
 
-    local_file_ifrag = dg_frag%ifrag_group
-    call infer_fragment_group_from_metadata(dg_frag, mg, bdir_frag, local_file_ifrag)
-    if (dg_frag%ifrag_group >= 1 .and. dg_frag%ifrag_group <= dg_frag%n_frag) then
-      map_local(dg_frag%ifrag_group) = local_file_ifrag
+    if (dg_frag%id_frag == 0) then
+      best_overlap = -1
+      local_file_ifrag = dg_frag%ifrag_group
+      do file_ifrag = 1, dg_frag%n_frag
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), file_ifrag, '/', binfile_rg
+        iunit = get_filehandle()
+        open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=bad_local)
+        if (bad_local /= 0) cycle
+        read(iunit, iostat=bad_local) lgnum_frag(1:3), lgnum_total(1:3)
+        if (bad_local /= 0) then
+          close(iunit)
+          cycle
+        end if
+        do n = 1, 3
+          read(iunit, iostat=bad_local) jxyz_tot(1:lgnum_frag(n), n)
+          if (bad_local /= 0) exit
+        end do
+        close(iunit)
+        if (bad_local /= 0) cycle
+
+        do n = 1, 3
+          ixyz_file(n) = jxyz_tot(1, n)
+          nxyz_file(n) = lgnum_frag(n)
+        end do
+
+        ov(1) = periodic_axis_overlap(ixyz_file(1), nxyz_file(1), mg%is(1), mg%ie(1), dg_frag%lgnum_total(1))
+        ov(2) = periodic_axis_overlap(ixyz_file(2), nxyz_file(2), mg%is(2), mg%ie(2), dg_frag%lgnum_total(2))
+        ov(3) = periodic_axis_overlap(ixyz_file(3), nxyz_file(3), mg%is(3), mg%ie(3), dg_frag%lgnum_total(3))
+        overlap_vol = ov(1) * ov(2) * ov(3)
+        if (overlap_vol > best_overlap) then
+          best_overlap = overlap_vol
+          local_file_ifrag = file_ifrag
+        end if
+      end do
+
+      if (dg_frag%ifrag_group >= 1 .and. dg_frag%ifrag_group <= dg_frag%n_frag) then
+        map_local(dg_frag%ifrag_group) = local_file_ifrag
+      end if
     end if
+
+    if (allocated(jxyz_tot)) deallocate(jxyz_tot)
+
     call comm_summation(map_local, map_sum, dg_frag%n_frag, dg_frag%icomm)
 
     bad_local = 0
@@ -3225,33 +3217,75 @@ contains
   end subroutine validate_coef_owner_map
 
   subroutine rebuild_coef_owner_map(dg_frag, stage_label)
+    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: stage_label
 
-    integer :: ispin, ifrag, io, global_idx, nbasis_iter
+    integer :: ispin, ifrag, io, global_idx, nbasis_iter, owner_new
+    integer :: env_status, env_len
+    integer :: conflict_local
+    character(len=64) :: env_owner_io_split
+    logical :: owner_root_only
+    logical, save :: printed_owner_mode = .false.
 
-    if (.not. allocated(dg_frag%id_array_file)) then
-      write(*,'(1x,a,a,a,i0)') "[FATAL] id_array_file is not allocated before coef owner build: stage=", &
+    owner_root_only = .true.
+    env_owner_io_split = ""
+    env_status = 1
+    env_len = 0
+    call get_environment_variable("SALMON_DG_COEF_OWNER_IO_SPLIT", env_owner_io_split, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_owner_io_split(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        owner_root_only = .false.
+      end select
+    end if
+
+    if (dg_frag%id == 0 .and. .not. printed_owner_mode) then
+      if (owner_root_only) then
+        write(*,'(1x,a)') "[INFO] DG coef owner mode: root-only (io split disabled)"
+      else
+        write(*,'(1x,a)') "[INFO] DG coef owner mode: io-split (legacy)"
+      end if
+      flush(6)
+      printed_owner_mode = .true.
+    end if
+
+    if (.not. allocated(dg_frag%id_array)) then
+      write(*,'(1x,a,a,a,i0)') "[FATAL] id_array is not allocated before coef owner build: stage=", &
         trim(stage_label), " rank=", dg_frag%id
-      stop "DG-Fragment RT: missing id_array_file before coef owner build"
+      stop "DG-Fragment RT: missing id_array before coef owner build"
     end if
 
     if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
     allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
     dg_frag%coef_owner(:, :) = -1
     dg_frag%H_local_block_ids_valid = .false.
+    conflict_local = 0
     do ispin = 1, dg_frag%nspin
       do ifrag = 1, dg_frag%n_frag
         nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
         do io = 1, nbasis_iter
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
           if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-            dg_frag%id_array_file(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+          if (owner_root_only) then
+            owner_new = dg_frag%id_array(ifrag)
+          else
+            owner_new = get_subgroup_block_owner_rank(dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+          end if
+          if (dg_frag%coef_owner(global_idx, ispin) == -1) then
+            dg_frag%coef_owner(global_idx, ispin) = owner_new
+          else if (dg_frag%coef_owner(global_idx, ispin) /= owner_new) then
+            conflict_local = conflict_local + 1
+          end if
         end do
       end do
     end do
+
+    if (dg_frag%id == 0 .and. conflict_local > 0) then
+      write(*,'(1x,a,a,a,i0)') "[WARN] coef_owner conflicts detected (kept first owner): stage=", &
+        trim(stage_label), " conflicts=", conflict_local
+    end if
 
     dg_frag%owned_coef_start = 0
     dg_frag%owned_coef_end = -1
