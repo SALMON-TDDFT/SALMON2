@@ -360,7 +360,10 @@
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
         end if
-        dcoef_dt_h0(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :) + 0.5d0 * A_squared * coef_all(1:n_tot, :)
+        ! NOTE:
+        ! In mixed-basis mode, H0c already includes the diamagnetic A^2/2 term
+        ! (either from uniform A_squared on the diagonal or from A2_mat in the
+        ! spatial-A path). Adding it again here double-counts A^2.
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
 
