@@ -1935,11 +1935,22 @@
     call cpu_time(t_setup0)
     do irank = 0, dg_frag%isize - 1
       if (.not. allocated(rho_recv(irank)%f)) cycle
-      if (recv_counts(irank + 1) > 0) then
-        rho_recv(irank)%f(:, 1, 1) = recv_flat(recv_displs(irank + 1)+1:recv_displs(irank + 1)+recv_counts(irank + 1))
+      if (recv_counts(irank + 1) <= 0) then
+        deallocate(rho_recv(irank)%f)
+        cycle
       end if
+      rho_recv(irank)%f(:, 1, 1) = recv_flat(recv_displs(irank + 1)+1:recv_displs(irank + 1)+recv_counts(irank + 1))
+
       npts = dg_frag%density_recv_map(irank)%npts
-      if (recv_counts(irank + 1) /= (system%nspin + 1) * npts) then
+      if (npts < 0) npts = -1
+      if ((system%nspin + 1) > 0) then
+        if (npts < 0 .or. recv_counts(irank + 1) /= (system%nspin + 1) * npts) then
+          if (mod(recv_counts(irank + 1), system%nspin + 1) == 0) then
+            npts = recv_counts(irank + 1) / (system%nspin + 1)
+          end if
+        end if
+      end if
+      if (npts < 0 .or. recv_counts(irank + 1) /= (system%nspin + 1) * npts) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
           "[FATAL] density unpack recv size mismatch: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " peer=", irank, &
@@ -2047,6 +2058,33 @@
       end if
       rho_s(ispin)%f(:, :, :) = rho_s_bf(:, :, :, ispin)
     end do
+    ! Rebuild rho from spin channels to keep charge accounting consistent
+    ! with the authoritative spin-resolved density field.
+    if (system%nspin == 1) then
+!$omp parallel do collapse(3) private(ix,iy,iz) schedule(static)
+      do iz = rho_z_lo, rho_z_hi
+        do iy = rho_y_lo, rho_y_hi
+          do ix = rho_x_lo, rho_x_hi
+            rho%f(ix, iy, iz) = rho_s(1)%f(ix, iy, iz)
+          end do
+        end do
+      end do
+!$omp end parallel do
+    else
+!$omp parallel do collapse(3) private(ix,iy,iz,ispin,rho_sum_local) schedule(static)
+      do iz = rho_z_lo, rho_z_hi
+        do iy = rho_y_lo, rho_y_hi
+          do ix = rho_x_lo, rho_x_hi
+            rho_sum_local = 0.0d0
+            do ispin = 1, system%nspin
+              rho_sum_local = rho_sum_local + rho_s(ispin)%f(ix, iy, iz)
+            end do
+            rho%f(ix, iy, iz) = rho_sum_local
+          end do
+        end do
+      end do
+!$omp end parallel do
+    end if
     call cpu_time(t_copy1)
     time_copy = time_copy + (t_copy1 - t_copy0)
     if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then

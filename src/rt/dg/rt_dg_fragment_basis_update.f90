@@ -912,7 +912,8 @@
     
     ! Recalculate RT operators only when requested or when not yet available.
     if (rebuild_rt_operators .or. (.not. allocated(dg_frag%momentum_blocks) .and. .not. allocated(dg_frag%momentum_mat)) .or. &
-        .not. allocated(dg_frag%S_mat)) then
+      (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_blocks) .and. &
+       .not. allocated(dg_frag%S_mat_prop_blocks))) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-rt-operator-recalc"
       flush(6)

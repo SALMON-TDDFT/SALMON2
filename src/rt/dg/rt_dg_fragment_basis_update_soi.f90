@@ -854,7 +854,8 @@
     
     ! Recalculate RT operators only when requested or when not yet available.
     if (rebuild_rt_operators .or. .not. allocated(dg_frag%momentum_mat) .or. .not. allocated(dg_frag%momentum_mat_c) .or. &
-        .not. allocated(dg_frag%S_mat) .or. .not. allocated(dg_frag%S_mat_c)) then
+      ((.not. allocated(dg_frag%S_mat) .or. .not. allocated(dg_frag%S_mat_c)) .and. &
+       .not. allocated(dg_frag%S_mat_blocks) .and. .not. allocated(dg_frag%S_mat_prop_blocks))) then
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  Recalculating momentum matrix for updated basis..."
       end if

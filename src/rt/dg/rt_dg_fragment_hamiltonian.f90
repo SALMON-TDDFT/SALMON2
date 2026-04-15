@@ -1547,6 +1547,9 @@
               end select
               ! dH/dA(face) = avg-avg term + avg-jump term on each interface.
               halo_integral_m = halo_integral_m_avgavg + halo_integral_m_avgjump
+              ! Neighbor-face off-diagonal coupling is SIPG/kinetic only.
+              ! Hartree/XC (Vh/Vxc) are volume-local terms and are not taken
+              ! from neighbor blocks in this halo path.
               halo_integral_h = halo_integral_t
               halo_partial_t(io) = halo_integral_t
               halo_partial_h(io) = halo_integral_h
@@ -1558,14 +1561,15 @@
             !$omp end parallel do
 
             halo_reduce_pair(1:n_basis_halo) = halo_partial_t(1:n_basis_halo)
-            halo_reduce_pair(n_basis_halo + 1:2 * n_basis_halo) = halo_partial_h(1:n_basis_halo)
+            ! Keep H halo channel identical to kinetic SIPG channel by design.
+            halo_reduce_pair(n_basis_halo + 1:2 * n_basis_halo) = halo_partial_t(1:n_basis_halo)
             halo_reduce_pair(2 * n_basis_halo + 1:3 * n_basis_halo) = halo_partial_m(1:n_basis_halo)
             halo_reduce_pair(3 * n_basis_halo + 1:4 * n_basis_halo) = halo_partial_a(1:n_basis_halo)
             halo_reduce_pair(4 * n_basis_halo + 1:5 * n_basis_halo) = halo_partial_b(1:n_basis_halo)
             halo_reduce_pair(5 * n_basis_halo + 1:6 * n_basis_halo) = halo_partial_c(1:n_basis_halo)
             call comm_summation(halo_reduce_pair, halo_reduce_sum, 6 * n_basis_halo, dg_frag%icomm_frag)
             halo_reduced_t(1:n_basis_halo) = halo_reduce_sum(1:n_basis_halo)
-            halo_reduced_h(1:n_basis_halo) = halo_reduce_sum(n_basis_halo + 1:2 * n_basis_halo)
+            halo_reduced_h(1:n_basis_halo) = halo_reduced_t(1:n_basis_halo)
             halo_reduced_m(1:n_basis_halo) = halo_reduce_sum(2 * n_basis_halo + 1:3 * n_basis_halo)
             halo_reduced_a(1:n_basis_halo) = halo_reduce_sum(3 * n_basis_halo + 1:4 * n_basis_halo)
             halo_reduced_b(1:n_basis_halo) = halo_reduce_sum(4 * n_basis_halo + 1:5 * n_basis_halo)
@@ -3123,7 +3127,7 @@
     integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
-    integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
+    integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag, nblk_use
     integer :: npts_local, npts_halo, ipt, nx_local, ny_local
     integer :: n_basis_halo_max, npts_halo_max
     logical :: log_frag_progress, has_overlap
@@ -3555,26 +3559,28 @@
       real(8) :: meta_sig_blocks_min(1), meta_sig_blocks_max(1)
       real(8) :: meta_sig_basis_min(1), meta_sig_basis_max(1)
       call cpu_time(t_reduce_start)
+      nblk_use = 0
+      if (allocated(dg_frag%momentum_blocks)) nblk_use = min(dg_frag%n_momentum_blocks, size(dg_frag%momentum_blocks))
       total_size = 0
-      do iblk = 1, dg_frag%n_momentum_blocks
+      do iblk = 1, nblk_use
         nrow = dg_frag%momentum_blocks(iblk)%nrow_max
         ncol = dg_frag%momentum_blocks(iblk)%ncol_max
         total_size = total_size + 3 * nrow * ncol * dg_frag%nspin
       end do
-      nblk_max = dg_frag%n_momentum_blocks
+      nblk_max = nblk_use
       call comm_get_max(nblk_max, dg_frag%icomm)
-      nblk_min = -dg_frag%n_momentum_blocks
+      nblk_min = -nblk_use
       call comm_get_max(nblk_min, dg_frag%icomm)
       nblk_min = -nblk_min
       if (nblk_min /= nblk_max) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] momentum reduce metadata mismatch: rank=", &
-          dg_frag%id, " nblk=", dg_frag%n_momentum_blocks, " min=", nblk_min, " max=", nblk_max
+          dg_frag%id, " nblk=", nblk_use, " min=", nblk_min, " max=", nblk_max
         flush(6)
         stop "DG-Fragment RT: momentum reduce n_momentum_blocks mismatch across MPI ranks"
       end if
 
       meta_sig_blocks = 0.0d0
-      do iblk = 1, dg_frag%n_momentum_blocks
+      do iblk = 1, nblk_use
         meta_sig_blocks = meta_sig_blocks + &
           dble(iblk) * 1.0d0 + &
           dble(dg_frag%momentum_blocks(iblk)%ifrag_row) * 1.0d3 + &
@@ -3629,7 +3635,7 @@
         allocate(send_flat(total_size), recv_flat(total_size))
         call cpu_time(t0)
         offset_flat = 1
-        do iblk = 1, dg_frag%n_momentum_blocks
+        do iblk = 1, nblk_use
           nrow = dg_frag%momentum_blocks(iblk)%nrow_max
           ncol = dg_frag%momentum_blocks(iblk)%ncol_max
           do ispin = 1, dg_frag%nspin
@@ -3660,7 +3666,7 @@
         time_reduce_comm = time_reduce_comm + (t1 - t0)
         call cpu_time(t0)
         offset_flat = 1
-        do iblk = 1, dg_frag%n_momentum_blocks
+        do iblk = 1, nblk_use
           nrow = dg_frag%momentum_blocks(iblk)%nrow_max
           ncol = dg_frag%momentum_blocks(iblk)%ncol_max
           offset_base = offset_flat - 1
@@ -3691,7 +3697,8 @@
     ! blocks against the reverse ordered fragment pair.
     call cpu_time(t0)
     do ispin = 1, system%nspin
-      do iblk = 1, dg_frag%n_momentum_blocks
+      do iblk = 1, nblk_use
+        if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
         ifrag = dg_frag%momentum_blocks(iblk)%ifrag_row
         jfrag = dg_frag%momentum_blocks(iblk)%ifrag_col
         if (ifrag == jfrag) then
@@ -3710,7 +3717,8 @@
           end do
         else
           iblk_rev = find_momentum_block(dg_frag, jfrag, ifrag)
-          if (iblk_rev <= 0 .or. iblk >= iblk_rev) cycle
+          if (iblk_rev <= 0 .or. iblk_rev > nblk_use .or. iblk >= iblk_rev) cycle
+          if (.not. allocated(dg_frag%momentum_blocks(iblk_rev)%val)) cycle
           ni = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 2), &
                    size(dg_frag%momentum_blocks(iblk_rev)%val, 3))
           nj = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 3), &
@@ -3736,7 +3744,8 @@
     end if
 
     max_p = 0.0d0
-    do iblk = 1, dg_frag%n_momentum_blocks
+    do iblk = 1, nblk_use
+      if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
       max_p = max(max_p, maxval(abs(dg_frag%momentum_blocks(iblk)%val)))
     end do
     if (comm_is_root(dg_frag%id)) then

@@ -454,7 +454,7 @@
 
     V_phi(:, :, :) = (0.0d0, 0.0d0)
     if (allocated(dg_frag%phi_frag_c)) then
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
+      ! Temporarily run this mapped-potential build serially to avoid OMP+MPI SIGBUS.
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         bz = map_z(gz)
@@ -463,7 +463,6 @@
           gy = ov_s(2) + (ly - ly_lo)
           by = map_y(gy)
           if (by == 0) cycle
-!$omp simd private(gx, bx, phi0)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
             bx = map_x(gx)
@@ -473,9 +472,8 @@
           end do
         end do
       end do
-!$omp end parallel do
     else
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
+      ! Temporarily run this mapped-potential build serially to avoid OMP+MPI SIGBUS.
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         bz = map_z(gz)
@@ -484,7 +482,6 @@
           gy = ov_s(2) + (ly - ly_lo)
           by = map_y(gy)
           if (by == 0) cycle
-!$omp simd private(gx, bx)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
             bx = map_x(gx)
@@ -493,7 +490,6 @@
           end do
         end do
       end do
-!$omp end parallel do
     end if
   end subroutine build_local_potential_applied_basis_mapped
 
@@ -525,7 +521,6 @@
           gy = ov_s(2) + (ly - ly_lo)
           by = map_y(gy)
           if (by == 0) cycle
-!$omp simd reduction(+:acc_re,acc_im) private(gx,bx,pr,pi,fr,fi)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
             bx = map_x(gx)
@@ -551,7 +546,6 @@
           gy = ov_s(2) + (ly - ly_lo)
           by = map_y(gy)
           if (by == 0) cycle
-!$omp simd reduction(+:acc_re,acc_im) private(gx,bx,phi_r,fr,fi)
           do lx = lx_lo, lx_hi
             gx = ov_s(1) + (lx - lx_lo)
             bx = map_x(gx)
