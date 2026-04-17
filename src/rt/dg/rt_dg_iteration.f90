@@ -88,8 +88,8 @@
         ! For adaptive-basis mode, keep post-step update active even in RK4
         ! so basis-update detection/trigger logic runs.
         if (enable_iteration_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-update-density-hmat"
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, " stage=", "before-update-density-hmat"
           flush(6)
         end if
         call timer_begin(LOG_CALC_RHO)
@@ -98,8 +98,8 @@
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
         call timer_end(LOG_CALC_RHO)
         if (enable_iteration_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-update-density-hmat"
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, " stage=", "after-update-density-hmat"
           flush(6)
         end if
       end if
@@ -107,14 +107,14 @@
     
     ! Calculate observables
     if (enable_iteration_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-calc-observables"
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, " stage=", "before-calc-observables"
       flush(6)
     end if
     call calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl)
     if (enable_iteration_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-calc-observables"
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, " stage=", "after-calc-observables"
       flush(6)
     end if
 

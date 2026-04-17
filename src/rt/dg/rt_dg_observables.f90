@@ -84,7 +84,7 @@
     real(8) :: para_block_best_abs, para_block_total_abs
     integer :: para_block_best_iblk
     complex(8) :: minus_i
-    complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
+    complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), ap_apply(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:), coef_frag_view(:,:), coef_pw_view(:,:)
     complex(8), allocatable :: tmp_probe(:,:), dense_probe_mat(:,:), dense_probe_out(:,:)
     complex(8), allocatable :: overlap_vec(:), overlap_dense(:,:)
@@ -174,9 +174,9 @@
     enable_electron_probe = .false.
     enable_obs_trace = .false.
     enable_occ_trace = .false.
-    ! Pure-DG (no PW rows) needs the real-space nonlocal current term for
-    ! consistency with the conventional current decomposition.
-    enable_realspace_probe = (n_pw == 0)
+    ! Real-space nonlocal current/energy probe is expensive and intended for
+    ! diagnostics; keep it opt-in via SALMON_DG_REALSPACE_PROBE.
+    enable_realspace_probe = .false.
     enable_current_norm_trace = .false.
     enable_current_component_trace = .false.
     enable_excitation_trace = .false.
@@ -337,6 +337,7 @@
     end if
 
     allocate(tmp_mat(n, max_nocc))
+    allocate(ap_apply(n, max_nocc))
     if (use_energy_components) allocate(tmp_probe(n, max_nocc))
     allocate(coef_frag_all(n, max_nocc))
     allocate(occ_weight(max_nocc))
@@ -895,16 +896,15 @@
             call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                        coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
           end if
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          op_mat(:, 1:nocc) = (0.0d0, 0.0d0)
-          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), op_mat(:, 1:nocc))
+          ap_apply(:, 1:nocc) = (0.0d0, 0.0d0)
+          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), ap_apply(:, 1:nocc))
           if (use_energy_components) then
             do io = 1, nocc
               energy_ap_local = energy_ap_local + occ_weight(io) * &
-                sum(real(conjg(coef_frag_all(1:n, io)) * (minus_i * op_mat(:, io))))
+                sum(real(conjg(coef_frag_all(1:n, io)) * (minus_i * ap_apply(:, io))))
             end do
           end if
-          tmp_mat(:, :) = tmp_mat(:, :) + minus_i * op_mat(:, 1:nocc)
+          tmp_mat(:, :) = tmp_mat(:, :) + minus_i * ap_apply(:, 1:nocc)
         else
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           do io = 1, n
@@ -1080,6 +1080,7 @@
     if (allocated(A2_mat)) deallocate(A2_mat)
     if (allocated(op_mat)) deallocate(op_mat)
     deallocate(tmp_mat)
+    deallocate(ap_apply)
     if (allocated(tmp_probe)) deallocate(tmp_probe)
     if (allocated(occ_weight)) deallocate(occ_weight)
     if (allocated(coef_frag_all)) deallocate(coef_frag_all)

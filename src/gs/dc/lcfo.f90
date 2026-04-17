@@ -64,7 +64,7 @@ contains
     integer :: index_basis(dc%nstate_frag,dc%n_frag,system%nspin)
     real(8) :: hvol
     real(8),allocatable :: f_basis(:,:,:,:,:),hf(:,:,:,:,:),wrk_array(:,:,:,:,:) &
-    & ,esp_tot(:,:),mat_H_local(:,:,:),coef_wf(:,:,:)
+    & ,esp_tot(:,:),mat_H_local(:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
     !
     integer :: i,j,n,ix,iy,iz,io,jo,ispin,ifrag,jfrag,i_halo
     
@@ -95,6 +95,7 @@ contains
 
     if(allocated(coef_wf)) deallocate(coef_wf)
     if(allocated(f_basis)) deallocate(f_basis)
+    if(allocated(basis_transform)) deallocate(basis_transform)
     if(allocated(esp_tot)) deallocate(esp_tot)
     if(allocated(mat_H_local)) deallocate(mat_H_local)
     do i=1,n_halo
@@ -185,11 +186,15 @@ contains
       integer :: nxyz_domain(3)
       real(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
+      real(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: transform_work
+      real(8) :: proj_coeff, basis_norm
       
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       
       allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
       allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      if (allocated(basis_transform)) deallocate(basis_transform)
+      allocate(basis_transform(dc%nstate_frag, dc%nstate_frag, nspin))
       
     ! f_basis <-- | \bar{\phi} > (projected fragment orbitals)
       wrk_array = 0d0
@@ -226,6 +231,7 @@ contains
     ! f_basis <-- | lambda > (basis functions)
       wrk_array = f_basis
       f_basis = 0d0
+      basis_transform = 0d0
       do ispin=1,nspin
         i = 0 ! count # of basis functions
         do io=dc%nstate_frag,1,-1
@@ -234,6 +240,7 @@ contains
             do jo=1,dc%nstate_frag
               f_basis(:,:,:,ispin,i) = f_basis(:,:,:,ispin,i) &
               & + wrk_array(:,:,:,ispin,jo) * mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
+              basis_transform(jo,i,ispin) = mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
             end do
           end if
         end do ! io
@@ -242,18 +249,24 @@ contains
       
     ! Gram–Schmidt orthonormalization
       wrk_array = f_basis
+      transform_work = basis_transform
       do ispin=1,nspin
         do io=1,nb(ispin)
           do jo=1,io-1
-            wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-            & - f_basis(:,:,:,ispin,jo) * sum(f_basis(:,:,:,ispin,jo)*wrk_array(:,:,:,ispin,io)) &
+            proj_coeff = sum(f_basis(:,:,:,ispin,jo)*wrk_array(:,:,:,ispin,io)) &
             & / sum(f_basis(:,:,:,ispin,jo)*f_basis(:,:,:,ispin,jo))
+            wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
+            & - f_basis(:,:,:,ispin,jo) * proj_coeff
+            transform_work(:,io,ispin) = transform_work(:,io,ispin) &
+            & - basis_transform(:,jo,ispin) * proj_coeff
           end do
-          wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-          & / sqrt( sum(wrk_array(:,:,:,ispin,io)*wrk_array(:,:,:,ispin,io)) * hvol )
+          basis_norm = sqrt( sum(wrk_array(:,:,:,ispin,io)*wrk_array(:,:,:,ispin,io)) * hvol )
+          wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) / basis_norm
+          transform_work(:,io,ispin) = transform_work(:,io,ispin) / basis_norm
         end do
       end do ! ispin
       f_basis = wrk_array
+      basis_transform = transform_work
       
     ! sttpsi <-- f_basis == | lambda > (basis functions)
       sttpsi%rwf = 0d0
@@ -549,14 +562,9 @@ contains
       implicit none
       integer :: iunit,i_halo
       integer :: nxyz_domain(3), nxyz_box(3)
-      integer :: nstate_tot_buffered
       character(256) :: filename
       real(8), allocatable :: buffered_basis(:,:,:,:,:), wrk_buffer(:,:,:,:,:)
-      real(8), allocatable :: coef_wf_buffered(:,:,:)
-      real(8) :: occ_buffered_local(dc%nstate_frag,system%nspin)
-      integer :: n_mat_buffered(system%nspin)
-      integer :: n_basis_buffered(dc%n_frag,system%nspin)
-      integer :: index_basis_buffered(dc%nstate_frag,dc%n_frag,system%nspin)
+      real(8), allocatable :: occ_buffered_orbital(:,:)
       
     ! total system data
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
@@ -583,18 +591,6 @@ contains
       
     ! fragment data
       if(dc%id_frag==0) then
-      n_basis_buffered = 0
-      index_basis_buffered = 0
-      do ispin = 1, nspin
-        n_mat_buffered(ispin) = dc%n_frag * dc%nstate_frag
-        do ifrag = 1, dc%n_frag
-          n_basis_buffered(ifrag, ispin) = dc%nstate_frag
-          do io = 1, dc%nstate_frag
-            index_basis_buffered(io, ifrag, ispin) = (ifrag - 1) * dc%nstate_frag + io
-          end do
-        end do
-      end do
-      nstate_tot_buffered = dc%n_frag * dc%nstate_frag
       ! r-grid index
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_rg ! base_directory==./data_dcdft/fragments/dc%i_frag/
@@ -614,8 +610,10 @@ contains
         write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3) &
         & ,1:nspin,1:dc%nstate_frag) ! basis functions | lambda >
         close(iunit)
-      ! buffered fragment KS orbitals on the full DC fragment box
+      ! buffered basis functions: keep the same lambda-basis definition as
+      ! basis_functions.bin and only enlarge the real-space support box.
         if (.not. allocated(spsi%rwf)) stop "DC-LCFO: buffered basis export requires real fragment orbitals"
+        if (.not. allocated(basis_transform)) stop "DC-LCFO: buffered basis export requires basis_transform"
         nxyz_box(1:3) = nxyz_domain(1:3) + 2 * dc%nxyz_buffer(1:3)
         allocate(buffered_basis(nxyz_box(1), nxyz_box(2), nxyz_box(3), nspin, dc%nstate_frag))
         allocate(wrk_buffer(nxyz_box(1), nxyz_box(2), nxyz_box(3), nspin, dc%nstate_frag))
@@ -634,6 +632,16 @@ contains
         end do
         end do
         call comm_summation(wrk_buffer, buffered_basis, product(nxyz_box) * nspin * dc%nstate_frag, info%icomm_rko)
+        wrk_buffer = buffered_basis
+        buffered_basis = 0d0
+        do ispin = 1, nspin
+          do io = 1, n_basis(dc%i_frag, ispin)
+            do jo = 1, dc%nstate_frag
+              buffered_basis(:,:,:,ispin,io) = buffered_basis(:,:,:,ispin,io) &
+              & + wrk_buffer(:,:,:,ispin,jo) * basis_transform(jo, io, ispin)
+            end do
+          end do
+        end do
 
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bfb
@@ -664,36 +672,30 @@ contains
           write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
           close(iunit)
 
-        ! buffered DG initialization: treat buffered fragment KS orbitals as the
-        ! state basis itself and carry fragment-local DC occupations separately.
-          allocate(coef_wf_buffered(dc%nstate_frag, nstate_tot_buffered, nspin))
-          coef_wf_buffered = 0d0
-          occ_buffered_local(:, :) = 0d0
-          do ispin = 1, nspin
-            do jo = 1, dc%nstate_frag
-              i = index_basis_buffered(jo, dc%i_frag, ispin)
-              if (i >= 1 .and. i <= nstate_tot_buffered) coef_wf_buffered(jo, i, ispin) = 1d0
-              occ_buffered_local(jo, ispin) = system%rocc(jo, 1, ispin)
-            end do
-          end do
-
+        ! buffered DG initialization: keep the same state definition as the
+        ! non-buffered output and only switch the real-space basis support.
           iunit = get_filehandle()
           filename = trim(base_directory)//binfile_wfb
           open(iunit,file=filename,form='unformatted',access='stream')
-          write(iunit) dc%n_frag, nspin, dc%nstate_frag, nstate_tot_buffered
-          write(iunit) n_mat_buffered(1:nspin)
-          write(iunit) n_basis_buffered(1:dc%n_frag,1:nspin)
-          write(iunit) index_basis_buffered(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
-          write(iunit) coef_wf_buffered(1:dc%nstate_frag,1:nstate_tot_buffered,1:nspin)
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, dc%nstate_tot
+          write(iunit) n_mat(1:nspin)
+          write(iunit) n_basis(1:dc%n_frag,1:nspin)
+          write(iunit) index_basis(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
+          write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
           close(iunit)
 
+          allocate(occ_buffered_orbital(dc%nstate_tot, nspin))
+          occ_buffered_orbital(:, :) = 0d0
+          do ispin = 1, nspin
+            occ_buffered_orbital(1:dc%nstate_tot, ispin) = system%rocc(1:dc%nstate_tot, 1, ispin)
+          end do
           iunit = get_filehandle()
           filename = trim(base_directory)//binfile_occb
           open(iunit,file=filename,form='unformatted',access='stream')
-          write(iunit) dc%n_frag, nspin, dc%nstate_frag, nstate_tot_buffered
-          write(iunit) occ_buffered_local(1:dc%nstate_frag,1:nspin)
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, dc%nstate_tot
+          write(iunit) occ_buffered_orbital(1:dc%nstate_tot,1:nspin)
           close(iunit)
-          deallocate(coef_wf_buffered)
+          deallocate(occ_buffered_orbital)
         end if
       end if
       

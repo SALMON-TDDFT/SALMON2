@@ -31,6 +31,7 @@
     complex(8), allocatable :: coef_ref(:,:,:)
     complex(8), allocatable :: coef_pw_ref(:,:,:)
     integer :: istage, io, jo, ispin
+    integer :: jo_local, jo_global, owned_s, owned_e, n_owned
     real(8) :: Ac_tot(3), t_stage
     integer :: n, n_pw
     logical :: use_mixed_rt
@@ -73,8 +74,18 @@
     
     if (dg_frag%time_integrator == 3) then
       ! Classical RK4 (paper-aligned): k1@t, k2@t+dt/2, k3@t+dt/2, k4@t+dt
-      allocate(coef_ref(n, dg_frag%nstate_tot, dg_frag%nspin))
-      coef_ref = dg_frag%coef
+      owned_s = max(1, dg_frag%owned_coef_start)
+      owned_e = min(n, dg_frag%owned_coef_end)
+      if (owned_e >= owned_s) then
+        n_owned = owned_e - owned_s + 1
+      else
+        n_owned = 0
+      end if
+      allocate(coef_ref(max(1, n_owned), dg_frag%nstate_tot, dg_frag%nspin))
+      coef_ref = (0.0d0, 0.0d0)
+      if (n_owned > 0) then
+        coef_ref(1:n_owned, :, :) = dg_frag%coef(owned_s:owned_e, :, :)
+      end if
       if (n_pw > 0) then
         allocate(coef_pw_ref(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
         coef_pw_ref = dg_frag%coef_pw
@@ -82,7 +93,9 @@
 
       ! Stage 1
       Ac_tot = rt%Ac_tot(:, itt)
-      dg_frag%coef = coef_ref
+      if (n_owned > 0) then
+        dg_frag%coef(owned_s:owned_e, :, :) = coef_ref(1:n_owned, :, :)
+      end if
       if (use_mixed_rt) then
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
@@ -138,13 +151,14 @@
         flush(6)
       end if
       if (n_pw > 0) then
-!$omp parallel private(jo)
+!$omp parallel private(jo,jo_local,jo_global)
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin, 1)
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + 0.5d0 * dt * k(jo_global, io, ispin, 1)
             end do
           end do
         end do
@@ -161,12 +175,13 @@
 !$omp end do
 !$omp end parallel
       else
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel do collapse(2) private(jo,jo_local,jo_global) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin, 1)
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + 0.5d0 * dt * k(jo_global, io, ispin, 1)
             end do
           end do
         end do
@@ -214,13 +229,14 @@
 
       ! Stage 3
       if (n_pw > 0) then
-!$omp parallel private(jo)
+!$omp parallel private(jo,jo_local,jo_global)
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin, 2)
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + 0.5d0 * dt * k(jo_global, io, ispin, 2)
             end do
           end do
         end do
@@ -237,12 +253,13 @@
 !$omp end do
 !$omp end parallel
       else
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel do collapse(2) private(jo,jo_local,jo_global) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin, 2)
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + 0.5d0 * dt * k(jo_global, io, ispin, 2)
             end do
           end do
         end do
@@ -267,13 +284,14 @@
       ! Stage 4
       Ac_tot = rt%Ac_tot(:, itt+1)
       if (n_pw > 0) then
-!$omp parallel private(jo)
+!$omp parallel private(jo,jo_local,jo_global)
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * k(jo, io, ispin, 3)
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + dt * k(jo_global, io, ispin, 3)
             end do
           end do
         end do
@@ -290,12 +308,13 @@
 !$omp end do
 !$omp end parallel
       else
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel do collapse(2) private(jo,jo_local,jo_global) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * k(jo, io, ispin, 3)
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + dt * k(jo_global, io, ispin, 3)
             end do
           end do
         end do
@@ -319,15 +338,16 @@
 
       ! Final RK4 combination
       if (n_pw > 0) then
-!$omp parallel private(jo)
+!$omp parallel private(jo,jo_local,jo_global)
 !$omp do collapse(2) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * ( &
-                                             k(jo, io, ispin, 1) + 2.0d0 * k(jo, io, ispin, 2) + &
-                                             2.0d0 * k(jo, io, ispin, 3) + k(jo, io, ispin, 4)) / 6.0d0
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + dt * ( &
+                                             k(jo_global, io, ispin, 1) + 2.0d0 * k(jo_global, io, ispin, 2) + &
+                                             2.0d0 * k(jo_global, io, ispin, 3) + k(jo_global, io, ispin, 4)) / 6.0d0
             end do
           end do
         end do
@@ -346,14 +366,15 @@
 !$omp end do
 !$omp end parallel
       else
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel do collapse(2) private(jo,jo_local,jo_global) schedule(static)
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%nstate_tot
 !$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * ( &
-                                             k(jo, io, ispin, 1) + 2.0d0 * k(jo, io, ispin, 2) + &
-                                             2.0d0 * k(jo, io, ispin, 3) + k(jo, io, ispin, 4)) / 6.0d0
+            do jo_local = 1, n_owned
+              jo_global = owned_s + jo_local - 1
+              dg_frag%coef(jo_global, io, ispin) = coef_ref(jo_local, io, ispin) + dt * ( &
+                                             k(jo_global, io, ispin, 1) + 2.0d0 * k(jo_global, io, ispin, 2) + &
+                                             2.0d0 * k(jo_global, io, ispin, 3) + k(jo_global, io, ispin, 4)) / 6.0d0
             end do
           end do
         end do
@@ -377,6 +398,9 @@
     else
       ! SSPRK3 stages.
       ! Store initial coefficients for Shu-Osher blending.
+      if (.not. allocated(dg_frag%coef_work)) then
+        allocate(dg_frag%coef_work(n, dg_frag%nstate_tot, dg_frag%nspin))
+      end if
       dg_frag%coef_work = dg_frag%coef
       ! Save initial PW coefficients for the Shu-Osher alpha*coef_work term
       ! (analogous to dg_frag%coef_work which is already set above for fragment coef).
@@ -417,7 +441,7 @@
           ! Update coefficients for next stage
           if (istage < dg_frag%rk_stages) then
             ! OpenMP parallelization for coefficient update
-!$omp parallel private(jo)
+!$omp parallel private(jo,jo_local,jo_global)
 !$omp do collapse(2) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
@@ -490,7 +514,7 @@
           ! Update coefficients for next stage
           if (istage < dg_frag%rk_stages) then
             ! OpenMP parallelization for coefficient update
-!$omp parallel do collapse(2) private(jo) schedule(static)
+!$omp parallel do collapse(2) private(jo,jo_local,jo_global) schedule(static)
             do ispin = 1, dg_frag%nspin
               do io = 1, dg_frag%nstate_tot
 !$omp simd
@@ -529,7 +553,7 @@
       !
       ! BUG FIX (PW): final step for coef_pw was missing entirely; added here.
       associate(rs => dg_frag%rk_stages)
-!$omp parallel private(jo)
+!$omp parallel private(jo,jo_local,jo_global)
 !$omp do collapse(2) schedule(static)
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%nstate_tot

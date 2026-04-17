@@ -362,7 +362,7 @@
       ! refreshed here, so the propagated state transfer is the identity in the
       ! existing fragment+PW representation.
       dg_frag%coef(:, :, :) = coef_old(:, :, :)
-      dg_frag%coef_new(:, :, :) = coef_old(:, :, :)
+      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = coef_old(:, :, :)
       if (allocated(coef_pw_old) .and. allocated(dg_frag%coef_pw)) then
         dg_frag%coef_pw(:, :, :) = coef_pw_old(:, :, :)
       end if
@@ -392,7 +392,7 @@
         end if
         if (allocated(phi_frag_old)) dg_frag%phi_frag = phi_frag_old
         dg_frag%coef = coef_old
-        dg_frag%coef_new = coef_old
+        if (allocated(dg_frag%coef_new)) dg_frag%coef_new = coef_old
         call zero_nonowned_coefficients(dg_frag)
         if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
         if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
@@ -410,7 +410,7 @@
 
       if (.not. allocated(phi_frag_old)) then
         dg_frag%coef = coef_old
-        dg_frag%coef_new = coef_old
+        if (allocated(dg_frag%coef_new)) dg_frag%coef_new = coef_old
         call zero_nonowned_coefficients(dg_frag)
         if (is_global_root) then
           write(*,'(1x,a)') "  No local old basis snapshot: restore coefficients and skip projection"
@@ -644,7 +644,7 @@
       end do
     end do
 
-    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     call zero_nonowned_coefficients(dg_frag)
     call stabilize_coeff_unitarity(dg_frag, dg_frag%last_basis_update_step)
     call comm_summation(rot_local_sum, rot_global_sum, dg_frag%icomm)
@@ -967,7 +967,7 @@
         end do
       end do
     end do
-    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
 
     deallocate(mat_H_local, halo_H_local, coef_local)
 

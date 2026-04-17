@@ -324,7 +324,7 @@ contains
     end do
 
     dg_frag%coef(:, :, :) = coef_new(:, :, :)
-    dg_frag%coef_new(:, :, :) = coef_new(:, :, :)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = coef_new(:, :, :)
     call zero_nonowned_coefficients(dg_frag)
 
     call reorthonormalize_occupied_subspace(dg_frag, system)
@@ -389,7 +389,7 @@ contains
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
     end do
 
-    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     call zero_nonowned_coefficients(dg_frag)
 
   end subroutine reorthonormalize_occupied_subspace
@@ -478,7 +478,7 @@ contains
       end do
 
       dg_frag%coef(:, :, ispin) = coef_new(:, :, 1)
-      dg_frag%coef_new(:, :, ispin) = coef_new(:, :, 1)
+      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, ispin) = coef_new(:, :, 1)
       call zero_nonowned_coefficients(dg_frag)
 
       deallocate(H_work, eigenvalues_tmp, eigenvectors, work)

@@ -36,6 +36,7 @@
     integer :: env_len, env_status, ispin
     character(len=64) :: env_val
     logical :: enable_density_call_probe
+    logical :: enable_update_trace
     complex(8), allocatable :: H_mat_metric(:,:,:)
     complex(8), allocatable :: H_mat_prev_c(:,:,:)
     real(8), allocatable :: H_mat_prev(:,:,:)
@@ -43,8 +44,6 @@
     logical :: use_hmat_complex
     real(8) :: t_stage0, t_stage1
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct
-    logical, parameter :: enable_update_trace = .false.
-
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
     ! - Photovoltaic effects
@@ -55,11 +54,19 @@
     time_xc = 0.0d0
     time_reconstruct = 0.0d0
     enable_density_call_probe = .false.
+    enable_update_trace = .false.
     call get_environment_variable("SALMON_DG_ELECTRON_PROBE", env_val, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
       if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
           env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
         enable_density_call_probe = .true.
+      end if
+    end if
+    call get_environment_variable("SALMON_DG_UPDATE_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_update_trace = .true.
       end if
     end if
     
@@ -73,7 +80,7 @@
       end if
       return
     end if
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-begin"
       flush(6)
     end if
@@ -101,7 +108,7 @@
         dg_frag%rho_ud_frag(:, :, :) = dg_frag%rho_ud_frag(:, :, :) * dg_frag%rho_scale_factor
       end if
     end if
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-end"
       flush(6)
     end if
@@ -110,7 +117,7 @@
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-begin"
       flush(6)
     end if
@@ -123,7 +130,7 @@
         " stage=", "after-hartree", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
       flush(6)
     end if
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-end"
       flush(6)
     end if
@@ -144,7 +151,7 @@
     !            Current implementation: calculated on full grid for simplicity
     ! Note: For meta-GGA functionals, spsi (wavefunctions) would be needed for τ and j
     !       DG-Fragment RT currently supports LDA/GGA functionals
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-begin"
       flush(6)
     end if
@@ -175,7 +182,7 @@
         call copy_vxc_mat_noncollinear(mg, dg_frag%Vxc_mat_frag, has_vxc_mat)
       end if
     end if
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-end"
       flush(6)
     end if
@@ -211,7 +218,7 @@
       end if
     end if
 
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-begin"
       flush(6)
     end if
@@ -224,7 +231,7 @@
         " stage=", "after-reconstruct", " Ne_raw=", dg_frag%elec_num_raw, " rho_scale=", dg_frag%rho_scale_factor
       flush(6)
     end if
-    if (enable_update_trace .and. itt == 1) then
+    if (enable_update_trace .and. itt <= 3) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-end"
       flush(6)
     end if

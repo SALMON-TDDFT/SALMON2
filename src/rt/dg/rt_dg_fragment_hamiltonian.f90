@@ -132,7 +132,11 @@
           sx = wrap_support_local_index(lx, nsup(1))
           gx = iorg(1) + sx - 1
           bx = map_global_to_phi_box_coord_ham_fragment(dg_frag, ifrag, 1, gx, phi_lb1, phi_ub1)
-          phi_local(lx, ly, lz) = dg_frag%phi_frag(bx, by, bz, jo, i_local)
+          if (bx == 0 .or. by == 0 .or. bz == 0) then
+            phi_local(lx, ly, lz) = 0.0d0
+          else
+            phi_local(lx, ly, lz) = dg_frag%phi_frag(bx, by, bz, jo, i_local)
+          end if
         end do
       end do
     end do
@@ -185,14 +189,69 @@
     end do
   end function fragment_row_is_locally_owned
 
-  subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks)
+  logical function fragment_row_has_single_owner(dg_frag, ifrag_row, owner_rank) result(has_single_owner)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag_row
+    integer, intent(out) :: owner_rank
+    integer :: ispin, io, global_idx, owner_candidate
+
+    has_single_owner = .false.
+    owner_rank = -1
+    if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) return
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    owner_candidate = -1
+    do ispin = 1, dg_frag%nspin
+      if (dg_frag%n_basis(ifrag_row, ispin) <= 0) cycle
+      do io = 1, min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1))
+        global_idx = dg_frag%index_basis(io, ifrag_row, ispin)
+        if (global_idx < 1 .or. global_idx > size(dg_frag%coef_owner, 1)) cycle
+        if (dg_frag%coef_owner(global_idx, ispin) < 0) cycle
+        if (owner_candidate < 0) then
+          owner_candidate = dg_frag%coef_owner(global_idx, ispin)
+        else if (owner_candidate /= dg_frag%coef_owner(global_idx, ispin)) then
+          owner_rank = -1
+          return
+        end if
+      end do
+    end do
+
+    if (owner_candidate < 0) return
+    owner_rank = owner_candidate
+    has_single_owner = .true.
+  end function fragment_row_has_single_owner
+
+  logical function momentum_blocks_use_row_local_storage(dg_frag) result(use_row_local)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer :: ifrag, owner_rank
+    logical :: has_basis
+
+    use_row_local = .false.
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+
+    do ifrag = 1, dg_frag%n_frag
+      has_basis = any(dg_frag%n_basis(ifrag, 1:dg_frag%nspin) > 0)
+      if (.not. has_basis) cycle
+      if (.not. fragment_row_has_single_owner(dg_frag, ifrag, owner_rank)) return
+    end do
+    use_row_local = .true.
+  end function momentum_blocks_use_row_local_storage
+
+  subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks, row_local_only)
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(matrix_block_info), allocatable, intent(inout) :: blocks(:)
     integer, allocatable, intent(inout) :: block_map(:, :)
     integer, intent(out) :: n_blocks
-    integer :: ifrag_row, ifrag_col, iblk, nrow_max, ncol_max
+    logical, intent(in), optional :: row_local_only
+    integer :: ifrag_row, ifrag_col, iblk, nrow_max, ncol_max, owner_rank
+    logical :: use_row_local
 
     if (allocated(blocks)) then
       do iblk = 1, size(blocks)
@@ -202,10 +261,20 @@
     end if
     if (allocated(block_map)) deallocate(block_map)
     call ensure_momentum_neighbor_pair_cache(dg_frag)
+    use_row_local = .false.
+    if (present(row_local_only)) use_row_local = row_local_only
 
     n_blocks = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
+        if (use_row_local) then
+          if (dg_frag%use_buffered_basis) then
+            if (ifrag_row < dg_frag%ifrag_start .or. ifrag_row > dg_frag%ifrag_end) cycle
+          else
+            if (.not. fragment_row_has_single_owner(dg_frag, ifrag_row, owner_rank)) cycle
+            if (owner_rank /= dg_frag%id) cycle
+          end if
+        end if
         if (is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) n_blocks = n_blocks + 1
       end do
     end do
@@ -218,6 +287,14 @@
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
+        if (use_row_local) then
+          if (dg_frag%use_buffered_basis) then
+            if (ifrag_row < dg_frag%ifrag_start .or. ifrag_row > dg_frag%ifrag_end) cycle
+          else
+            if (.not. fragment_row_has_single_owner(dg_frag, ifrag_row, owner_rank)) cycle
+            if (owner_rank /= dg_frag%id) cycle
+          end if
+        end if
         if (.not. is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
         iblk = iblk + 1
         nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
@@ -321,7 +398,8 @@
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer :: ifrag_row, ifrag_col, nblk, iblk
-    integer :: nrow_max, ncol_max
+    integer :: nrow_max, ncol_max, owner_rank
+    logical :: use_row_local
 
     if (allocated(dg_frag%momentum_blocks)) then
       do iblk = 1, size(dg_frag%momentum_blocks)
@@ -331,10 +409,20 @@
     end if
     if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
     call ensure_momentum_neighbor_pair_cache(dg_frag)
+    use_row_local = momentum_blocks_use_row_local_storage(dg_frag)
+    if (dg_frag%use_buffered_basis) use_row_local = .true.
 
     nblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
+        if (use_row_local) then
+          if (dg_frag%use_buffered_basis) then
+            if (ifrag_row < dg_frag%ifrag_start .or. ifrag_row > dg_frag%ifrag_end) cycle
+          else
+            if (.not. fragment_row_has_single_owner(dg_frag, ifrag_row, owner_rank)) cycle
+            if (owner_rank /= dg_frag%id) cycle
+          end if
+        end if
         if (is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) nblk = nblk + 1
       end do
     end do
@@ -348,6 +436,14 @@
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
+        if (use_row_local) then
+          if (dg_frag%use_buffered_basis) then
+            if (ifrag_row < dg_frag%ifrag_start .or. ifrag_row > dg_frag%ifrag_end) cycle
+          else
+            if (.not. fragment_row_has_single_owner(dg_frag, ifrag_row, owner_rank)) cycle
+            if (owner_rank /= dg_frag%id) cycle
+          end if
+        end if
         if (.not. is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
         iblk = iblk + 1
         dg_frag%momentum_block_map(ifrag_row, ifrag_col) = iblk
@@ -575,7 +671,7 @@
     logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup, need_halo_alloc
     logical :: jo_edge, jo_probe_main, jo_probe_352_396, jo_probe_small_frag2
     logical, parameter :: enable_hamiltonian_trace = .false.
-    logical, parameter :: enable_step2_probe = .false.
+    logical :: enable_step2_probe
     complex(8), allocatable :: H_metric_ref(:,:)
     real(8) :: partial_t_abs, partial_h_abs
     real(8) :: halo_integral_a_sum, halo_integral_b_sum, halo_integral_c_sum
@@ -585,7 +681,7 @@
     character(len=32) :: env_sipg_trace_rank, env_sipg_trace_jmax
     character(len=32) :: env_sipg_disable_b_term, env_sipg_disable_c_term, env_sipg_enable_halo, env_sipg_use_avg_trace, env_sipg_use_flux_form
     character(len=32) :: env_sipg_use_weak_form, env_sipg_ab_norm_max
-    character(len=32) :: env_startup_lowdin, env_startup_stationary_projection
+    character(len=32) :: env_startup_lowdin, env_startup_stationary_projection, env_step2_probe
     logical :: enable_sipg_face_trace, sipg_trace_allpairs, sipg_trace_pair
     logical :: sipg_disable_b_term, sipg_disable_c_term, sipg_enable_fragment_halo_exchange, sipg_use_avg_trace, sipg_use_flux_form
     logical :: sipg_use_weak_form
@@ -593,6 +689,15 @@
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
+    enable_step2_probe = .false.
+    env_step2_probe = ''
+    call get_environment_variable('SALMON_DG_STEP2_PROBE', env_step2_probe, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_step2_probe)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        enable_step2_probe = .true.
+      end select
+    end if
     probe_rank_main = enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)
     probe_rank_352_396 = enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)
     probe_small_frag2 = enable_step2_probe .and. dg_frag%n_frag == 2 .and. dg_frag%id <= 3
@@ -783,6 +888,10 @@
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
     end if
+    if (enable_step2_probe) then
+      write(*,'(1x,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=enter"
+      flush(6)
+    end if
     if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=enter"
       flush(6)
@@ -881,6 +990,10 @@
         H_kin_diag_blocks(i_diag)%val = 0.0d0
       end do
     end if
+    if (enable_step2_probe) then
+      write(*,'(1x,a,i0,a,i0)') "        step2-lite: rank=", dg_frag%id, " stage=after-diag-alloc n_local_diag=", n_local_diag
+      flush(6)
+    end if
     if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-diag-block-alloc"
       flush(6)
@@ -897,7 +1010,9 @@
 
     ! Exchange halo regions between fragments before stencil operations
     ! This ensures accurate Laplacian calculation at fragment boundaries
-    call exchange_phi_frag_halo(dg_frag)
+    if (.not. dg_frag%use_buffered_basis) then
+      call exchange_phi_frag_halo(dg_frag)
+    end if
     if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-step2-halo"
       flush(6)
@@ -913,6 +1028,10 @@
     ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
+    if (enable_step2_probe) then
+      write(*,'(1x,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-vtotal-alloc"
+      flush(6)
+    end if
     if (probe_rank_main) then
       write(*,'(1x,a,i0,a,3(i0,1x),a,3(i0,1x))') "        step2-probe: rank=", dg_frag%id, &
         " V_total is=", is(1), is(2), is(3), " ie=", ie(1), ie(2), ie(3)
@@ -928,6 +1047,10 @@
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      if (enable_step2_probe) then
+        write(*,'(1x,a,i0,a,i0)') "        step2-lite: rank=", dg_frag%id, " stage=after-build-total-potential ispin=", ispin
+        flush(6)
+      end if
       trace_spin1 = (ispin == 1)
       if (probe_rank_main .and. trace_spin1) then
         write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " after-build-total-potential ispin=", ispin
@@ -976,6 +1099,10 @@
         end if
         allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
         allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+        if (enable_step2_probe .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start) then
+          write(*,'(1x,a,i0,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-TH-alloc ifrag=", ifrag
+          flush(6)
+        end if
         if (nbf > size(dg_frag%index_basis, 1)) then
           write(*,*) "[FATAL] hamiltonian n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis_eff=", nbf, " n_basis_raw=", nbf_raw, &
@@ -1042,6 +1169,10 @@
           ! The DG kinetic face terms from Eq.(4) are not included here yet and
           ! must be added at the fragment-fragment block assembly stage below.
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
+          if (enable_step2_probe .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. jo == 1) then
+            write(*,'(1x,a,i0,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-build_hpsi ifrag=", ifrag
+            flush(6)
+          end if
           if (jo_probe_352_396) then
             write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-build_hpsi"
             flush(6)
@@ -1133,6 +1264,10 @@
           end if
 
         end do  ! jo loop
+        if (enable_step2_probe .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start) then
+          write(*,'(1x,a,i0,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-jo-loop ifrag=", ifrag
+          flush(6)
+        end if
         if (enable_hamiltonian_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo-loop done: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " nbf=", nbf
@@ -1157,6 +1292,10 @@
           
         
       end do  ! ifrag loop
+      if (enable_step2_probe) then
+        write(*,'(1x,a,i0,a,i0)') "        step2-lite: rank=", dg_frag%id, " stage=after-ifrag-loop ispin=", ispin
+        flush(6)
+      end if
       if (enable_hamiltonian_trace) then
         write(*,'(1x,a,i0,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
           " ispin=", ispin, " stage=", "after-ifrag-loop"
@@ -1164,6 +1303,10 @@
       end if
       
     end do  ! ispin loop
+    if (enable_step2_probe) then
+      write(*,'(1x,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-ispin-loop"
+      flush(6)
+    end if
     if (enable_hamiltonian_trace) then
       write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
         " stage=", "after-ispin-loop"
@@ -1742,18 +1885,18 @@
       if (.not. dg_frag%mixed_basis_ready) then
         stop "DG+PW startup requires mixed_basis_ready after diagonalize_mixed_basis"
       end if
-      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     else if (.not. dg_frag%puredg_lowdin_applied) then
       if (enable_startup_lowdin) then
         call apply_startup_lowdin_puredg(dg_frag)
         if (enable_startup_stationary_projection) then
-          call apply_startup_stationary_projection_puredg(dg_frag)
+          call apply_startup_stationary_projection_puredg(dg_frag, mg, ppg, system)
         end if
       else if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') "[INFO] PureDG startup Lowdin/stationary projection disabled (set SALMON_DG_STARTUP_LOWDIN=1 to enable)"
         write(*,'(1x,a)') "[INFO] To additionally enable stationary projection, set SALMON_DG_STARTUP_STATIONARY_PROJECTION=1"
       end if
-      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
       dg_frag%puredg_lowdin_applied = .true.
     end if
 
@@ -1796,7 +1939,7 @@
   !   C <- C (C^\dagger S C)^(-1/2)
   !=======================================================================
   subroutine apply_startup_lowdin_puredg(dg_frag)
-    use communication, only: comm_is_root
+    use communication, only: comm_is_root, comm_summation
     use rt_dg_fragment_ops, only: apply_overlap_operator, gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -1867,7 +2010,7 @@
     end do
 
     call zero_nonowned_coefficients(dg_frag)
-    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     dg_frag%puredg_lowdin_applied = .true.
 
     if (comm_is_root(dg_frag%id)) then
@@ -1881,118 +2024,164 @@
   !   2) Solve generalized EVP H c = e S c via Lowdin transform
   !   3) Replace startup coefficients with S-orthonormal eigenvectors
   !=======================================================================
-  subroutine apply_startup_stationary_projection_puredg(dg_frag)
+  subroutine apply_startup_stationary_projection_puredg(dg_frag, mg, ppg, system)
     use communication, only: comm_is_root
-    use rt_dg_fragment_ops, only: gather_full_coef_view, copy_matrix_blocks_metric_to_complex_dense, &
-                                  copy_overlap_operator_to_dense, zero_nonowned_coefficients
+    use structures, only: s_rgrid, s_pp_grid, s_dft_system
+    use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_complex_dense, &
+                                  copy_overlap_operator_to_dense, zero_nonowned_coefficients, &
+                                  ensure_nonlocal_pp_matrix_A, copy_complex_matrix_blocks_metric_to_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_rgrid),          intent(in)    :: mg
+    type(s_pp_grid),        intent(in)    :: ppg
+    type(s_dft_system),     intent(in)    :: system
 
-    integer :: ispin, n_frag, nst, nocc, info, lwork, j, nev
+    integer :: ispin, n_frag, nst, nocc, info, lwork, j, nev, env_status
     real(8), parameter :: eps_s = 1.0d-12
     real(8) :: eval_s_min, eval_s_max
+    logical :: allow_buffered_startup_stationary_projection
+    character(len=32) :: env_allow_buffered_startup_stationary_projection
     real(8), allocatable :: eval_s(:), eval_h(:), rwork(:)
     complex(8), allocatable :: h_dense(:,:), s_dense(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
-    complex(8), allocatable :: work(:), coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: work(:)
     external :: zheev
 
     if (dg_frag%use_plane_wave_basis) return
+
+    allow_buffered_startup_stationary_projection = .false.
+    env_allow_buffered_startup_stationary_projection = ''
+    call get_environment_variable('SALMON_DG_ALLOW_BUFFERED_STARTUP_STATIONARY_PROJECTION', &
+      env_allow_buffered_startup_stationary_projection, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_allow_buffered_startup_stationary_projection)))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        allow_buffered_startup_stationary_projection = .true.
+      end select
+    end if
+
+    if (dg_frag%use_buffered_basis .and. .not. allow_buffered_startup_stationary_projection) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') "[INFO] PureDG startup stationary projection skipped in buffered-basis mode (memory guard)"
+        write(*,'(1x,a)') "[INFO] Set SALMON_DG_ALLOW_BUFFERED_STARTUP_STATIONARY_PROJECTION=1 to override"
+      end if
+      return
+    end if
     if (.not. allocated(dg_frag%H_mat_blocks)) return
     if (.not. allocated(dg_frag%esp)) return
 
     n_frag = dg_frag%n_mat_max
     nst = min(dg_frag%nstate_tot, n_frag, size(dg_frag%esp, 1))
     if (n_frag <= 0 .or. nst <= 0) return
+    if (nst < n_frag) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,i0,a)') "[INFO] PureDG startup stationary projection skipped: reduced state mode is active (nst=", &
+          nst, ", n_frag=", n_frag, ")"
+        write(*,'(1x,a)') "[INFO] Use SALMON_DG_BUFFERED_FULL_STATE=1 if full-state startup stationary projection is required"
+      end if
+      return
+    end if
 
     do ispin = 1, dg_frag%nspin
-      nocc = nst
-      if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
-        nocc = min(nst, max(0, dg_frag%nocc_spin(ispin)))
-      end if
-      if (nocc <= 0) cycle
+        nocc = nst
+        if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
+          nocc = min(nst, max(0, dg_frag%nocc_spin(ispin)))
+        end if
+        if (nocc <= 0) cycle
 
-      call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+        nev = nocc
+        allocate(h_dense(nst, nst), s_dense(nst, nst), x_lowdin(nst, nst), h_ortho(nst, nst), u_h(nst, nst), c_eig(nst, nst))
+        allocate(eval_s(nst), eval_h(nst), rwork(max(1, 3 * nst - 2)))
 
-      nev = nocc
-      allocate(h_dense(nst, nst), s_dense(nst, nst), x_lowdin(nst, nst), h_ortho(nst, nst), u_h(nst, nst), c_eig(nst, nst))
-      allocate(eval_s(nst), eval_h(nst), rwork(max(1, 3 * nst - 2)))
+        h_dense(:, :) = (0.0d0, 0.0d0)
+        s_dense(:, :) = (0.0d0, 0.0d0)
+        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, nst, h_dense)
+        call copy_overlap_operator_to_dense(dg_frag, ispin, .true., s_dense)
 
-      h_dense(:, :) = (0.0d0, 0.0d0)
-      s_dense(:, :) = (0.0d0, 0.0d0)
-      call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, nst, h_dense)
-      call copy_overlap_operator_to_dense(dg_frag, ispin, .true., s_dense)
+        ! Add non-local pseudopotential contribution to H at A=0
+        block
+          real(8) :: Ac_zero(3)
+          complex(8), allocatable :: h_nl_dense(:,:)
+          Ac_zero(:) = 0.0d0
+          call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_zero, .false.)
+          if (allocated(dg_frag%H_nl_blocks)) then
+            allocate(h_nl_dense(nst, nst))
+            h_nl_dense(:, :) = (0.0d0, 0.0d0)
+            call copy_complex_matrix_blocks_metric_to_dense(dg_frag, dg_frag%H_nl_blocks, ispin, nst, h_nl_dense)
+            h_dense(:, :) = h_dense(:, :) + h_nl_dense(:, :)
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a,i0,a,1pe12.4)') &
+                "[INFO] PureDG startup: V_NL added to H for ispin=", ispin, &
+                " ||V_NL||_max=", maxval(abs(h_nl_dense(:, :)))
+            end if
+            deallocate(h_nl_dense)
+          end if
+        end block
 
-      ! Lowdin transform matrix X = U * diag(s^{-1/2})
-      x_lowdin(:, :) = s_dense(:, :)
-      lwork = -1
-      allocate(work(1))
-      call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
-      lwork = int(real(work(1), kind=8)) + 1
-      deallocate(work)
-      allocate(work(lwork))
-      call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
-      if (info /= 0) then
+        ! Lowdin transform matrix X = U * diag(s^{-1/2})
+        x_lowdin(:, :) = s_dense(:, :)
+        lwork = -1
+        allocate(work(1))
+        call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
+        lwork = int(real(work(1), kind=8)) + 1
+        deallocate(work)
+        allocate(work(lwork))
+        call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
+        if (info /= 0) then
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (S diagonalization failed): ispin=", ispin, " info=", info
+          end if
+          deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+          cycle
+        end if
+
+        eval_s_min = huge(1.0d0)
+        eval_s_max = 0.0d0
+        do j = 1, nst
+          eval_s_max = max(eval_s_max, eval_s(j))
+          if (eval_s(j) > eps_s) then
+            x_lowdin(:, j) = x_lowdin(:, j) / sqrt(eval_s(j))
+            eval_s_min = min(eval_s_min, eval_s(j))
+          else
+            x_lowdin(:, j) = (0.0d0, 0.0d0)
+          end if
+        end do
+
+        ! H_ortho = X^H H X and diagonalize
+        h_ortho(:, :) = matmul(conjg(transpose(x_lowdin)), matmul(h_dense, x_lowdin))
+        u_h(:, :) = h_ortho(:, :)
+        deallocate(work)
+        lwork = -1
+        allocate(work(1))
+        call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
+        lwork = int(real(work(1), kind=8)) + 1
+        deallocate(work)
+        allocate(work(lwork))
+        call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
+        if (info /= 0) then
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (H_ortho diagonalization failed): ispin=", ispin, " info=", info
+          end if
+          deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+          cycle
+        end if
+
+        c_eig(:, :) = matmul(x_lowdin, u_h)
+
+        ! Keep startup projection on occupied manifold only.
+        ! This avoids reshuffling non-occupied channels at t=0.
+        dg_frag%coef(1:n_frag, 1:nev, ispin) = c_eig(1:n_frag, 1:nev)
+        dg_frag%esp(1:nev, ispin) = eval_h(1:nev)
+
         if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (S diagonalization failed): ispin=", ispin, " info=", info
+          write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup stationary projection applied: ispin=", ispin, &
+            " nocc=", nev, " S-eig(min,max)=", eval_s_min, ", ", eval_s_max
         end if
+
         deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
-        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-        cycle
-      end if
-
-      eval_s_min = huge(1.0d0)
-      eval_s_max = 0.0d0
-      do j = 1, nst
-        eval_s_max = max(eval_s_max, eval_s(j))
-        if (eval_s(j) > eps_s) then
-          x_lowdin(:, j) = x_lowdin(:, j) / sqrt(eval_s(j))
-          eval_s_min = min(eval_s_min, eval_s(j))
-        else
-          x_lowdin(:, j) = (0.0d0, 0.0d0)
-        end if
-      end do
-
-      ! H_ortho = X^H H X and diagonalize
-      h_ortho(:, :) = matmul(conjg(transpose(x_lowdin)), matmul(h_dense, x_lowdin))
-      u_h(:, :) = h_ortho(:, :)
-      deallocate(work)
-      lwork = -1
-      allocate(work(1))
-      call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
-      lwork = int(real(work(1), kind=8)) + 1
-      deallocate(work)
-      allocate(work(lwork))
-      call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
-      if (info /= 0) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (H_ortho diagonalization failed): ispin=", ispin, " info=", info
-        end if
-        deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
-        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-        cycle
-      end if
-
-      c_eig(:, :) = matmul(x_lowdin, u_h)
-
-      ! Keep startup projection on occupied manifold only.
-      ! This avoids reshuffling non-occupied channels at t=0.
-      dg_frag%coef(1:n_frag, 1:nev, ispin) = c_eig(1:n_frag, 1:nev)
-      dg_frag%esp(1:nev, ispin) = eval_h(1:nev)
-
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup stationary projection applied: ispin=", ispin, &
-          " nocc=", nev, " S-eig(min,max)=", eval_s_min, ", ", eval_s_max
-      end if
-
-      deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     call zero_nonowned_coefficients(dg_frag)
-    dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
   end subroutine apply_startup_stationary_projection_puredg
 
   subroutine reduce_matrix_fragment_blocks(dg_frag, mat, label, icomm_reduce)
@@ -2870,18 +3059,30 @@
               szm3 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz - 3, nsup(3)) - 1, p_lb3, p_ub3, dg_frag%lgnum_total(3))
               szp4 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz + 4, nsup(3)) - 1, p_lb3, p_ub3, dg_frag%lgnum_total(3))
               szm4 = map_global_to_phi_box_coord_ham(iorg(3) + wrap_support_local_index(lz - 4, nsup(3)) - 1, p_lb3, p_ub3, dg_frag%lgnum_total(3))
-              gx = nabt(1,1) * (dg_frag%phi_frag(sxp1, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm1, iy0, iz0, jo, i_local)) + &
-                   nabt(2,1) * (dg_frag%phi_frag(sxp2, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm2, iy0, iz0, jo, i_local)) + &
-                   nabt(3,1) * (dg_frag%phi_frag(sxp3, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm3, iy0, iz0, jo, i_local)) + &
-                   nabt(4,1) * (dg_frag%phi_frag(sxp4, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm4, iy0, iz0, jo, i_local))
-              gy = nabt(1,2) * (dg_frag%phi_frag(ix0, syp1, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym1, iz0, jo, i_local)) + &
-                   nabt(2,2) * (dg_frag%phi_frag(ix0, syp2, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym2, iz0, jo, i_local)) + &
-                   nabt(3,2) * (dg_frag%phi_frag(ix0, syp3, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym3, iz0, jo, i_local)) + &
-                   nabt(4,2) * (dg_frag%phi_frag(ix0, syp4, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym4, iz0, jo, i_local))
-              gz = nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, szp1, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm1, jo, i_local)) + &
-                   nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, szp2, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm2, jo, i_local)) + &
-                   nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, szp3, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm3, jo, i_local)) + &
-                   nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, szp4, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm4, jo, i_local))
+              if (sxp1 < 1 .or. sxm1 < 1 .or. sxp2 < 1 .or. sxm2 < 1 .or. sxp3 < 1 .or. sxm3 < 1 .or. sxp4 < 1 .or. sxm4 < 1) then
+                gx = 0.0d0
+              else
+                gx = nabt(1,1) * (dg_frag%phi_frag(sxp1, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm1, iy0, iz0, jo, i_local)) + &
+                     nabt(2,1) * (dg_frag%phi_frag(sxp2, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm2, iy0, iz0, jo, i_local)) + &
+                     nabt(3,1) * (dg_frag%phi_frag(sxp3, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm3, iy0, iz0, jo, i_local)) + &
+                     nabt(4,1) * (dg_frag%phi_frag(sxp4, iy0, iz0, jo, i_local) - dg_frag%phi_frag(sxm4, iy0, iz0, jo, i_local))
+              end if
+              if (syp1 < 1 .or. sym1 < 1 .or. syp2 < 1 .or. sym2 < 1 .or. syp3 < 1 .or. sym3 < 1 .or. syp4 < 1 .or. sym4 < 1) then
+                gy = 0.0d0
+              else
+                gy = nabt(1,2) * (dg_frag%phi_frag(ix0, syp1, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym1, iz0, jo, i_local)) + &
+                     nabt(2,2) * (dg_frag%phi_frag(ix0, syp2, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym2, iz0, jo, i_local)) + &
+                     nabt(3,2) * (dg_frag%phi_frag(ix0, syp3, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym3, iz0, jo, i_local)) + &
+                     nabt(4,2) * (dg_frag%phi_frag(ix0, syp4, iz0, jo, i_local) - dg_frag%phi_frag(ix0, sym4, iz0, jo, i_local))
+              end if
+              if (szp1 < 1 .or. szm1 < 1 .or. szp2 < 1 .or. szm2 < 1 .or. szp3 < 1 .or. szm3 < 1 .or. szp4 < 1 .or. szm4 < 1) then
+                gz = 0.0d0
+              else
+                gz = nabt(1,3) * (dg_frag%phi_frag(ix0, iy0, szp1, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm1, jo, i_local)) + &
+                     nabt(2,3) * (dg_frag%phi_frag(ix0, iy0, szp2, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm2, jo, i_local)) + &
+                     nabt(3,3) * (dg_frag%phi_frag(ix0, iy0, szp3, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm3, jo, i_local)) + &
+                     nabt(4,3) * (dg_frag%phi_frag(ix0, iy0, szp4, jo, i_local) - dg_frag%phi_frag(ix0, iy0, szm4, jo, i_local))
+              end if
             else
               gx = nabt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) - &
                                 dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
@@ -3122,7 +3323,7 @@
     
     integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
-    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3), halo_s(3), halo_e(3)
+    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), ndom_grad(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3), halo_s(3), halo_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
@@ -3131,8 +3332,11 @@
     integer :: npts_local, npts_halo, ipt, nx_local, ny_local
     integer :: n_basis_halo_max, npts_halo_max
     logical :: log_frag_progress, has_overlap
-    logical :: has_halo_work
-    logical, parameter :: enable_momentum_probe = .false.
+    logical :: has_halo_work, use_row_local_momentum
+    logical :: enable_hmat_timing_trace
+    logical, save :: hmat_timing_trace_initialized = .false.
+    logical, save :: hmat_timing_trace_cached = .false.
+    logical :: enable_momentum_probe
     real(8) :: hvol, integral
     real(8) :: momentum_gb
     real(8) :: max_p, pavg
@@ -3145,8 +3349,26 @@
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components, fragment-local)
     real(8), allocatable :: grad_local_2d(:,:), phi_local_2d(:,:), self_proj(:,:)
     real(8), allocatable :: grad_halo_2d(:,:), halo_buf_2d(:,:), halo_proj(:,:)
+    character(len=32) :: env_hmat_trace, env_momentum_probe
+    integer :: env_hmat_len, env_hmat_stat
     
     if (.not. dg_frag%has_real_space_basis) return
+    enable_momentum_probe = .false.
+    env_momentum_probe = ''
+    call get_environment_variable('SALMON_DG_MOMENTUM_PROBE', env_momentum_probe, &
+      length=env_hmat_len, status=env_hmat_stat)
+    if (env_hmat_stat /= 0 .or. env_hmat_len <= 0) then
+      call get_environment_variable('SALMON_DG_TRANSITION_PROBE', env_momentum_probe, &
+        length=env_hmat_len, status=env_hmat_stat)
+    end if
+    if (env_hmat_stat == 0 .and. env_hmat_len > 0) then
+      if (env_momentum_probe(1:1) == '1' .or. env_momentum_probe(1:1) == 'y' .or. &
+          env_momentum_probe(1:1) == 'Y' .or. env_momentum_probe(1:1) == 't' .or. &
+          env_momentum_probe(1:1) == 'T') then
+        enable_momentum_probe = .true.
+      end if
+    end if
+
     time_halo_exchange = 0.0d0
     time_self_integral = 0.0d0
     time_halo_integral = 0.0d0
@@ -3156,6 +3378,25 @@
     time_reduce_pack = 0.0d0
     time_reduce_comm = 0.0d0
     time_reduce_unpack = 0.0d0
+    use_row_local_momentum = momentum_blocks_use_row_local_storage(dg_frag)
+    if (dg_frag%use_buffered_basis) use_row_local_momentum = .true.
+
+    if (.not. hmat_timing_trace_initialized) then
+      env_hmat_trace = ''
+      env_hmat_len = 0
+      env_hmat_stat = 0
+      call get_environment_variable('SALMON_DG_HMAT_TIMING_TRACE', env_hmat_trace, &
+        length=env_hmat_len, status=env_hmat_stat)
+      if (env_hmat_stat == 0 .and. env_hmat_len > 0) then
+        if (env_hmat_trace(1:1) == '1' .or. env_hmat_trace(1:1) == 'y' .or. &
+            env_hmat_trace(1:1) == 'Y' .or. env_hmat_trace(1:1) == 't' .or. &
+            env_hmat_trace(1:1) == 'T') then
+          hmat_timing_trace_cached = .true.
+        end if
+      end if
+      hmat_timing_trace_initialized = .true.
+    end if
+    enable_hmat_timing_trace = hmat_timing_trace_cached
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Computing transition moments: <φ_i|∇|φ_j>"
@@ -3255,7 +3496,11 @@
         nx_local = lx_hi - lx_lo + 1
         ny_local = ly_hi - ly_lo + 1
         allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
-        allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
+        ndom_grad(:) = ndom(:)
+        if (dg_frag%use_buffered_basis) then
+          ndom_grad(:) = dg_frag%basis_support_hi(:, ifrag) - dg_frag%basis_support_lo(:, ifrag) + 1
+        end if
+        allocate(grad_phi(1:ndom_grad(1), 1:ndom_grad(2), 1:ndom_grad(3), 3))
         if (enable_momentum_probe) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
             " ifrag=", ifrag, " nbf=", nbf, " npts_local=", npts_local
@@ -3339,7 +3584,6 @@
 
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) then
-            deallocate(grad_phi)
             cycle
           end if
           call cpu_time(t0)
@@ -3545,10 +3789,21 @@
         if (allocated(halo_buf_2d)) deallocate(halo_buf_2d)
         if (allocated(halo_proj)) deallocate(halo_proj)
         deallocate(phi_local_2d, grad_local_2d, self_proj)
+        if (enable_momentum_probe) then
+          write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " stage=after-frag-dealloc"
+          flush(6)
+        end if
       end do  ! ifrag
     end do  ! ispin
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a,l1)') "        momentum-probe: rank=", dg_frag%id, &
+        " stage=before-reduce use_row_local=", use_row_local_momentum
+      flush(6)
+    end if
     
     ! MPI aggregation of fragment-neighbor momentum blocks.
+    if (.not. use_row_local_momentum) then
     block
       real(8), allocatable :: send_flat(:), recv_flat(:)
       real(8) :: t_reduce_start, t_reduce_end
@@ -3690,9 +3945,18 @@
       call cpu_time(t_reduce_end)
       time_block_reduce = time_block_reduce + (t_reduce_end - t_reduce_start)
     end block
+    end if
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-reduce"
+      flush(6)
+    end if
 
     ! Enforce anti-symmetry blockwise: self blocks against themselves, off-diagonal
     ! blocks against the reverse ordered fragment pair.
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=before-antisym"
+      flush(6)
+    end if
     call cpu_time(t0)
     do ispin = 1, system%nspin
       do iblk = 1, dg_frag%n_momentum_blocks
@@ -3734,7 +3998,11 @@
     end do
     call cpu_time(t1)
     time_antisym = time_antisym + (t1 - t0)
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-antisym"
+      flush(6)
+    end if
+    if (enable_hmat_timing_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,1pe12.4)') "        momentum antisym done time=", time_antisym
       flush(6)
     end if
@@ -3743,7 +4011,12 @@
     do iblk = 1, dg_frag%n_momentum_blocks
       max_p = max(max_p, maxval(abs(dg_frag%momentum_blocks(iblk)%val)))
     end do
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a,1pe12.4)') "        momentum-probe: rank=", dg_frag%id, &
+        " stage=after-maxp max=", max_p
+      flush(6)
+    end if
+    if (enable_hmat_timing_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
         "        momentum timing: halo_exchange=", time_halo_exchange, &
         " grad=", time_grad_total, " self=", time_self_integral, &
@@ -3753,6 +4026,10 @@
       write(*,'(a,i0,a,i0,a)') "        Total matrix elements: ", &
                                3 * dg_frag%n_mat_max * dg_frag%n_mat_max * system%nspin, &
                                " (", 3, " directions × basis states × spin)"
+    end if
+    if (enable_momentum_probe) then
+      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=exit"
+      flush(6)
     end if
     
   end subroutine calculate_momentum_matrix
@@ -3777,27 +4054,76 @@
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
-    logical :: log_frag_progress, release_dense_overlap, has_overlap
+    logical :: log_frag_progress, release_dense_overlap, has_overlap, use_row_local_overlap
+    logical :: build_prop_overlap_blocks
+    logical :: enable_overlap_timing_trace, enable_overlap_probe
+    logical, save :: overlap_timing_trace_initialized = .false.
+    logical, save :: overlap_timing_trace_cached = .false.
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
     real(8) :: frag_self_start, frag_halo_start
     real(8), allocatable :: phi_local_2d(:,:), self_overlap(:,:)
+    character(len=32) :: env_overlap_trace
+    integer :: env_overlap_len, env_overlap_stat
 
     if (.not. dg_frag%has_real_space_basis) return
+    enable_overlap_probe = .false.
+    call get_environment_variable('SALMON_DG_OVERLAP_PROBE', env_overlap_trace, &
+      length=env_overlap_len, status=env_overlap_stat)
+    if (env_overlap_stat /= 0 .or. env_overlap_len <= 0) then
+      call get_environment_variable('SALMON_DG_TRANSITION_PROBE', env_overlap_trace, &
+        length=env_overlap_len, status=env_overlap_stat)
+    end if
+    if (env_overlap_stat == 0 .and. env_overlap_len > 0) then
+      if (env_overlap_trace(1:1) == '1' .or. env_overlap_trace(1:1) == 'y' .or. &
+          env_overlap_trace(1:1) == 'Y' .or. env_overlap_trace(1:1) == 't' .or. &
+          env_overlap_trace(1:1) == 'T') then
+        enable_overlap_probe = .true.
+      end if
+    end if
+    if (enable_overlap_probe) then
+      write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=enter"
+      flush(6)
+    end if
     if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_mat)) return
 
     release_dense_overlap = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
 
+    if (.not. overlap_timing_trace_initialized) then
+      env_overlap_trace = ''
+      env_overlap_len = 0
+      env_overlap_stat = 0
+      call get_environment_variable('SALMON_DG_OVERLAP_TIMING_TRACE', env_overlap_trace, &
+        length=env_overlap_len, status=env_overlap_stat)
+      if (env_overlap_stat == 0 .and. env_overlap_len > 0) then
+        if (env_overlap_trace(1:1) == '1' .or. env_overlap_trace(1:1) == 'y' .or. &
+            env_overlap_trace(1:1) == 'Y' .or. env_overlap_trace(1:1) == 't' .or. &
+            env_overlap_trace(1:1) == 'T') then
+          overlap_timing_trace_cached = .true.
+        end if
+      end if
+      overlap_timing_trace_initialized = .true.
+    end if
+    enable_overlap_timing_trace = overlap_timing_trace_cached
+
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
     dg_frag%has_global_overlap_copy = .true.
     dg_frag%overlap_prop_root_authoritative = .false.
-    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+    use_row_local_overlap = dg_frag%use_buffered_basis
+    build_prop_overlap_blocks = .not. dg_frag%use_buffered_basis
+    if (use_row_local_overlap) release_dense_overlap = .true.
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks, &
+      row_local_only=use_row_local_overlap)
     if (allocated(dg_frag%S_mat_blocks)) then
       do i_halo = 1, size(dg_frag%S_mat_blocks)
         dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
       end do
+    end if
+    if (enable_overlap_probe) then
+      write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=after-init-blocks"
+      flush(6)
     end if
 
     is = mg%is
@@ -3813,7 +4139,9 @@
     phi_ub2 = ubound(dg_frag%phi_frag, 2)
     phi_ub3 = ubound(dg_frag%phi_frag, 3)
 
-    call exchange_phi_frag_halo(dg_frag)
+    if (.not. dg_frag%use_buffered_basis) then
+      call exchange_phi_frag_halo(dg_frag)
+    end if
 
     do ispin = 1, system%nspin
       i_local = 0
@@ -3911,27 +4239,49 @@
         deallocate(phi_local_2d, self_overlap)
       end do
     end do
+    if (enable_overlap_probe) then
+      write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=after-local-loops"
+      flush(6)
+    end if
 
-    call cpu_time(t0)
-    call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
-    if (.not. dg_frag%is_frag_root) then
-      if (allocated(dg_frag%S_mat_blocks)) then
+    if (.not. use_row_local_overlap) then
+      call cpu_time(t0)
+      call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
+      if (.not. dg_frag%is_frag_root) then
+        if (allocated(dg_frag%S_mat_blocks)) then
+          do i_halo = 1, size(dg_frag%S_mat_blocks)
+            if (fragment_row_is_locally_owned(dg_frag, dg_frag%S_mat_blocks(i_halo)%ifrag_row)) cycle
+            dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
+          end do
+        end if
+      end if
+      call cpu_time(t1)
+      time_reduce_total = time_reduce_total + (t1 - t0)
+    end if
+    if (enable_overlap_probe) then
+      write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=after-reduce"
+      flush(6)
+    end if
+    if (enable_overlap_timing_trace .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,1pe12.4)') "        overlap reduce done time=", time_reduce_total
+      flush(6)
+    end if
+
+    if (build_prop_overlap_blocks) then
+      call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks, &
+        row_local_only=use_row_local_overlap)
+      if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
         do i_halo = 1, size(dg_frag%S_mat_blocks)
-          if (fragment_row_is_locally_owned(dg_frag, dg_frag%S_mat_blocks(i_halo)%ifrag_row)) cycle
-          dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
+          dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
         end do
       end if
-    end if
-    call cpu_time(t1)
-    time_reduce_total = time_reduce_total + (t1 - t0)
-    write(*,'(1x,a,1pe12.4)') "        overlap reduce done time=", time_reduce_total
-    flush(6)
-
-    call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
-    if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
-      do i_halo = 1, size(dg_frag%S_mat_blocks)
-        dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
-      end do
+    else
+      if (allocated(dg_frag%S_mat_prop_blocks)) then
+        do i_halo = 1, size(dg_frag%S_mat_prop_blocks)
+          if (allocated(dg_frag%S_mat_prop_blocks(i_halo)%val)) deallocate(dg_frag%S_mat_prop_blocks(i_halo)%val)
+        end do
+        deallocate(dg_frag%S_mat_prop_blocks)
+      end if
     end if
 
     do ispin = 1, dg_frag%nspin
@@ -3942,7 +4292,9 @@
                        size(dg_frag%S_mat_blocks(iblk)%val, 2))
           if (dg_frag%S_mat_blocks(iblk)%val(ii, ii, ispin) < 1.0d-12) then
             dg_frag%S_mat_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
-            dg_frag%S_mat_prop_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
+            if (allocated(dg_frag%S_mat_prop_blocks)) then
+              dg_frag%S_mat_prop_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
+            end if
           end if
         end do
       end do
@@ -3966,5 +4318,9 @@
     end if
     dg_frag%has_global_overlap_copy = .false.
     dg_frag%overlap_prop_root_authoritative = .false.
+    if (enable_overlap_probe) then
+      write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=exit"
+      flush(6)
+    end if
 
   end subroutine calculate_overlap_matrix

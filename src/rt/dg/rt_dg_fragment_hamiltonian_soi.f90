@@ -192,7 +192,7 @@
       if (.not. dg_frag%mixed_basis_ready) then
         stop "DG+PW SOI startup requires mixed_basis_ready after diagonalize_mixed_basis"
       end if
-      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     end if
 
     ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
