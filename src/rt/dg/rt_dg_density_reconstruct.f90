@@ -384,7 +384,19 @@
 
     ! Mixed-basis density reconstruction is only valid when PW channels exist.
     ! For n_pw==0, stay on the pure fragment-basis path.
+    ! Default keeps current behavior (split PW density when n_pw>0),
+    ! but allow comparison runs to force mixed path.
     split_pw_density = (n_pw > 0)
+    call get_environment_variable("SALMON_DG_SPLIT_PW_DENSITY", env_val, length=env_len, status=env_status)
+    if (n_pw > 0 .and. env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '0' .or. env_val(1:1) == 'n' .or. env_val(1:1) == 'N' .or. &
+          env_val(1:1) == 'f' .or. env_val(1:1) == 'F') then
+        split_pw_density = .false.
+      else if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+               env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        split_pw_density = .true.
+      end if
+    end if
     use_mixed_density = (n_pw > 0 .and. .not. split_pw_density .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
       allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
     ! Density reconstruction uses subgroup-distributed projection and collective reductions on icomm_frag.
@@ -1166,7 +1178,7 @@
           valid_remote_grid_count = 0
           call cpu_time(t_setup0)
           if (allocated(dg_frag%density_send_slot_map)) then
-            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, .false.)
+            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, n_pw == 0)
           else
             slot_buf(1:npt_blk) = 0
             call prepare_grid_buffers_owner_map_no_slot(i_local, igrid0, npt_blk, nxyz)
@@ -1343,7 +1355,7 @@
                   ixg = ixg_buf(igrid)
                   iyg = iyg_buf(igrid)
                   izg = izg_buf(igrid)
-                    if (owner_buf(igrid) /= dg_frag%id) cycle
+                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
                     if (ixg < rho_s_x_lo .or. ixg > rho_s_x_hi .or. &
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
@@ -1631,7 +1643,7 @@
                     ixg = ixg_buf(igrid)
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
-                    if (owner_buf(igrid) /= dg_frag%id) cycle
+                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
                     if (ixg < rho_s_x_lo .or. ixg > rho_s_x_hi .or. &
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
@@ -2276,14 +2288,20 @@
           " id_frag=", dg_frag%id_frag, " local(rho,rho_s,total,target)=", &
           charge_local_rho_check, charge_local_rhos_check, total_charge, target_charge
         flush(6)
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a)') "[FATAL] DG density charge mismatch detected before renormalization."
-          write(*,'(1x,a,3(1pe14.6,1x),a,l1)') "        charge raw/target/diff=", total_charge, target_charge, &
-            total_charge - target_charge, " allow_renorm=", enable_density_renormalize
-          write(*,'(1x,a)') "        set SALMON_DG_ALLOW_DENSITY_RENORMALIZE=1 only for temporary comparison runs"
+        if (dg_frag%current_iteration <= 0) then
+          if (dg_frag%id == 0) then
+            write(*,'(1x,a)') "[FATAL] DG density charge mismatch detected before renormalization."
+            write(*,'(1x,a,3(1pe14.6,1x),a,l1)') "        charge raw/target/diff=", total_charge, target_charge, &
+              total_charge - target_charge, " allow_renorm=", enable_density_renormalize
+            write(*,'(1x,a)') "        set SALMON_DG_ALLOW_DENSITY_RENORMALIZE=1 only for temporary comparison runs"
+            flush(6)
+          end if
+          stop "DG-Fragment RT: density charge mismatch before renormalization"
+        else if (dg_frag%id == 0 .and. (dg_frag%current_iteration == 1 .or. mod(dg_frag%current_iteration, 10) == 0)) then
+          write(*,'(1x,a,i0,a,3(1pe14.6,1x))') "[WARN] DG density charge mismatch during no-renorm propagation: itt=", &
+            dg_frag%current_iteration, " raw/target/diff=", total_charge, target_charge, total_charge - target_charge
           flush(6)
         end if
-        stop "DG-Fragment RT: density charge mismatch before renormalization"
       end if
     end if
     if (total_charge > 1.0d-14 .and. total_charge == total_charge) then

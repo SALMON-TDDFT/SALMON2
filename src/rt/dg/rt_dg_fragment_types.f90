@@ -37,6 +37,8 @@ module rt_dg_fragment_types
     integer :: recv_lo(3), recv_hi(3)        ! Local phi_frag recv block bounds
     real(8), allocatable :: buf_send(:,:,:,:,:)  ! (lx,ly,lz,nstate,ifrag_count)
     real(8), allocatable :: buf_recv(:,:,:,:,:)  ! (lx,ly,lz,nstate,ifrag_count)
+    real(8), allocatable :: buf_flow_send(:,:,:,:,:) ! (lx_face,ly_face,lz_face,nstate,2) phi_face,dphi_face
+    real(8), allocatable :: buf_flow_recv(:,:,:,:,:) ! (lx_face,ly_face,lz_face,nstate,2) phi_face,dphi_face
     complex(8), allocatable :: buf_send_c(:,:,:,:,:)  ! complex halo buffer for SOI path
     complex(8), allocatable :: buf_recv_c(:,:,:,:,:)  ! complex halo buffer for SOI path
   end type halo_info
@@ -200,6 +202,7 @@ module rt_dg_fragment_types
     real(8) :: elec_num_scaled                 ! total electrons after rho normalization
     real(8) :: elec_num_raw                    ! total electrons before rho normalization
     real(8) :: rho_scale_factor                ! density renormalization factor
+    integer :: current_iteration = 0          ! RT iteration index for density/startup diagnostics
     real(8) :: pw_weight_raw                   ! simple diagnostic: sum |coef_pw|^2 over occupied states
     logical :: use_buffered_basis = .false.    ! buffered DC fragment-orbital mode
 

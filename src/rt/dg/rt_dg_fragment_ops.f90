@@ -1307,7 +1307,7 @@ contains
     else if (allocated(dg_frag%S_mat)) then
       y(1:n_frag, :) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
     end if
-    if (n_pw > 0) then
+    if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
       y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :)
     end if
   end subroutine apply_overlap_operator_batch

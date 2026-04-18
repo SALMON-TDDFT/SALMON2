@@ -644,35 +644,6 @@ contains
       end do
       deallocate(dg_frag%density_recv_map)
     end if
-    if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
-    if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
-    if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
-    if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
-    if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
-    if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
-    if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
-    if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
-    if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
-    if (allocated(dg_frag%density_block_nblocks)) deallocate(dg_frag%density_block_nblocks)
-    if (allocated(dg_frag%density_block_first_offset)) deallocate(dg_frag%density_block_first_offset)
-    if (allocated(dg_frag%density_block_step)) deallocate(dg_frag%density_block_step)
-    if (allocated(dg_frag%current_valid_grid_count)) deallocate(dg_frag%current_valid_grid_count)
-    if (allocated(dg_frag%current_valid_ix)) deallocate(dg_frag%current_valid_ix)
-    if (allocated(dg_frag%current_valid_iy)) deallocate(dg_frag%current_valid_iy)
-    if (allocated(dg_frag%current_valid_iz)) deallocate(dg_frag%current_valid_iz)
-    if (allocated(dg_frag%current_valid_ixg)) deallocate(dg_frag%current_valid_ixg)
-    if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
-    if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
-    if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
-    if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
-    if (allocated(dg_frag%density_recv_map)) then
-      do ifrag = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
-        if (allocated(dg_frag%density_recv_map(ifrag)%ixg)) deallocate(dg_frag%density_recv_map(ifrag)%ixg)
-        if (allocated(dg_frag%density_recv_map(ifrag)%iyg)) deallocate(dg_frag%density_recv_map(ifrag)%iyg)
-        if (allocated(dg_frag%density_recv_map(ifrag)%izg)) deallocate(dg_frag%density_recv_map(ifrag)%izg)
-      end do
-      deallocate(dg_frag%density_recv_map)
-    end if
     if (.not. associated(dg_frag%mg)) return
     if (.not. allocated(dg_frag%nxyz_domain)) return
     if (.not. allocated(dg_frag%ixyz_frag)) return
@@ -725,7 +696,8 @@ contains
             dg_frag%density_ixg_map(ix, iy, iz, i_local) = ixg
             dg_frag%density_iyg_map(ix, iy, iz, i_local) = iyg
             dg_frag%density_izg_map(ix, iy, iz, i_local) = izg
-            dg_frag%density_primary_local_map(ix, iy, iz, i_local) = .true.
+            dg_frag%density_primary_local_map(ix, iy, iz, i_local) = &
+              is_density_primary_fragment(dg_frag, ifrag, ixg, iyg, izg)
             source_rank = root_rank_frag
             subgroup_target_rank = source_rank - root_rank_frag
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
@@ -838,6 +810,7 @@ contains
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
             source_rank = source_root_rank
+            if (.not. is_density_primary_fragment(dg_frag, ifrag, ixg, iyg, izg)) cycle
             if (.not. use_root_only_sender) then
               source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
             end if
@@ -958,6 +931,7 @@ contains
           do ix = 1, dg_frag%nxyz_domain(1, ifrag)
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
             source_rank = source_root_rank
+            if (.not. is_density_primary_fragment(dg_frag, ifrag, ixg, iyg, izg)) cycle
             if (.not. use_root_only_sender) then
               source_rank = get_fragment_grid_sender_rank(source_root_rank, dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
             end if
@@ -1047,7 +1021,21 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag_ref, ixg, iyg, izg
+    integer :: ifrag
+
     is_primary = is_density_core_point(dg_frag, ifrag_ref, ixg, iyg, izg)
+    if (.not. is_primary) return
+
+    ! Enforce a deterministic unique primary fragment when core boxes overlap.
+    ! The smallest fragment index among candidates becomes the primary owner.
+    do ifrag = 1, dg_frag%n_frag
+      if (ifrag == ifrag_ref) cycle
+      if (.not. is_density_core_point(dg_frag, ifrag, ixg, iyg, izg)) cycle
+      if (ifrag < ifrag_ref) then
+        is_primary = .false.
+        return
+      end if
+    end do
   end function is_density_primary_fragment
 
   integer function wrap_global_grid_index(ig_raw, ngrid) result(ig)
@@ -1850,7 +1838,13 @@ contains
               nocc_eff = min(dg_frag%nstate_tot, int(nelec / 2.0d0 + 1.0d-12))
             end if
           end if
-          if (nocc_eff > 0) dg_frag%occ_state(1:nocc_eff, ispin) = 1.0d0
+          if (nocc_eff > 0) then
+            if (dg_frag%nspin == 1) then
+              dg_frag%occ_state(1:nocc_eff, ispin) = 2.0d0
+            else
+              dg_frag%occ_state(1:nocc_eff, ispin) = 1.0d0
+            end if
+          end if
         end if
       end do
 

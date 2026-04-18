@@ -225,20 +225,67 @@
     recv_idx(3) = halo%recv_lo(3) + iz_buf - 1
   end subroutine get_halo_block_point_indices
 
+  subroutine get_halo_face_axis_dir_local(dvec, axis, dir)
+    implicit none
+    integer, intent(in) :: dvec(3)
+    integer, intent(out) :: axis, dir
+
+    axis = 0
+    dir = 0
+    if (count(dvec /= 0) /= 1) stop "DG-Fragment RT: halo face helper requires face neighbor"
+    if (dvec(1) /= 0) then
+      axis = 1
+      dir = dvec(1)
+    else if (dvec(2) /= 0) then
+      axis = 2
+      dir = dvec(2)
+    else
+      axis = 3
+      dir = dvec(3)
+    end if
+  end subroutine get_halo_face_axis_dir_local
+
+  integer function get_local_face_boundary_index_local(len_axis, face_dir) result(idx_face)
+    implicit none
+    integer, intent(in) :: len_axis, face_dir
+
+    if (face_dir > 0) then
+      idx_face = len_axis
+    else
+      idx_face = 1
+    end if
+  end function get_local_face_boundary_index_local
+
   !=======================================================================
   ! Initialize halo communication structures for fragment boundaries
   ! Following lcfo.f90 halo exchange pattern with periodic boundaries
   !=======================================================================
   subroutine init_halo_communication(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    call init_halo_communication_core(dg_frag, .true.)
+  end subroutine init_halo_communication
+
+  subroutine init_flow_halo_communication(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    call init_halo_communication_core(dg_frag, .false.)
+  end subroutine init_flow_halo_communication
+
+  subroutine init_halo_communication_core(dg_frag, strict_root_check)
     use structures
     use communication, only: comm_summation, comm_is_root
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    logical, intent(in) :: strict_root_check
 
     integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag, neighbor_root_rank
     integer :: d(3)
     integer, allocatable :: id_tmp(:)
     integer :: ifrag_count
+    integer :: face_axis, face_dir, flow_length(3)
 
     ! Build MPI rank array for all fragments (comm_summation across all ranks)
     allocate(id_tmp(dg_frag%n_frag))
@@ -283,7 +330,11 @@
     end do
 
     if (allocated(dg_frag%halo)) deallocate(dg_frag%halo)
-    allocate(dg_frag%halo(max(1, 26 * ifrag_count)))
+    if (strict_root_check) then
+      allocate(dg_frag%halo(max(1, 26 * ifrag_count)))
+    else
+      allocate(dg_frag%halo(max(1, 6 * ifrag_count)))
+    end if
 
     i = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -291,6 +342,10 @@
       do ly = -nh(2), nh(2)
       do lz = -nh(3), nh(3)
         if (lx == 0 .and. ly == 0 .and. lz == 0) cycle
+
+        if (.not. strict_root_check) then
+          if (count([lx, ly, lz] /= 0) /= 1) cycle
+        end if
 
         i = i + 1
         dg_frag%halo(i)%dvec(1:3) = [lx, ly, lz]
@@ -308,12 +363,22 @@
           stop "DG-Fragment RT: invalid halo neighbor index"
         end if
 
-        neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
-        if (dg_frag%id_array(jfrag) /= neighbor_root_rank) then
+        if (strict_root_check) then
+          neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
+        else
+          neighbor_root_rank = dg_frag%id_array(jfrag)
+        end if
+        if (strict_root_check .and. dg_frag%id_array(jfrag) /= neighbor_root_rank) then
           write(*,'(a,i0,a,i0,a,i0,a,i0)') &
             "[ERROR] DG-Fragment RT: inconsistent fragment root rank for ifrag=", ifrag, &
             " jfrag=", jfrag, " stored=", dg_frag%id_array(jfrag), " expected=", neighbor_root_rank
           stop "DG-Fragment RT: inconsistent fragment-group root rank"
+        end if
+        if (neighbor_root_rank < 0) then
+          write(*,'(a,i0,a,i0,a,i0)') &
+            "[ERROR] DG-Fragment RT: invalid fragment root rank for ifrag=", ifrag, &
+            " jfrag=", jfrag, " root=", neighbor_root_rank
+          stop "DG-Fragment RT: invalid fragment root rank"
         end if
 
         dg_frag%halo(i)%id_dst = neighbor_root_rank + dg_frag%id_frag
@@ -351,6 +416,11 @@
                                           dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
         allocate(dg_frag%halo(i)%buf_recv(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
                                           dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
+        call get_halo_face_axis_dir_local(dg_frag%halo(i)%dvec, face_axis, face_dir)
+        flow_length(:) = dg_frag%halo(i)%length(:)
+        flow_length(face_axis) = 1
+        allocate(dg_frag%halo(i)%buf_flow_send(flow_length(1), flow_length(2), flow_length(3), dg_frag%nstate_frag, 2))
+        allocate(dg_frag%halo(i)%buf_flow_recv(flow_length(1), flow_length(2), flow_length(3), dg_frag%nstate_frag, 2))
 
       end do
       end do
@@ -366,7 +436,7 @@
 
     deallocate(id_tmp)
 
-  end subroutine init_halo_communication
+  end subroutine init_halo_communication_core
 
   !=======================================================================
   ! Exchange halo regions for phi_frag between neighboring fragments
@@ -672,3 +742,102 @@
     end if
 
   end subroutine exchange_phi_frag_halo
+
+  subroutine exchange_flow_face_halo(dg_frag)
+    use communication, only: comm_isend, comm_irecv, comm_wait_all
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: i_halo, ix, iy, iz, istate
+    integer :: l(3), flow_l(3), i_local
+    integer :: ifrag_send, ifrag_recv, dir_code
+    integer :: itag_send, itag_recv
+    integer :: send_idx(3), recv_idx(3)
+    integer :: face_axis, face_dir, face_idx_local
+
+    if (.not. dg_frag%has_halo_exchange) return
+    if (dg_frag%n_halo <= 0) return
+
+    if (allocated(dg_frag%halo_ireq_send)) then
+      if (size(dg_frag%halo_ireq_send) /= dg_frag%n_halo) deallocate(dg_frag%halo_ireq_send)
+    end if
+    if (allocated(dg_frag%halo_ireq_recv)) then
+      if (size(dg_frag%halo_ireq_recv) /= dg_frag%n_halo) deallocate(dg_frag%halo_ireq_recv)
+    end if
+    if (.not. allocated(dg_frag%halo_ireq_send)) allocate(dg_frag%halo_ireq_send(dg_frag%n_halo))
+    if (.not. allocated(dg_frag%halo_ireq_recv)) allocate(dg_frag%halo_ireq_recv(dg_frag%n_halo))
+
+    do i_halo = 1, dg_frag%n_halo
+      i_local = dg_frag%halo(i_halo)%ifrag_dst - dg_frag%ifrag_start + 1
+      if (i_local < 1 .or. i_local > (dg_frag%ifrag_end - dg_frag%ifrag_start + 1)) then
+        stop "DG-Fragment RT: invalid i_local in exchange_flow_face_halo"
+      end if
+
+      l = dg_frag%halo(i_halo)%length
+      call get_halo_face_axis_dir_local(dg_frag%halo(i_halo)%dvec, face_axis, face_dir)
+      face_idx_local = get_local_face_boundary_index_local(l(face_axis), face_dir)
+      flow_l(:) = l(:)
+      flow_l(face_axis) = 1
+      dg_frag%halo(i_halo)%buf_flow_send(:, :, :, :, :) = 0.0d0
+
+      select case (face_axis)
+      case (1)
+!$omp parallel do collapse(3) private(istate,iz,iy,send_idx,recv_idx) schedule(static)
+        do istate = 1, dg_frag%nstate_frag
+        do iz = 1, l(3)
+        do iy = 1, l(2)
+          call get_halo_block_point_indices(dg_frag%halo(i_halo), face_idx_local, iy, iz, send_idx, recv_idx)
+          dg_frag%halo(i_halo)%buf_flow_send(1, iy, iz, istate, 1) = dg_frag%phi_frag(send_idx(1), send_idx(2), send_idx(3), istate, i_local)
+          dg_frag%halo(i_halo)%buf_flow_send(1, iy, iz, istate, 2) = -one_sided_face_derivative_local(dg_frag, i_local, istate, face_axis, face_dir, &
+            send_idx(1), send_idx(2), send_idx(3))
+        end do
+        end do
+        end do
+!$omp end parallel do
+      case (2)
+!$omp parallel do collapse(3) private(istate,iz,ix,send_idx,recv_idx) schedule(static)
+        do istate = 1, dg_frag%nstate_frag
+        do iz = 1, l(3)
+        do ix = 1, l(1)
+          call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, face_idx_local, iz, send_idx, recv_idx)
+          dg_frag%halo(i_halo)%buf_flow_send(ix, 1, iz, istate, 1) = dg_frag%phi_frag(send_idx(1), send_idx(2), send_idx(3), istate, i_local)
+          dg_frag%halo(i_halo)%buf_flow_send(ix, 1, iz, istate, 2) = -one_sided_face_derivative_local(dg_frag, i_local, istate, face_axis, face_dir, &
+            send_idx(1), send_idx(2), send_idx(3))
+        end do
+        end do
+        end do
+!$omp end parallel do
+      case (3)
+!$omp parallel do collapse(3) private(istate,iy,ix,send_idx,recv_idx) schedule(static)
+        do istate = 1, dg_frag%nstate_frag
+        do iy = 1, l(2)
+        do ix = 1, l(1)
+          call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, face_idx_local, send_idx, recv_idx)
+          dg_frag%halo(i_halo)%buf_flow_send(ix, iy, 1, istate, 1) = dg_frag%phi_frag(send_idx(1), send_idx(2), send_idx(3), istate, i_local)
+          dg_frag%halo(i_halo)%buf_flow_send(ix, iy, 1, istate, 2) = -one_sided_face_derivative_local(dg_frag, i_local, istate, face_axis, face_dir, &
+            send_idx(1), send_idx(2), send_idx(3))
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end select
+
+      ifrag_send = dg_frag%halo(i_halo)%ifrag_dst
+      dir_code = (dg_frag%halo(i_halo)%dvec(1) + 1) * 9 + &
+                 (dg_frag%halo(i_halo)%dvec(2) + 1) * 3 + &
+                 (dg_frag%halo(i_halo)%dvec(3) + 1)
+      itag_send = (ifrag_send - 1) * 27 + dir_code
+      dg_frag%halo_ireq_send(i_halo) = comm_isend(dg_frag%halo(i_halo)%buf_flow_send, &
+                                                  dg_frag%halo(i_halo)%id_dst, &
+                                                  itag_send, dg_frag%icomm)
+
+      ifrag_recv = dg_frag%halo(i_halo)%ifrag_src
+      itag_recv = (ifrag_recv - 1) * 27 + (26 - dir_code)
+      dg_frag%halo_ireq_recv(i_halo) = comm_irecv(dg_frag%halo(i_halo)%buf_flow_recv, &
+                                                  dg_frag%halo(i_halo)%id_src, &
+                                                  itag_recv, dg_frag%icomm)
+    end do
+
+    call comm_wait_all(dg_frag%halo_ireq_recv)
+    call comm_wait_all(dg_frag%halo_ireq_send)
+  end subroutine exchange_flow_face_halo

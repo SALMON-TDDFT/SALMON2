@@ -662,50 +662,24 @@
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: loc_s_dbg(3), loc_e_dbg(3)
     integer :: n_metric
-    integer :: env_status, sipg_trace_rank, sipg_trace_jmax, env_len
+    integer :: env_status, env_len
     logical :: release_dense_fragment_ops
     logical :: enable_startup_lowdin
     logical :: enable_startup_stationary_projection
     logical :: has_overlap_dbg
-    logical :: probe_rank_main, probe_rank_352_396, probe_small_frag2
-    logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup, need_halo_alloc
-    logical :: jo_edge, jo_probe_main, jo_probe_352_396, jo_probe_small_frag2
-    logical, parameter :: enable_hamiltonian_trace = .false.
-    logical :: enable_step2_probe
+    logical :: need_halo_alloc
     complex(8), allocatable :: H_metric_ref(:,:)
-    real(8) :: partial_t_abs, partial_h_abs
     real(8) :: halo_integral_a_sum, halo_integral_b_sum, halo_integral_c_sum
     real(8) :: sipg_h_face_a, sipg_h_face_b, sipg_h_face_c
-    real(8) :: sipg_terms_local(3), sipg_terms_sum(3)
-    character(len=32) :: env_sipg_face_trace, env_sipg_trace_allpairs
-    character(len=32) :: env_sipg_trace_rank, env_sipg_trace_jmax
     character(len=32) :: env_sipg_disable_b_term, env_sipg_disable_c_term, env_sipg_enable_halo, env_sipg_use_avg_trace, env_sipg_use_flux_form
     character(len=32) :: env_sipg_use_weak_form, env_sipg_ab_norm_max
-    character(len=32) :: env_startup_lowdin, env_startup_stationary_projection, env_step2_probe
-    logical :: enable_sipg_face_trace, sipg_trace_allpairs, sipg_trace_pair
+    character(len=32) :: env_startup_lowdin, env_startup_stationary_projection
     logical :: sipg_disable_b_term, sipg_disable_c_term, sipg_enable_fragment_halo_exchange, sipg_use_avg_trace, sipg_use_flux_form
     logical :: sipg_use_weak_form
     real(8) :: sipg_ab_norm_max
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
-    enable_step2_probe = .false.
-    env_step2_probe = ''
-    call get_environment_variable('SALMON_DG_STEP2_PROBE', env_step2_probe, status=env_status)
-    if (env_status == 0) then
-      select case (trim(adjustl(env_step2_probe)))
-      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
-        enable_step2_probe = .true.
-      end select
-    end if
-    probe_rank_main = enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)
-    probe_rank_352_396 = enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)
-    probe_small_frag2 = enable_step2_probe .and. dg_frag%n_frag == 2 .and. dg_frag%id <= 3
-
-    env_sipg_face_trace = ''
-    env_sipg_trace_allpairs = ''
-    env_sipg_trace_rank = ''
-    env_sipg_trace_jmax = ''
     env_sipg_disable_b_term = ''
     env_sipg_disable_c_term = ''
     env_sipg_enable_halo = ''
@@ -713,10 +687,6 @@
     env_sipg_use_flux_form = ''
     env_sipg_use_weak_form = ''
     env_sipg_ab_norm_max = ''
-    enable_sipg_face_trace = .false.
-    sipg_trace_allpairs = .false.
-    sipg_trace_rank = -1
-    sipg_trace_jmax = 1
     sipg_disable_b_term = .false.
     sipg_disable_c_term = .false.
     sipg_enable_fragment_halo_exchange = .false.
@@ -728,31 +698,6 @@
     enable_startup_stationary_projection = .false.
     env_startup_lowdin = ''
     env_startup_stationary_projection = ''
-
-    call get_environment_variable('SALMON_DG_SIPG_FACE_TRACE', env_sipg_face_trace, status=env_status)
-    if (env_status == 0) then
-      select case (trim(adjustl(env_sipg_face_trace)))
-      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
-        enable_sipg_face_trace = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_SIPG_TRACE_ALLPAIRS', env_sipg_trace_allpairs, status=env_status)
-    if (env_status == 0) then
-      select case (trim(adjustl(env_sipg_trace_allpairs)))
-      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
-        sipg_trace_allpairs = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_SIPG_TRACE_RANK', env_sipg_trace_rank, status=env_status)
-    if (env_status == 0 .and. len_trim(env_sipg_trace_rank) > 0) then
-      read(env_sipg_trace_rank, *, iostat=env_status) sipg_trace_rank
-      if (env_status /= 0) sipg_trace_rank = -1
-    end if
-    call get_environment_variable('SALMON_DG_SIPG_TRACE_JMAX', env_sipg_trace_jmax, status=env_status)
-    if (env_status == 0 .and. len_trim(env_sipg_trace_jmax) > 0) then
-      read(env_sipg_trace_jmax, *, iostat=env_status) sipg_trace_jmax
-      if (env_status /= 0 .or. sipg_trace_jmax < 1) sipg_trace_jmax = 1
-    end if
     call get_environment_variable('SALMON_DG_SIPG_DISABLE_B_TERM', env_sipg_disable_b_term, status=env_status)
     if (env_status == 0) then
       select case (trim(adjustl(env_sipg_disable_b_term)))
@@ -851,11 +796,6 @@
       call calculate_momentum_matrix(dg_frag, system, mg, stencil)
 
       call calculate_overlap_matrix(dg_frag, system, mg)
-      if (enable_hamiltonian_trace) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
-        flush(6)
-      end if
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "        Momentum matrix calculated (for A·p coupling)"
         write(*,*) "        Overlap matrix S calculated (for generalized propagation)"
@@ -867,11 +807,6 @@
       if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_blocks) .and. &
           .not. allocated(dg_frag%S_mat_prop_blocks)) then
         call calculate_overlap_matrix(dg_frag, system, mg)
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
-          flush(6)
-        end if
       end if
     end if
 
@@ -887,14 +822,6 @@
     ! fragment-fragment blocks while preserving the current volume assembly.
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
-    end if
-    if (enable_step2_probe) then
-      write(*,'(1x,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=enter"
-      flush(6)
-    end if
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=enter"
-      flush(6)
     end if
     
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
@@ -955,22 +882,8 @@
         end if
       end do
     end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-hmat-alloc"
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-        "        hamiltonian memory estimate: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-        " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " H_dense_MB=", hmat_dense_mb, &
-        " S_dense_MB=", overlap_dense_mb, " P_dense_MB=", momentum_dense_mb, " phi_MB=", phi_frag_mb, &
-        " halo_MB=", halo_buf_mb
-      flush(6)
-    end if
 
     n_local_diag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " n_local_diag=", n_local_diag
-      flush(6)
-    end if
     if (n_local_diag > 0) then
       allocate(H_diag_blocks(n_local_diag), H_kin_diag_blocks(n_local_diag))
       do i_diag = 1, n_local_diag
@@ -990,37 +903,18 @@
         H_kin_diag_blocks(i_diag)%val = 0.0d0
       end do
     end if
-    if (enable_step2_probe) then
-      write(*,'(1x,a,i0,a,i0)') "        step2-lite: rank=", dg_frag%id, " stage=after-diag-alloc n_local_diag=", n_local_diag
-      flush(6)
-    end if
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-diag-block-alloc"
-      flush(6)
-    end if
     
-    ! Optionally enable halo exchange only for Step2 SIPG coupling diagnostics.
-    ! This avoids changing Step1 momentum behavior unless explicitly requested.
+    ! Optionally enable flow-only face communication for Step2 SIPG coupling.
+    ! Hamiltonian bulk terms stay fragment-local; only remote face phi/dphi are exchanged.
     if (sipg_enable_fragment_halo_exchange .and. dg_frag%n_halo <= 0) then
-      call init_halo_communication(dg_frag)
+      call init_flow_halo_communication(dg_frag)
       if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a)') "Fragment halo exchange enabled for Step2 by SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE"
+        write(*,'(1x,a)') "Fragment flow-face exchange enabled for Step2 by SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE"
       end if
     end if
 
-    ! Exchange halo regions between fragments before stencil operations
-    ! This ensures accurate Laplacian calculation at fragment boundaries
-    if (.not. dg_frag%use_buffered_basis) then
-      call exchange_phi_frag_halo(dg_frag)
-    end if
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-step2-halo"
-      flush(6)
-    end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-step2-halo"
-      flush(6)
+    if (sipg_enable_fragment_halo_exchange) then
+      call exchange_flow_face_halo(dg_frag)
     end if
     
     hvol = system%hvol
@@ -1028,39 +922,11 @@
     ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
-    if (enable_step2_probe) then
-      write(*,'(1x,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-vtotal-alloc"
-      flush(6)
-    end if
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a,3(i0,1x),a,3(i0,1x))') "        step2-probe: rank=", dg_frag%id, &
-        " V_total is=", is(1), is(2), is(3), " ie=", ie(1), ie(2), ie(3)
-      flush(6)
-    end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-vtotal-alloc"
-      flush(6)
-    end if
     
     ! Construct total potential: V = Vpsl + Vh + Vxc
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      if (enable_step2_probe) then
-        write(*,'(1x,a,i0,a,i0)') "        step2-lite: rank=", dg_frag%id, " stage=after-build-total-potential ispin=", ispin
-        flush(6)
-      end if
-      trace_spin1 = (ispin == 1)
-      if (probe_rank_main .and. trace_spin1) then
-        write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " after-build-total-potential ispin=", ispin
-        flush(6)
-      end if
-      if (enable_hamiltonian_trace .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-build-total-potential"
-        flush(6)
-      end if
       
       ! Loop over fragments assigned to this rank
       i_local = 0
@@ -1069,16 +935,6 @@
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
         nbf_raw = dg_frag%n_basis(ifrag, ispin)
-        probe_frag_edge = probe_rank_main .and. trace_spin1 .and. &
-          (ifrag == dg_frag%ifrag_start .or. ifrag == dg_frag%ifrag_end)
-        probe_ifrag_head = trace_spin1 .and. (ifrag == dg_frag%ifrag_start)
-        probe_subgroup = enable_step2_probe .and. trace_spin1 .and. &
-          (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100)
-        if (probe_frag_edge) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " i_local=", i_local, " nbf_raw=", nbf_raw
-          flush(6)
-        end if
         if (nbf_raw < 0) then
           write(*,*) "[FATAL] negative n_basis in Hamiltonian Step 2: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
@@ -1099,10 +955,6 @@
         end if
         allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
         allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-        if (enable_step2_probe .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start) then
-          write(*,'(1x,a,i0,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-TH-alloc ifrag=", ifrag
-          flush(6)
-        end if
         if (nbf > size(dg_frag%index_basis, 1)) then
           write(*,*) "[FATAL] hamiltonian n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis_eff=", nbf, " n_basis_raw=", nbf_raw, &
@@ -1126,42 +978,9 @@
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
         allocate(partial_th(2 * nbf_comm), reduced_th(2 * nbf_comm))
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s_dbg, loc_e_dbg, has_overlap_dbg)
-        if (probe_subgroup) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0)') &
-            "        step2-subprobe: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-            " ifrag=", ifrag, " has_overlap=", has_overlap_dbg, " loc_s=", &
-            loc_s_dbg(1), loc_s_dbg(2), loc_s_dbg(3), " loc_e=", &
-            loc_e_dbg(1), loc_e_dbg(2), loc_e_dbg(3), " nbf=", nbf, " nbf_comm=", nbf_comm
-          flush(6)
-        end if
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian fragment begin: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " i_local=", i_local, " nbf=", nbf
-          flush(6)
-        end if
         do jo = 1, nbf
-          jo_edge = (jo == 1 .or. jo == nbf)
-          jo_probe_main = probe_rank_main .and. probe_ifrag_head .and. jo_edge
-          jo_probe_352_396 = probe_rank_352_396 .and. probe_ifrag_head .and. (jo <= 2 .or. jo == nbf)
-          jo_probe_small_frag2 = probe_small_frag2 .and. probe_ifrag_head .and. (jo <= 2 .or. jo == nbf)
-          if (jo_probe_main) then
-            write(*,'(1x,a,i0,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " jo=", jo
-            flush(6)
-          end if
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo begin: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, " nbf=", nbf
-            flush(6)
-          end if
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi begin: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
           ! Eq.(4) volume contribution only:
           !   H_phi = T(phi_j) + V_local * phi_j
           ! on the fragment core/domain.
@@ -1169,19 +988,6 @@
           ! The DG kinetic face terms from Eq.(4) are not included here yet and
           ! must be added at the fragment-fragment block assembly stage below.
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-          if (enable_step2_probe .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start .and. jo == 1) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-build_hpsi ifrag=", ifrag
-            flush(6)
-          end if
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-build_hpsi"
-            flush(6)
-          end if
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi done: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
 
           ! Calculate matrix elements with all φ_i
           partial_t(:) = 0.0d0
@@ -1199,52 +1005,11 @@
 
           end do
           !$omp end parallel do
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-integrate"
-            flush(6)
-          end if
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian integrate done: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
-          if (jo_probe_small_frag2) then
-            partial_t_abs = sum(abs(partial_t(1:nbf)))
-            partial_h_abs = sum(abs(partial_h(1:nbf)))
-            write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " partial_t_abs=", partial_t_abs, &
-              " partial_h_abs=", partial_h_abs
-            flush(6)
-          end if
-
-          if (jo_probe_small_frag2) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a)') "        step2-subprobe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " before-frag-reduce"
-            flush(6)
-          end if
           partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
           partial_th(nbf_comm + 1:2 * nbf_comm) = partial_h(1:nbf_comm)
           call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
           reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
           reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
-          if (jo_probe_small_frag2) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " reduced_t_abs=", sum(abs(reduced_t(1:nbf))), &
-              " reduced_h_abs=", sum(abs(reduced_h(1:nbf)))
-            write(*,'(1x,a,i0,a,i0,a,i0,a,2(es12.4,1x),a,2(es12.4,1x))') "        step2-elem probe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " t12=", reduced_t(1), reduced_t(min(2,nbf)), &
-              " h12=", reduced_h(1), reduced_h(min(2,nbf))
-            flush(6)
-          end if
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-frag-reduce"
-            flush(6)
-          end if
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian reduce done: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
           if (dg_frag%is_frag_root) then
             do io = 1, nbf
               ig_i = dg_frag%index_basis(io, ifrag, ispin)
@@ -1252,27 +1017,9 @@
               H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
               H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
-            if (enable_hamiltonian_trace .and. jo_edge) then
-              write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian H_mat store done: rank=", dg_frag%id, &
-                " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-              flush(6)
-            end if
-          end if
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-store"
-            flush(6)
           end if
 
         end do  ! jo loop
-        if (enable_step2_probe .and. ispin == 1 .and. ifrag == dg_frag%ifrag_start) then
-          write(*,'(1x,a,i0,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-jo-loop ifrag=", ifrag
-          flush(6)
-        end if
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo-loop done: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " nbf=", nbf
-          flush(6)
-        end if
         deallocate(partial_t, partial_h, reduced_t, reduced_h)
         deallocate(partial_th, reduced_th)
         deallocate(T_phi, H_phi)
@@ -1281,37 +1028,11 @@
             " ifrag=", ifrag, " ispin=", ispin
           stop 1
         end if
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian after deallocate TH: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin
-          flush(6)
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian fragment done: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin
-          flush(6)
-        end if
           
         
       end do  ! ifrag loop
-      if (enable_step2_probe) then
-        write(*,'(1x,a,i0,a,i0)') "        step2-lite: rank=", dg_frag%id, " stage=after-ifrag-loop ispin=", ispin
-        flush(6)
-      end if
-      if (enable_hamiltonian_trace) then
-        write(*,'(1x,a,i0,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-          " ispin=", ispin, " stage=", "after-ifrag-loop"
-        flush(6)
-      end if
       
     end do  ! ispin loop
-    if (enable_step2_probe) then
-      write(*,'(1x,a,i0,a)') "        step2-lite: rank=", dg_frag%id, " stage=after-ispin-loop"
-      flush(6)
-    end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "after-ispin-loop"
-      flush(6)
-    end if
     
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
@@ -1338,21 +1059,24 @@
 
         n_active_halo = 0
         n_basis_halo_max = 0
-        if (.not. dg_frag%use_buffered_basis) then
-          do i_halo = 1, dg_frag%n_halo
-            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-            jfrag = dg_frag%halo(i_halo)%ifrag_src
-            if (jfrag < 1) cycle
-            n_basis_halo = min(dg_frag%n_basis(jfrag, ispin), dg_frag%nstate_frag)
+        do i_halo = 1, dg_frag%n_halo
+          if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+          jfrag = dg_frag%halo(i_halo)%ifrag_src
+          if (jfrag < 1) cycle
+          n_basis_halo = min(dg_frag%n_basis(jfrag, ispin), dg_frag%nstate_frag)
+          if (n_basis_halo <= 0) cycle
+          if (.not. allocated(dg_frag%halo(i_halo)%buf_flow_recv)) cycle
+          if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_flow_recv, 4)) then
+            n_basis_halo = size(dg_frag%halo(i_halo)%buf_flow_recv, 4)
             if (n_basis_halo <= 0) cycle
-            if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
-            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
-            iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
-            if (iblk <= 0 .and. iblk_rev <= 0) cycle
-            n_active_halo = n_active_halo + 1
-            n_basis_halo_max = max(n_basis_halo_max, n_basis_halo)
-          end do
-        end if
+          end if
+          if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
+          iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
+          iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
+          if (iblk <= 0 .and. iblk_rev <= 0) cycle
+          n_active_halo = n_active_halo + 1
+          n_basis_halo_max = max(n_basis_halo_max, n_basis_halo)
+        end do
 
         if (allocated(halo_active_list)) deallocate(halo_active_list)
         if (allocated(halo_active_nbf)) deallocate(halo_active_nbf)
@@ -1373,9 +1097,9 @@
             if (jfrag < 1) cycle
             n_basis_halo = min(dg_frag%n_basis(jfrag, ispin), dg_frag%nstate_frag)
             if (n_basis_halo <= 0) cycle
-            if (.not. allocated(dg_frag%halo(i_halo)%buf_recv)) cycle
-            if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
-              n_basis_halo = size(dg_frag%halo(i_halo)%buf_recv, 4)
+            if (.not. allocated(dg_frag%halo(i_halo)%buf_flow_recv)) cycle
+            if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_flow_recv, 4)) then
+              n_basis_halo = size(dg_frag%halo(i_halo)%buf_flow_recv, 4)
               if (n_basis_halo <= 0) cycle
             end if
             if (.not. is_face_halo_neighbor(dg_frag%halo(i_halo))) cycle
@@ -1485,16 +1209,6 @@
             halo_partial_a(1:n_basis_halo) = 0.0d0
             halo_partial_b(1:n_basis_halo) = 0.0d0
             halo_partial_c(1:n_basis_halo) = 0.0d0
-            sipg_trace_pair = enable_sipg_face_trace .and. ispin == 1 .and. jo <= sipg_trace_jmax
-            if (sipg_trace_rank >= 0) sipg_trace_pair = sipg_trace_pair .and. dg_frag%id == sipg_trace_rank
-            if (.not. sipg_trace_allpairs) then
-              sipg_trace_pair = sipg_trace_pair .and. &
-                ((ifrag == 6 .and. jfrag == 8) .or. (ifrag == 8 .and. jfrag == 6))
-            end if
-
-            face_area = get_dg_face_area_element(dg_frag%hgs, face_axis)
-            face_penalty_alpha = get_dg_face_penalty_coefficient(dg_frag%hgs, face_axis)
-
             !$omp parallel do private(io,halo_integral_t,halo_integral_h,halo_integral_m,halo_integral_m_avgavg,halo_integral_m_avgjump,halo_integral_a_sum,halo_integral_b_sum,halo_integral_c_sum,ix_face,iy_face,iz_face,halo_send_idx,halo_recv_idx,phi_local_face,phi_remote_face,phi_face_avg,phi_face_jump,dphi_local_n,dphi_remote_n,dphi_flux_n,dphi_face_avg,dphi_face_jump,sipg_h_face_a,sipg_h_face_b,sipg_h_face_c,sipg_ab_sum,sipg_ab_cap,sipg_ab_scale,sipg_ab_ref,sipg_ab_norm) schedule(static)
             do io = 1, n_basis_halo
               halo_integral_t = 0.0d0
@@ -1514,9 +1228,9 @@
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
                     dphi_local_n = one_sided_face_derivative_local(dg_frag, i_local, jo, face_axis, face_dir, &
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
-                    phi_remote_face = face_trace_value_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                    phi_remote_face = face_trace_value_flow_halo(dg_frag%halo(i_halo)%buf_flow_recv, l, io, face_axis, &
                       face_idx_remote, iy_face, iz_face)
-                    dphi_remote_n = one_sided_face_derivative_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                    dphi_remote_n = face_derivative_value_flow_halo(dg_frag%halo(i_halo)%buf_flow_recv, l, io, face_axis, &
                       face_idx_remote, iy_face, iz_face, dg_frag%hgs)
                     ! SIPG off-diagonal face term using explicit average/jump roles:
                     !   - {{grad phi_local}} · [[phi_remote]]
@@ -1581,9 +1295,9 @@
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
                     dphi_local_n = one_sided_face_derivative_local(dg_frag, i_local, jo, face_axis, face_dir, &
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
-                    phi_remote_face = face_trace_value_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                    phi_remote_face = face_trace_value_flow_halo(dg_frag%halo(i_halo)%buf_flow_recv, l, io, face_axis, &
                       ix_face, face_idx_remote, iz_face)
-                    dphi_remote_n = one_sided_face_derivative_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                    dphi_remote_n = face_derivative_value_flow_halo(dg_frag%halo(i_halo)%buf_flow_recv, l, io, face_axis, &
                       ix_face, face_idx_remote, iz_face, dg_frag%hgs)
                     if (sipg_disable_b_term) then
                       sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
@@ -1638,9 +1352,9 @@
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
                     dphi_local_n = one_sided_face_derivative_local(dg_frag, i_local, jo, face_axis, face_dir, &
                       halo_send_idx(1), halo_send_idx(2), halo_send_idx(3))
-                    phi_remote_face = face_trace_value_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                    phi_remote_face = face_trace_value_flow_halo(dg_frag%halo(i_halo)%buf_flow_recv, l, io, face_axis, &
                       ix_face, iy_face, face_idx_remote)
-                    dphi_remote_n = one_sided_face_derivative_halo(dg_frag%halo(i_halo)%buf_recv, l, io, face_axis, face_dir, &
+                    dphi_remote_n = face_derivative_value_flow_halo(dg_frag%halo(i_halo)%buf_flow_recv, l, io, face_axis, &
                       ix_face, iy_face, face_idx_remote, dg_frag%hgs)
                     if (sipg_disable_b_term) then
                       sipg_h_face_a = 0.5d0 * phi_remote_face * dphi_local_n * face_area
@@ -1718,19 +1432,6 @@
             halo_reduced_b(1:n_basis_halo) = halo_reduce_sum(4 * n_basis_halo + 1:5 * n_basis_halo)
             halo_reduced_c(1:n_basis_halo) = halo_reduce_sum(5 * n_basis_halo + 1:6 * n_basis_halo)
 
-            if (sipg_trace_pair) then
-              sipg_terms_local(1) = sum(halo_reduced_a(1:n_basis_halo))
-              sipg_terms_local(2) = sum(halo_reduced_b(1:n_basis_halo))
-              sipg_terms_local(3) = sum(halo_reduced_c(1:n_basis_halo))
-              call comm_summation(sipg_terms_local, sipg_terms_sum, 3, dg_frag%icomm_frag)
-              if (dg_frag%is_frag_root) then
-                write(*,'(1x,a,2(a,i0),2(a,i0),4(a,1pe12.4))') '        sipg-face-trace:', &
-                  ' ifrag=', ifrag, ' jfrag=', jfrag, ' axis=', face_axis, ' dir=', face_dir, &
-                  ' A=', sipg_terms_sum(1), ' B=', sipg_terms_sum(2), &
-                  ' C=', sipg_terms_sum(3), ' T=', sum(sipg_terms_sum)
-              end if
-            end if
-
             if (.not. dg_frag%is_frag_root) cycle
 
             if (iblk > 0 .and. iblk_rev > 0) then
@@ -1739,7 +1440,9 @@
                 halo_integral_t_sum = halo_reduced_t(io)
                 halo_integral_h_sum = halo_reduced_h(io)
                 halo_integral_m_sum = halo_reduced_m(io)
-                if (io <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 1) .and. &
+                if (iblk <= size(dg_frag%H_mat_kinetic_blocks) .and. iblk <= size(dg_frag%H_mat_blocks) .and. &
+                    iblk_rev <= size(dg_frag%H_mat_kinetic_blocks) .and. iblk_rev <= size(dg_frag%H_mat_blocks) .and. &
+                    io <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 1) .and. &
                     jo <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 2) .and. &
                     io <= size(dg_frag%H_mat_blocks(iblk)%val, 1) .and. &
                     jo <= size(dg_frag%H_mat_blocks(iblk)%val, 2) .and. &
@@ -1757,7 +1460,8 @@
                     dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
                 end if
                 if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
-                  if (io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
+                  if (iblk <= size(dg_frag%momentum_blocks) .and. iblk_rev <= size(dg_frag%momentum_blocks) .and. &
+                      io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
                       jo <= size(dg_frag%momentum_blocks(iblk)%val, 3) .and. &
                       jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
                       io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
@@ -1775,7 +1479,8 @@
                 halo_integral_t_sum = halo_reduced_t(io)
                 halo_integral_h_sum = halo_reduced_h(io)
                 halo_integral_m_sum = halo_reduced_m(io)
-                if (io <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 1) .and. &
+                if (iblk <= size(dg_frag%H_mat_kinetic_blocks) .and. iblk <= size(dg_frag%H_mat_blocks) .and. &
+                    io <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 1) .and. &
                     jo <= size(dg_frag%H_mat_kinetic_blocks(iblk)%val, 2) .and. &
                     io <= size(dg_frag%H_mat_blocks(iblk)%val, 1) .and. &
                     jo <= size(dg_frag%H_mat_blocks(iblk)%val, 2)) then
@@ -1785,7 +1490,8 @@
                     dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
                 end if
                 if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
-                  if (io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
+                  if (iblk <= size(dg_frag%momentum_blocks) .and. &
+                      io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
                       jo <= size(dg_frag%momentum_blocks(iblk)%val, 3)) then
                     dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) = &
                       dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) + 0.5d0 * halo_integral_m_sum
@@ -1799,7 +1505,8 @@
                 halo_integral_t_sum = halo_reduced_t(io)
                 halo_integral_h_sum = halo_reduced_h(io)
                 halo_integral_m_sum = halo_reduced_m(io)
-                if (jo <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 1) .and. &
+                if (iblk_rev > 0 .and. iblk_rev <= size(dg_frag%H_mat_kinetic_blocks) .and. iblk_rev <= size(dg_frag%H_mat_blocks) .and. &
+                    jo <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 1) .and. &
                     io <= size(dg_frag%H_mat_kinetic_blocks(iblk_rev)%val, 2) .and. &
                     jo <= size(dg_frag%H_mat_blocks(iblk_rev)%val, 1) .and. &
                     io <= size(dg_frag%H_mat_blocks(iblk_rev)%val, 2)) then
@@ -1809,7 +1516,8 @@
                     dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
                 end if
                 if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
-                  if (jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
+                  if (iblk_rev > 0 .and. iblk_rev <= size(dg_frag%momentum_blocks) .and. &
+                      jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
                       io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
                     dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) = &
                       dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) - 0.5d0 * halo_integral_m_sum
@@ -1851,17 +1559,6 @@
     call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "after-global-hmat-sum"
-      flush(6)
-    end if
-
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "after-hermiticity"
-      flush(6)
-    end if
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Kinetic and potential terms computed"
@@ -1921,11 +1618,6 @@
       write(*,*) "[FATAL] V_total still allocated before return: rank=", dg_frag%id
       stop 1
     end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "before-return"
-      flush(6)
-    end if
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "=== Hamiltonian Matrix Ready ==="
@@ -1948,7 +1640,7 @@
     integer :: info, lwork
     real(8), parameter :: eps_eval = 1.0d-12
     real(8), allocatable :: eval(:), rwork(:)
-    complex(8), allocatable :: C(:,:), SC(:,:), M(:,:), U(:,:), M_invhalf(:,:)
+    complex(8), allocatable :: C(:,:), SC(:,:), M(:,:), M_sum(:,:), U(:,:), M_invhalf(:,:)
     complex(8), allocatable :: work(:), coef_frag_all(:,:), coef_pw_all(:,:)
     external :: zheev
 
@@ -1966,7 +1658,7 @@
     do ispin = 1, dg_frag%nspin
       call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
 
-      allocate(C(n_tot, nst), SC(n_tot, nst), M(nst, nst), U(nst, nst), M_invhalf(nst, nst))
+      allocate(C(n_tot, nst), SC(n_tot, nst), M(nst, nst), M_sum(nst, nst), U(nst, nst), M_invhalf(nst, nst))
       allocate(eval(nst), rwork(max(1, 3 * nst - 2)))
 
       C(:, :) = coef_frag_all(1:n_frag, 1:nst)
@@ -1974,6 +1666,8 @@
         call apply_overlap_operator(dg_frag, ispin, C(:, io), SC(:, io), .true.)
       end do
       M(:, :) = matmul(conjg(transpose(C)), SC)
+      call comm_summation(M, M_sum, nst * nst, dg_frag%icomm)
+      M(:, :) = 0.5d0 * (M_sum(:, :) + conjg(transpose(M_sum(:, :))))
 
       U(:, :) = M(:, :)
       lwork = -1
@@ -1987,7 +1681,7 @@
         if (comm_is_root(dg_frag%id)) then
           write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup Lowdin failed: ispin=", ispin, " info=", info
         end if
-        deallocate(C, SC, M, U, M_invhalf, eval, rwork, work)
+        deallocate(C, SC, M, M_sum, U, M_invhalf, eval, rwork, work)
         if (allocated(coef_frag_all)) deallocate(coef_frag_all)
         if (allocated(coef_pw_all)) deallocate(coef_pw_all)
         cycle
@@ -2004,7 +1698,7 @@
 
       dg_frag%coef(1:n_frag, 1:nst, ispin) = C(:, :)
 
-      deallocate(C, SC, M, U, M_invhalf, eval, rwork, work)
+      deallocate(C, SC, M, M_sum, U, M_invhalf, eval, rwork, work)
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
@@ -2025,7 +1719,7 @@
   !   3) Replace startup coefficients with S-orthonormal eigenvectors
   !=======================================================================
   subroutine apply_startup_stationary_projection_puredg(dg_frag, mg, ppg, system)
-    use communication, only: comm_is_root
+    use communication, only: comm_is_root, comm_summation
     use structures, only: s_rgrid, s_pp_grid, s_dft_system
     use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_complex_dense, &
                                   copy_overlap_operator_to_dense, zero_nonowned_coefficients, &
@@ -2039,10 +1733,15 @@
     integer :: ispin, n_frag, nst, nocc, info, lwork, j, nev, env_status
     real(8), parameter :: eps_s = 1.0d-12
     real(8) :: eval_s_min, eval_s_max
+    real(8) :: resid_max, resid_rms, resid_rel_max, resid_rel_rms
+    real(8) :: resid_norm, hc_norm, s_norm
     logical :: allow_buffered_startup_stationary_projection
+    logical :: buffered_wf_coef_mode
     character(len=32) :: env_allow_buffered_startup_stationary_projection
+    character(len=32) :: env_buffered_coef_source
     real(8), allocatable :: eval_s(:), eval_h(:), rwork(:)
-    complex(8), allocatable :: h_dense(:,:), s_dense(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
+    complex(8), allocatable :: h_dense(:,:), h_dense_sum(:,:), s_dense(:,:), s_dense_sum(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
+    complex(8), allocatable :: hc(:), sc(:)
     complex(8), allocatable :: work(:)
     external :: zheev
 
@@ -2057,6 +1756,20 @@
       case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
         allow_buffered_startup_stationary_projection = .true.
       end select
+    end if
+
+    buffered_wf_coef_mode = .false.
+    env_buffered_coef_source = ''
+    call get_environment_variable('SALMON_DG_BUFFERED_COEF_SOURCE', env_buffered_coef_source, status=env_status)
+    if (env_status == 0) then
+      select case (trim(adjustl(env_buffered_coef_source)))
+      case ('wf', 'WF', 'unbuffered', 'UNBUFFERED', 'plain', 'PLAIN', '0')
+        buffered_wf_coef_mode = .true.
+      end select
+    end if
+
+    if (buffered_wf_coef_mode .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') "[INFO] PureDG startup stationary projection enabled in buffered+wf mode"
     end if
 
     if (dg_frag%use_buffered_basis .and. .not. allow_buffered_startup_stationary_projection) then
@@ -2089,7 +1802,8 @@
         if (nocc <= 0) cycle
 
         nev = nocc
-        allocate(h_dense(nst, nst), s_dense(nst, nst), x_lowdin(nst, nst), h_ortho(nst, nst), u_h(nst, nst), c_eig(nst, nst))
+        allocate(h_dense(nst, nst), h_dense_sum(nst, nst), s_dense(nst, nst), s_dense_sum(nst, nst), x_lowdin(nst, nst), h_ortho(nst, nst), u_h(nst, nst), c_eig(nst, nst))
+        allocate(hc(nst), sc(nst))
         allocate(eval_s(nst), eval_h(nst), rwork(max(1, 3 * nst - 2)))
 
         h_dense(:, :) = (0.0d0, 0.0d0)
@@ -2117,6 +1831,11 @@
           end if
         end block
 
+        call comm_summation(h_dense, h_dense_sum, nst * nst, dg_frag%icomm)
+        call comm_summation(s_dense, s_dense_sum, nst * nst, dg_frag%icomm)
+        h_dense(:, :) = 0.5d0 * (h_dense_sum(:, :) + conjg(transpose(h_dense_sum(:, :))))
+        s_dense(:, :) = 0.5d0 * (s_dense_sum(:, :) + conjg(transpose(s_dense_sum(:, :))))
+
         ! Lowdin transform matrix X = U * diag(s^{-1/2})
         x_lowdin(:, :) = s_dense(:, :)
         lwork = -1
@@ -2130,7 +1849,7 @@
           if (comm_is_root(dg_frag%id)) then
             write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (S diagonalization failed): ispin=", ispin, " info=", info
           end if
-          deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+          deallocate(h_dense, h_dense_sum, s_dense, s_dense_sum, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
           cycle
         end if
 
@@ -2161,11 +1880,63 @@
           if (comm_is_root(dg_frag%id)) then
             write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (H_ortho diagonalization failed): ispin=", ispin, " info=", info
           end if
-          deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+          deallocate(h_dense, h_dense_sum, s_dense, s_dense_sum, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
           cycle
         end if
 
         c_eig(:, :) = matmul(x_lowdin, u_h)
+        block
+          integer :: info_occ, lwork_occ
+          real(8), allocatable :: eval_occ(:), rwork_occ(:)
+          complex(8), allocatable :: gram_occ(:,:), gram_vecs(:,:), work_occ(:)
+
+          allocate(eval_occ(nev), rwork_occ(max(1, 3 * nev - 2)))
+          allocate(gram_occ(nev, nev), gram_vecs(nev, nev))
+          gram_occ(:, :) = matmul(conjg(transpose(c_eig(:, 1:nev))), matmul(s_dense, c_eig(:, 1:nev)))
+          gram_occ(:, :) = 0.5d0 * (gram_occ(:, :) + conjg(transpose(gram_occ(:, :))))
+          gram_vecs(:, :) = gram_occ(:, :)
+
+          lwork_occ = -1
+          allocate(work_occ(1))
+          call ZHEEV('V', 'U', nev, gram_vecs, nev, eval_occ, work_occ, lwork_occ, rwork_occ, info_occ)
+          lwork_occ = int(real(work_occ(1), kind=8)) + 1
+          deallocate(work_occ)
+          allocate(work_occ(lwork_occ))
+          call ZHEEV('V', 'U', nev, gram_vecs, nev, eval_occ, work_occ, lwork_occ, rwork_occ, info_occ)
+          if (info_occ == 0) then
+            gram_occ(:, :) = (0.0d0, 0.0d0)
+            do j = 1, nev
+              if (eval_occ(j) > eps_s) gram_occ(:, j) = gram_vecs(:, j) / sqrt(eval_occ(j))
+            end do
+            gram_occ(:, :) = matmul(gram_occ(:, :), conjg(transpose(gram_vecs(:, :))))
+            c_eig(:, 1:nev) = matmul(c_eig(:, 1:nev), gram_occ(:, :))
+          end if
+          deallocate(eval_occ, rwork_occ, gram_occ, gram_vecs, work_occ)
+        end block
+        do j = 1, nev
+          sc(:) = matmul(s_dense, c_eig(:, j))
+          s_norm = real(sum(conjg(c_eig(:, j)) * sc(:)), kind=8)
+          if (s_norm > eps_s) c_eig(:, j) = c_eig(:, j) / sqrt(s_norm)
+        end do
+
+        ! Quantify generalized eigen residual on occupied startup manifold:
+        !   r = H c - S c e
+        resid_max = 0.0d0
+        resid_rms = 0.0d0
+        resid_rel_max = 0.0d0
+        resid_rel_rms = 0.0d0
+        do j = 1, nev
+          hc(:) = matmul(h_dense, c_eig(:, j))
+          sc(:) = matmul(s_dense, c_eig(:, j))
+          resid_norm = sqrt(sum(abs(hc(:) - sc(:) * eval_h(j))**2))
+          hc_norm = sqrt(sum(abs(hc(:))**2))
+          resid_max = max(resid_max, resid_norm)
+          resid_rms = resid_rms + resid_norm * resid_norm
+          resid_rel_max = max(resid_rel_max, resid_norm / max(hc_norm, 1.0d-30))
+          resid_rel_rms = resid_rel_rms + (resid_norm / max(hc_norm, 1.0d-30))**2
+        end do
+        resid_rms = sqrt(resid_rms / max(1, nev))
+        resid_rel_rms = sqrt(resid_rel_rms / max(1, nev))
 
         ! Keep startup projection on occupied manifold only.
         ! This avoids reshuffling non-occupied channels at t=0.
@@ -2175,9 +1946,13 @@
         if (comm_is_root(dg_frag%id)) then
           write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup stationary projection applied: ispin=", ispin, &
             " nocc=", nev, " S-eig(min,max)=", eval_s_min, ", ", eval_s_max
+          write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+            "[INFO] PureDG startup projection residual: ispin=", ispin, &
+            " abs(max,rms)=", resid_max, ", ", resid_rms, &
+            " rel(max,rms)=", resid_rel_max, ", ", resid_rel_rms
         end if
 
-        deallocate(h_dense, s_dense, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+        deallocate(h_dense, h_dense_sum, s_dense, s_dense_sum, x_lowdin, h_ortho, u_h, c_eig, hc, sc, eval_s, eval_h, rwork, work)
     end do
 
     call zero_nonowned_coefficients(dg_frag)
@@ -2899,6 +2674,24 @@
     phi_face = buf_recv(idx1, idx2, idx3, io, 1)
   end function face_trace_value_halo
 
+  real(8) function face_trace_value_flow_halo(buf_recv, length, io, axis, idx1, idx2, idx3) result(phi_face)
+    implicit none
+    real(8), intent(in) :: buf_recv(:,:,:,:,:)
+    integer, intent(in) :: length(3), io, axis
+    integer, intent(in) :: idx1, idx2, idx3
+
+    select case (axis)
+    case (1)
+      phi_face = buf_recv(1, idx2, idx3, io, 1)
+    case (2)
+      phi_face = buf_recv(idx1, 1, idx3, io, 1)
+    case (3)
+      phi_face = buf_recv(idx1, idx2, 1, io, 1)
+    case default
+      stop "DG-Fragment RT: invalid flow halo face axis"
+    end select
+  end function face_trace_value_flow_halo
+
   real(8) function one_sided_face_derivative_local(dg_frag, i_local, jo, axis, face_dir, idx1, idx2, idx3) result(dphi_dn)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -2979,6 +2772,25 @@
     ! aligned with local outward normal; use matching 2nd-order one-sided form.
     dphi_dn = (-3.0d0 * f0 + 4.0d0 * f1 - f2) / (2.0d0 * h)
   end function one_sided_face_derivative_halo
+
+  real(8) function face_derivative_value_flow_halo(buf_recv, length, io, axis, idx1, idx2, idx3, hgs) result(dphi_dn)
+    implicit none
+    real(8), intent(in) :: buf_recv(:,:,:,:,:)
+    integer, intent(in) :: length(3), io, axis
+    integer, intent(in) :: idx1, idx2, idx3
+    real(8), intent(in) :: hgs(3)
+
+    select case (axis)
+    case (1)
+      dphi_dn = buf_recv(1, idx2, idx3, io, 2)
+    case (2)
+      dphi_dn = buf_recv(idx1, 1, idx3, io, 2)
+    case (3)
+      dphi_dn = buf_recv(idx1, idx2, 1, io, 2)
+    case default
+      stop "DG-Fragment RT: invalid flow halo derivative axis"
+    end select
+  end function face_derivative_value_flow_halo
 
   subroutine apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
     use structures

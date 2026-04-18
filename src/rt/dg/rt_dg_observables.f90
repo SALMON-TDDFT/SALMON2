@@ -102,6 +102,7 @@
     real(8), allocatable :: nl_state_local(:), nl_state_sum(:)
     real(8) :: current_diag_local(3), current_offdiag_local(3)
     real(8) :: current_diag_sum(3), current_offdiag_sum(3)
+    real(8) :: current_para_transition(3), transition_mismatch(3)
     real(8) :: current_nl_rs_sum(3)
     complex(8) :: current_blk_total, current_blk_diag, current_elem
     complex(8) :: mfp
@@ -141,6 +142,8 @@
     energy_nl_rs_sum = 0.0d0
     current_diag_local(:) = 0.0d0
     current_offdiag_local(:) = 0.0d0
+    current_para_transition(:) = 0.0d0
+    transition_mismatch(:) = 0.0d0
     current_nl_rs_sum(:) = 0.0d0
     n = dg_frag%n_mat_max
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
@@ -1118,8 +1121,10 @@
     current_para_reduce_sum(:) = 0.0d0
     current_dia_reduce_sum(:) = 0.0d0
     current_nl_reduce_sum(:) = 0.0d0
-    if (enable_current_component_trace) then
+    if (enable_current_component_trace .or. enable_transition_probe) then
       call comm_summation(current_para_local, current_para_reduce_sum, 3, dg_frag%icomm)
+    end if
+    if (enable_current_component_trace) then
       call comm_summation(current_dia_local, current_dia_reduce_sum, 3, dg_frag%icomm)
       if (n_pw == 0 .and. enable_realspace_probe) then
         call comm_summation(current_nl_rs_sum, current_nl_reduce_sum, 3, dg_frag%icomm)
@@ -1297,6 +1302,7 @@
     if (enable_transition_probe) then
       current_diag_sum(:) = current_diag_sum(:) / real(max(1, dg_frag%isize), 8)
       current_offdiag_sum(:) = current_offdiag_sum(:) / real(max(1, dg_frag%isize), 8)
+      current_para_transition(:) = current_para_reduce_sum(:) / real(max(1, dg_frag%isize), 8)
     end if
     if (enable_orbital_probe) current_orb_sum(:) = current_orb_sum(:) / real(max(1, dg_frag%isize), 8)
     if (use_energy_components) then
@@ -1388,6 +1394,8 @@
     if (enable_transition_probe) then
       current_diag_sum(:) = current_diag_sum(:) / system%det_a
       current_offdiag_sum(:) = current_offdiag_sum(:) / system%det_a
+      current_para_transition(:) = current_para_transition(:) / system%det_a
+      transition_mismatch(:) = (current_diag_sum(:) + current_offdiag_sum(:)) - current_para_transition(:)
     end if
 
     if (enable_orbital_probe .and. dg_frag%id == 0) then
@@ -1402,9 +1410,11 @@
     end if
     if (enable_transition_probe .and. dg_frag%id == 0) then
       if (mod(itt - 1, transition_stride) == 0) then
-        write(*,'(1x,a,i0,a,3(1x,1pe14.6),a,3(1x,1pe14.6),a,3(1x,1pe14.6))') &
+        write(*,'(1x,a,i0,a,3(1x,1pe14.6),a,3(1x,1pe14.6),a,3(1x,1pe14.6),a,3(1x,1pe14.6),a,3(1x,1pe14.6))') &
           "        transition-probe: itt=", itt, " Jdiag=", current_diag_sum(1), current_diag_sum(2), current_diag_sum(3), &
           " Joffdiag=", current_offdiag_sum(1), current_offdiag_sum(2), current_offdiag_sum(3), &
+          " Jpara=", current_para_transition(1), current_para_transition(2), current_para_transition(3), &
+          " d(Jdiag+Joff-para)=", transition_mismatch(1), transition_mismatch(2), transition_mismatch(3), &
           " Jtotal=", dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)
         flush(6)
       end if

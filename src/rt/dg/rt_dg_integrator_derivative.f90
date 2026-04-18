@@ -1,11 +1,13 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, dcoef_dt, dcoef_dt_pw)
     use structures
+    use communication, only: comm_summation
     use salmon_global, only: theory, yn_spinorbit
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, &
                                   apply_nonlocal_pp_projector_batch, &
                                   apply_nonlocal_pp_projector_batch_so, apply_mixed_hamiltonian, &
                                   solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
-                                  copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense, gather_full_coef_view
+                                  copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense, gather_full_coef_view, &
+                                  apply_overlap_operator
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
     type(s_dft_system),     intent(in) :: system
@@ -39,15 +41,27 @@
     real(8) :: max_abs_h0, max_abs_m
     integer :: n_s, n_basis, ispin_other
     integer :: state_s, state_e, state0, nstate_blk
+    integer :: nocc_spin, io_occ
+    complex(8), allocatable, save :: vec_occ(:), svec_occ(:), sdc_occ(:)
+    real(8) :: occ_factor, csc, csc_local, c_s_dc_re, c_s_dc_re_local, alpha_real
+    real(8) :: dndt_before, dndt_after, dndt_before_local, dndt_after_local
     logical :: use_spatial_A
-    logical :: disable_mfp, use_mixed_basis
+    logical :: disable_mfp, disable_local_overlap_solve, bypass_overlap_solve, disable_block_h_apply, disable_nonlocal_pp, use_mixed_basis
+    logical :: use_prop_overlap, enforce_norm_tangent, enable_norm_deriv_check
     character(len=32) :: env_mfp
     integer :: env_len, env_stat
     real(8), allocatable, save :: Ap_mat(:,:), A2_mat(:,:)
+    complex(8), allocatable, save :: ap_block_dense(:,:), ap_block_ref(:,:)
     integer, parameter :: state_block_size = 64
     logical :: enable_deriv_trace
+    logical :: enable_hermit_check
+    logical, save :: ap_block_check_initialized = .false.
+    logical, save :: enable_ap_block_check = .false.
     character(len=32) :: env_deriv_trace
+    character(len=32) :: env_hermit_check
+    character(len=32), save :: env_ap_block_check
     integer :: env_trace_len, env_trace_stat
+    real(8) :: ap_block_diff_max
     
     ! Time derivative in velocity gauge:
     !   d/dt c_i = -i * (H_0_ij + A^2(t)/2 * delta_ij) * c_j - A(t)·<i|∇|j> * c_j
@@ -65,6 +79,7 @@
     huge_val = huge(0.0d0) / 2.0d0
 
     enable_deriv_trace = .false.
+    enable_hermit_check = .false.
     env_deriv_trace = ''
     call get_environment_variable('SALMON_DG_DERIV_TRACE', env_deriv_trace, length=env_trace_len, status=env_trace_stat)
     if (env_trace_stat == 0 .and. env_trace_len > 0) then
@@ -77,6 +92,27 @@
       write(*,'(1x,a,i0,a,i0,a,3(1x,1pe12.4))') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
         " Ac_tot=", Ac_tot(1), Ac_tot(2), Ac_tot(3)
       flush(6)
+    end if
+
+    env_hermit_check = ''
+    call get_environment_variable('SALMON_DG_HERMIT_CHECK', env_hermit_check, length=env_trace_len, status=env_trace_stat)
+    if (env_trace_stat == 0 .and. env_trace_len > 0) then
+      if (env_hermit_check(1:1) == '1' .or. env_hermit_check(1:1) == 'y' .or. env_hermit_check(1:1) == 'Y' .or. &
+          env_hermit_check(1:1) == 't' .or. env_hermit_check(1:1) == 'T') then
+        enable_hermit_check = .true.
+      end if
+    end if
+
+    if (.not. ap_block_check_initialized) then
+      env_ap_block_check = ''
+      call get_environment_variable('SALMON_DG_AP_BLOCK_CHECK', env_ap_block_check, length=env_trace_len, status=env_trace_stat)
+      if (env_trace_stat == 0 .and. env_trace_len > 0) then
+        if (env_ap_block_check(1:1) == '1' .or. env_ap_block_check(1:1) == 'y' .or. env_ap_block_check(1:1) == 'Y' .or. &
+            env_ap_block_check(1:1) == 't' .or. env_ap_block_check(1:1) == 'T') then
+          enable_ap_block_check = .true.
+        end if
+      end if
+      ap_block_check_initialized = .true.
     end if
 
     ! Calculate A^2 (diamagnetic term)
@@ -101,6 +137,13 @@
 
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
     disable_mfp = .false.
+    disable_local_overlap_solve = .false.
+    bypass_overlap_solve = .false.
+    disable_block_h_apply = .false.
+    disable_nonlocal_pp = .false.
+    use_prop_overlap = .true.
+    enforce_norm_tangent = .false.
+    enable_norm_deriv_check = .false.
     env_mfp = ''
     call get_environment_variable('SALMON_DG_DISABLE_MFP', env_mfp, length=env_len, status=env_stat)
     if (env_stat == 0 .and. env_len > 0) then
@@ -108,6 +151,66 @@
           env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
         disable_mfp = .true.
       end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_DISABLE_LOCAL_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        disable_local_overlap_solve = .true.
+      end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_BYPASS_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        bypass_overlap_solve = .true.
+      end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_DISABLE_BLOCK_H_APPLY', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        disable_block_h_apply = .true.
+      end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_DISABLE_NONLOCAL_PP', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        disable_nonlocal_pp = .true.
+      end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_DISABLE_PROP_OVERLAP', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        use_prop_overlap = .false.
+      end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_ENFORCE_NORM_TANGENT', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        enforce_norm_tangent = .true.
+      end if
+    end if
+    env_mfp = ''
+    call get_environment_variable('SALMON_DG_NORM_DERIV_CHECK', env_mfp, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
+        enable_norm_deriv_check = .true.
+      end if
+    end if
+    if (disable_nonlocal_pp) then
+      has_nonlocal = .false.
+      has_so_nonlocal = .false.
     end if
     if (use_spatial_A) then
       if (.not. allocated(Ap_mat)) then
@@ -144,6 +247,7 @@
       n_basis = 0
       if (use_mixed_basis) n_basis = min(dg_frag%mixed_basis_dim(ispin), n_tot, size(dg_frag%coef_mix, 1))
       need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. &
+              (n_pw == 0 .and. disable_block_h_apply) .or. &
                       (n_pw > 0 .and. .not. allocated(dg_frag%H_mat_frag_pw)) .or. use_mixed_basis
       need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks)) .or. use_mixed_basis
       if (need_h0_dense) then
@@ -323,6 +427,12 @@
           stop "Inf in H0c"
         end if
       end if
+      if (enable_hermit_check .and. need_h0_dense .and. itt <= 120 .and. dg_frag%id == 0) then
+        max_abs_h0 = maxval(abs(H0c(1:n_tot, 1:n_tot) - transpose(conjg(H0c(1:n_tot, 1:n_tot)))))
+        write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') '        hermit-check: rank=', dg_frag%id, ' itt=', itt, &
+          ' ispin=', ispin, ' max|H-H^H|=', max_abs_h0
+        flush(6)
+      end if
 
 
       ! dcoef_dt = -i * H0c * coef - M * coef
@@ -376,9 +486,8 @@
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
         end if
-        dcoef_dt_h0(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :) + 0.5d0 * A_squared * coef_all(1:n_tot, :)
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
-      else if (n_pw == 0 .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
+      else if (n_pw == 0 .and. .not. disable_block_h_apply .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
 
         if (allocated(dg_frag%H_local_block_ids)) then
           call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all, dcoef_dt_h0, dg_frag%H_local_block_ids)
@@ -393,7 +502,6 @@
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
         end if
-        dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + 0.5d0 * A_squared * coef_all(1:n_frag, :)
         dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
       else
 
@@ -442,6 +550,29 @@
       else if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
         dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
         call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
+        if (enable_ap_block_check .and. n_frag > 0 .and. dg_frag%nstate_tot > 0 .and. itt <= 2) then
+          if (.not. allocated(ap_block_dense)) then
+            allocate(ap_block_dense(n_frag, n_frag))
+          else if (size(ap_block_dense, 1) /= n_frag .or. size(ap_block_dense, 2) /= n_frag) then
+            deallocate(ap_block_dense)
+            allocate(ap_block_dense(n_frag, n_frag))
+          end if
+          if (.not. allocated(ap_block_ref)) then
+            allocate(ap_block_ref(n_frag, dg_frag%nstate_tot))
+          else if (size(ap_block_ref, 1) /= n_frag .or. size(ap_block_ref, 2) /= dg_frag%nstate_tot) then
+            deallocate(ap_block_ref)
+            allocate(ap_block_ref(n_frag, dg_frag%nstate_tot))
+          end if
+          call copy_momentum_blocks_to_complex_dense(dg_frag, ispin, Ac_tot, ap_block_dense)
+          call zgemm('N', 'N', n_frag, dg_frag%nstate_tot, n_frag, (1.0d0, 0.0d0), ap_block_dense, n_frag, &
+                     coef_all, n_tot, (0.0d0, 0.0d0), ap_block_ref, n_frag)
+          ap_block_diff_max = maxval(abs(ap_block_ref - dcoef_dt_m(1:n_frag, :)))
+          if (dg_frag%id == 0) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,1pe14.6)') "        ap-block-check: rank=", dg_frag%id, " itt=", itt, &
+              " ispin=", ispin, " max|block-dense|=", ap_block_diff_max
+            flush(6)
+          end if
+        end if
         if (n_pw > 0) then
           if (.not. allocated(mfp_vec)) then
             allocate(mfp_vec(n_pw))
@@ -520,12 +651,92 @@
           allocate(rhs_in(n_s, dg_frag%nstate_tot))
         end if
         rhs_in(:, :) = rhs_all(1:n_s, :)
-        if (n_pw == 0 .and. allocated(dg_frag%H_local_rows) .and. size(dg_frag%H_local_rows) > 0) then
-          call solve_overlap_operator_batch_local(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
+        if (bypass_overlap_solve) then
+          rhs_all(1:n_s, :) = rhs_in(:, :)
+        else if (n_pw == 0 .and. .not. disable_local_overlap_solve .and. allocated(dg_frag%H_local_rows) .and. size(dg_frag%H_local_rows) > 0) then
+          call solve_overlap_operator_batch_local(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), use_prop_overlap)
         else
-          call solve_overlap_operator_batch(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), .true.)
+          call solve_overlap_operator_batch(dg_frag, ispin, rhs_in, rhs_all(1:n_s, :), use_prop_overlap)
         end if
 
+      end if
+
+      if (enable_norm_deriv_check .and. dg_frag%id == 0 .and. itt <= 3) then
+        write(*,'(1x,a,i0,a,i0,a,3(1x,i0),a,2(1x,l1))') '        norm-deriv-gate: itt=', itt, ' ispin=', ispin, &
+          ' n_frag/n_pw/n_s=', n_frag, n_pw, n_s, ' enforce/check=', enforce_norm_tangent, enable_norm_deriv_check
+        if (.not. (n_pw == 0 .and. n_frag > 0)) then
+          write(*,'(1x,a)') '        norm-deriv-gate: skipped because (n_pw == 0 .and. n_frag > 0) is false'
+        end if
+        flush(6)
+      end if
+
+      if (n_pw == 0 .and. n_frag > 0 .and. (enforce_norm_tangent .or. enable_norm_deriv_check)) then
+        nocc_spin = dg_frag%nstate_tot
+        if (allocated(dg_frag%nocc_spin)) then
+          if (ispin <= size(dg_frag%nocc_spin)) nocc_spin = min(nocc_spin, max(0, dg_frag%nocc_spin(ispin)))
+        end if
+        if (nocc_spin > 0) then
+          if (n_s > 0) then
+            if (.not. allocated(vec_occ)) then
+              allocate(vec_occ(n_s), svec_occ(n_s), sdc_occ(n_s))
+            else if (size(vec_occ, 1) /= n_s) then
+              deallocate(vec_occ, svec_occ, sdc_occ)
+              allocate(vec_occ(n_s), svec_occ(n_s), sdc_occ(n_s))
+            end if
+          end if
+          dndt_before_local = 0.0d0
+          dndt_after_local = 0.0d0
+          do io_occ = 1, nocc_spin
+            if (n_s > 0) then
+              vec_occ(:) = coef_all(1:n_s, io_occ)
+              call apply_overlap_operator(dg_frag, ispin, vec_occ, svec_occ, use_prop_overlap)
+              csc_local = real(sum(conjg(vec_occ) * svec_occ), kind=8)
+            else
+              csc_local = real(sum(conjg(coef_all(1:n_frag, io_occ)) * coef_all(1:n_frag, io_occ)), kind=8)
+            end if
+            call comm_summation(csc_local, csc, dg_frag%icomm)
+            if (csc <= 1.0d-20) cycle
+
+            occ_factor = 1.0d0
+            if (allocated(system%rocc)) then
+              if (io_occ <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                occ_factor = max(0.0d0, system%rocc(io_occ, 1, ispin))
+              end if
+            end if
+
+            if (n_s > 0) then
+              call apply_overlap_operator(dg_frag, ispin, rhs_all(1:n_s, io_occ), sdc_occ, use_prop_overlap)
+              c_s_dc_re_local = real(sum(conjg(vec_occ) * sdc_occ), kind=8)
+            else
+              c_s_dc_re_local = real(sum(conjg(coef_all(1:n_frag, io_occ)) * rhs_all(1:n_frag, io_occ)), kind=8)
+            end if
+            call comm_summation(c_s_dc_re_local, c_s_dc_re, dg_frag%icomm)
+            dndt_before_local = dndt_before_local + 2.0d0 * occ_factor * c_s_dc_re_local
+
+            if (enforce_norm_tangent) then
+              alpha_real = c_s_dc_re / csc
+              if (n_s > 0) then
+                rhs_all(1:n_s, io_occ) = rhs_all(1:n_s, io_occ) - alpha_real * vec_occ
+                call apply_overlap_operator(dg_frag, ispin, rhs_all(1:n_s, io_occ), sdc_occ, use_prop_overlap)
+                c_s_dc_re_local = real(sum(conjg(vec_occ) * sdc_occ), kind=8)
+              else
+                rhs_all(1:n_frag, io_occ) = rhs_all(1:n_frag, io_occ) - alpha_real * coef_all(1:n_frag, io_occ)
+                c_s_dc_re_local = real(sum(conjg(coef_all(1:n_frag, io_occ)) * rhs_all(1:n_frag, io_occ)), kind=8)
+              end if
+              call comm_summation(c_s_dc_re_local, c_s_dc_re, dg_frag%icomm)
+            end if
+            dndt_after_local = dndt_after_local + 2.0d0 * occ_factor * c_s_dc_re_local
+          end do
+
+          call comm_summation(dndt_before_local, dndt_before, dg_frag%icomm)
+          call comm_summation(dndt_after_local, dndt_after, dg_frag%icomm)
+
+          if (enable_norm_deriv_check .and. dg_frag%id == 0 .and. itt <= 120) then
+            write(*,'(1x,a,i0,a,i0,a,2(1x,1pe12.4))') '        norm-deriv-check: itt=', itt, ' ispin=', ispin, &
+              ' dNdt(before/after)=', dndt_before, dndt_after
+            flush(6)
+          end if
+        end if
       end if
       if (enable_deriv_trace .and. itt <= 2) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &

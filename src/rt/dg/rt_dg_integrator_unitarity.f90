@@ -1,8 +1,9 @@
-  subroutine stabilize_coeff_unitarity(dg_frag, itt)
+  subroutine stabilize_coeff_unitarity(dg_frag, itt, occupied_only)
     use rt_dg_fragment_ops, only: apply_overlap_operator, gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: itt
+    logical, intent(in), optional :: occupied_only
 
     integer :: ispin, io, jo, n, nstab, n_frag, n_pw, n_tot
     complex(8), allocatable :: v(:), Sv(:), u_prev(:)
@@ -10,11 +11,13 @@
     complex(8) :: proj
     real(8) :: norm2_v, norm_v, dev_max, dev_post_max
     real(8), parameter :: eps_norm = 1.0d-14
-    logical :: use_S
+    logical :: use_S, occ_only
     logical, parameter :: enable_unitarity_trace = .false.
 
     dev_max = 0.0d0
     dev_post_max = 0.0d0
+    occ_only = .false.
+    if (present(occupied_only)) occ_only = occupied_only
     if (enable_unitarity_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        unitarity trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -33,6 +36,9 @@
       n_tot = n_frag + n_pw
       n = n_tot
       nstab = min(dg_frag%nstate_tot, n)
+      if (occ_only .and. allocated(dg_frag%nocc_spin) .and. ispin <= size(dg_frag%nocc_spin)) then
+        nstab = min(nstab, max(0, dg_frag%nocc_spin(ispin)))
+      end if
       if (n <= 0 .or. nstab <= 0) cycle
 
       allocate(v(n), Sv(n), u_prev(n))
@@ -77,8 +83,8 @@
 
           if (norm_v < eps_norm .or. norm_v /= norm_v) then
             if (dg_frag%id == 0) then
-              write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
-                ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S
+              write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
+                ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S, " occ_only=", occ_only
             end if
             cycle
           end if
@@ -144,8 +150,8 @@
 
           if (norm_v < eps_norm .or. norm_v /= norm_v) then
             if (dg_frag%id == 0) then
-              write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
-                ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S
+              write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,l1,a,l1)') "[WARN] Unitary stabilization failed: spin=", &
+                ispin, " state=", io, " itt=", itt, " norm=", norm_v, " use_S=", use_S, " occ_only=", occ_only
             end if
             cycle
           end if

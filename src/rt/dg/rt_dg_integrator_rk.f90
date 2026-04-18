@@ -2,10 +2,12 @@
                              lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                              rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
+    use communication, only: comm_summation
     use salmon_global, only: yn_fix_func
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw
+    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw, apply_overlap_operator, gather_full_coef_view, &
+                    zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -40,6 +42,13 @@
     complex(8) :: nan_val
     logical, parameter :: enable_rk_trace = .false.
     logical, parameter :: enable_rk_nan_check = .false.
+    logical :: enable_rk_stage_metric, zero_nonowned_after_stage, renormalize_occ_after_rk
+    character(len=64) :: env_stage_metric, env_stage_metric_maxitt
+    character(len=64) :: env_zero_nonowned, env_renorm_occ
+    integer :: env_stage_metric_len, env_stage_metric_status
+    integer :: stage_metric_max_itt
+    logical :: enable_hmat_s_check
+    character(len=64) :: env_hmat_s_check
     
     ! Use n_mat_max (global basis size) instead of nstate_frag (local basis size)
     n = dg_frag%n_mat_max
@@ -51,6 +60,62 @@
         dg_frag%use_plane_wave_basis, " n_plane_waves=", dg_frag%n_plane_waves, " coef_pw_alloc=", &
         allocated(dg_frag%coef_pw), " coef_pw_dim1=", merge(size(dg_frag%coef_pw,1), 0, allocated(dg_frag%coef_pw)), &
         " n_mat_max=", n, " nstate_tot=", dg_frag%nstate_tot
+      flush(6)
+    end if
+    enable_rk_stage_metric = .false.
+    zero_nonowned_after_stage = .false.
+    renormalize_occ_after_rk = (n_pw == 0)
+    stage_metric_max_itt = 5
+    env_stage_metric = ''
+    call get_environment_variable("SALMON_DG_RK_STAGE_METRIC", env_stage_metric, length=env_stage_metric_len, status=env_stage_metric_status)
+    if (env_stage_metric_status == 0 .and. env_stage_metric_len > 0) then
+      if (env_stage_metric(1:1) == '1' .or. env_stage_metric(1:1) == 'y' .or. env_stage_metric(1:1) == 'Y' .or. &
+          env_stage_metric(1:1) == 't' .or. env_stage_metric(1:1) == 'T') then
+        enable_rk_stage_metric = .true.
+      end if
+    end if
+    env_stage_metric_maxitt = ''
+    call get_environment_variable("SALMON_DG_RK_STAGE_METRIC_MAXITT", env_stage_metric_maxitt, &
+                                  length=env_stage_metric_len, status=env_stage_metric_status)
+    if (env_stage_metric_status == 0 .and. env_stage_metric_len > 0) then
+      read(env_stage_metric_maxitt(1:env_stage_metric_len), *, err=100, end=100) stage_metric_max_itt
+100   continue
+      stage_metric_max_itt = max(1, stage_metric_max_itt)
+    end if
+    env_zero_nonowned = ''
+    call get_environment_variable("SALMON_DG_ZERO_NONOWNED_AFTER_RK_STAGE", env_zero_nonowned, &
+                                  length=env_stage_metric_len, status=env_stage_metric_status)
+    if (env_stage_metric_status == 0 .and. env_stage_metric_len > 0) then
+      if (env_zero_nonowned(1:1) == '1' .or. env_zero_nonowned(1:1) == 'y' .or. env_zero_nonowned(1:1) == 'Y' .or. &
+          env_zero_nonowned(1:1) == 't' .or. env_zero_nonowned(1:1) == 'T') then
+        zero_nonowned_after_stage = .true.
+      end if
+    end if
+    env_renorm_occ = ''
+    call get_environment_variable("SALMON_DG_RENORMALIZE_OCC_AFTER_RK", env_renorm_occ, &
+                                  length=env_stage_metric_len, status=env_stage_metric_status)
+    if (env_stage_metric_status == 0 .and. env_stage_metric_len > 0) then
+      if (env_renorm_occ(1:1) == '1' .or. env_renorm_occ(1:1) == 'y' .or. env_renorm_occ(1:1) == 'Y' .or. &
+          env_renorm_occ(1:1) == 't' .or. env_renorm_occ(1:1) == 'T') then
+        renormalize_occ_after_rk = .true.
+      else if (env_renorm_occ(1:1) == '0' .or. env_renorm_occ(1:1) == 'n' .or. env_renorm_occ(1:1) == 'N' .or. &
+               env_renorm_occ(1:1) == 'f' .or. env_renorm_occ(1:1) == 'F') then
+        renormalize_occ_after_rk = .false.
+      end if
+    end if
+    
+    enable_hmat_s_check = .false.
+    env_hmat_s_check = ''
+    call get_environment_variable("SALMON_DG_RK_HMAT_S_CHECK", env_hmat_s_check, length=env_stage_metric_len, status=env_stage_metric_status)
+    if (env_stage_metric_status == 0 .and. env_stage_metric_len > 0) then
+      if (env_hmat_s_check(1:1) == '1' .or. env_hmat_s_check(1:1) == 'y' .or. env_hmat_s_check(1:1) == 'Y' .or. &
+          env_hmat_s_check(1:1) == 't' .or. env_hmat_s_check(1:1) == 'T') then
+        enable_hmat_s_check = .true.
+      end if
+    end if
+    if (itt == 1 .and. dg_frag%id == 0) then
+      write(*,'(1x,a,l1,a,l1)') "        DEBUG: RK init enable_rk_stage_metric=", enable_rk_stage_metric, &
+        " enable_hmat_s_check=", enable_hmat_s_check
       flush(6)
     end if
     
@@ -101,6 +166,7 @@
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
       end if
+      call debug_rk_stage_metric("rk4-stage1-state")
       if (enable_rk_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -192,6 +258,8 @@
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
       end if
+      if (zero_nonowned_after_stage) call zero_nonowned_coefficients(dg_frag)
+      call debug_rk_stage_metric("rk4-stage2-state")
       if (yn_fix_func == 'n') then
         if (enable_rk_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
@@ -270,6 +338,8 @@
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
       end if
+      if (zero_nonowned_after_stage) call zero_nonowned_coefficients(dg_frag)
+      call debug_rk_stage_metric("rk4-stage3-state")
       if (yn_fix_func == 'n') then
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
@@ -325,10 +395,19 @@
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
       end if
+      if (zero_nonowned_after_stage) call zero_nonowned_coefficients(dg_frag)
+      call debug_rk_stage_metric("rk4-stage4-state")
+      call debug_rk_stage_metric("rk4-final-state")
+      if (enable_hmat_s_check .and. itt <= stage_metric_max_itt) then
+        call debug_hmat_s_consistency("rk4-stage4-before-update")
+      end if
       if (yn_fix_func == 'n') then
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+      end if
+      if (enable_hmat_s_check .and. itt <= stage_metric_max_itt) then
+        call debug_hmat_s_consistency("rk4-stage4-after-update")
       end if
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,4), k_pw(:,:,:,4))
@@ -385,6 +464,8 @@
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
       end if
+      if (zero_nonowned_after_stage) call zero_nonowned_coefficients(dg_frag)
+      if (renormalize_occ_after_rk) call renormalize_occupied_norms_after_rk()
       if (yn_fix_func == 'n') then
         ! Rebuild H at the final RK4 state/time so next step starts from consistent rho/H.
         Ac_tot = rt%Ac_tot(:, itt+1)
@@ -620,5 +701,181 @@
         stop "NaN in coef"
       end if
     end if
+
+  contains
+
+  subroutine renormalize_occupied_norms_after_rk()
+    integer :: ispin_norm, io_norm, jo_norm, n_frag_norm, n_pw_norm, n_tot_norm, nocc_norm
+    real(8) :: norm2_norm, norm2_local, norm_scale
+    logical :: use_s_norm
+    complex(8), allocatable :: vec_norm(:), svec_norm(:)
+    complex(8), allocatable :: coef_frag_norm(:,:), coef_pw_norm(:,:)
+
+    do ispin_norm = 1, dg_frag%nspin
+      n_frag_norm = dg_frag%n_mat(ispin_norm)
+      n_pw_norm = 0
+      if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw_norm = dg_frag%n_plane_waves
+      use_s_norm = allocated(dg_frag%S_mat_frag_pw) .or. allocated(dg_frag%S_mat_prop_c) .or. &
+                   allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat) .or. &
+                   allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)
+      if (n_pw_norm > 0 .or. use_s_norm) n_frag_norm = dg_frag%n_mat_max
+      n_tot_norm = n_frag_norm + n_pw_norm
+      if (n_tot_norm <= 0) cycle
+      nocc_norm = dg_frag%nstate_tot
+      if (allocated(dg_frag%nocc_spin) .and. ispin_norm <= size(dg_frag%nocc_spin)) then
+        nocc_norm = min(nocc_norm, max(0, dg_frag%nocc_spin(ispin_norm)))
+      end if
+      if (nocc_norm <= 0) cycle
+
+      call gather_full_coef_view(dg_frag, ispin_norm, n_frag_norm, nocc_norm, coef_frag_norm, coef_pw_norm, 1, nocc_norm)
+      allocate(vec_norm(n_tot_norm), svec_norm(n_tot_norm))
+      do io_norm = 1, nocc_norm
+        vec_norm(:) = (0.0d0, 0.0d0)
+        vec_norm(1:n_frag_norm) = coef_frag_norm(1:n_frag_norm, io_norm)
+        if (n_pw_norm > 0) vec_norm(n_frag_norm+1:n_tot_norm) = coef_pw_norm(1:n_pw_norm, io_norm)
+        if (use_s_norm) then
+          call apply_overlap_operator(dg_frag, ispin_norm, vec_norm, svec_norm, .true.)
+          norm2_local = real(sum(conjg(vec_norm) * svec_norm), kind=8)
+          call comm_summation(norm2_local, norm2_norm, dg_frag%icomm)
+        else
+          norm2_norm = sum(abs(vec_norm)**2)
+        end if
+        if (norm2_norm <= 1.0d-24) cycle
+        norm_scale = 1.0d0 / sqrt(norm2_norm)
+        coef_frag_norm(1:n_frag_norm, io_norm) = coef_frag_norm(1:n_frag_norm, io_norm) * norm_scale
+        if (n_pw_norm > 0) coef_pw_norm(1:n_pw_norm, io_norm) = coef_pw_norm(1:n_pw_norm, io_norm) * norm_scale
+      end do
+
+      do io_norm = 1, nocc_norm
+        do jo_norm = 1, n_frag_norm
+          if (allocated(dg_frag%coef_owner)) then
+            if (dg_frag%coef_owner(jo_norm, ispin_norm) /= dg_frag%id) cycle
+          end if
+          dg_frag%coef(jo_norm, io_norm, ispin_norm) = coef_frag_norm(jo_norm, io_norm)
+        end do
+        do jo_norm = 1, n_pw_norm
+          if (allocated(dg_frag%coef_pw_owner)) then
+            if (dg_frag%coef_pw_owner(jo_norm) /= dg_frag%id) cycle
+          end if
+          dg_frag%coef_pw(jo_norm, io_norm, ispin_norm) = coef_pw_norm(jo_norm, io_norm)
+        end do
+      end do
+      deallocate(vec_norm, svec_norm)
+      if (allocated(coef_frag_norm)) deallocate(coef_frag_norm)
+      if (allocated(coef_pw_norm)) deallocate(coef_pw_norm)
+    end do
+    call zero_nonowned_coefficients(dg_frag)
+  end subroutine renormalize_occupied_norms_after_rk
+
+  subroutine debug_rk_stage_metric(stage_label)
+    character(len=*), intent(in) :: stage_label
+    integer :: ispin_probe, io, n_frag_rows, n_pw_probe, n_tot_probe, nocc_probe
+    real(8) :: cs2_sum, cs2_min, cs2_max, sval
+    complex(8), allocatable :: vec(:), svec(:)
+    complex(8), allocatable :: coef_frag_probe(:,:), coef_pw_probe(:,:)
+
+    if (.not. enable_rk_stage_metric) return
+    if (itt > stage_metric_max_itt) return
+    if (dg_frag%nspin <= 0 .or. dg_frag%nstate_tot <= 0) return
+
+    do ispin_probe = 1, dg_frag%nspin
+      nocc_probe = min(dg_frag%nstate_tot, dg_frag%nocc_spin(ispin_probe))
+      if (nocc_probe <= 0) cycle
+      n_frag_rows = dg_frag%n_mat_max
+      n_pw_probe = 0
+      if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw_probe = dg_frag%n_plane_waves
+      n_tot_probe = n_frag_rows + n_pw_probe
+      if (n_tot_probe <= 0) cycle
+
+      call gather_full_coef_view(dg_frag, ispin_probe, n_frag_rows, nocc_probe, coef_frag_probe, coef_pw_probe, 1, nocc_probe)
+      allocate(vec(n_tot_probe), svec(n_tot_probe))
+      cs2_sum = 0.0d0
+      cs2_min = huge(1.0d0)
+      cs2_max = -huge(1.0d0)
+      do io = 1, nocc_probe
+        vec(:) = (0.0d0, 0.0d0)
+        vec(1:n_frag_rows) = coef_frag_probe(1:n_frag_rows, io)
+        if (n_pw_probe > 0) vec(n_frag_rows+1:n_tot_probe) = coef_pw_probe(1:n_pw_probe, io)
+        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
+        sval = real(sum(conjg(vec) * svec), kind=8)
+        cs2_sum = cs2_sum + sval
+        cs2_min = min(cs2_min, sval)
+        cs2_max = max(cs2_max, sval)
+      end do
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,a,a,i0,a,i0,a,3(1x,es12.4))') "        rk stage metric: stage=", trim(stage_label), &
+          " ispin=", ispin_probe, " nocc=", nocc_probe, " cs2(sum,min,max)=", cs2_sum, cs2_min, cs2_max
+        flush(6)
+      end if
+      deallocate(vec, svec)
+      if (allocated(coef_frag_probe)) deallocate(coef_frag_probe)
+      if (allocated(coef_pw_probe)) deallocate(coef_pw_probe)
+    end do
+  end subroutine debug_rk_stage_metric
+
+  subroutine debug_hmat_s_consistency(label)
+    character(len=*), intent(in) :: label
+    integer :: ispin, io, jo, nmat, max_inspect
+    real(8) :: h_diag_min, h_diag_max, s_diag_min, s_diag_max, h_off_max, s_off_max
+    real(8) :: h_trace, s_trace, ratio_hs
+    logical :: hmat_ok, smat_ok
+    
+    if (dg_frag%id /= 0) return  ! Only rank 0 prints
+    
+    ! Defensive checks
+    if (dg_frag%nspin <= 0) return
+    if (.not. allocated(dg_frag%H_mat)) return
+    if (.not. allocated(dg_frag%S_mat)) return
+    
+    nmat = size(dg_frag%H_mat, 1)
+    if (nmat <= 0) return
+    if (size(dg_frag%H_mat, 3) /= dg_frag%nspin) return
+    if (size(dg_frag%S_mat, 3) /= dg_frag%nspin) return
+    if (size(dg_frag%S_mat, 1) /= nmat) return
+    if (size(dg_frag%S_mat, 2) /= nmat) return
+    
+    max_inspect = min(nmat, 200)  ! Limit inspection to first 200 states
+    
+    do ispin = 1, dg_frag%nspin
+      ! Compute diagnostics for this spin
+      h_diag_min = huge(1.0d0)
+      h_diag_max = -huge(1.0d0)
+      s_diag_min = huge(1.0d0)
+      s_diag_max = -huge(1.0d0)
+      h_off_max = 0.0d0
+      s_off_max = 0.0d0
+      h_trace = 0.0d0
+      s_trace = 0.0d0
+      
+      do io = 1, nmat
+        h_trace = h_trace + dg_frag%H_mat(io, io, ispin)
+        s_trace = s_trace + dg_frag%S_mat(io, io, ispin)
+        h_diag_min = min(h_diag_min, dg_frag%H_mat(io, io, ispin))
+        h_diag_max = max(h_diag_max, dg_frag%H_mat(io, io, ispin))
+        s_diag_min = min(s_diag_min, dg_frag%S_mat(io, io, ispin))
+        s_diag_max = max(s_diag_max, dg_frag%S_mat(io, io, ispin))
+      end do
+      
+      do io = 1, max_inspect
+        do jo = io+1, max_inspect
+          h_off_max = max(h_off_max, abs(dg_frag%H_mat(io, jo, ispin)))
+          s_off_max = max(s_off_max, abs(dg_frag%S_mat(io, jo, ispin)))
+        end do
+      end do
+      
+      hmat_ok = (h_diag_max > 0.0d0)
+      smat_ok = (s_diag_min > 1.0d-10 .and. s_diag_max < 1.0d2)
+      ratio_hs = merge(h_trace / s_trace, 0.0d0, s_trace /= 0.0d0)
+      
+      write(*,'(1x,a,a,a,i0,a,i0)') "        hmat-s-check: label=", trim(label), &
+        " ispin=", ispin, " nmat=", nmat
+      write(*,'(1x,a,4(1x,es12.4))') "          H_diag(min,max) S_diag(min,max):", &
+        h_diag_min, h_diag_max, s_diag_min, s_diag_max
+      write(*,'(1x,a,2(1x,es12.4))') "          H_offmax(first200) S_offmax(first200):", h_off_max, s_off_max
+      write(*,'(1x,a,2(1x,es12.4),1x,l1,1x,l1)') "          H_trace S_trace H/S_ratio hmat_ok smat_ok:", &
+        h_trace, s_trace, ratio_hs, hmat_ok, smat_ok
+      flush(6)
+    end do
+  end subroutine debug_hmat_s_consistency
     
   end subroutine time_evolution_rk
