@@ -1590,7 +1590,7 @@ contains
     allocate(dg_frag%coef_new(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
     allocate(dg_frag%coef_work(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
     dg_frag%coef = 0.0d0
-    dg_frag%coef_new = 0.0d0
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new = 0.0d0
     dg_frag%coef_work = 0.0d0
     
     ! Step 5: Reorganize coefficient data from fragment-local to global basis order
@@ -2310,11 +2310,39 @@ contains
   end subroutine validate_coef_owner_map
 
   subroutine rebuild_coef_owner_map(dg_frag, stage_label)
+    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: stage_label
 
-    integer :: ispin, ifrag, io, global_idx, nbasis_iter
+    integer :: ispin, ifrag, io, global_idx, nbasis_iter, owner_new
+    integer :: env_status, env_len
+    integer :: conflict_local
+    character(len=64) :: env_owner_io_split
+    logical :: owner_root_only
+    logical, save :: printed_owner_mode = .false.
+
+    owner_root_only = .true.
+    env_owner_io_split = ""
+    env_status = 1
+    env_len = 0
+    call get_environment_variable("SALMON_DG_COEF_OWNER_IO_SPLIT", env_owner_io_split, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_owner_io_split(1:env_len))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        owner_root_only = .false.
+      end select
+    end if
+
+    if (dg_frag%id == 0 .and. .not. printed_owner_mode) then
+      if (owner_root_only) then
+        write(*,'(1x,a)') "[INFO] DG coef owner mode: root-only (io split disabled)"
+      else
+        write(*,'(1x,a)') "[INFO] DG coef owner mode: io-split (legacy)"
+      end if
+      flush(6)
+      printed_owner_mode = .true.
+    end if
 
     if (.not. allocated(dg_frag%id_array)) then
       write(*,'(1x,a,a,a,i0)') "[FATAL] id_array is not allocated before coef owner build: stage=", &
@@ -2326,17 +2354,31 @@ contains
     allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
     dg_frag%coef_owner(:, :) = -1
     dg_frag%H_local_block_ids_valid = .false.
+    conflict_local = 0
     do ispin = 1, dg_frag%nspin
       do ifrag = 1, dg_frag%n_frag
         nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
         do io = 1, nbasis_iter
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
           if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+          if (owner_root_only) then
+            owner_new = dg_frag%id_array(ifrag)
+          else
+            owner_new = get_subgroup_block_owner_rank(dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+          end if
+          if (dg_frag%coef_owner(global_idx, ispin) == -1) then
+            dg_frag%coef_owner(global_idx, ispin) = owner_new
+          else if (dg_frag%coef_owner(global_idx, ispin) /= owner_new) then
+            conflict_local = conflict_local + 1
+          end if
         end do
       end do
     end do
+
+    if (dg_frag%id == 0 .and. conflict_local > 0) then
+      write(*,'(1x,a,a,a,i0)') "[WARN] coef_owner conflicts detected (kept first owner): stage=", &
+        trim(stage_label), " conflicts=", conflict_local
+    end if
 
     dg_frag%owned_coef_start = 0
     dg_frag%owned_coef_end = -1

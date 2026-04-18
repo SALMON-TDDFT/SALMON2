@@ -1242,7 +1242,7 @@
         write(*,*) "  [init] Diagonalizing mixed basis at startup (A=0)"
       end if
       call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
-      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     end if
 
     ! Initialize field-free reference Hamiltonian for adaptive-basis metric.

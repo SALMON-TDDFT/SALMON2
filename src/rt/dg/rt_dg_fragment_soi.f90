@@ -1018,7 +1018,7 @@ contains
     allocate(dg_frag%coef_new(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
     allocate(dg_frag%coef_work(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
     dg_frag%coef = 0.0d0
-    dg_frag%coef_new = 0.0d0
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new = 0.0d0
     dg_frag%coef_work = 0.0d0
     
     ! Step 5: Reorganize coefficient data from fragment-local to global basis order
