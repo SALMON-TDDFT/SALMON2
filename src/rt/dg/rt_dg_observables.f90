@@ -1,4 +1,4 @@
-  subroutine calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl)
+  subroutine calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl, rho)
     use salmon_global, only: theory
     use structures
     use communication, only: comm_summation
@@ -18,6 +18,7 @@
     integer,                intent(in)    :: itt
     type(s_scalar),         intent(in)    :: Vh, Vpsl
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
+    type(s_scalar),         intent(in), optional :: rho
     
     integer :: io, jo, ispin, idir, n, nocc, n_pw, n_tot, max_nocc, n_mix
     integer :: active_state_cap
@@ -42,6 +43,7 @@
     logical :: enable_excitation_trace, do_excitation_sample
     logical :: enable_para_decomp_trace, do_para_decomp_sample
     logical :: enable_para_block_trace, do_para_block_sample
+    logical :: enable_fragment_current_trace
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
     real(8) :: current_tmp, energy_tmp, pw_weight_local, kpw_dir
@@ -83,6 +85,7 @@
     real(8), allocatable :: para_block_abs_local(:,:), para_block_abs_sum(:,:)
     real(8) :: para_block_best_abs, para_block_total_abs
     integer :: para_block_best_iblk
+    integer :: frag_current_trace_stride
     complex(8) :: minus_i
     complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), ap_apply(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:), coef_frag_view(:,:), coef_pw_view(:,:)
@@ -99,6 +102,9 @@
     real(8), allocatable :: occ_weight(:)
     real(8), allocatable :: current_orb_local(:), current_orb_sum(:)
     real(8), allocatable :: energy_orb_local(:), energy_orb_sum(:)
+    real(8), allocatable :: frag_current_local(:,:), frag_current_sum(:,:)
+    real(8), allocatable :: frag_current_diag_local(:,:), frag_current_diag_sum(:,:)
+    real(8), allocatable :: frag_current_inter_local(:,:), frag_current_inter_sum(:,:)
     real(8), allocatable :: nl_state_local(:), nl_state_sum(:)
     real(8) :: current_diag_local(3), current_offdiag_local(3)
     real(8) :: current_diag_sum(3), current_offdiag_sum(3)
@@ -106,6 +112,8 @@
     real(8) :: current_nl_rs_sum(3)
     complex(8) :: current_blk_total, current_blk_diag, current_elem
     complex(8) :: mfp
+    real(8) :: frag_current_total_raw(3), frag_current_density(3)
+    real(8) :: frag_current_mean_raw(3), frag_current_rms_mismatch(3)
     real(8), parameter :: unit_dir(3,3) = reshape((/ &
       1.0d0, 0.0d0, 0.0d0, &
       0.0d0, 1.0d0, 0.0d0, &
@@ -185,6 +193,7 @@
     enable_excitation_trace = .false.
     enable_para_decomp_trace = .false.
     enable_para_block_trace = .false.
+    enable_fragment_current_trace = .false.
     use_s_metric_current = .false.
     use_s_adjoint_current = .false.
     transition_stride = 1
@@ -193,6 +202,7 @@
     current_component_stride = 1
     excitation_trace_stride = 1
     para_decomp_trace_stride = 1
+    frag_current_trace_stride = 1
     call get_environment_variable("SALMON_DG_ORBITAL_PROBE", env_val, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
       if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
@@ -331,6 +341,20 @@
         enable_para_block_trace = .true.
       end if
     end if
+    call get_environment_variable("SALMON_DG_FRAGMENT_CURRENT_TRACE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_fragment_current_trace = .true.
+      end if
+    end if
+    if (enable_fragment_current_trace) then
+      call get_environment_variable("SALMON_DG_FRAGMENT_CURRENT_TRACE_STRIDE", env_val, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_val(1:env_len), *, iostat=env_status) frag_current_trace_stride
+        if (env_status /= 0 .or. frag_current_trace_stride < 1) frag_current_trace_stride = 1
+      end if
+    end if
     if (enable_transition_probe) then
       call get_environment_variable("SALMON_DG_TRANSITION_PROBE_STRIDE", env_val, length=env_len, status=env_status)
       if (env_status == 0 .and. env_len > 0) then
@@ -372,13 +396,25 @@
     para_poff_local(:) = 0.0d0
     para_coff_abs_local(:) = 0.0d0
     para_poff_abs_local(:) = 0.0d0
-    if (enable_para_block_trace .and. allocated(dg_frag%momentum_blocks) .and. dg_frag%n_momentum_blocks > 0) then
+    if ((enable_para_block_trace .or. enable_fragment_current_trace) .and. &
+        allocated(dg_frag%momentum_blocks) .and. dg_frag%n_momentum_blocks > 0) then
       allocate(para_block_signed_local(3, dg_frag%n_momentum_blocks))
       allocate(para_block_signed_sum(3, dg_frag%n_momentum_blocks))
       allocate(para_block_abs_local(3, dg_frag%n_momentum_blocks))
       allocate(para_block_abs_sum(3, dg_frag%n_momentum_blocks))
       para_block_signed_local(:, :) = 0.0d0
       para_block_abs_local(:, :) = 0.0d0
+      if (enable_fragment_current_trace) then
+        allocate(frag_current_local(3, dg_frag%n_frag))
+        allocate(frag_current_sum(3, dg_frag%n_frag))
+        allocate(frag_current_diag_local(3, dg_frag%n_frag))
+        allocate(frag_current_diag_sum(3, dg_frag%n_frag))
+        allocate(frag_current_inter_local(3, dg_frag%n_frag))
+        allocate(frag_current_inter_sum(3, dg_frag%n_frag))
+        frag_current_local(:, :) = 0.0d0
+        frag_current_diag_local(:, :) = 0.0d0
+        frag_current_inter_local(:, :) = 0.0d0
+      end if
     end if
 
     if (enable_obs_trace) then
@@ -424,8 +460,9 @@
                 (itt == 0 .or. itt == 1 .or. mod(itt - 1, excitation_trace_stride) == 0)
       do_para_decomp_sample = enable_para_decomp_trace .and. (n_pw == 0) .and. (.not. use_mixed_current) .and. &
              (itt == 0 .or. itt == 1 .or. mod(itt - 1, para_decomp_trace_stride) == 0)
-            do_para_block_sample = enable_para_block_trace .and. (n_pw == 0) .and. (.not. use_mixed_current) .and. &
-              (itt == 0 .or. itt == 1 .or. mod(itt - 1, para_decomp_trace_stride) == 0)
+            do_para_block_sample = (n_pw == 0) .and. (.not. use_mixed_current) .and. &
+              ( (enable_para_block_trace .and. (itt == 0 .or. itt == 1 .or. mod(itt - 1, para_decomp_trace_stride) == 0)) .or. &
+                (enable_fragment_current_trace .and. (itt == 0 .or. itt == 1 .or. mod(itt - 1, frag_current_trace_stride) == 0)) )
       if (do_excitation_sample) then
         do ib = 1, n
           do jb = 1, n
@@ -595,6 +632,15 @@
                     if (do_para_block_sample .and. allocated(para_block_signed_local)) then
                       para_block_signed_local(idir, iblk) = para_block_signed_local(idir, iblk) - 2.0d0 * aimag(current_elem)
                       para_block_abs_local(idir, iblk) = para_block_abs_local(idir, iblk) + 2.0d0 * abs(aimag(current_elem))
+                      if (enable_fragment_current_trace .and. allocated(frag_current_local)) then
+                        if (ifrag == jfrag) then
+                          frag_current_local(idir, ifrag) = frag_current_local(idir, ifrag) - 2.0d0 * aimag(current_elem)
+                          frag_current_diag_local(idir, ifrag) = frag_current_diag_local(idir, ifrag) - 2.0d0 * aimag(current_elem)
+                        else
+                          frag_current_local(idir, ifrag) = frag_current_local(idir, ifrag) - 2.0d0 * aimag(current_elem)
+                          frag_current_inter_local(idir, ifrag) = frag_current_inter_local(idir, ifrag) - 2.0d0 * aimag(current_elem)
+                        end if
+                      end if
                     end if
                   end do
                 end do
@@ -1215,22 +1261,64 @@
         flush(6)
       end if
     end if
-    if (enable_para_block_trace .and. allocated(para_block_signed_local)) then
+    if ((enable_para_block_trace .or. enable_fragment_current_trace) .and. allocated(para_block_signed_local)) then
       call comm_summation(para_block_signed_local, para_block_signed_sum, 3 * dg_frag%n_momentum_blocks, dg_frag%icomm)
       call comm_summation(para_block_abs_local, para_block_abs_sum, 3 * dg_frag%n_momentum_blocks, dg_frag%icomm)
       para_block_signed_sum(:, :) = para_block_signed_sum(:, :) / real(max(1, dg_frag%isize), 8)
       para_block_abs_sum(:, :) = para_block_abs_sum(:, :) / real(max(1, dg_frag%isize), 8)
-      if (dg_frag%id == 0 .and. (itt == 0 .or. itt == 1 .or. mod(itt - 1, para_decomp_trace_stride) == 0)) then
+      if (enable_fragment_current_trace .and. allocated(frag_current_local)) then
+        call comm_summation(frag_current_local, frag_current_sum, 3 * dg_frag%n_frag, dg_frag%icomm)
+        call comm_summation(frag_current_diag_local, frag_current_diag_sum, 3 * dg_frag%n_frag, dg_frag%icomm)
+        call comm_summation(frag_current_inter_local, frag_current_inter_sum, 3 * dg_frag%n_frag, dg_frag%icomm)
+        frag_current_sum(:, :) = frag_current_sum(:, :) / real(max(1, dg_frag%isize), 8)
+        frag_current_diag_sum(:, :) = frag_current_diag_sum(:, :) / real(max(1, dg_frag%isize), 8)
+        frag_current_inter_sum(:, :) = frag_current_inter_sum(:, :) / real(max(1, dg_frag%isize), 8)
+      end if
+      if (enable_fragment_current_trace .and. dg_frag%id == 0 .and. &
+          (itt == 0 .or. itt == 1 .or. mod(itt - 1, frag_current_trace_stride) == 0)) then
+        frag_current_total_raw(:) = 0.0d0
+        do ifrag = 1, dg_frag%n_frag
+          frag_current_total_raw(:) = frag_current_total_raw(:) + frag_current_sum(:, ifrag)
+          write(*,'(1x,a,i0,a,i0,3(a,1pe14.6))') &
+            "        dg-frag-current-raw: itt=", itt, " ifrag=", ifrag, &
+            " Jx_raw=", frag_current_sum(1, ifrag), &
+            " Jy_raw=", frag_current_sum(2, ifrag), &
+            " Jz_raw=", frag_current_sum(3, ifrag)
+          write(*,'(1x,a,i0,a,i0,3(a,1pe14.6),3(a,1pe14.6))') &
+            "        dg-frag-current-split: itt=", itt, " ifrag=", ifrag, &
+            " Jx_diag=", frag_current_diag_sum(1, ifrag), &
+            " Jy_diag=", frag_current_diag_sum(2, ifrag), &
+            " Jz_diag=", frag_current_diag_sum(3, ifrag), &
+            " Jx_inter=", frag_current_inter_sum(1, ifrag), &
+            " Jy_inter=", frag_current_inter_sum(2, ifrag), &
+            " Jz_inter=", frag_current_inter_sum(3, ifrag)
+        end do
+        frag_current_density(:) = frag_current_total_raw(:) / system%det_a
+        frag_current_mean_raw(:) = frag_current_total_raw(:) / dble(max(1, dg_frag%n_frag))
+        frag_current_rms_mismatch(:) = 0.0d0
+        do ifrag = 1, dg_frag%n_frag
+          frag_current_rms_mismatch(:) = frag_current_rms_mismatch(:) + &
+            (frag_current_sum(:, ifrag) - frag_current_mean_raw(:))**2
+        end do
+        frag_current_rms_mismatch(:) = sqrt(frag_current_rms_mismatch(:) / dble(max(1, dg_frag%n_frag)))
+        write(*,'(1x,a,i0,a,3(1x,1pe14.6),a,3(1x,1pe14.6))') &
+          "        dg-frag-current-summary: itt=", itt, &
+          " sum_raw=", frag_current_total_raw(1), frag_current_total_raw(2), frag_current_total_raw(3), &
+          " sum_raw_over_V=", frag_current_density(1), frag_current_density(2), frag_current_density(3)
+        write(*,'(1x,a,i0,a,3(1x,1pe14.6))') &
+          "        dg-frag-current-mismatch-rms(raw): itt=", itt, &
+          " rms=", frag_current_rms_mismatch(1), frag_current_rms_mismatch(2), frag_current_rms_mismatch(3)
+      end if
+      if (enable_para_block_trace .and. dg_frag%id == 0 .and. &
+          (itt == 0 .or. itt == 1 .or. mod(itt - 1, para_decomp_trace_stride) == 0)) then
         do idir = 1, 3
           para_block_best_abs = -1.0d0
           para_block_best_iblk = 0
           para_block_total_abs = 0.0d0
           do iblk = 1, dg_frag%n_momentum_blocks
-            para_block_abs_sum(idir, iblk) = para_block_abs_sum(idir, iblk) / system%det_a
-            para_block_signed_sum(idir, iblk) = para_block_signed_sum(idir, iblk) / system%det_a
-            para_block_total_abs = para_block_total_abs + para_block_abs_sum(idir, iblk)
-            if (para_block_abs_sum(idir, iblk) > para_block_best_abs) then
-              para_block_best_abs = para_block_abs_sum(idir, iblk)
+            para_block_total_abs = para_block_total_abs + para_block_abs_sum(idir, iblk) / system%det_a
+            if (para_block_abs_sum(idir, iblk) / system%det_a > para_block_best_abs) then
+              para_block_best_abs = para_block_abs_sum(idir, iblk) / system%det_a
               para_block_best_iblk = iblk
             end if
           end do
@@ -1239,8 +1327,8 @@
               "        dg-para-block-trace: itt=", itt, " idir=", idir, " iblk=", para_block_best_iblk, &
               " ifrag_row=", dg_frag%momentum_blocks(para_block_best_iblk)%ifrag_row, &
               " ifrag_col=", dg_frag%momentum_blocks(para_block_best_iblk)%ifrag_col, &
-              " signed=", para_block_signed_sum(idir, para_block_best_iblk), &
-              " abs=", para_block_abs_sum(idir, para_block_best_iblk), " total_abs=", para_block_total_abs
+              " signed=", para_block_signed_sum(idir, para_block_best_iblk) / system%det_a, &
+              " abs=", para_block_abs_sum(idir, para_block_best_iblk) / system%det_a, " total_abs=", para_block_total_abs
           end if
         end do
         flush(6)
@@ -1448,6 +1536,12 @@
     if (allocated(para_block_signed_sum)) deallocate(para_block_signed_sum)
     if (allocated(para_block_abs_local)) deallocate(para_block_abs_local)
     if (allocated(para_block_abs_sum)) deallocate(para_block_abs_sum)
+    if (allocated(frag_current_local)) deallocate(frag_current_local)
+    if (allocated(frag_current_sum)) deallocate(frag_current_sum)
+    if (allocated(frag_current_diag_local)) deallocate(frag_current_diag_local)
+    if (allocated(frag_current_diag_sum)) deallocate(frag_current_diag_sum)
+    if (allocated(frag_current_inter_local)) deallocate(frag_current_inter_local)
+    if (allocated(frag_current_inter_sum)) deallocate(frag_current_inter_sum)
     ! Store in rt structure for output
     rt%curr(:, itt) = dg_frag%current(:)
     

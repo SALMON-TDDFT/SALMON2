@@ -111,6 +111,7 @@
     logical :: enable_density_reconstruct_trace
     logical :: enable_density_stage_trace
     logical :: enable_density_split_charge_probe
+    logical :: enable_density_phi_block_cache
     logical :: enable_density_renormalize
     logical :: enable_density_send_probe
     integer :: density_stage_trace_rank, ios_read
@@ -164,6 +165,7 @@
     enable_density_reconstruct_trace = .false.
     enable_density_stage_trace = .false.
     enable_density_split_charge_probe = .false.
+    enable_density_phi_block_cache = .false.
     enable_density_renormalize = .false.
     enable_density_send_probe = .false.
     density_stage_trace_rank = -1
@@ -200,6 +202,13 @@
       if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
           env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
         enable_density_send_probe = .true.
+      end if
+    end if
+    call get_environment_variable("SALMON_DG_DENSITY_PHI_BLOCK_CACHE", env_val, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+          env_val(1:1) == 't' .or. env_val(1:1) == 'T') then
+        enable_density_phi_block_cache = .true.
       end if
     end if
     call get_environment_variable("SALMON_DG_DENSITY_STAGE_TRACE_RANK", env_val, length=env_len, status=env_status)
@@ -716,88 +725,95 @@
     need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
     need_phi_cache_invalid = (.not. dg_frag%density_phi_block_cache_valid)
     need_phi_cache_resize = dg_frag%density_phi_block_size /= grid_block_size
-    if (need_phi_cache_alloc .or. need_phi_count_alloc .or. need_phi_cache_invalid .or. need_phi_cache_resize) then
+    if (enable_density_phi_block_cache) then
+      if (need_phi_cache_alloc .or. need_phi_count_alloc .or. need_phi_cache_invalid .or. need_phi_cache_resize) then
+        if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
+        if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
+        nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
+        allocate(dg_frag%density_phi_block_cache(grid_block_size, dg_frag%nstate_frag, nblocks_max, ifrag_count))
+        allocate(dg_frag%density_phi_block_count(ifrag_count))
+        dg_frag%density_phi_block_cache(:, :, :, :) = 0.0d0
+        dg_frag%density_phi_block_count(:) = 0
+        phi_lb1 = lbound(dg_frag%phi_frag, 1)
+        phi_lb2 = lbound(dg_frag%phi_frag, 2)
+        phi_lb3 = lbound(dg_frag%phi_frag, 3)
+        phi_ub1 = ubound(dg_frag%phi_frag, 1)
+        phi_ub2 = ubound(dg_frag%phi_frag, 2)
+        phi_ub3 = ubound(dg_frag%phi_frag, 3)
+        phi_lg1 = dg_frag%lgnum_total(1)
+        phi_lg2 = dg_frag%lgnum_total(2)
+        phi_lg3 = dg_frag%lgnum_total(3)
+        allocate(phi_map_x(phi_lg1), phi_map_y(phi_lg2), phi_map_z(phi_lg3))
+        do ixg = 1, phi_lg1
+          phi_map_x(ixg) = map_global_to_phi_box_coord_ham(ixg, phi_lb1, phi_ub1, phi_lg1)
+        end do
+        do iyg = 1, phi_lg2
+          phi_map_y(iyg) = map_global_to_phi_box_coord_ham(iyg, phi_lb2, phi_ub2, phi_lg2)
+        end do
+        do izg = 1, phi_lg3
+          phi_map_z(izg) = map_global_to_phi_box_coord_ham(izg, phi_lb3, phi_ub3, phi_lg3)
+        end do
+        i_local = 0
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = i_local + 1
+          local_grid_count = dg_frag%density_grid_point_count(i_local)
+          dg_frag%density_phi_block_count(i_local) = dg_frag%density_block_nblocks(i_local)
+          do block_cache_idx = 1, dg_frag%density_phi_block_count(i_local)
+            igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
+            npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
+!$omp parallel do private(igrid, ixg, iyg, izg, bx, by, bz, istate_frag) schedule(static)
+            do igrid = 1, npt_cache
+              ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
+              iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
+              izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
+              bx = phi_map_x(modulo(ixg - 1, phi_lg1) + 1)
+              by = phi_map_y(modulo(iyg - 1, phi_lg2) + 1)
+              bz = phi_map_z(modulo(izg - 1, phi_lg3) + 1)
+              if (bx == 0 .or. by == 0 .or. bz == 0) cycle
+              do istate_frag = 1, dg_frag%nstate_frag
+                dg_frag%density_phi_block_cache(igrid, istate_frag, block_cache_idx, i_local) = &
+                  dg_frag%phi_frag(bx, by, bz, istate_frag, i_local)
+              end do
+            end do
+!$omp end parallel do
+            if (enable_density_reconstruct_trace .and. block_cache_idx == 1 .and. npt_cache > 0) then
+              ixg = dg_frag%density_grid_points(igrid0, i_local)%ixg
+              iyg = dg_frag%density_grid_points(igrid0, i_local)%iyg
+              izg = dg_frag%density_grid_points(igrid0, i_local)%izg
+              ix = dg_frag%density_grid_points(igrid0, i_local)%ix
+              iy = dg_frag%density_grid_points(igrid0, i_local)%iy
+              iz = dg_frag%density_grid_points(igrid0, i_local)%iz
+              bx = phi_map_x(modulo(ixg - 1, phi_lg1) + 1)
+              by = phi_map_y(modulo(iyg - 1, phi_lg2) + 1)
+              bz = phi_map_z(modulo(izg - 1, phi_lg3) + 1)
+              phi_cache_global_probe = 0.0d0
+              phi_cache_local_probe = 0.0d0
+              if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
+                phi_cache_global_probe = dg_frag%phi_frag(bx, by, bz, 1, i_local)
+              end if
+              if (ix >= lbound(dg_frag%phi_frag, 1) .and. ix <= ubound(dg_frag%phi_frag, 1) .and. &
+                  iy >= lbound(dg_frag%phi_frag, 2) .and. iy <= ubound(dg_frag%phi_frag, 2) .and. &
+                  iz >= lbound(dg_frag%phi_frag, 3) .and. iz <= ubound(dg_frag%phi_frag, 3)) then
+                phi_cache_local_probe = dg_frag%phi_frag(ix, iy, iz, 1, i_local)
+              end if
+              write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,1pe12.4,a,1pe12.4)') &
+                "        density cache coord probe: rank=", dg_frag%id, " ifrag=", ifrag, &
+                " ixiyiz=", ix, iy, iz, " ixgiygizg=", ixg, iyg, izg, " mapped=", bx, by, bz, &
+                " phi(globalmap)=", phi_cache_global_probe, " phi(local)=", phi_cache_local_probe
+              flush(6)
+            end if
+          end do
+        end do
+        deallocate(phi_map_x, phi_map_y, phi_map_z)
+        dg_frag%density_phi_block_size = grid_block_size
+        dg_frag%density_phi_block_cache_valid = .true.
+        rebuilt_phi_block_cache = .true.
+      end if
+    else
       if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
       if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
-      nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
-      allocate(dg_frag%density_phi_block_cache(grid_block_size, dg_frag%nstate_frag, nblocks_max, ifrag_count))
-      allocate(dg_frag%density_phi_block_count(ifrag_count))
-      dg_frag%density_phi_block_cache(:, :, :, :) = 0.0d0
-      dg_frag%density_phi_block_count(:) = 0
-      phi_lb1 = lbound(dg_frag%phi_frag, 1)
-      phi_lb2 = lbound(dg_frag%phi_frag, 2)
-      phi_lb3 = lbound(dg_frag%phi_frag, 3)
-      phi_ub1 = ubound(dg_frag%phi_frag, 1)
-      phi_ub2 = ubound(dg_frag%phi_frag, 2)
-      phi_ub3 = ubound(dg_frag%phi_frag, 3)
-      phi_lg1 = dg_frag%lgnum_total(1)
-      phi_lg2 = dg_frag%lgnum_total(2)
-      phi_lg3 = dg_frag%lgnum_total(3)
-      allocate(phi_map_x(phi_lg1), phi_map_y(phi_lg2), phi_map_z(phi_lg3))
-      do ixg = 1, phi_lg1
-        phi_map_x(ixg) = map_global_to_phi_box_coord_ham(ixg, phi_lb1, phi_ub1, phi_lg1)
-      end do
-      do iyg = 1, phi_lg2
-        phi_map_y(iyg) = map_global_to_phi_box_coord_ham(iyg, phi_lb2, phi_ub2, phi_lg2)
-      end do
-      do izg = 1, phi_lg3
-        phi_map_z(izg) = map_global_to_phi_box_coord_ham(izg, phi_lb3, phi_ub3, phi_lg3)
-      end do
-      i_local = 0
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local = i_local + 1
-        local_grid_count = dg_frag%density_grid_point_count(i_local)
-        dg_frag%density_phi_block_count(i_local) = dg_frag%density_block_nblocks(i_local)
-        do block_cache_idx = 1, dg_frag%density_phi_block_count(i_local)
-          igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
-          npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
-!$omp parallel do private(igrid, ixg, iyg, izg, bx, by, bz, istate_frag) schedule(static)
-          do igrid = 1, npt_cache
-            ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
-            iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
-            izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
-            bx = phi_map_x(modulo(ixg - 1, phi_lg1) + 1)
-            by = phi_map_y(modulo(iyg - 1, phi_lg2) + 1)
-            bz = phi_map_z(modulo(izg - 1, phi_lg3) + 1)
-            if (bx == 0 .or. by == 0 .or. bz == 0) cycle
-            do istate_frag = 1, dg_frag%nstate_frag
-              dg_frag%density_phi_block_cache(igrid, istate_frag, block_cache_idx, i_local) = &
-                dg_frag%phi_frag(bx, by, bz, istate_frag, i_local)
-            end do
-          end do
-!$omp end parallel do
-          if (enable_density_reconstruct_trace .and. block_cache_idx == 1 .and. npt_cache > 0) then
-            ixg = dg_frag%density_grid_points(igrid0, i_local)%ixg
-            iyg = dg_frag%density_grid_points(igrid0, i_local)%iyg
-            izg = dg_frag%density_grid_points(igrid0, i_local)%izg
-            ix = dg_frag%density_grid_points(igrid0, i_local)%ix
-            iy = dg_frag%density_grid_points(igrid0, i_local)%iy
-            iz = dg_frag%density_grid_points(igrid0, i_local)%iz
-            bx = phi_map_x(modulo(ixg - 1, phi_lg1) + 1)
-            by = phi_map_y(modulo(iyg - 1, phi_lg2) + 1)
-            bz = phi_map_z(modulo(izg - 1, phi_lg3) + 1)
-            phi_cache_global_probe = 0.0d0
-            phi_cache_local_probe = 0.0d0
-            if (bx /= 0 .and. by /= 0 .and. bz /= 0) then
-              phi_cache_global_probe = dg_frag%phi_frag(bx, by, bz, 1, i_local)
-            end if
-            if (ix >= lbound(dg_frag%phi_frag, 1) .and. ix <= ubound(dg_frag%phi_frag, 1) .and. &
-                iy >= lbound(dg_frag%phi_frag, 2) .and. iy <= ubound(dg_frag%phi_frag, 2) .and. &
-                iz >= lbound(dg_frag%phi_frag, 3) .and. iz <= ubound(dg_frag%phi_frag, 3)) then
-              phi_cache_local_probe = dg_frag%phi_frag(ix, iy, iz, 1, i_local)
-            end if
-            write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,1pe12.4,a,1pe12.4)') &
-              "        density cache coord probe: rank=", dg_frag%id, " ifrag=", ifrag, &
-              " ixiyiz=", ix, iy, iz, " ixgiygizg=", ixg, iyg, izg, " mapped=", bx, by, bz, &
-              " phi(globalmap)=", phi_cache_global_probe, " phi(local)=", phi_cache_local_probe
-            flush(6)
-          end if
-        end do
-      end do
-      deallocate(phi_map_x, phi_map_y, phi_map_z)
-      dg_frag%density_phi_block_size = grid_block_size
-      dg_frag%density_phi_block_cache_valid = .true.
-      rebuilt_phi_block_cache = .true.
+      dg_frag%density_phi_block_cache_valid = .false.
+      dg_frag%density_phi_block_size = 0
     end if
     call cpu_time(t_setup1)
     time_project_phi_block_build = time_project_phi_block_build + (t_setup1 - t_setup0)
@@ -1272,7 +1288,27 @@
             valid_basis_count = valid_basis_count_spin(ispin)
 
           call cpu_time(t_setup0)
-          phi_blk(1:npt_blk, 1:nbf) = dg_frag%density_phi_block_cache(1:npt_blk, 1:nbf, block_offset + 1, i_local)
+          if (enable_density_phi_block_cache) then
+            phi_blk(1:npt_blk, 1:nbf) = dg_frag%density_phi_block_cache(1:npt_blk, 1:nbf, block_offset + 1, i_local)
+          else
+!$omp parallel do private(igrid, ixg, iyg, izg, bx, by, bz, istate_frag) schedule(static)
+            do igrid = 1, npt_blk
+              ixg = ixg_buf(igrid)
+              iyg = iyg_buf(igrid)
+              izg = izg_buf(igrid)
+              bx = map_global_to_phi_box_coord_ham(ixg, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
+              by = map_global_to_phi_box_coord_ham(iyg, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
+              bz = map_global_to_phi_box_coord_ham(izg, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+              if (bx == 0 .or. by == 0 .or. bz == 0) then
+                phi_blk(igrid, 1:nbf) = 0.0d0
+              else
+                do istate_frag = 1, nbf
+                  phi_blk(igrid, istate_frag) = dg_frag%phi_frag(bx, by, bz, istate_frag, i_local)
+                end do
+              end if
+            end do
+!$omp end parallel do
+          end if
           call cpu_time(t_setup1)
           time_project_phi_pack = time_project_phi_pack + (t_setup1 - t_setup0)
 

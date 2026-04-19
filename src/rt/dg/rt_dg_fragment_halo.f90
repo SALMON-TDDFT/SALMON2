@@ -363,17 +363,9 @@
           stop "DG-Fragment RT: invalid halo neighbor index"
         end if
 
-        if (strict_root_check) then
-          neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
-        else
-          neighbor_root_rank = dg_frag%id_array(jfrag)
-        end if
-        if (strict_root_check .and. dg_frag%id_array(jfrag) /= neighbor_root_rank) then
-          write(*,'(a,i0,a,i0,a,i0,a,i0)') &
-            "[ERROR] DG-Fragment RT: inconsistent fragment root rank for ifrag=", ifrag, &
-            " jfrag=", jfrag, " stored=", dg_frag%id_array(jfrag), " expected=", neighbor_root_rank
-          stop "DG-Fragment RT: inconsistent fragment-group root rank"
-        end if
+        ! Runtime fragment ownership can be non-contiguous (e.g. spatial/file remapping).
+        ! Use the actual per-fragment root rank map instead of assuming group-index roots.
+        neighbor_root_rank = dg_frag%id_array(jfrag)
         if (neighbor_root_rank < 0) then
           write(*,'(a,i0,a,i0,a,i0)') &
             "[ERROR] DG-Fragment RT: invalid fragment root rank for ifrag=", ifrag, &

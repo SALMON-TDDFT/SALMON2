@@ -26,6 +26,7 @@ module rt_dg_fragment_ops
   public :: symmetrize_real_matrix_blocks
   public :: mixed_fp_coupling_active
   public :: apply_overlap_operator
+  public :: apply_overlap_operator_diag_only
   public :: solve_overlap_operator_batch
   public :: solve_overlap_operator_batch_local
   public :: copy_overlap_operator_to_dense
@@ -1261,6 +1262,51 @@ contains
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
     end if
   end subroutine apply_overlap_operator
+
+  ! Diagonal-only (intra-fragment) overlap: skips all off-diagonal (ifrag_row /= ifrag_col)
+  ! blocks in S_mat_blocks. Used for startup Lowdin to keep each fragment operationally closed.
+  subroutine apply_overlap_operator_diag_only(dg_frag, ispin, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:)
+    complex(8), intent(inout) :: y(:)
+
+    integer :: n_frag, iblk, ifrag, nbf, ii, jj, ig_i, ig_j
+    complex(8) :: xj
+
+    n_frag = dg_frag%n_mat_max
+    y(1:n_frag) = (0.0d0, 0.0d0)
+
+    if (.not. allocated(dg_frag%S_mat_blocks)) then
+      ! Fall back to identity (no overlap info)
+      y(1:n_frag) = x(1:n_frag)
+      return
+    end if
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+
+    do iblk = 1, size(dg_frag%S_mat_blocks)
+      ! Skip off-diagonal blocks
+      if (dg_frag%S_mat_blocks(iblk)%ifrag_row /= dg_frag%S_mat_blocks(iblk)%ifrag_col) cycle
+      ifrag = dg_frag%S_mat_blocks(iblk)%ifrag_row
+      if (ifrag < 1 .or. ifrag > dg_frag%n_frag) cycle
+      nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                size(dg_frag%S_mat_blocks(iblk)%val, 1), size(dg_frag%S_mat_blocks(iblk)%val, 2))
+      if (nbf <= 0) cycle
+      do jj = 1, nbf
+        ig_j = dg_frag%index_basis(jj, ifrag, ispin)
+        if (ig_j < 1 .or. ig_j > size(x)) cycle
+        xj = x(ig_j)
+        if (xj == (0.0d0, 0.0d0)) cycle
+        do ii = 1, nbf
+          ig_i = dg_frag%index_basis(ii, ifrag, ispin)
+          if (ig_i < 1 .or. ig_i > size(y)) cycle
+          y(ig_i) = y(ig_i) + dg_frag%S_mat_blocks(iblk)%val(ii, jj, ispin) * xj
+        end do
+      end do
+    end do
+  end subroutine apply_overlap_operator_diag_only
 
   subroutine apply_overlap_operator_batch(dg_frag, ispin, x, y, use_prop)
     implicit none

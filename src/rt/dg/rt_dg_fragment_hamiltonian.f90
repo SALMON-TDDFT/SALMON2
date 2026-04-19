@@ -660,6 +660,7 @@
     integer, allocatable :: halo_active_face_axis(:), halo_active_face_dir(:), halo_active_face_idx_local(:), halo_active_face_idx_remote(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
+    integer :: iblk_mom, iblk_mom_rev
     integer :: loc_s_dbg(3), loc_e_dbg(3)
     integer :: n_metric
     integer :: env_status, env_len
@@ -674,8 +675,10 @@
     character(len=32) :: env_sipg_disable_b_term, env_sipg_disable_c_term, env_sipg_enable_halo, env_sipg_use_avg_trace, env_sipg_use_flux_form
     character(len=32) :: env_sipg_use_weak_form, env_sipg_ab_norm_max
     character(len=32) :: env_startup_lowdin, env_startup_stationary_projection
+    character(len=32) :: env_buffered_coef_source
     logical :: sipg_disable_b_term, sipg_disable_c_term, sipg_enable_fragment_halo_exchange, sipg_use_avg_trace, sipg_use_flux_form
     logical :: sipg_use_weak_form
+    logical :: startup_lowdin_explicit, startup_projection_explicit, buffered_wfb_coef_mode
     real(8) :: sipg_ab_norm_max
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
@@ -687,15 +690,19 @@
     env_sipg_use_flux_form = ''
     env_sipg_use_weak_form = ''
     env_sipg_ab_norm_max = ''
+    env_buffered_coef_source = ''
     sipg_disable_b_term = .false.
     sipg_disable_c_term = .false.
     sipg_enable_fragment_halo_exchange = .false.
     sipg_use_avg_trace = .false.
     sipg_use_flux_form = .false.
     sipg_use_weak_form = .false.
+    startup_lowdin_explicit = .false.
+    startup_projection_explicit = .false.
+    buffered_wfb_coef_mode = .false.
     sipg_ab_norm_max = -1.0d0
-    enable_startup_lowdin = .false.
-    enable_startup_stationary_projection = .false.
+    enable_startup_lowdin = .true.
+    enable_startup_stationary_projection = .true.
     env_startup_lowdin = ''
     env_startup_stationary_projection = ''
     call get_environment_variable('SALMON_DG_SIPG_DISABLE_B_TERM', env_sipg_disable_b_term, status=env_status)
@@ -747,19 +754,42 @@
       read(env_sipg_ab_norm_max, *, iostat=env_status) sipg_ab_norm_max
       if (env_status /= 0) sipg_ab_norm_max = -1.0d0
     end if
-    call get_environment_variable('SALMON_DG_STARTUP_LOWDIN', env_startup_lowdin, status=env_status)
-    if (env_status == 0) then
+    call get_environment_variable('SALMON_DG_STARTUP_LOWDIN', env_startup_lowdin, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      startup_lowdin_explicit = .true.
       select case (trim(adjustl(env_startup_lowdin)))
       case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
         enable_startup_lowdin = .true.
+      case ('0', 'false', 'FALSE', 'off', 'OFF', 'no', 'NO')
+        enable_startup_lowdin = .false.
       end select
     end if
-    call get_environment_variable('SALMON_DG_STARTUP_STATIONARY_PROJECTION', env_startup_stationary_projection, status=env_status)
-    if (env_status == 0) then
+    call get_environment_variable('SALMON_DG_STARTUP_STATIONARY_PROJECTION', env_startup_stationary_projection, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      startup_projection_explicit = .true.
       select case (trim(adjustl(env_startup_stationary_projection)))
       case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
         enable_startup_stationary_projection = .true.
+      case ('0', 'false', 'FALSE', 'off', 'OFF', 'no', 'NO')
+        enable_startup_stationary_projection = .false.
       end select
+    end if
+    call get_environment_variable('SALMON_DG_BUFFERED_COEF_SOURCE', env_buffered_coef_source, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_buffered_coef_source(1:env_len))))
+      case('wfb','WFB','buffered','BUFFERED','1')
+        buffered_wfb_coef_mode = .true.
+      end select
+    end if
+    if (dg_frag%use_buffered_basis .and. buffered_wfb_coef_mode .and. .not. startup_lowdin_explicit) then
+      enable_startup_lowdin = .false.
+      enable_startup_stationary_projection = .false.
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[INFO] Buffered+wfb mode: preserving DC initial states by default (startup Lowdin/projection disabled)'
+        write(*,'(1x,a)') '[INFO] Set SALMON_DG_STARTUP_LOWDIN=1 to enable startup reshaping explicitly'
+      end if
+    else if (dg_frag%use_buffered_basis .and. buffered_wfb_coef_mode .and. startup_lowdin_explicit .and. .not. startup_projection_explicit) then
+      enable_startup_stationary_projection = .false.
     end if
     if (.not. enable_startup_lowdin) enable_startup_stationary_projection = .false.
     if (.not. dg_frag%has_real_space_basis) then
@@ -1460,15 +1490,19 @@
                     dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
                 end if
                 if (allocated(dg_frag%momentum_blocks) .and. face_axis >= 1 .and. face_axis <= 3) then
-                  if (iblk <= size(dg_frag%momentum_blocks) .and. iblk_rev <= size(dg_frag%momentum_blocks) .and. &
-                      io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
-                      jo <= size(dg_frag%momentum_blocks(iblk)%val, 3) .and. &
-                      jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
-                      io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
-                    dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) = &
-                      dg_frag%momentum_blocks(iblk)%val(face_axis, io, jo, ispin) + 0.5d0 * halo_integral_m_sum
-                    dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) = &
-                      dg_frag%momentum_blocks(iblk_rev)%val(face_axis, jo, io, ispin) - 0.5d0 * halo_integral_m_sum
+                  ! NOTE: use momentum_block_map (not H_block_map) for correct indexing
+                  iblk_mom     = find_momentum_block(dg_frag, jfrag, ifrag)
+                  iblk_mom_rev = find_momentum_block(dg_frag, ifrag, jfrag)
+                  if (iblk_mom > 0 .and. iblk_mom <= size(dg_frag%momentum_blocks) .and. &
+                      iblk_mom_rev > 0 .and. iblk_mom_rev <= size(dg_frag%momentum_blocks) .and. &
+                      io <= size(dg_frag%momentum_blocks(iblk_mom)%val, 2) .and. &
+                      jo <= size(dg_frag%momentum_blocks(iblk_mom)%val, 3) .and. &
+                      jo <= size(dg_frag%momentum_blocks(iblk_mom_rev)%val, 2) .and. &
+                      io <= size(dg_frag%momentum_blocks(iblk_mom_rev)%val, 3)) then
+                    dg_frag%momentum_blocks(iblk_mom)%val(face_axis, io, jo, ispin) = &
+                      dg_frag%momentum_blocks(iblk_mom)%val(face_axis, io, jo, ispin) + 0.5d0 * halo_integral_m_sum
+                    dg_frag%momentum_blocks(iblk_mom_rev)%val(face_axis, jo, io, ispin) = &
+                      dg_frag%momentum_blocks(iblk_mom_rev)%val(face_axis, jo, io, ispin) - 0.5d0 * halo_integral_m_sum
                   end if
                 end if
               end do
@@ -1627,25 +1661,40 @@
   end subroutine calculate_hamiltonian_matrix
 
   !=======================================================================
-  ! One-time startup Lowdin orthonormalization for PureDG coefficients
-  !   C <- C (C^\dagger S C)^(-1/2)
+  ! One-time per-fragment independent Lowdin for PureDG coefficients
+  !   For each fragment f independently:
+  !     C_f <- C_f (C_f^\dagger S_ff C_f)^(-1/2)
+  !   where S_ff is the diagonal overlap block for fragment f.
+  !   This preserves the fragment-local design principle: each fragment's
+  !   sub-metric is independently normalized, removing DC numerical
+  !   asymmetry without mixing fragment subspaces.
   !=======================================================================
   subroutine apply_startup_lowdin_puredg(dg_frag)
     use communication, only: comm_is_root, comm_summation
-    use rt_dg_fragment_ops, only: apply_overlap_operator, gather_full_coef_view, zero_nonowned_coefficients
+    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
-    integer :: ispin, n_frag, n_tot, nst, j, io
-    integer :: info, lwork
+    integer :: ispin, n_frag, n_tot, nst, j, io2, jo, ifrag_l, iblk_s, i_s, ig, frag_nonzero
+    integer :: nbf_f, info_f, lwork_f
     real(8), parameter :: eps_eval = 1.0d-12
-    real(8), allocatable :: eval(:), rwork(:)
-    complex(8), allocatable :: C(:,:), SC(:,:), M(:,:), M_sum(:,:), U(:,:), M_invhalf(:,:)
-    complex(8), allocatable :: work(:), coef_frag_all(:,:), coef_pw_all(:,:)
+    real(8), allocatable :: eval_f(:), rwork_f(:)
+    real(8), allocatable :: frag_weight_local(:), frag_weight_sum(:)
+    real(8) :: frag_weight_min, frag_weight_max, frag_spread_pre, frag_spread_post
+    complex(8), allocatable :: C(:,:), C_f(:,:), SC_f(:,:), S_ff_c(:,:)
+    complex(8), allocatable :: M_f(:,:), M_f_sum(:,:), U_f(:,:), M_invhalf_f(:,:)
+    complex(8), allocatable :: work_f(:), coef_frag_all(:,:), coef_pw_all(:,:)
     external :: zheev
 
     if (dg_frag%use_plane_wave_basis) return
     if (dg_frag%puredg_lowdin_applied) return
+    if (.not. allocated(dg_frag%S_mat_blocks)) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') "[WARN] per-fragment Lowdin skipped: S_mat_blocks not allocated"
+      end if
+      dg_frag%puredg_lowdin_applied = .true.
+      return
+    end if
 
     n_frag = dg_frag%n_mat_max
     n_tot = n_frag
@@ -1655,99 +1704,208 @@
       return
     end if
 
+    allocate(frag_weight_local(dg_frag%n_frag), frag_weight_sum(dg_frag%n_frag))
+
     do ispin = 1, dg_frag%nspin
       call gather_full_coef_view(dg_frag, ispin, n_frag, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
 
-      allocate(C(n_tot, nst), SC(n_tot, nst), M(nst, nst), M_sum(nst, nst), U(nst, nst), M_invhalf(nst, nst))
-      allocate(eval(nst), rwork(max(1, 3 * nst - 2)))
-
+      allocate(C(n_tot, nst))
       C(:, :) = coef_frag_all(1:n_frag, 1:nst)
-      do io = 1, nst
-        call apply_overlap_operator(dg_frag, ispin, C(:, io), SC(:, io), .true.)
-      end do
-      M(:, :) = matmul(conjg(transpose(C)), SC)
-      call comm_summation(M, M_sum, nst * nst, dg_frag%icomm)
-      M(:, :) = 0.5d0 * (M_sum(:, :) + conjg(transpose(M_sum(:, :))))
 
-      U(:, :) = M(:, :)
-      lwork = -1
-      allocate(work(1))
-      call ZHEEV('V', 'U', nst, U, nst, eval, work, lwork, rwork, info)
-      lwork = int(real(work(1), kind=8)) + 1
-      deallocate(work)
-      allocate(work(lwork))
-      call ZHEEV('V', 'U', nst, U, nst, eval, work, lwork, rwork, info)
-      if (info /= 0) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup Lowdin failed: ispin=", ispin, " info=", info
+      ! --- measure frag-spread before Lowdin ---
+      frag_weight_local(:) = 0.0d0
+      do ifrag_l = 1, dg_frag%n_frag
+        nbf_f = dg_frag%n_basis(ifrag_l, ispin)
+        if (nbf_f <= 0) cycle
+        do io2 = 1, nbf_f
+          ig = dg_frag%index_basis(io2, ifrag_l, ispin)
+          if (ig < 1 .or. ig > n_frag) cycle
+          frag_weight_local(ifrag_l) = frag_weight_local(ifrag_l) + sum(abs(C(ig, 1:nst))**2)
+        end do
+      end do
+      call comm_summation(frag_weight_local, frag_weight_sum, dg_frag%n_frag, dg_frag%icomm)
+      frag_weight_min = huge(1.0d0); frag_weight_max = 0.0d0; frag_nonzero = 0
+      do ifrag_l = 1, dg_frag%n_frag
+        if (frag_weight_sum(ifrag_l) <= 1.0d-30) cycle
+        frag_weight_min = min(frag_weight_min, frag_weight_sum(ifrag_l))
+        frag_weight_max = max(frag_weight_max, frag_weight_sum(ifrag_l))
+        frag_nonzero = frag_nonzero + 1
+      end do
+      frag_spread_pre = 1.0d0
+      if (frag_nonzero > 1 .and. frag_weight_min > 0.0d0) frag_spread_pre = frag_weight_max / frag_weight_min
+
+      ! --- per-fragment independent Lowdin ---
+      do ifrag_l = 1, dg_frag%n_frag
+        nbf_f = dg_frag%n_basis(ifrag_l, ispin)
+        if (nbf_f <= 0) cycle
+
+        ! Find the diagonal S block S_ff for this fragment
+        iblk_s = -1
+        do i_s = 1, size(dg_frag%S_mat_blocks)
+          if (dg_frag%S_mat_blocks(i_s)%ifrag_row == ifrag_l .and. &
+              dg_frag%S_mat_blocks(i_s)%ifrag_col == ifrag_l) then
+            iblk_s = i_s
+            exit
+          end if
+        end do
+        if (iblk_s < 0) cycle
+        if (.not. allocated(dg_frag%S_mat_blocks(iblk_s)%val)) cycle
+        if (size(dg_frag%S_mat_blocks(iblk_s)%val, 1) < nbf_f .or. &
+            size(dg_frag%S_mat_blocks(iblk_s)%val, 2) < nbf_f) cycle
+
+        allocate(C_f(nbf_f, nst), SC_f(nbf_f, nst), S_ff_c(nbf_f, nbf_f))
+        allocate(M_f(nst, nst), M_f_sum(nst, nst), U_f(nst, nst), M_invhalf_f(nst, nst))
+        allocate(eval_f(nst), rwork_f(max(1, 3 * nst - 2)))
+
+        ! Extract fragment-f rows from C
+        do jo = 1, nst
+          do io2 = 1, nbf_f
+            ig = dg_frag%index_basis(io2, ifrag_l, ispin)
+            if (ig >= 1 .and. ig <= n_frag) then
+              C_f(io2, jo) = C(ig, jo)
+            else
+              C_f(io2, jo) = (0.0d0, 0.0d0)
+            end if
+          end do
+        end do
+
+        ! Cast S_ff to complex and compute SC_f = S_ff C_f
+        S_ff_c(:, :) = cmplx(dg_frag%S_mat_blocks(iblk_s)%val(1:nbf_f, 1:nbf_f, ispin), 0.0d0, kind=8)
+        SC_f(:, :) = matmul(S_ff_c, C_f)
+
+        ! M_f = C_f^H SC_f  [nst x nst], allreduce, symmetrize
+        M_f(:, :) = matmul(conjg(transpose(C_f)), SC_f)
+        call comm_summation(M_f, M_f_sum, nst * nst, dg_frag%icomm)
+        M_f(:, :) = 0.5d0 * (M_f_sum(:, :) + conjg(transpose(M_f_sum(:, :))))
+
+        ! Eigendecompose M_f
+        U_f(:, :) = M_f(:, :)
+        lwork_f = -1
+        allocate(work_f(1))
+        call ZHEEV('V', 'U', nst, U_f, nst, eval_f, work_f, lwork_f, rwork_f, info_f)
+        lwork_f = int(real(work_f(1), kind=8)) + 1
+        deallocate(work_f)
+        allocate(work_f(lwork_f))
+        call ZHEEV('V', 'U', nst, U_f, nst, eval_f, work_f, lwork_f, rwork_f, info_f)
+        if (info_f /= 0) then
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0,a,i0,a,i0)') "[WARN] per-fragment Lowdin ZHEEV failed: ispin=", ispin, &
+              " ifrag=", ifrag_l, " info=", info_f
+          end if
+          deallocate(C_f, SC_f, S_ff_c, M_f, M_f_sum, U_f, M_invhalf_f, eval_f, rwork_f, work_f)
+          cycle
         end if
-        deallocate(C, SC, M, M_sum, U, M_invhalf, eval, rwork, work)
-        if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-        if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-        cycle
+
+        ! Build M_f^{-1/2} = U diag(1/sqrt(eval)) U^H
+        M_invhalf_f(:, :) = (0.0d0, 0.0d0)
+        do j = 1, nst
+          if (eval_f(j) > eps_eval) M_invhalf_f(:, j) = U_f(:, j) / sqrt(eval_f(j))
+        end do
+        M_invhalf_f(:, :) = matmul(M_invhalf_f, conjg(transpose(U_f)))
+
+        ! Apply: C_f <- C_f M_invhalf_f, write back to C
+        C_f(:, :) = matmul(C_f, M_invhalf_f)
+        do jo = 1, nst
+          do io2 = 1, nbf_f
+            ig = dg_frag%index_basis(io2, ifrag_l, ispin)
+            if (ig >= 1 .and. ig <= n_frag) C(ig, jo) = C_f(io2, jo)
+          end do
+        end do
+
+        deallocate(C_f, SC_f, S_ff_c, M_f, M_f_sum, U_f, M_invhalf_f, eval_f, rwork_f, work_f)
+      end do ! ifrag_l
+
+      ! --- measure frag-spread after Lowdin ---
+      frag_weight_local(:) = 0.0d0
+      do ifrag_l = 1, dg_frag%n_frag
+        nbf_f = dg_frag%n_basis(ifrag_l, ispin)
+        if (nbf_f <= 0) cycle
+        do io2 = 1, nbf_f
+          ig = dg_frag%index_basis(io2, ifrag_l, ispin)
+          if (ig < 1 .or. ig > n_frag) cycle
+          frag_weight_local(ifrag_l) = frag_weight_local(ifrag_l) + sum(abs(C(ig, 1:nst))**2)
+        end do
+      end do
+      call comm_summation(frag_weight_local, frag_weight_sum, dg_frag%n_frag, dg_frag%icomm)
+      frag_weight_min = huge(1.0d0); frag_weight_max = 0.0d0; frag_nonzero = 0
+      do ifrag_l = 1, dg_frag%n_frag
+        if (frag_weight_sum(ifrag_l) <= 1.0d-30) cycle
+        frag_weight_min = min(frag_weight_min, frag_weight_sum(ifrag_l))
+        frag_weight_max = max(frag_weight_max, frag_weight_sum(ifrag_l))
+        frag_nonzero = frag_nonzero + 1
+      end do
+      frag_spread_post = 1.0d0
+      if (frag_nonzero > 1 .and. frag_weight_min > 0.0d0) frag_spread_post = frag_weight_max / frag_weight_min
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4)') &
+          "[INFO] PureDG per-frag Lowdin frag-spread: ispin=", ispin, &
+          " pre=", frag_spread_pre, " post=", frag_spread_post
       end if
-
-      M_invhalf(:, :) = (0.0d0, 0.0d0)
-      do j = 1, nst
-        if (eval(j) > eps_eval) then
-          M_invhalf(:, j) = U(:, j) / sqrt(eval(j))
-        end if
-      end do
-      M_invhalf(:, :) = matmul(M_invhalf, conjg(transpose(U)))
-      C(:, :) = matmul(C, M_invhalf)
 
       dg_frag%coef(1:n_frag, 1:nst, ispin) = C(:, :)
 
-      deallocate(C, SC, M, M_sum, U, M_invhalf, eval, rwork, work)
+      deallocate(C)
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
+    deallocate(frag_weight_local, frag_weight_sum)
     call zero_nonowned_coefficients(dg_frag)
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
     dg_frag%puredg_lowdin_applied = .true.
 
     if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a)') "[INFO] Applied one-time PureDG startup Lowdin orthonormalization"
+      write(*,'(1x,a)') "[INFO] Applied one-time PureDG per-fragment startup Lowdin"
     end if
   end subroutine apply_startup_lowdin_puredg
 
   !=======================================================================
   ! One-time startup stationary projection for PureDG coefficients
-  !   1) Build dense H and S in DG coefficient space
-  !   2) Solve generalized EVP H c = e S c via Lowdin transform
-  !   3) Replace startup coefficients with S-orthonormal eigenvectors
+  !   For each fragment f independently:
+  !     1) Extract diagonal blocks H_ff and S_ff
+  !     2) Solve H_ff c = e S_ff c on the fragment-local subspace
+  !     3) Replace startup coefficients using only fragment-local eigenvectors
+  ! This avoids startup-time global fragment mixing.
   !=======================================================================
   subroutine apply_startup_stationary_projection_puredg(dg_frag, mg, ppg, system)
     use communication, only: comm_is_root, comm_summation
     use structures, only: s_rgrid, s_pp_grid, s_dft_system
-    use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_complex_dense, &
-                                  copy_overlap_operator_to_dense, zero_nonowned_coefficients, &
-                                  ensure_nonlocal_pp_matrix_A, copy_complex_matrix_blocks_metric_to_dense
+    use rt_dg_fragment_ops, only: gather_full_coef_view, zero_nonowned_coefficients, &
+                                  ensure_nonlocal_pp_matrix_A
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_rgrid),          intent(in)    :: mg
     type(s_pp_grid),        intent(in)    :: ppg
     type(s_dft_system),     intent(in)    :: system
 
-    integer :: ispin, n_frag, nst, nocc, info, lwork, j, nev, env_status
+    integer :: ispin, n_frag, n_basis_proj, nocc, info, lwork, j, nev, env_status
+    integer :: ifrag, io, jo, global_idx, nbf, frag_nonzero
+    integer :: iblk_h, iblk_s, iblk_nl, nocc_frag, resid_count, owner_frag
+    integer :: info_occ, lwork_occ
     real(8), parameter :: eps_s = 1.0d-12
     real(8) :: eval_s_min, eval_s_max
     real(8) :: resid_max, resid_rms, resid_rel_max, resid_rel_rms
     real(8) :: resid_norm, hc_norm, s_norm
+    real(8) :: frag_weight_min, frag_weight_max, frag_weight_ratio_pre, frag_weight_ratio_post
     logical :: allow_buffered_startup_stationary_projection
     logical :: buffered_wf_coef_mode
+    logical :: rollback_projection
     character(len=32) :: env_allow_buffered_startup_stationary_projection
     character(len=32) :: env_buffered_coef_source
-    real(8), allocatable :: eval_s(:), eval_h(:), rwork(:)
-    complex(8), allocatable :: h_dense(:,:), h_dense_sum(:,:), s_dense(:,:), s_dense_sum(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
-    complex(8), allocatable :: hc(:), sc(:)
-    complex(8), allocatable :: work(:)
+    real(8), allocatable :: eval_s(:), eval_h(:), rwork(:), eval_occ(:), rwork_occ(:)
+    real(8), allocatable :: frag_weight(:), state_weight(:)
+    complex(8), allocatable :: h_ff(:,:), s_ff(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
+    complex(8), allocatable :: hc(:), sc(:), coef_prev(:,:), coef_proj(:,:)
+    complex(8), allocatable :: work(:), work_occ(:), coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: gram_occ(:,:), gram_vecs(:,:)
+    integer, allocatable :: state_owner(:), frag_occ_count(:), frag_occ_used(:)
+    logical, allocatable :: state_filled(:)
     external :: zheev
 
     if (dg_frag%use_plane_wave_basis) return
 
-    allow_buffered_startup_stationary_projection = .false.
+    allow_buffered_startup_stationary_projection = .true.
     env_allow_buffered_startup_stationary_projection = ''
     call get_environment_variable('SALMON_DG_ALLOW_BUFFERED_STARTUP_STATIONARY_PROJECTION', &
       env_allow_buffered_startup_stationary_projection, status=env_status)
@@ -1755,6 +1913,8 @@
       select case (trim(adjustl(env_allow_buffered_startup_stationary_projection)))
       case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
         allow_buffered_startup_stationary_projection = .true.
+      case ('0', 'false', 'FALSE', 'off', 'OFF', 'no', 'NO')
+        allow_buffered_startup_stationary_projection = .false.
       end select
     end if
 
@@ -1780,82 +1940,125 @@
       return
     end if
     if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%S_mat_blocks)) return
     if (.not. allocated(dg_frag%esp)) return
 
     n_frag = dg_frag%n_mat_max
-    nst = min(dg_frag%nstate_tot, n_frag, size(dg_frag%esp, 1))
-    if (n_frag <= 0 .or. nst <= 0) return
-    if (nst < n_frag) then
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,a,i0,a)') "[INFO] PureDG startup stationary projection skipped: reduced state mode is active (nst=", &
-          nst, ", n_frag=", n_frag, ")"
-        write(*,'(1x,a)') "[INFO] Use SALMON_DG_BUFFERED_FULL_STATE=1 if full-state startup stationary projection is required"
-      end if
-      return
-    end if
+    n_basis_proj = n_frag
+    if (n_frag <= 0) return
+
+    call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, [0.0d0, 0.0d0, 0.0d0], .false.)
 
     do ispin = 1, dg_frag%nspin
-        nocc = nst
-        if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
-          nocc = min(nst, max(0, dg_frag%nocc_spin(ispin)))
+      nocc = min(dg_frag%nstate_tot, n_basis_proj)
+      if (allocated(dg_frag%nocc_spin) .and. size(dg_frag%nocc_spin) >= ispin) then
+        nocc = min(nocc, max(0, dg_frag%nocc_spin(ispin)))
+      end if
+      if (nocc <= 0) cycle
+
+      nev = nocc
+      call gather_full_coef_view(dg_frag, ispin, n_basis_proj, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
+      allocate(coef_prev(n_basis_proj, nev), coef_proj(n_basis_proj, nev))
+      allocate(state_owner(nev), frag_occ_count(dg_frag%n_frag), frag_occ_used(dg_frag%n_frag), state_filled(nev))
+      allocate(frag_weight(dg_frag%n_frag), state_weight(dg_frag%n_frag))
+      coef_prev(:, :) = coef_frag_all(1:n_basis_proj, 1:nev)
+      coef_proj(:, :) = (0.0d0, 0.0d0)
+      state_owner(:) = 0
+      frag_occ_count(:) = 0
+      frag_occ_used(:) = 0
+      state_filled(:) = .false.
+
+      frag_weight(:) = 0.0d0
+      do ifrag = 1, dg_frag%n_frag
+        nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
+        if (nbf <= 0) cycle
+        do io = 1, nbf
+          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          if (global_idx < 1 .or. global_idx > n_basis_proj) cycle
+          frag_weight(ifrag) = frag_weight(ifrag) + sum(abs(coef_prev(global_idx, 1:nev))**2)
+        end do
+      end do
+      frag_weight_min = huge(1.0d0)
+      frag_weight_max = 0.0d0
+      frag_nonzero = 0
+      do ifrag = 1, dg_frag%n_frag
+        if (frag_weight(ifrag) <= 1.0d-30) cycle
+        frag_weight_min = min(frag_weight_min, frag_weight(ifrag))
+        frag_weight_max = max(frag_weight_max, frag_weight(ifrag))
+        frag_nonzero = frag_nonzero + 1
+      end do
+      frag_weight_ratio_pre = 1.0d0
+      if (frag_nonzero > 1 .and. frag_weight_min > 0.0d0) frag_weight_ratio_pre = frag_weight_max / frag_weight_min
+
+      do j = 1, nev
+        state_weight(:) = 0.0d0
+        do ifrag = 1, dg_frag%n_frag
+          nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
+          if (nbf <= 0) cycle
+          do io = 1, nbf
+            global_idx = dg_frag%index_basis(io, ifrag, ispin)
+            if (global_idx < 1 .or. global_idx > n_basis_proj) cycle
+            state_weight(ifrag) = state_weight(ifrag) + abs(coef_prev(global_idx, j))**2
+          end do
+        end do
+        owner_frag = maxloc(state_weight, dim=1)
+        if (owner_frag >= 1 .and. owner_frag <= dg_frag%n_frag .and. maxval(state_weight) > 1.0d-30) then
+          state_owner(j) = owner_frag
+          frag_occ_count(owner_frag) = frag_occ_count(owner_frag) + 1
         end if
-        if (nocc <= 0) cycle
+      end do
 
-        nev = nocc
-        allocate(h_dense(nst, nst), h_dense_sum(nst, nst), s_dense(nst, nst), s_dense_sum(nst, nst), x_lowdin(nst, nst), h_ortho(nst, nst), u_h(nst, nst), c_eig(nst, nst))
-        allocate(hc(nst), sc(nst))
-        allocate(eval_s(nst), eval_h(nst), rwork(max(1, 3 * nst - 2)))
+      eval_s_min = huge(1.0d0)
+      eval_s_max = 0.0d0
+      resid_max = 0.0d0
+      resid_rms = 0.0d0
+      resid_rel_max = 0.0d0
+      resid_rel_rms = 0.0d0
+      resid_count = 0
 
-        h_dense(:, :) = (0.0d0, 0.0d0)
-        s_dense(:, :) = (0.0d0, 0.0d0)
-        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, nst, h_dense)
-        call copy_overlap_operator_to_dense(dg_frag, ispin, .true., s_dense)
+      do ifrag = 1, dg_frag%n_frag
+        nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
+        nocc_frag = frag_occ_count(ifrag)
+        if (nbf <= 0 .or. nocc_frag <= 0) cycle
 
-        ! Add non-local pseudopotential contribution to H at A=0
-        block
-          real(8) :: Ac_zero(3)
-          complex(8), allocatable :: h_nl_dense(:,:)
-          Ac_zero(:) = 0.0d0
-          call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_zero, .false.)
-          if (allocated(dg_frag%H_nl_blocks)) then
-            allocate(h_nl_dense(nst, nst))
-            h_nl_dense(:, :) = (0.0d0, 0.0d0)
-            call copy_complex_matrix_blocks_metric_to_dense(dg_frag, dg_frag%H_nl_blocks, ispin, nst, h_nl_dense)
-            h_dense(:, :) = h_dense(:, :) + h_nl_dense(:, :)
-            if (comm_is_root(dg_frag%id)) then
-              write(*,'(1x,a,i0,a,1pe12.4)') &
-                "[INFO] PureDG startup: V_NL added to H for ispin=", ispin, &
-                " ||V_NL||_max=", maxval(abs(h_nl_dense(:, :)))
+        iblk_h = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
+        iblk_s = find_matrix_block(dg_frag%S_block_map, ifrag, ifrag)
+        if (iblk_h <= 0 .or. iblk_s <= 0) cycle
+
+        allocate(h_ff(nbf, nbf), s_ff(nbf, nbf), x_lowdin(nbf, nbf), h_ortho(nbf, nbf), u_h(nbf, nbf), c_eig(nbf, nbf))
+        allocate(hc(nbf), sc(nbf), eval_s(nbf), eval_h(nbf), rwork(max(1, 3 * nbf - 2)))
+
+        h_ff(:, :) = cmplx(dg_frag%H_mat_blocks(iblk_h)%val(1:nbf, 1:nbf, ispin), 0.0d0, kind=8)
+        s_ff(:, :) = cmplx(dg_frag%S_mat_blocks(iblk_s)%val(1:nbf, 1:nbf, ispin), 0.0d0, kind=8)
+        if (allocated(dg_frag%H_nl_blocks) .and. allocated(dg_frag%H_nl_block_map)) then
+          iblk_nl = find_matrix_block(dg_frag%H_nl_block_map, ifrag, ifrag)
+          if (iblk_nl > 0) then
+            if (size(dg_frag%H_nl_blocks(iblk_nl)%val, 1) >= nbf .and. size(dg_frag%H_nl_blocks(iblk_nl)%val, 2) >= nbf) then
+              h_ff(:, :) = h_ff(:, :) + dg_frag%H_nl_blocks(iblk_nl)%val(1:nbf, 1:nbf, ispin)
             end if
-            deallocate(h_nl_dense)
           end if
-        end block
+        end if
+        h_ff(:, :) = 0.5d0 * (h_ff(:, :) + conjg(transpose(h_ff(:, :))))
+        s_ff(:, :) = 0.5d0 * (s_ff(:, :) + conjg(transpose(s_ff(:, :))))
 
-        call comm_summation(h_dense, h_dense_sum, nst * nst, dg_frag%icomm)
-        call comm_summation(s_dense, s_dense_sum, nst * nst, dg_frag%icomm)
-        h_dense(:, :) = 0.5d0 * (h_dense_sum(:, :) + conjg(transpose(h_dense_sum(:, :))))
-        s_dense(:, :) = 0.5d0 * (s_dense_sum(:, :) + conjg(transpose(s_dense_sum(:, :))))
-
-        ! Lowdin transform matrix X = U * diag(s^{-1/2})
-        x_lowdin(:, :) = s_dense(:, :)
+        x_lowdin(:, :) = s_ff(:, :)
         lwork = -1
         allocate(work(1))
-        call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
+        call ZHEEV('V', 'U', nbf, x_lowdin, nbf, eval_s, work, lwork, rwork, info)
         lwork = int(real(work(1), kind=8)) + 1
         deallocate(work)
         allocate(work(lwork))
-        call ZHEEV('V', 'U', nst, x_lowdin, nst, eval_s, work, lwork, rwork, info)
+        call ZHEEV('V', 'U', nbf, x_lowdin, nbf, eval_s, work, lwork, rwork, info)
         if (info /= 0) then
           if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (S diagonalization failed): ispin=", ispin, " info=", info
+            write(*,'(1x,a,i0,a,i0,a,i0)') "[WARN] per-frag startup projection skipped (S diagonalization failed): ispin=", ispin, &
+              " ifrag=", ifrag, " info=", info
           end if
-          deallocate(h_dense, h_dense_sum, s_dense, s_dense_sum, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+          deallocate(h_ff, s_ff, x_lowdin, h_ortho, u_h, c_eig, hc, sc, eval_s, eval_h, rwork, work)
           cycle
         end if
 
-        eval_s_min = huge(1.0d0)
-        eval_s_max = 0.0d0
-        do j = 1, nst
+        do j = 1, nbf
           eval_s_max = max(eval_s_max, eval_s(j))
           if (eval_s(j) > eps_s) then
             x_lowdin(:, j) = x_lowdin(:, j) / sqrt(eval_s(j))
@@ -1865,94 +2068,147 @@
           end if
         end do
 
-        ! H_ortho = X^H H X and diagonalize
-        h_ortho(:, :) = matmul(conjg(transpose(x_lowdin)), matmul(h_dense, x_lowdin))
+        h_ortho(:, :) = matmul(conjg(transpose(x_lowdin)), matmul(h_ff, x_lowdin))
         u_h(:, :) = h_ortho(:, :)
         deallocate(work)
         lwork = -1
         allocate(work(1))
-        call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
+        call ZHEEV('V', 'U', nbf, u_h, nbf, eval_h, work, lwork, rwork, info)
         lwork = int(real(work(1), kind=8)) + 1
         deallocate(work)
         allocate(work(lwork))
-        call ZHEEV('V', 'U', nst, u_h, nst, eval_h, work, lwork, rwork, info)
+        call ZHEEV('V', 'U', nbf, u_h, nbf, eval_h, work, lwork, rwork, info)
         if (info /= 0) then
           if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0,a,i0)') "[WARN] PureDG startup stationary projection skipped (H_ortho diagonalization failed): ispin=", ispin, " info=", info
+            write(*,'(1x,a,i0,a,i0,a,i0)') "[WARN] per-frag startup projection skipped (H diagonalization failed): ispin=", ispin, &
+              " ifrag=", ifrag, " info=", info
           end if
-          deallocate(h_dense, h_dense_sum, s_dense, s_dense_sum, x_lowdin, h_ortho, u_h, c_eig, eval_s, eval_h, rwork, work)
+          deallocate(h_ff, s_ff, x_lowdin, h_ortho, u_h, c_eig, hc, sc, eval_s, eval_h, rwork, work)
           cycle
         end if
 
         c_eig(:, :) = matmul(x_lowdin, u_h)
-        block
-          integer :: info_occ, lwork_occ
-          real(8), allocatable :: eval_occ(:), rwork_occ(:)
-          complex(8), allocatable :: gram_occ(:,:), gram_vecs(:,:), work_occ(:)
-
-          allocate(eval_occ(nev), rwork_occ(max(1, 3 * nev - 2)))
-          allocate(gram_occ(nev, nev), gram_vecs(nev, nev))
-          gram_occ(:, :) = matmul(conjg(transpose(c_eig(:, 1:nev))), matmul(s_dense, c_eig(:, 1:nev)))
-          gram_occ(:, :) = 0.5d0 * (gram_occ(:, :) + conjg(transpose(gram_occ(:, :))))
-          gram_vecs(:, :) = gram_occ(:, :)
-
-          lwork_occ = -1
-          allocate(work_occ(1))
-          call ZHEEV('V', 'U', nev, gram_vecs, nev, eval_occ, work_occ, lwork_occ, rwork_occ, info_occ)
-          lwork_occ = int(real(work_occ(1), kind=8)) + 1
-          deallocate(work_occ)
-          allocate(work_occ(lwork_occ))
-          call ZHEEV('V', 'U', nev, gram_vecs, nev, eval_occ, work_occ, lwork_occ, rwork_occ, info_occ)
-          if (info_occ == 0) then
-            gram_occ(:, :) = (0.0d0, 0.0d0)
-            do j = 1, nev
-              if (eval_occ(j) > eps_s) gram_occ(:, j) = gram_vecs(:, j) / sqrt(eval_occ(j))
-            end do
-            gram_occ(:, :) = matmul(gram_occ(:, :), conjg(transpose(gram_vecs(:, :))))
-            c_eig(:, 1:nev) = matmul(c_eig(:, 1:nev), gram_occ(:, :))
-          end if
-          deallocate(eval_occ, rwork_occ, gram_occ, gram_vecs, work_occ)
-        end block
-        do j = 1, nev
-          sc(:) = matmul(s_dense, c_eig(:, j))
+        allocate(eval_occ(nocc_frag), rwork_occ(max(1, 3 * nocc_frag - 2)), gram_occ(nocc_frag, nocc_frag), &
+                 gram_vecs(nocc_frag, nocc_frag))
+        gram_occ(:, :) = matmul(conjg(transpose(c_eig(:, 1:nocc_frag))), matmul(s_ff, c_eig(:, 1:nocc_frag)))
+        gram_occ(:, :) = 0.5d0 * (gram_occ(:, :) + conjg(transpose(gram_occ(:, :))))
+        gram_vecs(:, :) = gram_occ(:, :)
+        lwork_occ = -1
+        allocate(work_occ(1))
+        call ZHEEV('V', 'U', nocc_frag, gram_vecs, nocc_frag, eval_occ, work_occ, lwork_occ, rwork_occ, info_occ)
+        lwork_occ = int(real(work_occ(1), kind=8)) + 1
+        deallocate(work_occ)
+        allocate(work_occ(lwork_occ))
+        call ZHEEV('V', 'U', nocc_frag, gram_vecs, nocc_frag, eval_occ, work_occ, lwork_occ, rwork_occ, info_occ)
+        if (info_occ == 0) then
+          gram_occ(:, :) = (0.0d0, 0.0d0)
+          do j = 1, nocc_frag
+            if (eval_occ(j) > eps_s) gram_occ(:, j) = gram_vecs(:, j) / sqrt(eval_occ(j))
+          end do
+          gram_occ(:, :) = matmul(gram_occ(:, :), conjg(transpose(gram_vecs(:, :))))
+          c_eig(:, 1:nocc_frag) = matmul(c_eig(:, 1:nocc_frag), gram_occ(:, :))
+        end if
+        do j = 1, nocc_frag
+          sc(:) = matmul(s_ff, c_eig(:, j))
           s_norm = real(sum(conjg(c_eig(:, j)) * sc(:)), kind=8)
           if (s_norm > eps_s) c_eig(:, j) = c_eig(:, j) / sqrt(s_norm)
         end do
 
-        ! Quantify generalized eigen residual on occupied startup manifold:
-        !   r = H c - S c e
-        resid_max = 0.0d0
-        resid_rms = 0.0d0
-        resid_rel_max = 0.0d0
-        resid_rel_rms = 0.0d0
-        do j = 1, nev
-          hc(:) = matmul(h_dense, c_eig(:, j))
-          sc(:) = matmul(s_dense, c_eig(:, j))
+        do j = 1, nocc_frag
+          hc(:) = matmul(h_ff, c_eig(:, j))
+          sc(:) = matmul(s_ff, c_eig(:, j))
           resid_norm = sqrt(sum(abs(hc(:) - sc(:) * eval_h(j))**2))
           hc_norm = sqrt(sum(abs(hc(:))**2))
           resid_max = max(resid_max, resid_norm)
           resid_rms = resid_rms + resid_norm * resid_norm
           resid_rel_max = max(resid_rel_max, resid_norm / max(hc_norm, 1.0d-30))
           resid_rel_rms = resid_rel_rms + (resid_norm / max(hc_norm, 1.0d-30))**2
+          resid_count = resid_count + 1
         end do
-        resid_rms = sqrt(resid_rms / max(1, nev))
-        resid_rel_rms = sqrt(resid_rel_rms / max(1, nev))
 
-        ! Keep startup projection on occupied manifold only.
-        ! This avoids reshuffling non-occupied channels at t=0.
-        dg_frag%coef(1:n_frag, 1:nev, ispin) = c_eig(1:n_frag, 1:nev)
-        dg_frag%esp(1:nev, ispin) = eval_h(1:nev)
+        do j = 1, nev
+          if (state_owner(j) /= ifrag) cycle
+          frag_occ_used(ifrag) = frag_occ_used(ifrag) + 1
+          jo = frag_occ_used(ifrag)
+          if (jo > nocc_frag) cycle
+          do io = 1, nbf
+            global_idx = dg_frag%index_basis(io, ifrag, ispin)
+            if (global_idx < 1 .or. global_idx > n_basis_proj) cycle
+            coef_proj(global_idx, j) = c_eig(io, jo)
+          end do
+          dg_frag%esp(j, ispin) = eval_h(jo)
+          state_filled(j) = .true.
+        end do
 
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup stationary projection applied: ispin=", ispin, &
-            " nocc=", nev, " S-eig(min,max)=", eval_s_min, ", ", eval_s_max
-          write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-            "[INFO] PureDG startup projection residual: ispin=", ispin, &
-            " abs(max,rms)=", resid_max, ", ", resid_rms, &
-            " rel(max,rms)=", resid_rel_max, ", ", resid_rel_rms
+        deallocate(eval_occ, rwork_occ, gram_occ, gram_vecs, work_occ)
+        deallocate(h_ff, s_ff, x_lowdin, h_ortho, u_h, c_eig, hc, sc, eval_s, eval_h, rwork, work)
+      end do
+
+      do j = 1, nev
+        if (state_filled(j)) cycle
+        coef_proj(:, j) = coef_prev(:, j)
+      end do
+
+      if (resid_count > 0) then
+        resid_rms = sqrt(resid_rms / dble(resid_count))
+        resid_rel_rms = sqrt(resid_rel_rms / dble(resid_count))
+      else
+        resid_rms = 0.0d0
+        resid_rel_rms = 0.0d0
+      end if
+
+      frag_weight(:) = 0.0d0
+      do ifrag = 1, dg_frag%n_frag
+        nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1))
+        if (nbf <= 0) cycle
+        do io = 1, nbf
+          global_idx = dg_frag%index_basis(io, ifrag, ispin)
+          if (global_idx < 1 .or. global_idx > n_basis_proj) cycle
+          frag_weight(ifrag) = frag_weight(ifrag) + sum(abs(coef_proj(global_idx, 1:nev))**2)
+        end do
+      end do
+      frag_weight_min = huge(1.0d0)
+      frag_weight_max = 0.0d0
+      frag_nonzero = 0
+      do ifrag = 1, dg_frag%n_frag
+        if (frag_weight(ifrag) <= 1.0d-30) cycle
+        frag_weight_min = min(frag_weight_min, frag_weight(ifrag))
+        frag_weight_max = max(frag_weight_max, frag_weight(ifrag))
+        frag_nonzero = frag_nonzero + 1
+      end do
+      frag_weight_ratio_post = 1.0d0
+      if (frag_nonzero > 1 .and. frag_weight_min > 0.0d0) frag_weight_ratio_post = frag_weight_max / frag_weight_min
+
+      rollback_projection = .false.
+      if (buffered_wf_coef_mode) then
+        if (frag_weight_ratio_post > max(1.1d0, 2.0d0 * frag_weight_ratio_pre)) then
+          rollback_projection = .true.
+          coef_proj(:, :) = coef_prev(:, :)
         end if
+      end if
 
-        deallocate(h_dense, h_dense_sum, s_dense, s_dense_sum, x_lowdin, h_ortho, u_h, c_eig, hc, sc, eval_s, eval_h, rwork, work)
+      dg_frag%coef(1:n_basis_proj, 1:nev, ispin) = coef_proj(:, :)
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup per-frag projection applied: ispin=", ispin, &
+          " nocc=", nev, " S-eig(min,max)=", eval_s_min, ", ", eval_s_max
+        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+          "[INFO] PureDG startup per-frag projection residual: ispin=", ispin, &
+          " abs(max,rms)=", resid_max, ", ", resid_rms, &
+          " rel(max,rms)=", resid_rel_max, ", ", resid_rel_rms
+        if (buffered_wf_coef_mode) then
+          write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4)') "[INFO] PureDG startup projection frag-spread: ispin=", ispin, &
+            " pre=", frag_weight_ratio_pre, " post=", frag_weight_ratio_post
+          if (rollback_projection) then
+            write(*,'(1x,a,i0,a)') "[WARN] PureDG startup stationary projection rolled back: ispin=", ispin, &
+              " fragment symmetry degraded in buffered+wf mode"
+          end if
+        end if
+      end if
+
+      deallocate(coef_prev, coef_proj, state_owner, frag_occ_count, frag_occ_used, state_filled, frag_weight, state_weight)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
 
     call zero_nonowned_coefficients(dg_frag)
@@ -2159,7 +2415,9 @@
     call apply_kinetic_to_basis(dg_frag, i_local, jo, mg, stencil, T_phi)
     H_phi(:, :, :) = T_phi(:, :, :)
 
-    call get_fragment_basis_owned_range(dg_frag, ifrag, mg, iorg, nsup, loc_s, loc_e, has_overlap)
+      ! Use CORE domain only for V*phi (fragment-local design: buffer excluded from volume integrals)
+      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+      call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
     if (.not. has_overlap) return
     phi_lb1 = lbound(dg_frag%phi_frag, 1)
     phi_ub1 = ubound(dg_frag%phi_frag, 1)
@@ -2273,14 +2531,9 @@
         " ifrag=", ifrag, " io=", io, " phi_frag_dim4=", size(dg_frag%phi_frag, 4)
       stop 1
     end if
-    if (dg_frag%use_buffered_basis) then
-      iorg(:) = dg_frag%basis_support_lo(:, ifrag)
-      nsup(:) = dg_frag%basis_support_hi(:, ifrag) - dg_frag%basis_support_lo(:, ifrag) + 1
-    else
-      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      nsup(:) = dg_frag%nxyz_domain(:, ifrag)
-    end if
-    call get_fragment_basis_owned_range(dg_frag, ifrag, mg, iorg, nsup, loc_s, loc_e, has_overlap)
+    ! Use CORE domain only for <phi_i|field> (fragment-local design: buffer excluded from volume integrals)
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
     if (.not. has_overlap) then
       integral = 0.0d0
       return

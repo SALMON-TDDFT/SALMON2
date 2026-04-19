@@ -31,6 +31,8 @@ module lcfo
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
   &                          binfile_bfb = "basis_functions_buffered.bin", &
+  &                          binfile_cgorb = "cg_orbitals_buffered.bin", &
+  &                          binfile_cgmap = "cg_orbitals_transform.bin", &
   &                          binfile_hl = "hamiltonian_local.bin"
   
 contains
@@ -562,9 +564,25 @@ contains
       implicit none
       integer :: iunit,i_halo
       integer :: nxyz_domain(3), nxyz_box(3)
+        integer :: env_status, env_len
+        integer :: ix_s, iy_s, iz_s
       character(256) :: filename
+      character(len=64) :: env_export_cg_orb
+      logical :: export_cg_orb
       real(8), allocatable :: buffered_basis(:,:,:,:,:), wrk_buffer(:,:,:,:,:)
       real(8), allocatable :: occ_buffered_orbital(:,:)
+
+      export_cg_orb = .false.
+      env_export_cg_orb = ""
+      env_status = 1
+      env_len = 0
+      call get_environment_variable("SALMON_DG_EXPORT_BUFFERED_CG_ORBITALS", env_export_cg_orb, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        select case(trim(adjustl(env_export_cg_orb(1:env_len))))
+        case('y','Y','yes','YES','true','TRUE','1')
+          export_cg_orb = .true.
+        end select
+      end if
       
     ! total system data
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
@@ -624,7 +642,17 @@ contains
         do iy = mg%is(2), mg%ie(2)
         do ix = mg%is(1), mg%ie(1)
           if (ix <= nxyz_box(1) .and. iy <= nxyz_box(2) .and. iz <= nxyz_box(3)) then
-            wrk_buffer(ix, iy, iz, ispin, io) = spsi%rwf(ix, iy, iz, ispin, io, 1, 1)
+              ! Re-index from DC layout (core, pos_buf, neg_buf) to RT layout (neg_buf, core, pos_buf)
+              ! DC file[1..nd] = core, DC file[nd+1..nd+nb] = pos_buf, DC file[nd+nb+1..nbox] = neg_buf
+              ! RT file[1..nb] = neg_buf, RT file[nb+1..nb+nd] = core, RT file[nb+nd+1..nbox] = pos_buf
+              ! Sorted index: ix_s = ix + nb (shift core to start at nb+1); wrap if > nbox
+              ix_s = ix + dc%nxyz_buffer(1)
+              if (ix_s > nxyz_box(1)) ix_s = ix_s - nxyz_box(1)
+              iy_s = iy + dc%nxyz_buffer(2)
+              if (iy_s > nxyz_box(2)) iy_s = iy_s - nxyz_box(2)
+              iz_s = iz + dc%nxyz_buffer(3)
+              if (iz_s > nxyz_box(3)) iz_s = iz_s - nxyz_box(3)
+              wrk_buffer(ix_s, iy_s, iz_s, ispin, io) = spsi%rwf(ix, iy, iz, ispin, io, 1, 1)
           end if
         end do
         end do
@@ -633,6 +661,29 @@ contains
         end do
         call comm_summation(wrk_buffer, buffered_basis, product(nxyz_box) * nspin * dc%nstate_frag, info%icomm_rko)
         wrk_buffer = buffered_basis
+
+        if (export_cg_orb) then
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_cgorb
+          open(iunit,file=filename,form='unformatted',access='stream')
+          write(iunit) nxyz_domain(1:3), dc%nxyz_buffer(1:3), nxyz_box(1:3), nspin, dc%nstate_frag
+          write(iunit) wrk_buffer(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3),1:nspin,1:dc%nstate_frag)
+          close(iunit)
+
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_cgmap
+          open(iunit,file=filename,form='unformatted',access='stream')
+          write(iunit) nspin, dc%nstate_frag
+          write(iunit) n_basis(dc%i_frag,1:nspin)
+          write(iunit) basis_transform(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+          close(iunit)
+
+          if (dc%id_tot == 0) then
+            write(*,'(1x,a)') "[INFO] Exported raw buffered CG orbitals: cg_orbitals_buffered.bin"
+            write(*,'(1x,a)') "[INFO] Exported CG<->buffered basis transform: cg_orbitals_transform.bin"
+          end if
+        end if
+
         buffered_basis = 0d0
         do ispin = 1, nspin
           do io = 1, n_basis(dc%i_frag, ispin)

@@ -152,8 +152,10 @@ contains
     real(8) :: abs_disp
     logical :: load_from_dcdft
     logical :: use_buffered_occ_source
+    logical :: enable_halo_exchange
     integer :: env_status_occ, env_len_occ
     character(len=64) :: env_buffered_coef_source
+    character(len=64) :: env_enable_halo_exchange
     
     if (comm_is_root(info%id_rko)) then
       write(*,*) "=== Initializing DG-Fragment RT method ==="
@@ -419,17 +421,33 @@ contains
       dg_frag%n_mat_max = maxval(dg_frag%n_mat)
     end if
     
-    ! DG fragment real-space basis is evaluated on the fragment box
-    ! (core+buffer when available) with periodic wrap inside that box.
-    ! Neighbor-fragment information should enter through DG coupling terms,
-    ! not through direct ghost exchange of phi_frag.
-    dg_frag%n_halo = 0
-    dg_frag%has_halo_exchange = .false.
-    call rebuild_coef_owner_map(dg_frag, "post-halo-skip")
-    call zero_nonowned_coefficients(dg_frag)
-    if (comm_is_root(info%id_rko)) then
-      write(*,'(1x,a)') "Fragment halo exchange disabled: phi_frag uses fragment-box periodic support"
+    enable_halo_exchange = .false.
+    env_enable_halo_exchange = ''
+    call get_environment_variable("SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE", env_enable_halo_exchange, &
+         length=env_len_occ, status=env_status_occ)
+    if (env_status_occ == 0 .and. env_len_occ > 0) then
+      select case(trim(adjustl(env_enable_halo_exchange(1:env_len_occ))))
+      case('y','Y','yes','YES','true','TRUE','1')
+        enable_halo_exchange = .true.
+      end select
     end if
+
+    ! DG fragment real-space basis is evaluated on the fragment box.
+    ! Halo exchange is opt-in to avoid altering default behavior in existing runs.
+    if (enable_halo_exchange) then
+      call init_flow_halo_communication(dg_frag)
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a)') "Fragment halo exchange enabled by SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE"
+      end if
+    else
+      dg_frag%n_halo = 0
+      dg_frag%has_halo_exchange = .false.
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a)') "Fragment halo exchange disabled: phi_frag uses fragment-box periodic support"
+      end if
+    end if
+    call rebuild_coef_owner_map(dg_frag, "post-halo-init")
+    call zero_nonowned_coefficients(dg_frag)
     
     ! Note: has_real_space_basis flag is set in read_fragment_basis_data()
     ! after successfully loading basis functions from DC-LCFO data
@@ -1387,18 +1405,22 @@ contains
     integer :: n_mat_cap, n_mat_cap_env, ienv
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: nocc_diag, nocc_diag_spin
+    integer :: idx_dup_global, idx_dup_frag, idx_unique_global, idx_nonzero_frag
     integer :: env_status, env_len
     character(len=64) :: env_n_mat_cap, env_use_buffered_basis, env_disable_basis_cap, env_full_state_count
     character(len=64) :: env_buffered_coef_source, env_coef_scale_wf
+    character(len=64) :: env_index_basis_audit
     logical :: warned_spin_discard
     logical :: use_buffered_basis, use_buffered_coef_files
     logical :: have_buffered_coef, have_buffered_occ_any
     logical :: use_full_state_count
     logical :: disable_basis_cap
     logical :: allow_huge_buffered_wfb
+    logical :: enable_index_basis_audit
     real(8) :: cap_avg, weight_best, coef_scale_wf, coef_scale_wf_default
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
+    integer, allocatable :: idx_owner(:)
 
     use_buffered_basis = .false.
     env_use_buffered_basis = ""
@@ -1581,6 +1603,43 @@ contains
     dg_frag%n_mat_max = maxval(n_mat_tmp(1:dg_frag%nspin))
     if (use_buffered_coef_files .and. dg_frag%id == 0) then
       write(*,'(1x,a,99(1x,i0))') "[INFO] Buffered metadata n_mat(file)=", dg_frag%n_mat(1:dg_frag%nspin)
+    end if
+
+    enable_index_basis_audit = .false.
+    env_index_basis_audit = ""
+    call get_environment_variable("SALMON_DG_INDEX_BASIS_AUDIT", env_index_basis_audit, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      if (env_index_basis_audit(1:1) == '1' .or. env_index_basis_audit(1:1) == 'y' .or. env_index_basis_audit(1:1) == 'Y' .or. &
+          env_index_basis_audit(1:1) == 't' .or. env_index_basis_audit(1:1) == 'T') then
+        enable_index_basis_audit = .true.
+      end if
+    end if
+    if (enable_index_basis_audit .and. dg_frag%id == 0 .and. dg_frag%nspin >= 1) then
+      allocate(idx_owner(max(1, dg_frag%n_mat_max)))
+      idx_owner(:) = 0
+      idx_dup_global = 0
+      do ifrag = 1, dg_frag%n_frag
+        idx_nonzero_frag = 0
+        idx_dup_frag = 0
+        nbasis_iter = min(dg_frag%n_basis_file(ifrag, 1), size(dg_frag%index_basis_file, 1))
+        do io = 1, nbasis_iter
+          global_idx = dg_frag%index_basis_file(io, ifrag, 1)
+          if (global_idx < 1 .or. global_idx > size(idx_owner)) cycle
+          idx_nonzero_frag = idx_nonzero_frag + 1
+          if (idx_owner(global_idx) == 0) then
+            idx_owner(global_idx) = ifrag
+          else if (idx_owner(global_idx) /= ifrag) then
+            idx_dup_global = idx_dup_global + 1
+            idx_dup_frag = idx_dup_frag + 1
+          end if
+        end do
+        write(*,'(1x,a,i0,a,i0,a,i0)') "[INDEX-AUDIT] ifrag=", ifrag, " nonzero=", idx_nonzero_frag, " cross_dup=", idx_dup_frag
+      end do
+      idx_unique_global = count(idx_owner(:) > 0)
+      write(*,'(1x,a,i0,a,i0,a,i0)') "[INDEX-AUDIT] unique_global=", idx_unique_global, " n_mat_max=", dg_frag%n_mat_max, &
+        " cross_dup_total=", idx_dup_global
+      deallocate(idx_owner)
+      flush(6)
     end if
 
     allow_huge_buffered_wfb = .false.
