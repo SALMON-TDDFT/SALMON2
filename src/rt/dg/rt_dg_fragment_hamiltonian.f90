@@ -1879,10 +1879,11 @@
     type(s_pp_grid),        intent(in)    :: ppg
     type(s_dft_system),     intent(in)    :: system
 
-    integer :: ispin, n_frag, n_basis_proj, nocc, info, lwork, j, nev, env_status
+    integer :: ispin, n_frag, n_basis_proj, nocc, info, lwork, j, nev, env_status, env_len
     integer :: ifrag, io, jo, global_idx, nbf, frag_nonzero
     integer :: iblk_h, iblk_s, iblk_nl, nocc_frag, resid_count, owner_frag
     integer :: info_occ, lwork_occ
+    integer :: startup_projection_trace_neval
     real(8), parameter :: eps_s = 1.0d-12
     real(8) :: eval_s_min, eval_s_max
     real(8) :: resid_max, resid_rms, resid_rel_max, resid_rel_rms
@@ -1890,17 +1891,21 @@
     real(8) :: frag_weight_min, frag_weight_max, frag_weight_ratio_pre, frag_weight_ratio_post
     logical :: allow_buffered_startup_stationary_projection
     logical :: buffered_wf_coef_mode
+    logical :: enable_startup_projection_trace
     logical :: rollback_projection
     character(len=32) :: env_allow_buffered_startup_stationary_projection
     character(len=32) :: env_buffered_coef_source
+    character(len=32) :: env_startup_projection_trace
+    character(len=32) :: env_startup_projection_trace_neval
     real(8), allocatable :: eval_s(:), eval_h(:), rwork(:), eval_occ(:), rwork_occ(:)
     real(8), allocatable :: frag_weight(:), state_weight(:)
     complex(8), allocatable :: h_ff(:,:), s_ff(:,:), x_lowdin(:,:), h_ortho(:,:), u_h(:,:), c_eig(:,:)
     complex(8), allocatable :: hc(:), sc(:), coef_prev(:,:), coef_proj(:,:)
     complex(8), allocatable :: work(:), work_occ(:), coef_frag_all(:,:), coef_pw_all(:,:)
     complex(8), allocatable :: gram_occ(:,:), gram_vecs(:,:)
-    integer, allocatable :: state_owner(:), frag_occ_count(:), frag_occ_used(:)
+    integer, allocatable :: state_owner(:), state_local_rank(:), frag_occ_count(:), frag_occ_used(:)
     logical, allocatable :: state_filled(:)
+    real(8), allocatable :: state_owner_weight(:)
     external :: zheev
 
     if (dg_frag%use_plane_wave_basis) return
@@ -1932,6 +1937,26 @@
       write(*,'(1x,a)') "[INFO] PureDG startup stationary projection enabled in buffered+wf mode"
     end if
 
+    enable_startup_projection_trace = .false.
+    startup_projection_trace_neval = 6
+    env_startup_projection_trace = ''
+    call get_environment_variable('SALMON_DG_STARTUP_PROJECTION_TRACE', env_startup_projection_trace, &
+      length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case (trim(adjustl(env_startup_projection_trace(1:env_len))))
+      case ('1', 'true', 'TRUE', 'on', 'ON', 'yes', 'YES')
+        enable_startup_projection_trace = .true.
+      end select
+    end if
+    env_startup_projection_trace_neval = ''
+    call get_environment_variable('SALMON_DG_STARTUP_PROJECTION_TRACE_NEVAL', env_startup_projection_trace_neval, &
+      length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_startup_projection_trace_neval(1:env_len), *, iostat=env_status) startup_projection_trace_neval
+      if (env_status /= 0) startup_projection_trace_neval = 6
+    end if
+    startup_projection_trace_neval = max(1, min(8, startup_projection_trace_neval))
+
     if (dg_frag%use_buffered_basis .and. .not. allow_buffered_startup_stationary_projection) then
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') "[INFO] PureDG startup stationary projection skipped in buffered-basis mode (memory guard)"
@@ -1959,14 +1984,17 @@
       nev = nocc
       call gather_full_coef_view(dg_frag, ispin, n_basis_proj, dg_frag%nstate_tot, coef_frag_all, coef_pw_all)
       allocate(coef_prev(n_basis_proj, nev), coef_proj(n_basis_proj, nev))
-      allocate(state_owner(nev), frag_occ_count(dg_frag%n_frag), frag_occ_used(dg_frag%n_frag), state_filled(nev))
+      allocate(state_owner(nev), state_local_rank(nev), frag_occ_count(dg_frag%n_frag), frag_occ_used(dg_frag%n_frag), state_filled(nev))
       allocate(frag_weight(dg_frag%n_frag), state_weight(dg_frag%n_frag))
+      allocate(state_owner_weight(nev))
       coef_prev(:, :) = coef_frag_all(1:n_basis_proj, 1:nev)
       coef_proj(:, :) = (0.0d0, 0.0d0)
       state_owner(:) = 0
+      state_local_rank(:) = 0
       frag_occ_count(:) = 0
       frag_occ_used(:) = 0
       state_filled(:) = .false.
+      state_owner_weight(:) = 0.0d0
 
       frag_weight(:) = 0.0d0
       do ifrag = 1, dg_frag%n_frag
@@ -2004,6 +2032,7 @@
         owner_frag = maxloc(state_weight, dim=1)
         if (owner_frag >= 1 .and. owner_frag <= dg_frag%n_frag .and. maxval(state_weight) > 1.0d-30) then
           state_owner(j) = owner_frag
+          state_owner_weight(j) = maxval(state_weight)
           frag_occ_count(owner_frag) = frag_occ_count(owner_frag) + 1
         end if
       end do
@@ -2131,6 +2160,7 @@
           frag_occ_used(ifrag) = frag_occ_used(ifrag) + 1
           jo = frag_occ_used(ifrag)
           if (jo > nocc_frag) cycle
+          state_local_rank(j) = jo
           do io = 1, nbf
             global_idx = dg_frag%index_basis(io, ifrag, ispin)
             if (global_idx < 1 .or. global_idx > n_basis_proj) cycle
@@ -2139,6 +2169,20 @@
           dg_frag%esp(j, ispin) = eval_h(jo)
           state_filled(j) = .true.
         end do
+
+        if (enable_startup_projection_trace .and. comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,8(1x,1pe12.4))') &
+            "[INFO] PureDG startup frag-spectrum: ispin=", ispin, " ifrag=", ifrag, " nocc_frag=", nocc_frag, " evals=", &
+            (eval_h(j), j=1, min(nbf, startup_projection_trace_neval))
+          do j = 1, nev
+            if (state_owner(j) /= ifrag) cycle
+            if (state_local_rank(j) <= 0 .or. state_local_rank(j) > nbf) cycle
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') &
+              "[INFO] PureDG startup state-assign: ispin=", ispin, " ifrag=", ifrag, " state=", j, &
+              " local_rank=", state_local_rank(j), " owner_w=", state_owner_weight(j), &
+              " eig=", eval_h(state_local_rank(j))
+          end do
+        end if
 
         deallocate(eval_occ, rwork_occ, gram_occ, gram_vecs, work_occ)
         deallocate(h_ff, s_ff, x_lowdin, h_ortho, u_h, c_eig, hc, sc, eval_s, eval_h, rwork, work)
@@ -2206,7 +2250,8 @@
         end if
       end if
 
-      deallocate(coef_prev, coef_proj, state_owner, frag_occ_count, frag_occ_used, state_filled, frag_weight, state_weight)
+      deallocate(coef_prev, coef_proj, state_owner, state_local_rank, frag_occ_count, frag_occ_used, state_filled, &
+        frag_weight, state_weight, state_owner_weight)
       if (allocated(coef_frag_all)) deallocate(coef_frag_all)
       if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     end do
@@ -3490,9 +3535,10 @@
     ie = mg%ie
     hvol = system%hvol
     
-    ! Buffered basis already carries its own periodic support, so neighbor halo
-    ! exchange is only needed for the raw fragment-domain path.
-    if (.not. dg_frag%use_buffered_basis) then
+    ! Buffered basis usually does not need explicit halo exchange, but when
+    ! halo exchange is explicitly enabled we must refresh halo buffers before
+    ! reading buf_recv in the inter-fragment momentum path.
+    if ((.not. dg_frag%use_buffered_basis) .or. dg_frag%has_halo_exchange) then
       call cpu_time(t0)
       call exchange_phi_frag_halo(dg_frag)
       call cpu_time(t1)
@@ -3684,7 +3730,7 @@
               flush(6)
             end if
             do i_halo = 1, dg_frag%n_halo
-              if (dg_frag%use_buffered_basis) cycle
+              if (dg_frag%use_buffered_basis .and. .not. dg_frag%has_halo_exchange) cycle
               if (enable_momentum_probe .and. jo == 1) then
                 write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
                   " ifrag=", ifrag, " i_halo=", i_halo, " src=", dg_frag%halo(i_halo)%ifrag_src, &
@@ -3694,6 +3740,8 @@
               end if
               if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
               jfrag = dg_frag%halo(i_halo)%ifrag_src
+              if (jfrag < 1 .or. jfrag > dg_frag%n_frag) cycle
+              if (.not. allocated(dg_frag%halo(i_halo)%buf_recv)) cycle
               n_basis_halo = dg_frag%n_basis(jfrag, ispin)
               l = dg_frag%halo(i_halo)%length
               if (enable_momentum_probe .and. jo == 1) then
@@ -3754,8 +3802,20 @@
                       flush(6)
                     end if
                     ipt = ipt + 1
-                    ! For stencil evaluation use source-side indices; recv-side halo points can
-                    ! sit at the outer ghost edge where +/-4 access may go out of bounds.
+                    ! For a face halo (e.g. x-direction), the transverse axes use dir=0 in
+                    ! compute_halo_axis_block, which sets send_lo/send_hi = phi_lb/phi_ub (full phi
+                    ! extent including buffer zones).  When halo_send_idx falls in the buffer zone
+                    ! (i.e. outside [core_lo, core_hi]) the centre ix0 is near phi_lb/phi_ub and
+                    ! the ±4 stencil in apply_gradient_at_phi_box_point goes out of phi_frag bounds.
+                    ! These buffer-zone face points are outside the physical fragment interface and
+                    ! do not contribute to the inter-fragment momentum integral, so zeroing them is
+                    ! both safe and correct.
+                    if (halo_send_idx(1) < phi_lb1 + 4 .or. halo_send_idx(1) > phi_ub1 - 4 .or. &
+                        halo_send_idx(2) < phi_lb2 + 4 .or. halo_send_idx(2) > phi_ub2 - 4 .or. &
+                        halo_send_idx(3) < phi_lb3 + 4 .or. halo_send_idx(3) > phi_ub3 - 4) then
+                      grad_halo_2d(ipt, 1:3) = 0.0d0
+                      cycle
+                    end if
                     call apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_send_idx, &
                       grad_halo_2d(ipt, 1), grad_halo_2d(ipt, 2), grad_halo_2d(ipt, 3))
                   end do

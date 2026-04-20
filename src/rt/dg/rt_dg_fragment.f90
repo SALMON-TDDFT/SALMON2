@@ -433,17 +433,26 @@ contains
     end if
 
     ! DG fragment real-space basis is evaluated on the fragment box.
-    ! Halo exchange is opt-in to avoid altering default behavior in existing runs.
+    ! In buffered-basis mode, halo exchange is disabled by default.
+    ! Users can explicitly re-enable it for inter-fragment current/momentum diagnostics.
     if (enable_halo_exchange) then
       call init_flow_halo_communication(dg_frag)
       if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a)') "Fragment halo exchange enabled by SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE"
+        if (dg_frag%use_buffered_basis) then
+          write(*,'(1x,a)') "Fragment halo exchange explicitly enabled in buffered-basis mode"
+        else
+          write(*,'(1x,a)') "Fragment halo exchange enabled by SALMON_DG_ENABLE_FRAGMENT_HALO_EXCHANGE"
+        end if
       end if
     else
       dg_frag%n_halo = 0
       dg_frag%has_halo_exchange = .false.
       if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a)') "Fragment halo exchange disabled: phi_frag uses fragment-box periodic support"
+        if (dg_frag%use_buffered_basis) then
+          write(*,'(1x,a)') "Fragment halo exchange disabled in buffered-basis mode (default)"
+        else
+          write(*,'(1x,a)') "Fragment halo exchange disabled: phi_frag uses fragment-box periodic support"
+        end if
       end if
     end if
     call rebuild_coef_owner_map(dg_frag, "post-halo-init")

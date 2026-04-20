@@ -312,6 +312,16 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   else
     call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
   end if
+
+  ! In buffered mode, halo is used only to build inter-fragment matrix terms.
+  ! Runtime propagation keeps halo disabled to avoid density reconstruction instability.
+  if (dg_frag%use_buffered_basis .and. dg_frag%has_halo_exchange) then
+    dg_frag%has_halo_exchange = .false.
+    dg_frag%n_halo = 0
+    if (comm_is_root(nproc_id_global)) then
+      write(*,'(1x,a)') "Fragment halo exchange disabled for runtime propagation (buffered mode)"
+    end if
+  end if
   
   ! H_mat_kinetic is constructed inside calculate_hamiltonian_matrix
   
