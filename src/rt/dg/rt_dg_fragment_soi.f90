@@ -79,6 +79,8 @@
 
 #include "config.h"
 module rt_dg_fragment_soi
+  use rt_dg_fragment, only: get_dg_spin_occ_info, copy_periodic_global_scalar_to_rank_buffer, &
+                            build_total_potential_grid_with_buffered_hartree
   use rt_dg_fragment_types, only: s_dg_fragment_rt, halo_info
   use rt_dg_basis_projection, only: calculate_new_old_basis_overlap, &
                                    stabilize_basis_overlap, &
@@ -290,20 +292,9 @@ contains
       dg_frag%n_mat_max = maxval(dg_frag%n_mat)
     end if
     
-    ! Initialize halo communication structures
-    if (dg_frag%has_real_space_basis) then
-      call init_halo_communication(dg_frag, info)
-    end if
-    
-    ! Perform initial halo exchange to fill ghost cells
-    ! This ensures phi_frag halo regions contain correct neighbor data
-    ! Skip if phi_frag was not loaded
-    if (dg_frag%has_real_space_basis) then
-      call exchange_phi_frag_halo(dg_frag)
-      if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a)') "Initial halo exchange completed for phi_frag"
-      end if
-    end if
+    ! Halo communication is explicitly disabled by design in this branch.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
     
     ! Note: has_real_space_basis flag is set in read_fragment_basis_data()
     ! after successfully loading basis functions from DC-LCFO data
@@ -321,12 +312,16 @@ contains
     
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    if (.not. allocated(dg_frag%rho_h_frag)) then
+      allocate(dg_frag%rho_h_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    end if
     allocate(dg_frag%rho_s_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     allocate(dg_frag%Vh_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%Vxc_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     
     ! Initialize to zero
     dg_frag%rho_frag = 0.0d0
+    if (.not. dg_frag%has_seed_rho_h) dg_frag%rho_h_frag = 0.0d0
     dg_frag%rho_s_frag = 0.0d0
     dg_frag%Vh_frag = 0.0d0
     dg_frag%Vxc_frag = 0.0d0
@@ -1636,6 +1631,7 @@ contains
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%phi_frag_c)) deallocate(dg_frag%phi_frag_c)
+    if (allocated(dg_frag%rho_h_frag)) deallocate(dg_frag%rho_h_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
     if (allocated(dg_frag%rk_beta)) deallocate(dg_frag%rk_beta)
     if (allocated(dg_frag%rk_gamma)) deallocate(dg_frag%rk_gamma)
@@ -1655,7 +1651,9 @@ contains
     dg_frag%coef_pw_full_cache_nstate = 0
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
     if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
+    if (allocated(dg_frag%P_mat_frag_pw)) deallocate(dg_frag%P_mat_frag_pw)
     if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)
+    if (allocated(dg_frag%H_mat_pw)) deallocate(dg_frag%H_mat_pw)
     if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
       call comm_free_group(dg_frag%icomm_frag)
       dg_frag%icomm_frag = COMM_GROUP_NULL

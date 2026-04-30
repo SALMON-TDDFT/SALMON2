@@ -47,6 +47,10 @@
       dg_frag%H_mat_c = (0.0d0, 0.0d0)
       return
     end if
+
+    ! Enforce fragment-local stencil policy: no halo communication path.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*)
@@ -86,9 +90,7 @@
     dg_frag%H_mat = 0.0d0
     dg_frag%H_mat_c = (0.0d0, 0.0d0)
     
-    ! Exchange halo regions between fragments before stencil operations
-    ! This ensures accurate Laplacian calculation at fragment boundaries
-    call exchange_phi_frag_halo(dg_frag)
+    ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
     
     hvol = system%hvol
     is = mg%is
@@ -217,6 +219,57 @@
     end if
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_ham_soi
+
+  integer function map_global_to_fragment_phi_box_coord_ham_soi(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, ig, lb, ub
+    integer :: core_lo, ndom, ig_wrap
+
+    core_lo = dg_frag%ixyz_frag(axis, ifrag)
+    ndom = dg_frag%nxyz_domain(axis, ifrag)
+    if (ndom <= 0) then
+      iloc = 0
+      return
+    end if
+    ig_wrap = core_lo + modulo(ig - core_lo, ndom)
+    ig_wrap = modulo(ig_wrap - 1, dg_frag%lgnum_total(axis)) + 1
+    iloc = map_global_to_phi_box_coord_ham_soi(ig_wrap, lb, ub, dg_frag%lgnum_total(axis))
+  end function map_global_to_fragment_phi_box_coord_ham_soi
+
+  subroutine enforce_fragment_periodic_buffer_for_state_ham_soi(dg_frag, ifrag, i_local, jo)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, jo
+
+    integer :: ix, iy, iz
+    integer :: sx, sy, sz
+    integer :: lb1, ub1, lb2, ub2, lb3, ub3
+
+    lb1 = lbound(dg_frag%phi_frag, 1)
+    ub1 = ubound(dg_frag%phi_frag, 1)
+    lb2 = lbound(dg_frag%phi_frag, 2)
+    ub2 = ubound(dg_frag%phi_frag, 2)
+    lb3 = lbound(dg_frag%phi_frag, 3)
+    ub3 = ubound(dg_frag%phi_frag, 3)
+
+    do iz = lb3, ub3
+      sz = map_global_to_fragment_phi_box_coord_ham_soi(dg_frag, ifrag, 3, iz, lb3, ub3)
+      if (sz == 0) cycle
+      do iy = lb2, ub2
+        sy = map_global_to_fragment_phi_box_coord_ham_soi(dg_frag, ifrag, 2, iy, lb2, ub2)
+        if (sy == 0) cycle
+        do ix = lb1, ub1
+          sx = map_global_to_fragment_phi_box_coord_ham_soi(dg_frag, ifrag, 1, ix, lb1, ub1)
+          if (sx == 0) cycle
+          if (allocated(dg_frag%phi_frag_c)) then
+            dg_frag%phi_frag_c(ix, iy, iz, jo, i_local) = dg_frag%phi_frag_c(sx, sy, sz, jo, i_local)
+          end if
+          dg_frag%phi_frag(ix, iy, iz, jo, i_local) = dg_frag%phi_frag(sx, sy, sz, jo, i_local)
+        end do
+      end do
+    end do
+  end subroutine enforce_fragment_periodic_buffer_for_state_ham_soi
 
   !=======================================================================
   ! Build total local potential on the given grid:
@@ -452,6 +505,7 @@
         " ifrag=", ifrag, " ndom=", ndom
       stop 1
     end if
+    call enforce_fragment_periodic_buffer_for_state_ham_soi(dg_frag, ifrag, i_local, jo)
     
     gx_lo = max(iorg(1), mg%is(1))
     gx_hi = min(iorg(1) + ndom(1) - 1, mg%ie(1))
@@ -665,6 +719,10 @@
     integer :: n_momentum_blocks_local
     
     if (.not. dg_frag%has_real_space_basis) return
+
+    ! Enforce fragment-local stencil policy: no halo communication path.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Computing transition moments: <φ_i|∇|φ_j>"
@@ -691,8 +749,7 @@
     ie = mg%ie
     hvol = system%hvol
     
-    ! Exchange halo regions before stencil operations
-    call exchange_phi_frag_halo(dg_frag)
+    ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
     use_phi_complex = allocated(dg_frag%phi_frag_c)
     
     ! Loop over spin
@@ -1852,6 +1909,10 @@
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_mat)) return
 
+    ! Enforce fragment-local stencil policy: no halo communication path.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
+
     if (.not. allocated(dg_frag%S_mat)) then
       allocate(dg_frag%S_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
     end if
@@ -1879,7 +1940,6 @@
     phi_lb3 = lbound(dg_frag%phi_frag, 3)
     phi_ub3 = ubound(dg_frag%phi_frag, 3)
 
-    call exchange_phi_frag_halo(dg_frag)
     use_complex_phi = allocated(dg_frag%phi_frag_c)
 
     do ispin = 1, system%nspin

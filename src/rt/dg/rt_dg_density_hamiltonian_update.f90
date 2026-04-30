@@ -3,8 +3,10 @@
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
+    use salmon_global, only: yn_dual_rho_vh_only
     use salmon_xc, only: s_xc_functional, exchange_correlation
     use poisson_dg_distributed, only: hartree_dg_distributed
+    use hartree_sub, only: build_hartree_density_from_rho
     use hamiltonian, only: update_vlocal
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use communication, only: comm_is_root
@@ -33,11 +35,15 @@
     complex(8), allocatable :: H_mat_metric(:,:,:)
     complex(8), allocatable :: H_mat_prev_c(:,:,:)
     real(8), allocatable :: H_mat_prev(:,:,:)
+    real(8), allocatable :: rho_buffer(:,:,:), Vh_buffer(:,:,:)
     integer :: n_metric
     logical :: use_hmat_complex
+    logical :: use_rank_buffered_potential
+    logical :: use_dual_rho_vh
     real(8) :: t_stage0, t_stage1
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct
     logical, parameter :: enable_update_trace = .false.
+    type(s_scalar) :: rho_h
 
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
@@ -68,6 +74,36 @@
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     call cpu_time(t_stage1)
     time_density = time_density + (t_stage1 - t_stage0)
+
+    dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
+    if (system%nspin > 0) then
+      dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = 0.0d0
+      do n_metric = 1, system%nspin
+        dg_frag%rho_s_frag(:, :, :, n_metric) = rho_s(n_metric)%f(:, :, :)
+      end do
+    end if
+
+    use_dual_rho_vh = (yn_dual_rho_vh_only == 'y')
+    if (use_dual_rho_vh) then
+      call allocate_scalar(mg, rho_h)
+      if (itt == 1 .and. dg_frag%has_seed_rho_h) then
+        rho_h%f(:, :, :) = dg_frag%rho_h_frag(:, :, :)
+      else
+        call build_hartree_density_from_rho(info, rho, rho_h)
+        dg_frag%rho_h_frag(:, :, :) = rho_h%f(:, :, :)
+      end if
+    end if
+
+    use_rank_buffered_potential = all(dg_frag%rank_buf_hi(:) >= dg_frag%rank_buf_lo(:))
+    if (use_rank_buffered_potential) then
+      allocate(rho_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                          dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      allocate(Vh_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                         dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                         dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-end"
       flush(6)
@@ -82,9 +118,17 @@
       flush(6)
     end if
     call cpu_time(t_stage0)
-    call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
+    if (use_dual_rho_vh) then
+      call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho_h, Vh)
+    else
+      call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
+    end if
     call cpu_time(t_stage1)
     time_hartree = time_hartree + (t_stage1 - t_stage0)
+    dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
+    if (use_rank_buffered_potential) then
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vh, Vh_buffer)
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-end"
       flush(6)
@@ -97,6 +141,9 @@
       write(*,'(1x,a,i0,a,i0,a,es12.4)') "[FATAL] DG-RT invalid Hartree, rank=", nproc_id_global, &
         ", itt=", itt, " max=", maxval(abs(Vh%f))
       stop "DG-RT Hartree diverged"
+    end if
+    if (use_dual_rho_vh) then
+      call deallocate_scalar(rho_h)
     end if
     
     ! Step 3: Update exchange-correlation potential
@@ -115,6 +162,12 @@
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t_stage1)
     time_xc = time_xc + (t_stage1 - t_stage0)
+    if (system%nspin > 0) then
+      dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
+      do n_metric = 1, system%nspin
+        dg_frag%Vxc_frag(:, :, :, n_metric) = Vxc(n_metric)%f(:, :, :)
+      end do
+    end if
     if (enable_update_trace .and. itt == 1) then
       write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-end"
       flush(6)
@@ -156,7 +209,11 @@
       flush(6)
     end if
     call cpu_time(t_stage0)
-    call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+    if (use_rank_buffered_potential) then
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
+    else
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+    end if
     call cpu_time(t_stage1)
     time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
     if (enable_update_trace .and. itt == 1) then
@@ -213,5 +270,8 @@
       if (allocated(H_mat_prev)) deallocate(H_mat_prev)
       if (allocated(H_mat_prev_c)) deallocate(H_mat_prev_c)
     end if
+
+    if (allocated(rho_buffer)) deallocate(rho_buffer)
+    if (allocated(Vh_buffer)) deallocate(Vh_buffer)
 
   end subroutine update_density_and_hamiltonian

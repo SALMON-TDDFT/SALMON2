@@ -1,0 +1,6 @@
+window=[0.05,0.8] a.u.
+OFF peak_e=0.050000 peak_im=4.608554e+01 re_at_peak=-4.426121e+00 im_l2=1.071573e+01 re_l2=3.354593e+00
+ON  peak_e=0.800000 peak_im=5.255332e-02 re_at_peak=1.043161e+00 im_l2=5.499578e-02 re_l2=1.073255e+00
+peak_e_shift=7.500000e-01
+peak_im_rel_change=-9.988597e-01
+im_l2_rel_change=-9.948678e-01

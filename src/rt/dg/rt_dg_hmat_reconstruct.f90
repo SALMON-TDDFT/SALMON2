@@ -1,4 +1,4 @@
-  subroutine reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+  subroutine reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
     use structures
     use communication, only: comm_summation
     use salmon_global, only: theory
@@ -12,6 +12,7 @@
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
     type(s_scalar),         intent(in)    :: Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
+    real(8),      optional, intent(in)    :: Vh_buffer(:,:,:)
 
     type(s_rgrid), pointer :: mg
     integer :: ifrag, ispin, io, jo, i_local
@@ -115,7 +116,11 @@
 
     do ispin = 1, system%nspin
       call cpu_time(t0)
-      call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      if (present(Vh_buffer)) then
+        call build_total_potential_grid_with_buffered_hartree(mg, dg_frag, Vh_buffer, Vxc(ispin), Vpsl, V_total)
+      else
+        call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      end if
       if (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v)) then
 !$omp parallel do collapse(3) private(A2val) schedule(static)
         do i_local = mg%is(3), mg%ie(3)

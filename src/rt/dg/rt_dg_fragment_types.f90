@@ -188,6 +188,9 @@ module rt_dg_fragment_types
     real(8), allocatable :: eigenvalues(:,:)   ! eigenvalues per fragment (nstate_frag, nspin)
     real(8) :: dipole_moment(3)                ! total dipole moment
     real(8) :: current(3)                      ! current density
+    real(8) :: current_para(3)                 ! paramagnetic current density
+    real(8) :: current_dia(3)                  ! diamagnetic current density proxy
+    real(8) :: current_total(3)                ! total current density = para + dia
     real(8) :: total_energy                    ! total energy
     real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
     real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block
@@ -196,7 +199,47 @@ module rt_dg_fragment_types
     real(8) :: elec_num_scaled                 ! total electrons after rho normalization
     real(8) :: elec_num_raw                    ! total electrons before rho normalization
     real(8) :: rho_scale_factor                ! density renormalization factor
+    real(8) :: elec_num_raw_t0                 ! baseline raw electron count for drift metric
+    real(8) :: elec_num_scaled_t0              ! baseline scaled electron count (diagnostic)
+    logical :: elec_num_baseline_ready         ! baseline cache status
+    real(8) :: rho_drift_indicator             ! time drift proxy using same convention: raw(t)-raw(t0)
+    real(8) :: rho_ff_elec                     ! electron count from frag-frag block (c_f^dag S_ff c_f)
+    real(8) :: rho_fp_elec                     ! electron count from frag-pw cross block
+    real(8) :: rho_pp_elec                     ! electron count from pw-pw block (c_p^dag S_pp c_p)
+    real(8) :: rho_owned_elec                  ! real-space integral from direct owner-local apply path
+    real(8) :: rho_imported_elec               ! real-space integral from imported/unpacked contributions
+    real(8) :: rho_local_all_elec              ! real-space integral over local rho before global reduction
+    real(8) :: rho_global_raw_elec             ! global real-space integral before scaling (same as elec_num_raw)
+    real(8) :: rho_global_scaled_elec          ! global real-space integral after scaling (same as elec_num_scaled)
+    real(8) :: rho_contract_residual_elec      ! global_raw - (owned + imported)
+    real(8) :: coef_occ_norm0                  ! occupied-coefficient norm baseline (itt=1)
+    real(8) :: coef_occ_norm                   ! occupied-coefficient norm at current step
+    real(8) :: coef_occ_norm_drift             ! occupied-coefficient norm drift from baseline
+    real(8) :: csc_occ_identity_norm           ! Frobenius norm of (C^dagger S C - I) in occupied space
+    real(8) :: csc_occ_identity_max            ! max absolute element of (C^dagger S C - I)
+    real(8) :: occvirt_leakage                 ! occupied->virtual leakage wrt reference basis
+    integer :: occvirt_top_occ                 ! top occupied state index (global) for leakage
+    integer :: occvirt_top_virt                ! top virtual state index (global) for leakage pair
+    real(8) :: occvirt_top_abs2                ! |U_vo|^2 of top leakage pair
+    integer :: jpara_top_occ_state             ! top occupied state index contributing to J_para,z
+    real(8) :: jpara_top_occ_value             ! signed contribution of top occupied state to J_para,z
+    integer :: selfexc_track_states(3)         ! tracked state IDs for self-excitation diagnostics
+    real(8) :: selfexc_track_norm(3)           ! tracked state coefficient norms at step sample
+    real(8) :: selfexc_csc_step_delta          ! per-step increment of C^dagger S C - I norm
+    real(8) :: selfexc_leak100_129_step_delta  ! per-step increment of 100->129 leakage amplitude
+    real(8) :: selfexc_csc_stage_pre_mixed     ! C^dagger S C - I norm before mixed sync
+    real(8) :: selfexc_csc_stage_post_overlap  ! C^dagger S C - I norm after overlap solve
+    real(8) :: selfexc_csc_stage_post_raw      ! C^dagger S C - I norm after raw restore
+    real(8) :: selfexc_leak100_129_pre_mixed   ! |U_129,100|^2 before mixed sync
+    real(8) :: selfexc_leak100_129_post_overlap! |U_129,100|^2 after overlap solve
+    real(8) :: selfexc_leak100_129_post_raw    ! |U_129,100|^2 after raw restore
+    real(8) :: selfexc_leak100_129_current     ! current-step |U_129,100|^2 sample
+    real(8) :: selfexc_csc_prev_step           ! previous-step C^dagger S C - I norm sample
+    real(8) :: selfexc_leak100_129_prev_step   ! previous-step |U_129,100|^2 sample
+    integer :: selfexc_prev_step_itt           ! step index cached for per-step delta
     real(8) :: pw_weight_raw                   ! simple diagnostic: sum |coef_pw|^2 over occupied states
+    complex(8), allocatable :: coef_ref_all(:,:,:) ! reference coefficients (n_tot,nstate_tot,nspin) at first RT step
+    logical :: coef_ref_ready = .false.        ! reference coefficient cache status
 
     ! Fragment geometry information
     integer :: num_fragment(3)                 ! Fragment division in each direction (from salmon_global)
@@ -238,8 +281,6 @@ module rt_dg_fragment_types
     integer, allocatable :: current_valid_iyg(:,:)              ! valid wrapped global y indices for microscopic current
     integer, allocatable :: current_valid_izg(:,:)              ! valid wrapped global z indices for microscopic current
     type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
-    real(8), allocatable :: density_weight_local(:,:,:) ! static overlap count on local grid
-    real(8), allocatable :: density_inv_weight_local(:,:,:) ! inverse of static overlap count on local grid
     real(8), allocatable :: density_phi_block_cache(:,:,:,:) ! block-packed basis (block_size,nstate_frag,nblock_max,ifrag_local)
     integer, allocatable :: density_phi_block_count(:)       ! block count per local fragment
     integer :: density_phi_block_size = 0
@@ -279,9 +320,11 @@ module rt_dg_fragment_types
 
     ! Density and potentials (allocated internally)
     real(8), allocatable :: rho_frag(:,:,:)        ! electron density on grid
+    real(8), allocatable :: rho_h_frag(:,:,:)      ! Hartree-only density on grid
     real(8), allocatable :: rho_s_frag(:,:,:,:)    ! spin-resolved density (ix,iy,iz,ispin)
     real(8), allocatable :: Vh_frag(:,:,:)         ! Hartree potential
     real(8), allocatable :: Vxc_frag(:,:,:,:)      ! XC potential (ix,iy,iz,ispin)
+    logical :: has_seed_rho_h = .false.
 
     ! Self-consistent basis update (adaptive basis)
     complex(8), allocatable :: H_mat_old(:,:,:)    ! Previous Hamiltonian matrix (nstate,nstate,nspin)
@@ -327,8 +370,15 @@ module rt_dg_fragment_types
 
     ! Mixed basis operators stored in FF/FP/PP form
     complex(8), allocatable :: S_mat_frag_pw(:,:,:) ! Overlap <fragment_i | PW_j>
+    complex(8), allocatable :: S_mat_frag_pw_g(:,:,:) ! G-space overlap <fragment_i | PW_j>
     complex(8), allocatable :: H_mat_frag_pw(:,:,:) ! Hamiltonian <fragment_i | PW_j>
+    complex(8), allocatable :: P_mat_frag_pw(:,:,:,:) ! Gradient <fragment_i | nabla_idir | PW_j>
+                             ! (3, n_mat_max, n_plane_waves, nspin)
+    complex(8), allocatable :: P_mat_frag_pw_g(:,:,:,:) ! G-space gradient <fragment_i | nabla_idir | PW_j>
+                  ! (3, n_mat_max, n_plane_waves, nspin)
     complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block
+    complex(8), allocatable :: H_mat_pw(:,:,:)      ! PW-PW Hamiltonian block (non-diagonal)
+                             ! (n_plane_waves, n_plane_waves, nspin)
     real(8), allocatable :: pw_orthogonalized(:,:,:) ! [UNUSED] Orthogonalized PWs in real space
     logical :: mixed_basis_ready = .false.          ! startup/basis-update mixed diagonalization prepared
     integer, allocatable :: mixed_basis_dim(:)      ! retained mixed dimension per spin

@@ -214,6 +214,11 @@
     integer, allocatable :: id_tmp(:)
     integer :: ifrag_count
 
+    ! Halo communication is disabled by design in this branch.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
+    return
+
     ! Build MPI rank array for all fragments (comm_summation across all ranks)
     allocate(id_tmp(dg_frag%n_frag))
     id_tmp = 0
@@ -367,6 +372,11 @@
     integer :: sample_ix, sample_iy, sample_iz, sample_istate
     real(8) :: pack_abs_sum, pack_abs_max, pack_first_value, src_first_value
     logical :: diag_second_halo_root, diag_fourth_halo_root
+
+    ! Halo communication is disabled by design in this branch.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
+    return
 
     if (.not. dg_frag%has_halo_exchange) return
     if (dg_frag%n_halo <= 0) return

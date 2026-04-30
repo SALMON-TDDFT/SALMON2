@@ -254,7 +254,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use sendrecv_grid, only: s_sendrecv_grid
   use salmon_xc, only: s_xc_functional
   use write_sub
-  use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit
+  use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, base_directory, SYSname
+  use filesystem, only: open_filehandle
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
   use hamiltonian, only: update_kvector_nonlocalpt_microAc
   implicit none
@@ -279,7 +280,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   type(s_singlescale),    intent(inout) :: singlescale
   
   type(s_dg_fragment_rt) :: dg_frag
-  integer :: itt
+  integer :: itt, fh_dg_current_decomp
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -302,6 +303,19 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     write(*,*)
     write(*,*) "=== Starting DG-Fragment RT time evolution ==="
     write(*,*)
+  end if
+
+  fh_dg_current_decomp = -1
+  if (comm_is_root(nproc_id_global) .and. iperiodic == 3) then
+    fh_dg_current_decomp = open_filehandle(trim(base_directory)//trim(SYSname)//'_dg_current_decomp.data')
+    write(fh_dg_current_decomp,'(a)') '# DG current decomposition diagnostics (a.u.)'
+    write(fh_dg_current_decomp,'(a)') '# J_total = J_para + J_dia, J_dia = -(Ne_raw/ngrid) * Ac_tot'
+    write(fh_dg_current_decomp,'(a)') '# rho_drift = elec_num_raw(t) - elec_num_raw(t0) (same-convention time drift)'
+    write(fh_dg_current_decomp,'(a)') '# convention_gap = elec_num_scaled - elec_num_raw (diagnostic only; not a time-drift metric)'
+    write(fh_dg_current_decomp,'(a)') '# rho_ff/rho_fp/rho_pp = coefficient-space electron count split with overlap metric'
+    write(fh_dg_current_decomp,'(a)') '# rho_owned/rho_imported/rho_local_all/rho_global_raw/rho_global_scaled/rho_contract_residual = real-space counting contract audit'
+    write(fh_dg_current_decomp,'(a)') '# coef_occ_norm_drift = coef_occ_norm - coef_occ_norm(t=dt)'
+    write(fh_dg_current_decomp,'(a)') '# 1:it 2:time_au 3:J_para_x 4:J_para_y 5:J_para_z 6:J_dia_x 7:J_dia_y 8:J_dia_z 9:J_total_x 10:J_total_y 11:J_total_z 12:rho_drift 13:coef_occ_norm_drift 14:coef_occ_norm 15:csc_occ_identity_norm 16:csc_occ_identity_max 17:occvirt_leakage 18:occvirt_top_occ 19:occvirt_top_virt 20:occvirt_top_abs2 21:jpara_top_occ_state 22:jpara_top_occ_value 23:norm_state_99 24:norm_state_100 25:norm_state_129 26:csc_step_delta 27:leak100_129_step_delta 28:csc_pre_mixed 29:csc_post_overlap 30:csc_post_raw 31:leak100_129_pre_mixed 32:leak100_129_post_overlap 33:leak100_129_post_raw 34:leak100_129_current 35:rho_ff_elec 36:rho_fp_elec 37:rho_pp_elec 38:rho_owned_elec 39:rho_imported_elec 40:rho_local_all_elec 41:rho_global_raw_elec 42:rho_global_scaled_elec 43:rho_contract_residual_elec'
   end if
 
   if (iperiodic == 3) then
@@ -357,13 +371,32 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                                      dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)], [3,2]), &
                             dg_frag%current(1:3))
     end select
+
+    if (fh_dg_current_decomp > 0) then
+      write(fh_dg_current_decomp,'(I8,1X,F16.8,41(1X,E23.15E3))') itt, dble(itt)*dt, &
+        dg_frag%current_para(1), dg_frag%current_para(2), dg_frag%current_para(3), &
+        dg_frag%current_dia(1), dg_frag%current_dia(2), dg_frag%current_dia(3), &
+        dg_frag%current_total(1), dg_frag%current_total(2), dg_frag%current_total(3), &
+        dg_frag%rho_drift_indicator, dg_frag%coef_occ_norm_drift, dg_frag%coef_occ_norm, &
+        dg_frag%csc_occ_identity_norm, dg_frag%csc_occ_identity_max, dg_frag%occvirt_leakage, &
+        dble(dg_frag%occvirt_top_occ), dble(dg_frag%occvirt_top_virt), dg_frag%occvirt_top_abs2, &
+        dble(dg_frag%jpara_top_occ_state), dg_frag%jpara_top_occ_value, &
+        dg_frag%selfexc_track_norm(1), dg_frag%selfexc_track_norm(2), dg_frag%selfexc_track_norm(3), &
+        dg_frag%selfexc_csc_step_delta, dg_frag%selfexc_leak100_129_step_delta, &
+        dg_frag%selfexc_csc_stage_pre_mixed, dg_frag%selfexc_csc_stage_post_overlap, dg_frag%selfexc_csc_stage_post_raw, &
+        dg_frag%selfexc_leak100_129_pre_mixed, dg_frag%selfexc_leak100_129_post_overlap, dg_frag%selfexc_leak100_129_post_raw, &
+        dg_frag%selfexc_leak100_129_current, dg_frag%rho_ff_elec, dg_frag%rho_fp_elec, dg_frag%rho_pp_elec, &
+        dg_frag%rho_owned_elec, dg_frag%rho_imported_elec, dg_frag%rho_local_all_elec, dg_frag%rho_global_raw_elec, &
+        dg_frag%rho_global_scaled_elec, dg_frag%rho_contract_residual_elec
+    end if
     
     ! Write energy data
     call write_rt_energy_data(itt, ofl, dt, energy, md)
     
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. mod(itt, 10) == 0) then
-      write(*,'(1x,i10,f12.3,3e16.6e3,e20.10e3)') itt, dble(itt)*dt, dg_frag%current(:), dg_frag%total_energy
+      write(*,'(1x,i10,f12.3,3e16.6e3,2e20.10e3)') itt, dble(itt)*dt, dg_frag%current(:), &
+                                                   dg_frag%elec_num_raw, dg_frag%total_energy
     end if
   end do
   
@@ -375,6 +408,10 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call finalize_dg_fragment_rt_soi(dg_frag)
   else
     call finalize_dg_fragment_rt_std(dg_frag)
+  end if
+
+  if (fh_dg_current_decomp > 0) then
+    close(fh_dg_current_decomp)
   end if
   
   if (comm_is_root(nproc_id_global)) then

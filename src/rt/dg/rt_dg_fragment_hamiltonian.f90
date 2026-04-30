@@ -81,6 +81,95 @@
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_ham
 
+  integer function map_global_to_periodic_box_coord_ham(ig, lb, ub) result(iloc)
+    implicit none
+    integer, intent(in) :: ig, lb, ub
+    integer :: nbox
+
+    nbox = ub - lb + 1
+    if (nbox <= 0) then
+      iloc = 0
+      return
+    end if
+    iloc = lb + modulo(ig - lb, nbox)
+  end function map_global_to_periodic_box_coord_ham
+
+  subroutine copy_periodic_global_scalar_to_rank_buffer(dg_frag, grid, field_global, field_buffer)
+    use structures, only: s_rgrid, s_scalar
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_rgrid), intent(in) :: grid
+    type(s_scalar), intent(in) :: field_global
+    real(8), intent(out) :: field_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                                         dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                                         dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3))
+    integer :: ix, iy, iz
+    integer :: gx, gy, gz
+
+    do iz = dg_frag%rank_buf_lo(3), dg_frag%rank_buf_hi(3)
+      gz = map_global_to_phi_box_coord_ham(iz, grid%is(3), grid%ie(3), dg_frag%lgnum_total(3))
+      do iy = dg_frag%rank_buf_lo(2), dg_frag%rank_buf_hi(2)
+        gy = map_global_to_phi_box_coord_ham(iy, grid%is(2), grid%ie(2), dg_frag%lgnum_total(2))
+        do ix = dg_frag%rank_buf_lo(1), dg_frag%rank_buf_hi(1)
+          gx = map_global_to_phi_box_coord_ham(ix, grid%is(1), grid%ie(1), dg_frag%lgnum_total(1))
+          if (gx == 0 .or. gy == 0 .or. gz == 0) then
+            field_buffer(ix, iy, iz) = 0.0d0
+          else
+            field_buffer(ix, iy, iz) = field_global%f(gx, gy, gz)
+          end if
+        end do
+      end do
+    end do
+  end subroutine copy_periodic_global_scalar_to_rank_buffer
+
+  integer function map_global_to_fragment_phi_box_coord_ham(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, ig, lb, ub
+    integer :: core_lo, ndom, ig_wrap
+
+    core_lo = dg_frag%ixyz_frag(axis, ifrag)
+    ndom = dg_frag%nxyz_domain(axis, ifrag)
+    if (ndom <= 0) then
+      iloc = 0
+      return
+    end if
+    ig_wrap = core_lo + modulo(ig - core_lo, ndom)
+    ig_wrap = modulo(ig_wrap - 1, dg_frag%lgnum_total(axis)) + 1
+    iloc = map_global_to_phi_box_coord_ham(ig_wrap, lb, ub, dg_frag%lgnum_total(axis))
+  end function map_global_to_fragment_phi_box_coord_ham
+
+  subroutine enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, i_local, jo
+
+    integer :: ix, iy, iz
+    integer :: sx, sy, sz
+    integer :: lb1, ub1, lb2, ub2, lb3, ub3
+
+    lb1 = lbound(dg_frag%phi_frag, 1)
+    ub1 = ubound(dg_frag%phi_frag, 1)
+    lb2 = lbound(dg_frag%phi_frag, 2)
+    ub2 = ubound(dg_frag%phi_frag, 2)
+    lb3 = lbound(dg_frag%phi_frag, 3)
+    ub3 = ubound(dg_frag%phi_frag, 3)
+
+    do iz = lb3, ub3
+      sz = map_global_to_fragment_phi_box_coord_ham(dg_frag, ifrag, 3, iz, lb3, ub3)
+      if (sz == 0) cycle
+      do iy = lb2, ub2
+        sy = map_global_to_fragment_phi_box_coord_ham(dg_frag, ifrag, 2, iy, lb2, ub2)
+        if (sy == 0) cycle
+        do ix = lb1, ub1
+          sx = map_global_to_fragment_phi_box_coord_ham(dg_frag, ifrag, 1, ix, lb1, ub1)
+          if (sx == 0) cycle
+          dg_frag%phi_frag(ix, iy, iz, jo, i_local) = dg_frag%phi_frag(sx, sy, sz, jo, i_local)
+        end do
+      end do
+    end do
+  end subroutine enforce_fragment_periodic_buffer_for_state_ham
+
   integer function find_momentum_block(dg_frag, ifrag_row, ifrag_col) result(iblk)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -434,11 +523,8 @@
     integer :: iorg_chk(3), ndom_chk(3)
     integer :: gx, gy, gz, bx, by, bz
     integer :: ndom(3)
-    integer :: i_halo, jfrag, n_basis_halo, n_basis_halo_max
-    integer :: l(3), halo_send_idx(3), halo_recv_idx(3)
-    integer :: npts_halo, ipt
+    integer :: i_halo
     real(8) :: hvol
-    real(8) :: halo_integral_t, halo_integral_h, halo_integral_t_sum, halo_integral_h_sum, t_point, h_point, halo_val
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
@@ -452,9 +538,6 @@
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     real(8), allocatable :: partial_th(:), reduced_th(:)
-    real(8), allocatable :: halo_partial_t(:), halo_partial_h(:), halo_reduced_t(:), halo_reduced_h(:)
-    real(8), allocatable :: halo_reduce_pair(:), halo_reduce_sum(:)
-    real(8), allocatable :: halo_t_point_buf(:), halo_h_point_buf(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: loc_s_dbg(3), loc_e_dbg(3)
@@ -462,7 +545,7 @@
     logical :: release_dense_fragment_ops
     logical :: has_overlap_dbg
     logical :: probe_rank_main, probe_rank_352_396, probe_small_frag2
-    logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup, need_halo_alloc
+    logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup
     logical :: jo_edge, jo_probe_main, jo_probe_352_396, jo_probe_small_frag2
     logical, parameter :: enable_hamiltonian_trace = .false.
     logical, parameter :: enable_step2_probe = .false.
@@ -482,6 +565,10 @@
       dg_frag%H_mat = 0.0d0
       return
     end if
+
+    ! Enforce fragment-local stencil policy: no halo communication path.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
     
     if (comm_is_root(dg_frag%id)) then
       write(*,*)
@@ -755,9 +842,7 @@
       flush(6)
     end if
     
-    ! Exchange halo regions between fragments before stencil operations
-    ! This ensures accurate Laplacian calculation at fragment boundaries
-    call exchange_phi_frag_halo(dg_frag)
+    ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
     if (probe_rank_main) then
       write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-step2-halo"
       flush(6)
@@ -1039,166 +1124,12 @@
       end do
     end do
 
-    do ispin = 1, system%nspin
-      i_local = 0
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local = i_local + 1
-        nbf_raw = dg_frag%n_basis(ifrag, ispin)
-        nbf = min(nbf_raw, dg_frag%nstate_frag)
-        if (nbf <= 0) cycle
-
-        n_basis_halo_max = 0
-        do i_halo = 1, dg_frag%n_halo
-          if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-          jfrag = dg_frag%halo(i_halo)%ifrag_src
-          if (jfrag < 1) cycle
-          n_basis_halo_max = max(n_basis_halo_max, dg_frag%n_basis(jfrag, ispin))
-        end do
-        if (n_basis_halo_max > 0) then
-          need_halo_alloc = .false.
-          if (.not. allocated(halo_partial_t)) need_halo_alloc = .true.
-          if (.not. allocated(halo_partial_h)) need_halo_alloc = .true.
-          if (.not. allocated(halo_reduced_t)) need_halo_alloc = .true.
-          if (.not. allocated(halo_reduced_h)) need_halo_alloc = .true.
-          if (.not. allocated(halo_reduce_pair)) need_halo_alloc = .true.
-          if (.not. allocated(halo_reduce_sum)) need_halo_alloc = .true.
-          if (.not. need_halo_alloc) then
-            if (size(halo_partial_t) < n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_partial_h) < n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduced_t) < n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduced_h) < n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduce_pair) < 2 * n_basis_halo_max) need_halo_alloc = .true.
-            if (size(halo_reduce_sum) < 2 * n_basis_halo_max) need_halo_alloc = .true.
-          end if
-          if (need_halo_alloc) then
-            if (allocated(halo_partial_t)) deallocate(halo_partial_t)
-            if (allocated(halo_partial_h)) deallocate(halo_partial_h)
-            if (allocated(halo_reduced_t)) deallocate(halo_reduced_t)
-            if (allocated(halo_reduced_h)) deallocate(halo_reduced_h)
-            if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair)
-            if (allocated(halo_reduce_sum)) deallocate(halo_reduce_sum)
-            allocate(halo_partial_t(n_basis_halo_max), halo_partial_h(n_basis_halo_max))
-            allocate(halo_reduced_t(n_basis_halo_max), halo_reduced_h(n_basis_halo_max))
-            allocate(halo_reduce_pair(2 * n_basis_halo_max), halo_reduce_sum(2 * n_basis_halo_max))
-          end if
-        end if
-
-        do jo = 1, nbf
-          do i_halo = 1, dg_frag%n_halo
-            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-            jfrag = dg_frag%halo(i_halo)%ifrag_src
-            if (jfrag < 1) cycle
-            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
-            if (n_basis_halo <= 0) cycle
-            l = dg_frag%halo(i_halo)%length
-            iblk = find_matrix_block(dg_frag%H_block_map, jfrag, ifrag)
-            iblk_rev = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
-            if (iblk <= 0 .and. iblk_rev <= 0) cycle
-
-            halo_partial_t(1:n_basis_halo) = 0.0d0
-            halo_partial_h(1:n_basis_halo) = 0.0d0
-
-            npts_halo = l(1) * l(2) * l(3)
-            if (.not. allocated(halo_t_point_buf) .or. .not. allocated(halo_h_point_buf)) then
-              if (allocated(halo_t_point_buf)) deallocate(halo_t_point_buf)
-              if (allocated(halo_h_point_buf)) deallocate(halo_h_point_buf)
-              allocate(halo_t_point_buf(npts_halo), halo_h_point_buf(npts_halo))
-            else if (size(halo_t_point_buf) < npts_halo .or. size(halo_h_point_buf) < npts_halo) then
-              deallocate(halo_t_point_buf, halo_h_point_buf)
-              allocate(halo_t_point_buf(npts_halo), halo_h_point_buf(npts_halo))
-            end if
-
-            !$omp parallel do collapse(3) private(iz_chk,iy_chk,ix_chk,ipt,halo_send_idx,halo_recv_idx,t_point,h_point) schedule(static)
-            do iz_chk = 1, l(3)
-              do iy_chk = 1, l(2)
-                do ix_chk = 1, l(1)
-                  ipt = ((iz_chk - 1) * l(2) + (iy_chk - 1)) * l(1) + ix_chk
-                  call get_halo_block_point_indices(dg_frag%halo(i_halo), ix_chk, iy_chk, iz_chk, halo_send_idx, halo_recv_idx)
-                  call apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, halo_recv_idx, t_point, h_point)
-                  halo_t_point_buf(ipt) = t_point
-                  halo_h_point_buf(ipt) = h_point
-                end do
-              end do
-            end do
-            !$omp end parallel do
-
-            !$omp parallel do private(io,halo_integral_t,halo_integral_h,iz_chk,iy_chk,ix_chk,ipt,halo_val) schedule(static)
-            do io = 1, n_basis_halo
-              halo_integral_t = 0.0d0
-              halo_integral_h = 0.0d0
-              do iz_chk = 1, l(3)
-                do iy_chk = 1, l(2)
-                  do ix_chk = 1, l(1)
-                    ipt = ((iz_chk - 1) * l(2) + (iy_chk - 1)) * l(1) + ix_chk
-                    halo_val = dg_frag%halo(i_halo)%buf_recv(ix_chk, iy_chk, iz_chk, io, 1)
-                    halo_integral_t = halo_integral_t + halo_val * halo_t_point_buf(ipt) * hvol
-                    halo_integral_h = halo_integral_h + halo_val * halo_h_point_buf(ipt) * hvol
-                  end do
-                end do
-              end do
-              halo_partial_t(io) = halo_integral_t
-              halo_partial_h(io) = halo_integral_h
-            end do
-            !$omp end parallel do
-
-            halo_reduce_pair(1:n_basis_halo) = halo_partial_t(1:n_basis_halo)
-            halo_reduce_pair(n_basis_halo + 1:2 * n_basis_halo) = halo_partial_h(1:n_basis_halo)
-            call comm_summation(halo_reduce_pair, halo_reduce_sum, 2 * n_basis_halo, dg_frag%icomm_frag)
-            halo_reduced_t(1:n_basis_halo) = halo_reduce_sum(1:n_basis_halo)
-            halo_reduced_h(1:n_basis_halo) = halo_reduce_sum(n_basis_halo + 1:2 * n_basis_halo)
-
-            if (.not. dg_frag%is_frag_root) cycle
-
-            if (iblk > 0 .and. iblk_rev > 0) then
-              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum) schedule(static)
-              do io = 1, n_basis_halo
-                halo_integral_t_sum = halo_reduced_t(io)
-                halo_integral_h_sum = halo_reduced_h(io)
-                dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
-                dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
-              end do
-              !$omp end parallel do
-            else if (iblk > 0) then
-              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum) schedule(static)
-              do io = 1, n_basis_halo
-                halo_integral_t_sum = halo_reduced_t(io)
-                halo_integral_h_sum = halo_reduced_h(io)
-                dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
-                  dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * halo_integral_h_sum
-              end do
-              !$omp end parallel do
-            else
-              !$omp parallel do private(io,halo_integral_t_sum,halo_integral_h_sum) schedule(static)
-              do io = 1, n_basis_halo
-                halo_integral_t_sum = halo_reduced_t(io)
-                halo_integral_h_sum = halo_reduced_h(io)
-                dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_kinetic_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_t_sum
-                dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                  dg_frag%H_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * halo_integral_h_sum
-              end do
-              !$omp end parallel do
-            end if
-          end do
-        end do
-      end do
-    end do
+    ! Non-buffered halo projection route has been removed.
 
     do i_diag = 1, n_local_diag
       if (allocated(H_diag_blocks(i_diag)%val)) deallocate(H_diag_blocks(i_diag)%val)
       if (allocated(H_kin_diag_blocks(i_diag)%val)) deallocate(H_kin_diag_blocks(i_diag)%val)
     end do
-    if (allocated(halo_partial_t)) deallocate(halo_partial_t, halo_partial_h, halo_reduced_t, halo_reduced_h)
-    if (allocated(halo_reduce_pair)) deallocate(halo_reduce_pair, halo_reduce_sum)
-    if (allocated(halo_t_point_buf)) deallocate(halo_t_point_buf, halo_h_point_buf)
     if (allocated(H_diag_blocks)) deallocate(H_diag_blocks)
     if (allocated(H_kin_diag_blocks)) deallocate(H_kin_diag_blocks)
     ! CRITICAL: MPI aggregation of Hamiltonian matrix
@@ -1430,6 +1361,38 @@
       end do
     end do
   end subroutine build_total_potential_grid
+
+  subroutine build_total_potential_grid_with_buffered_hartree(grid, dg_frag, Vh_buffer, Vxc_spin, Vpsl, V_total)
+    use structures
+    implicit none
+    type(s_rgrid), intent(in) :: grid
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    real(8), intent(in) :: Vh_buffer(:,:,:)
+    type(s_scalar), intent(in) :: Vxc_spin, Vpsl
+    real(8), intent(out) :: V_total(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
+    integer :: ix, iy, iz
+    integer :: bx, by, bz
+    integer :: b_lo1, b_lo2, b_lo3
+    integer :: b_hi1, b_hi2, b_hi3
+
+    b_lo1 = lbound(Vh_buffer, 1)
+    b_hi1 = ubound(Vh_buffer, 1)
+    b_lo2 = lbound(Vh_buffer, 2)
+    b_hi2 = ubound(Vh_buffer, 2)
+    b_lo3 = lbound(Vh_buffer, 3)
+    b_hi3 = ubound(Vh_buffer, 3)
+
+    do iz = grid%is(3), grid%ie(3)
+      bz = map_global_to_periodic_box_coord_ham(iz, b_lo3, b_hi3)
+      do iy = grid%is(2), grid%ie(2)
+        by = map_global_to_periodic_box_coord_ham(iy, b_lo2, b_hi2)
+        do ix = grid%is(1), grid%ie(1)
+          bx = map_global_to_periodic_box_coord_ham(ix, b_lo1, b_hi1)
+          V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh_buffer(bx, by, bz) + Vxc_spin%f(ix, iy, iz)
+        end do
+      end do
+    end do
+  end subroutine build_total_potential_grid_with_buffered_hartree
 
   !=======================================================================
   ! Build T|phi_j> and H|phi_j>=T|phi_j>+V|phi_j> for one fragment/basis state
@@ -1686,6 +1649,7 @@
         " ifrag=", ifrag, " ndom=", ndom
       stop 1
     end if
+    call enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
     call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
     lgx = dg_frag%lgnum_total(1)
     lgy = dg_frag%lgnum_total(2)
@@ -1701,11 +1665,8 @@
     ! for all interior points without boundary restrictions.
     
     ! Apply kinetic operator using finite difference stencil.
-    ! With periodic halos already populated in phi_frag, convert each global
-    ! coordinate to its periodic interior index once, then use ix0+/-n offsets
-    ! directly for neighbor access.
-    !
-    ! Note: exchange_phi_frag_halo() must be called before this routine
+    ! Convert each global coordinate to its periodic interior index once,
+    ! then use ix0+/-n offsets directly for neighbor access inside phi_frag.
 
 !$omp parallel do private(lz, ly, lx, gz, gy, gx, ix0, iy0, iz0, v) schedule(static)
     do lz = loc_s(3), loc_e(3)
@@ -1825,7 +1786,7 @@
   subroutine apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
     use structures
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer,                intent(in) :: i_local, jo
     type(s_rgrid),          intent(in) :: mg
     type(s_stencil),        intent(in) :: stencil
@@ -1850,6 +1811,7 @@
     p_ub3 = ubound(dg_frag%phi_frag, 3)
     nloc1 = loc_e(1) - loc_s(1) + 1
     nloc2 = loc_e(2) - loc_s(2) + 1
+    call enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
     !$omp parallel do private(lx, ly, lz, ipt, gxg, gyg, gzg, gx, gy, gz, ix0, iy0, iz0) schedule(static)
     do lz = 1, ndom(3)
       do ly = 1, ndom(2)
@@ -2112,10 +2074,8 @@
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
-    integer :: npts_local, npts_halo, ipt, nx_local, ny_local
-    integer :: n_basis_halo_max, npts_halo_max
+    integer :: npts_local, ipt, nx_local, ny_local
     logical :: log_frag_progress, has_overlap
-    logical :: has_halo_work
     logical, parameter :: enable_momentum_probe = .false.
     real(8) :: hvol, integral
     real(8) :: momentum_gb
@@ -2128,9 +2088,12 @@
     real(8) :: frag_grad_start, frag_self_start, frag_halo_start
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components, fragment-local)
     real(8), allocatable :: grad_local_2d(:,:), phi_local_2d(:,:), self_proj(:,:)
-    real(8), allocatable :: grad_halo_2d(:,:), halo_buf_2d(:,:), halo_proj(:,:)
+    
     
     if (.not. dg_frag%has_real_space_basis) return
+    ! Enforce fragment-local stencil policy: no halo communication path.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
     time_halo_exchange = 0.0d0
     time_self_integral = 0.0d0
     time_halo_integral = 0.0d0
@@ -2168,11 +2131,7 @@
     ie = mg%ie
     hvol = system%hvol
     
-    ! Exchange halo regions before stencil operations
-    call cpu_time(t0)
-    call exchange_phi_frag_halo(dg_frag)
-    call cpu_time(t1)
-    time_halo_exchange = time_halo_exchange + (t1 - t0)
+    ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
     if (enable_momentum_probe) then
       write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo"
       flush(6)
@@ -2265,21 +2224,6 @@
         !$omp end parallel do
         iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
 
-        n_basis_halo_max = 0
-        npts_halo_max = 0
-        do i_halo = 1, dg_frag%n_halo
-          if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-          jfrag = dg_frag%halo(i_halo)%ifrag_src
-          if (jfrag < 1) cycle
-          n_basis_halo_max = max(n_basis_halo_max, dg_frag%n_basis(jfrag, ispin))
-          l = dg_frag%halo(i_halo)%length
-          npts_halo_max = max(npts_halo_max, l(1) * l(2) * l(3))
-        end do
-        has_halo_work = (n_basis_halo_max > 0 .and. npts_halo_max > 0)
-        if (has_halo_work) then
-          allocate(grad_halo_2d(npts_halo_max, 3), halo_buf_2d(npts_halo_max, n_basis_halo_max), halo_proj(n_basis_halo_max, 3))
-        end if
-
         ! Loop over basis functions in fragment j (ket side)
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
         ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
@@ -2351,170 +2295,7 @@
           end do
 
           ig_col = ig_j
-          if (ig_col >= 1 .and. ig_col <= dg_frag%n_mat_max) then
-            if (enable_momentum_probe .and. jo == 1) then
-              write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
-                " ifrag=", ifrag, " stage=before-halo-loop ig_col=", ig_col
-              flush(6)
-            end if
-            do i_halo = 1, dg_frag%n_halo
-              if (enable_momentum_probe .and. jo == 1) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
-                  " ifrag=", ifrag, " i_halo=", i_halo, " src=", dg_frag%halo(i_halo)%ifrag_src, &
-                  " dst=", dg_frag%halo(i_halo)%ifrag_dst, " len=", dg_frag%halo(i_halo)%length(1), &
-                  dg_frag%halo(i_halo)%length(2), dg_frag%halo(i_halo)%length(3)
-                flush(6)
-              end if
-              if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-              jfrag = dg_frag%halo(i_halo)%ifrag_src
-              n_basis_halo = dg_frag%n_basis(jfrag, ispin)
-              l = dg_frag%halo(i_halo)%length
-              if (enable_momentum_probe .and. jo == 1) then
-                write(*,'(1x,a,i0,a,i0,a,l1,a,l1,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
-                  " ifrag=", ifrag, " buf_recv_alloc=", allocated(dg_frag%halo(i_halo)%buf_recv), &
-                  " buf_send_alloc=", allocated(dg_frag%halo(i_halo)%buf_send), " n_basis_halo=", n_basis_halo
-                flush(6)
-              end if
-              if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
-                write(*,*) "[FATAL] momentum halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
-                stop 1
-              end if
-              if (enable_momentum_probe .and. jo == 1) then
-                write(*,'(1x,a,i0,a,5(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
-                  " buf_recv_shape=", size(dg_frag%halo(i_halo)%buf_recv, 1), size(dg_frag%halo(i_halo)%buf_recv, 2), &
-                  size(dg_frag%halo(i_halo)%buf_recv, 3), size(dg_frag%halo(i_halo)%buf_recv, 4), &
-                  size(dg_frag%halo(i_halo)%buf_recv, 5)
-                flush(6)
-              end if
-              if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
-                write(*,*) "[FATAL] momentum halo basis exceeds buf dim4: rank=", dg_frag%id, &
-                  " i_halo=", i_halo, " n_basis_halo=", n_basis_halo, " buf_dim4=", size(dg_frag%halo(i_halo)%buf_recv, 4)
-                stop 1
-              end if
-              if (n_basis_halo > size(dg_frag%index_basis, 1)) then
-                write(*,*) "[FATAL] momentum halo basis exceeds index_basis dim1: rank=", dg_frag%id, &
-                  " i_halo=", i_halo, " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, &
-                  " index_basis_dim1=", size(dg_frag%index_basis, 1)
-                stop 1
-              end if
-              npts_halo = l(1) * l(2) * l(3)
-              if (npts_halo <= 0 .or. n_basis_halo <= 0) cycle
-              if (enable_momentum_probe .and. jo == 1) then
-                write(*,'(1x,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
-                  " npts_halo=", npts_halo
-                flush(6)
-              end if
-
-              if (.not. has_halo_work) cycle
-              if (enable_momentum_probe .and. jo == 1) then
-                write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo-alloc"
-                flush(6)
-              end if
-
-              ipt = 0
-              do iz = 1, l(3)
-                do iy = 1, l(2)
-                  do ix = 1, l(1)
-                    if (enable_momentum_probe .and. jo == 1 .and. ix == 1 .and. iy == 1 .and. iz == 1) then
-                      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=before-first-halo-index"
-                      flush(6)
-                    end if
-                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
-                    if (enable_momentum_probe .and. jo == 1 .and. ix == 1 .and. iy == 1 .and. iz == 1) then
-                      write(*,'(1x,a,i0,a,3(i0,1x),a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
-                        " first-halo send_idx=", halo_send_idx(1), halo_send_idx(2), halo_send_idx(3), &
-                        " recv_idx=", halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3)
-                      flush(6)
-                    end if
-                    ipt = ipt + 1
-                    ! For stencil evaluation use source-side indices; recv-side halo points can
-                    ! sit at the outer ghost edge where +/-4 access may go out of bounds.
-                    call apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, halo_send_idx, &
-                      grad_halo_2d(ipt, 1), grad_halo_2d(ipt, 2), grad_halo_2d(ipt, 3))
-                  end do
-                end do
-              end do
-
-              !$omp parallel do private(io,iz,iy,ix,ipt) schedule(static)
-              do io = 1, n_basis_halo
-                do iz = 1, l(3)
-                  do iy = 1, l(2)
-                    !$omp simd private(ipt)
-                    do ix = 1, l(1)
-                      ipt = ((iz - 1) * l(2) + (iy - 1)) * l(1) + ix
-                      halo_buf_2d(ipt, io) = dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1)
-                    end do
-                  end do
-                end do
-              end do
-              !$omp end parallel do
-
-              call cpu_time(t0)
-              call dgemm('T', 'N', n_basis_halo, 3, npts_halo, hvol, halo_buf_2d, npts_halo_max, &
-                grad_halo_2d, npts_halo_max, 0.0d0, halo_proj, n_basis_halo_max)
-              call cpu_time(t1)
-              time_halo_integral = time_halo_integral + (t1 - t0)
-
-              iblk = find_momentum_block(dg_frag, jfrag, ifrag)
-              iblk_rev = find_momentum_block(dg_frag, ifrag, jfrag)
-              if (iblk > 0 .and. iblk_rev > 0) then
-                !$omp parallel do private(io,ig_row,idir,integral) schedule(static)
-                do io = 1, n_basis_halo
-                  ig_row = dg_frag%index_basis(io, jfrag, ispin)
-                  if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-                  if (io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
-                      jo <= size(dg_frag%momentum_blocks(iblk)%val, 3) .and. &
-                      jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
-                      io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
-                    do idir = 1, 3
-                      integral = halo_proj(io, idir)
-                      dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) = &
-                        dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) + 0.5d0 * integral
-                      dg_frag%momentum_blocks(iblk_rev)%val(idir, jo, io, ispin) = &
-                        dg_frag%momentum_blocks(iblk_rev)%val(idir, jo, io, ispin) - 0.5d0 * integral
-                    end do
-                  end if
-                end do
-                !$omp end parallel do
-              else if (iblk > 0) then
-                !$omp parallel do private(io,ig_row,idir,integral) schedule(static)
-                do io = 1, n_basis_halo
-                  ig_row = dg_frag%index_basis(io, jfrag, ispin)
-                  if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-                  if (io <= size(dg_frag%momentum_blocks(iblk)%val, 2) .and. &
-                      jo <= size(dg_frag%momentum_blocks(iblk)%val, 3)) then
-                    do idir = 1, 3
-                      integral = halo_proj(io, idir)
-                      dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) = &
-                        dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) + 0.5d0 * integral
-                    end do
-                  end if
-                end do
-                !$omp end parallel do
-              else if (iblk_rev > 0) then
-                !$omp parallel do private(io,ig_row,idir,integral) schedule(static)
-                do io = 1, n_basis_halo
-                  ig_row = dg_frag%index_basis(io, jfrag, ispin)
-                  if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-                  if (jo <= size(dg_frag%momentum_blocks(iblk_rev)%val, 2) .and. &
-                      io <= size(dg_frag%momentum_blocks(iblk_rev)%val, 3)) then
-                    do idir = 1, 3
-                      integral = halo_proj(io, idir)
-                      dg_frag%momentum_blocks(iblk_rev)%val(idir, jo, io, ispin) = &
-                        dg_frag%momentum_blocks(iblk_rev)%val(idir, jo, io, ispin) - 0.5d0 * integral
-                    end do
-                  end if
-                end do
-                !$omp end parallel do
-              end if
-
-            end do
-            if (enable_momentum_probe .and. jo == 1) then
-              write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
-                " ifrag=", ifrag, " stage=after-halo-loop"
-              flush(6)
-            end if
-          end if
+          if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
 
         end do  ! jo
         if (enable_momentum_probe) then
@@ -2523,9 +2304,6 @@
           flush(6)
         end if
         if (allocated(grad_phi)) deallocate(grad_phi)
-        if (allocated(grad_halo_2d)) deallocate(grad_halo_2d)
-        if (allocated(halo_buf_2d)) deallocate(halo_buf_2d)
-        if (allocated(halo_proj)) deallocate(halo_proj)
         deallocate(phi_local_2d, grad_local_2d, self_proj)
       end do  ! ifrag
     end do  ! ispin
@@ -2744,15 +2522,15 @@
   !=======================================================================
   subroutine calculate_overlap_matrix(dg_frag, system, mg)
     use structures
-    use communication, only: comm_is_root
+    use communication, only: comm_is_root, comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
     type(s_rgrid),          intent(in)    :: mg
 
-    integer :: ifrag, i_local, ispin, io, jo, iblk, iblk_rev, nbf, jo_progress_stride
-    integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
-    integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
+    integer :: ifrag, i_local, ispin, io, jo, iblk, nbf, jo_progress_stride
+    integer :: ix, iy, iz, is(3), ie(3), i_halo
+    integer :: ig_row, ig_col, d(3), ii, jj
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: npts_local, nx_local, ny_local, ipt
     integer :: phi_loc_s(3), phi_loc_e(3)
@@ -2767,6 +2545,10 @@
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_mat)) return
+
+    ! Enforce fragment-local stencil policy: no halo communication path.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
 
     release_dense_overlap = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
@@ -2794,8 +2576,6 @@
     phi_ub1 = ubound(dg_frag%phi_frag, 1)
     phi_ub2 = ubound(dg_frag%phi_frag, 2)
     phi_ub3 = ubound(dg_frag%phi_frag, 3)
-
-    call exchange_phi_frag_halo(dg_frag)
 
     do ispin = 1, system%nspin
       i_local = 0
@@ -2884,71 +2664,6 @@
               dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = integral
             end if
           end do
-          do i_halo = 1, dg_frag%n_halo
-            if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-            jfrag = dg_frag%halo(i_halo)%ifrag_src
-            if (jfrag < 1) cycle
-            n_basis_halo = dg_frag%n_basis(jfrag, ispin)
-            l = dg_frag%halo(i_halo)%length
-            if (size(dg_frag%halo(i_halo)%buf_recv, 5) < 1) then
-              write(*,*) "[FATAL] overlap halo buf dim5 invalid: rank=", dg_frag%id, " i_halo=", i_halo
-              stop 1
-            end if
-            if (n_basis_halo > size(dg_frag%halo(i_halo)%buf_recv, 4)) then
-              write(*,*) "[FATAL] overlap halo basis exceeds buf dim4: rank=", dg_frag%id, &
-                " i_halo=", i_halo, " n_basis_halo=", n_basis_halo, " buf_dim4=", size(dg_frag%halo(i_halo)%buf_recv, 4)
-              stop 1
-            end if
-            if (n_basis_halo > size(dg_frag%index_basis, 1)) then
-              write(*,*) "[FATAL] overlap halo basis exceeds index_basis dim1: rank=", dg_frag%id, &
-                " i_halo=", i_halo, " jfrag=", jfrag, " n_basis_halo=", n_basis_halo, &
-                " index_basis_dim1=", size(dg_frag%index_basis, 1)
-              stop 1
-            end if
-            iblk = find_matrix_block(dg_frag%S_block_map, jfrag, ifrag)
-            iblk_rev = find_matrix_block(dg_frag%S_block_map, ifrag, jfrag)
-
-            do io = 1, n_basis_halo
-              ig_row = dg_frag%index_basis(io, jfrag, ispin)
-              if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-              integral = 0.0d0
-              call cpu_time(t0)
-              do iz = 1, l(3)
-                do iy = 1, l(2)
-                  do ix = 1, l(1)
-                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
-                    integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               dg_frag%phi_frag(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local) * hvol
-                  end do
-                end do
-              end do
-              call cpu_time(t1)
-              time_halo_integral = time_halo_integral + (t1 - t0)
-                if (iblk > 0 .and. iblk_rev > 0) then
-                  if (io <= size(dg_frag%S_mat_blocks(iblk)%val, 1) .and. &
-                      jo <= size(dg_frag%S_mat_blocks(iblk)%val, 2) .and. &
-                      jo <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 1) .and. &
-                      io <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 2)) then
-                    dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = &
-                      dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * integral
-                    dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                      dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * integral
-                  end if
-                else if (iblk > 0) then
-                  if (io <= size(dg_frag%S_mat_blocks(iblk)%val, 1) .and. &
-                      jo <= size(dg_frag%S_mat_blocks(iblk)%val, 2)) then
-                    dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = &
-                      dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * integral
-                  end if
-                else if (iblk_rev > 0) then
-                  if (jo <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 1) .and. &
-                      io <= size(dg_frag%S_mat_blocks(iblk_rev)%val, 2)) then
-                    dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) = &
-                      dg_frag%S_mat_blocks(iblk_rev)%val(jo, io, ispin) + 0.5d0 * integral
-                  end if
-                end if
-            end do
-          end do
 
         end do
         deallocate(phi_local_2d, self_overlap)
@@ -2970,11 +2685,20 @@
     write(*,'(1x,a,1pe12.4)') "        overlap reduce done time=", time_reduce_total
     flush(6)
 
-    call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
-    if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
-      do i_halo = 1, size(dg_frag%S_mat_blocks)
-        dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
-      end do
+    if (release_dense_overlap) then
+      if (allocated(dg_frag%S_mat_prop_blocks)) then
+        do i_halo = 1, size(dg_frag%S_mat_prop_blocks)
+          if (allocated(dg_frag%S_mat_prop_blocks(i_halo)%val)) deallocate(dg_frag%S_mat_prop_blocks(i_halo)%val)
+        end do
+        deallocate(dg_frag%S_mat_prop_blocks)
+      end if
+    else
+      call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+      if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
+        do i_halo = 1, size(dg_frag%S_mat_blocks)
+          dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
+        end do
+      end if
     end if
 
     do ispin = 1, dg_frag%nspin
@@ -2985,7 +2709,7 @@
                        size(dg_frag%S_mat_blocks(iblk)%val, 2))
           if (dg_frag%S_mat_blocks(iblk)%val(ii, ii, ispin) < 1.0d-12) then
             dg_frag%S_mat_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
-            dg_frag%S_mat_prop_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
+            if (allocated(dg_frag%S_mat_prop_blocks)) dg_frag%S_mat_prop_blocks(iblk)%val(ii, ii, ispin) = 1.0d0
           end if
         end do
       end do

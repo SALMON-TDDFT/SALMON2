@@ -5,7 +5,7 @@
     use salmon_global, only: yn_fix_func
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw, sync_raw_coef_from_mixed
+    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw, sync_raw_coef_from_mixed, capture_mixed_stage_diagnostics
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -75,12 +75,19 @@
 
       ! Stage 1
       Ac_tot = rt%Ac_tot(:, itt)
+      if (use_mixed_rt) call capture_mixed_stage_diagnostics(dg_frag, itt, 10, 'rk4_s1_after_ref_restore')
       dg_frag%coef = coef_ref
       if (use_mixed_rt) then
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 1, 'rk4_s1_sync_mixed_entry')
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 2, 'rk4_s1_sync_mixed_exit')
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 11, 'rk4_s1_sync_raw_entry')
+        do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 3, 'rk4_s1_sync_raw_exit')
       end if
       if (enable_rk_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
@@ -89,6 +96,11 @@
         flush(6)
       end if
       if (yn_fix_func == 'n') then
+        if (itt == 1) then
+          write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_RK_S1_UPDATE rank=', dg_frag%id, ' itt=', itt, &
+            ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         if (enable_rk_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -98,6 +110,11 @@
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        if (itt == 1) then
+          write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_RK_S1_UPDATE rank=', dg_frag%id, ' itt=', itt, &
+            ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         if (enable_rk_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
             " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
@@ -112,9 +129,24 @@
         flush(6)
       end if
       if (n_pw > 0) then
+        if (itt == 1) then
+          write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_RK_S1_DERIV rank=', dg_frag%id, ' itt=', itt, &
+            ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,1), k_pw(:,:,:,1))
       else
+        if (itt == 1) then
+          write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_RK_S1_DERIV rank=', dg_frag%id, ' itt=', itt, &
+            ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,1))
+      end if
+      if (itt == 1) then
+        write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_RK_S1_DERIV rank=', dg_frag%id, ' itt=', itt, &
+          ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
       end if
       if (enable_rk_trace) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        rk trace: rank=", dg_frag%id, &
@@ -167,10 +199,15 @@
 !$omp end parallel do
       end if
       if (use_mixed_rt) then
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+        do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
       end if
       if (yn_fix_func == 'n') then
         if (enable_rk_trace) then
@@ -244,10 +281,15 @@
 !$omp end parallel do
       end if
       if (use_mixed_rt) then
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+        do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
       end if
       if (yn_fix_func == 'n') then
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
@@ -298,10 +340,15 @@
 !$omp end parallel do
       end if
       if (use_mixed_rt) then
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+        do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
       end if
       if (yn_fix_func == 'n') then
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
@@ -357,10 +404,15 @@
 !$omp end parallel do
       end if
       if (use_mixed_rt) then
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+        do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
       end if
       if (yn_fix_func == 'n') then
         ! Rebuild H at the final RK4 state/time so next step starts from consistent rho/H.
@@ -430,10 +482,15 @@
 !$omp end do
 !$omp end parallel
             if (use_mixed_rt) then
+              call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
               do ispin = 1, dg_frag%nspin
                 call sync_mixed_coef_from_raw(dg_frag, ispin)
+              end do
+              call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+              do ispin = 1, dg_frag%nspin
                 call sync_raw_coef_from_mixed(dg_frag, ispin)
               end do
+              call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
             end if
           end if
         end do
@@ -468,10 +525,15 @@
             end do
 !$omp end parallel do
             if (use_mixed_rt) then
+              call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
               do ispin = 1, dg_frag%nspin
                 call sync_mixed_coef_from_raw(dg_frag, ispin)
+              end do
+              call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+              do ispin = 1, dg_frag%nspin
                 call sync_raw_coef_from_mixed(dg_frag, ispin)
               end do
+              call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
             end if
           end if
         end do
@@ -519,10 +581,15 @@
 !$omp end parallel
       end associate
       if (use_mixed_rt) then
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 1)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 2)
+        do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call capture_mixed_stage_diagnostics(dg_frag, itt, 3)
       end if
       if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)
     end if

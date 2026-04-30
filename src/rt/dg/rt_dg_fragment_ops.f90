@@ -19,12 +19,15 @@ module rt_dg_fragment_ops
   public :: rebuild_local_h_block_ids
   public :: copy_matrix_blocks_to_complex_dense
   public :: copy_matrix_blocks_metric_to_complex_dense
+  public :: copy_complex_matrix_blocks_metric_to_dense
   public :: copy_matrix_blocks_metric_to_real_dense
   public :: copy_hamiltonian_metric_to_complex_dense
   public :: copy_momentum_blocks_to_complex_dense
   public :: symmetrize_real_matrix_blocks
   public :: mixed_fp_coupling_active
   public :: apply_overlap_operator
+  public :: apply_overlap_operator_batch
+  public :: apply_overlap_operator_diag_only
   public :: solve_overlap_operator_batch
   public :: solve_overlap_operator_batch_local
   public :: copy_overlap_operator_to_dense
@@ -38,6 +41,8 @@ module rt_dg_fragment_ops
   public :: zero_nonlocal_h_matrix_blocks
   public :: sync_raw_coef_from_mixed
   public :: sync_mixed_coef_from_raw
+  public :: capture_mixed_stage_diagnostics
+  public :: reorthonormalize_mixed_occupied_subspace
 
 contains
 
@@ -50,10 +55,33 @@ contains
 
     integer :: ifrag_count, i_local, ifrag, jo
     integer :: nx_max, ny_max, nz_max
-    integer :: nxyz(3)
+    integer :: nxyz(3), trace_mid(3)
+    logical :: enable_selfblock_value_trace
+    logical, save :: selfblock_value_trace_initialized = .false.
+    logical, save :: selfblock_value_trace_cached = .false.
+    character(len=32) :: env_selfblock_value_trace
+    integer :: env_trace_len, env_trace_stat
 
+    if (.not. selfblock_value_trace_initialized) then
+      env_selfblock_value_trace = ''
+      call get_environment_variable('SALMON_DG_SELFBLOCK_VALUE_TRACE', env_selfblock_value_trace, &
+        length=env_trace_len, status=env_trace_stat)
+      if (env_trace_stat == 0 .and. env_trace_len > 0) then
+        if (env_selfblock_value_trace(1:1) == '1' .or. env_selfblock_value_trace(1:1) == 'y' .or. &
+            env_selfblock_value_trace(1:1) == 'Y' .or. env_selfblock_value_trace(1:1) == 't' .or. &
+            env_selfblock_value_trace(1:1) == 'T') selfblock_value_trace_cached = .true.
+      end if
+      selfblock_value_trace_initialized = .true.
+    end if
+    enable_selfblock_value_trace = selfblock_value_trace_cached
     if (.not. dg_frag%has_real_space_basis) return
-    if (dg_frag%gradient_basis_cache_valid) return
+    if (dg_frag%gradient_basis_cache_valid) then
+      if (enable_selfblock_value_trace) then
+        write(*,'(1x,a)') 'DG-GRAD-CACHE-SKIP already_valid'
+        flush(6)
+      end if
+      return
+    end if
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     if (ifrag_count <= 0) return
@@ -90,6 +118,16 @@ contains
       do jo = 1, maxval(dg_frag%n_basis(ifrag, 1:dg_frag%nspin))
         call apply_gradient_to_basis(dg_frag, i_local, jo, mg, stencil, &
           dg_frag%gradient_basis_cache(1:nxyz(1), 1:nxyz(2), 1:nxyz(3), 1:3, jo, i_local))
+        if (enable_selfblock_value_trace .and. jo <= 2) then
+          trace_mid(1) = min(nxyz(1), 6)
+          trace_mid(2) = min(nxyz(2), 6)
+          trace_mid(3) = min(nxyz(3), 6)
+          write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4)') &
+            'DG-GRAD-CACHE ifrag=', ifrag, ' jo=', jo, &
+            ' gz_edge=', dg_frag%gradient_basis_cache(1, 1, 1, 3, jo, i_local), &
+            ' gz_mid=', dg_frag%gradient_basis_cache(trace_mid(1), trace_mid(2), trace_mid(3), 3, jo, i_local)
+          flush(6)
+        end if
       end do
     end do
 
@@ -147,13 +185,15 @@ contains
     deallocate(raw_all)
   end subroutine sync_raw_coef_from_mixed
 
-  subroutine sync_mixed_coef_from_raw(dg_frag, ispin)
+  subroutine sync_mixed_coef_from_raw(dg_frag, ispin, overlap_metric)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: ispin
+    complex(8), intent(in), optional :: overlap_metric(:,:)
 
     integer :: n_frag, n_pw, n_tot, n_basis, nstate
     complex(8), allocatable :: raw_all(:,:), overlap_all(:,:), mixed_all(:,:)
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
 
     if (.not. dg_frag%mixed_basis_ready) return
     if (.not. allocated(dg_frag%mixed_transform)) return
@@ -180,16 +220,354 @@ contains
 
     allocate(raw_all(n_tot, nstate), overlap_all(n_tot, nstate), mixed_all(n_basis, nstate))
     raw_all(:, :) = (0.0d0, 0.0d0)
-    raw_all(1:n_frag, :) = dg_frag%coef(1:n_frag, 1:nstate, ispin)
-    if (n_pw > 0) raw_all(n_frag+1:n_tot, :) = dg_frag%coef_pw(1:n_pw, 1:nstate, ispin)
+    call gather_full_coef_view(dg_frag, ispin, n_frag, nstate, coef_frag_all, coef_pw_all)
+    raw_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:nstate)
+    if (n_pw > 0) raw_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:nstate)
 
-    call apply_overlap_operator_batch(dg_frag, ispin, raw_all, overlap_all, .false.)
+    if (present(overlap_metric)) then
+      if (size(overlap_metric, 1) == n_tot .and. size(overlap_metric, 2) == n_tot) then
+        overlap_all(:, :) = matmul(overlap_metric(1:n_tot, 1:n_tot), raw_all)
+      else
+        call apply_overlap_operator_batch(dg_frag, ispin, raw_all, overlap_all, .false.)
+      end if
+    else
+      call apply_overlap_operator_batch(dg_frag, ispin, raw_all, overlap_all, .false.)
+    end if
     mixed_all(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), overlap_all)
     dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
     dg_frag%coef_mix(1:n_basis, 1:nstate, ispin) = mixed_all(:, :)
 
+    if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+    if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     deallocate(raw_all, overlap_all, mixed_all)
   end subroutine sync_mixed_coef_from_raw
+
+  subroutine capture_mixed_stage_diagnostics(dg_frag, itt, stage_tag, checkpoint_tag)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: itt
+    integer, intent(in) :: stage_tag
+    character(len=*), intent(in), optional :: checkpoint_tag
+
+    integer :: n, n_pw, n_tot, nstate_use_diag
+    integer :: ispin, nocc_diag, nvirt_diag, io_state, tracked_state, occ_idx, virt_idx
+    integer :: env_len, env_status, parse_status
+    real(8) :: csc_occ_identity_norm_local, csc_occ_identity_norm_global
+    real(8) :: csc_norm_value
+    real(8) :: leak_pair_local, leak_pair_global, leak_pair_value
+    real(8) :: state_norm_local(3), state_norm_global(3)
+    real(8) :: nan_count_local, nan_count_global, inf_count_local, inf_count_global
+    real(8) :: tmp_re, tmp_im
+    integer :: ii, jj
+    character(len=64) :: stage_name
+    character(len=64), save :: env_stage_trace = ''
+    logical, save :: stage_trace_initialized = .false.
+    logical, save :: enable_stage_trace = .false.
+    integer, save :: accum_itt = -1
+    integer, save :: accum_count_pre2ov = 0
+    integer, save :: accum_count_ov2raw = 0
+    integer, save :: accum_last_report_itt = -1
+    real(8), save :: accum_csc_pre2ov = 0.0d0
+    real(8), save :: accum_csc_ov2raw = 0.0d0
+    real(8), save :: accum_csc_pre2raw = 0.0d0
+    real(8), save :: accum_leak_pre2ov = 0.0d0
+    real(8), save :: accum_leak_ov2raw = 0.0d0
+    real(8), save :: accum_leak_pre2raw = 0.0d0
+    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: coef_occ_diag(:,:), s_coef_occ(:,:), gram_occ(:,:), leak_proj(:,:)
+
+    if (.not. stage_trace_initialized) then
+      call get_environment_variable('SALMON_DG_SELFXC_STAGE_TRACE', env_stage_trace, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_stage_trace(1:1) == '1' .or. env_stage_trace(1:1) == 'y' .or. env_stage_trace(1:1) == 'Y' .or. &
+            env_stage_trace(1:1) == 't' .or. env_stage_trace(1:1) == 'T') then
+          enable_stage_trace = .true.
+        end if
+      end if
+      stage_trace_initialized = .true.
+    end if
+    if (.not. enable_stage_trace) return
+
+    n = dg_frag%n_mat_max
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n + n_pw
+    if (n_tot <= 0) return
+
+    nstate_use_diag = dg_frag%nstate_tot
+    if (nstate_use_diag <= 0) return
+
+    csc_occ_identity_norm_local = 0.0d0
+    state_norm_local(:) = 0.0d0
+    leak_pair_local = 0.0d0
+    nan_count_local = 0.0d0
+    inf_count_local = 0.0d0
+
+    do ispin = 1, dg_frag%nspin
+      nocc_diag = min(dg_frag%nocc_spin(ispin), min(nstate_use_diag, n_tot))
+      if (nocc_diag <= 0) cycle
+
+      call gather_full_coef_view(dg_frag, ispin, n, nstate_use_diag, coef_frag_all, coef_pw_all, itt_debug=itt)
+
+      do jj = 1, size(coef_frag_all, 2)
+        do ii = 1, size(coef_frag_all, 1)
+          tmp_re = real(coef_frag_all(ii, jj), kind=8)
+          tmp_im = aimag(coef_frag_all(ii, jj))
+          if (.not. ieee_is_finite(tmp_re) .or. .not. ieee_is_finite(tmp_im)) then
+            if (tmp_re /= tmp_re .or. tmp_im /= tmp_im) then
+              nan_count_local = nan_count_local + 1.0d0
+            else
+              inf_count_local = inf_count_local + 1.0d0
+            end if
+          end if
+        end do
+      end do
+      if (n_pw > 0) then
+        do jj = 1, size(coef_pw_all, 2)
+          do ii = 1, size(coef_pw_all, 1)
+            tmp_re = real(coef_pw_all(ii, jj), kind=8)
+            tmp_im = aimag(coef_pw_all(ii, jj))
+            if (.not. ieee_is_finite(tmp_re) .or. .not. ieee_is_finite(tmp_im)) then
+              if (tmp_re /= tmp_re .or. tmp_im /= tmp_im) then
+                nan_count_local = nan_count_local + 1.0d0
+              else
+                inf_count_local = inf_count_local + 1.0d0
+              end if
+            end if
+          end do
+        end do
+      end if
+
+      do tracked_state = 1, 3
+        io_state = dg_frag%selfexc_track_states(tracked_state)
+        if (io_state < 1 .or. io_state > nstate_use_diag) cycle
+        state_norm_local(tracked_state) = state_norm_local(tracked_state) + sum(abs(coef_frag_all(:, io_state))**2)
+        if (n_pw > 0) state_norm_local(tracked_state) = state_norm_local(tracked_state) + sum(abs(coef_pw_all(:, io_state))**2)
+      end do
+
+      allocate(coef_occ_diag(n_tot, nocc_diag), s_coef_occ(n_tot, nocc_diag), gram_occ(nocc_diag, nocc_diag))
+      coef_occ_diag(:, :) = (0.0d0, 0.0d0)
+      coef_occ_diag(1:n, 1:nocc_diag) = coef_frag_all(1:n, 1:nocc_diag)
+      if (n_pw > 0) coef_occ_diag(n+1:n_tot, 1:nocc_diag) = coef_pw_all(1:n_pw, 1:nocc_diag)
+
+      call apply_overlap_operator_batch(dg_frag, ispin, coef_occ_diag, s_coef_occ, .false.)
+      gram_occ(:, :) = matmul(conjg(transpose(coef_occ_diag(:, :))), s_coef_occ(:, :))
+      do io_state = 1, nocc_diag
+        gram_occ(io_state, io_state) = gram_occ(io_state, io_state) - (1.0d0, 0.0d0)
+      end do
+      csc_occ_identity_norm_local = csc_occ_identity_norm_local + sum(abs(gram_occ(:, :))**2)
+
+      occ_idx = dg_frag%selfexc_track_states(2)
+      virt_idx = dg_frag%selfexc_track_states(3)
+      nvirt_diag = max(0, nstate_use_diag - nocc_diag)
+      if (dg_frag%coef_ref_ready .and. allocated(dg_frag%coef_ref_all) .and. nvirt_diag > 0) then
+        if (size(dg_frag%coef_ref_all, 1) >= n_tot .and. size(dg_frag%coef_ref_all, 2) >= nstate_use_diag .and. &
+            size(dg_frag%coef_ref_all, 3) >= ispin) then
+          allocate(leak_proj(nstate_use_diag, nocc_diag))
+          leak_proj(:, :) = matmul(conjg(transpose(dg_frag%coef_ref_all(1:n_tot, 1:nstate_use_diag, ispin))), s_coef_occ(:, :))
+          if (occ_idx >= 1 .and. occ_idx <= nocc_diag .and. virt_idx >= nocc_diag + 1 .and. virt_idx <= nstate_use_diag) then
+            leak_pair_local = leak_pair_local + abs(leak_proj(virt_idx, occ_idx))**2
+          end if
+          deallocate(leak_proj)
+        end if
+      end if
+
+      deallocate(coef_occ_diag, s_coef_occ, gram_occ)
+      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
+      if (allocated(coef_pw_all)) deallocate(coef_pw_all)
+    end do
+
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_CSC rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    call comm_summation(csc_occ_identity_norm_local, csc_occ_identity_norm_global, dg_frag%icomm)
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_CSC rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_LEAK rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    call comm_summation(leak_pair_local, leak_pair_global, dg_frag%icomm)
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_LEAK rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_NAN rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    call comm_summation(nan_count_local, nan_count_global, dg_frag%icomm)
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_NAN rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_INF rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    call comm_summation(inf_count_local, inf_count_global, dg_frag%icomm)
+    if (itt == 1) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_INF rank=', dg_frag%id, ' itt=', itt, &
+        ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
+    do tracked_state = 1, 3
+      if (itt == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_STATE rank=', dg_frag%id, &
+          ' itt=', itt, ' tracked=', tracked_state, ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
+      end if
+      call comm_summation(state_norm_local(tracked_state), state_norm_global(tracked_state), dg_frag%icomm)
+      if (itt == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_STATE rank=', dg_frag%id, &
+          ' itt=', itt, ' tracked=', tracked_state, ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
+      end if
+    end do
+
+    csc_norm_value = sqrt(max(0.0d0, csc_occ_identity_norm_global / real(max(1, dg_frag%isize), 8)))
+    leak_pair_value = leak_pair_global / real(max(1, dg_frag%isize), 8)
+    dg_frag%selfexc_track_norm(:) = state_norm_global(:) / real(max(1, dg_frag%isize), 8)
+    dg_frag%selfexc_leak100_129_current = leak_pair_value
+
+    if (accum_itt /= itt) then
+      accum_itt = itt
+      accum_count_pre2ov = 0
+      accum_count_ov2raw = 0
+      accum_csc_pre2ov = 0.0d0
+      accum_csc_ov2raw = 0.0d0
+      accum_csc_pre2raw = 0.0d0
+      accum_leak_pre2ov = 0.0d0
+      accum_leak_ov2raw = 0.0d0
+      accum_leak_pre2raw = 0.0d0
+    end if
+
+    select case(stage_tag)
+    case(1)
+      dg_frag%selfexc_csc_stage_pre_mixed = csc_norm_value
+      dg_frag%selfexc_leak100_129_pre_mixed = leak_pair_value
+    case(2)
+      dg_frag%selfexc_csc_stage_post_overlap = csc_norm_value
+      dg_frag%selfexc_leak100_129_post_overlap = leak_pair_value
+      accum_count_pre2ov = accum_count_pre2ov + 1
+      accum_csc_pre2ov = accum_csc_pre2ov + (dg_frag%selfexc_csc_stage_post_overlap - dg_frag%selfexc_csc_stage_pre_mixed)
+      accum_leak_pre2ov = accum_leak_pre2ov + (dg_frag%selfexc_leak100_129_post_overlap - dg_frag%selfexc_leak100_129_pre_mixed)
+    case(3)
+      dg_frag%selfexc_csc_stage_post_raw = csc_norm_value
+      dg_frag%selfexc_leak100_129_post_raw = leak_pair_value
+      accum_count_ov2raw = accum_count_ov2raw + 1
+      accum_csc_ov2raw = accum_csc_ov2raw + (dg_frag%selfexc_csc_stage_post_raw - dg_frag%selfexc_csc_stage_post_overlap)
+      accum_csc_pre2raw = accum_csc_pre2raw + (dg_frag%selfexc_csc_stage_post_raw - dg_frag%selfexc_csc_stage_pre_mixed)
+      accum_leak_ov2raw = accum_leak_ov2raw + (dg_frag%selfexc_leak100_129_post_raw - dg_frag%selfexc_leak100_129_post_overlap)
+      accum_leak_pre2raw = accum_leak_pre2raw + (dg_frag%selfexc_leak100_129_post_raw - dg_frag%selfexc_leak100_129_pre_mixed)
+    case(4)
+      if (dg_frag%selfexc_prev_step_itt /= itt) then
+        dg_frag%selfexc_csc_step_delta = csc_norm_value - dg_frag%selfexc_csc_prev_step
+        dg_frag%selfexc_leak100_129_step_delta = leak_pair_value - dg_frag%selfexc_leak100_129_prev_step
+        dg_frag%selfexc_csc_prev_step = csc_norm_value
+        dg_frag%selfexc_leak100_129_prev_step = leak_pair_value
+        dg_frag%selfexc_prev_step_itt = itt
+      end if
+    case default
+      continue
+    end select
+
+    stage_name = 'stage_unknown'
+    if (present(checkpoint_tag)) then
+      stage_name = checkpoint_tag
+    else
+      select case(stage_tag)
+      case(1)
+        stage_name = 'pre_mixed'
+      case(2)
+        stage_name = 'post_overlap'
+      case(3)
+        stage_name = 'post_raw'
+      case(4)
+        stage_name = 'step_snapshot'
+      case default
+        stage_name = 'stage_unknown'
+      end select
+    end if
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,1x,a,1x,i0,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,i0,1x,a,i0)') &
+        '[DG-STEP-BOUNDARY] tag='//trim(stage_name), 'itt=', itt, &
+        'csc=', csc_norm_value, &
+        'coef_occ_norm_drift=', dg_frag%coef_occ_norm_drift, &
+        'occvirt_leakage=', dg_frag%occvirt_leakage, &
+        'leak100_129=', leak_pair_value, &
+        'norm99=', dg_frag%selfexc_track_norm(1), &
+        'norm100=', dg_frag%selfexc_track_norm(2), &
+        'norm129=', dg_frag%selfexc_track_norm(3), &
+        'nan_count=', int(nan_count_global), 'inf_count=', int(inf_count_global)
+      flush(6)
+
+      if (stage_tag == 4 .and. accum_last_report_itt /= itt) then
+        write(*,'(1x,a,i0,1x,a,i0,1x,a,i0,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4,1x,a,1pe12.4)') &
+          '[DG-INTRA-STEP-ACCUM] itt=', itt, &
+          'n_pre2ov=', accum_count_pre2ov, &
+          'n_ov2raw=', accum_count_ov2raw, &
+          'sum_dcsc_pre2ov=', accum_csc_pre2ov, &
+          'sum_dcsc_ov2raw=', accum_csc_ov2raw, &
+          'sum_dcsc_pre2raw=', accum_csc_pre2raw, &
+          'sum_dleak_pre2ov=', accum_leak_pre2ov, &
+          'sum_dleak_ov2raw=', accum_leak_ov2raw, &
+          'sum_dleak_pre2raw=', accum_leak_pre2raw
+        flush(6)
+        accum_last_report_itt = itt
+      end if
+    end if
+  end subroutine capture_mixed_stage_diagnostics
+
+  subroutine reorthonormalize_mixed_occupied_subspace(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ispin, io, jo, nocc, nbasis
+    complex(8) :: proj
+    real(8) :: norm_val
+
+    if (.not. dg_frag%mixed_basis_ready) return
+    if (.not. allocated(dg_frag%coef_mix)) return
+    if (.not. allocated(dg_frag%mixed_basis_dim)) return
+
+    do ispin = 1, dg_frag%nspin
+      nbasis = min(dg_frag%mixed_basis_dim(ispin), size(dg_frag%coef_mix, 1))
+      nocc = min(dg_frag%nstate_tot, nbasis)
+      if (allocated(dg_frag%nocc_spin)) then
+        if (ispin <= size(dg_frag%nocc_spin)) nocc = min(nocc, max(0, dg_frag%nocc_spin(ispin)))
+      end if
+      if (nocc <= 0) cycle
+
+      do io = 1, nocc
+        do jo = 1, io - 1
+          proj = sum(conjg(dg_frag%coef_mix(1:nbasis, jo, ispin)) * dg_frag%coef_mix(1:nbasis, io, ispin))
+          dg_frag%coef_mix(1:nbasis, io, ispin) = dg_frag%coef_mix(1:nbasis, io, ispin) - proj * dg_frag%coef_mix(1:nbasis, jo, ispin)
+        end do
+        norm_val = sqrt(sum(abs(dg_frag%coef_mix(1:nbasis, io, ispin))**2))
+        if (norm_val > 1.0d-14) then
+          dg_frag%coef_mix(1:nbasis, io, ispin) = dg_frag%coef_mix(1:nbasis, io, ispin) / norm_val
+        end if
+      end do
+
+      call sync_raw_coef_from_mixed(dg_frag, ispin)
+    end do
+
+    call zero_nonowned_coefficients(dg_frag)
+  end subroutine reorthonormalize_mixed_occupied_subspace
 
   subroutine symmetrize_real_matrix_blocks(dg_frag, blocks)
     implicit none
@@ -338,12 +716,9 @@ contains
               if (ix >= is(1) .and. ix <= ie(1) .and. &
                   iy >= is(2) .and. iy <= ie(2) .and. &
                   iz >= is(3) .and. iz <= ie(3)) then
-                lx = map_global_to_phi_box_coord(ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), &
-                                                 dg_frag%lgnum_total(1))
-                ly = map_global_to_phi_box_coord(iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), &
-                                                 dg_frag%lgnum_total(2))
-                lz = map_global_to_phi_box_coord(iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), &
-                                                 dg_frag%lgnum_total(3))
+                lx = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 1, ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1))
+                ly = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 2, iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2))
+                lz = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 3, iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3))
                 if (lx == 0 .or. ly == 0 .or. lz == 0) cycle
                 x = ppg%rxyz(1, j, ia)
                 y = ppg%rxyz(2, j, ia)
@@ -440,12 +815,9 @@ contains
               if (ix >= is(1) .and. ix <= ie(1) .and. &
                   iy >= is(2) .and. iy <= ie(2) .and. &
                   iz >= is(3) .and. iz <= ie(3)) then
-                lx = map_global_to_phi_box_coord(ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), &
-                                                 dg_frag%lgnum_total(1))
-                ly = map_global_to_phi_box_coord(iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), &
-                                                 dg_frag%lgnum_total(2))
-                lz = map_global_to_phi_box_coord(iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), &
-                                                 dg_frag%lgnum_total(3))
+                lx = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 1, ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1))
+                ly = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 2, iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2))
+                lz = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 3, iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3))
                 if (lx == 0 .or. ly == 0 .or. lz == 0) cycle
                 x = ppg%rxyz(1, j, ia)
                 y = ppg%rxyz(2, j, ia)
@@ -544,7 +916,7 @@ contains
     delta_A = maxval(abs(Ac_tot - dg_frag%Ac_nl_cache))
     if (.not. dg_frag%has_nl_cache .or. (.not. reuse_allowed) .or. delta_A > dg_frag%Ac_nl_cache_tol) then
       if (.not. allocated(dg_frag%H_nl_blocks) .or. .not. allocated(dg_frag%H_nl_block_map)) then
-        call init_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, dg_frag%H_nl_block_map)
+        call init_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, dg_frag%H_nl_block_map, diagonal_only=.true.)
         dg_frag%n_H_nl_blocks = size(dg_frag%H_nl_blocks)
       end if
       if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
@@ -608,6 +980,7 @@ contains
     integer :: iorg(3), ndom(3), d(3), l(3)
     integer :: self_shape(4), halo_shape(4)
     logical, parameter :: enable_nl_projector_cache_trace = .false.
+    logical :: need_halo_cache
 
     local_frag_count = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (local_frag_count <= 0 .or. .not. allocated(dg_frag%phi_frag)) return
@@ -615,6 +988,7 @@ contains
 
     natom = size(ppg%mps)
     self_shape = [ppg%nps, natom, dg_frag%nstate_frag, local_frag_count]
+    need_halo_cache = (dg_frag%n_halo > 0)
     halo_shape = [ppg%nps, natom, dg_frag%nstate_frag, max(0, dg_frag%n_halo)]
     if (enable_nl_projector_cache_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,4(a,i0),a,i0)') "        nonlocal projector cache trace: stage=entry", &
@@ -630,13 +1004,18 @@ contains
       end if
     end if
     if (allocated(dg_frag%nl_pp_phi_halo)) then
-      if (any(shape(dg_frag%nl_pp_phi_halo) /= halo_shape)) then
+      if ((.not. need_halo_cache) .or. any(shape(dg_frag%nl_pp_phi_halo) /= halo_shape)) then
         deallocate(dg_frag%nl_pp_phi_halo)
-        dg_frag%nl_pp_phi_cache_valid = .false.
+        if (need_halo_cache) dg_frag%nl_pp_phi_cache_valid = .false.
       end if
     end if
     if (.not. allocated(dg_frag%nl_pp_phi_self)) allocate(dg_frag%nl_pp_phi_self(self_shape(1), self_shape(2), self_shape(3), self_shape(4)))
-    if (.not. allocated(dg_frag%nl_pp_phi_halo)) allocate(dg_frag%nl_pp_phi_halo(halo_shape(1), halo_shape(2), halo_shape(3), halo_shape(4)))
+    if (need_halo_cache) then
+      if (.not. allocated(dg_frag%nl_pp_phi_halo)) then
+        allocate(dg_frag%nl_pp_phi_halo(halo_shape(1), halo_shape(2), halo_shape(3), halo_shape(4)))
+        dg_frag%nl_pp_phi_cache_valid = .false.
+      end if
+    end if
     if (dg_frag%nl_pp_phi_cache_valid) return
     if (enable_nl_projector_cache_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-alloc"
@@ -644,7 +1023,7 @@ contains
     end if
 
     dg_frag%nl_pp_phi_self(:, :, :, :) = (0.0d0, 0.0d0)
-    dg_frag%nl_pp_phi_halo(:, :, :, :) = (0.0d0, 0.0d0)
+    if (need_halo_cache) dg_frag%nl_pp_phi_halo(:, :, :, :) = (0.0d0, 0.0d0)
     if (enable_nl_projector_cache_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-zero"
       flush(6)
@@ -670,12 +1049,9 @@ contains
           iy = ppg%jxyz(2, j, ia)
           iz = ppg%jxyz(3, j, ia)
           if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
-          lx = map_global_to_phi_box_coord(ix, mg%is(1) - dg_frag%nxyz_buffer(1), mg%ie(1) + dg_frag%nxyz_buffer(1), &
-                                           dg_frag%lgnum_total(1))
-          ly = map_global_to_phi_box_coord(iy, mg%is(2) - dg_frag%nxyz_buffer(2), mg%ie(2) + dg_frag%nxyz_buffer(2), &
-                                           dg_frag%lgnum_total(2))
-          lz = map_global_to_phi_box_coord(iz, mg%is(3) - dg_frag%nxyz_buffer(3), mg%ie(3) + dg_frag%nxyz_buffer(3), &
-                                           dg_frag%lgnum_total(3))
+          lx = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 1, ix, mg%is(1) - dg_frag%nxyz_buffer(1), mg%ie(1) + dg_frag%nxyz_buffer(1))
+          ly = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 2, iy, mg%is(2) - dg_frag%nxyz_buffer(2), mg%ie(2) + dg_frag%nxyz_buffer(2))
+          lz = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 3, iz, mg%is(3) - dg_frag%nxyz_buffer(3), mg%ie(3) + dg_frag%nxyz_buffer(3))
           if (lx < lbound(dg_frag%phi_frag, 1) .or. lx > ubound(dg_frag%phi_frag, 1)) cycle
           if (ly < lbound(dg_frag%phi_frag, 2) .or. ly > ubound(dg_frag%phi_frag, 2)) cycle
           if (lz < lbound(dg_frag%phi_frag, 3) .or. lz > ubound(dg_frag%phi_frag, 3)) cycle
@@ -692,47 +1068,49 @@ contains
       flush(6)
     end if
 
-    do i_halo = 1, dg_frag%n_halo
-      ifrag = dg_frag%halo(i_halo)%ifrag_dst
-      i_local = ifrag - dg_frag%ifrag_start + 1
-      if (i_local < 1 .or. i_local > local_frag_count) cycle
-      if ((.not. allocated(dg_frag%halo(i_halo)%buf_recv)) .and. &
-          (.not. allocated(dg_frag%halo(i_halo)%buf_recv_c))) cycle
-      if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
-        nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv_c, 4))
-      else
-        nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv, 4))
-      end if
-      if (nbf <= 0) cycle
-      iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-      if (enable_nl_projector_cache_trace .and. dg_frag%id == 0 .and. i_halo == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x))') &
-          "        nonlocal projector cache trace: stage=halo-loop i_halo=", i_halo, &
-          " ifrag=", ifrag, " nbf=", nbf, " halo_len=", &
-          dg_frag%halo(i_halo)%length(1), dg_frag%halo(i_halo)%length(2), dg_frag%halo(i_halo)%length(3)
-        flush(6)
-      end if
-      do ia = 1, natom
-        do j = 1, ppg%mps(ia)
-          ix = ppg%jxyz(1, j, ia)
-          iy = ppg%jxyz(2, j, ia)
-          iz = ppg%jxyz(3, j, ia)
-          if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
-          lx = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 1, ix)
-          ly = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 2, iy)
-          lz = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 3, iz)
-          if (lx < 1 .or. lx > dg_frag%halo(i_halo)%length(1)) cycle
-          if (ly < 1 .or. ly > dg_frag%halo(i_halo)%length(2)) cycle
-          if (lz < 1 .or. lz > dg_frag%halo(i_halo)%length(3)) cycle
-          if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
-            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%halo(i_halo)%buf_recv_c(lx, ly, lz, 1:nbf, 1)
-          else
-            dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = cmplx(dg_frag%halo(i_halo)%buf_recv(lx, ly, lz, 1:nbf, 1), 0.0d0, kind=8)
-          end if
+    if (need_halo_cache) then
+      do i_halo = 1, dg_frag%n_halo
+        ifrag = dg_frag%halo(i_halo)%ifrag_dst
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > local_frag_count) cycle
+        if ((.not. allocated(dg_frag%halo(i_halo)%buf_recv)) .and. &
+            (.not. allocated(dg_frag%halo(i_halo)%buf_recv_c))) cycle
+        if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
+          nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv_c, 4))
+        else
+          nbf = min(dg_frag%nstate_frag, size(dg_frag%halo(i_halo)%buf_recv, 4))
+        end if
+        if (nbf <= 0) cycle
+        iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+        ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        if (enable_nl_projector_cache_trace .and. dg_frag%id == 0 .and. i_halo == 1) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x))') &
+            "        nonlocal projector cache trace: stage=halo-loop i_halo=", i_halo, &
+            " ifrag=", ifrag, " nbf=", nbf, " halo_len=", &
+            dg_frag%halo(i_halo)%length(1), dg_frag%halo(i_halo)%length(2), dg_frag%halo(i_halo)%length(3)
+          flush(6)
+        end if
+        do ia = 1, natom
+          do j = 1, ppg%mps(ia)
+            ix = ppg%jxyz(1, j, ia)
+            iy = ppg%jxyz(2, j, ia)
+            iz = ppg%jxyz(3, j, ia)
+            if (ix < mg%is(1) .or. ix > mg%ie(1) .or. iy < mg%is(2) .or. iy > mg%ie(2) .or. iz < mg%is(3) .or. iz > mg%ie(3)) cycle
+            lx = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 1, ix)
+            ly = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 2, iy)
+            lz = map_global_to_halo_recv_buf_coord(dg_frag, dg_frag%halo(i_halo), 3, iz)
+            if (lx < 1 .or. lx > dg_frag%halo(i_halo)%length(1)) cycle
+            if (ly < 1 .or. ly > dg_frag%halo(i_halo)%length(2)) cycle
+            if (lz < 1 .or. lz > dg_frag%halo(i_halo)%length(3)) cycle
+            if (allocated(dg_frag%halo(i_halo)%buf_recv_c)) then
+              dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = dg_frag%halo(i_halo)%buf_recv_c(lx, ly, lz, 1:nbf, 1)
+            else
+              dg_frag%nl_pp_phi_halo(j, ia, 1:nbf, i_halo) = cmplx(dg_frag%halo(i_halo)%buf_recv(lx, ly, lz, 1:nbf, 1), 0.0d0, kind=8)
+            end if
+          end do
         end do
       end do
-    end do
+    end if
     if (enable_nl_projector_cache_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a)') "        nonlocal projector cache trace: stage=after-halo-build"
       flush(6)
@@ -754,6 +1132,15 @@ contains
     end if
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord
+
+  integer function map_global_to_phi_box_coord_fragment(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, ig, lb, ub
+    integer :: ig_wrap, support_lo, support_len
+
+    iloc = map_global_to_phi_box_coord(ig, lb, ub, dg_frag%lgnum_total(axis))
+  end function map_global_to_phi_box_coord_fragment
 
   integer function map_global_to_halo_recv_buf_coord(dg_frag, halo, axis, ig) result(ibuf)
     use rt_dg_fragment_types, only: halo_info
@@ -884,26 +1271,28 @@ contains
               if (global_idx < 1 .or. global_idx > size(x_dn, 1)) cycle
               psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x_dn(global_idx, ist)
             end do
-            do i_halo = 1, dg_frag%n_halo
-              if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-              ifrag_halo = dg_frag%halo(i_halo)%ifrag_src
-              nbf_up = min(dg_frag%n_basis(ifrag_halo, 1), dg_frag%nstate_frag)
-              nbf_dn = min(dg_frag%n_basis(ifrag_halo, 2), dg_frag%nstate_frag)
-              if (nbf_up > 0) then
-                do io = 1, nbf_up
-                  global_idx = dg_frag%index_basis(io, ifrag_halo, 1)
-                  if (global_idx < 1 .or. global_idx > size(x_up, 1)) cycle
-                  psi_point_up = psi_point_up + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_up(global_idx, ist)
-                end do
-              end if
-              if (nbf_dn > 0) then
-                do io = 1, nbf_dn
-                  global_idx = dg_frag%index_basis(io, ifrag_halo, 2)
-                  if (global_idx < 1 .or. global_idx > size(x_dn, 1)) cycle
-                  psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_dn(global_idx, ist)
-                end do
-              end if
-            end do
+            if (dg_frag%n_halo > 0 .and. allocated(dg_frag%nl_pp_phi_halo)) then
+              do i_halo = 1, dg_frag%n_halo
+                if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+                ifrag_halo = dg_frag%halo(i_halo)%ifrag_src
+                nbf_up = min(dg_frag%n_basis(ifrag_halo, 1), dg_frag%nstate_frag)
+                nbf_dn = min(dg_frag%n_basis(ifrag_halo, 2), dg_frag%nstate_frag)
+                if (nbf_up > 0) then
+                  do io = 1, nbf_up
+                    global_idx = dg_frag%index_basis(io, ifrag_halo, 1)
+                    if (global_idx < 1 .or. global_idx > size(x_up, 1)) cycle
+                    psi_point_up = psi_point_up + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_up(global_idx, ist)
+                  end do
+                end if
+                if (nbf_dn > 0) then
+                  do io = 1, nbf_dn
+                    global_idx = dg_frag%index_basis(io, ifrag_halo, 2)
+                    if (global_idx < 1 .or. global_idx > size(x_dn, 1)) cycle
+                    psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_dn(global_idx, ist)
+                  end do
+                end if
+              end do
+            end if
             proj_local_up(ilma, ist) = proj_local_up(ilma, ist) + conjg(phase_factor(1)) * psi_point_up
             proj_local_dn(ilma, ist) = proj_local_dn(ilma, ist) + conjg(phase_factor(2)) * psi_point_dn
           end do
@@ -1070,17 +1459,19 @@ contains
               if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
               psi_point = psi_point + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x(global_idx, ist)
             end do
-            do i_halo = 1, dg_frag%n_halo
-              if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
-              ifrag_halo = dg_frag%halo(i_halo)%ifrag_src
-              nbf_halo = min(dg_frag%n_basis(ifrag_halo, ispin), dg_frag%nstate_frag)
-              if (nbf_halo <= 0) cycle
-              do io = 1, nbf_halo
-                global_idx = dg_frag%index_basis(io, ifrag_halo, ispin)
-                if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
-                psi_point = psi_point + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x(global_idx, ist)
+            if (dg_frag%n_halo > 0 .and. allocated(dg_frag%nl_pp_phi_halo)) then
+              do i_halo = 1, dg_frag%n_halo
+                if (dg_frag%halo(i_halo)%ifrag_dst /= ifrag) cycle
+                ifrag_halo = dg_frag%halo(i_halo)%ifrag_src
+                nbf_halo = min(dg_frag%n_basis(ifrag_halo, ispin), dg_frag%nstate_frag)
+                if (nbf_halo <= 0) cycle
+                do io = 1, nbf_halo
+                  global_idx = dg_frag%index_basis(io, ifrag_halo, ispin)
+                  if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
+                  psi_point = psi_point + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x(global_idx, ist)
+                end do
               end do
-            end do
+            end if
             proj_local(ilma, ist) = proj_local(ilma, ist) + conjg(phase_factor) * psi_point
           end do
         end do
@@ -1164,8 +1555,9 @@ contains
         call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
       else if (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) then
         y(1:n_frag, :) = matmul(dg_frag%H_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
-      else if (allocated(dg_frag%H_mat)) then
-        y(1:n_frag, :) = matmul(cmplx(dg_frag%H_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
+      else
+        write(*,'(1x,a,i0)') '[FATAL] apply_mixed_hamiltonian requires H_mat_blocks (block-only route). rank=', dg_frag%id
+        stop 1
       end if
     end if
 
@@ -1175,7 +1567,9 @@ contains
     end if
 
     if (n_pw > 0) then
-      if (allocated(dg_frag%H_mat_pw_diag)) then
+      if (allocated(dg_frag%H_mat_pw)) then
+        y(n_frag+1:n_tot, :) = y(n_frag+1:n_tot, :) + matmul(dg_frag%H_mat_pw(1:n_pw, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
+      else if (allocated(dg_frag%H_mat_pw_diag)) then
         do ipw = 1, n_pw
           y(n_frag+ipw, :) = y(n_frag+ipw, :) + dg_frag%H_mat_pw_diag(ipw, ispin) * x(n_frag+ipw, :)
         end do
@@ -1206,36 +1600,79 @@ contains
     if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
       if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
-      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+      else if (allocated(dg_frag%S_mat_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
       else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
         y(1:n_frag) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
-      else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-        y(1:n_frag) = matmul(cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
-      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+      else if (allocated(dg_frag%S_mat_c)) then
         y(1:n_frag) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
-      else if (allocated(dg_frag%S_mat)) then
-        y(1:n_frag) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
+      else
+        write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
+        stop 1
       end if
       y(1:n_frag) = y(1:n_frag) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot))
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+    else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
       y(1:n_frag) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
-    else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-      y(1:n_frag) = matmul(cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+    else if (allocated(dg_frag%S_mat_c)) then
       y(1:n_frag) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
-    else if (allocated(dg_frag%S_mat)) then
-      y(1:n_frag) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag))
+    else
+      write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
+      stop 1
     end if
     if (n_pw > 0) then
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
     end if
   end subroutine apply_overlap_operator
+
+  ! Diagonal-only (intra-fragment) overlap: skips all off-diagonal (ifrag_row /= ifrag_col)
+  ! blocks in S_mat_blocks. Used for startup Lowdin to keep each fragment operationally closed.
+  subroutine apply_overlap_operator_diag_only(dg_frag, ispin, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:)
+    complex(8), intent(inout) :: y(:)
+
+    integer :: n_frag, iblk, ifrag, nbf, ii, jj, ig_i, ig_j
+    complex(8) :: xj
+
+    n_frag = dg_frag%n_mat_max
+    y(1:n_frag) = (0.0d0, 0.0d0)
+
+    if (.not. allocated(dg_frag%S_mat_blocks)) then
+      ! Fall back to identity (no overlap info)
+      y(1:n_frag) = x(1:n_frag)
+      return
+    end if
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+
+    do iblk = 1, size(dg_frag%S_mat_blocks)
+      ! Skip off-diagonal blocks
+      if (dg_frag%S_mat_blocks(iblk)%ifrag_row /= dg_frag%S_mat_blocks(iblk)%ifrag_col) cycle
+      ifrag = dg_frag%S_mat_blocks(iblk)%ifrag_row
+      if (ifrag < 1 .or. ifrag > dg_frag%n_frag) cycle
+      nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                size(dg_frag%S_mat_blocks(iblk)%val, 1), size(dg_frag%S_mat_blocks(iblk)%val, 2))
+      if (nbf <= 0) cycle
+      do jj = 1, nbf
+        ig_j = dg_frag%index_basis(jj, ifrag, ispin)
+        if (ig_j < 1 .or. ig_j > size(x)) cycle
+        xj = x(ig_j)
+        if (xj == (0.0d0, 0.0d0)) cycle
+        do ii = 1, nbf
+          ig_i = dg_frag%index_basis(ii, ifrag, ispin)
+          if (ig_i < 1 .or. ig_i > size(y)) cycle
+          y(ig_i) = y(ig_i) + dg_frag%S_mat_blocks(iblk)%val(ii, jj, ispin) * xj
+        end do
+      end do
+    end do
+  end subroutine apply_overlap_operator_diag_only
 
   subroutine apply_overlap_operator_batch(dg_frag, ispin, x, y, use_prop)
     implicit none
@@ -1256,33 +1693,31 @@ contains
     if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
       if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
-      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+      else if (allocated(dg_frag%S_mat_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
       else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
         y(1:n_frag, :) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
-      else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-        y(1:n_frag, :) = matmul(cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
-      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+      else if (allocated(dg_frag%S_mat_c)) then
         y(1:n_frag, :) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
-      else if (allocated(dg_frag%S_mat)) then
-        y(1:n_frag, :) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
+      else
+        write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator_batch requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
+        stop 1
       end if
       y(1:n_frag, :) = y(1:n_frag, :) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
       y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag, :))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+    else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
       y(1:n_frag, :) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
-    else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-      y(1:n_frag, :) = matmul(cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+    else if (allocated(dg_frag%S_mat_c)) then
       y(1:n_frag, :) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
-    else if (allocated(dg_frag%S_mat)) then
-      y(1:n_frag, :) = matmul(cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8), x(1:n_frag, :))
+    else
+      write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator_batch requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
+      stop 1
     end if
-    if (n_pw > 0) then
+    if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
       y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :)
     end if
   end subroutine apply_overlap_operator_batch
@@ -1316,7 +1751,7 @@ contains
           diag(ig) = real(dg_frag%S_mat_prop_blocks(iblk)%val(ib, ib, ispin), kind=8)
         end do
       end do
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+    else if (allocated(dg_frag%S_mat_blocks)) then
       do ifrag = 1, dg_frag%n_frag
         iblk = find_matrix_block_runtime(dg_frag%S_block_map, ifrag, ifrag)
         if (iblk <= 0 .or. iblk > size(dg_frag%S_mat_blocks)) cycle
@@ -1330,12 +1765,11 @@ contains
       end do
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
       diag(1:n_frag) = real([(dg_frag%S_mat_prop_c(ib, ib, ispin), ib=1,n_frag)], kind=8)
-    else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-      diag(1:n_frag) = [(dg_frag%S_mat_prop(ib, ib, ispin), ib=1,n_frag)]
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+    else if (allocated(dg_frag%S_mat_c)) then
       diag(1:n_frag) = real([(dg_frag%S_mat_c(ib, ib, ispin), ib=1,n_frag)], kind=8)
-    else if (allocated(dg_frag%S_mat)) then
-      diag(1:n_frag) = [(dg_frag%S_mat(ib, ib, ispin), ib=1,n_frag)]
+    else
+      write(*,'(1x,a,i0)') '[FATAL] build_overlap_operator_diagonal requires overlap blocks (block-only route). rank=', dg_frag%id
+      stop 1
     end if
 
     if (n_pw > 0) diag(n_frag+1:n_tot) = 1.0d0
@@ -1350,8 +1784,13 @@ contains
     logical, intent(in) :: use_prop
 
     integer :: n_dim, n_rhs, icol, iter, max_iter
+    integer :: n_frag, n_pw, n_tot
     real(8) :: rhs_norm, res_norm
     real(8), parameter :: diag_floor = 1.0d-10, tol_rel = 1.0d-10
+    real(8) :: rhs_norm_max, res_norm_max
+    logical :: converged_all, diverged_any, enable_overlap_trace
+    integer :: iter_used, env_len, env_stat
+    character(len=32) :: env_trace
     complex(8), allocatable :: r(:,:), z(:,:), p(:,:), ap(:,:)
     real(8), allocatable :: diag(:), tol_abs(:), rho(:), rho_new(:), denom(:)
     complex(8), allocatable :: alpha(:), beta(:)
@@ -1362,6 +1801,21 @@ contains
     sol(:, :) = (0.0d0, 0.0d0)
     if (n_dim <= 0 .or. n_rhs <= 0) return
 
+    enable_overlap_trace = .false.
+    env_trace = ''
+    call get_environment_variable('SALMON_DG_OVERLAP_SOLVE_TRACE', env_trace, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_trace(1:1) == '1' .or. env_trace(1:1) == 'y' .or. env_trace(1:1) == 'Y' .or. &
+          env_trace(1:1) == 't' .or. env_trace(1:1) == 'T') then
+        enable_overlap_trace = .true.
+      end if
+    end if
+
+    n_frag = dg_frag%n_mat_max
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    n_tot = n_frag + n_pw
+
     allocate(diag(n_dim), r(n_dim, n_rhs), z(n_dim, n_rhs), p(n_dim, n_rhs), ap(n_dim, n_rhs))
     allocate(tol_abs(n_rhs), rho(n_rhs), rho_new(n_rhs), denom(n_rhs))
     allocate(alpha(n_rhs), beta(n_rhs), active(n_rhs))
@@ -1369,6 +1823,8 @@ contains
     where (diag < diag_floor) diag = diag_floor
 
     max_iter = max(20, min(6 * max(1, n_dim), 400))
+    iter_used = 0
+    diverged_any = .false.
     sol(:, :) = rhs(:, :)
     call apply_overlap_operator_batch(dg_frag, ispin, sol, ap, use_prop)
     r(:, :) = rhs(:, :) - ap(:, :)
@@ -1381,6 +1837,12 @@ contains
     end do
 
     if (.not. any(active)) then
+      if (enable_overlap_trace .and. dg_frag%id == 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,l1,a,1pe12.4,a,1pe12.4)') '[OVERLAP-SOLVE] ispin=', ispin, &
+          ' n_dim=', n_dim, ' n_rhs=', n_rhs, ' converged=', .true., ' diverged=', .false., &
+          ' rhs_norm_max=', 0.0d0, ' resid_max=', 0.0d0
+        flush(6)
+      end if
       deallocate(diag, r, z, p, ap, tol_abs, rho, rho_new, denom, alpha, beta, active)
       return
     end if
@@ -1393,10 +1855,12 @@ contains
       if (rho(icol) <= 0.0d0) then
         sol(:, icol) = rhs(:, icol)
         active(icol) = .false.
+        diverged_any = .true.
       end if
     end do
 
     do iter = 1, max_iter
+      iter_used = iter
       if (.not. any(active)) exit
       do icol = 1, n_rhs
         if (.not. active(icol)) p(:, icol) = (0.0d0, 0.0d0)
@@ -1407,6 +1871,7 @@ contains
         denom(icol) = real(sum(conjg(p(:, icol)) * ap(:, icol)), kind=8)
         if (abs(denom(icol)) <= 1.0d-30) then
           active(icol) = .false.
+          diverged_any = .true.
           cycle
         end if
         alpha(icol) = cmplx(rho(icol) / denom(icol), 0.0d0, kind=8)
@@ -1421,6 +1886,7 @@ contains
         rho_new(icol) = real(sum(conjg(r(:, icol)) * z(:, icol)), kind=8)
         if (rho(icol) <= 0.0d0) then
           active(icol) = .false.
+          diverged_any = .true.
           cycle
         end if
         beta(icol) = cmplx(rho_new(icol) / rho(icol), 0.0d0, kind=8)
@@ -1428,6 +1894,26 @@ contains
         rho(icol) = rho_new(icol)
       end do
     end do
+
+    rhs_norm_max = 0.0d0
+    res_norm_max = 0.0d0
+    call apply_overlap_operator_batch(dg_frag, ispin, sol, ap, use_prop)
+    r(:, :) = rhs(:, :) - ap(:, :)
+    converged_all = .true.
+    do icol = 1, n_rhs
+      rhs_norm = sqrt(max(0.0d0, real(sum(conjg(rhs(:, icol)) * rhs(:, icol)), kind=8)))
+      res_norm = sqrt(max(0.0d0, real(sum(conjg(r(:, icol)) * r(:, icol)), kind=8)))
+      rhs_norm_max = max(rhs_norm_max, rhs_norm)
+      res_norm_max = max(res_norm_max, res_norm)
+      if (res_norm > tol_abs(icol)) converged_all = .false.
+    end do
+
+    if (enable_overlap_trace .and. dg_frag%id == 0) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,l1,a,1pe12.4,a,1pe12.4)') '[OVERLAP-SOLVE] ispin=', ispin, &
+        ' n_dim=', n_dim, ' n_rhs=', n_rhs, ' iter=', iter_used, ' converged=', converged_all, ' diverged=', diverged_any, &
+        ' rhs_norm_max=', rhs_norm_max, ' resid_max=', res_norm_max
+      flush(6)
+    end if
 
     deallocate(diag, r, z, p, ap, tol_abs, rho, rho_new, denom, alpha, beta, active)
   end subroutine solve_overlap_operator_batch
@@ -1447,6 +1933,9 @@ contains
     complex(8), allocatable :: mat_loc(:,:), rhs_loc(:,:)
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+
+    write(*,'(1x,a,i0)') '[FATAL] solve_overlap_operator_batch_local is disabled by strict block-only policy. rank=', dg_frag%id
+    stop 1
 
     n_dim = size(rhs, 1)
     n_rhs = size(rhs, 2)
@@ -1474,7 +1963,7 @@ contains
           frag_selected(dg_frag%S_mat_prop_blocks(iblk)%ifrag_col) = .true.
         end if
       end do
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+    else if (allocated(dg_frag%S_mat_blocks)) then
       do iblk = 1, size(dg_frag%S_mat_blocks)
         if (frag_selected(dg_frag%S_mat_blocks(iblk)%ifrag_row) .or. &
             frag_selected(dg_frag%S_mat_blocks(iblk)%ifrag_col)) then
@@ -1619,6 +2108,9 @@ contains
 
     integer :: n_frag, n_pw, n_tot, ipw
 
+    write(*,'(1x,a,i0)') '[FATAL] copy_overlap_operator_to_dense is disabled by strict block-only policy. rank=', dg_frag%id
+    stop 1
+
     n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
@@ -1628,16 +2120,15 @@ contains
     if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
       if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, mat(1:n_frag, 1:n_frag))
-      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks)) then
+      else if (allocated(dg_frag%S_mat_blocks)) then
         call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, mat(1:n_frag, 1:n_frag))
       else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
         mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin)
-      else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-        mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
-      else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+      else if (allocated(dg_frag%S_mat_c)) then
         mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
-      else if (allocated(dg_frag%S_mat)) then
-        mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+      else
+        write(*,'(1x,a,i0)') '[FATAL] copy_overlap_operator_to_dense requires overlap blocks (block-only route). rank=', dg_frag%id
+        stop 1
       end if
       mat(1:n_frag, n_frag+1:n_tot) = dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin)
       mat(n_frag+1:n_tot, 1:n_frag) = conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin)))
@@ -1646,16 +2137,15 @@ contains
       end do
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, mat(1:n_frag, 1:n_frag))
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
+    else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
       call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, mat(1:n_frag, 1:n_frag))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
       mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin)
-    else if (use_prop .and. allocated(dg_frag%S_mat_prop)) then
-      mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
-    else if ((.not. use_prop) .and. allocated(dg_frag%S_mat_c)) then
+    else if (allocated(dg_frag%S_mat_c)) then
       mat(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
-    else if (allocated(dg_frag%S_mat)) then
-      mat(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
+    else
+      write(*,'(1x,a,i0)') '[FATAL] copy_overlap_operator_to_dense requires overlap blocks (block-only route). rank=', dg_frag%id
+      stop 1
     end if
     if (n_pw > 0) then
       do ipw = 1, n_pw
@@ -1666,13 +2156,14 @@ contains
 
   subroutine copy_momentum_blocks_to_complex_dense(dg_frag, ispin, scale_vec, mat)
     implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ispin
     real(8), intent(in) :: scale_vec(3)
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, idir, ib, jb, row_idx, col_idx, n_frag
     integer :: nrow, ncol, idx_ib, idx_jb, valid_row_count, valid_col_count
+    integer :: ifrag_row, ifrag_col
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
@@ -1680,22 +2171,25 @@ contains
     if (.not. allocated(dg_frag%momentum_blocks)) return
     if (.not. allocated(dg_frag%index_basis)) return
     n_frag = dg_frag%n_mat_max
-!$omp parallel do schedule(static) private(iblk, nrow, ncol, valid_row_count, valid_col_count, ib, jb, idir, idx_ib, idx_jb, row_idx, col_idx, row_gid, col_gid, valid_row_ids, valid_col_ids)
+!$omp parallel do schedule(static) private(iblk, nrow, ncol, valid_row_count, valid_col_count, ib, jb, idir, idx_ib, idx_jb, row_idx, col_idx, ifrag_row, ifrag_col, row_gid, col_gid, valid_row_ids, valid_col_ids)
     do iblk = 1, dg_frag%n_momentum_blocks
-      if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
-      nrow = dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
-      ncol = dg_frag%n_basis(dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+      ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
+      ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), &
+             size(dg_frag%index_basis, 1), size(dg_frag%momentum_blocks(iblk)%val, 2))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), &
+             size(dg_frag%index_basis, 1), size(dg_frag%momentum_blocks(iblk)%val, 3))
       if (nrow <= 0 .or. ncol <= 0) cycle
       valid_row_count = 0
       do ib = 1, nrow
-        row_gid(ib) = dg_frag%index_basis(ib, dg_frag%momentum_blocks(iblk)%ifrag_row, ispin)
+        row_gid(ib) = dg_frag%index_basis(ib, ifrag_row, ispin)
         if (row_gid(ib) < 1 .or. row_gid(ib) > n_frag) cycle
         valid_row_count = valid_row_count + 1
         valid_row_ids(valid_row_count) = ib
       end do
       valid_col_count = 0
       do jb = 1, ncol
-        col_gid(jb) = dg_frag%index_basis(jb, dg_frag%momentum_blocks(iblk)%ifrag_col, ispin)
+        col_gid(jb) = dg_frag%index_basis(jb, ifrag_col, ispin)
         if (col_gid(jb) < 1 .or. col_gid(jb) > n_frag) cycle
         valid_col_count = valid_col_count + 1
         valid_col_ids(valid_col_count) = jb
@@ -1819,8 +2313,8 @@ contains
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
       do ispin = 1, dg_frag%nspin
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
         if (nrow <= 0 .or. ncol <= 0) cycle
         valid_row_count = 0
         do ii = 1, nrow
@@ -1862,6 +2356,19 @@ contains
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical :: enable_reduce_trace
+    character(16) :: env_reduce_trace
+    integer :: env_status
+
+    enable_reduce_trace = .false.
+    env_reduce_trace = ''
+    call get_environment_variable('SALMON_DG_HMAT_REDUCE_TRACE', env_reduce_trace, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_reduce_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_reduce_trace = .true.
+      end select
+    end if
 
     max_block_size = 0
     total_active_size = 0
@@ -1892,7 +2399,7 @@ contains
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -1935,19 +2442,21 @@ contains
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
     end if
   end subroutine reduce_matrix_blocks_runtime
 
-  subroutine init_complex_matrix_blocks_runtime(dg_frag, blocks, block_map)
+  subroutine init_complex_matrix_blocks_runtime(dg_frag, blocks, block_map, diagonal_only)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(complex_matrix_block_info), allocatable, intent(inout) :: blocks(:)
     integer, allocatable, intent(inout) :: block_map(:, :)
+    logical, optional, intent(in) :: diagonal_only
     integer :: ifrag_row, ifrag_col, iblk, n_blocks, nrow_max, ncol_max
+    logical :: use_diagonal_only
 
     if (allocated(blocks)) then
       do iblk = 1, size(blocks)
@@ -1956,12 +2465,18 @@ contains
       deallocate(blocks)
     end if
     if (allocated(block_map)) deallocate(block_map)
-    call ensure_runtime_neighbor_pair_cache(dg_frag)
+    use_diagonal_only = .false.
+    if (present(diagonal_only)) use_diagonal_only = diagonal_only
+    if (.not. use_diagonal_only) call ensure_runtime_neighbor_pair_cache(dg_frag)
 
     n_blocks = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
-        if (.not. is_runtime_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
+        if (use_diagonal_only) then
+          if (ifrag_row /= ifrag_col) cycle
+        else
+          if (.not. is_runtime_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
+        end if
         n_blocks = n_blocks + 1
       end do
     end do
@@ -1974,7 +2489,11 @@ contains
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
-        if (.not. is_runtime_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
+        if (use_diagonal_only) then
+          if (ifrag_row /= ifrag_col) cycle
+        else
+          if (.not. is_runtime_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
+        end if
         iblk = iblk + 1
         nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
         ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
@@ -2001,6 +2520,19 @@ contains
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical :: enable_reduce_trace
+    character(16) :: env_reduce_trace
+    integer :: env_status
+
+    enable_reduce_trace = .false.
+    env_reduce_trace = ''
+    call get_environment_variable('SALMON_DG_HMAT_REDUCE_TRACE', env_reduce_trace, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_reduce_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_reduce_trace = .true.
+      end select
+    end if
 
     max_block_size = 0
     total_active_size = 0
@@ -2031,7 +2563,7 @@ contains
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -2095,7 +2627,7 @@ contains
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
@@ -2136,13 +2668,14 @@ contains
 !$omp end parallel do
   end subroutine pack_owned_coef
 
-  subroutine fetch_remote_coef_rows(dg_frag, ispin, row_ids, fetched, col_start, col_end)
+  subroutine fetch_remote_coef_rows(dg_frag, ispin, row_ids, fetched, col_start, col_end, itt_debug)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ispin
     integer, intent(in) :: row_ids(:)
     complex(8), intent(out) :: fetched(:, :)
     integer, intent(in), optional :: col_start, col_end
+    integer, intent(in), optional :: itt_debug
 
     integer :: irow, global_row, owner_rank
     integer :: nrows_req, nstate_req, owner, k, cnt, max_owner_rows
@@ -2151,6 +2684,10 @@ contains
     integer, allocatable :: owner_slot(:), owner_row(:)
     complex(8), allocatable :: packed_rows(:,:)
     logical, parameter :: enable_coef_gather_trace = .false.
+    integer :: itt_tag
+
+    itt_tag = -1
+    if (present(itt_debug)) itt_tag = itt_debug
 
     fetched(:, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%coef_owner)) return
@@ -2173,6 +2710,12 @@ contains
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] fetch_remote_coef_rows state-range mismatch: rank=", dg_frag%id, &
         " nstate_req=", nstate_req, " cstart=", cstart, " cend=", cend
       stop "DG-Fragment RT: state range/shape mismatch in fetch_remote_coef_rows"
+    end if
+
+    if (itt_tag == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] ENTER_FETCH_RAW rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
     end if
 
     allocate(owner_counts(0:dg_frag%isize-1), owner_offsets(0:dg_frag%isize-1), owner_fill(0:dg_frag%isize-1))
@@ -2244,7 +2787,17 @@ contains
             packed_rows(k, 1:nstate_req) = dg_frag%coef(global_row, cstart:cend, ispin)
           end do
         end if
+        if (itt_tag == 1) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_BCAST_RAW rank=', dg_frag%id, &
+            ' itt=', itt_tag, ' owner=', owner, ' chunk_cnt=', chunk_cnt, ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         call comm_bcast(packed_rows(1:chunk_cnt, 1:nstate_req), dg_frag%icomm, owner)
+        if (itt_tag == 1) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_BCAST_RAW rank=', dg_frag%id, &
+            ' itt=', itt_tag, ' owner=', owner, ' chunk_cnt=', chunk_cnt, ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         do k = 1, chunk_cnt
           irow = owner_offsets(owner) + (chunk0 + k - 2)
           slot_idx = owner_slot(irow)
@@ -2256,6 +2809,11 @@ contains
 
     deallocate(packed_rows)
     deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
+    if (itt_tag == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] EXIT_FETCH_RAW rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
   end subroutine fetch_remote_coef_rows
 
   subroutine pack_owned_coef_pw(dg_frag, row_ids, packed)
@@ -2281,13 +2839,14 @@ contains
 !$omp end parallel do
   end subroutine pack_owned_coef_pw
 
-  subroutine fetch_remote_coef_pw_rows(dg_frag, row_ids, fetched, col_start, col_end, ispin_req)
+  subroutine fetch_remote_coef_pw_rows(dg_frag, row_ids, fetched, col_start, col_end, ispin_req, itt_debug)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: row_ids(:)
     complex(8), intent(out) :: fetched(:, :, :)
     integer, intent(in), optional :: col_start, col_end
     integer, intent(in), optional :: ispin_req
+    integer, intent(in), optional :: itt_debug
 
     integer :: irow, pw_row, owner_rank
     integer :: nrows_req, nstate_req, nspin_req, owner, k, cnt, max_owner_rows
@@ -2296,6 +2855,10 @@ contains
     integer, allocatable :: owner_counts(:), owner_offsets(:), owner_fill(:)
     integer, allocatable :: owner_slot(:), owner_row(:)
     complex(8), allocatable :: packed_rows(:, :, :)
+    integer :: itt_tag
+
+    itt_tag = -1
+    if (present(itt_debug)) itt_tag = itt_debug
 
     fetched(:, :, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%coef_pw_owner)) return
@@ -2328,6 +2891,12 @@ contains
           " ispin_req=", spin_sel, " nspin=", dg_frag%nspin
         stop "DG-Fragment RT: invalid ispin_req in fetch_remote_coef_pw_rows"
       end if
+    end if
+
+    if (itt_tag == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] ENTER_FETCH_PW rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' spin_sel=', spin_sel, ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
     end if
 
     allocate(owner_counts(0:dg_frag%isize-1), owner_offsets(0:dg_frag%isize-1), owner_fill(0:dg_frag%isize-1))
@@ -2397,7 +2966,17 @@ contains
             end if
           end do
         end if
+        if (itt_tag == 1) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_BCAST_PW rank=', dg_frag%id, &
+            ' itt=', itt_tag, ' owner=', owner, ' chunk_cnt=', chunk_cnt, ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         call comm_bcast(packed_rows(1:chunk_cnt, 1:nstate_req, 1:nspin_req), dg_frag%icomm, owner)
+        if (itt_tag == 1) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_BCAST_PW rank=', dg_frag%id, &
+            ' itt=', itt_tag, ' owner=', owner, ' chunk_cnt=', chunk_cnt, ' coef_ref_ready=', dg_frag%coef_ref_ready
+          flush(6)
+        end if
         do k = 1, chunk_cnt
           irow = owner_offsets(owner) + (chunk0 + k - 2)
           slot_idx = owner_slot(irow)
@@ -2409,6 +2988,11 @@ contains
 
     deallocate(packed_rows)
     deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
+    if (itt_tag == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] EXIT_FETCH_PW rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' spin_sel=', spin_sel, ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
   end subroutine fetch_remote_coef_pw_rows
 
   subroutine refresh_pw_coef_cache(dg_frag, nstate_use)
@@ -2463,7 +3047,7 @@ contains
     deallocate(pw_row_ids)
   end subroutine refresh_pw_coef_cache
 
-  subroutine gather_full_coef_view(dg_frag, ispin, n_frag_rows, nstate_use, coef_frag, coef_pw, state_start, state_end)
+  subroutine gather_full_coef_view(dg_frag, ispin, n_frag_rows, nstate_use, coef_frag, coef_pw, state_start, state_end, itt_debug)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: ispin
@@ -2472,12 +3056,23 @@ contains
     complex(8), allocatable, intent(inout) :: coef_frag(:,:)
     complex(8), allocatable, intent(inout) :: coef_pw(:,:)
     integer, intent(in), optional :: state_start, state_end
+    integer, intent(in), optional :: itt_debug
 
     integer :: i, n_pw, cstart, cend
     integer, allocatable, save :: frag_row_ids(:), pw_row_ids(:)
     complex(8), allocatable, save :: coef_pw_all(:,:,:)
     integer :: ispin_eff
     logical, parameter :: enable_coef_gather_trace = .false.
+    integer :: itt_tag
+
+    itt_tag = -1
+    if (present(itt_debug)) itt_tag = itt_debug
+
+    if (itt_tag == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] ENTER_GATHER_FULL rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
+    end if
 
     if (enable_coef_gather_trace .and. dg_frag%id == 0 .and. ispin == 1) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        coef gather entry: rank=", dg_frag%id, &
@@ -2531,7 +3126,17 @@ contains
       do i = 1, n_frag_rows
         frag_row_ids(i) = i
       end do
-      call fetch_remote_coef_rows(dg_frag, ispin, frag_row_ids, coef_frag, cstart, cend)
+      if (itt_tag == 1) then
+        write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_FETCH_RAW rank=', dg_frag%id, ' itt=', itt_tag, &
+          ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
+      end if
+      call fetch_remote_coef_rows(dg_frag, ispin, frag_row_ids, coef_frag, cstart, cend, itt_tag)
+      if (itt_tag == 1) then
+        write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_FETCH_RAW rank=', dg_frag%id, ' itt=', itt_tag, &
+          ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
+      end if
     end if
 
     n_pw = 0
@@ -2562,8 +3167,24 @@ contains
         allocate(coef_pw_all(n_pw, nstate_use, 1))
       end if
       coef_pw_all(:, :, :) = (0.0d0, 0.0d0)
-      call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_all, cstart, cend, ispin_eff)
+      if (itt_tag == 1) then
+        write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_FETCH_PW rank=', dg_frag%id, ' itt=', itt_tag, &
+          ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
+      end if
+      call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, coef_pw_all, cstart, cend, ispin_eff, itt_tag)
       coef_pw(:, :) = coef_pw_all(:, :, 1)
+      if (itt_tag == 1) then
+        write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_FETCH_PW rank=', dg_frag%id, ' itt=', itt_tag, &
+          ' coef_ref_ready=', dg_frag%coef_ref_ready
+        flush(6)
+      end if
+    end if
+
+    if (itt_tag == 1) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] EXIT_GATHER_FULL rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
+      flush(6)
     end if
   end subroutine gather_full_coef_view
 
@@ -2761,8 +3382,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -2849,8 +3470,8 @@ contains
           flush(6)
           stop "invalid complex block col fragment"
         end if
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
         if (nrow <= 0 .or. ncol <= 0) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] inactive complex block dimensions: rank=", dg_frag%id, &
             " ispin=", ispin, " iblk=", iblk, " nrow=", nrow, " ncol=", ncol
@@ -2911,8 +3532,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -2975,8 +3596,8 @@ contains
         ifrag_col = blocks(iblk)%ifrag_col
         if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
         if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
         if (nrow <= 0 .or. ncol <= 0) cycle
 
         valid_row_count = 0
@@ -3018,8 +3639,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3075,8 +3696,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3132,8 +3753,8 @@ contains
       ifrag_col = blocks(iblk)%ifrag_col
       if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
       if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
-      nrow = dg_frag%n_basis(ifrag_row, ispin)
-      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
       if (nrow <= 0 .or. ncol <= 0) cycle
 
       valid_row_count = 0
@@ -3166,6 +3787,63 @@ contains
       end do
     end do
   end subroutine copy_matrix_blocks_metric_to_complex_dense
+
+  subroutine copy_complex_matrix_blocks_metric_to_dense(dg_frag, blocks, ispin, n_metric, mat)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(complex_matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    integer, intent(in) :: n_metric
+    complex(8), intent(inout) :: mat(:, :)
+
+    integer :: iblk, ifrag_row, ifrag_col
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (n_metric <= 0) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    do iblk = 1, size(blocks)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
+      if (nrow <= 0 .or. ncol <= 0) cycle
+
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > n_metric .or. row_gid(ii) > size(mat, 1)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+
+      valid_col_count = 0
+      do jj = 1, ncol
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > n_metric .or. col_gid(jj) > size(mat, 2)) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        ig_j = col_gid(jj)
+!$omp simd private(ii,ig_i)
+        do idx_ii = 1, valid_row_count
+          ii = valid_row_ids(idx_ii)
+          ig_i = row_gid(ii)
+          mat(ig_i, ig_j) = blocks(iblk)%val(ii, jj, ispin)
+        end do
+      end do
+    end do
+  end subroutine copy_complex_matrix_blocks_metric_to_dense
 
   subroutine copy_matrix_blocks_metric_to_real_dense(dg_frag, blocks, ispin, n_metric, mat)
     implicit none
@@ -3250,16 +3928,9 @@ contains
         call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n_metric, &
              mat(1:n_metric, 1:n_metric, ispin))
       end do
-    else if (allocated(dg_frag%H_mat)) then
-      !$omp parallel do collapse(3) private(io,jo,ispin)
-      do ispin = 1, dg_frag%nspin
-        do jo = 1, n_metric
-          do io = 1, n_metric
-            mat(io, jo, ispin) = cmplx(dg_frag%H_mat(io, jo, ispin), 0.0d0, kind=8)
-          end do
-        end do
-      end do
-      !$omp end parallel do
+    else
+      write(*,'(1x,a,i0)') '[FATAL] copy_hamiltonian_metric_to_complex_dense requires H_mat_blocks (block-only route). rank=', dg_frag%id
+      stop 1
     end if
   end subroutine copy_hamiltonian_metric_to_complex_dense
 
@@ -3390,7 +4061,6 @@ contains
 !$omp parallel do private(istate,iblk,idir,scale,jb,col_idx,ib,row_idx,active_dir_count,valid_row_count,valid_col_count,idx_dir,idx_ib,idx_jb,ifrag_row,ifrag_col,nrow,ncol,active_dirs,valid_row_ids,valid_col_ids,row_gid,col_gid) schedule(static)
     do istate = 1, nstate
       do iblk = 1, dg_frag%n_momentum_blocks
-        if (.not. allocated(dg_frag%momentum_blocks(iblk)%val)) cycle
         active_dir_count = 0
         do idir = 1, 3
           if (abs(scale_vec(idir)) < 1.0d-30) cycle
@@ -3401,8 +4071,10 @@ contains
 
         ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
         ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
-        nrow = dg_frag%n_basis(ifrag_row, ispin)
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
+        nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), &
+             size(dg_frag%momentum_blocks(iblk)%val, 2))
+        ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), &
+             size(dg_frag%momentum_blocks(iblk)%val, 3))
         if (nrow <= 0 .or. ncol <= 0) cycle
 
         valid_row_count = 0

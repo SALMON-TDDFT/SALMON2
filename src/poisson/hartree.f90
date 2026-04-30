@@ -20,6 +20,36 @@ module hartree_sub
 
 contains
 
+subroutine build_hartree_density_from_rho(info, rho_in, rho_h_out, preserve_charge)
+  use structures, only: s_parallel_info, s_scalar
+  use communication, only: comm_summation
+  implicit none
+  type(s_parallel_info), intent(in)    :: info
+  type(s_scalar)       , intent(in)    :: rho_in
+  type(s_scalar)       , intent(inout) :: rho_h_out
+  logical, optional    , intent(in)    :: preserve_charge
+  logical :: keep_charge
+  real(8) :: q_in_local, q_in_global, q_out_local, q_out_global
+  real(8) :: scale_factor
+
+  keep_charge = .true.
+  if (present(preserve_charge)) keep_charge = preserve_charge
+
+  rho_h_out%f(:, :, :) = rho_in%f(:, :, :)
+
+  if (.not. keep_charge) return
+
+  q_in_local = sum(rho_in%f)
+  q_out_local = sum(rho_h_out%f)
+  call comm_summation(q_in_local, q_in_global, info%icomm_r)
+  call comm_summation(q_out_local, q_out_global, info%icomm_r)
+
+  if (abs(q_out_global) <= tiny(1.0d0)) return
+
+  scale_factor = q_in_global / q_out_global
+  rho_h_out%f(:, :, :) = scale_factor * rho_h_out%f(:, :, :)
+end subroutine build_hartree_density_from_rho
+
 !===================================================================================================================================
 subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use math_constants,only: pi
@@ -32,7 +62,8 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid,  &
                         allocate_scalar, deallocate_scalar
-  use communication, only: comm_is_root
+  use communication, only: comm_is_root, comm_summation, comm_get_min, comm_get_max
+  use parallelization, only: nproc_id_global
   use poisson_isolated
   use poisson_periodic
   use poisson_dirichlet, only: jones
@@ -50,11 +81,14 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   type(s_scalar)         ,intent(in)    :: rho
   type(s_scalar)         ,intent(inout) :: Vh
   character(16) :: env_hse_sr
+  character(16) :: env_contract_trace
   logical :: use_hse_sr_hartree
+  logical :: enable_contract_trace
   integer :: env_status
 
   env_hse_sr = ''
   use_hse_sr_hartree = .false.
+  enable_contract_trace = .false.
   call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
   if (env_status == 0) then
     select case(trim(adjustl(env_hse_sr)))
@@ -62,6 +96,20 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
       use_hse_sr_hartree = .true.
     end select
   end if
+  env_contract_trace = ''
+  call get_environment_variable('SALMON_POISSON_CONTRACT_TRACE', env_contract_trace, status=env_status)
+  if (env_status == 0) then
+    select case(trim(adjustl(env_contract_trace)))
+    case('1','y','Y','yes','YES','true','TRUE','on','ON')
+      enable_contract_trace = .true.
+    end select
+  end if
+
+  if (enable_contract_trace) then
+    call print_scalar_contract_stats('DC-HARTREE-rho-in', lg, mg, info, rho)
+  end if
+
+  call set_poisson_contract_context('DC')
 
   call nvtxStartRange('hartree', __LINE__)
   
@@ -119,6 +167,10 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
 #endif
   end select
 
+  if (enable_contract_trace) then
+    call print_scalar_contract_stats('DC-HARTREE-vh-out', lg, mg, info, Vh)
+  end if
+
   !potentiall wall at the boundary on z direction
   if(yn_put_wall_z_boundary=='y') call add_potential_wall
 
@@ -153,6 +205,41 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
       !$omp end parallel do
 
     end subroutine add_potential_wall
+
+    subroutine print_scalar_contract_stats(tag, lg_local, mg_local, info_local, scalar)
+      implicit none
+      character(*),          intent(in) :: tag
+      type(s_rgrid),         intent(in) :: lg_local, mg_local
+      type(s_parallel_info), intent(in) :: info_local
+      type(s_scalar),        intent(in) :: scalar
+      real(8) :: lsum, gsum, lsum2, gsum2
+      real(8) :: lmin, gmin, lmax, gmax
+      real(8) :: min_in(1), min_out(1), max_in(1), max_out(1)
+      integer :: npts_global
+
+      lsum = sum(scalar%f(mg_local%is(1):mg_local%ie(1), mg_local%is(2):mg_local%ie(2), mg_local%is(3):mg_local%ie(3)))
+      lsum2 = sum(scalar%f(mg_local%is(1):mg_local%ie(1), mg_local%is(2):mg_local%ie(2), mg_local%is(3):mg_local%ie(3))**2)
+      lmin = minval(scalar%f(mg_local%is(1):mg_local%ie(1), mg_local%is(2):mg_local%ie(2), mg_local%is(3):mg_local%ie(3)))
+      lmax = maxval(scalar%f(mg_local%is(1):mg_local%ie(1), mg_local%is(2):mg_local%ie(2), mg_local%is(3):mg_local%ie(3)))
+
+      call comm_summation(lsum, gsum, info_local%icomm_r)
+      call comm_summation(lsum2, gsum2, info_local%icomm_r)
+      min_in(1) = lmin
+      max_in(1) = lmax
+      call comm_get_min(min_in, min_out, 1, info_local%icomm_r)
+      call comm_get_max(max_in, max_out, 1, info_local%icomm_r)
+      gmin = min_out(1)
+      gmax = max_out(1)
+
+      if (.not. comm_is_root(nproc_id_global)) return
+
+      npts_global = lg_local%num(1) * lg_local%num(2) * lg_local%num(3)
+      write(*,'(1x,a,1x,a,1x,a,3(i0,1x),a,3(i0,1x),a,es23.15,a,es23.15,a,es23.15,a,es23.15,a,es23.15)') &
+        '[POISSON-CONTRACT]', trim(tag), 'lg_num=', lg_local%num(1), lg_local%num(2), lg_local%num(3), &
+        ' mg_is=', mg_local%is(1), mg_local%is(2), mg_local%is(3), &
+        ' sum=', gsum, ' mean=', gsum / dble(npts_global), ' l2=', sqrt(gsum2), ' min=', gmin, ' max=', gmax
+      flush(6)
+    end subroutine print_scalar_contract_stats
 
 end subroutine hartree
 

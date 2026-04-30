@@ -947,11 +947,7 @@
     end if
 
     write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-second-halo"
-    flush(6)
-    call exchange_phi_frag_halo(dg_frag)
-    write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        basis-update stage: rank=", dg_frag%id, &
-      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-second-halo"
+      " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "halo-disabled"
     flush(6)
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1

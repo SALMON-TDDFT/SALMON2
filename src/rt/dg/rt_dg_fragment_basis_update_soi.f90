@@ -872,8 +872,6 @@
       end if
     end if
 
-    call exchange_phi_frag_halo(dg_frag)
-
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     allocate(mat_H_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, ifrag_count))
     allocate(halo_H_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, dg_frag%n_halo, ifrag_count))

@@ -99,6 +99,9 @@ module rt_dg_fragment
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
   public :: diagnose_density_from_fragments
+  public :: get_dg_spin_occ_info
+  public :: copy_periodic_global_scalar_to_rank_buffer
+  public :: build_total_potential_grid_with_buffered_hartree
   public :: s_dg_fragment_rt, halo_info
   
   ! Types and data structures are defined in rt_dg_fragment_types
@@ -119,6 +122,52 @@ module rt_dg_fragment
   logical, allocatable, save :: hse_ace_cache_valid(:,:)          ! (n_frag_local,nspin)
   
 contains
+
+  subroutine get_dg_spin_occ_info(dg_frag, system, ispin, occ_weight, nocc, state_cap)
+    use structures
+    use salmon_global, only: nelec, nelec_spin
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    integer, intent(in) :: ispin
+    real(8), intent(out) :: occ_weight(:)
+    integer, intent(out) :: nocc
+    integer, intent(in), optional :: state_cap
+
+    integer :: cap, io, nocc_eff
+
+    occ_weight(:) = 0.0d0
+    cap = min(size(occ_weight), dg_frag%nstate_tot)
+    if (present(state_cap)) cap = min(cap, max(0, state_cap))
+
+    if (cap <= 0) then
+      nocc = 0
+      return
+    end if
+
+    if (allocated(system%rocc)) then
+      if (ispin <= size(system%rocc, 3)) then
+        occ_weight(1:min(cap, size(system%rocc, 1))) = &
+          max(0.0d0, system%rocc(1:min(cap, size(system%rocc, 1)), 1, ispin))
+      end if
+    else
+      if (dg_frag%nspin == 1) then
+        nocc_eff = min(cap, int(nelec / 2.0d0 + 1.0d-12))
+        if (nocc_eff > 0) occ_weight(1:nocc_eff) = 2.0d0
+      else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
+        nocc_eff = min(cap, nelec_spin(ispin))
+        if (nocc_eff > 0) occ_weight(1:nocc_eff) = 1.0d0
+      else
+        nocc_eff = min(cap, int(nelec / 2.0d0 + 1.0d-12))
+        if (nocc_eff > 0) occ_weight(1:nocc_eff) = 1.0d0
+      end if
+    end if
+
+    nocc = 0
+    do io = 1, cap
+      if (occ_weight(io) > 0.0d0) nocc = io
+    end do
+  end subroutine get_dg_spin_occ_info
 
   !=======================================================================
   ! Initialize DG-Fragment RT calculation
@@ -300,6 +349,7 @@ contains
     ! Read fragment basis data from DC-LCFO calculation if requested
     if (load_from_dcdft) then
       call read_fragment_basis_data(dg_frag, bdir_frag)
+      call read_dg_occupation_seed(dg_frag)
     else
       if (comm_is_root(info%id_rko)) then
         write(*,'(1x,a)') "WARNING: yn_dg_fragment_from_dcdft='n'"
@@ -315,19 +365,13 @@ contains
       dg_frag%n_mat_max = maxval(dg_frag%n_mat)
     end if
     
-    ! Initialize halo communication structures
+    ! Halo communication is explicitly disabled by design in this branch.
+    dg_frag%n_halo = 0
+    dg_frag%has_halo_exchange = .false.
     if (dg_frag%has_real_space_basis) then
-      call init_halo_communication(dg_frag, info)
-      call rebuild_coef_owner_map(dg_frag, "post-halo-init")
-    end if
-    
-    ! Perform initial halo exchange to fill ghost cells
-    ! This ensures phi_frag halo regions contain correct neighbor data
-    ! Skip if phi_frag was not loaded
-    if (dg_frag%has_real_space_basis) then
-      call exchange_phi_frag_halo(dg_frag)
+      call rebuild_coef_owner_map(dg_frag, "post-halo-disabled")
       if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a)') "Initial halo exchange completed for phi_frag"
+        write(*,'(1x,a)') "Fragment halo exchange disabled: local PBC-buffered stencil only"
       end if
     end if
     
@@ -348,12 +392,16 @@ contains
     
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    if (.not. allocated(dg_frag%rho_h_frag)) then
+      allocate(dg_frag%rho_h_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    end if
     allocate(dg_frag%rho_s_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     allocate(dg_frag%Vh_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%Vxc_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     
     ! Initialize to zero
     dg_frag%rho_frag = 0.0d0
+    if (.not. dg_frag%has_seed_rho_h) dg_frag%rho_h_frag = 0.0d0
     dg_frag%rho_s_frag = 0.0d0
     dg_frag%Vh_frag = 0.0d0
     dg_frag%Vxc_frag = 0.0d0
@@ -446,6 +494,50 @@ contains
     
     ! Initialize RI/DF approximation for HSE if enabled
     call init_hse_ri_data(dg_frag, system, info)
+
+    dg_frag%current(:) = 0.0d0
+    dg_frag%current_para(:) = 0.0d0
+    dg_frag%current_dia(:) = 0.0d0
+    dg_frag%current_total(:) = 0.0d0
+    dg_frag%elec_num_raw_t0 = 0.0d0
+    dg_frag%elec_num_scaled_t0 = 0.0d0
+    dg_frag%elec_num_baseline_ready = .false.
+    dg_frag%rho_drift_indicator = 0.0d0
+    dg_frag%rho_ff_elec = 0.0d0
+    dg_frag%rho_fp_elec = 0.0d0
+    dg_frag%rho_pp_elec = 0.0d0
+    dg_frag%rho_owned_elec = 0.0d0
+    dg_frag%rho_imported_elec = 0.0d0
+    dg_frag%rho_local_all_elec = 0.0d0
+    dg_frag%rho_global_raw_elec = 0.0d0
+    dg_frag%rho_global_scaled_elec = 0.0d0
+    dg_frag%rho_contract_residual_elec = 0.0d0
+    dg_frag%coef_occ_norm0 = 0.0d0
+    dg_frag%coef_occ_norm = 0.0d0
+    dg_frag%coef_occ_norm_drift = 0.0d0
+    dg_frag%csc_occ_identity_norm = 0.0d0
+    dg_frag%csc_occ_identity_max = 0.0d0
+    dg_frag%occvirt_leakage = 0.0d0
+    dg_frag%occvirt_top_occ = 0
+    dg_frag%occvirt_top_virt = 0
+    dg_frag%occvirt_top_abs2 = 0.0d0
+    dg_frag%jpara_top_occ_state = 0
+    dg_frag%jpara_top_occ_value = 0.0d0
+    dg_frag%selfexc_track_states(:) = (/ 99, 100, 129 /)
+    dg_frag%selfexc_track_norm(:) = 0.0d0
+    dg_frag%selfexc_csc_step_delta = 0.0d0
+    dg_frag%selfexc_leak100_129_step_delta = 0.0d0
+    dg_frag%selfexc_csc_stage_pre_mixed = 0.0d0
+    dg_frag%selfexc_csc_stage_post_overlap = 0.0d0
+    dg_frag%selfexc_csc_stage_post_raw = 0.0d0
+    dg_frag%selfexc_leak100_129_pre_mixed = 0.0d0
+    dg_frag%selfexc_leak100_129_post_overlap = 0.0d0
+    dg_frag%selfexc_leak100_129_post_raw = 0.0d0
+    dg_frag%selfexc_leak100_129_current = 0.0d0
+    dg_frag%selfexc_csc_prev_step = 0.0d0
+    dg_frag%selfexc_leak100_129_prev_step = 0.0d0
+    dg_frag%selfexc_prev_step_itt = -1
+    dg_frag%coef_ref_ready = .false.
     
     if (comm_is_root(info%id_rko)) then
       write(*,*) "DG-Fragment RT initialization complete"
@@ -477,7 +569,14 @@ contains
     integer :: primary_count_local, primary_owned_local, primary_remote_local
     integer :: local_send_pts, local_recv_pts, global_send_pts, global_recv_pts
     integer :: self_source_owned_pts, self_source_total_pts, global_self_source_owned_pts, global_self_source_total_pts
+    integer :: pair_index, mismatch_src_rank, mismatch_dst_rank
     integer, allocatable :: recv_count(:), recv_cursor(:)
+    integer, allocatable :: id_tmp(:)
+    integer, allocatable :: send_matrix_local(:), send_matrix_global(:), recv_matrix_local(:), recv_matrix_global(:)
+    integer, allocatable :: first_send_ixg_local(:), first_send_iyg_local(:), first_send_izg_local(:)
+    integer, allocatable :: first_send_ixg_global(:), first_send_iyg_global(:), first_send_izg_global(:)
+    integer, allocatable :: first_recv_ixg_local(:), first_recv_iyg_local(:), first_recv_izg_local(:)
+    integer, allocatable :: first_recv_ixg_global(:), first_recv_iyg_global(:), first_recv_izg_global(:)
     logical, parameter :: enable_density_owner_map_probe = .false.
 
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
@@ -485,8 +584,6 @@ contains
     if (allocated(dg_frag%density_ixg_map)) deallocate(dg_frag%density_ixg_map)
     if (allocated(dg_frag%density_iyg_map)) deallocate(dg_frag%density_iyg_map)
     if (allocated(dg_frag%density_izg_map)) deallocate(dg_frag%density_izg_map)
-    if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
-    if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_send_count)) deallocate(dg_frag%density_send_count)
     if (allocated(dg_frag%density_send_slot_map)) deallocate(dg_frag%density_send_slot_map)
     if (allocated(dg_frag%density_subgroup_send_count)) deallocate(dg_frag%density_subgroup_send_count)
@@ -552,6 +649,21 @@ contains
 
     call build_fragment_global_boxes(dg_frag)
 
+    ! Rebuild id_array (fragment -> root rank) via comm_summation so that all
+    ! ranks have a consistent mapping regardless of halo-exchange init state.
+    if (allocated(dg_frag%id_array)) then
+      allocate(id_tmp(dg_frag%n_frag))
+      id_tmp = 0
+      if (dg_frag%is_frag_root) then
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          id_tmp(ifrag) = dg_frag%id + 1  ! +1 to distinguish from unset (0)
+        end do
+      end if
+      call comm_summation(id_tmp, dg_frag%id_array, dg_frag%n_frag, dg_frag%icomm)
+      dg_frag%id_array = dg_frag%id_array - 1  ! Convert back to 0-based MPI rank
+      deallocate(id_tmp)
+    end if
+
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     nx_max = max(1, maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end)))
     ny_max = max(1, maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end)))
@@ -569,6 +681,16 @@ contains
     allocate(dg_frag%density_recv_map(0:dg_frag%isize-1))
     allocate(dg_frag%density_grid_points(nx_max * ny_max * nz_max, ifrag_count))
     allocate(dg_frag%density_grid_point_count(ifrag_count))
+    allocate(send_matrix_local(dg_frag%isize * dg_frag%isize), send_matrix_global(dg_frag%isize * dg_frag%isize))
+    allocate(recv_matrix_local(dg_frag%isize * dg_frag%isize), recv_matrix_global(dg_frag%isize * dg_frag%isize))
+    allocate(first_send_ixg_local(dg_frag%isize * dg_frag%isize), first_send_iyg_local(dg_frag%isize * dg_frag%isize), &
+         first_send_izg_local(dg_frag%isize * dg_frag%isize))
+    allocate(first_send_ixg_global(dg_frag%isize * dg_frag%isize), first_send_iyg_global(dg_frag%isize * dg_frag%isize), &
+         first_send_izg_global(dg_frag%isize * dg_frag%isize))
+    allocate(first_recv_ixg_local(dg_frag%isize * dg_frag%isize), first_recv_iyg_local(dg_frag%isize * dg_frag%isize), &
+         first_recv_izg_local(dg_frag%isize * dg_frag%isize))
+    allocate(first_recv_ixg_global(dg_frag%isize * dg_frag%isize), first_recv_iyg_global(dg_frag%isize * dg_frag%isize), &
+         first_recv_izg_global(dg_frag%isize * dg_frag%isize))
     dg_frag%density_owner_map = dg_frag%id
     dg_frag%density_primary_local_map = .false.
     dg_frag%density_ixg_map = 1
@@ -579,6 +701,22 @@ contains
     dg_frag%density_subgroup_send_count = 0
     dg_frag%density_subgroup_send_slot_map = 0
     dg_frag%density_grid_point_count = 0
+    send_matrix_local = 0
+    send_matrix_global = 0
+    recv_matrix_local = 0
+    recv_matrix_global = 0
+    first_send_ixg_local = 0
+    first_send_iyg_local = 0
+    first_send_izg_local = 0
+    first_send_ixg_global = 0
+    first_send_iyg_global = 0
+    first_send_izg_global = 0
+    first_recv_ixg_local = 0
+    first_recv_iyg_local = 0
+    first_recv_izg_local = 0
+    first_recv_ixg_global = 0
+    first_recv_iyg_global = 0
+    first_recv_izg_global = 0
 
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -631,7 +769,14 @@ contains
             source_rank = dg_frag%id_array(ifrag)
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= source_rank .and. &
                 dg_frag%is_frag_root) then
+              pair_index = dg_frag%id * dg_frag%isize + owner_rank + 1
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
+              send_matrix_local(pair_index) = dg_frag%density_send_count(owner_rank)
+              if (dg_frag%density_send_count(owner_rank) == 1) then
+                first_send_ixg_local(pair_index) = ixg
+                first_send_iyg_local(pair_index) = iyg
+                first_send_izg_local(pair_index) = izg
+              end if
               dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
             end if
             dg_frag%density_grid_point_count(i_local) = dg_frag%density_grid_point_count(i_local) + 1
@@ -715,7 +860,14 @@ contains
               cycle
             end if
             if (owner_rank == dg_frag%id) then
+              pair_index = dg_frag%id * dg_frag%isize + source_rank + 1
+              if (recv_count(source_rank) == 0) then
+                first_recv_ixg_local(pair_index) = ixg
+                first_recv_iyg_local(pair_index) = iyg
+                first_recv_izg_local(pair_index) = izg
+              end if
               recv_count(source_rank) = recv_count(source_rank) + 1
+              recv_matrix_local(pair_index) = recv_count(source_rank)
             end if
           end do
         end do
@@ -838,7 +990,64 @@ contains
       end do
     end do
 
+    call comm_summation(send_matrix_local, send_matrix_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(recv_matrix_local, recv_matrix_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(first_send_ixg_local, first_send_ixg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(first_send_iyg_local, first_send_iyg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(first_send_izg_local, first_send_izg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(first_recv_ixg_local, first_recv_ixg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(first_recv_iyg_local, first_recv_iyg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+    call comm_summation(first_recv_izg_local, first_recv_izg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
+
+    if (dg_frag%id == 0) then
+      mismatch_src_rank = -1
+      mismatch_dst_rank = -1
+      do owner_rank = 1, min(2, dg_frag%isize - 1)
+        do source_rank = 0, dg_frag%isize - 1
+          if (send_matrix_global(source_rank * dg_frag%isize + owner_rank + 1) /= &
+              recv_matrix_global(owner_rank * dg_frag%isize + source_rank + 1)) then
+            mismatch_src_rank = source_rank
+            mismatch_dst_rank = owner_rank
+            exit
+          end if
+        end do
+        if (mismatch_src_rank >= 0) exit
+      end do
+      if (mismatch_src_rank >= 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_FIRST src=', mismatch_src_rank, &
+          ' dst=', mismatch_dst_rank, ' send_count=', &
+          send_matrix_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ' recv_count=', &
+          recv_matrix_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1)
+        if (send_matrix_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1) > 0) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_SEND src=', mismatch_src_rank, &
+            ' peer=', mismatch_dst_rank, ' global=', &
+            first_send_ixg_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ',', &
+            first_send_iyg_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ',', &
+            first_send_izg_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ' owner=', mismatch_dst_rank
+        else
+          write(*,'(1x,a,i0,a,i0,a)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_SEND src=', mismatch_src_rank, &
+            ' peer=', mismatch_dst_rank, ' global=none owner=none'
+        end if
+        if (recv_matrix_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1) > 0) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_RECV dst=', mismatch_dst_rank, &
+            ' peer=', mismatch_src_rank, ' global=', &
+            first_recv_ixg_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1), ',', &
+            first_recv_iyg_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1), ',', &
+            first_recv_izg_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1), ' expected_source=', mismatch_src_rank
+        else
+          write(*,'(1x,a,i0,a,i0,a)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_RECV dst=', mismatch_dst_rank, &
+            ' peer=', mismatch_src_rank, ' global=none expected_source=none'
+        end if
+        flush(6)
+      end if
+    end if
+
     deallocate(recv_count, recv_cursor)
+    deallocate(send_matrix_local, send_matrix_global, recv_matrix_local, recv_matrix_global)
+    deallocate(first_send_ixg_local, first_send_iyg_local, first_send_izg_local)
+    deallocate(first_send_ixg_global, first_send_iyg_global, first_send_izg_global)
+    deallocate(first_recv_ixg_local, first_recv_iyg_local, first_recv_izg_local)
+    deallocate(first_recv_ixg_global, first_recv_iyg_global, first_recv_izg_global)
 
   end subroutine build_density_grid_owner_maps
 
@@ -1165,6 +1374,57 @@ contains
 
 #include "rt_dg_fragment_halo.f90"
 
+  subroutine read_dg_occupation_seed(dg_frag)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root, comm_bcast
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: iunit, nspin_file, iostat_open
+    integer, allocatable :: occ_file(:)
+    logical :: has_file
+    character(256) :: filename
+
+    has_file = .false.
+    nspin_file = dg_frag%nspin
+    if (comm_is_root(dg_frag%id)) then
+      filename = './data_dcdft/total/dg_occupation.bin'
+      iunit = get_filehandle()
+      open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+      if (iostat_open == 0) then
+        has_file = .true.
+        read(iunit) nspin_file
+        if (nspin_file >= 1) then
+          allocate(occ_file(nspin_file))
+          read(iunit) occ_file(1:nspin_file)
+        end if
+        close(iunit)
+      end if
+    end if
+
+    call comm_bcast(has_file, dg_frag%icomm, 0)
+    call comm_bcast(nspin_file, dg_frag%icomm, 0)
+    if (.not. has_file) return
+    if (nspin_file < 1) return
+
+    if (.not. allocated(occ_file)) allocate(occ_file(nspin_file))
+    call comm_bcast(occ_file, dg_frag%icomm, 0)
+
+    if (nspin_file /= dg_frag%nspin) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,i0,a)') "[WARN] dg_occupation.bin nspin mismatch: file=", nspin_file, &
+          " runtime=", dg_frag%nspin, " (ignoring seed occupancy)"
+      end if
+      deallocate(occ_file)
+      return
+    end if
+
+    dg_frag%nocc_spin(1:dg_frag%nspin) = min(dg_frag%nstate_tot, max(0, occ_file(1:dg_frag%nspin)))
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,10(1x,i0))') "[INFO] DG occupancy seed loaded:", dg_frag%nocc_spin(1:dg_frag%nspin)
+    end if
+    deallocate(occ_file)
+  end subroutine read_dg_occupation_seed
+
 
   !=======================================================================
   ! Read fragment basis data from DC-LCFO calculation (MPI-parallelized)
@@ -1172,7 +1432,7 @@ contains
   subroutine read_fragment_basis_data(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root, comm_bcast, comm_sync_all, comm_summation, comm_get_max
-    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin
+    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin, yn_dual_rho_vh_only
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: bdir_frag
@@ -1180,6 +1440,7 @@ contains
     character(32), parameter :: binfile_wf = "wavefunctions.bin"
     character(32), parameter :: binfile_bf = "basis_functions.bin"
     character(32), parameter :: binfile_rg = "rgrid_index.bin"
+    character(32), parameter :: binfile_rho_h = "hartree_density.bin"
     character(256) :: filename
     integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
     integer :: nstate_frag_file, nstate_tot_file
@@ -1198,11 +1459,19 @@ contains
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: env_status, env_len
     character(len=64) :: env_n_mat_cap
-    logical :: warned_spin_discard
+    logical :: warned_spin_discard, want_seed_rho_h, has_rho_h_file
     real(8) :: cap_avg, weight_best
     real(8) :: coef_file_probe(3), coef_global_probe(3)
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
+    real(8), allocatable :: rho_h_local(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
+
+    want_seed_rho_h = (yn_dual_rho_vh_only == 'y')
+    dg_frag%has_seed_rho_h = .false.
+    if (want_seed_rho_h .and. .not. allocated(dg_frag%rho_h_frag)) then
+      allocate(dg_frag%rho_h_frag(dg_frag%mg%is(1):dg_frag%mg%ie(1), dg_frag%mg%is(2):dg_frag%mg%ie(2), dg_frag%mg%is(3):dg_frag%mg%ie(3)))
+      dg_frag%rho_h_frag = 0.0d0
+    end if
     
     ! Step 1: Root reads metadata from first fragment and broadcasts
     if (comm_is_root(dg_frag%id)) then
@@ -1731,6 +2000,41 @@ contains
         
         deallocate(phi_tmp)
       end block
+
+      if (want_seed_rho_h) then
+        has_rho_h_file = .false.
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_rho_h
+        iunit = get_filehandle()
+        open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=env_status)
+        if (env_status == 0) then
+          has_rho_h_file = .true.
+          allocate(rho_h_local(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
+          read(iunit) nxyz_new(1:3)
+          if (any(nxyz_new(1:3) /= nxyz_domain(1:3))) then
+            stop "DG-Fragment RT: hartree_density.bin domain mismatch"
+          end if
+          read(iunit) rho_h_local(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+          close(iunit)
+
+          do iz = 1, nxyz_domain(3)
+            izg_store = jxyz_tot(iz, 3)
+            if (izg_store < dg_frag%mg%is(3) .or. izg_store > dg_frag%mg%ie(3)) cycle
+            do iy = 1, nxyz_domain(2)
+              iyg_store = jxyz_tot(iy, 2)
+              if (iyg_store < dg_frag%mg%is(2) .or. iyg_store > dg_frag%mg%ie(2)) cycle
+              do ix = 1, nxyz_domain(1)
+                ixg_store = jxyz_tot(ix, 1)
+                if (ixg_store < dg_frag%mg%is(1) .or. ixg_store > dg_frag%mg%ie(1)) cycle
+                dg_frag%rho_h_frag(ixg_store, iyg_store, izg_store) = rho_h_local(ix, iy, iz)
+              end do
+            end do
+          end do
+          deallocate(rho_h_local)
+          dg_frag%has_seed_rho_h = .true.
+        else
+          close(iunit)
+        end if
+      end if
       
       close(iunit)
     end do
@@ -1765,6 +2069,9 @@ contains
       write(*,'(1x,a,i0,a,i0,a,i0)') "  Domain size: ", nxyz_domain(1), " x ", nxyz_domain(2), " x ", nxyz_domain(3)
       write(*,'(1x,a,i0)') "  Number of basis functions per fragment: ", dg_frag%nstate_frag
       write(*,'(1x,a,i0)') "  Number of fragments loaded: ", ifrag_count
+      if (want_seed_rho_h) then
+        write(*,'(1x,a,l1)') "  Hartree-density seed loaded: ", dg_frag%has_seed_rho_h
+      end if
     end if
     
   end subroutine read_fragment_basis_data
@@ -2207,14 +2514,13 @@ contains
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
-    if (allocated(dg_frag%density_weight_local)) deallocate(dg_frag%density_weight_local)
-    if (allocated(dg_frag%density_inv_weight_local)) deallocate(dg_frag%density_inv_weight_local)
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
     if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
+    if (allocated(dg_frag%rho_h_frag)) deallocate(dg_frag%rho_h_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
     if (allocated(dg_frag%rk_beta)) deallocate(dg_frag%rk_beta)
     if (allocated(dg_frag%rk_gamma)) deallocate(dg_frag%rk_gamma)
@@ -2240,7 +2546,9 @@ contains
     dg_frag%mixed_basis_ready = .false.
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
     if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
+    if (allocated(dg_frag%P_mat_frag_pw)) deallocate(dg_frag%P_mat_frag_pw)
     if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)
+    if (allocated(dg_frag%H_mat_pw)) deallocate(dg_frag%H_mat_pw)
     if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
       call comm_free_group(dg_frag%icomm_frag)
       dg_frag%icomm_frag = COMM_GROUP_NULL

@@ -315,7 +315,12 @@ call fipp_stop ! performance profiling
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
 if(yn_dc=='y') then
-  if(yn_dc_lcfo == 'y') then
+   if(yn_dc_for_dg == 'y') then
+      if(yn_spinorbit == 'y') then
+         stop "yn_dc_for_dg=y currently supports non-SOI path only"
+      end if
+      call write_dg_seed_from_dcdft(lg,mg,system,info,spsi,rho,dc)
+   else if(yn_dc_lcfo == 'y') then
     if(yn_spinorbit == 'y') then
       call dc_lcfo_soi(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     else

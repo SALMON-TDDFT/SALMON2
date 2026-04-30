@@ -23,12 +23,13 @@ module lcfo
   implicit none
   
   private
-  public :: dc_lcfo, init_conventional_from_dcdft
+  public :: dc_lcfo, init_conventional_from_dcdft, write_dg_seed_from_dcdft
   
   character(32),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
-  &                          binfile_hl = "hamiltonian_local.bin"
+  &                          binfile_hl = "hamiltonian_local.bin", &
+  &                          binfile_rho_h = "hartree_density.bin"
   
 contains
 
@@ -605,12 +606,12 @@ contains
         ! coefficients of the wavefunctions
           iunit = get_filehandle()
           filename = trim(base_directory)//binfile_wf
-          open(iunit,file=filename,form='unformatted',access='stream')
+            open(iunit,file=filename,form='unformatted',access='stream')
           write(iunit) dc%n_frag, nspin, dc%nstate_frag, dc%nstate_tot
           write(iunit) n_mat(1:nspin)
           write(iunit) n_basis(1:dc%n_frag,1:nspin)
-          write(iunit) index_basis(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
-          write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
+            write(iunit) index_basis(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
+            write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
           close(iunit)
         end if
       end if
@@ -672,6 +673,140 @@ contains
 !++++++++++++++++
   
   end subroutine dc_lcfo
+
+!===================================================================================================================================
+
+! yn_dc_for_dg==y : export DG seed data without LCFO diagonalization
+  subroutine write_dg_seed_from_dcdft(lg,mg,system,info,spsi,rho,dc)
+    use structures
+    use communication, only: comm_is_root, comm_bcast
+    use filesystem, only: get_filehandle
+    use salmon_global, only: base_directory, yn_dual_rho_vh_only
+    use hartree_sub, only: build_hartree_density_from_rho
+    implicit none
+    type(s_rgrid),        intent(in) :: lg,mg
+    type(s_dft_system),   intent(in) :: system
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),      intent(in) :: spsi
+    type(s_scalar),       intent(in) :: rho
+    type(s_dcdft),        intent(in) :: dc
+    integer :: iunit, ifrag, ispin, io, nspin, nstate_seed, nstate_tot_seed
+    integer :: nxyz_domain(3)
+    integer, allocatable :: n_basis(:,:), n_mat(:), nocc_spin(:)
+    integer, allocatable :: index_basis(:,:,:)
+    real(8), allocatable :: coef_wf(:,:,:)
+    character(256) :: filename
+    logical :: has_rwf_local, has_rwf, write_rho_h_seed
+    type(s_scalar) :: rho_h_seed
+
+    nspin = system%nspin
+    nstate_seed = dc%nstate_frag
+    nstate_tot_seed = dc%n_frag * dc%nstate_frag
+    write_rho_h_seed = (yn_dual_rho_vh_only == 'y')
+
+    has_rwf_local = allocated(spsi%rwf)
+    has_rwf = has_rwf_local
+    call comm_bcast(has_rwf, dc%icomm_tot, 0)
+    if (.not. has_rwf) then
+      if (comm_is_root(dc%id_tot)) then
+        write(*,'(1x,a)') "[FATAL] yn_dc_for_dg requires real-orbital fragment wavefunctions (spsi%rwf)."
+      end if
+      stop "write_dg_seed_from_dcdft: spsi%rwf is not allocated"
+    end if
+
+    allocate(n_basis(dc%n_frag, nspin), n_mat(nspin))
+    allocate(index_basis(nstate_seed, dc%n_frag, nspin))
+    n_basis(:,:) = nstate_seed
+    do ispin = 1, nspin
+      n_mat(ispin) = dc%n_frag * nstate_seed
+      do ifrag = 1, dc%n_frag
+        do io = 1, nstate_seed
+          index_basis(io, ifrag, ispin) = (ifrag - 1) * nstate_seed + io
+        end do
+      end do
+    end do
+
+    if (dc%id_frag == 0) then
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+
+      iunit = get_filehandle()
+      filename = trim(base_directory)//binfile_rg
+      open(iunit,file=filename,form='unformatted',access='stream')
+      write(iunit) lg%num(1:3), dc%lg_tot%num(1:3)
+      do io = 1, 3
+        write(iunit) dc%jxyz_tot(1:lg%num(io), io)
+      end do
+      close(iunit)
+
+      iunit = get_filehandle()
+      filename = trim(base_directory)//binfile_bf
+      open(iunit,file=filename,form='unformatted',access='stream')
+      write(iunit) nxyz_domain(1:3), nspin, nstate_seed
+      write(iunit) n_basis(dc%i_frag, 1:nspin)
+      do ispin = 1, nspin
+        do io = 1, nstate_seed
+          write(iunit) spsi%rwf(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),ispin,io,1,1)
+        end do
+      end do
+      close(iunit)
+
+      allocate(coef_wf(nstate_seed, nstate_tot_seed, nspin))
+      coef_wf(:,:,:) = 0.0d0
+      do ispin = 1, nspin
+        do io = 1, nstate_seed
+          coef_wf(io, (dc%i_frag-1)*nstate_seed + io, ispin) = 1.0d0
+        end do
+      end do
+
+      iunit = get_filehandle()
+      filename = trim(base_directory)//binfile_wf
+      open(iunit,file=filename,form='unformatted',access='stream')
+      write(iunit) dc%n_frag, nspin, nstate_seed, nstate_tot_seed
+      write(iunit) n_mat(1:nspin)
+      write(iunit) n_basis(1:dc%n_frag,1:nspin)
+      write(iunit) index_basis(1:nstate_seed,1:dc%n_frag,1:nspin)
+      write(iunit) coef_wf(1:nstate_seed,1:nstate_tot_seed,1:nspin)
+      close(iunit)
+      deallocate(coef_wf)
+
+      if (write_rho_h_seed) then
+        call allocate_scalar(mg, rho_h_seed)
+        call build_hartree_density_from_rho(info, rho, rho_h_seed)
+
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_rho_h
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) nxyz_domain(1:3)
+        write(iunit) rho_h_seed%f(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3))
+        close(iunit)
+
+        call deallocate_scalar(rho_h_seed)
+      end if
+    end if
+
+    if (dc%id_tot == 0) then
+      allocate(nocc_spin(nspin))
+      if (nspin == 1) then
+        nocc_spin(1) = min(nstate_tot_seed, int(dc%elec_num_tot/2.0d0 + 1.0d-12))
+      else
+        nocc_spin(:) = min(nstate_tot_seed, int(dc%elec_num_tot/2.0d0 + 1.0d-12))
+      end if
+      iunit = get_filehandle()
+      filename = trim(dc%base_directory)//'dg_occupation.bin'
+      open(iunit,file=filename,form='unformatted',access='stream')
+      write(iunit) nspin
+      write(iunit) nocc_spin(1:nspin)
+      close(iunit)
+      deallocate(nocc_spin)
+      if (write_rho_h_seed) then
+        write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin/basis_functions.bin/rgrid_index.bin + dg_occupation.bin + hartree_density.bin'
+      else
+        write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin/basis_functions.bin/rgrid_index.bin + dg_occupation.bin'
+      end if
+    end if
+
+    deallocate(n_basis, n_mat, index_basis)
+  end subroutine write_dg_seed_from_dcdft
 
 !===================================================================================================================================
 
