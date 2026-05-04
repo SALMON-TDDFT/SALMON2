@@ -129,6 +129,7 @@ contains
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
+           dg_fragment_parallel_mode, &
                  nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
                  dg_subspace_pw_vectors, dg_subspace_fallback_cond
@@ -178,6 +179,15 @@ contains
     dg_frag%ifrag_group = 0
     dg_frag%nproc_frag = 1
     dg_frag%is_frag_root = .true.
+    dg_frag%parallel_mode = trim(dg_fragment_parallel_mode)
+    dg_frag%parallel_mode_orbital = (trim(dg_frag%parallel_mode) == 'orbital')
+
+    if (.not. dg_frag%parallel_mode_orbital .and. trim(dg_frag%parallel_mode) /= 'legacy_realspace') then
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,a)') "ERROR: invalid dg_fragment_parallel_mode=", trim(dg_frag%parallel_mode)
+      end if
+      stop "DG-Fragment RT: dg_fragment_parallel_mode must be orbital or legacy_realspace"
+    end if
 
     dg_frag%nproc_frag = product(nproc_rgrid)
     if (dg_frag%nproc_frag < 1) then
@@ -224,6 +234,7 @@ contains
     
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,i0,a,i0)') "  MPI parallelization: ", dg_frag%isize, " processes"
+      write(*,'(1x,a,a)') "  DG fragment parallel mode: ", trim(dg_frag%parallel_mode)
       write(*,'(1x,a,i0)') "  MPI ranks per fragment subgroup: ", dg_frag%nproc_frag
       write(*,'(1x,a)') "  Fragment distribution across MPI ranks:"
     end if
@@ -822,8 +833,7 @@ contains
         do io = 1, nbasis_iter
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
           if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-          dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-            dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+          dg_frag%coef_owner(global_idx, ispin) = get_fragment_coef_owner_rank(dg_frag, ifrag, io, nbasis_iter)
         end do
       end do
     end do
@@ -975,8 +985,7 @@ contains
           do io = 1, nbasis_iter
             global_idx = dg_frag%index_basis(io, ifrag, ispin)
             if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
-            dg_frag%coef_owner(global_idx, ispin) = get_subgroup_block_owner_rank( &
-              dg_frag%id_array(ifrag), dg_frag%isize_frag, io, nbasis_iter)
+            dg_frag%coef_owner(global_idx, ispin) = get_fragment_coef_owner_rank(dg_frag, ifrag, io, nbasis_iter)
           end do
         end do
       end do
@@ -1676,6 +1685,23 @@ contains
       owner_rank = (ifrag - 1) * nproc_frag
     end if
   end function get_fragment_group_root_rank
+
+  integer function get_fragment_coef_owner_rank(dg_frag, ifrag, local_row, n_local_rows) result(owner_rank)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, local_row, n_local_rows
+
+    if (ifrag < 1 .or. ifrag > size(dg_frag%id_array)) then
+      owner_rank = 0
+      return
+    end if
+
+    if (dg_frag%parallel_mode_orbital) then
+      owner_rank = dg_frag%id_array(ifrag)
+    else
+      owner_rank = get_subgroup_block_owner_rank(dg_frag%id_array(ifrag), dg_frag%isize_frag, local_row, n_local_rows)
+    end if
+  end function get_fragment_coef_owner_rank
 
   integer function get_subgroup_block_owner_rank(root_rank, subgroup_size, local_row, n_local_rows) result(owner_rank)
     implicit none
