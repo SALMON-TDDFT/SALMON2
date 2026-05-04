@@ -2372,7 +2372,7 @@
           valid_remote_grid_count = 0
           call cpu_time(t_setup0)
           if (allocated(dg_frag%density_send_slot_map)) then
-            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, n_pw == 0)
+            call prepare_grid_buffers_owner_map(i_local, igrid0, npt_blk, nxyz, n_pw == 0 .and. .not. dg_frag%parallel_mode_orbital)
           else
             slot_buf(1:npt_blk) = 0
             call prepare_grid_buffers_owner_map_no_slot(i_local, igrid0, npt_blk, nxyz)
@@ -4002,6 +4002,13 @@
       integer, intent(in) :: nxyz_grid(3)
       logical, intent(in) :: use_subgroup_slot
       type(density_grid_point_info) :: point
+
+      if (use_subgroup_slot .and. dg_frag%parallel_mode_orbital) then
+        write(*,'(1x,a,i0,a,i0,a)') '[FATAL] orbital mode entered subgroup-slot path: rank=', dg_frag%id, &
+          ' id_frag=', dg_frag%id_frag, ' path=prepare_grid_buffers_owner_map'
+        flush(6)
+        stop 'DG-Fragment RT orbital mode: subgroup real-space slot path is not allowed'
+      end if
 
 !$omp parallel do private(igrid, point) schedule(static)
       do igrid = 1, npt_blk_grid
