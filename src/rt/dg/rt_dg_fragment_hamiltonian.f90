@@ -1136,7 +1136,39 @@
     ! Each rank computed elements only for its assigned fragments.
     ! Reduce one fragment block at a time to avoid a single dense global allreduce.
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
+    if (.not. dg_frag%is_frag_root) then
+      if (allocated(dg_frag%H_mat_blocks)) then
+        do i_halo = 1, size(dg_frag%H_mat_blocks)
+          if (fragment_row_is_locally_owned(dg_frag, dg_frag%H_mat_blocks(i_halo)%ifrag_row)) then
+            if (dg_frag%parallel_mode_orbital) then
+              write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] orbital H-matrix ownership mismatch: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " ifrag_row=", dg_frag%H_mat_blocks(i_halo)%ifrag_row
+              flush(6)
+              stop "DG-Fragment RT orbital mode: non-root rank owns H-matrix rows"
+            end if
+            cycle
+          end if
+          dg_frag%H_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
+        end do
+      end if
+    end if
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
+    if (.not. dg_frag%is_frag_root) then
+      if (allocated(dg_frag%H_mat_kinetic_blocks)) then
+        do i_halo = 1, size(dg_frag%H_mat_kinetic_blocks)
+          if (fragment_row_is_locally_owned(dg_frag, dg_frag%H_mat_kinetic_blocks(i_halo)%ifrag_row)) then
+            if (dg_frag%parallel_mode_orbital) then
+              write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] orbital H-kinetic ownership mismatch: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " ifrag_row=", dg_frag%H_mat_kinetic_blocks(i_halo)%ifrag_row
+              flush(6)
+              stop "DG-Fragment RT orbital mode: non-root rank owns H-kinetic rows"
+            end if
+            cycle
+          end if
+          dg_frag%H_mat_kinetic_blocks(i_halo)%val(:, :, :) = 0.0d0
+        end do
+      end if
+    end if
     call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_blocks)
     call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
