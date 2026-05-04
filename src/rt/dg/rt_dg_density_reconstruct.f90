@@ -24,6 +24,7 @@
     integer :: igrid0, igrid, ngrid, npt_blk, io0, io1, nbatch, nstate, ipw0, npw_blk
     integer :: total_send_pts, subgroup_root_rank, block_idx_global
     integer :: send_total_count, recv_total_count
+    integer :: handler_send_peers, handler_recv_peers
     integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
     integer :: valid_basis_count
     integer :: owner_valid_count, slot0_count, slotp_count, owner_true_count, owner_false_count
@@ -3394,6 +3395,25 @@
     end do
     send_total_count = sum(send_counts)
     recv_total_count = sum(recv_counts)
+    handler_send_peers = 0
+    handler_recv_peers = 0
+    do irank = 0, dg_frag%isize - 1
+      if (send_counts(irank + 1) > 0) handler_send_peers = handler_send_peers + 1
+      if (recv_counts(irank + 1) > 0) handler_recv_peers = handler_recv_peers + 1
+      if (.not. dg_frag%parallel_mode_orbital) cycle
+      if (send_counts(irank + 1) > 0 .and. .not. target_rank_owned_by_handler(irank)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] orbital send handler mismatch: rank=', dg_frag%id, &
+          ' id_frag=', dg_frag%id_frag, ' target_rank=', irank, ' send_count=', send_counts(irank + 1)
+        flush(6)
+        stop 'DG-Fragment RT orbital mode: non-handler rank has send payload'
+      end if
+      if (recv_counts(irank + 1) > 0 .and. .not. target_rank_owned_by_handler(irank)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] orbital recv handler mismatch: rank=', dg_frag%id, &
+          ' id_frag=', dg_frag%id_frag, ' source_rank=', irank, ' recv_count=', recv_counts(irank + 1)
+        flush(6)
+        stop 'DG-Fragment RT orbital mode: non-handler rank has recv payload'
+      end if
+    end do
     if (itt_tag == 1) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_SUM rank=', dg_frag%id, &
         ' itt=', itt_tag, ' send_total=', send_total_count, ' recv_total=', recv_total_count, &
@@ -3433,6 +3453,9 @@
     if (enable_density_reconstruct_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density alltoallv summary: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " send_total=", send_total_count, " recv_total=", recv_total_count
+      write(*,'(1x,a,i0,a,i0,a,l1,a,i0,a,i0)') "        density handler summary: rank=", dg_frag%id, &
+        " id_frag=", dg_frag%id_frag, " orbital=", dg_frag%parallel_mode_orbital, &
+        " send_peers=", handler_send_peers, " recv_peers=", handler_recv_peers
       flush(6)
       do irank = 0, dg_frag%isize - 1
         if (send_counts(irank + 1) > 0 .or. recv_counts(irank + 1) > 0) then
