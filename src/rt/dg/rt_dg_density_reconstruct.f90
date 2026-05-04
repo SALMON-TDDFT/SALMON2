@@ -2687,7 +2687,10 @@
               end if
 
 
-              if (dg_frag%is_frag_root) then
+              ! orbital mode: all orbital ranks share the same real-space domain and
+              ! have identical rho_blk after icomm_frag reduce; all must materialize.
+              ! Remote send (outside-fragment owners) is still frag_root-only.
+              if (dg_frag%is_frag_root .or. dg_frag%parallel_mode_orbital) then
                 do igrid = 1, npt_blk
                   ixg = ixg_buf(igrid)
                   iyg = iyg_buf(igrid)
@@ -2714,6 +2717,8 @@
                   rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
                   rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
                 end do
+              end if
+              if (dg_frag%is_frag_root) then
                 do idx_remote = 1, valid_remote_grid_count
                   igrid = valid_remote_grid_ids(idx_remote)
                   owner_rank = owner_buf(igrid)
@@ -3054,7 +3059,9 @@
 !$omp parallel private(igrid, owner_rank, ixg, iyg, izg, bx, by, bz, rho_contrib, rho_raw_contrib, slot, theta)
 !$omp do schedule(static)
                   do igrid = 1, npt_blk
-                    if (.not. dg_frag%is_frag_root) cycle
+                    ! orbital mode: rho_blk_accum is AllReduced across icomm_frag;
+                    ! all orbital ranks hold identical data and must write to rho_bf.
+                    if (.not. dg_frag%is_frag_root .and. .not. dg_frag%parallel_mode_orbital) cycle
                     ixg = ixg_buf(igrid)
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
