@@ -937,6 +937,8 @@
           end if
           partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
           partial_th(nbf_comm + 1:2 * nbf_comm) = partial_h(1:nbf_comm)
+          ! Fragment-subgroup reduction is required when parent real-space grids
+          ! are distributed across nproc_rgrid slabs.
           call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
           reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
           reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
@@ -1628,17 +1630,6 @@
 
     integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
 
-    ! In orbital-parallel mode all ranks replicate the full fragment domain;
-    ! clipping to mg%is/mg%ie would give each rank only a slab and corrupt
-    ! the H/S/momentum integrals after icomm_frag reduction.
-    if (dg_frag%parallel_mode_orbital) then
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-      loc_s(:) = 1
-      loc_e(:) = ndom(:)
-      has_overlap = .true.
-      return
-    end if
-
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
     g_s(:) = iorg(:)
@@ -1665,12 +1656,6 @@
     integer, intent(out) :: loc_s(3), loc_e(3)
 
     integer :: ipx, ipy, ipz, coords(3), nsize
-
-    if (dg_frag%parallel_mode_orbital) then
-      loc_s(:) = 1
-      loc_e(:) = ndom(:)
-      return
-    end if
 
     ipx = max(1, nproc_rgrid(1))
     ipy = max(1, nproc_rgrid(2))
@@ -2540,6 +2525,7 @@
     end do
 
     call cpu_time(t0)
+    ! Ranks can hold partial real-space slabs; always reduce over fragment subgroup.
     call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then

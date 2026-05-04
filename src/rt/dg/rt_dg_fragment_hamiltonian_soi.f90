@@ -129,7 +129,9 @@
             ! Kinetic energy matrix element: T_ij = ∫ φ_i (T|φ_j>) dr
             call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, T_phi, hvol, integral_t)
 
-            ! Store kinetic part
+            ! Store kinetic part.
+            ! The work domain is clipped to mg%is:mg%ie, so each rank can carry
+            ! a distinct slab contribution when nproc_rgrid > 1.
             dg_frag%H_mat_kinetic(ig_i, ig_j, ispin) = real(integral_t, kind=8)
             call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, H_phi, hvol, integral_h)
             dg_frag%H_mat(ig_i, ig_j, ispin) = real(integral_h, kind=8)
@@ -580,17 +582,6 @@
 
     integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
 
-    ! In orbital-parallel mode all ranks replicate the full fragment domain;
-    ! clipping to mg%is/mg%ie would give each rank only a slab and corrupt
-    ! the H/S/momentum integrals after icomm_frag reduction.
-    if (dg_frag%parallel_mode_orbital) then
-      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-      loc_s(:) = 1
-      loc_e(:) = ndom(:)
-      has_overlap = .true.
-      return
-    end if
-
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
     g_s(:) = iorg(:)
@@ -617,12 +608,6 @@
     integer, intent(out) :: loc_s(3), loc_e(3)
 
     integer :: ipx, ipy, ipz, coords(3), nsize
-
-    if (dg_frag%parallel_mode_orbital) then
-      loc_s(:) = 1
-      loc_e(:) = ndom(:)
-      return
-    end if
 
     ipx = max(1, nproc_rgrid(1))
     ipy = max(1, nproc_rgrid(2))
@@ -820,7 +805,9 @@
                 integral = cmplx(integral_re, 0.0d0, kind=8)
               end if
               
-              ! Store in global momentum matrix
+              ! Store in global momentum matrix.
+              ! In distributed parent-grid runs each rank may hold a unique slab;
+              ! dropping non-root writes would lose valid contributions.
               dg_frag%momentum_mat_c(idir, ig_i, ig_j, ispin) = integral
               
             end do  ! idir
@@ -1875,11 +1862,11 @@
     integer :: ifrag, i_local, ispin, io, jo, nbf_local
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
     integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
-    integer :: lx, ly, lz, iorg(3), ndom(3)
+    integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3)
     integer :: ixg, iyg, izg, bx, by, bz
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: n_eval, lwork, info_eig, n_blocks, icomm_reduce
-    logical :: use_complex_halo, use_complex_phi
+    logical :: use_complex_halo, use_complex_phi, has_overlap
     real(8) :: hvol, s_min, s_max, cond_est
     complex(8) :: integral
     complex(8) :: cwork_query(1)
@@ -1932,6 +1919,8 @@
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         nbf_local = dg_frag%n_basis(ifrag, ispin)
         if (nbf_local <= 0) cycle
+        call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+        if (.not. has_overlap) cycle
 
         do jo = 1, nbf_local
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
@@ -1941,15 +1930,15 @@
             ig_row = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
             integral = (0.0d0, 0.0d0)
-            do lz = 1, ndom(3)
+            do lz = loc_s(3), loc_e(3)
               izg = iorg(3) + lz - 1
               bz = map_global_to_phi_box_coord_ham_soi(izg, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
               if (bz == 0) cycle
-              do ly = 1, ndom(2)
+              do ly = loc_s(2), loc_e(2)
                 iyg = iorg(2) + ly - 1
                 by = map_global_to_phi_box_coord_ham_soi(iyg, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
                 if (by == 0) cycle
-                do lx = 1, ndom(1)
+                do lx = loc_s(1), loc_e(1)
                   ixg = iorg(1) + lx - 1
                   bx = map_global_to_phi_box_coord_ham_soi(ixg, phi_lb1, phi_ub1, dg_frag%lgnum_total(1))
                   if (bx == 0) cycle
@@ -2015,9 +2004,6 @@
     call sync_complex_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_c, S_blocks_re, S_blocks_im, S_block_map_local)
     call reduce_complex_matrix_blocks(dg_frag, S_blocks_re, S_blocks_im, "smat-soi", icomm_reduce)
     call sync_blocks_to_complex_dense_matrix(dg_frag, S_blocks_re, S_blocks_im, S_block_map_local, dg_frag%S_mat_c)
-    ! In orbital-parallel mode all icomm_frag ranks hold the full replicated
-    ! S matrix after reduction; skip the ownership-based zeroing that would
-    ! clear all rows on non-root orbital ranks (coef_owner is root-only).
     if (icomm_reduce == dg_frag%icomm_frag .and. .not. dg_frag%is_frag_root &
         .and. .not. dg_frag%parallel_mode_orbital) then
       do ispin = 1, dg_frag%nspin

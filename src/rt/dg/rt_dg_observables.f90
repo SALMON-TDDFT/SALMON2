@@ -1347,5 +1347,3 @@
       end do
     end if
   end subroutine integrate_local_basis_with_field_local
-
-end module
