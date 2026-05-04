@@ -1502,7 +1502,6 @@ contains
     character(len=64) :: env_n_mat_cap
     logical :: warned_spin_discard, want_seed_rho_h, has_rho_h_file
     real(8) :: cap_avg, weight_best
-    real(8) :: coef_file_probe(3), coef_global_probe(3)
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
     real(8), allocatable :: rho_h_local(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
@@ -1725,8 +1724,6 @@ contains
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     allocate(coef_local(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, ifrag_count))
     coef_local = 0.0d0
-    coef_file_probe(:) = 0.0d0
-    coef_global_probe(:) = 0.0d0
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
@@ -1754,15 +1751,6 @@ contains
       
       close(iunit)
     end do
-
-    if (dg_frag%id == 0) then
-      do io = 1, min(3, dg_frag%nstate_tot)
-        coef_file_probe(io) = sum(abs(coef_local(:, io, 1:dg_frag%nspin, 1:ifrag_count))**2)
-      end do
-      write(*,'(1x,a,3(1pe12.4,1x))') "        coef init probe: file-local c2=", &
-        coef_file_probe(1), coef_file_probe(2), coef_file_probe(3)
-      flush(6)
-    end if
 
     if (n_mat_cap < 1 .and. trim(dg_nmat_cap_mode) == 'occ_multiple' .and. dg_nmat_cap_multiple > 0.0d0) then
       if (dg_frag%nspin == 1) then
@@ -1922,15 +1910,6 @@ contains
         end do
       end do
     end do
-
-    if (dg_frag%id == 0) then
-      do io = 1, min(3, dg_frag%nstate_tot)
-        coef_global_probe(io) = sum(abs(dg_frag%coef(:, io, 1:dg_frag%nspin))**2)
-      end do
-      write(*,'(1x,a,3(1pe12.4,1x))') "        coef init probe: global c2=", &
-        coef_global_probe(1), coef_global_probe(2), coef_global_probe(3)
-      flush(6)
-    end if
 
     ! Keep coefficients only on the owning fragment ranks.
 

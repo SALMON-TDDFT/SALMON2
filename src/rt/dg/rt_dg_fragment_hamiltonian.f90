@@ -544,19 +544,12 @@
     integer :: n_metric
     logical :: release_dense_fragment_ops
     logical :: has_overlap_dbg
-    logical :: probe_rank_main, probe_rank_352_396, probe_small_frag2
-    logical :: trace_spin1, probe_frag_edge, probe_ifrag_head, probe_subgroup
-    logical :: jo_edge, jo_probe_main, jo_probe_352_396, jo_probe_small_frag2
+    logical :: jo_edge
     logical, parameter :: enable_hamiltonian_trace = .false.
-    logical, parameter :: enable_step2_probe = .false.
     complex(8), allocatable :: H_metric_ref(:,:)
-    real(8) :: partial_t_abs, partial_h_abs
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
-    probe_rank_main = enable_step2_probe .and. (dg_frag%id == 0 .or. dg_frag%id == 352 .or. dg_frag%id == 396)
-    probe_rank_352_396 = enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)
-    probe_small_frag2 = enable_step2_probe .and. dg_frag%n_frag == 2 .and. dg_frag%id <= 3
 
     if (.not. dg_frag%has_real_space_basis) then
       if (.not. allocated(dg_frag%H_mat)) then
@@ -682,10 +675,6 @@
     end if
 
     if (did_overlap_call) then
-      if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)) then
-        write(*,'(1x,a,i0,a)') "        overlap-probe: rank=", dg_frag%id, " stage=checksum-before-loop"
-        flush(6)
-      end if
       phi_checksum_after = 0.0d0
       i_local_chk = 0
       do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -712,18 +701,8 @@
           end do
         end do
       end do
-      if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)) then
-        write(*,'(1x,a,i0,a,1pe12.4)') "        overlap-probe: rank=", dg_frag%id, &
-          " stage=checksum-after-loop value=", phi_checksum_after
-        flush(6)
-      end if
       phi_checksum_delta = abs(phi_checksum_after - phi_checksum_before)
       phi_checksum_tol = max(1.0d-12, 1.0d-12 * max(abs(phi_checksum_before), abs(phi_checksum_after)))
-      if (enable_step2_probe .and. (dg_frag%id == 352 .or. dg_frag%id == 396)) then
-        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        overlap-probe: rank=", dg_frag%id, &
-          " stage=checksum-delta before=", phi_checksum_before, " after=", phi_checksum_after, " delta=", phi_checksum_delta
-        flush(6)
-      end if
       write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        overlap phi checksum: rank=", &
         dg_frag%id, " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
         " before=", phi_checksum_before, " after=", phi_checksum_after, " delta=", phi_checksum_delta
@@ -738,10 +717,6 @@
     ! Step 2: Allocate Hamiltonian matrix
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "  [2/3] Constructing Hamiltonian matrix H = T + V..."
-    end if
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=enter"
-      flush(6)
     end if
     
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
@@ -814,10 +789,6 @@
     end if
 
     n_local_diag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " n_local_diag=", n_local_diag
-      flush(6)
-    end if
     if (n_local_diag > 0) then
       allocate(H_diag_blocks(n_local_diag), H_kin_diag_blocks(n_local_diag))
       do i_diag = 1, n_local_diag
@@ -837,16 +808,8 @@
         H_kin_diag_blocks(i_diag)%val = 0.0d0
       end do
     end if
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-diag-block-alloc"
-      flush(6)
-    end if
     
     ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " stage=after-step2-halo"
-      flush(6)
-    end if
     if (enable_hamiltonian_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-step2-halo"
@@ -858,11 +821,6 @@
     ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
-    if (probe_rank_main) then
-      write(*,'(1x,a,i0,a,3(i0,1x),a,3(i0,1x))') "        step2-probe: rank=", dg_frag%id, &
-        " V_total is=", is(1), is(2), is(3), " ie=", ie(1), ie(2), ie(3)
-      flush(6)
-    end if
     if (enable_hamiltonian_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-vtotal-alloc"
@@ -873,11 +831,6 @@
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      trace_spin1 = (ispin == 1)
-      if (probe_rank_main .and. trace_spin1) then
-        write(*,'(1x,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, " after-build-total-potential ispin=", ispin
-        flush(6)
-      end if
       if (enable_hamiltonian_trace .and. ispin == 1) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
           " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-build-total-potential"
@@ -891,16 +844,6 @@
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
         nbf_raw = dg_frag%n_basis(ifrag, ispin)
-        probe_frag_edge = probe_rank_main .and. trace_spin1 .and. &
-          (ifrag == dg_frag%ifrag_start .or. ifrag == dg_frag%ifrag_end)
-        probe_ifrag_head = trace_spin1 .and. (ifrag == dg_frag%ifrag_start)
-        probe_subgroup = enable_step2_probe .and. trace_spin1 .and. &
-          (dg_frag%ifrag_group == 89 .or. dg_frag%ifrag_group == 100)
-        if (probe_frag_edge) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " i_local=", i_local, " nbf_raw=", nbf_raw
-          flush(6)
-        end if
         if (nbf_raw < 0) then
           write(*,*) "[FATAL] negative n_basis in Hamiltonian Step 2: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis=", nbf_raw
@@ -944,14 +887,6 @@
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
         allocate(partial_th(2 * nbf_comm), reduced_th(2 * nbf_comm))
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s_dbg, loc_e_dbg, has_overlap_dbg)
-        if (probe_subgroup) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0)') &
-            "        step2-subprobe: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-            " ifrag=", ifrag, " has_overlap=", has_overlap_dbg, " loc_s=", &
-            loc_s_dbg(1), loc_s_dbg(2), loc_s_dbg(3), " loc_e=", &
-            loc_e_dbg(1), loc_e_dbg(2), loc_e_dbg(3), " nbf=", nbf, " nbf_comm=", nbf_comm
-          flush(6)
-        end if
         if (enable_hamiltonian_trace) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian fragment begin: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " i_local=", i_local, " nbf=", nbf
@@ -959,14 +894,6 @@
         end if
         do jo = 1, nbf
           jo_edge = (jo == 1 .or. jo == nbf)
-          jo_probe_main = probe_rank_main .and. probe_ifrag_head .and. jo_edge
-          jo_probe_352_396 = probe_rank_352_396 .and. probe_ifrag_head .and. (jo <= 2 .or. jo == nbf)
-          jo_probe_small_frag2 = probe_small_frag2 .and. probe_ifrag_head .and. (jo <= 2 .or. jo == nbf)
-          if (jo_probe_main) then
-            write(*,'(1x,a,i0,a,i0,a,i0)') "        step2-probe: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " jo=", jo
-            flush(6)
-          end if
           if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo begin: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, " nbf=", nbf
@@ -981,10 +908,6 @@
             flush(6)
           end if
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-build_hpsi"
-            flush(6)
-          end if
           if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
@@ -1007,27 +930,9 @@
 
           end do
           !$omp end parallel do
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-integrate"
-            flush(6)
-          end if
           if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian integrate done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
-          if (jo_probe_small_frag2) then
-            partial_t_abs = sum(abs(partial_t(1:nbf)))
-            partial_h_abs = sum(abs(partial_h(1:nbf)))
-            write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " partial_t_abs=", partial_t_abs, &
-              " partial_h_abs=", partial_h_abs
-            flush(6)
-          end if
-
-          if (jo_probe_small_frag2) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a)') "        step2-subprobe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " before-frag-reduce"
             flush(6)
           end if
           partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
@@ -1035,19 +940,6 @@
           call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
           reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
           reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
-          if (jo_probe_small_frag2) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,es12.4,a,es12.4)') "        step2-subprobe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " reduced_t_abs=", sum(abs(reduced_t(1:nbf))), &
-              " reduced_h_abs=", sum(abs(reduced_h(1:nbf)))
-            write(*,'(1x,a,i0,a,i0,a,i0,a,2(es12.4,1x),a,2(es12.4,1x))') "        step2-elem probe: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " jo=", jo, " t12=", reduced_t(1), reduced_t(min(2,nbf)), &
-              " h12=", reduced_h(1), reduced_h(min(2,nbf))
-            flush(6)
-          end if
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-frag-reduce"
-            flush(6)
-          end if
           if (enable_hamiltonian_trace .and. jo_edge) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian reduce done: rank=", dg_frag%id, &
               " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
@@ -1065,10 +957,6 @@
                 " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
               flush(6)
             end if
-          end if
-          if (jo_probe_352_396) then
-            write(*,'(1x,a,i0,a,i0,a)') "        step2-probe: rank=", dg_frag%id, " jo=", jo, " after-store"
-            flush(6)
           end if
 
         end do  ! jo loop
@@ -1528,43 +1416,6 @@
     end do
 !$omp end parallel do
   end subroutine build_hpsi_for_basis
-
-  subroutine build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    integer, intent(in) :: ifrag, i_local, jo
-    type(s_rgrid), intent(in) :: mg
-    type(s_stencil), intent(in) :: stencil
-    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    complex(8), intent(out) :: T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    complex(8), intent(out) :: H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    real(8), allocatable :: T_phi_re(:,:,:), H_phi_re(:,:,:)
-
-    allocate(T_phi_re(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    allocate(H_phi_re(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi_re, H_phi_re)
-    T_phi(:, :, :) = cmplx(T_phi_re(:, :, :), 0.0d0, kind=8)
-    H_phi(:, :, :) = cmplx(H_phi_re(:, :, :), 0.0d0, kind=8)
-    deallocate(T_phi_re, H_phi_re)
-  end subroutine build_hpsi_for_basis_probe
-
-  subroutine get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, gx, gy, gz, phi_val)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag, i_local, jo, gx, gy, gz
-    complex(8), intent(out) :: phi_val
-    integer :: bx, by, bz
-
-    bx = map_global_to_phi_box_coord_ham(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-    by = map_global_to_phi_box_coord_ham(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-    bz = map_global_to_phi_box_coord_ham(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
-    if (bx == 0 .or. by == 0 .or. bz == 0) then
-      phi_val = (0.0d0, 0.0d0)
-      return
-    end if
-    phi_val = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
-  end subroutine get_phi_value_at_global_probe
 
   !=======================================================================
   ! Integrate one bra basis function against a real-space field
@@ -2139,7 +1990,6 @@
     integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
     integer :: npts_local, ipt, nx_local, ny_local
     logical :: log_frag_progress, has_overlap
-    logical, parameter :: enable_momentum_probe = .false.
     real(8) :: hvol, integral
     real(8) :: momentum_gb
     real(8) :: max_p, pavg
@@ -2171,10 +2021,6 @@
       write(*,*) "        Computing transition moments: <φ_i|∇|φ_j>"
       flush(6)
     end if
-    if (enable_momentum_probe) then
-      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=enter"
-      flush(6)
-    end if
     momentum_gb = real(3_8 * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * &
       int(dg_frag%nspin, kind=8) * 8_8, 8) / 1.0d9
     if (comm_is_root(dg_frag%id)) then
@@ -2195,10 +2041,6 @@
     hvol = system%hvol
     
     ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
-    if (enable_momentum_probe) then
-      write(*,'(1x,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, " stage=after-halo"
-      flush(6)
-    end if
     
     ! Loop over spin
     do ispin = 1, system%nspin
@@ -2213,12 +2055,6 @@
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
-        if (enable_momentum_probe) then
-          write(*,'(1x,a,i0,a,i0,a,l1,a,3(i0,1x),a,3(i0,1x))') "        momentum-probe: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " has_overlap=", has_overlap, " loc_s=", loc_s(1), loc_s(2), loc_s(3), &
-            " loc_e=", loc_e(1), loc_e(2), loc_e(3)
-          flush(6)
-        end if
         if (.not. has_overlap) cycle
         
         ! Cache the local basis matrix once per fragment; it does not depend on jo.
@@ -2261,11 +2097,6 @@
         ny_local = ly_hi - ly_lo + 1
         allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
         allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
-        if (enable_momentum_probe) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " nbf=", nbf, " npts_local=", npts_local
-          flush(6)
-        end if
 
         if (nbf > size(dg_frag%phi_frag, 4)) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "DG-Fragment RT invalid n_basis=", nbf, &
@@ -2291,25 +2122,10 @@
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
         ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
         do jo = 1, nbf
-          if (enable_momentum_probe .and. (jo == 1 .or. jo == nbf)) then
-            write(*,'(1x,a,i0,a,i0,a,i0)') "        momentum-probe: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " jo=", jo
-            flush(6)
-          end if
-          if (enable_momentum_probe .and. jo == 1) then
-            write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " stage=before-apply-gradient"
-            flush(6)
-          end if
           call cpu_time(t0)
           call apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
           call cpu_time(t1)
           time_grad_total = time_grad_total + (t1 - t0)
-          if (enable_momentum_probe .and. jo == 1) then
-            write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " stage=after-apply-gradient"
-            flush(6)
-          end if
 
           grad_lb1 = lbound(grad_phi, 1)
           grad_ub1 = ubound(grad_phi, 1)
@@ -2337,11 +2153,6 @@
             grad_local_2d, npts_local, 0.0d0, self_proj, nbf)
           call cpu_time(t1)
           time_self_integral = time_self_integral + (t1 - t0)
-          if (enable_momentum_probe .and. jo == 1) then
-            write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " stage=after-self-dgemm"
-            flush(6)
-          end if
 
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
@@ -2361,11 +2172,6 @@
           if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
 
         end do  ! jo
-        if (enable_momentum_probe) then
-          write(*,'(1x,a,i0,a,i0,a)') "        momentum-probe: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " stage=after-jo-loop"
-          flush(6)
-        end if
         if (allocated(grad_phi)) deallocate(grad_phi)
         deallocate(phi_local_2d, grad_local_2d, self_proj)
       end do  ! ifrag

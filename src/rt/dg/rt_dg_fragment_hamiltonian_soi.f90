@@ -357,41 +357,6 @@
 !$omp end parallel do
   end subroutine build_hpsi_for_basis
 
-  subroutine build_hpsi_for_basis_probe(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    integer, intent(in) :: ifrag, i_local, jo
-    type(s_rgrid), intent(in) :: mg
-    type(s_stencil), intent(in) :: stencil
-    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    complex(8), intent(out) :: T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    complex(8), intent(out) :: H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-
-    call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-  end subroutine build_hpsi_for_basis_probe
-
-  subroutine get_phi_value_at_global_probe(dg_frag, ifrag, i_local, jo, gx, gy, gz, phi_val)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag, i_local, jo, gx, gy, gz
-    complex(8), intent(out) :: phi_val
-    integer :: bx, by, bz
-
-    bx = map_global_to_phi_box_coord_ham_soi(gx, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
-    by = map_global_to_phi_box_coord_ham_soi(gy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
-    bz = map_global_to_phi_box_coord_ham_soi(gz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
-    if (bx == 0 .or. by == 0 .or. bz == 0) then
-      phi_val = (0.0d0, 0.0d0)
-      return
-    end if
-    if (allocated(dg_frag%phi_frag_c)) then
-      phi_val = dg_frag%phi_frag_c(bx, by, bz, jo, i_local)
-    else
-      phi_val = cmplx(dg_frag%phi_frag(bx, by, bz, jo, i_local), 0.0d0, kind=8)
-    end if
-  end subroutine get_phi_value_at_global_probe
-
   !=======================================================================
   ! Integrate one bra basis function against a real-space field
   !   integral = <phi_io | field>
