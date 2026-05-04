@@ -2050,7 +2050,11 @@
     call sync_complex_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_c, S_blocks_re, S_blocks_im, S_block_map_local)
     call reduce_complex_matrix_blocks(dg_frag, S_blocks_re, S_blocks_im, "smat-soi", icomm_reduce)
     call sync_blocks_to_complex_dense_matrix(dg_frag, S_blocks_re, S_blocks_im, S_block_map_local, dg_frag%S_mat_c)
-    if (icomm_reduce == dg_frag%icomm_frag .and. .not. dg_frag%is_frag_root) then
+    ! In orbital-parallel mode all icomm_frag ranks hold the full replicated
+    ! S matrix after reduction; skip the ownership-based zeroing that would
+    ! clear all rows on non-root orbital ranks (coef_owner is root-only).
+    if (icomm_reduce == dg_frag%icomm_frag .and. .not. dg_frag%is_frag_root &
+        .and. .not. dg_frag%parallel_mode_orbital) then
       do ispin = 1, dg_frag%nspin
         do ii = 1, dg_frag%n_mat_max
           if (matrix_row_is_locally_owned(dg_frag, ii, ispin)) cycle
