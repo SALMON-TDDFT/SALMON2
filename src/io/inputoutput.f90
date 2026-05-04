@@ -314,6 +314,7 @@ contains
       & yn_fix_func, &
       & yn_predictor_corrector, &
       & yn_dg_fragment_rt, &
+      & dg_fragment_parallel_mode, &
       & yn_dc_cg_basis_update, &
       & time_integrator_dg_fragment, &
       & yn_plane_wave_basis, &
@@ -785,6 +786,7 @@ contains
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
+    dg_fragment_parallel_mode = 'orbital'
     yn_dc_cg_basis_update = 'n'
     time_integrator_dg_fragment = 'rk4'
     yn_plane_wave_basis = 'n'
@@ -1370,6 +1372,7 @@ contains
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
+    call comm_bcast(dg_fragment_parallel_mode,nproc_group_global)
     call comm_bcast(yn_dc_cg_basis_update,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
@@ -2304,6 +2307,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_fragment_parallel_mode', trim(dg_fragment_parallel_mode)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc_cg_basis_update', yn_dc_cg_basis_update
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
@@ -3164,6 +3168,8 @@ contains
          time_integrator_dg_fragment/='rk4' .and. &
          time_integrator_dg_fragment/='aetrs') &
       & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', or 'aetrs'"
+      if(trim(dg_fragment_parallel_mode)/='orbital' .and. trim(dg_fragment_parallel_mode)/='legacy_realspace') &
+      & stop "DG-Fragment RT: dg_fragment_parallel_mode must be 'orbital' or 'legacy_realspace'"
     end if
     
     call yn_argument_check(yn_dg_fragment_rt)

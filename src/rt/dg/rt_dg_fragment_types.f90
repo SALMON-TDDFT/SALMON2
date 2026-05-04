@@ -298,6 +298,8 @@ module rt_dg_fragment_types
     integer :: ifrag_group                     ! global fragment index owned by this subgroup
     integer :: nproc_frag                      ! # of MPI ranks assigned to one fragment
     logical :: is_frag_root                    ! subgroup root responsible for fragment-global ownership
+    character(32) :: parallel_mode = 'orbital' ! 'orbital' or 'legacy_realspace'
+    logical :: parallel_mode_orbital = .true.
 
     type(halo_info), allocatable :: halo(:)    ! Halo regions (max 26 = 3^3-1 neighbors)
     integer :: n_halo                          ! Number of active halo regions

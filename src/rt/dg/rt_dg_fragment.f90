@@ -177,6 +177,7 @@ contains
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
+                 dg_fragment_parallel_mode, &
                  nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, yn_spinorbit, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
                  dg_subspace_pw_vectors, dg_subspace_fallback_cond, nelec, nelec_spin
@@ -254,6 +255,15 @@ contains
     dg_frag%ifrag_group = 0
     dg_frag%nproc_frag = 1
     dg_frag%is_frag_root = .true.
+    dg_frag%parallel_mode = trim(dg_fragment_parallel_mode)
+    dg_frag%parallel_mode_orbital = (trim(dg_frag%parallel_mode) == 'orbital')
+
+    if (.not. dg_frag%parallel_mode_orbital .and. trim(dg_frag%parallel_mode) /= 'legacy_realspace') then
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,a)') "ERROR: invalid dg_fragment_parallel_mode=", trim(dg_frag%parallel_mode)
+      end if
+      stop "DG-Fragment RT: dg_fragment_parallel_mode must be orbital or legacy_realspace"
+    end if
 
     dg_frag%nproc_frag = product(nproc_rgrid)
     if (dg_frag%nproc_frag < 1) then
@@ -296,6 +306,7 @@ contains
     
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,i0,a,i0)') "  MPI parallelization: ", dg_frag%isize, " processes"
+      write(*,'(1x,a,a)') "  DG fragment parallel mode: ", trim(dg_frag%parallel_mode)
       write(*,'(1x,a,i0)') "  MPI ranks per fragment subgroup: ", dg_frag%nproc_frag
       write(*,'(1x,a)') "  Fragment distribution across MPI ranks:"
     end if
@@ -757,6 +768,12 @@ contains
               end if
             end if
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, dg_frag%id_array(ifrag))
+            if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) then
+              write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,i0,a,i0)') '[FATAL] orbital density owner mismatch: rank=', dg_frag%id, &
+                   ' ifrag=', ifrag, ' global=', ixg, iyg, izg, ' source=', source_rank, ' owner=', owner_rank
+              flush(6)
+              stop 'DG-Fragment RT orbital mode: density owner must match fragment root sender'
+            end if
             dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
               primary_count_local = primary_count_local + 1
@@ -854,6 +871,7 @@ contains
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
             source_rank = source_root_rank
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
+            if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) cycle
             if (source_rank == dg_frag%id) then
               self_source_total_pts = self_source_total_pts + 1
               if (owner_rank == dg_frag%id) self_source_owned_pts = self_source_owned_pts + 1
@@ -979,6 +997,7 @@ contains
             source_rank = source_root_rank
             if (source_rank == dg_frag%id) cycle
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
+            if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) cycle
             if (owner_rank == dg_frag%id) then
               recv_cursor(source_rank) = recv_cursor(source_rank) + 1
               dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
@@ -1066,10 +1085,15 @@ contains
   end function wrap_global_grid_index
 
   integer function get_fragment_grid_sender_rank(root_rank, ndom, ix, iy, iz) result(sender_rank)
-    use salmon_global, only: nproc_rgrid
+    use salmon_global, only: nproc_rgrid, dg_fragment_parallel_mode
     implicit none
     integer, intent(in) :: root_rank, ndom(3), ix, iy, iz
     integer :: ipx, ipy, ipz, coords(3), nsize
+
+    if (trim(dg_fragment_parallel_mode) == 'orbital') then
+      sender_rank = root_rank
+      return
+    end if
 
     ipx = max(1, nproc_rgrid(1))
     ipy = max(1, nproc_rgrid(2))
@@ -1106,10 +1130,17 @@ contains
       dg_frag%frag_buf_hi(:, ifrag) = dg_frag%frag_core_hi(:, ifrag) + dg_frag%nxyz_buffer(:)
     end do
 
-    dg_frag%rank_core_lo(:) = dg_frag%mg%is(:)
-    dg_frag%rank_core_hi(:) = dg_frag%mg%ie(:)
-    dg_frag%rank_buf_lo(:) = dg_frag%mg%is(:) - dg_frag%nxyz_buffer(:)
-    dg_frag%rank_buf_hi(:) = dg_frag%mg%ie(:) + dg_frag%nxyz_buffer(:)
+    if (dg_frag%parallel_mode_orbital .and. dg_frag%ifrag_group >= 1 .and. dg_frag%ifrag_group <= dg_frag%n_frag) then
+      dg_frag%rank_core_lo(:) = dg_frag%frag_core_lo(:, dg_frag%ifrag_group)
+      dg_frag%rank_core_hi(:) = dg_frag%frag_core_hi(:, dg_frag%ifrag_group)
+      dg_frag%rank_buf_lo(:) = dg_frag%frag_buf_lo(:, dg_frag%ifrag_group)
+      dg_frag%rank_buf_hi(:) = dg_frag%frag_buf_hi(:, dg_frag%ifrag_group)
+    else
+      dg_frag%rank_core_lo(:) = dg_frag%mg%is(:)
+      dg_frag%rank_core_hi(:) = dg_frag%mg%ie(:)
+      dg_frag%rank_buf_lo(:) = dg_frag%mg%is(:) - dg_frag%nxyz_buffer(:)
+      dg_frag%rank_buf_hi(:) = dg_frag%mg%ie(:) + dg_frag%nxyz_buffer(:)
+    end if
   end subroutine build_fragment_global_boxes
 
   logical function is_density_core_point(dg_frag, ifrag, ixg, iyg, izg) result(is_core)
@@ -1169,6 +1200,16 @@ contains
     owner = -1
     first_match = -1
     nfrag_ranks = max(1, dg_frag%isize_frag)
+
+    if (dg_frag%parallel_mode_orbital) then
+      if (present(hint_rank)) then
+        owner = max(0, hint_rank)
+      else
+        owner = dg_frag%id
+      end if
+      return
+    end if
+
     hint_group = -1
     if (present(hint_rank)) hint_group = max(0, hint_rank) / nfrag_ranks
     do jrank = 0, dg_frag%isize - 1
