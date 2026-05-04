@@ -642,6 +642,12 @@
 
     integer :: ipx, ipy, ipz, coords(3), nsize
 
+    if (dg_frag%parallel_mode_orbital) then
+      loc_s(:) = 1
+      loc_e(:) = ndom(:)
+      return
+    end if
+
     ipx = max(1, nproc_rgrid(1))
     ipy = max(1, nproc_rgrid(2))
     ipz = max(1, nproc_rgrid(3))
