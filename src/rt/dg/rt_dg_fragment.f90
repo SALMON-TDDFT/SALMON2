@@ -2683,8 +2683,19 @@ contains
       end select
     end if
 
+    if (dg_frag%parallel_mode_orbital .and. .not. owner_root_only) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,a)') '[FATAL] orbital mode forbids SALMON_DG_COEF_OWNER_IO_SPLIT in stage=', trim(stage_label)
+        flush(6)
+      end if
+      stop 'DG-Fragment RT orbital mode: coef_owner io-split is not allowed'
+    end if
+    if (dg_frag%parallel_mode_orbital) owner_root_only = .true.
+
     if (dg_frag%id == 0 .and. .not. printed_owner_mode) then
-      if (owner_root_only) then
+      if (dg_frag%parallel_mode_orbital) then
+        write(*,'(1x,a)') "[INFO] DG coef owner mode: root-only (orbital override)"
+      else if (owner_root_only) then
         write(*,'(1x,a)') "[INFO] DG coef owner mode: root-only (io split disabled)"
       else
         write(*,'(1x,a)') "[INFO] DG coef owner mode: io-split (legacy)"
