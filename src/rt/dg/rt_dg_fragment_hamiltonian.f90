@@ -2681,7 +2681,15 @@
     if (.not. dg_frag%is_frag_root) then
       if (allocated(dg_frag%S_mat_blocks)) then
         do i_halo = 1, size(dg_frag%S_mat_blocks)
-          if (fragment_row_is_locally_owned(dg_frag, dg_frag%S_mat_blocks(i_halo)%ifrag_row)) cycle
+          if (fragment_row_is_locally_owned(dg_frag, dg_frag%S_mat_blocks(i_halo)%ifrag_row)) then
+            if (dg_frag%parallel_mode_orbital) then
+              write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] orbital overlap ownership mismatch: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " ifrag_row=", dg_frag%S_mat_blocks(i_halo)%ifrag_row
+              flush(6)
+              stop "DG-Fragment RT orbital mode: non-root rank owns overlap rows"
+            end if
+            cycle
+          end if
           dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
         end do
       end if
