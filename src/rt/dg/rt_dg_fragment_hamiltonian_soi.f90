@@ -615,6 +615,17 @@
 
     integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
 
+    ! In orbital-parallel mode all ranks replicate the full fragment domain;
+    ! clipping to mg%is/mg%ie would give each rank only a slab and corrupt
+    ! the H/S/momentum integrals after icomm_frag reduction.
+    if (dg_frag%parallel_mode_orbital) then
+      ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+      loc_s(:) = 1
+      loc_e(:) = ndom(:)
+      has_overlap = .true.
+      return
+    end if
+
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
     g_s(:) = iorg(:)
