@@ -308,7 +308,7 @@
     use communication, only: comm_sync_all
     use rt_dg_fragment_parallel, only: setup_fragment_system, finalize_fragment_parallel
     use rt_dg_fragment_ops, only: zero_nonowned_coefficients, sync_mixed_coef_from_raw, sync_raw_coef_from_mixed, &
-      zero_nonlocal_h_matrix_blocks
+      zero_nonlocal_h_matrix_blocks, capture_occmap_pair_snapshot
     use rt_dg_plane_wave, only: diagonalize_mixed_basis
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -330,6 +330,8 @@
     logical :: had_old_mixed_basis
     logical :: is_global_root
     integer :: i, ispin
+    integer, save :: basis_update_counter = 0
+    integer :: basis_update_tag
 
     is_global_root = (nproc_id_global == 0)
     if (is_global_root) then
@@ -373,6 +375,10 @@
       allocate(coef_mix_old(size(dg_frag%coef_mix,1), size(dg_frag%coef_mix,2), size(dg_frag%coef_mix,3)))
       coef_mix_old = dg_frag%coef_mix
     end if
+
+    basis_update_counter = basis_update_counter + 1
+    basis_update_tag = -basis_update_counter
+    call capture_occmap_pair_snapshot(dg_frag, basis_update_tag, 'basis_update_pre')
 
     if (is_global_root) then
       write(*,*) "  [1/3] Old basis saved to memory"
@@ -501,6 +507,12 @@
       write(*,*) "BASIS UPDATE COMPLETE (NO FILE I/O)"
       write(*,*) "=========================================="
       write(*,*)
+    end if
+
+    if (overlap_is_valid) then
+      call capture_occmap_pair_snapshot(dg_frag, basis_update_tag, 'basis_update_post')
+    else
+      call capture_occmap_pair_snapshot(dg_frag, basis_update_tag, 'basis_update_post_restore')
     end if
 
     if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)

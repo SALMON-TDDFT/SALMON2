@@ -376,6 +376,30 @@
         stop 1
       end if
 
+      ! Fill PW-PW diagonal and FP off-diagonal blocks of H0c.
+      ! These were missing, causing the mixed-basis propagation (T^H*H0c*T)
+      ! to use incorrect energies for PW states and no static FP coupling.
+      if (need_h0_dense .and. n_pw > 0) then
+        if (allocated(dg_frag%H_mat_pw)) then
+          H0c(n_frag+1:n_frag+n_pw, n_frag+1:n_frag+n_pw) = dg_frag%H_mat_pw(1:n_pw, 1:n_pw, ispin)
+        else if (allocated(dg_frag%H_mat_pw_diag)) then
+          do io = 1, n_pw
+            H0c(n_frag+io, n_frag+io) = dg_frag%H_mat_pw_diag(io, ispin)
+          end do
+        else
+          do io = 1, n_pw
+            H0c(n_frag+io, n_frag+io) = cmplx(0.5d0 * sum(dg_frag%k_pw(1:3,io)**2), 0.0d0, kind=8)
+          end do
+        end if
+        if (.not. allocated(dg_frag%H_mat_frag_pw)) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative requires H_mat_frag_pw when n_pw>0 (FP/PF off-diagonal is mandatory): rank=', &
+               dg_frag%id, ' itt=', itt, ' ispin=', ispin
+          stop 1
+        end if
+        H0c(1:n_frag, n_frag+1:n_frag+n_pw) = dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin)
+        H0c(n_frag+1:n_frag+n_pw, 1:n_frag) = conjg(transpose(dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin)))
+      end if
+
       if (use_spatial_A) then
         call build_spatial_A_coupling_matrices(dg_frag, system, mg, stencil, ispin, Ap_mat, A2_mat)
         H0c(:, :) = H0c(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
@@ -566,7 +590,7 @@
             ' n_basis=', n_basis, ' max|op_mix|=', op_mix_norm_h0
           flush(6)
         end if
-        call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, -zi, op_mix, n_basis, &
+        call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), op_mix, n_basis, &
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
         call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
                    dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, rhs_mix, n_basis, &

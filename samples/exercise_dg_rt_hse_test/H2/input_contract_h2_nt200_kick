@@ -10,7 +10,7 @@
 !========================================================================================
 
 &calculation
-  theory = 'single_scale_maxwell_tddft'
+  theory = 'tddft_response'
 /
 
 &control
@@ -75,11 +75,9 @@
 
 &emfield
   trans_longi = 'tr'
-  ae_shape1 = 'Acos2'
+  ae_shape1 = 'impulse'
   epdir_re1 = 1.0d0, 0.0d0, 0.0d0
-  I_wcm2_1 = 1.0d12
-  omega1 = 0.05d0
-  tw1 = 6.0d0
+  e_impulse = 1.0d-02
 /
 
 &analysis

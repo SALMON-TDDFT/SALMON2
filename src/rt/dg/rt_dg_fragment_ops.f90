@@ -42,6 +42,7 @@ module rt_dg_fragment_ops
   public :: sync_raw_coef_from_mixed
   public :: sync_mixed_coef_from_raw
   public :: capture_mixed_stage_diagnostics
+  public :: capture_occmap_pair_snapshot
   public :: reorthonormalize_mixed_occupied_subspace
 
 contains
@@ -530,7 +531,216 @@ contains
         accum_last_report_itt = itt
       end if
     end if
+
+    call capture_occmap_pair_snapshot(dg_frag, itt, trim(stage_name))
   end subroutine capture_mixed_stage_diagnostics
+
+  subroutine capture_occmap_pair_snapshot(dg_frag, itt, stage_label)
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: itt
+    character(len=*), intent(in) :: stage_label
+
+    integer, parameter :: n_target_pairs = 3
+    integer, parameter :: target_gid(n_target_pairs) = (/26, 14, 14/)
+    integer, parameter :: target_ref_m2(n_target_pairs) = (/27, 2, 9/)
+    integer, parameter :: target_cur_m2(n_target_pairs) = (/23, 29, 2/)
+    integer, parameter :: topk = 5
+    integer :: ifrag, ispin, ipair, iocc, io, m, nbf, nmode, gid_i
+    integer :: nocc_spin, rank_ref, rank_cur, top_id(topk)
+    real(8) :: top_val(topk), contrib_abs, ref_abs, cur_abs, top5_sum_abs
+    real(8) :: cur_ref_ratio, margin_rel, phase_ref, phase_cur, phase_diff
+    real(8) :: ovl_re, ovl_im, ovl_abs, ovl_norm_ref, ovl_norm_cur
+    complex(8) :: ff_occ_amp, amp_ref, amp_cur, contrib, ovl
+    complex(8), allocatable :: coef_mix_work(:,:), transform_frag(:,:)
+    logical, save :: trace_initialized = .false.
+    logical, save :: trace_enabled = .false.
+    character(len=32), save :: env_pair_trace = ''
+    integer :: env_len, env_status
+
+    if (.not. trace_initialized) then
+      call get_environment_variable('SALMON_DG_OCCMAP_PAIR_TRACE', env_pair_trace, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_pair_trace(1:1) == '1' .or. env_pair_trace(1:1) == 'y' .or. env_pair_trace(1:1) == 'Y' .or. &
+            env_pair_trace(1:1) == 't' .or. env_pair_trace(1:1) == 'T') then
+          trace_enabled = .true.
+        end if
+      end if
+      trace_initialized = .true.
+    end if
+    if (.not. trace_enabled) return
+    if (.not. dg_frag%mixed_basis_ready) return
+    if (.not. allocated(dg_frag%mixed_transform)) return
+    if (.not. allocated(dg_frag%coef_mix)) return
+    if (.not. allocated(dg_frag%mixed_basis_dim)) return
+    if (.not. allocated(dg_frag%nocc_spin)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+
+    ispin = 1
+    if (ispin > dg_frag%nspin) return
+    nocc_spin = min(dg_frag%nocc_spin(ispin), dg_frag%nstate_tot)
+    if (nocc_spin <= 0) return
+    nmode = min(dg_frag%mixed_basis_dim(ispin), size(dg_frag%mixed_transform, 2), size(dg_frag%coef_mix, 1))
+    if (nmode <= 0) return
+
+    allocate(coef_mix_work(nmode, nocc_spin))
+    coef_mix_work(:, :) = dg_frag%coef_mix(1:nmode, 1:nocc_spin, ispin)
+
+    do ifrag = 1, min(2, dg_frag%n_frag)
+      nbf = dg_frag%n_basis(ifrag, ispin)
+      if (nbf <= 0) cycle
+      allocate(transform_frag(nbf, nmode))
+      transform_frag(:, :) = (0.0d0, 0.0d0)
+      do io = 1, nbf
+        gid_i = dg_frag%index_basis(io, ifrag, ispin)
+        if (gid_i < 1 .or. gid_i > size(dg_frag%mixed_transform, 1)) cycle
+        transform_frag(io, :) = dg_frag%mixed_transform(gid_i, 1:nmode, ispin)
+      end do
+
+      do ipair = 1, n_target_pairs
+        do iocc = 1, nocc_spin
+          do io = 1, nbf
+            gid_i = dg_frag%index_basis(io, ifrag, ispin)
+            if (gid_i /= target_gid(ipair)) cycle
+
+            ff_occ_amp = (0.0d0, 0.0d0)
+            do m = 1, nmode
+              ff_occ_amp = ff_occ_amp + transform_frag(io, m) * coef_mix_work(m, iocc)
+            end do
+
+            top_id(:) = 0
+            top_val(:) = 0.0d0
+            rank_ref = 0
+            rank_cur = 0
+            amp_ref = (0.0d0, 0.0d0)
+            amp_cur = (0.0d0, 0.0d0)
+            ref_abs = 0.0d0
+            cur_abs = 0.0d0
+
+            do m = 1, nmode
+              contrib = conjg(ff_occ_amp) * transform_frag(io, m) * coef_mix_work(m, iocc)
+              contrib_abs = abs(real(contrib, kind=8))
+              if (contrib_abs > top_val(topk)) then
+                top_val(topk) = contrib_abs
+                top_id(topk) = m
+                call sort_topk_mode(top_id, top_val, topk)
+              end if
+              if (m == target_ref_m2(ipair)) then
+                amp_ref = transform_frag(io, m) * coef_mix_work(m, iocc)
+                ref_abs = contrib_abs
+              end if
+              if (m == target_cur_m2(ipair)) then
+                amp_cur = transform_frag(io, m) * coef_mix_work(m, iocc)
+                cur_abs = contrib_abs
+              end if
+            end do
+
+            call compute_mode_rank(ff_occ_amp, transform_frag(io, :), coef_mix_work(:, iocc), target_ref_m2(ipair), rank_ref)
+            call compute_mode_rank(ff_occ_amp, transform_frag(io, :), coef_mix_work(:, iocc), target_cur_m2(ipair), rank_cur)
+
+            top5_sum_abs = sum(top_val(:))
+            cur_ref_ratio = 0.0d0
+            if (ref_abs > 1.0d-30) cur_ref_ratio = cur_abs / ref_abs
+            margin_rel = 0.0d0
+            if (max(cur_abs, ref_abs) > 1.0d-30) margin_rel = (cur_abs - ref_abs) / max(cur_abs, ref_abs)
+
+            phase_ref = atan2(aimag(amp_ref), real(amp_ref, kind=8))
+            phase_cur = atan2(aimag(amp_cur), real(amp_cur, kind=8))
+            phase_diff = phase_cur - phase_ref
+
+            ovl = (0.0d0, 0.0d0)
+            ovl_norm_ref = 0.0d0
+            ovl_norm_cur = 0.0d0
+            do m = 1, nbf
+              if (target_ref_m2(ipair) >= 1 .and. target_ref_m2(ipair) <= nmode .and. &
+                  target_cur_m2(ipair) >= 1 .and. target_cur_m2(ipair) <= nmode) then
+                ovl = ovl + conjg(transform_frag(m, target_ref_m2(ipair))) * transform_frag(m, target_cur_m2(ipair))
+                ovl_norm_ref = ovl_norm_ref + abs(transform_frag(m, target_ref_m2(ipair)))**2
+                ovl_norm_cur = ovl_norm_cur + abs(transform_frag(m, target_cur_m2(ipair)))**2
+              end if
+            end do
+            ovl_re = real(ovl, kind=8)
+            ovl_im = aimag(ovl)
+            ovl_abs = abs(ovl)
+            if (ovl_norm_ref > 1.0d-30 .and. ovl_norm_cur > 1.0d-30) ovl_abs = ovl_abs / sqrt(ovl_norm_ref * ovl_norm_cur)
+
+            if (comm_is_root(dg_frag%id)) then
+              write(*,*) &
+                'DG-OCCMAP-PAIR-SNAP', 'tag='//trim(stage_label), 'itt=', itt, 'ifrag=', ifrag, 'occ_id=', iocc, &
+                'gid=', target_gid(ipair), 'ref_m2=', target_ref_m2(ipair), 'cur_m2=', target_cur_m2(ipair), 'top1=', top_id(1), &
+                'top1_abs=', top_val(1), 'top2=', top_id(2), 'top2_abs=', top_val(2), 'ref_abs=', ref_abs, &
+                'cur_abs=', cur_abs, 'ref_rank=', rank_ref, 'cur_rank=', rank_cur, 'top5_abs_sum=', top5_sum_abs, &
+                'cur_ref_ratio=', cur_ref_ratio, 'margin_rel=', margin_rel, 'phase_diff=', phase_diff, 'mode_ovl_re=', ovl_re, &
+                'mode_ovl_im=', ovl_im, 'mode_ovl_cos=', ovl_abs
+              flush(6)
+            end if
+          end do
+        end do
+      end do
+
+      deallocate(transform_frag)
+    end do
+
+    deallocate(coef_mix_work)
+  end subroutine capture_occmap_pair_snapshot
+
+  subroutine sort_topk_mode(top_id, top_val, topk)
+    implicit none
+    integer, intent(inout) :: top_id(topk)
+    real(8), intent(inout) :: top_val(topk)
+    integer, intent(in) :: topk
+    integer :: i, j, tmp_id
+    real(8) :: tmp_val
+
+    do i = topk, 2, -1
+      if (top_val(i) > top_val(i-1)) then
+        tmp_val = top_val(i-1)
+        top_val(i-1) = top_val(i)
+        top_val(i) = tmp_val
+        tmp_id = top_id(i-1)
+        top_id(i-1) = top_id(i)
+        top_id(i) = tmp_id
+      end if
+    end do
+    do i = 1, topk - 1
+      do j = i + 1, topk
+        if (top_val(j) > top_val(i)) then
+          tmp_val = top_val(i)
+          top_val(i) = top_val(j)
+          top_val(j) = tmp_val
+          tmp_id = top_id(i)
+          top_id(i) = top_id(j)
+          top_id(j) = tmp_id
+        end if
+      end do
+    end do
+  end subroutine sort_topk_mode
+
+  subroutine compute_mode_rank(ff_occ_amp, transform_row, coef_vec, target_mode, rank_val)
+    implicit none
+    complex(8), intent(in) :: ff_occ_amp
+    complex(8), intent(in) :: transform_row(:)
+    complex(8), intent(in) :: coef_vec(:)
+    integer, intent(in) :: target_mode
+    integer, intent(out) :: rank_val
+
+    integer :: m, nmode, gt_count
+    real(8) :: ref_abs, val_abs
+
+    rank_val = 0
+    nmode = min(size(transform_row), size(coef_vec))
+    if (target_mode < 1 .or. target_mode > nmode) return
+
+    ref_abs = abs(real(conjg(ff_occ_amp) * transform_row(target_mode) * coef_vec(target_mode), kind=8))
+    gt_count = 0
+    do m = 1, nmode
+      val_abs = abs(real(conjg(ff_occ_amp) * transform_row(m) * coef_vec(m), kind=8))
+      if (val_abs > ref_abs) gt_count = gt_count + 1
+    end do
+    rank_val = gt_count + 1
+  end subroutine compute_mode_rank
 
   subroutine reorthonormalize_mixed_occupied_subspace(dg_frag)
     implicit none
@@ -1624,7 +1834,7 @@ contains
       write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
       stop 1
     end if
-    if (n_pw > 0) then
+    if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
     end if
   end subroutine apply_overlap_operator

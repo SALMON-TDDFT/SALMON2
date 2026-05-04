@@ -445,6 +445,13 @@
         if (.not. use_mixed_current) then
           ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
           current_tmp = sum(aimag(conjg(coef_frag_all(1:n, 1:nocc)) * tmp_mat(1:n, 1:nocc)))
+          if (n_pw > 0) then
+            do jo = 1, n_pw
+              kpw_dir = dg_frag%k_pw(idir, jo)
+              if (abs(kpw_dir) < 1.0d-15) cycle
+              current_tmp = current_tmp + kpw_dir * sum(abs(coef_pw_all(jo, 1:nocc))**2)
+            end do
+          end if
         end if
 
         if (idir == 3) then

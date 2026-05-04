@@ -9,6 +9,7 @@
     use poisson_dg_distributed, only: hartree_dg_distributed
     use hartree_sub, only: build_hartree_density_from_rho
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
+    use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -204,6 +205,9 @@
         deallocate(dg_frag%H_mat_frag_pw)
         allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
       end if
+
+      ! Mixed FP/PP nonlocal terms require dense H_nl cache at current A(t).
+      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, .true.)
 
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
       call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)

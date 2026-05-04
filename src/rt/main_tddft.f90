@@ -244,12 +244,14 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use rt_dg_fragment, only: init_dg_fragment_rt_std => init_dg_fragment_rt, &
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
-                            calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix
+                calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix, &
+                diagnose_density_from_fragments_std => diagnose_density_from_fragments
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
-                                calculate_hamiltonian_matrix_soi => calculate_hamiltonian_matrix
-  use communication, only: comm_is_root
+                  calculate_hamiltonian_matrix_soi => calculate_hamiltonian_matrix, &
+                  diagnose_density_from_fragments_soi => diagnose_density_from_fragments
+  use communication, only: comm_is_root, comm_summation
   use parallelization, only: nproc_id_global
   use sendrecv_grid, only: s_sendrecv_grid
   use salmon_xc, only: s_xc_functional
@@ -281,6 +283,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt, fh_dg_current_decomp
+  integer :: ix, iy, iz
+  real(8) :: ne_raw_prert, ne_raw_prert_local
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -298,6 +302,18 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   end if
   
   ! H_mat_kinetic is constructed inside calculate_hamiltonian_matrix
+
+  ! Snapshot the pre-RT raw electron count directly from the initialized real-space density.
+  ne_raw_prert_local = 0.0d0
+  do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        ne_raw_prert_local = ne_raw_prert_local + rho%f(ix, iy, iz)
+      end do
+    end do
+  end do
+  ne_raw_prert_local = ne_raw_prert_local * system%hvol
+  call comm_summation(ne_raw_prert_local, ne_raw_prert, info%icomm_r)
   
   if (comm_is_root(nproc_id_global)) then
     write(*,*)
@@ -314,8 +330,11 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     write(fh_dg_current_decomp,'(a)') '# convention_gap = elec_num_scaled - elec_num_raw (diagnostic only; not a time-drift metric)'
     write(fh_dg_current_decomp,'(a)') '# rho_ff/rho_fp/rho_pp = coefficient-space electron count split with overlap metric'
     write(fh_dg_current_decomp,'(a)') '# rho_owned/rho_imported/rho_local_all/rho_global_raw/rho_global_scaled/rho_contract_residual = real-space counting contract audit'
+    write(fh_dg_current_decomp,'(a)') '# rho_coef_sum = rho_ff + rho_fp + rho_pp, rho_coef_minus_raw = rho_coef_sum - rho_global_raw'
+    write(fh_dg_current_decomp,'(a)') '# rho_ff_minus_raw = rho_ff - rho_global_raw, rho_ff_fp_minus_raw = (rho_ff + rho_fp) - rho_global_raw'
+    write(fh_dg_current_decomp,'(a,1X,E23.15E3)') '# Ne_raw_preRT_snapshot', ne_raw_prert
     write(fh_dg_current_decomp,'(a)') '# coef_occ_norm_drift = coef_occ_norm - coef_occ_norm(t=dt)'
-    write(fh_dg_current_decomp,'(a)') '# 1:it 2:time_au 3:J_para_x 4:J_para_y 5:J_para_z 6:J_dia_x 7:J_dia_y 8:J_dia_z 9:J_total_x 10:J_total_y 11:J_total_z 12:rho_drift 13:coef_occ_norm_drift 14:coef_occ_norm 15:csc_occ_identity_norm 16:csc_occ_identity_max 17:occvirt_leakage 18:occvirt_top_occ 19:occvirt_top_virt 20:occvirt_top_abs2 21:jpara_top_occ_state 22:jpara_top_occ_value 23:norm_state_99 24:norm_state_100 25:norm_state_129 26:csc_step_delta 27:leak100_129_step_delta 28:csc_pre_mixed 29:csc_post_overlap 30:csc_post_raw 31:leak100_129_pre_mixed 32:leak100_129_post_overlap 33:leak100_129_post_raw 34:leak100_129_current 35:rho_ff_elec 36:rho_fp_elec 37:rho_pp_elec 38:rho_owned_elec 39:rho_imported_elec 40:rho_local_all_elec 41:rho_global_raw_elec 42:rho_global_scaled_elec 43:rho_contract_residual_elec'
+    write(fh_dg_current_decomp,'(a)') '# 1:it 2:time_au 3:J_para_x 4:J_para_y 5:J_para_z 6:J_dia_x 7:J_dia_y 8:J_dia_z 9:J_total_x 10:J_total_y 11:J_total_z 12:rho_drift 13:coef_occ_norm_drift 14:coef_occ_norm 15:csc_occ_identity_norm 16:csc_occ_identity_max 17:occvirt_leakage 18:occvirt_top_occ 19:occvirt_top_virt 20:occvirt_top_abs2 21:jpara_top_occ_state 22:jpara_top_occ_value 23:norm_state_99 24:norm_state_100 25:norm_state_129 26:csc_step_delta 27:leak100_129_step_delta 28:csc_pre_mixed 29:csc_post_overlap 30:csc_post_raw 31:leak100_129_pre_mixed 32:leak100_129_post_overlap 33:leak100_129_post_raw 34:leak100_129_current 35:rho_ff_elec 36:rho_fp_elec 37:rho_pp_elec 38:rho_owned_elec 39:rho_imported_elec 40:rho_local_all_elec 41:rho_global_raw_elec 42:rho_global_scaled_elec 43:rho_contract_residual_elec 44:rho_coef_sum_elec 45:rho_coef_minus_raw_elec 46:Ne_raw_preRT 47:rho_ff_minus_raw_elec 48:rho_ff_fp_minus_raw_elec'
   end if
 
   if (iperiodic == 3) then
@@ -373,7 +392,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     end select
 
     if (fh_dg_current_decomp > 0) then
-      write(fh_dg_current_decomp,'(I8,1X,F16.8,41(1X,E23.15E3))') itt, dble(itt)*dt, &
+      write(fh_dg_current_decomp,'(I8,1X,F16.8,46(1X,E23.15E3))') itt, dble(itt)*dt, &
         dg_frag%current_para(1), dg_frag%current_para(2), dg_frag%current_para(3), &
         dg_frag%current_dia(1), dg_frag%current_dia(2), dg_frag%current_dia(3), &
         dg_frag%current_total(1), dg_frag%current_total(2), dg_frag%current_total(3), &
@@ -387,7 +406,12 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         dg_frag%selfexc_leak100_129_pre_mixed, dg_frag%selfexc_leak100_129_post_overlap, dg_frag%selfexc_leak100_129_post_raw, &
         dg_frag%selfexc_leak100_129_current, dg_frag%rho_ff_elec, dg_frag%rho_fp_elec, dg_frag%rho_pp_elec, &
         dg_frag%rho_owned_elec, dg_frag%rho_imported_elec, dg_frag%rho_local_all_elec, dg_frag%rho_global_raw_elec, &
-        dg_frag%rho_global_scaled_elec, dg_frag%rho_contract_residual_elec
+        dg_frag%rho_global_scaled_elec, dg_frag%rho_contract_residual_elec, &
+        dg_frag%rho_ff_elec + dg_frag%rho_fp_elec + dg_frag%rho_pp_elec, &
+        dg_frag%rho_ff_elec + dg_frag%rho_fp_elec + dg_frag%rho_pp_elec - dg_frag%rho_global_raw_elec, &
+        ne_raw_prert, &
+        dg_frag%rho_ff_elec - dg_frag%rho_global_raw_elec, &
+        dg_frag%rho_ff_elec + dg_frag%rho_fp_elec - dg_frag%rho_global_raw_elec
     end if
     
     ! Write energy data

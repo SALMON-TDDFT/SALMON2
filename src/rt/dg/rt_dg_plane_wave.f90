@@ -395,7 +395,7 @@ contains
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
-    character(len=64), save :: fp_domain_mode = 'core'
+    character(len=64), save :: fp_domain_mode = 'buffered'
     character(len=64) :: env_fp_domain
 
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -423,7 +423,7 @@ contains
       if (env_stat == 0 .and. env_len > 0) then
         fp_domain_mode = adjustl(env_fp_domain(1:env_len))
       else
-        fp_domain_mode = 'core'
+        fp_domain_mode = 'buffered'
       end if
       select case (fp_domain_mode(1:1))
       case ('b','B','p','P','f','F','1')
@@ -609,7 +609,7 @@ contains
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
-    character(len=64), save :: fp_domain_mode = 'core'
+    character(len=64), save :: fp_domain_mode = 'buffered'
     character(len=64) :: env_fp_domain
 
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -635,7 +635,7 @@ contains
       if (env_stat == 0 .and. env_len > 0) then
         fp_domain_mode = adjustl(env_fp_domain(1:env_len))
       else
-        fp_domain_mode = 'core'
+        fp_domain_mode = 'buffered'
       end if
       select case (fp_domain_mode(1:1))
       case ('b','B','p','P','f','F','1')
@@ -871,7 +871,7 @@ contains
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
-    character(len=64), save :: fp_domain_mode = 'core'
+    character(len=64), save :: fp_domain_mode = 'buffered'
     character(len=64) :: env_fp_domain
 
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -903,7 +903,7 @@ contains
       if (env_stat == 0 .and. env_len > 0) then
         fp_domain_mode = adjustl(env_fp_domain(1:env_len))
       else
-        fp_domain_mode = 'core'
+        fp_domain_mode = 'buffered'
       end if
       select case (fp_domain_mode(1:1))
       case ('b','B','p','P','f','F','1')
@@ -1262,16 +1262,17 @@ contains
     type(s_scalar),         intent(in)    :: Vh, Vxc(:), Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
     complex(8),             intent(in)    :: S_frag_pw(:,:,:)
-    complex(8),             intent(in)    :: H_frag_pw(:,:,:)
+    complex(8),             intent(inout) :: H_frag_pw(:,:,:)
 
     integer :: ispin, i, ipw, n_frag, n_pw
     integer :: env_len, env_stat
     real(8) :: k_vec(3), kinetic_energy
     real(8), allocatable :: V_mean(:)
     complex(8), allocatable :: H_pw(:,:,:)
+    complex(8), allocatable :: H_nl_fp(:,:), H_nl_pp(:,:), H_nl_diag(:,:)
     character(len=64) :: env_hpp_mode
     character(len=64) :: hpp_mode
-    logical :: use_local_nondiag
+    logical :: use_local_nondiag, include_nl_mixed
 
     if (.not. dg_frag%use_plane_wave_basis) return
 
@@ -1292,6 +1293,15 @@ contains
 
     allocate(V_mean(dg_frag%nspin))
     call compute_mean_potential(dg_frag, Vh, Vxc, Vpsl, V_mean)
+
+    include_nl_mixed = dg_frag%has_nl_cache .and. allocated(dg_frag%H_nl_cache) .and. n_frag > 0 .and. n_pw > 0
+    if (include_nl_mixed) then
+      allocate(H_nl_fp(n_frag, n_pw), H_nl_pp(n_pw, n_pw), H_nl_diag(n_pw, dg_frag%nspin))
+      H_nl_fp(:, :) = (0.0d0, 0.0d0)
+      H_nl_pp(:, :) = (0.0d0, 0.0d0)
+      H_nl_diag(:, :) = (0.0d0, 0.0d0)
+    end if
+
     if (.not. allocated(dg_frag%H_mat_pw_diag)) then
       allocate(dg_frag%H_mat_pw_diag(n_pw, dg_frag%nspin))
     else if (size(dg_frag%H_mat_pw_diag,1) /= n_pw .or. size(dg_frag%H_mat_pw_diag,2) /= dg_frag%nspin) then
@@ -1309,9 +1319,33 @@ contains
       end if
       allocate(H_pw(n_pw, n_pw, dg_frag%nspin))
       call compute_pw_hamiltonian_local_potential(dg_frag, Vh, Vxc, Vpsl, H_pw)
+      if (include_nl_mixed) then
+        do ispin = 1, dg_frag%nspin
+          H_nl_fp(:, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), S_frag_pw(1:n_frag, 1:n_pw, ispin))
+          H_frag_pw(1:n_frag, 1:n_pw, ispin) = H_frag_pw(1:n_frag, 1:n_pw, ispin) + H_nl_fp(:, :)
+          H_nl_pp(:, :) = matmul(conjg(transpose(S_frag_pw(1:n_frag, 1:n_pw, ispin))), H_nl_fp(:, :))
+          H_pw(1:n_pw, 1:n_pw, ispin) = H_pw(1:n_pw, 1:n_pw, ispin) + H_nl_pp(:, :)
+          H_nl_diag(1:n_pw, ispin) = [(H_nl_pp(i, i), i=1,n_pw)]
+        end do
+      end if
       dg_frag%H_mat_pw(:, :, :) = H_pw(:, :, :)
     else
       if (allocated(dg_frag%H_mat_pw)) deallocate(dg_frag%H_mat_pw)
+      if (include_nl_mixed) then
+        do ispin = 1, dg_frag%nspin
+          H_nl_fp(:, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), S_frag_pw(1:n_frag, 1:n_pw, ispin))
+          H_frag_pw(1:n_frag, 1:n_pw, ispin) = H_frag_pw(1:n_frag, 1:n_pw, ispin) + H_nl_fp(:, :)
+          H_nl_pp(:, :) = matmul(conjg(transpose(S_frag_pw(1:n_frag, 1:n_pw, ispin))), H_nl_fp(:, :))
+          H_nl_diag(1:n_pw, ispin) = [(H_nl_pp(i, i), i=1,n_pw)]
+        end do
+      end if
+    end if
+
+    if (allocated(dg_frag%H_mat_frag_pw)) then
+      if (size(dg_frag%H_mat_frag_pw,1) == n_frag .and. size(dg_frag%H_mat_frag_pw,2) == n_pw .and. &
+          size(dg_frag%H_mat_frag_pw,3) == dg_frag%nspin) then
+        dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, 1:dg_frag%nspin) = H_frag_pw(1:n_frag, 1:n_pw, 1:dg_frag%nspin)
+      end if
     end if
 
     do ispin = 1, dg_frag%nspin
@@ -1325,11 +1359,15 @@ contains
           kinetic_energy = 0.5d0 * sum(k_vec**2)
           i = n_frag + ipw
           dg_frag%H_mat_pw_diag(ipw, ispin) = cmplx(kinetic_energy + V_mean(ispin), 0.0d0, kind=8)
+          if (include_nl_mixed) dg_frag%H_mat_pw_diag(ipw, ispin) = dg_frag%H_mat_pw_diag(ipw, ispin) + H_nl_diag(ipw, ispin)
         end if
       end do
     end do
 
     if (allocated(H_pw)) deallocate(H_pw)
+    if (allocated(H_nl_fp)) deallocate(H_nl_fp)
+    if (allocated(H_nl_pp)) deallocate(H_nl_pp)
+    if (allocated(H_nl_diag)) deallocate(H_nl_diag)
 
     deallocate(V_mean)
 

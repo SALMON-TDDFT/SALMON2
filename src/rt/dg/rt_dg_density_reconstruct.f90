@@ -2,7 +2,8 @@
     use structures
     use salmon_global, only: nelec, nelec_spin
     use communication, only: comm_summation, comm_bcast, comm_alltoallv, comm_send, comm_recv, COMM_GROUP_NULL
-    use rt_dg_fragment_ops, only: refresh_pw_coef_cache, gather_full_coef_view, copy_overlap_operator_to_dense
+    use rt_dg_fragment_ops, only: refresh_pw_coef_cache, gather_full_coef_view, copy_overlap_operator_to_dense, &
+      apply_overlap_operator_batch, capture_occmap_pair_snapshot
     use rt_dg_fragment_types, only: density_grid_point_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -12,7 +13,7 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin)
     integer, intent(in), optional :: itt_debug
 
-    integer :: ifrag, io, i_local, ispin
+    integer :: ifrag, io, i_local, ispin, iocc
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, bx, by, bz, owner_rank
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
@@ -25,8 +26,12 @@
     integer :: send_total_count, recv_total_count
     integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
     integer :: valid_basis_count
+    integer :: owner_valid_count, slot0_count, slotp_count, owner_true_count, owner_false_count
+    integer :: basis_gid_probe(3)
     integer :: handler_id_frag
     integer :: spin_offset
+    integer :: ix0_frag, ix1_frag, iy0_frag, iy1_frag, iz0_frag, iz1_frag
+    integer :: cmp_slot
     integer :: ixg_min_probe, ixg_max_probe, owner_valid_probe, nprobe_cols, iprobe
     integer, parameter :: grid_block_size = 1024, state_block_size = 64, rho_state_block_size = 16, pw_block_size = 128
     integer, parameter :: mixed_io_block_size = 64
@@ -104,6 +109,10 @@
     complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: basis_mix_blk_t(:,:), density_mix_tmp_t(:,:)
     complex(8), allocatable :: transform_frag_spin(:,:,:), transform_pw_spin(:,:,:)
+    complex(8), allocatable :: mix_transform_spin(:,:), mix_overlap_spin(:,:), s_mix(:,:), s_mix_work(:,:)
+    complex(8), allocatable :: coef_mix_eff(:,:), coef_mix_metric(:,:), coef_mix_spin(:,:,:)
+    complex(8), allocatable :: d_raw_ff(:,:), d_raw_fp(:,:), d_raw_pp(:,:)
+    integer, allocatable :: ipiv_mix(:)
     integer, allocatable :: n_basis_mix_spin(:)
     complex(8), allocatable :: coef_probe_full(:,:), coef_probe_pw(:,:), overlap_probe(:,:), overlap_vec(:)
     integer, allocatable :: subgroup_self_ixg_tmp(:), subgroup_self_iyg_tmp(:), subgroup_self_izg_tmp(:)
@@ -148,9 +157,15 @@
     character(32) :: env_owned_path_scale
     character(32) :: env_imported_unpack_mode
     character(32) :: env_imported_unpack_scale
+    character(32) :: env_rho_mix_mode
+    character(32) :: env_rho_mix_trace
+    character(32) :: env_rho_mix_raw_trace
+    character(32) :: env_rho_mix_grid_compare
     character(96) :: env_point_probe
     integer :: env_status
     integer :: env_probe_status
+    integer :: rho_mix_mode_kind
+    integer :: info_lapack
     integer :: itt_tag
     real(8) :: state_charge_sum_spin, state_charge_sum_all
     real(8) :: state_coeff_c2_sum_spin, state_coeff_c2_sum_all
@@ -203,12 +218,77 @@
     real(8) :: imported_unpack_weight
     real(8) :: owned_path_scale
     real(8) :: imported_unpack_scale
+    real(8) :: s_mix_dev_frob, s_mix_offdiag_frob, s_mix_diag_min, s_mix_diag_max
+    real(8) :: tr_ff_probe, tr_fp_probe, tr_pp_probe, fp_frob_probe, fp_maxabs_probe
+    real(8) :: trs_ff_probe, trs_fp_probe, trs_pp_probe, trs_total_probe, fp_weight_frac_probe
+    real(8) :: phase_applied_total_block, send_pre_block_raw
+    complex(8) :: tr_fp_complex
+    real(8) :: rho_mix_grid_l2, rho_mix_grid_ref, rho_mix_grid_max, rho_mix_grid_rel
+    real(8) :: coef_c2_probe(3), coef_metric_probe(3)
+    real(8) :: density_mix_trace_probe, density_mix_diag_min, density_mix_diag_max
     real(8) :: psi2_occ_val, psi2_dv_val
     real(8) :: psi2_after_partition_val, psi2_after_slot_val, psi2_after_any_norm_val
     integer :: state_rhobf_trace_io, state_rhobf_trace_spin
+    logical :: enable_rho_mix_trace
+    logical :: enable_rho_mix_raw_trace
+    logical :: enable_rho_mix_grid_compare
+    logical :: enable_ifrag_compare_trace
+    character(32) :: env_ifrag_compare_trace
+    logical :: enable_fp_decomp_audit
+    character(32) :: env_fp_decomp_audit
+    logical :: enable_fp_phase_fix
+    character(32) :: env_fp_phase_fix
+    logical :: enable_tf_occmap_only
+    character(32) :: env_tf_occmap_only
+    character(256) :: env_tf_occmap_itts
+    character(256) :: env_tf_occmap_itts_work
+    integer, parameter :: max_occmap_trace_itt = 32
+    integer :: occmap_trace_itts(max_occmap_trace_itt), n_occmap_trace_itt
+    integer :: occmap_trace_pos, occmap_trace_next, occmap_trace_val, occmap_trace_ios, occmap_trace_idx
+    character(32) :: occmap_trace_tok
+    logical :: trace_occmap_itt
+    logical :: ifrag_grid_seen(2), ifrag_basis_seen(2), ifrag_fp_seen(2)
+    logical :: ifrag_decomp_seen(2)
+    logical :: ifrag_ff_occ_seen(2)
+    integer :: cmp_nxyz(3, 2), cmp_nbf(2), cmp_valid(2), cmp_basis_gid(3, 2)
+    integer :: cmp_frag_lo(3, 2), cmp_frag_hi(3, 2)
+    integer :: cmp_npt(2), cmp_local(2), cmp_remote(2), cmp_valid_remote(2)
+    integer :: cmp_owner_valid(2), cmp_slot0(2), cmp_slotp(2), cmp_owner_true(2), cmp_owner_false(2)
+    real(8) :: cmp_phase_total(2), cmp_send_pre(2), cmp_trs_fp(2), cmp_fp_frac(2), cmp_fp_frob(2), cmp_fp_max(2)
+    real(8) :: cmp_trs_ff(2), cmp_trs_pp(2), cmp_trs_tot(2)
+    real(8), allocatable :: cmp_ff_occ(:,:), cmp_ff_occ_global(:,:)
+    real(8), allocatable :: cmp_ff_gid_pre(:,:,:), cmp_ff_gid_post(:,:,:)
+    real(8), allocatable :: cmp_ff_gid_pre_global(:,:,:), cmp_ff_gid_post_global(:,:,:)
+    real(8), allocatable :: cmp_tf_gid_pre(:,:,:), cmp_tf_gid_full(:,:,:), cmp_tf_gid_int(:,:,:)
+    real(8), allocatable :: cmp_tf_gid_pre_global(:,:,:), cmp_tf_gid_full_global(:,:,:), cmp_tf_gid_int_global(:,:,:)
+    real(8), allocatable :: cmp_tf_gid_mode_pre(:,:,:,:), cmp_tf_gid_mode_full(:,:,:,:)
+    real(8), allocatable :: cmp_tf_gid_mode_pre_global(:,:,:,:), cmp_tf_gid_mode_full_global(:,:,:,:)
+    complex(8), allocatable :: cmp_tf_gid_mode_ovl(:,:,:,:), cmp_tf_gid_mode_ovl_global(:,:,:,:)
+    integer, parameter :: n_focus_gid = 2
+    integer, parameter :: max_occmap_ref_occ = 32768
+    integer, save :: cmp_tf_m2_ref_static(max_occmap_ref_occ, n_focus_gid) = 0
+    integer, parameter :: max_occmap_track_step = 64
+    integer, save :: cmp_tf_track_m2(max_occmap_ref_occ, n_focus_gid, max_occmap_track_step) = 0
+    integer, save :: cmp_tf_track_itt(max_occmap_track_step) = 0
+    integer, save :: cmp_tf_track_nstep = 0
+    integer, allocatable :: cmp_ff_dom_gid(:,:)
+    real(8), allocatable :: cmp_ff_dom_gid_local(:,:), cmp_ff_dom_gid_global(:,:)
+    real(8) :: cmp_recv_post_raw(2)
+    integer, parameter :: n_top_fp_pairs = 5
+    integer, parameter :: n_top_ff_gid = 5
+    integer, parameter :: focus_gid_ids(n_focus_gid) = (/14, 26/)
+    integer, parameter :: n_top_tf_mode = 5
+    real(8) :: top_fp_contrib_val(n_top_fp_pairs), fp_pair_contrib
+    integer :: top_fp_io(n_top_fp_pairs), top_fp_ipw(n_top_fp_pairs), top_fp_gid(n_top_fp_pairs)
+    integer :: k_top, k_min, io_top, ipw_top
+    integer :: dom_m, ikx_pw, iky_pw, ikz_pw
+    real(8) :: dom_m_abs, dom_sign, g_abs, m_term_abs
+    complex(8) :: m_term
+    real(8), allocatable :: ifrag_recv_post_raw_local(:,:), ifrag_recv_post_raw_global(:,:)
 
     itt_tag = -1
     if (present(itt_debug)) itt_tag = itt_debug
+    call capture_occmap_pair_snapshot(dg_frag, itt_tag, 'density_reconstruct_pre')
 
     if (itt_tag == 1) then
       write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] ENTER_DENSITY_RECON rank=', dg_frag%id, ' itt=', itt_tag, &
@@ -292,6 +372,57 @@
     env_owned_path_scale = ''
     env_imported_unpack_mode = ''
     env_imported_unpack_scale = ''
+    env_rho_mix_mode = 'legacy'
+    env_rho_mix_trace = ''
+    env_rho_mix_raw_trace = ''
+    env_rho_mix_grid_compare = ''
+    env_ifrag_compare_trace = ''
+    env_fp_decomp_audit = ''
+    env_fp_phase_fix = ''
+    env_tf_occmap_only = ''
+    env_tf_occmap_itts = ''
+    env_tf_occmap_itts_work = ''
+    rho_mix_mode_kind = 0
+    enable_rho_mix_trace = .false.
+    enable_rho_mix_raw_trace = .false.
+    enable_rho_mix_grid_compare = .false.
+    enable_ifrag_compare_trace = .false.
+    enable_fp_decomp_audit = .false.
+    enable_fp_phase_fix = .false.
+    enable_tf_occmap_only = .false.
+    n_occmap_trace_itt = 0
+    occmap_trace_itts(:) = 0
+    trace_occmap_itt = .false.
+    ifrag_grid_seen(:) = .false.
+    ifrag_basis_seen(:) = .false.
+    ifrag_fp_seen(:) = .false.
+    ifrag_decomp_seen(:) = .false.
+    ifrag_ff_occ_seen(:) = .false.
+    cmp_nxyz(:, :) = 0
+    cmp_nbf(:) = 0
+    cmp_valid(:) = 0
+    cmp_basis_gid(:, :) = 0
+    cmp_frag_lo(:, :) = 0
+    cmp_frag_hi(:, :) = 0
+    cmp_npt(:) = 0
+    cmp_local(:) = 0
+    cmp_remote(:) = 0
+    cmp_valid_remote(:) = 0
+    cmp_owner_valid(:) = 0
+    cmp_slot0(:) = 0
+    cmp_slotp(:) = 0
+    cmp_owner_true(:) = 0
+    cmp_owner_false(:) = 0
+    cmp_phase_total(:) = 0.0d0
+    cmp_send_pre(:) = 0.0d0
+    cmp_trs_fp(:) = 0.0d0
+    cmp_fp_frac(:) = 0.0d0
+    cmp_fp_frob(:) = 0.0d0
+    cmp_fp_max(:) = 0.0d0
+    cmp_trs_ff(:) = 0.0d0
+    cmp_trs_pp(:) = 0.0d0
+    cmp_trs_tot(:) = 0.0d0
+    cmp_recv_post_raw(:) = 0.0d0
     env_point_probe = ''
     probe_ixg = 0
     probe_iyg = 0
@@ -443,6 +574,125 @@
       read(env_imported_unpack_scale, *, iostat=env_status) imported_unpack_scale
       if (env_status /= 0) imported_unpack_scale = 0.5d0
     end if
+    call get_environment_variable('SALMON_DG_RHO_MIX_MODE', env_rho_mix_mode, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_rho_mix_mode)))
+      case('orthonormal_cc','ORTHONORMAL_CC')
+        rho_mix_mode_kind = 1
+      case('metric_consistent','METRIC_CONSISTENT','overlap_metric','OVERLAP_METRIC')
+        rho_mix_mode_kind = 2
+      case default
+        rho_mix_mode_kind = 0
+        env_rho_mix_mode = 'legacy'
+      end select
+    else
+      env_rho_mix_mode = 'legacy'
+    end if
+    call get_environment_variable('SALMON_DG_RHO_MIX_TRACE', env_rho_mix_trace, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_rho_mix_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_rho_mix_trace = .true.
+      end select
+    end if
+    enable_rho_mix_raw_trace = enable_rho_mix_trace
+    enable_rho_mix_grid_compare = enable_rho_mix_trace
+    call get_environment_variable('SALMON_DG_RHO_MIX_RAW_TRACE', env_rho_mix_raw_trace, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_rho_mix_raw_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_rho_mix_raw_trace = .true.
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        enable_rho_mix_raw_trace = .false.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_RHO_MIX_GRID_COMPARE', env_rho_mix_grid_compare, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_rho_mix_grid_compare)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_rho_mix_grid_compare = .true.
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        enable_rho_mix_grid_compare = .false.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_IFRAG_COMPARE_TRACE', env_ifrag_compare_trace, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_ifrag_compare_trace)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_ifrag_compare_trace = .true.
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        enable_ifrag_compare_trace = .false.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_FP_DECOMP_AUDIT', env_fp_decomp_audit, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_fp_decomp_audit)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_fp_decomp_audit = .true.
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        enable_fp_decomp_audit = .false.
+      end select
+    end if
+    if (enable_fp_decomp_audit) then
+      enable_rho_mix_raw_trace = .true.
+    end if
+    call get_environment_variable('SALMON_DG_FP_PHASE_FIX', env_fp_phase_fix, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_fp_phase_fix)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_fp_phase_fix = .true.
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        enable_fp_phase_fix = .false.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_TF_OCCMAP_ONLY', env_tf_occmap_only, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_tf_occmap_only)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_tf_occmap_only = .true.
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        enable_tf_occmap_only = .false.
+      end select
+    end if
+    call get_environment_variable('SALMON_DG_TF_OCCMAP_ITTS', env_tf_occmap_itts, status=env_status)
+    if (env_status == 0) then
+      env_tf_occmap_itts_work = trim(env_tf_occmap_itts)
+      do occmap_trace_idx = 1, len_trim(env_tf_occmap_itts_work)
+        if (env_tf_occmap_itts_work(occmap_trace_idx:occmap_trace_idx) == ',') env_tf_occmap_itts_work(occmap_trace_idx:occmap_trace_idx) = ' '
+      end do
+      occmap_trace_pos = 1
+      do while (occmap_trace_pos <= len_trim(env_tf_occmap_itts_work))
+        do while (occmap_trace_pos <= len_trim(env_tf_occmap_itts_work) .and. env_tf_occmap_itts_work(occmap_trace_pos:occmap_trace_pos) == ' ')
+          occmap_trace_pos = occmap_trace_pos + 1
+        end do
+        if (occmap_trace_pos > len_trim(env_tf_occmap_itts_work)) exit
+        occmap_trace_next = occmap_trace_pos
+        do while (occmap_trace_next <= len_trim(env_tf_occmap_itts_work) .and. env_tf_occmap_itts_work(occmap_trace_next:occmap_trace_next) /= ' ')
+          occmap_trace_next = occmap_trace_next + 1
+        end do
+        occmap_trace_tok = ''
+        occmap_trace_tok = env_tf_occmap_itts_work(occmap_trace_pos:occmap_trace_next-1)
+        read(occmap_trace_tok, *, iostat=occmap_trace_ios) occmap_trace_val
+        if (occmap_trace_ios == 0) then
+          if (n_occmap_trace_itt < max_occmap_trace_itt) then
+            n_occmap_trace_itt = n_occmap_trace_itt + 1
+            occmap_trace_itts(n_occmap_trace_itt) = occmap_trace_val
+          end if
+        end if
+        occmap_trace_pos = occmap_trace_next + 1
+      end do
+    end if
+    if (n_occmap_trace_itt > 0) then
+      trace_occmap_itt = .false.
+      do occmap_trace_idx = 1, n_occmap_trace_itt
+        if (itt_tag == occmap_trace_itts(occmap_trace_idx)) then
+          trace_occmap_itt = .true.
+          exit
+        end if
+      end do
+    else
+      trace_occmap_itt = (itt_tag == 1 .or. itt_tag == 4 .or. itt_tag == 8)
+    end if
     call get_environment_variable('SALMON_DG_DENSITY_POINT_PROBE', env_point_probe, status=env_probe_status)
     if (env_probe_status == 0) then
       read(env_point_probe, *, iostat=env_status) probe_ixg, probe_iyg, probe_izg
@@ -476,6 +726,20 @@
         ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
       end do
     end if
+    allocate(ifrag_recv_post_raw_local(system%nspin, max(1, ifrag_count)))
+    allocate(ifrag_recv_post_raw_global(system%nspin, max(1, ifrag_count)))
+    ifrag_recv_post_raw_local(:, :) = 0.0d0
+    ifrag_recv_post_raw_global(:, :) = 0.0d0
+    allocate(cmp_ff_occ(max(1, nocc_cache), 2))
+    allocate(cmp_ff_occ_global(max(1, nocc_cache), 2))
+    allocate(cmp_ff_dom_gid(max(1, nocc_cache), 2))
+    allocate(cmp_ff_dom_gid_local(max(1, nocc_cache), 2))
+    allocate(cmp_ff_dom_gid_global(max(1, nocc_cache), 2))
+    cmp_ff_occ(:, :) = 0.0d0
+    cmp_ff_occ_global(:, :) = 0.0d0
+    cmp_ff_dom_gid(:, :) = 0
+    cmp_ff_dom_gid_local(:, :) = 0.0d0
+    cmp_ff_dom_gid_global(:, :) = 0.0d0
     nbf_max = max(1, maxval(dg_frag%n_basis(:, 1:system%nspin)))
 
     allocate(ix_buf(grid_block_size), iy_buf(grid_block_size), iz_buf(grid_block_size))
@@ -580,6 +844,44 @@
     rho_blk_reduced(:) = 0.0d0
     n_pw = max(0, dg_frag%n_plane_waves)
     n_frag = dg_frag%n_mat_max
+    allocate(cmp_ff_gid_pre(max(1, nocc_cache), max(1, n_frag), 2))
+    allocate(cmp_ff_gid_post(max(1, nocc_cache), max(1, n_frag), 2))
+    allocate(cmp_ff_gid_pre_global(max(1, nocc_cache), max(1, n_frag), 2))
+    allocate(cmp_ff_gid_post_global(max(1, nocc_cache), max(1, n_frag), 2))
+    allocate(cmp_tf_gid_pre(max(1, nocc_cache), n_focus_gid, 2))
+    allocate(cmp_tf_gid_full(max(1, nocc_cache), n_focus_gid, 2))
+    allocate(cmp_tf_gid_int(max(1, nocc_cache), n_focus_gid, 2))
+    allocate(cmp_tf_gid_pre_global(max(1, nocc_cache), n_focus_gid, 2))
+    allocate(cmp_tf_gid_full_global(max(1, nocc_cache), n_focus_gid, 2))
+    allocate(cmp_tf_gid_int_global(max(1, nocc_cache), n_focus_gid, 2))
+    allocate(cmp_tf_gid_mode_pre(max(1, nocc_cache), max(1, max_mixed_basis), n_focus_gid, 2))
+    allocate(cmp_tf_gid_mode_full(max(1, nocc_cache), max(1, max_mixed_basis), n_focus_gid, 2))
+    allocate(cmp_tf_gid_mode_pre_global(max(1, nocc_cache), max(1, max_mixed_basis), n_focus_gid, 2))
+    allocate(cmp_tf_gid_mode_full_global(max(1, nocc_cache), max(1, max_mixed_basis), n_focus_gid, 2))
+    allocate(cmp_tf_gid_mode_ovl(max(1, nocc_cache), max(1, max_mixed_basis), n_focus_gid, 2))
+    allocate(cmp_tf_gid_mode_ovl_global(max(1, nocc_cache), max(1, max_mixed_basis), n_focus_gid, 2))
+    if (itt_tag <= 1) then
+      cmp_tf_m2_ref_static(:, :) = 0
+      cmp_tf_track_m2(:, :, :) = 0
+      cmp_tf_track_itt(:) = 0
+      cmp_tf_track_nstep = 0
+    end if
+    cmp_ff_gid_pre(:, :, :) = 0.0d0
+    cmp_ff_gid_post(:, :, :) = 0.0d0
+    cmp_ff_gid_pre_global(:, :, :) = 0.0d0
+    cmp_ff_gid_post_global(:, :, :) = 0.0d0
+    cmp_tf_gid_pre(:, :, :) = 0.0d0
+    cmp_tf_gid_full(:, :, :) = 0.0d0
+    cmp_tf_gid_int(:, :, :) = 0.0d0
+    cmp_tf_gid_pre_global(:, :, :) = 0.0d0
+    cmp_tf_gid_full_global(:, :, :) = 0.0d0
+    cmp_tf_gid_int_global(:, :, :) = 0.0d0
+    cmp_tf_gid_mode_pre(:, :, :, :) = 0.0d0
+    cmp_tf_gid_mode_full(:, :, :, :) = 0.0d0
+    cmp_tf_gid_mode_pre_global(:, :, :, :) = 0.0d0
+    cmp_tf_gid_mode_full_global(:, :, :, :) = 0.0d0
+    cmp_tf_gid_mode_ovl(:, :, :, :) = (0.0d0, 0.0d0)
+    cmp_tf_gid_mode_ovl_global(:, :, :, :) = (0.0d0, 0.0d0)
     n_tot = n_frag + n_pw
     if (n_pw > 0) then
       allocate(phase_cache(grid_block_size, n_pw))
@@ -593,6 +895,11 @@
     ! For n_pw==0, stay on the pure fragment-basis path.
     use_mixed_density = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
       allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
+    if ((enable_density_reconstruct_trace .or. enable_rho_mix_trace) .and. dg_frag%id == 0) then
+      write(*,'(1x,a,a,a,i0)') '        density rho_mix mode: mode=', trim(adjustl(env_rho_mix_mode)), &
+        ' kind=', rho_mix_mode_kind
+      flush(6)
+    end if
     ! Density reconstruction uses subgroup-distributed projection and collective reductions on icomm_frag.
     subgroup_root_rank = dg_frag%id - dg_frag%id_frag
     total_send_pts = 0
@@ -634,6 +941,8 @@
     if (use_mixed_density) then
       allocate(density_mix(max_mixed_basis, max_mixed_basis, system%nspin))
       density_mix(:, :, :) = (0.0d0, 0.0d0)
+      allocate(coef_mix_spin(max_mixed_basis, max(1, nocc_cache), system%nspin))
+      coef_mix_spin(:, :, :) = (0.0d0, 0.0d0)
       allocate(basis_mix_blk(grid_block_size, max_mixed_basis))
       allocate(density_mix_tmp(grid_block_size, max_mixed_basis))
       allocate(basis_mix_blk_t(max_mixed_basis, grid_block_size))
@@ -650,6 +959,63 @@
         nocc_spin = dg_frag%nocc_spin(ispin)
         n_basis_mix = min(dg_frag%mixed_basis_dim(ispin), max_mixed_basis, size(dg_frag%coef_mix, 1))
         if (n_basis_mix <= 0 .or. nocc_spin <= 0) cycle
+        if (allocated(s_mix)) deallocate(s_mix)
+        if (allocated(mix_transform_spin)) deallocate(mix_transform_spin)
+        if (allocated(mix_overlap_spin)) deallocate(mix_overlap_spin)
+        if (allocated(s_mix_work)) deallocate(s_mix_work)
+        if (allocated(coef_mix_eff)) deallocate(coef_mix_eff)
+        if (allocated(coef_mix_metric)) deallocate(coef_mix_metric)
+        if (allocated(ipiv_mix)) deallocate(ipiv_mix)
+
+        if (rho_mix_mode_kind == 2 .or. enable_rho_mix_trace) then
+          allocate(mix_transform_spin(n_tot, n_basis_mix), mix_overlap_spin(n_tot, n_basis_mix), s_mix(n_basis_mix, n_basis_mix))
+          mix_transform_spin(:, :) = dg_frag%mixed_transform(1:n_tot, 1:n_basis_mix, ispin)
+          call apply_overlap_operator_batch(dg_frag, ispin, mix_transform_spin, mix_overlap_spin, .false.)
+          s_mix(:, :) = matmul(conjg(transpose(mix_transform_spin)), mix_overlap_spin)
+          if (enable_rho_mix_trace .and. dg_frag%id == 0) then
+            s_mix_dev_frob = 0.0d0
+            s_mix_offdiag_frob = 0.0d0
+            s_mix_diag_min = huge(1.0d0)
+            s_mix_diag_max = -huge(1.0d0)
+            do io = 1, n_basis_mix
+              s_mix_diag_min = min(s_mix_diag_min, real(s_mix(io, io), kind=8))
+              s_mix_diag_max = max(s_mix_diag_max, real(s_mix(io, io), kind=8))
+              s_mix_dev_frob = s_mix_dev_frob + abs(s_mix(io, io) - (1.0d0, 0.0d0))**2
+              do i_local = 1, n_basis_mix
+                if (i_local == io) cycle
+                s_mix_offdiag_frob = s_mix_offdiag_frob + abs(s_mix(i_local, io))**2
+              end do
+            end do
+            s_mix_dev_frob = sqrt(max(0.0d0, s_mix_dev_frob + s_mix_offdiag_frob))
+            s_mix_offdiag_frob = sqrt(max(0.0d0, s_mix_offdiag_frob))
+            write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') '        rho_mix metric: ispin=', ispin, &
+              ' dev_frob=', s_mix_dev_frob, ' offdiag_frob=', s_mix_offdiag_frob, ' diag_min=', s_mix_diag_min, ' diag_max=', s_mix_diag_max
+            flush(6)
+          end if
+        end if
+
+        if (rho_mix_mode_kind == 2 .and. allocated(s_mix)) then
+          allocate(coef_mix_metric(n_basis_mix, nocc_spin), coef_mix_eff(n_basis_mix, nocc_spin))
+          coef_mix_metric(:, :) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+          allocate(s_mix_work(n_basis_mix, n_basis_mix), ipiv_mix(n_basis_mix))
+          s_mix_work(:, :) = s_mix(:, :)
+          call zgesv(n_basis_mix, nocc_spin, s_mix_work, n_basis_mix, ipiv_mix, coef_mix_metric, n_basis_mix, info_lapack)
+          if (info_lapack /= 0) then
+            coef_mix_eff(:, :) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+            if (dg_frag%id == 0) then
+              write(*,'(1x,a,i0,a,i0)') ' [WARN] rho_mix metric_consistent fallback to legacy for ispin=', ispin, ' zgesv info=', info_lapack
+              flush(6)
+            end if
+          else
+            coef_mix_eff(:, :) = coef_mix_metric(:, :)
+          end if
+        else
+          allocate(coef_mix_eff(n_basis_mix, nocc_spin))
+          coef_mix_eff(:, :) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+        end if
+
+        coef_mix_spin(1:n_basis_mix, 1:nocc_spin, ispin) = coef_mix_eff(1:n_basis_mix, 1:nocc_spin)
+
         density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = (0.0d0, 0.0d0)
         do io = 1, nocc_spin
           occ_factor = 1.0d0
@@ -660,9 +1026,34 @@
           end if
           if (occ_factor <= 0.0d0) cycle
           density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) + &
-            occ_factor * matmul(dg_frag%coef_mix(1:n_basis_mix, io:io, ispin), &
-                                conjg(transpose(dg_frag%coef_mix(1:n_basis_mix, io:io, ispin))))
+            occ_factor * matmul(coef_mix_eff(1:n_basis_mix, io:io), conjg(transpose(coef_mix_eff(1:n_basis_mix, io:io))))
         end do
+
+        if (enable_rho_mix_trace .and. dg_frag%id == 0) then
+          coef_c2_probe(:) = 0.0d0
+          coef_metric_probe(:) = 0.0d0
+          do io = 1, min(3, nocc_spin)
+            coef_c2_probe(io) = real(sum(conjg(coef_mix_eff(:, io)) * coef_mix_eff(:, io)), kind=8)
+            if (allocated(s_mix)) then
+              coef_metric_probe(io) = real(sum(conjg(coef_mix_eff(:, io)) * matmul(s_mix, coef_mix_eff(:, io))), kind=8)
+            else
+              coef_metric_probe(io) = coef_c2_probe(io)
+            end if
+          end do
+          density_mix_trace_probe = 0.0d0
+          density_mix_diag_min = huge(1.0d0)
+          density_mix_diag_max = -huge(1.0d0)
+          do io = 1, n_basis_mix
+            density_mix_trace_probe = density_mix_trace_probe + real(density_mix(io, io, ispin), kind=8)
+            density_mix_diag_min = min(density_mix_diag_min, real(density_mix(io, io, ispin), kind=8))
+            density_mix_diag_max = max(density_mix_diag_max, real(density_mix(io, io, ispin), kind=8))
+          end do
+          write(*,'(1x,a,i0,a,3(1pe12.4,1x),a,3(1pe12.4,1x),a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+            '        rho_mix coef/diag: ispin=', ispin, ' c2=', coef_c2_probe(1), coef_c2_probe(2), coef_c2_probe(3), &
+            ' cSc=', coef_metric_probe(1), coef_metric_probe(2), coef_metric_probe(3), ' tr=', density_mix_trace_probe, &
+            ' diag_min=', density_mix_diag_min, ' diag_max=', density_mix_diag_max
+          flush(6)
+        end if
       end do
     end if
     boxL(1) = dg_frag%hgs(1) * real(mg%num(1), 8)
@@ -939,6 +1330,749 @@
             end do
             if (n_pw > 0) then
               transform_pw_spin(1:n_pw, 1:n_basis_mix, ispin) = dg_frag%mixed_transform(n_frag+1:n_tot, 1:n_basis_mix, ispin)
+              ! Phase-fixing test: rotate each mode m so max-abs PW component is real-positive
+              if (enable_fp_phase_fix) then
+                block
+                  integer :: im_pf, ipw_pf, ipw_max
+                  real(8) :: abs_max_pf
+                  complex(8) :: phase_fix
+                  do im_pf = 1, n_basis_mix
+                    ipw_max = 1
+                    abs_max_pf = abs(transform_pw_spin(1, im_pf, ispin))
+                    do ipw_pf = 2, n_pw
+                      if (abs(transform_pw_spin(ipw_pf, im_pf, ispin)) > abs_max_pf) then
+                        abs_max_pf = abs(transform_pw_spin(ipw_pf, im_pf, ispin))
+                        ipw_max = ipw_pf
+                      end if
+                    end do
+                    if (abs_max_pf > 1.0d-30) then
+                      phase_fix = conjg(transform_pw_spin(ipw_max, im_pf, ispin)) / abs_max_pf
+                      transform_pw_spin(1:n_pw, im_pf, ispin) = transform_pw_spin(1:n_pw, im_pf, ispin) * phase_fix
+                      transform_frag_spin(1:nbf, im_pf, ispin) = transform_frag_spin(1:nbf, im_pf, ispin) * phase_fix
+                    end if
+                  end do
+                end block
+              end if
+            end if
+
+            if (enable_tf_occmap_only .and. ispin == 1 .and. trace_occmap_itt .and. &
+                nocc_spin > 0 .and. n_basis_mix > 0 .and. ifrag <= 2) then
+              block
+                complex(8), allocatable :: ff_occ_amp_min(:)
+                integer :: iocc_min, io_ff_min, im_ff_min, gid_i_min
+                integer :: gid_focus_slot_min, i_focus_min
+                integer :: ff_audit_unit_min, ff_audit_ios_min
+                integer :: m_mode_min, n_mode_max_min, m_peak_if2_min, m_second_if2_min
+                integer :: m_ref_it1_min, ref_valid_it1_min, same_m_ref_it1_min
+                integer :: n_ref_gt_min, ref_in_top5_min, ref_rank_min
+                integer :: trans_ref_min, trans_cur_min
+                integer :: i_step_min, track_step_idx_min
+                integer, allocatable :: occmap_transition_counts_min(:,:,:)
+                real(8), allocatable :: occmap_transition_ratio_sum_min(:,:,:), occmap_transition_margin_sum_min(:,:,:)
+                real(8) :: occ_factor_min, if2_peak_val_min, if2_second_val_min
+                real(8) :: ref_if2_val_min, cur_ref_ratio_min, ref_abs_min, margin_abs_min, margin_rel_min
+                real(8) :: top12_ratio_min
+                complex(8) :: tf_mode_amp_min
+
+                cmp_slot = 0
+                if (ifrag == 1) cmp_slot = 1
+                if (ifrag == 2) cmp_slot = 2
+
+                if (cmp_slot > 0) then
+                  allocate(ff_occ_amp_min(nbf))
+                  do iocc_min = 1, nocc_spin
+                    occ_factor_min = 1.0d0
+                    if (allocated(system%rocc)) then
+                      if (iocc_min <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                        occ_factor_min = max(0.0d0, system%rocc(iocc_min, 1, ispin))
+                      end if
+                    end if
+                    if (occ_factor_min <= 0.0d0) cycle
+
+                    ff_occ_amp_min(1:nbf) = matmul(transform_frag_spin(1:nbf, 1:n_basis_mix, ispin), coef_mix_spin(1:n_basis_mix, iocc_min, ispin))
+                    do io_ff_min = 1, nbf
+                      gid_i_min = dg_frag%index_basis(io_ff_min, ifrag, ispin)
+                      if (gid_i_min < 1 .or. gid_i_min > n_frag) cycle
+                      gid_focus_slot_min = 0
+                      do i_focus_min = 1, n_focus_gid
+                        if (gid_i_min == focus_gid_ids(i_focus_min)) then
+                          gid_focus_slot_min = i_focus_min
+                          exit
+                        end if
+                      end do
+                      if (gid_focus_slot_min <= 0) cycle
+                      do im_ff_min = 1, n_basis_mix
+                        tf_mode_amp_min = transform_frag_spin(io_ff_min, im_ff_min, ispin) * coef_mix_spin(im_ff_min, iocc_min, ispin)
+                        cmp_tf_gid_mode_full(iocc_min, im_ff_min, gid_focus_slot_min, cmp_slot) = cmp_tf_gid_mode_full(iocc_min, im_ff_min, gid_focus_slot_min, cmp_slot) + &
+                          occ_factor_min * real(conjg(ff_occ_amp_min(io_ff_min)) * tf_mode_amp_min, kind=8)
+                      end do
+                    end do
+                  end do
+                  deallocate(ff_occ_amp_min)
+                end if
+
+                call comm_summation(cmp_tf_gid_mode_full, cmp_tf_gid_mode_full_global, size(cmp_tf_gid_mode_full), dg_frag%icomm)
+                if (dg_frag%is_frag_root .and. cmp_slot == 2) then
+                  ff_audit_unit_min = -1
+                  open(newunit=ff_audit_unit_min, file='ff_tf_mode_interference.log', status='unknown', position='append', &
+                    action='write', iostat=ff_audit_ios_min)
+                  if (ff_audit_ios_min == 0) then
+                    write(ff_audit_unit_min,*) 'ff-tf-header-lite: itt=', itt_tag, ' gidA=', focus_gid_ids(1), ' gidB=', focus_gid_ids(2)
+                    n_mode_max_min = size(cmp_tf_gid_mode_full_global, 2)
+                    allocate(occmap_transition_counts_min(n_mode_max_min, n_mode_max_min, n_focus_gid))
+                    allocate(occmap_transition_ratio_sum_min(n_mode_max_min, n_mode_max_min, n_focus_gid))
+                    allocate(occmap_transition_margin_sum_min(n_mode_max_min, n_mode_max_min, n_focus_gid))
+                    occmap_transition_counts_min(:, :, :) = 0
+                    occmap_transition_ratio_sum_min(:, :, :) = 0.0d0
+                    occmap_transition_margin_sum_min(:, :, :) = 0.0d0
+                    track_step_idx_min = 0
+                    if (n_occmap_trace_itt > 0) then
+                      do i_step_min = 1, min(n_occmap_trace_itt, max_occmap_track_step)
+                        if (occmap_trace_itts(i_step_min) == itt_tag) then
+                          track_step_idx_min = i_step_min
+                          exit
+                        end if
+                      end do
+                    else
+                      if (itt_tag >= 1 .and. itt_tag <= max_occmap_track_step) track_step_idx_min = itt_tag
+                    end if
+                    if (track_step_idx_min > 0) then
+                      cmp_tf_track_nstep = max(cmp_tf_track_nstep, track_step_idx_min)
+                      cmp_tf_track_itt(track_step_idx_min) = itt_tag
+                    end if
+                    do iocc_min = 1, min(nocc_spin, size(cmp_tf_gid_mode_full_global, 1))
+                      do i_focus_min = 1, n_focus_gid
+                        m_peak_if2_min = 0
+                        m_second_if2_min = 0
+                        if2_peak_val_min = 0.0d0
+                        if2_second_val_min = 0.0d0
+                        do m_mode_min = 1, n_mode_max_min
+                          if (abs(cmp_tf_gid_mode_full_global(iocc_min, m_mode_min, i_focus_min, 2)) > abs(if2_peak_val_min)) then
+                            if2_second_val_min = if2_peak_val_min
+                            m_second_if2_min = m_peak_if2_min
+                            if2_peak_val_min = cmp_tf_gid_mode_full_global(iocc_min, m_mode_min, i_focus_min, 2)
+                            m_peak_if2_min = m_mode_min
+                          else if (abs(cmp_tf_gid_mode_full_global(iocc_min, m_mode_min, i_focus_min, 2)) > abs(if2_second_val_min)) then
+                            if2_second_val_min = cmp_tf_gid_mode_full_global(iocc_min, m_mode_min, i_focus_min, 2)
+                            m_second_if2_min = m_mode_min
+                          end if
+                        end do
+                        if (iocc_min <= max_occmap_ref_occ) then
+                          if (itt_tag == 1 .and. m_peak_if2_min > 0) &
+                            cmp_tf_m2_ref_static(iocc_min, i_focus_min) = m_peak_if2_min
+                          m_ref_it1_min = cmp_tf_m2_ref_static(iocc_min, i_focus_min)
+                        else
+                          m_ref_it1_min = 0
+                        end if
+                        ref_valid_it1_min = 0
+                        if (m_ref_it1_min > 0) ref_valid_it1_min = 1
+                        same_m_ref_it1_min = 0
+                        if (m_ref_it1_min > 0 .and. m_ref_it1_min == m_peak_if2_min) same_m_ref_it1_min = 1
+                        ref_if2_val_min = 0.0d0
+                        if (m_ref_it1_min > 0 .and. m_ref_it1_min <= n_mode_max_min) then
+                          ref_if2_val_min = cmp_tf_gid_mode_full_global(iocc_min, m_ref_it1_min, i_focus_min, 2)
+                        end if
+                        cur_ref_ratio_min = 0.0d0
+                        if (abs(ref_if2_val_min) > 1.0d-30) cur_ref_ratio_min = if2_peak_val_min / ref_if2_val_min
+                        margin_abs_min = if2_peak_val_min - ref_if2_val_min
+                        margin_rel_min = margin_abs_min / max(abs(if2_peak_val_min), 1.0d-30)
+                        ref_in_top5_min = 0
+                        ref_rank_min = 0
+                        if (m_ref_it1_min > 0 .and. m_ref_it1_min <= n_mode_max_min) then
+                          ref_abs_min = abs(cmp_tf_gid_mode_full_global(iocc_min, m_ref_it1_min, i_focus_min, 2))
+                          n_ref_gt_min = 0
+                          do m_mode_min = 1, n_mode_max_min
+                            if (abs(cmp_tf_gid_mode_full_global(iocc_min, m_mode_min, i_focus_min, 2)) > ref_abs_min) n_ref_gt_min = n_ref_gt_min + 1
+                          end do
+                          if (n_ref_gt_min < 5) then
+                            ref_in_top5_min = 1
+                            ref_rank_min = n_ref_gt_min + 1
+                          end if
+                        end if
+                        top12_ratio_min = 0.0d0
+                        if (abs(if2_second_val_min) > 1.0d-30) then
+                          top12_ratio_min = if2_peak_val_min / if2_second_val_min
+                        end if
+                        if (ref_valid_it1_min == 1 .and. m_peak_if2_min > 0 .and. m_peak_if2_min <= n_mode_max_min) then
+                          occmap_transition_counts_min(m_ref_it1_min, m_peak_if2_min, i_focus_min) = &
+                            occmap_transition_counts_min(m_ref_it1_min, m_peak_if2_min, i_focus_min) + 1
+                          occmap_transition_ratio_sum_min(m_ref_it1_min, m_peak_if2_min, i_focus_min) = &
+                            occmap_transition_ratio_sum_min(m_ref_it1_min, m_peak_if2_min, i_focus_min) + cur_ref_ratio_min
+                          occmap_transition_margin_sum_min(m_ref_it1_min, m_peak_if2_min, i_focus_min) = &
+                            occmap_transition_margin_sum_min(m_ref_it1_min, m_peak_if2_min, i_focus_min) + margin_rel_min
+                        end if
+                        if (track_step_idx_min > 0 .and. iocc_min <= max_occmap_ref_occ) then
+                          cmp_tf_track_m2(iocc_min, i_focus_min, track_step_idx_min) = m_peak_if2_min
+                        end if
+                        write(ff_audit_unit_min,*) 'ff-tf-occmap-lite: itt=', itt_tag, ' occ_id=', iocc_min, ' gid=', focus_gid_ids(i_focus_min), &
+                          ' m2_peak=', m_peak_if2_min, ' if2_full_m2=', if2_peak_val_min, &
+                          ' if1_full_at_m2=', merge(cmp_tf_gid_mode_full_global(iocc_min, m_peak_if2_min, i_focus_min, 1), 0.0d0, m_peak_if2_min > 0), &
+                          ' ref1_m2=', m_ref_it1_min, ' ref_valid=', ref_valid_it1_min, ' same_ref1=', same_m_ref_it1_min, &
+                          ' m2_second=', m_second_if2_min, ' if2_full_m2_second=', if2_second_val_min, ' top12_ratio=', top12_ratio_min
+                        if (ref_valid_it1_min == 1 .and. same_m_ref_it1_min == 0) then
+                          write(ff_audit_unit_min,*) 'ff-tf-occmap-lite-mismatch: itt=', itt_tag, ' occ_id=', iocc_min, ' gid=', focus_gid_ids(i_focus_min), &
+                            ' ref1_m2=', m_ref_it1_min, ' m2_peak=', m_peak_if2_min, &
+                            ' ref_rank=', ref_rank_min, ' cur_val=', if2_peak_val_min, ' ref_val=', ref_if2_val_min, &
+                            ' cur_ref_ratio=', cur_ref_ratio_min, ' margin_abs=', margin_abs_min, ' margin_rel=', margin_rel_min, &
+                            ' ref_in_top5=', ref_in_top5_min
+                        end if
+                      end do
+                    end do
+                    do i_focus_min = 1, n_focus_gid
+                      do trans_ref_min = 1, n_mode_max_min
+                        do trans_cur_min = 1, n_mode_max_min
+                          if (occmap_transition_counts_min(trans_ref_min, trans_cur_min, i_focus_min) > 0) then
+                            write(ff_audit_unit_min,*) 'ff-tf-occmap-transition: itt=', itt_tag, ' gid=', focus_gid_ids(i_focus_min), &
+                              ' ref_m2=', trans_ref_min, ' cur_m2=', trans_cur_min, &
+                              ' count=', occmap_transition_counts_min(trans_ref_min, trans_cur_min, i_focus_min), &
+                              ' avg_cur_ref_ratio=', occmap_transition_ratio_sum_min(trans_ref_min, trans_cur_min, i_focus_min) / &
+                                dble(max(1, occmap_transition_counts_min(trans_ref_min, trans_cur_min, i_focus_min))), &
+                              ' avg_margin_rel=', occmap_transition_margin_sum_min(trans_ref_min, trans_cur_min, i_focus_min) / &
+                                dble(max(1, occmap_transition_counts_min(trans_ref_min, trans_cur_min, i_focus_min)))
+                          end if
+                        end do
+                      end do
+                    end do
+                    if (track_step_idx_min > 0) then
+                      if ((n_occmap_trace_itt > 0 .and. track_step_idx_min == min(n_occmap_trace_itt, max_occmap_track_step)) .or. &
+                          (n_occmap_trace_itt == 0 .and. itt_tag == 8)) then
+                        do i_focus_min = 1, n_focus_gid
+                          do iocc_min = 1, min(nocc_spin, max_occmap_ref_occ)
+                            m_ref_it1_min = cmp_tf_m2_ref_static(iocc_min, i_focus_min)
+                            if (m_ref_it1_min <= 0) cycle
+                            write(ff_audit_unit_min,'(a,i0,a,i0,a,i0,a)',advance='no') 'ff-tf-occmap-track: gid=', focus_gid_ids(i_focus_min), &
+                              ' occ_id=', iocc_min, ' ref_m2=', m_ref_it1_min, ' seq='
+                            do i_step_min = 1, cmp_tf_track_nstep
+                              if (cmp_tf_track_itt(i_step_min) <= 0) cycle
+                              if (i_step_min > 1) write(ff_audit_unit_min,'(a)',advance='no') ','
+                              write(ff_audit_unit_min,'(i0)',advance='no') cmp_tf_track_m2(iocc_min, i_focus_min, i_step_min)
+                            end do
+                            write(ff_audit_unit_min,*)
+                          end do
+                        end do
+                      end if
+                    end if
+                    deallocate(occmap_transition_counts_min)
+                    deallocate(occmap_transition_ratio_sum_min)
+                    deallocate(occmap_transition_margin_sum_min)
+                    flush(ff_audit_unit_min)
+                    close(ff_audit_unit_min)
+                  end if
+                end if
+              end block
+            end if
+
+            if ((enable_rho_mix_raw_trace .or. enable_fp_decomp_audit) .and. dg_frag%is_frag_root .and. trace_occmap_itt) then
+              tr_ff_probe = 0.0d0
+              tr_fp_probe = 0.0d0
+              tr_pp_probe = 0.0d0
+              fp_frob_probe = 0.0d0
+              fp_maxabs_probe = 0.0d0
+              trs_ff_probe = 0.0d0
+              trs_fp_probe = 0.0d0
+              trs_pp_probe = 0.0d0
+              trs_total_probe = 0.0d0
+              fp_weight_frac_probe = 0.0d0
+              tr_fp_complex = (0.0d0, 0.0d0)
+              if (allocated(d_raw_ff)) deallocate(d_raw_ff)
+              allocate(d_raw_ff(nbf, nbf))
+              d_raw_ff(:, :) = matmul(transform_frag_spin(1:nbf, 1:n_basis_mix, ispin), &
+                matmul(density_mix(1:n_basis_mix, 1:n_basis_mix, ispin), &
+                  conjg(transpose(transform_frag_spin(1:nbf, 1:n_basis_mix, ispin)))))
+              do io = 1, nbf
+                tr_ff_probe = tr_ff_probe + real(d_raw_ff(io, io), kind=8)
+              end do
+              if (n_pw > 0) then
+                if (allocated(d_raw_fp)) deallocate(d_raw_fp)
+                if (allocated(d_raw_pp)) deallocate(d_raw_pp)
+                allocate(d_raw_fp(nbf, n_pw), d_raw_pp(n_pw, n_pw))
+                d_raw_fp(:, :) = matmul(transform_frag_spin(1:nbf, 1:n_basis_mix, ispin), &
+                  matmul(density_mix(1:n_basis_mix, 1:n_basis_mix, ispin), &
+                    conjg(transpose(transform_pw_spin(1:n_pw, 1:n_basis_mix, ispin)))))
+                d_raw_pp(:, :) = matmul(transform_pw_spin(1:n_pw, 1:n_basis_mix, ispin), &
+                  matmul(density_mix(1:n_basis_mix, 1:n_basis_mix, ispin), &
+                    conjg(transpose(transform_pw_spin(1:n_pw, 1:n_basis_mix, ispin)))))
+                do io = 1, n_pw
+                  tr_pp_probe = tr_pp_probe + real(d_raw_pp(io, io), kind=8)
+                end do
+                do io = 1, min(nbf, n_pw)
+                  tr_fp_probe = tr_fp_probe + real(d_raw_fp(io, io), kind=8)
+                end do
+                fp_frob_probe = sqrt(max(0.0d0, sum(abs(d_raw_fp(:, :))**2)))
+                fp_maxabs_probe = maxval(abs(d_raw_fp(:, :)))
+              end if
+
+              trs_ff_probe = 0.0d0
+              do io = 1, nbf
+                ig_i = dg_frag%index_basis(io, ifrag, ispin)
+                if (ig_i < 1 .or. ig_i > n_frag) cycle
+                do i_local = 1, nbf
+                  istate_frag = dg_frag%index_basis(i_local, ifrag, ispin)
+                  if (istate_frag < 1 .or. istate_frag > n_frag) cycle
+                  if (allocated(dg_frag%S_mat_c)) then
+                    tr_fp_complex = dg_frag%S_mat_c(ig_i, istate_frag, ispin)
+                  else if (allocated(dg_frag%S_mat)) then
+                    tr_fp_complex = cmplx(dg_frag%S_mat(ig_i, istate_frag, ispin), 0.0d0, kind=8)
+                  else
+                    tr_fp_complex = (0.0d0, 0.0d0)
+                    if (ig_i == istate_frag) tr_fp_complex = (1.0d0, 0.0d0)
+                  end if
+                  trs_ff_probe = trs_ff_probe + real(tr_fp_complex * d_raw_ff(i_local, io), kind=8)
+                end do
+              end do
+              if (n_pw > 0) then
+                tr_fp_complex = (0.0d0, 0.0d0)
+                top_fp_contrib_val(:) = 0.0d0
+                top_fp_io(:) = 0
+                top_fp_ipw(:) = 0
+                top_fp_gid(:) = 0
+                do io = 1, nbf
+                  ig_i = dg_frag%index_basis(io, ifrag, ispin)
+                  if (ig_i < 1 .or. ig_i > n_frag) cycle
+                  do i_local = 1, n_pw
+                    tr_fp_complex = tr_fp_complex + dg_frag%S_mat_frag_pw(ig_i, i_local, ispin) * conjg(d_raw_fp(io, i_local))
+                    if ((enable_ifrag_compare_trace .or. enable_fp_decomp_audit) .and. ispin == 1) then
+                      fp_pair_contrib = real(dg_frag%S_mat_frag_pw(ig_i, i_local, ispin) * conjg(d_raw_fp(io, i_local)), kind=8)
+                      k_min = 1
+                      do k_top = 2, n_top_fp_pairs
+                        if (abs(top_fp_contrib_val(k_top)) < abs(top_fp_contrib_val(k_min))) k_min = k_top
+                      end do
+                      if (abs(fp_pair_contrib) > abs(top_fp_contrib_val(k_min))) then
+                        top_fp_contrib_val(k_min) = fp_pair_contrib
+                        top_fp_io(k_min) = io
+                        top_fp_ipw(k_min) = i_local
+                        top_fp_gid(k_min) = ig_i
+                      end if
+                    end if
+                  end do
+                end do
+                trs_fp_probe = 2.0d0 * real(tr_fp_complex, kind=8)
+                trs_pp_probe = tr_pp_probe
+              end if
+              trs_total_probe = trs_ff_probe + trs_fp_probe + trs_pp_probe
+              if (abs(trs_total_probe) > 1.0d-20) fp_weight_frac_probe = trs_fp_probe / trs_total_probe
+
+              write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                '        rho_mix raw map: ifrag=', ifrag, ' ispin=', ispin, ' tr_ff=', tr_ff_probe, ' tr_fp_diag=', tr_fp_probe, &
+                ' tr_pp=', tr_pp_probe, ' fp_frob=', fp_frob_probe, ' fp_max=', fp_maxabs_probe
+              write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                '        rho_mix fp-weighted: ifrag=', ifrag, ' ispin=', ispin, ' trs_ff=', trs_ff_probe, ' trs_fp=', trs_fp_probe, &
+                ' trs_pp=', trs_pp_probe, ' trs_tot=', trs_total_probe, ' fp_frac=', fp_weight_frac_probe
+              if (enable_tf_occmap_only .and. ispin == 1 .and. (itt_tag == 1 .or. itt_tag == 4 .or. itt_tag == 8) .and. &
+                  nocc_spin > 0 .and. n_basis_mix > 0 .and. ifrag <= 2) then
+                block
+                  complex(8), allocatable :: ff_occ_amp(:)
+                  integer :: iocc, io_ff, im_ff, gid_i
+                  integer :: gid_focus_slot, i_focus
+                  integer :: ff_audit_unit, ff_audit_ios
+                  integer :: m_mode, n_mode_max, m_peak_if2
+                  integer :: m_ref_it1, ref_valid_it1, same_m_ref_it1
+                  real(8) :: occ_factor, if2_peak_val
+                  complex(8) :: tf_mode_amp
+
+                  cmp_slot = 0
+                  if (ifrag == 1) cmp_slot = 1
+                  if (ifrag == 2) cmp_slot = 2
+                  if (cmp_slot > 0) then
+                    allocate(ff_occ_amp(nbf))
+                    do iocc = 1, nocc_spin
+                      occ_factor = 1.0d0
+                      if (allocated(system%rocc)) then
+                        if (iocc <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                          occ_factor = max(0.0d0, system%rocc(iocc, 1, ispin))
+                        end if
+                      end if
+                      if (occ_factor <= 0.0d0) cycle
+
+                      ff_occ_amp(1:nbf) = matmul(transform_frag_spin(1:nbf, 1:n_basis_mix, ispin), coef_mix_spin(1:n_basis_mix, iocc, ispin))
+                      do io_ff = 1, nbf
+                        gid_i = dg_frag%index_basis(io_ff, ifrag, ispin)
+                        if (gid_i < 1 .or. gid_i > n_frag) cycle
+                        gid_focus_slot = 0
+                        do i_focus = 1, n_focus_gid
+                          if (gid_i == focus_gid_ids(i_focus)) then
+                            gid_focus_slot = i_focus
+                            exit
+                          end if
+                        end do
+                        if (gid_focus_slot <= 0) cycle
+                        do im_ff = 1, n_basis_mix
+                          tf_mode_amp = transform_frag_spin(io_ff, im_ff, ispin) * coef_mix_spin(im_ff, iocc, ispin)
+                          cmp_tf_gid_mode_full(iocc, im_ff, gid_focus_slot, cmp_slot) = cmp_tf_gid_mode_full(iocc, im_ff, gid_focus_slot, cmp_slot) + &
+                            occ_factor * real(conjg(ff_occ_amp(io_ff)) * tf_mode_amp, kind=8)
+                        end do
+                      end do
+                    end do
+                    deallocate(ff_occ_amp)
+                  end if
+
+                  call comm_summation(cmp_tf_gid_mode_full, cmp_tf_gid_mode_full_global, size(cmp_tf_gid_mode_full), dg_frag%icomm)
+                  if (dg_frag%is_frag_root .and. cmp_slot == 2) then
+                    ff_audit_unit = -1
+                    open(newunit=ff_audit_unit, file='ff_tf_mode_interference.log', status='unknown', position='append', &
+                      action='write', iostat=ff_audit_ios)
+                    if (ff_audit_ios == 0) then
+                      write(ff_audit_unit,*) 'ff-tf-header-lite: itt=', itt_tag, ' gidA=', focus_gid_ids(1), ' gidB=', focus_gid_ids(2)
+                      n_mode_max = size(cmp_tf_gid_mode_full_global, 2)
+                      do iocc = 1, min(nocc_spin, size(cmp_tf_gid_mode_full_global, 1))
+                        do i_focus = 1, n_focus_gid
+                          m_peak_if2 = 0
+                          if2_peak_val = 0.0d0
+                          do m_mode = 1, n_mode_max
+                            if (abs(cmp_tf_gid_mode_full_global(iocc, m_mode, i_focus, 2)) > abs(if2_peak_val)) then
+                              if2_peak_val = cmp_tf_gid_mode_full_global(iocc, m_mode, i_focus, 2)
+                              m_peak_if2 = m_mode
+                            end if
+                          end do
+                          if (iocc <= max_occmap_ref_occ) then
+                            if (itt_tag == 1 .and. m_peak_if2 > 0) cmp_tf_m2_ref_static(iocc, i_focus) = m_peak_if2
+                            m_ref_it1 = cmp_tf_m2_ref_static(iocc, i_focus)
+                          else
+                            m_ref_it1 = 0
+                          end if
+                          ref_valid_it1 = 0
+                          if (m_ref_it1 > 0) ref_valid_it1 = 1
+                          same_m_ref_it1 = 0
+                          if (m_ref_it1 > 0 .and. m_ref_it1 == m_peak_if2) same_m_ref_it1 = 1
+                          write(ff_audit_unit,*) 'ff-tf-occmap-lite: itt=', itt_tag, ' occ_id=', iocc, ' gid=', focus_gid_ids(i_focus), &
+                            ' m2_peak=', m_peak_if2, ' if2_full_m2=', if2_peak_val, &
+                            ' if1_full_at_m2=', merge(cmp_tf_gid_mode_full_global(iocc, m_peak_if2, i_focus, 1), 0.0d0, m_peak_if2 > 0), &
+                            ' ref1_m2=', m_ref_it1, ' ref_valid=', ref_valid_it1, ' same_ref1=', same_m_ref_it1
+                        end do
+                      end do
+                      flush(ff_audit_unit)
+                      close(ff_audit_unit)
+                    end if
+                  end if
+                end block
+              end if
+
+              if (enable_fp_decomp_audit .and. ispin == 1 .and. itt_tag <= 10 .and. nocc_spin > 0 .and. n_basis_mix > 0) then
+                block
+                  complex(8), allocatable :: ff_occ_amp(:), ff_occ_work(:)
+                  real(8), allocatable :: ff_gid_part(:)
+                  real(8), allocatable :: ff_gid_pre_by_gid(:), ff_gid_post_by_gid(:)
+                  integer :: iocc, io_ff, il_ff, gid_i, gid_j, gid_dom, im_ff
+                  integer :: gid_k, ff_audit_unit, ff_audit_ios
+                  integer :: gid_focus_slot, i_focus
+                  integer :: top_mode_if1_pre(n_top_tf_mode), top_mode_if2_pre(n_top_tf_mode)
+                  integer :: top_mode_if1_full(n_top_tf_mode), top_mode_if2_full(n_top_tf_mode)
+                  integer :: k_min_mode_if1_pre, k_min_mode_if2_pre
+                  integer :: k_min_mode_if1_full, k_min_mode_if2_full
+                  integer :: m_mode, n_mode_max
+                  complex(8) :: tf_mode_amp
+                  real(8) :: tf_full_io
+                  real(8) :: top_mode_val_if1_pre(n_top_tf_mode), top_mode_val_if2_pre(n_top_tf_mode)
+                  real(8) :: top_mode_val_if1_full(n_top_tf_mode), top_mode_val_if2_full(n_top_tf_mode)
+                  real(8) :: top_mode_abs_if1(n_top_tf_mode), top_mode_abs_if2(n_top_tf_mode)
+                  real(8) :: top_mode_phase_if1(n_top_tf_mode), top_mode_phase_if2(n_top_tf_mode)
+                  real(8) :: phase_diff, overlap_count
+                  real(8) :: cross_ph1, cross_ph2, cross_dph
+                  real(8) :: occ_weight_m2
+                  real(8) :: if2_peak_val
+                  real(8) :: tf_gid_m2_if1, tf_gid_m2_if2
+                  real(8) :: diag_est_m2_if1, diag_est_m2_if2
+                  integer :: top_mode_if1(n_top_tf_mode), top_mode_if2(n_top_tf_mode)
+                  integer :: same_mode_flag, overlap_i, overlap_j
+                  integer :: m_peak_if2
+                  integer :: m_ref_it1, ref_valid_it1, same_m_ref_it1
+                  complex(8) :: mode_ovl_if1, mode_ovl_if2
+                  complex(8) :: mode_ovl_if1_at_if2, mode_ovl_if2_ref
+                  integer :: top_gid_if1(n_top_ff_gid), top_gid_if2(n_top_ff_gid)
+                  integer :: top_gid_if1_post(n_top_ff_gid), top_gid_if2_post(n_top_ff_gid)
+                  integer :: k_min_if1, k_min_if2, k_min_if1_post, k_min_if2_post
+                  real(8) :: top_val_if1(n_top_ff_gid), top_val_if2(n_top_ff_gid)
+                  real(8) :: top_val_if1_post(n_top_ff_gid), top_val_if2_post(n_top_ff_gid)
+                  real(8) :: pre_part, post_part
+                  real(8) :: ff_occ_trace, gid_dom_part, pre_io_part
+                  allocate(ff_occ_amp(nbf), ff_occ_work(nbf), ff_gid_part(nbf))
+                  allocate(ff_gid_pre_by_gid(max(1, n_frag)), ff_gid_post_by_gid(max(1, n_frag)))
+                  ff_occ_amp(:) = (0.0d0, 0.0d0)
+                  ff_occ_work(:) = (0.0d0, 0.0d0)
+                  ff_gid_part(:) = 0.0d0
+                  ff_gid_pre_by_gid(:) = 0.0d0
+                  ff_gid_post_by_gid(:) = 0.0d0
+                  cmp_slot = 0
+                  if (ifrag == 1) cmp_slot = 1
+                  if (ifrag == 2) cmp_slot = 2
+                  do iocc = 1, nocc_spin
+                    occ_factor = 1.0d0
+                    if (allocated(system%rocc)) then
+                      if (iocc <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                        occ_factor = max(0.0d0, system%rocc(iocc, 1, ispin))
+                      end if
+                    end if
+                    if (occ_factor <= 0.0d0) cycle
+                    ff_occ_amp(1:nbf) = matmul(transform_frag_spin(1:nbf, 1:n_basis_mix, ispin), coef_mix_spin(1:n_basis_mix, iocc, ispin))
+                    ff_occ_work(1:nbf) = (0.0d0, 0.0d0)
+                    ff_gid_part(1:nbf) = 0.0d0
+                    ff_gid_pre_by_gid(:) = 0.0d0
+                    ff_gid_post_by_gid(:) = 0.0d0
+                    do io_ff = 1, nbf
+                      gid_i = dg_frag%index_basis(io_ff, ifrag, ispin)
+                      if (gid_i < 1 .or. gid_i > n_frag) cycle
+                      gid_focus_slot = 0
+                      do i_focus = 1, n_focus_gid
+                        if (gid_i == focus_gid_ids(i_focus)) then
+                          gid_focus_slot = i_focus
+                          exit
+                        end if
+                      end do
+                      ! pre-transform_frag proxy on gid: diagonal-only propagation from mixed coefficients.
+                      pre_io_part = 0.0d0
+                      do im_ff = 1, n_basis_mix
+                        pre_io_part = pre_io_part + abs(transform_frag_spin(io_ff, im_ff, ispin))**2 * &
+                          abs(coef_mix_spin(im_ff, iocc, ispin))**2
+                      end do
+                      pre_part = occ_factor * pre_io_part
+                      ff_gid_pre_by_gid(gid_i) = ff_gid_pre_by_gid(gid_i) + pre_part
+                      if (cmp_slot > 0 .and. gid_focus_slot > 0 .and. (itt_tag == 1 .or. itt_tag == 4 .or. itt_tag == 8)) then
+                        cmp_tf_gid_pre(iocc, gid_focus_slot, cmp_slot) = cmp_tf_gid_pre(iocc, gid_focus_slot, cmp_slot) + pre_part
+                        tf_full_io = occ_factor * abs(ff_occ_amp(io_ff))**2
+                        cmp_tf_gid_full(iocc, gid_focus_slot, cmp_slot) = cmp_tf_gid_full(iocc, gid_focus_slot, cmp_slot) + tf_full_io
+                        cmp_tf_gid_int(iocc, gid_focus_slot, cmp_slot) = cmp_tf_gid_int(iocc, gid_focus_slot, cmp_slot) + (tf_full_io - pre_part)
+                        do im_ff = 1, n_basis_mix
+                          tf_mode_amp = transform_frag_spin(io_ff, im_ff, ispin) * coef_mix_spin(im_ff, iocc, ispin)
+                          cmp_tf_gid_mode_pre(iocc, im_ff, gid_focus_slot, cmp_slot) = cmp_tf_gid_mode_pre(iocc, im_ff, gid_focus_slot, cmp_slot) + &
+                            occ_factor * abs(transform_frag_spin(io_ff, im_ff, ispin))**2 * abs(coef_mix_spin(im_ff, iocc, ispin))**2
+                          cmp_tf_gid_mode_full(iocc, im_ff, gid_focus_slot, cmp_slot) = cmp_tf_gid_mode_full(iocc, im_ff, gid_focus_slot, cmp_slot) + &
+                            occ_factor * real(conjg(ff_occ_amp(io_ff)) * tf_mode_amp, kind=8)
+                          cmp_tf_gid_mode_ovl(iocc, im_ff, gid_focus_slot, cmp_slot) = cmp_tf_gid_mode_ovl(iocc, im_ff, gid_focus_slot, cmp_slot) + &
+                            occ_factor * conjg(ff_occ_amp(io_ff)) * tf_mode_amp
+                        end do
+                      end if
+                      do il_ff = 1, nbf
+                        gid_j = dg_frag%index_basis(il_ff, ifrag, ispin)
+                        if (gid_j < 1 .or. gid_j > n_frag) cycle
+                        if (allocated(dg_frag%S_mat_c)) then
+                          tr_fp_complex = dg_frag%S_mat_c(gid_i, gid_j, ispin)
+                        else if (allocated(dg_frag%S_mat)) then
+                          tr_fp_complex = cmplx(dg_frag%S_mat(gid_i, gid_j, ispin), 0.0d0, kind=8)
+                        else
+                          tr_fp_complex = (0.0d0, 0.0d0)
+                          if (gid_i == gid_j) tr_fp_complex = (1.0d0, 0.0d0)
+                        end if
+                        ff_occ_work(io_ff) = ff_occ_work(io_ff) + tr_fp_complex * ff_occ_amp(il_ff)
+                      end do
+                    end do
+                    ff_occ_trace = 0.0d0
+                    gid_dom = 0
+                    gid_dom_part = 0.0d0
+                    do io_ff = 1, nbf
+                      gid_i = dg_frag%index_basis(io_ff, ifrag, ispin)
+                      if (gid_i < 1 .or. gid_i > n_frag) cycle
+                      ff_gid_part(io_ff) = occ_factor * real(conjg(ff_occ_amp(io_ff)) * ff_occ_work(io_ff), kind=8)
+                      ff_gid_post_by_gid(gid_i) = ff_gid_post_by_gid(gid_i) + ff_gid_part(io_ff)
+                      ff_occ_trace = ff_occ_trace + ff_gid_part(io_ff)
+                      if (abs(ff_gid_part(io_ff)) > abs(gid_dom_part)) then
+                        gid_dom_part = ff_gid_part(io_ff)
+                        gid_dom = gid_i
+                      end if
+                    end do
+                    if (cmp_slot > 0 .and. iocc <= size(cmp_ff_occ, 1)) then
+                      cmp_ff_occ(iocc, cmp_slot) = ff_occ_trace
+                      cmp_ff_dom_gid(iocc, cmp_slot) = gid_dom
+                      cmp_ff_dom_gid_local(iocc, cmp_slot) = real(gid_dom, kind=8)
+                      if (itt_tag == 1 .or. itt_tag == 4 .or. itt_tag == 8) then
+                        cmp_ff_gid_pre(iocc, 1:n_frag, cmp_slot) = ff_gid_pre_by_gid(1:n_frag)
+                        cmp_ff_gid_post(iocc, 1:n_frag, cmp_slot) = ff_gid_post_by_gid(1:n_frag)
+                      end if
+                    end if
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,i0,a,1pe12.4)') &
+                      '        ff-decomp occ: itt=', itt_tag, ' ifrag=', ifrag, ' occ_id=', iocc, ' trs_ff_occ=', ff_occ_trace, &
+                      ' dom_gid=', gid_dom, ' dom_part=', gid_dom_part
+                  end do
+                  if (cmp_slot > 0) ifrag_ff_occ_seen(cmp_slot) = .true.
+                  if (itt_tag >= 8 .and. ifrag <= 2) then
+                    call comm_summation(cmp_ff_occ, cmp_ff_occ_global, size(cmp_ff_occ), dg_frag%icomm)
+                    call comm_summation(cmp_ff_dom_gid_local, cmp_ff_dom_gid_global, size(cmp_ff_dom_gid_local), dg_frag%icomm)
+                    if (dg_frag%is_frag_root .and. cmp_slot == 2) then
+                      do iocc = 1, min(nocc_cache, size(cmp_ff_occ_global, 1))
+                        write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,i0,a,i0)') &
+                          '        ff-decomp occ-diff: itt=', itt_tag, ' occ_id=', iocc, ' if1=', cmp_ff_occ_global(iocc, 1), &
+                          ' if2=', cmp_ff_occ_global(iocc, 2), ' d=', cmp_ff_occ_global(iocc, 1) - cmp_ff_occ_global(iocc, 2), &
+                          ' gid1=', nint(cmp_ff_dom_gid_global(iocc, 1)), ' gid2=', nint(cmp_ff_dom_gid_global(iocc, 2))
+                      end do
+                      flush(6)
+                    end if
+                  end if
+                  if ((itt_tag == 1 .or. itt_tag == 4 .or. itt_tag == 8) .and. ifrag <= 2) then
+                    call comm_summation(cmp_tf_gid_mode_full, cmp_tf_gid_mode_full_global, size(cmp_tf_gid_mode_full), dg_frag%icomm)
+                    if (dg_frag%is_frag_root .and. cmp_slot == 2) then
+                      ff_audit_unit = -1
+                      open(newunit=ff_audit_unit, file='ff_tf_mode_interference.log', status='unknown', position='append', &
+                        action='write', iostat=ff_audit_ios)
+                      if (ff_audit_ios == 0) then
+                        write(ff_audit_unit,*) 'ff-tf-header-lite: itt=', itt_tag, ' gidA=', focus_gid_ids(1), ' gidB=', focus_gid_ids(2)
+                        n_mode_max = size(cmp_tf_gid_mode_full_global, 2)
+                        do iocc = 1, min(nocc_spin, size(cmp_tf_gid_pre_global, 1))
+                          do i_focus = 1, n_focus_gid
+                            m_peak_if2 = 0
+                            if2_peak_val = 0.0d0
+                            do m_mode = 1, n_mode_max
+                              if (abs(cmp_tf_gid_mode_full_global(iocc, m_mode, i_focus, 2)) > abs(if2_peak_val)) then
+                                if2_peak_val = cmp_tf_gid_mode_full_global(iocc, m_mode, i_focus, 2)
+                                m_peak_if2 = m_mode
+                              end if
+                            end do
+
+                            if (iocc <= max_occmap_ref_occ) then
+                              if (itt_tag == 1 .and. m_peak_if2 > 0) cmp_tf_m2_ref_static(iocc, i_focus) = m_peak_if2
+                              m_ref_it1 = cmp_tf_m2_ref_static(iocc, i_focus)
+                            else
+                              m_ref_it1 = 0
+                            end if
+                            ref_valid_it1 = 0
+                            if (m_ref_it1 > 0) ref_valid_it1 = 1
+                            same_m_ref_it1 = 0
+                            if (m_ref_it1 > 0 .and. m_ref_it1 == m_peak_if2) same_m_ref_it1 = 1
+
+                            write(ff_audit_unit,*) 'ff-tf-occmap-lite: itt=', itt_tag, ' occ_id=', iocc, ' gid=', focus_gid_ids(i_focus), &
+                              ' m2_peak=', m_peak_if2, ' if2_full_m2=', if2_peak_val, &
+                              ' if1_full_at_m2=', merge(cmp_tf_gid_mode_full_global(iocc, m_peak_if2, i_focus, 1), 0.0d0, m_peak_if2 > 0), &
+                              ' ref1_m2=', m_ref_it1, ' ref_valid=', ref_valid_it1, ' same_ref1=', same_m_ref_it1
+                          end do
+                        end do
+                        flush(ff_audit_unit)
+                        close(ff_audit_unit)
+                      end if
+                    end if
+                  end if
+                end block
+              end if
+              if (enable_fp_decomp_audit .and. ispin == 1 .and. itt_tag <= 10) then
+                write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                  '        fp-decomp total: itt=', itt_tag, ' ifrag=', ifrag, ' trs_ff=', trs_ff_probe, &
+                  ' trs_fp=', trs_fp_probe, ' trs_pp=', trs_pp_probe, ' trs_tot=', trs_total_probe
+              end if
+              if (enable_ifrag_compare_trace .and. ispin == 1) then
+                cmp_slot = 0
+                if (ifrag == 1) cmp_slot = 1
+                if (ifrag == 2) cmp_slot = 2
+                if (cmp_slot > 0) then
+                  cmp_trs_fp(cmp_slot) = trs_fp_probe
+                  cmp_fp_frac(cmp_slot) = fp_weight_frac_probe
+                  cmp_fp_frob(cmp_slot) = fp_frob_probe
+                  cmp_fp_max(cmp_slot) = fp_maxabs_probe
+                  cmp_send_pre(cmp_slot) = send_pre_block_raw
+                  cmp_trs_ff(cmp_slot) = trs_ff_probe
+                  cmp_trs_pp(cmp_slot) = trs_pp_probe
+                  cmp_trs_tot(cmp_slot) = trs_total_probe
+                  ifrag_fp_seen(cmp_slot) = .true.
+                  ifrag_decomp_seen(cmp_slot) = .true.
+                end if
+                if (enable_fp_decomp_audit .and. cmp_slot > 0 .and. dg_frag%is_frag_root .and. itt_tag <= 10) then
+                  write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                    '        fp-decomp ifrag-total: itt=', itt_tag, ' ifrag=', ifrag, ' ff=', cmp_trs_ff(cmp_slot), &
+                    ' fp=', cmp_trs_fp(cmp_slot), ' pp=', cmp_trs_pp(cmp_slot), ' total=', cmp_trs_tot(cmp_slot)
+                  if (ifrag_decomp_seen(1) .and. ifrag_decomp_seen(2)) then
+                    write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                      '        fp-decomp ifrag-diff: itt=', itt_tag, ' d_ff=', cmp_trs_ff(1)-cmp_trs_ff(2), &
+                      ' d_fp=', cmp_trs_fp(1)-cmp_trs_fp(2), ' d_pp=', cmp_trs_pp(1)-cmp_trs_pp(2), &
+                      ' d_tot=', cmp_trs_tot(1)-cmp_trs_tot(2)
+                  end if
+                end if
+                if (cmp_slot > 0 .and. dg_frag%is_frag_root .and. enable_ifrag_compare_trace) then
+                  write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                    '        ifrag-compare fp: itt=', itt_tag, ' ifrag=', ifrag, ' trs_fp=', cmp_trs_fp(cmp_slot), &
+                    ' frac=', cmp_fp_frac(cmp_slot), ' frob=', cmp_fp_frob(cmp_slot), ' max=', cmp_fp_max(cmp_slot)
+                  write(*,'(1x,a,i0,a,1pe12.4)') '        ifrag-compare fp-flow: ifrag=', ifrag, &
+                    ' send_pre=', cmp_send_pre(cmp_slot)
+                  ! --- top contributing (frag_state, pw) pairs sorted by |contribution| ---
+                  do k_top = 1, n_top_fp_pairs - 1
+                    do io_top = k_top + 1, n_top_fp_pairs
+                      if (abs(top_fp_contrib_val(io_top)) > abs(top_fp_contrib_val(k_top))) then
+                        fp_pair_contrib = top_fp_contrib_val(k_top)
+                        top_fp_contrib_val(k_top) = top_fp_contrib_val(io_top)
+                        top_fp_contrib_val(io_top) = fp_pair_contrib
+                        ipw_top = top_fp_io(k_top); top_fp_io(k_top) = top_fp_io(io_top); top_fp_io(io_top) = ipw_top
+                        ipw_top = top_fp_ipw(k_top); top_fp_ipw(k_top) = top_fp_ipw(io_top); top_fp_ipw(io_top) = ipw_top
+                        ipw_top = top_fp_gid(k_top); top_fp_gid(k_top) = top_fp_gid(io_top); top_fp_gid(io_top) = ipw_top
+                      end if
+                    end do
+                  end do
+                  do k_top = 1, n_top_fp_pairs
+                    if (top_fp_io(k_top) == 0) cycle
+                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,1pe12.4)') &
+                      '        ifrag-compare fp-top: ifrag=', ifrag, ' rank=', k_top, &
+                      ' fstate=', top_fp_io(k_top), ' gid=', top_fp_gid(k_top), &
+                      ' ipw=', top_fp_ipw(k_top), ' contrib2=', 2.0d0 * top_fp_contrib_val(k_top)
+                    ! factor decomposition: S_mat_frag_pw and d_raw_fp separately
+                    block
+                      complex(8) :: s_fac, d_fac
+                      s_fac = dg_frag%S_mat_frag_pw(top_fp_gid(k_top), top_fp_ipw(k_top), ispin)
+                      d_fac = d_raw_fp(top_fp_io(k_top), top_fp_ipw(k_top))
+                      write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                        '          ifrag-compare fp-factors: ifrag=', ifrag, ' rank=', k_top, &
+                        ' S_re=', real(s_fac,8), ' S_im=', aimag(s_fac), &
+                        ' D_re=', real(d_fac,8), ' D_im=', aimag(d_fac)
+                      if (enable_fp_decomp_audit .and. itt_tag <= 10) then
+                        ikx_pw = nint(dg_frag%k_pw(1, top_fp_ipw(k_top)))
+                        iky_pw = nint(dg_frag%k_pw(2, top_fp_ipw(k_top)))
+                        ikz_pw = nint(dg_frag%k_pw(3, top_fp_ipw(k_top)))
+                        g_abs = sqrt((dg_frag%k_pw(1, top_fp_ipw(k_top)) * dg_frag%hgs(1))**2 + &
+                                     (dg_frag%k_pw(2, top_fp_ipw(k_top)) * dg_frag%hgs(2))**2 + &
+                                     (dg_frag%k_pw(3, top_fp_ipw(k_top)) * dg_frag%hgs(3))**2)
+                        dom_m = 1
+                        dom_m_abs = -1.0d0
+                        do io = 1, n_basis_mix
+                          m_term = transform_frag_spin(top_fp_io(k_top), io, ispin) * density_mix(io, io, ispin) * &
+                                   conjg(transform_pw_spin(top_fp_ipw(k_top), io, ispin))
+                          m_term_abs = abs(m_term)
+                          if (m_term_abs > dom_m_abs) then
+                            dom_m_abs = m_term_abs
+                            dom_m = io
+                          end if
+                        end do
+                        m_term = transform_frag_spin(top_fp_io(k_top), dom_m, ispin) * density_mix(dom_m, dom_m, ispin) * &
+                                 conjg(transform_pw_spin(top_fp_ipw(k_top), dom_m, ispin))
+                        dom_sign = 0.0d0
+                        if (real(m_term, kind=8) > 0.0d0) dom_sign = 1.0d0
+                        if (real(m_term, kind=8) < 0.0d0) dom_sign = -1.0d0
+                        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,1pe12.4,a,3(1pe11.3,1x),a,i0)') &
+                          '          fp-decomp pw-id: ifrag=', ifrag, ' rank=', k_top, ' ipw=', top_fp_ipw(k_top), &
+                          ' ik=', ikx_pw, iky_pw, ikz_pw, ' |G|=', g_abs, &
+                          ' kpw=', dg_frag%k_pw(1, top_fp_ipw(k_top)), dg_frag%k_pw(2, top_fp_ipw(k_top)), &
+                          dg_frag%k_pw(3, top_fp_ipw(k_top)), ' gpw=', n_frag + top_fp_ipw(k_top)
+                        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+                          '          fp-decomp dom-map: ifrag=', ifrag, ' occ_id=', top_fp_io(k_top), ' gid=', top_fp_gid(k_top), &
+                          ' ipw=', top_fp_ipw(k_top), ' m=', dom_m, ' sign=', dom_sign, ' mabs=', dom_m_abs, &
+                          ' S_re=', real(s_fac,8), ' S_im=', aimag(s_fac), ' D_re=', real(d_fac,8), ' D_im=', aimag(d_fac)
+                      end if
+                      ! Drill into d_raw_fp = T_f * D_mix * T_pw^H:
+                      ! for rank=1 only, print per-mixmode m: Tf(io,m), Tpw(ipw,m), Dmix(m,m)
+                      if (k_top == 1) then
+                        block
+                          integer :: im, n_mix_pr, io_k, ipw_k
+                          complex(8) :: tf_m, tpw_m, dm_m, partial
+                          io_k  = top_fp_io(k_top)
+                          ipw_k = top_fp_ipw(k_top)
+                          n_mix_pr = min(n_basis_mix, 5)
+                          if (io_k >= 1 .and. io_k <= size(transform_frag_spin,1) .and. &
+                              ipw_k >= 1 .and. ipw_k <= size(transform_pw_spin,1)) then
+                            do im = 1, n_mix_pr
+                              if (im > size(transform_frag_spin,2) .or. im > size(transform_pw_spin,2) .or. &
+                                  im > size(density_mix,1)) exit
+                              tf_m   = transform_frag_spin(io_k,  im, ispin)
+                              tpw_m  = transform_pw_spin(ipw_k, im, ispin)
+                              dm_m   = density_mix(im, im, ispin)
+                              partial = tf_m * dm_m * conjg(tpw_m)
+                              write(*,'(1x,a,i0,a,i0,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,1pe11.3)') &
+                                '          ifrag-compare fp-dmix: ifrag=', ifrag, ' rank=1 m=', im, &
+                                ' Tf_re=', real(tf_m,8),  ' Tf_im=', aimag(tf_m), &
+                                ' Tpw_re=', real(tpw_m,8), ' Tpw_im=', aimag(tpw_m), &
+                                ' Dm_re=', real(dm_m,8), ' Dm_im=', aimag(dm_m), &
+                                ' p_re=', real(partial,8), ' p_im=', aimag(partial)
+                            end do
+                          end if
+                        end block
+                      end if
+                    end block
+                  end do
+                  flush(6)
+                end if
+              end if
+              flush(6)
             end if
           end do
           call cpu_time(t_setup1)
@@ -1300,6 +2434,55 @@
               valid_remote_grid_ids(valid_remote_grid_count) = igrid
             end if
           end do
+          if (enable_ifrag_compare_trace .and. itt_tag >= 8 .and. itt_tag <= 10 .and. block_offset == first_block_offset) then
+            owner_valid_count = 0
+            slot0_count = 0
+            slotp_count = 0
+            owner_true_count = 0
+            owner_false_count = 0
+            do igrid = 1, npt_blk
+              if (owner_buf(igrid) >= 0) owner_valid_count = owner_valid_count + 1
+              if (slot_buf(igrid) == 0) slot0_count = slot0_count + 1
+              if (slot_buf(igrid) > 0) slotp_count = slotp_count + 1
+              if (target_rank_owned_by_handler(owner_buf(igrid))) then
+                owner_true_count = owner_true_count + 1
+              else
+                owner_false_count = owner_false_count + 1
+              end if
+            end do
+            cmp_slot = 0
+            if (ifrag == 1) cmp_slot = 1
+            if (ifrag == 2) cmp_slot = 2
+            if (cmp_slot > 0) then
+              cmp_nxyz(:, cmp_slot) = nxyz(:)
+              cmp_frag_lo(1, cmp_slot) = dg_frag%ixyz_frag(1, ifrag)
+              cmp_frag_lo(2, cmp_slot) = dg_frag%ixyz_frag(2, ifrag)
+              cmp_frag_lo(3, cmp_slot) = dg_frag%ixyz_frag(3, ifrag)
+              cmp_frag_hi(1, cmp_slot) = dg_frag%ixyz_frag(1, ifrag) + nxyz(1) - 1
+              cmp_frag_hi(2, cmp_slot) = dg_frag%ixyz_frag(2, ifrag) + nxyz(2) - 1
+              cmp_frag_hi(3, cmp_slot) = dg_frag%ixyz_frag(3, ifrag) + nxyz(3) - 1
+              cmp_npt(cmp_slot) = npt_blk
+              cmp_local(cmp_slot) = local_grid_count
+              cmp_remote(cmp_slot) = remote_grid_count
+              cmp_valid_remote(cmp_slot) = valid_remote_grid_count
+              cmp_owner_valid(cmp_slot) = owner_valid_count
+              cmp_slot0(cmp_slot) = slot0_count
+              cmp_slotp(cmp_slot) = slotp_count
+              cmp_owner_true(cmp_slot) = owner_true_count
+              cmp_owner_false(cmp_slot) = owner_false_count
+              ifrag_grid_seen(cmp_slot) = .true.
+            end if
+            if (cmp_slot > 0 .and. dg_frag%is_frag_root) then
+              write(*,*) '        ifrag-compare gridprep: itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', 1, &
+                ' nxyz=', cmp_nxyz(1,cmp_slot), cmp_nxyz(2,cmp_slot), cmp_nxyz(3,cmp_slot), &
+                ' lo=', cmp_frag_lo(1,cmp_slot), cmp_frag_lo(2,cmp_slot), cmp_frag_lo(3,cmp_slot), &
+                ' hi=', cmp_frag_hi(1,cmp_slot), cmp_frag_hi(2,cmp_slot), cmp_frag_hi(3,cmp_slot)
+              write(*,*) '        ifrag-compare owner: npt=', cmp_npt(cmp_slot), ' local=', cmp_local(cmp_slot), &
+                ' remote=', cmp_remote(cmp_slot), ' valid_remote=', cmp_valid_remote(cmp_slot), &
+                ' ownerT=', cmp_owner_true(cmp_slot), ' ownerF=', cmp_owner_false(cmp_slot)
+              flush(6)
+            end if
+          end if
           if (n_pw == 0 .and. enable_density_state_charge_trace) then
             do igrid = 1, npt_blk
               if (owner_buf(igrid) < 0) cycle
@@ -1322,11 +2505,17 @@
               izg = izg_buf(igrid)
 !$omp simd
               do ipw = 1, n_pw
-                theta = kpw_hx(ipw) * real(ixg - 1, 8) + kpw_hy(ipw) * real(iyg - 1, 8) + kpw_hz(ipw) * real(izg - 1, 8)
+                theta = kpw_hx(ipw) * real(ixg, 8) + kpw_hy(ipw) * real(iyg, 8) + kpw_hz(ipw) * real(izg, 8)
                 phase_cache(igrid, ipw) = cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
               end do
             end do
 !$omp end parallel do
+            phase_applied_total_block = 0.0d0
+            if (enable_ifrag_compare_trace .and. itt_tag >= 8 .and. itt_tag <= 10 .and. block_offset == first_block_offset) then
+              phase_applied_total_block = sum(abs(phase_cache(1:npt_blk, 1:n_pw)))
+            end if
+          else
+            phase_applied_total_block = 0.0d0
           end if
 
           do ispin = 1, system%nspin
@@ -1334,6 +2523,29 @@
             nbf = dg_frag%n_basis(ifrag, ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
             valid_basis_count = valid_basis_count_spin(ispin)
+            send_pre_block_raw = 0.0d0
+            if (enable_ifrag_compare_trace .and. itt_tag >= 8 .and. itt_tag <= 10 .and. ispin == 1 .and. block_offset == first_block_offset) then
+              basis_gid_probe(:) = 0
+              do io = 1, min(3, nbf)
+                basis_gid_probe(io) = dg_frag%index_basis(io, ifrag, ispin)
+              end do
+              cmp_slot = 0
+              if (ifrag == 1) cmp_slot = 1
+              if (ifrag == 2) cmp_slot = 2
+              if (cmp_slot > 0) then
+                cmp_nbf(cmp_slot) = nbf
+                cmp_valid(cmp_slot) = valid_basis_count
+                cmp_basis_gid(:, cmp_slot) = basis_gid_probe(:)
+                cmp_phase_total(cmp_slot) = phase_applied_total_block
+                ifrag_basis_seen(cmp_slot) = .true.
+              end if
+              if (cmp_slot > 0 .and. dg_frag%is_frag_root) then
+                write(*,*) '        ifrag-compare basis: itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' block=', block_offset, &
+                  ' nbf=', cmp_nbf(cmp_slot), ' valid=', cmp_valid(cmp_slot), ' gid=', cmp_basis_gid(1,cmp_slot), &
+                  cmp_basis_gid(2,cmp_slot), cmp_basis_gid(3,cmp_slot), ' phase=', cmp_phase_total(cmp_slot)
+                flush(6)
+              end if
+            end if
 
           call cpu_time(t_setup0)
           if (enable_density_phi_block_cache) then
@@ -1423,6 +2635,44 @@
                 write(*,'(1x,a,i0,a)') "        density mixed trace: rank=", dg_frag%id, " stage=after-rho-accum-loop"
                 flush(6)
               end if
+              if (enable_rho_mix_grid_compare .and. block_offset == first_block_offset .and. dg_frag%id == 0) then
+                rho_blk_reduced(1:npt_blk) = 0.0d0
+                do io0 = 1, nocc_spin, state_block_size
+                  nbatch = min(state_block_size, nocc_spin - io0 + 1)
+                  call zgemm('N', 'N', npt_blk, nbatch, n_basis_mix, zone, basis_mix_blk, grid_block_size, &
+                    coef_mix_spin(1, io0, ispin), max_mixed_basis, zzero, pw_tmp_z, grid_block_size)
+                  do io = 1, nbatch
+                    occ_factor = 1.0d0
+                    if (allocated(system%rocc)) then
+                      if (io0 + io - 1 <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                        occ_factor = max(0.0d0, system%rocc(io0 + io - 1, 1, ispin))
+                      end if
+                    end if
+                    if (occ_factor <= 0.0d0) cycle
+!$omp parallel do private(igrid) schedule(static)
+                    do igrid = 1, npt_blk
+                      rho_blk_reduced(igrid) = rho_blk_reduced(igrid) + occ_factor * &
+                        (real(pw_tmp_z(igrid, io), kind=8)**2 + aimag(pw_tmp_z(igrid, io))**2)
+                    end do
+!$omp end parallel do
+                  end do
+                end do
+                rho_mix_grid_l2 = 0.0d0
+                rho_mix_grid_ref = 0.0d0
+                rho_mix_grid_max = 0.0d0
+                do igrid = 1, npt_blk
+                  rho_mix_grid_l2 = rho_mix_grid_l2 + (rho_blk(igrid) - rho_blk_reduced(igrid))**2
+                  rho_mix_grid_ref = rho_mix_grid_ref + rho_blk_reduced(igrid)**2
+                  rho_mix_grid_max = max(rho_mix_grid_max, abs(rho_blk(igrid) - rho_blk_reduced(igrid)))
+                end do
+                rho_mix_grid_l2 = sqrt(max(0.0d0, rho_mix_grid_l2))
+                rho_mix_grid_ref = sqrt(max(0.0d0, rho_mix_grid_ref))
+                rho_mix_grid_rel = 0.0d0
+                if (rho_mix_grid_ref > 1.0d-20) rho_mix_grid_rel = rho_mix_grid_l2 / rho_mix_grid_ref
+                write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') '        rho_mix grid2path: ifrag=', ifrag, &
+                  ' ispin=', ispin, ' npt=', npt_blk, ' l2=', rho_mix_grid_l2, ' rel=', rho_mix_grid_rel, ' max=', rho_mix_grid_max
+                flush(6)
+              end if
               if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
                 call cpu_time(t_rho1)
                 call comm_summation(rho_blk(1:npt_blk), rho_blk_reduced(1:npt_blk), npt_blk, dg_frag%icomm_frag)
@@ -1489,6 +2739,7 @@
                     stop "DG-Fragment RT: density remote slot out of range"
                   end if
                   rho_contrib = rho_blk(igrid)
+                  send_pre_block_raw = send_pre_block_raw + rho_contrib * system%hvol
                   rho_send(owner_rank)%f(slot, 1, 1) = rho_send(owner_rank)%f(slot, 1, 1) + rho_contrib
                   spin_offset = ispin * dg_frag%density_send_count(owner_rank)
                   if (spin_offset + slot < 1 .or. spin_offset + slot > size(rho_send(owner_rank)%f, 1)) then
@@ -1709,9 +2960,18 @@
                 ! n_pw > 0: state-distributed loop, no per-batch bcast
                 if (.not. allocated(rho_blk_partial)) allocate(rho_blk_partial(grid_block_size))
                 rho_blk_partial(1:npt_blk) = 0.0d0
+                occ_cache(1:nocc_cache) = 0.0d0
+                occ_cache(1:nocc_spin) = 1.0d0
+                if (allocated(system%rocc)) then
+                  do io = 1, nocc_spin
+                    if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
+                      occ_cache(io) = max(0.0d0, system%rocc(io, 1, ispin))
+                    end if
+                  end do
+                end if
 
-                do io0 = io_s_frag, io_e_frag, state_block_size
-                  nbatch = min(state_block_size, io_e_frag - io0 + 1)
+                do io0 = io_s_frag, min(io_e_frag, nocc_spin), state_block_size
+                  nbatch = min(state_block_size, min(io_e_frag, nocc_spin) - io0 + 1)
 
                   ! copy coef from upfront buffer (no bcast)
                   coef_blk_re(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
@@ -1745,8 +3005,9 @@
                       rho_accum = 0.0d0
 !$omp simd reduction(+:rho_accum)
                       do io = io1, io1 + nstate - 1
-                        rho_accum = rho_accum + psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
-                                    psi_blk_im(igrid, io) * psi_blk_im(igrid, io)
+                        rho_accum = rho_accum + occ_cache(io0 + io - 1) * &
+                                    (psi_blk_re(igrid, io) * psi_blk_re(igrid, io) + &
+                                    psi_blk_im(igrid, io) * psi_blk_im(igrid, io))
                       end do
                       rho_blk_partial(igrid) = rho_blk_partial(igrid) + rho_accum
                     end do
@@ -1864,6 +3125,7 @@
                       stop "DG-Fragment RT: density accum slot out of range"
                     end if
                     rho_contrib = rho_blk_accum(igrid)
+                    send_pre_block_raw = send_pre_block_raw + rho_contrib * system%hvol
                     if (enable_density_weight_path_trace .and. has_density_point_probe) then
                       ixg = ixg_buf(igrid)
                       iyg = iyg_buf(igrid)
@@ -2242,7 +3504,7 @@
         flush(6)
         stop "DG-Fragment RT: density unpack recv size mismatch"
       end if
-!$omp parallel do private(slot, ixg, iyg, izg, bx, by, bz, ispin, spin_offset, rho_contrib, rho_raw_contrib, imported_unpack_weight) schedule(static)
+!$omp parallel do private(slot, ixg, iyg, izg, bx, by, bz, ispin, spin_offset, rho_contrib, rho_raw_contrib, imported_unpack_weight, i_local, ix0_frag, ix1_frag, iy0_frag, iy1_frag, iz0_frag, iz1_frag) schedule(static)
       do slot = 1, dg_frag%density_recv_map(irank)%npts
       ixg = dg_frag%density_recv_map(irank)%ixg(slot)
       iyg = dg_frag%density_recv_map(irank)%iyg(slot)
@@ -2271,6 +3533,21 @@
         stop "DG-Fragment RT: density unpack rho_s_bf bounds"
       end if
       rho_raw_contrib = rho_recv(irank)%f(slot, 1, 1)
+      if (enable_ifrag_compare_trace .and. itt_tag >= 8 .and. itt_tag <= 10) then
+        do i_local = 1, ifrag_count
+          ix0_frag = dg_frag%ixyz_frag(1, dg_frag%ifrag_start + i_local - 1)
+          iy0_frag = dg_frag%ixyz_frag(2, dg_frag%ifrag_start + i_local - 1)
+          iz0_frag = dg_frag%ixyz_frag(3, dg_frag%ifrag_start + i_local - 1)
+          ix1_frag = ix0_frag + dg_frag%nxyz_domain(1, dg_frag%ifrag_start + i_local - 1) - 1
+          iy1_frag = iy0_frag + dg_frag%nxyz_domain(2, dg_frag%ifrag_start + i_local - 1) - 1
+          iz1_frag = iz0_frag + dg_frag%nxyz_domain(3, dg_frag%ifrag_start + i_local - 1) - 1
+          if (ixg < ix0_frag .or. ixg > ix1_frag) cycle
+          if (iyg < iy0_frag .or. iyg > iy1_frag) cycle
+          if (izg < iz0_frag .or. izg > iz1_frag) cycle
+!$omp atomic update
+          ifrag_recv_post_raw_local(1, i_local) = ifrag_recv_post_raw_local(1, i_local) + rho_raw_contrib * system%hvol
+        end do
+      end if
       imported_unpack_weight = 1.0d0
       if (enable_imported_unpack_normalized) then
         imported_unpack_weight = imported_unpack_scale
@@ -2356,6 +3633,16 @@
         write(*,'(1x,a,i0,a,3(i0,1x),a,i0,a,i0,a,i0)') '        density point-import first: rank=', dg_frag%id, ' idx=', &
           first_imp_ixg_local, first_imp_iyg_local, first_imp_izg_local, ' slot=', first_imp_slot_local, &
           ' source_rank=', first_imp_src_local, ' target_rank=', first_imp_tgt_local
+        flush(6)
+      end if
+    end if
+    if (enable_ifrag_compare_trace .and. itt_tag >= 8 .and. itt_tag <= 10) then
+      call comm_summation(ifrag_recv_post_raw_local, ifrag_recv_post_raw_global, size(ifrag_recv_post_raw_local), dg_frag%icomm)
+      if (dg_frag%id == 0 .and. ifrag_count >= 2) then
+        cmp_recv_post_raw(1) = ifrag_recv_post_raw_global(1, 1)
+        cmp_recv_post_raw(2) = ifrag_recv_post_raw_global(1, 2)
+        write(*,'(1x,a,i0,a,1pe12.4,a,1pe12.4)') '        ifrag-compare recv_post_raw: itt=', itt_tag, &
+          ' f1=', cmp_recv_post_raw(1), ' f2=', cmp_recv_post_raw(2)
         flush(6)
       end if
     end if
@@ -2643,8 +3930,42 @@
     if (allocated(density_mix_tmp_t)) deallocate(density_mix_tmp_t)
     if (allocated(transform_frag_spin)) deallocate(transform_frag_spin)
     if (allocated(transform_pw_spin)) deallocate(transform_pw_spin)
+    if (allocated(mix_transform_spin)) deallocate(mix_transform_spin)
+    if (allocated(mix_overlap_spin)) deallocate(mix_overlap_spin)
+    if (allocated(s_mix)) deallocate(s_mix)
+    if (allocated(s_mix_work)) deallocate(s_mix_work)
+    if (allocated(coef_mix_eff)) deallocate(coef_mix_eff)
+    if (allocated(coef_mix_metric)) deallocate(coef_mix_metric)
+    if (allocated(coef_mix_spin)) deallocate(coef_mix_spin)
+    if (allocated(d_raw_ff)) deallocate(d_raw_ff)
+    if (allocated(d_raw_fp)) deallocate(d_raw_fp)
+    if (allocated(d_raw_pp)) deallocate(d_raw_pp)
+    if (allocated(ipiv_mix)) deallocate(ipiv_mix)
     if (allocated(n_basis_mix_spin)) deallocate(n_basis_mix_spin)
     if (allocated(g211_cos_x)) deallocate(g211_cos_x, g211_sin_x)
+    if (allocated(ifrag_recv_post_raw_local)) deallocate(ifrag_recv_post_raw_local)
+    if (allocated(ifrag_recv_post_raw_global)) deallocate(ifrag_recv_post_raw_global)
+    if (allocated(cmp_ff_occ)) deallocate(cmp_ff_occ)
+    if (allocated(cmp_ff_occ_global)) deallocate(cmp_ff_occ_global)
+    if (allocated(cmp_ff_dom_gid)) deallocate(cmp_ff_dom_gid)
+    if (allocated(cmp_ff_dom_gid_local)) deallocate(cmp_ff_dom_gid_local)
+    if (allocated(cmp_ff_dom_gid_global)) deallocate(cmp_ff_dom_gid_global)
+    if (allocated(cmp_ff_gid_pre)) deallocate(cmp_ff_gid_pre)
+    if (allocated(cmp_ff_gid_post)) deallocate(cmp_ff_gid_post)
+    if (allocated(cmp_ff_gid_pre_global)) deallocate(cmp_ff_gid_pre_global)
+    if (allocated(cmp_ff_gid_post_global)) deallocate(cmp_ff_gid_post_global)
+    if (allocated(cmp_tf_gid_pre)) deallocate(cmp_tf_gid_pre)
+    if (allocated(cmp_tf_gid_full)) deallocate(cmp_tf_gid_full)
+    if (allocated(cmp_tf_gid_int)) deallocate(cmp_tf_gid_int)
+    if (allocated(cmp_tf_gid_pre_global)) deallocate(cmp_tf_gid_pre_global)
+    if (allocated(cmp_tf_gid_full_global)) deallocate(cmp_tf_gid_full_global)
+    if (allocated(cmp_tf_gid_int_global)) deallocate(cmp_tf_gid_int_global)
+    if (allocated(cmp_tf_gid_mode_pre)) deallocate(cmp_tf_gid_mode_pre)
+    if (allocated(cmp_tf_gid_mode_full)) deallocate(cmp_tf_gid_mode_full)
+    if (allocated(cmp_tf_gid_mode_pre_global)) deallocate(cmp_tf_gid_mode_pre_global)
+    if (allocated(cmp_tf_gid_mode_full_global)) deallocate(cmp_tf_gid_mode_full_global)
+    if (allocated(cmp_tf_gid_mode_ovl)) deallocate(cmp_tf_gid_mode_ovl)
+    if (allocated(cmp_tf_gid_mode_ovl_global)) deallocate(cmp_tf_gid_mode_ovl_global)
     deallocate(rho_bf, rho_s_bf)
     deallocate(rho_send, rho_recv)
     call cpu_time(t_total1)
@@ -2667,6 +3988,7 @@
         ' coef_ref_ready=', dg_frag%coef_ref_ready
       flush(6)
     end if
+    call capture_occmap_pair_snapshot(dg_frag, itt_tag, 'density_reconstruct_post')
 
   contains
 
