@@ -2696,7 +2696,9 @@
                   iyg = iyg_buf(igrid)
                   izg = izg_buf(igrid)
                   if (slot_buf(igrid) > 0) cycle
+                  if (.not. dg_frag%parallel_mode_orbital) then
                     if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                  end if
                     if (ixg < rho_s_x_lo .or. ixg > rho_s_x_hi .or. &
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
@@ -3066,7 +3068,9 @@
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
                     if (slot_buf(igrid) > 0) cycle
-                    if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                    if (.not. dg_frag%parallel_mode_orbital) then
+                      if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
+                    end if
                     if (ixg < rho_s_x_lo .or. ixg > rho_s_x_hi .or. &
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
