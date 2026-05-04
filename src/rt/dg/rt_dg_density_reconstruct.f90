@@ -906,12 +906,14 @@
     do irank = 0, dg_frag%isize - 1
       npts = dg_frag%density_send_count(irank)
       if (npts <= 0) cycle
+      if (.not. target_rank_owned_by_handler(irank)) cycle
       allocate(rho_send(irank)%f((system%nspin + 1) * npts, 1, 1))
       rho_send(irank)%f(:, :, :) = 0.0d0
     end do
     do irank = 0, dg_frag%isize - 1
       npts = dg_frag%density_recv_map(irank)%npts
       if (npts <= 0) cycle
+      if (.not. target_rank_owned_by_handler(irank)) cycle
       allocate(rho_recv(irank)%f((system%nspin + 1) * npts, 1, 1))
       rho_recv(irank)%f(:, :, :) = 0.0d0
     end do
@@ -1107,6 +1109,8 @@
       flush(6)
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density trace: comm-state icomm_frag=", dg_frag%icomm_frag, &
         " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag, " ifrag_group=", dg_frag%ifrag_group
+      write(*,'(1x,a,l1,a,a)') "        density trace: parallel-mode orbital=", dg_frag%parallel_mode_orbital, &
+        " mode=", trim(dg_frag%parallel_mode)
       write(*,'(1x,a,l1,a,l1,a,l1,a,l1,a,l1)') "        density trace: mixed-state use=", use_mixed_density, &
         " ready=", dg_frag%mixed_basis_ready, " tr=", allocated(dg_frag%mixed_transform), &
         " coef_mix=", allocated(dg_frag%coef_mix), " dim=", allocated(dg_frag%mixed_basis_dim)
@@ -4074,8 +4078,10 @@
     implicit none
     integer, intent(in) :: target_rank
     integer :: handler_id_frag
+    integer :: frag_size
 
-    handler_id_frag = modulo(target_rank, dg_frag%isize_frag)
+    frag_size = max(1, dg_frag%isize_frag)
+    handler_id_frag = modulo(target_rank, frag_size)
     is_handler = (dg_frag%id_frag == handler_id_frag)
   end function target_rank_owned_by_handler
 
