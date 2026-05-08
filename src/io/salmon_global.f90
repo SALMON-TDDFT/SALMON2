@@ -338,6 +338,7 @@ module salmon_global
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
   character(1)   :: yn_out_tm
+  character(1)   :: yn_out_tm_bin
   character(1)   :: yn_out_gs_sgm_eps
   integer        :: out_gs_sgm_eps_mu_nu(2)
   real(8)        :: out_gs_sgm_eps_width

@@ -103,13 +103,14 @@ contains
     use structures
     use stencil_sub
     use sendrecv_grid
-    use salmon_global, only: yn_out_tm,yn_out_gs_sgm_eps, &
+    use salmon_global, only: yn_out_tm,yn_out_tm_bin,yn_out_gs_sgm_eps, &
                        out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
                        base_directory,sysname, de,nenergy,nelec,xc
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_energy
+    use mpi
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -120,24 +121,29 @@ contains
     type(s_orbital)       :: tpsi
     type(s_dft_energy) :: energy
     !
-    logical :: flag_print_tm, flag_print_eps
+    logical :: flag_print_tm, flag_print_eps, flag_print_tm_bin
     integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
     real(8) :: x,y,z
-    complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
-    complex(8),allocatable :: upu_all(:,:,:,:),upu_all_l(:,:,:,:)
+    complex(8),allocatable :: upu(:,:,:,:,:),upu_l(:,:,:,:,:)
+    complex(8),allocatable :: upu_all(:,:,:,:,:),upu_all_l(:,:,:,:,:)
     complex(8),allocatable :: gtpsi(:,:,:,:),gtpsi_l(:,:,:,:)
     complex(8),allocatable :: uVpsi(:),uVpsi_l(:),uVrpsi(:,:),uVrpsi_l(:,:)
-    complex(8),allocatable :: u_rVnl_Vnlr_u(:,:,:,:)
-    complex(8),allocatable :: u_rVnl_Vnlr_u_all(:,:,:,:),u_rVnl_Vnlr_u_all_l(:,:,:,:)
+    complex(8),allocatable :: u_rVnl_Vnlr_u(:,:,:,:,:)
+    complex(8),allocatable :: u_rVnl_Vnlr_u_all(:,:,:,:,:),u_rVnl_Vnlr_u_all_l(:,:,:,:,:)
     complex(8) :: u_rVnl_u(3),u_Vnlr_u(3),veik
     complex(8) :: wrk(3)
     character(100) :: file_tm_data
+    character(256) :: iofile
     !(for printing dielectric function)
     integer :: mu,nu,iw,nomega
+    integer :: icomm, iopen_flag, minfo, mfile
+    integer :: source_type, local_type, global_type
+    integer :: ierr
+    integer :: gsize5(5), lsize5(5), lstart5(5)
     real(8) :: w, omega_max, domega, delta, delta_munu, n_e, V, deigen
-    complex(8),allocatable :: matrix_vij(:,:,:,:), matrix_vji(:,:,:,:)
+    complex(8),allocatable :: matrix_vij(:,:,:,:,:), matrix_vji(:,:,:,:,:)
     complex(8),allocatable :: mat_l(:,:), mat(:,:)
     complex(8) :: sigma,eps,sigma_intra,sigma_inter,eps_intra,eps_inter
     complex(8) :: sigma_l,sigma_intra_l
@@ -146,8 +152,10 @@ contains
 
     flag_print_tm = .false.
     flag_print_eps= .false.
+    flag_print_tm_bin = .false.
     if(yn_out_tm=='y') flag_print_tm = .true.
     if(yn_out_gs_sgm_eps=='y') flag_print_eps= .true.
+    if(yn_out_tm_bin=='y') flag_print_tm_bin = .true.
 
     !For yn_out_gs_sgm_eps=='y'
     !following input parameters are used:
@@ -163,10 +171,10 @@ contains
       write(*,*) "error @ write_tm_data: im/=1"
       return
     endif
-    if(system%Nspin/=1) then!??????
-      write(*,*) "error @ write_tm_data: nspin/=1"
-      return
-    endif
+!    if(system%Nspin/=1) then!??????
+!      write(*,*) "error @ write_tm_data: nspin/=1"
+!      return
+!    endif
     !if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
     !  if (comm_is_root(nproc_id_global)) then
     !    write(*,*) "error @ write_tm_data: do not use orbital parallelization"
@@ -183,7 +191,7 @@ contains
     write(*,*) "  calculating transition moment ....."
 
     im = 1
-    ispin = 1
+ !   ispin = 1
 
     NB = system%no
     NK = system%nk
@@ -198,19 +206,7 @@ contains
     ie = mg%ie
 
     Nlma = ppg%Nlma
-
-    !calculate <u_nk|p_j|u_mk>  (j=x,y,z)
-
-    allocate( upu_l(3,io_s:io_e,NB,ik_s:ik_e) )
-    !$omp parallel do private(ik,ib1,ib2) collapse(3)
-    do ik =ik_s,ik_e
-    do ib1=io_s,io_e
-    do ib2=1,NB
-       upu_l(1:3,ib1,ib2,ik) = 0d0
-    enddo
-    enddo
-    enddo
-    !$omp end parallel do
+    allocate( upu_l(3,system%nspin,io_s:io_e,NB,ik_s:ik_e) )
 
     allocate(gtpsi_l(3,mg%is_array(1):mg%ie_array(1) &
                       ,mg%is_array(2):mg%ie_array(2) &
@@ -222,6 +218,19 @@ contains
               * ( mg%ie_array(2) - mg%is_array(2) + 1 ) &
               * ( mg%ie_array(3) - mg%is_array(3) + 1 )
 
+    do ispin = 1, system%nspin
+    !calculate <u_nk|p_j|u_mk>  (j=x,y,z)
+
+    !$omp parallel do private(ik,ib1,ib2) collapse(3)
+    do ik =ik_s,ik_e
+    do ib1=io_s,io_e
+    do ib2=1,NB
+       upu_l(1:3,ispin,ib1,ib2,ik) = 0d0
+    enddo
+    enddo
+    enddo
+    !$omp end parallel do
+    
   ! overlap region communication
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, tpsi%zwf)
@@ -245,53 +254,55 @@ contains
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
                             * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
         end do
-        upu_l(:,ib1,ib2,ik) = - zI * wrk * system%Hvol
+        upu_l(:,ispin,ib1,ib2,ik) = - zI * wrk * system%Hvol
       end do
       !$omp end parallel do
     end do
     end do
+    end do ! ispin
     deallocate(gtpsi_l,gtpsi)
 
 
-    allocate( upu(3,io_s:io_e,NB,ik_s:ik_e) )
-    call comm_summation(upu_l,upu,3*(io_e-io_s+1)*NB*(ik_e-ik_s+1),info%icomm_r)
+    allocate( upu(3,system%nspin,io_s:io_e,NB,ik_s:ik_e) )
+    call comm_summation(upu_l,upu,3*(io_e-io_s+1)*NB*(ik_e-ik_s+1)*system%nspin,info%icomm_r)
 !    call comm_summation(upu_l,upu,3*NB*NB*(ik_e-ik_s+1),info%icomm_ro)
 !    call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
     deallocate(upu_l)
 
-
     if(flag_print_tm) then
-       allocate( upu_all_l(3,NB,NB,NK), upu_all(3,NB,NB,NK) )
+       allocate( upu_all_l(3,system%nspin,NB,NB,NK), upu_all(3,system%nspin,NB,NB,NK) )
+       do ispin = 1, system%nspin
        !$omp parallel do private(ik,ib1,ib2) collapse(3)
        do ik =1,NK
        do ib1=1,NB
        do ib2=1,NB
           if( (ik .ge.ik_s .and. ik .le.ik_e) .and. &
               (ib1.ge.io_s .and. ib1.le.io_e) ) then
-             upu_all_l(1:3,ib1,ib2,ik) = upu(1:3,ib1,ib2,ik)
+             upu_all_l(1:3,ispin,ib1,ib2,ik) = upu(1:3,ispin,ib1,ib2,ik)
           else
-             upu_all_l(1:3,ib1,ib2,ik) = 0d0
+             upu_all_l(1:3,ispin,ib1,ib2,ik) = 0d0
           endif
        enddo
        enddo
        enddo
        !$omp end parallel do
-       call comm_summation(upu_all_l,upu_all,3*NB*NB*NK,info%icomm_ko)
+       end do ! ispin
+       call comm_summation(upu_all_l,upu_all,3*NB*NB*NK*system%nspin,info%icomm_ko)
 !       call comm_summation(upu_all_l,upu_all,3*NB*NB*NK,info%icomm_k)
        deallocate(upu_all_l)
     endif
-
 
     !calculate -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
 
     allocate( uVpsi(NB)   ,uVpsi_l(NB) )
     allocate( uVrpsi(3,NB),uVrpsi_l(3,NB) )
-    allocate( u_rVnl_Vnlr_u(3,io_s:io_e,NB,ik_s:ik_e) )
+    allocate( u_rVnl_Vnlr_u(3,system%nspin,io_s:io_e,NB,ik_s:ik_e) )
 
     !$omp workshare
-    u_rVnl_Vnlr_u(:,:,:,:) = 0d0
+    u_rVnl_Vnlr_u(:,:,:,:,:) = 0d0
     !$omp end workshare
 
+    do ispin = 1, system%nspin
     do ik=ik_s,ik_e
     do ilma=1,Nlma
        ia=ppg%ia_tbl(ilma)
@@ -331,7 +342,7 @@ contains
           !<u|e^{-ik}|v><v|e^{ik}*r|u>
           u_Vnlr_u(1:3) = conjg(uVpsi(ib1))*uVrpsi(1:3,ib2)
         
-          u_rVnl_Vnlr_u(:,ib1,ib2,ik) = u_rVnl_Vnlr_u(:,ib1,ib2,ik)  &
+          u_rVnl_Vnlr_u(:,ispin,ib1,ib2,ik) = u_rVnl_Vnlr_u(:,ispin,ib1,ib2,ik)  &
           &                           - zi * ( u_rVnl_u(:) - u_Vnlr_u(:) ) * system%Hvol
        enddo
        enddo
@@ -339,36 +350,40 @@ contains
        !$omp end parallel
     enddo  !ilma
     enddo  !ik
+    end do !ispin
    !call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*(ik_e-ik_s+1),info%icomm_o)
    !call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_ko)
-
 
     !(print tm)
     if(flag_print_tm) then
 
-       allocate( u_rVnl_Vnlr_u_all(3,NB,NB,NK), u_rVnl_Vnlr_u_all_l(3,NB,NB,NK) )
+      if (comm_is_root(nproc_id_global)) &
+        &  write(*,*) "  printing transition moment ....."
 
+       allocate( u_rVnl_Vnlr_u_all(3,system%nspin,NB,NB,NK), u_rVnl_Vnlr_u_all_l(3,system%nspin,NB,NB,NK) )
+
+       do ispin = 1, system%nspin
        !$omp parallel do private(ik,ib1,ib2) collapse(3)
        do ik =1,NK
        do ib1=1,NB
        do ib2=1,NB
           if( (ik .ge.ik_s .and. ik .le.ik_e) .and.  &
               (ib1.ge.io_s .and. ib1.le.io_e) ) then
-             u_rVnl_Vnlr_u_all_l(1:3,ib1,ib2,ik) = u_rVnl_Vnlr_u(1:3,ib1,ib2,ik)
+             u_rVnl_Vnlr_u_all_l(1:3,ispin,ib1,ib2,ik) = u_rVnl_Vnlr_u(1:3,ispin,ib1,ib2,ik)
           else
-             u_rVnl_Vnlr_u_all_l(1:3,ib1,ib2,ik) = 0d0
+             u_rVnl_Vnlr_u_all_l(1:3,ispin,ib1,ib2,ik) = 0d0
           endif
        enddo
        enddo
        enddo
        !$omp end parallel do
+       end do !ispin
 
-       call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK,info%icomm_ko)
+       call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK*system%nspin,info%icomm_ko)
       !call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK,info%icomm_k)
 
        deallocate(uVpsi_l, uVrpsi_l)
        deallocate(u_rVnl_Vnlr_u_all_l)
-
 
        file_tm_data = trim(base_directory)//trim(sysname)//'_tm.data'
 
@@ -383,37 +398,82 @@ contains
 
           !<u_nk|p_j|u_mk>  (j=x,y,z)
           write(fh_tm,*) "#<u_nk|p_j|u_mk>  (j=x,y,z)"
+          do ispin = 1, system%nspin
           do ik =1,NK
           do ib1=1,NB
           do ib2=1,NB
-             write(fh_tm,9000) ik,ib1,ib2,(upu_all(j,ib1,ib2,ik),j=1,3)
+             write(fh_tm,9000) ik,ib1,ib2,(upu_all(j,ispin,ib1,ib2,ik),j=1,3)
           enddo
           enddo
           enddo
+          end do !ispin
 !9000     format(3i8,6e18.10)
 9000     format(3i8,6e18.5)
 
           ! -i*<u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
           write(fh_tm,*) "# -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)"
+          do ispin = 1, system%nspin
           do ik =1,NK
           do ib1=1,NB
           do ib2=1,NB
-             write(fh_tm,9000) ik,ib1,ib2,(u_rVnl_Vnlr_u_all(j,ib1,ib2,ik),j=1,3)
+             write(fh_tm,9000) ik,ib1,ib2,(u_rVnl_Vnlr_u_all(j,ispin,ib1,ib2,ik),j=1,3)
           enddo
           enddo
           enddo
+          end do !ispin
 
           close(fh_tm)
        end if
 
     end if  !flag_print_tm
 
+    if(flag_print_tm_bin) then
+
+       file_tm_data = trim(base_directory)//'tm.bin'
+
+      if (comm_is_root(nproc_id_global)) &
+        &  write(*,*) "  printing transition moment ....."
+
+      source_type = MPI_DOUBLE_COMPLEX
+      minfo = MPI_INFO_NULL
+      iopen_flag = MPI_MODE_WRONLY+MPI_MODE_CREATE
+      iofile = file_tm_data
+      icomm = info%icomm_ko
+
+    ! create MPI_Type (Window) of process-local tm array
+      gsize5  = [4, system%nspin, io_e - io_s + 1, NB, ik_e - ik_s + 1]
+      lsize5  = [4, system%nspin, io_e - io_s + 1, NB, ik_e - ik_s + 1]
+      lstart5 = [1, 1,            1,               1 , 1              ] - 1
+
+      call MPI_Type_create_subarray(5, gsize5, lsize5, lstart5, MPI_ORDER_FORTRAN, source_type, local_type, ierr)
+      call MPI_Type_commit(local_type, ierr)
+
+    ! create MPI_Type (Window) of global tm
+      gsize5  = [4, system%no, NB,             NB, NK              ]
+      lstart5 = [1, 1,         io_s,           1 , ik_s            ] - 1
+
+      call MPI_Type_create_subarray(5, gsize5, lsize5, lstart5, MPI_ORDER_FORTRAN, source_type, global_type, ierr)
+      call MPI_Type_commit(global_type, ierr)
+
+    ! write/read file
+      call MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr)
+      call MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr)
+
+      call MPI_File_write_all(mfile, upu, 1, local_type, MPI_STATUS_IGNORE, ierr)
+      call MPI_File_write_all(mfile, u_rVnl_Vnlr_u, 1, local_type, MPI_STATUS_IGNORE, ierr)
+
+      call MPI_File_close(mfile, ierr) 
+      call MPI_Type_free(global_type, ierr)
+      call MPI_Type_free( local_type, ierr)
+
+    end if  !flag_print_tm_bin
+
 
     if (flag_print_eps) then
        ! taken from tm2sigma.f90 in utility directory
-       if(system%nspin==2) then
-          stop "printing option of dielectric function is available for nspin=1"
-       endif
+!       if(system%nspin==2) then
+!          stop "printing option of dielectric function is available for nspin=1"
+!       endif
        if(xc.ne.'pz' .or. xc.ne.'PZ') then
           if (comm_is_root(nproc_id_global)) then
              write(*,*) "Warning for calculating :"
@@ -447,42 +507,45 @@ contains
        end if
        end if
 
-       allocate(matrix_vij(io_s:io_e,NB,3,ik_s:ik_e))
+       allocate(matrix_vij(system%nspin,io_s:io_e,NB,3,ik_s:ik_e))
 
+       do ispin = 1, system%nspin
        !$omp parallel do private(ik,ib1,ib2) collapse(3)
        do ik=ik_s,ik_e
        do ib1=io_s,io_e
        do ib2=1,NB
           ! <u_ib1,k|p_(1:3)|u_ib2,k> + <u_ib1,k|[r_(1:3),V_nl]|u_ib2,k>/i
-          matrix_vij(ib1,ib2,1:3,ik) = upu(1:3,ib1,ib2,ik) + u_rVnl_Vnlr_u(1:3,ib1,ib2,ik)
+          matrix_vij(ispin,ib1,ib2,1:3,ik) = upu(1:3,ispin,ib1,ib2,ik) + u_rVnl_Vnlr_u(1:3,ispin,ib1,ib2,ik)
        end do
        end do
        end do
        !$omp end parallel do
+       end do !ispin
        deallocate( upu, u_rVnl_Vnlr_u )
 
-       allocate(matrix_vji(NB,io_s:io_e,3,ik_s:ik_e))
+       allocate(matrix_vji(system%nspin,NB,io_s:io_e,3,ik_s:ik_e))
        allocate(mat_l(NB,3),mat(NB,3))
 
+       do ispin = 1, system%nspin
        do ik=ik_s,ik_e
        do ib2=1,NB
 
           mat_l(:,:)=0d0
           do ib1=io_s,io_e
-             mat_l(ib1,1:3)=matrix_vij(ib1,ib2,1:3,ik)
+             mat_l(ib1,1:3)=matrix_vij(ispin,ib1,ib2,1:3,ik)
           enddo
 
           call comm_summation(mat_l,mat,NB*3,info%icomm_o)
 
           if(ib2.ge.io_s .and. ib2.le.io_e) then
           do ib1=1,NB
-             matrix_vji(ib1,ib2,1:3,ik) = mat(ib1,1:3)
+             matrix_vji(ispin,ib1,ib2,1:3,ik) = mat(ib1,1:3)
           enddo
           endif
 
        enddo
        enddo
-
+       end do !ispin
 
        if (comm_is_root(nproc_id_global)) then
           filename = trim(base_directory)//trim(sysname) // '_sigma.data'
@@ -502,6 +565,7 @@ contains
           w = dble(iw)*domega
           sigma_l = 0d0
           sigma_intra_l = 0d0
+          do ispin = 1, system%nspin
           !$omp parallel do private(ik,ib1,ib2,deigen) collapse(2) reduction(+:sigma_l,sigma_intra_l)
           do ik=ik_s,ik_e
          !do ib1=1,nb
@@ -511,15 +575,16 @@ contains
                 if(ib2==ib1) cycle
                 deigen = energy%esp(ib1,ik,ispin) - energy%esp(ib2,ik,ispin)
                 sigma_l = sigma_l + (zi/(w*V))* system%rocc(ib1,ik,ispin)*   &
-                     & ( matrix_vij(ib1,ib2,mu,ik) * matrix_vji(ib2,ib1,nu,ik) / ( w + deigen + zi*delta ) &
-                     & + matrix_vji(ib2,ib1,mu,ik) * matrix_vij(ib1,ib2,nu,ik) / (-w + deigen - zi*delta ) )
+                     & ( matrix_vij(ispin,ib1,ib2,mu,ik) * matrix_vji(ispin,ib2,ib1,nu,ik) / ( w + deigen + zi*delta ) &
+                     & + matrix_vji(ispin,ib2,ib1,mu,ik) * matrix_vij(ispin,ib1,ib2,nu,ik) / (-w + deigen - zi*delta ) )
                 sigma_intra_l = sigma_intra_l + (zi/(w*V))* system%rocc(ib1,ik,ispin)*   &
-                     & ( matrix_vij(ib1,ib2,mu,ik) * matrix_vji(ib2,ib1,nu,ik) / deigen &
-                     & + matrix_vji(ib2,ib1,mu,ik) * matrix_vij(ib1,ib2,nu,ik) / deigen )
+                     & ( matrix_vij(ispin,ib1,ib2,mu,ik) * matrix_vji(ispin,ib2,ib1,nu,ik) / deigen &
+                     & + matrix_vji(ispin,ib2,ib1,mu,ik) * matrix_vij(ispin,ib1,ib2,nu,ik) / deigen )
              end do
           end do
           end do
           !$omp end parallel do
+          end do !ispin
           call comm_summation(sigma_l,      sigma,       info%icomm_ko)
           call comm_summation(sigma_intra_l,sigma_intra, info%icomm_ko)
          !call comm_summation(sigma_l,      sigma,       info%icomm_k)

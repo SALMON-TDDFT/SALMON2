@@ -501,6 +501,7 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
+      & yn_out_tm_bin, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
       & out_gs_sgm_eps_width, &
@@ -927,6 +928,7 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
+    yn_out_tm_bin       = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
     out_gs_sgm_eps_mu_nu(2) = 3
@@ -1542,6 +1544,7 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(yn_out_tm_bin       ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_width,nproc_group_global)
@@ -2456,6 +2459,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
