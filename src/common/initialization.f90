@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile,unfold)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_rgrid,method_poisson
@@ -44,12 +44,13 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   type(s_poisson)          :: poisson
   type(s_sendrecv_grid)    :: srg,srg_scalar
   type(s_ofile)            :: ofile
+  type(s_unfold)           :: unfold
   !
   integer,dimension(2,3) :: neig
   call nvtxStartRange('init_dft', __LINE__)
 
 ! electron system
-  call init_dft_system(lg,system,stencil)
+  call init_dft_system(lg,system,stencil,unfold)
 
 ! process distribution
   info%npk       = nproc_k
@@ -98,7 +99,7 @@ end subroutine init_dft
 
 !===================================================================================================================================
 
-subroutine init_dft_system(lg,system,stencil)
+subroutine init_dft_system(lg,system,stencil,unfold)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
@@ -111,6 +112,7 @@ subroutine init_dft_system(lg,system,stencil)
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
   type(s_stencil)    :: stencil
+  type(s_unfold)     :: unfold
   !
   integer :: ii,jj
   real(8) :: rsize(3),hgs(3),cnmat(0:12,12),bnmat(4,4)
@@ -155,7 +157,7 @@ subroutine init_dft_system(lg,system,stencil)
 
   call init_lattice(system,stencil)
   call init_sym_sub( system%primitive_a, system%primitive_b )
-  call init_kvector(num_kgrid,system)
+  call init_kvector(system,unfold)
 
   if(calc_mode=='RT') then
     system%if_real_orbital = .false.

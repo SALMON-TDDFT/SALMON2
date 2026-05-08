@@ -77,6 +77,7 @@ type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 type(s_opt) :: opt
 type(s_dcdft) :: dc
+type(s_unfold) :: unfold
 
 logical :: rion_update
 logical :: flag_opt_conv
@@ -104,7 +105,7 @@ call timer_begin(LOG_INIT_GS)
 
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl,unfold)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &

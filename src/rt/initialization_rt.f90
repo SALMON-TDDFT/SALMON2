@@ -29,7 +29,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn  )
+                     pp, ppg, ppn, unfold  )
   use inputoutput
   use math_constants, only: pi, zi
   use structures
@@ -40,6 +40,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
                        init_projection,write_rt_spin,write_current_decomposed
+  use dm_unfold_sub, only: init_dm_unfold
   use code_optimization
   use initialization_sub
   use prep_pp_sub
@@ -90,6 +91,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
   type(s_ofile) :: ofile
+  type(s_unfold) :: unfold
   
   integer :: iob, i1,iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
@@ -194,7 +196,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   call nvtxStartRange('READ_GS_DATA', __LINE__)
   
-  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile,unfold)
   
   call init_code_optimization
   
@@ -307,9 +309,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end if
   
   call nvtxEndRange
+
+   if(dm_unfold_option == 'super') then
+    call init_dm_unfold(lg,system,info,ofl,unfold)
+  end if
+
   call timer_end(LOG_READ_GS_DATA)
-
-
 
   select case(iperiodic)
   case(0) 

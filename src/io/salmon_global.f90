@@ -449,4 +449,16 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
 
+  !! &unfolding
+  character(256) :: dm_unfold_option
+  integer        :: num_lkgrid(3)
+  integer        :: num_skgrid(3)
+  integer        :: no_pr
+  integer        :: out_dm_unfold_step
+  character(1)   :: yn_out_mom_distr_gs
+  character(1)   :: yn_out_mom_distr_rt
+  integer        :: out_mom_distr_rt_step
+  integer        :: nq_mom
+  real(8)        :: dq_mom
+
 end module salmon_global

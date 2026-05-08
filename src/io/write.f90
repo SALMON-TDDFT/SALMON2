@@ -125,6 +125,9 @@ contains
     integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
+    integer :: icomm, iopen_flag, minfo, mfile, ierr, n_count, source_type, file_type
+    integer :: gsize(4), lsize(4), lstart(4)
+    integer(kind=MPI_OFFSET_KIND) :: disp, block_size, base_vnl
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:,:),upu_l(:,:,:,:,:)
     complex(8),allocatable :: upu_all(:,:,:,:,:),upu_all_l(:,:,:,:,:)
@@ -138,10 +141,6 @@ contains
     character(256) :: iofile
     !(for printing dielectric function)
     integer :: mu,nu,iw,nomega
-    integer :: icomm, iopen_flag, minfo, mfile
-    integer :: source_type, local_type, global_type
-    integer :: ierr
-    integer :: gsize5(5), lsize5(5), lstart5(5)
     real(8) :: w, omega_max, domega, delta, delta_munu, n_e, V, deigen
     complex(8),allocatable :: matrix_vij(:,:,:,:,:), matrix_vji(:,:,:,:,:)
     complex(8),allocatable :: mat_l(:,:), mat(:,:)
@@ -164,24 +163,6 @@ contains
     !   nenergy         != # of eneryg(omega) point
     !   de              != dw
 
-
-
-
-    if(info%im_s/=1 .or. info%im_e/=1) then!??????
-      write(*,*) "error @ write_tm_data: im/=1"
-      return
-    endif
-!    if(system%Nspin/=1) then!??????
-!      write(*,*) "error @ write_tm_data: nspin/=1"
-!      return
-!    endif
-    !if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
-    !  if (comm_is_root(nproc_id_global)) then
-    !    write(*,*) "error @ write_tm_data: do not use orbital parallelization"
-    !    write(*,*) "Only <u|p|u> is printed (pseudopotential terms are not printed)"
-    !  endif
-    ! !return
-    !endif
     if(.not. allocated(tpsi%zwf)) then!??????
       write(*,*) "error @ write_tm_data: do not use real wavefunction (iperiodic=0)"
       return
@@ -191,7 +172,6 @@ contains
     write(*,*) "  calculating transition moment ....."
 
     im = 1
- !   ispin = 1
 
     NB = system%no
     NK = system%nk
@@ -265,8 +245,6 @@ contains
 
     allocate( upu(3,system%nspin,io_s:io_e,NB,ik_s:ik_e) )
     call comm_summation(upu_l,upu,3*(io_e-io_s+1)*NB*(ik_e-ik_s+1)*system%nspin,info%icomm_r)
-!    call comm_summation(upu_l,upu,3*NB*NB*(ik_e-ik_s+1),info%icomm_ro)
-!    call comm_summation(upu_l,upu,3*NB*NB*NK,info%icomm_rko)
     deallocate(upu_l)
 
     if(flag_print_tm) then
@@ -288,7 +266,6 @@ contains
        !$omp end parallel do
        end do ! ispin
        call comm_summation(upu_all_l,upu_all,3*NB*NB*NK*system%nspin,info%icomm_ko)
-!       call comm_summation(upu_all_l,upu_all,3*NB*NB*NK,info%icomm_k)
        deallocate(upu_all_l)
     endif
 
@@ -317,7 +294,6 @@ contains
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
           veik = conjg(ppg%zekr_uV(j,ilma,ik))
-         !do ib=1,NB
           do ib=io_s,io_e
              uVpsi_l(ib)    = uVpsi_l(ib)    + veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
              uVrpsi_l(1,ib) = uVrpsi_l(1,ib) + veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
@@ -329,8 +305,6 @@ contains
        uVpsi_l  = uVpsi_l * ppg%rinv_uvu(ilma)
        call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_ro)
        call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_ro)
-!       call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_r)
-!       call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_r)
 
        !$omp parallel
        !$omp do private(ib1,ib2,u_rVnl_u,u_Vnlr_u) collapse(2)
@@ -351,14 +325,9 @@ contains
     enddo  !ilma
     enddo  !ik
     end do !ispin
-   !call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*(ik_e-ik_s+1),info%icomm_o)
-   !call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_ko)
 
     !(print tm)
     if(flag_print_tm) then
-
-      if (comm_is_root(nproc_id_global)) &
-        &  write(*,*) "  printing transition moment ....."
 
        allocate( u_rVnl_Vnlr_u_all(3,system%nspin,NB,NB,NK), u_rVnl_Vnlr_u_all_l(3,system%nspin,NB,NB,NK) )
 
@@ -380,7 +349,6 @@ contains
        end do !ispin
 
        call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK*system%nspin,info%icomm_ko)
-      !call comm_summation(u_rVnl_Vnlr_u_all_l,u_rVnl_Vnlr_u_all,3*NB*NB*NK,info%icomm_k)
 
        deallocate(uVpsi_l, uVrpsi_l)
        deallocate(u_rVnl_Vnlr_u_all_l)
@@ -429,10 +397,10 @@ contains
 
     if(flag_print_tm_bin) then
 
-       file_tm_data = trim(base_directory)//'tm.bin'
+      file_tm_data = trim(base_directory)//'data_for_restart/tm.bin'
 
       if (comm_is_root(nproc_id_global)) &
-        &  write(*,*) "  printing transition moment ....."
+        &  write(*,*) "  printing transition moment (binary) ....."
 
       source_type = MPI_DOUBLE_COMPLEX
       minfo = MPI_INFO_NULL
@@ -440,40 +408,46 @@ contains
       iofile = file_tm_data
       icomm = info%icomm_ko
 
-    ! create MPI_Type (Window) of process-local tm array
-      gsize5  = [4, system%nspin, io_e - io_s + 1, NB, ik_e - ik_s + 1]
-      lsize5  = [4, system%nspin, io_e - io_s + 1, NB, ik_e - ik_s + 1]
-      lstart5 = [1, 1,            1,               1 , 1              ] - 1
+      gsize  = [3, system%nspin, NB             , NB]
+      lsize  = [3, system%nspin, io_e - io_s + 1, NB]
+      lstart = [1, 1,            io_s,            1 ] - 1
 
-      call MPI_Type_create_subarray(5, gsize5, lsize5, lstart5, MPI_ORDER_FORTRAN, source_type, local_type, ierr)
-      call MPI_Type_commit(local_type, ierr)
+      n_count = lsize(1)*lsize(2)*lsize(3)*lsize(4)
 
-    ! create MPI_Type (Window) of global tm
-      gsize5  = [4, system%no, NB,             NB, NK              ]
-      lstart5 = [1, 1,         io_s,           1 , ik_s            ] - 1
-
-      call MPI_Type_create_subarray(5, gsize5, lsize5, lstart5, MPI_ORDER_FORTRAN, source_type, global_type, ierr)
-      call MPI_Type_commit(global_type, ierr)
-
-    ! write/read file
+      call MPI_Type_create_subarray(4, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, file_type, ierr)
+      call MPI_Type_commit(file_type, ierr)
       call MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr)
-      call MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr)
 
-      call MPI_File_write_all(mfile, upu, 1, local_type, MPI_STATUS_IGNORE, ierr)
-      call MPI_File_write_all(mfile, u_rVnl_Vnlr_u, 1, local_type, MPI_STATUS_IGNORE, ierr)
+      block_size = int(3,8)*system%nspin*NB*NB*int(16,8)
+
+      do ik = ik_s, ik_e
+
+      disp = int(ik-1, MPI_OFFSET_KIND) * block_size
+
+      call MPI_File_set_view(mfile, disp, source_type, file_type, 'native', minfo, ierr)
+      call MPI_File_write_all(mfile, upu(1,1,io_s,1,ik), n_count, source_type, MPI_STATUS_IGNORE, ierr)
+
+      end do
+
+      base_vnl = int(NK,8) * block_size
+
+      do ik = ik_s, ik_e
+
+      disp = base_vnl + int(ik-1, MPI_OFFSET_KIND) * block_size
+
+      call MPI_File_set_view(mfile, disp, source_type, file_type, 'native', minfo, ierr)
+      call MPI_File_write_all(mfile, u_rVnl_Vnlr_u(1,1,io_s,1,ik), n_count, source_type, MPI_STATUS_IGNORE, ierr)
+
+      end do 
 
       call MPI_File_close(mfile, ierr) 
-      call MPI_Type_free(global_type, ierr)
-      call MPI_Type_free( local_type, ierr)
+      call MPI_Type_free(file_type, ierr)
 
     end if  !flag_print_tm_bin
 
-
     if (flag_print_eps) then
        ! taken from tm2sigma.f90 in utility directory
-!       if(system%nspin==2) then
-!          stop "printing option of dielectric function is available for nspin=1"
-!       endif
+
        if(xc.ne.'pz' .or. xc.ne.'PZ') then
           if (comm_is_root(nproc_id_global)) then
              write(*,*) "Warning for calculating :"
@@ -481,7 +455,6 @@ contains
              write(*,*) "(not well verified in the current code)"
           endif
        endif
-
 
        mu = out_gs_sgm_eps_mu_nu(1)
        nu = out_gs_sgm_eps_mu_nu(2)
@@ -587,8 +560,6 @@ contains
           end do !ispin
           call comm_summation(sigma_l,      sigma,       info%icomm_ko)
           call comm_summation(sigma_intra_l,sigma_intra, info%icomm_ko)
-         !call comm_summation(sigma_l,      sigma,       info%icomm_k)
-         !call comm_summation(sigma_intra_l,sigma_intra, info%icomm_k)
 
           sigma       = sigma       + (zi*n_e/w)* delta_munu
           sigma_intra = sigma_intra + (zi*n_e/w)* delta_munu
@@ -2700,7 +2671,5 @@ contains
     end if
     
   end subroutine write_mag_decomposed_gs
-
-!===================================================================================================================================
 
 end module write_sub

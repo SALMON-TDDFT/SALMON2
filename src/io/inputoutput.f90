@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_unfolding
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -603,6 +604,18 @@ contains
       & energy_cut, &
       & lambda_cut
 
+    namelist/unfolding/ &
+      & dm_unfold_option, &
+      & num_lkgrid, &
+      & num_skgrid, &
+      & no_pr, &
+      & out_dm_unfold_step, &
+      & yn_out_mom_distr_gs, &
+      & yn_out_mom_distr_rt, &
+      & out_mom_distr_rt_step, &
+      & nq_mom, &
+      & dq_mom
+
 !! == default for &unit ==
     unit_system='au'
 !! =======================
@@ -1025,6 +1038,17 @@ contains
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
+!! == default for &unfolding
+    dm_unfold_option = 'no'
+    num_lkgrid = 1
+    num_skgrid = 1
+    no_pr = 0
+    out_dm_unfold_step = 100
+    yn_out_mom_distr_gs = 'n'
+    yn_out_mom_distr_rt = 'n'
+    out_mom_distr_rt_step = 100
+    nq_mom = 0
+    dq_mom = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1105,6 +1129,9 @@ contains
       read(fh_namelist, nml=dc, iostat=inml_dc)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=unfolding, iostat=inml_unfolding)
+      rewind(fh_namelist)
+
       close(fh_namelist)
     end if
 
@@ -1148,6 +1175,7 @@ contains
       end do
     end if
     call string_lowercase(lattice)
+    call string_lowercase(dm_unfold_option)
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1652,6 +1680,17 @@ contains
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
+!! == bcast for unfolding
+    call comm_bcast(dm_unfold_option, nproc_group_global)
+    call comm_bcast(num_lkgrid, nproc_group_global)
+    call comm_bcast(num_skgrid, nproc_group_global)
+    call comm_bcast(no_pr, nproc_group_global)
+    call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_gs, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_rt, nproc_group_global)
+    call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
+    call comm_bcast(nq_mom, nproc_group_global)
+    call comm_bcast(dq_mom, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2613,6 +2652,22 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'unfolding', inml_unfolding
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dm_unfold_option', dm_unfold_option
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(1)', num_lkgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(2)', num_lkgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(3)', num_lkgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nq_mom', nq_mom
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dq_mom', dq_mom
       
       close(fh_variables_log)
     end if
@@ -2677,6 +2732,7 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_tm_bin)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)
@@ -2707,6 +2763,8 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
+    call yn_argument_check(yn_out_mom_distr_gs)
+    call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
