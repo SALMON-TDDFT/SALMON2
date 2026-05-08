@@ -88,6 +88,21 @@
     logical :: have_occvirt_ref
     logical, save :: occvirt_ref_mode_initialized = .false.
     logical, save :: occvirt_ref_legacy_mode = .false.
+    logical, save :: observables_env_initialized = .false.
+    logical, save :: cfg_enable_obs_charge_check = .false.
+    integer, save :: cfg_obs_charge_check_stride = 10
+    real(8), save :: cfg_obs_charge_check_tol = 1.0d-8
+    logical, save :: cfg_enable_current_block_trace = .false.
+    integer, save :: cfg_current_block_trace_stride = 20
+    integer, save :: cfg_current_block_trace_maxblocks = 0
+    logical, save :: cfg_enable_mij_audit = .false.
+    logical, save :: cfg_enable_mij_block_audit = .false.
+    integer, save :: cfg_mij_audit_stride = 50
+    integer, save :: cfg_mij_audit_topk = 10
+    integer, save :: cfg_mij_audit_max_occ = 0
+    integer, save :: cfg_mij_audit_max_emp = 0
+    integer, save :: cfg_mij_audit_dir = 3
+    real(8), save :: cfg_mij_audit_ewin = 0.0d0
     logical :: require_dense_nl
     logical :: use_spatial_A
     logical :: enable_obs_charge_check
@@ -145,58 +160,126 @@
 
     n = dg_frag%n_mat_max
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
-    enable_obs_charge_check = .false.
-    obs_charge_check_stride = 10
-    obs_charge_check_tol = 1.0d-8
     obs_charge_local = 0.0d0
     obs_charge_global = 0.0d0
     obs_charge_diff = 0.0d0
-    env_value = ''
-    call get_environment_variable("SALMON_DG_OBS_CHARGE_CHECK", env_value, length=obs_charge_check_env_len, status=obs_charge_check_env_status)
-    if (obs_charge_check_env_status == 0 .and. obs_charge_check_env_len > 0) then
-      if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
-          env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
-        enable_obs_charge_check = .true.
+
+    ! Observables are evaluated every RT step; diagnostic switches are static
+    ! process settings, so read them once and reuse the parsed values.
+    if (.not. observables_env_initialized) then
+      env_value = ''
+      call get_environment_variable("SALMON_DG_OBS_CHARGE_CHECK", env_value, length=obs_charge_check_env_len, status=obs_charge_check_env_status)
+      if (obs_charge_check_env_status == 0 .and. obs_charge_check_env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
+          cfg_enable_obs_charge_check = .true.
+        end if
       end if
-    end if
-    env_value = ''
-    call get_environment_variable("SALMON_DG_OBS_CHARGE_CHECK_STRIDE", env_value, length=obs_charge_check_env_len, status=obs_charge_check_env_status)
-    if (obs_charge_check_env_status == 0 .and. obs_charge_check_env_len > 0) then
-      read(env_value(1:obs_charge_check_env_len), *, iostat=parse_status) obs_charge_check_stride
-      if (parse_status /= 0) obs_charge_check_stride = 10
-    end if
-    if (obs_charge_check_stride < 1) obs_charge_check_stride = 1
-    env_value = ''
-    call get_environment_variable("SALMON_DG_OBS_CHARGE_CHECK_TOL", env_value, length=obs_charge_check_env_len, status=obs_charge_check_env_status)
-    if (obs_charge_check_env_status == 0 .and. obs_charge_check_env_len > 0) then
-      read(env_value(1:obs_charge_check_env_len), *, iostat=parse_status) obs_charge_check_tol
-      if (parse_status /= 0) obs_charge_check_tol = 1.0d-8
-    end if
-    enable_current_block_trace = .false.
-    current_block_trace_stride = 20
-    current_block_trace_maxblocks = 0
-    env_value = ''
-    call get_environment_variable("SALMON_DG_CURRENT_BLOCK_TRACE", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
-          env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
-        enable_current_block_trace = .true.
+      env_value = ''
+      call get_environment_variable("SALMON_DG_OBS_CHARGE_CHECK_STRIDE", env_value, length=obs_charge_check_env_len, status=obs_charge_check_env_status)
+      if (obs_charge_check_env_status == 0 .and. obs_charge_check_env_len > 0) then
+        read(env_value(1:obs_charge_check_env_len), *, iostat=parse_status) cfg_obs_charge_check_stride
+        if (parse_status /= 0) cfg_obs_charge_check_stride = 10
       end if
+      if (cfg_obs_charge_check_stride < 1) cfg_obs_charge_check_stride = 1
+      env_value = ''
+      call get_environment_variable("SALMON_DG_OBS_CHARGE_CHECK_TOL", env_value, length=obs_charge_check_env_len, status=obs_charge_check_env_status)
+      if (obs_charge_check_env_status == 0 .and. obs_charge_check_env_len > 0) then
+        read(env_value(1:obs_charge_check_env_len), *, iostat=parse_status) cfg_obs_charge_check_tol
+        if (parse_status /= 0) cfg_obs_charge_check_tol = 1.0d-8
+      end if
+
+      env_value = ''
+      call get_environment_variable("SALMON_DG_CURRENT_BLOCK_TRACE", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
+          cfg_enable_current_block_trace = .true.
+        end if
+      end if
+      env_value = ''
+      call get_environment_variable("SALMON_DG_CURRENT_BLOCK_TRACE_STRIDE", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_current_block_trace_stride
+        if (parse_status /= 0) cfg_current_block_trace_stride = 20
+      end if
+      if (cfg_current_block_trace_stride < 1) cfg_current_block_trace_stride = 1
+      env_value = ''
+      call get_environment_variable("SALMON_DG_CURRENT_BLOCK_TRACE_MAXBLOCKS", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_current_block_trace_maxblocks
+        if (parse_status /= 0) cfg_current_block_trace_maxblocks = 0
+      end if
+      if (cfg_current_block_trace_maxblocks < 0) cfg_current_block_trace_maxblocks = 0
+
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
+          cfg_enable_mij_audit = .true.
+        end if
+      end if
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_BLOCK_AUDIT", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
+          cfg_enable_mij_block_audit = .true.
+        end if
+      end if
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT_STRIDE", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_mij_audit_stride
+        if (parse_status /= 0) cfg_mij_audit_stride = 50
+      end if
+      if (cfg_mij_audit_stride < 1) cfg_mij_audit_stride = 1
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT_TOPK", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_mij_audit_topk
+        if (parse_status /= 0) cfg_mij_audit_topk = 10
+      end if
+      if (cfg_mij_audit_topk < 1) cfg_mij_audit_topk = 1
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT_MAX_OCC", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_mij_audit_max_occ
+        if (parse_status /= 0) cfg_mij_audit_max_occ = 0
+      end if
+      if (cfg_mij_audit_max_occ < 0) cfg_mij_audit_max_occ = 0
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT_MAX_EMP", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_mij_audit_max_emp
+        if (parse_status /= 0) cfg_mij_audit_max_emp = 0
+      end if
+      if (cfg_mij_audit_max_emp < 0) cfg_mij_audit_max_emp = 0
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT_DIR", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_mij_audit_dir
+        if (parse_status /= 0) cfg_mij_audit_dir = 3
+      end if
+      if (cfg_mij_audit_dir < 1 .or. cfg_mij_audit_dir > 3) cfg_mij_audit_dir = 3
+      env_value = ''
+      call get_environment_variable("SALMON_DG_MIJ_AUDIT_EWIN", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_mij_audit_ewin
+        if (parse_status /= 0) cfg_mij_audit_ewin = 0.0d0
+      end if
+      if (cfg_mij_audit_ewin < 0.0d0) cfg_mij_audit_ewin = 0.0d0
+
+      observables_env_initialized = .true.
     end if
-    env_value = ''
-    call get_environment_variable("SALMON_DG_CURRENT_BLOCK_TRACE_STRIDE", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) current_block_trace_stride
-      if (parse_status /= 0) current_block_trace_stride = 20
-    end if
-    if (current_block_trace_stride < 1) current_block_trace_stride = 1
-    env_value = ''
-    call get_environment_variable("SALMON_DG_CURRENT_BLOCK_TRACE_MAXBLOCKS", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) current_block_trace_maxblocks
-      if (parse_status /= 0) current_block_trace_maxblocks = 0
-    end if
-    if (current_block_trace_maxblocks < 0) current_block_trace_maxblocks = 0
+
+    enable_obs_charge_check = cfg_enable_obs_charge_check
+    obs_charge_check_stride = cfg_obs_charge_check_stride
+    obs_charge_check_tol = cfg_obs_charge_check_tol
+    enable_current_block_trace = cfg_enable_current_block_trace
+    current_block_trace_stride = cfg_current_block_trace_stride
+    current_block_trace_maxblocks = cfg_current_block_trace_maxblocks
     do_current_block_trace = enable_current_block_trace .and. allocated(dg_frag%momentum_blocks) .and. &
       (itt == 1 .or. mod(itt, current_block_trace_stride) == 0)
 
@@ -215,72 +298,14 @@
       occvirt_ref_mode_initialized = .true.
     end if
 
-    enable_mij_audit = .false.
-    enable_mij_block_audit = .false.
-    mij_audit_stride = 50
-    mij_audit_topk = 10
-    mij_audit_max_occ = 0
-    mij_audit_max_emp = 0
-    mij_audit_dir = 3
-    mij_audit_ewin = 0.0d0
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
-          env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
-        enable_mij_audit = .true.
-      end if
-    end if
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_BLOCK_AUDIT", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
-          env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
-        enable_mij_block_audit = .true.
-      end if
-    end if
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT_STRIDE", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) mij_audit_stride
-      if (parse_status /= 0) mij_audit_stride = 50
-    end if
-    if (mij_audit_stride < 1) mij_audit_stride = 1
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT_TOPK", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) mij_audit_topk
-      if (parse_status /= 0) mij_audit_topk = 10
-    end if
-    if (mij_audit_topk < 1) mij_audit_topk = 1
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT_MAX_OCC", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) mij_audit_max_occ
-      if (parse_status /= 0) mij_audit_max_occ = 0
-    end if
-    if (mij_audit_max_occ < 0) mij_audit_max_occ = 0
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT_MAX_EMP", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) mij_audit_max_emp
-      if (parse_status /= 0) mij_audit_max_emp = 0
-    end if
-    if (mij_audit_max_emp < 0) mij_audit_max_emp = 0
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT_DIR", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) mij_audit_dir
-      if (parse_status /= 0) mij_audit_dir = 3
-    end if
-    if (mij_audit_dir < 1 .or. mij_audit_dir > 3) mij_audit_dir = 3
-    env_value = ''
-    call get_environment_variable("SALMON_DG_MIJ_AUDIT_EWIN", env_value, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_value(1:env_len), *, iostat=parse_status) mij_audit_ewin
-      if (parse_status /= 0) mij_audit_ewin = 0.0d0
-    end if
-    if (mij_audit_ewin < 0.0d0) mij_audit_ewin = 0.0d0
+    enable_mij_audit = cfg_enable_mij_audit
+    enable_mij_block_audit = cfg_enable_mij_block_audit
+    mij_audit_stride = cfg_mij_audit_stride
+    mij_audit_topk = cfg_mij_audit_topk
+    mij_audit_max_occ = cfg_mij_audit_max_occ
+    mij_audit_max_emp = cfg_mij_audit_max_emp
+    mij_audit_dir = cfg_mij_audit_dir
+    mij_audit_ewin = cfg_mij_audit_ewin
 
     do_mij_audit = enable_mij_audit .and. (dg_frag%id == 0) .and. &
       (itt == 1 .or. mod(itt, mij_audit_stride) == 0)
@@ -1135,8 +1160,8 @@
     else
       nelec_ref = dble(sum(max(0, dg_frag%nocc_spin(1:dg_frag%nspin))))
     end if
-    if (system%ngrid > 0) then
-      ne_density = nelec_ref / dble(system%ngrid)
+    if (system%ngrid > 0 .and. system%hvol > 0.0d0) then
+      ne_density = nelec_ref / (dble(system%ngrid) * system%hvol)
     else
       ne_density = 0.0d0
     end if
@@ -1149,8 +1174,8 @@
     end if
     dg_frag%rho_drift_indicator = dg_frag%elec_num_raw - dg_frag%elec_num_raw_t0
     
-    ! Store in rt structure for output
-    rt%curr(:, itt) = dg_frag%current(:)
+    ! Store in rt structure for output (J_total = J_para + J_dia to match standard periodic SALMON)
+    rt%curr(:, itt) = dg_frag%current_total(:)
     
   end subroutine calculate_observables
 
@@ -1173,13 +1198,16 @@
     real(8), intent(out) :: V_total(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
     integer :: ix, iy, iz
 
+!$omp parallel do collapse(2) private(ix,iy,iz)
     do iz = grid%is(3), grid%ie(3)
       do iy = grid%is(2), grid%ie(2)
+!$omp simd
         do ix = grid%is(1), grid%ie(1)
           V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh%f(ix, iy, iz) + Vxc_spin%f(ix, iy, iz)
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine build_total_potential_grid_local
 
   integer function map_global_to_phi_box_coord_obs(ig, lb, ub, lgtot) result(iloc)

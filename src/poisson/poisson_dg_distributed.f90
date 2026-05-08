@@ -96,7 +96,7 @@ contains
       call print_scalar_contract_stats('DG-HARTREE-rho-in', lg, mg, info, rho)
     end if
 
-    if (dg_frag%id == 0) then
+    if (enable_contract_trace .and. dg_frag%id == 0) then
       write(*,'(1x,a,4(a,i0))') "        hartree trace: using-parent-localrho-main", &
         " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
       flush(6)

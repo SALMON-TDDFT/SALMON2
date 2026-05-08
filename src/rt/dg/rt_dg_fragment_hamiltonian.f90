@@ -106,10 +106,12 @@
     integer :: ix, iy, iz
     integer :: gx, gy, gz
 
+!$omp parallel do collapse(2) private(ix,iy,iz,gx,gy,gz)
     do iz = dg_frag%rank_buf_lo(3), dg_frag%rank_buf_hi(3)
       gz = map_global_to_phi_box_coord_ham(iz, grid%is(3), grid%ie(3), dg_frag%lgnum_total(3))
       do iy = dg_frag%rank_buf_lo(2), dg_frag%rank_buf_hi(2)
         gy = map_global_to_phi_box_coord_ham(iy, grid%is(2), grid%ie(2), dg_frag%lgnum_total(2))
+!$omp simd
         do ix = dg_frag%rank_buf_lo(1), dg_frag%rank_buf_hi(1)
           gx = map_global_to_phi_box_coord_ham(ix, grid%is(1), grid%ie(1), dg_frag%lgnum_total(1))
           if (gx == 0 .or. gy == 0 .or. gz == 0) then
@@ -120,6 +122,7 @@
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine copy_periodic_global_scalar_to_rank_buffer
 
   integer function map_global_to_fragment_phi_box_coord_ham(dg_frag, ifrag, axis, ig, lb, ub) result(iloc)
@@ -409,6 +412,22 @@
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical, save :: reduce_trace_initialized = .false.
+    logical, save :: enable_reduce_trace = .false.
+    character(16) :: env_reduce_trace
+    integer :: env_status
+
+    if (.not. reduce_trace_initialized) then
+      env_reduce_trace = ''
+      call get_environment_variable('SALMON_DG_HMAT_REDUCE_TRACE', env_reduce_trace, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_reduce_trace)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_reduce_trace = .true.
+        end select
+      end if
+      reduce_trace_initialized = .true.
+    end if
 
     max_block_size = 0
     total_active_size = 0
@@ -439,7 +458,7 @@
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -482,7 +501,7 @@
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (enable_reduce_trace .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
@@ -527,12 +546,9 @@
     real(8) :: hvol
     real(8) :: max_p
     real(8) :: Ac_zero(3)
-    real(8) :: hmat_dense_mb, phi_frag_mb, halo_buf_mb, overlap_dense_mb, momentum_dense_mb
     real(8) :: phi_checksum_before, phi_checksum_after, phi_checksum_delta, phi_checksum_tol
     logical :: did_overlap_call
     integer :: is(3), ie(3)
-    integer(8) :: byte_count
-    integer(8) :: i_halo_chk
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
@@ -540,12 +556,8 @@
     real(8), allocatable :: partial_th(:), reduced_th(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
-    integer :: loc_s_dbg(3), loc_e_dbg(3)
     integer :: n_metric
     logical :: release_dense_fragment_ops
-    logical :: has_overlap_dbg
-    logical :: jo_edge
-    logical, parameter :: enable_hamiltonian_trace = .false.
     complex(8), allocatable :: H_metric_ref(:,:)
     
     release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
@@ -622,11 +634,6 @@
 
       call calculate_overlap_matrix(dg_frag, system, mg)
       did_overlap_call = .true.
-      if (enable_hamiltonian_trace) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
-        flush(6)
-      end if
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "        Momentum matrix calculated (for A·p coupling)"
         write(*,*) "        Overlap matrix S calculated (for generalized propagation)"
@@ -666,11 +673,6 @@
 
         call calculate_overlap_matrix(dg_frag, system, mg)
         did_overlap_call = .true.
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-overlap-return"
-          flush(6)
-        end if
       end if
     end if
 
@@ -721,73 +723,6 @@
     
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
-    hmat_dense_mb = 0.0d0
-    overlap_dense_mb = 0.0d0
-    momentum_dense_mb = 0.0d0
-    phi_frag_mb = 0.0d0
-    halo_buf_mb = 0.0d0
-    if (allocated(dg_frag%H_mat)) then
-      byte_count = int(size(dg_frag%H_mat, 1), kind=8) * int(size(dg_frag%H_mat, 2), kind=8) * &
-                   int(size(dg_frag%H_mat, 3), kind=8) * 8_8
-      hmat_dense_mb = hmat_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
-    end if
-    if (allocated(dg_frag%H_mat_kinetic)) then
-      byte_count = int(size(dg_frag%H_mat_kinetic, 1), kind=8) * int(size(dg_frag%H_mat_kinetic, 2), kind=8) * &
-                   int(size(dg_frag%H_mat_kinetic, 3), kind=8) * 8_8
-      hmat_dense_mb = hmat_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
-    end if
-    if (allocated(dg_frag%S_mat)) then
-      byte_count = int(size(dg_frag%S_mat, 1), kind=8) * int(size(dg_frag%S_mat, 2), kind=8) * &
-                   int(size(dg_frag%S_mat, 3), kind=8) * 8_8
-      overlap_dense_mb = overlap_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
-    end if
-    if (allocated(dg_frag%S_mat_prop)) then
-      byte_count = int(size(dg_frag%S_mat_prop, 1), kind=8) * int(size(dg_frag%S_mat_prop, 2), kind=8) * &
-                   int(size(dg_frag%S_mat_prop, 3), kind=8) * 8_8
-      overlap_dense_mb = overlap_dense_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
-    end if
-    if (allocated(dg_frag%momentum_mat)) then
-      byte_count = int(size(dg_frag%momentum_mat, 1), kind=8) * int(size(dg_frag%momentum_mat, 2), kind=8) * &
-                   int(size(dg_frag%momentum_mat, 3), kind=8) * int(size(dg_frag%momentum_mat, 4), kind=8) * 8_8
-      momentum_dense_mb = dble(byte_count) / (1024.0d0 * 1024.0d0)
-    end if
-    if (allocated(dg_frag%phi_frag)) then
-      byte_count = int(size(dg_frag%phi_frag, 1), kind=8) * int(size(dg_frag%phi_frag, 2), kind=8) * &
-                   int(size(dg_frag%phi_frag, 3), kind=8) * int(size(dg_frag%phi_frag, 4), kind=8) * &
-                   int(size(dg_frag%phi_frag, 5), kind=8) * 8_8
-      phi_frag_mb = dble(byte_count) / (1024.0d0 * 1024.0d0)
-    end if
-    if (allocated(dg_frag%halo)) then
-      do i_halo_chk = 1, size(dg_frag%halo)
-        if (allocated(dg_frag%halo(i_halo_chk)%buf_send)) then
-          byte_count = int(size(dg_frag%halo(i_halo_chk)%buf_send, 1), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 2), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 3), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 4), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_send, 5), kind=8) * 8_8
-          halo_buf_mb = halo_buf_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
-        end if
-        if (allocated(dg_frag%halo(i_halo_chk)%buf_recv)) then
-          byte_count = int(size(dg_frag%halo(i_halo_chk)%buf_recv, 1), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 2), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 3), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 4), kind=8) * &
-                       int(size(dg_frag%halo(i_halo_chk)%buf_recv, 5), kind=8) * 8_8
-          halo_buf_mb = halo_buf_mb + dble(byte_count) / (1024.0d0 * 1024.0d0)
-        end if
-      end do
-    end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-hmat-alloc"
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-        "        hamiltonian memory estimate: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
-        " ifrag_group=", dg_frag%ifrag_group, " n_mat_max=", dg_frag%n_mat_max, " H_dense_MB=", hmat_dense_mb, &
-        " S_dense_MB=", overlap_dense_mb, " P_dense_MB=", momentum_dense_mb, " phi_MB=", phi_frag_mb, &
-        " halo_MB=", halo_buf_mb
-      flush(6)
-    end if
-
     n_local_diag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
     if (n_local_diag > 0) then
       allocate(H_diag_blocks(n_local_diag), H_kin_diag_blocks(n_local_diag))
@@ -810,32 +745,17 @@
     end if
     
     ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-step2-halo"
-      flush(6)
-    end if
     
     hvol = system%hvol
     is = mg%is
     ie = mg%ie
     
     allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-vtotal-alloc"
-      flush(6)
-    end if
     
     ! Construct total potential: V = Vpsl + Vh + Vxc
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
       call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      if (enable_hamiltonian_trace .and. ispin == 1) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        hamiltonian stage: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-build-total-potential"
-        flush(6)
-      end if
       
       ! Loop over fragments assigned to this rank
       i_local = 0
@@ -886,35 +806,14 @@
         end if
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
         allocate(partial_th(2 * nbf_comm), reduced_th(2 * nbf_comm))
-        call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s_dbg, loc_e_dbg, has_overlap_dbg)
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian fragment begin: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " i_local=", i_local, " nbf=", nbf
-          flush(6)
-        end if
+        ! T_phi/H_phi are evaluated on this rank's parent-grid local box.  The
+        ! fragment subgroup reduction below combines those box integrals into
+        ! one full fragment-local matrix column.
         do jo = 1, nbf
-          jo_edge = (jo == 1 .or. jo == nbf)
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo begin: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, " nbf=", nbf
-            flush(6)
-          end if
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi begin: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian build_hpsi done: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
 
-          ! Calculate matrix elements with all φ_i
           partial_t(:) = 0.0d0
           partial_h(:) = 0.0d0
           !$omp parallel do private(io, ig_i)
@@ -930,23 +829,13 @@
 
           end do
           !$omp end parallel do
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian integrate done: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
           partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
           partial_th(nbf_comm + 1:2 * nbf_comm) = partial_h(1:nbf_comm)
           ! Fragment-subgroup reduction is required when parent real-space grids
-          ! are distributed across nproc_rgrid slabs.
+          ! are distributed across nproc_rgrid local boxes.
           call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
           reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
           reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
-          if (enable_hamiltonian_trace .and. jo_edge) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian reduce done: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-            flush(6)
-          end if
           if (dg_frag%is_frag_root) then
             do io = 1, nbf
               ig_i = dg_frag%index_basis(io, ifrag, ispin)
@@ -954,19 +843,9 @@
               H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
               H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
-            if (enable_hamiltonian_trace .and. jo_edge) then
-              write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian H_mat store done: rank=", dg_frag%id, &
-                " ifrag=", ifrag, " ispin=", ispin, " jo=", jo
-              flush(6)
-            end if
           end if
 
         end do  ! jo loop
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        hamiltonian jo-loop done: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin, " nbf=", nbf
-          flush(6)
-        end if
         deallocate(partial_t, partial_h, reduced_t, reduced_h)
         deallocate(partial_th, reduced_th)
         deallocate(T_phi, H_phi)
@@ -975,29 +854,11 @@
             " ifrag=", ifrag, " ispin=", ispin
           stop 1
         end if
-        if (enable_hamiltonian_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian after deallocate TH: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin
-          flush(6)
-          write(*,'(1x,a,i0,a,i0,a,i0)') "        hamiltonian fragment done: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ispin=", ispin
-          flush(6)
-        end if
           
         
       end do  ! ifrag loop
-      if (enable_hamiltonian_trace) then
-        write(*,'(1x,a,i0,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-          " ispin=", ispin, " stage=", "after-ifrag-loop"
-        flush(6)
-      end if
       
     end do  ! ispin loop
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "after-ispin-loop"
-      flush(6)
-    end if
     
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
@@ -1077,17 +938,6 @@
     call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "after-global-hmat-sum"
-      flush(6)
-    end if
-
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "after-hermiticity"
-      flush(6)
-    end if
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*) "        Kinetic and potential terms computed"
@@ -1132,11 +982,6 @@
     if (allocated(V_total)) then
       write(*,*) "[FATAL] V_total still allocated before return: rank=", dg_frag%id
       stop 1
-    end if
-    if (enable_hamiltonian_trace) then
-      write(*,'(1x,a,i0,a,a)') "        hamiltonian tail: rank=", dg_frag%id, &
-        " stage=", "before-return"
-      flush(6)
     end if
     
     if (comm_is_root(dg_frag%id)) then
@@ -1289,13 +1134,16 @@
     grid_y_hi = grid%ie(2)
     grid_z_lo = grid%is(3)
     grid_z_hi = grid%ie(3)
+!$omp parallel do collapse(2) private(ix,iy,iz)
     do iz = grid_z_lo, grid_z_hi
       do iy = grid_y_lo, grid_y_hi
+!$omp simd
         do ix = grid_x_lo, grid_x_hi
           V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh%f(ix, iy, iz) + Vxc_spin%f(ix, iy, iz)
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine build_total_potential_grid
 
   subroutine build_total_potential_grid_with_buffered_hartree(grid, dg_frag, Vh_buffer, Vxc_spin, Vpsl, V_total)
@@ -1318,16 +1166,19 @@
     b_lo3 = lbound(Vh_buffer, 3)
     b_hi3 = ubound(Vh_buffer, 3)
 
+!$omp parallel do collapse(2) private(ix,iy,iz,bx,by,bz)
     do iz = grid%is(3), grid%ie(3)
       bz = map_global_to_periodic_box_coord_ham(iz, b_lo3, b_hi3)
       do iy = grid%is(2), grid%ie(2)
         by = map_global_to_periodic_box_coord_ham(iy, b_lo2, b_hi2)
+!$omp simd
         do ix = grid%is(1), grid%ie(1)
           bx = map_global_to_periodic_box_coord_ham(ix, b_lo1, b_hi1)
           V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh_buffer(bx, by, bz) + Vxc_spin%f(ix, iy, iz)
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine build_total_potential_grid_with_buffered_hartree
 
   !=======================================================================
@@ -2525,7 +2376,7 @@
     end do
 
     call cpu_time(t0)
-    ! Ranks can hold partial real-space slabs; always reduce over fragment subgroup.
+    ! Ranks can hold partial real-space boxes; always reduce over fragment subgroup.
     call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then

@@ -325,7 +325,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   if (comm_is_root(nproc_id_global) .and. iperiodic == 3) then
     fh_dg_current_decomp = open_filehandle(trim(base_directory)//trim(SYSname)//'_dg_current_decomp.data')
     write(fh_dg_current_decomp,'(a)') '# DG current decomposition diagnostics (a.u.)'
-    write(fh_dg_current_decomp,'(a)') '# J_total = J_para + J_dia, J_dia = -(Ne_raw/ngrid) * Ac_tot'
+    write(fh_dg_current_decomp,'(a)') '# J_total = J_para + J_dia, J_dia = -(Ne_raw/(ngrid*hvol)) * Ac_tot'
     write(fh_dg_current_decomp,'(a)') '# rho_drift = elec_num_raw(t) - elec_num_raw(t0) (same-convention time drift)'
     write(fh_dg_current_decomp,'(a)') '# convention_gap = elec_num_scaled - elec_num_raw (diagnostic only; not a time-drift metric)'
     write(fh_dg_current_decomp,'(a)') '# rho_ff/rho_fp/rho_pp = coefficient-space electron count split with overlap metric'
@@ -354,7 +354,13 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     end if
     
     ! Reconstruct the DFT total energy from the DG one-body expectation.
-    call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
+    ! Gate the expensive MPI reductions to the energy-output stride to avoid
+    ! O(nt) collective-communication overhead at every timestep.
+    if (itt == 1 .or. mod(itt, out_rt_energy_step) == 0 .or. itt == nt) then
+      call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
+    end if
+    energy%E_kin     = dg_frag%energy_kinetic
+    energy%E_ion_nloc = dg_frag%energy_nonlocal
     energy%elec_num = dg_frag%elec_num_scaled
     energy%elec_num_raw = dg_frag%elec_num_raw
     energy%pw_weight_raw = dg_frag%pw_weight_raw

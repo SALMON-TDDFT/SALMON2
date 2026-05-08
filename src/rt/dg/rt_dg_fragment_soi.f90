@@ -1612,6 +1612,10 @@ contains
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
     if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
     if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
+    if (allocated(dg_frag%density_grid_bx)) deallocate(dg_frag%density_grid_bx)
+    if (allocated(dg_frag%density_grid_by)) deallocate(dg_frag%density_grid_by)
+    if (allocated(dg_frag%density_grid_bz)) deallocate(dg_frag%density_grid_bz)
+    dg_frag%density_rhobf_box_cache_valid = .false.
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
@@ -1627,6 +1631,14 @@ contains
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
+    if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
+    if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
+    dg_frag%density_phi_block_size = 0
+    dg_frag%density_phi_block_cache_valid = .false.
+    if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
+    dg_frag%density_phase_block_size = 0
+    dg_frag%density_phase_block_npw = 0
+    dg_frag%density_phase_block_cache_valid = .false.
     if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
     if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%density_recv_map)) then
@@ -1634,6 +1646,9 @@ contains
         if (allocated(dg_frag%density_recv_map(i)%ixg)) deallocate(dg_frag%density_recv_map(i)%ixg)
         if (allocated(dg_frag%density_recv_map(i)%iyg)) deallocate(dg_frag%density_recv_map(i)%iyg)
         if (allocated(dg_frag%density_recv_map(i)%izg)) deallocate(dg_frag%density_recv_map(i)%izg)
+        if (allocated(dg_frag%density_recv_map(i)%bx)) deallocate(dg_frag%density_recv_map(i)%bx)
+        if (allocated(dg_frag%density_recv_map(i)%by)) deallocate(dg_frag%density_recv_map(i)%by)
+        if (allocated(dg_frag%density_recv_map(i)%bz)) deallocate(dg_frag%density_recv_map(i)%bz)
       end do
       deallocate(dg_frag%density_recv_map)
     end if

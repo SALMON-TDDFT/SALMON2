@@ -131,7 +131,7 @@
 
             ! Store kinetic part.
             ! The work domain is clipped to mg%is:mg%ie, so each rank can carry
-            ! a distinct slab contribution when nproc_rgrid > 1.
+            ! a distinct local-box contribution when nproc_rgrid > 1.
             dg_frag%H_mat_kinetic(ig_i, ig_j, ispin) = real(integral_t, kind=8)
             call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, H_phi, hvol, integral_h)
             dg_frag%H_mat(ig_i, ig_j, ispin) = real(integral_h, kind=8)
@@ -292,13 +292,16 @@
     grid_y_hi = grid%ie(2)
     grid_z_lo = grid%is(3)
     grid_z_hi = grid%ie(3)
+!$omp parallel do collapse(2) private(ix,iy,iz)
     do iz = grid_z_lo, grid_z_hi
       do iy = grid_y_lo, grid_y_hi
+!$omp simd
         do ix = grid_x_lo, grid_x_hi
           V_total(ix, iy, iz) = Vpsl%f(ix, iy, iz) + Vh%f(ix, iy, iz) + Vxc_spin%f(ix, iy, iz)
         end do
       end do
     end do
+!$omp end parallel do
   end subroutine build_total_potential_grid
 
   !=======================================================================
@@ -727,6 +730,9 @@
         i_local = i_local + 1
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        ! Integrate only the part of the fragment that overlaps this rank's
+        ! parent-grid local box.  The block reduction below assembles the complete
+        ! momentum matrix, avoiding duplicate full-domain sums in orbital mode.
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
         if (.not. has_overlap) cycle
         phi_loc_s(:) = iorg(:) + loc_s(:) - 1
@@ -806,7 +812,7 @@
               end if
               
               ! Store in global momentum matrix.
-              ! In distributed parent-grid runs each rank may hold a unique slab;
+              ! In distributed parent-grid runs each rank may hold a unique box;
               ! dropping non-root writes would lose valid contributions.
               dg_frag%momentum_mat_c(idir, ig_i, ig_j, ispin) = integral
               
@@ -1919,6 +1925,9 @@
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         nbf_local = dg_frag%n_basis(ifrag, ispin)
         if (nbf_local <= 0) cycle
+        ! S uses the same box ownership as H and momentum.  Each rank
+        ! integrates its local real-space box, then the block reduction below
+        ! reconstructs the full fragment overlap matrix.
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
         if (.not. has_overlap) cycle
 
@@ -2000,6 +2009,9 @@
     icomm_reduce = dg_frag%icomm
     if (dg_frag%icomm_frag /= COMM_GROUP_NULL) icomm_reduce = dg_frag%icomm_frag
 
+    ! Reduce complex S through compact blocks.  Non-SOI and SOI must share this
+    ! ownership rule: box contributions are summed, while orbital ranks retain
+    ! the replicated reduced matrix for propagation.
     call init_complex_matrix_blocks(dg_frag, S_blocks_re, S_blocks_im, S_block_map_local, n_blocks)
     call sync_complex_dense_matrix_to_blocks(dg_frag, dg_frag%S_mat_c, S_blocks_re, S_blocks_im, S_block_map_local)
     call reduce_complex_matrix_blocks(dg_frag, S_blocks_re, S_blocks_im, "smat-soi", icomm_reduce)

@@ -3,7 +3,7 @@
     use salmon_global, only: nelec, nelec_spin
     use communication, only: comm_summation, comm_bcast, comm_alltoallv, comm_send, comm_recv, COMM_GROUP_NULL
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache, gather_full_coef_view, copy_overlap_operator_to_dense, &
-      apply_overlap_operator_batch, capture_occmap_pair_snapshot
+      apply_overlap_operator_batch
     use rt_dg_fragment_types, only: density_grid_point_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -19,7 +19,7 @@
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), ifrag_count, ngrid_max
     integer :: nocc_spin, nocc_cache
-    integer :: irank, slot, npts, idx_local, idx_remote
+    integer :: irank, slot, npts, idx_local, idx_remote, point_idx
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count
     integer :: igrid0, igrid, ngrid, npt_blk, io0, io1, nbatch, nstate, ipw0, npw_blk
     integer :: total_send_pts, subgroup_root_rank, block_idx_global
@@ -51,15 +51,19 @@
     real(8) :: time_project_grid_prep, time_project_phi_pack, time_project_overhead
     real(8) :: time_project_dmat_build
     real(8) :: t_dmat0, t_dmat1
-    real(8) :: time_cache_pw_refresh, time_cache_phi_block_refresh
+    real(8) :: time_cache_pw_refresh, time_cache_phi_block_refresh, time_cache_phase_block_refresh
     logical :: use_mixed_density
-    logical :: enable_density_phi_block_cache
-    logical :: enable_density_stage_contrib_trace
-    logical :: enable_density_state_charge_trace
-    logical :: rebuilt_pw_cache, rebuilt_phi_block_cache
+    logical :: enable_density_phi_block_cache, enable_density_phase_block_cache
+    logical, parameter :: enable_density_stage_contrib_trace = .false.
+    logical, parameter :: enable_density_state_charge_trace = .false.
+    logical :: rebuilt_pw_cache, rebuilt_phi_block_cache, rebuilt_phase_block_cache
     logical :: need_pw_cache_alloc, need_pw_cache_expand
     logical :: need_phi_cache_alloc, need_phi_count_alloc, need_phi_cache_invalid, need_phi_cache_resize
+    logical :: need_phase_cache_alloc, need_phase_cache_invalid, need_phase_cache_resize, need_phase_cache_npw
+    logical :: need_rhobf_box_cache
+    logical :: env_phi_block_cache_seen, env_phase_block_cache_seen
     integer, allocatable :: ix_buf(:), iy_buf(:), iz_buf(:), owner_buf(:), ixg_buf(:), iyg_buf(:), izg_buf(:)
+    integer, allocatable :: rhobf_bx_buf(:), rhobf_by_buf(:), rhobf_bz_buf(:)
     integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     integer, allocatable :: basis_gid_spin(:,:), valid_basis_ids_spin(:,:), valid_basis_count_spin(:)
@@ -71,8 +75,6 @@
     real(8), allocatable :: basis_frag_metric_total(:,:,:,:)
     type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
     integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
-    integer, allocatable :: send_total_local_by_rank(:), recv_total_local_by_rank(:)
-    integer, allocatable :: send_total_all_ranks(:), recv_total_all_ranks(:)
     real(8), allocatable :: send_flat(:), recv_flat(:)
     real(8), allocatable :: rho_bf(:,:,:), rho_s_bf(:,:,:,:)
     real(8), allocatable :: rho_rank_buf(:,:,:,:), send_rank_buf(:,:,:,:)
@@ -99,7 +101,7 @@
     complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
     real(8) :: time_project_rho_reduce, time_project_phi_block_build
     real(8) :: D_partial_trace
-    integer :: io_s_frag, io_e_frag, nocc_loc, nocc_per_rank_loc
+    integer :: io_s_frag, io_e_frag, io_loc, nocc_loc, nocc_mix_cols, nocc_per_rank_loc
     integer :: nblocks_max, block_cache_idx, npt_cache, rem_xy
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: phi_lg1, phi_lg2, phi_lg3
@@ -107,7 +109,7 @@
     integer :: rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi
     integer :: rho_s_x_lo, rho_s_x_hi, rho_s_y_lo, rho_s_y_hi, rho_s_z_lo, rho_s_z_hi
     complex(8), allocatable :: phase_cache(:,:), coef_pw_blk(:,:), pw_tmp_z(:,:)
-    complex(8), allocatable :: density_mix(:,:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
+    complex(8), allocatable :: density_mix(:,:,:), density_mix_partial(:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: basis_mix_blk_t(:,:), density_mix_tmp_t(:,:)
     complex(8), allocatable :: transform_frag_spin(:,:,:), transform_pw_spin(:,:,:)
     complex(8), allocatable :: mix_transform_spin(:,:), mix_overlap_spin(:,:), s_mix(:,:), s_mix_work(:,:)
@@ -147,24 +149,12 @@
     real(8) :: g211_re_line, g211_im_line, rho_val
     real(8), allocatable :: g211_cos_x(:), g211_sin_x(:)
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
-    character(32) :: env_phi_block_cache
-    character(32) :: env_stage_trace, env_state_trace
-    character(32) :: env_point_dup_audit
-    character(32) :: env_weight_path_trace
-    character(32) :: env_state_rhobf_trace
-    character(32) :: env_state_rhobf_io
-    character(32) :: env_state_rhobf_spin
-    character(32) :: env_owned_path_mode
-    character(32) :: env_owned_path_scale
-    character(32) :: env_imported_unpack_mode
-    character(32) :: env_imported_unpack_scale
+    character(32) :: env_phi_block_cache, env_phase_block_cache
     character(32) :: env_rho_mix_mode
     character(32) :: env_rho_mix_trace
     character(32) :: env_rho_mix_raw_trace
     character(32) :: env_rho_mix_grid_compare
-    character(96) :: env_point_probe
     integer :: env_status
-    integer :: env_probe_status
     integer :: rho_mix_mode_kind
     integer :: info_lapack
     integer :: itt_tag
@@ -192,7 +182,6 @@
     real(8) :: probe_import_send_apply_count_local, probe_import_send_apply_count_global
     real(8) :: probe_import_unpack_apply_count_local, probe_import_unpack_apply_count_global
     real(8) :: probe_import_unpack_weight_sum_local, probe_import_unpack_weight_sum_global
-    real(8) :: imported_unpack_norm_trigger_local, imported_unpack_norm_trigger_global
     real(8) :: state_rhobf_psi2_q_local, state_rhobf_psi2_q_global
     real(8) :: state_rhobf_psi2_occ_q_local, state_rhobf_psi2_occ_q_global
     real(8) :: state_rhobf_psi2_dv_q_local, state_rhobf_psi2_dv_q_global
@@ -201,12 +190,10 @@
     real(8) :: state_rhobf_psi2_after_slot_q_local, state_rhobf_psi2_after_slot_q_global
     real(8) :: state_rhobf_psi2_after_any_norm_q_local, state_rhobf_psi2_after_any_norm_q_global
     real(8) :: state_rhobf_state_total_q
-    logical :: enable_owned_path_normalized
-    logical :: enable_state_rhobf_trace
-    logical :: enable_density_point_dup_audit
-    logical :: enable_density_weight_path_trace
-    logical :: enable_imported_unpack_normalized
-    logical :: has_density_point_probe
+    logical, parameter :: enable_state_rhobf_trace = .false.
+    logical, parameter :: enable_density_point_dup_audit = .false.
+    logical, parameter :: enable_density_weight_path_trace = .false.
+    logical, parameter :: has_density_point_probe = .false.
     logical :: found_duplicate_point_local
     integer :: probe_ixg, probe_iyg, probe_izg
     integer :: dup_ixg_local, dup_iyg_local, dup_izg_local
@@ -216,9 +203,6 @@
     integer :: dup_ixg_global, dup_iyg_global, dup_izg_global
     integer :: dup_src_global, dup_tgt_global, dup_slot_global
     real(8) :: dup_local_contrib, dup_import_contrib
-    real(8) :: imported_unpack_weight
-    real(8) :: owned_path_scale
-    real(8) :: imported_unpack_scale
     real(8) :: s_mix_dev_frob, s_mix_offdiag_frob, s_mix_diag_min, s_mix_diag_max
     real(8) :: tr_ff_probe, tr_fp_probe, tr_pp_probe, fp_frob_probe, fp_maxabs_probe
     real(8) :: trs_ff_probe, trs_fp_probe, trs_pp_probe, trs_total_probe, fp_weight_frac_probe
@@ -233,6 +217,7 @@
     logical :: enable_rho_mix_trace
     logical :: enable_rho_mix_raw_trace
     logical :: enable_rho_mix_grid_compare
+    logical :: need_full_coef_mix_spin
     logical :: enable_ifrag_compare_trace
     character(32) :: env_ifrag_compare_trace
     logical :: enable_fp_decomp_audit
@@ -244,6 +229,22 @@
     character(256) :: env_tf_occmap_itts
     character(256) :: env_tf_occmap_itts_work
     integer, parameter :: max_occmap_trace_itt = 32
+    logical, save :: density_env_initialized = .false.
+    logical, save :: cfg_env_phi_block_cache_seen = .false.
+    logical, save :: cfg_env_phase_block_cache_seen = .false.
+    logical, save :: cfg_enable_density_phi_block_cache = .false.
+    logical, save :: cfg_enable_density_phase_block_cache = .false.
+    character(32), save :: cfg_env_rho_mix_mode = 'legacy'
+    integer, save :: cfg_rho_mix_mode_kind = 0
+    logical, save :: cfg_enable_rho_mix_trace = .false.
+    logical, save :: cfg_enable_rho_mix_raw_trace = .false.
+    logical, save :: cfg_enable_rho_mix_grid_compare = .false.
+    logical, save :: cfg_enable_ifrag_compare_trace = .false.
+    logical, save :: cfg_enable_fp_decomp_audit = .false.
+    logical, save :: cfg_enable_fp_phase_fix = .false.
+    logical, save :: cfg_enable_tf_occmap_only = .false.
+    integer, save :: cfg_n_occmap_trace_itt = 0
+    integer, save :: cfg_occmap_trace_itts(max_occmap_trace_itt) = 0
     integer :: occmap_trace_itts(max_occmap_trace_itt), n_occmap_trace_itt
     integer :: occmap_trace_pos, occmap_trace_next, occmap_trace_val, occmap_trace_ios, occmap_trace_idx
     character(32) :: occmap_trace_tok
@@ -289,13 +290,6 @@
 
     itt_tag = -1
     if (present(itt_debug)) itt_tag = itt_debug
-    call capture_occmap_pair_snapshot(dg_frag, itt_tag, 'density_reconstruct_pre')
-
-    if (itt_tag == 1) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] ENTER_DENSITY_RECON rank=', dg_frag%id, ' itt=', itt_tag, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
 
     rho%f = 0.0d0
     do ispin = 1, system%nspin
@@ -321,6 +315,7 @@
     time_project_phi_block_build = 0.0d0
     time_cache_pw_refresh = 0.0d0
     time_cache_phi_block_refresh = 0.0d0
+    time_cache_phase_block_refresh = 0.0d0
     orbital_norm_probe_local(:) = 0.0d0
     orbital_norm_probe_total(:) = 0.0d0
     orbital_norm_frag_local(:, :) = 0.0d0
@@ -352,27 +347,13 @@
     charge_contract_residual = 0.0d0
     rebuilt_pw_cache = .false.
     rebuilt_phi_block_cache = .false.
+    rebuilt_phase_block_cache = .false.
     enable_density_phi_block_cache = .false.
-    enable_density_stage_contrib_trace = .false.
-    enable_density_state_charge_trace = .false.
-    enable_density_point_dup_audit = .false.
-    enable_density_weight_path_trace = .false.
-    enable_state_rhobf_trace = .false.
-    enable_owned_path_normalized = .false.
-    enable_imported_unpack_normalized = .false.
-    has_density_point_probe = .false.
+    enable_density_phase_block_cache = .false.
+    env_phi_block_cache_seen = .false.
+    env_phase_block_cache_seen = .false.
     env_phi_block_cache = ''
-    env_stage_trace = ''
-    env_state_trace = ''
-    env_point_dup_audit = ''
-    env_weight_path_trace = ''
-    env_state_rhobf_trace = ''
-    env_state_rhobf_io = ''
-    env_state_rhobf_spin = ''
-    env_owned_path_mode = ''
-    env_owned_path_scale = ''
-    env_imported_unpack_mode = ''
-    env_imported_unpack_scale = ''
+    env_phase_block_cache = ''
     env_rho_mix_mode = 'legacy'
     env_rho_mix_trace = ''
     env_rho_mix_raw_trace = ''
@@ -387,6 +368,7 @@
     enable_rho_mix_trace = .false.
     enable_rho_mix_raw_trace = .false.
     enable_rho_mix_grid_compare = .false.
+    need_full_coef_mix_spin = .false.
     enable_ifrag_compare_trace = .false.
     enable_fp_decomp_audit = .false.
     enable_fp_phase_fix = .false.
@@ -424,7 +406,6 @@
     cmp_trs_pp(:) = 0.0d0
     cmp_trs_tot(:) = 0.0d0
     cmp_recv_post_raw(:) = 0.0d0
-    env_point_probe = ''
     probe_ixg = 0
     probe_iyg = 0
     probe_izg = 0
@@ -474,8 +455,6 @@
     probe_import_unpack_apply_count_global = 0.0d0
     probe_import_unpack_weight_sum_local = 0.0d0
     probe_import_unpack_weight_sum_global = 0.0d0
-    imported_unpack_norm_trigger_local = 0.0d0
-    imported_unpack_norm_trigger_global = 0.0d0
     state_rhobf_psi2_q_local = 0.0d0
     state_rhobf_psi2_q_global = 0.0d0
     state_rhobf_psi2_occ_q_local = 0.0d0
@@ -493,195 +472,158 @@
     state_rhobf_state_total_q = 0.0d0
     state_rhobf_trace_io = 1
     state_rhobf_trace_spin = 1
-    owned_path_scale = 0.5d0
-    imported_unpack_scale = 0.5d0
-    call get_environment_variable('SALMON_DG_DENSITY_PHI_BLOCK_CACHE', env_phi_block_cache, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_phi_block_cache)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_density_phi_block_cache = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_DENSITY_STAGE_CONTRIB_TRACE', env_stage_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_stage_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_density_stage_contrib_trace = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_DENSITY_STATE_CHARGE_TRACE', env_state_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_state_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_density_state_charge_trace = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_DENSITY_POINT_DUP_AUDIT', env_point_dup_audit, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_point_dup_audit)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_density_point_dup_audit = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_DENSITY_WEIGHT_PATH_TRACE', env_weight_path_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_weight_path_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_density_weight_path_trace = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_STATE_RHOBF_TRACE', env_state_rhobf_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_state_rhobf_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_state_rhobf_trace = .true.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_STATE_RHOBF_IO', env_state_rhobf_io, status=env_status)
-    if (env_status == 0) then
-      read(env_state_rhobf_io, *, iostat=env_status) state_rhobf_trace_io
-      if (env_status /= 0) state_rhobf_trace_io = 1
-    end if
-    call get_environment_variable('SALMON_DG_STATE_RHOBF_SPIN', env_state_rhobf_spin, status=env_status)
-    if (env_status == 0) then
-      read(env_state_rhobf_spin, *, iostat=env_status) state_rhobf_trace_spin
-      if (env_status /= 0) state_rhobf_trace_spin = 1
-    end if
-    call get_environment_variable('SALMON_DG_OWNED_PATH_MODE', env_owned_path_mode, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_owned_path_mode)))
-      case('normalized','NORMALIZED','norm','NORM')
-        enable_owned_path_normalized = .true.
-      case default
-        enable_owned_path_normalized = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_OWNED_PATH_SCALE', env_owned_path_scale, status=env_status)
-    if (env_status == 0) then
-      read(env_owned_path_scale, *, iostat=env_status) owned_path_scale
-      if (env_status /= 0) owned_path_scale = 0.5d0
-    end if
-    call get_environment_variable('SALMON_DG_IMPORTED_UNPACK_MODE', env_imported_unpack_mode, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_imported_unpack_mode)))
-      case('normalized','NORMALIZED','norm','NORM')
-        enable_imported_unpack_normalized = .true.
-      case default
-        enable_imported_unpack_normalized = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_IMPORTED_UNPACK_SCALE', env_imported_unpack_scale, status=env_status)
-    if (env_status == 0) then
-      read(env_imported_unpack_scale, *, iostat=env_status) imported_unpack_scale
-      if (env_status /= 0) imported_unpack_scale = 0.5d0
-    end if
-    call get_environment_variable('SALMON_DG_RHO_MIX_MODE', env_rho_mix_mode, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_rho_mix_mode)))
-      case('orthonormal_cc','ORTHONORMAL_CC')
-        rho_mix_mode_kind = 1
-      case('metric_consistent','METRIC_CONSISTENT','overlap_metric','OVERLAP_METRIC')
-        rho_mix_mode_kind = 2
-      case default
-        rho_mix_mode_kind = 0
-        env_rho_mix_mode = 'legacy'
-      end select
-    else
-      env_rho_mix_mode = 'legacy'
-    end if
-    call get_environment_variable('SALMON_DG_RHO_MIX_TRACE', env_rho_mix_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_rho_mix_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_rho_mix_trace = .true.
-      end select
-    end if
-    enable_rho_mix_raw_trace = enable_rho_mix_trace
-    enable_rho_mix_grid_compare = enable_rho_mix_trace
-    call get_environment_variable('SALMON_DG_RHO_MIX_RAW_TRACE', env_rho_mix_raw_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_rho_mix_raw_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_rho_mix_raw_trace = .true.
-      case('0','n','N','no','NO','false','FALSE','off','OFF')
-        enable_rho_mix_raw_trace = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_RHO_MIX_GRID_COMPARE', env_rho_mix_grid_compare, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_rho_mix_grid_compare)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_rho_mix_grid_compare = .true.
-      case('0','n','N','no','NO','false','FALSE','off','OFF')
-        enable_rho_mix_grid_compare = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_IFRAG_COMPARE_TRACE', env_ifrag_compare_trace, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_ifrag_compare_trace)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_ifrag_compare_trace = .true.
-      case('0','n','N','no','NO','false','FALSE','off','OFF')
-        enable_ifrag_compare_trace = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_FP_DECOMP_AUDIT', env_fp_decomp_audit, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_fp_decomp_audit)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_fp_decomp_audit = .true.
-      case('0','n','N','no','NO','false','FALSE','off','OFF')
-        enable_fp_decomp_audit = .false.
-      end select
-    end if
-    if (enable_fp_decomp_audit) then
-      enable_rho_mix_raw_trace = .true.
-    end if
-    call get_environment_variable('SALMON_DG_FP_PHASE_FIX', env_fp_phase_fix, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_fp_phase_fix)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_fp_phase_fix = .true.
-      case('0','n','N','no','NO','false','FALSE','off','OFF')
-        enable_fp_phase_fix = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_TF_OCCMAP_ONLY', env_tf_occmap_only, status=env_status)
-    if (env_status == 0) then
-      select case (adjustl(trim(env_tf_occmap_only)))
-      case('1','y','Y','yes','YES','true','TRUE','on','ON')
-        enable_tf_occmap_only = .true.
-      case('0','n','N','no','NO','false','FALSE','off','OFF')
-        enable_tf_occmap_only = .false.
-      end select
-    end if
-    call get_environment_variable('SALMON_DG_TF_OCCMAP_ITTS', env_tf_occmap_itts, status=env_status)
-    if (env_status == 0) then
-      env_tf_occmap_itts_work = trim(env_tf_occmap_itts)
-      do occmap_trace_idx = 1, len_trim(env_tf_occmap_itts_work)
-        if (env_tf_occmap_itts_work(occmap_trace_idx:occmap_trace_idx) == ',') env_tf_occmap_itts_work(occmap_trace_idx:occmap_trace_idx) = ' '
-      end do
-      occmap_trace_pos = 1
-      do while (occmap_trace_pos <= len_trim(env_tf_occmap_itts_work))
-        do while (occmap_trace_pos <= len_trim(env_tf_occmap_itts_work) .and. env_tf_occmap_itts_work(occmap_trace_pos:occmap_trace_pos) == ' ')
-          occmap_trace_pos = occmap_trace_pos + 1
+    ! These switches are process-level controls.  Cache them once because this
+    ! routine is called many times per RT step in self-consistent propagation.
+    if (.not. density_env_initialized) then
+      call get_environment_variable('SALMON_DG_DENSITY_PHI_BLOCK_CACHE', env_phi_block_cache, status=env_status)
+      if (env_status == 0) then
+        cfg_env_phi_block_cache_seen = .true.
+        select case (adjustl(trim(env_phi_block_cache)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_density_phi_block_cache = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_density_phi_block_cache = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_DENSITY_PHASE_BLOCK_CACHE', env_phase_block_cache, status=env_status)
+      if (env_status == 0) then
+        cfg_env_phase_block_cache_seen = .true.
+        select case (adjustl(trim(env_phase_block_cache)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_density_phase_block_cache = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_density_phase_block_cache = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_RHO_MIX_MODE', env_rho_mix_mode, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_rho_mix_mode)))
+        case('orthonormal_cc','ORTHONORMAL_CC')
+          cfg_rho_mix_mode_kind = 1
+          cfg_env_rho_mix_mode = env_rho_mix_mode
+        case('metric_consistent','METRIC_CONSISTENT','overlap_metric','OVERLAP_METRIC')
+          cfg_rho_mix_mode_kind = 2
+          cfg_env_rho_mix_mode = env_rho_mix_mode
+        case default
+          cfg_rho_mix_mode_kind = 0
+          cfg_env_rho_mix_mode = 'legacy'
+        end select
+      else
+        cfg_env_rho_mix_mode = 'legacy'
+      end if
+      call get_environment_variable('SALMON_DG_RHO_MIX_TRACE', env_rho_mix_trace, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_rho_mix_trace)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_rho_mix_trace = .true.
+        end select
+      end if
+      cfg_enable_rho_mix_raw_trace = cfg_enable_rho_mix_trace
+      cfg_enable_rho_mix_grid_compare = cfg_enable_rho_mix_trace
+      call get_environment_variable('SALMON_DG_RHO_MIX_RAW_TRACE', env_rho_mix_raw_trace, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_rho_mix_raw_trace)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_rho_mix_raw_trace = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_rho_mix_raw_trace = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_RHO_MIX_GRID_COMPARE', env_rho_mix_grid_compare, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_rho_mix_grid_compare)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_rho_mix_grid_compare = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_rho_mix_grid_compare = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_IFRAG_COMPARE_TRACE', env_ifrag_compare_trace, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_ifrag_compare_trace)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_ifrag_compare_trace = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_ifrag_compare_trace = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_FP_DECOMP_AUDIT', env_fp_decomp_audit, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_fp_decomp_audit)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_fp_decomp_audit = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_fp_decomp_audit = .false.
+        end select
+      end if
+      if (cfg_enable_fp_decomp_audit) then
+        cfg_enable_rho_mix_raw_trace = .true.
+      end if
+      call get_environment_variable('SALMON_DG_FP_PHASE_FIX', env_fp_phase_fix, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_fp_phase_fix)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_fp_phase_fix = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_fp_phase_fix = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_TF_OCCMAP_ONLY', env_tf_occmap_only, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_tf_occmap_only)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_tf_occmap_only = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_tf_occmap_only = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_TF_OCCMAP_ITTS', env_tf_occmap_itts, status=env_status)
+      if (env_status == 0) then
+        env_tf_occmap_itts_work = trim(env_tf_occmap_itts)
+        do occmap_trace_idx = 1, len_trim(env_tf_occmap_itts_work)
+          if (env_tf_occmap_itts_work(occmap_trace_idx:occmap_trace_idx) == ',') env_tf_occmap_itts_work(occmap_trace_idx:occmap_trace_idx) = ' '
         end do
-        if (occmap_trace_pos > len_trim(env_tf_occmap_itts_work)) exit
-        occmap_trace_next = occmap_trace_pos
-        do while (occmap_trace_next <= len_trim(env_tf_occmap_itts_work) .and. env_tf_occmap_itts_work(occmap_trace_next:occmap_trace_next) /= ' ')
-          occmap_trace_next = occmap_trace_next + 1
-        end do
-        occmap_trace_tok = ''
-        occmap_trace_tok = env_tf_occmap_itts_work(occmap_trace_pos:occmap_trace_next-1)
-        read(occmap_trace_tok, *, iostat=occmap_trace_ios) occmap_trace_val
-        if (occmap_trace_ios == 0) then
-          if (n_occmap_trace_itt < max_occmap_trace_itt) then
-            n_occmap_trace_itt = n_occmap_trace_itt + 1
-            occmap_trace_itts(n_occmap_trace_itt) = occmap_trace_val
+        occmap_trace_pos = 1
+        do while (occmap_trace_pos <= len_trim(env_tf_occmap_itts_work))
+          do while (occmap_trace_pos <= len_trim(env_tf_occmap_itts_work) .and. env_tf_occmap_itts_work(occmap_trace_pos:occmap_trace_pos) == ' ')
+            occmap_trace_pos = occmap_trace_pos + 1
+          end do
+          if (occmap_trace_pos > len_trim(env_tf_occmap_itts_work)) exit
+          occmap_trace_next = occmap_trace_pos
+          do while (occmap_trace_next <= len_trim(env_tf_occmap_itts_work) .and. env_tf_occmap_itts_work(occmap_trace_next:occmap_trace_next) /= ' ')
+            occmap_trace_next = occmap_trace_next + 1
+          end do
+          occmap_trace_tok = ''
+          occmap_trace_tok = env_tf_occmap_itts_work(occmap_trace_pos:occmap_trace_next-1)
+          read(occmap_trace_tok, *, iostat=occmap_trace_ios) occmap_trace_val
+          if (occmap_trace_ios == 0) then
+            if (cfg_n_occmap_trace_itt < max_occmap_trace_itt) then
+              cfg_n_occmap_trace_itt = cfg_n_occmap_trace_itt + 1
+              cfg_occmap_trace_itts(cfg_n_occmap_trace_itt) = occmap_trace_val
+            end if
           end if
-        end if
-        occmap_trace_pos = occmap_trace_next + 1
-      end do
+          occmap_trace_pos = occmap_trace_next + 1
+        end do
+      end if
+      density_env_initialized = .true.
+    end if
+    env_phi_block_cache_seen = cfg_env_phi_block_cache_seen
+    env_phase_block_cache_seen = cfg_env_phase_block_cache_seen
+    enable_density_phi_block_cache = cfg_enable_density_phi_block_cache
+    enable_density_phase_block_cache = cfg_enable_density_phase_block_cache
+    env_rho_mix_mode = cfg_env_rho_mix_mode
+    rho_mix_mode_kind = cfg_rho_mix_mode_kind
+    enable_rho_mix_trace = cfg_enable_rho_mix_trace
+    enable_rho_mix_raw_trace = cfg_enable_rho_mix_raw_trace
+    enable_rho_mix_grid_compare = cfg_enable_rho_mix_grid_compare
+    enable_ifrag_compare_trace = cfg_enable_ifrag_compare_trace
+    enable_fp_decomp_audit = cfg_enable_fp_decomp_audit
+    enable_fp_phase_fix = cfg_enable_fp_phase_fix
+    enable_tf_occmap_only = cfg_enable_tf_occmap_only
+    n_occmap_trace_itt = cfg_n_occmap_trace_itt
+    occmap_trace_itts(:) = 0
+    if (cfg_n_occmap_trace_itt > 0) then
+      occmap_trace_itts(1:cfg_n_occmap_trace_itt) = cfg_occmap_trace_itts(1:cfg_n_occmap_trace_itt)
     end if
     if (n_occmap_trace_itt > 0) then
       trace_occmap_itt = .false.
@@ -694,17 +636,22 @@
     else
       trace_occmap_itt = (itt_tag == 1 .or. itt_tag == 4 .or. itt_tag == 8)
     end if
-    call get_environment_variable('SALMON_DG_DENSITY_POINT_PROBE', env_point_probe, status=env_probe_status)
-    if (env_probe_status == 0) then
-      read(env_point_probe, *, iostat=env_status) probe_ixg, probe_iyg, probe_izg
-      if (env_status == 0) has_density_point_probe = .true.
-    end if
+    ! Full mixed-state coefficients are only needed by diagnostics that inspect
+    ! individual occupied states.  The production density path can build local
+    ! occupied-state slices and reduce the final density matrix over icomm_frag.
+    need_full_coef_mix_spin = enable_rho_mix_trace .or. enable_rho_mix_grid_compare .or. &
+                              enable_tf_occmap_only .or. enable_fp_decomp_audit
     need_pw_cache_alloc = .false.
     need_pw_cache_expand = .false.
     need_phi_cache_alloc = .false.
     need_phi_count_alloc = .false.
     need_phi_cache_invalid = .false.
     need_phi_cache_resize = .false.
+    need_phase_cache_alloc = .false.
+    need_phase_cache_invalid = .false.
+    need_phase_cache_resize = .false.
+    need_phase_cache_npw = .false.
+    need_rhobf_box_cache = .false.
     if (enable_density_reconstruct_trace .and. dg_frag%is_frag_root) then
       write(*,'(1x,a,i0,a,i0,a,i0)') "        density trace: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " stage=entry_root root_world=", dg_frag%id - dg_frag%id_frag
@@ -745,6 +692,7 @@
 
     allocate(ix_buf(grid_block_size), iy_buf(grid_block_size), iz_buf(grid_block_size))
     allocate(owner_buf(grid_block_size), ixg_buf(grid_block_size), iyg_buf(grid_block_size), izg_buf(grid_block_size))
+    allocate(rhobf_bx_buf(grid_block_size), rhobf_by_buf(grid_block_size), rhobf_bz_buf(grid_block_size))
     allocate(slot_buf(grid_block_size), local_grid_ids(grid_block_size), remote_grid_ids(grid_block_size))
     allocate(valid_remote_grid_ids(grid_block_size))
     allocate(basis_gid(dg_frag%nstate_frag), valid_basis_ids(dg_frag%nstate_frag))
@@ -774,42 +722,6 @@
     nocc_cache = max(1, nocc_cache)
     allocate(coef_blk_re(nbf_max, state_block_size), coef_blk_im(nbf_max, state_block_size))
     allocate(psi_blk_re(grid_block_size, state_block_size), psi_blk_im(grid_block_size, state_block_size))
-    allocate(state_charge_local(max(1, nocc_cache), system%nspin))
-    allocate(state_charge_global(max(1, nocc_cache), system%nspin))
-    allocate(state_coeff_c2_local(max(1, nocc_cache), system%nspin))
-    allocate(state_coeff_c2_global(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_raw_local(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_raw_global(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_occ_local(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_occ_global(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_dv_local(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_dv_global(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_owned_local(max(1, nocc_cache), system%nspin))
-    allocate(state_psi2_owned_global(max(1, nocc_cache), system%nspin))
-    allocate(state_import_core_local(max(1, nocc_cache), system%nspin))
-    allocate(state_import_core_global(max(1, nocc_cache), system%nspin))
-    allocate(probe_state_owned_local(max(1, nocc_cache), system%nspin))
-    allocate(probe_state_owned_global(max(1, nocc_cache), system%nspin))
-    allocate(probe_state_import_local(max(1, nocc_cache), system%nspin))
-    allocate(probe_state_import_global(max(1, nocc_cache), system%nspin))
-    state_charge_local(:, :) = 0.0d0
-    state_charge_global(:, :) = 0.0d0
-    state_coeff_c2_local(:, :) = 0.0d0
-    state_coeff_c2_global(:, :) = 0.0d0
-    state_psi2_raw_local(:, :) = 0.0d0
-    state_psi2_raw_global(:, :) = 0.0d0
-    state_psi2_occ_local(:, :) = 0.0d0
-    state_psi2_occ_global(:, :) = 0.0d0
-    state_psi2_dv_local(:, :) = 0.0d0
-    state_psi2_dv_global(:, :) = 0.0d0
-    state_psi2_owned_local(:, :) = 0.0d0
-    state_psi2_owned_global(:, :) = 0.0d0
-    state_import_core_local(:, :) = 0.0d0
-    state_import_core_global(:, :) = 0.0d0
-    probe_state_owned_local(:, :) = 0.0d0
-    probe_state_owned_global(:, :) = 0.0d0
-    probe_state_import_local(:, :) = 0.0d0
-    probe_state_import_global(:, :) = 0.0d0
     allocate(coef_blk_ri(nbf_max, 2*state_block_size), psi_blk_ri(grid_block_size, 2*state_block_size))
     allocate(pw_tmp_z(grid_block_size, state_block_size))
     allocate(density_mat_re(nbf_max, nbf_max), density_tmp(grid_block_size, nbf_max))
@@ -839,11 +751,81 @@
     allocate(rho_send(0:dg_frag%isize-1))
     allocate(rho_recv(0:dg_frag%isize-1))
 
+    need_rhobf_box_cache = (.not. dg_frag%density_rhobf_box_cache_valid)
+    need_rhobf_box_cache = need_rhobf_box_cache .or. &
+      any(dg_frag%density_rhobf_box_lo /= (/ lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3) /))
+    need_rhobf_box_cache = need_rhobf_box_cache .or. &
+      any(dg_frag%density_rhobf_box_hi /= (/ ubound(rho_bf, 1), ubound(rho_bf, 2), ubound(rho_bf, 3) /))
+    need_rhobf_box_cache = need_rhobf_box_cache .or. (.not. allocated(dg_frag%density_grid_bx)) .or. &
+                            (.not. allocated(dg_frag%density_grid_by)) .or. (.not. allocated(dg_frag%density_grid_bz))
+    if (.not. need_rhobf_box_cache .and. allocated(dg_frag%density_grid_bx)) then
+      need_rhobf_box_cache = size(dg_frag%density_grid_bx, 1) /= size(dg_frag%density_grid_points, 1) .or. &
+                              size(dg_frag%density_grid_bx, 2) /= size(dg_frag%density_grid_points, 2)
+    end if
+    if (.not. need_rhobf_box_cache) then
+      do irank = 0, dg_frag%isize - 1
+        if (dg_frag%density_recv_map(irank)%npts <= 0) cycle
+        if ((.not. allocated(dg_frag%density_recv_map(irank)%bx)) .or. &
+            (.not. allocated(dg_frag%density_recv_map(irank)%by)) .or. &
+            (.not. allocated(dg_frag%density_recv_map(irank)%bz))) then
+          need_rhobf_box_cache = .true.
+          exit
+        end if
+      end do
+    end if
+    if (need_rhobf_box_cache) then
+      if (allocated(dg_frag%density_grid_bx)) deallocate(dg_frag%density_grid_bx)
+      if (allocated(dg_frag%density_grid_by)) deallocate(dg_frag%density_grid_by)
+      if (allocated(dg_frag%density_grid_bz)) deallocate(dg_frag%density_grid_bz)
+      allocate(dg_frag%density_grid_bx(size(dg_frag%density_grid_points, 1), size(dg_frag%density_grid_points, 2)))
+      allocate(dg_frag%density_grid_by(size(dg_frag%density_grid_points, 1), size(dg_frag%density_grid_points, 2)))
+      allocate(dg_frag%density_grid_bz(size(dg_frag%density_grid_points, 1), size(dg_frag%density_grid_points, 2)))
+      dg_frag%density_grid_bx(:, :) = 0
+      dg_frag%density_grid_by(:, :) = 0
+      dg_frag%density_grid_bz(:, :) = 0
+      do i_local = 1, ifrag_count
+        do point_idx = 1, dg_frag%density_grid_point_count(i_local)
+          ixg = dg_frag%density_grid_points(point_idx, i_local)%ixg
+          iyg = dg_frag%density_grid_points(point_idx, i_local)%iyg
+          izg = dg_frag%density_grid_points(point_idx, i_local)%izg
+          dg_frag%density_grid_bx(point_idx, i_local) = &
+            map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
+          dg_frag%density_grid_by(point_idx, i_local) = &
+            map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
+          dg_frag%density_grid_bz(point_idx, i_local) = &
+            map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
+        end do
+      end do
+      do irank = 0, dg_frag%isize - 1
+        npts = dg_frag%density_recv_map(irank)%npts
+        if (npts <= 0) cycle
+        if (allocated(dg_frag%density_recv_map(irank)%bx)) deallocate(dg_frag%density_recv_map(irank)%bx)
+        if (allocated(dg_frag%density_recv_map(irank)%by)) deallocate(dg_frag%density_recv_map(irank)%by)
+        if (allocated(dg_frag%density_recv_map(irank)%bz)) deallocate(dg_frag%density_recv_map(irank)%bz)
+        allocate(dg_frag%density_recv_map(irank)%bx(npts))
+        allocate(dg_frag%density_recv_map(irank)%by(npts))
+        allocate(dg_frag%density_recv_map(irank)%bz(npts))
+        do slot = 1, npts
+          dg_frag%density_recv_map(irank)%bx(slot) = map_global_to_phi_box_coord_ham( &
+            dg_frag%density_recv_map(irank)%ixg(slot), lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
+          dg_frag%density_recv_map(irank)%by(slot) = map_global_to_phi_box_coord_ham( &
+            dg_frag%density_recv_map(irank)%iyg(slot), lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
+          dg_frag%density_recv_map(irank)%bz(slot) = map_global_to_phi_box_coord_ham( &
+            dg_frag%density_recv_map(irank)%izg(slot), lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
+        end do
+      end do
+      dg_frag%density_rhobf_box_lo = (/ lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3) /)
+      dg_frag%density_rhobf_box_hi = (/ ubound(rho_bf, 1), ubound(rho_bf, 2), ubound(rho_bf, 3) /)
+      dg_frag%density_rhobf_box_cache_valid = .true.
+    end if
+
     rho%f = 0.0d0
     rho_bf(:, :, :) = 0.0d0
     rho_s_bf(:, :, :, :) = 0.0d0
     rho_blk_reduced(:) = 0.0d0
     n_pw = max(0, dg_frag%n_plane_waves)
+    if (n_pw > 0 .and. .not. env_phase_block_cache_seen) enable_density_phase_block_cache = .true.
+    if (n_pw <= 0) enable_density_phase_block_cache = .false.
     n_frag = dg_frag%n_mat_max
     allocate(cmp_ff_gid_pre(max(1, nocc_cache), max(1, n_frag), 2))
     allocate(cmp_ff_gid_post(max(1, nocc_cache), max(1, n_frag), 2))
@@ -944,8 +926,11 @@
     if (use_mixed_density) then
       allocate(density_mix(max_mixed_basis, max_mixed_basis, system%nspin))
       density_mix(:, :, :) = (0.0d0, 0.0d0)
-      allocate(coef_mix_spin(max_mixed_basis, max(1, nocc_cache), system%nspin))
-      coef_mix_spin(:, :, :) = (0.0d0, 0.0d0)
+      allocate(density_mix_partial(max_mixed_basis, max_mixed_basis))
+      if (need_full_coef_mix_spin) then
+        allocate(coef_mix_spin(max_mixed_basis, max(1, nocc_cache), system%nspin))
+        coef_mix_spin(:, :, :) = (0.0d0, 0.0d0)
+      end if
       allocate(basis_mix_blk(grid_block_size, max_mixed_basis))
       allocate(density_mix_tmp(grid_block_size, max_mixed_basis))
       allocate(basis_mix_blk_t(max_mixed_basis, grid_block_size))
@@ -997,30 +982,60 @@
           end if
         end if
 
+        nocc_per_rank_loc = (nocc_spin + max(1, dg_frag%isize_frag) - 1) / max(1, dg_frag%isize_frag)
+        io_s_frag = dg_frag%id_frag * nocc_per_rank_loc + 1
+        io_e_frag = min((dg_frag%id_frag + 1) * nocc_per_rank_loc, nocc_spin)
+        nocc_loc = max(0, io_e_frag - io_s_frag + 1)
+        nocc_mix_cols = merge(nocc_spin, nocc_loc, need_full_coef_mix_spin)
+
         if (rho_mix_mode_kind == 2 .and. allocated(s_mix)) then
-          allocate(coef_mix_metric(n_basis_mix, nocc_spin), coef_mix_eff(n_basis_mix, nocc_spin))
-          coef_mix_metric(:, :) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
-          allocate(s_mix_work(n_basis_mix, n_basis_mix), ipiv_mix(n_basis_mix))
-          s_mix_work(:, :) = s_mix(:, :)
-          call zgesv(n_basis_mix, nocc_spin, s_mix_work, n_basis_mix, ipiv_mix, coef_mix_metric, n_basis_mix, info_lapack)
-          if (info_lapack /= 0) then
-            coef_mix_eff(:, :) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
-            if (dg_frag%id == 0) then
-              write(*,'(1x,a,i0,a,i0)') ' [WARN] rho_mix metric_consistent fallback to legacy for ispin=', ispin, ' zgesv info=', info_lapack
-              flush(6)
+          allocate(coef_mix_metric(n_basis_mix, max(1, nocc_mix_cols)), coef_mix_eff(n_basis_mix, max(1, nocc_mix_cols)))
+          coef_mix_metric(:, :) = (0.0d0, 0.0d0)
+          coef_mix_eff(:, :) = (0.0d0, 0.0d0)
+          if (need_full_coef_mix_spin) then
+            coef_mix_metric(1:n_basis_mix, 1:nocc_spin) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+          else if (nocc_loc > 0) then
+            coef_mix_metric(1:n_basis_mix, 1:nocc_loc) = dg_frag%coef_mix(1:n_basis_mix, io_s_frag:io_e_frag, ispin)
+          end if
+          if (nocc_mix_cols > 0) then
+            allocate(s_mix_work(n_basis_mix, n_basis_mix), ipiv_mix(n_basis_mix))
+            s_mix_work(:, :) = s_mix(:, :)
+            call zgesv(n_basis_mix, nocc_mix_cols, s_mix_work, n_basis_mix, ipiv_mix, coef_mix_metric, n_basis_mix, info_lapack)
+            if (info_lapack /= 0) then
+              if (need_full_coef_mix_spin) then
+                coef_mix_eff(1:n_basis_mix, 1:nocc_spin) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+              else if (nocc_loc > 0) then
+                coef_mix_eff(1:n_basis_mix, 1:nocc_loc) = dg_frag%coef_mix(1:n_basis_mix, io_s_frag:io_e_frag, ispin)
+              end if
+              if (dg_frag%id == 0) then
+                write(*,'(1x,a,i0,a,i0)') ' [WARN] rho_mix metric_consistent fallback to legacy for ispin=', ispin, ' zgesv info=', info_lapack
+                flush(6)
+              end if
+            else
+              coef_mix_eff(1:n_basis_mix, 1:nocc_mix_cols) = coef_mix_metric(1:n_basis_mix, 1:nocc_mix_cols)
             end if
-          else
-            coef_mix_eff(:, :) = coef_mix_metric(:, :)
           end if
         else
-          allocate(coef_mix_eff(n_basis_mix, nocc_spin))
-          coef_mix_eff(:, :) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+          allocate(coef_mix_eff(n_basis_mix, max(1, nocc_mix_cols)))
+          coef_mix_eff(:, :) = (0.0d0, 0.0d0)
+          if (need_full_coef_mix_spin) then
+            coef_mix_eff(1:n_basis_mix, 1:nocc_spin) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
+          else if (nocc_loc > 0) then
+            coef_mix_eff(1:n_basis_mix, 1:nocc_loc) = dg_frag%coef_mix(1:n_basis_mix, io_s_frag:io_e_frag, ispin)
+          end if
         end if
 
-        coef_mix_spin(1:n_basis_mix, 1:nocc_spin, ispin) = coef_mix_eff(1:n_basis_mix, 1:nocc_spin)
+        if (need_full_coef_mix_spin) then
+          coef_mix_spin(1:n_basis_mix, 1:nocc_spin, ispin) = coef_mix_eff(1:n_basis_mix, 1:nocc_spin)
+        end if
 
-        density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = (0.0d0, 0.0d0)
-        do io = 1, nocc_spin
+        ! Build the production density matrix from only the local occupied-state
+        ! columns.  Diagnostic modes keep a full coefficient copy above, but the
+        ! density path still contributes through this local slice and reduces on
+        ! icomm_frag.
+        density_mix_partial(:, :) = (0.0d0, 0.0d0)
+        do io = io_s_frag, io_e_frag
+          io_loc = merge(io, io - io_s_frag + 1, need_full_coef_mix_spin)
           occ_factor = 1.0d0
           if (allocated(system%rocc)) then
             if (io <= size(system%rocc, 1) .and. ispin <= size(system%rocc, 3)) then
@@ -1028,9 +1043,17 @@
             end if
           end if
           if (occ_factor <= 0.0d0) cycle
-          density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) + &
-            occ_factor * matmul(coef_mix_eff(1:n_basis_mix, io:io), conjg(transpose(coef_mix_eff(1:n_basis_mix, io:io))))
+          density_mix_partial(1:n_basis_mix, 1:n_basis_mix) = density_mix_partial(1:n_basis_mix, 1:n_basis_mix) + &
+            occ_factor * matmul(coef_mix_eff(1:n_basis_mix, io_loc:io_loc), &
+                                 conjg(transpose(coef_mix_eff(1:n_basis_mix, io_loc:io_loc))))
         end do
+        if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+          call comm_summation(density_mix_partial(1:n_basis_mix, 1:n_basis_mix), &
+                              density_mix(1:n_basis_mix, 1:n_basis_mix, ispin), &
+                              n_basis_mix * n_basis_mix, dg_frag%icomm_frag)
+        else
+          density_mix(1:n_basis_mix, 1:n_basis_mix, ispin) = density_mix_partial(1:n_basis_mix, 1:n_basis_mix)
+        end if
 
         if (enable_rho_mix_trace .and. dg_frag%id == 0) then
           coef_c2_probe(:) = 0.0d0
@@ -1235,6 +1258,9 @@
     phi_lg1 = dg_frag%lgnum_total(1)
     phi_lg2 = dg_frag%lgnum_total(2)
     phi_lg3 = dg_frag%lgnum_total(3)
+    ! Cache fragment basis values on the density grid block layout.  This avoids
+    ! remapping global grid coordinates to buffered phi indices on every density
+    ! reconstruction step.
     if (enable_density_phi_block_cache) then
       need_phi_cache_alloc = (.not. allocated(dg_frag%density_phi_block_cache))
       need_phi_count_alloc = (.not. allocated(dg_frag%density_phi_block_count))
@@ -1290,6 +1316,60 @@
       write(*,'(1x,a,l1,a,l1,a,l1,a,l1,a,l1,a,l1,a,1pe12.4)') "        density cache: phi_block enabled=", &
         enable_density_phi_block_cache, " rebuilt=", rebuilt_phi_block_cache, " alloc=", need_phi_cache_alloc, " count_alloc=", need_phi_count_alloc, &
         " invalid=", need_phi_cache_invalid, " resize=", need_phi_cache_resize, " dt=", time_cache_phi_block_refresh
+      flush(6)
+    end if
+    call cpu_time(t_setup0)
+    ! Cache PW phases with the same global-index convention used by operator
+    ! construction.  n_pw > 0 revisits these phases for every occupied state,
+    ! so keeping them per density block removes repeated trig calls.
+    if (enable_density_phase_block_cache .and. n_pw > 0) then
+      need_phase_cache_alloc = (.not. allocated(dg_frag%density_phase_block_cache))
+      need_phase_cache_invalid = (.not. dg_frag%density_phase_block_cache_valid)
+      need_phase_cache_resize = dg_frag%density_phase_block_size /= grid_block_size
+      need_phase_cache_npw = dg_frag%density_phase_block_npw /= n_pw
+      if (need_phase_cache_alloc .or. need_phase_cache_invalid .or. need_phase_cache_resize .or. need_phase_cache_npw) then
+        if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
+        nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
+        allocate(dg_frag%density_phase_block_cache(grid_block_size, n_pw, nblocks_max, ifrag_count))
+        i_local = 0
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = i_local + 1
+          local_grid_count = dg_frag%density_grid_point_count(i_local)
+          do block_cache_idx = 1, dg_frag%density_block_nblocks(i_local)
+            igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
+            npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
+!$omp parallel do private(igrid, ixg, iyg, izg, ipw, theta) schedule(static)
+            do igrid = 1, npt_cache
+              ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
+              iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
+              izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
+!$omp simd private(theta)
+              do ipw = 1, n_pw
+                theta = kpw_hx(ipw) * real(ixg, 8) + kpw_hy(ipw) * real(iyg, 8) + kpw_hz(ipw) * real(izg, 8)
+                dg_frag%density_phase_block_cache(igrid, ipw, block_cache_idx, i_local) = &
+                  cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
+              end do
+            end do
+!$omp end parallel do
+          end do
+        end do
+        dg_frag%density_phase_block_size = grid_block_size
+        dg_frag%density_phase_block_npw = n_pw
+        dg_frag%density_phase_block_cache_valid = .true.
+        rebuilt_phase_block_cache = .true.
+      end if
+    else
+      if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
+      dg_frag%density_phase_block_size = grid_block_size
+      dg_frag%density_phase_block_npw = 0
+      dg_frag%density_phase_block_cache_valid = .false.
+    end if
+    call cpu_time(t_setup1)
+    if (rebuilt_phase_block_cache) time_cache_phase_block_refresh = time_cache_phase_block_refresh + (t_setup1 - t_setup0)
+    if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then
+      write(*,'(1x,a,l1,a,l1,a,l1,a,l1,a,l1,a,1pe12.4)') "        density cache: phase_block enabled=", &
+        enable_density_phase_block_cache, " rebuilt=", rebuilt_phase_block_cache, " alloc=", need_phase_cache_alloc, &
+        " invalid=", need_phase_cache_invalid, " resize=", need_phase_cache_resize, " dt=", time_cache_phase_block_refresh
       flush(6)
     end if
     call cpu_time(t_project0)
@@ -2090,15 +2170,6 @@
             nbf = dg_frag%n_basis(ifrag, ispin)
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
-            state_charge_local(1:nocc_spin, ispin) = 0.0d0
-            state_coeff_c2_local(1:nocc_spin, ispin) = 0.0d0
-            state_psi2_raw_local(1:nocc_spin, ispin) = 0.0d0
-            state_psi2_occ_local(1:nocc_spin, ispin) = 0.0d0
-            state_psi2_dv_local(1:nocc_spin, ispin) = 0.0d0
-            state_psi2_owned_local(1:nocc_spin, ispin) = 0.0d0
-            state_import_core_local(1:nocc_spin, ispin) = 0.0d0
-            probe_state_owned_local(1:nocc_spin, ispin) = 0.0d0
-            probe_state_import_local(1:nocc_spin, ispin) = 0.0d0
             occ_cache(1:nocc_spin) = 1.0d0
             if (allocated(system%rocc)) then
               do io = 1, nocc_spin
@@ -2132,20 +2203,8 @@
 !$omp end parallel do
             if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
               coef_c_frag(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-              if (itt_tag == 1) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_DENSITY_COEF rank=', &
-                  dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' nbf=', nbf, &
-                  ' coef_ref_ready=', dg_frag%coef_ref_ready
-                flush(6)
-              end if
               call comm_summation(coef_c_full(1:nbf, 1:nocc_spin), coef_c_frag(1:nbf, 1:nocc_spin), &
                                   nbf * nocc_spin, dg_frag%icomm_frag)
-              if (itt_tag == 1) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_DENSITY_COEF rank=', &
-                  dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' nbf=', nbf, &
-                  ' coef_ref_ready=', dg_frag%coef_ref_ready
-                flush(6)
-              end if
               coef_c_full(1:nbf_max, 1:nocc_spin) = coef_c_frag(1:nbf_max, 1:nocc_spin)
             end if
             coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
@@ -2220,18 +2279,8 @@
             end if
             ! Step 3c: AllReduce partial D across icomm_frag
             if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-              if (itt_tag == 1) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_DENSITY_DMAT rank=', &
-                  dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
-                flush(6)
-              end if
               call comm_summation(D_partial_re(1:nbf, 1:nbf), D_frag_re(1:nbf, 1:nbf, ispin), &
                                   nbf * nbf, dg_frag%icomm_frag)
-              if (itt_tag == 1) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_DENSITY_DMAT rank=', &
-                  dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
-                flush(6)
-              end if
             else
               D_frag_re(1:nbf_max, 1:nbf_max, ispin) = D_partial_re(1:nbf_max, 1:nbf_max)
             end if
@@ -2503,18 +2552,23 @@
           time_project_grid_prep = time_project_grid_prep + (t_setup1 - t_setup0)
 
           if (n_pw > 0) then
+            if (enable_density_phase_block_cache) then
+              phase_cache(1:npt_blk, 1:n_pw) = &
+                dg_frag%density_phase_block_cache(1:npt_blk, 1:n_pw, block_offset + 1, i_local)
+            else
 !$omp parallel do private(ixg, iyg, izg, ipw, theta) schedule(static)
-            do igrid = 1, npt_blk
-              ixg = ixg_buf(igrid)
-              iyg = iyg_buf(igrid)
-              izg = izg_buf(igrid)
+              do igrid = 1, npt_blk
+                ixg = ixg_buf(igrid)
+                iyg = iyg_buf(igrid)
+                izg = izg_buf(igrid)
 !$omp simd
-              do ipw = 1, n_pw
-                theta = kpw_hx(ipw) * real(ixg, 8) + kpw_hy(ipw) * real(iyg, 8) + kpw_hz(ipw) * real(izg, 8)
-                phase_cache(igrid, ipw) = cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
+                do ipw = 1, n_pw
+                  theta = kpw_hx(ipw) * real(ixg, 8) + kpw_hy(ipw) * real(iyg, 8) + kpw_hz(ipw) * real(izg, 8)
+                  phase_cache(igrid, ipw) = cmplx(cos(theta), sin(theta), kind=8) * inv_sqrt_vol
+                end do
               end do
-            end do
 !$omp end parallel do
+            end if
             phase_applied_total_block = 0.0d0
             if (enable_ifrag_compare_trace .and. itt_tag >= 8 .and. itt_tag <= 10 .and. block_offset == first_block_offset) then
               phase_applied_total_block = sum(abs(phase_cache(1:npt_blk, 1:n_pw)))
@@ -2616,10 +2670,10 @@
               time_project_psi = time_project_psi + (t_psi1 - t_psi0)
               call cpu_time(t_rho0)
 
+              if (n_pw > 0) then
 !$omp parallel do private(io, io0, io1, rho_mix_accum) schedule(static)
-              do igrid = 1, npt_blk
-                rho_mix_accum = 0.0d0
-                if (n_pw > 0) then
+                do igrid = 1, npt_blk
+                  rho_mix_accum = 0.0d0
                   do io0 = 1, n_basis_mix, mixed_io_block_size
                     io1 = min(n_basis_mix, io0 + mixed_io_block_size - 1)
 !$omp simd reduction(+:rho_mix_accum)
@@ -2627,15 +2681,21 @@
                       rho_mix_accum = rho_mix_accum + real(conjg(basis_mix_blk_t(io, igrid)) * density_mix_tmp_t(io, igrid), kind=8)
                     end do
                   end do
-                else
+                  rho_blk(igrid) = rho_mix_accum
+                end do
+!$omp end parallel do
+              else
+!$omp parallel do private(io, rho_mix_accum) schedule(static)
+                do igrid = 1, npt_blk
+                  rho_mix_accum = 0.0d0
 !$omp simd reduction(+:rho_mix_accum)
                   do io = 1, n_basis_mix
                     rho_mix_accum = rho_mix_accum + real(conjg(basis_mix_blk(igrid, io)) * density_mix_tmp(igrid, io), kind=8)
                   end do
-                end if
-                rho_blk(igrid) = rho_mix_accum
-              end do
+                  rho_blk(igrid) = rho_mix_accum
+                end do
 !$omp end parallel do
+              end if
               if (enable_density_reconstruct_trace .and. block_offset == first_block_offset .and. ispin == 1) then
                 write(*,'(1x,a,i0,a)') "        density mixed trace: rank=", dg_frag%id, " stage=after-rho-accum-loop"
                 flush(6)
@@ -2703,10 +2763,10 @@
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
                   rho_raw_contrib = rho_blk(igrid)
-                  rho_contrib = rho_raw_contrib * merge(owned_path_scale, 1.0d0, enable_owned_path_normalized)
-                  bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
-                  by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
-                  bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
+                  rho_contrib = rho_raw_contrib
+                  bx = rhobf_bx_buf(igrid)
+                  by = rhobf_by_buf(igrid)
+                  bz = rhobf_bz_buf(igrid)
                   if (bx == 0 .or. by == 0 .or. bz == 0) then
                     write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
                       "[FATAL] density local rho_bf map failed: rank=", dg_frag%id, &
@@ -2874,12 +2934,12 @@
                             if (slot_buf(igrid) > 0) then
                               if (target_rank_owned_by_handler(owner_buf(igrid))) then
                                 probe_state_import_local(io0 + io - 1, ispin) = probe_state_import_local(io0 + io - 1, ispin) + &
-                                  merge(imported_unpack_scale, 1.0d0, enable_imported_unpack_normalized) * occ_factor * psi2_val * system%hvol
+                                  occ_factor * psi2_val * system%hvol
                               end if
                             else
                               if (target_rank_owned_by_handler(owner_buf(igrid))) then
                                 probe_state_owned_local(io0 + io - 1, ispin) = probe_state_owned_local(io0 + io - 1, ispin) + &
-                                  merge(owned_path_scale, 1.0d0, enable_owned_path_normalized) * occ_factor * psi2_val * system%hvol
+                                  occ_factor * psi2_val * system%hvol
                               end if
                             end if
                           end if
@@ -2887,15 +2947,15 @@
                         if (slot_buf(igrid) > 0) then
                           if (target_rank_owned_by_handler(owner_buf(igrid))) then
                             state_import_core_local(io0 + io - 1, ispin) = state_import_core_local(io0 + io - 1, ispin) + &
-                              merge(imported_unpack_scale, 1.0d0, enable_imported_unpack_normalized) * occ_factor * psi2_val * system%hvol
+                              occ_factor * psi2_val * system%hvol
                           end if
                           cycle
                         end if
                         if (.not. target_rank_owned_by_handler(owner_buf(igrid))) cycle
                         state_psi2_owned_local(io0 + io - 1, ispin) = state_psi2_owned_local(io0 + io - 1, ispin) + &
-                          merge(owned_path_scale, 1.0d0, enable_owned_path_normalized) * occ_factor * psi2_val * system%hvol
+                          occ_factor * psi2_val * system%hvol
                         state_charge_local(io0 + io - 1, ispin) = state_charge_local(io0 + io - 1, ispin) + &
-                          merge(owned_path_scale, 1.0d0, enable_owned_path_normalized) * occ_factor * psi2_val * system%hvol
+                          occ_factor * psi2_val * system%hvol
                         if (enable_state_rhobf_trace) then
                           if (ispin == state_rhobf_trace_spin .and. io0 + io - 1 == state_rhobf_trace_io) then
                             state_rhobf_psi2_q_local = state_rhobf_psi2_q_local + psi2_val
@@ -2907,12 +2967,10 @@
                               if (slot_buf(igrid) > 0) then
                                 psi2_after_partition_val = psi2_dv_val
                                 psi2_after_slot_val = psi2_after_partition_val
-                                psi2_after_any_norm_val = psi2_after_slot_val * &
-                                  merge(imported_unpack_scale, 1.0d0, enable_imported_unpack_normalized)
+                                psi2_after_any_norm_val = psi2_after_slot_val
                               else
                                 state_rhobf_psi2_owned_q_local = state_rhobf_psi2_owned_q_local + psi2_dv_val
-                                psi2_after_partition_val = psi2_dv_val * &
-                                  merge(owned_path_scale, 1.0d0, enable_owned_path_normalized)
+                                psi2_after_partition_val = psi2_dv_val
                                 psi2_after_slot_val = psi2_after_partition_val
                                 psi2_after_any_norm_val = psi2_after_slot_val
                               end if
@@ -2945,17 +3003,7 @@
                 end do
                 if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
                   call cpu_time(t_setup0)
-                  if (itt_tag == 1) then
-                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_DENSITY_RHOBLK rank=', &
-                      dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
-                    flush(6)
-                  end if
                   call comm_summation(rho_blk_partial(1:npt_blk), rho_blk_reduced(1:npt_blk), npt_blk, dg_frag%icomm_frag)
-                  if (itt_tag == 1) then
-                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_DENSITY_RHOBLK rank=', &
-                      dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
-                    flush(6)
-                  end if
                   rho_blk_accum(1:npt_blk) = rho_blk_reduced(1:npt_blk)
                   call cpu_time(t_setup1)
                   time_project_rho_reduce = time_project_rho_reduce + (t_setup1 - t_setup0)
@@ -2969,7 +3017,10 @@
                   flush(6)
                 end if
               else
-                ! n_pw > 0: state-distributed loop, no per-batch bcast
+                ! n_pw > 0: each orbital rank owns a block of occupied states.
+                ! Occupations must be applied here because this fallback builds
+                ! rho directly from |psi|**2, not from an occupation-weighted
+                ! density matrix.
                 if (.not. allocated(rho_blk_partial)) allocate(rho_blk_partial(grid_block_size))
                 rho_blk_partial(1:npt_blk) = 0.0d0
                 occ_cache(1:nocc_cache) = 0.0d0
@@ -2985,7 +3036,9 @@
                 do io0 = io_s_frag, min(io_e_frag, nocc_spin), state_block_size
                   nbatch = min(state_block_size, min(io_e_frag, nocc_spin) - io0 + 1)
 
-                  ! copy coef from upfront buffer (no bcast)
+                  ! Copy fragment coefficients from the full cached view.  The
+                  ! PW coefficients are read from the matching full cache below,
+                  ! so the fragment and PW pieces describe the same state block.
                   coef_blk_re(1:nbf, 1:nbatch) = coef_re_full(1:nbf, io0:io0+nbatch-1, ispin)
                   coef_blk_im(1:nbf, 1:nbatch) = coef_im_full(1:nbf, io0:io0+nbatch-1, ispin)
 
@@ -2996,7 +3049,8 @@
                              coef_blk_im, nbf_max, 0.0d0, psi_blk_im, grid_block_size)
                   do ipw0 = 1, n_pw, pw_block_size
                     npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
-                    ! direct access from full_cache on all ranks (no bcast)
+                    ! Direct access from the replicated PW coefficient cache
+                    ! avoids a per-state broadcast inside the hot grid loop.
                     coef_pw_blk(1:npw_blk, 1:nbatch) = &
                       dg_frag%coef_pw_full_cache(ipw0:ipw0+npw_blk-1, io0:io0+nbatch-1, ispin)
 
@@ -3033,29 +3087,17 @@
                 ! Note: comm_summation overwrites rho_blk_accum (does not accumulate into it)
                 call cpu_time(t_rho0)
                 if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-                  if (itt_tag == 1) then
-                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_COMM_SUM_DENSITY_RHOBLK_MIX rank=', &
-                      dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
-                    flush(6)
-                  end if
                   call comm_summation(rho_blk_partial(1:npt_blk), rho_blk_accum(1:npt_blk), npt_blk, dg_frag%icomm_frag)
-                  if (itt_tag == 1) then
-                    write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_COMM_SUM_DENSITY_RHOBLK_MIX rank=', &
-                      dg_frag%id, ' itt=', itt_tag, ' ifrag=', ifrag, ' ispin=', ispin, ' coef_ref_ready=', dg_frag%coef_ref_ready
-                    flush(6)
-                  end if
                 else
                   rho_blk_accum(1:npt_blk) = rho_blk_partial(1:npt_blk)
                 end if
                 call cpu_time(t_rho1)
                 time_project_rho_reduce = time_project_rho_reduce + (t_rho1 - t_rho0)
               end if
-              if (itt_tag == 1) then
-                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_DENSITY_RHOBLK_PHASE rank=', &
-                  dg_frag%id, ' itt=', itt_tag, ' i_local=', i_local, ' ifrag=', ifrag, ' ispin=', ispin, &
-                  ' coef_ref_ready=', dg_frag%coef_ref_ready
-                flush(6)
-              end if
+              ! rho_blk_accum now holds the fragment contribution for this grid
+              ! block.  The first loop materializes points owned by this handler
+              ! into rho_bf/rho_s_bf; the second loop packs points whose parent
+              ! grid owner lives on another handler rank.
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call cpu_time(t_rho0)
 !$omp parallel private(igrid, owner_rank, ixg, iyg, izg, bx, by, bz, rho_contrib, rho_raw_contrib, slot, theta)
@@ -3075,18 +3117,18 @@
                       iyg < rho_s_y_lo .or. iyg > rho_s_y_hi .or. &
                       izg < rho_s_z_lo .or. izg > rho_s_z_hi) cycle
                     rho_raw_contrib = rho_blk_accum(igrid)
-                    rho_contrib = rho_raw_contrib * merge(owned_path_scale, 1.0d0, enable_owned_path_normalized)
+                    rho_contrib = rho_raw_contrib
                     if (enable_density_weight_path_trace .and. has_density_point_probe) then
                       if (ixg == probe_ixg .and. iyg == probe_iyg .and. izg == probe_izg) then
                         probe_owned_pre_weight_local = probe_owned_pre_weight_local + rho_raw_contrib * system%hvol
                         probe_owned_add_local = probe_owned_add_local + rho_contrib * system%hvol
                         probe_owned_apply_count_local = probe_owned_apply_count_local + 1.0d0
-                        probe_owned_weight_sum_local = probe_owned_weight_sum_local + merge(owned_path_scale, 1.0d0, enable_owned_path_normalized)
+                        probe_owned_weight_sum_local = probe_owned_weight_sum_local + 1.0d0
                       end if
                     end if
-                    bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
-                    by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
-                    bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
+                    bx = rhobf_bx_buf(igrid)
+                    by = rhobf_by_buf(igrid)
+                    bz = rhobf_bz_buf(igrid)
                     if (bx == 0 .or. by == 0 .or. bz == 0) then
                       write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
                         "[FATAL] density accum rho_bf map failed: rank=", dg_frag%id, &
@@ -3102,6 +3144,10 @@
 !$omp end do nowait
 !$omp do schedule(static)
                   do idx_remote = 1, valid_remote_grid_count
+                    ! Remote density exchange is emitted only once per fragment.
+                    ! Orbital ranks have already contributed through the
+                    ! subgroup reduction, so non-root ranks must not duplicate
+                    ! these send-buffer entries.
                     if (.not. dg_frag%is_frag_root) cycle
                     igrid = valid_remote_grid_ids(idx_remote)
                     owner_rank = owner_buf(igrid)
@@ -3425,42 +3471,6 @@
         stop 'DG-Fragment RT orbital mode: non-handler rank has recv payload'
       end if
     end do
-    if (itt_tag == 1) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_SUM rank=', dg_frag%id, &
-        ' itt=', itt_tag, ' send_total=', send_total_count, ' recv_total=', recv_total_count, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-      do irank = 0, dg_frag%isize - 1
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_PEER rank=', &
-          dg_frag%id, ' peer=', irank, ' send_count=', send_counts(irank + 1), ' recv_count=', recv_counts(irank + 1), &
-          ' sdispl=', send_displs(irank + 1), ' rdispl=', recv_displs(irank + 1), ' coef_ref_ready=', dg_frag%coef_ref_ready
-        flush(6)
-      end do
-
-      allocate(send_total_local_by_rank(1:dg_frag%isize), recv_total_local_by_rank(1:dg_frag%isize))
-      allocate(send_total_all_ranks(1:dg_frag%isize), recv_total_all_ranks(1:dg_frag%isize))
-      send_total_local_by_rank = 0
-      recv_total_local_by_rank = 0
-      send_total_local_by_rank(dg_frag%id + 1) = send_total_count
-      recv_total_local_by_rank(dg_frag%id + 1) = recv_total_count
-      call comm_summation(send_total_local_by_rank, send_total_all_ranks, dg_frag%isize, dg_frag%icomm)
-      call comm_summation(recv_total_local_by_rank, recv_total_all_ranks, dg_frag%isize, dg_frag%icomm)
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_GLOBAL_SUMMARY_BEGIN'
-        do irank = 0, dg_frag%isize - 1
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_GLOBAL_SUM rank=', irank, &
-            ' sum_sendcounts=', send_total_all_ranks(irank + 1), ' sum_recvcounts=', recv_total_all_ranks(irank + 1), &
-            ' diff=', send_total_all_ranks(irank + 1) - recv_total_all_ranks(irank + 1)
-        end do
-        write(*,'(1x,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_GLOBAL_TOTAL sum_sendcounts=', &
-          sum(send_total_all_ranks), ' sum_recvcounts=', sum(recv_total_all_ranks), &
-          ' diff=', sum(send_total_all_ranks) - sum(recv_total_all_ranks)
-        write(*,'(1x,a)') '[DG-HANG-TRACE] DENSITY_ALLTOALLV_CONTRACT_GLOBAL_SUMMARY_END'
-        flush(6)
-      end if
-      deallocate(send_total_local_by_rank, recv_total_local_by_rank)
-      deallocate(send_total_all_ranks, recv_total_all_ranks)
-    end if
     if (enable_density_reconstruct_trace) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "        density alltoallv summary: rank=", dg_frag%id, &
         " id_frag=", dg_frag%id_frag, " send_total=", send_total_count, " recv_total=", recv_total_count
@@ -3509,22 +3519,12 @@
       write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=before-alltoallv"
       flush(6)
     end if
-    if (itt_tag == 1) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_DENSITY_ALLTOALLV rank=', dg_frag%id, &
-        ' itt=', itt_tag, ' i_local=', i_local, ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
     call cpu_time(t_setup0)
     call comm_alltoallv(send_flat, send_counts, send_displs, recv_flat, recv_counts, recv_displs, dg_frag%icomm)
     call cpu_time(t_setup1)
     time_comm_exchange = time_comm_exchange + (t_setup1 - t_setup0)
     if (enable_density_reconstruct_trace) then
       write(*,'(1x,a,i0,a)') "        density collective: rank=", dg_frag%id, " stage=after-alltoallv"
-      flush(6)
-    end if
-    if (itt_tag == 1) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_DENSITY_ALLTOALLV rank=', dg_frag%id, &
-        ' itt=', itt_tag, ' i_local=', i_local, ' coef_ref_ready=', dg_frag%coef_ref_ready
       flush(6)
     end if
     call cpu_time(t_setup0)
@@ -3542,14 +3542,14 @@
         flush(6)
         stop "DG-Fragment RT: density unpack recv size mismatch"
       end if
-!$omp parallel do private(slot, ixg, iyg, izg, bx, by, bz, ispin, spin_offset, rho_contrib, rho_raw_contrib, imported_unpack_weight, i_local, ix0_frag, ix1_frag, iy0_frag, iy1_frag, iz0_frag, iz1_frag) schedule(static)
+!$omp parallel do private(slot, ixg, iyg, izg, bx, by, bz, ispin, spin_offset, rho_contrib, rho_raw_contrib, i_local, ix0_frag, ix1_frag, iy0_frag, iy1_frag, iz0_frag, iz1_frag) schedule(static)
       do slot = 1, dg_frag%density_recv_map(irank)%npts
       ixg = dg_frag%density_recv_map(irank)%ixg(slot)
       iyg = dg_frag%density_recv_map(irank)%iyg(slot)
       izg = dg_frag%density_recv_map(irank)%izg(slot)
-      bx = map_global_to_phi_box_coord_ham(ixg, lbound(rho_bf, 1), ubound(rho_bf, 1), dg_frag%lgnum_total(1))
-      by = map_global_to_phi_box_coord_ham(iyg, lbound(rho_bf, 2), ubound(rho_bf, 2), dg_frag%lgnum_total(2))
-      bz = map_global_to_phi_box_coord_ham(izg, lbound(rho_bf, 3), ubound(rho_bf, 3), dg_frag%lgnum_total(3))
+      bx = dg_frag%density_recv_map(irank)%bx(slot)
+      by = dg_frag%density_recv_map(irank)%by(slot)
+      bz = dg_frag%density_recv_map(irank)%bz(slot)
       if (bx == 0 .or. by == 0 .or. bz == 0) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
           "[FATAL] density unpack rho_bf bounds: rank=", dg_frag%id, &
@@ -3586,18 +3586,13 @@
           ifrag_recv_post_raw_local(1, i_local) = ifrag_recv_post_raw_local(1, i_local) + rho_raw_contrib * system%hvol
         end do
       end if
-      imported_unpack_weight = 1.0d0
-      if (enable_imported_unpack_normalized) then
-        imported_unpack_weight = imported_unpack_scale
-        if (imported_unpack_weight < 0.999999d0) imported_unpack_norm_trigger_local = imported_unpack_norm_trigger_local + 1.0d0
-      end if
-      rho_contrib = rho_raw_contrib * imported_unpack_weight
+      rho_contrib = rho_raw_contrib
       if (enable_density_weight_path_trace .and. has_density_point_probe) then
         if (ixg == probe_ixg .and. iyg == probe_iyg .and. izg == probe_izg) then
           probe_import_unpack_pre_weight_local = probe_import_unpack_pre_weight_local + rho_raw_contrib * system%hvol
           probe_import_unpack_add_local = probe_import_unpack_add_local + rho_contrib * system%hvol
           probe_import_unpack_apply_count_local = probe_import_unpack_apply_count_local + 1.0d0
-          probe_import_unpack_weight_sum_local = probe_import_unpack_weight_sum_local + imported_unpack_weight
+          probe_import_unpack_weight_sum_local = probe_import_unpack_weight_sum_local + 1.0d0
         end if
       end if
       if (enable_density_point_dup_audit) then
@@ -3647,7 +3642,7 @@
           flush(6)
           stop "DG-Fragment RT: density unpack spin slot bounds"
         end if
-        rho_contrib = rho_recv(irank)%f(spin_offset + slot, 1, 1) * imported_unpack_weight
+        rho_contrib = rho_recv(irank)%f(spin_offset + slot, 1, 1)
         rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
       end do
       end do
@@ -3656,11 +3651,6 @@
     end do
     call cpu_time(t_setup1)
     time_comm_unpack = time_comm_unpack + (t_setup1 - t_setup0)
-    if (itt_tag == 1) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_DENSITY_UNPACK rank=', dg_frag%id, &
-        ' itt=', itt_tag, ' i_local=', i_local, ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
     if (enable_density_point_dup_audit) then
       if (found_duplicate_point_local) then
         write(*,'(1x,a,i0,a,3(i0,1x),a,1pe12.4,a,1pe12.4,a,i0,a,i0,a,i0)') '        density point-dup first: rank=', dg_frag%id, ' idx=', &
@@ -3796,7 +3786,6 @@
       call comm_summation(probe_import_send_apply_count_local, probe_import_send_apply_count_global, dg_frag%icomm)
       call comm_summation(probe_import_unpack_apply_count_local, probe_import_unpack_apply_count_global, dg_frag%icomm)
       call comm_summation(probe_import_unpack_weight_sum_local, probe_import_unpack_weight_sum_global, dg_frag%icomm)
-      call comm_summation(imported_unpack_norm_trigger_local, imported_unpack_norm_trigger_global, dg_frag%icomm)
     end if
     dg_frag%rho_imported_elec = charge_imported_global
     if (enable_density_reconstruct_trace .and. dg_frag%id == 0) then
@@ -3816,6 +3805,9 @@
         " id_frag=", dg_frag%id_frag, " stage=before-total-charge-sum total_charge_local=", total_charge_local
       flush(6)
     end if
+    ! Keep the unscaled electron count before density normalization.  This is
+    ! the quantity that exposes coefficient-norm drift even when rho%f is later
+    ! rescaled to the target electron count for the real-space solver.
     call comm_summation(total_charge_local, total_charge, dg_frag%icomm)
     charge_weighted_total_global = total_charge
     dg_frag%rho_global_raw_elec = total_charge
@@ -3843,16 +3835,8 @@
       flush(6)
     end if
     if (enable_density_weight_path_trace .and. has_density_point_probe .and. dg_frag%id == 0) then
-      if (enable_owned_path_normalized) then
-        write(*,'(1x,a,a,a,1pe12.4)') '        density weight-probe owned-mode: ', 'normalized', ' scale=', owned_path_scale
-      else
-        write(*,'(1x,a,a)') '        density weight-probe owned-mode: ', 'legacy'
-      end if
-      if (enable_imported_unpack_normalized) then
-        write(*,'(1x,a,a,a,1pe12.4)') '        density weight-probe unpack-mode: ', 'normalized', ' scale=', imported_unpack_scale
-      else
-        write(*,'(1x,a,a)') '        density weight-probe unpack-mode: ', 'legacy'
-      end if
+      write(*,'(1x,a,a)') '        density weight-probe owned-mode: ', 'legacy'
+      write(*,'(1x,a,a)') '        density weight-probe unpack-mode: ', 'legacy'
       write(*,'(1x,a,3(i0,1x),3(a,1pe12.4))') '        density weight-probe point: idx=', &
         probe_ixg, probe_iyg, probe_izg, ' partition_w=', probe_partition_weight, ' overlap_w=', probe_overlap_weight, &
         ' norm_w=', probe_norm_weight
@@ -3870,8 +3854,6 @@
       write(*,'(1x,a,a,1pe12.4)') '        density weight-probe imported-unpack-weight:', ' avg_w=', &
         merge(probe_import_unpack_weight_sum_global / probe_import_unpack_apply_count_global, 0.0d0, &
           probe_import_unpack_apply_count_global > 1.0d-14)
-      write(*,'(1x,a,1pe12.4)') '        density weight-probe imported-unpack-normalized-trigger-count=', &
-        imported_unpack_norm_trigger_global
       flush(6)
     end if
     if (enable_density_reconstruct_trace) then
@@ -3937,17 +3919,9 @@
     end if
 
     deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
+    deallocate(rhobf_bx_buf, rhobf_by_buf, rhobf_bz_buf)
     deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids)
     deallocate(basis_gid, valid_basis_ids)
-    deallocate(state_charge_local, state_charge_global)
-    deallocate(state_coeff_c2_local, state_coeff_c2_global)
-    deallocate(state_psi2_raw_local, state_psi2_raw_global)
-    deallocate(state_psi2_occ_local, state_psi2_occ_global)
-    deallocate(state_psi2_dv_local, state_psi2_dv_global)
-    deallocate(state_psi2_owned_local, state_psi2_owned_global)
-    deallocate(state_import_core_local, state_import_core_global)
-    deallocate(probe_state_owned_local, probe_state_owned_global)
-    deallocate(probe_state_import_local, probe_state_import_global)
     if (allocated(basis_sdiag_probe)) deallocate(basis_sdiag_probe)
     if (allocated(phi_col_metric_total)) deallocate(phi_col_metric_total)
     if (allocated(basis_smat_probe)) deallocate(basis_smat_probe)
@@ -3962,6 +3936,7 @@
     if (allocated(phase_cache)) deallocate(phase_cache)
     if (allocated(kpw_hx)) deallocate(kpw_hx, kpw_hy, kpw_hz)
     if (allocated(density_mix)) deallocate(density_mix)
+    if (allocated(density_mix_partial)) deallocate(density_mix_partial)
     if (allocated(basis_mix_blk)) deallocate(basis_mix_blk)
     if (allocated(density_mix_tmp)) deallocate(density_mix_tmp)
     if (allocated(basis_mix_blk_t)) deallocate(basis_mix_blk_t)
@@ -4021,12 +3996,6 @@
         " phi_blk_build=", time_project_phi_block_build, " over=", time_project_overhead
       flush(6)
     end if
-    if (itt_tag == 1) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] EXIT_DENSITY_RECON rank=', dg_frag%id, ' itt=', itt_tag, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
-    call capture_occmap_pair_snapshot(dg_frag, itt_tag, 'density_reconstruct_post')
 
   contains
 
@@ -4054,6 +4023,9 @@
           ixg_buf(igrid) = 1
           iyg_buf(igrid) = 1
           izg_buf(igrid) = 1
+          rhobf_bx_buf(igrid) = 0
+          rhobf_by_buf(igrid) = 0
+          rhobf_bz_buf(igrid) = 0
           owner_buf(igrid) = -1
           slot_buf(igrid) = 0
           cycle
@@ -4061,6 +4033,9 @@
         ixg_buf(igrid) = point%ixg
         iyg_buf(igrid) = point%iyg
         izg_buf(igrid) = point%izg
+        rhobf_bx_buf(igrid) = dg_frag%density_grid_bx(igrid0_grid + igrid - 1, i_local_grid)
+        rhobf_by_buf(igrid) = dg_frag%density_grid_by(igrid0_grid + igrid - 1, i_local_grid)
+        rhobf_bz_buf(igrid) = dg_frag%density_grid_bz(igrid0_grid + igrid - 1, i_local_grid)
         owner_buf(igrid) = point%owner_rank
         if (use_subgroup_slot) then
           slot_buf(igrid) = point%subgroup_send_slot
@@ -4087,6 +4062,9 @@
           ixg_buf(igrid) = 1
           iyg_buf(igrid) = 1
           izg_buf(igrid) = 1
+          rhobf_bx_buf(igrid) = 0
+          rhobf_by_buf(igrid) = 0
+          rhobf_bz_buf(igrid) = 0
           owner_buf(igrid) = -1
           slot_buf(igrid) = 0
           cycle
@@ -4094,6 +4072,9 @@
         ixg_buf(igrid) = point%ixg
         iyg_buf(igrid) = point%iyg
         izg_buf(igrid) = point%izg
+        rhobf_bx_buf(igrid) = dg_frag%density_grid_bx(igrid0_grid + igrid - 1, i_local_grid)
+        rhobf_by_buf(igrid) = dg_frag%density_grid_by(igrid0_grid + igrid - 1, i_local_grid)
+        rhobf_bz_buf(igrid) = dg_frag%density_grid_bz(igrid0_grid + igrid - 1, i_local_grid)
         owner_buf(igrid) = point%owner_rank
         slot_buf(igrid) = 0
       end do

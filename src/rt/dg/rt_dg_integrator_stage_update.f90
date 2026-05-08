@@ -31,36 +31,14 @@
     type(s_dft_energy),     intent(inout) :: energy
     integer :: n_frag, n_pw, ispin
     integer :: n_floor_local, n_floor_global
-    real(8) :: t_stage0, t_stage1
     real(8) :: rho_floor_min_local, rho_floor_min_global
     real(8) :: rho_floor_min_buf(1)
     real(8), allocatable :: rho_buffer(:,:,:), Vh_buffer(:,:,:)
     logical :: use_rank_buffered_potential
     logical :: use_dual_rho_vh
-    logical, parameter :: enable_stage_update_trace = .false.
-    logical, parameter :: enable_stage_update_progress = .false.
     type(s_scalar) :: rho_h
 
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        density-hmat stage trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "entry"
-      flush(6)
-    end if
-
-    call cpu_time(t_stage0)
-    if (itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_DENSITY_RECON_CALL rank=', dg_frag%id, ' itt=', itt, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s, itt)
-    if (itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_DENSITY_RECON_CALL rank=', dg_frag%id, ' itt=', itt, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
-    call cpu_time(t_stage1)
 
     dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
     if (system%nspin > 0) then
@@ -91,38 +69,17 @@
                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
     end if
-
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-density dt=", t_stage1 - t_stage0
-      flush(6)
-    end if
-
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a)') "        density-hmat stage trace: stage=before-hartree"
-      flush(6)
-    end if
-    call cpu_time(t_stage0)
     if (use_dual_rho_vh) then
       call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho_h, Vh)
     else
       call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     end if
-    call cpu_time(t_stage1)
     dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
     if (use_rank_buffered_potential) then
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vh, Vh_buffer)
     end if
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-hartree dt=", t_stage1 - t_stage0
-      flush(6)
-    end if
     if (use_dual_rho_vh) then
       call deallocate_scalar(rho_h)
-    end if
-
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a)') "        density-hmat stage trace: stage=before-xc"
-      flush(6)
     end if
     ! Guard against tiny negative rho before XC; this prevents non-physical Vxc NaN under aggressive FP reassociation.
     ! Validation note: O3 and O3+no-unsafe-math runs matched key observables (J_para/J_total/Ne_raw) in this case.
@@ -147,19 +104,13 @@
         flush(6)
       end if
     end if
-    call cpu_time(t_stage0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
-    call cpu_time(t_stage1)
     if (system%nspin > 0) then
       dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
       do n_frag = 1, system%nspin
         dg_frag%Vxc_frag(:, :, :, n_frag) = Vxc(n_frag)%f(:, :, :)
       end do
-    end if
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-xc dt=", t_stage1 - t_stage0
-      flush(6)
     end if
 
     if (dg_frag%use_plusu .and. PLUS_U_ON) then
@@ -167,21 +118,10 @@
     else
       energy%E_U = 0.0d0
     end if
-
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a)') "        density-hmat stage trace: stage=before-reconstruct"
-      flush(6)
-    end if
-    call cpu_time(t_stage0)
     if (use_rank_buffered_potential) then
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
     else
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
-    end if
-    call cpu_time(t_stage1)
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        density-hmat stage trace: stage=after-reconstruct dt=", t_stage1 - t_stage0
-      flush(6)
     end if
 
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
@@ -211,15 +151,6 @@
 
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
       call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
-      if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') "        density-hmat stage trace: stage=after-mixed-refresh"
-        flush(6)
-      end if
-    end if
-
-    if ((enable_stage_update_trace .or. enable_stage_update_progress) .and. dg_frag%id == 0) then
-      write(*,'(1x,a)') "        density-hmat stage trace: stage=exit"
-      flush(6)
     end if
 
     if (allocated(rho_buffer)) deallocate(rho_buffer)

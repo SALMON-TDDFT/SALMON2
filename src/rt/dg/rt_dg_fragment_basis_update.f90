@@ -308,7 +308,7 @@
     use communication, only: comm_sync_all
     use rt_dg_fragment_parallel, only: setup_fragment_system, finalize_fragment_parallel
     use rt_dg_fragment_ops, only: zero_nonowned_coefficients, sync_mixed_coef_from_raw, sync_raw_coef_from_mixed, &
-      zero_nonlocal_h_matrix_blocks, capture_occmap_pair_snapshot
+      zero_nonlocal_h_matrix_blocks
     use rt_dg_plane_wave, only: diagonalize_mixed_basis
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -378,7 +378,6 @@
 
     basis_update_counter = basis_update_counter + 1
     basis_update_tag = -basis_update_counter
-    call capture_occmap_pair_snapshot(dg_frag, basis_update_tag, 'basis_update_pre')
 
     if (is_global_root) then
       write(*,*) "  [1/3] Old basis saved to memory"
@@ -510,9 +509,7 @@
     end if
 
     if (overlap_is_valid) then
-      call capture_occmap_pair_snapshot(dg_frag, basis_update_tag, 'basis_update_post')
     else
-      call capture_occmap_pair_snapshot(dg_frag, basis_update_tag, 'basis_update_post_restore')
     end if
 
     if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
@@ -522,6 +519,10 @@
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     dg_frag%density_phi_block_size = 0
     dg_frag%density_phi_block_cache_valid = .false.
+    if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
+    dg_frag%density_phase_block_size = 0
+    dg_frag%density_phase_block_npw = 0
+    dg_frag%density_phase_block_cache_valid = .false.
     if (.not. dg_frag%use_plane_wave_basis) then
       dg_frag%mixed_basis_ready = .false.
       if (allocated(dg_frag%mixed_basis_dim)) dg_frag%mixed_basis_dim(:) = 0

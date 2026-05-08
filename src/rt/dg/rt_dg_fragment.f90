@@ -573,22 +573,11 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
     integer :: ifrag, i_local, ix, iy, iz, ixg, iyg, izg, owner_rank, source_rank, source_root_rank, i
-    integer :: subgroup_target_rank, subgroup_self_count
+    integer :: subgroup_target_rank
     integer :: ifrag_count
     integer :: nx_max, ny_max, nz_max
-    integer :: nsend_nonzero, nrecv_nonzero, printed_targets, printed_sources, printed_ranges, printed_points
-    integer :: primary_count_local, primary_owned_local, primary_remote_local
-    integer :: local_send_pts, local_recv_pts, global_send_pts, global_recv_pts
-    integer :: self_source_owned_pts, self_source_total_pts, global_self_source_owned_pts, global_self_source_total_pts
-    integer :: pair_index, mismatch_src_rank, mismatch_dst_rank
     integer, allocatable :: recv_count(:), recv_cursor(:)
     integer, allocatable :: id_tmp(:)
-    integer, allocatable :: send_matrix_local(:), send_matrix_global(:), recv_matrix_local(:), recv_matrix_global(:)
-    integer, allocatable :: first_send_ixg_local(:), first_send_iyg_local(:), first_send_izg_local(:)
-    integer, allocatable :: first_send_ixg_global(:), first_send_iyg_global(:), first_send_izg_global(:)
-    integer, allocatable :: first_recv_ixg_local(:), first_recv_iyg_local(:), first_recv_izg_local(:)
-    integer, allocatable :: first_recv_ixg_global(:), first_recv_iyg_global(:), first_recv_izg_global(:)
-    logical, parameter :: enable_density_owner_map_probe = .false.
 
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)
     if (allocated(dg_frag%density_primary_local_map)) deallocate(dg_frag%density_primary_local_map)
@@ -601,6 +590,10 @@ contains
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
     if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
     if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
+    if (allocated(dg_frag%density_grid_bx)) deallocate(dg_frag%density_grid_bx)
+    if (allocated(dg_frag%density_grid_by)) deallocate(dg_frag%density_grid_by)
+    if (allocated(dg_frag%density_grid_bz)) deallocate(dg_frag%density_grid_bz)
+    dg_frag%density_rhobf_box_cache_valid = .false.
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
@@ -616,11 +609,22 @@ contains
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
+    if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
+    if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
+    dg_frag%density_phi_block_size = 0
+    dg_frag%density_phi_block_cache_valid = .false.
+    if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
+    dg_frag%density_phase_block_size = 0
+    dg_frag%density_phase_block_npw = 0
+    dg_frag%density_phase_block_cache_valid = .false.
     if (allocated(dg_frag%density_recv_map)) then
       do i = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
         if (allocated(dg_frag%density_recv_map(i)%ixg)) deallocate(dg_frag%density_recv_map(i)%ixg)
         if (allocated(dg_frag%density_recv_map(i)%iyg)) deallocate(dg_frag%density_recv_map(i)%iyg)
         if (allocated(dg_frag%density_recv_map(i)%izg)) deallocate(dg_frag%density_recv_map(i)%izg)
+        if (allocated(dg_frag%density_recv_map(i)%bx)) deallocate(dg_frag%density_recv_map(i)%bx)
+        if (allocated(dg_frag%density_recv_map(i)%by)) deallocate(dg_frag%density_recv_map(i)%by)
+        if (allocated(dg_frag%density_recv_map(i)%bz)) deallocate(dg_frag%density_recv_map(i)%bz)
       end do
       deallocate(dg_frag%density_recv_map)
     end if
@@ -630,6 +634,10 @@ contains
     if (allocated(dg_frag%density_subgroup_send_slot_map)) deallocate(dg_frag%density_subgroup_send_slot_map)
     if (allocated(dg_frag%density_grid_points)) deallocate(dg_frag%density_grid_points)
     if (allocated(dg_frag%density_grid_point_count)) deallocate(dg_frag%density_grid_point_count)
+    if (allocated(dg_frag%density_grid_bx)) deallocate(dg_frag%density_grid_bx)
+    if (allocated(dg_frag%density_grid_by)) deallocate(dg_frag%density_grid_by)
+    if (allocated(dg_frag%density_grid_bz)) deallocate(dg_frag%density_grid_bz)
+    dg_frag%density_rhobf_box_cache_valid = .false.
     if (allocated(dg_frag%density_subgroup_self_ixg)) deallocate(dg_frag%density_subgroup_self_ixg)
     if (allocated(dg_frag%density_subgroup_self_iyg)) deallocate(dg_frag%density_subgroup_self_iyg)
     if (allocated(dg_frag%density_subgroup_self_izg)) deallocate(dg_frag%density_subgroup_self_izg)
@@ -650,6 +658,9 @@ contains
         if (allocated(dg_frag%density_recv_map(ifrag)%ixg)) deallocate(dg_frag%density_recv_map(ifrag)%ixg)
         if (allocated(dg_frag%density_recv_map(ifrag)%iyg)) deallocate(dg_frag%density_recv_map(ifrag)%iyg)
         if (allocated(dg_frag%density_recv_map(ifrag)%izg)) deallocate(dg_frag%density_recv_map(ifrag)%izg)
+        if (allocated(dg_frag%density_recv_map(ifrag)%bx)) deallocate(dg_frag%density_recv_map(ifrag)%bx)
+        if (allocated(dg_frag%density_recv_map(ifrag)%by)) deallocate(dg_frag%density_recv_map(ifrag)%by)
+        if (allocated(dg_frag%density_recv_map(ifrag)%bz)) deallocate(dg_frag%density_recv_map(ifrag)%bz)
       end do
       deallocate(dg_frag%density_recv_map)
     end if
@@ -680,6 +691,9 @@ contains
     ny_max = max(1, maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end)))
     nz_max = max(1, maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end)))
 
+    ! The density maps are the contract between fragment-local coordinates and
+    ! the parent real-space grid: every local fragment point gets a global grid
+    ! index, an owner rank, and optional send/receive slots.
     allocate(dg_frag%density_owner_map(nx_max, ny_max, nz_max, ifrag_count))
     allocate(dg_frag%density_primary_local_map(nx_max, ny_max, nz_max, ifrag_count))
     allocate(dg_frag%density_ixg_map(nx_max, ny_max, nz_max, ifrag_count))
@@ -692,16 +706,6 @@ contains
     allocate(dg_frag%density_recv_map(0:dg_frag%isize-1))
     allocate(dg_frag%density_grid_points(nx_max * ny_max * nz_max, ifrag_count))
     allocate(dg_frag%density_grid_point_count(ifrag_count))
-    allocate(send_matrix_local(dg_frag%isize * dg_frag%isize), send_matrix_global(dg_frag%isize * dg_frag%isize))
-    allocate(recv_matrix_local(dg_frag%isize * dg_frag%isize), recv_matrix_global(dg_frag%isize * dg_frag%isize))
-    allocate(first_send_ixg_local(dg_frag%isize * dg_frag%isize), first_send_iyg_local(dg_frag%isize * dg_frag%isize), &
-         first_send_izg_local(dg_frag%isize * dg_frag%isize))
-    allocate(first_send_ixg_global(dg_frag%isize * dg_frag%isize), first_send_iyg_global(dg_frag%isize * dg_frag%isize), &
-         first_send_izg_global(dg_frag%isize * dg_frag%isize))
-    allocate(first_recv_ixg_local(dg_frag%isize * dg_frag%isize), first_recv_iyg_local(dg_frag%isize * dg_frag%isize), &
-         first_recv_izg_local(dg_frag%isize * dg_frag%isize))
-    allocate(first_recv_ixg_global(dg_frag%isize * dg_frag%isize), first_recv_iyg_global(dg_frag%isize * dg_frag%isize), &
-         first_recv_izg_global(dg_frag%isize * dg_frag%isize))
     dg_frag%density_owner_map = dg_frag%id
     dg_frag%density_primary_local_map = .false.
     dg_frag%density_ixg_map = 1
@@ -712,30 +716,13 @@ contains
     dg_frag%density_subgroup_send_count = 0
     dg_frag%density_subgroup_send_slot_map = 0
     dg_frag%density_grid_point_count = 0
-    send_matrix_local = 0
-    send_matrix_global = 0
-    recv_matrix_local = 0
-    recv_matrix_global = 0
-    first_send_ixg_local = 0
-    first_send_iyg_local = 0
-    first_send_izg_local = 0
-    first_send_ixg_global = 0
-    first_send_iyg_global = 0
-    first_send_izg_global = 0
-    first_recv_ixg_local = 0
-    first_recv_iyg_local = 0
-    first_recv_izg_local = 0
-    first_recv_ixg_global = 0
-    first_recv_iyg_global = 0
-    first_recv_izg_global = 0
 
+    ! First pass: build the maps for fragments local to this rank.  In orbital
+    ! mode the fragment root owns the replicated density contribution, so the
+    ! source rank and density owner must agree.
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
-      primary_count_local = 0
-      primary_owned_local = 0
-      primary_remote_local = 0
-      subgroup_self_count = 0
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
         izg = wrap_global_grid_index(dg_frag%frag_core_lo(3, ifrag) + iz - 1, dg_frag%lgnum_total(3))
         do iy = 1, dg_frag%nxyz_domain(2, ifrag)
@@ -758,9 +745,7 @@ contains
                 flush(6)
                 stop "DG-Fragment RT: density subgroup target out of range"
               end if
-              if (subgroup_target_rank == dg_frag%id_frag) then
-                subgroup_self_count = subgroup_self_count + 1
-              else
+              if (subgroup_target_rank /= dg_frag%id_frag) then
                 dg_frag%density_subgroup_send_count(subgroup_target_rank) = &
                   dg_frag%density_subgroup_send_count(subgroup_target_rank) + 1
                 dg_frag%density_subgroup_send_slot_map(ix, iy, iz, i_local) = &
@@ -775,25 +760,12 @@ contains
               stop 'DG-Fragment RT orbital mode: density owner must match fragment root sender'
             end if
             dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
-            if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
-              primary_count_local = primary_count_local + 1
-              if (owner_rank == dg_frag%id) then
-                primary_owned_local = primary_owned_local + 1
-              else
-                primary_remote_local = primary_remote_local + 1
-              end if
-            end if
             source_rank = dg_frag%id_array(ifrag)
+            ! Legacy real-space mode sends primary fragment density from the
+            ! fragment root to the rank that owns the parent-grid point.
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= source_rank .and. &
                 dg_frag%is_frag_root) then
-              pair_index = dg_frag%id * dg_frag%isize + owner_rank + 1
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
-              send_matrix_local(pair_index) = dg_frag%density_send_count(owner_rank)
-              if (dg_frag%density_send_count(owner_rank) == 1) then
-                first_send_ixg_local(pair_index) = ixg
-                first_send_iyg_local(pair_index) = iyg
-                first_send_izg_local(pair_index) = izg
-              end if
               dg_frag%density_send_slot_map(ix, iy, iz, i_local) = dg_frag%density_send_count(owner_rank)
             end if
             dg_frag%density_grid_point_count(i_local) = dg_frag%density_grid_point_count(i_local) + 1
@@ -813,54 +785,12 @@ contains
           end do
         end do
       end do
-      if (.false. .and. dg_frag%id_frag == 0 .and. i_local <= 4) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
-             'density core-count: rank=', dg_frag%id, &
-             ' ifrag=', ifrag, &
-             ' primary=', primary_count_local, &
-             ' owned=', primary_owned_local, &
-             ' remote=', primary_remote_local
-        if (subgroup_self_count > 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') &
-               'density subgroup-self-count: rank=', dg_frag%id, &
-               ' ifrag=', ifrag, ' npts=', subgroup_self_count
-        end if
-      end if
-      if (enable_density_owner_map_probe .and. dg_frag%id_frag == 0 .and. i_local <= 2) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x))') &
-             'density fragment-grid: rank=', dg_frag%id, &
-             ' ifrag=', ifrag, &
-             ' i_local=', i_local, &
-             ' core_lo=', dg_frag%frag_core_lo(1, ifrag), dg_frag%frag_core_lo(2, ifrag), dg_frag%frag_core_lo(3, ifrag), &
-             ' core_hi=', dg_frag%frag_core_hi(1, ifrag), dg_frag%frag_core_hi(2, ifrag), dg_frag%frag_core_hi(3, ifrag)
-        printed_points = 0
-        do iz = 1, min(1, dg_frag%nxyz_domain(3, ifrag))
-          do iy = 1, min(2, dg_frag%nxyz_domain(2, ifrag))
-            do ix = 1, min(2, dg_frag%nxyz_domain(1, ifrag))
-              ixg = dg_frag%density_ixg_map(ix, iy, iz, i_local)
-              iyg = dg_frag%density_iyg_map(ix, iy, iz, i_local)
-              izg = dg_frag%density_izg_map(ix, iy, iz, i_local)
-              owner_rank = dg_frag%density_owner_map(ix, iy, iz, i_local)
-              write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,i0)') &
-                   'density fragment-point: rank=', dg_frag%id, &
-                   ' ifrag=', ifrag, &
-                   ' local=', ix, iy, iz, &
-                   ' global=', ixg, iyg, izg, &
-                   ' owner=', owner_rank
-              printed_points = printed_points + 1
-              if (printed_points >= 4) exit
-            end do
-            if (printed_points >= 4) exit
-          end do
-          if (printed_points >= 4) exit
-        end do
-      end if
     end do
 
     allocate(recv_count(0:dg_frag%isize-1), recv_cursor(0:dg_frag%isize-1))
     recv_count = 0
-    self_source_owned_pts = 0
-    self_source_total_pts = 0
+    ! Second pass: count remote density points that this rank receives from
+    ! other fragment roots.  Counts are needed before allocating recv buffers.
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
@@ -873,109 +803,15 @@ contains
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
             if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) cycle
             if (source_rank == dg_frag%id) then
-              self_source_total_pts = self_source_total_pts + 1
-              if (owner_rank == dg_frag%id) self_source_owned_pts = self_source_owned_pts + 1
               cycle
             end if
             if (owner_rank == dg_frag%id) then
-              pair_index = dg_frag%id * dg_frag%isize + source_rank + 1
-              if (recv_count(source_rank) == 0) then
-                first_recv_ixg_local(pair_index) = ixg
-                first_recv_iyg_local(pair_index) = iyg
-                first_recv_izg_local(pair_index) = izg
-              end if
               recv_count(source_rank) = recv_count(source_rank) + 1
-              recv_matrix_local(pair_index) = recv_count(source_rank)
             end if
           end do
         end do
       end do
     end do
-
-    if (enable_density_owner_map_probe) then
-      local_send_pts = sum(dg_frag%density_send_count)
-      local_recv_pts = sum(recv_count)
-      call comm_summation(local_send_pts, global_send_pts, dg_frag%icomm)
-      call comm_summation(local_recv_pts, global_recv_pts, dg_frag%icomm)
-      call comm_summation(self_source_owned_pts, global_self_source_owned_pts, dg_frag%icomm)
-      call comm_summation(self_source_total_pts, global_self_source_total_pts, dg_frag%icomm)
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,2(a,i0),2(a,i0))') 'density owner-map global summary:', &
-          ' send_pts=', global_send_pts, ' recv_pts=', global_recv_pts, &
-          ' self_src_owned_pts=', global_self_source_owned_pts, ' self_src_total_pts=', global_self_source_total_pts
-        flush(6)
-      end if
-      write(*,'(1x,a,i0,4(a,i0))') 'density owner-map local summary: rank=', dg_frag%id, &
-        ' send_pts=', local_send_pts, ' recv_pts=', local_recv_pts, &
-        ' self_src_owned_pts=', self_source_owned_pts, ' self_src_total_pts=', self_source_total_pts
-      flush(6)
-    end if
-
-    if (dg_frag%id_frag == 0) then
-      nsend_nonzero = count(dg_frag%density_send_count > 0)
-      nrecv_nonzero = count(recv_count > 0)
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
-           'density owner-map trace: rank=', dg_frag%id, &
-           ' id_frag=', dg_frag%id_frag, &
-           ' send_nonzero=', nsend_nonzero, &
-           ' recv_nonzero=', nrecv_nonzero, &
-           ' self_owner=', dg_frag%id
-      printed_targets = 0
-      do owner_rank = 0, dg_frag%isize - 1
-        if (dg_frag%density_send_count(owner_rank) <= 0) cycle
-        printed_targets = printed_targets + 1
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-map send-target: rank=', dg_frag%id, &
-             ' id_frag=', dg_frag%id_frag, &
-             ' target_rank=', owner_rank, &
-             ' npts=', dg_frag%density_send_count(owner_rank)
-        if (printed_targets >= 8) exit
-      end do
-      printed_sources = 0
-      do source_rank = 0, dg_frag%isize - 1
-        if (recv_count(source_rank) <= 0) cycle
-        printed_sources = printed_sources + 1
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-map recv-source: rank=', dg_frag%id, &
-             ' id_frag=', dg_frag%id_frag, &
-             ' source_rank=', source_rank, &
-             ' npts=', recv_count(source_rank)
-        if (printed_sources >= 8) exit
-      end do
-      if (dg_frag%id == 0) then
-        printed_ranges = 0
-        do owner_rank = 0, dg_frag%isize - 1
-          printed_ranges = printed_ranges + 1
-          write(*,'(1x,a,i0,a,i0,a,3(i0,a,i0,1x))') &
-               'density owner-grid-range: rank=', dg_frag%id, &
-               ' target_rank=', owner_rank, &
-               ' is_ie=', dg_frag%mg%is_all(1, owner_rank), ':', dg_frag%mg%ie_all(1, owner_rank), &
-                         dg_frag%mg%is_all(2, owner_rank), ':', dg_frag%mg%ie_all(2, owner_rank), &
-                         dg_frag%mg%is_all(3, owner_rank), ':', dg_frag%mg%ie_all(3, owner_rank)
-          if (printed_ranges >= 8) exit
-        end do
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-sample: rank=', dg_frag%id, &
-             ' point=1,1,1 owner=', find_density_grid_owner(dg_frag, 1, 1, 1), &
-             ' self=', dg_frag%id
-           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-sample: rank=', dg_frag%id, &
-             ' point=2,1,1 owner=', find_density_grid_owner(dg_frag, 2, 1, 1), &
-             ' self=', dg_frag%id
-           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-sample: rank=', dg_frag%id, &
-             ' point=3,1,1 owner=', find_density_grid_owner(dg_frag, 3, 1, 1), &
-             ' self=', dg_frag%id
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-sample: rank=', dg_frag%id, &
-             ' point=160,160,1 owner=', find_density_grid_owner(dg_frag, 160, 160, 1), &
-             ' self=', dg_frag%id
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
-             'density owner-sample: rank=', dg_frag%id, &
-             ' point=320,320,1 owner=', find_density_grid_owner(dg_frag, 320, 320, 1), &
-             ' self=', dg_frag%id
-      end if
-    end if
 
     do source_rank = 0, dg_frag%isize - 1
       dg_frag%density_recv_map(source_rank)%npts = recv_count(source_rank)
@@ -986,6 +822,8 @@ contains
     end do
 
     recv_cursor = 0
+    ! Third pass: materialize the receive coordinate lists using the counts
+    ! above.  The reconstruction path later uses these lists directly.
     do ifrag = 1, dg_frag%n_frag
       source_root_rank = dg_frag%id_array(ifrag)
       do iz = 1, dg_frag%nxyz_domain(3, ifrag)
@@ -1009,64 +847,7 @@ contains
       end do
     end do
 
-    call comm_summation(send_matrix_local, send_matrix_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(recv_matrix_local, recv_matrix_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(first_send_ixg_local, first_send_ixg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(first_send_iyg_local, first_send_iyg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(first_send_izg_local, first_send_izg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(first_recv_ixg_local, first_recv_ixg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(first_recv_iyg_local, first_recv_iyg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-    call comm_summation(first_recv_izg_local, first_recv_izg_global, dg_frag%isize * dg_frag%isize, dg_frag%icomm)
-
-    if (dg_frag%id == 0) then
-      mismatch_src_rank = -1
-      mismatch_dst_rank = -1
-      do owner_rank = 1, min(2, dg_frag%isize - 1)
-        do source_rank = 0, dg_frag%isize - 1
-          if (send_matrix_global(source_rank * dg_frag%isize + owner_rank + 1) /= &
-              recv_matrix_global(owner_rank * dg_frag%isize + source_rank + 1)) then
-            mismatch_src_rank = source_rank
-            mismatch_dst_rank = owner_rank
-            exit
-          end if
-        end do
-        if (mismatch_src_rank >= 0) exit
-      end do
-      if (mismatch_src_rank >= 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_FIRST src=', mismatch_src_rank, &
-          ' dst=', mismatch_dst_rank, ' send_count=', &
-          send_matrix_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ' recv_count=', &
-          recv_matrix_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1)
-        if (send_matrix_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1) > 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_SEND src=', mismatch_src_rank, &
-            ' peer=', mismatch_dst_rank, ' global=', &
-            first_send_ixg_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ',', &
-            first_send_iyg_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ',', &
-            first_send_izg_global(mismatch_src_rank * dg_frag%isize + mismatch_dst_rank + 1), ' owner=', mismatch_dst_rank
-        else
-          write(*,'(1x,a,i0,a,i0,a)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_SEND src=', mismatch_src_rank, &
-            ' peer=', mismatch_dst_rank, ' global=none owner=none'
-        end if
-        if (recv_matrix_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1) > 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_RECV dst=', mismatch_dst_rank, &
-            ' peer=', mismatch_src_rank, ' global=', &
-            first_recv_ixg_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1), ',', &
-            first_recv_iyg_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1), ',', &
-            first_recv_izg_global(mismatch_dst_rank * dg_frag%isize + mismatch_src_rank + 1), ' expected_source=', mismatch_src_rank
-        else
-          write(*,'(1x,a,i0,a,i0,a)') '[DG-HANG-TRACE] DENSITY_OWNER_MISMATCH_RECV dst=', mismatch_dst_rank, &
-            ' peer=', mismatch_src_rank, ' global=none expected_source=none'
-        end if
-        flush(6)
-      end if
-    end if
-
     deallocate(recv_count, recv_cursor)
-    deallocate(send_matrix_local, send_matrix_global, recv_matrix_local, recv_matrix_global)
-    deallocate(first_send_ixg_local, first_send_iyg_local, first_send_izg_local)
-    deallocate(first_send_ixg_global, first_send_iyg_global, first_send_izg_global)
-    deallocate(first_recv_ixg_local, first_recv_iyg_local, first_recv_izg_local)
-    deallocate(first_recv_ixg_global, first_recv_iyg_global, first_recv_izg_global)
 
   end subroutine build_density_grid_owner_maps
 
@@ -2536,6 +2317,12 @@ contains
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
+    dg_frag%density_phi_block_size = 0
+    dg_frag%density_phi_block_cache_valid = .false.
+    if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
+    dg_frag%density_phase_block_size = 0
+    dg_frag%density_phase_block_npw = 0
+    dg_frag%density_phase_block_cache_valid = .false.
     if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
     if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)

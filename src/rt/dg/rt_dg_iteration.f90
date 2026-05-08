@@ -8,7 +8,7 @@
     use salmon_xc, only: s_xc_functional
     use timer, only: timer_begin, timer_end, LOG_CALC_TIME_PROPAGATION, LOG_CALC_RHO
     use rt_dg_fragment_ops, only: zero_nonowned_coefficients, apply_overlap_operator, &
-                    capture_mixed_stage_diagnostics, reorthonormalize_mixed_occupied_subspace
+                    reorthonormalize_mixed_occupied_subspace
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -28,7 +28,6 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
-    logical, parameter :: enable_iteration_trace = .false.
     logical, save :: startup_pre_relax_done = .false.
     logical, save :: reorth_mixed_occ_initialized = .false.
     logical, save :: enable_reorth_mixed_occ = .false.
@@ -46,12 +45,6 @@
     integer :: rayleigh_nonev_count, io_rayleigh
     integer :: n_frag_ref, n_pw_ref, n_tot_ref, nstate_ref
     ! Time evolution in fragment basis coefficient space
-    if (enable_iteration_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "entry"
-      flush(6)
-    end if
 
     ! Initialize eigenstate check on iter 1
     if (itt == 1 .and. .not. eigenstate_check_initialized) then
@@ -199,9 +192,6 @@
     end if
 
     if (itt == 1 .and. .not. occvirt_ref_legacy_mode .and. .not. dg_frag%coef_ref_ready) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] ENTER_T0_REF_FIX rank=', dg_frag%id, ' itt=', itt, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
       n_frag_ref = dg_frag%n_mat_max
       n_pw_ref = 0
       if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw_ref = dg_frag%n_plane_waves
@@ -219,31 +209,14 @@
         dg_frag%coef_ref_all(1:n_frag_ref, 1:nstate_ref, :) = dg_frag%coef(1:n_frag_ref, 1:nstate_ref, :)
         if (n_pw_ref > 0) dg_frag%coef_ref_all(n_frag_ref+1:n_tot_ref, 1:nstate_ref, :) = dg_frag%coef_pw(1:n_pw_ref, 1:nstate_ref, :)
         dg_frag%coef_ref_ready = .true.
-        write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_T0_REF_READY rank=', dg_frag%id, ' itt=', itt, &
-          ' coef_ref_ready=', dg_frag%coef_ref_ready
-        flush(6)
         if (comm_is_root(dg_frag%id)) then
           write(*,'(1x,a)') '[DG-OBS] occvirt reference fixed at t=0 (pre-propagation)'
           flush(6)
         end if
       end if
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] EXIT_T0_REF_FIX rank=', dg_frag%id, ' itt=', itt, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
     end if
 
     call debug_coef_metric("entry")
-    if (itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] BEFORE_CAPTURE_STAGE12 rank=', dg_frag%id, ' itt=', itt, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
-    call capture_mixed_stage_diagnostics(dg_frag, itt, 12, 'iter_step_entry_prev_post_raw')
-    if (itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a,l1)') '[DG-HANG-TRACE] AFTER_CAPTURE_STAGE12 rank=', dg_frag%id, ' itt=', itt, &
-        ' coef_ref_ready=', dg_frag%coef_ref_ready
-      flush(6)
-    end if
     call timer_begin(LOG_CALC_TIME_PROPAGATION)
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
@@ -256,8 +229,6 @@
       stop "Unknown time integrator for DG-Fragment method"
     end select
     call timer_end(LOG_CALC_TIME_PROPAGATION)
-    call capture_mixed_stage_diagnostics(dg_frag, itt, 13, 'iter_time_evolution_exit_pre_snapshot')
-    call capture_mixed_stage_diagnostics(dg_frag, itt, 4)
 
     if (.not. reorth_mixed_occ_initialized) then
       env_val = ''
@@ -275,14 +246,6 @@
 
     if (enable_reorth_mixed_occ) then
       call reorthonormalize_mixed_occupied_subspace(dg_frag)
-      call capture_mixed_stage_diagnostics(dg_frag, itt, 4)
-    end if
-
-    if (enable_iteration_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        iteration trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "after-time-evolution"
-      flush(6)
     end if
     call debug_coef_metric("after-time-evolution")
 
@@ -303,21 +266,11 @@
       if (dg_frag%time_integrator /= 3 .or. dg_frag%yn_adaptive_basis) then
         ! For adaptive-basis mode, keep post-step update active even in RK4
         ! so basis-update detection/trigger logic runs.
-        if (enable_iteration_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "before-update-density-hmat"
-          flush(6)
-        end if
         call timer_begin(LOG_CALC_RHO)
         call update_density_and_hamiltonian(dg_frag, system, info, rt, itt, rt%Ac_tot(:,itt), &
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
         call timer_end(LOG_CALC_RHO)
-        if (enable_iteration_trace) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        iteration stage: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " stage=", "after-update-density-hmat"
-          flush(6)
-        end if
       end if
     end if
     

@@ -66,6 +66,24 @@
     logical :: enable_m_block_audit
     logical, save :: ap_block_check_initialized = .false.
     logical, save :: enable_ap_block_check = .false.
+    logical, save :: derivative_env_initialized = .false.
+    logical, save :: cfg_enable_deriv_trace = .false.
+    logical, save :: cfg_enable_hermit_check = .false.
+    logical, save :: cfg_enable_op_mix_trace = .false.
+    logical, save :: cfg_enable_m_block_audit = .false.
+    logical, save :: cfg_enable_overlap_path_trace = .false.
+    logical, save :: cfg_force_overlap_solve = .false.
+    logical, save :: cfg_disable_mfp = .false.
+    logical, save :: cfg_disable_local_overlap_solve = .true.
+    logical, save :: cfg_bypass_overlap_solve = .false.
+    logical, save :: cfg_disable_block_h_apply = .false.
+    logical, save :: cfg_disable_nonlocal_pp = .false.
+    logical, save :: cfg_use_direct_pfp = .false.
+    logical, save :: cfg_use_fft_pfp = .false.
+    logical, save :: cfg_use_prop_overlap = .true.
+    logical, save :: cfg_enforce_norm_tangent = .false.
+    logical, save :: cfg_enable_norm_deriv_check = .false.
+    logical, save :: cfg_enable_excitation_source_trace = .false.
     character(len=32) :: env_deriv_trace
     character(len=32) :: env_hermit_check
     character(len=32) :: env_op_mix_trace
@@ -95,57 +113,152 @@
     dt_gather_local = 0.0d0
     huge_val = huge(0.0d0) / 2.0d0
 
-    enable_deriv_trace = .false.
-    enable_hermit_check = .false.
-    env_deriv_trace = ''
-    call get_environment_variable('SALMON_DG_DERIV_TRACE', env_deriv_trace, length=env_trace_len, status=env_trace_stat)
-    if (env_trace_stat == 0 .and. env_trace_len > 0) then
-      if (env_deriv_trace(1:1) == '1' .or. env_deriv_trace(1:1) == 'y' .or. env_deriv_trace(1:1) == 'Y' .or. &
-          env_deriv_trace(1:1) == 't' .or. env_deriv_trace(1:1) == 'T') then
-        enable_deriv_trace = .true.
+    if (.not. derivative_env_initialized) then
+      env_deriv_trace = ''
+      call get_environment_variable('SALMON_DG_DERIV_TRACE', env_deriv_trace, length=env_trace_len, status=env_trace_stat)
+      if (env_trace_stat == 0 .and. env_trace_len > 0) then
+        if (env_deriv_trace(1:1) == '1' .or. env_deriv_trace(1:1) == 'y' .or. env_deriv_trace(1:1) == 'Y' .or. &
+            env_deriv_trace(1:1) == 't' .or. env_deriv_trace(1:1) == 'T') cfg_enable_deriv_trace = .true.
       end if
+
+      env_hermit_check = ''
+      call get_environment_variable('SALMON_DG_HERMIT_CHECK', env_hermit_check, length=env_trace_len, status=env_trace_stat)
+      if (env_trace_stat == 0 .and. env_trace_len > 0) then
+        if (env_hermit_check(1:1) == '1' .or. env_hermit_check(1:1) == 'y' .or. env_hermit_check(1:1) == 'Y' .or. &
+            env_hermit_check(1:1) == 't' .or. env_hermit_check(1:1) == 'T') cfg_enable_hermit_check = .true.
+      end if
+
+      env_op_mix_trace = ''
+      call get_environment_variable('SALMON_DG_OP_MIX_TRACE', env_op_mix_trace, length=env_trace_len, status=env_trace_stat)
+      if (env_trace_stat == 0 .and. env_trace_len > 0) then
+        if (env_op_mix_trace(1:1) == '1' .or. env_op_mix_trace(1:1) == 'y' .or. env_op_mix_trace(1:1) == 'Y' .or. &
+            env_op_mix_trace(1:1) == 't' .or. env_op_mix_trace(1:1) == 'T') cfg_enable_op_mix_trace = .true.
+      end if
+
+      env_m_block_audit = ''
+      call get_environment_variable('SALMON_DG_M_BLOCK_AUDIT', env_m_block_audit, length=env_trace_len, status=env_trace_stat)
+      if (env_trace_stat == 0 .and. env_trace_len > 0) then
+        if (env_m_block_audit(1:1) == '1' .or. env_m_block_audit(1:1) == 'y' .or. env_m_block_audit(1:1) == 'Y' .or. &
+            env_m_block_audit(1:1) == 't' .or. env_m_block_audit(1:1) == 'T') cfg_enable_m_block_audit = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_OVERLAP_SOLVE_TRACE', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_enable_overlap_path_trace = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_FORCE_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_force_overlap_solve = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_DISABLE_MFP', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_disable_mfp = .true.
+      end if
+
+      env_mfp_mode = ''
+      call get_environment_variable('SALMON_DG_MFP_MODE', env_mfp_mode, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp_mode(1:1) == 'f' .or. env_mfp_mode(1:1) == 'F' .or. env_mfp_mode(1:1) == 'g' .or. env_mfp_mode(1:1) == 'G') then
+          cfg_use_direct_pfp = .true.
+          cfg_use_fft_pfp = .true.
+        else if (env_mfp_mode(1:1) == 'p' .or. env_mfp_mode(1:1) == 'P' .or. &
+                 env_mfp_mode(1:1) == 'd' .or. env_mfp_mode(1:1) == 'D' .or. &
+                 env_mfp_mode(1:1) == 'n' .or. env_mfp_mode(1:1) == 'N' .or. &
+                 env_mfp_mode(1:1) == '1') then
+          cfg_use_direct_pfp = .true.
+          cfg_use_fft_pfp = .false.
+        end if
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_DISABLE_LOCAL_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '0' .or. env_mfp(1:1) == 'n' .or. env_mfp(1:1) == 'N' .or. &
+            env_mfp(1:1) == 'f' .or. env_mfp(1:1) == 'F') cfg_disable_local_overlap_solve = .false.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_BYPASS_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_bypass_overlap_solve = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_DISABLE_BLOCK_H_APPLY', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_disable_block_h_apply = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_DISABLE_NONLOCAL_PP', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_disable_nonlocal_pp = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_DISABLE_PROP_OVERLAP', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_use_prop_overlap = .false.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_ENFORCE_NORM_TANGENT', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_enforce_norm_tangent = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_NORM_DERIV_CHECK', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_enable_norm_deriv_check = .true.
+      end if
+
+      env_mfp = ''
+      call get_environment_variable('SALMON_DG_EXCITATION_SOURCE_TRACE', env_mfp, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
+            env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') cfg_enable_excitation_source_trace = .true.
+      end if
+
+      derivative_env_initialized = .true.
     end if
+
+    enable_deriv_trace = cfg_enable_deriv_trace
+    enable_hermit_check = cfg_enable_hermit_check
+    enable_op_mix_trace = cfg_enable_op_mix_trace
+    enable_m_block_audit = cfg_enable_m_block_audit
+    enable_overlap_path_trace = cfg_enable_overlap_path_trace
+    force_overlap_solve = cfg_force_overlap_solve
+    disable_mfp = cfg_disable_mfp
+    disable_local_overlap_solve = cfg_disable_local_overlap_solve
+    bypass_overlap_solve = cfg_bypass_overlap_solve
+    disable_block_h_apply = cfg_disable_block_h_apply
+    disable_nonlocal_pp = cfg_disable_nonlocal_pp
+    use_direct_pfp = cfg_use_direct_pfp
+    use_fft_pfp = cfg_use_fft_pfp
+    use_prop_overlap = cfg_use_prop_overlap
+    enforce_norm_tangent = cfg_enforce_norm_tangent
+    enable_norm_deriv_check = cfg_enable_norm_deriv_check
+    enable_excitation_source_trace = cfg_enable_excitation_source_trace
+
     if (enable_deriv_trace .and. itt <= 2) then
       write(*,'(1x,a,i0,a,i0,a,3(1x,1pe12.4))') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
         " Ac_tot=", Ac_tot(1), Ac_tot(2), Ac_tot(3)
       flush(6)
-    end if
-
-    env_hermit_check = ''
-    call get_environment_variable('SALMON_DG_HERMIT_CHECK', env_hermit_check, length=env_trace_len, status=env_trace_stat)
-    if (env_trace_stat == 0 .and. env_trace_len > 0) then
-      if (env_hermit_check(1:1) == '1' .or. env_hermit_check(1:1) == 'y' .or. env_hermit_check(1:1) == 'Y' .or. &
-          env_hermit_check(1:1) == 't' .or. env_hermit_check(1:1) == 'T') then
-        enable_hermit_check = .true.
-      end if
-    end if
-    enable_op_mix_trace = .false.
-    env_op_mix_trace = ''
-    call get_environment_variable('SALMON_DG_OP_MIX_TRACE', env_op_mix_trace, length=env_trace_len, status=env_trace_stat)
-    if (env_trace_stat == 0 .and. env_trace_len > 0) then
-      if (env_op_mix_trace(1:1) == '1' .or. env_op_mix_trace(1:1) == 'y' .or. env_op_mix_trace(1:1) == 'Y' .or. &
-          env_op_mix_trace(1:1) == 't' .or. env_op_mix_trace(1:1) == 'T') then
-        enable_op_mix_trace = .true.
-      end if
-    end if
-    enable_m_block_audit = .false.
-    env_m_block_audit = ''
-    call get_environment_variable('SALMON_DG_M_BLOCK_AUDIT', env_m_block_audit, length=env_trace_len, status=env_trace_stat)
-    if (env_trace_stat == 0 .and. env_trace_len > 0) then
-      if (env_m_block_audit(1:1) == '1' .or. env_m_block_audit(1:1) == 'y' .or. env_m_block_audit(1:1) == 'Y' .or. &
-          env_m_block_audit(1:1) == 't' .or. env_m_block_audit(1:1) == 'T') then
-        enable_m_block_audit = .true.
-      end if
-    end if
-
-    enable_overlap_path_trace = .false.
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_OVERLAP_SOLVE_TRACE', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        enable_overlap_path_trace = .true.
-      end if
     end if
     if (dg_frag%id == 0 .and. itt == 1) then
       if (use_direct_pfp .and. use_fft_pfp) then
@@ -156,18 +269,6 @@
         write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW momentum mode: legacy i(A·k)S_fp'
       end if
       flush(6)
-    end if
-
-    if (.not. ap_block_check_initialized) then
-      env_ap_block_check = ''
-      call get_environment_variable('SALMON_DG_AP_BLOCK_CHECK', env_ap_block_check, length=env_trace_len, status=env_trace_stat)
-      if (env_trace_stat == 0 .and. env_trace_len > 0) then
-        if (env_ap_block_check(1:1) == '1' .or. env_ap_block_check(1:1) == 'y' .or. env_ap_block_check(1:1) == 'Y' .or. &
-            env_ap_block_check(1:1) == 't' .or. env_ap_block_check(1:1) == 'T') then
-          enable_ap_block_check = .true.
-        end if
-      end if
-      ap_block_check_initialized = .true.
     end if
 
     ! Calculate A^2 (diamagnetic term)
@@ -192,115 +293,6 @@
     n_tot = n_frag + n_pw
 
     use_spatial_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v) .and. dg_frag%has_real_space_basis)
-    disable_mfp = .false.
-    disable_local_overlap_solve = .true.
-    bypass_overlap_solve = .false.
-    disable_block_h_apply = .false.
-    disable_nonlocal_pp = .false.
-    use_direct_pfp = .false.
-    use_fft_pfp = .false.
-    use_prop_overlap = .true.
-    enforce_norm_tangent = .false.
-    enable_norm_deriv_check = .false.
-    enable_excitation_source_trace = .false.
-    force_overlap_solve = .false.
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_FORCE_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        force_overlap_solve = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_DISABLE_MFP', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        disable_mfp = .true.
-      end if
-    end if
-    env_mfp_mode = ''
-    call get_environment_variable('SALMON_DG_MFP_MODE', env_mfp_mode, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp_mode(1:1) == 'l' .or. env_mfp_mode(1:1) == 'L' .or. env_mfp_mode(1:1) == '0') then
-        use_direct_pfp = .false.
-        use_fft_pfp = .false.
-      else if (env_mfp_mode(1:1) == 'f' .or. env_mfp_mode(1:1) == 'F' .or. env_mfp_mode(1:1) == 'g' .or. env_mfp_mode(1:1) == 'G') then
-        use_direct_pfp = .true.
-        use_fft_pfp = .true.
-      else if (env_mfp_mode(1:1) == 'p' .or. env_mfp_mode(1:1) == 'P' .or. &
-               env_mfp_mode(1:1) == 'd' .or. env_mfp_mode(1:1) == 'D' .or. &
-               env_mfp_mode(1:1) == 'n' .or. env_mfp_mode(1:1) == 'N' .or. &
-               env_mfp_mode(1:1) == '1') then
-        use_direct_pfp = .true.
-        use_fft_pfp = .false.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_DISABLE_LOCAL_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        disable_local_overlap_solve = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_BYPASS_OVERLAP_SOLVE', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        bypass_overlap_solve = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_DISABLE_BLOCK_H_APPLY', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        disable_block_h_apply = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_DISABLE_NONLOCAL_PP', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        disable_nonlocal_pp = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_DISABLE_PROP_OVERLAP', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        use_prop_overlap = .false.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_ENFORCE_NORM_TANGENT', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        enforce_norm_tangent = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_NORM_DERIV_CHECK', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        enable_norm_deriv_check = .true.
-      end if
-    end if
-    env_mfp = ''
-    call get_environment_variable('SALMON_DG_EXCITATION_SOURCE_TRACE', env_mfp, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mfp(1:1) == '1' .or. env_mfp(1:1) == 'y' .or. env_mfp(1:1) == 'Y' .or. &
-          env_mfp(1:1) == 't' .or. env_mfp(1:1) == 'T') then
-        enable_excitation_source_trace = .true.
-      end if
-    end if
     if (disable_nonlocal_pp) then
       has_nonlocal = .false.
       has_so_nonlocal = .false.
@@ -896,6 +888,10 @@
       has_s_c = allocated(dg_frag%S_mat_c)
       overlap_gate_reason = 'none'
       n_s = 0
+      ! Decide whether the RHS needs an S^{-1} application.  The mixed-basis
+      ! route normally propagates in the orthonormalized mixed coordinates, so
+      ! applying the fragment overlap again is skipped unless explicitly forced.
+      ! Legacy fragment-only routes still use the available overlap storage.
       if (use_mixed_basis .and. n_basis > 0) then
         if (force_overlap_solve) then
           if (mfp_coupling_on) then
@@ -949,6 +945,8 @@
           end if
           rhs_all(1:n_s, :) = rhs_in(:, :)
         else
+          ! Convert dC/dt from covariant RHS form to coefficient derivatives
+          ! by solving S x = rhs over the active fragment/mixed subspace.
           if (enable_overlap_path_trace .and. dg_frag%id == 0 .and. (itt <= 200 .or. mod(itt, 50) == 0)) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,l1,a,l1)') '[OVERLAP-SOLVE-ENTER] itt=', itt, ' ispin=', ispin, &
               ' n_s=', n_s, ' use_prop=', use_prop_overlap, ' force=', force_overlap_solve, ' mixed=', use_mixed_basis

@@ -78,6 +78,9 @@ module rt_dg_fragment_types
     integer, allocatable :: ixg(:)
     integer, allocatable :: iyg(:)
     integer, allocatable :: izg(:)
+    integer, allocatable :: bx(:)
+    integer, allocatable :: by(:)
+    integer, allocatable :: bz(:)
   end type density_recv_map_info
 
   type :: density_grid_point_info
@@ -267,6 +270,12 @@ module rt_dg_fragment_types
     integer, allocatable :: density_subgroup_send_slot_map(:,:,:,:) ! local-fragment grid -> packed subgroup-reduce slot
     type(density_grid_point_info), allocatable :: density_grid_points(:,:) ! (max_points_per_local_fragment, ifrag_local)
     integer, allocatable :: density_grid_point_count(:)         ! valid point count per local fragment
+    integer, allocatable :: density_grid_bx(:,:)                ! cached rho_bf x index for density_grid_points
+    integer, allocatable :: density_grid_by(:,:)                ! cached rho_bf y index for density_grid_points
+    integer, allocatable :: density_grid_bz(:,:)                ! cached rho_bf z index for density_grid_points
+    integer :: density_rhobf_box_lo(3) = 0
+    integer :: density_rhobf_box_hi(3) = -1
+    logical :: density_rhobf_box_cache_valid = .false.
     integer, allocatable :: density_subgroup_self_ixg(:)        ! root-owned subgroup-reduce unpack x index
     integer, allocatable :: density_subgroup_self_iyg(:)        ! root-owned subgroup-reduce unpack y index
     integer, allocatable :: density_subgroup_self_izg(:)        ! root-owned subgroup-reduce unpack z index
@@ -285,6 +294,10 @@ module rt_dg_fragment_types
     integer, allocatable :: density_phi_block_count(:)       ! block count per local fragment
     integer :: density_phi_block_size = 0
     logical :: density_phi_block_cache_valid = .false.
+    complex(8), allocatable :: density_phase_block_cache(:,:,:,:) ! block-packed PW phases (block_size,n_pw,nblock_max,ifrag_local)
+    integer :: density_phase_block_size = 0
+    integer :: density_phase_block_npw = 0
+    logical :: density_phase_block_cache_valid = .false.
     complex(8), allocatable :: density_matrix_frag(:,:,:,:) ! raw fragment density matrix cache (nbf,nbf,nspin,ifrag_local)
     logical, allocatable :: density_matrix_frag_valid(:,:)  ! raw fragment density matrix validity (nspin,ifrag_local)
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)

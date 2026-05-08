@@ -301,10 +301,6 @@ contains
     integer :: env_len, env_stat
     character(len=64) :: env_sfp_mode
     logical :: use_fft_gspace
-    logical :: enable_fft_trace
-    character(len=64) :: env_fft_trace
-    real(8) :: norm_fft, norm_legacy, norm_diff
-    complex(8), allocatable :: S_legacy_diag(:,:,:)
 
     env_sfp_mode = ''
     call get_environment_variable('SALMON_DG_SFP_MODE', env_sfp_mode, length=env_len, status=env_stat)
@@ -312,16 +308,6 @@ contains
     if (env_stat == 0 .and. env_len > 0) then
       if (env_sfp_mode(1:1) == 'f' .or. env_sfp_mode(1:1) == 'F' .or. env_sfp_mode(1:1) == 'g' .or. env_sfp_mode(1:1) == 'G') then
         use_fft_gspace = .true.
-      end if
-    end if
-
-    enable_fft_trace = .false.
-    env_fft_trace = ''
-    call get_environment_variable('SALMON_DG_FFT_FP_TRACE', env_fft_trace, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_fft_trace(1:1) == '1' .or. env_fft_trace(1:1) == 'y' .or. env_fft_trace(1:1) == 'Y' .or. &
-          env_fft_trace(1:1) == 't' .or. env_fft_trace(1:1) == 'T') then
-        enable_fft_trace = .true.
       end if
     end if
 
@@ -335,35 +321,8 @@ contains
         allocate(dg_frag%S_mat_frag_pw_g(size(S_complex,1), size(S_complex,2), size(S_complex,3)))
       end if
       dg_frag%S_mat_frag_pw_g(:, :, :) = S_complex(:, :, :)
-      if (enable_fft_trace .and. comm_is_root(dg_frag%id)) then
-        norm_fft = sqrt(sum(abs(S_complex(:, :, :))**2))
-        norm_legacy = -1.0d0
-        norm_diff = -1.0d0
-        if (allocated(dg_frag%S_mat_frag_pw)) then
-          if (size(dg_frag%S_mat_frag_pw,1) == size(S_complex,1) .and. size(dg_frag%S_mat_frag_pw,2) == size(S_complex,2) .and. &
-              size(dg_frag%S_mat_frag_pw,3) == size(S_complex,3)) then
-            norm_legacy = sqrt(sum(abs(dg_frag%S_mat_frag_pw(:, :, :))**2))
-          end if
-        end if
-        allocate(S_legacy_diag(size(S_complex,1), size(S_complex,2), size(S_complex,3)))
-        call compute_fragment_pw_overlap_legacy(dg_frag, S_legacy_diag)
-        norm_legacy = sqrt(sum(abs(S_legacy_diag(:, :, :))**2))
-        norm_diff = sqrt(sum(abs(S_complex(:, :, :) - S_legacy_diag(:, :, :))**2))
-        deallocate(S_legacy_diag)
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW overlap mode: fft_gspace'
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag FFT domain: periodic cell FFT with buffered support'
-        if (norm_legacy >= 0.0d0) then
-          write(*,'(1x,a,1x,1pe14.6,a,1x,1pe14.6)') '[DG-FFT-FP] ||S_fp(legacy)||_F=', norm_legacy, ' ||S_fp(fft)||_F=', norm_fft
-          write(*,'(1x,a,1x,1pe14.6)') '[DG-FFT-FP] ||S_fp(fft)-S_fp(legacy)||_F=', norm_diff
-        else
-          write(*,'(1x,a,1x,1pe14.6)') '[DG-FFT-FP] ||S_fp(fft)||_F=', norm_fft
-        end if
-      end if
     else
       call compute_fragment_pw_overlap_legacy(dg_frag, S_complex)
-      if (enable_fft_trace .and. comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW overlap mode: legacy'
-      end if
     end if
 
   end subroutine compute_fragment_pw_overlap
@@ -1098,11 +1057,8 @@ contains
     integer :: ispin, ipw, idir
     integer :: env_len, env_stat
     character(len=64) :: env_mfp_mode
-    character(len=64) :: env_fft_trace
-    logical :: enable_fft_trace
     logical :: use_fft_mfp
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
-    real(8) :: norm_p
 
     P_frag_pw(:, :, :, :) = (0.0d0, 0.0d0)
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -1114,16 +1070,6 @@ contains
     if (env_stat == 0 .and. env_len > 0) then
       if (env_mfp_mode(1:1) == 'f' .or. env_mfp_mode(1:1) == 'F' .or. env_mfp_mode(1:1) == 'g' .or. env_mfp_mode(1:1) == 'G') then
         use_fft_mfp = .true.
-      end if
-    end if
-
-    enable_fft_trace = .false.
-    env_fft_trace = ''
-    call get_environment_variable('SALMON_DG_FFT_FP_TRACE', env_fft_trace, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_fft_trace(1:1) == '1' .or. env_fft_trace(1:1) == 'y' .or. env_fft_trace(1:1) == 'Y' .or. &
-          env_fft_trace(1:1) == 't' .or. env_fft_trace(1:1) == 'T') then
-        enable_fft_trace = .true.
       end if
     end if
 
@@ -1144,15 +1090,6 @@ contains
         allocate(dg_frag%P_mat_frag_pw_g(size(P_frag_pw,1), size(P_frag_pw,2), size(P_frag_pw,3), size(P_frag_pw,4)))
       end if
       dg_frag%P_mat_frag_pw_g(:, :, :, :) = P_frag_pw(:, :, :, :)
-      if (enable_fft_trace .and. comm_is_root(dg_frag%id)) then
-        norm_p = sqrt(sum(abs(P_frag_pw(:, :, :, :))**2))
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW momentum mode: fft_gspace'
-        write(*,'(1x,a,1x,1pe14.6)') '[DG-FFT-FP] ||P_fp(fft)||_F=', norm_p
-      end if
-    else
-      if (enable_fft_trace .and. comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW momentum mode: legacy/direct_grad'
-      end if
     end if
   end subroutine compute_fragment_pw_gradient_from_overlap
 
@@ -1397,7 +1334,6 @@ contains
 
     integer :: ispin, n_total, n_frag, n_pw, lda, lwork, info, i, j, k
     integer :: n_floor, n_keep_s, n_drop_s
-    integer :: dropped_mode_topk, keep_compare_topk
     integer :: env_len, env_stat
     real(8) :: sij, s_eff_min, s_eff_max, s_eff_cond
     real(8) :: tau_s, trunc_ratio, lam_keep_min, lam_max
@@ -1406,11 +1342,7 @@ contains
     character(len=64) :: env_eps_rel
     character(len=64) :: env_init_mode
     character(len=64) :: init_mode_norm
-    character(len=64) :: env_rank_drop_topk, env_keep_compare_topk
     character(len=64) :: env_pw_weight_protect_n, env_apply_pw_weight_keep
-    character(len=64) :: env_mix_mode_audit
-    logical :: enable_mix_mode_audit
-    real(8) :: audit_frag_w
     real(8), parameter :: pw_dom_thresh = 0.5d0, pw_nontriv_thresh = 0.1d0
     integer :: n_pw_dom_modes, n_pw_nontriv_modes, n_pw_drop_dom
     logical :: use_raw_prop_s
@@ -1425,7 +1357,7 @@ contains
     integer, allocatable :: jpvt(:), keep_idx(:), keep_s_idx(:)
     integer :: m_qr, n_qr, lwork_qr, info_qr, n_keep_pw, n_keep_pw_base, ndiag
     integer :: n_protect_pw, n_keep_protect
-    integer :: n_pw_weight_protect, n_keep_pw_pwprotect, n_added_pwprotect
+    integer :: n_pw_weight_protect, n_keep_pw_pwprotect
     real(8) :: diag_max, tau_rr
     real(8) :: k_protect_thr
     real(8), parameter :: eps_s_abs = 1.0d-10
@@ -1465,28 +1397,6 @@ contains
         init_occupied_projection = .true.
       end if
     end if
-    dropped_mode_topk = 8
-    env_rank_drop_topk = ''
-    call get_environment_variable('SALMON_DG_RANK_DROP_TOPK', env_rank_drop_topk, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      read(env_rank_drop_topk(1:env_len), *, iostat=info) dropped_mode_topk
-      if (info /= 0 .or. dropped_mode_topk < 1) dropped_mode_topk = 8
-    end if
-    keep_compare_topk = 8
-    env_keep_compare_topk = ''
-    call get_environment_variable('SALMON_DG_KEEP_COMPARE_TOPK', env_keep_compare_topk, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      read(env_keep_compare_topk(1:env_len), *, iostat=info) keep_compare_topk
-      if (info /= 0 .or. keep_compare_topk < 1) keep_compare_topk = 8
-    end if
-    enable_mix_mode_audit = .false.
-    env_mix_mode_audit = ''
-    call get_environment_variable('SALMON_DG_MIX_MODE_AUDIT', env_mix_mode_audit, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      if (env_mix_mode_audit(1:1) == '1' .or. env_mix_mode_audit(1:1) == 'y' .or. &
-          env_mix_mode_audit(1:1) == 'Y' .or. env_mix_mode_audit(1:1) == 't' .or. &
-          env_mix_mode_audit(1:1) == 'T') enable_mix_mode_audit = .true.
-    end if
     n_pw_weight_protect = 0
     env_pw_weight_protect_n = ''
     call get_environment_variable('SALMON_DG_PW_WEIGHT_PROTECT_N', env_pw_weight_protect_n, length=env_len, status=env_stat)
@@ -1522,9 +1432,8 @@ contains
       else
         write(*,'(1x,a)') "Mixed-init mode: raw_projection"
       end if
-      write(*,'(1x,a,i0,a,i0,a,l1)') 'PW keep compare/protect: topk=', keep_compare_topk, &
-           ' pw_weight_protect_n=', n_pw_weight_protect, ' apply=', apply_pw_weight_keep
-      write(*,'(1x,a,i0)') 'Rank-drop topk: ', dropped_mode_topk
+      write(*,'(1x,a,i0,a,l1)') 'PW weight protection: n=', n_pw_weight_protect, &
+           ' apply=', apply_pw_weight_keep
     end if
 
     allocate(S_frag_pw(n_frag, n_pw, dg_frag%nspin))
@@ -1559,6 +1468,9 @@ contains
       call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
       n_keep_pw = n_pw
       if (info_qr == 0) then
+        ! Rank-revealing QR removes PW columns that are linearly dependent in
+        ! the fragment-overlap space.  This keeps the mixed metric well
+        ! conditioned before the generalized eigenproblem.
         ndiag = min(m_qr, n_qr)
         diag_max = 0.0d0
         do i = 1, ndiag
@@ -1576,12 +1488,11 @@ contains
 
       n_keep_pw_base = n_keep_pw
       if (n_pw_weight_protect <= 0) n_pw_weight_protect = n_protect_pw
+      ! Protection is applied after QR so physically important low-|G| or
+      ! high-overlap PW modes are not discarded only because they are nearly
+      ! dependent on the fragment subspace.
       call build_keep_sets_from_jpvt(n_qr, jpvt, n_keep_pw_base, pw_col_proxy, n_pw_weight_protect, &
-           keep_idx_jpvt, keep_idx_pw_protect, n_keep_pw_pwprotect, n_added_pwprotect)
-      if (comm_is_root(dg_frag%id)) then
-        call emit_keep_set_compare_report(n_qr, keep_idx_jpvt, n_keep_pw_base, keep_idx_pw_protect, n_keep_pw_pwprotect, &
-             n_added_pwprotect, pw_col_proxy, keep_compare_topk)
-      end if
+           keep_idx_jpvt, keep_idx_pw_protect, n_keep_pw_pwprotect)
 
       if (allocated(keep_idx)) deallocate(keep_idx)
       allocate(keep_idx(n_qr))
@@ -1594,6 +1505,8 @@ contains
       end if
 
       if (n_protect_pw > 0) then
+        ! Merge explicit low-|G| protection with the selected QR/proxy keep set
+        ! while preserving uniqueness and the compacted PW ordering.
         allocate(selected_keep(n_pw))
         selected_keep(:) = .false.
         n_keep_pw = 0
@@ -1893,7 +1806,6 @@ contains
              " pw_nontriv_modes=", n_pw_nontriv_modes, " / ", n_keep_s
         write(*,'(1x,a,i0,a,i0,a,1pe11.3)') "Mixed-S dropped PW-like: ", n_pw_drop_dom, " / ", n_drop_s, &
              " max_pw_weight_dropped=", pw_weight_drop_max
-        call emit_post_rank_qr_dropped_modes(ispin, n_frag, n_total, eval_s, S_work, tau_s, dropped_mode_topk)
       end if
 
       allocate(X(n_total, n_keep_s), tmp_mat(n_keep_s, n_total), H_ortho(n_keep_s, n_keep_s), eigvec(n_total, n_keep_s))
@@ -1936,18 +1848,6 @@ contains
       dg_frag%mixed_basis_dim(ispin) = min(dg_frag%nstate_tot, n_keep_s)
       dg_frag%mixed_transform(1:n_total, 1:dg_frag%mixed_basis_dim(ispin), ispin) = &
         eigvec(1:n_total, 1:dg_frag%mixed_basis_dim(ispin))
-      if (enable_mix_mode_audit .and. comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,a,i0,a,i0)') '[MIX-MODE-AUDIT] ispin=', ispin, &
-             ' n_basis=', dg_frag%mixed_basis_dim(ispin), ' n_frag=', n_frag
-        write(*,'(1x,a)') '[MIX-MODE-AUDIT] mode  energy_Ha   pw_weight   frag_weight'
-        do j = 1, dg_frag%mixed_basis_dim(ispin)
-          pw_weight = sum(abs(eigvec(n_frag+1:n_total, j))**2)
-          audit_frag_w = sum(abs(eigvec(1:n_frag, j))**2)
-          write(*,'(1x,a,i5,3(1x,1pe14.6))') '[MIX-MODE-AUDIT] ', j, eigenvalues_tmp(j), &
-               pw_weight, audit_frag_w
-        end do
-        flush(6)
-      end if
       dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
       if (init_identity) then
         do i = 1, dg_frag%mixed_basis_dim(ispin)
@@ -2353,14 +2253,14 @@ contains
   end subroutine compute_pw_weight_proxy_from_overlap
 
   subroutine build_keep_sets_from_jpvt(n_pw, jpvt, n_keep_base, pw_proxy, n_pw_weight_protect, &
-                                       keep_jpvt, keep_pw_protect, n_keep_pw_protect, n_added)
+                                       keep_jpvt, keep_pw_protect, n_keep_pw_protect)
     implicit none
     integer, intent(in) :: n_pw, jpvt(:), n_keep_base, n_pw_weight_protect
     real(8), intent(in) :: pw_proxy(:)
     integer, allocatable, intent(out) :: keep_jpvt(:), keep_pw_protect(:)
-    integer, intent(out) :: n_keep_pw_protect, n_added
+    integer, intent(out) :: n_keep_pw_protect
 
-    integer :: i, idx, n_valid_base, n_extra, best_idx
+    integer :: i, idx, n_valid_base, n_extra, best_idx, n_added
     real(8) :: best_val
     logical, allocatable :: selected(:)
 
@@ -2404,102 +2304,6 @@ contains
     if (n_valid_base <= 0) keep_jpvt(1) = 1
     deallocate(selected)
   end subroutine build_keep_sets_from_jpvt
-
-  subroutine emit_keep_set_compare_report(n_pw, keep_jpvt, n_keep_jpvt, keep_pw_protect, n_keep_pw_protect, &
-                                          n_added, pw_proxy, topk)
-    implicit none
-    integer, intent(in) :: n_pw, n_keep_jpvt, n_keep_pw_protect, n_added, topk
-    integer, intent(in) :: keep_jpvt(:), keep_pw_protect(:)
-    real(8), intent(in) :: pw_proxy(:)
-
-    integer :: i, j, n_overlap, n_report
-    logical, allocatable :: in_jpvt(:)
-
-    allocate(in_jpvt(n_pw))
-    in_jpvt(:) = .false.
-    do i = 1, n_keep_jpvt
-      if (keep_jpvt(i) < 1 .or. keep_jpvt(i) > n_pw) cycle
-      in_jpvt(keep_jpvt(i)) = .true.
-    end do
-
-    n_overlap = 0
-    do i = 1, n_keep_pw_protect
-      if (keep_pw_protect(i) < 1 .or. keep_pw_protect(i) > n_pw) cycle
-      if (in_jpvt(keep_pw_protect(i))) n_overlap = n_overlap + 1
-    end do
-    write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') '[PW-MIX-AUDIT] ', 'stage=post_rank_qr_keep_compare', &
-         ' jpvt_keep=', n_keep_jpvt, ' pw_protect_keep=', n_keep_pw_protect, ' overlap=', n_overlap, ' n_pw=', n_pw
-    write(*,'(1x,a,a,i0)') '[PW-MIX-AUDIT] ', 'stage=post_rank_qr_keep_compare_added n_added=', n_added
-
-    n_report = min(max(0, topk), n_keep_pw_protect)
-    j = 0
-    do i = 1, n_keep_pw_protect
-      if (keep_pw_protect(i) < 1 .or. keep_pw_protect(i) > n_pw) cycle
-      if (in_jpvt(keep_pw_protect(i))) cycle
-      j = j + 1
-      if (j > n_report) exit
-      write(*,'(1x,a,a,i0,a,i0,a,1pe11.3)') '[PW-MIX-AUDIT] ', 'stage=post_rank_qr_keep_compare_topk rank=', j, &
-           ' mode_idx=', keep_pw_protect(i), ' pw_weight_proxy=', pw_proxy(keep_pw_protect(i))
-    end do
-    deallocate(in_jpvt)
-  end subroutine emit_keep_set_compare_report
-
-  subroutine emit_post_rank_qr_dropped_modes(ispin, n_frag, n_total, eval_s, eigvec_s, tau_s, topk)
-    implicit none
-    integer, intent(in) :: ispin, n_frag, n_total, topk
-    real(8), intent(in) :: eval_s(:), tau_s
-    complex(8), intent(in) :: eigvec_s(:,:)
-
-    integer :: i, j, n_drop, n_emit, idx_best
-    integer, allocatable :: drop_idx(:), top_idx(:)
-    real(8), allocatable :: drop_pw(:), drop_frag(:), drop_proxy(:)
-    logical, allocatable :: selected(:)
-    real(8) :: best_pw
-
-    n_drop = count(eval_s(1:n_total) < tau_s)
-    write(*,'(1x,a,a,i0,a,i0,a,i0,a,1pe11.3)') '[PW-MIX-AUDIT] ', 'stage=post_rank_qr ispin=', ispin, &
-         ' keep=', n_total - n_drop, ' drop=', n_drop, ' tau=', tau_s
-    if (n_drop <= 0) return
-
-    allocate(drop_idx(n_drop), drop_pw(n_drop), drop_frag(n_drop), drop_proxy(n_drop))
-    j = 0
-    do i = 1, n_total
-      if (eval_s(i) >= tau_s) cycle
-      j = j + 1
-      drop_idx(j) = i
-      drop_pw(j) = 0.0d0
-      if (n_total > n_frag) drop_pw(j) = sum(abs(eigvec_s(n_frag+1:n_total, i))**2)
-      drop_frag(j) = sum(abs(eigvec_s(1:n_frag, i))**2)
-      drop_proxy(j) = eval_s(i)
-      write(*,'(1x,a,a,i0,a,i0,a,1pe11.3,a,1pe11.3,a,1pe11.3)') '[PW-MIX-AUDIT] ', &
-           'stage=post_rank_qr_dropped ispin=', ispin, ' mode_idx=', i, ' pw_weight=', drop_pw(j), &
-           ' frag_weight=', drop_frag(j), ' rank_proxy=', drop_proxy(j)
-    end do
-
-    n_emit = min(max(1, topk), n_drop)
-    allocate(top_idx(n_emit), selected(n_drop))
-    selected(:) = .false.
-    do i = 1, n_emit
-      idx_best = 0
-      best_pw = -1.0d0
-      do j = 1, n_drop
-        if (selected(j)) cycle
-        if (drop_pw(j) > best_pw) then
-          best_pw = drop_pw(j)
-          idx_best = j
-        end if
-      end do
-      if (idx_best <= 0) exit
-      selected(idx_best) = .true.
-      top_idx(i) = idx_best
-      write(*,'(1x,a,a,i0,a,i0,a,i0,a,1pe11.3,a,1pe11.3,a,1pe11.3)') '[PW-MIX-AUDIT] ', &
-           'stage=post_rank_qr_dropped_topk rank=', i, ' ispin=', ispin, ' mode_idx=', drop_idx(idx_best), &
-           ' pw_weight=', drop_pw(idx_best), ' frag_weight=', drop_frag(idx_best), &
-           ' rank_proxy=', drop_proxy(idx_best)
-    end do
-
-    deallocate(drop_idx, drop_pw, drop_frag, drop_proxy, top_idx, selected)
-  end subroutine emit_post_rank_qr_dropped_modes
 
   !=======================================================================
   ! Keep only rank-revealed independent PW columns.
