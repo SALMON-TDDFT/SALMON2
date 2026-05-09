@@ -127,7 +127,7 @@ contains
     integer, intent(in) :: ispin
 
     integer :: n_frag, n_pw, n_tot, n_basis, nstate
-    complex(8), allocatable :: raw_all(:,:)
+    complex(8), allocatable, save :: raw_all(:,:)
 
     if (.not. dg_frag%mixed_basis_ready) return
     if (.not. allocated(dg_frag%mixed_transform)) return
@@ -145,11 +145,18 @@ contains
 
     ! coef_mix stores coordinates in the orthonormalized mixed basis.  Expand
     ! them back to the raw fragment/PW arrays used by density and operator code.
-    allocate(raw_all(n_tot, nstate))
-    raw_all(:, :) = matmul(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), dg_frag%coef_mix(1:n_basis, 1:nstate, ispin))
+    if (.not. allocated(raw_all)) then
+      allocate(raw_all(n_tot, nstate))
+    else if (size(raw_all, 1) /= n_tot .or. size(raw_all, 2) /= nstate) then
+      deallocate(raw_all)
+      allocate(raw_all(n_tot, nstate))
+    end if
+    call zgemm('N', 'N', n_tot, nstate, n_basis, (1.0d0, 0.0d0), &
+               dg_frag%mixed_transform(1, 1, ispin), size(dg_frag%mixed_transform, 1), &
+               dg_frag%coef_mix(1, 1, ispin), size(dg_frag%coef_mix, 1), &
+               (0.0d0, 0.0d0), raw_all, n_tot)
     dg_frag%coef(1:n_frag, 1:nstate, ispin) = raw_all(1:n_frag, 1:nstate)
     if (n_pw > 0) dg_frag%coef_pw(1:n_pw, 1:nstate, ispin) = raw_all(n_frag+1:n_tot, 1:nstate)
-    deallocate(raw_all)
   end subroutine sync_raw_coef_from_mixed
 
   subroutine sync_mixed_coef_from_raw(dg_frag, ispin, overlap_metric)
@@ -161,7 +168,7 @@ contains
     integer :: n_frag, n_pw, n_tot, n_basis, nstate
     integer :: row_s, row_e, pw_s, pw_e
     integer :: base, extra, rank_in_frag, nworker
-    complex(8), allocatable :: raw_all(:,:), raw_sum(:,:), overlap_all(:,:), mixed_all(:,:), mixed_sum(:,:)
+    complex(8), allocatable, save :: raw_all(:,:), raw_sum(:,:), overlap_all(:,:), mixed_all(:,:), mixed_sum(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
 
     if (.not. dg_frag%mixed_basis_ready) return
@@ -187,7 +194,24 @@ contains
       dg_frag%coef_mix(:, :, :) = (0.0d0, 0.0d0)
     end if
 
-    allocate(raw_all(n_tot, nstate), overlap_all(n_tot, nstate), mixed_all(n_basis, nstate))
+    if (.not. allocated(raw_all)) then
+      allocate(raw_all(n_tot, nstate))
+    else if (size(raw_all, 1) /= n_tot .or. size(raw_all, 2) /= nstate) then
+      deallocate(raw_all)
+      allocate(raw_all(n_tot, nstate))
+    end if
+    if (.not. allocated(overlap_all)) then
+      allocate(overlap_all(n_tot, nstate))
+    else if (size(overlap_all, 1) /= n_tot .or. size(overlap_all, 2) /= nstate) then
+      deallocate(overlap_all)
+      allocate(overlap_all(n_tot, nstate))
+    end if
+    if (.not. allocated(mixed_all)) then
+      allocate(mixed_all(n_basis, nstate))
+    else if (size(mixed_all, 1) /= n_basis .or. size(mixed_all, 2) /= nstate) then
+      deallocate(mixed_all)
+      allocate(mixed_all(n_basis, nstate))
+    end if
     raw_all(:, :) = (0.0d0, 0.0d0)
     if (dg_frag%parallel_mode_orbital) then
       ! Mixed raw coefficients may be either freshly row-owned or already
@@ -224,10 +248,14 @@ contains
         end if
       end if
       if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-        allocate(raw_sum(n_tot, nstate))
+        if (.not. allocated(raw_sum)) then
+          allocate(raw_sum(n_tot, nstate))
+        else if (size(raw_sum, 1) /= n_tot .or. size(raw_sum, 2) /= nstate) then
+          deallocate(raw_sum)
+          allocate(raw_sum(n_tot, nstate))
+        end if
         call comm_summation(raw_all, raw_sum, n_tot * nstate, dg_frag%icomm_frag)
         raw_all(:, :) = raw_sum(:, :)
-        deallocate(raw_sum)
       end if
     else
       ! Gather distributed raw coefficients before projecting them into the
@@ -253,30 +281,35 @@ contains
     if (dg_frag%parallel_mode_orbital) then
       mixed_all(:, :) = (0.0d0, 0.0d0)
       if (row_s <= n_frag .and. row_e >= row_s) then
-        mixed_all(:, :) = mixed_all(:, :) + &
-          matmul(conjg(transpose(dg_frag%mixed_transform(row_s:min(row_e, n_frag), 1:n_basis, ispin))), &
-                 overlap_all(row_s:min(row_e, n_frag), 1:nstate))
+        call zgemm('C', 'N', n_basis, nstate, min(row_e, n_frag) - row_s + 1, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(row_s, 1, ispin), size(dg_frag%mixed_transform, 1), &
+                   overlap_all(row_s, 1), n_tot, (1.0d0, 0.0d0), mixed_all, n_basis)
       end if
       if (n_pw > 0 .and. pw_s <= n_pw .and. pw_e >= pw_s) then
-        mixed_all(:, :) = mixed_all(:, :) + &
-          matmul(conjg(transpose(dg_frag%mixed_transform(n_frag+pw_s:n_frag+min(pw_e, n_pw), 1:n_basis, ispin))), &
-                 overlap_all(n_frag+pw_s:n_frag+min(pw_e, n_pw), 1:nstate))
+        call zgemm('C', 'N', n_basis, nstate, min(pw_e, n_pw) - pw_s + 1, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(n_frag + pw_s, 1, ispin), size(dg_frag%mixed_transform, 1), &
+                   overlap_all(n_frag + pw_s, 1), n_tot, (1.0d0, 0.0d0), mixed_all, n_basis)
       end if
       if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-        allocate(mixed_sum(n_basis, nstate))
+        if (.not. allocated(mixed_sum)) then
+          allocate(mixed_sum(n_basis, nstate))
+        else if (size(mixed_sum, 1) /= n_basis .or. size(mixed_sum, 2) /= nstate) then
+          deallocate(mixed_sum)
+          allocate(mixed_sum(n_basis, nstate))
+        end if
         call comm_summation(mixed_all, mixed_sum, n_basis * nstate, dg_frag%icomm_frag)
         mixed_all(:, :) = mixed_sum(:, :)
-        deallocate(mixed_sum)
       end if
     else
-      mixed_all(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), overlap_all)
+      call zgemm('C', 'N', n_basis, nstate, n_tot, (1.0d0, 0.0d0), &
+                 dg_frag%mixed_transform(1, 1, ispin), size(dg_frag%mixed_transform, 1), &
+                 overlap_all, n_tot, (0.0d0, 0.0d0), mixed_all, n_basis)
     end if
     dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
     dg_frag%coef_mix(1:n_basis, 1:nstate, ispin) = mixed_all(:, :)
 
     if (allocated(coef_frag_all)) deallocate(coef_frag_all)
     if (allocated(coef_pw_all)) deallocate(coef_pw_all)
-    deallocate(raw_all, overlap_all, mixed_all)
   end subroutine sync_mixed_coef_from_raw
 
   subroutine reorthonormalize_mixed_occupied_subspace(dg_frag)

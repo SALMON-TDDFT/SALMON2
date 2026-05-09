@@ -37,8 +37,34 @@
     logical :: use_rank_buffered_potential
     logical :: use_dual_rho_vh
     type(s_scalar) :: rho_h
+    real(8) :: t0, t1
+    real(8) :: time_density, time_hartree, time_xc, time_reconstruct, time_pw_mix
+    logical, save :: timing_initialized = .false.
+    logical, save :: enable_stage_timing = .false.
+    character(16) :: env_timing
+    integer :: env_status
 
+    if (.not. timing_initialized) then
+      env_timing = ''
+      call get_environment_variable('SALMON_DG_STAGE_TIMING', env_timing, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_timing)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_stage_timing = .true.
+        end select
+      end if
+      timing_initialized = .true.
+    end if
+    time_density = 0.0d0
+    time_hartree = 0.0d0
+    time_xc = 0.0d0
+    time_reconstruct = 0.0d0
+    time_pw_mix = 0.0d0
+
+    call cpu_time(t0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s, itt)
+    call cpu_time(t1)
+    time_density = time_density + (t1 - t0)
 
     dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
     if (system%nspin > 0) then
@@ -70,9 +96,15 @@
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
     end if
     if (use_dual_rho_vh) then
+      call cpu_time(t0)
       call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho_h, Vh)
+      call cpu_time(t1)
+      time_hartree = time_hartree + (t1 - t0)
     else
+      call cpu_time(t0)
       call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
+      call cpu_time(t1)
+      time_hartree = time_hartree + (t1 - t0)
     end if
     dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
     if (use_rank_buffered_potential) then
@@ -104,8 +136,11 @@
         flush(6)
       end if
     end if
+    call cpu_time(t0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
+    call cpu_time(t1)
+    time_xc = time_xc + (t1 - t0)
     if (system%nspin > 0) then
       dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
       do n_frag = 1, system%nspin
@@ -119,12 +154,19 @@
       energy%E_U = 0.0d0
     end if
     if (use_rank_buffered_potential) then
+      call cpu_time(t0)
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
+      call cpu_time(t1)
+      time_reconstruct = time_reconstruct + (t1 - t0)
     else
+      call cpu_time(t0)
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+      call cpu_time(t1)
+      time_reconstruct = time_reconstruct + (t1 - t0)
     end if
 
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
+      call cpu_time(t0)
       n_frag = dg_frag%n_mat_max
       n_pw = dg_frag%n_plane_waves
 
@@ -151,6 +193,15 @@
 
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
       call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
+      call cpu_time(t1)
+      time_pw_mix = time_pw_mix + (t1 - t0)
+    end if
+
+    if (enable_stage_timing .and. dg_frag%id == 0) then
+      write(*,'(1x,a,i0,5(a,1pe12.4))') '        stage timing: itt=', itt, &
+        ' density=', time_density, ' hartree=', time_hartree, ' xc=', time_xc, &
+        ' reconstruct=', time_reconstruct, ' pw_mix=', time_pw_mix
+      flush(6)
     end if
 
     if (allocated(rho_buffer)) deallocate(rho_buffer)

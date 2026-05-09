@@ -18,9 +18,10 @@
     integer :: ifrag, ispin, io, jo, i_local
     integer :: nbf, nbf_raw, iblk
     integer :: max_nbf_local
-    integer :: jo_s, jo_e
+    integer :: jo_s, jo_e, jo_loc
     integer :: loop_ifrag_start, loop_ifrag_end
     integer :: frag_rank, frag_size
+    integer :: ncol_local, npts_local, ipt, lx, ly, lz, bx, by, bz
     integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
     integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
@@ -33,15 +34,30 @@
     real(8), allocatable :: V_total(:,:,:)
     complex(8), allocatable :: V_phi(:,:,:)
     real(8), allocatable :: partial_total(:), partial_block(:,:), reduced_block(:,:)
+    real(8), allocatable :: phi_local_2d(:,:), vphi_local_2d(:,:), pot_block(:,:)
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: has_overlap
     logical :: is_local_fragment
     logical :: block_is_local_fragment
     logical :: use_block_reconstruct
-    logical, parameter :: enable_reconstruct_timing = .false.
+    logical, save :: timing_initialized = .false.
+    logical, save :: enable_reconstruct_timing = .false.
     logical, parameter :: enable_hmat_nan_check = .false.
+    character(16) :: env_timing
+    integer :: env_status
 
     if (.not. dg_frag%has_real_space_basis) return
+    if (.not. timing_initialized) then
+      env_timing = ''
+      call get_environment_variable('SALMON_DG_HMAT_RECONSTRUCT_TIMING', env_timing, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_timing)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_reconstruct_timing = .true.
+        end select
+      end if
+      timing_initialized = .true.
+    end if
     if (.not. associated(dg_frag%mg)) then
       stop "reconstruct_hamiltonian_matrix requires dg_frag%mg"
     end if
@@ -171,7 +187,10 @@
           ! integrate matrix columns for this fragment.
           allocate(V_total(1:ndom(1), 1:ndom(2), 1:ndom(3)))
           allocate(V_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
+          call cpu_time(t0)
           call build_reconstruct_fragment_total_potential_grid(dg_frag, ifrag, mg, Vh, Vxc(ispin), Vpsl, V_total)
+          call cpu_time(t1)
+          time_potential_build = time_potential_build + (t1 - t0)
           if (.not. is_local_fragment) then
             deallocate(V_total, V_phi)
             cycle
@@ -200,25 +219,80 @@
 
         if (dg_frag%parallel_mode_orbital) then
           ! Orbital mode splits matrix construction by ket-side columns.
-          ! Each subgroup rank first reconstructs the full fragment potential
-          ! box, then integrates only its assigned columns.
+          ! Pack the fragment basis once, form V*Phi for the assigned columns,
+          ! and evaluate Phi^T*(V*Phi_cols) with BLAS instead of one
+          ! row-integration pass per matrix column.
           call get_reconstruct_column_range(dg_frag, nbf, jo_s, jo_e)
-          do jo = jo_s, jo_e
+          ncol_local = max(0, jo_e - jo_s + 1)
+          if (ncol_local > 0) then
             call cpu_time(t0)
-            call build_fragment_potential_applied_basis_reconstruct(dg_frag, ifrag, i_local, jo, V_total, V_phi)
-
-            partial_total(1:nbf) = 0.0d0
-!$omp parallel do private(io, integral_v) schedule(static)
+            npts_local = ndom(1) * ndom(2) * ndom(3)
+            allocate(phi_local_2d(npts_local, nbf), vphi_local_2d(npts_local, ncol_local), pot_block(nbf, ncol_local))
+            allocate(map_x(1:ndom(1)), map_y(1:ndom(2)), map_z(1:ndom(3)))
+            p_lb1 = lbound(dg_frag%phi_frag, 1)
+            p_ub1 = ubound(dg_frag%phi_frag, 1)
+            p_lb2 = lbound(dg_frag%phi_frag, 2)
+            p_ub2 = ubound(dg_frag%phi_frag, 2)
+            p_lb3 = lbound(dg_frag%phi_frag, 3)
+            p_ub3 = ubound(dg_frag%phi_frag, 3)
+            do lx = 1, ndom(1)
+              map_x(lx) = map_global_to_phi_box_coord_reconstruct(iorg(1) + lx - 1, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+            end do
+            do ly = 1, ndom(2)
+              map_y(ly) = map_global_to_phi_box_coord_reconstruct(iorg(2) + ly - 1, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+            end do
+            do lz = 1, ndom(3)
+              map_z(lz) = map_global_to_phi_box_coord_reconstruct(iorg(3) + lz - 1, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+            end do
+            phi_local_2d(:, :) = 0.0d0
+            vphi_local_2d(:, :) = 0.0d0
+!$omp parallel do private(io,lz,ly,lx,ipt,bx,by,bz) schedule(static)
             do io = 1, nbf
-              call integrate_fragment_basis_with_field_reconstruct(dg_frag, ifrag, i_local, io, V_phi, hvol, integral_v)
-              partial_total(io) = real(integral_v, kind=8)
+              do lz = 1, ndom(3)
+                bz = map_z(lz)
+                if (bz == 0) cycle
+                do ly = 1, ndom(2)
+                  by = map_y(ly)
+                  if (by == 0) cycle
+!$omp simd private(ipt,bx)
+                  do lx = 1, ndom(1)
+                    bx = map_x(lx)
+                    if (bx == 0) cycle
+                    ipt = ((lz - 1) * ndom(2) + (ly - 1)) * ndom(1) + lx
+                    phi_local_2d(ipt, io) = dg_frag%phi_frag(bx, by, bz, io, i_local)
+                  end do
+                end do
+              end do
             end do
 !$omp end parallel do
+!$omp parallel do private(jo,jo_loc,lz,ly,lx,ipt,bx,by,bz) schedule(static)
+            do jo = jo_s, jo_e
+              jo_loc = jo - jo_s + 1
+              do lz = 1, ndom(3)
+                bz = map_z(lz)
+                if (bz == 0) cycle
+                do ly = 1, ndom(2)
+                  by = map_y(ly)
+                  if (by == 0) cycle
+!$omp simd private(ipt,bx)
+                  do lx = 1, ndom(1)
+                    bx = map_x(lx)
+                    if (bx == 0) cycle
+                    ipt = ((lz - 1) * ndom(2) + (ly - 1)) * ndom(1) + lx
+                    vphi_local_2d(ipt, jo_loc) = V_total(lx, ly, lz) * dg_frag%phi_frag(bx, by, bz, jo, i_local)
+                  end do
+                end do
+              end do
+            end do
+!$omp end parallel do
+            call dgemm('T', 'N', nbf, ncol_local, npts_local, hvol, phi_local_2d, npts_local, &
+                       vphi_local_2d, npts_local, 0.0d0, pot_block, nbf)
             call cpu_time(t1)
             time_local_build = time_local_build + (t1 - t0)
-
-            partial_block(1:nbf, jo) = partial_total(1:nbf)
-          end do
+            partial_block(1:nbf, jo_s:jo_e) = pot_block(1:nbf, 1:ncol_local)
+            deallocate(phi_local_2d, vphi_local_2d, pot_block)
+            deallocate(map_x, map_y, map_z)
+          end if
           deallocate(V_total, V_phi)
         else
           g_s(:) = iorg(:)
@@ -281,7 +355,7 @@
         end if
 
         call cpu_time(t0)
-        call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
+        call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag, 0)
         call cpu_time(t1)
         time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
 

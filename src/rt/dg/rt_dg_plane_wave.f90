@@ -33,6 +33,29 @@ module rt_dg_plane_wave
 
 contains
 
+  logical function plane_wave_trace_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env_trace
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env_trace = ''
+      call get_environment_variable('SALMON_DG_PW_TRACE', env_trace, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env_trace(1:env_len))))
+        case ('1', 'y', 'Y', 'yes', 'YES', 'true', 'TRUE', 'on', 'ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function plane_wave_trace_enabled
+
   subroutine assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, mat)
     use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
     implicit none
@@ -393,7 +416,7 @@ contains
         use_buffered_domain = .false.
       end select
       fp_domain_initialized = .true.
-      if (dg_frag%id == 0) then
+      if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
         write(*,'(1x,a,a)') '[FP-DOMAIN] S_fp integral domain mode = ', trim(fp_domain_mode)
       end if
     end if
@@ -441,7 +464,7 @@ contains
         ny = dg_frag%frag_buf_hi(2, ifrag) - dg_frag%frag_buf_lo(2, ifrag) + 1
         nz = dg_frag%frag_buf_hi(3, ifrag) - dg_frag%frag_buf_lo(3, ifrag) + 1
       else
-        if (use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
+        if (plane_wave_trace_enabled() .and. use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
           write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
           warned_missing_buffer = .true.
         end if
@@ -538,7 +561,7 @@ contains
     end do
 
     s_fp_norm = sqrt(sum(abs(S_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
-    if (dg_frag%id == 0) then
+    if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
       write(*,'(1x,a,1x,1pe14.6)') '[FP-DOMAIN] ||S_fp||_F =', s_fp_norm
     end if
 
@@ -610,7 +633,7 @@ contains
         use_buffered_domain = .false.
       end select
       fp_domain_initialized = .true.
-      if (dg_frag%id == 0) then
+      if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
         write(*,'(1x,a,a)') '[FP-DOMAIN] S_fp integral domain mode = ', trim(fp_domain_mode)
       end if
     end if
@@ -623,10 +646,10 @@ contains
       nz_max = max(1, maxval(dg_frag%frag_buf_hi(3, dg_frag%ifrag_start:dg_frag%ifrag_end) - &
                            dg_frag%frag_buf_lo(3, dg_frag%ifrag_start:dg_frag%ifrag_end) + 1))
     else
-      if (use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
-        warned_missing_buffer = .true.
-      end if
+        if (plane_wave_trace_enabled() .and. use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
+          write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
+          warned_missing_buffer = .true.
+        end if
       nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
       ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
       nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
@@ -639,6 +662,7 @@ contains
     do ispin = 1, dg_frag%nspin
       do ipw = 1, dg_frag%n_plane_waves
         owns_pw_col = (.not. dg_frag%parallel_mode_orbital) .or. (ipw >= ipw_s .and. ipw <= ipw_e)
+        if (.not. owns_pw_col) cycle
         k_vec(1:3) = dg_frag%k_pw(1:3, ipw)
 
         i_local = 0
@@ -688,7 +712,6 @@ contains
             call get_fragment_subgroup_box_range_pw(dg_frag, [nx, ny, nz], loc_s, loc_e)
           end if
           if (any(loc_s(:) > loc_e(:))) cycle
-          if (.not. owns_pw_col) cycle
 
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
@@ -781,7 +804,7 @@ contains
     deallocate(frag_block, frag_block_sum)
 
     s_fp_norm = sqrt(sum(abs(S_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
-    if (dg_frag%id == 0) then
+    if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
       write(*,'(1x,a,1x,1pe14.6)') '[FP-DOMAIN] ||S_fp||_F =', s_fp_norm
     end if
 
@@ -857,9 +880,10 @@ contains
     complex(8) :: phase_x0, phase_y0, phase_z0
     complex(8), allocatable :: frag_block(:,:,:), frag_block_sum(:,:,:)
     complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
-    real(8), allocatable :: V_box(:,:,:)
+    real(8), allocatable :: V_box_cache(:,:,:,:)
     logical :: use_complex_basis
     logical :: owns_pw_col
+    logical, allocatable :: V_box_ready(:)
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
@@ -906,7 +930,7 @@ contains
         use_buffered_domain = .false.
       end select
       fp_domain_initialized = .true.
-      if (dg_frag%id == 0) then
+      if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
         write(*,'(1x,a,a)') '[FP-DOMAIN] H_fp integral domain mode = ', trim(fp_domain_mode)
       end if
     end if
@@ -919,7 +943,7 @@ contains
       nz_max = max(1, maxval(dg_frag%frag_buf_hi(3, dg_frag%ifrag_start:dg_frag%ifrag_end) - &
                            dg_frag%frag_buf_lo(3, dg_frag%ifrag_start:dg_frag%ifrag_end) + 1))
     else
-      if (use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
+      if (plane_wave_trace_enabled() .and. use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
         write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
         warned_missing_buffer = .true.
       end if
@@ -928,13 +952,21 @@ contains
       nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
     end if
     allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
+    if (dg_frag%parallel_mode_orbital) then
+      allocate(V_box_cache(nx_max, ny_max, nz_max, max(1, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)))
+      allocate(V_box_ready(max(1, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)))
+      V_box_cache(:, :, :, :) = 0.0d0
+      V_box_ready(:) = .false.
+    end if
 
     H_complex = (0.0d0, 0.0d0)
     call get_fragment_pw_column_range(dg_frag, dg_frag%n_plane_waves, ipw_s, ipw_e)
 
     do ispin = 1, dg_frag%nspin
+      if (allocated(V_box_ready)) V_box_ready(:) = .false.
       do ipw = 1, dg_frag%n_plane_waves
         owns_pw_col = (.not. dg_frag%parallel_mode_orbital) .or. (ipw >= ipw_s .and. ipw <= ipw_e)
+        if (.not. owns_pw_col) cycle
         k_vec(1:3) = dg_frag%k_pw(1:3, ipw)
         k_squared = sum(k_vec**2)
 
@@ -978,20 +1010,19 @@ contains
 
           if (dg_frag%parallel_mode_orbital) then
             ! H_fp uses the same PW-column ownership as S_fp.  The scalar
-            ! potential is first assembled over the fragment subgroup so each
-            ! column owner can integrate the full box.
+            ! potential is independent of the PW column.  Assemble it once per
+            ! fragment/spin and reuse it for all PW columns owned by this rank.
             loc_s(:) = [1, 1, 1]
             loc_e(:) = [nx, ny, nz]
-            allocate(V_box(1:nx, 1:ny, 1:nz))
-            call build_fragment_pw_total_potential_box(dg_frag, ifrag, Vh, Vxc(ispin), Vpsl, gx0, gy0, gz0, V_box)
+            if (.not. V_box_ready(i_local)) then
+              call build_fragment_pw_total_potential_box(dg_frag, ifrag, Vh, Vxc(ispin), Vpsl, gx0, gy0, gz0, &
+                V_box_cache(1:nx, 1:ny, 1:nz, i_local))
+              V_box_ready(i_local) = .true.
+            end if
           else
             call get_fragment_subgroup_box_range_pw(dg_frag, [nx, ny, nz], loc_s, loc_e)
           end if
           if (any(loc_s(:) > loc_e(:))) cycle
-          if (.not. owns_pw_col) then
-            if (allocated(V_box)) deallocate(V_box)
-            cycle
-          end if
 
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
@@ -1015,7 +1046,7 @@ contains
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     pw_laplacian = (k_squared / 2.0d0) * pw_val
                     if (dg_frag%parallel_mode_orbital) then
-                      V_total = V_box(ix, iy, iz)
+                      V_total = V_box_cache(ix, iy, iz, i_local)
                     else
                       vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
                       if (vx < v_lb1 .or. vx > v_ub1) cycle
@@ -1050,7 +1081,7 @@ contains
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     pw_laplacian = (k_squared / 2.0d0) * pw_val
                     if (dg_frag%parallel_mode_orbital) then
-                      V_total = V_box(ix, iy, iz)
+                      V_total = V_box_cache(ix, iy, iz, i_local)
                     else
                       vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
                       if (vx < v_lb1 .or. vx > v_ub1) cycle
@@ -1071,7 +1102,6 @@ contains
 
             H_complex(ig, ipw, ispin) = H_complex(ig, ipw, ispin) + hamiltonian_local
           end do
-          if (allocated(V_box)) deallocate(V_box)
         end do
       end do
     end do
@@ -1079,6 +1109,8 @@ contains
     if (allocated(phase_x)) deallocate(phase_x)
     if (allocated(phase_y)) deallocate(phase_y)
     if (allocated(phase_z)) deallocate(phase_z)
+    if (allocated(V_box_cache)) deallocate(V_box_cache)
+    if (allocated(V_box_ready)) deallocate(V_box_ready)
 
     allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
     allocate(frag_block_sum(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
@@ -1112,7 +1144,7 @@ contains
     deallocate(frag_block, frag_block_sum)
 
     h_fp_norm = sqrt(sum(abs(H_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
-    if (dg_frag%id == 0) then
+    if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
       write(*,'(1x,a,1x,1pe14.6)') '[FP-DOMAIN] ||H_fp||_F =', h_fp_norm
     end if
 
@@ -1379,7 +1411,7 @@ contains
 
     deallocate(V_mean)
 
-    if (comm_is_root(dg_frag%id) .and. n_pw > 0) then
+    if (plane_wave_trace_enabled() .and. comm_is_root(dg_frag%id) .and. n_pw > 0) then
       if (use_local_nondiag) then
         write(*,'(1x,a)') '[HPP-MODE] local non-diagonal PW-PW potential enabled'
       else

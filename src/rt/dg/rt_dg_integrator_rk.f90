@@ -32,14 +32,35 @@
     complex(8), allocatable :: coef_pw_ref(:,:,:)
     integer :: istage, io, jo, ispin
     real(8) :: Ac_tot(3), t_stage
+    real(8) :: t0, t1
+    real(8) :: time_sync, time_stage_update, time_deriv, time_coef_update
     integer :: n, n_pw
     logical :: use_mixed_rt
+    logical, save :: timing_initialized = .false.
+    logical, save :: enable_rk_timing = .false.
+    character(16) :: env_timing
+    integer :: env_status
     
     ! Use n_mat_max (global basis size) instead of nstate_frag (local basis size)
     n = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     use_mixed_rt = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%coef_mix))
+    if (.not. timing_initialized) then
+      env_timing = ''
+      call get_environment_variable('SALMON_DG_RK_TIMING', env_timing, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_timing)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_rk_timing = .true.
+        end select
+      end if
+      timing_initialized = .true.
+    end if
+    time_sync = 0.0d0
+    time_stage_update = 0.0d0
+    time_deriv = 0.0d0
+    time_coef_update = 0.0d0
     
     ! Reuse RK stage arrays across calls to reduce per-step allocation overhead.
     if (.not. allocated(k)) then
@@ -65,12 +86,15 @@
         ! Orbital-parallel matrix/density construction splits basis/state work
         ! across ranks, so the RK reference state must be the canonical mixed
         ! view on every rank before any stage-local column work starts.
+        call cpu_time(t0)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
         do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call cpu_time(t1)
+        time_sync = time_sync + (t1 - t0)
       end if
       allocate(coef_ref(n, dg_frag%nstate_tot, dg_frag%nspin))
       coef_ref = dg_frag%coef
@@ -82,30 +106,28 @@
       ! Stage 1
       Ac_tot = rt%Ac_tot(:, itt)
       dg_frag%coef = coef_ref
-      if (use_mixed_rt) then
-        ! Keep both coefficient views coherent before each stage evaluation:
-        ! propagation uses coef_mix, while density/H/current paths still read
-        ! the raw fragment/PW coefficient arrays.
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-      end if
+      ! The mixed/raw views were canonicalized immediately before coef_ref was
+      ! captured, so Stage 1 can reuse that state without another sync pair.
       if (yn_fix_func == 'n') then
+        call cpu_time(t0)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        call cpu_time(t1)
+        time_stage_update = time_stage_update + (t1 - t0)
       end if
+      call cpu_time(t0)
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,1), k_pw(:,:,:,1))
       else
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,1))
       end if
+      call cpu_time(t1)
+      time_deriv = time_deriv + (t1 - t0)
 
       ! Stage 2
       Ac_tot = 0.5d0 * (rt%Ac_tot(:, itt) + rt%Ac_tot(:, itt+1))
+      call cpu_time(t0)
       if (n_pw > 0) then
 !$omp parallel private(jo)
 !$omp do collapse(2) schedule(static)
@@ -141,7 +163,10 @@
         end do
 !$omp end parallel do
       end if
+      call cpu_time(t1)
+      time_coef_update = time_coef_update + (t1 - t0)
       if (use_mixed_rt) then
+        call cpu_time(t0)
         ! The provisional RK update changed raw coefficients; rebuild coef_mix
         ! and then refresh raw coefficients from the canonical mixed view.
         do ispin = 1, dg_frag%nspin
@@ -150,19 +175,28 @@
         do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call cpu_time(t1)
+        time_sync = time_sync + (t1 - t0)
       end if
       if (yn_fix_func == 'n') then
+        call cpu_time(t0)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        call cpu_time(t1)
+        time_stage_update = time_stage_update + (t1 - t0)
       end if
+      call cpu_time(t0)
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,2), k_pw(:,:,:,2))
       else
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,2))
       end if
+      call cpu_time(t1)
+      time_deriv = time_deriv + (t1 - t0)
 
       ! Stage 3
+      call cpu_time(t0)
       if (n_pw > 0) then
 !$omp parallel private(jo)
 !$omp do collapse(2) schedule(static)
@@ -198,27 +232,39 @@
         end do
 !$omp end parallel do
       end if
+      call cpu_time(t1)
+      time_coef_update = time_coef_update + (t1 - t0)
       if (use_mixed_rt) then
+        call cpu_time(t0)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
         do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call cpu_time(t1)
+        time_sync = time_sync + (t1 - t0)
       end if
       if (yn_fix_func == 'n') then
+        call cpu_time(t0)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        call cpu_time(t1)
+        time_stage_update = time_stage_update + (t1 - t0)
       end if
+      call cpu_time(t0)
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,3), k_pw(:,:,:,3))
       else
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,3))
       end if
+      call cpu_time(t1)
+      time_deriv = time_deriv + (t1 - t0)
 
       ! Stage 4
       Ac_tot = rt%Ac_tot(:, itt+1)
+      call cpu_time(t0)
       if (n_pw > 0) then
 !$omp parallel private(jo)
 !$omp do collapse(2) schedule(static)
@@ -254,26 +300,38 @@
         end do
 !$omp end parallel do
       end if
+      call cpu_time(t1)
+      time_coef_update = time_coef_update + (t1 - t0)
       if (use_mixed_rt) then
+        call cpu_time(t0)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
         do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call cpu_time(t1)
+        time_sync = time_sync + (t1 - t0)
       end if
       if (yn_fix_func == 'n') then
+        call cpu_time(t0)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        call cpu_time(t1)
+        time_stage_update = time_stage_update + (t1 - t0)
       end if
+      call cpu_time(t0)
       if (n_pw > 0) then
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,4), k_pw(:,:,:,4))
       else
         call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k(:,:,:,4))
       end if
+      call cpu_time(t1)
+      time_deriv = time_deriv + (t1 - t0)
 
       ! Final RK4 combination
+      call cpu_time(t0)
       if (n_pw > 0) then
 !$omp parallel private(jo)
 !$omp do collapse(2) schedule(static)
@@ -315,20 +373,33 @@
         end do
 !$omp end parallel do
       end if
+      call cpu_time(t1)
+      time_coef_update = time_coef_update + (t1 - t0)
       if (use_mixed_rt) then
+        call cpu_time(t0)
         do ispin = 1, dg_frag%nspin
           call sync_mixed_coef_from_raw(dg_frag, ispin)
         end do
         do ispin = 1, dg_frag%nspin
           call sync_raw_coef_from_mixed(dg_frag, ispin)
         end do
+        call cpu_time(t1)
+        time_sync = time_sync + (t1 - t0)
       end if
       if (yn_fix_func == 'n') then
         ! Rebuild H at the final RK4 state/time so next step starts from consistent rho/H.
         Ac_tot = rt%Ac_tot(:, itt+1)
+        call cpu_time(t0)
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
+        call cpu_time(t1)
+        time_stage_update = time_stage_update + (t1 - t0)
+      end if
+      if (enable_rk_timing .and. dg_frag%id == 0) then
+        write(*,'(1x,a,i0,4(a,1pe12.4))') '        rk timing: itt=', itt, &
+          ' sync=', time_sync, ' coef=', time_coef_update, ' stage_update=', time_stage_update, ' deriv=', time_deriv
+        flush(6)
       end if
       deallocate(coef_ref)
       if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)

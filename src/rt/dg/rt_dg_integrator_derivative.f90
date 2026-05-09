@@ -32,6 +32,7 @@
     complex(8), allocatable :: coef_frag_other(:,:), coef_pw_other(:,:)
     complex(8), allocatable, save :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
     complex(8), allocatable, save :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:), tmp_mix(:,:)
+    complex(8), allocatable, save :: op_mix_sum(:,:), raw_rhs_sum(:,:), nl_rhs_sum(:,:)
     complex(8), allocatable, save :: mfp_vec(:), coef_pw_scaled(:,:), tmp_fp_fw(:,:), tmp_fp_bw(:,:), mfp_fp(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
@@ -612,22 +613,20 @@
 
         if (.not. allocated(rhs_mix)) then
           allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis), &
-                   tmp_mix(n_tot, n_basis))
+                   tmp_mix(n_tot, n_basis), op_mix_sum(n_basis, n_basis), raw_rhs_sum(n_tot, dg_frag%nstate_tot))
         else if (size(rhs_mix, 1) /= n_basis .or. size(rhs_mix, 2) /= dg_frag%nstate_tot .or. &
                  size(raw_rhs, 1) /= n_tot .or. size(raw_rhs, 2) /= dg_frag%nstate_tot .or. &
                  size(op_mix, 1) /= n_basis .or. size(op_mix, 2) /= n_basis .or. &
-                 size(tmp_mix, 1) /= n_tot .or. size(tmp_mix, 2) /= n_basis) then
-          deallocate(rhs_mix, raw_rhs, op_mix, tmp_mix)
+                 size(tmp_mix, 1) /= n_tot .or. size(tmp_mix, 2) /= n_basis .or. &
+                 size(op_mix_sum, 1) /= n_basis .or. size(op_mix_sum, 2) /= n_basis .or. &
+                 size(raw_rhs_sum, 1) /= n_tot .or. size(raw_rhs_sum, 2) /= dg_frag%nstate_tot) then
+          deallocate(rhs_mix, raw_rhs, op_mix, tmp_mix, op_mix_sum, raw_rhs_sum)
           allocate(rhs_mix(n_basis, dg_frag%nstate_tot), raw_rhs(n_tot, dg_frag%nstate_tot), op_mix(n_basis, n_basis), &
-                   tmp_mix(n_tot, n_basis))
+                   tmp_mix(n_tot, n_basis), op_mix_sum(n_basis, n_basis), raw_rhs_sum(n_tot, dg_frag%nstate_tot))
         end if
         rhs_mix(:, :) = (0.0d0, 0.0d0)
         raw_rhs(:, :) = (0.0d0, 0.0d0)
-        call zgemm('N', 'N', n_tot, n_basis, n_tot, (1.0d0, 0.0d0), H0c, n_tot, &
-                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, (0.0d0, 0.0d0), tmp_mix, n_tot)
-        call zgemm('C', 'N', n_basis, n_basis, n_tot, (1.0d0, 0.0d0), &
-                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, tmp_mix, n_tot, &
-                   (0.0d0, 0.0d0), op_mix, n_basis)
+        call build_mixed_projected_operator(H0c, op_mix)
         if (enable_op_mix_trace .and. dg_frag%id == 0 .and. (itt <= 200 .or. mod(itt, 50) == 0)) then
           op_mix_norm_h0 = maxval(abs(op_mix(1:n_basis, 1:n_basis)))
           write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') '        op-mix-norm(H0): itt=', itt, ' ispin=', ispin, &
@@ -636,9 +635,7 @@
         end if
         call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), op_mix, n_basis, &
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
-        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
-                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, rhs_mix, n_basis, &
-                   (0.0d0, 0.0d0), raw_rhs, n_tot)
+        call expand_mixed_rhs_to_raw(rhs_mix, raw_rhs)
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
         dcoef_dt_h0_core(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
@@ -647,7 +644,7 @@
             ! nonlocal matrix for FP/PP terms.  Reuse the same matrix for the
             ! FF action so the propagated operator is independent of how the
             ! fragment real-space boxes are distributed.
-            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            call apply_dense_nonlocal_cache(dcoef_dt_nl)
             dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
@@ -674,7 +671,7 @@
 
         if (has_nonlocal) then
           if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            call apply_dense_nonlocal_cache(dcoef_dt_nl)
             dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
@@ -701,7 +698,7 @@
 
         if (has_nonlocal) then
           if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            call apply_dense_nonlocal_cache(dcoef_dt_nl)
             dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_h0)
@@ -724,7 +721,7 @@
         dcoef_dt_h0_core(:, :) = dcoef_dt_h0(:, :)
         if (has_nonlocal) then
           if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            call apply_dense_nonlocal_cache(dcoef_dt_nl)
             dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
@@ -756,11 +753,7 @@
 
       if (use_mixed_basis .and. n_basis > 0) then
         rhs_mix(:, :) = (0.0d0, 0.0d0)
-        call zgemm('N', 'N', n_tot, n_basis, n_tot, (1.0d0, 0.0d0), M, n_tot, &
-                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, (0.0d0, 0.0d0), tmp_mix, n_tot)
-        call zgemm('C', 'N', n_basis, n_basis, n_tot, (1.0d0, 0.0d0), &
-                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, tmp_mix, n_tot, &
-                   (0.0d0, 0.0d0), op_mix, n_basis)
+        call build_mixed_projected_operator(M, op_mix)
         if (enable_m_block_audit .and. dg_frag%id == 0 .and. itt <= 5) then
           m_raw_ff = 0.0d0
           m_raw_fp = 0.0d0
@@ -824,9 +817,7 @@
         end if
         call zgemm('N', 'N', n_basis, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), op_mix, n_basis, &
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
-        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
-                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, rhs_mix, n_basis, &
-                   (0.0d0, 0.0d0), raw_rhs, n_tot)
+        call expand_mixed_rhs_to_raw(rhs_mix, raw_rhs)
         dcoef_dt_m(:, :) = raw_rhs(:, :)
       else if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
         dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
@@ -1261,5 +1252,212 @@
     dt_deriv = t_deriv1 - t_deriv0
 
     ! Cache retained for reuse
-    
+
+  contains
+
+    logical function distributed_mixed_rows_active() result(active)
+      implicit none
+      active = dg_frag%parallel_mode_orbital .and. dg_frag%isize > 1 .and. allocated(dg_frag%coef_owner)
+    end function distributed_mixed_rows_active
+
+    logical function owns_fragment_row(row_idx) result(owned)
+      implicit none
+      integer, intent(in) :: row_idx
+      owned = .false.
+      if (row_idx < 1 .or. row_idx > n_frag) return
+      if (.not. allocated(dg_frag%coef_owner)) return
+      if (row_idx > size(dg_frag%coef_owner, 1) .or. ispin > size(dg_frag%coef_owner, 2)) return
+      owned = (dg_frag%coef_owner(row_idx, ispin) == dg_frag%id)
+    end function owns_fragment_row
+
+    logical function owns_pw_row_global(pw_idx) result(owned)
+      implicit none
+      integer, intent(in) :: pw_idx
+      owned = .false.
+      if (pw_idx < 1 .or. pw_idx > n_pw) return
+      if (.not. allocated(dg_frag%coef_pw_owner)) return
+      if (pw_idx > size(dg_frag%coef_pw_owner, 1)) return
+      ! The PW block is global in the mixed matrix.  coef_pw_owner is defined
+      ! inside each fragment subgroup, so only the first subgroup contributes
+      ! PW rows to world reductions to avoid counting the same PW row once per
+      ! fragment.
+      if (dg_frag%ifrag_group /= 1) return
+      owned = (dg_frag%coef_pw_owner(pw_idx) == dg_frag%id)
+    end function owns_pw_row_global
+
+    subroutine next_owned_fragment_segment(start_row, row_s, row_e)
+      implicit none
+      integer, intent(inout) :: start_row
+      integer, intent(out) :: row_s, row_e
+
+      row_s = 0
+      row_e = -1
+      do while (start_row <= n_frag)
+        if (owns_fragment_row(start_row)) exit
+        start_row = start_row + 1
+      end do
+      if (start_row > n_frag) return
+      row_s = start_row
+      row_e = row_s
+      do while (row_e < n_frag)
+        if (.not. owns_fragment_row(row_e + 1)) exit
+        row_e = row_e + 1
+      end do
+      start_row = row_e + 1
+    end subroutine next_owned_fragment_segment
+
+    subroutine next_owned_pw_segment(start_pw, pw_s, pw_e)
+      implicit none
+      integer, intent(inout) :: start_pw
+      integer, intent(out) :: pw_s, pw_e
+
+      pw_s = 0
+      pw_e = -1
+      do while (start_pw <= n_pw)
+        if (owns_pw_row_global(start_pw)) exit
+        start_pw = start_pw + 1
+      end do
+      if (start_pw > n_pw) return
+      pw_s = start_pw
+      pw_e = pw_s
+      do while (pw_e < n_pw)
+        if (.not. owns_pw_row_global(pw_e + 1)) exit
+        pw_e = pw_e + 1
+      end do
+      start_pw = pw_e + 1
+    end subroutine next_owned_pw_segment
+
+    subroutine accumulate_projected_rows(raw_op, projected, row_s, row_e)
+      implicit none
+      complex(8), intent(in) :: raw_op(n_tot, n_tot)
+      complex(8), intent(inout) :: projected(n_basis, n_basis)
+      integer, intent(in) :: row_s, row_e
+      integer :: nrow
+
+      if (row_s < 1 .or. row_e < row_s) return
+      nrow = row_e - row_s + 1
+      call zgemm('N', 'N', nrow, n_basis, n_tot, (1.0d0, 0.0d0), &
+                 raw_op(row_s, 1), n_tot, dg_frag%mixed_transform(1, 1, ispin), n_tot, &
+                 (0.0d0, 0.0d0), tmp_mix(row_s, 1), n_tot)
+      call zgemm('C', 'N', n_basis, n_basis, nrow, (1.0d0, 0.0d0), &
+                 dg_frag%mixed_transform(row_s, 1, ispin), n_tot, tmp_mix(row_s, 1), n_tot, &
+                 (1.0d0, 0.0d0), projected, n_basis)
+    end subroutine accumulate_projected_rows
+
+    subroutine build_mixed_projected_operator(raw_op, projected)
+      implicit none
+      complex(8), intent(in) :: raw_op(n_tot, n_tot)
+      complex(8), intent(inout) :: projected(n_basis, n_basis)
+      integer :: row_cursor, row_s, row_e
+      integer :: pw_cursor, pw_s, pw_e
+
+      if (distributed_mixed_rows_active()) then
+        projected(:, :) = (0.0d0, 0.0d0)
+
+        row_cursor = 1
+        do
+          call next_owned_fragment_segment(row_cursor, row_s, row_e)
+          if (row_s <= 0) exit
+          call accumulate_projected_rows(raw_op, projected, row_s, row_e)
+        end do
+
+        if (n_pw > 0) then
+          pw_cursor = 1
+          do
+            call next_owned_pw_segment(pw_cursor, pw_s, pw_e)
+            if (pw_s <= 0) exit
+            call accumulate_projected_rows(raw_op, projected, n_frag + pw_s, n_frag + pw_e)
+          end do
+        end if
+
+        call comm_summation(projected, op_mix_sum, n_basis * n_basis, dg_frag%icomm)
+        projected(:, :) = op_mix_sum(:, :)
+      else
+        call zgemm('N', 'N', n_tot, n_basis, n_tot, (1.0d0, 0.0d0), raw_op, n_tot, &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, (0.0d0, 0.0d0), tmp_mix, n_tot)
+        call zgemm('C', 'N', n_basis, n_basis, n_tot, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, tmp_mix, n_tot, &
+                   (0.0d0, 0.0d0), projected, n_basis)
+      end if
+    end subroutine build_mixed_projected_operator
+
+    subroutine expand_raw_rows(rhs, raw_out, row_s, row_e)
+      implicit none
+      complex(8), intent(in) :: rhs(n_basis, dg_frag%nstate_tot)
+      complex(8), intent(inout) :: raw_out(n_tot, dg_frag%nstate_tot)
+      integer, intent(in) :: row_s, row_e
+      integer :: nrow
+
+      if (row_s < 1 .or. row_e < row_s) return
+      nrow = row_e - row_s + 1
+      call zgemm('N', 'N', nrow, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
+                 dg_frag%mixed_transform(row_s, 1, ispin), n_tot, rhs, n_basis, &
+                 (0.0d0, 0.0d0), raw_out(row_s, 1), size(raw_out, 1))
+    end subroutine expand_raw_rows
+
+    subroutine expand_mixed_rhs_to_raw(rhs, raw_out)
+      implicit none
+      complex(8), intent(in) :: rhs(n_basis, dg_frag%nstate_tot)
+      complex(8), intent(inout) :: raw_out(n_tot, dg_frag%nstate_tot)
+      integer :: row_cursor, row_s, row_e
+      integer :: pw_cursor, pw_s, pw_e
+
+      if (distributed_mixed_rows_active()) then
+        raw_out(:, :) = (0.0d0, 0.0d0)
+
+        row_cursor = 1
+        do
+          call next_owned_fragment_segment(row_cursor, row_s, row_e)
+          if (row_s <= 0) exit
+          call expand_raw_rows(rhs, raw_out, row_s, row_e)
+        end do
+
+        if (n_pw > 0) then
+          pw_cursor = 1
+          do
+            call next_owned_pw_segment(pw_cursor, pw_s, pw_e)
+            if (pw_s <= 0) exit
+            call expand_raw_rows(rhs, raw_out, n_frag + pw_s, n_frag + pw_e)
+          end do
+        end if
+
+        call comm_summation(raw_out, raw_rhs_sum, n_tot * dg_frag%nstate_tot, dg_frag%icomm)
+        raw_out(:, :) = raw_rhs_sum(:, :)
+      else
+        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_basis, (1.0d0, 0.0d0), &
+                   dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin), n_tot, rhs, n_basis, &
+                   (0.0d0, 0.0d0), raw_out, n_tot)
+      end if
+    end subroutine expand_mixed_rhs_to_raw
+
+    subroutine apply_dense_nonlocal_cache(nl_out)
+      implicit none
+      complex(8), intent(inout) :: nl_out(n_tot, dg_frag%nstate_tot)
+      integer :: row_cursor, row_s, row_e, nrow
+
+      nl_out(:, :) = (0.0d0, 0.0d0)
+      if (distributed_mixed_rows_active()) then
+        if (.not. allocated(nl_rhs_sum)) then
+          allocate(nl_rhs_sum(n_tot, dg_frag%nstate_tot))
+        else if (size(nl_rhs_sum, 1) /= n_tot .or. size(nl_rhs_sum, 2) /= dg_frag%nstate_tot) then
+          deallocate(nl_rhs_sum)
+          allocate(nl_rhs_sum(n_tot, dg_frag%nstate_tot))
+        end if
+
+        row_cursor = 1
+        do
+          call next_owned_fragment_segment(row_cursor, row_s, row_e)
+          if (row_s <= 0) exit
+          nrow = row_e - row_s + 1
+          call zgemm('N', 'N', nrow, dg_frag%nstate_tot, n_frag, (1.0d0, 0.0d0), &
+                     dg_frag%H_nl_cache(row_s, 1, ispin), dg_frag%n_mat_max, coef_all(1, 1), n_tot, &
+                     (0.0d0, 0.0d0), nl_out(row_s, 1), size(nl_out, 1))
+        end do
+        call comm_summation(nl_out, nl_rhs_sum, n_tot * dg_frag%nstate_tot, dg_frag%icomm)
+        nl_out(:, :) = nl_rhs_sum(:, :)
+      else
+        nl_out(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+      end if
+    end subroutine apply_dense_nonlocal_cache
+
   end subroutine calculate_time_derivative

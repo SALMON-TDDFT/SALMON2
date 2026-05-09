@@ -130,7 +130,7 @@ contains
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
            dg_fragment_parallel_mode, &
-                 nproc_rgrid, yn_dg_subspace_diag, dg_subspace_extra_states, &
+                 nproc_rgrid, nproc_ob, yn_dg_subspace_diag, dg_subspace_extra_states, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
                  dg_subspace_pw_vectors, dg_subspace_fallback_cond
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
@@ -189,9 +189,13 @@ contains
       stop "DG-Fragment RT: dg_fragment_parallel_mode must be orbital or legacy_realspace"
     end if
 
-    dg_frag%nproc_frag = product(nproc_rgrid)
+    if (dg_frag%parallel_mode_orbital) then
+      dg_frag%nproc_frag = max(1, nproc_ob)
+    else
+      dg_frag%nproc_frag = product(nproc_rgrid)
+    end if
     if (dg_frag%nproc_frag < 1) then
-      stop "DG-Fragment RT requires product(nproc_rgrid) >= 1"
+      stop "DG-Fragment RT requires positive fragment subgroup size"
     end if
 
     if (dg_frag%isize < dg_frag%n_frag) then
@@ -204,12 +208,20 @@ contains
     if (dg_frag%isize /= dg_frag%n_frag * dg_frag%nproc_frag) then
       if (comm_is_root(info%id_rko)) then
         write(*,'(1x,a,i0,a,i0)') "ERROR: Invalid MPI setup for DG-Fragment RT: np=", dg_frag%isize, ", n_frag=", dg_frag%n_frag
-        write(*,'(1x,a,i0)') "       product(nproc_rgrid) = ", dg_frag%nproc_frag
+        if (dg_frag%parallel_mode_orbital) then
+          write(*,'(1x,a,i0)') "       nproc_ob = ", dg_frag%nproc_frag
+        else
+          write(*,'(1x,a,i0)') "       product(nproc_rgrid) = ", dg_frag%nproc_frag
+        end if
         write(*,'(1x,a)') "       Stage-1 fragment-local MPI requires one subgroup per fragment."
-        write(*,'(1x,a)') "       MPI process count must satisfy np = n_frag * product(nproc_rgrid)."
+        if (dg_frag%parallel_mode_orbital) then
+          write(*,'(1x,a)') "       MPI process count must satisfy np = n_frag * nproc_ob."
+        else
+          write(*,'(1x,a)') "       MPI process count must satisfy np = n_frag * product(nproc_rgrid)."
+        end if
         write(*,'(1x,a)') "       This is a current implementation restriction, not a general DG-RT requirement."
       end if
-      stop "DG-Fragment RT stage-1 requires np = n_frag * product(nproc_rgrid)"
+      stop "DG-Fragment RT stage-1 requires np = n_frag * nproc_frag"
     end if
 
     dg_frag%ifrag_group = dg_frag%id / dg_frag%nproc_frag + 1
