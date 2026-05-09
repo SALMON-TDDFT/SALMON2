@@ -159,7 +159,9 @@ contains
     complex(8), intent(in), optional :: overlap_metric(:,:)
 
     integer :: n_frag, n_pw, n_tot, n_basis, nstate
-    complex(8), allocatable :: raw_all(:,:), overlap_all(:,:), mixed_all(:,:)
+    integer :: row_s, row_e, pw_s, pw_e
+    integer :: base, extra, rank_in_frag, nworker
+    complex(8), allocatable :: raw_all(:,:), raw_sum(:,:), overlap_all(:,:), mixed_all(:,:), mixed_sum(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
 
     if (.not. dg_frag%mixed_basis_ready) return
@@ -187,11 +189,53 @@ contains
 
     allocate(raw_all(n_tot, nstate), overlap_all(n_tot, nstate), mixed_all(n_basis, nstate))
     raw_all(:, :) = (0.0d0, 0.0d0)
-    ! Gather the distributed raw coefficients before projecting them into the
-    ! mixed basis; otherwise orbital/PW-owned rows would be missing locally.
-    call gather_full_coef_view(dg_frag, ispin, n_frag, nstate, coef_frag_all, coef_pw_all)
-    raw_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:nstate)
-    if (n_pw > 0) raw_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:nstate)
+    if (dg_frag%parallel_mode_orbital) then
+      ! Mixed raw coefficients may be either freshly row-owned or already
+      ! replicated from coef_mix.  In both cases, take only this rank's
+      ! fragment-subgroup row slice, then rebuild the complete fragment-local
+      ! raw vector by summing over icomm_frag.  This avoids using coef_owner,
+      ! whose row indices are ambiguous across fragment-local coefficient views.
+      nworker = max(1, dg_frag%isize_frag)
+      rank_in_frag = max(0, min(dg_frag%id_frag, nworker - 1))
+      base = n_frag / nworker
+      extra = mod(n_frag, nworker)
+      if (rank_in_frag < extra) then
+        row_s = rank_in_frag * (base + 1) + 1
+        row_e = row_s + base
+      else
+        row_s = extra * (base + 1) + (rank_in_frag - extra) * base + 1
+        row_e = row_s + base - 1
+      end if
+      if (row_s <= n_frag .and. row_e >= row_s) then
+        raw_all(row_s:min(row_e, n_frag), :) = dg_frag%coef(row_s:min(row_e, n_frag), 1:nstate, ispin)
+      end if
+      if (n_pw > 0) then
+        base = n_pw / nworker
+        extra = mod(n_pw, nworker)
+        if (rank_in_frag < extra) then
+          pw_s = rank_in_frag * (base + 1) + 1
+          pw_e = pw_s + base
+        else
+          pw_s = extra * (base + 1) + (rank_in_frag - extra) * base + 1
+          pw_e = pw_s + base - 1
+        end if
+        if (pw_s <= n_pw .and. pw_e >= pw_s) then
+          raw_all(n_frag+pw_s:n_frag+min(pw_e, n_pw), :) = dg_frag%coef_pw(pw_s:min(pw_e, n_pw), 1:nstate, ispin)
+        end if
+      end if
+      if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+        allocate(raw_sum(n_tot, nstate))
+        call comm_summation(raw_all, raw_sum, n_tot * nstate, dg_frag%icomm_frag)
+        raw_all(:, :) = raw_sum(:, :)
+        deallocate(raw_sum)
+      end if
+    else
+      ! Gather distributed raw coefficients before projecting them into the
+      ! mixed basis; otherwise owner-split rows would be missing locally.
+      call gather_full_coef_view(dg_frag, ispin, n_frag, nstate, coef_frag_all, coef_pw_all)
+      raw_all(1:n_frag, :) = coef_frag_all(1:n_frag, 1:nstate)
+      if (n_pw > 0) raw_all(n_frag+1:n_tot, :) = coef_pw_all(1:n_pw, 1:nstate)
+    end if
 
     if (present(overlap_metric)) then
       if (size(overlap_metric, 1) == n_tot .and. size(overlap_metric, 2) == n_tot) then
@@ -203,7 +247,30 @@ contains
       call apply_overlap_operator_batch(dg_frag, ispin, raw_all, overlap_all, .false.)
     end if
     ! mixed_transform is S-orthonormal, so projection uses <U|S|raw>.
-    mixed_all(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), overlap_all)
+    ! In orbital mode the projection is also accumulated by subgroup-owned
+    ! rows.  This keeps coef_mix invariant whether overlap_all came back as a
+    ! full replicated vector or as row-local matrix-block output.
+    if (dg_frag%parallel_mode_orbital) then
+      mixed_all(:, :) = (0.0d0, 0.0d0)
+      if (row_s <= n_frag .and. row_e >= row_s) then
+        mixed_all(:, :) = mixed_all(:, :) + &
+          matmul(conjg(transpose(dg_frag%mixed_transform(row_s:min(row_e, n_frag), 1:n_basis, ispin))), &
+                 overlap_all(row_s:min(row_e, n_frag), 1:nstate))
+      end if
+      if (n_pw > 0 .and. pw_s <= n_pw .and. pw_e >= pw_s) then
+        mixed_all(:, :) = mixed_all(:, :) + &
+          matmul(conjg(transpose(dg_frag%mixed_transform(n_frag+pw_s:n_frag+min(pw_e, n_pw), 1:n_basis, ispin))), &
+                 overlap_all(n_frag+pw_s:n_frag+min(pw_e, n_pw), 1:nstate))
+      end if
+      if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+        allocate(mixed_sum(n_basis, nstate))
+        call comm_summation(mixed_all, mixed_sum, n_basis * nstate, dg_frag%icomm_frag)
+        mixed_all(:, :) = mixed_sum(:, :)
+        deallocate(mixed_sum)
+      end if
+    else
+      mixed_all(:, :) = matmul(conjg(transpose(dg_frag%mixed_transform(1:n_tot, 1:n_basis, ispin))), overlap_all)
+    end if
     dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
     dg_frag%coef_mix(1:n_basis, 1:nstate, ispin) = mixed_all(:, :)
 
@@ -346,6 +413,7 @@ contains
   !=======================================================================
   subroutine build_nonlocal_pp_matrix_A(dg_frag, mg, ppg, nspin, hvol, Ac_tot, use_micro_A, Ac_micro, H_nl)
     use structures
+    use communication, only: comm_summation, COMM_GROUP_NULL
     use math_constants, only: zi
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -364,6 +432,8 @@ contains
     real(8) :: x, y, z, phase
     real(8) :: A_local(3)
     complex(8), allocatable :: uVpsi(:,:,:)  ! (nstate_frag, Nlma, nspin)
+    complex(8), allocatable :: uVpsi_sum(:,:)
+    complex(8), allocatable :: H_nl_sum(:,:,:)
     complex(8) :: overlap_i, overlap_j, nlpp_contrib
 
     if (ppg%Nlma == 0) then
@@ -376,6 +446,8 @@ contains
     H_nl = (0.0d0, 0.0d0)
 
     allocate(uVpsi(dg_frag%nstate_frag, ppg%Nlma, nspin))
+    if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) &
+      allocate(uVpsi_sum(dg_frag%nstate_frag, ppg%Nlma))
 
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -418,6 +490,20 @@ contains
         end do
         !$omp end parallel do
 
+        if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+          ! Dense mixed-basis nonlocal terms must use the same complete
+          ! <beta|phi> vector as the block Hamiltonian path.  Each subgroup
+          ! rank contributes one real-space box; form the projector overlaps
+          ! before the nonlocal outer product and let only the fragment root
+          ! publish that block into the global dense cache below.
+          call comm_summation(uVpsi(1:dg_frag%nstate_frag, 1:ppg%Nlma, ispin), &
+                              uVpsi_sum(1:dg_frag%nstate_frag, 1:ppg%Nlma), &
+                              dg_frag%nstate_frag * ppg%Nlma, dg_frag%icomm_frag)
+          uVpsi(1:dg_frag%nstate_frag, 1:ppg%Nlma, ispin) = &
+            uVpsi_sum(1:dg_frag%nstate_frag, 1:ppg%Nlma)
+          if (.not. dg_frag%is_frag_root) cycle
+        end if
+
         nbf = dg_frag%n_basis(ifrag, ispin)
         !$omp parallel do collapse(2) private(jo, io, ig_i, ig_j, ilma, nlpp_contrib, overlap_i, overlap_j)
         do jo = 1, nbf
@@ -439,7 +525,15 @@ contains
       end do
     end do
 
+    if (dg_frag%isize > 1) then
+      allocate(H_nl_sum(dg_frag%n_mat_max, dg_frag%n_mat_max, nspin))
+      call comm_summation(H_nl, H_nl_sum, size(H_nl), dg_frag%icomm)
+      H_nl(:, :, :) = H_nl_sum(:, :, :)
+      deallocate(H_nl_sum)
+    end if
+
     deallocate(uVpsi)
+    if (allocated(uVpsi_sum)) deallocate(uVpsi_sum)
 
   end subroutine build_nonlocal_pp_matrix_A
 
@@ -464,6 +558,7 @@ contains
     real(8) :: x, y, z, phase
     real(8) :: A_local(3)
     complex(8), allocatable :: uVpsi(:,:,:)  ! (nstate_frag, Nlma, nspin)
+    complex(8), allocatable :: uVpsi_sum(:,:)
     complex(8) :: overlap_i, overlap_j, nlpp_contrib
 
     if (ppg%Nlma == 0) return
@@ -475,6 +570,7 @@ contains
     end do
 
     allocate(uVpsi(dg_frag%nstate_frag, ppg%Nlma, nspin))
+    if (dg_frag%isize_frag > 1) allocate(uVpsi_sum(dg_frag%nstate_frag, ppg%Nlma))
 
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -517,6 +613,18 @@ contains
         end do
         !$omp end parallel do
 
+        if (dg_frag%isize_frag > 1) then
+          ! Projector overlaps are linear in real space; form the nonlocal
+          ! outer product only after the fragment subgroup has reconstructed the
+          ! complete <beta|phi> vector.
+          call comm_summation(uVpsi(1:dg_frag%nstate_frag, 1:ppg%Nlma, ispin), &
+                              uVpsi_sum(1:dg_frag%nstate_frag, 1:ppg%Nlma), &
+                              dg_frag%nstate_frag * ppg%Nlma, dg_frag%icomm_frag)
+          uVpsi(1:dg_frag%nstate_frag, 1:ppg%Nlma, ispin) = &
+            uVpsi_sum(1:dg_frag%nstate_frag, 1:ppg%Nlma)
+          if (.not. dg_frag%is_frag_root) cycle
+        end if
+
         nbf = dg_frag%n_basis(ifrag, ispin)
         iblk = find_matrix_block_runtime(H_nl_block_map, ifrag, ifrag)
         if (iblk <= 0 .or. iblk > size(H_nl_blocks)) then
@@ -540,6 +648,7 @@ contains
     end do
 
     deallocate(uVpsi)
+    if (allocated(uVpsi_sum)) deallocate(uVpsi_sum)
   end subroutine build_nonlocal_pp_matrix_A_blocks
 
   !=======================================================================
@@ -827,7 +936,7 @@ contains
     real(8) :: A_local(3)
     logical :: use_micro_A
     complex(8) :: phase_factor(2), psi_point_up, psi_point_dn
-    complex(8), allocatable :: uVphi_self(:,:,:)
+    complex(8), allocatable :: uVphi_self(:,:,:), uVphi_self_sum(:,:,:)
     complex(8), allocatable :: proj_local_up(:,:), proj_local_dn(:,:), proj_global_up(:,:), proj_global_dn(:,:)
     complex(8), allocatable :: proj_weight_so(:,:), contrib_so(:,:)
 
@@ -932,6 +1041,16 @@ contains
       end do
     end do
 
+    if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+      ! Same reduction as the scalar nonlocal path: each orbital rank owns a
+      ! real-space box of <phi|beta>, but the output row update needs the full
+      ! fragment-subgroup projector vector.
+      allocate(uVphi_self_sum(dg_frag%nstate_frag, nlma_so, local_frag_count))
+      call comm_summation(uVphi_self, uVphi_self_sum, size(uVphi_self), dg_frag%icomm_frag)
+      uVphi_self(:, :, :) = uVphi_self_sum(:, :, :)
+      deallocate(uVphi_self_sum)
+    end if
+
     call comm_summation(proj_local_up, proj_global_up, size(proj_local_up), dg_frag%icomm)
     call comm_summation(proj_local_dn, proj_global_dn, size(proj_local_dn), dg_frag%icomm)
 
@@ -959,6 +1078,7 @@ contains
       end do
     end do
 
+    if (allocated(uVphi_self_sum)) deallocate(uVphi_self_sum)
     deallocate(uVphi_self, proj_local_up, proj_local_dn, proj_global_up, proj_global_dn, proj_weight_so, contrib_so)
   end subroutine apply_nonlocal_pp_projector_batch_so
 
@@ -983,7 +1103,7 @@ contains
     real(8) :: A_local(3)
     logical :: use_micro_A
     complex(8) :: phase_factor, psi_point
-    complex(8), allocatable :: proj_local(:,:), proj_global(:,:), uVphi_self(:,:,:)
+    complex(8), allocatable :: proj_local(:,:), proj_global(:,:), uVphi_self(:,:,:), uVphi_self_sum(:,:,:)
     complex(8), allocatable :: proj_weight(:,:), contrib(:,:)
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
@@ -1059,6 +1179,19 @@ contains
       end do
     end do
 
+    if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+      ! The projector application needs two linear reductions:
+      !   <beta|psi> is global over all fragment contributions, while
+      !   <phi_i|beta> is local to this fragment but distributed over the
+      !   fragment subgroup's real-space boxes.  Reconstruct the latter before
+      !   forming |beta><beta|psi>, otherwise orbital-mode rows only receive
+      !   the grid box held by their owner rank.
+      allocate(uVphi_self_sum(dg_frag%nstate_frag, ppg%Nlma, local_frag_count))
+      call comm_summation(uVphi_self, uVphi_self_sum, size(uVphi_self), dg_frag%icomm_frag)
+      uVphi_self(:, :, :) = uVphi_self_sum(:, :, :)
+      deallocate(uVphi_self_sum)
+    end if
+
     call comm_summation(proj_local, proj_global, size(proj_local), dg_frag%icomm)
 
     proj_weight(:, :) = (0.0d0, 0.0d0)
@@ -1085,6 +1218,7 @@ contains
       end do
     end do
 
+    if (allocated(uVphi_self_sum)) deallocate(uVphi_self_sum)
     deallocate(uVphi_self, proj_local, proj_global, proj_weight, contrib)
   end subroutine apply_nonlocal_pp_projector_batch
 
@@ -1173,6 +1307,22 @@ contains
       end if
       y(1:n_frag) = y(1:n_frag) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot))
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag))
+    else if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
+      ! Decoupled PW mode: fragment coefficients still live in the fragment
+      ! overlap metric, while PW rows are orthonormal identity rows.
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+        call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
+      else if (allocated(dg_frag%S_mat_blocks)) then
+        call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
+        y(1:n_frag) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
+      else if (allocated(dg_frag%S_mat_c)) then
+        y(1:n_frag) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag))
+      else
+        write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator requires fragment overlap storage for decoupled PW route. rank=', dg_frag%id
+        stop 1
+      end if
+      y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
     else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
@@ -1184,9 +1334,6 @@ contains
     else
       write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
       stop 1
-    end if
-    if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
-      y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
     end if
   end subroutine apply_overlap_operator
 
@@ -1266,6 +1413,23 @@ contains
       end if
       y(1:n_frag, :) = y(1:n_frag, :) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
       y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag, :))
+    else if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
+      ! Decoupled PW mode: apply the fragment metric to fragment rows and
+      ! identity to PW rows.  This keeps reduced/compacted PW sets valid even
+      ! when FP overlap is intentionally zero.
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (allocated(dg_frag%S_mat_blocks)) then
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
+        y(1:n_frag, :) = matmul(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
+      else if (allocated(dg_frag%S_mat_c)) then
+        y(1:n_frag, :) = matmul(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), x(1:n_frag, :))
+      else
+        write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator_batch requires fragment overlap storage for decoupled PW route. rank=', dg_frag%id
+        stop 1
+      end if
+      y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :)
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
     else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
@@ -1277,9 +1441,6 @@ contains
     else
       write(*,'(1x,a,i0)') '[FATAL] apply_overlap_operator_batch requires S_mat_blocks/S_mat_prop_blocks (block-only route). rank=', dg_frag%id
       stop 1
-    end if
-    if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
-      y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :)
     end if
   end subroutine apply_overlap_operator_batch
 
@@ -2701,6 +2862,13 @@ contains
     integer :: iblk
 
     if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (dg_frag%parallel_mode_orbital) then
+      ! Orbital mode keeps the reduced Hamiltonian replicated on every
+      ! subgroup rank.  Row ownership is applied by block-id selection during
+      ! sparse application; destructively zeroing blocks would corrupt dense
+      ! mixed-basis transforms.
+      return
+    end if
     if (.not. allocated(dg_frag%H_local_block_ids)) then
 !$omp parallel do private(iblk) schedule(static)
       do iblk = 1, size(dg_frag%H_mat_blocks)

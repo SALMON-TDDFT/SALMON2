@@ -92,6 +92,8 @@
     integer :: env_trace_len, env_trace_stat
     real(8) :: ap_block_diff_max
     real(8) :: m_raw_ff, m_raw_fp, m_raw_pf, m_raw_pp, m_raw_all
+    real(8) :: h_raw_ff, h_raw_fp, h_raw_pf, h_raw_pp, h_raw_all
+    real(8) :: h_max_ff, h_max_fp, h_max_pf, h_max_pp, h_max_all
     real(8) :: m_mix_oo, m_mix_ov, m_mix_vo, m_mix_vv, m_mix_all
     integer :: nocc_basis, nvirt_basis
     integer :: jo_occ, source_idx
@@ -473,14 +475,24 @@
       end if
       call cpu_time(t_coef_gather0)
       coef_all(:, :) = (0.0d0, 0.0d0)
-      do state0 = 1, dg_frag%nstate_tot, state_block_size
-        nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
-        state_s = state0
-        state_e = state0 + nstate_blk - 1
-        call gather_full_coef_view(dg_frag, ispin, n_frag, nstate_blk, coef_frag_all, coef_pw_all, state_s, state_e)
-        coef_all(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
-        if (n_pw > 0) coef_all(n_frag+1:n_tot, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
-      end do
+      if (dg_frag%parallel_mode_orbital .and. use_mixed_basis) then
+        ! Mixed-basis propagation keeps a replicated raw coefficient view in
+        ! each fragment subgroup.  Do not re-gather it through coef_owner here:
+        ! coef_owner is a global-index owner map, while coef(:,:,:) is the
+        ! fragment-local raw array used by the mixed transform.
+        coef_all(1:n_frag, 1:dg_frag%nstate_tot) = dg_frag%coef(1:n_frag, 1:dg_frag%nstate_tot, ispin)
+        if (n_pw > 0) coef_all(n_frag+1:n_tot, 1:dg_frag%nstate_tot) = &
+          dg_frag%coef_pw(1:n_pw, 1:dg_frag%nstate_tot, ispin)
+      else
+        do state0 = 1, dg_frag%nstate_tot, state_block_size
+          nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
+          state_s = state0
+          state_e = state0 + nstate_blk - 1
+          call gather_full_coef_view(dg_frag, ispin, n_frag, nstate_blk, coef_frag_all, coef_pw_all, state_s, state_e)
+          coef_all(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
+          if (n_pw > 0) coef_all(n_frag+1:n_tot, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
+        end do
+      end if
       if (has_so_nonlocal .or. has_spin_mix) then
         ispin_other = 3 - ispin
         if (.not. allocated(coef_frag_other)) then
@@ -499,14 +511,21 @@
           end if
           coef_pw_other(:, :) = (0.0d0, 0.0d0)
         end if
-        do state0 = 1, dg_frag%nstate_tot, state_block_size
-          nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
-          state_s = state0
-          state_e = state0 + nstate_blk - 1
-          call gather_full_coef_view(dg_frag, ispin_other, n_frag, nstate_blk, coef_frag_all, coef_pw_all, state_s, state_e)
-          coef_frag_other(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
-          if (n_pw > 0) coef_pw_other(1:n_pw, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
-        end do
+        if (dg_frag%parallel_mode_orbital .and. use_mixed_basis) then
+          coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot) = &
+            dg_frag%coef(1:n_frag, 1:dg_frag%nstate_tot, ispin_other)
+          if (n_pw > 0) coef_pw_other(1:n_pw, 1:dg_frag%nstate_tot) = &
+            dg_frag%coef_pw(1:n_pw, 1:dg_frag%nstate_tot, ispin_other)
+        else
+          do state0 = 1, dg_frag%nstate_tot, state_block_size
+            nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
+            state_s = state0
+            state_e = state0 + nstate_blk - 1
+            call gather_full_coef_view(dg_frag, ispin_other, n_frag, nstate_blk, coef_frag_all, coef_pw_all, state_s, state_e)
+            coef_frag_other(1:n_frag, state_s:state_e) = coef_frag_all(1:n_frag, 1:nstate_blk)
+            if (n_pw > 0) coef_pw_other(1:n_pw, state_s:state_e) = coef_pw_all(1:n_pw, 1:nstate_blk)
+          end do
+        end if
       end if
       call cpu_time(t_coef_gather1)
       dt_gather_local = dt_gather_local + (t_coef_gather1 - t_coef_gather0)
@@ -542,6 +561,39 @@
           write(*,'(a,i0,a,i0,a,i0)') "[Inf] H0c: rank=", dg_frag%id, " itt=", itt, " ispin=", ispin
           stop "Inf in H0c"
         end if
+      end if
+      if (enable_m_block_audit .and. need_h0_dense .and. dg_frag%id == 0 .and. itt <= 5) then
+        h_raw_ff = 0.0d0
+        h_raw_fp = 0.0d0
+        h_raw_pf = 0.0d0
+        h_raw_pp = 0.0d0
+        h_max_ff = 0.0d0
+        h_max_fp = 0.0d0
+        h_max_pf = 0.0d0
+        h_max_pp = 0.0d0
+        if (n_frag > 0) then
+          h_raw_ff = sqrt(sum(abs(H0c(1:n_frag, 1:n_frag))**2))
+          h_max_ff = maxval(abs(H0c(1:n_frag, 1:n_frag)))
+        end if
+        if (n_frag > 0 .and. n_pw > 0) then
+          h_raw_fp = sqrt(sum(abs(H0c(1:n_frag, n_frag+1:n_tot))**2))
+          h_raw_pf = sqrt(sum(abs(H0c(n_frag+1:n_tot, 1:n_frag))**2))
+          h_max_fp = maxval(abs(H0c(1:n_frag, n_frag+1:n_tot)))
+          h_max_pf = maxval(abs(H0c(n_frag+1:n_tot, 1:n_frag)))
+        end if
+        if (n_pw > 0) then
+          h_raw_pp = sqrt(sum(abs(H0c(n_frag+1:n_tot, n_frag+1:n_tot))**2))
+          h_max_pp = maxval(abs(H0c(n_frag+1:n_tot, n_frag+1:n_tot)))
+        end if
+        h_raw_all = sqrt(sum(abs(H0c(1:n_tot, 1:n_tot))**2))
+        h_max_all = maxval(abs(H0c(1:n_tot, 1:n_tot)))
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') '[H0-BLOCK-AUDIT] itt=', itt, ' ispin=', ispin, &
+             ' n_frag=', n_frag, ' n_pw=', n_pw, ' n_basis=', n_basis
+        write(*,'(1x,a,5(1x,1pe14.6))') '[H0-BLOCK-AUDIT] frob ff fp pf pp all=', &
+             h_raw_ff, h_raw_fp, h_raw_pf, h_raw_pp, h_raw_all
+        write(*,'(1x,a,5(1x,1pe14.6))') '[H0-BLOCK-AUDIT] max  ff fp pf pp all=', &
+             h_max_ff, h_max_fp, h_max_pf, h_max_pp, h_max_all
+        flush(6)
       end if
       if (enable_hermit_check .and. need_h0_dense .and. itt <= 120 .and. dg_frag%id == 0) then
         max_abs_h0 = maxval(abs(H0c(1:n_tot, 1:n_tot) - transpose(conjg(H0c(1:n_tot, 1:n_tot)))))
@@ -590,8 +642,17 @@
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
         dcoef_dt_h0_core(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
+            ! n_pw mixed propagation already requires a subgroup-reduced dense
+            ! nonlocal matrix for FP/PP terms.  Reuse the same matrix for the
+            ! FF action so the propagated operator is independent of how the
+            ! fragment real-space boxes are distributed.
+            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          else
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+          end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
@@ -612,8 +673,13 @@
         dcoef_dt_h0_core(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :)
 
         if (has_nonlocal) then
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
+            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          else
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+          end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
@@ -634,8 +700,13 @@
         dcoef_dt_h0_core(:, :) = dcoef_dt_h0(:, :)
 
         if (has_nonlocal) then
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_h0)
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_nl)
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
+            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          else
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_h0)
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_nl)
+          end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
@@ -652,8 +723,13 @@
                    coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
         dcoef_dt_h0_core(:, :) = dcoef_dt_h0(:, :)
         if (has_nonlocal) then
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
+            dcoef_dt_nl(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          else
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+          end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
@@ -1151,17 +1227,28 @@
         flush(6)
       end if
 
-      do io = 1, n_frag
-        if (.not. allocated(dg_frag%coef_owner)) exit
-        if (dg_frag%coef_owner(io, ispin) /= dg_frag%id) cycle
-        dcoef_dt(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(io, :)
-      end do
-      if (present(dcoef_dt_pw) .and. n_pw > 0) then
-        do io = 1, n_pw
-          if (.not. allocated(dg_frag%coef_pw_owner)) exit
-          if (dg_frag%coef_pw_owner(io) /= dg_frag%id) cycle
-          dcoef_dt_pw(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+io, :)
+      if (use_mixed_basis .and. n_basis > 0) then
+        ! Mixed-basis RK stages keep a replicated canonical raw coefficient
+        ! view on every orbital rank.  The derivative must therefore be
+        ! replicated too; owner-only writes leave stale non-owner k rows that
+        ! the RK update still reads.
+        dcoef_dt(1:n_frag, 1:dg_frag%nstate_tot, ispin) = rhs_all(1:n_frag, :)
+        if (present(dcoef_dt_pw) .and. n_pw > 0) then
+          dcoef_dt_pw(1:n_pw, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+1:n_tot, :)
+        end if
+      else
+        do io = 1, n_frag
+          if (.not. allocated(dg_frag%coef_owner)) exit
+          if (dg_frag%coef_owner(io, ispin) /= dg_frag%id) cycle
+          dcoef_dt(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(io, :)
         end do
+        if (present(dcoef_dt_pw) .and. n_pw > 0) then
+          do io = 1, n_pw
+            if (.not. allocated(dg_frag%coef_pw_owner)) exit
+            if (dg_frag%coef_pw_owner(io) /= dg_frag%id) cycle
+            dcoef_dt_pw(io, 1:dg_frag%nstate_tot, ispin) = rhs_all(n_frag+io, :)
+          end do
+        end if
       end if
       if (enable_deriv_trace .and. itt <= 2) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &

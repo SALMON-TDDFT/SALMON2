@@ -354,7 +354,7 @@ contains
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
-    character(len=64), save :: fp_domain_mode = 'buffered'
+    character(len=64), save :: fp_domain_mode = 'core'
     character(len=64) :: env_fp_domain
 
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -382,7 +382,9 @@ contains
       if (env_stat == 0 .and. env_len > 0) then
         fp_domain_mode = adjustl(env_fp_domain(1:env_len))
       else
-        fp_domain_mode = 'buffered'
+        ! Match the real-space density materialization domain by default.
+        ! Buffered FP integrals can still be requested explicitly for tests.
+        fp_domain_mode = 'core'
       end if
       select case (fp_domain_mode(1:1))
       case ('b','B','p','P','f','F','1')
@@ -547,7 +549,7 @@ contains
 
   subroutine compute_fragment_pw_overlap_legacy(dg_frag, S_complex)
     use structures
-    use communication, only: comm_bcast
+    use communication, only: comm_bcast, comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(out) :: S_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
@@ -555,6 +557,8 @@ contains
     integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
     integer :: nx, ny, nz, nx_max, ny_max, nz_max
     integer :: gx, gy, gz, gx0, gy0, gz0, bx, by, bz
+    integer :: loc_s(3), loc_e(3)
+    integer :: ipw_s, ipw_e
     integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
     integer :: env_len, env_stat
     real(8) :: k_vec(3), Lbox(3), sqrt_V, inv_sqrt_V
@@ -562,13 +566,14 @@ contains
     complex(8) :: pw_val, overlap_local, phase_yz
     complex(8) :: step_x, step_y, step_z
     complex(8) :: phase_x0, phase_y0, phase_z0
-    complex(8), allocatable :: frag_block(:,:,:)
+    complex(8), allocatable :: frag_block(:,:,:), frag_block_sum(:,:,:)
     complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
     logical :: use_complex_basis
+    logical :: owns_pw_col
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
-    character(len=64), save :: fp_domain_mode = 'buffered'
+    character(len=64), save :: fp_domain_mode = 'core'
     character(len=64) :: env_fp_domain
 
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -594,7 +599,9 @@ contains
       if (env_stat == 0 .and. env_len > 0) then
         fp_domain_mode = adjustl(env_fp_domain(1:env_len))
       else
-        fp_domain_mode = 'buffered'
+        ! Match the real-space density materialization domain by default.
+        ! Buffered FP integrals can still be requested explicitly for tests.
+        fp_domain_mode = 'core'
       end if
       select case (fp_domain_mode(1:1))
       case ('b','B','p','P','f','F','1')
@@ -627,9 +634,11 @@ contains
     allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
 
     S_complex = (0.0d0, 0.0d0)
+    call get_fragment_pw_column_range(dg_frag, dg_frag%n_plane_waves, ipw_s, ipw_e)
 
     do ispin = 1, dg_frag%nspin
       do ipw = 1, dg_frag%n_plane_waves
+        owns_pw_col = (.not. dg_frag%parallel_mode_orbital) .or. (ipw >= ipw_s .and. ipw <= ipw_e)
         k_vec(1:3) = dg_frag%k_pw(1:3, ipw)
 
         i_local = 0
@@ -670,22 +679,33 @@ contains
             phase_z(iz) = phase_z(iz-1) * step_z
           end do
 
+          if (dg_frag%parallel_mode_orbital) then
+            ! Orbital mode distributes fragment-PW matrix work by PW columns.
+            ! The fragment box is replicated; it is not split into real-space boxes.
+            loc_s(:) = [1, 1, 1]
+            loc_e(:) = [nx, ny, nz]
+          else
+            call get_fragment_subgroup_box_range_pw(dg_frag, [nx, ny, nz], loc_s, loc_e)
+          end if
+          if (any(loc_s(:) > loc_e(:))) cycle
+          if (.not. owns_pw_col) cycle
+
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
             if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
             overlap_local = (0.0d0, 0.0d0)
 
             if (use_complex_basis) then
-              do iz = 1, nz
+              do iz = loc_s(3), loc_e(3)
                 gz = gz0 + iz - 1
                 bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
-                do iy = 1, ny
+                do iy = loc_s(2), loc_e(2)
                   gy = gy0 + iy - 1
                   by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
-                  do ix = 1, nx
+                  do ix = loc_s(1), loc_e(1)
                     gx = gx0 + ix - 1
                     bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
@@ -696,22 +716,24 @@ contains
                 end do
               end do
             else
-              do iz = 1, nz
+              ! Real fragment orbitals have conjg(phi)=phi, so <phi|PW>
+              ! must use the same +ik phase as density reconstruction.
+              do iz = loc_s(3), loc_e(3)
                 gz = gz0 + iz - 1
                 bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
-                do iy = 1, ny
+                do iy = loc_s(2), loc_e(2)
                   gy = gy0 + iy - 1
                   by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
-                  do ix = 1, nx
+                  do ix = loc_s(1), loc_e(1)
                     gx = gx0 + ix - 1
                     bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     overlap_local = overlap_local + &
-                         dg_frag%phi_frag(bx,by,bz,io,i_local) * conjg(pw_val) * vol_elem
+                         dg_frag%phi_frag(bx,by,bz,io,i_local) * pw_val * vol_elem
                   end do
                 end do
               end do
@@ -728,6 +750,7 @@ contains
     if (allocated(phase_z)) deallocate(phase_z)
 
     allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
+    allocate(frag_block_sum(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
     do ifrag = 1, dg_frag%n_frag
       frag_block(:, :, :) = (0.0d0, 0.0d0)
       if (ifrag >= dg_frag%ifrag_start .and. ifrag <= dg_frag%ifrag_end) then
@@ -739,6 +762,12 @@ contains
             frag_block(io, 1:dg_frag%n_plane_waves, ispin) = S_complex(ig, 1:dg_frag%n_plane_waves, ispin)
           end do
         end do
+        ! Fragment-PW overlaps are linear integrals.  Legacy mode reduces
+        ! real-space pieces; orbital mode reduces disjoint PW-column pieces.
+        if (dg_frag%isize_frag > 1) then
+          call comm_summation(frag_block, frag_block_sum, size(frag_block), dg_frag%icomm_frag)
+          frag_block(:, :, :) = frag_block_sum(:, :, :)
+        end if
       end if
       call comm_bcast(frag_block, dg_frag%icomm, dg_frag%id_array(ifrag))
       do ispin = 1, dg_frag%nspin
@@ -749,7 +778,7 @@ contains
         end do
       end do
     end do
-    deallocate(frag_block)
+    deallocate(frag_block, frag_block_sum)
 
     s_fp_norm = sqrt(sum(abs(S_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
     if (dg_frag%id == 0) then
@@ -807,7 +836,7 @@ contains
   !=======================================================================
   subroutine compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_complex)
     use structures
-    use communication, only: comm_bcast
+    use communication, only: comm_bcast, comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_scalar),         intent(in)    :: Vh, Vxc(:), Vpsl
@@ -816,6 +845,8 @@ contains
     integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
     integer :: nx, ny, nz, nx_max, ny_max, nz_max
     integer :: gx, gy, gz, gx0, gy0, gz0, bx, by, bz, vx, vy, vz
+    integer :: loc_s(3), loc_e(3)
+    integer :: ipw_s, ipw_e
     integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
     integer :: v_lb1, v_lb2, v_lb3, v_ub1, v_ub2, v_ub3
     integer :: env_len, env_stat
@@ -824,13 +855,15 @@ contains
     complex(8) :: pw_val, pw_laplacian, hamiltonian_local, phase_yz
     complex(8) :: step_x, step_y, step_z
     complex(8) :: phase_x0, phase_y0, phase_z0
-    complex(8), allocatable :: frag_block(:,:,:)
+    complex(8), allocatable :: frag_block(:,:,:), frag_block_sum(:,:,:)
     complex(8), allocatable :: phase_x(:), phase_y(:), phase_z(:)
+    real(8), allocatable :: V_box(:,:,:)
     logical :: use_complex_basis
+    logical :: owns_pw_col
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
     logical, save :: warned_missing_buffer = .false.
-    character(len=64), save :: fp_domain_mode = 'buffered'
+    character(len=64), save :: fp_domain_mode = 'core'
     character(len=64) :: env_fp_domain
 
     if (.not. dg_frag%use_plane_wave_basis) return
@@ -862,7 +895,9 @@ contains
       if (env_stat == 0 .and. env_len > 0) then
         fp_domain_mode = adjustl(env_fp_domain(1:env_len))
       else
-        fp_domain_mode = 'buffered'
+        ! Match the real-space density materialization domain by default.
+        ! Buffered FP integrals can still be requested explicitly for tests.
+        fp_domain_mode = 'core'
       end if
       select case (fp_domain_mode(1:1))
       case ('b','B','p','P','f','F','1')
@@ -895,9 +930,11 @@ contains
     allocate(phase_x(nx_max), phase_y(ny_max), phase_z(nz_max))
 
     H_complex = (0.0d0, 0.0d0)
+    call get_fragment_pw_column_range(dg_frag, dg_frag%n_plane_waves, ipw_s, ipw_e)
 
     do ispin = 1, dg_frag%nspin
       do ipw = 1, dg_frag%n_plane_waves
+        owns_pw_col = (.not. dg_frag%parallel_mode_orbital) .or. (ipw >= ipw_s .and. ipw <= ipw_e)
         k_vec(1:3) = dg_frag%k_pw(1:3, ipw)
         k_squared = sum(k_vec**2)
 
@@ -939,34 +976,55 @@ contains
             phase_z(iz) = phase_z(iz-1) * step_z
           end do
 
+          if (dg_frag%parallel_mode_orbital) then
+            ! H_fp uses the same PW-column ownership as S_fp.  The scalar
+            ! potential is first assembled over the fragment subgroup so each
+            ! column owner can integrate the full box.
+            loc_s(:) = [1, 1, 1]
+            loc_e(:) = [nx, ny, nz]
+            allocate(V_box(1:nx, 1:ny, 1:nz))
+            call build_fragment_pw_total_potential_box(dg_frag, ifrag, Vh, Vxc(ispin), Vpsl, gx0, gy0, gz0, V_box)
+          else
+            call get_fragment_subgroup_box_range_pw(dg_frag, [nx, ny, nz], loc_s, loc_e)
+          end if
+          if (any(loc_s(:) > loc_e(:))) cycle
+          if (.not. owns_pw_col) then
+            if (allocated(V_box)) deallocate(V_box)
+            cycle
+          end if
+
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
             if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
             hamiltonian_local = (0.0d0, 0.0d0)
 
             if (use_complex_basis) then
-              do iz = 1, nz
+              do iz = loc_s(3), loc_e(3)
                 gz = gz0 + iz - 1
                 bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
-                do iy = 1, ny
+                do iy = loc_s(2), loc_e(2)
                   gy = gy0 + iy - 1
                   by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
-                  do ix = 1, nx
+                  do ix = loc_s(1), loc_e(1)
                     gx = gx0 + ix - 1
                     bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
-                    vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
-                    if (vx < v_lb1 .or. vx > v_ub1) cycle
-                    vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
-                    if (vy < v_lb2 .or. vy > v_ub2) cycle
-                    vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
-                    if (vz < v_lb3 .or. vz > v_ub3) cycle
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     pw_laplacian = (k_squared / 2.0d0) * pw_val
-                    V_total = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc(ispin)%f(vx, vy, vz)
+                    if (dg_frag%parallel_mode_orbital) then
+                      V_total = V_box(ix, iy, iz)
+                    else
+                      vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
+                      if (vx < v_lb1 .or. vx > v_ub1) cycle
+                      vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
+                      if (vy < v_lb2 .or. vy > v_ub2) cycle
+                      vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
+                      if (vz < v_lb3 .or. vz > v_ub3) cycle
+                      V_total = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc(ispin)%f(vx, vy, vz)
+                    end if
 
                     hamiltonian_local = hamiltonian_local + &
                          conjg(dg_frag%phi_frag_c(bx,by,bz,io,i_local)) * &
@@ -975,32 +1033,37 @@ contains
                 end do
               end do
             else
-              do iz = 1, nz
+              ! Keep H_fp in the same PW phase convention as S_fp and density.
+              do iz = loc_s(3), loc_e(3)
                 gz = gz0 + iz - 1
                 bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
                 if (bz < p_lb3 .or. bz > p_ub3) cycle
-                do iy = 1, ny
+                do iy = loc_s(2), loc_e(2)
                   gy = gy0 + iy - 1
                   by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
                   if (by < p_lb2 .or. by > p_ub2) cycle
                   phase_yz = phase_y(iy) * phase_z(iz)
-                  do ix = 1, nx
+                  do ix = loc_s(1), loc_e(1)
                     gx = gx0 + ix - 1
                     bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
                     if (bx < p_lb1 .or. bx > p_ub1) cycle
-                    vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
-                    if (vx < v_lb1 .or. vx > v_ub1) cycle
-                    vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
-                    if (vy < v_lb2 .or. vy > v_ub2) cycle
-                    vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
-                    if (vz < v_lb3 .or. vz > v_ub3) cycle
                     pw_val = phase_x(ix) * phase_yz * inv_sqrt_V
                     pw_laplacian = (k_squared / 2.0d0) * pw_val
-                    V_total = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc(ispin)%f(vx, vy, vz)
+                    if (dg_frag%parallel_mode_orbital) then
+                      V_total = V_box(ix, iy, iz)
+                    else
+                      vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
+                      if (vx < v_lb1 .or. vx > v_ub1) cycle
+                      vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
+                      if (vy < v_lb2 .or. vy > v_ub2) cycle
+                      vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
+                      if (vz < v_lb3 .or. vz > v_ub3) cycle
+                      V_total = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc(ispin)%f(vx, vy, vz)
+                    end if
 
                     hamiltonian_local = hamiltonian_local + &
                       dg_frag%phi_frag(bx,by,bz,io,i_local) * &
-                      conjg(pw_laplacian + V_total * pw_val) * vol_elem
+                      (pw_laplacian + V_total * pw_val) * vol_elem
                   end do
                 end do
               end do
@@ -1008,6 +1071,7 @@ contains
 
             H_complex(ig, ipw, ispin) = H_complex(ig, ipw, ispin) + hamiltonian_local
           end do
+          if (allocated(V_box)) deallocate(V_box)
         end do
       end do
     end do
@@ -1017,6 +1081,7 @@ contains
     if (allocated(phase_z)) deallocate(phase_z)
 
     allocate(frag_block(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
+    allocate(frag_block_sum(dg_frag%nstate_frag, dg_frag%n_plane_waves, dg_frag%nspin))
     do ifrag = 1, dg_frag%n_frag
       frag_block(:, :, :) = (0.0d0, 0.0d0)
       if (ifrag >= dg_frag%ifrag_start .and. ifrag <= dg_frag%ifrag_end) then
@@ -1028,6 +1093,12 @@ contains
             frag_block(io, 1:dg_frag%n_plane_waves, ispin) = H_complex(ig, 1:dg_frag%n_plane_waves, ispin)
           end do
         end do
+        ! H_fp follows the same ownership as S_fp: legacy reduces spatial
+        ! pieces, orbital mode reduces disjoint PW-column pieces.
+        if (dg_frag%isize_frag > 1) then
+          call comm_summation(frag_block, frag_block_sum, size(frag_block), dg_frag%icomm_frag)
+          frag_block(:, :, :) = frag_block_sum(:, :, :)
+        end if
       end if
       call comm_bcast(frag_block, dg_frag%icomm, dg_frag%id_array(ifrag))
       do ispin = 1, dg_frag%nspin
@@ -1038,7 +1109,7 @@ contains
         end do
       end do
     end do
-    deallocate(frag_block)
+    deallocate(frag_block, frag_block_sum)
 
     h_fp_norm = sqrt(sum(abs(H_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
     if (dg_frag%id == 0) then
@@ -1333,16 +1404,19 @@ contains
     real(8), intent(in) :: Ac_tot(3)
 
     integer :: ispin, n_total, n_frag, n_pw, lda, lwork, info, i, j, k
-    integer :: n_floor, n_keep_s, n_drop_s
+    integer :: n_floor, n_keep_s, n_drop_s, n_below_abs, n_below_tau
     integer :: env_len, env_stat
     real(8) :: sij, s_eff_min, s_eff_max, s_eff_cond
     real(8) :: tau_s, trunc_ratio, lam_keep_min, lam_max
+    real(8) :: s_mix_min, s_mix_max, s_mix_cond
     real(8) :: pw_dim_eff, frag_dim_eff, pw_weight, pw_weight_drop_max
     real(8) :: eps_s_rel_cfg
     character(len=64) :: env_eps_rel
     character(len=64) :: env_init_mode
     character(len=64) :: init_mode_norm
-    character(len=64) :: env_pw_weight_protect_n, env_apply_pw_weight_keep
+    character(len=64) :: env_pw_weight_protect_n, env_apply_pw_weight_keep, env_append_pw_protected
+    character(len=64) :: env_fragment_qr_keep
+    character(len=64) :: env_pw_perp_project
     real(8), parameter :: pw_dom_thresh = 0.5d0, pw_nontriv_thresh = 0.1d0
     integer :: n_pw_dom_modes, n_pw_nontriv_modes, n_pw_drop_dom
     logical :: use_raw_prop_s
@@ -1356,6 +1430,8 @@ contains
     complex(8), allocatable :: P_frag_pw(:,:,:,:) ! Gradient coupling matrix
     integer, allocatable :: jpvt(:), keep_idx(:), keep_s_idx(:)
     integer :: m_qr, n_qr, lwork_qr, info_qr, n_keep_pw, n_keep_pw_base, ndiag
+    integer :: n_keep_pw_premerge, n_keep_pw_before_final
+    integer :: n_drop_final_rank, n_drop_real_rank, n_drop_metric_rank
     integer :: n_protect_pw, n_keep_protect
     integer :: n_pw_weight_protect, n_keep_pw_pwprotect
     real(8) :: diag_max, tau_rr
@@ -1364,7 +1440,9 @@ contains
     real(8), parameter :: eps_s_rel_default = 1.0d-8
     real(8), parameter :: tau_pw_rank_rel = 1.0d-6
     real(8) :: eps_s
-    logical :: init_identity, init_truncated, init_occupied_projection, apply_pw_weight_keep
+    logical :: init_identity, init_truncated, init_occupied_projection, apply_pw_weight_keep, append_pw_protected
+    logical :: use_fragment_overlap_qr_keep
+    logical :: apply_pw_perp_projection
     integer :: nocc_init
     complex(8), allocatable :: S_init_metric(:,:), U_keep(:,:), UH_scaled(:,:)
     logical, allocatable :: protect_low_g(:), selected_keep(:)
@@ -1415,6 +1493,39 @@ contains
         apply_pw_weight_keep = .false.
       end select
     end if
+    append_pw_protected = .false.
+    env_append_pw_protected = ''
+    call get_environment_variable('SALMON_DG_PW_APPEND_PROTECTED', env_append_pw_protected, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      select case (env_append_pw_protected(1:1))
+      case ('1','y','Y','t','T')
+        append_pw_protected = .true.
+      case default
+        append_pw_protected = .false.
+      end select
+    end if
+    use_fragment_overlap_qr_keep = .false.
+    env_fragment_qr_keep = ''
+    call get_environment_variable('SALMON_DG_PW_FRAGMENT_QR_KEEP', env_fragment_qr_keep, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      select case (env_fragment_qr_keep(1:1))
+      case ('1','y','Y','t','T')
+        use_fragment_overlap_qr_keep = .true.
+      case default
+        use_fragment_overlap_qr_keep = .false.
+      end select
+    end if
+    apply_pw_perp_projection = .false.
+    env_pw_perp_project = ''
+    call get_environment_variable('SALMON_DG_PW_PERP_PROJECT', env_pw_perp_project, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      select case (env_pw_perp_project(1:1))
+      case ('1','y','Y','t','T')
+        apply_pw_perp_projection = .true.
+      case default
+        apply_pw_perp_projection = .false.
+      end select
+    end if
 
     if (comm_is_root(dg_frag%id)) then
       write(*,*)
@@ -1434,6 +1545,9 @@ contains
       end if
       write(*,'(1x,a,i0,a,l1)') 'PW weight protection: n=', n_pw_weight_protect, &
            ' apply=', apply_pw_weight_keep
+      write(*,'(1x,a,l1)') 'PW append protected modes: ', append_pw_protected
+      write(*,'(1x,a,l1)') 'PW fragment-overlap QR keep: ', use_fragment_overlap_qr_keep
+      write(*,'(1x,a,l1)') 'PW_perp projection: ', apply_pw_perp_projection
     end if
 
     allocate(S_frag_pw(n_frag, n_pw, dg_frag%nspin))
@@ -1446,115 +1560,165 @@ contains
     if (comm_is_root(dg_frag%id) .and. n_pw > 0) then
       write(*,'(1x,a,i0,a,i0,a,1pe11.3)') 'PW low-|G| protection: ', n_protect_pw, ' / ', n_pw, ' (k_thr=', k_protect_thr, ')'
     end if
-    call project_pw_to_fragment_orthogonal_complement(dg_frag, eps_s_abs, eps_s_rel_cfg, S_frag_pw, H_frag_pw, P_frag_pw, protect_low_g)
+    if (apply_pw_perp_projection) then
+      call project_pw_to_fragment_orthogonal_complement(dg_frag, eps_s_abs, eps_s_rel_cfg, S_frag_pw, H_frag_pw, P_frag_pw, protect_low_g)
+    else if (comm_is_root(dg_frag%id) .and. n_pw > 0) then
+      ! Keep the matrix basis in the same representation used by density/current
+      ! reconstruction.  The mixed metric below handles any FP/PW overlap.
+      write(*,'(1x,a)') 'PW_perp projection skipped: using raw PW basis with full mixed metric'
+    end if
     if (n_pw > 0 .and. n_frag > 0) then
-      m_qr = 2 * n_frag * dg_frag%nspin
-      n_qr = n_pw
-      allocate(A_qr(m_qr, n_qr), jpvt(n_qr), tau_qr(min(m_qr, n_qr)))
-      allocate(pw_col_proxy(n_qr))
-      call compute_pw_weight_proxy_from_overlap(S_frag_pw, pw_col_proxy)
-      A_qr(:, :) = 0.0d0
-      do ispin = 1, dg_frag%nspin
-        A_qr((ispin-1)*2*n_frag + 1:(ispin-1)*2*n_frag + n_frag, :) = real(S_frag_pw(:, :, ispin), kind=8)
-        A_qr((ispin-1)*2*n_frag + n_frag + 1:ispin*2*n_frag, :) = aimag(S_frag_pw(:, :, ispin))
-      end do
-      jpvt(:) = 0
-      lwork_qr = -1
-      allocate(work_qr(1))
-      call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
-      lwork_qr = max(1, int(work_qr(1)))
-      deallocate(work_qr)
-      allocate(work_qr(lwork_qr))
-      call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
-      n_keep_pw = n_pw
-      if (info_qr == 0) then
-        ! Rank-revealing QR removes PW columns that are linearly dependent in
-        ! the fragment-overlap space.  This keeps the mixed metric well
-        ! conditioned before the generalized eigenproblem.
-        ndiag = min(m_qr, n_qr)
-        diag_max = 0.0d0
-        do i = 1, ndiag
-          diag_max = max(diag_max, abs(A_qr(i, i)))
-        end do
-        tau_rr = tau_pw_rank_rel * max(diag_max, 1.0d0)
-        n_keep_pw = 0
-        do i = 1, ndiag
-          if (abs(A_qr(i, i)) >= tau_rr) n_keep_pw = i
-        end do
-        if (n_keep_pw <= 0 .and. n_pw > 0) n_keep_pw = 1
-      else if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0)') "WARN: dgeqp3 failed in PW rank selection, info=", info_qr
-      end if
-
-      n_keep_pw_base = n_keep_pw
-      if (n_pw_weight_protect <= 0) n_pw_weight_protect = n_protect_pw
-      ! Protection is applied after QR so physically important low-|G| or
-      ! high-overlap PW modes are not discarded only because they are nearly
-      ! dependent on the fragment subspace.
-      call build_keep_sets_from_jpvt(n_qr, jpvt, n_keep_pw_base, pw_col_proxy, n_pw_weight_protect, &
-           keep_idx_jpvt, keep_idx_pw_protect, n_keep_pw_pwprotect)
-
-      if (allocated(keep_idx)) deallocate(keep_idx)
-      allocate(keep_idx(n_qr))
-      if (apply_pw_weight_keep .and. n_keep_pw_pwprotect > 0) then
-        n_keep_pw = n_keep_pw_pwprotect
-        keep_idx(1:n_keep_pw) = keep_idx_pw_protect(1:n_keep_pw)
-      else
-        n_keep_pw = n_keep_pw_base
-        keep_idx(1:n_keep_pw) = keep_idx_jpvt(1:n_keep_pw)
-      end if
-
-      if (n_protect_pw > 0) then
-        ! Merge explicit low-|G| protection with the selected QR/proxy keep set
-        ! while preserving uniqueness and the compacted PW ordering.
-        allocate(selected_keep(n_pw))
-        selected_keep(:) = .false.
-        n_keep_pw = 0
-        do i = 1, n_qr
-          if (i > size(keep_idx)) exit
-          if (keep_idx(i) < 1 .or. keep_idx(i) > n_pw) cycle
-          if (selected_keep(keep_idx(i))) cycle
-          n_keep_pw = n_keep_pw + 1
-          keep_idx(n_keep_pw) = keep_idx(i)
-          selected_keep(keep_idx(i)) = .true.
-          if (n_keep_pw >= n_qr) exit
-        end do
+      if (.not. use_fragment_overlap_qr_keep) then
+        allocate(keep_idx(n_pw))
         do i = 1, n_pw
-          if (.not. protect_low_g(i)) cycle
-          if (.not. selected_keep(i)) then
-            n_keep_pw = n_keep_pw + 1
-            keep_idx(n_keep_pw) = i
-            selected_keep(i) = .true.
-          end if
+          keep_idx(i) = i
         end do
-        deallocate(selected_keep)
-      end if
-
-      n_keep_protect = 0
-      if (n_keep_pw > 0 .and. n_protect_pw > 0) then
-        if (allocated(keep_idx)) then
-          n_keep_protect = count(protect_low_g(keep_idx(1:n_keep_pw)))
-        else
-          n_keep_protect = count(protect_low_g(jpvt(1:n_keep_pw)))
-        end if
-      end if
-      if (comm_is_root(dg_frag%id) .and. n_protect_pw > 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') 'PW QR keep stats: total_kept=', n_keep_pw, ' / ', n_pw, &
-             ' protected_kept=', n_keep_protect, ' / ', n_protect_pw
-      end if
-
-      if (n_keep_pw < n_pw) then
-        call compact_plane_wave_basis(dg_frag, S_frag_pw, H_frag_pw, P_frag_pw, keep_idx, n_keep_pw)
-        deallocate(keep_idx)
-        n_pw = dg_frag%n_plane_waves
-        n_total = n_frag + n_pw
+        n_keep_pw = n_pw
+        n_keep_pw_premerge = n_keep_pw
+        n_keep_pw_before_final = n_keep_pw
+        n_drop_metric_rank = 0
+        call filter_pw_keep_by_mixed_metric(dg_frag, S_frag_pw, keep_idx, n_keep_pw, n_keep_pw, &
+             eps_s_abs, eps_s_rel_cfg, n_drop_metric_rank)
         if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,i0,a,1pe11.3)') "PW rank selection: kept ", n_keep_pw, " / ", n_qr, " (tau=", tau_rr, ")"
+          write(*,'(1x,a,i0,a,i0,a,i0)') 'PW metric keep stats: total_kept=', n_keep_pw, ' / ', n_keep_pw_before_final, &
+               ' metric_dropped=', n_drop_metric_rank
         end if
+        if (n_keep_pw < n_pw) then
+          call compact_plane_wave_basis(dg_frag, S_frag_pw, H_frag_pw, P_frag_pw, keep_idx, n_keep_pw)
+          n_pw = dg_frag%n_plane_waves
+          n_total = n_frag + n_pw
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0,a,i0)') "PW metric rank selection: kept ", n_keep_pw, " / ", n_keep_pw_before_final
+          end if
+        end if
+        deallocate(keep_idx)
+      else
+        m_qr = 2 * n_frag * dg_frag%nspin
+        n_qr = n_pw
+        allocate(A_qr(m_qr, n_qr), jpvt(n_qr), tau_qr(min(m_qr, n_qr)))
+        allocate(pw_col_proxy(n_qr))
+        call compute_pw_weight_proxy_from_overlap(S_frag_pw, pw_col_proxy)
+        tau_rr = tau_pw_rank_rel
+        A_qr(:, :) = 0.0d0
+        do ispin = 1, dg_frag%nspin
+          A_qr((ispin-1)*2*n_frag + 1:(ispin-1)*2*n_frag + n_frag, :) = real(S_frag_pw(:, :, ispin), kind=8)
+          A_qr((ispin-1)*2*n_frag + n_frag + 1:ispin*2*n_frag, :) = aimag(S_frag_pw(:, :, ispin))
+        end do
+        jpvt(:) = 0
+        lwork_qr = -1
+        allocate(work_qr(1))
+        call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
+        lwork_qr = max(1, int(work_qr(1)))
+        deallocate(work_qr)
+        allocate(work_qr(lwork_qr))
+        call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
+        n_keep_pw = n_pw
+        if (info_qr == 0) then
+          ! Legacy experimental path: keep PW columns by their fragment-overlap
+          ! rank. After PW_perp projection this can remove valid complement
+          ! directions, so it is opt-in only.
+          ndiag = min(m_qr, n_qr)
+          diag_max = 0.0d0
+          do i = 1, ndiag
+            diag_max = max(diag_max, abs(A_qr(i, i)))
+          end do
+          tau_rr = tau_pw_rank_rel * max(diag_max, 1.0d0)
+          n_keep_pw = 0
+          do i = 1, ndiag
+            if (abs(A_qr(i, i)) >= tau_rr) n_keep_pw = i
+          end do
+          if (n_keep_pw <= 0 .and. n_pw > 0) n_keep_pw = 1
+        else if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0)') "WARN: dgeqp3 failed in PW rank selection, info=", info_qr
+        end if
+
+        n_keep_pw_base = n_keep_pw
+        if (n_pw_weight_protect <= 0) n_pw_weight_protect = n_protect_pw
+        ! Protection is applied after QR so physically important low-|G| or
+        ! high-overlap PW modes are not discarded only because they are nearly
+        ! dependent on the fragment subspace.
+        call build_keep_sets_from_jpvt(n_qr, jpvt, n_keep_pw_base, pw_col_proxy, n_pw_weight_protect, &
+             keep_idx_jpvt, keep_idx_pw_protect, n_keep_pw_pwprotect)
+
+        if (allocated(keep_idx)) deallocate(keep_idx)
+        allocate(keep_idx(n_qr))
+        if (apply_pw_weight_keep .and. n_keep_pw_pwprotect > 0) then
+          n_keep_pw = n_keep_pw_pwprotect
+          keep_idx(1:n_keep_pw) = keep_idx_pw_protect(1:n_keep_pw)
+        else
+          n_keep_pw = n_keep_pw_base
+          keep_idx(1:n_keep_pw) = keep_idx_jpvt(1:n_keep_pw)
+        end if
+
+        n_keep_pw_premerge = n_keep_pw
+        if (n_protect_pw > 0 .and. append_pw_protected) then
+          ! Merge explicit low-|G| protection with the selected QR/proxy keep set
+          ! while preserving uniqueness and the compacted PW ordering.
+          allocate(selected_keep(n_pw))
+          selected_keep(:) = .false.
+          n_keep_pw = 0
+          do i = 1, n_keep_pw_premerge
+            if (keep_idx(i) < 1 .or. keep_idx(i) > n_pw) cycle
+            if (selected_keep(keep_idx(i))) cycle
+            n_keep_pw = n_keep_pw + 1
+            keep_idx(n_keep_pw) = keep_idx(i)
+            selected_keep(keep_idx(i)) = .true.
+            if (n_keep_pw >= n_qr) exit
+          end do
+          do i = 1, n_pw
+            if (.not. protect_low_g(i)) cycle
+            if (.not. selected_keep(i)) then
+              n_keep_pw = n_keep_pw + 1
+              keep_idx(n_keep_pw) = i
+              selected_keep(i) = .true.
+            end if
+          end do
+          deallocate(selected_keep)
+        end if
+
+        n_keep_pw_before_final = n_keep_pw
+        call filter_pw_keep_by_real_rank(S_frag_pw, keep_idx, n_keep_pw, tau_pw_rank_rel, n_drop_real_rank)
+        call filter_pw_keep_by_mixed_metric(dg_frag, S_frag_pw, keep_idx, n_keep_pw, &
+             min(n_keep_pw_premerge, n_keep_pw), eps_s_abs, eps_s_rel_cfg, n_drop_metric_rank)
+        n_drop_final_rank = n_drop_real_rank + n_drop_metric_rank
+        if (comm_is_root(dg_frag%id) .and. n_drop_final_rank > 0) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') 'PW final rank filter: kept=', n_keep_pw, &
+               ' / ', n_keep_pw_before_final, ' dropped=', n_drop_final_rank, &
+               ' real=', n_drop_real_rank, ' metric=', n_drop_metric_rank
+          write(*,'(1x,a)', advance='no') 'PW final keep indices:'
+          do i = 1, n_keep_pw
+            write(*,'(1x,i0)', advance='no') keep_idx(i)
+          end do
+          write(*,*)
+        end if
+
+        n_keep_protect = 0
+        if (n_keep_pw > 0 .and. n_protect_pw > 0) then
+          if (allocated(keep_idx)) then
+            n_keep_protect = count(protect_low_g(keep_idx(1:n_keep_pw)))
+          else
+            n_keep_protect = count(protect_low_g(jpvt(1:n_keep_pw)))
+          end if
+        end if
+        if (comm_is_root(dg_frag%id) .and. n_protect_pw > 0) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') 'PW QR keep stats: total_kept=', n_keep_pw, ' / ', n_pw, &
+               ' protected_kept=', n_keep_protect, ' / ', n_protect_pw
+        end if
+
+        if (n_keep_pw < n_pw) then
+          call compact_plane_wave_basis(dg_frag, S_frag_pw, H_frag_pw, P_frag_pw, keep_idx, n_keep_pw)
+          deallocate(keep_idx)
+          n_pw = dg_frag%n_plane_waves
+          n_total = n_frag + n_pw
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0,a,i0,a,1pe11.3)') "PW rank selection: kept ", n_keep_pw, " / ", n_qr, " (tau=", tau_rr, ")"
+          end if
+        end if
+        if (allocated(keep_idx)) deallocate(keep_idx)
+        if (allocated(keep_idx_jpvt)) deallocate(keep_idx_jpvt)
+        if (allocated(keep_idx_pw_protect)) deallocate(keep_idx_pw_protect)
+        deallocate(A_qr, jpvt, tau_qr, work_qr, pw_col_proxy)
       end if
-      if (allocated(keep_idx_jpvt)) deallocate(keep_idx_jpvt)
-      if (allocated(keep_idx_pw_protect)) deallocate(keep_idx_pw_protect)
-      deallocate(A_qr, jpvt, tau_qr, work_qr, pw_col_proxy)
     end if
     if (allocated(protect_low_g)) deallocate(protect_low_g)
 
@@ -1751,6 +1915,13 @@ contains
         cycle
       end if
       eps_s = max(eps_s_abs, eps_s_rel_cfg * max(eval_s(n_total), 1.0d0))
+      s_mix_min = eval_s(1)
+      s_mix_max = eval_s(n_total)
+      if (s_mix_min > 0.0d0) then
+        s_mix_cond = s_mix_max / s_mix_min
+      else
+        s_mix_cond = huge(1.0d0)
+      end if
 
       tau_s = eps_s
       n_keep_s = 0
@@ -1759,6 +1930,8 @@ contains
       end do
       if (n_keep_s <= 0) n_keep_s = 1
       n_drop_s = n_total - n_keep_s
+      n_below_abs = count(eval_s(1:n_total) < eps_s_abs)
+      n_below_tau = count(eval_s(1:n_total) < tau_s)
       allocate(keep_s_idx(n_keep_s))
       k = 0
       do i = 1, n_total
@@ -1799,6 +1972,9 @@ contains
         end do
       end if
       if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,i0,a,i0)') "Mixed-S spectrum: spin=", ispin, &
+             " lam_min=", s_mix_min, " lam_max=", s_mix_max, " cond=", s_mix_cond, &
+             " below_abs=", n_below_abs, " below_tau=", n_below_tau
         write(*,'(1x,a,i0,a,i0,a,1pe11.3,a,1pe11.3,a,i0,a,i0,a,1pe11.3)') "Mixed-S effective rank: ", n_keep_s, " / ", n_total, &
              " tau=", tau_s, " lam_min_keep=", lam_keep_min, " drop=", n_drop_s, " / ", n_total, " trunc_ratio=", trunc_ratio
         write(*,'(1x,a,1pe11.3,a,1pe11.3,a,i0,a,i0,a,i0,a,i0)') "Mixed-S composition: pw_eff=", pw_dim_eff, &
@@ -1845,12 +2021,16 @@ contains
       do i = 1, min(dg_frag%nstate_tot, n_keep_s)
         dg_frag%esp(i, ispin) = eigenvalues_tmp(i)
       end do
-      dg_frag%mixed_basis_dim(ispin) = min(dg_frag%nstate_tot, n_keep_s)
+      ! The number of propagated states and the rank of the mixed basis are
+      ! different quantities.  Keep the full S-effective mixed basis so a raw
+      ! fragment/PW state can be represented without an artificial projection
+      ! onto only the lowest nstate_tot mixed eigenmodes.
+      dg_frag%mixed_basis_dim(ispin) = min(n_total, n_keep_s)
       dg_frag%mixed_transform(1:n_total, 1:dg_frag%mixed_basis_dim(ispin), ispin) = &
         eigvec(1:n_total, 1:dg_frag%mixed_basis_dim(ispin))
       dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
       if (init_identity) then
-        do i = 1, dg_frag%mixed_basis_dim(ispin)
+        do i = 1, min(dg_frag%nstate_tot, dg_frag%mixed_basis_dim(ispin))
           dg_frag%coef_mix(i, i, ispin) = (1.0d0, 0.0d0)
         end do
       else if (init_truncated) then
@@ -2061,12 +2241,12 @@ contains
     end if
     protect_low_g(:) = .false.
 
-    protect_scale = 1.0d0
+    protect_scale = 0.0d0
     env_scale = ''
     call get_environment_variable('SALMON_DG_PW_PROTECT_SCALE', env_scale, length=env_len, status=env_stat)
     if (env_stat == 0 .and. env_len > 0) then
       read(env_scale(1:env_len), *, iostat=info) protect_scale
-      if (info /= 0) protect_scale = 1.0d0
+      if (info /= 0) protect_scale = 0.0d0
     end if
     if (protect_scale <= 0.0d0) then
       n_protect = 0
@@ -2306,6 +2486,224 @@ contains
   end subroutine build_keep_sets_from_jpvt
 
   !=======================================================================
+  ! Re-check the final PW keep set after protection has been merged in.
+  ! Protection is intentionally soft here: a protected PW mode is retained
+  ! only if it adds an independent direction to the fragment-overlap space.
+  ! The modified Gram-Schmidt pass is deterministic because it follows the
+  ! existing keep order and does not depend on nearly tied QR pivots.
+  !=======================================================================
+  subroutine filter_pw_keep_by_real_rank(S_frag_pw, keep_idx, n_keep, tau_rel, n_dropped)
+    implicit none
+    complex(8), intent(in) :: S_frag_pw(:,:,:)
+    integer, intent(inout) :: keep_idx(:)
+    integer, intent(inout) :: n_keep
+    real(8), intent(in) :: tau_rel
+    integer, intent(out) :: n_dropped
+
+    integer :: n_frag, n_pw, nspin, m_real, j, k, idx, n_new
+    real(8) :: max_col_norm, tau_abs, norm_col, norm_res, proj
+    real(8), allocatable :: q(:,:), col(:)
+    integer, allocatable :: keep_new(:)
+
+    n_dropped = 0
+    if (n_keep <= 1) return
+
+    n_frag = size(S_frag_pw, 1)
+    n_pw = size(S_frag_pw, 2)
+    nspin = size(S_frag_pw, 3)
+    if (n_frag <= 0 .or. n_pw <= 0 .or. nspin <= 0) return
+
+    m_real = 2 * n_frag * nspin
+    allocate(q(m_real, n_keep), col(m_real), keep_new(n_keep))
+
+    max_col_norm = 0.0d0
+    do j = 1, n_keep
+      idx = keep_idx(j)
+      if (idx < 1 .or. idx > n_pw) cycle
+      call fill_real_pw_column(idx, col)
+      norm_col = sqrt(sum(col(:) * col(:)))
+      max_col_norm = max(max_col_norm, norm_col)
+    end do
+
+    tau_abs = max(1.0d-14, tau_rel * max(max_col_norm, 1.0d0))
+    q(:, :) = 0.0d0
+    n_new = 0
+    do j = 1, n_keep
+      idx = keep_idx(j)
+      if (idx < 1 .or. idx > n_pw) cycle
+      call fill_real_pw_column(idx, col)
+      norm_col = sqrt(sum(col(:) * col(:)))
+      if (norm_col < tau_abs) cycle
+
+      do k = 1, n_new
+        proj = dot_product(q(:, k), col(:))
+        col(:) = col(:) - proj * q(:, k)
+      end do
+      norm_res = sqrt(sum(col(:) * col(:)))
+
+      if (norm_res >= tau_abs) then
+        n_new = n_new + 1
+        q(:, n_new) = col(:) / norm_res
+        keep_new(n_new) = idx
+      end if
+    end do
+
+    if (n_new <= 0) then
+      do j = 1, n_keep
+        idx = keep_idx(j)
+        if (idx < 1 .or. idx > n_pw) cycle
+        n_new = 1
+        keep_new(1) = idx
+        exit
+      end do
+    end if
+
+    if (n_new > 0) keep_idx(1:n_new) = keep_new(1:n_new)
+    n_dropped = max(0, n_keep - n_new)
+    n_keep = n_new
+
+    deallocate(q, col, keep_new)
+
+  contains
+
+    subroutine fill_real_pw_column(idx_col, vec)
+      implicit none
+      integer, intent(in) :: idx_col
+      real(8), intent(out) :: vec(:)
+
+      integer :: ispin_l, ifrag_l, row_l
+
+      row_l = 0
+      do ispin_l = 1, nspin
+        do ifrag_l = 1, n_frag
+          row_l = row_l + 1
+          vec(row_l) = real(S_frag_pw(ifrag_l, idx_col, ispin_l), kind=8)
+        end do
+        do ifrag_l = 1, n_frag
+          row_l = row_l + 1
+          vec(row_l) = aimag(S_frag_pw(ifrag_l, idx_col, ispin_l))
+        end do
+      end do
+    end subroutine fill_real_pw_column
+  end subroutine filter_pw_keep_by_real_rank
+
+  !=======================================================================
+  ! Ensure the final fragment+PW metric is full-rank for every spin channel.
+  ! When protected PW modes recreate a near-null mixed-S direction, the PW
+  ! component with the largest weight in the discarded metric eigenvectors is
+  ! removed. Ties are resolved by dropping the later keep entry so the earlier
+  ! QR/proxy ordering remains stable.
+  !=======================================================================
+  subroutine filter_pw_keep_by_mixed_metric(dg_frag, S_frag_pw, keep_idx, n_keep, n_preferred, eps_abs, eps_rel, n_dropped)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    complex(8), intent(in) :: S_frag_pw(:,:,:)
+    integer, intent(inout) :: keep_idx(:)
+    integer, intent(inout) :: n_keep
+    integer, intent(in) :: n_preferred
+    real(8), intent(in) :: eps_abs, eps_rel
+    integer, intent(out) :: n_dropped
+
+    integer :: n_frag, n_pw, nspin, n_total, n_total_max
+    integer :: iter, ispin, i, j, idx, info, lwork, drop_pos, preferred_limit
+    real(8) :: tau_s, best_score
+    logical :: full_rank
+    complex(8), allocatable :: Sff(:,:), Smix(:,:), work_c(:)
+    real(8), allocatable :: eval_s(:), rwork(:), drop_score(:)
+
+    external :: zheev
+
+    n_dropped = 0
+    if (n_keep <= 0) return
+
+    n_frag = size(S_frag_pw, 1)
+    n_pw = size(S_frag_pw, 2)
+    nspin = size(S_frag_pw, 3)
+    if (n_frag <= 0 .or. n_pw <= 0 .or. nspin <= 0) return
+
+    n_total_max = n_frag + n_keep
+    allocate(Sff(n_frag, n_frag), Smix(n_total_max, n_total_max))
+    allocate(eval_s(n_total_max), rwork(max(1, 3*n_total_max - 2)), drop_score(n_keep))
+
+    do iter = 1, n_pw
+      if (n_keep <= 0) exit
+      n_total = n_frag + n_keep
+      drop_score(1:n_keep) = 0.0d0
+      full_rank = .true.
+
+      do ispin = 1, nspin
+        call get_fragment_overlap_dense(dg_frag, ispin, Sff)
+        Smix(1:n_total, 1:n_total) = (0.0d0, 0.0d0)
+        Smix(1:n_frag, 1:n_frag) = Sff(:, :)
+        do j = 1, n_keep
+          idx = keep_idx(j)
+          if (idx < 1 .or. idx > n_pw) cycle
+          do i = 1, n_frag
+            Smix(i, n_frag + j) = S_frag_pw(i, idx, ispin)
+            Smix(n_frag + j, i) = conjg(Smix(i, n_frag + j))
+          end do
+          Smix(n_frag + j, n_frag + j) = (1.0d0, 0.0d0)
+        end do
+        do i = 1, n_total
+          Smix(i, i) = cmplx(real(Smix(i, i), kind=8), 0.0d0, kind=8)
+        end do
+
+        lwork = -1
+        allocate(work_c(1))
+        call ZHEEV('V', 'U', n_total, Smix, n_total_max, eval_s, work_c, lwork, rwork, info)
+        lwork = max(1, int(real(work_c(1), kind=8)) + 1)
+        deallocate(work_c)
+        allocate(work_c(lwork))
+        call ZHEEV('V', 'U', n_total, Smix, n_total_max, eval_s, work_c, lwork, rwork, info)
+        deallocate(work_c)
+
+        if (info /= 0) then
+          full_rank = .false.
+          drop_score(n_keep) = drop_score(n_keep) + 1.0d0
+          cycle
+        end if
+
+        tau_s = max(eps_abs, eps_rel * max(eval_s(n_total), 1.0d0))
+        do i = 1, n_total
+          if (eval_s(i) >= tau_s) cycle
+          full_rank = .false.
+          do j = 1, n_keep
+            drop_score(j) = drop_score(j) + abs(Smix(n_frag + j, i))**2
+          end do
+        end do
+      end do
+
+      if (full_rank) exit
+
+      preferred_limit = max(0, min(n_preferred, n_keep))
+      drop_pos = 0
+      best_score = -1.0d0
+      do j = preferred_limit + 1, n_keep
+        if (drop_score(j) > best_score + 1.0d-18) then
+          best_score = drop_score(j)
+          drop_pos = j
+        end if
+      end do
+      if (drop_pos <= 0) then
+        drop_pos = n_keep
+        best_score = drop_score(drop_pos)
+        do j = 1, preferred_limit
+          if (drop_score(j) > best_score + 1.0d-18) then
+            best_score = drop_score(j)
+            drop_pos = j
+          end if
+        end do
+      end if
+
+      if (drop_pos < n_keep) keep_idx(drop_pos:n_keep-1) = keep_idx(drop_pos+1:n_keep)
+      n_keep = n_keep - 1
+      n_dropped = n_dropped + 1
+    end do
+
+    deallocate(Sff, Smix, eval_s, rwork, drop_score)
+  end subroutine filter_pw_keep_by_mixed_metric
+
+  !=======================================================================
   ! Keep only rank-revealed independent PW columns.
   !=======================================================================
   subroutine compact_plane_wave_basis(dg_frag, S_frag_pw, H_frag_pw, P_frag_pw, keep_idx, n_keep)
@@ -2392,6 +2790,127 @@ contains
 
     deallocate(k_new, coef_new, Sfp_new, Hfp_new, Pfp_new, Hpp_diag_new, Hpp_full_new)
   end subroutine compact_plane_wave_basis
+
+  subroutine build_fragment_pw_total_potential_box(dg_frag, ifrag, Vh, Vxc_spin, Vpsl, gx0, gy0, gz0, V_box)
+    use structures, only: s_scalar
+    use communication, only: comm_summation, COMM_GROUP_NULL
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    type(s_scalar), intent(in) :: Vh, Vxc_spin, Vpsl
+    integer, intent(in) :: gx0, gy0, gz0
+    real(8), intent(inout) :: V_box(:,:,:)
+
+    integer :: ix, iy, iz, gx, gy, gz, vx, vy, vz
+    integer :: v_lb1, v_lb2, v_lb3, v_ub1, v_ub2, v_ub3
+    integer :: npt
+    real(8), allocatable :: V_sum(:,:,:)
+
+    V_box(:, :, :) = 0.0d0
+    v_lb1 = lbound(Vpsl%f, 1)
+    v_lb2 = lbound(Vpsl%f, 2)
+    v_lb3 = lbound(Vpsl%f, 3)
+    v_ub1 = ubound(Vpsl%f, 1)
+    v_ub2 = ubound(Vpsl%f, 2)
+    v_ub3 = ubound(Vpsl%f, 3)
+
+    ! H_fp is column-partitioned in orbital mode.  Each column owner needs the
+    ! scalar potential over the whole fragment box, so the parent-grid pieces
+    ! held by the subgroup ranks are gathered once into this local box.
+!$omp parallel do private(iz,iy,ix,gz,gy,gx,vz,vy,vx) schedule(static)
+    do iz = lbound(V_box, 3), ubound(V_box, 3)
+      gz = gz0 + iz - 1
+      vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
+      do iy = lbound(V_box, 2), ubound(V_box, 2)
+        gy = gy0 + iy - 1
+        vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
+!$omp simd private(ix,gx,vx)
+        do ix = lbound(V_box, 1), ubound(V_box, 1)
+          gx = gx0 + ix - 1
+          vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))
+          if (vx < v_lb1 .or. vx > v_ub1 .or. &
+              vy < v_lb2 .or. vy > v_ub2 .or. &
+              vz < v_lb3 .or. vz > v_ub3) cycle
+          V_box(ix, iy, iz) = Vpsl%f(vx, vy, vz) + Vh%f(vx, vy, vz) + Vxc_spin%f(vx, vy, vz)
+        end do
+      end do
+    end do
+!$omp end parallel do
+
+    if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+      npt = size(V_box)
+      allocate(V_sum(lbound(V_box,1):ubound(V_box,1), &
+                     lbound(V_box,2):ubound(V_box,2), &
+                     lbound(V_box,3):ubound(V_box,3)))
+      call comm_summation(V_box, V_sum, npt, dg_frag%icomm_frag)
+      V_box(:, :, :) = V_sum(:, :, :)
+      deallocate(V_sum)
+    end if
+  end subroutine build_fragment_pw_total_potential_box
+
+  subroutine get_fragment_pw_column_range(dg_frag, ncol, col_s, col_e)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ncol
+    integer, intent(out) :: col_s, col_e
+
+    integer :: base, extra, rank_in_frag, nworker
+
+    if (ncol <= 0) then
+      col_s = 1
+      col_e = 0
+      return
+    end if
+    if (.not. dg_frag%parallel_mode_orbital .or. dg_frag%isize_frag <= 1) then
+      col_s = 1
+      col_e = ncol
+      return
+    end if
+
+    nworker = max(1, dg_frag%isize_frag)
+    rank_in_frag = max(0, min(dg_frag%id_frag, nworker - 1))
+    base = ncol / nworker
+    extra = mod(ncol, nworker)
+    if (rank_in_frag < extra) then
+      col_s = rank_in_frag * (base + 1) + 1
+      col_e = col_s + base
+    else
+      col_s = extra * (base + 1) + (rank_in_frag - extra) * base + 1
+      col_e = col_s + base - 1
+    end if
+    if (col_s > ncol) then
+      col_s = 1
+      col_e = 0
+    else
+      col_e = min(col_e, ncol)
+    end if
+  end subroutine get_fragment_pw_column_range
+
+  subroutine get_fragment_subgroup_box_range_pw(dg_frag, nbox, loc_s, loc_e)
+    use salmon_global, only: nproc_rgrid
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: nbox(3)
+    integer, intent(out) :: loc_s(3), loc_e(3)
+
+    integer :: axis, nproc_axis(3), coords(3), nsize
+
+    nproc_axis(:) = max(1, nproc_rgrid(:))
+    coords(1) = mod(dg_frag%id_frag, nproc_axis(1))
+    coords(2) = mod(dg_frag%id_frag / nproc_axis(1), nproc_axis(2))
+    coords(3) = dg_frag%id_frag / max(1, nproc_axis(1) * nproc_axis(2))
+
+    do axis = 1, 3
+      if (nbox(axis) <= 0) then
+        loc_s(axis) = 1
+        loc_e(axis) = 0
+      else
+        nsize = (nbox(axis) + nproc_axis(axis) - 1) / nproc_axis(axis)
+        loc_s(axis) = 1 + nsize * coords(axis)
+        loc_e(axis) = min(nbox(axis), loc_s(axis) + nsize - 1)
+      end if
+    end do
+  end subroutine get_fragment_subgroup_box_range_pw
 
   !=======================================================================
   ! Map global periodic grid index to this rank's phi-box coordinate.

@@ -508,6 +508,51 @@
     end if
   end subroutine reduce_matrix_blocks
 
+  subroutine trace_matrix_blocks_if_enabled(dg_frag, blocks, label)
+    use communication, only: comm_is_root
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(in) :: blocks(:)
+    character(*), intent(in) :: label
+
+    logical, save :: initialized = .false.
+    logical, save :: enabled = .false.
+    character(16) :: env_trace
+    integer :: env_status
+    integer :: iblk, ispin, nrow, ncol
+    real(8) :: frob, maxabs
+
+    if (.not. initialized) then
+      env_trace = ''
+      call get_environment_variable('SALMON_DG_HMAT_BLOCK_TRACE', env_trace, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_trace)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enabled = .true.
+        end select
+      end if
+      initialized = .true.
+    end if
+    if (.not. enabled) return
+    if (.not. comm_is_root(dg_frag%id)) return
+
+    do iblk = 1, size(blocks)
+      do ispin = 1, dg_frag%nspin
+        nrow = min(dg_frag%n_basis(blocks(iblk)%ifrag_row, ispin), size(blocks(iblk)%val, 1))
+        ncol = min(dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin), size(blocks(iblk)%val, 2))
+        if (nrow <= 0 .or. ncol <= 0) cycle
+        frob = sqrt(sum(blocks(iblk)%val(1:nrow, 1:ncol, ispin)**2))
+        maxabs = maxval(abs(blocks(iblk)%val(1:nrow, 1:ncol, ispin)))
+        write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+          '[HMAT-BLOCK] label=', trim(label), ' iblk=', iblk, &
+          ' row=', blocks(iblk)%ifrag_row, ' col=', blocks(iblk)%ifrag_col, &
+          ' ispin=', ispin, ' frob=', frob, ' max=', maxabs
+      end do
+    end do
+    flush(6)
+  end subroutine trace_matrix_blocks_if_enabled
+
   !=======================================================================
   ! Calculate initial Hamiltonian matrix from basis functions
   !
@@ -536,6 +581,7 @@
     type(s_pp_grid),        intent(in)    :: ppg
     
     integer :: ifrag, ispin, io, jo, i_local, nbf, nbf_raw, ig_i, ig_j
+    integer :: loop_ifrag_start, loop_ifrag_end
     integer :: ifrag_chk, i_local_chk, ix_chk, iy_chk, iz_chk, istate_chk
     integer :: nstate_chk_max, lg1_chk, lg2_chk, lg3_chk
     integer :: phi_lb1_chk, phi_ub1_chk, phi_lb2_chk, phi_ub2_chk, phi_lb3_chk, phi_ub3_chk
@@ -547,7 +593,7 @@
     real(8) :: max_p
     real(8) :: Ac_zero(3)
     real(8) :: phi_checksum_before, phi_checksum_after, phi_checksum_delta, phi_checksum_tol
-    logical :: did_overlap_call
+    logical :: did_overlap_call, is_local_fragment
     integer :: is(3), ie(3)
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
@@ -556,6 +602,7 @@
     real(8), allocatable :: partial_th(:), reduced_th(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
+    integer :: jo_s, jo_e, jo_loc, ncol_local
     integer :: n_metric
     logical :: release_dense_fragment_ops
     complex(8), allocatable :: H_metric_ref(:,:)
@@ -747,20 +794,33 @@
     ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
     
     hvol = system%hvol
-    is = mg%is
-    ie = mg%ie
-    
-    allocate(V_total(is(1):ie(1), is(2):ie(2), is(3):ie(3)))
-    
     ! Construct total potential: V = Vpsl + Vh + Vxc
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
-      call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
-      
-      ! Loop over fragments assigned to this rank
-      i_local = 0
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local = i_local + 1
+      if (dg_frag%parallel_mode_orbital) then
+        loop_ifrag_start = 1
+        loop_ifrag_end = dg_frag%n_frag
+      else
+        loop_ifrag_start = dg_frag%ifrag_start
+        loop_ifrag_end = dg_frag%ifrag_end
+      end if
+
+      do ifrag = loop_ifrag_start, loop_ifrag_end
+        ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+        if (any(ndom <= 0)) then
+          write(*,*) "[FATAL] hamiltonian step2 non-positive ndom: rank=", dg_frag%id, &
+            " ifrag=", ifrag, " ndom=", ndom
+          stop 1
+        end if
+        allocate(V_total(1:ndom(1), 1:ndom(2), 1:ndom(3)))
+        call build_fragment_total_potential_grid(dg_frag, ifrag, mg, Vh, Vxc(ispin), Vpsl, V_total)
+
+        is_local_fragment = (ifrag >= dg_frag%ifrag_start .and. ifrag <= dg_frag%ifrag_end)
+        if (.not. is_local_fragment) then
+          deallocate(V_total)
+          cycle
+        end if
+        i_local = ifrag - dg_frag%ifrag_start + 1
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
         nbf_raw = dg_frag%n_basis(ifrag, ispin)
@@ -771,19 +831,18 @@
         end if
         nbf = min(nbf_raw, dg_frag%nstate_frag)
         if (nbf <= 0) cycle
+        call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        if (jo_s > jo_e) cycle
         if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
           write(*,*) "[FATAL] hamiltonian step2 invalid i_local: rank=", dg_frag%id, &
             " ifrag=", ifrag, " i_local=", i_local, " phi_frag_dim5=", size(dg_frag%phi_frag, 5)
           stop 1
         end if
-        ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-        if (any(ndom <= 0)) then
-          write(*,*) "[FATAL] hamiltonian step2 non-positive ndom: rank=", dg_frag%id, &
-            " ifrag=", ifrag, " ndom=", ndom
-          stop 1
-        end if
-        allocate(T_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-        allocate(H_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+        ! T_phi/H_phi/V_total are indexed by fragment-local box coordinates
+        ! (1:ndom).  Orbital mode gathers V_total in global fragment order so
+        ! column-split ranks all see the same full fragment potential.
+        allocate(T_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
+        allocate(H_phi(1:ndom(1), 1:ndom(2), 1:ndom(3)))
         if (nbf > size(dg_frag%index_basis, 1)) then
           write(*,*) "[FATAL] hamiltonian n_basis exceeds index_basis dim1: rank=", dg_frag%id, &
             " ifrag=", ifrag, " ispin=", ispin, " n_basis_eff=", nbf, " n_basis_raw=", nbf_raw, &
@@ -806,10 +865,9 @@
         end if
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
         allocate(partial_th(2 * nbf_comm), reduced_th(2 * nbf_comm))
-        ! T_phi/H_phi are evaluated on this rank's parent-grid local box.  The
-        ! fragment subgroup reduction below combines those box integrals into
-        ! one full fragment-local matrix column.
-        do jo = 1, nbf
+        ! Orbital mode distributes matrix construction by ket-side columns.
+        ! Legacy mode keeps the old full-column spatial-box reduction.
+        do jo = jo_s, jo_e
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
           call build_hpsi_for_basis(dg_frag, ifrag, i_local, jo, mg, stencil, V_total, T_phi, H_phi)
@@ -831,23 +889,36 @@
           !$omp end parallel do
           partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
           partial_th(nbf_comm + 1:2 * nbf_comm) = partial_h(1:nbf_comm)
-          ! Fragment-subgroup reduction is required when parent real-space grids
-          ! are distributed across nproc_rgrid local boxes.
-          call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
-          reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
-          reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
-          if (dg_frag%is_frag_root) then
+          if (dg_frag%parallel_mode_orbital) then
+            ! Each rank owns a disjoint column range and integrates the full
+            ! fragment box, so no spatial subgroup sum is needed here.
+            reduced_t(1:nbf_comm) = partial_t(1:nbf_comm)
+            reduced_h(1:nbf_comm) = partial_h(1:nbf_comm)
             do io = 1, nbf
               ig_i = dg_frag%index_basis(io, ifrag, ispin)
               if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
               H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
               H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
+          else
+            ! Legacy real-space mode reduces parent-grid box contributions.
+            call comm_summation(partial_th, reduced_th, 2 * nbf_comm, dg_frag%icomm_frag)
+            reduced_t(1:nbf_comm) = reduced_th(1:nbf_comm)
+            reduced_h(1:nbf_comm) = reduced_th(nbf_comm + 1:2 * nbf_comm)
+            if (dg_frag%is_frag_root) then
+              do io = 1, nbf
+                ig_i = dg_frag%index_basis(io, ifrag, ispin)
+                if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+                H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
+                H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
+              end do
+            end if
           end if
 
         end do  ! jo loop
         deallocate(partial_t, partial_h, reduced_t, reduced_h)
         deallocate(partial_th, reduced_th)
+        deallocate(V_total)
         deallocate(T_phi, H_phi)
         if (allocated(T_phi) .or. allocated(H_phi)) then
           write(*,*) "[FATAL] hamiltonian deallocate(T_phi,H_phi) failed: rank=", dg_frag%id, &
@@ -889,18 +960,9 @@
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then
-        ! Orbital mode: H_mat_blocks are replicated across the fragment subgroup.
-        ! Keep the fully-reduced data on all orbital ranks; only check the invariant.
-        if (allocated(dg_frag%H_mat_blocks)) then
-          do i_halo = 1, size(dg_frag%H_mat_blocks)
-            if (fragment_row_is_locally_owned(dg_frag, dg_frag%H_mat_blocks(i_halo)%ifrag_row)) then
-              write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] orbital H-matrix ownership mismatch: rank=", dg_frag%id, &
-                " id_frag=", dg_frag%id_frag, " ifrag_row=", dg_frag%H_mat_blocks(i_halo)%ifrag_row
-              flush(6)
-              stop "DG-Fragment RT orbital mode: non-root rank owns H-matrix rows"
-            end if
-          end do
-        end if
+        ! Orbital row-split keeps the reduced matrix replicated on all
+        ! subgroup ranks; coefficient ownership selects the rows to update.
+        continue
       else
         ! Legacy real-space mode: zero out blocks not owned by this rank.
         if (allocated(dg_frag%H_mat_blocks)) then
@@ -914,17 +976,8 @@
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then
-        ! Orbital mode: H_mat_kinetic_blocks are replicated; keep the reduced data.
-        if (allocated(dg_frag%H_mat_kinetic_blocks)) then
-          do i_halo = 1, size(dg_frag%H_mat_kinetic_blocks)
-            if (fragment_row_is_locally_owned(dg_frag, dg_frag%H_mat_kinetic_blocks(i_halo)%ifrag_row)) then
-              write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] orbital H-kinetic ownership mismatch: rank=", dg_frag%id, &
-                " id_frag=", dg_frag%id_frag, " ifrag_row=", dg_frag%H_mat_kinetic_blocks(i_halo)%ifrag_row
-              flush(6)
-              stop "DG-Fragment RT orbital mode: non-root rank owns H-kinetic rows"
-            end if
-          end do
-        end if
+        ! Keep the replicated kinetic block for row-owned coefficient updates.
+        continue
       else
         if (allocated(dg_frag%H_mat_kinetic_blocks)) then
           do i_halo = 1, size(dg_frag%H_mat_kinetic_blocks)
@@ -936,6 +989,8 @@
     end if
     call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_blocks)
     call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
+    call trace_matrix_blocks_if_enabled(dg_frag, dg_frag%H_mat_blocks, "H")
+    call trace_matrix_blocks_if_enabled(dg_frag, dg_frag%H_mat_kinetic_blocks, "T")
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
 
@@ -978,7 +1033,7 @@
       if (allocated(H_metric_ref)) deallocate(H_metric_ref)
     end if
     
-    deallocate(V_total)
+    if (allocated(V_total)) deallocate(V_total)
     if (allocated(V_total)) then
       write(*,*) "[FATAL] V_total still allocated before return: rank=", dg_frag%id
       stop 1
@@ -1146,6 +1201,58 @@
 !$omp end parallel do
   end subroutine build_total_potential_grid
 
+  subroutine build_fragment_total_potential_grid(dg_frag, ifrag, mg, Vh, Vxc_spin, Vpsl, V_total)
+    use structures
+    use communication, only: comm_summation, COMM_GROUP_NULL
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    type(s_rgrid), intent(in) :: mg
+    type(s_scalar), intent(in) :: Vh, Vxc_spin, Vpsl
+    real(8), intent(inout) :: V_total(:,:,:)
+
+    integer :: lx, ly, lz, gx, gy, gz, gwx, gwy, gwz
+    integer :: iorg(3), ndom(3)
+    integer :: npt
+    real(8) :: vh_val
+    real(8), allocatable :: V_reduced(:,:,:)
+
+    V_total(:, :, :) = 0.0d0
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+!$omp parallel do private(lz,ly,lx,gz,gy,gx,gwz,gwy,gwx,vh_val) schedule(static)
+    do lz = 1, ndom(3)
+      gz = iorg(3) + lz - 1
+      gwz = map_global_to_periodic_box_coord_ham(gz, 1, dg_frag%lgnum_total(3))
+      if (gwz < mg%is(3) .or. gwz > mg%ie(3)) cycle
+      do ly = 1, ndom(2)
+        gy = iorg(2) + ly - 1
+        gwy = map_global_to_periodic_box_coord_ham(gy, 1, dg_frag%lgnum_total(2))
+        if (gwy < mg%is(2) .or. gwy > mg%ie(2)) cycle
+!$omp simd private(gx,gwx,vh_val)
+        do lx = 1, ndom(1)
+          gx = iorg(1) + lx - 1
+          gwx = map_global_to_periodic_box_coord_ham(gx, 1, dg_frag%lgnum_total(1))
+          if (gwx >= mg%is(1) .and. gwx <= mg%ie(1)) then
+            vh_val = Vh%f(gwx, gwy, gwz)
+            V_total(lx, ly, lz) = Vpsl%f(gwx, gwy, gwz) + vh_val + Vxc_spin%f(gwx, gwy, gwz)
+          end if
+        end do
+      end do
+    end do
+!$omp end parallel do
+
+    if (dg_frag%parallel_mode_orbital .and. dg_frag%isize > 1 .and. dg_frag%icomm /= COMM_GROUP_NULL) then
+      npt = size(V_total)
+      allocate(V_reduced(lbound(V_total,1):ubound(V_total,1), &
+                         lbound(V_total,2):ubound(V_total,2), &
+                         lbound(V_total,3):ubound(V_total,3)))
+      call comm_summation(V_total, V_reduced, npt, dg_frag%icomm)
+      V_total(:, :, :) = V_reduced(:, :, :)
+      deallocate(V_reduced)
+    end if
+  end subroutine build_fragment_total_potential_grid
+
   subroutine build_total_potential_grid_with_buffered_hartree(grid, dg_frag, Vh_buffer, Vxc_spin, Vpsl, V_total)
     use structures
     implicit none
@@ -1191,7 +1298,7 @@
     integer, intent(in) :: ifrag, i_local, jo
     type(s_rgrid), intent(in) :: mg
     type(s_stencil), intent(in) :: stencil
-    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8), intent(in) :: V_total(:,:,:)
     real(8), intent(out) :: T_phi(:,:,:)
     real(8), intent(out) :: H_phi(:,:,:)
     integer :: gx, gy, gz, lx, ly, lz
@@ -1239,15 +1346,11 @@
     v_ub2 = ubound(V_total, 2)
     v_lb3 = lbound(V_total, 3)
     v_ub3 = ubound(V_total, 3)
-    gx0 = iorg(1) + loc_s(1) - 1
-    gx1 = iorg(1) + loc_e(1) - 1
-    gy0 = iorg(2) + loc_s(2) - 1
-    gy1 = iorg(2) + loc_e(2) - 1
-    gz0 = iorg(3) + loc_s(3) - 1
-    gz1 = iorg(3) + loc_e(3) - 1
-    if (gx0 < v_lb1 .or. gx1 > v_ub1 .or. gy0 < v_lb2 .or. gy1 > v_ub2 .or. gz0 < v_lb3 .or. gz1 > v_ub3) then
+    if (loc_s(1) < v_lb1 .or. loc_e(1) > v_ub1 .or. &
+        loc_s(2) < v_lb2 .or. loc_e(2) > v_ub2 .or. &
+        loc_s(3) < v_lb3 .or. loc_e(3) > v_ub3) then
       write(*,*) "[FATAL] build_hpsi V_total index out of bounds: rank=", dg_frag%id, &
-        " ifrag=", ifrag, " g0=", gx0, gy0, gz0, " g1=", gx1, gy1, gz1, &
+        " ifrag=", ifrag, " loc_s=", loc_s, " loc_e=", loc_e, &
         " V_lb=", v_lb1, v_lb2, v_lb3, " V_ub=", v_ub1, v_ub2, v_ub3
       stop 1
     end if
@@ -1263,7 +1366,7 @@
           by = map_global_to_phi_box_coord_ham(gy, phi_lb2, phi_ub2, dg_frag%lgnum_total(2))
           bz = map_global_to_phi_box_coord_ham(gz, phi_lb3, phi_ub3, dg_frag%lgnum_total(3))
           if (bx == 0 .or. by == 0 .or. bz == 0) cycle
-          H_phi(lx, ly, lz) = H_phi(lx, ly, lz) + V_total(gx, gy, gz) * dg_frag%phi_frag(bx, by, bz, jo, i_local)
+          H_phi(lx, ly, lz) = H_phi(lx, ly, lz) + V_total(lx, ly, lz) * dg_frag%phi_frag(bx, by, bz, jo, i_local)
         end do
       end do
     end do
@@ -1483,6 +1586,14 @@
 
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    if (dg_frag%parallel_mode_orbital) then
+      ! Orbital mode replicates the fragment real-space box on every subgroup
+      ! rank and distributes matrix work by basis columns, not by grid boxes.
+      loc_s(:) = 1
+      loc_e(:) = ndom(:)
+      has_overlap = all(ndom(:) > 0)
+      return
+    end if
     g_s(:) = iorg(:)
     g_e(:) = iorg(:) + ndom(:) - 1
     ov_s(:) = max(g_s(:), mg%is(:))
@@ -1498,6 +1609,73 @@
     loc_s(:) = ov_s(:) - iorg(:) + 1
     loc_e(:) = ov_e(:) - iorg(:) + 1
   end subroutine get_fragment_owned_range
+
+  subroutine get_fragment_mg_overlap_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    type(s_rgrid), intent(in) :: mg
+    integer, intent(out) :: loc_s(3), loc_e(3)
+    logical, intent(out) :: has_overlap
+
+    integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
+
+    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
+    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    g_s(:) = iorg(:)
+    g_e(:) = iorg(:) + ndom(:) - 1
+    ov_s(:) = max(g_s(:), mg%is(:))
+    ov_e(:) = min(g_e(:), mg%ie(:))
+
+    has_overlap = all(ov_s(:) <= ov_e(:))
+    if (.not. has_overlap) then
+      loc_s(:) = 1
+      loc_e(:) = 0
+      return
+    end if
+
+    loc_s(:) = ov_s(:) - iorg(:) + 1
+    loc_e(:) = ov_e(:) - iorg(:) + 1
+  end subroutine get_fragment_mg_overlap_range
+
+  subroutine get_fragment_column_range(dg_frag, ncol, col_s, col_e)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ncol
+    integer, intent(out) :: col_s, col_e
+
+    integer :: base, extra, rank_in_frag, nworker
+
+    if (ncol <= 0) then
+      col_s = 1
+      col_e = 0
+      return
+    end if
+    if (.not. dg_frag%parallel_mode_orbital .or. dg_frag%isize_frag <= 1) then
+      col_s = 1
+      col_e = ncol
+      return
+    end if
+
+    nworker = max(1, dg_frag%isize_frag)
+    rank_in_frag = max(0, min(dg_frag%id_frag, nworker - 1))
+    base = ncol / nworker
+    extra = mod(ncol, nworker)
+    if (rank_in_frag < extra) then
+      col_s = rank_in_frag * (base + 1) + 1
+      col_e = col_s + base
+    else
+      col_s = extra * (base + 1) + (rank_in_frag - extra) * base + 1
+      col_e = col_s + base - 1
+    end if
+    if (col_s > ncol) then
+      col_s = 1
+      col_e = 0
+    else
+      col_e = min(col_e, ncol)
+    end if
+  end subroutine get_fragment_column_range
 
   subroutine get_fragment_local_range(dg_frag, ndom, loc_s, loc_e)
     use salmon_global, only: nproc_rgrid
@@ -1817,6 +1995,7 @@
     type(s_stencil),        intent(in)    :: stencil
     
     integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
+    integer :: jo_s, jo_e
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3), halo_s(3), halo_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
@@ -1921,6 +2100,8 @@
           stop "DG-Fragment RT: momentum phi_frag local range out of bounds"
         end if
         nbf = dg_frag%n_basis(ifrag, ispin)
+        call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        if (jo_s > jo_e) cycle
         jo_progress_stride = max(1, nbf / 4)
         npts_local = (loc_e(1) - loc_s(1) + 1) * (loc_e(2) - loc_s(2) + 1) * (loc_e(3) - loc_s(3) + 1)
         lx_lo = phi_loc_s(1)
@@ -1957,7 +2138,7 @@
         ! Loop over basis functions in fragment j (ket side)
         ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
         ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
-        do jo = 1, nbf
+        do jo = jo_s, jo_e
           call cpu_time(t0)
           call apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
           call cpu_time(t1)
@@ -2234,6 +2415,7 @@
     type(s_rgrid),          intent(in)    :: mg
 
     integer :: ifrag, i_local, ispin, io, jo, iblk, nbf, jo_progress_stride
+    integer :: jo_s, jo_e, jo_loc, ncol_local
     integer :: ix, iy, iz, is(3), ie(3), i_halo
     integer :: ig_row, ig_col, d(3), ii, jj
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
@@ -2331,10 +2513,13 @@
         end if
 
         if (nbf <= 0) cycle
+        call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        ncol_local = max(0, jo_e - jo_s + 1)
+        if (ncol_local <= 0) cycle
         npts_local = (lx_hi - lx_lo + 1) * (ly_hi - ly_lo + 1) * (lz_hi - lz_lo + 1)
         nx_local = lx_hi - lx_lo + 1
         ny_local = ly_hi - ly_lo + 1
-        allocate(phi_local_2d(npts_local, nbf), self_overlap(nbf, nbf))
+        allocate(phi_local_2d(npts_local, nbf), self_overlap(nbf, ncol_local))
         !$omp parallel do private(io,lz,ly,lx,ipt) schedule(static)
         do io = 1, nbf
           do lz = lz_lo, lz_hi
@@ -2349,13 +2534,14 @@
         end do
         !$omp end parallel do
         call cpu_time(t0)
-        call dgemm('T', 'N', nbf, nbf, npts_local, hvol, phi_local_2d, npts_local, &
-                   phi_local_2d, npts_local, 0.0d0, self_overlap, nbf)
+        call dgemm('T', 'N', nbf, ncol_local, npts_local, hvol, phi_local_2d, npts_local, &
+                   phi_local_2d(1, jo_s), npts_local, 0.0d0, self_overlap, nbf)
         call cpu_time(t1)
         time_self_integral = time_self_integral + (t1 - t0)
         iblk = find_matrix_block(dg_frag%S_block_map, ifrag, ifrag)
 
-        do jo = 1, nbf
+        do jo = jo_s, jo_e
+          jo_loc = jo - jo_s + 1
           ig_col = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
           if (iblk <= 0) cycle
@@ -2364,7 +2550,7 @@
           do io = 1, nbf
             ig_row = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_row < 1 .or. ig_row > dg_frag%n_mat_max) cycle
-            integral = self_overlap(io, jo)
+            integral = self_overlap(io, jo_loc)
             if (io <= size(dg_frag%S_mat_blocks(iblk)%val, 1)) then
               dg_frag%S_mat_blocks(iblk)%val(io, jo, ispin) = integral
             end if
@@ -2380,18 +2566,8 @@
     call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then
-        ! Orbital mode: S_mat_blocks are replicated across the fragment subgroup.
-        ! Keep the fully-reduced data on all orbital ranks; only check the invariant.
-        if (allocated(dg_frag%S_mat_blocks)) then
-          do i_halo = 1, size(dg_frag%S_mat_blocks)
-            if (fragment_row_is_locally_owned(dg_frag, dg_frag%S_mat_blocks(i_halo)%ifrag_row)) then
-              write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] orbital overlap ownership mismatch: rank=", dg_frag%id, &
-                " id_frag=", dg_frag%id_frag, " ifrag_row=", dg_frag%S_mat_blocks(i_halo)%ifrag_row
-              flush(6)
-              stop "DG-Fragment RT orbital mode: non-root rank owns overlap rows"
-            end if
-          end do
-        end if
+        ! Keep the replicated overlap block for row-owned coefficient updates.
+        continue
       else
         if (allocated(dg_frag%S_mat_blocks)) then
           do i_halo = 1, size(dg_frag%S_mat_blocks)

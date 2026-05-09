@@ -494,7 +494,15 @@ contains
     if (dg_frag%n_plane_waves > 0) then
       allocate(dg_frag%coef_pw_owner(dg_frag%n_plane_waves))
       do i = 1, dg_frag%n_plane_waves
-        dg_frag%coef_pw_owner(i) = min(dg_frag%isize - 1, ((i - 1) * dg_frag%isize) / dg_frag%n_plane_waves)
+        if (dg_frag%parallel_mode_orbital) then
+          ! PW coefficients are fragment-local, just like fragment orbital
+          ! coefficients.  Split their rows inside each fragment subgroup,
+          ! not once over the whole MPI world.
+          dg_frag%coef_pw_owner(i) = get_subgroup_block_owner_rank( &
+            dg_frag%id_array(dg_frag%ifrag_group), dg_frag%isize_frag, i, dg_frag%n_plane_waves)
+        else
+          dg_frag%coef_pw_owner(i) = min(dg_frag%isize - 1, ((i - 1) * dg_frag%isize) / dg_frag%n_plane_waves)
+        end if
       end do
       do i = 1, dg_frag%n_plane_waves
         if (dg_frag%coef_pw_owner(i) /= dg_frag%id) cycle
@@ -753,16 +761,12 @@ contains
               end if
             end if
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, dg_frag%id_array(ifrag))
-            if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) then
-              write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,i0,a,i0)') '[FATAL] orbital density owner mismatch: rank=', dg_frag%id, &
-                   ' ifrag=', ifrag, ' global=', ixg, iyg, izg, ' source=', source_rank, ' owner=', owner_rank
-              flush(6)
-              stop 'DG-Fragment RT orbital mode: density owner must match fragment root sender'
-            end if
             dg_frag%density_owner_map(ix, iy, iz, i_local) = owner_rank
             source_rank = dg_frag%id_array(ifrag)
-            ! Legacy real-space mode sends primary fragment density from the
-            ! fragment root to the rank that owns the parent-grid point.
+            ! Density computation may be orbital-parallel, but the final rho
+            ! field is still owned by the parent real-space grid.  The fragment
+            ! root emits each primary point once, either locally or through the
+            ! packed send map below.
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local) .and. owner_rank /= source_rank .and. &
                 dg_frag%is_frag_root) then
               dg_frag%density_send_count(owner_rank) = dg_frag%density_send_count(owner_rank) + 1
@@ -801,7 +805,6 @@ contains
             ixg = wrap_global_grid_index(dg_frag%frag_core_lo(1, ifrag) + ix - 1, dg_frag%lgnum_total(1))
             source_rank = source_root_rank
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
-            if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) cycle
             if (source_rank == dg_frag%id) then
               cycle
             end if
@@ -835,7 +838,6 @@ contains
             source_rank = source_root_rank
             if (source_rank == dg_frag%id) cycle
             owner_rank = find_density_grid_owner(dg_frag, ixg, iyg, izg, source_root_rank)
-            if (dg_frag%parallel_mode_orbital .and. owner_rank /= source_rank) cycle
             if (owner_rank == dg_frag%id) then
               recv_cursor(source_rank) = recv_cursor(source_rank) + 1
               dg_frag%density_recv_map(source_rank)%ixg(recv_cursor(source_rank)) = ixg
@@ -982,17 +984,8 @@ contains
     first_match = -1
     nfrag_ranks = max(1, dg_frag%isize_frag)
 
-    if (dg_frag%parallel_mode_orbital) then
-      if (present(hint_rank)) then
-        owner = max(0, hint_rank)
-      else
-        owner = dg_frag%id
-      end if
-      return
-    end if
-
     hint_group = -1
-    if (present(hint_rank)) hint_group = max(0, hint_rank) / nfrag_ranks
+    if (present(hint_rank) .and. .not. dg_frag%parallel_mode_orbital) hint_group = max(0, hint_rank) / nfrag_ranks
     do jrank = 0, dg_frag%isize - 1
       xlo = dg_frag%mg%is_all(1, jrank)
       xhi = dg_frag%mg%ie_all(1, jrank)
@@ -1275,6 +1268,7 @@ contains
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
     integer :: ixg_store, iyg_store, izg_store
+    integer :: ix_src, iy_src, iz_src
     integer :: nb  ! halo width
     integer :: nbasis_iter
     integer :: n_mat_cap, n_mat_cap_env, ienv
@@ -1742,13 +1736,21 @@ contains
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
       
-      ! Allocate phi_frag on the mg-local world-grid box plus buffer so all
-      ! real-space data share the same global-index contract.
+      ! Orbital fragment parallelism must not partition the fragment basis in
+      ! real space.  Each subgroup rank keeps the same full fragment box, then
+      ! matrix construction is split over basis rows/columns.
       if (.not. allocated(dg_frag%phi_frag)) then
-        allocate(dg_frag%phi_frag(dg_frag%mg%is(1)-nb:dg_frag%mg%ie(1)+nb, &
-                                   dg_frag%mg%is(2)-nb:dg_frag%mg%ie(2)+nb, &
-                                   dg_frag%mg%is(3)-nb:dg_frag%mg%ie(3)+nb, &
-                                   dg_frag%nstate_frag, ifrag_count))
+        if (dg_frag%parallel_mode_orbital) then
+          allocate(dg_frag%phi_frag(dg_frag%ixyz_frag(1, ifrag)-nb:dg_frag%ixyz_frag(1, ifrag)+nxyz_domain(1)-1+nb, &
+                                     dg_frag%ixyz_frag(2, ifrag)-nb:dg_frag%ixyz_frag(2, ifrag)+nxyz_domain(2)-1+nb, &
+                                     dg_frag%ixyz_frag(3, ifrag)-nb:dg_frag%ixyz_frag(3, ifrag)+nxyz_domain(3)-1+nb, &
+                                     dg_frag%nstate_frag, ifrag_count))
+        else
+          allocate(dg_frag%phi_frag(dg_frag%mg%is(1)-nb:dg_frag%mg%ie(1)+nb, &
+                                     dg_frag%mg%is(2)-nb:dg_frag%mg%ie(2)+nb, &
+                                     dg_frag%mg%is(3)-nb:dg_frag%mg%ie(3)+nb, &
+                                     dg_frag%nstate_frag, ifrag_count))
+        end if
         dg_frag%phi_frag = 0.0d0  ! Initialize (including halo) to zero
       end if
       
@@ -1770,22 +1772,17 @@ contains
             read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
             
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
-              do iz = 1, nxyz_domain(3)
-                izg_store = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
-                if (izg_store < lbound(dg_frag%phi_frag, 3)) izg_store = izg_store + dg_frag%lgnum_total(3)
-                if (izg_store > ubound(dg_frag%phi_frag, 3)) izg_store = izg_store - dg_frag%lgnum_total(3)
-                if (izg_store < lbound(dg_frag%phi_frag, 3) .or. izg_store > ubound(dg_frag%phi_frag, 3)) cycle
-                do iy = 1, nxyz_domain(2)
-                  iyg_store = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
-                  if (iyg_store < lbound(dg_frag%phi_frag, 2)) iyg_store = iyg_store + dg_frag%lgnum_total(2)
-                  if (iyg_store > ubound(dg_frag%phi_frag, 2)) iyg_store = iyg_store - dg_frag%lgnum_total(2)
-                  if (iyg_store < lbound(dg_frag%phi_frag, 2) .or. iyg_store > ubound(dg_frag%phi_frag, 2)) cycle
-                  do ix = 1, nxyz_domain(1)
-                    ixg_store = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
-                    if (ixg_store < lbound(dg_frag%phi_frag, 1)) ixg_store = ixg_store + dg_frag%lgnum_total(1)
-                    if (ixg_store > ubound(dg_frag%phi_frag, 1)) ixg_store = ixg_store - dg_frag%lgnum_total(1)
-                    if (ixg_store < lbound(dg_frag%phi_frag, 1) .or. ixg_store > ubound(dg_frag%phi_frag, 1)) cycle
-                    dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_tmp(ix, iy, iz)
+              ! Fill the allocated global-index box directly from the full
+              ! DC-LCFO fragment image.  In orbital mode this is the full
+              ! fragment box; in legacy mode it remains the parent-grid box.
+              do izg_store = lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3)
+                iz_src = modulo(izg_store - dg_frag%ixyz_frag(3, ifrag), nxyz_domain(3)) + 1
+                do iyg_store = lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2)
+                  iy_src = modulo(iyg_store - dg_frag%ixyz_frag(2, ifrag), nxyz_domain(2)) + 1
+                  do ixg_store = lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1)
+                    ix_src = modulo(ixg_store - dg_frag%ixyz_frag(1, ifrag), nxyz_domain(1)) + 1
+                    dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = &
+                      phi_tmp(ix_src, iy_src, iz_src)
                   end do
                 end do
               end do
@@ -2449,18 +2446,16 @@ contains
       end select
     end if
 
-    if (dg_frag%parallel_mode_orbital .and. .not. owner_root_only) then
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,a)') '[FATAL] orbital mode forbids SALMON_DG_COEF_OWNER_IO_SPLIT in stage=', trim(stage_label)
-        flush(6)
-      end if
-      stop 'DG-Fragment RT orbital mode: coef_owner io-split is not allowed'
+    if (dg_frag%parallel_mode_orbital) then
+      ! Fragment-internal orbital parallelism distributes coefficient rows
+      ! across the subgroup.  Matrix construction is column-split, while the
+      ! propagated coefficient vector is row-owned by the same subgroup ranks.
+      owner_root_only = .false.
     end if
-    if (dg_frag%parallel_mode_orbital) owner_root_only = .true.
 
     if (dg_frag%id == 0 .and. .not. printed_owner_mode) then
       if (dg_frag%parallel_mode_orbital) then
-        write(*,'(1x,a)') "[INFO] DG coef owner mode: root-only (orbital override)"
+        write(*,'(1x,a)') "[INFO] DG coef owner mode: orbital row-split"
       else if (owner_root_only) then
         write(*,'(1x,a)') "[INFO] DG coef owner mode: root-only (io split disabled)"
       else

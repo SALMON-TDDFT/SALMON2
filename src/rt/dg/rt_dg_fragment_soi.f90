@@ -417,7 +417,14 @@ contains
     if (dg_frag%n_plane_waves > 0) then
       allocate(dg_frag%coef_pw_owner(dg_frag%n_plane_waves))
       do i = 1, dg_frag%n_plane_waves
-        dg_frag%coef_pw_owner(i) = min(dg_frag%isize - 1, ((i - 1) * dg_frag%isize) / dg_frag%n_plane_waves)
+        if (dg_frag%parallel_mode_orbital) then
+          ! PW coefficients are fragment-local in orbital mode, so each
+          ! fragment subgroup owns its own split of the PW rows.
+          dg_frag%coef_pw_owner(i) = get_fragment_coef_owner_rank( &
+            dg_frag, dg_frag%ifrag_group, i, dg_frag%n_plane_waves)
+        else
+          dg_frag%coef_pw_owner(i) = min(dg_frag%isize - 1, ((i - 1) * dg_frag%isize) / dg_frag%n_plane_waves)
+        end if
       end do
       do i = 1, dg_frag%n_plane_waves
         if (dg_frag%coef_pw_owner(i) /= dg_frag%id) cycle

@@ -22,6 +22,8 @@
     integer :: nstate_use_diag, nocc_diag, nvirt_diag
     integer :: ix, iy, iz
     integer :: ifrag, jfrag, ib, jb, i_idx, j_idx
+    integer :: ifrag_obs, local_row_obs, nbasis_obs, global_idx_obs
+    integer :: owner_rank_obs, subgroup_root_rank, owner_offset, block_base, block_rem, cutoff
     integer :: iblk, nrow_blk, ncol_blk, n_diag_block_ids, idb
     integer :: env_len, env_status, parse_status
     integer :: current_block_trace_stride, current_block_trace_maxblocks
@@ -38,6 +40,7 @@
     integer :: itop, irep, io_state
     logical :: do_interface_check
     logical :: enable_current_block_trace, do_current_block_trace
+    logical :: enable_energy_trace, do_energy_trace
     logical :: enable_mij_audit, do_mij_audit, has_esp, enable_mij_block_audit
     real(8), allocatable :: interface_flow(:,:), dndt_frag(:)
     real(8) :: pair_residual, max_pair_residual, charge_balance_residual
@@ -45,6 +48,7 @@
     real(8) :: jpara_state, jpara_top_abs
     real(8) :: Ac_tot(3), A_squared
     real(8) :: current_local(3), energy_local
+    real(8) :: energy_sum_raw
     real(8) :: energy_static_local, energy_kin_local, energy_nl_local, energy_ap_local, energy_a2_local
     real(8) :: energy_static_sum, energy_kin_sum, energy_nl_sum, energy_ap_sum, energy_a2_sum
     real(8) :: energy_kin_diag_local, energy_kin_offdiag_local
@@ -95,6 +99,8 @@
     logical, save :: cfg_enable_current_block_trace = .false.
     integer, save :: cfg_current_block_trace_stride = 20
     integer, save :: cfg_current_block_trace_maxblocks = 0
+    logical, save :: cfg_enable_energy_trace = .false.
+    integer, save :: cfg_energy_trace_stride = 10
     logical, save :: cfg_enable_mij_audit = .false.
     logical, save :: cfg_enable_mij_block_audit = .false.
     integer, save :: cfg_mij_audit_stride = 50
@@ -112,6 +118,7 @@
     integer :: obs_charge_check_env_len, obs_charge_check_env_status
     real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     integer, allocatable :: diag_block_ids(:)
+    logical, allocatable :: fp_row_owned(:), pw_row_owned(:)
     real(8), allocatable :: occ_weight(:)
     complex(8) :: mfp
     real(8), parameter :: unit_dir(3,3) = reshape((/ &
@@ -213,6 +220,22 @@
       if (cfg_current_block_trace_maxblocks < 0) cfg_current_block_trace_maxblocks = 0
 
       env_value = ''
+      call get_environment_variable("SALMON_DG_OBS_ENERGY_TRACE", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
+          cfg_enable_energy_trace = .true.
+        end if
+      end if
+      env_value = ''
+      call get_environment_variable("SALMON_DG_OBS_ENERGY_TRACE_STRIDE", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=parse_status) cfg_energy_trace_stride
+        if (parse_status /= 0) cfg_energy_trace_stride = 10
+      end if
+      if (cfg_energy_trace_stride < 1) cfg_energy_trace_stride = 1
+
+      env_value = ''
       call get_environment_variable("SALMON_DG_MIJ_AUDIT", env_value, length=env_len, status=env_status)
       if (env_status == 0 .and. env_len > 0) then
         if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
@@ -280,6 +303,8 @@
     enable_current_block_trace = cfg_enable_current_block_trace
     current_block_trace_stride = cfg_current_block_trace_stride
     current_block_trace_maxblocks = cfg_current_block_trace_maxblocks
+    enable_energy_trace = cfg_enable_energy_trace
+    do_energy_trace = enable_energy_trace .and. (itt == 1 .or. mod(itt, cfg_energy_trace_stride) == 0)
     do_current_block_trace = enable_current_block_trace .and. allocated(dg_frag%momentum_blocks) .and. &
       (itt == 1 .or. mod(itt, current_block_trace_stride) == 0)
 
@@ -391,6 +416,8 @@
     allocate(tmp_mat(n, max_nocc))
     allocate(coef_frag_all(n, max_nocc))
     allocate(occ_weight(max_nocc))
+    allocate(fp_row_owned(n))
+    allocate(pw_row_owned(max(1, n_pw)))
     if (n_pw > 0) then
       allocate(coef_pw_all(n_pw, max_nocc))
       allocate(coef_all(n_tot, max_nocc), tmp_all(n_tot, max_nocc))
@@ -407,17 +434,68 @@
       nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
       if (nocc <= 0) cycle
       use_mixed_current = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
-      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
+      ! Coefficients in this routine are fragment-local.  Build an ownership
+      ! mask from the rank's assigned fragment and use it only for the final
+      ! contraction; the operator application still sees the complete local
+      ! fragment vector.
+      fp_row_owned(:) = .false.
+      do ifrag_obs = dg_frag%ifrag_start, dg_frag%ifrag_end
+        nbasis_obs = min(dg_frag%n_basis(ifrag_obs, ispin), size(dg_frag%index_basis, 1))
+        do local_row_obs = 1, nbasis_obs
+          global_idx_obs = dg_frag%index_basis(local_row_obs, ifrag_obs, ispin)
+          if (global_idx_obs < 1 .or. global_idx_obs > n) cycle
+          owner_rank_obs = dg_frag%id
+          if (dg_frag%parallel_mode_orbital .and. allocated(dg_frag%coef_owner) .and. &
+              global_idx_obs <= size(dg_frag%coef_owner, 1) .and. ispin <= size(dg_frag%coef_owner, 2)) then
+            ! In orbital mode coefficient rows are distributed by the canonical
+            ! coef_owner map.  index_basis may be compacted/remapped, so using
+            ! the fragment-local row number here makes observables depend on
+            ! the fragment subgroup size.
+            owner_rank_obs = dg_frag%coef_owner(global_idx_obs, ispin)
+          else if (dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1) then
+            subgroup_root_rank = dg_frag%id_array(ifrag_obs) - mod(max(0, dg_frag%id_array(ifrag_obs)), dg_frag%isize_frag)
+            block_base = nbasis_obs / dg_frag%isize_frag
+            block_rem = mod(nbasis_obs, dg_frag%isize_frag)
+            cutoff = (block_base + 1) * block_rem
+            if (local_row_obs <= 0) then
+              owner_offset = 0
+            else if (block_base <= 0) then
+              owner_offset = min(local_row_obs - 1, dg_frag%isize_frag - 1)
+            else if (local_row_obs <= cutoff) then
+              owner_offset = (local_row_obs - 1) / (block_base + 1)
+            else
+              owner_offset = block_rem + (local_row_obs - cutoff - 1) / block_base
+            end if
+            owner_rank_obs = subgroup_root_rank + min(owner_offset, dg_frag%isize_frag - 1)
+          end if
+          if (owner_rank_obs == dg_frag%id) fp_row_owned(global_idx_obs) = .true.
+        end do
+      end do
+      pw_row_owned(:) = .false.
       if (n_pw > 0) then
-        coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+        do jo = 1, n_pw
+          owner_rank_obs = dg_frag%id
+          if (allocated(dg_frag%coef_pw_owner)) owner_rank_obs = dg_frag%coef_pw_owner(jo)
+          if (owner_rank_obs == dg_frag%id) pw_row_owned(jo) = .true.
+        end do
       end if
+      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
+      if (n_pw > 0) coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
       if (n_pw > 0) then
         coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
         coef_all(1:n, 1:nocc) = coef_frag_all(1:n, 1:nocc)
         coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
       end if
-      coef_occ_norm_local = coef_occ_norm_local + sum(abs(coef_frag_all(1:n, 1:nocc))**2)
-      if (n_pw > 0) coef_occ_norm_local = coef_occ_norm_local + sum(abs(coef_pw_all(1:n_pw, 1:nocc))**2)
+      do i_idx = 1, n
+        if (.not. fp_row_owned(i_idx)) cycle
+        coef_occ_norm_local = coef_occ_norm_local + sum(abs(coef_frag_all(i_idx, 1:nocc))**2)
+      end do
+      if (n_pw > 0) then
+        do jo = 1, n_pw
+          if (.not. pw_row_owned(jo)) cycle
+          coef_occ_norm_local = coef_occ_norm_local + sum(abs(coef_pw_all(jo, 1:nocc))**2)
+        end do
+      end if
       do idir = 1, 3
         ! momentum_mat = <φ|∇|φ>, need to apply -i via aimag() and include factor 2
         if (use_mixed_current) then
@@ -445,7 +523,21 @@
               tmp_all(n+jo, 1:nocc) = tmp_all(n+jo, 1:nocc) - conjg(mfp) * coef_all(io, 1:nocc)
             end do
           end do
-          current_tmp = sum(aimag(conjg(coef_all(1:n_tot, 1:nocc)) * tmp_all(1:n_tot, 1:nocc)))
+          current_tmp = 0.0d0
+          do io_state = 1, nocc
+            do i_idx = 1, n
+              if (.not. fp_row_owned(i_idx)) cycle
+              current_tmp = current_tmp + aimag(conjg(coef_frag_all(i_idx, io_state)) * tmp_all(i_idx, io_state))
+            end do
+          end do
+          if (n_pw > 0) then
+            do io_state = 1, nocc
+              do jo = 1, n_pw
+                if (.not. pw_row_owned(jo)) cycle
+                current_tmp = current_tmp + aimag(conjg(coef_pw_all(jo, io_state)) * tmp_all(n+jo, io_state))
+              end do
+            end do
+          end if
         else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
           call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_frag_all(1:n, 1:nocc), tmp_mat)
@@ -463,9 +555,16 @@
         
         if (.not. use_mixed_current) then
           ! Factor -2.0: -1 for operator sign convention, 2 for Im[ψ*∇ψ] normalization
-          current_tmp = sum(aimag(conjg(coef_frag_all(1:n, 1:nocc)) * tmp_mat(1:n, 1:nocc)))
+          current_tmp = 0.0d0
+          do io_state = 1, nocc
+            do i_idx = 1, n
+              if (.not. fp_row_owned(i_idx)) cycle
+              current_tmp = current_tmp + aimag(conjg(coef_frag_all(i_idx, io_state)) * tmp_mat(i_idx, io_state))
+            end do
+          end do
           if (n_pw > 0) then
             do jo = 1, n_pw
+              if (.not. pw_row_owned(jo)) cycle
               kpw_dir = dg_frag%k_pw(idir, jo)
               if (abs(kpw_dir) < 1.0d-15) cycle
               current_tmp = current_tmp + kpw_dir * sum(abs(coef_pw_all(jo, 1:nocc))**2)
@@ -476,7 +575,17 @@
         if (idir == 3) then
           if (use_mixed_current) then
             do io_state = 1, nocc
-              jpara_state = -2.0d0 * sum(aimag(conjg(coef_all(1:n_tot, io_state)) * tmp_all(1:n_tot, io_state)))
+              jpara_state = 0.0d0
+              do i_idx = 1, n
+                if (.not. fp_row_owned(i_idx)) cycle
+                jpara_state = jpara_state - 2.0d0 * aimag(conjg(coef_frag_all(i_idx, io_state)) * tmp_all(i_idx, io_state))
+              end do
+              if (n_pw > 0) then
+                do jo = 1, n_pw
+                  if (.not. pw_row_owned(jo)) cycle
+                  jpara_state = jpara_state - 2.0d0 * aimag(conjg(coef_pw_all(jo, io_state)) * tmp_all(n+jo, io_state))
+                end do
+              end if
               if (abs(jpara_state) > jpara_top_abs) then
                 jpara_top_abs = abs(jpara_state)
                 dg_frag%jpara_top_occ_state = io_state
@@ -485,7 +594,11 @@
             end do
           else
             do io_state = 1, nocc
-              jpara_state = -2.0d0 * sum(aimag(conjg(coef_frag_all(1:n, io_state)) * tmp_mat(1:n, io_state)))
+              jpara_state = 0.0d0
+              do i_idx = 1, n
+                if (.not. fp_row_owned(i_idx)) cycle
+                jpara_state = jpara_state - 2.0d0 * aimag(conjg(coef_frag_all(i_idx, io_state)) * tmp_mat(i_idx, io_state))
+              end do
               if (abs(jpara_state) > jpara_top_abs) then
                 jpara_top_abs = abs(jpara_state)
                 dg_frag%jpara_top_occ_state = io_state
@@ -508,6 +621,7 @@
               do ii_trace = 1, nrow_trace
                 ig_i_trace = dg_frag%index_basis(ii_trace, ifrag_row_trace, ispin)
                 if (ig_i_trace < 1 .or. ig_i_trace > n) cycle
+                if (.not. fp_row_owned(ig_i_trace)) cycle
                 mfp = (0.0d0, 0.0d0)
                 do jj_trace = 1, ncol_trace
                   ig_j_trace = dg_frag%index_basis(jj_trace, ifrag_col_trace, ispin)
@@ -892,10 +1006,48 @@
       if (nocc <= 0) cycle
       occ_weight(:) = 0.0d0
       call get_dg_spin_occ_info(dg_frag, system, ispin, occ_weight, nocc)
-      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
+      fp_row_owned(:) = .false.
+      do ifrag_obs = dg_frag%ifrag_start, dg_frag%ifrag_end
+        nbasis_obs = min(dg_frag%n_basis(ifrag_obs, ispin), size(dg_frag%index_basis, 1))
+        do local_row_obs = 1, nbasis_obs
+          global_idx_obs = dg_frag%index_basis(local_row_obs, ifrag_obs, ispin)
+          if (global_idx_obs < 1 .or. global_idx_obs > n) cycle
+          owner_rank_obs = dg_frag%id
+          if (dg_frag%parallel_mode_orbital .and. allocated(dg_frag%coef_owner) .and. &
+              global_idx_obs <= size(dg_frag%coef_owner, 1) .and. ispin <= size(dg_frag%coef_owner, 2)) then
+            ! Use the same row ownership as propagation and block application.
+            ! The compact global row is index_basis(local_row, fragment, spin),
+            ! not the fragment-local row number.
+            owner_rank_obs = dg_frag%coef_owner(global_idx_obs, ispin)
+          else if (dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1) then
+            subgroup_root_rank = dg_frag%id_array(ifrag_obs) - mod(max(0, dg_frag%id_array(ifrag_obs)), dg_frag%isize_frag)
+            block_base = nbasis_obs / dg_frag%isize_frag
+            block_rem = mod(nbasis_obs, dg_frag%isize_frag)
+            cutoff = (block_base + 1) * block_rem
+            if (local_row_obs <= 0) then
+              owner_offset = 0
+            else if (block_base <= 0) then
+              owner_offset = min(local_row_obs - 1, dg_frag%isize_frag - 1)
+            else if (local_row_obs <= cutoff) then
+              owner_offset = (local_row_obs - 1) / (block_base + 1)
+            else
+              owner_offset = block_rem + (local_row_obs - cutoff - 1) / block_base
+            end if
+            owner_rank_obs = subgroup_root_rank + min(owner_offset, dg_frag%isize_frag - 1)
+          end if
+          if (owner_rank_obs == dg_frag%id) fp_row_owned(global_idx_obs) = .true.
+        end do
+      end do
+      pw_row_owned(:) = .false.
       if (n_pw > 0) then
-        coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+        do jo = 1, n_pw
+          owner_rank_obs = dg_frag%id
+          if (allocated(dg_frag%coef_pw_owner)) owner_rank_obs = dg_frag%coef_pw_owner(jo)
+          if (owner_rank_obs == dg_frag%id) pw_row_owned(jo) = .true.
+        end do
       end if
+      coef_frag_all(1:n, 1:nocc) = dg_frag%coef(1:n, 1:nocc, ispin)
+      if (n_pw > 0) coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
       if (n_pw > 0) then
         coef_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
         tmp_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
@@ -1024,7 +1176,16 @@
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
         energy_tmp = 0.0d0
         do io = 1, nocc
-          energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_all(1:n_tot, io)) * tmp_all(1:n_tot, io)))
+          do i_idx = 1, n
+            if (.not. fp_row_owned(i_idx)) cycle
+            energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_frag_all(i_idx, io)) * tmp_all(i_idx, io))
+          end do
+          if (n_pw > 0) then
+            do jo = 1, n_pw
+              if (.not. pw_row_owned(jo)) cycle
+              energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_pw_all(jo, io)) * tmp_all(n+jo, io))
+            end do
+          end if
         end do
       else
         if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
@@ -1033,7 +1194,10 @@
         end if
         energy_tmp = 0.0d0
         do io = 1, nocc
-          energy_tmp = energy_tmp + occ_weight(io) * sum(real(conjg(coef_frag_all(1:n, io)) * tmp_mat(1:n, io)))
+          do i_idx = 1, n
+            if (.not. fp_row_owned(i_idx)) cycle
+            energy_tmp = energy_tmp + occ_weight(io) * real(conjg(coef_frag_all(i_idx, io)) * tmp_mat(i_idx, io))
+          end do
         end do
       end if
         energy_local = energy_local + energy_tmp
@@ -1043,8 +1207,17 @@
         do ispin = 1, dg_frag%nspin
           nocc = min(dg_frag%nocc_spin(ispin), min(dg_frag%nstate_tot, n))
           if (nocc <= 0) cycle
-          coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
-          pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(:, 1:nocc))**2)
+          if (n_pw > 0) coef_pw_all(1:n_pw, 1:nocc) = dg_frag%coef_pw(1:n_pw, 1:nocc, ispin)
+          pw_row_owned(:) = .false.
+          do jo = 1, n_pw
+            owner_rank_obs = dg_frag%id
+            if (allocated(dg_frag%coef_pw_owner)) owner_rank_obs = dg_frag%coef_pw_owner(jo)
+            if (owner_rank_obs == dg_frag%id) pw_row_owned(jo) = .true.
+          end do
+          do jo = 1, n_pw
+            if (.not. pw_row_owned(jo)) cycle
+            pw_weight_local = pw_weight_local + sum(abs(coef_pw_all(jo, 1:nocc))**2)
+          end do
         end do
       end if
     if (do_interface_check) then
@@ -1079,11 +1252,21 @@
     if (allocated(coef_pw_all)) deallocate(coef_pw_all)
     if (allocated(coef_all)) deallocate(coef_all)
     if (allocated(tmp_all)) deallocate(tmp_all)
+    if (allocated(fp_row_owned)) deallocate(fp_row_owned)
+    if (allocated(pw_row_owned)) deallocate(pw_row_owned)
     ! Cache retained for reuse
 
   1000 continue
     
     ! MPI aggregation: sum local contributions from all ranks
+    if (do_energy_trace) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,1pe16.8,a,1pe16.8)') &
+        "[DG-ENERGY-LOCAL] itt=", itt, " rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
+        " ifrag_start=", dg_frag%ifrag_start, " ifrag_end=", dg_frag%ifrag_end, &
+        " isize_frag=", dg_frag%isize_frag, " energy_local=", energy_local, &
+        " pw_weight_local=", pw_weight_local
+      flush(6)
+    end if
     call comm_summation(current_local, dg_frag%current, 3, dg_frag%icomm)
     call comm_summation(coef_occ_norm_local, coef_occ_norm_global, dg_frag%icomm)
     if (do_current_block_trace) then
@@ -1091,12 +1274,31 @@
     end if
     call comm_summation(energy_local, dg_frag%total_energy, dg_frag%icomm)
     call comm_summation(pw_weight_local, dg_frag%pw_weight_raw, dg_frag%icomm)
-    frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
+    if (dg_frag%parallel_mode_orbital) then
+      ! In orbital mode the observable contraction is row-owned: each rank
+      ! contributes only its coefficient rows, so the world sum is already the
+      ! full value and must not be averaged over subgroup ranks.
+      frag_reduce_factor = 1.0d0
+    else
+      frag_reduce_factor = real(max(1, dg_frag%isize_frag), 8)
+    end if
+    energy_sum_raw = dg_frag%total_energy
     dg_frag%total_energy = dg_frag%total_energy / frag_reduce_factor
+    if (do_energy_trace .and. dg_frag%id == 0) then
+      write(*,'(1x,a,i0,a,1pe16.8,a,1pe16.8,a,1pe16.8)') &
+        "[DG-ENERGY-GLOBAL] itt=", itt, " energy_sum=", energy_sum_raw, &
+        " frag_reduce=", frag_reduce_factor, " total_energy=", dg_frag%total_energy
+      flush(6)
+    end if
 
-    ! Current and PW weight are replicated over all ranks, so these remain world-averaged.
-    dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
-    dg_frag%coef_occ_norm = coef_occ_norm_global / real(max(1, dg_frag%isize), 8)
+    ! Legacy paths can still carry replicated observable contributions.  The
+    ! orbital path above is row-owned and the MPI sum is already complete.
+    if (.not. dg_frag%parallel_mode_orbital) then
+      dg_frag%current(:) = dg_frag%current(:) / real(max(1, dg_frag%isize), 8)
+      dg_frag%coef_occ_norm = coef_occ_norm_global / real(max(1, dg_frag%isize), 8)
+    else
+      dg_frag%coef_occ_norm = coef_occ_norm_global
+    end if
     if (itt == 1 .or. dg_frag%coef_occ_norm0 <= 0.0d0) dg_frag%coef_occ_norm0 = dg_frag%coef_occ_norm
     dg_frag%coef_occ_norm_drift = dg_frag%coef_occ_norm - dg_frag%coef_occ_norm0
     dg_frag%csc_occ_identity_norm = sqrt(max(0.0d0, csc_occ_identity_norm_global / real(max(1, dg_frag%isize), 8)))
@@ -1139,7 +1341,9 @@
       end if
       deallocate(current_block_local, current_block_sum)
     end if
-    dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
+    if (.not. dg_frag%parallel_mode_orbital) then
+      dg_frag%pw_weight_raw = dg_frag%pw_weight_raw / real(max(1, dg_frag%isize), 8)
+    end if
     dg_frag%energy_kinetic = 0.0d0
     dg_frag%energy_nonlocal = 0.0d0
     dg_frag%energy_Ap = 0.0d0

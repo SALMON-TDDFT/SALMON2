@@ -61,6 +61,17 @@
     
     if (dg_frag%time_integrator == 3) then
       ! Classical RK4 (paper-aligned): k1@t, k2@t+dt/2, k3@t+dt/2, k4@t+dt
+      if (use_mixed_rt) then
+        ! Orbital-parallel matrix/density construction splits basis/state work
+        ! across ranks, so the RK reference state must be the canonical mixed
+        ! view on every rank before any stage-local column work starts.
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        do ispin = 1, dg_frag%nspin
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+      end if
       allocate(coef_ref(n, dg_frag%nstate_tot, dg_frag%nspin))
       coef_ref = dg_frag%coef
       if (n_pw > 0) then
@@ -325,6 +336,16 @@
     else
       ! SSPRK3 stages.
       ! Store initial coefficients for Shu-Osher blending.
+      if (use_mixed_rt) then
+        ! Keep the saved Shu-Osher reference in the same canonical coefficient
+        ! view used by the orbital-parallel matrix and density builders.
+        do ispin = 1, dg_frag%nspin
+          call sync_mixed_coef_from_raw(dg_frag, ispin)
+        end do
+        do ispin = 1, dg_frag%nspin
+          call sync_raw_coef_from_mixed(dg_frag, ispin)
+        end do
+      end if
       dg_frag%coef_work = dg_frag%coef
       ! Save initial PW coefficients for the Shu-Osher alpha*coef_work term
       ! (analogous to dg_frag%coef_work which is already set above for fragment coef).
