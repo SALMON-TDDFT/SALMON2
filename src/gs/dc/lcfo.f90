@@ -28,8 +28,10 @@ module lcfo
   character(32),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
-  &                          binfile_hl = "hamiltonian_local.bin", &
-  &                          binfile_rho_h = "hartree_density.bin"
+  &                          binfile_bfb = "basis_functions_buffer.bin", &
+  &                          binfile_hl = "hamiltonian_local.bin"
+  integer, parameter :: basis_buffer_magic = -22022212
+  integer, parameter :: basis_buffer_version = 1
   
 contains
 
@@ -677,32 +679,36 @@ contains
 !===================================================================================================================================
 
 ! yn_dc_for_dg==y : export DG seed data without LCFO diagonalization
-  subroutine write_dg_seed_from_dcdft(lg,mg,system,info,spsi,rho,dc)
+  subroutine write_dg_seed_from_dcdft(lg,system,spsi,dc)
     use structures
-    use communication, only: comm_is_root, comm_bcast
+    use communication, only: comm_is_root, comm_bcast, comm_summation
+    use eigen_subdiag_sub, only: eigen_dsyev
     use filesystem, only: get_filehandle
-    use salmon_global, only: base_directory, yn_dual_rho_vh_only
-    use hartree_sub, only: build_hartree_density_from_rho
+    use salmon_global, only: base_directory, lambda_cut
     implicit none
-    type(s_rgrid),        intent(in) :: lg,mg
+    type(s_rgrid),        intent(in) :: lg
     type(s_dft_system),   intent(in) :: system
-    type(s_parallel_info),intent(in) :: info
     type(s_orbital),      intent(in) :: spsi
-    type(s_scalar),       intent(in) :: rho
     type(s_dcdft),        intent(in) :: dc
     integer :: iunit, ifrag, ispin, io, nspin, nstate_seed, nstate_tot_seed
-    integer :: nxyz_domain(3)
-    integer, allocatable :: n_basis(:,:), n_mat(:), nocc_spin(:)
+    integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+    integer :: ibx, iby, ibz, sx, sy, sz
+    integer :: lb_rwf(3), ub_rwf(3), io_lb, io_ub
+    integer :: ipt, npts_core, ieig, ibasis, nb_eff, raw_io
+    real(8) :: hvol, alpha, norm_core, coef_val
+    integer, allocatable :: n_basis(:,:), n_basis_local(:,:), n_mat(:), nocc_spin(:)
     integer, allocatable :: index_basis(:,:,:)
+    real(8), allocatable :: raw_core_local(:,:), raw_core_sum(:,:), basis_core(:,:)
+    real(8), allocatable :: mat_S(:,:), mat_U(:,:), lambda(:), transform(:,:,:)
+    real(8), allocatable :: coeff(:), vec_core(:)
     real(8), allocatable :: coef_wf(:,:,:)
+    real(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
     character(256) :: filename
-    logical :: has_rwf_local, has_rwf, write_rho_h_seed
-    type(s_scalar) :: rho_h_seed
+    logical :: has_rwf_local, has_rwf
 
     nspin = system%nspin
     nstate_seed = dc%nstate_frag
-    nstate_tot_seed = dc%n_frag * dc%nstate_frag
-    write_rho_h_seed = (yn_dual_rho_vh_only == 'y')
+    hvol = system%hvol
 
     has_rwf_local = allocated(spsi%rwf)
     has_rwf = has_rwf_local
@@ -714,21 +720,99 @@ contains
       stop "write_dg_seed_from_dcdft: spsi%rwf is not allocated"
     end if
 
-    allocate(n_basis(dc%n_frag, nspin), n_mat(nspin))
+    allocate(n_basis(dc%n_frag, nspin), n_basis_local(dc%n_frag, nspin), n_mat(nspin))
     allocate(index_basis(nstate_seed, dc%n_frag, nspin))
-    n_basis(:,:) = nstate_seed
+    call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+    nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
+    nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
+    npts_core = product(nxyz_domain)
+    lb_rwf(1) = lbound(spsi%rwf, 1)
+    lb_rwf(2) = lbound(spsi%rwf, 2)
+    lb_rwf(3) = lbound(spsi%rwf, 3)
+    ub_rwf(1) = ubound(spsi%rwf, 1)
+    ub_rwf(2) = ubound(spsi%rwf, 2)
+    ub_rwf(3) = ubound(spsi%rwf, 3)
+    io_lb = lbound(spsi%rwf, 5)
+    io_ub = ubound(spsi%rwf, 5)
+
+    allocate(transform(nstate_seed, nstate_seed, nspin))
+    allocate(raw_core_local(npts_core, nstate_seed), raw_core_sum(npts_core, nstate_seed))
+    allocate(basis_core(npts_core, nstate_seed))
+    allocate(mat_S(nstate_seed, nstate_seed), mat_U(nstate_seed, nstate_seed))
+    allocate(lambda(nstate_seed), coeff(nstate_seed), vec_core(npts_core))
+    transform(:,:,:) = 0.0d0
+    n_basis_local(:,:) = 0
+
     do ispin = 1, nspin
-      n_mat(ispin) = dc%n_frag * nstate_seed
+      raw_core_local(:,:) = 0.0d0
+      do io = max(1, io_lb), min(nstate_seed, io_ub)
+        do ibz = 1, nxyz_domain(3)
+          if (ibz < lb_rwf(3) .or. ibz > ub_rwf(3)) cycle
+          do iby = 1, nxyz_domain(2)
+            if (iby < lb_rwf(2) .or. iby > ub_rwf(2)) cycle
+            do ibx = 1, nxyz_domain(1)
+              if (ibx < lb_rwf(1) .or. ibx > ub_rwf(1)) cycle
+              ipt = ((ibz - 1) * nxyz_domain(2) + (iby - 1)) * nxyz_domain(1) + ibx
+              raw_core_local(ipt, io) = spsi%rwf(ibx, iby, ibz, ispin, io, 1, 1)
+            end do
+          end do
+        end do
+      end do
+      call comm_summation(raw_core_local, raw_core_sum, npts_core * nstate_seed, dc%icomm_frag)
+
+      do io = 1, nstate_seed
+        do raw_io = 1, nstate_seed
+          mat_S(io, raw_io) = sum(raw_core_sum(:, io) * raw_core_sum(:, raw_io)) * hvol
+        end do
+      end do
+      call eigen_dsyev(mat_S, lambda, mat_U)
+
+      basis_core(:,:) = 0.0d0
+      nb_eff = 0
+      do ieig = nstate_seed, 1, -1
+        if (lambda(ieig) <= lambda_cut) cycle
+        coeff(:) = mat_U(:, ieig) / sqrt(lambda(ieig))
+        vec_core(:) = 0.0d0
+        do raw_io = 1, nstate_seed
+          if (abs(coeff(raw_io)) <= 0.0d0) cycle
+          vec_core(:) = vec_core(:) + raw_core_sum(:, raw_io) * coeff(raw_io)
+        end do
+
+        do ibasis = 1, nb_eff
+          alpha = sum(basis_core(:, ibasis) * vec_core(:)) * hvol
+          vec_core(:) = vec_core(:) - alpha * basis_core(:, ibasis)
+          coeff(:) = coeff(:) - alpha * transform(:, ibasis, ispin)
+        end do
+
+        norm_core = sqrt(max(0.0d0, sum(vec_core(:) * vec_core(:)) * hvol))
+        if (norm_core <= 1.0d-12) cycle
+        nb_eff = nb_eff + 1
+        basis_core(:, nb_eff) = vec_core(:) / norm_core
+        transform(:, nb_eff, ispin) = coeff(:) / norm_core
+      end do
+
+      if (nb_eff <= 0) then
+        write(*,'(1x,a,i0,a,i0)') "[FATAL] DG seed basis cutoff removed all states: ifrag=", dc%i_frag, &
+                                  " ispin=", ispin
+        stop "write_dg_seed_from_dcdft: zero basis after cutoff"
+      end if
+      if (dc%id_frag == 0) n_basis_local(dc%i_frag, ispin) = nb_eff
+    end do
+
+    call comm_summation(n_basis_local, n_basis, dc%n_frag * nspin, dc%icomm_tot)
+    index_basis(:,:,:) = 0
+    n_mat(:) = 0
+    do ispin = 1, nspin
       do ifrag = 1, dc%n_frag
-        do io = 1, nstate_seed
-          index_basis(io, ifrag, ispin) = (ifrag - 1) * nstate_seed + io
+        do io = 1, n_basis(ifrag, ispin)
+          n_mat(ispin) = n_mat(ispin) + 1
+          index_basis(io, ifrag, ispin) = n_mat(ispin)
         end do
       end do
     end do
+    nstate_tot_seed = maxval(n_mat(1:nspin))
 
     if (dc%id_frag == 0) then
-      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
-
       iunit = get_filehandle()
       filename = trim(base_directory)//binfile_rg
       open(iunit,file=filename,form='unformatted',access='stream')
@@ -737,24 +821,61 @@ contains
         write(iunit) dc%jxyz_tot(1:lg%num(io), io)
       end do
       close(iunit)
+    end if
 
+    ! Keep the DC buffer values for RT finite-difference stencils.  DG-RT
+    ! reads this unwrapped [core-buffer:core+buffer] box directly.  The same
+    ! core-overlap cutoff/orthonormalization transform is applied to the buffer.
+    allocate(phi_box_local(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+    allocate(phi_box_sum(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+    if (dc%id_frag == 0) then
       iunit = get_filehandle()
-      filename = trim(base_directory)//binfile_bf
+      filename = trim(base_directory)//binfile_bfb
       open(iunit,file=filename,form='unformatted',access='stream')
-      write(iunit) nxyz_domain(1:3), nspin, nstate_seed
+      write(iunit) basis_buffer_magic, basis_buffer_version
+      write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, nstate_seed
       write(iunit) n_basis(dc%i_frag, 1:nspin)
-      do ispin = 1, nspin
-        do io = 1, nstate_seed
-          write(iunit) spsi%rwf(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),ispin,io,1,1)
-        end do
+    end if
+    do ispin = 1, nspin
+      do ibasis = 1, nstate_seed
+        phi_box_local(:,:,:) = 0.0d0
+        if (ibasis <= n_basis(dc%i_frag, ispin)) then
+          do raw_io = max(1, io_lb), min(nstate_seed, io_ub)
+            coef_val = transform(raw_io, ibasis, ispin)
+            if (abs(coef_val) <= 0.0d0) cycle
+            do ibz = 1, nxyz_box(3)
+              sz = dc_buffer_box_to_local_index(ibz, nxyz_domain(3), nxyz_buffer_seed(3))
+              if (sz < lb_rwf(3) .or. sz > ub_rwf(3)) cycle
+              do iby = 1, nxyz_box(2)
+                sy = dc_buffer_box_to_local_index(iby, nxyz_domain(2), nxyz_buffer_seed(2))
+                if (sy < lb_rwf(2) .or. sy > ub_rwf(2)) cycle
+                do ibx = 1, nxyz_box(1)
+                  sx = dc_buffer_box_to_local_index(ibx, nxyz_domain(1), nxyz_buffer_seed(1))
+                  if (sx < lb_rwf(1) .or. sx > ub_rwf(1)) cycle
+                  phi_box_local(ibx, iby, ibz) = phi_box_local(ibx, iby, ibz) + &
+                    coef_val * spsi%rwf(sx, sy, sz, ispin, raw_io, 1, 1)
+                end do
+              end do
+            end do
+          end do
+        end if
+        call comm_summation(phi_box_local, phi_box_sum, product(nxyz_box), dc%icomm_frag)
+        if (dc%id_frag == 0) then
+          write(iunit) phi_box_sum(1:nxyz_box(1), 1:nxyz_box(2), 1:nxyz_box(3))
+        end if
       end do
-      close(iunit)
+    end do
+    if (dc%id_frag == 0) close(iunit)
+    deallocate(phi_box_local, phi_box_sum)
 
+    if (dc%id_frag == 0) then
       allocate(coef_wf(nstate_seed, nstate_tot_seed, nspin))
       coef_wf(:,:,:) = 0.0d0
       do ispin = 1, nspin
-        do io = 1, nstate_seed
-          coef_wf(io, (dc%i_frag-1)*nstate_seed + io, ispin) = 1.0d0
+        do io = 1, n_basis(dc%i_frag, ispin)
+          if (index_basis(io, dc%i_frag, ispin) > 0) then
+            coef_wf(io, index_basis(io, dc%i_frag, ispin), ispin) = 1.0d0
+          end if
         end do
       end do
 
@@ -769,28 +890,13 @@ contains
       close(iunit)
       deallocate(coef_wf)
 
-      if (write_rho_h_seed) then
-        call allocate_scalar(mg, rho_h_seed)
-        call build_hartree_density_from_rho(info, rho, rho_h_seed)
-
-        iunit = get_filehandle()
-        filename = trim(base_directory)//binfile_rho_h
-        open(iunit,file=filename,form='unformatted',access='stream')
-        write(iunit) nxyz_domain(1:3)
-        write(iunit) rho_h_seed%f(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3))
-        close(iunit)
-
-        call deallocate_scalar(rho_h_seed)
-      end if
     end if
 
     if (dc%id_tot == 0) then
       allocate(nocc_spin(nspin))
-      if (nspin == 1) then
-        nocc_spin(1) = min(nstate_tot_seed, int(dc%elec_num_tot/2.0d0 + 1.0d-12))
-      else
-        nocc_spin(:) = min(nstate_tot_seed, int(dc%elec_num_tot/2.0d0 + 1.0d-12))
-      end if
+      do ispin = 1, nspin
+        nocc_spin(ispin) = min(n_mat(ispin), int(dc%elec_num_tot/2.0d0 + 1.0d-12))
+      end do
       iunit = get_filehandle()
       filename = trim(dc%base_directory)//'dg_occupation.bin'
       open(iunit,file=filename,form='unformatted',access='stream')
@@ -798,15 +904,31 @@ contains
       write(iunit) nocc_spin(1:nspin)
       close(iunit)
       deallocate(nocc_spin)
-      if (write_rho_h_seed) then
-        write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin/basis_functions.bin/rgrid_index.bin + dg_occupation.bin + hartree_density.bin'
-      else
-        write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin/basis_functions.bin/rgrid_index.bin + dg_occupation.bin'
-      end if
+      do ispin = 1, nspin
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') 'DG seed basis cutoff: spin=', ispin, &
+          ' min_nbasis=', minval(n_basis(:, ispin)), ' max_nbasis=', maxval(n_basis(:, ispin)), &
+          ' n_mat=', n_mat(ispin)
+      end do
+      write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin + ' // &
+        'basis_functions_buffer.bin + rgrid_index.bin + dg_occupation.bin'
     end if
 
-    deallocate(n_basis, n_mat, index_basis)
+    deallocate(n_basis, n_basis_local, n_mat, index_basis)
+    deallocate(transform, raw_core_local, raw_core_sum, basis_core, mat_S, mat_U, lambda, coeff, vec_core)
   end subroutine write_dg_seed_from_dcdft
+
+  integer function dc_buffer_box_to_local_index(ibox, ndom, nbuf) result(iloc)
+    implicit none
+    integer, intent(in) :: ibox, ndom, nbuf
+
+    if (nbuf <= 0) then
+      iloc = ibox
+    else if (ibox <= nbuf) then
+      iloc = ndom + nbuf + ibox
+    else
+      iloc = ibox - nbuf
+    end if
+  end function dc_buffer_box_to_local_index
 
 !===================================================================================================================================
 
@@ -826,10 +948,12 @@ contains
     character(256) :: filename
     integer :: iunit, n_frag, nspin, nstate_frag, nstate_tot
     integer :: i,j,jfrag,ispin,io,jo,ix,iy,iz,ix_tot,iy_tot,iz_tot,n
-    integer,dimension(3) :: lgnum_frag,lgnum_tmp,nxyz_domain
+    integer :: magic_file, version_file
+    integer,dimension(3) :: lgnum_frag,lgnum_tmp,nxyz_domain,nxyz_buffer_file,nxyz_box
     !
     integer,allocatable :: n_mat(:),n_basis(:,:),index_basis(:,:,:),jxyz_tot(:,:)
     real(8),allocatable :: f_basis(:,:,:,:,:),coef_wf(:,:,:),wrk1(:,:,:),wrk2(:,:,:)
+    real(8),allocatable :: phi_box(:,:,:)
     
     nspin = system%nspin
     n_frag = product(num_fragment)
@@ -895,16 +1019,48 @@ contains
       close(iunit)
     ! basis functions | lambda >
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
-      open(iunit,file=filename,form='unformatted',access='stream')
-      read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
-      read(iunit) lgnum_tmp(1:nspin) ! dummy
-      if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
-        stop "data_dcdft: input mismatch (basis_functions.bin)"
+      if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bfb
+        open(iunit,file=filename,form='unformatted',access='stream')
+        read(iunit) magic_file, version_file
+        if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
+          stop "data_dcdft: input mismatch (basis_functions_buffer.bin header)"
+        end if
+        read(iunit) nxyz_domain(1:3),nxyz_buffer_file(1:3),i,j ! i,j: dummy
+        read(iunit) lgnum_tmp(1:nspin) ! dummy
+        if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
+          stop "data_dcdft: input mismatch (basis_functions_buffer.bin)"
+        end if
+        nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_file(1:3)
+        allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
+        allocate(phi_box(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3)))
+        do ispin = 1, nspin
+          do io = 1, nstate_frag
+            read(iunit) phi_box(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+            do iz = 1, nxyz_domain(3)
+            do iy = 1, nxyz_domain(2)
+            do ix = 1, nxyz_domain(1)
+              f_basis(ix,iy,iz,ispin,io) = &
+                phi_box(ix + nxyz_buffer_file(1), iy + nxyz_buffer_file(2), iz + nxyz_buffer_file(3))
+            end do
+            end do
+            end do
+          end do
+        end do
+        close(iunit)
+        deallocate(phi_box)
+      else
+        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
+        open(iunit,file=filename,form='unformatted',access='stream')
+        read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
+        read(iunit) lgnum_tmp(1:nspin) ! dummy
+        if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
+          stop "data_dcdft: input mismatch (basis_functions.bin)"
+        end if
+        allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
+        read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag)
+        close(iunit)
       end if
-      allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
-      read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag)
-      close(iunit)
     end if
     
   ! r-grid wavefunctions

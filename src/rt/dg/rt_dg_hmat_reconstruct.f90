@@ -246,7 +246,7 @@
             end do
             phi_local_2d(:, :) = 0.0d0
             vphi_local_2d(:, :) = 0.0d0
-!$omp parallel do private(io,lz,ly,lx,ipt,bx,by,bz) schedule(static)
+!$omp parallel do private(lz,ly,lx,ipt,bx,by,bz) schedule(static)
             do io = 1, nbf
               do lz = 1, ndom(3)
                 bz = map_z(lz)
@@ -265,7 +265,7 @@
               end do
             end do
 !$omp end parallel do
-!$omp parallel do private(jo,jo_loc,lz,ly,lx,ipt,bx,by,bz) schedule(static)
+!$omp parallel do private(jo_loc,lz,ly,lx,ipt,bx,by,bz) schedule(static)
             do jo = jo_s, jo_e
               jo_loc = jo - jo_s + 1
               do lz = 1, ndom(3)
@@ -336,7 +336,7 @@
 
             partial_total(1:nbf) = 0.0d0
 
-!$omp parallel do private(io, integral_v) schedule(static)
+!$omp parallel do private(integral_v) schedule(static)
             do io = 1, nbf
               call integrate_local_basis_with_field_mapped(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, &
                 lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
@@ -394,7 +394,7 @@
     end if
 
     call cpu_time(t0)
-!$omp parallel do collapse(2) private(ispin,iblk,nbf,jo,io) schedule(static)
+!$omp parallel do collapse(2) private(nbf,jo,io) schedule(static)
     do ispin = 1, system%nspin
       do iblk = 1, size(dg_frag%H_mat_blocks)
         if (dg_frag%H_mat_blocks(iblk)%ifrag_row /= dg_frag%H_mat_blocks(iblk)%ifrag_col) cycle
@@ -531,7 +531,7 @@
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
 
-!$omp parallel do private(lz,ly,lx,gz,gy,gx,gwz,gwy,gwx,vh_val) schedule(static)
+!$omp parallel do private(ly,lx,gz,gy,gx,gwz,gwy,gwx,vh_val) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
       gwz = map_global_to_periodic_box_coord_reconstruct(gz, 1, dg_frag%lgnum_total(3))
@@ -625,7 +625,7 @@
 
     V_phi(:, :, :) = (0.0d0, 0.0d0)
     if (allocated(dg_frag%phi_frag_c)) then
-!$omp parallel do private(lz,ly,lx,gz,gy,gx,bz,by,bx,phi0) schedule(static)
+!$omp parallel do private(ly,lx,gz,gy,gx,bz,by,bx,phi0) schedule(static)
       do lz = 1, ndom(3)
         gz = iorg(3) + lz - 1
         bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
@@ -634,7 +634,7 @@
           gy = iorg(2) + ly - 1
           by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
           if (by == 0) cycle
-!$omp simd private(lx,gx,bx,phi0)
+!$omp simd private(gx,bx,phi0)
           do lx = 1, ndom(1)
             gx = iorg(1) + lx - 1
             bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
@@ -646,7 +646,7 @@
       end do
 !$omp end parallel do
     else
-!$omp parallel do private(lz,ly,lx,gz,gy,gx,bz,by,bx) schedule(static)
+!$omp parallel do private(ly,lx,gz,gy,gx,bz,by,bx) schedule(static)
       do lz = 1, ndom(3)
         gz = iorg(3) + lz - 1
         bz = map_global_to_phi_box_coord_reconstruct(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
@@ -655,7 +655,7 @@
           gy = iorg(2) + ly - 1
           by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
           if (by == 0) cycle
-!$omp simd private(lx,gx,bx)
+!$omp simd private(gx,bx)
           do lx = 1, ndom(1)
             gx = iorg(1) + lx - 1
             bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
@@ -701,7 +701,7 @@
           gy = iorg(2) + ly - 1
           by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
           if (by == 0) cycle
-!$omp simd reduction(+:acc_re,acc_im) private(lx,gx,bx,pr,pi,fr,fi)
+!$omp simd reduction(+:acc_re,acc_im) private(gx,bx,pr,pi,fr,fi)
           do lx = 1, ndom(1)
             gx = iorg(1) + lx - 1
             bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
@@ -724,7 +724,7 @@
           gy = iorg(2) + ly - 1
           by = map_global_to_phi_box_coord_reconstruct(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
           if (by == 0) cycle
-!$omp simd reduction(+:acc_re,acc_im) private(lx,gx,bx,phi_r,fr,fi)
+!$omp simd reduction(+:acc_re,acc_im) private(gx,bx,phi_r,fr,fi)
           do lx = 1, ndom(1)
             gx = iorg(1) + lx - 1
             bx = map_global_to_phi_box_coord_reconstruct(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
@@ -785,7 +785,7 @@
 
     V_phi(:, :, :) = (0.0d0, 0.0d0)
     if (allocated(dg_frag%phi_frag_c)) then
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
+!$omp parallel do private(ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         bz = map_z(gz)
@@ -806,7 +806,7 @@
       end do
 !$omp end parallel do
     else
-!$omp parallel do private(lz, ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
+!$omp parallel do private(ly, lx, gx, gy, gz, bx, by, bz) schedule(static)
       do lz = lz_lo, lz_hi
         gz = ov_s(3) + (lz - lz_lo)
         bz = map_z(gz)

@@ -20,36 +20,6 @@ module hartree_sub
 
 contains
 
-subroutine build_hartree_density_from_rho(info, rho_in, rho_h_out, preserve_charge)
-  use structures, only: s_parallel_info, s_scalar
-  use communication, only: comm_summation
-  implicit none
-  type(s_parallel_info), intent(in)    :: info
-  type(s_scalar)       , intent(in)    :: rho_in
-  type(s_scalar)       , intent(inout) :: rho_h_out
-  logical, optional    , intent(in)    :: preserve_charge
-  logical :: keep_charge
-  real(8) :: q_in_local, q_in_global, q_out_local, q_out_global
-  real(8) :: scale_factor
-
-  keep_charge = .true.
-  if (present(preserve_charge)) keep_charge = preserve_charge
-
-  rho_h_out%f(:, :, :) = rho_in%f(:, :, :)
-
-  if (.not. keep_charge) return
-
-  q_in_local = sum(rho_in%f)
-  q_out_local = sum(rho_h_out%f)
-  call comm_summation(q_in_local, q_in_global, info%icomm_r)
-  call comm_summation(q_out_local, q_out_global, info%icomm_r)
-
-  if (abs(q_out_global) <= tiny(1.0d0)) return
-
-  scale_factor = q_in_global / q_out_global
-  rho_h_out%f(:, :, :) = scale_factor * rho_h_out%f(:, :, :)
-end subroutine build_hartree_density_from_rho
-
 !===================================================================================================================================
 subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use math_constants,only: pi

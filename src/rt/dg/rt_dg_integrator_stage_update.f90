@@ -3,11 +3,9 @@
                                               rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
-    use salmon_global, only: yn_dual_rho_vh_only
     use communication, only: comm_summation, comm_get_min
     use salmon_xc, only: s_xc_functional, exchange_correlation
     use poisson_dg_distributed, only: hartree_dg_distributed
-    use hartree_sub, only: build_hartree_density_from_rho
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A
     implicit none
@@ -35,8 +33,6 @@
     real(8) :: rho_floor_min_buf(1)
     real(8), allocatable :: rho_buffer(:,:,:), Vh_buffer(:,:,:)
     logical :: use_rank_buffered_potential
-    logical :: use_dual_rho_vh
-    type(s_scalar) :: rho_h
     real(8) :: t0, t1
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct, time_pw_mix
     logical, save :: timing_initialized = .false.
@@ -74,17 +70,6 @@
       end do
     end if
 
-    use_dual_rho_vh = (yn_dual_rho_vh_only == 'y')
-    if (use_dual_rho_vh) then
-      call allocate_scalar(mg, rho_h)
-      if (itt == 1 .and. dg_frag%has_seed_rho_h) then
-        rho_h%f(:, :, :) = dg_frag%rho_h_frag(:, :, :)
-      else
-        call build_hartree_density_from_rho(info, rho, rho_h)
-        dg_frag%rho_h_frag(:, :, :) = rho_h%f(:, :, :)
-      end if
-    end if
-
     use_rank_buffered_potential = all(dg_frag%rank_buf_hi(:) >= dg_frag%rank_buf_lo(:))
     if (use_rank_buffered_potential) then
       allocate(rho_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
@@ -95,23 +80,13 @@
                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
     end if
-    if (use_dual_rho_vh) then
-      call cpu_time(t0)
-      call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho_h, Vh)
-      call cpu_time(t1)
-      time_hartree = time_hartree + (t1 - t0)
-    else
-      call cpu_time(t0)
-      call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
-      call cpu_time(t1)
-      time_hartree = time_hartree + (t1 - t0)
-    end if
+    call cpu_time(t0)
+    call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
+    call cpu_time(t1)
+    time_hartree = time_hartree + (t1 - t0)
     dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
     if (use_rank_buffered_potential) then
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vh, Vh_buffer)
-    end if
-    if (use_dual_rho_vh) then
-      call deallocate_scalar(rho_h)
     end if
     ! Guard against tiny negative rho before XC; this prevents non-physical Vxc NaN under aggressive FP reassociation.
     ! Validation note: O3 and O3+no-unsafe-math runs matched key observables (J_para/J_total/Ne_raw) in this case.

@@ -129,7 +129,6 @@ contains
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
-           dg_fragment_parallel_mode, &
                  nproc_rgrid, nproc_ob, yn_dg_subspace_diag, dg_subspace_extra_states, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
                  dg_subspace_pw_vectors, dg_subspace_fallback_cond
@@ -179,8 +178,9 @@ contains
     dg_frag%ifrag_group = 0
     dg_frag%nproc_frag = 1
     dg_frag%is_frag_root = .true.
-    dg_frag%parallel_mode = trim(dg_fragment_parallel_mode)
-    dg_frag%parallel_mode_orbital = (trim(dg_frag%parallel_mode) == 'orbital')
+    ! DG fragment subgroups are used as orbital-parallel teams in this branch.
+    dg_frag%parallel_mode = 'orbital'
+    dg_frag%parallel_mode_orbital = .true.
 
     if (.not. dg_frag%parallel_mode_orbital .and. trim(dg_frag%parallel_mode) /= 'legacy_realspace') then
       if (comm_is_root(info%id_rko)) then
@@ -335,16 +335,12 @@ contains
     
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    if (.not. allocated(dg_frag%rho_h_frag)) then
-      allocate(dg_frag%rho_h_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    end if
     allocate(dg_frag%rho_s_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     allocate(dg_frag%Vh_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%Vxc_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     
     ! Initialize to zero
     dg_frag%rho_frag = 0.0d0
-    if (.not. dg_frag%has_seed_rho_h) dg_frag%rho_h_frag = 0.0d0
     dg_frag%rho_s_frag = 0.0d0
     dg_frag%Vh_frag = 0.0d0
     dg_frag%Vxc_frag = 0.0d0
@@ -664,7 +660,7 @@ contains
     real(8), allocatable :: coef_local(:,:,:,:), coef_tmp(:,:,:)  ! local coef buffers
     integer :: n_mat_tmp(2)   ! nspin is expected to be 1 or 2
     integer :: ifrag_count, i_local, io, global_idx
-    integer :: nxyz_domain(3), nxyz_alloc(3), nxyz_new(3), lgnum_frag(3), lgnum_total(3)
+    integer :: nxyz_domain(3), nxyz_alloc(3), lgnum_frag(3), lgnum_total(3)
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
@@ -1674,7 +1670,6 @@ contains
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
     if (allocated(dg_frag%phi_frag_c)) deallocate(dg_frag%phi_frag_c)
-    if (allocated(dg_frag%rho_h_frag)) deallocate(dg_frag%rho_h_frag)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
     if (allocated(dg_frag%rk_beta)) deallocate(dg_frag%rk_beta)
     if (allocated(dg_frag%rk_gamma)) deallocate(dg_frag%rk_gamma)

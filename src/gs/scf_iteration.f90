@@ -110,11 +110,10 @@ end subroutine solve_orbitals
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_hse,hse_alpha,yn_dc_for_dg, &
-                           yn_dual_rho_vh_only
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_hse,hse_alpha,yn_dc_for_dg
   use timer
   use mixing_sub
-  use hartree_sub, only: hartree, build_hartree_density_from_rho
+  use hartree_sub, only: hartree
   use salmon_xc, only: exchange_correlation
   use xc_hse, only: calc_xc_hse_fft
   use noncollinear_module, only: simple_mixing_so
@@ -140,8 +139,6 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   !
   integer :: j
   real(8) :: e_xc_hse
-  logical :: use_dual_rho_vh
-  type(s_scalar) :: rho_h
 
   select case(method_mixing)
   case ('simple')
@@ -166,23 +163,9 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
 
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
-  use_dual_rho_vh = (yn_dc_for_dg == 'y' .and. yn_dual_rho_vh_only == 'y')
-  if (use_dual_rho_vh) then
-    call allocate_scalar(mg, rho_h)
-    call build_hartree_density_from_rho(info, rho, rho_h)
-  end if
-
   call timer_begin(LOG_CALC_HARTREE)
-  if (use_dual_rho_vh) then
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho_h,Vh)
-  else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  end if
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call timer_end(LOG_CALC_HARTREE)
-
-  if (use_dual_rho_vh) then
-    call deallocate_scalar(rho_h)
-  end if
 
   if (yn_dc_for_dg == 'y') then
     do j = 1, system%nspin

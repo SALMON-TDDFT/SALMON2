@@ -628,8 +628,6 @@ contains
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
       & yn_dc_for_dg, &
-      & yn_dual_rho_vh_only, &
-      & dual_rho_h_mode, &
       & yn_dc_fragment_optimization, &
       & nstate_frag, &
       & lcfo_frag_cache_size, &
@@ -645,8 +643,6 @@ contains
       & eps_dg_frag, &
       & yn_adaptive_basis_dg, &
       & niter_dg_frag_rt_max, &
-      & yn_dual_rho_vh_only, &
-      & dual_rho_h_mode, &
       & yn_adaptive_basis, &
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft, &
@@ -1101,8 +1097,6 @@ contains
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
     yn_dc_for_dg = 'n'
-  yn_dual_rho_vh_only = 'n'
-  dual_rho_h_mode = 'copy'
     yn_dc_fragment_optimization = 'n'
     nstate_frag = 0
     lcfo_frag_cache_size = 1
@@ -1777,8 +1771,6 @@ contains
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(yn_dc_for_dg, nproc_group_global)
-  call comm_bcast(yn_dual_rho_vh_only, nproc_group_global)
-  call comm_bcast(dual_rho_h_mode, nproc_group_global)
     call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
@@ -2777,8 +2769,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_for_dg",yn_dc_for_dg
-      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dual_rho_vh_only",yn_dual_rho_vh_only
-      write(fh_variables_log, '("#",4X,A,"=",A)') "dual_rho_h_mode",trim(dual_rho_h_mode)
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
@@ -2885,7 +2875,6 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
     call yn_argument_check(yn_dc_for_dg)
-    call yn_argument_check(yn_dual_rho_vh_only)
     call yn_argument_check(yn_dc_fragment_optimization)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
@@ -3145,10 +3134,6 @@ contains
       if(theory/='dft') stop "DC for DG mode (yn_dc_for_dg=y): theory must be dft"
     end if
 
-    if(yn_dual_rho_vh_only=='y') then
-      if(trim(dual_rho_h_mode) == '') stop "dual-rho mode: dual_rho_h_mode must not be empty"
-    end if
-    
     ! DG-Fragment RT method checks
     if(yn_dg_fragment_rt=='y') then
       if(theory/='tddft_pulse' .and. theory/='tddft_response' .and. theory/='single_scale_maxwell_tddft') &

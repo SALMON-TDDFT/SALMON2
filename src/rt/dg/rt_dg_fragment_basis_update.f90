@@ -1561,6 +1561,9 @@
     end do
 
     basis_functions_changed = .true.
+    if (allocated(dg_frag%phi_frag_has_seed_buffer)) then
+      dg_frag%phi_frag_has_seed_buffer(:) = .false.
+    end if
 
     if (allocated(cg%pk%rwf)) deallocate(cg%pk%rwf)
     if (allocated(cg%pk%zwf)) deallocate(cg%pk%zwf)

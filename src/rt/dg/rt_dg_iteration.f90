@@ -3,11 +3,11 @@
                                          rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use communication, only: comm_is_root
-    use salmon_global, only: yn_fix_func, theory, nelec
+    use salmon_global, only: yn_fix_func, theory
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
     use timer, only: timer_begin, timer_end, LOG_CALC_TIME_PROPAGATION, LOG_CALC_RHO
-    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, apply_overlap_operator, &
+    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, &
                     reorthonormalize_mixed_occupied_subspace
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -216,7 +216,6 @@
       end if
     end if
 
-    call debug_coef_metric("entry")
     call timer_begin(LOG_CALC_TIME_PROPAGATION)
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
@@ -247,12 +246,6 @@
     if (enable_reorth_mixed_occ) then
       call reorthonormalize_mixed_occupied_subspace(dg_frag)
     end if
-    call debug_coef_metric("after-time-evolution")
-
-    ! Probe: bypass local-only unitarity stabilization to test whether it
-    ! over-normalizes distributed coefficients before density reconstruction.
-    call debug_coef_metric("after-unitarity")
-
     ! Self-consistent update of density and Hamiltonian (if enabled)
     ! Performance note:
     !   - Coefficient space evolution: O(n_basis²) - very fast
@@ -280,113 +273,5 @@
     if (trim(theory) == 'single_scale_maxwell_tddft') then
       call calculate_microscopic_current_dg(dg_frag, system, mg, stencil, rt%j_e)
     end if
-    
-  contains
-
-  subroutine debug_coef_metric(stage_label)
-    character(len=*), intent(in) :: stage_label
-
-    integer :: ispin_probe, n_frag_rows, n_pw, n_tot, nstate_probe, io
-    integer :: env_probe_len, env_probe_status, nocc_probe, parse_status
-    integer :: coef_metric_maxitt
-    complex(8), allocatable :: vec(:), svec(:)
-    real(8) :: c2(3), cs2(3), cs2_occ_rocc_sum, cs2_state, occ_factor
-    logical :: enable_coef_metric_probe
-    character(len=64) :: env_probe
-
-    enable_coef_metric_probe = .false.
-    env_probe = ''
-    call get_environment_variable("SALMON_DG_COEF_METRIC_PROBE", env_probe, length=env_probe_len, status=env_probe_status)
-    if (env_probe_status == 0 .and. env_probe_len > 0) then
-      if (env_probe(1:1) == '1' .or. env_probe(1:1) == 'y' .or. env_probe(1:1) == 'Y' .or. &
-          env_probe(1:1) == 't' .or. env_probe(1:1) == 'T') then
-        enable_coef_metric_probe = .true.
-      end if
-    end if
-    if (.not. enable_coef_metric_probe) return
-
-    coef_metric_maxitt = 1
-    env_probe = ''
-    call get_environment_variable("SALMON_DG_COEF_METRIC_MAXITT", env_probe, length=env_probe_len, status=env_probe_status)
-    if (env_probe_status == 0 .and. env_probe_len > 0) then
-      read(env_probe(1:env_probe_len), *, iostat=parse_status) coef_metric_maxitt
-      if (parse_status /= 0) coef_metric_maxitt = 1
-    end if
-    if (coef_metric_maxitt < 1) coef_metric_maxitt = 1
-    if (itt > coef_metric_maxitt) return
-    if (dg_frag%id /= 0) return
-    if (dg_frag%nspin <= 0 .or. dg_frag%nstate_tot <= 0) return
-
-    ispin_probe = 1
-    n_frag_rows = dg_frag%n_mat_max
-    n_pw = 0
-    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    n_tot = n_frag_rows + n_pw
-    nstate_probe = min(3, dg_frag%nstate_tot)
-    if (n_tot <= 0 .or. nstate_probe <= 0) return
-
-    allocate(vec(n_tot), svec(n_tot))
-
-    c2(:) = 0.0d0
-    cs2(:) = 0.0d0
-    cs2_occ_rocc_sum = 0.0d0
-    nocc_probe = min(dg_frag%nstate_tot, dg_frag%nocc_spin(ispin_probe))
-
-    if (n_pw > 0) then
-      do io = 1, nstate_probe
-        vec(:) = (0.0d0, 0.0d0)
-        if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
-        vec(n_frag_rows+1:n_tot) = dg_frag%coef_pw(1:n_pw, io, ispin_probe)
-        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
-        c2(io) = real(sum(conjg(vec) * vec), kind=8)
-        cs2(io) = real(sum(conjg(vec) * svec), kind=8)
-      end do
-      do io = 1, nocc_probe
-        vec(:) = (0.0d0, 0.0d0)
-        if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
-        vec(n_frag_rows+1:n_tot) = dg_frag%coef_pw(1:n_pw, io, ispin_probe)
-        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
-        cs2_state = real(sum(conjg(vec) * svec), kind=8)
-        occ_factor = 1.0d0
-        if (allocated(system%rocc)) then
-          if (io <= size(system%rocc, 1) .and. 1 <= size(system%rocc, 3)) then
-            occ_factor = max(0.0d0, system%rocc(io, 1, 1))
-          end if
-        end if
-        cs2_occ_rocc_sum = cs2_occ_rocc_sum + occ_factor * cs2_state
-      end do
-    else
-      do io = 1, nstate_probe
-        vec(:) = (0.0d0, 0.0d0)
-        if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
-        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
-        c2(io) = real(sum(conjg(vec) * vec), kind=8)
-        cs2(io) = real(sum(conjg(vec) * svec), kind=8)
-      end do
-      do io = 1, nocc_probe
-        vec(:) = (0.0d0, 0.0d0)
-        if (n_frag_rows > 0) vec(1:n_frag_rows) = dg_frag%coef(1:n_frag_rows, io, ispin_probe)
-        call apply_overlap_operator(dg_frag, ispin_probe, vec, svec, .true.)
-        cs2_state = real(sum(conjg(vec) * svec), kind=8)
-        occ_factor = 1.0d0
-        if (allocated(system%rocc)) then
-          if (io <= size(system%rocc, 1) .and. 1 <= size(system%rocc, 3)) then
-            occ_factor = max(0.0d0, system%rocc(io, 1, 1))
-          end if
-        end if
-        cs2_occ_rocc_sum = cs2_occ_rocc_sum + occ_factor * cs2_state
-      end do
-    end if
-
-    write(*,'(1x,a,a,a,3(1x,es12.4),a,3(1x,es12.4))') "        coef stage probe: stage=", trim(stage_label), &
-      " c2=", c2(1), c2(2), c2(3), " cs2=", cs2(1), cs2(2), cs2(3)
-    flush(6)
-    write(*,'(1x,a,a,a,i0,a,4(1x,es12.4))') "        coef-density comparable: stage=", trim(stage_label), &
-      " itt=", itt, " cs2_rocc_sum / (cs2_rocc_sum-nelec) / Ne_raw / (Ne_raw-nelec)=", &
-      cs2_occ_rocc_sum, cs2_occ_rocc_sum - dble(nelec), dg_frag%elec_num_raw, dg_frag%elec_num_raw - dble(nelec)
-    flush(6)
-
-    deallocate(vec, svec)
-  end subroutine debug_coef_metric
 
   end subroutine tddft_dg_fragment_iteration

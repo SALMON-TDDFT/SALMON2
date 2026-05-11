@@ -24,6 +24,9 @@
 6. `doc/DOCUMENT_STATUS_MATRIX.md`  
    - 文書の現行/履歴/提案の分類表
 
+7. `DG_DC_TO_DG_RT_USAGE_JA.md`
+   - DC から DG-RT へ buffered seed を渡す現行手順
+
 注: DG関連の説明文書は更新遅延があるため、現時点では参照専用として扱います。
 
 ---
@@ -99,5 +102,4 @@ HSE RI/DF 関連には、作成時点の異なる文書が混在しています�
 1. 新規文書は、必ず「現行 / 履歴 / 提案」のいずれかを冒頭に明記する。  
 2. 実装完了時は、提案文書に「Superseded by: ...」を追記する。  
 3. `DOCUMENTATION_INDEX.md` と `doc/DOCUMENT_STATUS_MATRIX.md` を同時更新する。
-
 

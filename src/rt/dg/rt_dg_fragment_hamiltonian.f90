@@ -106,7 +106,7 @@
     integer :: ix, iy, iz
     integer :: gx, gy, gz
 
-!$omp parallel do collapse(2) private(ix,iy,iz,gx,gy,gz)
+!$omp parallel do private(ix,iy,gx,gy,gz) schedule(static)
     do iz = dg_frag%rank_buf_lo(3), dg_frag%rank_buf_hi(3)
       gz = map_global_to_phi_box_coord_ham(iz, grid%is(3), grid%ie(3), dg_frag%lgnum_total(3))
       do iy = dg_frag%rank_buf_lo(2), dg_frag%rank_buf_hi(2)
@@ -582,18 +582,12 @@
     
     integer :: ifrag, ispin, io, jo, i_local, nbf, nbf_raw, ig_i, ig_j
     integer :: loop_ifrag_start, loop_ifrag_end
-    integer :: ifrag_chk, i_local_chk, ix_chk, iy_chk, iz_chk, istate_chk
-    integer :: nstate_chk_max, lg1_chk, lg2_chk, lg3_chk
-    integer :: phi_lb1_chk, phi_ub1_chk, phi_lb2_chk, phi_ub2_chk, phi_lb3_chk, phi_ub3_chk
-    integer :: iorg_chk(3), ndom_chk(3)
-    integer :: gx, gy, gz, bx, by, bz
     integer :: ndom(3)
     integer :: i_halo
     real(8) :: hvol
     real(8) :: max_p
     real(8) :: Ac_zero(3)
-    real(8) :: phi_checksum_before, phi_checksum_after, phi_checksum_delta, phi_checksum_tol
-    logical :: did_overlap_call, is_local_fragment
+    logical :: is_local_fragment
     integer :: is(3), ie(3)
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
@@ -627,22 +621,6 @@
       write(*,*) "=== Preparing Hamiltonian Matrix ==="
     end if
 
-    phi_checksum_before = 0.0d0
-    phi_checksum_after = 0.0d0
-    phi_checksum_delta = 0.0d0
-    phi_checksum_tol = 0.0d0
-    nstate_chk_max = min(dg_frag%nstate_frag, size(dg_frag%phi_frag, 4))
-    lg1_chk = dg_frag%lgnum_total(1)
-    lg2_chk = dg_frag%lgnum_total(2)
-    lg3_chk = dg_frag%lgnum_total(3)
-    phi_lb1_chk = lbound(dg_frag%phi_frag, 1)
-    phi_ub1_chk = ubound(dg_frag%phi_frag, 1)
-    phi_lb2_chk = lbound(dg_frag%phi_frag, 2)
-    phi_ub2_chk = ubound(dg_frag%phi_frag, 2)
-    phi_lb3_chk = lbound(dg_frag%phi_frag, 3)
-    phi_ub3_chk = ubound(dg_frag%phi_frag, 3)
-    did_overlap_call = .false.
-    
     ! Step 1: Calculate momentum matrix elements (transition moments)
     ! Required for velocity gauge A·p coupling
     if (.not. allocated(dg_frag%momentum_blocks) .and. .not. allocated(dg_frag%momentum_mat)) then
@@ -652,35 +630,7 @@
       end if
       call calculate_momentum_matrix(dg_frag, system, mg, stencil)
 
-      phi_checksum_before = 0.0d0
-      i_local_chk = 0
-      do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local_chk = i_local_chk + 1
-        if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-        iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
-        ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
-        do istate_chk = 1, nstate_chk_max
-          do iz_chk = 1, ndom_chk(3)
-            gz = iorg_chk(3) + iz_chk - 1
-            bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
-            if (bz == 0) cycle
-            do iy_chk = 1, ndom_chk(2)
-              gy = iorg_chk(2) + iy_chk - 1
-              by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
-              if (by == 0) cycle
-              do ix_chk = 1, ndom_chk(1)
-                gx = iorg_chk(1) + ix_chk - 1
-                bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
-                if (bx == 0) cycle
-                phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
-              end do
-            end do
-          end do
-        end do
-      end do
-
       call calculate_overlap_matrix(dg_frag, system, mg)
-      did_overlap_call = .true.
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "        Momentum matrix calculated (for A·p coupling)"
         write(*,*) "        Overlap matrix S calculated (for generalized propagation)"
@@ -691,75 +641,7 @@
       end if
       if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_blocks) .and. &
           .not. allocated(dg_frag%S_mat_prop_blocks)) then
-        phi_checksum_before = 0.0d0
-        i_local_chk = 0
-        do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
-          i_local_chk = i_local_chk + 1
-          if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-          iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
-          ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
-          do istate_chk = 1, nstate_chk_max
-            do iz_chk = 1, ndom_chk(3)
-              gz = iorg_chk(3) + iz_chk - 1
-              bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
-              if (bz == 0) cycle
-              do iy_chk = 1, ndom_chk(2)
-                gy = iorg_chk(2) + iy_chk - 1
-                by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
-                if (by == 0) cycle
-                do ix_chk = 1, ndom_chk(1)
-                  gx = iorg_chk(1) + ix_chk - 1
-                  bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
-                  if (bx == 0) cycle
-                  phi_checksum_before = phi_checksum_before + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
-                end do
-              end do
-            end do
-          end do
-        end do
-
         call calculate_overlap_matrix(dg_frag, system, mg)
-        did_overlap_call = .true.
-      end if
-    end if
-
-    if (did_overlap_call) then
-      phi_checksum_after = 0.0d0
-      i_local_chk = 0
-      do ifrag_chk = dg_frag%ifrag_start, dg_frag%ifrag_end
-        i_local_chk = i_local_chk + 1
-        if (i_local_chk < 1 .or. i_local_chk > size(dg_frag%phi_frag, 5)) cycle
-        iorg_chk(:) = dg_frag%ixyz_frag(:, ifrag_chk)
-        ndom_chk(:) = dg_frag%nxyz_domain(:, ifrag_chk)
-        do istate_chk = 1, nstate_chk_max
-          do iz_chk = 1, ndom_chk(3)
-            gz = iorg_chk(3) + iz_chk - 1
-            bz = map_global_to_phi_box_coord_ham(gz, phi_lb3_chk, phi_ub3_chk, lg3_chk)
-            if (bz == 0) cycle
-            do iy_chk = 1, ndom_chk(2)
-              gy = iorg_chk(2) + iy_chk - 1
-              by = map_global_to_phi_box_coord_ham(gy, phi_lb2_chk, phi_ub2_chk, lg2_chk)
-              if (by == 0) cycle
-              do ix_chk = 1, ndom_chk(1)
-                gx = iorg_chk(1) + ix_chk - 1
-                bx = map_global_to_phi_box_coord_ham(gx, phi_lb1_chk, phi_ub1_chk, lg1_chk)
-                if (bx == 0) cycle
-                phi_checksum_after = phi_checksum_after + abs(dg_frag%phi_frag(bx, by, bz, istate_chk, i_local_chk))
-              end do
-            end do
-          end do
-        end do
-      end do
-      phi_checksum_delta = abs(phi_checksum_after - phi_checksum_before)
-      phi_checksum_tol = max(1.0d-12, 1.0d-12 * max(abs(phi_checksum_before), abs(phi_checksum_after)))
-      write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') "        overlap phi checksum: rank=", &
-        dg_frag%id, " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, &
-        " before=", phi_checksum_before, " after=", phi_checksum_after, " delta=", phi_checksum_delta
-      flush(6)
-      if (phi_checksum_delta > phi_checksum_tol) then
-        write(*,'(1x,a,1pe12.4,a,1pe12.4)') "[FATAL] overlap modified interior phi_frag: delta=", &
-          phi_checksum_delta, " tol=", phi_checksum_tol
-        stop 1
       end if
     end if
     
@@ -874,7 +756,7 @@
 
           partial_t(:) = 0.0d0
           partial_h(:) = 0.0d0
-          !$omp parallel do private(io, ig_i)
+          !$omp parallel do private(ig_i)
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
@@ -1189,7 +1071,7 @@
     grid_y_hi = grid%ie(2)
     grid_z_lo = grid%is(3)
     grid_z_hi = grid%ie(3)
-!$omp parallel do collapse(2) private(ix,iy,iz)
+!$omp parallel do collapse(2) private(ix)
     do iz = grid_z_lo, grid_z_hi
       do iy = grid_y_lo, grid_y_hi
 !$omp simd
@@ -1220,7 +1102,7 @@
     V_total(:, :, :) = 0.0d0
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-!$omp parallel do private(lz,ly,lx,gz,gy,gx,gwz,gwy,gwx,vh_val) schedule(static)
+!$omp parallel do private(ly,lx,gz,gy,gx,gwz,gwy,gwx,vh_val) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
       gwz = map_global_to_periodic_box_coord_ham(gz, 1, dg_frag%lgnum_total(3))
@@ -1273,7 +1155,7 @@
     b_lo3 = lbound(Vh_buffer, 3)
     b_hi3 = ubound(Vh_buffer, 3)
 
-!$omp parallel do collapse(2) private(ix,iy,iz,bx,by,bz)
+!$omp parallel do private(ix,iy,bx,by,bz) schedule(static)
     do iz = grid%is(3), grid%ie(3)
       bz = map_global_to_periodic_box_coord_ham(iz, b_lo3, b_hi3)
       do iy = grid%is(2), grid%ie(2)
@@ -1354,7 +1236,7 @@
         " V_lb=", v_lb1, v_lb2, v_lb3, " V_ub=", v_ub1, v_ub2, v_ub3
       stop 1
     end if
-!$omp parallel do private(lz, ly, lx, gz, gy, gx, bx, by, bz) schedule(static)
+!$omp parallel do private(ly, lx, gz, gy, gx, bx, by, bz) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = iorg(3) + lz - 1
       do ly = loc_s(2), loc_e(2)
@@ -1502,7 +1384,10 @@
         " ifrag=", ifrag, " ndom=", ndom
       stop 1
     end if
-    call enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
+    if (.not. allocated(dg_frag%phi_frag_has_seed_buffer) .or. &
+        .not. dg_frag%phi_frag_has_seed_buffer(i_local)) then
+      call enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
+    end if
     call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
     lgx = dg_frag%lgnum_total(1)
     lgy = dg_frag%lgnum_total(2)
@@ -1521,7 +1406,7 @@
     ! Convert each global coordinate to its periodic interior index once,
     ! then use ix0+/-n offsets directly for neighbor access inside phi_frag.
 
-!$omp parallel do private(lz, ly, lx, gz, gy, gx, ix0, iy0, iz0, v) schedule(static)
+!$omp parallel do private(ly, lx, gz, gy, gx, ix0, iy0, iz0, v) schedule(static)
     do lz = loc_s(3), loc_e(3)
       gz = dg_frag%ixyz_frag(3, ifrag) + lz - 1
       iz0 = modulo(gz - 1, lgz) + 1
@@ -1739,8 +1624,11 @@
     p_ub3 = ubound(dg_frag%phi_frag, 3)
     nloc1 = loc_e(1) - loc_s(1) + 1
     nloc2 = loc_e(2) - loc_s(2) + 1
-    call enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
-    !$omp parallel do private(lx, ly, lz, ipt, gxg, gyg, gzg, gx, gy, gz, ix0, iy0, iz0) schedule(static)
+    if (.not. allocated(dg_frag%phi_frag_has_seed_buffer) .or. &
+        .not. dg_frag%phi_frag_has_seed_buffer(i_local)) then
+      call enforce_fragment_periodic_buffer_for_state_ham(dg_frag, ifrag, i_local, jo)
+    end if
+    !$omp parallel do private(lx, ly, ipt, gxg, gyg, gzg, gx, gy, gz, ix0, iy0, iz0) schedule(static)
     do lz = 1, ndom(3)
       do ly = 1, ndom(2)
         !$omp simd private(ipt, gxg, gyg, gzg, gx, gy, gz, ix0, iy0, iz0)
@@ -1961,28 +1849,6 @@
   end subroutine apply_hamiltonian_at_phi_box_point
 
   !=======================================================================
-  ! Add non-local pseudopotential contribution to Hamiltonian matrix
-  !
-  ! Calculates <φ_i|V_NL|φ_j> = Σ_ilma <φ_i|proj_ilma> V_ilma <proj_ilma|φ_j>
-  ! where proj_ilma are the pseudopotential projector functions
-  !
-  ! NUMERICAL ACCURACY: Store unnormalized overlaps, apply rinv_uvu once
-  ! This prevents rinv_uvu^2 error amplification and follows SALMON convention
-  !=======================================================================
-  subroutine add_nonlocal_pp_matrix(dg_frag, mg, ppg, nspin, hvol)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    type(s_rgrid),          intent(in) :: mg
-    type(s_pp_grid),        intent(in) :: ppg
-    integer,                intent(in)    :: nspin
-    real(8),                intent(in)    :: hvol
-    
-    stop "DG-Fragment RT: add_nonlocal_pp_matrix fallback path is retired; use ensure_nonlocal_pp_matrix_A"
-    
-  end subroutine add_nonlocal_pp_matrix
-
-  !=======================================================================
   ! Calculate momentum matrix elements in fragment basis (velocity gauge)
   !=======================================================================
   subroutine calculate_momentum_matrix(dg_frag, system, mg, stencil)
@@ -2120,7 +1986,7 @@
             " phi_frag dim4=", size(dg_frag%phi_frag, 4), " ifrag=", ifrag, " ispin=", ispin
           stop "DG-Fragment RT: invalid basis-function count"
         end if
-        !$omp parallel do private(io,lz,ly,lx,ipt) schedule(static)
+        !$omp parallel do private(lz,ly,lx,ipt) schedule(static)
         do io = 1, nbf
           do lz = lz_lo, lz_hi
             do ly = ly_lo, ly_hi
@@ -2520,7 +2386,7 @@
         nx_local = lx_hi - lx_lo + 1
         ny_local = ly_hi - ly_lo + 1
         allocate(phi_local_2d(npts_local, nbf), self_overlap(nbf, ncol_local))
-        !$omp parallel do private(io,lz,ly,lx,ipt) schedule(static)
+        !$omp parallel do private(lz,ly,lx,ipt) schedule(static)
         do io = 1, nbf
           do lz = lz_lo, lz_hi
             do ly = ly_lo, ly_hi

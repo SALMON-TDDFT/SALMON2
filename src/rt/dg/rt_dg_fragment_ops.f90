@@ -704,12 +704,6 @@ contains
     logical :: need_dense_cache
     logical :: want_dense_cache
     integer :: i
-    logical, parameter :: enable_hmat_nl_progress = .false.
-
-    if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
-      write(*,'(1x,a)') "        hmat-nl trace: stage=entry"
-      flush(6)
-    end if
 
     if (ppg%Nlma == 0 .or. .not. allocated(ppg%uV)) then
       if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
@@ -741,10 +735,6 @@ contains
         call init_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, dg_frag%H_nl_block_map, diagonal_only=.true.)
         dg_frag%n_H_nl_blocks = size(dg_frag%H_nl_blocks)
       end if
-      if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') "        hmat-nl trace: stage=after-init-blocks"
-        flush(6)
-      end if
       if (use_micro_A) then
         call build_nonlocal_pp_matrix_A_blocks(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
              .true., system%Ac_micro%v, dg_frag%H_nl_blocks, dg_frag%H_nl_block_map)
@@ -752,23 +742,9 @@ contains
         call build_nonlocal_pp_matrix_A_blocks(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
              .false., H_nl_blocks=dg_frag%H_nl_blocks, H_nl_block_map=dg_frag%H_nl_block_map)
       end if
-      if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') "        hmat-nl trace: stage=after-build-blocks"
-        flush(6)
-        write(*,'(1x,a)') "        hmat-nl trace: stage=before-block-reduce"
-        flush(6)
-      end if
       call reduce_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, "hmat-nl", dg_frag%icomm)
       call rebuild_local_nl_block_ids(dg_frag)
-      if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') "        hmat-nl trace: stage=after-block-reduce"
-        flush(6)
-      end if
       if (need_dense_cache) then
-        if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
-          write(*,'(1x,a)') "        hmat-nl trace: stage=before-dense-cache-build"
-          flush(6)
-        end if
         if (.not. allocated(dg_frag%H_nl_cache)) allocate(dg_frag%H_nl_cache(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
         if (use_micro_A) then
           call build_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
@@ -776,10 +752,6 @@ contains
         else
           call build_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
                .false., H_nl=dg_frag%H_nl_cache)
-        end if
-        if (enable_hmat_nl_progress .and. dg_frag%id == 0) then
-          write(*,'(1x,a)') "        hmat-nl trace: stage=after-dense-cache-build"
-          flush(6)
         end if
       else if (allocated(dg_frag%H_nl_cache)) then
         deallocate(dg_frag%H_nl_cache)

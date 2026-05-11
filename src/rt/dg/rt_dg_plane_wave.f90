@@ -376,7 +376,6 @@ contains
     logical :: use_complex_basis, owns_ifrag, participates_ifrag_fft, fft_info_ready
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
-    logical, save :: warned_missing_buffer = .false.
     character(len=64), save :: fp_domain_mode = 'core'
     character(len=64) :: env_fp_domain
 
@@ -464,9 +463,11 @@ contains
         ny = dg_frag%frag_buf_hi(2, ifrag) - dg_frag%frag_buf_lo(2, ifrag) + 1
         nz = dg_frag%frag_buf_hi(3, ifrag) - dg_frag%frag_buf_lo(3, ifrag) + 1
       else
-        if (plane_wave_trace_enabled() .and. use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
-          write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
-          warned_missing_buffer = .true.
+        if (use_buffered_domain) then
+          if (dg_frag%id == 0) then
+            write(*,'(1x,a)') '[FP-DOMAIN] buffered FP domain requested but fragment buffer bounds are unavailable'
+          end if
+          stop "DG-Fragment RT: missing fragment buffer bounds for buffered FP domain"
         end if
         gx0 = dg_frag%ixyz_frag(1, ifrag)
         gy0 = dg_frag%ixyz_frag(2, ifrag)
@@ -595,7 +596,6 @@ contains
     logical :: owns_pw_col
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
-    logical, save :: warned_missing_buffer = .false.
     character(len=64), save :: fp_domain_mode = 'core'
     character(len=64) :: env_fp_domain
 
@@ -646,10 +646,12 @@ contains
       nz_max = max(1, maxval(dg_frag%frag_buf_hi(3, dg_frag%ifrag_start:dg_frag%ifrag_end) - &
                            dg_frag%frag_buf_lo(3, dg_frag%ifrag_start:dg_frag%ifrag_end) + 1))
     else
-        if (plane_wave_trace_enabled() .and. use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
-          write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
-          warned_missing_buffer = .true.
+      if (use_buffered_domain) then
+        if (dg_frag%id == 0) then
+          write(*,'(1x,a)') '[FP-DOMAIN] buffered FP domain requested but fragment buffer bounds are unavailable'
         end if
+        stop "DG-Fragment RT: missing fragment buffer bounds for buffered FP domain"
+      end if
       nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
       ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
       nz_max = maxval(dg_frag%nxyz_domain(3, dg_frag%ifrag_start:dg_frag%ifrag_end))
@@ -834,7 +836,7 @@ contains
 
     do ispin = 1, dg_frag%nspin
       integral_local = 0.0d0
-!$omp parallel do collapse(3) private(ix,iy,iz) reduction(+:integral_local) schedule(static)
+!$omp parallel do collapse(3) reduction(+:integral_local) schedule(static)
       do iz = lbound(Vpsl%f, 3), ubound(Vpsl%f, 3)
         do iy = lbound(Vpsl%f, 2), ubound(Vpsl%f, 2)
           do ix = lbound(Vpsl%f, 1), ubound(Vpsl%f, 1)
@@ -886,7 +888,6 @@ contains
     logical, allocatable :: V_box_ready(:)
     logical, save :: fp_domain_initialized = .false.
     logical, save :: use_buffered_domain = .false.
-    logical, save :: warned_missing_buffer = .false.
     character(len=64), save :: fp_domain_mode = 'core'
     character(len=64) :: env_fp_domain
 
@@ -943,9 +944,11 @@ contains
       nz_max = max(1, maxval(dg_frag%frag_buf_hi(3, dg_frag%ifrag_start:dg_frag%ifrag_end) - &
                            dg_frag%frag_buf_lo(3, dg_frag%ifrag_start:dg_frag%ifrag_end) + 1))
     else
-      if (plane_wave_trace_enabled() .and. use_buffered_domain .and. .not. warned_missing_buffer .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') '[FP-DOMAIN] buffered requested but frag_buf bounds are unavailable; fallback to core domain'
-        warned_missing_buffer = .true.
+      if (use_buffered_domain) then
+        if (dg_frag%id == 0) then
+          write(*,'(1x,a)') '[FP-DOMAIN] buffered FP domain requested but fragment buffer bounds are unavailable'
+        end if
+        stop "DG-Fragment RT: missing fragment buffer bounds for buffered FP domain"
       end if
       nx_max = maxval(dg_frag%nxyz_domain(1, dg_frag%ifrag_start:dg_frag%ifrag_end))
       ny_max = maxval(dg_frag%nxyz_domain(2, dg_frag%ifrag_start:dg_frag%ifrag_end))
@@ -2849,14 +2852,14 @@ contains
     ! H_fp is column-partitioned in orbital mode.  Each column owner needs the
     ! scalar potential over the whole fragment box, so the parent-grid pieces
     ! held by the subgroup ranks are gathered once into this local box.
-!$omp parallel do private(iz,iy,ix,gz,gy,gx,vz,vy,vx) schedule(static)
+!$omp parallel do private(iy,ix,gz,gy,gx,vz,vy,vx) schedule(static)
     do iz = lbound(V_box, 3), ubound(V_box, 3)
       gz = gz0 + iz - 1
       vz = map_global_to_phi_box_coord_pw(gz, v_lb3, v_ub3, dg_frag%lgnum_total(3))
       do iy = lbound(V_box, 2), ubound(V_box, 2)
         gy = gy0 + iy - 1
         vy = map_global_to_phi_box_coord_pw(gy, v_lb2, v_ub2, dg_frag%lgnum_total(2))
-!$omp simd private(ix,gx,vx)
+!$omp simd private(gx,vx)
         do ix = lbound(V_box, 1), ubound(V_box, 1)
           gx = gx0 + ix - 1
           vx = map_global_to_phi_box_coord_pw(gx, v_lb1, v_ub1, dg_frag%lgnum_total(1))

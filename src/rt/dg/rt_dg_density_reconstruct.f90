@@ -1053,15 +1053,11 @@
             s_mix_work(:, :) = s_mix(:, :)
             call zgesv(n_basis_mix, nocc_mix_cols, s_mix_work, n_basis_mix, ipiv_mix, coef_mix_metric, n_basis_mix, info_lapack)
             if (info_lapack /= 0) then
-              if (need_full_coef_mix_spin) then
-                coef_mix_eff(1:n_basis_mix, 1:nocc_spin) = dg_frag%coef_mix(1:n_basis_mix, 1:nocc_spin, ispin)
-              else if (nocc_loc > 0) then
-                coef_mix_eff(1:n_basis_mix, 1:nocc_loc) = dg_frag%coef_mix(1:n_basis_mix, io_s_frag:io_e_frag, ispin)
-              end if
               if (dg_frag%id == 0) then
-                write(*,'(1x,a,i0,a,i0)') ' [WARN] rho_mix metric_consistent fallback to legacy for ispin=', ispin, ' zgesv info=', info_lapack
+                write(*,'(1x,a,i0,a,i0)') ' [FATAL] rho_mix metric_consistent solve failed for ispin=', ispin, ' zgesv info=', info_lapack
                 flush(6)
               end if
+              stop "DG-Fragment RT: rho_mix metric_consistent solve failed"
             else
               coef_mix_eff(1:n_basis_mix, 1:nocc_mix_cols) = coef_mix_metric(1:n_basis_mix, 1:nocc_mix_cols)
             end if

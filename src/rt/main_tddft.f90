@@ -94,10 +94,6 @@ if (yn_out_lz_rt == 'y') then
   call write_local_angular_momentum_xy(Mit, lg, mg, system, info, singlescale, spsi_in)
 end if
 
-if (iperiodic == 3) then
-  call write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, 'full-initial-density')
-end if
-
 #ifdef USE_OPENACC
 !$acc enter data copyin(rt, rt%zc)
 !$acc enter data copyin(mg, mg%is, mg%ie)
@@ -337,10 +333,6 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     write(fh_dg_current_decomp,'(a)') '# 1:it 2:time_au 3:J_para_x 4:J_para_y 5:J_para_z 6:J_dia_x 7:J_dia_y 8:J_dia_z 9:J_total_x 10:J_total_y 11:J_total_z 12:rho_drift 13:coef_occ_norm_drift 14:coef_occ_norm 15:csc_occ_identity_norm 16:csc_occ_identity_max 17:occvirt_leakage 18:occvirt_top_occ 19:occvirt_top_virt 20:occvirt_top_abs2 21:jpara_top_occ_state 22:jpara_top_occ_value 23:norm_state_99 24:norm_state_100 25:norm_state_129 26:csc_step_delta 27:leak100_129_step_delta 28:csc_pre_mixed 29:csc_post_overlap 30:csc_post_raw 31:leak100_129_pre_mixed 32:leak100_129_post_overlap 33:leak100_129_post_raw 34:leak100_129_current 35:rho_ff_elec 36:rho_fp_elec 37:rho_pp_elec 38:rho_owned_elec 39:rho_imported_elec 40:rho_local_all_elec 41:rho_global_raw_elec 42:rho_global_scaled_elec 43:rho_contract_residual_elec 44:rho_coef_sum_elec 45:rho_coef_minus_raw_elec 46:Ne_raw_preRT 47:rho_ff_minus_raw_elec 48:rho_ff_fp_minus_raw_elec'
   end if
 
-  if (iperiodic == 3) then
-    call write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, 'dg-initial-density')
-  end if
-
   ! Time evolution loop
   do itt = Mit+1, nt
     if (yn_spinorbit == 'y') then
@@ -455,11 +447,10 @@ end subroutine time_evolution_dg_fragment
 subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
   use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_reciprocal_grid, s_poisson, s_pp_grid, &
                         s_scalar, s_dft_energy
-  use communication, only: comm_summation, comm_is_root, comm_get_max
+  use communication, only: comm_summation
   use rt_dg_fragment_types, only: s_dg_fragment_rt
   use math_constants, only: zi
   use salmon_global, only: yn_jm
-  use parallelization, only: nproc_id_global
   implicit none
   type(s_dft_system),     intent(in)    :: system
   type(s_parallel_info),  intent(in)    :: info
@@ -472,31 +463,14 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   type(s_dg_fragment_rt), intent(in)    :: dg_frag
   type(s_dft_energy),     intent(inout) :: energy
   integer,                intent(in)    :: itt
-  integer, parameter :: n_gprobe = 3
-  integer, parameter :: gprobe_idx(3, n_gprobe) = reshape((/ 1,1,1, 2,1,1, 3,1,1 /), (/3, n_gprobe/))
-  integer :: ix, iy, iz, ispin, ia, iprobe
-  real(8) :: rho_vh_local, rho_vh_sum, rho_vh_sum_r
-  real(8) :: rho_vxc_local, rho_vxc_sum, rho_vxc_sum_r
-  real(8) :: rho_vpsl_local, rho_vpsl_sum, rho_vpsl_sum_r
-  real(8) :: rho2_local, rho2_sum, rho2_sum_r
-  real(8) :: rho_max_local(1), rho_max_sum(1), rho_max_sum_r(1)
-  real(8) :: rho_g2_local, rho_g2_sum, rho_g2_sum_r
-  real(8) :: rho_gmax_local(1), rho_gmax_sum(1), rho_gmax_sum_r(1)
-  real(8) :: rho_gprobe_re_local(n_gprobe), rho_gprobe_im_local(n_gprobe)
-  real(8) :: rho_gprobe_re_sum(n_gprobe), rho_gprobe_im_sum(n_gprobe)
-  real(8) :: rho_gprobe_re_sum_r(n_gprobe), rho_gprobe_im_sum_r(n_gprobe)
+  integer :: ix, iy, iz, ispin, ia
+  real(8) :: rho_vh_local, rho_vh_sum
+  real(8) :: rho_vxc_local, rho_vxc_sum
   real(8) :: E_wrk(3), E_sum(3), etmp, sysvol, g(3), r(3), Gd
   complex(8) :: rho_e, rho_i
 
   rho_vh_local = 0.0d0
   rho_vxc_local = 0.0d0
-  rho_vpsl_local = 0.0d0
-  rho2_local = 0.0d0
-  rho_max_local(1) = 0.0d0
-  rho_g2_local = 0.0d0
-  rho_gmax_local(1) = 0.0d0
-  rho_gprobe_re_local(:) = 0.0d0
-  rho_gprobe_im_local(:) = 0.0d0
   E_wrk(:) = 0.0d0
   E_sum(:) = 0.0d0
   etmp = 0.0d0
@@ -504,10 +478,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   do iz = mg%is(3), mg%ie(3)
     do iy = mg%is(2), mg%ie(2)
       do ix = mg%is(1), mg%ie(1)
-        rho_max_local(1) = max(rho_max_local(1), rho%f(ix, iy, iz))
-        rho2_local = rho2_local + rho%f(ix, iy, iz) * rho%f(ix, iy, iz)
         rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
-        rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
         do ispin = 1, system%nspin
           rho_vxc_local = rho_vxc_local + rho_s(ispin)%f(ix, iy, iz) * Vxc(ispin)%f(ix, iy, iz)
         end do
@@ -517,19 +488,9 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
 
   rho_vh_local = rho_vh_local * system%Hvol
   rho_vxc_local = rho_vxc_local * system%Hvol
-  rho_vpsl_local = rho_vpsl_local * system%Hvol
-  rho2_local = rho2_local * system%Hvol
 
   call comm_summation(rho_vh_local, rho_vh_sum, dg_frag%icomm)
-  call comm_summation(rho_vh_local, rho_vh_sum_r, info%icomm_r)
   call comm_summation(rho_vxc_local, rho_vxc_sum, dg_frag%icomm)
-  call comm_summation(rho_vxc_local, rho_vxc_sum_r, info%icomm_r)
-  call comm_summation(rho_vpsl_local, rho_vpsl_sum, dg_frag%icomm)
-  call comm_summation(rho_vpsl_local, rho_vpsl_sum_r, info%icomm_r)
-  call comm_summation(rho2_local, rho2_sum, dg_frag%icomm)
-  call comm_summation(rho2_local, rho2_sum_r, info%icomm_r)
-  call comm_get_max(rho_max_local, rho_max_sum, 1, dg_frag%icomm)
-  call comm_get_max(rho_max_local, rho_max_sum_r, 1, info%icomm_r)
 
   sysvol = system%det_a
   do iz = mg%is(3), mg%ie(3)
@@ -539,14 +500,6 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
         g(2) = fg%vec_G(2, ix, iy, iz)
         g(3) = fg%vec_G(3, ix, iy, iz)
         rho_e = poisson%zrhoG_ele(ix, iy, iz)
-        rho_g2_local = rho_g2_local + sysvol * fg%coef(ix, iy, iz) * abs(rho_e)**2
-        rho_gmax_local(1) = max(rho_gmax_local(1), abs(rho_e))
-        do iprobe = 1, n_gprobe
-          if (ix == gprobe_idx(1, iprobe) .and. iy == gprobe_idx(2, iprobe) .and. iz == gprobe_idx(3, iprobe)) then
-            rho_gprobe_re_local(iprobe) = real(rho_e)
-            rho_gprobe_im_local(iprobe) = aimag(rho_e)
-          end if
-        end do
         E_wrk(1) = E_wrk(1) + sysvol * fg%coef(ix, iy, iz) * (abs(rho_e)**2 * 0.5d0)
         if (yn_jm == 'n') then
           rho_i = ppg%zrhoG_ion(ix, iy, iz)
@@ -563,107 +516,13 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
 
   call comm_summation(etmp, E_wrk(3), info%icomm_ko)
   call comm_summation(E_wrk, E_sum, 3, dg_frag%icomm)
-  call comm_summation(rho_g2_local, rho_g2_sum, dg_frag%icomm)
-  call comm_summation(rho_g2_local, rho_g2_sum_r, info%icomm_r)
-  call comm_summation(rho_gprobe_re_local, rho_gprobe_re_sum, n_gprobe, dg_frag%icomm)
-  call comm_summation(rho_gprobe_im_local, rho_gprobe_im_sum, n_gprobe, dg_frag%icomm)
-  call comm_summation(rho_gprobe_re_local, rho_gprobe_re_sum_r, n_gprobe, info%icomm_r)
-  call comm_summation(rho_gprobe_im_local, rho_gprobe_im_sum_r, n_gprobe, info%icomm_r)
-  call comm_get_max(rho_gmax_local, rho_gmax_sum, 1, dg_frag%icomm)
-  call comm_get_max(rho_gmax_local, rho_gmax_sum_r, 1, info%icomm_r)
 
   energy%E_kin = dg_frag%energy_kinetic
   energy%E_ion_nloc = dg_frag%energy_nonlocal
   energy%E_h = E_sum(1)
   energy%E_ion_loc = E_sum(2) + E_sum(3)
   energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
-  if (comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
-    write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
-      "        dg-energy-helper: itt=", itt, " E_one=", dg_frag%total_energy, " rhoVh=", rho_vh_sum, " rhoVxc=", rho_vxc_sum, &
-      " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &
-      " rhoG2=", rho_g2_sum, " rhoGmax=", rho_gmax_sum(1), " rhoVh_r=", rho_vh_sum_r, &
-      " rhoVxc_r=", rho_vxc_sum_r, " rhoVpsl_r=", rho_vpsl_sum_r, " rho2_r=", rho2_sum_r, &
-      " rhomax_r=", rho_max_sum_r(1), " rhoG2_r=", rho_g2_sum_r, " rhoGmax_r=", rho_gmax_sum_r(1), &
-      " E_kin=", energy%E_kin, &
-      " E_ion_nloc=", energy%E_ion_nloc, " E_h=", energy%E_h, " E_xc=", energy%E_xc, &
-      " E_ion_loc=", energy%E_ion_loc, " E_ion_ion=", energy%E_ion_ion, " E_tot=", energy%E_tot
-    write(*,'(1x,a,i0,6(a,1pe14.6),3(a,1pe14.6))') &
-      "        dg-rhoG-probe: itt=", itt, &
-      " g111_re=", rho_gprobe_re_sum(1), " g111_im=", rho_gprobe_im_sum(1), &
-      " g211_re=", rho_gprobe_re_sum(2), " g211_im=", rho_gprobe_im_sum(2), &
-      " g311_re=", rho_gprobe_re_sum(3), " g311_im=", rho_gprobe_im_sum(3), &
-      " g111_abs=", sqrt(rho_gprobe_re_sum(1)**2 + rho_gprobe_im_sum(1)**2), &
-      " g211_abs=", sqrt(rho_gprobe_re_sum(2)**2 + rho_gprobe_im_sum(2)**2), &
-      " g311_abs=", sqrt(rho_gprobe_re_sum(3)**2 + rho_gprobe_im_sum(3)**2)
-    write(*,'(1x,a,i0,6(a,1pe14.6),3(a,1pe14.6))') &
-      "        dg-rhoG-probe-r: itt=", itt, &
-      " g111_re=", rho_gprobe_re_sum_r(1), " g111_im=", rho_gprobe_im_sum_r(1), &
-      " g211_re=", rho_gprobe_re_sum_r(2), " g211_im=", rho_gprobe_im_sum_r(2), &
-      " g311_re=", rho_gprobe_re_sum_r(3), " g311_im=", rho_gprobe_im_sum_r(3), &
-      " g111_abs=", sqrt(rho_gprobe_re_sum_r(1)**2 + rho_gprobe_im_sum_r(1)**2), &
-      " g211_abs=", sqrt(rho_gprobe_re_sum_r(2)**2 + rho_gprobe_im_sum_r(2)**2), &
-      " g311_abs=", sqrt(rho_gprobe_re_sum_r(3)**2 + rho_gprobe_im_sum_r(3)**2)
-    write(*,'(1x,a,i0,3(a,1pe14.6))') "        dg-rhoG-probe-gvec: itt=", itt, &
-      " g211_gx=", fg%vec_G(1, 2, 1, 1), " g211_gy=", fg%vec_G(2, 2, 1, 1), " g211_gz=", fg%vec_G(3, 2, 1, 1)
-    flush(6)
-  end if
 end subroutine update_dg_rt_total_energy
-
-subroutine write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, label)
-  use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_scalar
-  use communication, only: comm_summation, comm_get_max, comm_is_root
-  implicit none
-  type(s_dft_system),    intent(in) :: system
-  type(s_parallel_info), intent(in) :: info
-  type(s_rgrid),         intent(in) :: mg
-  type(s_scalar),        intent(in) :: rho, Vh, Vpsl
-  type(s_scalar),        intent(in) :: rho_s(system%nspin), Vxc(system%nspin)
-  character(*),          intent(in) :: label
-  integer :: ix, iy, iz, ispin
-  real(8) :: rho_vh_local, rho_vh_sum
-  real(8) :: rho_vxc_local, rho_vxc_sum
-  real(8) :: rho_vpsl_local, rho_vpsl_sum
-  real(8) :: rho2_local, rho2_sum
-  real(8) :: rho_max_local(1), rho_max_sum(1)
-
-  rho_vh_local = 0.0d0
-  rho_vxc_local = 0.0d0
-  rho_vpsl_local = 0.0d0
-  rho2_local = 0.0d0
-  rho_max_local(1) = 0.0d0
-
-  do iz = mg%is(3), mg%ie(3)
-    do iy = mg%is(2), mg%ie(2)
-      do ix = mg%is(1), mg%ie(1)
-        rho_max_local(1) = max(rho_max_local(1), rho%f(ix, iy, iz))
-        rho2_local = rho2_local + rho%f(ix, iy, iz) * rho%f(ix, iy, iz)
-        rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
-        rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
-        do ispin = 1, system%nspin
-          rho_vxc_local = rho_vxc_local + rho_s(ispin)%f(ix, iy, iz) * Vxc(ispin)%f(ix, iy, iz)
-        end do
-      end do
-    end do
-  end do
-
-  rho_vh_local = rho_vh_local * system%Hvol
-  rho_vxc_local = rho_vxc_local * system%Hvol
-  rho_vpsl_local = rho_vpsl_local * system%Hvol
-  rho2_local = rho2_local * system%Hvol
-
-  call comm_summation(rho_vh_local, rho_vh_sum, info%icomm_r)
-  call comm_summation(rho_vxc_local, rho_vxc_sum, info%icomm_r)
-  call comm_summation(rho_vpsl_local, rho_vpsl_sum, info%icomm_r)
-  call comm_summation(rho2_local, rho2_sum, info%icomm_r)
-  call comm_get_max(rho_max_local, rho_max_sum, 1, info%icomm_r)
-
-  if (comm_is_root(nproc_id_global)) then
-    write(*,'(1x,a,a,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
-      '        ', trim(label), ': rhoVh=', rho_vh_sum, ' rhoVxc=', rho_vxc_sum, &
-      ' rhoVpsl=', rho_vpsl_sum, ' rho2=', rho2_sum, ' rhomax=', rho_max_sum(1)
-    flush(6)
-  end if
-end subroutine write_initial_density_probe
 
 subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital

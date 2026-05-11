@@ -477,8 +477,6 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag
   character(1)   :: yn_dc_for_dg
-  character(1)   :: yn_dual_rho_vh_only
-  character(16)  :: dual_rho_h_mode
   character(1)   :: yn_dc_fragment_optimization
   integer        :: nstate_frag
   integer        :: lcfo_frag_cache_size

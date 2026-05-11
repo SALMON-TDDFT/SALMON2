@@ -326,6 +326,7 @@ module rt_dg_fragment_types
                                                    ! This is the shared real-space fragment basis itself.
                                                    ! Spin dependence enters through bookkeeping/operators, not here.
     complex(8), allocatable :: phi_frag_c(:,:,:,:,:) ! complex fragment basis for SOI/noncollinear path
+    logical, allocatable :: phi_frag_has_seed_buffer(:) ! true when halo values came from DC buffer seed
     logical :: has_real_space_basis                ! flag: real-space basis available
     logical :: has_halo_exchange                   ! flag: halo exchange implemented
 
@@ -335,11 +336,9 @@ module rt_dg_fragment_types
 
     ! Density and potentials (allocated internally)
     real(8), allocatable :: rho_frag(:,:,:)        ! electron density on grid
-    real(8), allocatable :: rho_h_frag(:,:,:)      ! Hartree-only density on grid
     real(8), allocatable :: rho_s_frag(:,:,:,:)    ! spin-resolved density (ix,iy,iz,ispin)
     real(8), allocatable :: Vh_frag(:,:,:)         ! Hartree potential
     real(8), allocatable :: Vxc_frag(:,:,:,:)      ! XC potential (ix,iy,iz,ispin)
-    logical :: has_seed_rho_h = .false.
 
     ! Self-consistent basis update (adaptive basis)
     complex(8), allocatable :: H_mat_old(:,:,:)    ! Previous Hamiltonian matrix (nstate,nstate,nspin)

@@ -638,28 +638,6 @@
   end subroutine get_fragment_local_range
 
   !=======================================================================
-  ! Add non-local pseudopotential contribution to Hamiltonian matrix
-  !
-  ! Calculates <φ_i|V_NL|φ_j> = Σ_ilma <φ_i|proj_ilma> V_ilma <proj_ilma|φ_j>
-  ! where proj_ilma are the pseudopotential projector functions
-  !
-  ! NUMERICAL ACCURACY: Store unnormalized overlaps, apply rinv_uvu once
-  ! This prevents rinv_uvu^2 error amplification and follows SALMON convention
-  !=======================================================================
-  subroutine add_nonlocal_pp_matrix(dg_frag, mg, ppg, nspin, hvol)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    type(s_rgrid),          intent(in) :: mg
-    type(s_pp_grid),        intent(in) :: ppg
-    integer,                intent(in)    :: nspin
-    real(8),                intent(in)    :: hvol
-    
-    stop "DG-Fragment RT SOI: add_nonlocal_pp_matrix fallback path is retired; use ensure_nonlocal_pp_matrix_A"
-    
-  end subroutine add_nonlocal_pp_matrix
-
-  !=======================================================================
   ! Calculate momentum matrix elements in fragment basis (velocity gauge)
   !=======================================================================
   subroutine calculate_momentum_matrix(dg_frag, system, mg, stencil)

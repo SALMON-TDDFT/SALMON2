@@ -177,7 +177,6 @@ contains
     use communication, only: comm_summation, comm_is_root, comm_create_group, COMM_GROUP_NULL
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
-                 dg_fragment_parallel_mode, &
                  nproc_rgrid, nproc_ob, yn_dg_subspace_diag, dg_subspace_extra_states, yn_spinorbit, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
                  dg_subspace_pw_vectors, dg_subspace_fallback_cond, nelec, nelec_spin
@@ -192,8 +191,7 @@ contains
     type(s_pp_grid),        intent(in)    :: ppg
     
     character(32), parameter :: bdir_frag='./data_dcdft/fragments/'
-    character(256) :: filename
-    integer :: iunit, i, j, io, ispin, ifrag, ia, ip
+    integer :: i, io, ispin, ia, ip
     integer :: pp_buf(3)
     integer, parameter :: momentum_stencil_buf = 4
     real(8) :: abs_disp
@@ -255,8 +253,9 @@ contains
     dg_frag%ifrag_group = 0
     dg_frag%nproc_frag = 1
     dg_frag%is_frag_root = .true.
-    dg_frag%parallel_mode = trim(dg_fragment_parallel_mode)
-    dg_frag%parallel_mode_orbital = (trim(dg_frag%parallel_mode) == 'orbital')
+    ! DG fragment subgroups are used as orbital-parallel teams in this branch.
+    dg_frag%parallel_mode = 'orbital'
+    dg_frag%parallel_mode_orbital = .true.
 
     if (.not. dg_frag%parallel_mode_orbital .and. trim(dg_frag%parallel_mode) /= 'legacy_realspace') then
       if (comm_is_root(info%id_rko)) then
@@ -415,16 +414,12 @@ contains
     
     ! Allocate density and potential arrays
     allocate(dg_frag%rho_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    if (.not. allocated(dg_frag%rho_h_frag)) then
-      allocate(dg_frag%rho_h_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    end if
     allocate(dg_frag%rho_s_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     allocate(dg_frag%Vh_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
     allocate(dg_frag%Vxc_frag(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), dg_frag%nspin))
     
     ! Initialize to zero
     dg_frag%rho_frag = 0.0d0
-    if (.not. dg_frag%has_seed_rho_h) dg_frag%rho_h_frag = 0.0d0
     dg_frag%rho_s_frag = 0.0d0
     dg_frag%Vh_frag = 0.0d0
     dg_frag%Vxc_frag = 0.0d0
@@ -756,7 +751,8 @@ contains
             source_rank = dg_frag%id_array(ifrag)
             subgroup_target_rank = source_rank - dg_frag%id_array(ifrag)
             if (dg_frag%density_primary_local_map(ix, iy, iz, i_local)) then
-              source_rank = get_fragment_grid_sender_rank(dg_frag%id_array(ifrag), dg_frag%nxyz_domain(:, ifrag), ix, iy, iz)
+              source_rank = get_fragment_grid_sender_rank(dg_frag%id_array(ifrag), dg_frag%nxyz_domain(:, ifrag), &
+                                                           ix, iy, iz, dg_frag%parallel_mode_orbital)
               subgroup_target_rank = source_rank - dg_frag%id_array(ifrag)
               if (subgroup_target_rank < 0 .or. subgroup_target_rank > dg_frag%isize_frag - 1) then
                 write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
@@ -879,13 +875,14 @@ contains
     ig = modulo(ig_raw - 1, ngrid) + 1
   end function wrap_global_grid_index
 
-  integer function get_fragment_grid_sender_rank(root_rank, ndom, ix, iy, iz) result(sender_rank)
-    use salmon_global, only: nproc_rgrid, dg_fragment_parallel_mode
+  integer function get_fragment_grid_sender_rank(root_rank, ndom, ix, iy, iz, parallel_mode_orbital) result(sender_rank)
+    use salmon_global, only: nproc_rgrid
     implicit none
     integer, intent(in) :: root_rank, ndom(3), ix, iy, iz
+    logical, intent(in) :: parallel_mode_orbital
     integer :: ipx, ipy, ipz, coords(3), nsize
 
-    if (trim(dg_fragment_parallel_mode) == 'orbital') then
+    if (parallel_mode_orbital) then
       sender_rank = root_rank
       return
     end if
@@ -1259,15 +1256,16 @@ contains
   subroutine read_fragment_basis_data(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root, comm_bcast, comm_sync_all, comm_summation, comm_get_max
-    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin, yn_dual_rho_vh_only
+    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: bdir_frag
     
     character(32), parameter :: binfile_wf = "wavefunctions.bin"
-    character(32), parameter :: binfile_bf = "basis_functions.bin"
+    character(32), parameter :: binfile_bfb = "basis_functions_buffer.bin"
     character(32), parameter :: binfile_rg = "rgrid_index.bin"
-    character(32), parameter :: binfile_rho_h = "hartree_density.bin"
+    integer, parameter :: basis_buffer_magic = -22022212
+    integer, parameter :: basis_buffer_version = 1
     character(256) :: filename
     integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
     integer :: nstate_frag_file, nstate_tot_file
@@ -1275,30 +1273,25 @@ contains
     real(8), allocatable :: coef_local(:,:,:,:), coef_tmp(:,:,:)  ! local coef buffers
     integer :: n_mat_tmp(2)   ! nspin is expected to be 1 or 2
     integer :: ifrag_count, i_local, io, global_idx
-    integer :: nxyz_domain(3), nxyz_alloc(3), nxyz_new(3), lgnum_frag(3), lgnum_total(3)
+    integer :: nxyz_domain(3), nxyz_alloc(3), lgnum_frag(3), lgnum_total(3)
+    integer :: nxyz_buffer_file(3), nxyz_box(3)
+    integer :: magic_file, version_file
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
     integer :: ix, iy, iz, n
     integer :: ixg_store, iyg_store, izg_store
     integer :: ix_src, iy_src, iz_src
+    integer :: ix_box, iy_box, iz_box
     integer :: nb  ! halo width
     integer :: nbasis_iter
     integer :: n_mat_cap, n_mat_cap_env, ienv
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: env_status, env_len
     character(len=64) :: env_n_mat_cap
-    logical :: warned_spin_discard, want_seed_rho_h, has_rho_h_file
+    logical :: warned_spin_discard, has_buffer_file
     real(8) :: cap_avg, weight_best
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
-    real(8), allocatable :: rho_h_local(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
-
-    want_seed_rho_h = (yn_dual_rho_vh_only == 'y')
-    dg_frag%has_seed_rho_h = .false.
-    if (want_seed_rho_h .and. .not. allocated(dg_frag%rho_h_frag)) then
-      allocate(dg_frag%rho_h_frag(dg_frag%mg%is(1):dg_frag%mg%ie(1), dg_frag%mg%is(2):dg_frag%mg%ie(2), dg_frag%mg%is(3):dg_frag%mg%ie(3)))
-      dg_frag%rho_h_frag = 0.0d0
-    end if
     
     ! Step 1: Root reads metadata from first fragment and broadcasts
     if (comm_is_root(dg_frag%id)) then
@@ -1509,6 +1502,9 @@ contains
     ! Step 4: nstate_tot was aligned to file metadata above (full-state mode).
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    if (allocated(dg_frag%phi_frag_has_seed_buffer)) deallocate(dg_frag%phi_frag_has_seed_buffer)
+    allocate(dg_frag%phi_frag_has_seed_buffer(ifrag_count))
+    dg_frag%phi_frag_has_seed_buffer(:) = .false.
     allocate(coef_local(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, ifrag_count))
     coef_local = 0.0d0
     i_local = 0
@@ -1730,17 +1726,39 @@ contains
       ! jxyz_tot(1,:) gives the global index of the first grid point in this fragment
       dg_frag%ixyz_frag(1:3, ifrag) = jxyz_tot(1, 1:3)
       
-      ! Read basis functions
+      ! DG-RT requires the DC-exported buffer-aware basis.  The core-only
+      ! basis_functions.bin cannot provide fragment-boundary stencil data.
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bfb
+      inquire(file=filename, exist=has_buffer_file)
       
+      if (.not. has_buffer_file) then
+        write(*,'(1x,a,i0,a,a)') "[FATAL] missing DG buffer basis at ifrag=", ifrag, &
+          " file=", trim(filename)
+        write(*,'(1x,a)') "Regenerate the DC seed so basis_functions_buffer.bin is exported."
+        stop "DG-Fragment RT: missing basis buffer file"
+      end if
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
-      read(iunit) nxyz_domain(1:3), nspin_file, nstate_frag_file
+      read(iunit) magic_file, version_file
+      if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "Error: invalid basis buffer header at ifrag=", ifrag, &
+          " magic=", magic_file, " version=", version_file
+        stop "DG-Fragment RT: invalid basis buffer file"
+      end if
+      read(iunit) nxyz_domain(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
       if (nspin_file < 1) then
-        write(*,'(1x,a,i0,a,i0)') "Error: invalid nspin_file in basis_functions header at ifrag=", ifrag, &
+        write(*,'(1x,a,i0,a,i0)') "Error: invalid nspin_file in basis buffer header at ifrag=", ifrag, &
                                    " nspin_file=", nspin_file
         stop "DG-Fragment RT: invalid nspin_file"
       end if
+      do n = 1, 3
+        if (dg_frag%num_fragment(n) > 1 .and. nxyz_buffer_file(n) < nb) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] DG seed buffer too small at ifrag=", ifrag, &
+            " axis=", n, " seed_buffer=", nxyz_buffer_file(n), " required=", nb
+          stop "DG-Fragment RT: insufficient basis buffer"
+        end if
+      end do
+      nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_file(1:3)
       if (allocated(n_basis_frag)) deallocate(n_basis_frag)
       allocate(n_basis_frag(nspin_file))
       read(iunit) n_basis_frag(1:nspin_file)
@@ -1770,82 +1788,62 @@ contains
       ! phi_frag has no spin dimension: keep spin-1 basis and discard extra spin channels
       ! while still consuming all records to keep stream alignment.
       block
-        real(8), allocatable :: phi_tmp(:,:,:)
+        real(8), allocatable :: phi_box(:,:,:)
         if (nspin_file < 1 .or. nstate_frag_file < 1) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "Error: invalid basis_functions header at ifrag=", ifrag, &
+          write(*,'(1x,a,i0,a,i0,a,i0)') "Error: invalid basis buffer header at ifrag=", ifrag, &
                                          " nspin_file=", nspin_file, " nstate_frag_file=", nstate_frag_file
-          stop "DG-Fragment RT: invalid basis_functions header"
+          stop "DG-Fragment RT: invalid basis buffer header"
         end if
-        allocate(phi_tmp(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
+        allocate(phi_box(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
         
         do ispin = 1, nspin_file
           do n = 1, nstate_frag_file
-            ! Read basis function for interior domain (1:nx, 1:ny, 1:nz)
-            read(iunit) phi_tmp(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
+            read(iunit) phi_box(1:nxyz_box(1), 1:nxyz_box(2), 1:nxyz_box(3))
             
             if (ispin == 1 .and. n <= dg_frag%nstate_frag) then
-              ! Fill the allocated global-index box directly from the full
-              ! DC-LCFO fragment image.  In orbital mode this is the full
-              ! fragment box; in legacy mode it remains the parent-grid box.
+              ! The buffer file is stored as an unwrapped box around the core.
+              ! Unsplitted axes may still wrap within the fragment itself; split
+              ! axes must be covered by the seed buffer checked above.
               do izg_store = lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3)
-                iz_src = modulo(izg_store - dg_frag%ixyz_frag(3, ifrag), nxyz_domain(3)) + 1
+                iz_box = izg_store - (dg_frag%ixyz_frag(3, ifrag) - nxyz_buffer_file(3)) + 1
+                if (iz_box < 1 .or. iz_box > nxyz_box(3)) then
+                  iz_src = nxyz_buffer_file(3) + modulo(izg_store - dg_frag%ixyz_frag(3, ifrag), nxyz_domain(3)) + 1
+                else
+                  iz_src = iz_box
+                end if
                 do iyg_store = lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2)
-                  iy_src = modulo(iyg_store - dg_frag%ixyz_frag(2, ifrag), nxyz_domain(2)) + 1
+                  iy_box = iyg_store - (dg_frag%ixyz_frag(2, ifrag) - nxyz_buffer_file(2)) + 1
+                  if (iy_box < 1 .or. iy_box > nxyz_box(2)) then
+                    iy_src = nxyz_buffer_file(2) + modulo(iyg_store - dg_frag%ixyz_frag(2, ifrag), nxyz_domain(2)) + 1
+                  else
+                    iy_src = iy_box
+                  end if
                   do ixg_store = lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1)
-                    ix_src = modulo(ixg_store - dg_frag%ixyz_frag(1, ifrag), nxyz_domain(1)) + 1
+                    ix_box = ixg_store - (dg_frag%ixyz_frag(1, ifrag) - nxyz_buffer_file(1)) + 1
+                    if (ix_box < 1 .or. ix_box > nxyz_box(1)) then
+                      ix_src = nxyz_buffer_file(1) + modulo(ixg_store - dg_frag%ixyz_frag(1, ifrag), nxyz_domain(1)) + 1
+                    else
+                      ix_src = ix_box
+                    end if
                     dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = &
-                      phi_tmp(ix_src, iy_src, iz_src)
+                      phi_box(ix_src, iy_src, iz_src)
                   end do
                 end do
               end do
+              dg_frag%phi_frag_has_seed_buffer(i_local) = .true.
             end if
           end do
         end do
 
         if (nspin_file > 1 .and. .not. warned_spin_discard .and. comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a)') "[WARN] basis_functions.bin has nspin_file=", nspin_file, &
+          write(*,'(1x,a,i0,a)') "[WARN] basis_functions_buffer.bin has nspin_file=", nspin_file, &
                                  "; using spin-1 basis only in phi_frag"
           warned_spin_discard = .true.
         end if
         
-        deallocate(phi_tmp)
+        if (allocated(phi_box)) deallocate(phi_box)
       end block
 
-      if (want_seed_rho_h) then
-        has_rho_h_file = .false.
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_rho_h
-        iunit = get_filehandle()
-        open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=env_status)
-        if (env_status == 0) then
-          has_rho_h_file = .true.
-          allocate(rho_h_local(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3)))
-          read(iunit) nxyz_new(1:3)
-          if (any(nxyz_new(1:3) /= nxyz_domain(1:3))) then
-            stop "DG-Fragment RT: hartree_density.bin domain mismatch"
-          end if
-          read(iunit) rho_h_local(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3))
-          close(iunit)
-
-          do iz = 1, nxyz_domain(3)
-            izg_store = jxyz_tot(iz, 3)
-            if (izg_store < dg_frag%mg%is(3) .or. izg_store > dg_frag%mg%ie(3)) cycle
-            do iy = 1, nxyz_domain(2)
-              iyg_store = jxyz_tot(iy, 2)
-              if (iyg_store < dg_frag%mg%is(2) .or. iyg_store > dg_frag%mg%ie(2)) cycle
-              do ix = 1, nxyz_domain(1)
-                ixg_store = jxyz_tot(ix, 1)
-                if (ixg_store < dg_frag%mg%is(1) .or. ixg_store > dg_frag%mg%ie(1)) cycle
-                dg_frag%rho_h_frag(ixg_store, iyg_store, izg_store) = rho_h_local(ix, iy, iz)
-              end do
-            end do
-          end do
-          deallocate(rho_h_local)
-          dg_frag%has_seed_rho_h = .true.
-        else
-          close(iunit)
-        end if
-      end if
-      
       close(iunit)
     end do
     
@@ -1879,9 +1877,6 @@ contains
       write(*,'(1x,a,i0,a,i0,a,i0)') "  Domain size: ", nxyz_domain(1), " x ", nxyz_domain(2), " x ", nxyz_domain(3)
       write(*,'(1x,a,i0)') "  Number of basis functions per fragment: ", dg_frag%nstate_frag
       write(*,'(1x,a,i0)') "  Number of fragments loaded: ", ifrag_count
-      if (want_seed_rho_h) then
-        write(*,'(1x,a,l1)') "  Hartree-density seed loaded: ", dg_frag%has_seed_rho_h
-      end if
     end if
     
   end subroutine read_fragment_basis_data
@@ -2336,7 +2331,7 @@ contains
     if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%jxyz_tot)) deallocate(dg_frag%jxyz_tot)
     if (allocated(dg_frag%phi_frag)) deallocate(dg_frag%phi_frag)
-    if (allocated(dg_frag%rho_h_frag)) deallocate(dg_frag%rho_h_frag)
+    if (allocated(dg_frag%phi_frag_has_seed_buffer)) deallocate(dg_frag%phi_frag_has_seed_buffer)
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
     if (allocated(dg_frag%rk_beta)) deallocate(dg_frag%rk_beta)
     if (allocated(dg_frag%rk_gamma)) deallocate(dg_frag%rk_gamma)

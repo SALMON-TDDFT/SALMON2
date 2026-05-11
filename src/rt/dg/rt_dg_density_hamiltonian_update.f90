@@ -3,10 +3,8 @@
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
-    use salmon_global, only: yn_dual_rho_vh_only
     use salmon_xc, only: s_xc_functional, exchange_correlation
     use poisson_dg_distributed, only: hartree_dg_distributed
-    use hartree_sub, only: build_hartree_density_from_rho
     use hamiltonian, only: update_vlocal
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use communication, only: comm_is_root
@@ -39,8 +37,6 @@
     integer :: n_metric
     logical :: use_hmat_complex
     logical :: use_rank_buffered_potential
-    logical :: use_dual_rho_vh
-    type(s_scalar) :: rho_h
 
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
@@ -69,17 +65,6 @@
       end do
     end if
 
-    use_dual_rho_vh = (yn_dual_rho_vh_only == 'y')
-    if (use_dual_rho_vh) then
-      call allocate_scalar(mg, rho_h)
-      if (itt == 1 .and. dg_frag%has_seed_rho_h) then
-        rho_h%f(:, :, :) = dg_frag%rho_h_frag(:, :, :)
-      else
-        call build_hartree_density_from_rho(info, rho, rho_h)
-        dg_frag%rho_h_frag(:, :, :) = rho_h%f(:, :, :)
-      end if
-    end if
-
     use_rank_buffered_potential = all(dg_frag%rank_buf_hi(:) >= dg_frag%rank_buf_lo(:))
     if (use_rank_buffered_potential) then
       allocate(rho_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
@@ -95,11 +80,7 @@
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
-    if (use_dual_rho_vh) then
-      call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho_h, Vh)
-    else
-      call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
-    end if
+    call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
     if (use_rank_buffered_potential) then
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vh, Vh_buffer)
@@ -113,10 +94,6 @@
         ", itt=", itt, " max=", maxval(abs(Vh%f))
       stop "DG-RT Hartree diverged"
     end if
-    if (use_dual_rho_vh) then
-      call deallocate_scalar(rho_h)
-    end if
-    
     ! Step 3: Update exchange-correlation potential
     ! IMPORTANT: XC potential is LOCAL/SEMI-LOCAL (LDA/GGA)
     !            Vxc(r) depends only on ρ(r) and ∇ρ(r) at nearby points

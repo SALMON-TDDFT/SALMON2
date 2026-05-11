@@ -326,6 +326,7 @@ contains
     MPI_ERROR_CHECK(call MPI_Group_incl(igroup_parent, size(idlists), idlists, igroup_child, ierr))
     MPI_ERROR_CHECK(call MPI_Comm_create(iparent, igroup_child, ichild, ierr))
     MPI_ERROR_CHECK(call MPI_Group_free(igroup_child, ierr))
+    MPI_ERROR_CHECK(call MPI_Group_free(igroup_parent, ierr))
   end function
 
   subroutine comm_free_group(igroup)

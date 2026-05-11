@@ -16,6 +16,7 @@
 | README.md | Current | 上流 SALMON 全体の入口 |
 | README_JP.md | Current | 日本語入口 |
 | DOCUMENTATION_INDEX.md | Current | 本リポジトリ向け索引 |
+| DG_DC_TO_DG_RT_USAGE_JA.md | Current | DC から DG-RT へ buffered seed を渡す現行手順 |
 | doc/NOTE_DG.md | Current | DG系統合ノート |
 | doc/NOTE_PLUSU.md | Current | +U系統合ノート |
 | doc/NOTE_HSE.md | Current | HSE系統合ノート |

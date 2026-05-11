@@ -263,17 +263,6 @@
         " Ac_tot=", Ac_tot(1), Ac_tot(2), Ac_tot(3)
       flush(6)
     end if
-    if (dg_frag%id == 0 .and. itt == 1) then
-      if (use_direct_pfp .and. use_fft_pfp) then
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW momentum mode: fft_gspace'
-      else if (use_direct_pfp) then
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW momentum mode: direct_grad'
-      else
-        write(*,'(1x,a)') '[DG-FFT-FP] Frag-PW momentum mode: legacy i(A·k)S_fp'
-      end if
-      flush(6)
-    end if
-
     ! Calculate A^2 (diamagnetic term)
     A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
     if (A_squared /= A_squared) then
