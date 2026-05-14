@@ -51,9 +51,15 @@ if(USE_OPENACC)
 endif()
 
 
+if(DEFINED USE_MPI_DEFAULT)
+  set(SALMON_USE_MPI_DEFAULT ${USE_MPI_DEFAULT})
+else()
+  set(SALMON_USE_MPI_DEFAULT OFF)
+endif()
+
 # Bulid options
 ## For third party libraries
-option(USE_MPI       "Use MPI parallelization" OFF)
+option(USE_MPI       "Use MPI parallelization" ${SALMON_USE_MPI_DEFAULT})
 option(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option(USE_LIBXC     "Use Libxc library"       OFF)
