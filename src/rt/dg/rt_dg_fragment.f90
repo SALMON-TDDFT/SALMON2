@@ -179,7 +179,7 @@ contains
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
                  nproc_rgrid, nproc_ob, yn_dg_subspace_diag, dg_subspace_extra_states, yn_spinorbit, &
                  dg_nmat_cap_mode, dg_nmat_cap_fixed, &
-                 dg_subspace_pw_vectors, dg_subspace_fallback_cond, nelec, nelec_spin
+                 dg_subspace_pw_vectors, dg_subspace_fallback_cond, nelec, nelec_spin, process_allocation
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
     use filesystem, only: get_filehandle
     implicit none
@@ -192,7 +192,7 @@ contains
     
     character(32), parameter :: bdir_frag='./data_dcdft/fragments/'
     integer :: i, io, ispin, ia, ip
-    integer :: pp_buf(3)
+    integer :: pp_buf(3), parent_rgrid(3)
     integer, parameter :: momentum_stencil_buf = 4
     real(8) :: abs_disp
     logical :: load_from_dcdft
@@ -272,6 +272,31 @@ contains
     if (dg_frag%nproc_frag < 1) then
       stop "DG-Fragment RT requires positive fragment subgroup size"
     end if
+    ! initialization_rt may temporarily replace the namelist nproc_rgrid by
+    ! nproc_rgrid_tot when building the parent DFT grid.  Use info%nprgrid
+    ! here because it records the actual parent real-space communicator.
+    parent_rgrid(1:3) = info%nprgrid(1:3)
+
+    if (dg_frag%parallel_mode_orbital) then
+      if (trim(process_allocation) /= 'orbital_sequential') then
+        if (comm_is_root(info%id_rko)) then
+          write(*,'(1x,a)') "ERROR: DG orbital fragment parallelism requires process_allocation='orbital_sequential'."
+          write(*,'(1x,a,a)') "       Current process_allocation=", trim(process_allocation)
+          write(*,'(1x,a)') "       Otherwise each fragment subgroup is laid out as real-space ranks, not orbital ranks."
+        end if
+        stop "DG-Fragment RT orbital mode requires orbital_sequential rank layout"
+      end if
+      if (any(parent_rgrid(1:3) /= num_fragment(1:3))) then
+        if (comm_is_root(info%id_rko)) then
+          write(*,'(1x,a)') "ERROR: DG orbital fragment parallelism requires one parent real-space rank per fragment."
+          write(*,'(1x,a,3(i0,1x))') "       parent nproc_rgrid = ", parent_rgrid(1), parent_rgrid(2), parent_rgrid(3)
+          write(*,'(1x,a,3(i0,1x))') "       num_fragment = ", num_fragment(1), num_fragment(2), num_fragment(3)
+          write(*,'(1x,a,3(i0,1x))') "       namelist nproc_rgrid = ", nproc_rgrid(1), nproc_rgrid(2), nproc_rgrid(3)
+          write(*,'(1x,a)') "       Use nproc_ob for fragment-internal orbital parallelism."
+        end if
+        stop "DG-Fragment RT orbital mode requires parent nproc_rgrid == num_fragment"
+      end if
+    end if
 
     if (dg_frag%isize < dg_frag%n_frag) then
       stop "DG-Fragment RT requires np >= n_frag"
@@ -295,8 +320,12 @@ contains
       stop "DG-Fragment RT stage-1 requires np = n_frag * nproc_frag"
     end if
 
-    dg_frag%ifrag_group = dg_frag%id / dg_frag%nproc_frag + 1
     dg_frag%id_frag = mod(dg_frag%id, dg_frag%nproc_frag)
+    if (dg_frag%parallel_mode_orbital) then
+      dg_frag%ifrag_group = fragment_from_rank_address(info%iaddress(1:3), num_fragment)
+    else
+      dg_frag%ifrag_group = dg_frag%id / dg_frag%nproc_frag + 1
+    end if
     dg_frag%isize_frag = dg_frag%nproc_frag
     dg_frag%is_frag_root = (dg_frag%id_frag == 0)
     dg_frag%icomm_frag = comm_create_group(dg_frag%icomm, dg_frag%ifrag_group - 1, dg_frag%id_frag)
@@ -364,6 +393,9 @@ contains
     allocate(dg_frag%nxyz_domain(3, dg_frag%n_frag))
     allocate(dg_frag%ixyz_frag(3, dg_frag%n_frag))
     allocate(dg_frag%id_array(dg_frag%n_frag))
+    do i = 1, dg_frag%n_frag
+      dg_frag%id_array(i) = get_fragment_group_root_rank(i, dg_frag%nproc_frag)
+    end do
     dg_frag%lg => lg
     dg_frag%mg => mg
     dg_frag%hgs = system%hgs
@@ -977,8 +1009,8 @@ contains
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: idx(3)
 
-    ifrag = idx(1) + (idx(2) - 1) * dg_frag%num_fragment(1) + &
-            (idx(3) - 1) * dg_frag%num_fragment(1) * dg_frag%num_fragment(2)
+    ifrag = ((idx(1) - 1) * dg_frag%num_fragment(2) + (idx(2) - 1)) * &
+            dg_frag%num_fragment(3) + idx(3)
   end function cartesian_index_to_fragment
 
   integer function find_density_grid_owner(dg_frag, ixg, iyg, izg, hint_rank) result(owner)
@@ -1256,7 +1288,8 @@ contains
   subroutine read_fragment_basis_data(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root, comm_bcast, comm_sync_all, comm_summation, comm_get_max
-    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin
+    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin, &
+                             yn_adaptive_basis
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: bdir_frag
@@ -1270,9 +1303,9 @@ contains
     integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
     integer :: nstate_frag_file, nstate_tot_file
     integer, allocatable :: n_basis_tmp(:,:), index_basis_tmp(:,:,:)
-    real(8), allocatable :: coef_local(:,:,:,:), coef_tmp(:,:,:)  ! local coef buffers
     integer :: n_mat_tmp(2)   ! nspin is expected to be 1 or 2
     integer :: ifrag_count, i_local, io, global_idx
+    integer :: local_coef_max, local_idx
     integer :: nxyz_domain(3), nxyz_alloc(3), lgnum_frag(3), lgnum_total(3)
     integer :: nxyz_buffer_file(3), nxyz_box(3)
     integer :: magic_file, version_file
@@ -1288,7 +1321,7 @@ contains
     integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
     integer :: env_status, env_len
     character(len=64) :: env_n_mat_cap
-    logical :: warned_spin_discard, has_buffer_file
+    logical :: warned_spin_discard, has_buffer_file, identity_seed_coefficients
     real(8) :: cap_avg, weight_best
     real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
     integer, allocatable :: occ_count(:,:), cap_frag(:,:)
@@ -1319,6 +1352,16 @@ contains
     call comm_bcast(nspin_file, dg_frag%icomm, 0)
     call comm_bcast(nstate_frag_file, dg_frag%icomm, 0)
     call comm_bcast(nstate_tot_file, dg_frag%icomm, 0)
+
+    identity_seed_coefficients = (nstate_tot_file < 0)
+    if (identity_seed_coefficients) nstate_tot_file = -nstate_tot_file
+    if (.not. identity_seed_coefficients) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "[FATAL] dense DG seed coefficients are no longer supported for DG-RT."
+        write(*,'(1x,a)') "Regenerate the DC seed so wavefunctions.bin stores identity coefficients via index_basis."
+      end if
+      stop "DG-Fragment RT: dense seed coefficient block is unsupported"
+    end if
 
     if (nstate_frag_file /= dg_frag%nstate_frag) then
       if (dg_frag%id == 0) then
@@ -1355,6 +1398,7 @@ contains
     write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
     open(iunit, file=filename, form='unformatted', access='stream', status='old')
     read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+    if (nstate_tot_file < 0) nstate_tot_file = -nstate_tot_file
     read(iunit) n_mat_tmp(1:dg_frag%nspin)
     read(iunit) n_basis_tmp(1:dg_frag%n_frag, 1:dg_frag%nspin)
     read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
@@ -1498,6 +1542,12 @@ contains
 
     dg_frag%owned_coef_start = 0
     dg_frag%owned_coef_end = -1
+
+    ! Build the row-owner map before allocating coefficient storage.  In
+    ! orbital mode this keeps only the subgroup-owned basis rows on each rank,
+    ! avoiding a temporary full-fragment coefficient replica during seed load.
+    call rebuild_coef_owner_map(dg_frag, "read-fragment-basis")
+    local_coef_max = max(1, maxval(dg_frag%local_coef_count(1:dg_frag%nspin)))
     
     ! Step 4: nstate_tot was aligned to file metadata above (full-state mode).
 
@@ -1505,35 +1555,6 @@ contains
     if (allocated(dg_frag%phi_frag_has_seed_buffer)) deallocate(dg_frag%phi_frag_has_seed_buffer)
     allocate(dg_frag%phi_frag_has_seed_buffer(ifrag_count))
     dg_frag%phi_frag_has_seed_buffer(:) = .false.
-    allocate(coef_local(dg_frag%nstate_frag, dg_frag%nstate_tot, dg_frag%nspin, ifrag_count))
-    coef_local = 0.0d0
-    i_local = 0
-    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      i_local = i_local + 1
-      
-      iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
-      
-      open(iunit, file=filename, form='unformatted', access='stream', status='old')
-      
-      ! Read header
-      read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
-      
-      ! Read metadata blocks
-      read(iunit) n_mat_tmp(1:dg_frag%nspin)
-      read(iunit) n_basis_tmp(1:dg_frag%n_frag, 1:dg_frag%nspin)
-      read(iunit) index_basis_tmp(1:dg_frag%nstate_frag, 1:dg_frag%n_frag, 1:dg_frag%nspin)
-
-      ! Read coefficient block with file dimensions and map into runtime dimensions
-      allocate(coef_tmp(dg_frag%nstate_frag, nstate_tot_file, dg_frag%nspin))
-      coef_tmp = 0.0d0
-      read(iunit) coef_tmp(1:dg_frag%nstate_frag, 1:nstate_tot_file, 1:dg_frag%nspin)
-      coef_local(1:dg_frag%nstate_frag, 1:min(dg_frag%nstate_tot, nstate_tot_file), 1:dg_frag%nspin, i_local) = &
-        coef_tmp(1:dg_frag%nstate_frag, 1:min(dg_frag%nstate_tot, nstate_tot_file), 1:dg_frag%nspin)
-      deallocate(coef_tmp)
-      
-      close(iunit)
-    end do
 
     if (n_mat_cap < 1 .and. trim(dg_nmat_cap_mode) == 'occ_multiple' .and. dg_nmat_cap_multiple > 0.0d0) then
       if (dg_frag%nspin == 1) then
@@ -1564,8 +1585,11 @@ contains
             nocc_eff = max(1, min(int(nelec / 2.0d0 + 1.0d-12), dg_frag%nstate_tot))
           end if
           nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
-          do io = 1, nocc_eff
-            frag_weight_local(ifrag, io, ispin) = sum(abs(coef_local(1:nbasis_iter, io, ispin, i_local))**2)
+          do io = 1, nbasis_iter
+            global_idx = dg_frag%index_basis(io, ifrag, ispin)
+            if (global_idx >= 1 .and. global_idx <= nocc_eff) then
+              frag_weight_local(ifrag, global_idx, ispin) = 1.0d0
+            end if
           end do
         end do
       end do
@@ -1667,9 +1691,11 @@ contains
     if (allocated(dg_frag%coef)) deallocate(dg_frag%coef)
     if (allocated(dg_frag%coef_new)) deallocate(dg_frag%coef_new)
     if (allocated(dg_frag%coef_work)) deallocate(dg_frag%coef_work)
-    allocate(dg_frag%coef(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
-    allocate(dg_frag%coef_new(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
-    allocate(dg_frag%coef_work(dg_frag%n_mat_max, dg_frag%nstate_tot, dg_frag%nspin))
+    allocate(dg_frag%coef(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+    if (yn_adaptive_basis == 'y') then
+      allocate(dg_frag%coef_new(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+    end if
+    allocate(dg_frag%coef_work(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
     dg_frag%coef = 0.0d0
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new = 0.0d0
     dg_frag%coef_work = 0.0d0
@@ -1685,10 +1711,12 @@ contains
         nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
         do io = 1, nbasis_iter
           global_idx = dg_frag%index_basis(io, ifrag, ispin)
-          if (global_idx > 0 .and. global_idx <= dg_frag%n_mat_max) then
-            ! Copy coefficient for this global basis function
-            dg_frag%coef(global_idx, 1:dg_frag%nstate_tot, ispin) = &
-              coef_local(io, 1:dg_frag%nstate_tot, ispin, i_local)
+          local_idx = 0
+          if (global_idx > 0 .and. global_idx <= dg_frag%n_mat_max) local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+          if (local_idx > 0 .and. local_idx <= size(dg_frag%coef, 1)) then
+            ! DC-DG seed coefficients are the identity after index_basis
+            ! compression: local basis row io represents global state global_idx.
+            if (global_idx <= dg_frag%nstate_tot) dg_frag%coef(local_idx, global_idx, ispin) = (1.0d0, 0.0d0)
           end if
         end do
       end do
@@ -1851,9 +1879,9 @@ contains
     if (allocated(jxyz_tot)) deallocate(jxyz_tot)
     if (allocated(n_basis_frag)) deallocate(n_basis_frag)
     
-    ! CRITICAL: Share fragment geometry metadata across all ranks for Halo initialization
-    ! id_array is not initialized yet here, so reconstruct owner rank using
-    ! the same block distribution rule as distribute_fragments().
+    ! Share fragment geometry metadata across all ranks.  The fragment root
+    ! ranks are fixed by the stage-1 subgroup layout, so use the same
+    ! deterministic mapping that initializes id_array before owner-map builds.
     block
       integer :: owner_rank
       do ifrag = 1, dg_frag%n_frag
@@ -1870,7 +1898,7 @@ contains
     call comm_sync_all(dg_frag%icomm)
     
     ! Clean up
-    deallocate(n_basis_tmp, index_basis_tmp, coef_local)
+    deallocate(n_basis_tmp, index_basis_tmp)
     
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a)') "Fragment basis data loaded (coefficients + real-space basis)"
@@ -2026,7 +2054,7 @@ contains
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, ifrag_local, ispin, n_occ
     real(8), intent(out) :: metric
-    integer :: io, istate, ig, nb
+    integer :: io, istate, ig, iloc, nb
     complex(8) :: c_now, c_prev
     real(8) :: amp_now, amp_prev, amp_num, amp_den
     real(8) :: phase_now, phase_prev, phase_diff, phase_num, phase_den, weight
@@ -2041,9 +2069,12 @@ contains
 
     do io = 1, nb
       ig = dg_frag%index_basis(io, ifrag, ispin)
-      if (ig < 1 .or. ig > size(dg_frag%coef, 1)) cycle
+      if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+      if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+      iloc = dg_frag%coef_global_to_local(ig, ispin)
+      if (iloc < 1 .or. iloc > size(dg_frag%coef, 1)) cycle
       do istate = 1, min(n_occ, dg_frag%nstate_tot)
-        c_now = dg_frag%coef(ig, istate, ispin)
+        c_now = dg_frag%coef(iloc, istate, ispin)
         c_prev = hse_ace_coef_snapshot(io, istate, ispin, ifrag_local)
         amp_now = abs(c_now)
         amp_prev = abs(c_prev)
@@ -2080,14 +2111,17 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, ifrag_local, ispin, n_occ
-    integer :: io, ig, nocc_eff
+    integer :: io, ig, iloc, nocc_eff
 
     nocc_eff = min(n_occ, dg_frag%nstate_tot)
     hse_ace_coef_snapshot(:, :, ispin, ifrag_local) = (0.0d0, 0.0d0)
     do io = 1, min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
       ig = dg_frag%index_basis(io, ifrag, ispin)
-      if (ig < 1 .or. ig > size(dg_frag%coef, 1)) cycle
-      hse_ace_coef_snapshot(io, 1:nocc_eff, ispin, ifrag_local) = dg_frag%coef(ig, 1:nocc_eff, ispin)
+      if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+      if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+      iloc = dg_frag%coef_global_to_local(ig, ispin)
+      if (iloc < 1 .or. iloc > size(dg_frag%coef, 1)) cycle
+      hse_ace_coef_snapshot(io, 1:nocc_eff, ispin, ifrag_local) = dg_frag%coef(iloc, 1:nocc_eff, ispin)
     end do
   end subroutine update_dg_hse_ace_snapshot
 
@@ -2101,7 +2135,7 @@ contains
     integer, intent(in) :: ifrag, ispin, n_occ
     real(8), intent(out) :: density_matrix(:, :)
 
-    integer :: i, j, iocc, istate, iidx, jidx, nb
+    integer :: i, j, iocc, istate, iidx, jidx, iloc, jloc, nb
     complex(8) :: coef_i, coef_j
     real(8) :: dval
 
@@ -2114,16 +2148,21 @@ contains
     ! RI exchange currently expects a real density matrix; use Hermitian real part.
     do j = 1, nb
       jidx = dg_frag%index_basis(j, ifrag, ispin)
-      if (jidx < 1 .or. jidx > size(dg_frag%coef, 1)) cycle
+      if (jidx < 1 .or. jidx > dg_frag%n_mat_max) cycle
+      if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+      jloc = dg_frag%coef_global_to_local(jidx, ispin)
+      if (jloc < 1 .or. jloc > size(dg_frag%coef, 1)) cycle
       do i = 1, nb
         iidx = dg_frag%index_basis(i, ifrag, ispin)
-        if (iidx < 1 .or. iidx > size(dg_frag%coef, 1)) cycle
+        if (iidx < 1 .or. iidx > dg_frag%n_mat_max) cycle
+        iloc = dg_frag%coef_global_to_local(iidx, ispin)
+        if (iloc < 1 .or. iloc > size(dg_frag%coef, 1)) cycle
         do iocc = 1, n_occ
           istate = iocc
           if (istate > dg_frag%nstate_tot) cycle
 
-          coef_i = dg_frag%coef(iidx, istate, ispin)
-          coef_j = dg_frag%coef(jidx, istate, ispin)
+          coef_i = dg_frag%coef(iloc, istate, ispin)
+          coef_j = dg_frag%coef(jloc, istate, ispin)
 
           dval = real(conjg(coef_i) * coef_j, kind=8)
           density_matrix(i, j) = density_matrix(i, j) + dval
@@ -2269,6 +2308,18 @@ contains
       end do
       deallocate(dg_frag%S_mat_prop_blocks)
     end if
+    if (allocated(dg_frag%S_mat_blocks_c)) then
+      do i = 1, size(dg_frag%S_mat_blocks_c)
+        if (allocated(dg_frag%S_mat_blocks_c(i)%val)) deallocate(dg_frag%S_mat_blocks_c(i)%val)
+      end do
+      deallocate(dg_frag%S_mat_blocks_c)
+    end if
+    if (allocated(dg_frag%S_mat_prop_blocks_c)) then
+      do i = 1, size(dg_frag%S_mat_prop_blocks_c)
+        if (allocated(dg_frag%S_mat_prop_blocks_c(i)%val)) deallocate(dg_frag%S_mat_prop_blocks_c(i)%val)
+      end do
+      deallocate(dg_frag%S_mat_prop_blocks_c)
+    end if
     if (allocated(dg_frag%S_block_map)) deallocate(dg_frag%S_block_map)
     if (allocated(dg_frag%n_basis)) deallocate(dg_frag%n_basis)
     if (allocated(dg_frag%index_basis)) deallocate(dg_frag%index_basis)
@@ -2282,6 +2333,12 @@ contains
       end do
       deallocate(dg_frag%momentum_blocks)
       dg_frag%n_momentum_blocks = 0
+    end if
+    if (allocated(dg_frag%momentum_blocks_c)) then
+      do i = 1, size(dg_frag%momentum_blocks_c)
+        if (allocated(dg_frag%momentum_blocks_c(i)%val)) deallocate(dg_frag%momentum_blocks_c(i)%val)
+      end do
+      deallocate(dg_frag%momentum_blocks_c)
     end if
     if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
     if (allocated(dg_frag%dipole_mat)) deallocate(dg_frag%dipole_mat)
@@ -2339,7 +2396,6 @@ contains
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
     if (allocated(dg_frag%eigenvalues)) deallocate(dg_frag%eigenvalues)
     if (allocated(dg_frag%basis_overlap)) deallocate(dg_frag%basis_overlap)
-    if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
     if (allocated(dg_frag%nl_pp_phi_self)) deallocate(dg_frag%nl_pp_phi_self)
     if (allocated(dg_frag%nl_pp_phi_halo)) deallocate(dg_frag%nl_pp_phi_halo)
     dg_frag%nl_pp_phi_cache_valid = .false.
@@ -2373,15 +2429,40 @@ contains
   end subroutine finalize_dg_fragment_rt
 
   integer function get_fragment_group_root_rank(ifrag, nproc_frag) result(owner_rank)
+    use salmon_global, only: num_fragment
     implicit none
     integer, intent(in) :: ifrag, nproc_frag
+    integer :: ix_frag, iy_frag, iz_frag, rem, group_index
 
     if (ifrag < 1 .or. nproc_frag <= 0) then
       owner_rank = 0
     else
-      owner_rank = (ifrag - 1) * nproc_frag
+      ! DC fragment files are numbered with z as the fastest index:
+      !   ifrag = ((ix-1) * ny + (iy-1)) * nz + iz.
+      ! The orbital_sequential MPI layout numbers real-space rank groups with
+      ! x as the fastest index.  Convert explicitly so each fragment subgroup
+      ! reads the DC file matching its parent real-space box.
+      ix_frag = (ifrag - 1) / max(1, num_fragment(2) * num_fragment(3)) + 1
+      rem = modulo(ifrag - 1, max(1, num_fragment(2) * num_fragment(3)))
+      iy_frag = rem / max(1, num_fragment(3)) + 1
+      iz_frag = modulo(rem, max(1, num_fragment(3))) + 1
+      group_index = ((iz_frag - 1) * max(1, num_fragment(2)) + (iy_frag - 1)) * &
+                    max(1, num_fragment(1)) + (ix_frag - 1)
+      owner_rank = group_index * nproc_frag
     end if
   end function get_fragment_group_root_rank
+
+  integer function fragment_from_rank_address(iaddr, nfrag_axis) result(ifrag)
+    implicit none
+    integer, intent(in) :: iaddr(3), nfrag_axis(3)
+    integer :: ix_frag, iy_frag, iz_frag
+
+    ix_frag = iaddr(1) + 1
+    iy_frag = iaddr(2) + 1
+    iz_frag = iaddr(3) + 1
+    ifrag = ((ix_frag - 1) * max(1, nfrag_axis(2)) + (iy_frag - 1)) * &
+            max(1, nfrag_axis(3)) + iz_frag
+  end function fragment_from_rank_address
 
   subroutine validate_coef_owner_map(dg_frag, stage_label)
     use communication, only: comm_get_max
@@ -2427,6 +2508,129 @@ contains
       end do
     end do
   end subroutine validate_coef_owner_map
+
+  subroutine rebuild_local_coef_storage(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ispin, global_idx, local_idx, old_local_idx
+    integer :: local_coef_max, old_nstate, old_nspin
+    integer, allocatable :: new_count(:)
+    integer, allocatable :: new_global_ids(:,:)
+    integer, allocatable :: new_global_to_local(:,:)
+    complex(8), allocatable :: coef_new_rows(:,:,:)
+    complex(8), allocatable :: coef_newbuf_rows(:,:,:)
+    complex(8), allocatable :: coef_work_rows(:,:,:)
+    logical :: has_coef, has_coef_new, has_coef_work
+
+    if (.not. allocated(dg_frag%coef_owner)) return
+
+    allocate(new_count(dg_frag%nspin))
+    new_count(:) = 0
+    do ispin = 1, dg_frag%nspin
+      do global_idx = 1, dg_frag%n_mat_max
+        if (dg_frag%coef_owner(global_idx, ispin) == dg_frag%id) then
+          new_count(ispin) = new_count(ispin) + 1
+        end if
+      end do
+    end do
+
+    local_coef_max = max(1, maxval(new_count(1:dg_frag%nspin)))
+    allocate(new_global_ids(local_coef_max, dg_frag%nspin))
+    allocate(new_global_to_local(dg_frag%n_mat_max, dg_frag%nspin))
+    new_global_ids(:, :) = 0
+    new_global_to_local(:, :) = 0
+
+    do ispin = 1, dg_frag%nspin
+      local_idx = 0
+      do global_idx = 1, dg_frag%n_mat_max
+        if (dg_frag%coef_owner(global_idx, ispin) /= dg_frag%id) cycle
+        local_idx = local_idx + 1
+        new_global_ids(local_idx, ispin) = global_idx
+        new_global_to_local(global_idx, ispin) = local_idx
+      end do
+    end do
+
+    has_coef = allocated(dg_frag%coef)
+    has_coef_new = allocated(dg_frag%coef_new)
+    has_coef_work = allocated(dg_frag%coef_work)
+    if (has_coef) then
+      old_nstate = size(dg_frag%coef, 2)
+      old_nspin = min(dg_frag%nspin, size(dg_frag%coef, 3))
+      allocate(coef_new_rows(local_coef_max, old_nstate, size(dg_frag%coef, 3)))
+      coef_new_rows(:, :, :) = (0.0d0, 0.0d0)
+      do ispin = 1, old_nspin
+        do local_idx = 1, new_count(ispin)
+          global_idx = new_global_ids(local_idx, ispin)
+          old_local_idx = 0
+          if (allocated(dg_frag%coef_global_to_local)) then
+            old_local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+          end if
+          if (old_local_idx < 1 .or. old_local_idx > size(dg_frag%coef, 1)) cycle
+          coef_new_rows(local_idx, 1:old_nstate, ispin) = &
+            dg_frag%coef(old_local_idx, 1:old_nstate, ispin)
+        end do
+      end do
+    end if
+
+    if (has_coef_new) then
+      old_nstate = size(dg_frag%coef_new, 2)
+      old_nspin = min(dg_frag%nspin, size(dg_frag%coef_new, 3))
+      allocate(coef_newbuf_rows(local_coef_max, old_nstate, size(dg_frag%coef_new, 3)))
+      coef_newbuf_rows(:, :, :) = (0.0d0, 0.0d0)
+      do ispin = 1, old_nspin
+        do local_idx = 1, new_count(ispin)
+          global_idx = new_global_ids(local_idx, ispin)
+          old_local_idx = 0
+          if (allocated(dg_frag%coef_global_to_local)) then
+            old_local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+          end if
+          if (old_local_idx < 1 .or. old_local_idx > size(dg_frag%coef_new, 1)) cycle
+          coef_newbuf_rows(local_idx, 1:old_nstate, ispin) = &
+            dg_frag%coef_new(old_local_idx, 1:old_nstate, ispin)
+        end do
+      end do
+    end if
+
+    if (has_coef_work) then
+      old_nstate = size(dg_frag%coef_work, 2)
+      old_nspin = min(dg_frag%nspin, size(dg_frag%coef_work, 3))
+      allocate(coef_work_rows(local_coef_max, old_nstate, size(dg_frag%coef_work, 3)))
+      coef_work_rows(:, :, :) = (0.0d0, 0.0d0)
+      do ispin = 1, old_nspin
+        do local_idx = 1, new_count(ispin)
+          global_idx = new_global_ids(local_idx, ispin)
+          old_local_idx = 0
+          if (allocated(dg_frag%coef_global_to_local)) then
+            old_local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+          end if
+          if (old_local_idx < 1 .or. old_local_idx > size(dg_frag%coef_work, 1)) cycle
+          coef_work_rows(local_idx, 1:old_nstate, ispin) = &
+            dg_frag%coef_work(old_local_idx, 1:old_nstate, ispin)
+        end do
+      end do
+    end if
+
+    if (allocated(dg_frag%local_coef_count)) deallocate(dg_frag%local_coef_count)
+    if (allocated(dg_frag%local_coef_global_ids)) deallocate(dg_frag%local_coef_global_ids)
+    if (allocated(dg_frag%coef_global_to_local)) deallocate(dg_frag%coef_global_to_local)
+    call move_alloc(new_count, dg_frag%local_coef_count)
+    call move_alloc(new_global_ids, dg_frag%local_coef_global_ids)
+    call move_alloc(new_global_to_local, dg_frag%coef_global_to_local)
+
+    if (has_coef) then
+      deallocate(dg_frag%coef)
+      call move_alloc(coef_new_rows, dg_frag%coef)
+    end if
+    if (has_coef_new) then
+      deallocate(dg_frag%coef_new)
+      call move_alloc(coef_newbuf_rows, dg_frag%coef_new)
+    end if
+    if (has_coef_work) then
+      deallocate(dg_frag%coef_work)
+      call move_alloc(coef_work_rows, dg_frag%coef_work)
+    end if
+  end subroutine rebuild_local_coef_storage
 
   subroutine rebuild_coef_owner_map(dg_frag, stage_label)
     use communication, only: comm_summation
@@ -2518,6 +2722,7 @@ contains
     end do
 
     call validate_coef_owner_map(dg_frag, stage_label)
+    call rebuild_local_coef_storage(dg_frag)
   end subroutine rebuild_coef_owner_map
 
   integer function get_subgroup_block_owner_rank(root_rank, subgroup_size, local_row, n_local_rows) result(owner_rank)

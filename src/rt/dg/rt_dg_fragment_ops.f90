@@ -12,6 +12,7 @@ module rt_dg_fragment_ops
   public :: apply_momentum_blocks
   public :: apply_matrix_blocks
   public :: apply_matrix_blocks_batch
+  public :: apply_complex_matrix_blocks
   public :: apply_complex_matrix_blocks_batch
   public :: apply_nonlocal_pp_projector_batch
   public :: apply_nonlocal_pp_projector_batch_so
@@ -438,138 +439,6 @@ contains
     end do
   end subroutine ensure_runtime_neighbor_pair_cache
 
-  !=======================================================================
-  ! Build non-local pseudopotential matrix with vector potential A(t)
-  ! V_NL(A) = e^{-i A·r} V_NL e^{i A·r}
-  !
-  ! Uses the SALMON approximation: A is nearly constant within PP cutoff
-  !=======================================================================
-  subroutine build_nonlocal_pp_matrix_A(dg_frag, mg, ppg, nspin, hvol, Ac_tot, use_micro_A, Ac_micro, H_nl)
-    use structures
-    use communication, only: comm_summation, COMM_GROUP_NULL
-    use math_constants, only: zi
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    type(s_rgrid),          intent(in)    :: mg
-    type(s_pp_grid),        intent(in)    :: ppg
-    integer,                intent(in) :: nspin
-    real(8),                intent(in) :: hvol
-    real(8),                intent(in) :: Ac_tot(3)
-    logical,                intent(in) :: use_micro_A
-    real(8),                intent(in), optional :: Ac_micro(:, :, :, :)
-    complex(8),             intent(out) :: H_nl(dg_frag%n_mat_max, dg_frag%n_mat_max, nspin)
-
-    integer :: ifrag, ispin, io, jo, i_local, ilma, ia, j, ix, iy, iz, ig_i, ig_j, nbf
-    integer :: iorg(3), ndom(3), lx, ly, lz
-    integer :: is(3), ie(3)
-    real(8) :: x, y, z, phase
-    real(8) :: A_local(3)
-    complex(8), allocatable :: uVpsi(:,:,:)  ! (nstate_frag, Nlma, nspin)
-    complex(8), allocatable :: uVpsi_sum(:,:)
-    complex(8), allocatable :: H_nl_sum(:,:,:)
-    complex(8) :: overlap_i, overlap_j, nlpp_contrib
-
-    if (ppg%Nlma == 0) then
-      H_nl = (0.0d0, 0.0d0)
-      return
-    end if
-
-    is = mg%is
-    ie = mg%ie
-    H_nl = (0.0d0, 0.0d0)
-
-    allocate(uVpsi(dg_frag%nstate_frag, ppg%Nlma, nspin))
-    if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) &
-      allocate(uVpsi_sum(dg_frag%nstate_frag, ppg%Nlma))
-
-    i_local = 0
-    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      i_local = i_local + 1
-      uVpsi = (0.0d0, 0.0d0)
-
-      do ispin = 1, nspin
-        !$omp parallel do collapse(2) private(ilma, io, ia, j, ix, iy, iz, x, y, z, phase, overlap_i)
-        do ilma = 1, ppg%Nlma
-          do io = 1, dg_frag%nstate_frag
-            ia = ppg%ia_tbl(ilma)
-            overlap_i = (0.0d0, 0.0d0)
-            do j = 1, ppg%mps(ia)
-              ix = ppg%jxyz(1, j, ia)
-              iy = ppg%jxyz(2, j, ia)
-              iz = ppg%jxyz(3, j, ia)
-
-              if (ix >= is(1) .and. ix <= ie(1) .and. &
-                  iy >= is(2) .and. iy <= ie(2) .and. &
-                  iz >= is(3) .and. iz <= ie(3)) then
-                lx = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 1, ix, lbound(dg_frag%phi_frag, 1), ubound(dg_frag%phi_frag, 1))
-                ly = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 2, iy, lbound(dg_frag%phi_frag, 2), ubound(dg_frag%phi_frag, 2))
-                lz = map_global_to_phi_box_coord_fragment(dg_frag, ifrag, 3, iz, lbound(dg_frag%phi_frag, 3), ubound(dg_frag%phi_frag, 3))
-                if (lx == 0 .or. ly == 0 .or. lz == 0) cycle
-                x = ppg%rxyz(1, j, ia)
-                y = ppg%rxyz(2, j, ia)
-                z = ppg%rxyz(3, j, ia)
-                if (use_micro_A .and. present(Ac_micro)) then
-                  A_local(1:3) = Ac_micro(1:3, ix, iy, iz)
-                else
-                  A_local(1:3) = Ac_tot(1:3)
-                end if
-                phase = A_local(1) * x + A_local(2) * y + A_local(3) * z
-                overlap_i = overlap_i + dg_frag%phi_frag(lx, ly, lz, io, i_local) * &
-                            ppg%uV(j, ilma) * exp(-zi * phase) * hvol
-              end if
-            end do
-            uVpsi(io, ilma, ispin) = overlap_i
-          end do
-        end do
-        !$omp end parallel do
-
-        if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-          ! Dense mixed-basis nonlocal terms must use the same complete
-          ! <beta|phi> vector as the block Hamiltonian path.  Each subgroup
-          ! rank contributes one real-space box; form the projector overlaps
-          ! before the nonlocal outer product and let only the fragment root
-          ! publish that block into the global dense cache below.
-          call comm_summation(uVpsi(1:dg_frag%nstate_frag, 1:ppg%Nlma, ispin), &
-                              uVpsi_sum(1:dg_frag%nstate_frag, 1:ppg%Nlma), &
-                              dg_frag%nstate_frag * ppg%Nlma, dg_frag%icomm_frag)
-          uVpsi(1:dg_frag%nstate_frag, 1:ppg%Nlma, ispin) = &
-            uVpsi_sum(1:dg_frag%nstate_frag, 1:ppg%Nlma)
-          if (.not. dg_frag%is_frag_root) cycle
-        end if
-
-        nbf = dg_frag%n_basis(ifrag, ispin)
-        !$omp parallel do collapse(2) private(jo, io, ig_i, ig_j, ilma, nlpp_contrib, overlap_i, overlap_j)
-        do jo = 1, nbf
-          do io = 1, nbf
-            ig_i = dg_frag%index_basis(io, ifrag, ispin)
-            ig_j = dg_frag%index_basis(jo, ifrag, ispin)
-            if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-            if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-            nlpp_contrib = (0.0d0, 0.0d0)
-            do ilma = 1, ppg%Nlma
-              overlap_i = uVpsi(io, ilma, ispin)
-              overlap_j = uVpsi(jo, ilma, ispin)
-              nlpp_contrib = nlpp_contrib + conjg(overlap_i) * overlap_j * ppg%rinv_uvu(ilma)
-            end do
-            H_nl(ig_i, ig_j, ispin) = H_nl(ig_i, ig_j, ispin) + nlpp_contrib
-          end do
-        end do
-        !$omp end parallel do
-      end do
-    end do
-
-    if (dg_frag%isize > 1) then
-      allocate(H_nl_sum(dg_frag%n_mat_max, dg_frag%n_mat_max, nspin))
-      call comm_summation(H_nl, H_nl_sum, size(H_nl), dg_frag%icomm)
-      H_nl(:, :, :) = H_nl_sum(:, :, :)
-      deallocate(H_nl_sum)
-    end if
-
-    deallocate(uVpsi)
-    if (allocated(uVpsi_sum)) deallocate(uVpsi_sum)
-
-  end subroutine build_nonlocal_pp_matrix_A
-
   subroutine build_nonlocal_pp_matrix_A_blocks(dg_frag, mg, ppg, nspin, hvol, Ac_tot, use_micro_A, Ac_micro, H_nl_blocks, H_nl_block_map)
     use structures
     use math_constants, only: zi
@@ -685,9 +554,9 @@ contains
   end subroutine build_nonlocal_pp_matrix_A_blocks
 
   !=======================================================================
-  ! Ensure cached non-local PP matrix for current A(t)
+  ! Ensure cached non-local PP blocks for current A(t)
   !=======================================================================
-  subroutine ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, require_dense_cache)
+  subroutine ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
     use structures
     use salmon_global, only: ae_shape1, ae_shape2, theory
     implicit none
@@ -696,17 +565,13 @@ contains
     type(s_pp_grid),        intent(in)    :: ppg
     type(s_dft_system),     intent(in)    :: system
     real(8),                intent(in)    :: Ac_tot(3)
-    logical, optional,      intent(in)    :: require_dense_cache
 
     real(8) :: delta_A
     logical :: reuse_allowed
     logical :: use_micro_A
-    logical :: need_dense_cache
-    logical :: want_dense_cache
     integer :: i
 
     if (ppg%Nlma == 0 .or. .not. allocated(ppg%uV)) then
-      if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
       if (allocated(dg_frag%H_nl_blocks)) then
         do i = 1, size(dg_frag%H_nl_blocks)
           if (allocated(dg_frag%H_nl_blocks(i)%val)) deallocate(dg_frag%H_nl_blocks(i)%val)
@@ -721,9 +586,6 @@ contains
     end if
 
     use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
-    want_dense_cache = (.not. allocated(dg_frag%H_mat_blocks)) .or. allocated(dg_frag%H_mat_c)
-    if (present(require_dense_cache)) want_dense_cache = require_dense_cache
-    need_dense_cache = want_dense_cache
 
     reuse_allowed = (.not. use_micro_A) .and. &
                     (trim(ae_shape1) == 'impulse' .or. trim(ae_shape1) == 'none') .and. &
@@ -744,18 +606,6 @@ contains
       end if
       call reduce_complex_matrix_blocks_runtime(dg_frag, dg_frag%H_nl_blocks, "hmat-nl", dg_frag%icomm)
       call rebuild_local_nl_block_ids(dg_frag)
-      if (need_dense_cache) then
-        if (.not. allocated(dg_frag%H_nl_cache)) allocate(dg_frag%H_nl_cache(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-        if (use_micro_A) then
-          call build_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
-               .true., system%Ac_micro%v, dg_frag%H_nl_cache)
-        else
-          call build_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot, &
-               .false., H_nl=dg_frag%H_nl_cache)
-        end if
-      else if (allocated(dg_frag%H_nl_cache)) then
-        deallocate(dg_frag%H_nl_cache)
-      end if
       dg_frag%Ac_nl_cache = Ac_tot
       dg_frag%has_nl_cache = .true.
     end if
@@ -935,11 +785,11 @@ contains
     complex(8), intent(inout) :: y_out(:, :)
 
     integer :: ifrag, frag_slot, local_frag_count, ifrag_halo, nbf_out, nbf_up, nbf_dn
-    integer :: io, ist, ilma, ia, j, ix, iy, iz, global_idx, i_halo, ispin_proj
+    integer :: io, ist, ilma, ia, j, ix, iy, iz, global_idx, local_idx, i_halo, ispin_proj
     integer :: nlma_so, nstate
     real(8) :: xcoord, ycoord, zcoord, phase
     real(8) :: A_local(3)
-    logical :: use_micro_A
+    logical :: use_micro_A, use_x_up_map, use_x_dn_map, use_y_map
     complex(8) :: phase_factor(2), psi_point_up, psi_point_dn
     complex(8), allocatable :: uVphi_self(:,:,:), uVphi_self_sum(:,:,:)
     complex(8), allocatable :: proj_local_up(:,:), proj_local_dn(:,:), proj_global_up(:,:), proj_global_dn(:,:)
@@ -972,6 +822,9 @@ contains
     contrib_so(:, :) = (0.0d0, 0.0d0)
 
     use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
+    use_x_up_map = allocated(dg_frag%coef_global_to_local) .and. size(x_up, 1) < dg_frag%n_mat_max
+    use_x_dn_map = allocated(dg_frag%coef_global_to_local) .and. size(x_dn, 1) < dg_frag%n_mat_max
+    use_y_map = allocated(dg_frag%coef_global_to_local) .and. size(y_out, 1) < dg_frag%n_mat_max
 
     do frag_slot = 1, local_frag_count
       ifrag = dg_frag%ifrag_start + frag_slot - 1
@@ -1009,13 +862,19 @@ contains
             psi_point_dn = (0.0d0, 0.0d0)
             do io = 1, nbf_up
               global_idx = dg_frag%index_basis(io, ifrag, 1)
-              if (global_idx < 1 .or. global_idx > size(x_up, 1)) cycle
-              psi_point_up = psi_point_up + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x_up(global_idx, ist)
+              if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+              local_idx = global_idx
+              if (use_x_up_map) local_idx = dg_frag%coef_global_to_local(global_idx, 1)
+              if (local_idx < 1 .or. local_idx > size(x_up, 1)) cycle
+              psi_point_up = psi_point_up + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x_up(local_idx, ist)
             end do
             do io = 1, nbf_dn
               global_idx = dg_frag%index_basis(io, ifrag, 2)
-              if (global_idx < 1 .or. global_idx > size(x_dn, 1)) cycle
-              psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x_dn(global_idx, ist)
+              if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+              local_idx = global_idx
+              if (use_x_dn_map) local_idx = dg_frag%coef_global_to_local(global_idx, 2)
+              if (local_idx < 1 .or. local_idx > size(x_dn, 1)) cycle
+              psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x_dn(local_idx, ist)
             end do
             if (dg_frag%n_halo > 0 .and. allocated(dg_frag%nl_pp_phi_halo)) then
               do i_halo = 1, dg_frag%n_halo
@@ -1026,15 +885,21 @@ contains
                 if (nbf_up > 0) then
                   do io = 1, nbf_up
                     global_idx = dg_frag%index_basis(io, ifrag_halo, 1)
-                    if (global_idx < 1 .or. global_idx > size(x_up, 1)) cycle
-                    psi_point_up = psi_point_up + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_up(global_idx, ist)
+                    if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+                    local_idx = global_idx
+                    if (use_x_up_map) local_idx = dg_frag%coef_global_to_local(global_idx, 1)
+                    if (local_idx < 1 .or. local_idx > size(x_up, 1)) cycle
+                    psi_point_up = psi_point_up + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_up(local_idx, ist)
                   end do
                 end if
                 if (nbf_dn > 0) then
                   do io = 1, nbf_dn
                     global_idx = dg_frag%index_basis(io, ifrag_halo, 2)
-                    if (global_idx < 1 .or. global_idx > size(x_dn, 1)) cycle
-                    psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_dn(global_idx, ist)
+                    if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+                    local_idx = global_idx
+                    if (use_x_dn_map) local_idx = dg_frag%coef_global_to_local(global_idx, 2)
+                    if (local_idx < 1 .or. local_idx > size(x_dn, 1)) cycle
+                    psi_point_dn = psi_point_dn + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x_dn(local_idx, ist)
                   end do
                 end if
               end do
@@ -1075,10 +940,13 @@ contains
                  proj_weight_so, nlma_so, (0.0d0, 0.0d0), contrib_so, dg_frag%nstate_frag)
       do io = 1, nbf_out
         global_idx = dg_frag%index_basis(io, ifrag, ispin_out)
-        if (global_idx < 1 .or. global_idx > size(y_out, 1)) cycle
+        if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
         if (dg_frag%coef_owner(global_idx, ispin_out) /= dg_frag%id) cycle
+        local_idx = global_idx
+        if (use_y_map) local_idx = dg_frag%coef_global_to_local(global_idx, ispin_out)
+        if (local_idx < 1 .or. local_idx > size(y_out, 1)) cycle
         do ist = 1, nstate
-          y_out(global_idx, ist) = y_out(global_idx, ist) + contrib_so(io, ist)
+          y_out(local_idx, ist) = y_out(local_idx, ist) + contrib_so(io, ist)
         end do
       end do
     end do
@@ -1102,11 +970,11 @@ contains
     complex(8), intent(inout) :: y(:, :)
 
     integer :: ifrag, frag_slot, local_frag_count, ifrag_halo, nbf, nbf_halo
-    integer :: io, ist, ilma, ia, j, ix, iy, iz, global_idx, i_halo
+    integer :: io, ist, ilma, ia, j, ix, iy, iz, global_idx, local_idx, i_halo
     integer :: nstate
     real(8) :: xcoord, ycoord, zcoord, phase
     real(8) :: A_local(3)
-    logical :: use_micro_A
+    logical :: use_micro_A, use_x_map, use_y_map
     complex(8) :: phase_factor, psi_point
     complex(8), allocatable :: proj_local(:,:), proj_global(:,:), uVphi_self(:,:,:), uVphi_self_sum(:,:,:)
     complex(8), allocatable :: proj_weight(:,:), contrib(:,:)
@@ -1132,6 +1000,8 @@ contains
     proj_weight(:, :) = (0.0d0, 0.0d0)
     contrib(:, :) = (0.0d0, 0.0d0)
     use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
+    use_x_map = allocated(dg_frag%coef_global_to_local) .and. size(x, 1) < dg_frag%n_mat_max
+    use_y_map = allocated(dg_frag%coef_global_to_local) .and. size(y, 1) < dg_frag%n_mat_max
 
     do frag_slot = 1, local_frag_count
       ifrag = dg_frag%ifrag_start + frag_slot - 1
@@ -1162,8 +1032,11 @@ contains
             psi_point = (0.0d0, 0.0d0)
             do io = 1, nbf
               global_idx = dg_frag%index_basis(io, ifrag, ispin)
-              if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
-              psi_point = psi_point + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x(global_idx, ist)
+              if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+              local_idx = global_idx
+              if (use_x_map) local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+              if (local_idx < 1 .or. local_idx > size(x, 1)) cycle
+              psi_point = psi_point + dg_frag%nl_pp_phi_self(j, ia, io, frag_slot) * x(local_idx, ist)
             end do
             if (dg_frag%n_halo > 0 .and. allocated(dg_frag%nl_pp_phi_halo)) then
               do i_halo = 1, dg_frag%n_halo
@@ -1173,8 +1046,11 @@ contains
                 if (nbf_halo <= 0) cycle
                 do io = 1, nbf_halo
                   global_idx = dg_frag%index_basis(io, ifrag_halo, ispin)
-                  if (global_idx < 1 .or. global_idx > size(x, 1)) cycle
-                  psi_point = psi_point + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x(global_idx, ist)
+                  if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+                  local_idx = global_idx
+                  if (use_x_map) local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+                  if (local_idx < 1 .or. local_idx > size(x, 1)) cycle
+                  psi_point = psi_point + dg_frag%nl_pp_phi_halo(j, ia, io, i_halo) * x(local_idx, ist)
                 end do
               end do
             end if
@@ -1215,10 +1091,13 @@ contains
              proj_weight, ppg%Nlma, (0.0d0, 0.0d0), contrib, dg_frag%nstate_frag)
       do io = 1, nbf
         global_idx = dg_frag%index_basis(io, ifrag, ispin)
-        if (global_idx < 1 .or. global_idx > size(y, 1)) cycle
+        if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
         if (dg_frag%coef_owner(global_idx, ispin) /= dg_frag%id) cycle
+        local_idx = global_idx
+        if (use_y_map) local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+        if (local_idx < 1 .or. local_idx > size(y, 1)) cycle
         do ist = 1, nstate
-          y(global_idx, ist) = y(global_idx, ist) + contrib(io, ist)
+          y(local_idx, ist) = y(local_idx, ist) + contrib(io, ist)
         end do
       end do
     end do
@@ -1243,11 +1122,16 @@ contains
     complex(8), intent(inout) :: y(:, :)
 
     integer :: n_frag, n_pw, n_tot, ipw
+    logical :: has_pw_rows
 
-    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    n_tot = n_frag + n_pw
+    n_frag = size(x, 1)
+    if (allocated(dg_frag%coef)) n_frag = min(n_frag, size(dg_frag%coef, 1))
+    n_frag = min(n_frag, size(y, 1))
+    has_pw_rows = (n_pw > 0 .and. size(x, 1) >= n_frag + n_pw .and. size(y, 1) >= n_frag + n_pw)
+    n_tot = n_frag
+    if (has_pw_rows) n_tot = n_frag + n_pw
     y(:, :) = (0.0d0, 0.0d0)
 
     if (n_frag > 0) then
@@ -1261,12 +1145,12 @@ contains
       end if
     end if
 
-    if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
+    if (has_pw_rows .and. allocated(dg_frag%H_mat_frag_pw)) then
       y(1:n_frag, :) = y(1:n_frag, :) + matmul(dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
       y(n_frag+1:n_tot, :) = y(n_frag+1:n_tot, :) + matmul(conjg(transpose(dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag, :))
     end if
 
-    if (n_pw > 0) then
+    if (has_pw_rows) then
       if (allocated(dg_frag%H_mat_pw)) then
         y(n_frag+1:n_tot, :) = y(n_frag+1:n_tot, :) + matmul(dg_frag%H_mat_pw(1:n_pw, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
       else if (allocated(dg_frag%H_mat_pw_diag)) then
@@ -1290,15 +1174,24 @@ contains
     logical, intent(in) :: use_prop
 
     integer :: n_frag, n_pw, n_tot
+    logical :: has_pw_rows
 
-    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    n_tot = n_frag + n_pw
+    n_frag = size(x, 1)
+    if (allocated(dg_frag%coef)) n_frag = min(n_frag, size(dg_frag%coef, 1))
+    n_frag = min(n_frag, size(y, 1))
+    has_pw_rows = (n_pw > 0 .and. size(x, 1) >= n_frag + n_pw .and. size(y, 1) >= n_frag + n_pw)
+    n_tot = n_frag
+    if (has_pw_rows) n_tot = n_frag + n_pw
     y(:) = (0.0d0, 0.0d0)
 
-    if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
-      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+    if (has_pw_rows .and. mixed_fp_coupling_active(dg_frag, ispin)) then
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c)) then
+        call apply_complex_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks_c, ispin, x(1:n_frag), y(1:n_frag))
+      else if (allocated(dg_frag%S_mat_blocks_c)) then
+        call apply_complex_matrix_blocks(dg_frag, dg_frag%S_mat_blocks_c, ispin, x(1:n_frag), y(1:n_frag))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
       else if (allocated(dg_frag%S_mat_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
@@ -1312,10 +1205,14 @@ contains
       end if
       y(1:n_frag) = y(1:n_frag) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot))
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag))
-    else if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
+    else if (has_pw_rows .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
       ! Decoupled PW mode: fragment coefficients still live in the fragment
       ! overlap metric, while PW rows are orthonormal identity rows.
-      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c)) then
+        call apply_complex_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks_c, ispin, x(1:n_frag), y(1:n_frag))
+      else if (allocated(dg_frag%S_mat_blocks_c)) then
+        call apply_complex_matrix_blocks(dg_frag, dg_frag%S_mat_blocks_c, ispin, x(1:n_frag), y(1:n_frag))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
       else if (allocated(dg_frag%S_mat_blocks)) then
         call apply_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag), y(1:n_frag))
@@ -1328,6 +1225,10 @@ contains
         stop 1
       end if
       y(n_frag+1:n_tot) = x(n_frag+1:n_tot)
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c) .and. n_pw == 0) then
+      call apply_complex_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks_c, ispin, x(1:n_frag), y(1:n_frag))
+    else if (allocated(dg_frag%S_mat_blocks_c) .and. n_pw == 0) then
+      call apply_complex_matrix_blocks(dg_frag, dg_frag%S_mat_blocks_c, ispin, x(1:n_frag), y(1:n_frag))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag), y(1:n_frag))
     else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
@@ -1396,15 +1297,24 @@ contains
     logical, intent(in) :: use_prop
 
     integer :: n_frag, n_pw, n_tot
+    logical :: has_pw_rows
 
-    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    n_tot = n_frag + n_pw
+    n_frag = size(x, 1)
+    if (allocated(dg_frag%coef)) n_frag = min(n_frag, size(dg_frag%coef, 1))
+    n_frag = min(n_frag, size(y, 1))
+    has_pw_rows = (n_pw > 0 .and. size(x, 1) >= n_frag + n_pw .and. size(y, 1) >= n_frag + n_pw)
+    n_tot = n_frag
+    if (has_pw_rows) n_tot = n_frag + n_pw
     y(:, :) = (0.0d0, 0.0d0)
 
-    if (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin)) then
-      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+    if (has_pw_rows .and. mixed_fp_coupling_active(dg_frag, ispin)) then
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c)) then
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks_c, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (allocated(dg_frag%S_mat_blocks_c)) then
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks_c, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
       else if (allocated(dg_frag%S_mat_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
@@ -1418,11 +1328,15 @@ contains
       end if
       y(1:n_frag, :) = y(1:n_frag, :) + matmul(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
       y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :) + matmul(conjg(transpose(dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin))), x(1:n_frag, :))
-    else if (n_pw > 0 .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
+    else if (has_pw_rows .and. .not. mixed_fp_coupling_active(dg_frag, ispin)) then
       ! Decoupled PW mode: apply the fragment metric to fragment rows and
       ! identity to PW rows.  This keeps reduced/compacted PW sets valid even
       ! when FP overlap is intentionally zero.
-      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+      if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c)) then
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks_c, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (allocated(dg_frag%S_mat_blocks_c)) then
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks_c, ispin, x(1:n_frag, :), y(1:n_frag, :))
+      else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
       else if (allocated(dg_frag%S_mat_blocks)) then
         call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
@@ -1435,6 +1349,10 @@ contains
         stop 1
       end if
       y(n_frag+1:n_tot, :) = x(n_frag+1:n_tot, :)
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c) .and. n_pw == 0) then
+      call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks_c, ispin, x(1:n_frag, :), y(1:n_frag, :))
+    else if (allocated(dg_frag%S_mat_blocks_c) .and. n_pw == 0) then
+      call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%S_mat_blocks_c, ispin, x(1:n_frag, :), y(1:n_frag, :))
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks) .and. n_pw == 0) then
       call apply_matrix_blocks_batch(dg_frag, dg_frag%S_mat_prop_blocks, ispin, x(1:n_frag, :), y(1:n_frag, :))
     else if (allocated(dg_frag%S_mat_blocks) .and. n_pw == 0) then
@@ -1457,16 +1375,49 @@ contains
     real(8), intent(out) :: diag(:)
 
     integer :: n_frag, n_pw, n_tot
-    integer :: ifrag, iblk, ib, ig, nbf, nblock_diag
+    integer :: ifrag, iblk, ib, ig, iloc, nbf, nblock_diag
+    logical :: has_pw_rows
 
     diag(:) = 0.0d0
-    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    n_tot = n_frag + n_pw
-    if (size(diag) < n_tot) return
+    n_frag = size(diag)
+    if (allocated(dg_frag%coef)) n_frag = min(n_frag, size(dg_frag%coef, 1))
+    has_pw_rows = (n_pw > 0 .and. size(diag) >= n_frag + n_pw)
+    n_tot = n_frag
+    if (has_pw_rows) n_tot = n_frag + n_pw
 
-    if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
+    if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks_c)) then
+      do ifrag = 1, dg_frag%n_frag
+        iblk = find_matrix_block_runtime(dg_frag%S_block_map, ifrag, ifrag)
+        if (iblk <= 0 .or. iblk > size(dg_frag%S_mat_prop_blocks_c)) cycle
+        nbf = dg_frag%n_basis(ifrag, ispin)
+        nblock_diag = min(nbf, size(dg_frag%S_mat_prop_blocks_c(iblk)%val, 1), size(dg_frag%S_mat_prop_blocks_c(iblk)%val, 2))
+        do ib = 1, nblock_diag
+          ig = dg_frag%index_basis(ib, ifrag, ispin)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          iloc = ig
+          if (allocated(dg_frag%coef_global_to_local)) iloc = dg_frag%coef_global_to_local(ig, ispin)
+          if (iloc < 1 .or. iloc > n_frag) cycle
+          diag(iloc) = real(dg_frag%S_mat_prop_blocks_c(iblk)%val(ib, ib, ispin), kind=8)
+        end do
+      end do
+    else if (allocated(dg_frag%S_mat_blocks_c)) then
+      do ifrag = 1, dg_frag%n_frag
+        iblk = find_matrix_block_runtime(dg_frag%S_block_map, ifrag, ifrag)
+        if (iblk <= 0 .or. iblk > size(dg_frag%S_mat_blocks_c)) cycle
+        nbf = dg_frag%n_basis(ifrag, ispin)
+        nblock_diag = min(nbf, size(dg_frag%S_mat_blocks_c(iblk)%val, 1), size(dg_frag%S_mat_blocks_c(iblk)%val, 2))
+        do ib = 1, nblock_diag
+          ig = dg_frag%index_basis(ib, ifrag, ispin)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          iloc = ig
+          if (allocated(dg_frag%coef_global_to_local)) iloc = dg_frag%coef_global_to_local(ig, ispin)
+          if (iloc < 1 .or. iloc > n_frag) cycle
+          diag(iloc) = real(dg_frag%S_mat_blocks_c(iblk)%val(ib, ib, ispin), kind=8)
+        end do
+      end do
+    else if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then
       do ifrag = 1, dg_frag%n_frag
         iblk = find_matrix_block_runtime(dg_frag%S_block_map, ifrag, ifrag)
         if (iblk <= 0 .or. iblk > size(dg_frag%S_mat_prop_blocks)) cycle
@@ -1474,8 +1425,11 @@ contains
         nblock_diag = min(nbf, size(dg_frag%S_mat_prop_blocks(iblk)%val, 1), size(dg_frag%S_mat_prop_blocks(iblk)%val, 2))
         do ib = 1, nblock_diag
           ig = dg_frag%index_basis(ib, ifrag, ispin)
-          if (ig < 1 .or. ig > size(diag)) cycle
-          diag(ig) = real(dg_frag%S_mat_prop_blocks(iblk)%val(ib, ib, ispin), kind=8)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          iloc = ig
+          if (allocated(dg_frag%coef_global_to_local)) iloc = dg_frag%coef_global_to_local(ig, ispin)
+          if (iloc < 1 .or. iloc > n_frag) cycle
+          diag(iloc) = real(dg_frag%S_mat_prop_blocks(iblk)%val(ib, ib, ispin), kind=8)
         end do
       end do
     else if (allocated(dg_frag%S_mat_blocks)) then
@@ -1486,8 +1440,11 @@ contains
         nblock_diag = min(nbf, size(dg_frag%S_mat_blocks(iblk)%val, 1), size(dg_frag%S_mat_blocks(iblk)%val, 2))
         do ib = 1, nblock_diag
           ig = dg_frag%index_basis(ib, ifrag, ispin)
-          if (ig < 1 .or. ig > size(diag)) cycle
-          diag(ig) = real(dg_frag%S_mat_blocks(iblk)%val(ib, ib, ispin), kind=8)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          iloc = ig
+          if (allocated(dg_frag%coef_global_to_local)) iloc = dg_frag%coef_global_to_local(ig, ispin)
+          if (iloc < 1 .or. iloc > n_frag) cycle
+          diag(iloc) = real(dg_frag%S_mat_blocks(iblk)%val(ib, ib, ispin), kind=8)
         end do
       end do
     else if (use_prop .and. allocated(dg_frag%S_mat_prop_c)) then
@@ -1499,7 +1456,7 @@ contains
       stop 1
     end if
 
-    if (n_pw > 0) diag(n_frag+1:n_tot) = 1.0d0
+    if (has_pw_rows) diag(n_frag+1:n_tot) = 1.0d0
   end subroutine build_overlap_operator_diagonal
 
   subroutine solve_overlap_operator_batch(dg_frag, ispin, rhs, sol, use_prop)
@@ -1511,7 +1468,6 @@ contains
     logical, intent(in) :: use_prop
 
     integer :: n_dim, n_rhs, icol, iter, max_iter
-    integer :: n_frag, n_pw, n_tot
     real(8) :: rhs_norm, res_norm
     real(8), parameter :: diag_floor = 1.0d-10, tol_rel = 1.0d-10
     complex(8), allocatable :: r(:,:), z(:,:), p(:,:), ap(:,:)
@@ -1523,11 +1479,6 @@ contains
     n_rhs = size(rhs, 2)
     sol(:, :) = (0.0d0, 0.0d0)
     if (n_dim <= 0 .or. n_rhs <= 0) return
-
-    n_frag = dg_frag%n_mat_max
-    n_pw = 0
-    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    n_tot = n_frag + n_pw
 
     allocate(diag(n_dim), r(n_dim, n_rhs), z(n_dim, n_rhs), p(n_dim, n_rhs), ap(n_dim, n_rhs))
     allocate(tol_abs(n_rhs), rho(n_rhs), rho_new(n_rhs), denom(n_rhs))
@@ -1843,15 +1794,17 @@ contains
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, idir, ib, jb, row_idx, col_idx, n_frag
-    integer :: nrow, ncol, idx_ib, idx_jb, valid_row_count, valid_col_count
-    integer :: ifrag_row, ifrag_col
-    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
-    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+	    integer :: nrow, ncol, idx_ib, idx_jb, valid_row_count, valid_col_count
+	    integer :: ifrag_row, ifrag_col
+	    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+	    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+	    logical :: use_complex_blocks
 
     mat(:, :) = (0.0d0, 0.0d0)
-    if (.not. allocated(dg_frag%momentum_blocks)) return
-    if (.not. allocated(dg_frag%index_basis)) return
-    n_frag = dg_frag%n_mat_max
+	    if (.not. allocated(dg_frag%momentum_blocks)) return
+	    if (.not. allocated(dg_frag%index_basis)) return
+	    use_complex_blocks = allocated(dg_frag%momentum_blocks_c)
+	    n_frag = dg_frag%n_mat_max
 !$omp parallel do schedule(static) private(iblk, nrow, ncol, valid_row_count, valid_col_count, ib, jb, idir, idx_ib, idx_jb, row_idx, col_idx, ifrag_row, ifrag_col, row_gid, col_gid, valid_row_ids, valid_col_ids)
     do iblk = 1, dg_frag%n_momentum_blocks
       ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
@@ -1881,12 +1834,18 @@ contains
           jb = valid_col_ids(idx_jb)
           col_idx = col_gid(jb)
 !$omp simd private(ib,row_idx)
-          do idx_ib = 1, valid_row_count
-            ib = valid_row_ids(idx_ib)
-            row_idx = row_gid(ib)
-            mat(row_idx, col_idx) = mat(row_idx, col_idx) + &
-              cmplx(scale_vec(idir) * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin), 0.0d0, kind=8)
-          end do
+	          do idx_ib = 1, valid_row_count
+	            ib = valid_row_ids(idx_ib)
+	            row_idx = row_gid(ib)
+	            if (use_complex_blocks .and. iblk <= size(dg_frag%momentum_blocks_c) .and. &
+	                allocated(dg_frag%momentum_blocks_c(iblk)%val)) then
+	              mat(row_idx, col_idx) = mat(row_idx, col_idx) + &
+	                scale_vec(idir) * dg_frag%momentum_blocks_c(iblk)%val(idir, ib, jb, ispin)
+	            else
+	              mat(row_idx, col_idx) = mat(row_idx, col_idx) + &
+	                cmplx(scale_vec(idir) * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin), 0.0d0, kind=8)
+	            end if
+	          end do
         end do
       end do
     end do
@@ -2281,18 +2240,21 @@ contains
     integer, intent(in) :: row_ids(:)
     complex(8), intent(out) :: packed(:, :)
 
-    integer :: irow, global_row
+    integer :: irow, global_row, local_row
 
     packed(:, :) = (0.0d0, 0.0d0)
     if (.not. allocated(dg_frag%coef_owner)) return
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
 
-!$omp parallel do private(irow, global_row) schedule(static)
+!$omp parallel do private(irow, global_row, local_row) schedule(static)
     do irow = 1, min(size(row_ids), size(packed, 1))
       global_row = row_ids(irow)
-      if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
+      if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
+      if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+      local_row = dg_frag%coef_global_to_local(global_row, ispin)
+      if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
       if (dg_frag%coef_owner(global_row, ispin) /= dg_frag%id) cycle
-      packed(irow, 1:size(packed, 2)) = dg_frag%coef(global_row, 1:size(packed, 2), ispin)
+      packed(irow, 1:size(packed, 2)) = dg_frag%coef(local_row, 1:size(packed, 2), ispin)
     end do
 !$omp end parallel do
   end subroutine pack_owned_coef
@@ -2306,7 +2268,7 @@ contains
     integer, intent(in), optional :: col_start, col_end
     integer, intent(in), optional :: itt_debug
 
-    integer :: irow, global_row, owner_rank
+    integer :: irow, global_row, owner_rank, local_row
     integer :: nrows_req, nstate_req, owner, k, cnt, max_owner_rows
     integer :: cstart, cend, owner_chunk_rows, chunk0, chunk1, chunk_cnt, slot_idx
     integer, allocatable :: owner_counts(:), owner_offsets(:), owner_fill(:)
@@ -2346,7 +2308,7 @@ contains
 
     do irow = 1, nrows_req
       global_row = row_ids(irow)
-      if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
+      if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
       owner_rank = dg_frag%coef_owner(global_row, ispin)
       if (owner_rank < 0) cycle
       if (owner_rank >= dg_frag%isize) then
@@ -2373,7 +2335,7 @@ contains
 
     do irow = 1, nrows_req
       global_row = row_ids(irow)
-      if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
+      if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
       owner_rank = dg_frag%coef_owner(global_row, ispin)
       if (owner_rank < 0 .or. owner_rank >= dg_frag%isize) cycle
       k = owner_offsets(owner_rank) + owner_fill(owner_rank)
@@ -2395,8 +2357,11 @@ contains
           do k = 1, chunk_cnt
             irow = owner_offsets(owner) + (chunk0 + k - 2)
             global_row = owner_row(irow)
-            if (global_row < 1 .or. global_row > size(dg_frag%coef, 1)) cycle
-            packed_rows(k, 1:nstate_req) = dg_frag%coef(global_row, cstart:cend, ispin)
+            if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
+            if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+            local_row = dg_frag%coef_global_to_local(global_row, ispin)
+            if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
+            packed_rows(k, 1:nstate_req) = dg_frag%coef(local_row, cstart:cend, ispin)
           end do
         end if
         call comm_bcast(packed_rows(1:chunk_cnt, 1:nstate_req), dg_frag%icomm, owner)
@@ -2412,6 +2377,110 @@ contains
     deallocate(packed_rows)
     deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
   end subroutine fetch_remote_coef_rows
+
+  subroutine fetch_vector_rows_from_local(dg_frag, ispin, row_ids, x_local, fetched)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    integer, intent(in) :: row_ids(:)
+    complex(8), intent(in) :: x_local(:, :)
+    complex(8), intent(out) :: fetched(:, :)
+
+    integer :: irow, global_row, owner_rank, local_row
+    integer :: nrows_req, nstate_req, owner, k, cnt, max_owner_rows
+    integer :: owner_chunk_rows, chunk0, chunk1, chunk_cnt, slot_idx
+    integer, allocatable :: owner_counts(:), owner_offsets(:), owner_fill(:)
+    integer, allocatable :: owner_slot(:), owner_row(:)
+    complex(8), allocatable :: packed_rows(:,:)
+
+    fetched(:, :) = (0.0d0, 0.0d0)
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%coef_global_to_local)) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (dg_frag%isize <= 0) return
+
+    nrows_req = min(size(row_ids), size(fetched, 1))
+    nstate_req = min(size(x_local, 2), size(fetched, 2))
+    if (nrows_req <= 0 .or. nstate_req <= 0) return
+
+    allocate(owner_counts(0:dg_frag%isize-1), owner_offsets(0:dg_frag%isize-1), owner_fill(0:dg_frag%isize-1))
+    allocate(owner_slot(nrows_req), owner_row(nrows_req))
+    owner_counts(:) = 0
+    owner_offsets(:) = 0
+    owner_fill(:) = 0
+    owner_slot(:) = 0
+    owner_row(:) = 0
+
+    do irow = 1, nrows_req
+      global_row = row_ids(irow)
+      if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
+      owner_rank = dg_frag%coef_owner(global_row, ispin)
+      if (owner_rank < 0) cycle
+      if (owner_rank >= dg_frag%isize) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid vector owner rank: rank=", dg_frag%id, &
+          " ispin=", ispin, " row=", global_row, " owner_rank=", owner_rank, " isize=", dg_frag%isize
+        stop "DG-Fragment RT: invalid vector owner rank"
+      end if
+      owner_counts(owner_rank) = owner_counts(owner_rank) + 1
+    end do
+
+    max_owner_rows = 0
+    do owner = 0, dg_frag%isize-1
+      if (owner_counts(owner) > max_owner_rows) max_owner_rows = owner_counts(owner)
+    end do
+    if (max_owner_rows <= 0) then
+      deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
+      return
+    end if
+
+    owner_offsets(0) = 1
+    do owner = 1, dg_frag%isize-1
+      owner_offsets(owner) = owner_offsets(owner-1) + owner_counts(owner-1)
+    end do
+
+    do irow = 1, nrows_req
+      global_row = row_ids(irow)
+      if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
+      owner_rank = dg_frag%coef_owner(global_row, ispin)
+      if (owner_rank < 0 .or. owner_rank >= dg_frag%isize) cycle
+      k = owner_offsets(owner_rank) + owner_fill(owner_rank)
+      owner_fill(owner_rank) = owner_fill(owner_rank) + 1
+      owner_slot(k) = irow
+      owner_row(k) = global_row
+    end do
+
+    allocate(packed_rows(max_owner_rows, nstate_req))
+    owner_chunk_rows = 128
+    do owner = 0, dg_frag%isize-1
+      cnt = owner_counts(owner)
+      if (cnt <= 0) cycle
+      do chunk0 = 1, cnt, owner_chunk_rows
+        chunk1 = min(cnt, chunk0 + owner_chunk_rows - 1)
+        chunk_cnt = chunk1 - chunk0 + 1
+        packed_rows(1:chunk_cnt, 1:nstate_req) = (0.0d0, 0.0d0)
+        if (owner == dg_frag%id) then
+          do k = 1, chunk_cnt
+            irow = owner_offsets(owner) + (chunk0 + k - 2)
+            global_row = owner_row(irow)
+            if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
+            local_row = dg_frag%coef_global_to_local(global_row, ispin)
+            if (local_row < 1 .or. local_row > size(x_local, 1)) cycle
+            packed_rows(k, 1:nstate_req) = x_local(local_row, 1:nstate_req)
+          end do
+        end if
+        call comm_bcast(packed_rows(1:chunk_cnt, 1:nstate_req), dg_frag%icomm, owner)
+        do k = 1, chunk_cnt
+          irow = owner_offsets(owner) + (chunk0 + k - 2)
+          slot_idx = owner_slot(irow)
+          if (slot_idx < 1 .or. slot_idx > nrows_req) cycle
+          fetched(slot_idx, 1:nstate_req) = packed_rows(k, 1:nstate_req)
+        end do
+      end do
+    end do
+
+    deallocate(packed_rows)
+    deallocate(owner_counts, owner_offsets, owner_fill, owner_slot, owner_row)
+  end subroutine fetch_vector_rows_from_local
 
   subroutine pack_owned_coef_pw(dg_frag, row_ids, packed)
     implicit none
@@ -2680,7 +2749,11 @@ contains
         allocate(frag_row_ids(n_frag_rows))
       end if
       do i = 1, n_frag_rows
-        frag_row_ids(i) = i
+        if (allocated(dg_frag%local_coef_global_ids) .and. i <= size(dg_frag%local_coef_global_ids, 1)) then
+          frag_row_ids(i) = dg_frag%local_coef_global_ids(i, min(max(ispin, 1), dg_frag%nspin))
+        else
+          frag_row_ids(i) = i
+        end if
       end do
       call fetch_remote_coef_rows(dg_frag, ispin, frag_row_ids, coef_frag, cstart, cend)
     end if
@@ -2722,12 +2795,24 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
-    integer :: ispin, i
+    integer :: ispin, i, global_row
 
     if (allocated(dg_frag%coef_owner) .and. allocated(dg_frag%coef)) then
       do ispin = 1, min(size(dg_frag%coef_owner, 2), size(dg_frag%coef, 3))
-        do i = 1, min(size(dg_frag%coef_owner, 1), size(dg_frag%coef, 1))
-          if (dg_frag%coef_owner(i, ispin) == dg_frag%id) cycle
+        do i = 1, size(dg_frag%coef, 1)
+          global_row = 0
+          if (allocated(dg_frag%local_coef_global_ids)) then
+            if (i <= size(dg_frag%local_coef_global_ids, 1) .and. ispin <= size(dg_frag%local_coef_global_ids, 2)) then
+              global_row = dg_frag%local_coef_global_ids(i, ispin)
+            end if
+          else
+            global_row = i
+          end if
+          if (global_row < 1 .or. global_row > size(dg_frag%coef_owner, 1)) then
+            dg_frag%coef(i, :, ispin) = (0.0d0, 0.0d0)
+            cycle
+          end if
+          if (dg_frag%coef_owner(global_row, ispin) == dg_frag%id) cycle
           dg_frag%coef(i, :, ispin) = (0.0d0, 0.0d0)
         end do
       end do
@@ -2906,13 +2991,19 @@ contains
     complex(8), intent(inout) :: y(:)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: nrow, ncol, ii, jj, ig_i, iloc_i, idx_ii, idx_jj, valid_row_count, valid_col_count
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+    integer, allocatable :: col_req_ids(:)
+    complex(8), allocatable :: x_local_2d(:, :), col_vec(:, :)
     complex(8) :: xj
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
     if (.not. allocated(dg_frag%index_basis)) return
+    if (size(x) <= 0 .or. size(y) <= 0) return
+
+    allocate(x_local_2d(size(x), 1))
+    x_local_2d(:, 1) = x(:)
 
     do iblk = 1, size(blocks)
       ifrag_row = blocks(iblk)%ifrag_row
@@ -2926,7 +3017,10 @@ contains
       valid_row_count = 0
       do ii = 1, nrow
         row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-        if (row_gid(ii) < 1 .or. row_gid(ii) > size(y)) cycle
+        if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(row_gid(ii), ispin) > size(y)) cycle
         valid_row_count = valid_row_count + 1
         valid_row_ids(valid_row_count) = ii
       end do
@@ -2934,25 +3028,35 @@ contains
       valid_col_count = 0
       do jj = 1, ncol
         col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (col_gid(jj) < 1 .or. col_gid(jj) > size(x)) cycle
+        if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_owner)) cycle
+        if (dg_frag%coef_owner(col_gid(jj), ispin) < 0) cycle
         valid_col_count = valid_col_count + 1
         valid_col_ids(valid_col_count) = jj
       end do
       if (valid_col_count <= 0) cycle
+      allocate(col_req_ids(valid_col_count), col_vec(valid_col_count, 1))
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        col_req_ids(idx_jj) = col_gid(jj)
+      end do
+      call fetch_vector_rows_from_local(dg_frag, ispin, col_req_ids, x_local_2d, col_vec)
 
       do idx_jj = 1, valid_col_count
         jj = valid_col_ids(idx_jj)
-        ig_j = col_gid(jj)
-        xj = x(ig_j)
+        xj = col_vec(idx_jj, 1)
         if (abs(xj) == 0.0d0) cycle
-!$omp simd private(ii,ig_i)
+!$omp simd private(ii,ig_i,iloc_i)
         do idx_ii = 1, valid_row_count
           ii = valid_row_ids(idx_ii)
           ig_i = row_gid(ii)
-          y(ig_i) = y(ig_i) + blocks(iblk)%val(ii, jj, ispin) * xj
+          iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+          y(iloc_i) = y(iloc_i) + blocks(iblk)%val(ii, jj, ispin) * xj
         end do
       end do
+      deallocate(col_req_ids, col_vec)
     end do
+    deallocate(x_local_2d)
   end subroutine apply_matrix_blocks
 
   subroutine apply_matrix_blocks_batch(dg_frag, blocks, ispin, x, y, block_ids)
@@ -2965,9 +3069,11 @@ contains
     integer, intent(in), optional :: block_ids(:)
 
     integer :: iblk, iblk_idx, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: nrow, ncol, ii, jj, ist, ig_i, iloc_i, idx_ii, idx_jj, valid_row_count, valid_col_count
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+    integer, allocatable :: col_req_ids(:)
+    complex(8), allocatable :: col_vec(:, :)
     complex(8) :: xj
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
@@ -3013,7 +3119,10 @@ contains
         valid_row_count = 0
         do ii = 1, nrow
           row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-          if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+          if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+          if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+          if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+              dg_frag%coef_global_to_local(row_gid(ii), ispin) > size(y, 1)) cycle
           valid_row_count = valid_row_count + 1
           valid_row_ids(valid_row_count) = ii
         end do
@@ -3021,25 +3130,34 @@ contains
         valid_col_count = 0
         do jj = 1, ncol
           col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-          if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+          if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+          if (.not. allocated(dg_frag%coef_owner)) cycle
+          if (dg_frag%coef_owner(col_gid(jj), ispin) < 0) cycle
           valid_col_count = valid_col_count + 1
           valid_col_ids(valid_col_count) = jj
         end do
         if (valid_col_count <= 0) cycle
+        allocate(col_req_ids(valid_col_count), col_vec(valid_col_count, size(x, 2)))
         do idx_jj = 1, valid_col_count
           jj = valid_col_ids(idx_jj)
-          ig_j = col_gid(jj)
+          col_req_ids(idx_jj) = col_gid(jj)
+        end do
+        call fetch_vector_rows_from_local(dg_frag, ispin, col_req_ids, x, col_vec)
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
           do ist = 1, size(x, 2)
-            xj = x(ig_j, ist)
+            xj = col_vec(idx_jj, ist)
             if (abs(xj) == 0.0d0) cycle
 !$omp simd private(ii,ig_i)
             do idx_ii = 1, valid_row_count
               ii = valid_row_ids(idx_ii)
               ig_i = row_gid(ii)
-              y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
+              iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+              y(iloc_i, ist) = y(iloc_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
             end do
           end do
         end do
+        deallocate(col_req_ids, col_vec)
       end do
       return
     end if
@@ -3056,7 +3174,10 @@ contains
       valid_row_count = 0
       do ii = 1, nrow
         row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-        if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+        if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(row_gid(ii), ispin) > size(y, 1)) cycle
         valid_row_count = valid_row_count + 1
         valid_row_ids(valid_row_count) = ii
       end do
@@ -3064,27 +3185,113 @@ contains
       valid_col_count = 0
       do jj = 1, ncol
         col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+        if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_owner)) cycle
+        if (dg_frag%coef_owner(col_gid(jj), ispin) < 0) cycle
         valid_col_count = valid_col_count + 1
         valid_col_ids(valid_col_count) = jj
       end do
       if (valid_col_count <= 0) cycle
+      allocate(col_req_ids(valid_col_count), col_vec(valid_col_count, size(x, 2)))
       do idx_jj = 1, valid_col_count
         jj = valid_col_ids(idx_jj)
-        ig_j = col_gid(jj)
+        col_req_ids(idx_jj) = col_gid(jj)
+      end do
+      call fetch_vector_rows_from_local(dg_frag, ispin, col_req_ids, x, col_vec)
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
         do ist = 1, size(x, 2)
-          xj = x(ig_j, ist)
+          xj = col_vec(idx_jj, ist)
           if (abs(xj) == 0.0d0) cycle
-!$omp simd private(ii,ig_i)
+!$omp simd private(ii,ig_i,iloc_i)
           do idx_ii = 1, valid_row_count
             ii = valid_row_ids(idx_ii)
             ig_i = row_gid(ii)
-            y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
+            iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+            y(iloc_i, ist) = y(iloc_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
           end do
         end do
       end do
+      deallocate(col_req_ids, col_vec)
     end do
   end subroutine apply_matrix_blocks_batch
+
+  subroutine apply_complex_matrix_blocks(dg_frag, blocks, ispin, x, y)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(complex_matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    complex(8), intent(in) :: x(:)
+    complex(8), intent(inout) :: y(:)
+
+    integer :: iblk, ifrag_row, ifrag_col
+    integer :: nrow, ncol, ii, jj, ig_i, iloc_i, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+    integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+    integer, allocatable :: col_req_ids(:)
+    complex(8), allocatable :: x_local_2d(:, :), col_vec(:, :)
+    complex(8) :: xj
+
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (size(x) <= 0 .or. size(y) <= 0) return
+
+    allocate(x_local_2d(size(x), 1))
+    x_local_2d(:, 1) = x(:)
+
+    do iblk = 1, size(blocks)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+      nrow = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 1))
+      ncol = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%index_basis, 1), size(blocks(iblk)%val, 2))
+      if (nrow <= 0 .or. ncol <= 0) cycle
+
+      valid_row_count = 0
+      do ii = 1, nrow
+        row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(row_gid(ii), ispin) > size(y)) cycle
+        valid_row_count = valid_row_count + 1
+        valid_row_ids(valid_row_count) = ii
+      end do
+      if (valid_row_count <= 0) cycle
+      valid_col_count = 0
+      do jj = 1, ncol
+        col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_owner)) cycle
+        if (dg_frag%coef_owner(col_gid(jj), ispin) < 0) cycle
+        valid_col_count = valid_col_count + 1
+        valid_col_ids(valid_col_count) = jj
+      end do
+      if (valid_col_count <= 0) cycle
+      allocate(col_req_ids(valid_col_count), col_vec(valid_col_count, 1))
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        col_req_ids(idx_jj) = col_gid(jj)
+      end do
+      call fetch_vector_rows_from_local(dg_frag, ispin, col_req_ids, x_local_2d, col_vec)
+
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
+        xj = col_vec(idx_jj, 1)
+        if (abs(xj) == 0.0d0) cycle
+!$omp simd private(ii,ig_i,iloc_i)
+        do idx_ii = 1, valid_row_count
+          ii = valid_row_ids(idx_ii)
+          ig_i = row_gid(ii)
+          iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+          y(iloc_i) = y(iloc_i) + blocks(iblk)%val(ii, jj, ispin) * xj
+        end do
+      end do
+      deallocate(col_req_ids, col_vec)
+    end do
+    deallocate(x_local_2d)
+  end subroutine apply_complex_matrix_blocks
 
   subroutine apply_complex_matrix_blocks_batch(dg_frag, blocks, ispin, x, y, block_ids)
     implicit none
@@ -3096,9 +3303,11 @@ contains
     integer, intent(in), optional :: block_ids(:)
 
     integer :: iblk, iblk_idx, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ist, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: nrow, ncol, ii, jj, ist, ig_i, iloc_i, idx_ii, idx_jj, valid_row_count, valid_col_count
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+    integer, allocatable :: col_req_ids(:)
+    complex(8), allocatable :: col_vec(:, :)
     complex(8) :: xj
 
     if (ispin < 1 .or. ispin > dg_frag%nspin) return
@@ -3120,7 +3329,10 @@ contains
         valid_row_count = 0
         do ii = 1, nrow
           row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-          if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+          if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+          if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+          if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+              dg_frag%coef_global_to_local(row_gid(ii), ispin) > size(y, 1)) cycle
           valid_row_count = valid_row_count + 1
           valid_row_ids(valid_row_count) = ii
         end do
@@ -3128,25 +3340,34 @@ contains
         valid_col_count = 0
         do jj = 1, ncol
           col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-          if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+          if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+          if (.not. allocated(dg_frag%coef_owner)) cycle
+          if (dg_frag%coef_owner(col_gid(jj), ispin) < 0) cycle
           valid_col_count = valid_col_count + 1
           valid_col_ids(valid_col_count) = jj
         end do
         if (valid_col_count <= 0) cycle
+        allocate(col_req_ids(valid_col_count), col_vec(valid_col_count, size(x, 2)))
         do idx_jj = 1, valid_col_count
           jj = valid_col_ids(idx_jj)
-          ig_j = col_gid(jj)
+          col_req_ids(idx_jj) = col_gid(jj)
+        end do
+        call fetch_vector_rows_from_local(dg_frag, ispin, col_req_ids, x, col_vec)
+        do idx_jj = 1, valid_col_count
+          jj = valid_col_ids(idx_jj)
           do ist = 1, size(x, 2)
-            xj = x(ig_j, ist)
+            xj = col_vec(idx_jj, ist)
             if (abs(xj) == 0.0d0) cycle
-!$omp simd private(ii,ig_i)
+!$omp simd private(ii,ig_i,iloc_i)
             do idx_ii = 1, valid_row_count
               ii = valid_row_ids(idx_ii)
               ig_i = row_gid(ii)
-              y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
+              iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+              y(iloc_i, ist) = y(iloc_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
             end do
           end do
         end do
+        deallocate(col_req_ids, col_vec)
       end do
       return
     end if
@@ -3163,7 +3384,10 @@ contains
       valid_row_count = 0
       do ii = 1, nrow
         row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-        if (row_gid(ii) < 1 .or. row_gid(ii) > size(y, 1)) cycle
+        if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(row_gid(ii), ispin) > size(y, 1)) cycle
         valid_row_count = valid_row_count + 1
         valid_row_ids(valid_row_count) = ii
       end do
@@ -3171,25 +3395,34 @@ contains
       valid_col_count = 0
       do jj = 1, ncol
         col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (col_gid(jj) < 1 .or. col_gid(jj) > size(x, 1)) cycle
+        if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_owner)) cycle
+        if (dg_frag%coef_owner(col_gid(jj), ispin) < 0) cycle
         valid_col_count = valid_col_count + 1
         valid_col_ids(valid_col_count) = jj
       end do
       if (valid_col_count <= 0) cycle
+      allocate(col_req_ids(valid_col_count), col_vec(valid_col_count, size(x, 2)))
       do idx_jj = 1, valid_col_count
         jj = valid_col_ids(idx_jj)
-        ig_j = col_gid(jj)
+        col_req_ids(idx_jj) = col_gid(jj)
+      end do
+      call fetch_vector_rows_from_local(dg_frag, ispin, col_req_ids, x, col_vec)
+      do idx_jj = 1, valid_col_count
+        jj = valid_col_ids(idx_jj)
         do ist = 1, size(x, 2)
-          xj = x(ig_j, ist)
+          xj = col_vec(idx_jj, ist)
           if (abs(xj) == 0.0d0) cycle
-!$omp simd private(ii,ig_i)
+!$omp simd private(ii,ig_i,iloc_i)
           do idx_ii = 1, valid_row_count
             ii = valid_row_ids(idx_ii)
             ig_i = row_gid(ii)
-            y(ig_i, ist) = y(ig_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
+            iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+            y(iloc_i, ist) = y(iloc_i, ist) + blocks(iblk)%val(ii, jj, ispin) * xj
           end do
         end do
       end do
+      deallocate(col_req_ids, col_vec)
     end do
   end subroutine apply_complex_matrix_blocks_batch
 
@@ -3201,7 +3434,7 @@ contains
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, iloc_i, iloc_j, idx_ii, idx_jj, valid_row_count, valid_col_count
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
@@ -3257,7 +3490,7 @@ contains
     complex(8), intent(inout) :: mat(:, :)
 
     integer :: iblk, ifrag_row, ifrag_col
-    integer :: nrow, ncol, ii, jj, ig_i, ig_j, idx_ii, idx_jj, valid_row_count, valid_col_count
+    integer :: nrow, ncol, ii, jj, ig_i, ig_j, iloc_i, iloc_j, idx_ii, idx_jj, valid_row_count, valid_col_count
     integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
     integer :: valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
 
@@ -3277,7 +3510,10 @@ contains
       valid_row_count = 0
       do ii = 1, nrow
         row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-        if (row_gid(ii) < 1 .or. row_gid(ii) > n_metric .or. row_gid(ii) > size(mat, 1)) cycle
+        if (row_gid(ii) < 1 .or. row_gid(ii) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(row_gid(ii), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(row_gid(ii), ispin) > min(n_metric, size(mat, 1))) cycle
         valid_row_count = valid_row_count + 1
         valid_row_ids(valid_row_count) = ii
       end do
@@ -3286,7 +3522,10 @@ contains
       valid_col_count = 0
       do jj = 1, ncol
         col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-        if (col_gid(jj) < 1 .or. col_gid(jj) > n_metric .or. col_gid(jj) > size(mat, 2)) cycle
+        if (col_gid(jj) < 1 .or. col_gid(jj) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(col_gid(jj), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(col_gid(jj), ispin) > min(n_metric, size(mat, 2))) cycle
         valid_col_count = valid_col_count + 1
         valid_col_ids(valid_col_count) = jj
       end do
@@ -3295,11 +3534,13 @@ contains
       do idx_jj = 1, valid_col_count
         jj = valid_col_ids(idx_jj)
         ig_j = col_gid(jj)
-!$omp simd private(ii,ig_i)
+        iloc_j = dg_frag%coef_global_to_local(ig_j, ispin)
+!$omp simd private(ii,ig_i,iloc_i)
         do idx_ii = 1, valid_row_count
           ii = valid_row_ids(idx_ii)
           ig_i = row_gid(ii)
-          mat(ig_i, ig_j) = cmplx(blocks(iblk)%val(ii, jj, ispin), 0.0d0, kind=8)
+          iloc_i = dg_frag%coef_global_to_local(ig_i, ispin)
+          mat(iloc_i, iloc_j) = cmplx(blocks(iblk)%val(ii, jj, ispin), 0.0d0, kind=8)
         end do
       end do
     end do
@@ -3565,15 +3806,17 @@ contains
     complex(8),             intent(in) :: x(:,:)
     complex(8),             intent(inout) :: y(:,:)
 
-    integer :: iblk, idir, ib, jb, row_idx, col_idx, nstate, istate
+    integer :: iblk, idir, ib, jb, row_idx, col_idx, row_loc, col_loc, nstate, istate
     integer :: active_dir_count, valid_row_count, valid_col_count, idx_dir, idx_ib, idx_jb
-    integer :: ifrag_row, ifrag_col, nrow, ncol
-    integer :: active_dirs(3), valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
-    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
-    real(8) :: scale
+	    integer :: ifrag_row, ifrag_col, nrow, ncol
+	    integer :: active_dirs(3), valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1))
+	    integer :: row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1))
+	    real(8) :: scale
+	    logical :: use_complex_blocks
 
-    if (.not. allocated(dg_frag%momentum_blocks)) return
-    nstate = min(size(x, 2), size(y, 2))
+	    if (.not. allocated(dg_frag%momentum_blocks)) return
+	    use_complex_blocks = allocated(dg_frag%momentum_blocks_c)
+	    nstate = min(size(x, 2), size(y, 2))
 
     active_dir_count = 0
     do idir = 1, 3
@@ -3598,7 +3841,10 @@ contains
       valid_row_count = 0
       do ib = 1, nrow
         row_gid(ib) = dg_frag%index_basis(ib, ifrag_row, ispin)
-        if (row_gid(ib) < 1 .or. row_gid(ib) > size(y, 1)) cycle
+        if (row_gid(ib) < 1 .or. row_gid(ib) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(row_gid(ib), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(row_gid(ib), ispin) > size(y, 1)) cycle
         valid_row_count = valid_row_count + 1
         valid_row_ids(valid_row_count) = ib
       end do
@@ -3607,7 +3853,10 @@ contains
       valid_col_count = 0
       do jb = 1, ncol
         col_gid(jb) = dg_frag%index_basis(jb, ifrag_col, ispin)
-        if (col_gid(jb) < 1 .or. col_gid(jb) > size(x, 1)) cycle
+        if (col_gid(jb) < 1 .or. col_gid(jb) > dg_frag%n_mat_max) cycle
+        if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+        if (dg_frag%coef_global_to_local(col_gid(jb), ispin) < 1 .or. &
+            dg_frag%coef_global_to_local(col_gid(jb), ispin) > size(x, 1)) cycle
         valid_col_count = valid_col_count + 1
         valid_col_ids(valid_col_count) = jb
       end do
@@ -3620,13 +3869,21 @@ contains
           do idx_jb = 1, valid_col_count
             jb = valid_col_ids(idx_jb)
             col_idx = col_gid(jb)
-!$omp simd private(ib,row_idx)
+            col_loc = dg_frag%coef_global_to_local(col_idx, ispin)
+!$omp simd private(ib,row_idx,row_loc)
             do idx_ib = 1, valid_row_count
               ib = valid_row_ids(idx_ib)
-              row_idx = row_gid(ib)
-              y(row_idx, istate) = y(row_idx, istate) + &
-                scale * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin) * x(col_idx, istate)
-            end do
+	              row_idx = row_gid(ib)
+	              row_loc = dg_frag%coef_global_to_local(row_idx, ispin)
+	              if (use_complex_blocks .and. iblk <= size(dg_frag%momentum_blocks_c) .and. &
+	                  allocated(dg_frag%momentum_blocks_c(iblk)%val)) then
+	                y(row_loc, istate) = y(row_loc, istate) + &
+	                  scale * dg_frag%momentum_blocks_c(iblk)%val(idir, ib, jb, ispin) * x(col_loc, istate)
+	              else
+	                y(row_loc, istate) = y(row_loc, istate) + &
+	                  scale * dg_frag%momentum_blocks(iblk)%val(idir, ib, jb, ispin) * x(col_loc, istate)
+	              end if
+	            end do
           end do
         end do
       end do

@@ -81,29 +81,24 @@ contains
 
       wrk = 0d0
       if(allocated(spsi%zwf)) then
-        do ispin=1,system%nspin
+        ! A SOI orbital is one two-component spinor.  The duplicated spin
+        ! slots below keep the existing rocc/esp storage convention intact.
         do io=info%io_s,info%io_e
           do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3))
           do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2))
           do ix=mg%is(1),min(mg%ie(1),dc%nxyz_domain(1))
-            wrk(io,ispin) = wrk(io,ispin) + (abs(spsi%zwf(ix,iy,iz,ispin,io,1,1))**2) * system%hvol
+            do ispin=1,system%nspin
+              wrk(io,1) = wrk(io,1) + (abs(spsi%zwf(ix,iy,iz,ispin,io,1,1))**2) * system%hvol
+            end do
           end do
           end do
           end do
         end do
+        do ispin=2,system%nspin
+          wrk(:,ispin) = wrk(:,1)
         end do
       else if(allocated(spsi%rwf)) then
-        do ispin=1,system%nspin
-        do io=info%io_s,info%io_e
-          do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3))
-          do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2))
-          do ix=mg%is(1),min(mg%ie(1),dc%nxyz_domain(1))
-            wrk(io,ispin) = wrk(io,ispin) + (abs(spsi%rwf(ix,iy,iz,ispin,io,1,1))**2) * system%hvol
-          end do
-          end do
-          end do
-        end do
-        end do
+        stop "ne2mu_dcdft_soi: real wavefunction is invalid for SOI occupation."
       else
         stop "ne2mu_dcdft_soi: neither rwf nor zwf is allocated."
       end if
@@ -218,33 +213,111 @@ contains
 
   subroutine calc_rho_total_dcdft_soi(nspin,lg,mg,info,rho_s,dc)
     use structures
-    use dcdft, only: calc_rho_total_dcdft
+    use communication, only: comm_summation
+    use noncollinear_module, only: get_den_mat_noncollinear, set_den_mat_noncollinear, &
+      & rot_dm_noncollinear
     implicit none
     integer,              intent(in) :: nspin
     type(s_rgrid),        intent(in) :: lg,mg
     type(s_parallel_info),intent(in) :: info
     type(s_scalar),       intent(in) :: rho_s(nspin)
-    type(s_dcdft)                    :: dc
+    type(s_dcdft),        intent(inout) :: dc
+    !
+    integer :: ix,iy,iz,is,js,ix_tot,iy_tot,iz_tot
+    real(8) :: rho_int
+    complex(8),allocatable :: frg_tmp(:,:,:,:,:),frg(:,:,:,:,:)
+    complex(8),allocatable :: tot_tmp(:,:,:,:,:),tot(:,:,:,:,:)
 
-    call calc_rho_total_dcdft(nspin,lg,mg,info,rho_s,dc)
+    if(nspin /= 2) stop "calc_rho_total_dcdft_soi: nspin must be 2."
+
+    allocate(frg_tmp(lg%num(1),lg%num(2),lg%num(3),2,2))
+    allocate(frg    (lg%num(1),lg%num(2),lg%num(3),2,2))
+    allocate(tot_tmp(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),2,2))
+    allocate(tot    (dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),2,2))
+
+    frg_tmp = (0.0d0,0.0d0)
+    call get_den_mat_noncollinear(mg, &
+      & frg_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2,1:2))
+    call comm_summation(frg_tmp,frg,lg%num(1)*lg%num(2)*lg%num(3)*4,info%icomm_r)
+
+    tot_tmp = (0.0d0,0.0d0)
+    if(info%id_rko==0) then
+      do js=1,2
+      do is=1,2
+      do iz=1,dc%nxyz_domain(3); iz_tot = dc%jxyz_tot(iz,3)
+      do iy=1,dc%nxyz_domain(2); iy_tot = dc%jxyz_tot(iy,2)
+      do ix=1,dc%nxyz_domain(1); ix_tot = dc%jxyz_tot(ix,1)
+        tot_tmp(ix_tot,iy_tot,iz_tot,is,js) = frg(ix,iy,iz,is,js)
+      end do
+      end do
+      end do
+      end do
+      end do
+    end if
+    call comm_summation(tot_tmp,tot,dc%lg_tot%num(1)*dc%lg_tot%num(2)*dc%lg_tot%num(3)*4,dc%icomm_tot)
+
+    call set_den_mat_noncollinear(dc%mg_tot, &
+      & tot(dc%mg_tot%is(1):dc%mg_tot%ie(1),dc%mg_tot%is(2):dc%mg_tot%ie(2), &
+      &     dc%mg_tot%is(3):dc%mg_tot%ie(3),1:2,1:2))
+    call rot_dm_noncollinear(dc%rho_tot_s,dc%system_tot,dc%mg_tot)
+
+    if(dc%id_tot==0) then
+      rho_int = sum(dble(tot(:,:,:,1,1)+tot(:,:,:,2,2)))*dc%system_tot%hvol
+      write(*,*) "integral(rho_tot)=",rho_int," Ne=",dc%elec_num_tot
+    end if
+
+    deallocate(frg_tmp,frg,tot_tmp,tot)
   end subroutine calc_rho_total_dcdft_soi
 
   subroutine calc_vlocal_fragment_dcdft_soi(nspin,mg,vloc,dc)
     use structures
     use dcdft, only: calc_vlocal_fragment_dcdft
+    use communication, only: comm_summation
+    use noncollinear_module, only: get_vxc_mat_noncollinear, set_vxc_mat_noncollinear
     implicit none
     integer,      intent(in) :: nspin
     type(s_rgrid),intent(in) :: mg
-    type(s_scalar)           :: vloc(nspin)
-    type(s_dcdft)            :: dc
+    type(s_scalar),intent(inout) :: vloc(nspin)
+    type(s_dcdft), intent(inout) :: dc
+    !
+    integer :: ix,iy,iz,is,js,ix_tot,iy_tot,iz_tot
+    complex(8),allocatable :: tot_tmp(:,:,:,:,:),tot(:,:,:,:,:),frg(:,:,:,:,:)
 
+    if(nspin /= 2) stop "calc_vlocal_fragment_dcdft_soi: nspin must be 2."
     call calc_vlocal_fragment_dcdft(nspin,mg,vloc,dc)
+
+    allocate(tot_tmp(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),2,2))
+    allocate(tot    (dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),2,2))
+    allocate(frg(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2))
+
+    tot_tmp = (0.0d0,0.0d0)
+    call get_vxc_mat_noncollinear(dc%mg_tot, &
+      & tot_tmp(dc%mg_tot%is(1):dc%mg_tot%ie(1),dc%mg_tot%is(2):dc%mg_tot%ie(2), &
+      &         dc%mg_tot%is(3):dc%mg_tot%ie(3),1:2,1:2))
+    call comm_summation(tot_tmp,tot,dc%lg_tot%num(1)*dc%lg_tot%num(2)*dc%lg_tot%num(3)*4,dc%icomm_tot)
+
+    do js=1,2
+    do is=1,2
+    do iz=mg%is(3),mg%ie(3); iz_tot = dc%jxyz_tot(iz,3)
+    do iy=mg%is(2),mg%ie(2); iy_tot = dc%jxyz_tot(iy,2)
+    do ix=mg%is(1),mg%ie(1); ix_tot = dc%jxyz_tot(ix,1)
+      frg(ix,iy,iz,is,js) = tot(ix_tot,iy_tot,iz_tot,is,js)
+    end do
+    end do
+    end do
+    end do
+    end do
+
+    call set_vxc_mat_noncollinear(mg,frg)
+
+    deallocate(tot_tmp,tot,frg)
   end subroutine calc_vlocal_fragment_dcdft_soi
 
-  subroutine calc_total_energy_dcdft_soi(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
+  subroutine calc_total_energy_dcdft_soi(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,ppg,rion_update,dc,energy)
     use structures
     use communication, only: comm_summation
     use Total_Energy, only: calc_Total_Energy_periodic
+    use pseudo_pt_so_sub, only: pseudo_so
     use, intrinsic :: ieee_arithmetic, only: ieee_is_nan
     implicit none
     type(s_rgrid),        intent(in) :: mg
@@ -254,9 +327,11 @@ contains
     type(s_orbital),      intent(in) :: spsi,shpsi,sttpsi
     type(s_ewald_ion_ion),intent(in) :: ewald
     type(s_pp_info)      ,intent(in) :: pp
+    type(s_pp_grid)      ,intent(in) :: ppg
     logical              ,intent(in) :: rion_update
     type(s_dcdft),        intent(in) :: dc
     type(s_dft_energy)               :: energy
+    type(s_orbital) :: nloc_psi
     integer :: ispin,io
     integer,dimension(3) :: is,ie
     real(8) :: E_tmp,E_local(2),E_sum(2)
@@ -309,27 +384,20 @@ contains
 
     E_tmp = 0d0
     if(allocated(spsi%zwf)) then
+      call allocate_orbital_complex(system%nspin,mg,info,nloc_psi)
+      ! shpsi also contains the noncollinear XC operator; evaluate SO nonlocal
+      ! energy from the spin-orbit pseudopotential alone, as in calc_eigen_energy.
+      call pseudo_so(spsi,nloc_psi,info,system%Nspin,ppg,mg)
       do ispin=1,system%Nspin
       do io=info%io_s,info%io_e
         ztmp = sum( conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) &
-            &     * (shpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
-            &     - (sttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
-            &     + v_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
-            &       * spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) ) )
+            &     * nloc_psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) )
         E_tmp = E_tmp + system%rocc(io,1,ispin) * dble(ztmp) * system%hvol
       end do
       end do
+      call deallocate_orbital(nloc_psi)
     else if(allocated(spsi%rwf)) then
-      do ispin=1,system%Nspin
-      do io=info%io_s,info%io_e
-        E_tmp = E_tmp + system%rocc(io,1,ispin) * system%hvol &
-          * sum( spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
-             * (shpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
-            - (sttpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
-            + v_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
-              * spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1)) ) )
-      end do
-      end do
+      stop "calc_total_energy_dcdft_soi: real wavefunction is invalid for SOI E_ion_nloc."
     else
       stop "calc_total_energy_dcdft_soi: neither rwf nor zwf is allocated (E_ion_nloc)."
     end if

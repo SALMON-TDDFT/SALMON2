@@ -22,8 +22,8 @@ module rt_dg_fragment_types
   implicit none
 
   private
-  public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, momentum_block_info, &
-            density_recv_map_info, density_grid_point_info, real_buffer_info, s_dg_fragment_rt
+  public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, complex_vector_block_info, &
+            momentum_block_info, density_recv_map_info, density_grid_point_info, real_buffer_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -64,6 +64,14 @@ module rt_dg_fragment_types
     integer :: ncol_max = 0
     real(8), allocatable :: val(:,:,:,:) ! (ndir, nrow_max, ncol_max, nspin)
   end type vector_block_info
+
+  type :: complex_vector_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    complex(8), allocatable :: val(:,:,:,:) ! (ndir, nrow_max, ncol_max, nspin)
+  end type complex_vector_block_info
 
   type :: momentum_block_info
     integer :: ifrag_row = 0
@@ -125,6 +133,10 @@ module rt_dg_fragment_types
     complex(8), allocatable :: coef(:,:,:)        ! (nstate_frag, nstate_tot, nspin)
     complex(8), allocatable :: coef_new(:,:,:)    ! for time propagation
     complex(8), allocatable :: coef_work(:,:,:)   ! work array
+    ! Orbital parallelism stores only the coefficient rows owned by this rank.
+    integer, allocatable :: local_coef_count(:)        ! (nspin), local coefficient-row count
+    integer, allocatable :: local_coef_global_ids(:,:) ! (local_coef_max,nspin), local row -> global basis id
+    integer, allocatable :: coef_global_to_local(:,:)  ! (n_mat_max,nspin), global basis id -> local row, 0 if absent
     integer, allocatable :: coef_owner(:,:)       ! (n_mat_max, nspin), owning rank of each fragment-basis row
     integer :: owned_coef_start = 0               ! first owned fragment-basis row (contiguous hint)
     integer :: owned_coef_end = -1                ! last owned fragment-basis row (contiguous hint)
@@ -153,6 +165,9 @@ module rt_dg_fragment_types
     complex(8), allocatable :: S_mat_prop_c(:,:,:) ! complex overlap used in propagation/unitarity
     type(matrix_block_info), allocatable :: S_mat_blocks(:)
     type(matrix_block_info), allocatable :: S_mat_prop_blocks(:)
+    ! Complex overlap blocks are used by SOI and mixed/PW propagation paths.
+    type(complex_matrix_block_info), allocatable :: S_mat_blocks_c(:)
+    type(complex_matrix_block_info), allocatable :: S_mat_prop_blocks_c(:)
     integer, allocatable :: S_block_map(:,:)
     integer :: n_S_blocks = 0
     logical :: has_global_overlap_copy = .true.
@@ -166,6 +181,7 @@ module rt_dg_fragment_types
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)
     complex(8), allocatable :: momentum_mat_c(:,:,:,:) ! complex momentum matrix for SOI/mixed propagation
     type(vector_block_info), allocatable :: momentum_blocks(:)
+    type(complex_vector_block_info), allocatable :: momentum_blocks_c(:)
     integer, allocatable :: momentum_block_map(:,:)
     integer :: n_momentum_blocks = 0
     integer, allocatable :: momentum_dense_row_gid_cache(:)    ! reusable scratch for momentum dense materialization
@@ -178,8 +194,7 @@ module rt_dg_fragment_types
     type(vector_block_info), allocatable :: dipole_blocks(:)
     integer, allocatable :: dipole_block_map(:,:)
     integer :: n_dipole_blocks = 0
-    complex(8), allocatable :: H_nl_cache(:,:,:)   ! cached non-local PP matrix (A-dependent)
-    real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_cache
+    real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_blocks
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
     complex(8), allocatable :: nl_pp_phi_self(:,:,:,:) ! (nps,natom,nstate_frag,ifrag_local)
@@ -241,7 +256,7 @@ module rt_dg_fragment_types
     real(8) :: selfexc_leak100_129_prev_step   ! previous-step |U_129,100|^2 sample
     integer :: selfexc_prev_step_itt           ! step index cached for per-step delta
     real(8) :: pw_weight_raw                   ! simple diagnostic: sum |coef_pw|^2 over occupied states
-    complex(8), allocatable :: coef_ref_all(:,:,:) ! reference coefficients (n_tot,nstate_tot,nspin) at first RT step
+    complex(8), allocatable :: coef_ref_all(:,:,:) ! local-row occ/virt diagnostic reference coefficients
     logical :: coef_ref_ready = .false.        ! reference coefficient cache status
 
     ! Fragment geometry information
@@ -326,6 +341,7 @@ module rt_dg_fragment_types
                                                    ! This is the shared real-space fragment basis itself.
                                                    ! Spin dependence enters through bookkeeping/operators, not here.
     complex(8), allocatable :: phi_frag_c(:,:,:,:,:) ! complex fragment basis for SOI/noncollinear path
+    complex(8), allocatable :: phi_frag_spinor_c(:,:,:,:,:,:) ! (x,y,z,nspin,basis,ifrag_local) SOI spinor basis
     logical, allocatable :: phi_frag_has_seed_buffer(:) ! true when halo values came from DC buffer seed
     logical :: has_real_space_basis                ! flag: real-space basis available
     logical :: has_halo_exchange                   ! flag: halo exchange implemented

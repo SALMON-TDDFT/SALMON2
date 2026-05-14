@@ -17,36 +17,33 @@
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag_row, ifrag_col
-    integer :: axis
-    logical :: axis_ok(3)
+    integer :: axis, n_same, n_adjacent
+    logical :: same_axis, adjacent_axis
 
     is_pair = .false.
     if (ifrag_row == ifrag_col) then
       is_pair = .true.
       return
     end if
-    if (allocated(dg_frag%momentum_neighbor_pair_cache)) then
-      if (ifrag_row >= 1 .and. ifrag_row <= size(dg_frag%momentum_neighbor_pair_cache, 1) .and. &
-          ifrag_col >= 1 .and. ifrag_col <= size(dg_frag%momentum_neighbor_pair_cache, 2)) then
-        is_pair = dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col)
-        return
-      end if
-    end if
-
+    n_same = 0
+    n_adjacent = 0
     do axis = 1, 3
-      axis_ok(axis) = is_momentum_neighbor_axis(dg_frag%lgnum_total(axis), &
+      same_axis = (dg_frag%ixyz_frag(axis, ifrag_row) == dg_frag%ixyz_frag(axis, ifrag_col) .and. &
+                   dg_frag%nxyz_domain(axis, ifrag_row) == dg_frag%nxyz_domain(axis, ifrag_col))
+      adjacent_axis = is_momentum_neighbor_axis(dg_frag%lgnum_total(axis), &
         dg_frag%ixyz_frag(axis, ifrag_row), dg_frag%nxyz_domain(axis, ifrag_row), &
-        dg_frag%ixyz_frag(axis, ifrag_col), dg_frag%nxyz_domain(axis, ifrag_col))
+        dg_frag%ixyz_frag(axis, ifrag_col), dg_frag%nxyz_domain(axis, ifrag_col)) .and. .not. same_axis
+      if (same_axis) n_same = n_same + 1
+      if (adjacent_axis) n_adjacent = n_adjacent + 1
     end do
 
-    is_pair = all(axis_ok)
+    is_pair = (n_same == 2 .and. n_adjacent == 1)
   end function is_momentum_neighbor_pair
 
   subroutine ensure_momentum_neighbor_pair_cache(dg_frag)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    integer :: ifrag_row, ifrag_col, axis
-    logical :: axis_ok(3)
+    integer :: ifrag_row, ifrag_col
 
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) return
     allocate(dg_frag%momentum_neighbor_pair_cache(dg_frag%n_frag, dg_frag%n_frag))
@@ -56,12 +53,8 @@
         if (ifrag_row == ifrag_col) then
           dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col) = .true.
         else
-          do axis = 1, 3
-            axis_ok(axis) = is_momentum_neighbor_axis(dg_frag%lgnum_total(axis), &
-              dg_frag%ixyz_frag(axis, ifrag_row), dg_frag%nxyz_domain(axis, ifrag_row), &
-              dg_frag%ixyz_frag(axis, ifrag_col), dg_frag%nxyz_domain(axis, ifrag_col))
-          end do
-          dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col) = all(axis_ok)
+          dg_frag%momentum_neighbor_pair_cache(ifrag_row, ifrag_col) = &
+            is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
         end if
       end do
     end do
@@ -220,14 +213,34 @@
     end do
   end function fragment_row_is_locally_owned
 
-  subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks)
+  logical function basis_row_is_locally_owned(dg_frag, ifrag, ispin, io) result(is_local)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, ispin, io
+    integer :: global_idx
+
+    is_local = .false.
+    if (ifrag < 1 .or. ifrag > dg_frag%n_frag) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (io < 1 .or. io > size(dg_frag%index_basis, 1)) return
+
+    global_idx = dg_frag%index_basis(io, ifrag, ispin)
+    if (global_idx < 1 .or. global_idx > size(dg_frag%coef_owner, 1)) return
+    is_local = (dg_frag%coef_owner(global_idx, ispin) == dg_frag%id)
+  end function basis_row_is_locally_owned
+
+  subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks, diagonal_only)
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(matrix_block_info), allocatable, intent(inout) :: blocks(:)
     integer, allocatable, intent(inout) :: block_map(:, :)
     integer, intent(out) :: n_blocks
+    logical, intent(in), optional :: diagonal_only
     integer :: ifrag_row, ifrag_col, iblk, nrow_max, ncol_max
+    logical :: diagonal_blocks_only, local_fragment_only, include_pair
 
     if (allocated(blocks)) then
       do iblk = 1, size(blocks)
@@ -237,11 +250,26 @@
     end if
     if (allocated(block_map)) deallocate(block_map)
     call ensure_momentum_neighbor_pair_cache(dg_frag)
+    ! Galerkin volume operators are fragment-local.  S and local-potential H
+    ! must stay block diagonal; inter-fragment coupling belongs in an explicit
+    ! boundary/flow term, not in these dense volume blocks.
+    diagonal_blocks_only = .true.
+    if (present(diagonal_only)) diagonal_blocks_only = diagonal_only
+    local_fragment_only = dg_frag%parallel_mode_orbital
 
     n_blocks = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
-        if (is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) n_blocks = n_blocks + 1
+        if (local_fragment_only) then
+          if (ifrag_row /= dg_frag%ifrag_group) cycle
+          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
+        end if
+        if (diagonal_blocks_only) then
+          include_pair = (ifrag_row == ifrag_col)
+        else
+          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
+        end if
+        if (include_pair) n_blocks = n_blocks + 1
       end do
     end do
     if (n_blocks <= 0) return
@@ -253,7 +281,16 @@
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
-        if (.not. is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
+        if (local_fragment_only) then
+          if (ifrag_row /= dg_frag%ifrag_group) cycle
+          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
+        end if
+        if (diagonal_blocks_only) then
+          include_pair = (ifrag_row == ifrag_col)
+        else
+          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
+        end if
+        if (.not. include_pair) cycle
         iblk = iblk + 1
         nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
         ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
@@ -352,11 +389,13 @@
     deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
   end subroutine sync_blocks_to_dense_matrix
 
-  subroutine init_momentum_blocks(dg_frag)
+  subroutine init_momentum_blocks(dg_frag, diagonal_only)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    logical, intent(in), optional :: diagonal_only
     integer :: ifrag_row, ifrag_col, nblk, iblk
     integer :: nrow_max, ncol_max
+    logical :: diagonal_blocks_only, local_fragment_only, include_pair
 
     if (allocated(dg_frag%momentum_blocks)) then
       do iblk = 1, size(dg_frag%momentum_blocks)
@@ -364,13 +403,34 @@
       end do
       deallocate(dg_frag%momentum_blocks)
     end if
+    if (allocated(dg_frag%momentum_blocks_c)) then
+      do iblk = 1, size(dg_frag%momentum_blocks_c)
+        if (allocated(dg_frag%momentum_blocks_c(iblk)%val)) deallocate(dg_frag%momentum_blocks_c(iblk)%val)
+      end do
+      deallocate(dg_frag%momentum_blocks_c)
+    end if
     if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
     call ensure_momentum_neighbor_pair_cache(dg_frag)
+    ! The volume momentum operator is also fragment-local.  Boundary current
+    ! corrections must be added as an explicit flow term so that current across
+    ! fragment faces is not confused with dense neighbor volume coupling.
+    diagonal_blocks_only = .true.
+    if (present(diagonal_only)) diagonal_blocks_only = diagonal_only
+    local_fragment_only = dg_frag%parallel_mode_orbital
 
     nblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
-        if (is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) nblk = nblk + 1
+        if (local_fragment_only) then
+          if (ifrag_row /= dg_frag%ifrag_group) cycle
+          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
+        end if
+        if (diagonal_blocks_only) then
+          include_pair = (ifrag_row == ifrag_col)
+        else
+          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
+        end if
+        if (include_pair) nblk = nblk + 1
       end do
     end do
 
@@ -383,7 +443,16 @@
     iblk = 0
     do ifrag_col = 1, dg_frag%n_frag
       do ifrag_row = 1, dg_frag%n_frag
-        if (.not. is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)) cycle
+        if (local_fragment_only) then
+          if (ifrag_row /= dg_frag%ifrag_group) cycle
+          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
+        end if
+        if (diagonal_blocks_only) then
+          include_pair = (ifrag_row == ifrag_col)
+        else
+          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
+        end if
+        if (.not. include_pair) cycle
         iblk = iblk + 1
         dg_frag%momentum_block_map(ifrag_row, ifrag_col) = iblk
         dg_frag%momentum_blocks(iblk)%ifrag_row = ifrag_row
@@ -397,6 +466,451 @@
       end do
     end do
   end subroutine init_momentum_blocks
+
+  integer function face_neighbor_fragment_ham(dg_frag, ifrag, axis, side) result(jfrag)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, side
+    integer :: coords(3), rem
+
+    jfrag = 0
+    if (ifrag < 1 .or. ifrag > dg_frag%n_frag) return
+    if (axis < 1 .or. axis > 3) return
+    if (dg_frag%num_fragment(axis) <= 1) return
+
+    coords(1) = (ifrag - 1) / (dg_frag%num_fragment(2) * dg_frag%num_fragment(3)) + 1
+    rem = modulo(ifrag - 1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3))
+    coords(2) = rem / dg_frag%num_fragment(3) + 1
+    coords(3) = modulo(rem, dg_frag%num_fragment(3)) + 1
+    coords(axis) = modulo(coords(axis) - 1 + side + dg_frag%num_fragment(axis), &
+                          dg_frag%num_fragment(axis)) + 1
+    jfrag = ((coords(1) - 1) * dg_frag%num_fragment(2) + coords(2) - 1) * &
+            dg_frag%num_fragment(3) + coords(3)
+  end function face_neighbor_fragment_ham
+
+  subroutine read_fragment_buffer_basis_box_ham(dg_frag, ifrag, phi_box, box_lo, box_hi)
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag
+    real(8), allocatable, intent(out) :: phi_box(:,:,:,:)
+    integer, intent(out) :: box_lo(3), box_hi(3)
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_bfb = 'basis_functions_buffer.bin'
+    integer, parameter :: basis_buffer_magic = -22022212
+    integer, parameter :: basis_buffer_version = 1
+    character(256) :: filename
+    integer :: iunit, magic_file, version_file
+    integer :: nxyz_domain(3), nxyz_buffer_file(3), nxyz_box(3)
+    integer :: nspin_file, nstate_frag_file, n_basis_keep
+    integer :: ispin_file, istate, ix, ixg, iyg, izg
+    integer :: ix_box, iy_box, iz_box, ix_src, iy_src, iz_src
+    integer, allocatable :: n_basis_frag(:)
+    real(8), allocatable :: phi_read(:,:,:)
+    logical :: has_file
+
+    if (allocated(phi_box)) deallocate(phi_box)
+    box_lo(:) = 0
+    box_hi(:) = -1
+    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bfb
+    inquire(file=filename, exist=has_file)
+    if (.not. has_file) then
+      write(*,'(1x,a,i0,a,a)') '[FATAL] missing neighbor DG buffer basis at ifrag=', ifrag, &
+        ' file=', trim(filename)
+      stop 'DG-Fragment RT: missing neighbor basis buffer file'
+    end if
+
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old')
+    read(iunit) magic_file, version_file
+    if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
+      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] invalid neighbor basis buffer header at ifrag=', &
+        ifrag, ' magic=', magic_file, ' version=', version_file
+      stop 'DG-Fragment RT: invalid neighbor basis buffer file'
+    end if
+    read(iunit) nxyz_domain(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
+    do ix = 1, 3
+      if (dg_frag%num_fragment(ix) > 1 .and. nxyz_buffer_file(ix) < dg_frag%nxyz_buffer(ix)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] neighbor DG buffer too small at ifrag=', &
+          ifrag, ' axis=', ix, ' seed_buffer=', nxyz_buffer_file(ix), &
+          ' required=', dg_frag%nxyz_buffer(ix)
+        stop 'DG-Fragment RT: insufficient neighbor basis buffer'
+      end if
+    end do
+
+    allocate(n_basis_frag(max(1, nspin_file)))
+    read(iunit) n_basis_frag(1:max(1, nspin_file))
+    n_basis_keep = 0
+    if (nspin_file >= 1) then
+      n_basis_keep = min(maxval(dg_frag%n_basis(ifrag, 1:dg_frag%nspin)), nstate_frag_file, dg_frag%nstate_frag)
+    end if
+    nxyz_box(:) = nxyz_domain(:) + 2 * nxyz_buffer_file(:)
+    box_lo(:) = dg_frag%ixyz_frag(:, ifrag) - nxyz_buffer_file(:)
+    box_hi(:) = dg_frag%ixyz_frag(:, ifrag) + nxyz_domain(:) - 1 + nxyz_buffer_file(:)
+    allocate(phi_box(1:nxyz_box(1), 1:nxyz_box(2), 1:nxyz_box(3), max(1, n_basis_keep)))
+    allocate(phi_read(1:nxyz_box(1), 1:nxyz_box(2), 1:nxyz_box(3)))
+    phi_box = 0.0d0
+
+    do ispin_file = 1, nspin_file
+      do istate = 1, nstate_frag_file
+        read(iunit) phi_read(1:nxyz_box(1), 1:nxyz_box(2), 1:nxyz_box(3))
+        if (ispin_file /= 1 .or. istate > n_basis_keep) cycle
+        do izg = box_lo(3), box_hi(3)
+          iz_box = izg - (dg_frag%ixyz_frag(3, ifrag) - nxyz_buffer_file(3)) + 1
+          if (iz_box < 1 .or. iz_box > nxyz_box(3)) then
+            iz_src = nxyz_buffer_file(3) + modulo(izg - dg_frag%ixyz_frag(3, ifrag), nxyz_domain(3)) + 1
+          else
+            iz_src = iz_box
+          end if
+          do iyg = box_lo(2), box_hi(2)
+            iy_box = iyg - (dg_frag%ixyz_frag(2, ifrag) - nxyz_buffer_file(2)) + 1
+            if (iy_box < 1 .or. iy_box > nxyz_box(2)) then
+              iy_src = nxyz_buffer_file(2) + modulo(iyg - dg_frag%ixyz_frag(2, ifrag), nxyz_domain(2)) + 1
+            else
+              iy_src = iy_box
+            end if
+            do ixg = box_lo(1), box_hi(1)
+              ix_box = ixg - (dg_frag%ixyz_frag(1, ifrag) - nxyz_buffer_file(1)) + 1
+              if (ix_box < 1 .or. ix_box > nxyz_box(1)) then
+                ix_src = nxyz_buffer_file(1) + modulo(ixg - dg_frag%ixyz_frag(1, ifrag), nxyz_domain(1)) + 1
+              else
+                ix_src = ix_box
+              end if
+              phi_box(ixg - box_lo(1) + 1, iyg - box_lo(2) + 1, izg - box_lo(3) + 1, istate) = &
+                phi_read(ix_src, iy_src, iz_src)
+            end do
+          end do
+        end do
+      end do
+    end do
+    close(iunit)
+    deallocate(phi_read, n_basis_frag)
+  end subroutine read_fragment_buffer_basis_box_ham
+
+  real(8) function phi_box_value_ham(phi_box, box_lo, box_hi, lgtot, istate, gidx) result(val)
+    implicit none
+    real(8), intent(in) :: phi_box(:,:,:,:)
+    integer, intent(in) :: box_lo(3), box_hi(3), lgtot(3), istate, gidx(3)
+    integer :: ix, iy, iz
+
+    val = 0.0d0
+    if (istate < 1 .or. istate > size(phi_box, 4)) return
+    ix = map_global_to_phi_box_coord_ham(gidx(1), box_lo(1), box_hi(1), lgtot(1))
+    iy = map_global_to_phi_box_coord_ham(gidx(2), box_lo(2), box_hi(2), lgtot(2))
+    iz = map_global_to_phi_box_coord_ham(gidx(3), box_lo(3), box_hi(3), lgtot(3))
+    if (ix == 0 .or. iy == 0 .or. iz == 0) return
+    val = phi_box(ix - box_lo(1) + 1, iy - box_lo(2) + 1, iz - box_lo(3) + 1, istate)
+  end function phi_box_value_ham
+
+  real(8) function phi_local_value_ham(dg_frag, i_local, istate, gidx) result(val)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: i_local, istate, gidx(3)
+    integer :: ix, iy, iz
+
+    val = 0.0d0
+    if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) return
+    if (istate < 1 .or. istate > size(dg_frag%phi_frag, 4)) return
+    ix = map_global_to_phi_box_coord_ham(gidx(1), lbound(dg_frag%phi_frag, 1), &
+                                         ubound(dg_frag%phi_frag, 1), dg_frag%lgnum_total(1))
+    iy = map_global_to_phi_box_coord_ham(gidx(2), lbound(dg_frag%phi_frag, 2), &
+                                         ubound(dg_frag%phi_frag, 2), dg_frag%lgnum_total(2))
+    iz = map_global_to_phi_box_coord_ham(gidx(3), lbound(dg_frag%phi_frag, 3), &
+                                         ubound(dg_frag%phi_frag, 3), dg_frag%lgnum_total(3))
+    if (ix == 0 .or. iy == 0 .or. iz == 0) return
+    val = dg_frag%phi_frag(ix, iy, iz, istate, i_local)
+  end function phi_local_value_ham
+
+  real(8) function phi_box_dn_ham(phi_box, box_lo, box_hi, lgtot, stencil, istate, gidx, axis, side) result(dn)
+    use structures, only: s_stencil
+    implicit none
+    real(8), intent(in) :: phi_box(:,:,:,:)
+    integer, intent(in) :: box_lo(3), box_hi(3), lgtot(3), istate, gidx(3), axis, side
+    type(s_stencil), intent(in) :: stencil
+    integer :: ix, iy, iz, ixc, iyc, izc
+    real(8) :: nabt(4,3), grad_axis
+
+    dn = 0.0d0
+    if (istate < 1 .or. istate > size(phi_box, 4)) return
+    ix = map_global_to_phi_box_coord_ham(gidx(1), box_lo(1), box_hi(1), lgtot(1))
+    iy = map_global_to_phi_box_coord_ham(gidx(2), box_lo(2), box_hi(2), lgtot(2))
+    iz = map_global_to_phi_box_coord_ham(gidx(3), box_lo(3), box_hi(3), lgtot(3))
+    if (ix == 0 .or. iy == 0 .or. iz == 0) return
+    ixc = ix - box_lo(1) + 1
+    iyc = iy - box_lo(2) + 1
+    izc = iz - box_lo(3) + 1
+    nabt = stencil%coef_nab
+    select case(axis)
+    case(1)
+      if (ixc - 4 < 1 .or. ixc + 4 > size(phi_box, 1)) return
+      grad_axis = nabt(1,1) * (phi_box(ixc + 1, iyc, izc, istate) - phi_box(ixc - 1, iyc, izc, istate)) + &
+                  nabt(2,1) * (phi_box(ixc + 2, iyc, izc, istate) - phi_box(ixc - 2, iyc, izc, istate)) + &
+                  nabt(3,1) * (phi_box(ixc + 3, iyc, izc, istate) - phi_box(ixc - 3, iyc, izc, istate)) + &
+                  nabt(4,1) * (phi_box(ixc + 4, iyc, izc, istate) - phi_box(ixc - 4, iyc, izc, istate))
+    case(2)
+      if (iyc - 4 < 1 .or. iyc + 4 > size(phi_box, 2)) return
+      grad_axis = nabt(1,2) * (phi_box(ixc, iyc + 1, izc, istate) - phi_box(ixc, iyc - 1, izc, istate)) + &
+                  nabt(2,2) * (phi_box(ixc, iyc + 2, izc, istate) - phi_box(ixc, iyc - 2, izc, istate)) + &
+                  nabt(3,2) * (phi_box(ixc, iyc + 3, izc, istate) - phi_box(ixc, iyc - 3, izc, istate)) + &
+                  nabt(4,2) * (phi_box(ixc, iyc + 4, izc, istate) - phi_box(ixc, iyc - 4, izc, istate))
+    case(3)
+      if (izc - 4 < 1 .or. izc + 4 > size(phi_box, 3)) return
+      grad_axis = nabt(1,3) * (phi_box(ixc, iyc, izc + 1, istate) - phi_box(ixc, iyc, izc - 1, istate)) + &
+                  nabt(2,3) * (phi_box(ixc, iyc, izc + 2, istate) - phi_box(ixc, iyc, izc - 2, istate)) + &
+                  nabt(3,3) * (phi_box(ixc, iyc, izc + 3, istate) - phi_box(ixc, iyc, izc - 3, istate)) + &
+                  nabt(4,3) * (phi_box(ixc, iyc, izc + 4, istate) - phi_box(ixc, iyc, izc - 4, istate))
+    case default
+      return
+    end select
+    dn = real(side, 8) * grad_axis
+  end function phi_box_dn_ham
+
+  real(8) function phi_local_dn_ham(dg_frag, i_local, mg, stencil, istate, gidx, axis, side) result(dn)
+    use structures, only: s_rgrid, s_stencil
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: i_local, istate, gidx(3), axis, side
+    type(s_rgrid), intent(in) :: mg
+    type(s_stencil), intent(in) :: stencil
+    real(8) :: gx, gy, gz
+
+    dn = 0.0d0
+    call apply_gradient_at_phi_box_point(dg_frag, i_local, istate, mg, stencil, gidx, gx, gy, gz)
+    select case(axis)
+    case(1)
+      dn = real(side, 8) * gx
+    case(2)
+      dn = real(side, 8) * gy
+    case(3)
+      dn = real(side, 8) * gz
+    end select
+  end function phi_local_dn_ham
+
+  subroutine add_dg_surface_flux_blocks(dg_frag, system, mg, stencil, H_blocks, T_blocks, block_map)
+    use structures, only: s_dft_system, s_rgrid, s_stencil
+    use rt_dg_fragment_types, only: matrix_block_info
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    type(s_rgrid), intent(in) :: mg
+    type(s_stencil), intent(in) :: stencil
+    type(matrix_block_info), intent(inout) :: H_blocks(:)
+    type(matrix_block_info), intent(inout) :: T_blocks(:)
+    integer, intent(in) :: block_map(:, :)
+
+    real(8), parameter :: surface_penalty_factor = 10.0d0
+    integer :: ifrag, jfrag, i_local, axis, side, ispin, io, jo
+    integer :: iblk_self, iblk_cross, nrow, ncol, ix, iy, iz
+    integer :: g_row(3), g_col(3), loop_lo(3), loop_hi(3)
+    integer :: col_lo(3), col_hi(3)
+    real(8) :: area_weight, alpha, u_l, u_r, v_l, dnu_l, dnu_r, dnv_l
+    real(8) :: term_self, term_cross
+    real(8), allocatable :: phi_col(:,:,:,:)
+
+    if (.not. allocated(dg_frag%phi_frag)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (.not. dg_frag%parallel_mode_orbital) return
+
+    ! Equation (4) of the DG-ALB formulation: keep the volume kinetic and
+    ! local-potential terms fragment-local, then add only the surface
+    ! jump/average/penalty contribution as sparse face-neighbor blocks.
+    i_local = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = i_local + 1
+      if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) cycle
+      if (.not. dg_frag%parallel_mode_orbital .and. .not. dg_frag%is_frag_root) cycle
+
+      do axis = 1, 3
+        if (dg_frag%num_fragment(axis) <= 1) cycle
+        if (system%hgs(axis) <= 0.0d0) cycle
+        area_weight = system%hvol / system%hgs(axis)
+        alpha = surface_penalty_factor / system%hgs(axis)
+        do side = -1, 1, 2
+          jfrag = face_neighbor_fragment_ham(dg_frag, ifrag, axis, side)
+          if (jfrag <= 0 .or. jfrag == ifrag) cycle
+          iblk_self = find_matrix_block(block_map, ifrag, ifrag)
+          iblk_cross = find_matrix_block(block_map, ifrag, jfrag)
+          if (iblk_self <= 0 .and. iblk_cross <= 0) cycle
+
+          call read_fragment_buffer_basis_box_ham(dg_frag, jfrag, phi_col, col_lo, col_hi)
+
+          loop_lo(:) = dg_frag%ixyz_frag(:, ifrag)
+          loop_hi(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+          if (side > 0) then
+            loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag) + dg_frag%nxyz_domain(axis, ifrag) - 1
+            loop_hi(axis) = loop_lo(axis)
+          else
+            loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag)
+            loop_hi(axis) = loop_lo(axis)
+          end if
+
+          do ispin = 1, dg_frag%nspin
+            nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), size(dg_frag%phi_frag, 4))
+            ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%index_basis, 1), size(phi_col, 4))
+            if (nrow <= 0) cycle
+
+            do iz = loop_lo(3), loop_hi(3)
+              do iy = loop_lo(2), loop_hi(2)
+                do ix = loop_lo(1), loop_hi(1)
+                  g_row = [ix, iy, iz]
+                  g_col = g_row
+                  if (side > 0) then
+                    g_col(axis) = dg_frag%ixyz_frag(axis, jfrag)
+                  else
+                    g_col(axis) = dg_frag%ixyz_frag(axis, jfrag) + dg_frag%nxyz_domain(axis, jfrag) - 1
+                  end if
+
+                  if (iblk_self > 0) then
+                    do jo = 1, nrow
+                      u_l = phi_local_value_ham(dg_frag, i_local, jo, g_row)
+                      dnu_l = phi_local_dn_ham(dg_frag, i_local, mg, stencil, jo, g_row, axis, side)
+                      do io = 1, nrow
+                        if (dg_frag%parallel_mode_orbital) then
+                          if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
+                        end if
+                        v_l = phi_local_value_ham(dg_frag, i_local, io, g_row)
+                        dnv_l = phi_local_dn_ham(dg_frag, i_local, mg, stencil, io, g_row, axis, side)
+                        term_self = (-0.25d0 * v_l * dnu_l - 0.25d0 * dnv_l * u_l + alpha * v_l * u_l) * area_weight
+                        H_blocks(iblk_self)%val(io, jo, ispin) = H_blocks(iblk_self)%val(io, jo, ispin) + term_self
+                        T_blocks(iblk_self)%val(io, jo, ispin) = T_blocks(iblk_self)%val(io, jo, ispin) + term_self
+                      end do
+                    end do
+                  end if
+
+                  if (iblk_cross > 0 .and. ncol > 0) then
+                    do jo = 1, ncol
+                      u_r = phi_box_value_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, jo, g_col)
+                      dnu_r = phi_box_dn_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, stencil, &
+                                             jo, g_col, axis, side)
+                      do io = 1, nrow
+                        if (dg_frag%parallel_mode_orbital) then
+                          if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
+                        end if
+                        v_l = phi_local_value_ham(dg_frag, i_local, io, g_row)
+                        dnv_l = phi_local_dn_ham(dg_frag, i_local, mg, stencil, io, g_row, axis, side)
+                        term_cross = (-0.25d0 * v_l * dnu_r + 0.25d0 * dnv_l * u_r - alpha * v_l * u_r) * area_weight
+                        H_blocks(iblk_cross)%val(io, jo, ispin) = H_blocks(iblk_cross)%val(io, jo, ispin) + term_cross
+                        T_blocks(iblk_cross)%val(io, jo, ispin) = T_blocks(iblk_cross)%val(io, jo, ispin) + term_cross
+                      end do
+                    end do
+                  end if
+                end do
+              end do
+            end do
+          end do
+
+          if (allocated(phi_col)) deallocate(phi_col)
+        end do
+      end do
+    end do
+  end subroutine add_dg_surface_flux_blocks
+
+  subroutine add_dg_surface_momentum_blocks(dg_frag, system)
+    use structures, only: s_dft_system
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+
+    integer :: ifrag, jfrag, i_local, axis, side, ispin, io, jo
+    integer :: iblk_self, iblk_cross, nrow, ncol, ix, iy, iz
+    integer :: g_row(3), g_col(3), loop_lo(3), loop_hi(3)
+    integer :: col_lo(3), col_hi(3)
+    real(8) :: area_weight, normal_sign
+    real(8) :: u_l, u_r, v_l, term_self, term_cross
+    real(8), allocatable :: phi_col(:,:,:,:)
+
+    if (.not. allocated(dg_frag%momentum_blocks)) return
+    if (.not. allocated(dg_frag%momentum_block_map)) return
+    if (.not. allocated(dg_frag%phi_frag)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (.not. dg_frag%parallel_mode_orbital) return
+
+    ! Momentum/current uses the DG face correction for the normal gradient.
+    ! Local volume gradients stay inside each fragment; only u_R-u_L on a
+    ! shared face is written into off-diagonal flow blocks.
+    i_local = 0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = i_local + 1
+      if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) cycle
+
+      do axis = 1, 3
+        if (dg_frag%num_fragment(axis) <= 1) cycle
+        if (system%hgs(axis) <= 0.0d0) cycle
+        area_weight = system%hvol / system%hgs(axis)
+        do side = -1, 1, 2
+          normal_sign = real(side, kind=8)
+          jfrag = face_neighbor_fragment_ham(dg_frag, ifrag, axis, side)
+          if (jfrag <= 0 .or. jfrag == ifrag) cycle
+          iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
+          iblk_cross = find_momentum_block(dg_frag, ifrag, jfrag)
+          if (iblk_self <= 0 .and. iblk_cross <= 0) cycle
+
+          call read_fragment_buffer_basis_box_ham(dg_frag, jfrag, phi_col, col_lo, col_hi)
+
+          loop_lo(:) = dg_frag%ixyz_frag(:, ifrag)
+          loop_hi(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+          if (side > 0) then
+            loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag) + dg_frag%nxyz_domain(axis, ifrag) - 1
+            loop_hi(axis) = loop_lo(axis)
+          else
+            loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag)
+            loop_hi(axis) = loop_lo(axis)
+          end if
+
+          do ispin = 1, dg_frag%nspin
+            nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), size(dg_frag%phi_frag, 4))
+            ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%index_basis, 1), size(phi_col, 4))
+            if (nrow <= 0) cycle
+
+            do iz = loop_lo(3), loop_hi(3)
+              do iy = loop_lo(2), loop_hi(2)
+                do ix = loop_lo(1), loop_hi(1)
+                  g_row = [ix, iy, iz]
+                  g_col = g_row
+                  if (side > 0) then
+                    g_col(axis) = dg_frag%ixyz_frag(axis, jfrag)
+                  else
+                    g_col(axis) = dg_frag%ixyz_frag(axis, jfrag) + dg_frag%nxyz_domain(axis, jfrag) - 1
+                  end if
+
+                  if (iblk_self > 0) then
+                    do jo = 1, nrow
+                      u_l = phi_local_value_ham(dg_frag, i_local, jo, g_row)
+                      do io = 1, nrow
+                        if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
+                        v_l = phi_local_value_ham(dg_frag, i_local, io, g_row)
+                        term_self = -0.5d0 * normal_sign * v_l * u_l * area_weight
+                        dg_frag%momentum_blocks(iblk_self)%val(axis, io, jo, ispin) = &
+                          dg_frag%momentum_blocks(iblk_self)%val(axis, io, jo, ispin) + term_self
+                      end do
+                    end do
+                  end if
+
+                  if (iblk_cross > 0 .and. ncol > 0) then
+                    do jo = 1, ncol
+                      u_r = phi_box_value_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, jo, g_col)
+                      do io = 1, nrow
+                        if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
+                        v_l = phi_local_value_ham(dg_frag, i_local, io, g_row)
+                        term_cross = 0.5d0 * normal_sign * v_l * u_r * area_weight
+                        dg_frag%momentum_blocks(iblk_cross)%val(axis, io, jo, ispin) = &
+                          dg_frag%momentum_blocks(iblk_cross)%val(axis, io, jo, ispin) + term_cross
+                      end do
+                    end do
+                  end if
+                end do
+              end do
+            end do
+          end do
+
+          if (allocated(phi_col)) deallocate(phi_col)
+        end do
+      end do
+    end do
+  end subroutine add_dg_surface_momentum_blocks
 
   subroutine reduce_matrix_blocks(dg_frag, blocks, label, icomm_reduce)
     use communication, only: comm_is_root, comm_summation, comm_get_max
@@ -605,10 +1119,6 @@
       ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
 
     if (.not. dg_frag%has_real_space_basis) then
-      if (.not. allocated(dg_frag%H_mat)) then
-        allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      end if
-      dg_frag%H_mat = 0.0d0
       return
     end if
 
@@ -679,13 +1189,8 @@
     ! Construct total potential: V = Vpsl + Vh + Vxc
     ! Note: This is used for initial H_mat calculation
     do ispin = 1, system%nspin
-      if (dg_frag%parallel_mode_orbital) then
-        loop_ifrag_start = 1
-        loop_ifrag_end = dg_frag%n_frag
-      else
-        loop_ifrag_start = dg_frag%ifrag_start
-        loop_ifrag_end = dg_frag%ifrag_end
-      end if
+      loop_ifrag_start = dg_frag%ifrag_start
+      loop_ifrag_end = dg_frag%ifrag_end
 
       do ifrag = loop_ifrag_start, loop_ifrag_end
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
@@ -697,11 +1202,7 @@
         allocate(V_total(1:ndom(1), 1:ndom(2), 1:ndom(3)))
         call build_fragment_total_potential_grid(dg_frag, ifrag, mg, Vh, Vxc(ispin), Vpsl, V_total)
 
-        is_local_fragment = (ifrag >= dg_frag%ifrag_start .and. ifrag <= dg_frag%ifrag_end)
-        if (.not. is_local_fragment) then
-          deallocate(V_total)
-          cycle
-        end if
+        is_local_fragment = .true.
         i_local = ifrag - dg_frag%ifrag_start + 1
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
@@ -713,7 +1214,15 @@
         end if
         nbf = min(nbf_raw, dg_frag%nstate_frag)
         if (nbf <= 0) cycle
-        call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        if (dg_frag%parallel_mode_orbital) then
+          ! Matrix blocks are kept local to the row-owning orbital rank.  Build
+          ! all ket columns locally so propagation does not need a global block
+          ! replication/reduction step.
+          jo_s = 1
+          jo_e = nbf
+        else
+          call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        end if
         if (jo_s > jo_e) cycle
         if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
           write(*,*) "[FATAL] hamiltonian step2 invalid i_local: rank=", dg_frag%id, &
@@ -747,7 +1256,8 @@
         end if
         allocate(partial_t(nbf_comm), partial_h(nbf_comm), reduced_t(nbf_comm), reduced_h(nbf_comm))
         allocate(partial_th(2 * nbf_comm), reduced_th(2 * nbf_comm))
-        ! Orbital mode distributes matrix construction by ket-side columns.
+        ! Orbital mode stores row-owned coefficient slices; build only those
+        ! bra-side rows while still using all ket columns of the local fragment.
         ! Legacy mode keeps the old full-column spatial-box reduction.
         do jo = jo_s, jo_e
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
@@ -760,6 +1270,9 @@
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+            if (dg_frag%parallel_mode_orbital) then
+              if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
+            end if
 
             ! Kinetic energy matrix element: T_ij = ∫ φ_i (T|φ_j>) dr
             call integrate_basis_with_field(dg_frag, ifrag, i_local, io, mg, T_phi, hvol, partial_t(io))
@@ -772,13 +1285,14 @@
           partial_th(1:nbf_comm) = partial_t(1:nbf_comm)
           partial_th(nbf_comm + 1:2 * nbf_comm) = partial_h(1:nbf_comm)
           if (dg_frag%parallel_mode_orbital) then
-            ! Each rank owns a disjoint column range and integrates the full
-            ! fragment box, so no spatial subgroup sum is needed here.
+            ! Orbital mode integrates the full fragment box locally and keeps
+            ! only the row-local self block, so no subgroup sum is needed here.
             reduced_t(1:nbf_comm) = partial_t(1:nbf_comm)
             reduced_h(1:nbf_comm) = partial_h(1:nbf_comm)
             do io = 1, nbf
               ig_i = dg_frag%index_basis(io, ifrag, ispin)
               if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
+              if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
               H_kin_diag_blocks(i_local)%val(io, jo, ispin) = reduced_t(io)
               H_diag_blocks(i_local)%val(io, jo, ispin) = reduced_h(io)
             end do
@@ -813,8 +1327,10 @@
       
     end do  ! ispin loop
     
-    call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-    call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+    call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                            diagonal_only=.false.)
+    call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                            diagonal_only=.false.)
     call rebuild_local_h_block_ids(dg_frag)
     do i_diag = 1, n_local_diag
       iblk = find_matrix_block(dg_frag%H_block_map, H_diag_blocks(i_diag)%ifrag_row, H_diag_blocks(i_diag)%ifrag_col)
@@ -828,6 +1344,10 @@
       end do
     end do
 
+    call add_dg_surface_flux_blocks(dg_frag, system, mg, stencil, &
+                                    dg_frag%H_mat_blocks, dg_frag%H_mat_kinetic_blocks, &
+                                    dg_frag%H_block_map)
+
     ! Non-buffered halo projection route has been removed.
 
     do i_diag = 1, n_local_diag
@@ -839,7 +1359,9 @@
     ! CRITICAL: MPI aggregation of Hamiltonian matrix
     ! Each rank computed elements only for its assigned fragments.
     ! Reduce one fragment block at a time to avoid a single dense global allreduce.
-    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
+    if (.not. dg_frag%parallel_mode_orbital) then
+      call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat", dg_frag%icomm)
+    end if
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then
         ! Orbital row-split keeps the reduced matrix replicated on all
@@ -855,7 +1377,9 @@
         end if
       end if
     end if
-    call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
+    if (.not. dg_frag%parallel_mode_orbital) then
+      call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, "hmat-kinetic", dg_frag%icomm)
+    end if
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then
         ! Keep the replicated kinetic block for row-owned coefficient updates.
@@ -1085,7 +1609,6 @@
 
   subroutine build_fragment_total_potential_grid(dg_frag, ifrag, mg, Vh, Vxc_spin, Vpsl, V_total)
     use structures
-    use communication, only: comm_summation, COMM_GROUP_NULL
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag
@@ -1095,13 +1618,44 @@
 
     integer :: lx, ly, lz, gx, gy, gz, gwx, gwy, gwz
     integer :: iorg(3), ndom(3)
-    integer :: npt
     real(8) :: vh_val
-    real(8), allocatable :: V_reduced(:,:,:)
+    logical :: full_box_local
 
     V_total(:, :, :) = 0.0d0
     iorg(:) = dg_frag%ixyz_frag(:, ifrag)
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
+    if (dg_frag%parallel_mode_orbital) then
+      full_box_local = .true.
+      do lz = 1, ndom(3)
+        gz = iorg(3) + lz - 1
+        gwz = map_global_to_periodic_box_coord_ham(gz, 1, dg_frag%lgnum_total(3))
+        do ly = 1, ndom(2)
+          gy = iorg(2) + ly - 1
+          gwy = map_global_to_periodic_box_coord_ham(gy, 1, dg_frag%lgnum_total(2))
+          do lx = 1, ndom(1)
+            gx = iorg(1) + lx - 1
+            gwx = map_global_to_periodic_box_coord_ham(gx, 1, dg_frag%lgnum_total(1))
+            if (gwx < mg%is(1) .or. gwx > mg%ie(1) .or. &
+                gwy < mg%is(2) .or. gwy > mg%ie(2) .or. &
+                gwz < mg%is(3) .or. gwz > mg%ie(3)) then
+              full_box_local = .false.
+              exit
+            end if
+          end do
+          if (.not. full_box_local) exit
+        end do
+        if (.not. full_box_local) exit
+      end do
+      if (.not. full_box_local) then
+        write(*,'(1x,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+          "[FATAL] DG orbital H build requires the parent rank to own the full fragment box: rank=", dg_frag%id, &
+          " ifrag=", ifrag, " mg_is=", mg%is(1), mg%is(2), mg%is(3), &
+          " mg_ie=", mg%ie(1), mg%ie(2), mg%ie(3), " ndom=", ndom(1), ndom(2), ndom(3)
+        write(*,'(1x,a)') "        Set process_allocation='orbital_sequential' and nproc_rgrid(1:3)=num_fragment(1:3); use nproc_ob for orbital parallelism."
+        flush(6)
+        stop "DG-Fragment RT orbital H build requires local full fragment box"
+      end if
+    end if
 !$omp parallel do private(ly,lx,gz,gy,gx,gwz,gwy,gwx,vh_val) schedule(static)
     do lz = 1, ndom(3)
       gz = iorg(3) + lz - 1
@@ -1123,16 +1677,6 @@
       end do
     end do
 !$omp end parallel do
-
-    if (dg_frag%parallel_mode_orbital .and. dg_frag%isize > 1 .and. dg_frag%icomm /= COMM_GROUP_NULL) then
-      npt = size(V_total)
-      allocate(V_reduced(lbound(V_total,1):ubound(V_total,1), &
-                         lbound(V_total,2):ubound(V_total,2), &
-                         lbound(V_total,3):ubound(V_total,3)))
-      call comm_summation(V_total, V_reduced, npt, dg_frag%icomm)
-      V_total(:, :, :) = V_reduced(:, :, :)
-      deallocate(V_reduced)
-    end if
   end subroutine build_fragment_total_potential_grid
 
   subroutine build_total_potential_grid_with_buffered_hartree(grid, dg_frag, Vh_buffer, Vxc_spin, Vpsl, V_total)
@@ -1861,6 +2405,7 @@
     type(s_stencil),        intent(in)    :: stencil
     
     integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
+    integer :: jloc, ncol_mom
     integer :: jo_s, jo_e
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3), halo_s(3), halo_e(3)
@@ -1872,7 +2417,7 @@
     integer :: npts_local, ipt, nx_local, ny_local
     logical :: log_frag_progress, has_overlap
     real(8) :: hvol, integral
-    real(8) :: momentum_gb
+    real(8) :: momentum_gb, momentum_block_gb
     real(8) :: max_p, pavg
     real(8) :: t0, t1
     real(8) :: time_halo_exchange, time_self_integral, time_halo_integral
@@ -1881,7 +2426,7 @@
     real(8) :: time_reduce_pack, time_reduce_comm, time_reduce_unpack
     real(8) :: frag_grad_start, frag_self_start, frag_halo_start
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components, fragment-local)
-    real(8), allocatable :: grad_local_2d(:,:), phi_local_2d(:,:), self_proj(:,:)
+    real(8), allocatable :: grad_local_2d(:,:), grad_all_2d(:,:,:), phi_local_2d(:,:), self_proj(:,:)
     
     
     if (.not. dg_frag%has_real_space_basis) return
@@ -1902,21 +2447,27 @@
       write(*,*) "        Computing transition moments: <φ_i|∇|φ_j>"
       flush(6)
     end if
-    momentum_gb = real(3_8 * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * &
-      int(dg_frag%nspin, kind=8) * 8_8, 8) / 1.0d9
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,i0,a,f10.3,a)') "        n_mat_max=", dg_frag%n_mat_max, &
-        " momentum_mat GB=", momentum_gb, " per rank"
-      flush(6)
-    end if
     
-    ! Allocate momentum matrix: (3 directions, n_mat_max x n_mat_max, nspin)
     ! Momentum matrix elements for vector potential coupling: p_ij = <phi_i|p|phi_j>
     ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
     ! The A·p term couples to momentum matrix elements
     ! The A^2/2 term is diagonal (diamagnetic contribution)
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
-    call init_momentum_blocks(dg_frag)
+    call init_momentum_blocks(dg_frag, diagonal_only=(.not. dg_frag%parallel_mode_orbital))
+    momentum_gb = real(3_8 * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * &
+      int(dg_frag%nspin, kind=8) * 8_8, 8) / 1.0d9
+    momentum_block_gb = 0.0d0
+    do iblk = 1, dg_frag%n_momentum_blocks
+      momentum_block_gb = momentum_block_gb + real(3_8 * int(dg_frag%momentum_blocks(iblk)%nrow_max, kind=8) * &
+        int(dg_frag%momentum_blocks(iblk)%ncol_max, kind=8) * int(dg_frag%nspin, kind=8) * 8_8, 8) / 1.0d9
+    end do
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,f10.3,a)') "        n_mat_max=", dg_frag%n_mat_max, &
+        " dense momentum_mat GB=", momentum_gb, " (not allocated)"
+      write(*,'(1x,a,i0,a,f10.6,a)') "        momentum_blocks=", dg_frag%n_momentum_blocks, &
+        " allocated GB=", momentum_block_gb, " per rank"
+      flush(6)
+    end if
     is = mg%is
     ie = mg%ie
     hvol = system%hvol
@@ -1966,7 +2517,14 @@
           stop "DG-Fragment RT: momentum phi_frag local range out of bounds"
         end if
         nbf = dg_frag%n_basis(ifrag, ispin)
-        call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        if (dg_frag%parallel_mode_orbital) then
+          ! Momentum blocks are row-local in orbital mode.  Build the full
+          ! ket-column range locally and avoid the old all-rank block reduce.
+          jo_s = 1
+          jo_e = nbf
+        else
+          call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        end if
         if (jo_s > jo_e) cycle
         jo_progress_stride = max(1, nbf / 4)
         npts_local = (loc_e(1) - loc_s(1) + 1) * (loc_e(2) - loc_s(2) + 1) * (loc_e(3) - loc_s(3) + 1)
@@ -1978,8 +2536,11 @@
         lz_hi = phi_loc_e(3)
         nx_local = lx_hi - lx_lo + 1
         ny_local = ly_hi - ly_lo + 1
-        allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), self_proj(nbf, 3))
+        ncol_mom = jo_e - jo_s + 1
+        allocate(phi_local_2d(npts_local, nbf), grad_local_2d(npts_local, 3), &
+                 grad_all_2d(npts_local, ncol_mom, 3), self_proj(nbf, ncol_mom))
         allocate(grad_phi(1:ndom(1), 1:ndom(2), 1:ndom(3), 3))
+        grad_all_2d(:, :, :) = 0.0d0
 
         if (nbf > size(dg_frag%phi_frag, 4)) then
           write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "DG-Fragment RT invalid n_basis=", nbf, &
@@ -2001,47 +2562,56 @@
         !$omp end parallel do
         iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
 
-        ! Loop over basis functions in fragment j (ket side)
-        ! Keep this loop serial to avoid per-thread duplication of large grad_phi buffers.
-        ! Parallelism is still provided inside apply_gradient_to_basis and SIMD in accumulations.
+        grad_lb1 = lbound(grad_phi, 1)
+        grad_ub1 = ubound(grad_phi, 1)
+        grad_lb2 = lbound(grad_phi, 2)
+        grad_ub2 = ubound(grad_phi, 2)
+        grad_lb3 = lbound(grad_phi, 3)
+        grad_ub3 = ubound(grad_phi, 3)
+        if (loc_s(1) < grad_lb1 .or. loc_e(1) > grad_ub1 .or. &
+            loc_s(2) < grad_lb2 .or. loc_e(2) > grad_ub2 .or. &
+            loc_s(3) < grad_lb3 .or. loc_e(3) > grad_ub3) then
+          write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x))') &
+            "DG-Fragment RT momentum grad_phi local range out of bounds: loc_s=", &
+            loc_s(1), loc_s(2), loc_s(3), "loc_e=", loc_e(1), loc_e(2), loc_e(3), &
+            "lb=", grad_lb1, grad_lb2, grad_lb3, "ub=", grad_ub1, grad_ub2, grad_ub3
+          stop "DG-Fragment RT: momentum grad_phi local range out of bounds"
+        end if
+
+        ! Build all ket gradients first, then project in three BLAS-3 calls.
+        ! This avoids nbf tiny DGEMM(nbf x 3) calls, which were dominating
+        ! momentum timing as "self" on large DG runs.
         do jo = jo_s, jo_e
+          jloc = jo - jo_s + 1
           call cpu_time(t0)
           call apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
           call cpu_time(t1)
           time_grad_total = time_grad_total + (t1 - t0)
 
-          grad_lb1 = lbound(grad_phi, 1)
-          grad_ub1 = ubound(grad_phi, 1)
-          grad_lb2 = lbound(grad_phi, 2)
-          grad_ub2 = ubound(grad_phi, 2)
-          grad_lb3 = lbound(grad_phi, 3)
-          grad_ub3 = ubound(grad_phi, 3)
-          if (loc_s(1) < grad_lb1 .or. loc_e(1) > grad_ub1 .or. &
-              loc_s(2) < grad_lb2 .or. loc_e(2) > grad_ub2 .or. &
-              loc_s(3) < grad_lb3 .or. loc_e(3) > grad_ub3) then
-            write(*,'(1x,a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x),a,1x,3(i0,1x))') &
-              "DG-Fragment RT momentum grad_phi local range out of bounds: loc_s=", &
-              loc_s(1), loc_s(2), loc_s(3), "loc_e=", loc_e(1), loc_e(2), loc_e(3), &
-              "lb=", grad_lb1, grad_lb2, grad_lb3, "ub=", grad_ub1, grad_ub2, grad_ub3
-            stop "DG-Fragment RT: momentum grad_phi local range out of bounds"
-          end if
-
           ig_j = dg_frag%index_basis(jo, ifrag, ispin)
           if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) then
-            deallocate(grad_phi)
             cycle
           end if
+          grad_all_2d(:, jloc, 1) = grad_local_2d(:, 1)
+          grad_all_2d(:, jloc, 2) = grad_local_2d(:, 2)
+          grad_all_2d(:, jloc, 3) = grad_local_2d(:, 3)
+
+          ig_col = ig_j
+          if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
+        end do  ! jo
+
+        do idir = 1, 3
           call cpu_time(t0)
-          call dgemm('T', 'N', nbf, 3, npts_local, hvol, phi_local_2d, npts_local, &
-            grad_local_2d, npts_local, 0.0d0, self_proj, nbf)
+          call dgemm('T', 'N', nbf, ncol_mom, npts_local, hvol, phi_local_2d, npts_local, &
+            grad_all_2d(1, 1, idir), npts_local, 0.0d0, self_proj, nbf)
           call cpu_time(t1)
           time_self_integral = time_self_integral + (t1 - t0)
-
           do io = 1, nbf
             ig_i = dg_frag%index_basis(io, ifrag, ispin)
             if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-            do idir = 1, 3
-              integral = self_proj(io, idir)
+            do jloc = 1, ncol_mom
+              jo = jo_s + jloc - 1
+              integral = self_proj(io, jloc)
               if (iblk_self > 0) then
                 if (io <= size(dg_frag%momentum_blocks(iblk_self)%val, 2) .and. &
                     jo <= size(dg_frag%momentum_blocks(iblk_self)%val, 3)) then
@@ -2050,17 +2620,16 @@
               end if
             end do
           end do
-
-          ig_col = ig_j
-          if (ig_col < 1 .or. ig_col > dg_frag%n_mat_max) cycle
-
-        end do  ! jo
+        end do  ! idir
         if (allocated(grad_phi)) deallocate(grad_phi)
-        deallocate(phi_local_2d, grad_local_2d, self_proj)
+        deallocate(phi_local_2d, grad_local_2d, grad_all_2d, self_proj)
       end do  ! ifrag
     end do  ! ispin
+    call add_dg_surface_momentum_blocks(dg_frag, system)
     
-    ! MPI aggregation of fragment-neighbor momentum blocks.
+    ! Legacy real-space mode needs a global block aggregation.  Orbital mode
+    ! builds the self block directly on the row-owning subgroup ranks.
+    if (.not. dg_frag%parallel_mode_orbital) then
     block
       real(8), allocatable :: send_flat(:), recv_flat(:)
       real(8) :: t_reduce_start, t_reduce_end
@@ -2202,6 +2771,7 @@
       call cpu_time(t_reduce_end)
       time_block_reduce = time_block_reduce + (t_reduce_end - t_reduce_start)
     end block
+    end if
 
     ! Enforce anti-symmetry blockwise: self blocks against themselves, off-diagonal
     ! blocks against the reverse ordered fragment pair.
@@ -2310,7 +2880,8 @@
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
     dg_frag%has_global_overlap_copy = .true.
     dg_frag%overlap_prop_root_authoritative = .false.
-    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks, &
+                            diagonal_only=.true.)
     if (allocated(dg_frag%S_mat_blocks)) then
       do i_halo = 1, size(dg_frag%S_mat_blocks)
         dg_frag%S_mat_blocks(i_halo)%val(:, :, :) = 0.0d0
@@ -2379,7 +2950,14 @@
         end if
 
         if (nbf <= 0) cycle
-        call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        if (dg_frag%parallel_mode_orbital) then
+          ! Row-local overlap blocks need all ket columns on the owning rank;
+          ! this avoids replicating the full S block set through allreduce.
+          jo_s = 1
+          jo_e = nbf
+        else
+          call get_fragment_column_range(dg_frag, nbf, jo_s, jo_e)
+        end if
         ncol_local = max(0, jo_e - jo_s + 1)
         if (ncol_local <= 0) cycle
         npts_local = (lx_hi - lx_lo + 1) * (ly_hi - ly_lo + 1) * (lz_hi - lz_lo + 1)
@@ -2428,8 +3006,11 @@
     end do
 
     call cpu_time(t0)
-    ! Ranks can hold partial real-space boxes; always reduce over fragment subgroup.
-    call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
+    ! Legacy ranks can hold partial real-space boxes; orbital mode already
+    ! integrates the full fragment box for its local row block.
+    if (.not. dg_frag%parallel_mode_orbital) then
+      call reduce_matrix_blocks(dg_frag, dg_frag%S_mat_blocks, "smat-frag", dg_frag%icomm_frag)
+    end if
     if (.not. dg_frag%is_frag_root) then
       if (dg_frag%parallel_mode_orbital) then
         ! Keep the replicated overlap block for row-owned coefficient updates.
@@ -2448,20 +3029,12 @@
     write(*,'(1x,a,1pe12.4)') "        overlap reduce done time=", time_reduce_total
     flush(6)
 
-    if (release_dense_overlap) then
-      if (allocated(dg_frag%S_mat_prop_blocks)) then
-        do i_halo = 1, size(dg_frag%S_mat_prop_blocks)
-          if (allocated(dg_frag%S_mat_prop_blocks(i_halo)%val)) deallocate(dg_frag%S_mat_prop_blocks(i_halo)%val)
-        end do
-        deallocate(dg_frag%S_mat_prop_blocks)
-      end if
-    else
-      call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks)
-      if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
-        do i_halo = 1, size(dg_frag%S_mat_blocks)
-          dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
-        end do
-      end if
+    call init_matrix_blocks(dg_frag, dg_frag%S_mat_prop_blocks, dg_frag%S_block_map, dg_frag%n_S_blocks, &
+                            diagonal_only=.true.)
+    if (allocated(dg_frag%S_mat_blocks) .and. allocated(dg_frag%S_mat_prop_blocks)) then
+      do i_halo = 1, size(dg_frag%S_mat_blocks)
+        dg_frag%S_mat_prop_blocks(i_halo)%val(:, :, :) = dg_frag%S_mat_blocks(i_halo)%val(:, :, :)
+      end do
     end if
 
     do ispin = 1, dg_frag%nspin
@@ -2478,22 +3051,6 @@
       end do
     end do
 
-    if (.not. release_dense_overlap) then
-      allocate(dg_frag%S_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      allocate(dg_frag%S_mat_prop(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%S_mat_blocks, dg_frag%S_block_map, dg_frag%S_mat)
-      do ispin = 1, dg_frag%nspin
-        do ii = 1, dg_frag%n_mat_max
-          if (dg_frag%S_mat(ii, ii, ispin) < 1.0d-12) dg_frag%S_mat(ii, ii, ispin) = 1.0d0
-          do jj = ii + 1, dg_frag%n_mat_max
-            savg = 0.5d0 * (dg_frag%S_mat(ii, jj, ispin) + dg_frag%S_mat(jj, ii, ispin))
-            dg_frag%S_mat(ii, jj, ispin) = savg
-            dg_frag%S_mat(jj, ii, ispin) = savg
-          end do
-        end do
-      end do
-      dg_frag%S_mat_prop(:, :, :) = dg_frag%S_mat(:, :, :)
-    end if
     dg_frag%has_global_overlap_copy = .false.
     dg_frag%overlap_prop_root_authoritative = .false.
 

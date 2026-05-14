@@ -468,20 +468,20 @@
         if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
         if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
         dg_frag%gradient_basis_cache_valid = .false.
-        if (allocated(dg_frag%momentum_blocks)) then
-          do i = 1, size(dg_frag%momentum_blocks)
-            if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
-          end do
-          deallocate(dg_frag%momentum_blocks)
-          dg_frag%n_momentum_blocks = 0
-        end if
-        if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
+	        if (allocated(dg_frag%momentum_blocks)) then
+	          do i = 1, size(dg_frag%momentum_blocks)
+	            if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
+	          end do
+	          deallocate(dg_frag%momentum_blocks)
+	          dg_frag%n_momentum_blocks = 0
+	        end if
+	        if (allocated(dg_frag%momentum_blocks_c)) deallocate(dg_frag%momentum_blocks_c)
+	        if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
         if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
         if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
         if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
         if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
         if (allocated(dg_frag%S_mat_prop_c)) deallocate(dg_frag%S_mat_prop_c)
-        if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
         dg_frag%has_nl_cache = .false.
         dg_frag%nl_pp_phi_cache_valid = .false.
         call calculate_momentum_matrix(dg_frag, system, mg, stencil)
@@ -936,14 +936,15 @@
       if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
       if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
       dg_frag%gradient_basis_cache_valid = .false.
-      if (allocated(dg_frag%momentum_blocks)) then
-        do i = 1, size(dg_frag%momentum_blocks)
-          if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
-        end do
-        deallocate(dg_frag%momentum_blocks)
-        dg_frag%n_momentum_blocks = 0
-      end if
-      if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
+	      if (allocated(dg_frag%momentum_blocks)) then
+	        do i = 1, size(dg_frag%momentum_blocks)
+	          if (allocated(dg_frag%momentum_blocks(i)%val)) deallocate(dg_frag%momentum_blocks(i)%val)
+	        end do
+	        deallocate(dg_frag%momentum_blocks)
+	        dg_frag%n_momentum_blocks = 0
+	      end if
+	      if (allocated(dg_frag%momentum_blocks_c)) deallocate(dg_frag%momentum_blocks_c)
+	      if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
       if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
       if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
       if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
@@ -1095,10 +1096,12 @@
       integer :: valid_local_ids(dg_frag%nstate_frag), valid_halo_ids(dg_frag%nstate_frag)
 
       if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
-        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                                diagonal_only=.true.)
       end if
       if (.not. allocated(dg_frag%H_mat_kinetic_blocks)) then
-        call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+        call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                                diagonal_only=.true.)
       end if
       do iblk = 1, size(dg_frag%H_mat_blocks)
         dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
@@ -1207,14 +1210,13 @@
     end subroutine refresh_operator_matrices_from_local_blocks
 
     subroutine diag_full_lapack
+      use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_real_dense
       implicit none
-      integer :: i, j
+      integer :: i, j, iblk_diag
       real(8), allocatable :: mat_H(:,:), mat_V(:,:)
 
-      if (.not. allocated(dg_frag%H_mat)) then
-        allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      end if
-      dg_frag%H_mat(:, :, :) = 0.0d0
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                              diagonal_only=.true.)
 
       do ispin = 1, system%nspin
         n = dg_frag%n_mat(ispin)
@@ -1254,23 +1256,33 @@
           end do
         end do
 
-        dg_frag%H_mat(1:n, 1:n, ispin) = mat_V
+        do iblk_diag = 1, dg_frag%n_H_blocks
+          ifrag = dg_frag%H_mat_blocks(iblk_diag)%ifrag_row
+          jfrag = dg_frag%H_mat_blocks(iblk_diag)%ifrag_col
+          n_basis_local = dg_frag%n_basis(ifrag, ispin)
+          n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+          do jo = 1, n_basis_halo
+            j = dg_frag%index_basis(jo, jfrag, ispin)
+            if (j < 1 .or. j > n) cycle
+            do io = 1, n_basis_local
+              i = dg_frag%index_basis(io, ifrag, ispin)
+              if (i < 1 .or. i > n) cycle
+              dg_frag%H_mat_blocks(iblk_diag)%val(io, jo, ispin) = mat_V(i, j)
+            end do
+          end do
+        end do
 
         deallocate(mat_V)
       end do
 
-      if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
-        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-      end if
-      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-diag", dg_frag%icomm)
-      call sync_blocks_to_dense_matrix(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%H_mat)
 
       do ispin = 1, system%nspin
         n = dg_frag%n_mat(ispin)
         if (n <= 0) cycle
         allocate(mat_H(n, n), mat_V(n, n))
-        mat_H = dg_frag%H_mat(1:n, 1:n, ispin)
+        mat_H = 0.0d0
+        call copy_matrix_blocks_metric_to_real_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n, mat_H)
         call eigen_dsyev(mat_H, dg_frag%esp(1:n, ispin), mat_V)
 
         i_local = 0

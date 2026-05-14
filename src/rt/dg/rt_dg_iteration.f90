@@ -40,6 +40,7 @@
     logical, save :: enable_eigenstate_check = .false.
     logical, save :: eigenstate_check_initialized = .false.
     logical, save :: occvirt_ref_mode_initialized = .false.
+    logical, save :: enable_occvirt_ref_diag = .false.
     logical, save :: occvirt_ref_legacy_mode = .false.
     real(8) :: rayleigh_max_rel_dev
     integer :: rayleigh_nonev_count, io_rayleigh
@@ -170,9 +171,18 @@
 
     if (.not. occvirt_ref_mode_initialized) then
       env_val = ''
+      call get_environment_variable('SALMON_DG_OCCVIRT_DIAG', env_val, length=env_len, status=env_status)
+      enable_occvirt_ref_diag = .false.
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+            env_val(1:1) == 't' .or. env_val(1:1) == 'T') enable_occvirt_ref_diag = .true.
+      end if
+
+      env_val = ''
       call get_environment_variable('SALMON_DG_OCCVIRT_REF_MODE', env_val, length=env_len, status=env_status)
       occvirt_ref_legacy_mode = .false.
       if (env_status == 0 .and. env_len > 0) then
+        enable_occvirt_ref_diag = .true.
         select case (env_val(1:1))
         case ('l','L','0')
           occvirt_ref_legacy_mode = .true.
@@ -182,19 +192,24 @@
       end if
       occvirt_ref_mode_initialized = .true.
       if (comm_is_root(dg_frag%id)) then
-        if (occvirt_ref_legacy_mode) then
+        if (.not. enable_occvirt_ref_diag) then
+          write(*,'(1x,a)') '[DG-CONFIG] SALMON_DG_OCCVIRT_DIAG=OFF (default)'
+        else if (occvirt_ref_legacy_mode) then
           write(*,'(1x,a)') '[DG-CONFIG] SALMON_DG_OCCVIRT_REF_MODE=legacy'
         else
-          write(*,'(1x,a)') '[DG-CONFIG] SALMON_DG_OCCVIRT_REF_MODE=t0 (default)'
+          write(*,'(1x,a)') '[DG-CONFIG] SALMON_DG_OCCVIRT_REF_MODE=t0'
         end if
         flush(6)
       end if
     end if
 
-    if (itt == 1 .and. .not. occvirt_ref_legacy_mode .and. .not. dg_frag%coef_ref_ready) then
-      n_frag_ref = dg_frag%n_mat_max
+    if (enable_occvirt_ref_diag .and. itt == 1 .and. .not. occvirt_ref_legacy_mode .and. .not. dg_frag%coef_ref_ready) then
+      ! The occ/virt reference is a diagnostic snapshot in the local coefficient
+      ! layout.  In orbital row-split mode coef(:,:,:) only stores local rows;
+      ! using n_mat_max here would allocate a dense global matrix on every rank.
+      n_frag_ref = size(dg_frag%coef, 1)
       n_pw_ref = 0
-      if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw_ref = dg_frag%n_plane_waves
+      if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw_ref = size(dg_frag%coef_pw, 1)
       n_tot_ref = n_frag_ref + n_pw_ref
       nstate_ref = dg_frag%nstate_tot
       if (n_tot_ref > 0 .and. nstate_ref > 0) then

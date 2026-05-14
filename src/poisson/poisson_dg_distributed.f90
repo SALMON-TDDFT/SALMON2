@@ -64,15 +64,21 @@ contains
 
     character(16) :: env_hse_sr
     character(16) :: env_contract_trace
+    character(16) :: env_hartree_timing
+    character(16) :: solver_name
     logical :: use_hse_sr_hartree
     logical :: enable_contract_trace
+    logical :: enable_hartree_timing
+    logical, save :: warned_direct_ft = .false.
     integer :: env_status
     integer :: ix, iy, iz
     real(8) :: z, z0, Vwall_z
+    real(8) :: t_solver_start, t_solver_end
 
     env_hse_sr = ''
     use_hse_sr_hartree = .false.
     enable_contract_trace = .false.
+    enable_hartree_timing = .false.
     call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
     if (env_status == 0) then
       select case(trim(adjustl(env_hse_sr)))
@@ -88,6 +94,15 @@ contains
         enable_contract_trace = .true.
       end select
     end if
+    env_hartree_timing = ''
+    call get_environment_variable('SALMON_DG_HARTREE_TIMING', env_hartree_timing, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_hartree_timing)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enable_hartree_timing = .true.
+      end select
+    end if
+    enable_hartree_timing = enable_hartree_timing .or. enable_contract_trace
     if (use_hse_sr_hartree .and. hse_omega <= 0.0d0) then
       stop 'poisson_dg_distributed: hse_omega must be > 0 when SALMON_HSE_SR_HARTREE is enabled'
     end if
@@ -101,8 +116,42 @@ contains
         " id=", dg_frag%id, " isize=", dg_frag%isize, " id_frag=", dg_frag%id_frag, " isize_frag=", dg_frag%isize_frag
       flush(6)
     end if
+    if (yn_ffte /= 'y' .and. .not. warned_direct_ft) then
+      warned_direct_ft = .true.
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') '[DG-HARTREE][WARN] yn_ffte=n: using direct Poisson FT; set yn_ffte=y for large DG-RT grids.'
+        write(*,'(1x,a)') '[DG-HARTREE][WARN] yn_fix_func=n with RK4 updates Hartree at RK stages, so this path is very expensive.'
+        flush(6)
+      end if
+    end if
 
     call set_poisson_contract_context('DG')
+
+    if (yn_ffte == 'y') then
+      if (use_hse_sr_hartree) then
+        solver_name = 'ffte_hse_sr'
+      else
+        solver_name = 'ffte'
+      end if
+    else
+      if (use_hse_sr_hartree) then
+        solver_name = 'direct_hse_sr'
+      else
+        solver_name = 'direct'
+      end if
+    end if
+
+    if (enable_hartree_timing) then
+      call cpu_time(t_solver_start)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,a,a,3(i0,1x),a,3(i0,1x),a,i0,a,i0)') &
+          '[DG-HARTREE] start solver=', trim(solver_name), ' grid=', &
+          lg%num(1), lg%num(2), lg%num(3), &
+          ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3), &
+          ' nproc_ob=', info%nporbital, ' fragment_ranks=', dg_frag%isize_frag
+        flush(6)
+      end if
+    end if
 
     if (yn_ffte == 'y') then
       if (use_hse_sr_hartree) then
@@ -115,6 +164,15 @@ contains
         call poisson_ft_hse_sr(lg, mg, info, fg, rho, Vh, poisson, hse_omega)
       else
         call poisson_ft(lg, mg, info, fg, rho, Vh, poisson)
+      end if
+    end if
+
+    if (enable_hartree_timing) then
+      call cpu_time(t_solver_end)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,a,a,es12.4)') '[DG-HARTREE] done solver=', trim(solver_name), &
+          ' time=', t_solver_end - t_solver_start
+        flush(6)
       end if
     end if
 

@@ -17,6 +17,7 @@
 
 module poisson_periodic
   implicit none
+  public :: set_poisson_contract_context
 
   character(16), save :: poisson_contract_context = 'UNSET'
   logical, save :: dumped_dc_ft = .false.

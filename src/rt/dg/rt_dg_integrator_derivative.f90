@@ -3,6 +3,7 @@
     use communication, only: comm_summation
     use salmon_global, only: theory, yn_spinorbit
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, &
+                                  apply_complex_matrix_blocks_batch, &
                                   apply_nonlocal_pp_projector_batch, &
                                   apply_nonlocal_pp_projector_batch_so, apply_mixed_hamiltonian, &
                                   solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
@@ -32,7 +33,7 @@
     complex(8), allocatable :: coef_frag_other(:,:), coef_pw_other(:,:)
     complex(8), allocatable, save :: rhs_in(:,:), rhs_eig(:,:), Uc(:,:), Uc_keep(:,:)
     complex(8), allocatable, save :: coef_mix_all(:,:), rhs_mix(:,:), raw_rhs(:,:), op_mix(:,:), tmp_mix(:,:)
-    complex(8), allocatable, save :: op_mix_sum(:,:), raw_rhs_sum(:,:), nl_rhs_sum(:,:)
+    complex(8), allocatable, save :: op_mix_sum(:,:), raw_rhs_sum(:,:)
     complex(8), allocatable, save :: mfp_vec(:), coef_pw_scaled(:,:), tmp_fp_fw(:,:), tmp_fp_bw(:,:), mfp_fp(:,:)
     complex(8) :: mfp
     real(8) :: huge_val
@@ -52,8 +53,10 @@
     logical :: disable_mfp, disable_local_overlap_solve, bypass_overlap_solve, disable_block_h_apply, disable_nonlocal_pp, use_mixed_basis
     logical :: use_direct_pfp, use_fft_pfp
     logical :: use_prop_overlap, enforce_norm_tangent, enable_norm_deriv_check, enable_excitation_source_trace
+    logical :: need_source_decomp, need_spinmix_work
     logical :: enable_overlap_path_trace, force_overlap_solve
-    logical :: mfp_coupling_on, has_s_prop_blocks, has_s_blocks, has_s_prop_c, has_s_c
+    logical :: mfp_coupling_on, has_s_prop_blocks, has_s_blocks, has_s_prop_blocks_c, has_s_blocks_c
+    logical :: has_s_prop_c, has_s_c
     character(len=32) :: overlap_gate_reason
     character(len=32) :: env_mfp
     character(len=32) :: env_mfp_mode
@@ -277,9 +280,9 @@
     ! Explicit spin-mixing block is not stored in current s_dg_fragment_rt.
     has_spin_mix = .false.
     
-    n = dg_frag%n_mat_max
+    n = size(dg_frag%coef, 1)
     if (n <= 0) return
-    n_frag = dg_frag%n_mat_max
+    n_frag = size(dg_frag%coef, 1)
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
@@ -298,15 +301,38 @@
       end if
     end if
 
+    need_source_decomp = enable_excitation_source_trace
+    need_spinmix_work = need_source_decomp .or. has_spin_mix
+
     if (.not. allocated(dcoef_dt_h0)) then
-      allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot), &
-               dcoef_dt_h0_core(n_tot, dg_frag%nstate_tot), dcoef_dt_nl(n_tot, dg_frag%nstate_tot), &
-               dcoef_dt_spinmix(n_tot, dg_frag%nstate_tot), rhs_pre_solve(n_tot, dg_frag%nstate_tot))
+      allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
     else if (size(dcoef_dt_h0, 1) /= n_tot .or. size(dcoef_dt_h0, 2) /= dg_frag%nstate_tot) then
-      deallocate(dcoef_dt_h0, dcoef_dt_m, dcoef_dt_h0_core, dcoef_dt_nl, dcoef_dt_spinmix, rhs_pre_solve)
-      allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot), &
-               dcoef_dt_h0_core(n_tot, dg_frag%nstate_tot), dcoef_dt_nl(n_tot, dg_frag%nstate_tot), &
-               dcoef_dt_spinmix(n_tot, dg_frag%nstate_tot), rhs_pre_solve(n_tot, dg_frag%nstate_tot))
+      deallocate(dcoef_dt_h0, dcoef_dt_m)
+      allocate(dcoef_dt_h0(n_tot, dg_frag%nstate_tot), dcoef_dt_m(n_tot, dg_frag%nstate_tot))
+    end if
+    if (need_source_decomp) then
+      if (.not. allocated(dcoef_dt_h0_core)) then
+        allocate(dcoef_dt_h0_core(n_tot, dg_frag%nstate_tot), dcoef_dt_nl(n_tot, dg_frag%nstate_tot), &
+                 rhs_pre_solve(n_tot, dg_frag%nstate_tot))
+      else if (size(dcoef_dt_h0_core, 1) /= n_tot .or. size(dcoef_dt_h0_core, 2) /= dg_frag%nstate_tot) then
+        deallocate(dcoef_dt_h0_core, dcoef_dt_nl, rhs_pre_solve)
+        allocate(dcoef_dt_h0_core(n_tot, dg_frag%nstate_tot), dcoef_dt_nl(n_tot, dg_frag%nstate_tot), &
+                 rhs_pre_solve(n_tot, dg_frag%nstate_tot))
+      end if
+    else
+      if (allocated(dcoef_dt_h0_core)) deallocate(dcoef_dt_h0_core)
+      if (allocated(dcoef_dt_nl)) deallocate(dcoef_dt_nl)
+      if (allocated(rhs_pre_solve)) deallocate(rhs_pre_solve)
+    end if
+    if (need_spinmix_work) then
+      if (.not. allocated(dcoef_dt_spinmix)) then
+        allocate(dcoef_dt_spinmix(n_tot, dg_frag%nstate_tot))
+      else if (size(dcoef_dt_spinmix, 1) /= n_tot .or. size(dcoef_dt_spinmix, 2) /= dg_frag%nstate_tot) then
+        deallocate(dcoef_dt_spinmix)
+        allocate(dcoef_dt_spinmix(n_tot, dg_frag%nstate_tot))
+      end if
+    else if (allocated(dcoef_dt_spinmix)) then
+      deallocate(dcoef_dt_spinmix)
     end if
     if (.not. allocated(coef_all)) then
       allocate(coef_all(n_tot, dg_frag%nstate_tot), rhs_all(n_tot, dg_frag%nstate_tot))
@@ -328,24 +354,17 @@
       n_basis = 0
       if (use_mixed_basis) n_basis = min(dg_frag%mixed_basis_dim(ispin), n_tot, size(dg_frag%coef_mix, 1))
       need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. &
-              (n_pw == 0 .and. disable_block_h_apply) .or. &
-                      (n_pw > 0 .and. .not. allocated(dg_frag%H_mat_frag_pw)) .or. use_mixed_basis
+              (n_pw == 0 .and. disable_block_h_apply) .or. use_mixed_basis
       need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks)) .or. use_mixed_basis
       if (need_h0_dense) then
-        if (.not. allocated(H0c)) then
-          allocate(H0c(n_tot, n_tot))
-        else if (size(H0c, 1) /= n_tot .or. size(H0c, 2) /= n_tot) then
-          deallocate(H0c)
-          allocate(H0c(n_tot, n_tot))
-        end if
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative would require dense H0c(n_tot,n_tot); block/raw route only: rank=', &
+             dg_frag%id, ' itt=', itt, ' ispin=', ispin
+        stop 1
       end if
       if (need_m_dense) then
-        if (.not. allocated(M)) then
-          allocate(M(n_tot, n_tot))
-        else if (size(M, 1) /= n_tot .or. size(M, 2) /= n_tot) then
-          deallocate(M)
-          allocate(M(n_tot, n_tot))
-        end if
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative would require dense M(n_tot,n_tot); block/raw route only: rank=', &
+             dg_frag%id, ' itt=', itt, ' ispin=', ispin
+        stop 1
       end if
       if (allocated(H0c)) H0c(:, :) = (0.0d0, 0.0d0)
       if (allocated(M)) M(:, :) = (0.0d0, 0.0d0)
@@ -595,9 +614,11 @@
 
       ! dcoef_dt = -i * H0c * coef - M * coef
       dcoef_dt_h0(:, :) = (0.0d0, 0.0d0)
-      dcoef_dt_h0_core(:, :) = (0.0d0, 0.0d0)
-      dcoef_dt_nl(:, :) = (0.0d0, 0.0d0)
-      dcoef_dt_spinmix(:, :) = (0.0d0, 0.0d0)
+      if (need_source_decomp) then
+        dcoef_dt_h0_core(:, :) = (0.0d0, 0.0d0)
+        dcoef_dt_nl(:, :) = (0.0d0, 0.0d0)
+      end if
+      if (need_spinmix_work) dcoef_dt_spinmix(:, :) = (0.0d0, 0.0d0)
       if (use_mixed_basis .and. n_basis > 0) then
 
         if (.not. allocated(rhs_mix)) then
@@ -626,55 +647,105 @@
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
         call expand_mixed_rhs_to_raw(rhs_mix, raw_rhs)
         dcoef_dt_h0(:, :) = raw_rhs(:, :)
-        dcoef_dt_h0_core(:, :) = raw_rhs(:, :)
+        if (need_source_decomp) dcoef_dt_h0_core(:, :) = raw_rhs(:, :)
         if (has_nonlocal) then
-          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            ! n_pw mixed propagation already requires a subgroup-reduced dense
-            ! nonlocal matrix for FP/PP terms.  Reuse the same matrix for the
-            ! FF action so the propagated operator is independent of how the
-            ! fragment real-space boxes are distributed.
-            call apply_dense_nonlocal_cache(dcoef_dt_nl)
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_blocks)) then
+            if (need_source_decomp) then
+              call apply_block_nonlocal_cache(dcoef_dt_nl)
+              dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+            else
+              call apply_block_nonlocal_cache(dcoef_dt_h0, .false.)
+            end if
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+            if (need_source_decomp) &
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
           end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
+          if (need_source_decomp) &
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
         end if
         ! NOTE:
         ! In mixed-basis mode, H0c already includes the diamagnetic A^2/2 term
         ! (either from uniform A_squared on the diagonal or from A2_mat in the
         ! spatial-A path). Adding it again here double-counts A^2.
-        dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
-        dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
+        if (need_source_decomp) then
+          dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
+          dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
+        end if
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw)) then
 
         call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, :), dcoef_dt_h0(1:n_tot, :))
-        dcoef_dt_h0_core(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :)
+        if (need_source_decomp) dcoef_dt_h0_core(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :)
 
         if (has_nonlocal) then
-          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            call apply_dense_nonlocal_cache(dcoef_dt_nl)
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_blocks)) then
+            if (need_source_decomp) then
+              call apply_block_nonlocal_cache(dcoef_dt_nl)
+              dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+            else
+              call apply_block_nonlocal_cache(dcoef_dt_h0, .false.)
+            end if
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+            if (need_source_decomp) &
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
           end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
+          if (need_source_decomp) &
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
         end if
-        dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
-        dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
+        if (need_source_decomp) then
+          dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
+          dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
+        end if
+        dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
+      else if (n_pw > 0 .and. allocated(dg_frag%H_mat_blocks) .and. .not. disable_block_h_apply) then
+
+        if (allocated(dg_frag%H_local_block_ids)) then
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), &
+                                         dcoef_dt_h0(1:n_frag, :), dg_frag%H_local_block_ids)
+        else
+          call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+        end if
+        if (allocated(dg_frag%H_mat_pw_diag)) then
+          do io = 1, n_pw
+            dcoef_dt_h0(n_frag+io, :) = dcoef_dt_h0(n_frag+io, :) + &
+              dg_frag%H_mat_pw_diag(io, ispin) * coef_all(n_frag+io, :)
+          end do
+        else
+          do io = 1, n_pw
+            dcoef_dt_h0(n_frag+io, :) = dcoef_dt_h0(n_frag+io, :) + &
+              0.5d0 * sum(dg_frag%k_pw(1:3, io)**2) * coef_all(n_frag+io, :)
+          end do
+        end if
+        if (need_source_decomp) dcoef_dt_h0_core(1:n_tot, :) = dcoef_dt_h0(1:n_tot, :)
+
+        if (has_nonlocal) then
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
+          if (need_source_decomp) &
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
+        end if
+        if (has_so_nonlocal) then
+          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
+          if (need_source_decomp) &
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
+        end if
+        if (need_source_decomp) then
+          dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
+          dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
+        end if
         dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
       else if (n_pw == 0 .and. .not. disable_block_h_apply .and. .not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
 
@@ -683,49 +754,39 @@
         else
           call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_all, dcoef_dt_h0)
         end if
-        dcoef_dt_h0_core(:, :) = dcoef_dt_h0(:, :)
+        if (need_source_decomp) dcoef_dt_h0_core(:, :) = dcoef_dt_h0(:, :)
 
         if (has_nonlocal) then
-          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            call apply_dense_nonlocal_cache(dcoef_dt_nl)
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+          if (n_pw > 0 .and. allocated(dg_frag%H_nl_blocks)) then
+            if (need_source_decomp) then
+              call apply_block_nonlocal_cache(dcoef_dt_nl)
+              dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
+            else
+              call apply_block_nonlocal_cache(dcoef_dt_h0, .false.)
+            end if
           else
             call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_h0)
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_nl)
+            if (need_source_decomp) &
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all, dcoef_dt_nl)
           end if
         end if
         if (has_so_nonlocal) then
           call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
                coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
+          if (need_source_decomp) &
+            call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
+                 coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
         end if
-        dcoef_dt_h0_core(1:n_frag, :) = -zi * dcoef_dt_h0_core(1:n_frag, :)
-        dcoef_dt_nl(1:n_frag, :) = -zi * dcoef_dt_nl(1:n_frag, :)
+        if (need_source_decomp) then
+          dcoef_dt_h0_core(1:n_frag, :) = -zi * dcoef_dt_h0_core(1:n_frag, :)
+          dcoef_dt_nl(1:n_frag, :) = -zi * dcoef_dt_nl(1:n_frag, :)
+        end if
         dcoef_dt_h0(1:n_frag, :) = -zi * dcoef_dt_h0(1:n_frag, :)
       else
 
-        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), H0c, n_tot, &
-                   coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_h0, n_tot)
-        dcoef_dt_h0_core(:, :) = dcoef_dt_h0(:, :)
-        if (has_nonlocal) then
-          if (n_pw > 0 .and. allocated(dg_frag%H_nl_cache)) then
-            call apply_dense_nonlocal_cache(dcoef_dt_nl)
-            dcoef_dt_h0(1:n_frag, :) = dcoef_dt_h0(1:n_frag, :) + dcoef_dt_nl(1:n_frag, :)
-          else
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_h0(1:n_frag, :))
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n_frag, :), dcoef_dt_nl(1:n_frag, :))
-          end if
-        end if
-        if (has_so_nonlocal) then
-          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_h0(1:n_frag, :))
-          call apply_nonlocal_pp_projector_batch_so(dg_frag, mg, ppg, system, Ac_tot, ispin, &
-               coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
-        end if
-        dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
-        dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
-        dcoef_dt_h0(1:n_tot, :) = -zi * dcoef_dt_h0(1:n_tot, :)
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative reached removed dense H0 application path: rank=', &
+             dg_frag%id, ' itt=', itt, ' ispin=', ispin
+        stop 1
 
       end if
 
@@ -850,16 +911,16 @@
           if (.not. disable_mfp .and. mixed_fp_coupling_active(dg_frag, ispin)) then
             if (use_direct_pfp .and. ((use_fft_pfp .and. allocated(dg_frag%P_mat_frag_pw_g)) .or. allocated(dg_frag%P_mat_frag_pw))) then
               if (.not. allocated(tmp_fp_bw)) then
-                allocate(tmp_fp_bw(n_pw, dg_frag%nstate_tot))
-              else if (size(tmp_fp_bw, 1) /= n_pw .or. size(tmp_fp_bw, 2) /= dg_frag%nstate_tot) then
+                allocate(tmp_fp_bw(n_pw, min(state_block_size, dg_frag%nstate_tot)))
+              else if (size(tmp_fp_bw, 1) /= n_pw .or. size(tmp_fp_bw, 2) /= min(state_block_size, dg_frag%nstate_tot)) then
                 deallocate(tmp_fp_bw)
-                allocate(tmp_fp_bw(n_pw, dg_frag%nstate_tot))
+                allocate(tmp_fp_bw(n_pw, min(state_block_size, dg_frag%nstate_tot)))
               end if
               if (.not. allocated(tmp_fp_fw)) then
-                allocate(tmp_fp_fw(n_frag, dg_frag%nstate_tot))
-              else if (size(tmp_fp_fw, 1) /= n_frag .or. size(tmp_fp_fw, 2) /= dg_frag%nstate_tot) then
+                allocate(tmp_fp_fw(n_frag, min(state_block_size, dg_frag%nstate_tot)))
+              else if (size(tmp_fp_fw, 1) /= n_frag .or. size(tmp_fp_fw, 2) /= min(state_block_size, dg_frag%nstate_tot)) then
                 deallocate(tmp_fp_fw)
-                allocate(tmp_fp_fw(n_frag, dg_frag%nstate_tot))
+                allocate(tmp_fp_fw(n_frag, min(state_block_size, dg_frag%nstate_tot)))
               end if
               if (.not. allocated(mfp_fp)) then
                 allocate(mfp_fp(n_frag, n_pw))
@@ -880,52 +941,72 @@
                 end if
               end do
 
-              call zgemm('N', 'N', n_frag, dg_frag%nstate_tot, n_pw, (1.0d0, 0.0d0), &
-                         mfp_fp, n_frag, coef_all(n_frag+1:n_tot, :), n_pw, (0.0d0, 0.0d0), tmp_fp_fw, n_frag)
-              dcoef_dt_m(1:n_frag, :) = dcoef_dt_m(1:n_frag, :) + tmp_fp_fw(1:n_frag, :)
+              do state0 = 1, dg_frag%nstate_tot, state_block_size
+                nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
+                state_s = state0
+                state_e = state0 + nstate_blk - 1
 
-              call zgemm('C', 'N', n_pw, dg_frag%nstate_tot, n_frag, (1.0d0, 0.0d0), &
-                         mfp_fp, n_frag, coef_all, n_tot, (0.0d0, 0.0d0), tmp_fp_bw, n_pw)
-              dcoef_dt_m(n_frag+1:n_tot, :) = dcoef_dt_m(n_frag+1:n_tot, :) - tmp_fp_bw(1:n_pw, :)
+                call zgemm('N', 'N', n_frag, nstate_blk, n_pw, (1.0d0, 0.0d0), &
+                           mfp_fp, n_frag, coef_all(n_frag+1:n_tot, state_s:state_e), n_pw, &
+                           (0.0d0, 0.0d0), tmp_fp_fw, n_frag)
+                dcoef_dt_m(1:n_frag, state_s:state_e) = dcoef_dt_m(1:n_frag, state_s:state_e) + &
+                  tmp_fp_fw(1:n_frag, 1:nstate_blk)
+
+                call zgemm('C', 'N', n_pw, nstate_blk, n_frag, (1.0d0, 0.0d0), &
+                           mfp_fp, n_frag, coef_all(1, state_s), n_tot, (0.0d0, 0.0d0), tmp_fp_bw, n_pw)
+                dcoef_dt_m(n_frag+1:n_tot, state_s:state_e) = dcoef_dt_m(n_frag+1:n_tot, state_s:state_e) - &
+                  tmp_fp_bw(1:n_pw, 1:nstate_blk)
+              end do
             else
               if (.not. allocated(coef_pw_scaled)) then
-                allocate(coef_pw_scaled(n_pw, dg_frag%nstate_tot), tmp_fp_bw(n_pw, dg_frag%nstate_tot))
-              else if (size(coef_pw_scaled, 1) /= n_pw .or. size(coef_pw_scaled, 2) /= dg_frag%nstate_tot) then
+                allocate(coef_pw_scaled(n_pw, min(state_block_size, dg_frag%nstate_tot)), &
+                         tmp_fp_bw(n_pw, min(state_block_size, dg_frag%nstate_tot)))
+              else if (size(coef_pw_scaled, 1) /= n_pw .or. size(coef_pw_scaled, 2) /= min(state_block_size, dg_frag%nstate_tot)) then
                 deallocate(coef_pw_scaled, tmp_fp_bw)
-                allocate(coef_pw_scaled(n_pw, dg_frag%nstate_tot), tmp_fp_bw(n_pw, dg_frag%nstate_tot))
+                allocate(coef_pw_scaled(n_pw, min(state_block_size, dg_frag%nstate_tot)), &
+                         tmp_fp_bw(n_pw, min(state_block_size, dg_frag%nstate_tot)))
               end if
               if (.not. allocated(tmp_fp_fw)) then
-                allocate(tmp_fp_fw(n_frag, dg_frag%nstate_tot))
-              else if (size(tmp_fp_fw, 1) /= n_frag .or. size(tmp_fp_fw, 2) /= dg_frag%nstate_tot) then
+                allocate(tmp_fp_fw(n_frag, min(state_block_size, dg_frag%nstate_tot)))
+              else if (size(tmp_fp_fw, 1) /= n_frag .or. size(tmp_fp_fw, 2) /= min(state_block_size, dg_frag%nstate_tot)) then
                 deallocate(tmp_fp_fw)
-                allocate(tmp_fp_fw(n_frag, dg_frag%nstate_tot))
+                allocate(tmp_fp_fw(n_frag, min(state_block_size, dg_frag%nstate_tot)))
               end if
 
+              do state0 = 1, dg_frag%nstate_tot, state_block_size
+                nstate_blk = min(state_block_size, dg_frag%nstate_tot - state0 + 1)
+                state_s = state0
+                state_e = state0 + nstate_blk - 1
+
 !$omp parallel do schedule(static) private(jo)
-              do jo = 1, n_pw
-                coef_pw_scaled(jo, :) = mfp_vec(jo) * coef_all(n_frag+jo, :)
-              end do
+                do jo = 1, n_pw
+                  coef_pw_scaled(jo, 1:nstate_blk) = mfp_vec(jo) * coef_all(n_frag+jo, state_s:state_e)
+                end do
 !$omp end parallel do
 
-              call zgemm('N', 'N', n_frag, dg_frag%nstate_tot, n_pw, (1.0d0, 0.0d0), &
-                         dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), n_frag, &
-                         coef_pw_scaled, n_pw, (0.0d0, 0.0d0), tmp_fp_fw, n_frag)
-              dcoef_dt_m(1:n_frag, :) = dcoef_dt_m(1:n_frag, :) + tmp_fp_fw(1:n_frag, :)
+                call zgemm('N', 'N', n_frag, nstate_blk, n_pw, (1.0d0, 0.0d0), &
+                           dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), n_frag, &
+                           coef_pw_scaled, n_pw, (0.0d0, 0.0d0), tmp_fp_fw, n_frag)
+                dcoef_dt_m(1:n_frag, state_s:state_e) = dcoef_dt_m(1:n_frag, state_s:state_e) + &
+                  tmp_fp_fw(1:n_frag, 1:nstate_blk)
 
-              call zgemm('C', 'N', n_pw, dg_frag%nstate_tot, n_frag, (1.0d0, 0.0d0), &
-                         dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), n_frag, &
-                         coef_all, n_tot, (0.0d0, 0.0d0), tmp_fp_bw, n_pw)
+                call zgemm('C', 'N', n_pw, nstate_blk, n_frag, (1.0d0, 0.0d0), &
+                           dg_frag%S_mat_frag_pw(1:n_frag, 1:n_pw, ispin), n_frag, &
+                           coef_all(1, state_s), n_tot, (0.0d0, 0.0d0), tmp_fp_bw, n_pw)
 !$omp parallel do schedule(static) private(jo)
-              do jo = 1, n_pw
-                dcoef_dt_m(n_frag+jo, :) = dcoef_dt_m(n_frag+jo, :) - conjg(mfp_vec(jo)) * tmp_fp_bw(jo, :)
-              end do
+                do jo = 1, n_pw
+                  dcoef_dt_m(n_frag+jo, state_s:state_e) = dcoef_dt_m(n_frag+jo, state_s:state_e) - &
+                    conjg(mfp_vec(jo)) * tmp_fp_bw(jo, 1:nstate_blk)
+                end do
 !$omp end parallel do
+              end do
             end if
           end if
         end if
       else
-        call zgemm('N', 'N', n_tot, dg_frag%nstate_tot, n_tot, (1.0d0, 0.0d0), M, n_tot, &
-                   coef_all, n_tot, (0.0d0, 0.0d0), dcoef_dt_m, n_tot)
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative reached removed dense M application path: rank=', &
+             dg_frag%id, ' itt=', itt, ' ispin=', ispin
+        stop 1
       end if
       if (enable_deriv_trace .and. itt <= 2) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        deriv-trace: rank=", dg_frag%id, " itt=", itt, &
@@ -935,9 +1016,11 @@
 
 
       rhs_all = dcoef_dt_h0 - dcoef_dt_m
-      rhs_pre_solve(:, :) = rhs_all(:, :)
+      if (need_source_decomp) rhs_pre_solve(:, :) = rhs_all(:, :)
 
       mfp_coupling_on = (n_pw > 0 .and. mixed_fp_coupling_active(dg_frag, ispin))
+      has_s_prop_blocks_c = allocated(dg_frag%S_mat_prop_blocks_c)
+      has_s_blocks_c = allocated(dg_frag%S_mat_blocks_c)
       has_s_prop_blocks = allocated(dg_frag%S_mat_prop_blocks)
       has_s_blocks = allocated(dg_frag%S_mat_blocks)
       has_s_prop_c = allocated(dg_frag%S_mat_prop_c)
@@ -953,7 +1036,7 @@
           if (mfp_coupling_on) then
             n_s = n_tot
             overlap_gate_reason = 'force+mixed-fp-coupling'
-          else if (has_s_prop_blocks .or. has_s_blocks .or. has_s_prop_c .or. has_s_c) then
+          else if (has_s_prop_blocks_c .or. has_s_blocks_c .or. has_s_prop_blocks .or. has_s_blocks .or. has_s_prop_c .or. has_s_c) then
             n_s = n_frag
             overlap_gate_reason = 'force+fragment-overlap'
           else
@@ -967,7 +1050,7 @@
       else if (mfp_coupling_on) then
         n_s = n_tot
         overlap_gate_reason = 'mixed-fp-coupling'
-      else if (has_s_prop_blocks .or. has_s_blocks .or. has_s_prop_c .or. has_s_c) then
+      else if (has_s_prop_blocks_c .or. has_s_blocks_c .or. has_s_prop_blocks .or. has_s_blocks .or. has_s_prop_c .or. has_s_c) then
         n_s = n_frag
         overlap_gate_reason = 'fragment-overlap'
       else
@@ -1012,7 +1095,7 @@
         end if
 
       else if (enable_overlap_path_trace .and. dg_frag%id == 0 .and. (itt <= 200 .or. mod(itt, 50) == 0)) then
-        write(*,'(1x,a,i0,a,i0,a,a)') '[OVERLAP-PATH] fallback-no-solve: itt=', itt, ' ispin=', ispin, &
+        write(*,'(1x,a,i0,a,i0,a,a)') '[OVERLAP-PATH] no-solve: itt=', itt, ' ispin=', ispin, &
           ' reason=', trim(overlap_gate_reason)
         flush(6)
       end if
@@ -1419,34 +1502,23 @@
       end if
     end subroutine expand_mixed_rhs_to_raw
 
-    subroutine apply_dense_nonlocal_cache(nl_out)
+    subroutine apply_block_nonlocal_cache(nl_out, zero_output)
       implicit none
       complex(8), intent(inout) :: nl_out(n_tot, dg_frag%nstate_tot)
-      integer :: row_cursor, row_s, row_e, nrow
+      logical, intent(in), optional :: zero_output
+      logical :: do_zero
 
-      nl_out(:, :) = (0.0d0, 0.0d0)
-      if (distributed_mixed_rows_active()) then
-        if (.not. allocated(nl_rhs_sum)) then
-          allocate(nl_rhs_sum(n_tot, dg_frag%nstate_tot))
-        else if (size(nl_rhs_sum, 1) /= n_tot .or. size(nl_rhs_sum, 2) /= dg_frag%nstate_tot) then
-          deallocate(nl_rhs_sum)
-          allocate(nl_rhs_sum(n_tot, dg_frag%nstate_tot))
-        end if
-
-        row_cursor = 1
-        do
-          call next_owned_fragment_segment(row_cursor, row_s, row_e)
-          if (row_s <= 0) exit
-          nrow = row_e - row_s + 1
-          call zgemm('N', 'N', nrow, dg_frag%nstate_tot, n_frag, (1.0d0, 0.0d0), &
-                     dg_frag%H_nl_cache(row_s, 1, ispin), dg_frag%n_mat_max, coef_all(1, 1), n_tot, &
-                     (0.0d0, 0.0d0), nl_out(row_s, 1), size(nl_out, 1))
-        end do
-        call comm_summation(nl_out, nl_rhs_sum, n_tot * dg_frag%nstate_tot, dg_frag%icomm)
-        nl_out(:, :) = nl_rhs_sum(:, :)
+      do_zero = .true.
+      if (present(zero_output)) do_zero = zero_output
+      if (do_zero) nl_out(:, :) = (0.0d0, 0.0d0)
+      if (.not. allocated(dg_frag%H_nl_blocks)) return
+      if (allocated(dg_frag%H_nl_local_block_ids)) then
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, &
+             coef_all(1:n_frag, :), nl_out(1:n_frag, :), dg_frag%H_nl_local_block_ids)
       else
-        nl_out(1:n_frag, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), coef_all(1:n_frag, :))
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, &
+             coef_all(1:n_frag, :), nl_out(1:n_frag, :))
       end if
-    end subroutine apply_dense_nonlocal_cache
+    end subroutine apply_block_nonlocal_cache
 
   end subroutine calculate_time_derivative

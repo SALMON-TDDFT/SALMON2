@@ -89,10 +89,11 @@
     real(8), allocatable :: top_abs2(:), top_de(:)
     integer, allocatable :: top_spin(:), top_occ(:), top_emp(:)
     logical :: has_nonlocal, use_hmat_complex, use_mixed_current
-    logical :: have_occvirt_ref
+    logical :: have_occvirt_ref, enable_occvirt_diag
     logical, save :: occvirt_ref_mode_initialized = .false.
     logical, save :: occvirt_ref_legacy_mode = .false.
     logical, save :: observables_env_initialized = .false.
+    logical, save :: cfg_enable_occvirt_diag = .false.
     logical, save :: cfg_enable_obs_charge_check = .false.
     integer, save :: cfg_obs_charge_check_stride = 10
     real(8), save :: cfg_obs_charge_check_tol = 1.0d-8
@@ -109,7 +110,6 @@
     integer, save :: cfg_mij_audit_max_emp = 0
     integer, save :: cfg_mij_audit_dir = 3
     real(8), save :: cfg_mij_audit_ewin = 0.0d0
-    logical :: require_dense_nl
     logical :: use_spatial_A
     logical :: enable_obs_charge_check
     integer :: obs_charge_check_stride
@@ -304,15 +304,25 @@
     current_block_trace_stride = cfg_current_block_trace_stride
     current_block_trace_maxblocks = cfg_current_block_trace_maxblocks
     enable_energy_trace = cfg_enable_energy_trace
+    enable_occvirt_diag = cfg_enable_occvirt_diag
     do_energy_trace = enable_energy_trace .and. (itt == 1 .or. mod(itt, cfg_energy_trace_stride) == 0)
     do_current_block_trace = enable_current_block_trace .and. allocated(dg_frag%momentum_blocks) .and. &
       (itt == 1 .or. mod(itt, current_block_trace_stride) == 0)
 
     if (.not. occvirt_ref_mode_initialized) then
       env_value = ''
+      call get_environment_variable('SALMON_DG_OCCVIRT_DIAG', env_value, length=env_len, status=env_status)
+      cfg_enable_occvirt_diag = .false.
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') cfg_enable_occvirt_diag = .true.
+      end if
+
+      env_value = ''
       call get_environment_variable('SALMON_DG_OCCVIRT_REF_MODE', env_value, length=env_len, status=env_status)
       occvirt_ref_legacy_mode = .false.
       if (env_status == 0 .and. env_len > 0) then
+        cfg_enable_occvirt_diag = .true.
         select case (env_value(1:1))
         case ('l','L','0')
           occvirt_ref_legacy_mode = .true.
@@ -321,6 +331,7 @@
         end select
       end if
       occvirt_ref_mode_initialized = .true.
+      enable_occvirt_diag = cfg_enable_occvirt_diag
     end if
 
     enable_mij_audit = cfg_enable_mij_audit
@@ -385,17 +396,21 @@
       goto 1000
     end if
     n_pw = 0
-    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = size(dg_frag%coef_pw, 1)
     n_tot = n + n_pw
     nstate_use_diag = dg_frag%nstate_tot
-    if (allocated(dg_frag%coef_ref_all)) then
+    if (.not. enable_occvirt_diag .and. allocated(dg_frag%coef_ref_all)) then
+      deallocate(dg_frag%coef_ref_all)
+      dg_frag%coef_ref_ready = .false.
+    end if
+    if (enable_occvirt_diag .and. allocated(dg_frag%coef_ref_all)) then
       if (size(dg_frag%coef_ref_all, 1) /= n_tot .or. size(dg_frag%coef_ref_all, 2) /= nstate_use_diag .or. &
           size(dg_frag%coef_ref_all, 3) /= dg_frag%nspin) then
         deallocate(dg_frag%coef_ref_all)
         dg_frag%coef_ref_ready = .false.
       end if
     end if
-    if (.not. dg_frag%coef_ref_ready .and. (occvirt_ref_legacy_mode .or. itt == 1)) then
+    if (enable_occvirt_diag .and. .not. dg_frag%coef_ref_ready .and. (occvirt_ref_legacy_mode .or. itt == 1)) then
       if (.not. allocated(dg_frag%coef_ref_all)) allocate(dg_frag%coef_ref_all(n_tot, nstate_use_diag, dg_frag%nspin))
       dg_frag%coef_ref_all(:, :, :) = (0.0d0, 0.0d0)
       do ispin = 1, dg_frag%nspin
@@ -410,7 +425,7 @@
         flush(6)
       end if
     end if
-    have_occvirt_ref = dg_frag%coef_ref_ready
+    have_occvirt_ref = enable_occvirt_diag .and. dg_frag%coef_ref_ready
     max_nocc = max(1, maxval(dg_frag%nocc_spin(1:dg_frag%nspin)))
 
     allocate(tmp_mat(n, max_nocc))
@@ -993,10 +1008,7 @@
       Ac_tot = rt%Ac_tot(:, itt)
       A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
       
-      require_dense_nl = (.not. allocated(dg_frag%H_mat_blocks)) .or. &
-                         (allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)) .or. &
-                         use_spatial_A .or. do_interface_check
-      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, require_dense_nl)
+      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
       has_nonlocal = dg_frag%has_nl_cache
 
       ! Calculate total energy: E = <ψ|H(t)|ψ>
@@ -1064,9 +1076,6 @@
         else if (.not. allocated(dg_frag%H_mat_blocks)) then
           op_mat(:, :) = cmplx(dg_frag%H_mat(1:n, 1:n, ispin), 0.0d0, kind=8)
         end if
-        if (has_nonlocal .and. allocated(dg_frag%H_nl_cache) .and. ((.not. allocated(dg_frag%H_mat_blocks)) .or. use_hmat_complex)) then
-          op_mat(:, :) = op_mat(:, :) + dg_frag%H_nl_cache(1:n, 1:n, ispin)
-        end if
       end if
       if (use_spatial_A) then
         if (.not. allocated(Ap_mat)) allocate(Ap_mat(n, n), A2_mat(n, n))
@@ -1077,13 +1086,8 @@
         if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin)) then
           call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
           if (has_nonlocal) then
-            if (allocated(dg_frag%H_nl_cache) .and. ((.not. allocated(dg_frag%H_mat_blocks)) .or. use_hmat_complex)) then
-              tmp_all(1:n, 1:nocc) = tmp_all(1:n, 1:nocc) + &
-                matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_all(1:n, 1:nocc))
-            else
-              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n, 1:nocc), &
-                tmp_all(1:n, 1:nocc))
-            end if
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_all(1:n, 1:nocc), &
+              tmp_all(1:n, 1:nocc))
           end if
           tmp_all(1:n_tot, 1:nocc) = tmp_all(1:n_tot, 1:nocc) + 0.5d0 * A_squared * coef_all(1:n_tot, 1:nocc)
           if (allocated(dg_frag%momentum_blocks)) then
@@ -1116,13 +1120,8 @@
           if (.not. use_hmat_complex .and. allocated(dg_frag%H_mat_blocks)) then
             call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
             if (has_nonlocal) then
-              if (allocated(dg_frag%H_nl_cache)) then
-                tmp_mat(:, :) = tmp_mat(:, :) + &
-                  matmul(dg_frag%H_nl_cache(1:n, 1:n, ispin), coef_frag_all(1:n, 1:nocc))
-              else
-                call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
-                  tmp_mat)
-              end if
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
+                tmp_mat)
             end if
             tmp_mat(1:n, 1:nocc) = tmp_mat(1:n, 1:nocc) + 0.5d0 * A_squared * coef_frag_all(1:n, 1:nocc)
           else
@@ -1132,6 +1131,10 @@
             end do
             call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
                        coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+            if (has_nonlocal) then
+              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
+                tmp_mat)
+            end if
           end if
           if (.not. allocated(op_mat)) allocate(op_mat(n, n))
           op_mat(:, 1:nocc) = (0.0d0, 0.0d0)
@@ -1189,8 +1192,12 @@
         end do
       else
         if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
-        call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                   coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+          call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
+                     coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+          if (has_nonlocal) then
+            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
+              tmp_mat)
+          end if
         end if
         energy_tmp = 0.0d0
         do io = 1, nocc

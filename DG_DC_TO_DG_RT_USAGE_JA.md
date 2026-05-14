@@ -56,11 +56,12 @@ grep -E "DG seed basis cutoff|DG seed export|end SALMON|SIG|STOP|Error|FATAL" dc
 
 ```text
 DG seed basis cutoff: spin=1 min_nbasis=60 max_nbasis=60 n_mat=480
+DG seed fragment basis file rows=60 original nstate_frag=64
 DG seed export complete (non-LCFO): wavefunctions.bin + basis_functions_buffer.bin + rgrid_index.bin + dg_occupation.bin
 end SALMON
 ```
 
-`min_nbasis` と `max_nbasis` は cutoff 後の物理基底本数です。RT 側は入力の `nstate_frag` ではなく、seed ファイル内の本数を優先して使います。
+`min_nbasis` と `max_nbasis` は cutoff 後の物理基底本数です。seed ファイルは cutoff 後の最大本数だけを書き、除去されたゼロ基底列は保存しません。RT 側は入力の `nstate_frag` ではなく、seed ファイル内の本数を優先して使います。
 
 ## 4. DG-RT 入力の要点
 
@@ -69,6 +70,13 @@ RT 側では `yn_dg_fragment_from_dcdft='y'` と `yn_dg_fragment_rt='y'` を指�
 ```fortran
 &calculation
   theory = 'tddft_response'
+/
+
+&parallel
+  nproc_k = 1
+  nproc_ob = 4
+  nproc_rgrid(1:3) = 2,2,2
+  process_allocation = 'orbital_sequential'
 /
 
 &dc
@@ -91,7 +99,7 @@ RT 側では `yn_dg_fragment_from_dcdft='y'` と `yn_dg_fragment_rt='y'` を指�
 RT 入力の `nstate_frag` が seed ファイルと違う場合でも、現行コードはファイル側の本数を優先します。ログには次のような情報行が出ます。
 
 ```text
-[INFO] nstate_frag differs: file=64 runtime=32 (using fragment-state count from file)
+[INFO] nstate_frag differs: file=60 runtime=32 (using fragment-state count from file)
 ```
 
 これは異常ではありません。実際の DG-RT 基底本数は `basis_functions_buffer.bin` と `wavefunctions.bin` の header で決まります。
@@ -103,6 +111,19 @@ np = num_fragment(1) * num_fragment(2) * num_fragment(3) * nproc_ob
 ```
 
 に合わせます。
+
+現行の orbital mode では、RT 側の親 real-space 並列は fragment 分割と一致させます。
+
+```text
+nproc_rgrid(1:3) = num_fragment(1:3)
+process_allocation = 'orbital_sequential'
+```
+
+`nproc_ob` がフラグメント内の軌道並列数です。`process_allocation='grid_sequential'` のままだと、連続 rank が orbital rank ではなく real-space rank になり、H 構築で全 fragment のポテンシャルを global reduction する遅い経路に落ちます。現在のコードはこの誤配置を初期化時点でエラーにします。
+
+RT-DG の初期化ログでは、`nproc_ob` を `nproc_rgrid` に折り込んではいけません。例えば `num_fragment=8,8,8`, `nproc_ob=4`, RT 側 `nproc_rgrid(1:3)=8,8,8` の場合、期待される表示は `nproc_rgrid : 8 8 8` と `nproc_ob : 4` です。`nproc_rgrid : 32 8 8` のように出る場合は、フラグメント内軌道並列が空間並列へ誤変換されています。
+
+DC 計算時の `&dc nproc_rgrid_tot(1:3)` と DG-RT 計算時の `&parallel nproc_rgrid(1:3)` は一致させる必要はありません。DC 側の `nproc_rgrid_tot` は fragment SCF をどう空間分割して解くかの指定で、seed ファイルには cutoff 後の fragment box と buffer box が保存されます。DG-RT 側では、その seed を読み直したうえで `nproc_ob` によるフラグメント内軌道並列を使います。
 
 ## 5. 15 fs impulse 計算の指定
 
@@ -136,6 +157,8 @@ end SALMON
 `Total states` は cutoff 後の fragment 基底の総数です。C64 buffer=4, 2x2x2 fragment の確認では `60 * 8 = 480` でした。
 
 密度や current の drift を見る場合は、通常ログだけでなく `*_dg_current_decomp.data` の raw charge や energy/current 列も併せて見ます。`rho%f` は全電子数へ正規化されるため、係数ノルムの破れは raw charge 側に先に出ます。
+
+大規模並列では、DG density の実空間 owner への返送は full communicator の `Alltoallv` ではなく、peer ごとの sparse ring exchange を使います。富岳/Tofu で `tofu-mrq-overflow` が出る場合は、まず `nproc_ob` を下げて再現性を見てください。`nproc_ob` を下げると止まる場合、物理入力ではなく通信キュー圧が主因です。
 
 ## 7. 容量見積もり
 

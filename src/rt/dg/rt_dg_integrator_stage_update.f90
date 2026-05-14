@@ -35,6 +35,9 @@
     logical :: use_rank_buffered_potential
     real(8) :: t0, t1
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct, time_pw_mix
+    integer :: trace_call_id
+    integer, save :: trace_stage_call_count = 0
+    logical :: trace_stage
     logical, save :: timing_initialized = .false.
     logical, save :: enable_stage_timing = .false.
     character(16) :: env_timing
@@ -56,11 +59,28 @@
     time_xc = 0.0d0
     time_reconstruct = 0.0d0
     time_pw_mix = 0.0d0
+    trace_call_id = 0
+    trace_stage = .false.
+    if (itt == 1 .and. dg_frag%id == 0 .and. trace_stage_call_count < 5) then
+      trace_stage_call_count = trace_stage_call_count + 1
+      trace_call_id = trace_stage_call_count
+      trace_stage = .true.
+      write(*,'(1x,a,i0,a,i0)') '[DG-STAGE] enter itt=', itt, ' call=', trace_call_id
+      flush(6)
+    end if
 
+    if (trace_stage) then
+      write(*,'(1x,a)') '[DG-STAGE] density start'
+      flush(6)
+    end if
     call cpu_time(t0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s, itt)
     call cpu_time(t1)
     time_density = time_density + (t1 - t0)
+    if (trace_stage) then
+      write(*,'(1x,a,1pe12.4)') '[DG-STAGE] density done time=', t1 - t0
+      flush(6)
+    end if
 
     dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
     if (system%nspin > 0) then
@@ -80,10 +100,18 @@
                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
     end if
+    if (trace_stage) then
+      write(*,'(1x,a)') '[DG-STAGE] Hartree start'
+      flush(6)
+    end if
     call cpu_time(t0)
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
     call cpu_time(t1)
     time_hartree = time_hartree + (t1 - t0)
+    if (trace_stage) then
+      write(*,'(1x,a,1pe12.4)') '[DG-STAGE] Hartree done time=', t1 - t0
+      flush(6)
+    end if
     dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
     if (use_rank_buffered_potential) then
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vh, Vh_buffer)
@@ -111,11 +139,19 @@
         flush(6)
       end if
     end if
+    if (trace_stage) then
+      write(*,'(1x,a)') '[DG-STAGE] XC start'
+      flush(6)
+    end if
     call cpu_time(t0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     call cpu_time(t1)
     time_xc = time_xc + (t1 - t0)
+    if (trace_stage) then
+      write(*,'(1x,a,1pe12.4)') '[DG-STAGE] XC done time=', t1 - t0
+      flush(6)
+    end if
     if (system%nspin > 0) then
       dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
       do n_frag = 1, system%nspin
@@ -129,20 +165,36 @@
       energy%E_U = 0.0d0
     end if
     if (use_rank_buffered_potential) then
+      if (trace_stage) then
+        write(*,'(1x,a)') '[DG-STAGE] reconstruct start'
+        flush(6)
+      end if
       call cpu_time(t0)
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
       call cpu_time(t1)
       time_reconstruct = time_reconstruct + (t1 - t0)
     else
+      if (trace_stage) then
+        write(*,'(1x,a)') '[DG-STAGE] reconstruct start'
+        flush(6)
+      end if
       call cpu_time(t0)
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
       call cpu_time(t1)
       time_reconstruct = time_reconstruct + (t1 - t0)
     end if
+    if (trace_stage) then
+      write(*,'(1x,a,1pe12.4)') '[DG-STAGE] reconstruct done time=', time_reconstruct
+      flush(6)
+    end if
 
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
+      if (trace_stage) then
+        write(*,'(1x,a)') '[DG-STAGE] PW mixed update start'
+        flush(6)
+      end if
       call cpu_time(t0)
-      n_frag = dg_frag%n_mat_max
+      n_frag = size(dg_frag%coef, 1)
       n_pw = dg_frag%n_plane_waves
 
       if (.not. allocated(dg_frag%S_mat_frag_pw)) then
@@ -163,13 +215,19 @@
         allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
       end if
 
-      ! Mixed FP/PP nonlocal terms require dense H_nl cache at current A(t).
-      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, .true.)
+      ! Mixed FP/PP nonlocal terms use the subgroup-reduced block cache.
+      ! Requesting the dense cache here scales as n_mat_max**2 and is not
+      ! viable for large DC->DG runs.
+      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
 
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
       call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
       call cpu_time(t1)
       time_pw_mix = time_pw_mix + (t1 - t0)
+      if (trace_stage) then
+        write(*,'(1x,a,1pe12.4)') '[DG-STAGE] PW mixed update done time=', t1 - t0
+        flush(6)
+      end if
     end if
 
     if (enable_stage_timing .and. dg_frag%id == 0) then

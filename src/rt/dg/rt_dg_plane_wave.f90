@@ -56,6 +56,22 @@ contains
     enabled = cached_enabled
   end function plane_wave_trace_enabled
 
+  integer function fragment_local_row_index_pw(dg_frag, ig, ispin, nrow) result(iloc)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ig, ispin, nrow
+
+    iloc = 0
+    if (ig < 1 .or. ig > dg_frag%n_mat_max) return
+    if (allocated(dg_frag%coef_global_to_local)) then
+      if (ispin < 1 .or. ispin > size(dg_frag%coef_global_to_local, 2)) return
+      iloc = dg_frag%coef_global_to_local(ig, ispin)
+    else
+      iloc = ig
+    end if
+    if (iloc < 1 .or. iloc > nrow) iloc = 0
+  end function fragment_local_row_index_pw
+
   subroutine assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, mat)
     use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense
     implicit none
@@ -262,6 +278,7 @@ contains
     complex(8), allocatable :: S_frag_pw(:,:,:), H_frag_pw(:,:,:), P_frag_pw(:,:,:,:)
 
     n_frag = dg_frag%n_mat_max
+    if (allocated(dg_frag%coef)) n_frag = size(dg_frag%coef, 1)
     n_pw = dg_frag%n_plane_waves
     if (.not. dg_frag%use_plane_wave_basis .or. n_pw <= 0) return
 
@@ -345,7 +362,7 @@ contains
       end if
       dg_frag%S_mat_frag_pw_g(:, :, :) = S_complex(:, :, :)
     else
-      call compute_fragment_pw_overlap_legacy(dg_frag, S_complex)
+      call compute_fragment_pw_overlap_realspace(dg_frag, S_complex)
     end if
 
   end subroutine compute_fragment_pw_overlap
@@ -359,7 +376,7 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(out) :: S_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
 
-    integer :: ifrag, i_local, ispin, io, ig, ipw
+    integer :: ifrag, i_local, ispin, io, ig, iloc, ipw
     integer :: ix, iy, iz, gx, gy, gz, bx, by, bz
     integer :: nx, ny, nz, gx0, gy0, gz0
     integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
@@ -555,13 +572,14 @@ contains
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%n_basis(ifrag, ispin)
           ig = dg_frag%index_basis(io, ifrag, ispin)
-          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
-          S_complex(ig, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
+          iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(S_complex, 1))
+          if (iloc <= 0) cycle
+          S_complex(iloc, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
         end do
       end do
     end do
 
-    s_fp_norm = sqrt(sum(abs(S_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
+    s_fp_norm = sqrt(sum(abs(S_complex(1:size(S_complex, 1), 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
     if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
       write(*,'(1x,a,1x,1pe14.6)') '[FP-DOMAIN] ||S_fp||_F =', s_fp_norm
     end if
@@ -571,14 +589,14 @@ contains
     deallocate(fft_in, fft_out, frag_block, k_fft_slot, k_fft_slot_neg)
   end subroutine compute_fragment_pw_overlap_fft_gspace
 
-  subroutine compute_fragment_pw_overlap_legacy(dg_frag, S_complex)
+  subroutine compute_fragment_pw_overlap_realspace(dg_frag, S_complex)
     use structures
     use communication, only: comm_bcast, comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(out) :: S_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
 
-    integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
+    integer :: ipw, ifrag, i_local, io, ig, iloc, ispin, ix, iy, iz
     integer :: nx, ny, nz, nx_max, ny_max, nz_max
     integer :: gx, gy, gz, gx0, gy0, gz0, bx, by, bz
     integer :: loc_s(3), loc_e(3)
@@ -717,7 +735,8 @@ contains
 
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
-            if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+            iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(S_complex, 1))
+            if (iloc <= 0) cycle
             overlap_local = (0.0d0, 0.0d0)
 
             if (use_complex_basis) then
@@ -764,7 +783,7 @@ contains
               end do
             end if
 
-            S_complex(ig, ipw, ispin) = S_complex(ig, ipw, ispin) + overlap_local
+            S_complex(iloc, ipw, ispin) = S_complex(iloc, ipw, ispin) + overlap_local
           end do
         end do
       end do
@@ -783,8 +802,9 @@ contains
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
-            if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
-            frag_block(io, 1:dg_frag%n_plane_waves, ispin) = S_complex(ig, 1:dg_frag%n_plane_waves, ispin)
+            iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(S_complex, 1))
+            if (iloc <= 0) cycle
+            frag_block(io, 1:dg_frag%n_plane_waves, ispin) = S_complex(iloc, 1:dg_frag%n_plane_waves, ispin)
           end do
         end do
         ! Fragment-PW overlaps are linear integrals.  Legacy mode reduces
@@ -798,19 +818,20 @@ contains
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%n_basis(ifrag, ispin)
           ig = dg_frag%index_basis(io, ifrag, ispin)
-          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
-          S_complex(ig, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
+          iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(S_complex, 1))
+          if (iloc <= 0) cycle
+          S_complex(iloc, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
         end do
       end do
     end do
     deallocate(frag_block, frag_block_sum)
 
-    s_fp_norm = sqrt(sum(abs(S_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
+    s_fp_norm = sqrt(sum(abs(S_complex(1:size(S_complex, 1), 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
     if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
       write(*,'(1x,a,1x,1pe14.6)') '[FP-DOMAIN] ||S_fp||_F =', s_fp_norm
     end if
 
-  end subroutine compute_fragment_pw_overlap_legacy
+  end subroutine compute_fragment_pw_overlap_realspace
 
   !=======================================================================
   ! Compute mean potential energy for plane wave basis
@@ -867,7 +888,7 @@ contains
     type(s_scalar),         intent(in)    :: Vh, Vxc(:), Vpsl
     complex(8),             intent(out)   :: H_complex(:,:,:)  ! (n_mat_max, n_pw, nspin)
 
-    integer :: ipw, ifrag, i_local, io, ig, ispin, ix, iy, iz
+    integer :: ipw, ifrag, i_local, io, ig, iloc, ispin, ix, iy, iz
     integer :: nx, ny, nz, nx_max, ny_max, nz_max
     integer :: gx, gy, gz, gx0, gy0, gz0, bx, by, bz, vx, vy, vz
     integer :: loc_s(3), loc_e(3)
@@ -1029,7 +1050,8 @@ contains
 
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
-            if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+            iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(H_complex, 1))
+            if (iloc <= 0) cycle
             hamiltonian_local = (0.0d0, 0.0d0)
 
             if (use_complex_basis) then
@@ -1103,7 +1125,7 @@ contains
               end do
             end if
 
-            H_complex(ig, ipw, ispin) = H_complex(ig, ipw, ispin) + hamiltonian_local
+            H_complex(iloc, ipw, ispin) = H_complex(iloc, ipw, ispin) + hamiltonian_local
           end do
         end do
       end do
@@ -1124,11 +1146,12 @@ contains
         do ispin = 1, dg_frag%nspin
           do io = 1, dg_frag%n_basis(ifrag, ispin)
             ig = dg_frag%index_basis(io, ifrag, ispin)
-            if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
-            frag_block(io, 1:dg_frag%n_plane_waves, ispin) = H_complex(ig, 1:dg_frag%n_plane_waves, ispin)
+            iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(H_complex, 1))
+            if (iloc <= 0) cycle
+            frag_block(io, 1:dg_frag%n_plane_waves, ispin) = H_complex(iloc, 1:dg_frag%n_plane_waves, ispin)
           end do
         end do
-        ! H_fp follows the same ownership as S_fp: legacy reduces spatial
+        ! H_fp follows the same ownership as S_fp: real-space mode reduces spatial
         ! pieces, orbital mode reduces disjoint PW-column pieces.
         if (dg_frag%isize_frag > 1) then
           call comm_summation(frag_block, frag_block_sum, size(frag_block), dg_frag%icomm_frag)
@@ -1139,14 +1162,15 @@ contains
       do ispin = 1, dg_frag%nspin
         do io = 1, dg_frag%n_basis(ifrag, ispin)
           ig = dg_frag%index_basis(io, ifrag, ispin)
-          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
-          H_complex(ig, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
+          iloc = fragment_local_row_index_pw(dg_frag, ig, ispin, size(H_complex, 1))
+          if (iloc <= 0) cycle
+          H_complex(iloc, 1:dg_frag%n_plane_waves, ispin) = frag_block(io, 1:dg_frag%n_plane_waves, ispin)
         end do
       end do
     end do
     deallocate(frag_block, frag_block_sum)
 
-    h_fp_norm = sqrt(sum(abs(H_complex(1:dg_frag%n_mat_max, 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
+    h_fp_norm = sqrt(sum(abs(H_complex(1:size(H_complex, 1), 1:dg_frag%n_plane_waves, 1:dg_frag%nspin))**2))
     if (plane_wave_trace_enabled() .and. dg_frag%id == 0) then
       write(*,'(1x,a,1x,1pe14.6)') '[FP-DOMAIN] ||H_fp||_F =', h_fp_norm
     end if
@@ -1298,7 +1322,8 @@ contains
   subroutine build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, &
                                       S_frag_pw, H_frag_pw)
     use structures
-    use communication, only: comm_is_root
+    use communication, only: comm_is_root, comm_summation
+    use rt_dg_fragment_ops, only: apply_complex_matrix_blocks_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_rgrid),          intent(in)    :: lg
@@ -1307,42 +1332,22 @@ contains
     complex(8),             intent(in)    :: S_frag_pw(:,:,:)
     complex(8),             intent(inout) :: H_frag_pw(:,:,:)
 
-    integer :: ispin, i, ipw, n_frag, n_pw
-    integer :: env_len, env_stat
-    real(8) :: k_vec(3), kinetic_energy
-    real(8), allocatable :: V_mean(:)
+    integer :: ispin, ipw, n_frag, n_pw
     complex(8), allocatable :: H_pw(:,:,:)
-    complex(8), allocatable :: H_nl_fp(:,:), H_nl_pp(:,:), H_nl_diag(:,:)
-    character(len=64) :: env_hpp_mode
-    character(len=64) :: hpp_mode
-    logical :: use_local_nondiag, include_nl_mixed
+    complex(8), allocatable :: H_nl_fp(:,:), H_nl_pp(:,:), H_nl_pp_local(:,:)
+    logical :: include_nl_mixed
 
     if (.not. dg_frag%use_plane_wave_basis) return
 
-    n_frag = dg_frag%n_mat_max
-    n_pw = dg_frag%n_plane_waves
+    n_frag = min(size(S_frag_pw, 1), size(H_frag_pw, 1))
+    n_pw = min(dg_frag%n_plane_waves, size(S_frag_pw, 2), size(H_frag_pw, 2))
 
-    hpp_mode = 'local'
-    env_hpp_mode = ''
-    call get_environment_variable('SALMON_DG_HPP_MODE', env_hpp_mode, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) hpp_mode = adjustl(env_hpp_mode(1:env_len))
-    use_local_nondiag = .true.
-    select case (hpp_mode(1:1))
-    case ('d','D','l','L','0')
-      use_local_nondiag = .false.
-    case default
-      use_local_nondiag = .true.
-    end select
-
-    allocate(V_mean(dg_frag%nspin))
-    call compute_mean_potential(dg_frag, Vh, Vxc, Vpsl, V_mean)
-
-    include_nl_mixed = dg_frag%has_nl_cache .and. allocated(dg_frag%H_nl_cache) .and. n_frag > 0 .and. n_pw > 0
+    include_nl_mixed = dg_frag%has_nl_cache .and. allocated(dg_frag%H_nl_blocks) .and. n_frag > 0 .and. n_pw > 0
     if (include_nl_mixed) then
-      allocate(H_nl_fp(n_frag, n_pw), H_nl_pp(n_pw, n_pw), H_nl_diag(n_pw, dg_frag%nspin))
+      allocate(H_nl_fp(n_frag, n_pw), H_nl_pp(n_pw, n_pw), H_nl_pp_local(n_pw, n_pw))
       H_nl_fp(:, :) = (0.0d0, 0.0d0)
       H_nl_pp(:, :) = (0.0d0, 0.0d0)
-      H_nl_diag(:, :) = (0.0d0, 0.0d0)
+      H_nl_pp_local(:, :) = (0.0d0, 0.0d0)
     end if
 
     if (.not. allocated(dg_frag%H_mat_pw_diag)) then
@@ -1352,7 +1357,7 @@ contains
       allocate(dg_frag%H_mat_pw_diag(n_pw, dg_frag%nspin))
     end if
 
-    if (use_local_nondiag .and. n_pw > 0) then
+    if (n_pw > 0) then
       if (.not. allocated(dg_frag%H_mat_pw)) then
         allocate(dg_frag%H_mat_pw(n_pw, n_pw, dg_frag%nspin))
       else if (size(dg_frag%H_mat_pw,1) /= n_pw .or. size(dg_frag%H_mat_pw,2) /= n_pw .or. &
@@ -1364,24 +1369,25 @@ contains
       call compute_pw_hamiltonian_local_potential(dg_frag, Vh, Vxc, Vpsl, H_pw)
       if (include_nl_mixed) then
         do ispin = 1, dg_frag%nspin
-          H_nl_fp(:, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), S_frag_pw(1:n_frag, 1:n_pw, ispin))
+          H_nl_fp(:, :) = (0.0d0, 0.0d0)
+          if (allocated(dg_frag%H_nl_local_block_ids)) then
+            call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, &
+                 S_frag_pw(1:n_frag, 1:n_pw, ispin), H_nl_fp(:, :), dg_frag%H_nl_local_block_ids)
+          else
+            call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, &
+                 S_frag_pw(1:n_frag, 1:n_pw, ispin), H_nl_fp(:, :))
+          end if
           H_frag_pw(1:n_frag, 1:n_pw, ispin) = H_frag_pw(1:n_frag, 1:n_pw, ispin) + H_nl_fp(:, :)
-          H_nl_pp(:, :) = matmul(conjg(transpose(S_frag_pw(1:n_frag, 1:n_pw, ispin))), H_nl_fp(:, :))
+          H_nl_pp_local(:, :) = matmul(conjg(transpose(S_frag_pw(1:n_frag, 1:n_pw, ispin))), H_nl_fp(:, :))
+          if (n_frag < dg_frag%n_mat_max) then
+            call comm_summation(H_nl_pp_local, H_nl_pp, n_pw * n_pw, dg_frag%icomm)
+          else
+            H_nl_pp(:, :) = H_nl_pp_local(:, :)
+          end if
           H_pw(1:n_pw, 1:n_pw, ispin) = H_pw(1:n_pw, 1:n_pw, ispin) + H_nl_pp(:, :)
-          H_nl_diag(1:n_pw, ispin) = [(H_nl_pp(i, i), i=1,n_pw)]
         end do
       end if
       dg_frag%H_mat_pw(:, :, :) = H_pw(:, :, :)
-    else
-      if (allocated(dg_frag%H_mat_pw)) deallocate(dg_frag%H_mat_pw)
-      if (include_nl_mixed) then
-        do ispin = 1, dg_frag%nspin
-          H_nl_fp(:, :) = matmul(dg_frag%H_nl_cache(1:n_frag, 1:n_frag, ispin), S_frag_pw(1:n_frag, 1:n_pw, ispin))
-          H_frag_pw(1:n_frag, 1:n_pw, ispin) = H_frag_pw(1:n_frag, 1:n_pw, ispin) + H_nl_fp(:, :)
-          H_nl_pp(:, :) = matmul(conjg(transpose(S_frag_pw(1:n_frag, 1:n_pw, ispin))), H_nl_fp(:, :))
-          H_nl_diag(1:n_pw, ispin) = [(H_nl_pp(i, i), i=1,n_pw)]
-        end do
-      end if
     end if
 
     if (allocated(dg_frag%H_mat_frag_pw)) then
@@ -1395,31 +1401,17 @@ contains
       if (n_pw <= 0) cycle
 
       do ipw = 1, n_pw
-        if (use_local_nondiag) then
-          dg_frag%H_mat_pw_diag(ipw, ispin) = dg_frag%H_mat_pw(ipw, ipw, ispin)
-        else
-          k_vec(1:3) = dg_frag%k_pw(1:3, ipw)
-          kinetic_energy = 0.5d0 * sum(k_vec**2)
-          i = n_frag + ipw
-          dg_frag%H_mat_pw_diag(ipw, ispin) = cmplx(kinetic_energy + V_mean(ispin), 0.0d0, kind=8)
-          if (include_nl_mixed) dg_frag%H_mat_pw_diag(ipw, ispin) = dg_frag%H_mat_pw_diag(ipw, ispin) + H_nl_diag(ipw, ispin)
-        end if
+        dg_frag%H_mat_pw_diag(ipw, ispin) = dg_frag%H_mat_pw(ipw, ipw, ispin)
       end do
     end do
 
     if (allocated(H_pw)) deallocate(H_pw)
     if (allocated(H_nl_fp)) deallocate(H_nl_fp)
     if (allocated(H_nl_pp)) deallocate(H_nl_pp)
-    if (allocated(H_nl_diag)) deallocate(H_nl_diag)
-
-    deallocate(V_mean)
+    if (allocated(H_nl_pp_local)) deallocate(H_nl_pp_local)
 
     if (plane_wave_trace_enabled() .and. comm_is_root(dg_frag%id) .and. n_pw > 0) then
-      if (use_local_nondiag) then
-        write(*,'(1x,a)') '[HPP-MODE] local non-diagonal PW-PW potential enabled'
-      else
-        write(*,'(1x,a)') '[HPP-MODE] diagonal PW-PW approximation (legacy)'
-      end if
+      write(*,'(1x,a)') '[HPP-MODE] full PW-PW potential enabled'
     end if
 
   end subroutine build_mixed_hamiltonian
@@ -1431,689 +1423,18 @@ contains
   subroutine diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     use structures
     use communication, only: comm_is_root
-    use rt_dg_fragment_ops, only: copy_matrix_blocks_to_complex_dense, sync_raw_coef_from_mixed, sync_mixed_coef_from_raw
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
     type(s_scalar), intent(in) :: Vh, Vxc(:), Vpsl
     real(8), intent(in) :: Ac_tot(3)
 
-    integer :: ispin, n_total, n_frag, n_pw, lda, lwork, info, i, j, k
-    integer :: n_floor, n_keep_s, n_drop_s, n_below_abs, n_below_tau
-    integer :: env_len, env_stat
-    real(8) :: sij, s_eff_min, s_eff_max, s_eff_cond
-    real(8) :: tau_s, trunc_ratio, lam_keep_min, lam_max
-    real(8) :: s_mix_min, s_mix_max, s_mix_cond
-    real(8) :: pw_dim_eff, frag_dim_eff, pw_weight, pw_weight_drop_max
-    real(8) :: eps_s_rel_cfg
-    character(len=64) :: env_eps_rel
-    character(len=64) :: env_init_mode
-    character(len=64) :: init_mode_norm
-    character(len=64) :: env_pw_weight_protect_n, env_apply_pw_weight_keep, env_append_pw_protected
-    character(len=64) :: env_fragment_qr_keep
-    character(len=64) :: env_pw_perp_project
-    real(8), parameter :: pw_dom_thresh = 0.5d0, pw_nontriv_thresh = 0.1d0
-    integer :: n_pw_dom_modes, n_pw_nontriv_modes, n_pw_drop_dom
-    logical :: use_raw_prop_s
-    complex(8), allocatable :: H_work(:,:), S_work(:,:), work_c(:)
-    complex(8), allocatable :: X(:,:), H_ortho(:,:), tmp_mat(:,:), eigvec(:,:)
-    real(8), allocatable :: eigenvalues_tmp(:), eval_s(:), rwork(:), work(:)
-    real(8), allocatable :: S_eff(:,:), S_eff_work(:,:), eval_eff(:), work_eff(:)
-    real(8), allocatable :: A_qr(:,:), tau_qr(:), work_qr(:)
-    complex(8), allocatable :: S_frag_pw(:,:,:)  ! Complex overlap matrix
-    complex(8), allocatable :: H_frag_pw(:,:,:)  ! Hamiltonian coupling matrix
-    complex(8), allocatable :: P_frag_pw(:,:,:,:) ! Gradient coupling matrix
-    integer, allocatable :: jpvt(:), keep_idx(:), keep_s_idx(:)
-    integer :: m_qr, n_qr, lwork_qr, info_qr, n_keep_pw, n_keep_pw_base, ndiag
-    integer :: n_keep_pw_premerge, n_keep_pw_before_final
-    integer :: n_drop_final_rank, n_drop_real_rank, n_drop_metric_rank
-    integer :: n_protect_pw, n_keep_protect
-    integer :: n_pw_weight_protect, n_keep_pw_pwprotect
-    real(8) :: diag_max, tau_rr
-    real(8) :: k_protect_thr
-    real(8), parameter :: eps_s_abs = 1.0d-10
-    real(8), parameter :: eps_s_rel_default = 1.0d-8
-    real(8), parameter :: tau_pw_rank_rel = 1.0d-6
-    real(8) :: eps_s
-    logical :: init_identity, init_truncated, init_occupied_projection, apply_pw_weight_keep, append_pw_protected
-    logical :: use_fragment_overlap_qr_keep
-    logical :: apply_pw_perp_projection
-    integer :: nocc_init
-    complex(8), allocatable :: S_init_metric(:,:), U_keep(:,:), UH_scaled(:,:)
-    logical, allocatable :: protect_low_g(:), selected_keep(:)
-    real(8), allocatable :: pw_col_proxy(:)
-    integer, allocatable :: keep_idx_jpvt(:), keep_idx_pw_protect(:)
-    external :: dsyev, dgeqp3, zheev
-
-    n_frag = dg_frag%n_mat_max
-    n_pw = dg_frag%n_plane_waves
-    n_total = n_frag + n_pw
-    init_identity = .false.
-    init_truncated = .false.
-    init_occupied_projection = .false.
-    eps_s_rel_cfg = eps_s_rel_default
-    env_eps_rel = ''
-    call get_environment_variable('SALMON_DG_MIXED_S_EPS_REL', env_eps_rel, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      read(env_eps_rel(1:env_len), *, iostat=info) eps_s_rel_cfg
-      if (info /= 0 .or. eps_s_rel_cfg <= 0.0d0) eps_s_rel_cfg = eps_s_rel_default
-    end if
-    env_init_mode = ''
-    call get_environment_variable('SALMON_DG_MIXED_INIT_MODE', env_init_mode, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      init_mode_norm = trim(adjustl(env_init_mode(1:env_len)))
-      if (init_mode_norm == 'identity') then
-        init_identity = .true.
-      else if (init_mode_norm == 'truncated_projection' .or. init_mode_norm == 'truncated_metric_projection') then
-        init_truncated = .true.
-      else if (init_mode_norm == 'occupied_projection' .or. init_mode_norm == 'conservative_occupied') then
-        init_occupied_projection = .true.
-      end if
-    end if
-    n_pw_weight_protect = 0
-    env_pw_weight_protect_n = ''
-    call get_environment_variable('SALMON_DG_PW_WEIGHT_PROTECT_N', env_pw_weight_protect_n, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      read(env_pw_weight_protect_n(1:env_len), *, iostat=info) n_pw_weight_protect
-      if (info /= 0 .or. n_pw_weight_protect < 0) n_pw_weight_protect = 0
-    end if
-    apply_pw_weight_keep = .false.
-    env_apply_pw_weight_keep = ''
-    call get_environment_variable('SALMON_DG_APPLY_PW_WEIGHT_KEEP', env_apply_pw_weight_keep, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      select case (env_apply_pw_weight_keep(1:1))
-      case ('1','y','Y','t','T')
-        apply_pw_weight_keep = .true.
-      case default
-        apply_pw_weight_keep = .false.
-      end select
-    end if
-    append_pw_protected = .false.
-    env_append_pw_protected = ''
-    call get_environment_variable('SALMON_DG_PW_APPEND_PROTECTED', env_append_pw_protected, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      select case (env_append_pw_protected(1:1))
-      case ('1','y','Y','t','T')
-        append_pw_protected = .true.
-      case default
-        append_pw_protected = .false.
-      end select
-    end if
-    use_fragment_overlap_qr_keep = .false.
-    env_fragment_qr_keep = ''
-    call get_environment_variable('SALMON_DG_PW_FRAGMENT_QR_KEEP', env_fragment_qr_keep, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      select case (env_fragment_qr_keep(1:1))
-      case ('1','y','Y','t','T')
-        use_fragment_overlap_qr_keep = .true.
-      case default
-        use_fragment_overlap_qr_keep = .false.
-      end select
-    end if
-    apply_pw_perp_projection = .false.
-    env_pw_perp_project = ''
-    call get_environment_variable('SALMON_DG_PW_PERP_PROJECT', env_pw_perp_project, length=env_len, status=env_stat)
-    if (env_stat == 0 .and. env_len > 0) then
-      select case (env_pw_perp_project(1:1))
-      case ('1','y','Y','t','T')
-        apply_pw_perp_projection = .true.
-      case default
-        apply_pw_perp_projection = .false.
-      end select
-    end if
-
-    if (comm_is_root(dg_frag%id)) then
-      write(*,*)
-      write(*,*) "=== Diagonalizing mixed basis (Fragment + PW) ==="
-      write(*,'(1x,a,i0)') "Fragment basis size: ", n_frag
-      write(*,'(1x,a,i0)') "Plane wave basis size: ", n_pw
-      write(*,'(1x,a,i0)') "Total mixed basis size: ", n_total
-      write(*,'(1x,a,1pe11.3)') "Mixed-S eps_s_rel: ", eps_s_rel_cfg
-      if (init_identity) then
-        write(*,'(1x,a)') "Mixed-init mode: identity"
-      else if (init_truncated) then
-        write(*,'(1x,a)') "Mixed-init mode: truncated_projection"
-      else if (init_occupied_projection) then
-        write(*,'(1x,a)') "Mixed-init mode: occupied_projection"
-      else
-        write(*,'(1x,a)') "Mixed-init mode: raw_projection"
-      end if
-      write(*,'(1x,a,i0,a,l1)') 'PW weight protection: n=', n_pw_weight_protect, &
-           ' apply=', apply_pw_weight_keep
-      write(*,'(1x,a,l1)') 'PW append protected modes: ', append_pw_protected
-      write(*,'(1x,a,l1)') 'PW fragment-overlap QR keep: ', use_fragment_overlap_qr_keep
-      write(*,'(1x,a,l1)') 'PW_perp projection: ', apply_pw_perp_projection
-    end if
-
-    allocate(S_frag_pw(n_frag, n_pw, dg_frag%nspin))
-    allocate(H_frag_pw(n_frag, n_pw, dg_frag%nspin))
-    allocate(P_frag_pw(3, n_frag, n_pw, dg_frag%nspin))
-    call compute_fragment_pw_overlap(dg_frag, S_frag_pw)
-    call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, H_frag_pw)
-    call compute_fragment_pw_gradient_from_overlap(dg_frag, S_frag_pw, P_frag_pw)
-    call select_protected_low_g_modes(dg_frag, protect_low_g, n_protect_pw, k_protect_thr)
-    if (comm_is_root(dg_frag%id) .and. n_pw > 0) then
-      write(*,'(1x,a,i0,a,i0,a,1pe11.3)') 'PW low-|G| protection: ', n_protect_pw, ' / ', n_pw, ' (k_thr=', k_protect_thr, ')'
-    end if
-    if (apply_pw_perp_projection) then
-      call project_pw_to_fragment_orthogonal_complement(dg_frag, eps_s_abs, eps_s_rel_cfg, S_frag_pw, H_frag_pw, P_frag_pw, protect_low_g)
-    else if (comm_is_root(dg_frag%id) .and. n_pw > 0) then
-      ! Keep the matrix basis in the same representation used by density/current
-      ! reconstruction.  The mixed metric below handles any FP/PW overlap.
-      write(*,'(1x,a)') 'PW_perp projection skipped: using raw PW basis with full mixed metric'
-    end if
-    if (n_pw > 0 .and. n_frag > 0) then
-      if (.not. use_fragment_overlap_qr_keep) then
-        allocate(keep_idx(n_pw))
-        do i = 1, n_pw
-          keep_idx(i) = i
-        end do
-        n_keep_pw = n_pw
-        n_keep_pw_premerge = n_keep_pw
-        n_keep_pw_before_final = n_keep_pw
-        n_drop_metric_rank = 0
-        call filter_pw_keep_by_mixed_metric(dg_frag, S_frag_pw, keep_idx, n_keep_pw, n_keep_pw, &
-             eps_s_abs, eps_s_rel_cfg, n_drop_metric_rank)
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') 'PW metric keep stats: total_kept=', n_keep_pw, ' / ', n_keep_pw_before_final, &
-               ' metric_dropped=', n_drop_metric_rank
-        end if
-        if (n_keep_pw < n_pw) then
-          call compact_plane_wave_basis(dg_frag, S_frag_pw, H_frag_pw, P_frag_pw, keep_idx, n_keep_pw)
-          n_pw = dg_frag%n_plane_waves
-          n_total = n_frag + n_pw
-          if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0,a,i0)') "PW metric rank selection: kept ", n_keep_pw, " / ", n_keep_pw_before_final
-          end if
-        end if
-        deallocate(keep_idx)
-      else
-        m_qr = 2 * n_frag * dg_frag%nspin
-        n_qr = n_pw
-        allocate(A_qr(m_qr, n_qr), jpvt(n_qr), tau_qr(min(m_qr, n_qr)))
-        allocate(pw_col_proxy(n_qr))
-        call compute_pw_weight_proxy_from_overlap(S_frag_pw, pw_col_proxy)
-        tau_rr = tau_pw_rank_rel
-        A_qr(:, :) = 0.0d0
-        do ispin = 1, dg_frag%nspin
-          A_qr((ispin-1)*2*n_frag + 1:(ispin-1)*2*n_frag + n_frag, :) = real(S_frag_pw(:, :, ispin), kind=8)
-          A_qr((ispin-1)*2*n_frag + n_frag + 1:ispin*2*n_frag, :) = aimag(S_frag_pw(:, :, ispin))
-        end do
-        jpvt(:) = 0
-        lwork_qr = -1
-        allocate(work_qr(1))
-        call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
-        lwork_qr = max(1, int(work_qr(1)))
-        deallocate(work_qr)
-        allocate(work_qr(lwork_qr))
-        call dgeqp3(m_qr, n_qr, A_qr, m_qr, jpvt, tau_qr, work_qr, lwork_qr, info_qr)
-        n_keep_pw = n_pw
-        if (info_qr == 0) then
-          ! Legacy experimental path: keep PW columns by their fragment-overlap
-          ! rank. After PW_perp projection this can remove valid complement
-          ! directions, so it is opt-in only.
-          ndiag = min(m_qr, n_qr)
-          diag_max = 0.0d0
-          do i = 1, ndiag
-            diag_max = max(diag_max, abs(A_qr(i, i)))
-          end do
-          tau_rr = tau_pw_rank_rel * max(diag_max, 1.0d0)
-          n_keep_pw = 0
-          do i = 1, ndiag
-            if (abs(A_qr(i, i)) >= tau_rr) n_keep_pw = i
-          end do
-          if (n_keep_pw <= 0 .and. n_pw > 0) n_keep_pw = 1
-        else if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0)') "WARN: dgeqp3 failed in PW rank selection, info=", info_qr
-        end if
-
-        n_keep_pw_base = n_keep_pw
-        if (n_pw_weight_protect <= 0) n_pw_weight_protect = n_protect_pw
-        ! Protection is applied after QR so physically important low-|G| or
-        ! high-overlap PW modes are not discarded only because they are nearly
-        ! dependent on the fragment subspace.
-        call build_keep_sets_from_jpvt(n_qr, jpvt, n_keep_pw_base, pw_col_proxy, n_pw_weight_protect, &
-             keep_idx_jpvt, keep_idx_pw_protect, n_keep_pw_pwprotect)
-
-        if (allocated(keep_idx)) deallocate(keep_idx)
-        allocate(keep_idx(n_qr))
-        if (apply_pw_weight_keep .and. n_keep_pw_pwprotect > 0) then
-          n_keep_pw = n_keep_pw_pwprotect
-          keep_idx(1:n_keep_pw) = keep_idx_pw_protect(1:n_keep_pw)
-        else
-          n_keep_pw = n_keep_pw_base
-          keep_idx(1:n_keep_pw) = keep_idx_jpvt(1:n_keep_pw)
-        end if
-
-        n_keep_pw_premerge = n_keep_pw
-        if (n_protect_pw > 0 .and. append_pw_protected) then
-          ! Merge explicit low-|G| protection with the selected QR/proxy keep set
-          ! while preserving uniqueness and the compacted PW ordering.
-          allocate(selected_keep(n_pw))
-          selected_keep(:) = .false.
-          n_keep_pw = 0
-          do i = 1, n_keep_pw_premerge
-            if (keep_idx(i) < 1 .or. keep_idx(i) > n_pw) cycle
-            if (selected_keep(keep_idx(i))) cycle
-            n_keep_pw = n_keep_pw + 1
-            keep_idx(n_keep_pw) = keep_idx(i)
-            selected_keep(keep_idx(i)) = .true.
-            if (n_keep_pw >= n_qr) exit
-          end do
-          do i = 1, n_pw
-            if (.not. protect_low_g(i)) cycle
-            if (.not. selected_keep(i)) then
-              n_keep_pw = n_keep_pw + 1
-              keep_idx(n_keep_pw) = i
-              selected_keep(i) = .true.
-            end if
-          end do
-          deallocate(selected_keep)
-        end if
-
-        n_keep_pw_before_final = n_keep_pw
-        call filter_pw_keep_by_real_rank(S_frag_pw, keep_idx, n_keep_pw, tau_pw_rank_rel, n_drop_real_rank)
-        call filter_pw_keep_by_mixed_metric(dg_frag, S_frag_pw, keep_idx, n_keep_pw, &
-             min(n_keep_pw_premerge, n_keep_pw), eps_s_abs, eps_s_rel_cfg, n_drop_metric_rank)
-        n_drop_final_rank = n_drop_real_rank + n_drop_metric_rank
-        if (comm_is_root(dg_frag%id) .and. n_drop_final_rank > 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') 'PW final rank filter: kept=', n_keep_pw, &
-               ' / ', n_keep_pw_before_final, ' dropped=', n_drop_final_rank, &
-               ' real=', n_drop_real_rank, ' metric=', n_drop_metric_rank
-          write(*,'(1x,a)', advance='no') 'PW final keep indices:'
-          do i = 1, n_keep_pw
-            write(*,'(1x,i0)', advance='no') keep_idx(i)
-          end do
-          write(*,*)
-        end if
-
-        n_keep_protect = 0
-        if (n_keep_pw > 0 .and. n_protect_pw > 0) then
-          if (allocated(keep_idx)) then
-            n_keep_protect = count(protect_low_g(keep_idx(1:n_keep_pw)))
-          else
-            n_keep_protect = count(protect_low_g(jpvt(1:n_keep_pw)))
-          end if
-        end if
-        if (comm_is_root(dg_frag%id) .and. n_protect_pw > 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') 'PW QR keep stats: total_kept=', n_keep_pw, ' / ', n_pw, &
-               ' protected_kept=', n_keep_protect, ' / ', n_protect_pw
-        end if
-
-        if (n_keep_pw < n_pw) then
-          call compact_plane_wave_basis(dg_frag, S_frag_pw, H_frag_pw, P_frag_pw, keep_idx, n_keep_pw)
-          deallocate(keep_idx)
-          n_pw = dg_frag%n_plane_waves
-          n_total = n_frag + n_pw
-          if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0,a,i0,a,1pe11.3)') "PW rank selection: kept ", n_keep_pw, " / ", n_qr, " (tau=", tau_rr, ")"
-          end if
-        end if
-        if (allocated(keep_idx)) deallocate(keep_idx)
-        if (allocated(keep_idx_jpvt)) deallocate(keep_idx_jpvt)
-        if (allocated(keep_idx_pw_protect)) deallocate(keep_idx_pw_protect)
-        deallocate(A_qr, jpvt, tau_qr, work_qr, pw_col_proxy)
-      end if
-    end if
-    if (allocated(protect_low_g)) deallocate(protect_low_g)
-
-    if (.not. allocated(dg_frag%mixed_basis_dim)) then
-      allocate(dg_frag%mixed_basis_dim(dg_frag%nspin))
-    end if
-    dg_frag%mixed_basis_dim(:) = 0
-    if (allocated(dg_frag%mixed_transform)) deallocate(dg_frag%mixed_transform)
-    allocate(dg_frag%mixed_transform(n_total, n_total, dg_frag%nspin))
-    dg_frag%mixed_transform(:, :, :) = (0.0d0, 0.0d0)
-    if (allocated(dg_frag%coef_mix)) deallocate(dg_frag%coef_mix)
-    allocate(dg_frag%coef_mix(n_total, dg_frag%nstate_tot, dg_frag%nspin))
-    dg_frag%coef_mix(:, :, :) = (0.0d0, 0.0d0)
+    call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot)
     dg_frag%mixed_basis_ready = .false.
-
-    if (.not. allocated(dg_frag%S_mat_frag_pw)) then
-      allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-    else if (size(dg_frag%S_mat_frag_pw,1) /= n_frag .or. size(dg_frag%S_mat_frag_pw,2) /= n_pw .or. &
-             size(dg_frag%S_mat_frag_pw,3) /= dg_frag%nspin) then
-      deallocate(dg_frag%S_mat_frag_pw)
-      allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-    end if
-    dg_frag%S_mat_frag_pw(1:n_frag,1:n_pw,1:dg_frag%nspin) = S_frag_pw(1:n_frag,1:n_pw,1:dg_frag%nspin)
-    if (.not. allocated(dg_frag%H_mat_frag_pw)) then
-      allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-    else if (size(dg_frag%H_mat_frag_pw,1) /= n_frag .or. size(dg_frag%H_mat_frag_pw,2) /= n_pw .or. &
-             size(dg_frag%H_mat_frag_pw,3) /= dg_frag%nspin) then
-      deallocate(dg_frag%H_mat_frag_pw)
-      allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
-    end if
-    dg_frag%H_mat_frag_pw(1:n_frag,1:n_pw,1:dg_frag%nspin) = H_frag_pw(1:n_frag,1:n_pw,1:dg_frag%nspin)
-    if (.not. allocated(dg_frag%P_mat_frag_pw)) then
-      allocate(dg_frag%P_mat_frag_pw(3, n_frag, n_pw, dg_frag%nspin))
-    else if (size(dg_frag%P_mat_frag_pw,1) /= 3 .or. size(dg_frag%P_mat_frag_pw,2) /= n_frag .or. &
-             size(dg_frag%P_mat_frag_pw,3) /= n_pw .or. size(dg_frag%P_mat_frag_pw,4) /= dg_frag%nspin) then
-      deallocate(dg_frag%P_mat_frag_pw)
-      allocate(dg_frag%P_mat_frag_pw(3, n_frag, n_pw, dg_frag%nspin))
-    end if
-    dg_frag%P_mat_frag_pw(:,1:n_frag,1:n_pw,1:dg_frag%nspin) = P_frag_pw(:,1:n_frag,1:n_pw,1:dg_frag%nspin)
-    call build_mixed_hamiltonian(dg_frag, dg_frag%lg, Vh, Vxc, Vpsl, Ac_tot, S_frag_pw, H_frag_pw)
-
-    do ispin = 1, dg_frag%nspin
-      lda = n_total
-
-      allocate(H_work(n_total, n_total), S_work(n_total, n_total))
-      allocate(eigenvalues_tmp(n_total))
-      allocate(eval_s(n_total))
-      allocate(S_eff(n_frag, n_frag), S_eff_work(n_frag, n_frag), eval_eff(n_frag))
-
-      call assemble_mixed_hamiltonian_dense(dg_frag, ispin, H_frag_pw, H_work)
-      S_work(:, :) = (0.0d0, 0.0d0)
-      if (allocated(dg_frag%S_mat_c)) then
-        S_work(1:n_frag, 1:n_frag) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
-      else if (allocated(dg_frag%S_mat_blocks)) then
-        call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, S_work(1:n_frag, 1:n_frag))
-      else if (allocated(dg_frag%S_mat)) then
-        S_work(1:n_frag, 1:n_frag) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
-      else
-        do i = 1, n_frag
-          S_work(i, i) = (1.0d0, 0.0d0)
-        end do
-      end if
-      do j = 1, n_pw
-        do i = 1, n_frag
-          S_work(i, n_frag + j) = S_frag_pw(i, j, ispin)
-          S_work(n_frag + j, i) = conjg(S_work(i, n_frag + j))
-          H_work(i, n_frag + j) = H_frag_pw(i, j, ispin)
-          H_work(n_frag + j, i) = conjg(H_work(i, n_frag + j))
-        end do
-      end do
-      do i = n_frag + 1, n_total
-        if (real(S_work(i, i), kind=8) < 1.0d0) S_work(i, i) = (1.0d0, 0.0d0)
-      end do
-      do i = 1, n_total
-        if (real(S_work(i, i), kind=8) < eps_s_abs) S_work(i, i) = cmplx(eps_s_abs, 0.0d0, kind=8)
-      end do
-
-      ! Build propagation overlap from the same S definition used in mixed
-      ! diagonalization (fragment block of S_mixed), then regularize.
-      if (.not. allocated(dg_frag%S_mat_prop)) then
-        allocate(dg_frag%S_mat_prop(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-        dg_frag%S_mat_prop(:, :, :) = 0.0d0
-      end if
-      if (.not. allocated(dg_frag%S_mat_prop_c)) then
-        allocate(dg_frag%S_mat_prop_c(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-        dg_frag%S_mat_prop_c(:, :, :) = (0.0d0, 0.0d0)
-      end if
-      S_eff(:, :) = real(S_work(1:n_frag, 1:n_frag), kind=8)
-      do j = 1, n_frag
-        do i = j + 1, n_frag
-          sij = 0.5d0 * (S_eff(i, j) + S_eff(j, i))
-          S_eff(i, j) = sij
-          S_eff(j, i) = sij
-        end do
-      end do
-      S_eff_work(:, :) = S_eff(:, :)
-      lwork = max(1, 3 * n_frag)
-      allocate(work_eff(lwork))
-      call dsyev('V', 'U', n_frag, S_eff_work, n_frag, eval_eff, work_eff, lwork, info)
-      deallocate(work_eff)
-      use_raw_prop_s = .false.
-      s_eff_min = 0.0d0
-      s_eff_cond = huge(1.0d0)
-      if (info == 0) then
-        s_eff_min = eval_eff(1)
-        s_eff_max = eval_eff(n_frag)
-        eps_s = max(eps_s_abs, eps_s_rel_cfg * max(s_eff_max, 1.0d0))
-        if (s_eff_min <= 0.0d0) then
-          s_eff_cond = huge(1.0d0)
-        else
-          s_eff_cond = s_eff_max / s_eff_min
-        end if
-        if (s_eff_min < 1.0d-6 .or. s_eff_cond > 1.0d8) then
-          use_raw_prop_s = .true.
-        end if
-      end if
-      if (info == 0 .and. .not. use_raw_prop_s) then
-        n_floor = 0
-        do i = 1, n_frag
-          if (eval_eff(i) < eps_s) then
-            eval_eff(i) = eps_s
-            n_floor = n_floor + 1
-          end if
-        end do
-        if (n_floor > 0 .and. comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0,a,1pe11.3)') "Prop-S regularization: floored ", n_floor, " eigenvalues below ", eps_s
-        end if
-        S_eff(:, :) = 0.0d0
-        do j = 1, n_frag
-          do i = 1, n_frag
-            S_eff(i, :) = S_eff(i, :) + S_eff_work(i, j) * eval_eff(j) * S_eff_work(:, j)
-          end do
-        end do
-      else
-        use_raw_prop_s = .true.
-        if (info /= 0 .and. comm_is_root(dg_frag%id)) then
-          write(*,*) "WARN: Prop-S diagonalization failed, keeping unregularized S_eff, info=", info
-        end if
-      end if
-      if (use_raw_prop_s) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,1pe11.3,a,1pe11.3)') "Prop-S fallback to raw S_ff (min/cond): ", s_eff_min, " / ", s_eff_cond
-        end if
-        if (allocated(dg_frag%S_mat_c)) then
-          dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin) = dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin)
-          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = real(dg_frag%S_mat_c(1:n_frag, 1:n_frag, ispin), kind=8)
-        else if (allocated(dg_frag%S_mat_prop_blocks)) then
-          call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_prop_blocks, ispin, dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin))
-          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = real(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), kind=8)
-        else if (allocated(dg_frag%S_mat_blocks)) then
-          call copy_matrix_blocks_to_complex_dense(dg_frag, dg_frag%S_mat_blocks, ispin, dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin))
-          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = real(dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin), kind=8)
-        else if (allocated(dg_frag%S_mat)) then
-          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = dg_frag%S_mat(1:n_frag, 1:n_frag, ispin)
-          dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin) = cmplx(dg_frag%S_mat(1:n_frag, 1:n_frag, ispin), 0.0d0, kind=8)
-        else
-          dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = S_eff(:, :)
-          dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin) = cmplx(S_eff(:, :), 0.0d0, kind=8)
-        end if
-      else
-        dg_frag%S_mat_prop(1:n_frag, 1:n_frag, ispin) = S_eff(:, :)
-        dg_frag%S_mat_prop_c(1:n_frag, 1:n_frag, ispin) = cmplx(S_eff(:, :), 0.0d0, kind=8)
-      end if
-      if (n_frag < dg_frag%n_mat_max) then
-        dg_frag%S_mat_prop(n_frag+1:dg_frag%n_mat_max, :, ispin) = 0.0d0
-        dg_frag%S_mat_prop(:, n_frag+1:dg_frag%n_mat_max, ispin) = 0.0d0
-        dg_frag%S_mat_prop_c(n_frag+1:dg_frag%n_mat_max, :, ispin) = (0.0d0, 0.0d0)
-        dg_frag%S_mat_prop_c(:, n_frag+1:dg_frag%n_mat_max, ispin) = (0.0d0, 0.0d0)
-      end if
-
-      do j = 1, n_total
-        S_work(j, j) = cmplx(real(S_work(j, j), kind=8), 0.0d0, kind=8)
-        do i = j + 1, n_total
-          S_work(i, j) = conjg(S_work(j, i))
-        end do
-      end do
-
-      ! Regularize generalized EVP by Lowdin transform with eigencut.
-      ! S = U diag(s) U^H, keep s >= tau_s, X = U_keep diag(1/sqrt(s_keep)).
-      lwork = -1
-      allocate(work_c(1), rwork(max(1, 3*n_total-2)))
-      call ZHEEV('V', 'U', n_total, S_work, lda, eval_s, work_c, lwork, rwork, info)
-      lwork = int(real(work_c(1), kind=8)) + 1
-      deallocate(work_c)
-      allocate(work_c(lwork))
-      call ZHEEV('V', 'U', n_total, S_work, lda, eval_s, work_c, lwork, rwork, info)
-      if (info /= 0) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,*) "WARN: S diagonalization failed in mixed basis, info=", info
-          write(*,*) "WARN: Skipping mixed-basis refresh for this spin channel"
-        end if
-        deallocate(H_work, S_work, eigenvalues_tmp, eval_s, work_c, rwork)
-        deallocate(S_eff, S_eff_work, eval_eff)
-        cycle
-      end if
-      eps_s = max(eps_s_abs, eps_s_rel_cfg * max(eval_s(n_total), 1.0d0))
-      s_mix_min = eval_s(1)
-      s_mix_max = eval_s(n_total)
-      if (s_mix_min > 0.0d0) then
-        s_mix_cond = s_mix_max / s_mix_min
-      else
-        s_mix_cond = huge(1.0d0)
-      end if
-
-      tau_s = eps_s
-      n_keep_s = 0
-      do i = 1, n_total
-        if (eval_s(i) >= tau_s) n_keep_s = n_keep_s + 1
-      end do
-      if (n_keep_s <= 0) n_keep_s = 1
-      n_drop_s = n_total - n_keep_s
-      n_below_abs = count(eval_s(1:n_total) < eps_s_abs)
-      n_below_tau = count(eval_s(1:n_total) < tau_s)
-      allocate(keep_s_idx(n_keep_s))
-      k = 0
-      do i = 1, n_total
-        if (eval_s(i) >= tau_s) then
-          k = k + 1
-          if (k <= n_keep_s) keep_s_idx(k) = i
-        end if
-      end do
-      if (k < n_keep_s) then
-        do i = k + 1, n_keep_s
-          keep_s_idx(i) = n_total - n_keep_s + i
-        end do
-      end if
-      lam_keep_min = eval_s(keep_s_idx(1))
-      lam_max = eval_s(n_total)
-      trunc_ratio = real(n_drop_s, kind=8) / max(1.0d0, real(n_total, kind=8))
-      pw_dim_eff = 0.0d0
-      n_pw_dom_modes = 0
-      n_pw_nontriv_modes = 0
-      if (n_pw > 0) then
-        do j = 1, n_keep_s
-          i = keep_s_idx(j)
-          pw_weight = sum(abs(S_work(n_frag+1:n_total, i))**2)
-          pw_dim_eff = pw_dim_eff + pw_weight
-          if (pw_weight >= pw_dom_thresh) n_pw_dom_modes = n_pw_dom_modes + 1
-          if (pw_weight >= pw_nontriv_thresh) n_pw_nontriv_modes = n_pw_nontriv_modes + 1
-        end do
-      end if
-      frag_dim_eff = real(n_keep_s, kind=8) - pw_dim_eff
-      n_pw_drop_dom = 0
-      pw_weight_drop_max = 0.0d0
-      if (n_pw > 0 .and. n_drop_s > 0) then
-        do i = 1, n_total
-          if (eval_s(i) >= tau_s) cycle
-          pw_weight = sum(abs(S_work(n_frag+1:n_total, i))**2)
-          pw_weight_drop_max = max(pw_weight_drop_max, pw_weight)
-          if (pw_weight >= pw_dom_thresh) n_pw_drop_dom = n_pw_drop_dom + 1
-        end do
-      end if
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,a,1pe11.3,a,1pe11.3,a,1pe11.3,a,i0,a,i0)') "Mixed-S spectrum: spin=", ispin, &
-             " lam_min=", s_mix_min, " lam_max=", s_mix_max, " cond=", s_mix_cond, &
-             " below_abs=", n_below_abs, " below_tau=", n_below_tau
-        write(*,'(1x,a,i0,a,i0,a,1pe11.3,a,1pe11.3,a,i0,a,i0,a,1pe11.3)') "Mixed-S effective rank: ", n_keep_s, " / ", n_total, &
-             " tau=", tau_s, " lam_min_keep=", lam_keep_min, " drop=", n_drop_s, " / ", n_total, " trunc_ratio=", trunc_ratio
-        write(*,'(1x,a,1pe11.3,a,1pe11.3,a,i0,a,i0,a,i0,a,i0)') "Mixed-S composition: pw_eff=", pw_dim_eff, &
-             " frag_eff=", frag_dim_eff, " pw_dom_modes=", n_pw_dom_modes, " / ", n_keep_s, &
-             " pw_nontriv_modes=", n_pw_nontriv_modes, " / ", n_keep_s
-        write(*,'(1x,a,i0,a,i0,a,1pe11.3)') "Mixed-S dropped PW-like: ", n_pw_drop_dom, " / ", n_drop_s, &
-             " max_pw_weight_dropped=", pw_weight_drop_max
-      end if
-
-      allocate(X(n_total, n_keep_s), tmp_mat(n_keep_s, n_total), H_ortho(n_keep_s, n_keep_s), eigvec(n_total, n_keep_s))
-      do j = 1, n_keep_s
-        i = keep_s_idx(j)
-        X(:, j) = S_work(:, i) / sqrt(eval_s(i))
-      end do
-      tmp_mat = matmul(conjg(transpose(X)), H_work)
-      H_ortho = matmul(tmp_mat, X)
-      do j = 1, n_keep_s
-        H_ortho(j, j) = cmplx(real(H_ortho(j, j), kind=8), 0.0d0, kind=8)
-        do i = j + 1, n_keep_s
-          H_ortho(i, j) = conjg(H_ortho(j, i))
-        end do
-      end do
-
-      deallocate(work_c)
-      lwork = -1
-      allocate(work_c(1))
-      call ZHEEV('V', 'U', n_keep_s, H_ortho, n_keep_s, eigenvalues_tmp, work_c, lwork, rwork, info)
-      lwork = int(real(work_c(1), kind=8)) + 1
-      deallocate(work_c)
-      allocate(work_c(lwork))
-      call ZHEEV('V', 'U', n_keep_s, H_ortho, n_keep_s, eigenvalues_tmp, work_c, lwork, rwork, info)
-      if (info /= 0) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,*) "WARN: H_ortho diagonalization failed in mixed basis, info=", info
-          write(*,*) "WARN: Skipping mixed-basis refresh for this spin channel"
-        end if
-        deallocate(H_work, S_work, eigenvalues_tmp, eval_s, X, H_ortho, tmp_mat, eigvec, work_c, rwork, keep_s_idx)
-        deallocate(S_eff, S_eff_work, eval_eff)
-        cycle
-      end if
-
-      eigvec = matmul(X, H_ortho)
-
-      do i = 1, min(dg_frag%nstate_tot, n_keep_s)
-        dg_frag%esp(i, ispin) = eigenvalues_tmp(i)
-      end do
-      ! The number of propagated states and the rank of the mixed basis are
-      ! different quantities.  Keep the full S-effective mixed basis so a raw
-      ! fragment/PW state can be represented without an artificial projection
-      ! onto only the lowest nstate_tot mixed eigenmodes.
-      dg_frag%mixed_basis_dim(ispin) = min(n_total, n_keep_s)
-      dg_frag%mixed_transform(1:n_total, 1:dg_frag%mixed_basis_dim(ispin), ispin) = &
-        eigvec(1:n_total, 1:dg_frag%mixed_basis_dim(ispin))
-      dg_frag%coef_mix(:, :, ispin) = (0.0d0, 0.0d0)
-      if (init_identity) then
-        do i = 1, min(dg_frag%nstate_tot, dg_frag%mixed_basis_dim(ispin))
-          dg_frag%coef_mix(i, i, ispin) = (1.0d0, 0.0d0)
-        end do
-      else if (init_truncated) then
-        allocate(U_keep(n_total, n_keep_s), UH_scaled(n_keep_s, n_total), S_init_metric(n_total, n_total))
-        do j = 1, n_keep_s
-          k = keep_s_idx(j)
-          U_keep(:, j) = S_work(:, k)
-          UH_scaled(j, :) = eval_s(k) * conjg(S_work(:, k))
-        end do
-        S_init_metric(:, :) = matmul(U_keep, UH_scaled)
-        call sync_mixed_coef_from_raw(dg_frag, ispin, overlap_metric=S_init_metric)
-        deallocate(S_init_metric, UH_scaled, U_keep)
-      else
-        call sync_mixed_coef_from_raw(dg_frag, ispin)
-      end if
-      if (init_occupied_projection) then
-        nocc_init = dg_frag%nstate_tot
-        if (allocated(dg_frag%nocc_spin)) then
-          if (ispin <= size(dg_frag%nocc_spin)) nocc_init = min(nocc_init, max(0, dg_frag%nocc_spin(ispin)))
-        end if
-        nocc_init = min(nocc_init, dg_frag%mixed_basis_dim(ispin))
-        if (nocc_init < dg_frag%nstate_tot) then
-          dg_frag%coef_mix(:, nocc_init+1:dg_frag%nstate_tot, ispin) = (0.0d0, 0.0d0)
-        end if
-        if (nocc_init < dg_frag%mixed_basis_dim(ispin)) then
-          dg_frag%coef_mix(nocc_init+1:dg_frag%mixed_basis_dim(ispin), 1:dg_frag%nstate_tot, ispin) = (0.0d0, 0.0d0)
-        end if
-      end if
-      call sync_raw_coef_from_mixed(dg_frag, ispin)
-
-      deallocate(H_work, S_work, eigenvalues_tmp, eval_s, X, H_ortho, tmp_mat, eigvec, work_c, rwork, keep_s_idx)
-      deallocate(S_eff, S_eff_work, eval_eff)
-    end do
-
-    dg_frag%mixed_basis_ready = .true.
-
-    deallocate(S_frag_pw, H_frag_pw, P_frag_pw)
-
     if (comm_is_root(dg_frag%id)) then
-      write(*,*) "Mixed basis diagonalization complete"
-      write(*,'(1x,a,f12.6,a)') "Lowest eigenvalue: ", dg_frag%esp(1, 1), " a.u."
-      if (dg_frag%nstate_tot > 1) then
-        write(*,'(1x,a,f12.6,a)') "Highest occupied energy: ", &
-             dg_frag%esp(min(system%no, dg_frag%nstate_tot), 1), " a.u."
-      end if
-      write(*,*)
+      write(*,'(1x,a)') "Mixed basis dense EVP skipped"
+      write(*,'(1x,a)') "Mixed basis startup uses block/raw PW coupling path"
     end if
-
   end subroutine diagonalize_mixed_basis
 
   !=======================================================================

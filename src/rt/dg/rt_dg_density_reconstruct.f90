@@ -1,7 +1,7 @@
   subroutine calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s, itt_debug)
     use structures
     use salmon_global, only: nelec, nelec_spin
-    use communication, only: comm_summation, comm_bcast, comm_alltoallv, comm_send, comm_recv, comm_get_max, COMM_GROUP_NULL
+    use communication, only: comm_summation, comm_bcast, comm_get_max, COMM_GROUP_NULL
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache, gather_full_coef_view, copy_overlap_operator_to_dense, &
       apply_overlap_operator_batch
     use rt_dg_fragment_types, only: density_grid_point_info
@@ -194,6 +194,7 @@
     logical, parameter :: enable_density_point_dup_audit = .false.
     logical, parameter :: enable_density_weight_path_trace = .false.
     logical, parameter :: has_density_point_probe = .false.
+    logical, parameter :: enable_density_dense_overlap_probe = .false.
     logical :: found_duplicate_point_local
     integer :: probe_ixg, probe_iyg, probe_izg
     integer :: dup_ixg_local, dup_iyg_local, dup_izg_local
@@ -1198,7 +1199,7 @@
         " coef_mix=", allocated(dg_frag%coef_mix), " dim=", allocated(dg_frag%mixed_basis_dim)
       flush(6)
     end if
-    if (n_pw == 0 .and. enable_density_reconstruct_trace) then
+    if (n_pw == 0 .and. enable_density_reconstruct_trace .and. enable_density_dense_overlap_probe) then
       allocate(overlap_probe(dg_frag%n_mat_max, dg_frag%n_mat_max))
       allocate(overlap_vec(dg_frag%n_mat_max))
       overlap_probe(:, :) = (0.0d0, 0.0d0)
@@ -3752,7 +3753,7 @@
       flush(6)
     end if
     call cpu_time(t_setup0)
-    call comm_alltoallv(send_flat, send_counts, send_displs, recv_flat, recv_counts, recv_displs, dg_frag%icomm)
+    call exchange_density_sparse(send_flat, send_counts, send_displs, recv_flat, recv_counts, recv_displs)
     call cpu_time(t_setup1)
     time_comm_exchange = time_comm_exchange + (t_setup1 - t_setup0)
     if (enable_density_reconstruct_trace) then
@@ -4557,5 +4558,92 @@
     end if
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_ham
+
+  subroutine exchange_density_sparse(sendbuf, scounts, sdispls, recvbuf, rcounts, rdispls)
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
+    implicit none
+    real(8), intent(in) :: sendbuf(:)
+    integer, intent(in) :: scounts(:), sdispls(:)
+    real(8), intent(inout) :: recvbuf(:)
+    integer, intent(in) :: rcounts(:), rdispls(:)
+    integer, parameter :: density_exchange_tag = 26017
+    integer, parameter :: density_exchange_chunk_size = 524288
+    integer :: step, dest, src, scount, rcount, sidx, ridx
+    integer :: soff, roff, send_chunk, recv_chunk
+    integer :: ierr, istatus(MPI_STATUS_SIZE)
+    real(8) :: send_dummy, recv_dummy
+
+    if (dg_frag%isize <= 1) then
+      if (size(recvbuf) >= 1 .and. size(sendbuf) >= 1 .and. scounts(1) > 0) then
+        recvbuf(1:scounts(1)) = sendbuf(1:scounts(1))
+      end if
+      return
+    end if
+
+    ! Avoid a full-communicator Alltoallv here.  On Fugaku/Tofu, a sparse DG
+    ! density exchange over thousands of ranks can still overflow the message
+    ! receive queue when implemented as one collective.  The ring schedule keeps
+    ! only one send and one receive active per rank in each phase.
+    send_dummy = 0.0d0
+    recv_dummy = 0.0d0
+    do step = 0, dg_frag%isize - 1
+      dest = modulo(dg_frag%id + step, dg_frag%isize)
+      src = modulo(dg_frag%id - step + dg_frag%isize, dg_frag%isize)
+      scount = scounts(dest + 1)
+      rcount = rcounts(src + 1)
+      sidx = 1
+      ridx = 1
+      if (scount > 0) sidx = sdispls(dest + 1) + 1
+      if (rcount > 0) ridx = rdispls(src + 1) + 1
+
+      if (dest == dg_frag%id .and. src == dg_frag%id) then
+        if (scount /= rcount) then
+          write(*,'(1x,a,i0,a,i0,a,i0)') &
+            "[FATAL] DG density self-exchange size mismatch: rank=", dg_frag%id, &
+            " send=", scount, " recv=", rcount
+          flush(6)
+          stop "DG-Fragment RT: density self-exchange size mismatch"
+        end if
+        if (scount > 0) recvbuf(ridx:ridx + scount - 1) = sendbuf(sidx:sidx + scount - 1)
+      else
+        ! Keep each point-to-point transfer small enough that the Tofu/MPI
+        ! registered-buffer cache is not stressed by a single dense message.
+        soff = 0
+        roff = 0
+        do while (soff < scount .or. roff < rcount)
+          send_chunk = min(density_exchange_chunk_size, scount - soff)
+          recv_chunk = min(density_exchange_chunk_size, rcount - roff)
+          if (send_chunk < 0) send_chunk = 0
+          if (recv_chunk < 0) recv_chunk = 0
+
+          if (send_chunk > 0 .and. recv_chunk > 0) then
+            call MPI_Sendrecv(sendbuf(sidx + soff), send_chunk, MPI_DOUBLE_PRECISION, dest, density_exchange_tag, &
+                              recvbuf(ridx + roff), recv_chunk, MPI_DOUBLE_PRECISION, src, density_exchange_tag, &
+                              dg_frag%icomm, istatus, ierr)
+          else if (send_chunk > 0) then
+            call MPI_Sendrecv(sendbuf(sidx + soff), send_chunk, MPI_DOUBLE_PRECISION, dest, density_exchange_tag, &
+                              recv_dummy, 0, MPI_DOUBLE_PRECISION, src, density_exchange_tag, &
+                              dg_frag%icomm, istatus, ierr)
+          else if (recv_chunk > 0) then
+            call MPI_Sendrecv(send_dummy, 0, MPI_DOUBLE_PRECISION, dest, density_exchange_tag, &
+                              recvbuf(ridx + roff), recv_chunk, MPI_DOUBLE_PRECISION, src, density_exchange_tag, &
+                              dg_frag%icomm, istatus, ierr)
+          else
+            ierr = 0
+          end if
+
+          if (ierr /= 0) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+              "[FATAL] DG density sparse exchange failed: rank=", dg_frag%id, &
+              " step=", step, " dest=", dest, " src=", src, " ierr=", ierr
+            flush(6)
+            stop "DG-Fragment RT: density sparse exchange failed"
+          end if
+          soff = soff + send_chunk
+          roff = roff + recv_chunk
+        end do
+      end if
+    end do
+  end subroutine exchange_density_sparse
 
   end subroutine calculate_density_from_fragments

@@ -690,7 +690,7 @@ contains
     type(s_dft_system),   intent(in) :: system
     type(s_orbital),      intent(in) :: spsi
     type(s_dcdft),        intent(in) :: dc
-    integer :: iunit, ifrag, ispin, io, nspin, nstate_seed, nstate_tot_seed
+    integer :: iunit, ifrag, ispin, io, nspin, nstate_seed, nstate_frag_seed, nstate_tot_seed, nocc_seed
     integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
     integer :: ibx, iby, ibz, sx, sy, sz
     integer :: lb_rwf(3), ub_rwf(3), io_lb, io_ub
@@ -701,7 +701,6 @@ contains
     real(8), allocatable :: raw_core_local(:,:), raw_core_sum(:,:), basis_core(:,:)
     real(8), allocatable :: mat_S(:,:), mat_U(:,:), lambda(:), transform(:,:,:)
     real(8), allocatable :: coeff(:), vec_core(:)
-    real(8), allocatable :: coef_wf(:,:,:)
     real(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
     character(256) :: filename
     logical :: has_rwf_local, has_rwf
@@ -800,6 +799,7 @@ contains
     end do
 
     call comm_summation(n_basis_local, n_basis, dc%n_frag * nspin, dc%icomm_tot)
+    nstate_frag_seed = max(1, maxval(n_basis(1:dc%n_frag, 1:nspin)))
     index_basis(:,:,:) = 0
     n_mat(:) = 0
     do ispin = 1, nspin
@@ -810,7 +810,11 @@ contains
         end do
       end do
     end do
-    nstate_tot_seed = maxval(n_mat(1:nspin))
+    ! RT-DG propagates occupied states.  Keep the full DG basis count in
+    ! n_mat/index_basis, but avoid allocating coefficient columns for virtual
+    ! seed states that do not contribute to the real-time density.
+    nocc_seed = max(1, int(dc%elec_num_tot / 2.0d0 + 1.0d-12))
+    nstate_tot_seed = min(maxval(n_mat(1:nspin)), max(1, min(dc%nstate_tot, nocc_seed)))
 
     if (dc%id_frag == 0) then
       iunit = get_filehandle()
@@ -833,11 +837,11 @@ contains
       filename = trim(base_directory)//binfile_bfb
       open(iunit,file=filename,form='unformatted',access='stream')
       write(iunit) basis_buffer_magic, basis_buffer_version
-      write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, nstate_seed
+      write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, nstate_frag_seed
       write(iunit) n_basis(dc%i_frag, 1:nspin)
     end if
     do ispin = 1, nspin
-      do ibasis = 1, nstate_seed
+      do ibasis = 1, nstate_frag_seed
         phi_box_local(:,:,:) = 0.0d0
         if (ibasis <= n_basis(dc%i_frag, ispin)) then
           do raw_io = max(1, io_lb), min(nstate_seed, io_ub)
@@ -869,33 +873,24 @@ contains
     deallocate(phi_box_local, phi_box_sum)
 
     if (dc%id_frag == 0) then
-      allocate(coef_wf(nstate_seed, nstate_tot_seed, nspin))
-      coef_wf(:,:,:) = 0.0d0
-      do ispin = 1, nspin
-        do io = 1, n_basis(dc%i_frag, ispin)
-          if (index_basis(io, dc%i_frag, ispin) > 0) then
-            coef_wf(io, index_basis(io, dc%i_frag, ispin), ispin) = 1.0d0
-          end if
-        end do
-      end do
-
       iunit = get_filehandle()
       filename = trim(base_directory)//binfile_wf
       open(iunit,file=filename,form='unformatted',access='stream')
-      write(iunit) dc%n_frag, nspin, nstate_seed, nstate_tot_seed
+      ! The DG seed coefficients are an identity map encoded by index_basis.
+      ! Store a negative nstate_tot marker so RT can reconstruct the rows without
+      ! writing or reading an O(nstate_frag*nstate_tot) dense coefficient block.
+      write(iunit) dc%n_frag, nspin, nstate_frag_seed, -nstate_tot_seed
       write(iunit) n_mat(1:nspin)
       write(iunit) n_basis(1:dc%n_frag,1:nspin)
-      write(iunit) index_basis(1:nstate_seed,1:dc%n_frag,1:nspin)
-      write(iunit) coef_wf(1:nstate_seed,1:nstate_tot_seed,1:nspin)
+      write(iunit) index_basis(1:nstate_frag_seed,1:dc%n_frag,1:nspin)
       close(iunit)
-      deallocate(coef_wf)
 
     end if
 
     if (dc%id_tot == 0) then
       allocate(nocc_spin(nspin))
       do ispin = 1, nspin
-        nocc_spin(ispin) = min(n_mat(ispin), int(dc%elec_num_tot/2.0d0 + 1.0d-12))
+        nocc_spin(ispin) = min(nstate_tot_seed, min(n_mat(ispin), int(dc%elec_num_tot/2.0d0 + 1.0d-12)))
       end do
       iunit = get_filehandle()
       filename = trim(dc%base_directory)//'dg_occupation.bin'
@@ -909,6 +904,10 @@ contains
           ' min_nbasis=', minval(n_basis(:, ispin)), ' max_nbasis=', maxval(n_basis(:, ispin)), &
           ' n_mat=', n_mat(ispin)
       end do
+      write(*,'(1x,a,i0,a,i0)') 'DG seed propagated states=', nstate_tot_seed, &
+        ' total DG basis=', maxval(n_mat(1:nspin))
+      write(*,'(1x,a,i0,a,i0)') 'DG seed fragment basis file rows=', nstate_frag_seed, &
+        ' original nstate_frag=', nstate_seed
       write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin + ' // &
         'basis_functions_buffer.bin + rgrid_index.bin + dg_occupation.bin'
     end if

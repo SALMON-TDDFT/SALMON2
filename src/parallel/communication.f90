@@ -835,8 +835,7 @@ contains
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer, parameter :: allreduce_chunk_size = 1000000
-    integer :: ierr, npid_debug, nprocs_debug, i1, i2, nchunk
+    integer :: ierr
 #ifdef USE_OPENACC
     integer :: npid, nprocs
     call comm_get_groupinfo(ngroup ,npid, nprocs)
@@ -847,50 +846,57 @@ contains
       return
     endif
 #endif
-    if (N >= 20000000) then
-      call comm_get_groupinfo(ngroup, npid_debug, nprocs_debug)
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-        " nprocs=", nprocs_debug, " ngroup=", ngroup, " N=", N, " stage=", "entry"
-      flush(6)
-    end if
-    if (present(dest)) then
-      if (N >= 20000000) then
-        write(*,'(1x,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-          " dest=", dest, " stage=", "before-reduce"
-        flush(6)
-      end if
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-      if (N >= 20000000) then
-        write(*,'(1x,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-          " ierr=", ierr, " stage=", "after-reduce"
-        flush(6)
-      end if
-    else
-      if (N >= 20000000) then
-        write(*,'(1x,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-          " stage=", "before-allreduce"
-        flush(6)
-      end if
-      if (N >= 20000000) then
-        do i1 = 1, N, allreduce_chunk_size
-          i2 = min(i1 + allreduce_chunk_size - 1, N)
-          nchunk = i2 - i1 + 1
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-            " offset=", i1, " count=", nchunk, " stage=", "before-allreduce-chunk"
-          flush(6)
-          MPI_ERROR_CHECK(call MPI_Allreduce(invalue(i1:i2), outvalue(i1:i2), nchunk, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-          write(*,'(1x,a,i0,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-            " offset=", i1, " ierr=", ierr, " stage=", "after-allreduce-chunk"
-          flush(6)
-        end do
-        write(*,'(1x,a,i0,a,i0,a,a)') "        comm_summation_array1d_double: rank=", npid_debug, &
-          " ierr=", ierr, " stage=", "after-allreduce"
-        flush(6)
-      else
-        MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-      end if
-    end if
+    call comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
+
+  subroutine comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
+    implicit none
+    real(8), intent(in)  :: invalue(*)
+    real(8), intent(out) :: outvalue(*)
+    integer, intent(in)  :: N, ngroup
+    integer, optional, intent(in) :: dest
+    integer, parameter :: allreduce_chunk_size = 524288
+    integer :: ierr, i1, i2, nchunk
+
+    ! Large single collectives can exhaust registered-buffer resources on
+    ! Tofu/MPI.  Keep each reduction message small while preserving the
+    ! caller-visible sum over the full array.
+    if(N <= 0) return
+    do i1 = 1, N, allreduce_chunk_size
+      i2 = min(i1 + allreduce_chunk_size - 1, N)
+      nchunk = i2 - i1 + 1
+      if (present(dest)) then
+        MPI_ERROR_CHECK(call MPI_Reduce(invalue(i1), outvalue(i1), nchunk, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
+      else
+        MPI_ERROR_CHECK(call MPI_Allreduce(invalue(i1), outvalue(i1), nchunk, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
+      end if
+    end do
+  end subroutine comm_summation_double_chunked
+
+  subroutine comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
+    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
+    implicit none
+    complex(8), intent(in)  :: invalue(*)
+    complex(8), intent(out) :: outvalue(*)
+    integer, intent(in)     :: N, ngroup
+    integer, optional, intent(in) :: dest
+    integer, parameter :: allreduce_chunk_size = 262144
+    integer :: ierr, i1, i2, nchunk
+
+    ! Same byte limit as the real(8) helper: complex(8) entries are twice
+    ! as large, so the element chunk is halved.
+    if(N <= 0) return
+    do i1 = 1, N, allreduce_chunk_size
+      i2 = min(i1 + allreduce_chunk_size - 1, N)
+      nchunk = i2 - i1 + 1
+      if (present(dest)) then
+        MPI_ERROR_CHECK(call MPI_Reduce(invalue(i1), outvalue(i1), nchunk, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
+      else
+        MPI_ERROR_CHECK(call MPI_Allreduce(invalue(i1), outvalue(i1), nchunk, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
+      end if
+    end do
+  end subroutine comm_summation_dcomplex_chunked
 
   subroutine comm_summation_array1d_dcomplex(invalue, outvalue, N, ngroup, dest)
     use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
@@ -913,15 +919,9 @@ contains
     endif
 #endif
     call nvtxStartRange('comm_summation_array1d_dcomplex', __LINE__)
-    if (present(dest)) then
-      call nvtxStartRange('MPI_Reduce', 0)
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-      call nvtxEndRange
-    else
-      call nvtxStartRange('MPI_Allreduce', 0)
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-      call nvtxEndRange
-    end if
+    call nvtxStartRange('MPI_Allreduce', 0)
+    call comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
+    call nvtxEndRange
     call nvtxEndRange
   end subroutine
 
@@ -968,11 +968,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
   subroutine comm_summation_array2d_dcomplex(invalue, outvalue, N, ngroup, dest)
@@ -996,15 +992,9 @@ contains
     endif
 #endif
     call nvtxStartRange('comm_summation_array2d_dcomplex', __LINE__)
-    if (present(dest)) then
-      call nvtxStartRange('MPI_Reduce', 0)
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-      call nvtxEndRange
-    else
-      call nvtxStartRange('MPI_Allreduce', 0)
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-      call nvtxEndRange
-    end if
+    call nvtxStartRange('MPI_Allreduce', 0)
+    call comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
+    call nvtxEndRange
     call nvtxEndRange
   end subroutine
 
@@ -1044,15 +1034,9 @@ contains
     endif
 #endif
     call nvtxStartRange('comm_summation_array3d_double', __LINE__)
-    if (present(dest)) then
-      call nvtxStartRange('MPI_Reduce', 0)
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-      call nvtxEndRange
-    else
-      call nvtxStartRange('MPI_Alldeduce', 0)
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-      call nvtxEndRange
-    end if
+    call nvtxStartRange('MPI_Allreduce', 0)
+    call comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
+    call nvtxEndRange
     call nvtxEndRange
   end subroutine
 
@@ -1077,15 +1061,9 @@ contains
     endif
 #endif
     call nvtxStartRange('comm_summation_array3d_dcomplex', __LINE__)
-    if (present(dest)) then
-      call nvtxStartRange('MPI_Reduce', 0)
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-      call nvtxEndRange
-    else
-      call nvtxStartRange('MPI_Allreduce', 0)
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-      call nvtxEndRange
-    end if
+    call nvtxStartRange('MPI_Allreduce', 0)
+    call comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
+    call nvtxEndRange
     call nvtxEndRange
   end subroutine
 
@@ -1107,11 +1085,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
   subroutine comm_summation_array4d_dcomplex(invalue, outvalue, N, ngroup, dest)
@@ -1132,11 +1106,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
   subroutine comm_summation_array5d_double(invalue, outvalue, N, ngroup, dest)
@@ -1157,11 +1127,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
   subroutine comm_summation_array5d_dcomplex(invalue, outvalue, N, ngroup, dest)
@@ -1182,11 +1148,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
   subroutine comm_summation_array6d_double(invalue, outvalue, N, ngroup, dest)
@@ -1207,11 +1169,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_double_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
   subroutine comm_summation_array6d_dcomplex(invalue, outvalue, N, ngroup, dest)
@@ -1232,11 +1190,7 @@ contains
       return
     endif
 #endif
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    call comm_summation_dcomplex_chunked(invalue, outvalue, N, ngroup, dest)
   end subroutine
 
 

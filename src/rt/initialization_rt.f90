@@ -104,6 +104,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   integer :: itt
   integer :: nproc_rgrid_tmp(3)
   integer :: nproc_ob_tmp
+  integer :: expected_ob
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
@@ -202,17 +203,33 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     nproc_rgrid_tmp = nproc_rgrid
     nproc_ob_tmp = nproc_ob
     nproc_rgrid = nproc_rgrid_tot
-    ! In DG-RT, nproc_ob means orbital ranks inside each fragment subgroup.
-    ! Keep the parent DFT initialization free of the standard orbital split,
-    ! but fold the same MPI ranks into the real-space communicator used to
-    ! read and distribute the ground-state data.
-    nproc_rgrid(1) = nproc_rgrid(1) * max(1, nproc_ob_tmp)
-    nproc_ob = 1
+    ! In DG-RT, nproc_ob is the orbital-parallel width inside each fragment
+    ! subgroup.  Keep it as an orbital dimension during the parent grid setup;
+    ! do not fold it into nproc_rgrid, or the run silently reverts to extra
+    ! real-space splitting such as 8,8,8 x nproc_ob -> 32,8,8.
   end if
 
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
 
   if (yn_dg_fragment_rt == 'y') then
+    expected_ob = max(1, nproc_ob_tmp)
+    if (comm_is_root(nproc_id_global)) then
+      write(*,'(1x,a,i0,a,3(i0,1x))') '[DG-RT-PARENT] nproc_ob=', info%nporbital, &
+        ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3)
+      flush(6)
+    end if
+    if (info%nporbital /= expected_ob .or. any(info%nprgrid(1:3) /= nproc_rgrid_tot(1:3))) then
+      if (comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') '[FATAL] DG-RT parent MPI layout mismatch.'
+        write(*,'(1x,a,i0,a,3(i0,1x))') '        actual   nproc_ob=', info%nporbital, &
+          ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3)
+        write(*,'(1x,a,i0,a,3(i0,1x))') '        expected nproc_ob=', expected_ob, &
+          ' nproc_rgrid_tot=', nproc_rgrid_tot(1), nproc_rgrid_tot(2), nproc_rgrid_tot(3)
+        write(*,'(1x,a)') '        Use &parallel nproc_ob for fragment-internal orbital parallelism; do not fold it into nproc_rgrid.'
+        flush(6)
+      end if
+      stop 'DG-RT parent MPI layout mismatch'
+    end if
     nproc_rgrid = nproc_rgrid_tmp
     nproc_ob = nproc_ob_tmp
   end if
@@ -344,6 +361,16 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call  init_nion_div(system,lg,mg,info)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
+
+  if (yn_dg_fragment_rt == 'y') then
+    ! DG-RT initialization returns before conventional eigen-energy and
+    ! standard orbital propagation setup.  The DG branch builds its own
+    ! fragment Hamiltonian and observables in time_evolution_dg_fragment.
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+      write(*,'(1x,a)') "DG-Fragment RT: skip conventional calc_eigen_energy and enter DG propagation setup"
+    end if
+    return
+  end if
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)

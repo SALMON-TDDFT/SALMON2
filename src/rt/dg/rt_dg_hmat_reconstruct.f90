@@ -366,7 +366,8 @@
     end do
 
     if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
-      call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                              diagonal_only=.true.)
     end if
     call cpu_time(t0)
     if (dg_frag%parallel_mode_orbital) then

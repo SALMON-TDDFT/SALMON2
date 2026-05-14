@@ -30,7 +30,7 @@
     complex(8), allocatable :: coef_pw_save(:,:,:)
     complex(8), allocatable :: k1_pw(:,:,:), k_mid_pw(:,:,:)
 
-    n = dg_frag%n_mat_max
+    n = size(dg_frag%coef, 1)
     if (n <= 0) return
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves

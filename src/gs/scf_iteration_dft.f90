@@ -235,7 +235,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    else if(yn_dc=='y') then
    ! Divide-and-Conquer method
      if(yn_spinorbit=='y') then
-       call calc_total_energy_dcdft_soi(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
+       call calc_total_energy_dcdft_soi(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,ppg,rion_update,dc,energy)
      else
        call calc_total_energy_dcdft(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
      end if
