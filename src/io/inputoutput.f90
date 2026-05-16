@@ -587,7 +587,8 @@ contains
       & nelec_sbe, &
       & al_sbe, &
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
-      & norder_correction
+      & norder_correction, &
+      & t2_sbe_fs
       
     namelist/dc/ &
       & num_fragment, &
@@ -1010,6 +1011,7 @@ contains
     al_vec2_sbe(:,:) = 0.d0
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
+    t2_sbe_fs = 1.0d10  ! Default: no dephasing (very large T2)
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1634,6 +1636,7 @@ contains
     al_vec2_sbe = al_vec2_sbe * ulength_to_au
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
+    call comm_bcast(t2_sbe_fs        ,nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)

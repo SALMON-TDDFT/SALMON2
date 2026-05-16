@@ -357,12 +357,15 @@ contains
 
     !Calculate [H, rho] commutation:
     subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
+        use phys_constants, only: au_fs
+        use salmon_global, only: t2_sbe_fs
         implicit none
         integer, intent(in) :: ik
         complex(8), intent(in) :: rho_k(nb, nb)
         complex(8), intent(in) :: p_k(nb, nb, 1:3)
         complex(8), intent(out) :: hrho_k(nb, nb)
-        integer :: idir
+        integer :: idir, ib, jb
+        real(8) :: T2inv, t2_au
         !hrho = hrho + Ac(t) * (p * rho - rho * p)
         hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
         do idir=1, 3 !1:x, 2:y, 3:z
@@ -384,6 +387,32 @@ contains
                 dcmplx(1d0, 0d0), hrho_k(:, :), nb)
 
         end do !idir
+
+        ! Add dephasing term (T2 relaxation) for off-diagonal elements
+        ! t2_sbe_fs is always specified in femtoseconds by user
+        ! Convert to atomic units using the same conversion as dt:
+        ! dt is converted by: dt = dt_input * utime_to_au
+        ! where utime_to_au = 1/au_fs for fs units, or 1 for au units
+        ! So T2(au) = T2(fs) / au_fs (same as done here)
+        if (t2_sbe_fs < 1.0d9) then
+            ! Convert T2 from fs to atomic units
+            ! au_fs = 0.02418884326505 (1 a.u. of time in fs)
+            ! This matches the conversion used for dt in inputoutput.f90
+            t2_au = t2_sbe_fs / au_fs
+            T2inv = 1.0d0 / t2_au
+            
+            do ib = 1, nb
+                do jb = 1, nb
+                    if (ib /= jb) then
+                        ! Add -i * rho/T2 to [H, rho]
+                        ! When multiplied by -i*dt in the evolution step,
+                        ! this gives (-i)*(-i)*(dt/T2) = -dt/T2 (decay)
+                        hrho_k(ib, jb) = hrho_k(ib, jb) - zi * rho_k(ib, jb) * T2inv
+                    endif
+                enddo
+            enddo
+        endif
+        
         return
     end subroutine calc_hrho_bloch_k
 end subroutine
