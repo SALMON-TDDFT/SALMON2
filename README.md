@@ -1,17 +1,10 @@
-# SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience
+# SALMON (Fork) — Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience
+This repository is a fork of the original SALMON project, an open-source software package for ab-initio quantum-mechanical calculations of light-matter interactions.
+🚀 Fork Features & Modifications
+The primary modification in this fork is the introduction of a phenomenological decoherence (dephasing) time (
+) into the Semiconductor Bloch Equations (SBE) solver.
 
-SALMON is an open-source software based on first-principles time-dependent density functional theory
-to describe optical responses and electron dynamics in matters induced by light electromagnetic fields.
-
-SALMON has been tested and optimized to run in the following supercomputer platforms:
-
-- K-computer (It is scheduled to be permanently shut down at the end of August, 2019)
-- Fujitsu FX100 supercomputer system
-- Fujitsu supercomputer (Fugaku, FX1000, FX700) with A64FX processor
-- Linux PC Cluster with Intel Xeon Phi (Knights Landing architecture)
-- Linux PC Cluster with x86-64 CPU
-
-For more information, please visit our website.
+For more information, please visit this website.
 
 http://salmon-tddft.jp/
 
