@@ -2569,6 +2569,10 @@ contains
       write(fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
       
       if(inml_sbe >0)ierr_nml = ierr_nml +1
+      if(t2_sbe_fs <= 0.0d0)then
+        write(fh_variables_log, '("# error: t2_sbe_fs must be positive.")')
+        ierr_nml = ierr_nml + 1
+      end if
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
@@ -2595,6 +2599,7 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't2_sbe_fs', t2_sbe_fs
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc

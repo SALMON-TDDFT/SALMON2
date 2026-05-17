@@ -349,6 +349,7 @@ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
+
     end do
     return
 
@@ -365,7 +366,7 @@ contains
         complex(8), intent(in) :: p_k(nb, nb, 1:3)
         complex(8), intent(out) :: hrho_k(nb, nb)
         integer :: idir, ib, jb
-        real(8) :: T2inv, t2_au
+        real(8) :: t2_au, t2inv
         !hrho = hrho + Ac(t) * (p * rho - rho * p)
         hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
         do idir=1, 3 !1:x, 2:y, 3:z
@@ -388,31 +389,25 @@ contains
 
         end do !idir
 
-        ! Add dephasing term (T2 relaxation) for off-diagonal elements
-        ! t2_sbe_fs is always specified in femtoseconds by user
-        ! Convert to atomic units using the same conversion as dt:
-        ! dt is converted by: dt = dt_input * utime_to_au
-        ! where utime_to_au = 1/au_fs for fs units, or 1 for au units
-        ! So T2(au) = T2(fs) / au_fs (same as done here)
-        if (t2_sbe_fs < 1.0d9) then
-            ! Convert T2 from fs to atomic units
-            ! au_fs = 0.02418884326505 (1 a.u. of time in fs)
-            ! This matches the conversion used for dt in inputoutput.f90
+        ! Add phenomenological T2 dephasing to the same linear generator that
+        ! is advanced by the fourth-order Taylor step above.  For the intended
+        ! SBE regime dt << T2 (for example dt=0.001 fs and T2=10 fs), the
+        ! polynomial approximation to exp(-dt/T2) is stable and keeps the
+        ! Hamiltonian-dephasing cross terms at the solver's existing order.
+        if (0.0d0 < t2_sbe_fs .and. t2_sbe_fs < 1.0d9) then
             t2_au = t2_sbe_fs / au_fs
-            T2inv = 1.0d0 / t2_au
-            
+            t2inv = 1.0d0 / t2_au
             do ib = 1, nb
                 do jb = 1, nb
                     if (ib /= jb) then
-                        ! Add -i * rho/T2 to [H, rho]
-                        ! When multiplied by -i*dt in the evolution step,
-                        ! this gives (-i)*(-i)*(dt/T2) = -dt/T2 (decay)
-                        hrho_k(ib, jb) = hrho_k(ib, jb) - zi * rho_k(ib, jb) * T2inv
+                        ! The evolution uses rho += (-i*dt)*hrho, so this
+                        ! contribution gives d rho_ij / dt = -rho_ij / T2.
+                        hrho_k(ib, jb) = hrho_k(ib, jb) - zi * rho_k(ib, jb) * t2inv
                     endif
                 enddo
             enddo
         endif
-        
+
         return
     end subroutine calc_hrho_bloch_k
 end subroutine
