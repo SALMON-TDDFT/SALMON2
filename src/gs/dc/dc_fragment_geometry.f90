@@ -42,7 +42,13 @@ contains
 
     call evaluate_fragment_partition(widths, num_fragment, num_rgrid, al, natom, rion, objective, valid, load_frag)
     if (.not. valid) then
-      stop "DC fragment optimization: uniform initial partition contains vacuum fragment(s)"
+      call flatten_axis_widths(widths, num_fragment, widths_out)
+      if (.not. allocated(dc%nxyz_domain_frag)) allocate(dc%nxyz_domain_frag(3, product(num_fragment)))
+      dc%nxyz_domain_frag(:, :) = widths_out(:, :)
+      dc%optimized_fragment_geometry = .false.
+      write(*,'(1x,a)') "WARNING: DC fragment optimization skipped (uniform initial partition contains vacuum fragment); fallback to uniform geometry"
+      deallocate(candidate_widths, widths)
+      return
     end if
     initial_objective = objective
     write(*,'(1x,a)') "DC fragment optimization enabled"

@@ -2752,7 +2752,7 @@
 
     integer :: ifrag, i_local, ispin, io, jo, iblk, iblk_rev, nbf, jo_progress_stride
     integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo
-    integer :: ig_row, ig_col, l(3), d(3), ii, jj, halo_send_idx(3), halo_recv_idx(3)
+    integer :: ig_row, ig_col, l(3), d(3), ii, jj, recv_ix, recv_iy, recv_iz
     integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
     integer :: npts_local, nx_local, ny_local, ipt
     integer :: phi_loc_s(3), phi_loc_e(3)
@@ -2914,11 +2914,14 @@
               integral = 0.0d0
               call cpu_time(t0)
               do iz = 1, l(3)
+                recv_iz = dg_frag%halo(i_halo)%recv_lo(3) + iz - 1
                 do iy = 1, l(2)
+                  recv_iy = dg_frag%halo(i_halo)%recv_lo(2) + iy - 1
+                  !$omp simd reduction(+:integral) private(recv_ix)
                   do ix = 1, l(1)
-                    call get_halo_block_point_indices(dg_frag%halo(i_halo), ix, iy, iz, halo_send_idx, halo_recv_idx)
+                    recv_ix = dg_frag%halo(i_halo)%recv_lo(1) + ix - 1
                     integral = integral + dg_frag%halo(i_halo)%buf_recv(ix, iy, iz, io, 1) * &
-                               dg_frag%phi_frag(halo_recv_idx(1), halo_recv_idx(2), halo_recv_idx(3), jo, i_local) * hvol
+                               dg_frag%phi_frag(recv_ix, recv_iy, recv_iz, jo, i_local) * hvol
                   end do
                 end do
               end do
