@@ -311,7 +311,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
   if(comm_is_root(info%id_rko)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
     dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,fw%curr_ave,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule, &
-    fw%light_lz_flux, fw%light_lz_cum
+    fw%light_lz_flux, fw%light_lz_cum,e_poynting
     
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -409,21 +409,18 @@ contains
   subroutine calc_light_lz_flux
     implicit none
     integer :: ix, iy
-    real(8) :: x, y, area, coef_lz, center_x, center_y
-    real(8) :: E_tot(3), B_tot(3), E_inc(3), B_inc(3), E_ref(3), B_ref(3), S(3)
+    real(8) :: x, y, area, center_x, center_y
+    real(8) :: E_tot(3), B_tot(3), E_inc(3), B_inc(3), E_ref(3), B_ref(3)
 
     light_lz_wrk = 0d0
     area = hgs(1) * hgs(2)
-    ! Lz flux through a z-normal plane is c times the angular-momentum density:
-    !   j_Lz = c * (r x S / c^2)_z = (r x S)_z / c
-    coef_lz = 1d0 / cspeed_au
     center_x = optical_vortex_center_x
     center_y = optical_vortex_center_y
     if (center_x < -1d20) center_x = 0.5d0 * lg%num(1) * hgs(1)
     if (center_y < -1d20) center_y = 0.5d0 * lg%num(2) * hgs(2)
 
     if (mg%is(3) == lg%is(3)) then
-!$omp parallel do private(ix,iy,x,y,E_tot,B_tot,E_inc,B_inc,E_ref,B_ref,S) reduction(+:light_lz_wrk)
+!$omp parallel do private(ix,iy,x,y,E_tot,B_tot,E_inc,B_inc,E_ref,B_ref) reduction(+:light_lz_wrk)
       do iy = mg%is(2), mg%ie(2)
         do ix = mg%is(1), mg%ie(1)
           x = (dble(ix) - 0.5d0) * hgs(1) - center_x
@@ -438,29 +435,38 @@ contains
           end if
           E_ref = E_tot - E_inc
           B_ref = B_tot - B_inc
-          S = (cspeed_au / (4d0 * pi)) * vec_cross(E_inc, B_inc)
-          light_lz_wrk(1) = light_lz_wrk(1) + (x * S(2) - y * S(1)) * coef_lz * area
-          S = (cspeed_au / (4d0 * pi)) * vec_cross(E_ref, B_ref)
-          light_lz_wrk(2) = light_lz_wrk(2) + (x * S(2) - y * S(1)) * coef_lz * area
+          light_lz_wrk(1) = light_lz_wrk(1) + light_lz_flux_density(x, y, E_inc, B_inc) * area
+          light_lz_wrk(2) = light_lz_wrk(2) + light_lz_flux_density(x, y, E_ref, B_ref) * area
         end do
       end do
     end if
 
     if (mg%ie(3) == lg%ie(3)) then
-!$omp parallel do private(ix,iy,x,y,E_tot,B_tot,S) reduction(+:light_lz_wrk)
+!$omp parallel do private(ix,iy,x,y,E_tot,B_tot) reduction(+:light_lz_wrk)
       do iy = mg%is(2), mg%ie(2)
         do ix = mg%is(1), mg%ie(1)
           x = (dble(ix) - 0.5d0) * hgs(1) - center_x
           y = (dble(iy) - 0.5d0) * hgs(2) - center_y
           call calc_boundary_em(ix, iy, lg%ie(3), E_tot, B_tot)
-          S = (cspeed_au / (4d0 * pi)) * vec_cross(E_tot, B_tot)
-          light_lz_wrk(3) = light_lz_wrk(3) + (x * S(2) - y * S(1)) * coef_lz * area
+          light_lz_wrk(3) = light_lz_wrk(3) + light_lz_flux_density(x, y, E_tot, B_tot) * area
         end do
       end do
     end if
 
     call comm_summation(light_lz_wrk, light_lz_all, 3, info%icomm_r)
   end subroutine calc_light_lz_flux
+
+  pure function light_lz_flux_density(x, y, E, B) result(flux)
+    implicit none
+    real(8), intent(in) :: x, y, E(3), B(3)
+    real(8) :: flux
+    real(8) :: Pixz, Piyz
+
+    ! Momentum flux through a +z surface; this is the opposite sign of the off-diagonal Maxwell stress.
+    Pixz = -(E(1) * E(3) + B(1) * B(3)) / (4d0 * pi)
+    Piyz = -(E(2) * E(3) + B(2) * B(3)) / (4d0 * pi)
+    flux = x * Piyz - y * Pixz
+  end function light_lz_flux_density
 
   pure function vec_cross(a, b) result(c)
     implicit none
@@ -995,8 +1001,8 @@ subroutine init_singlescale(mg,lg,info,hgs,matrix_B,rho,Vh,srg_scalar,fw,Ac,div_
      & 12, "J_y(w/o Ac)",   "a.u.", &
      & 13, "J_z(w/o Ac)",   "a.u.", &
      & 14, "E_electron",    "a.u.", &
-     & 15, "E_poynting(z=0)", "a.u.", &
-     & 16, "E_poynting(z=L)", "a.u.", &
+     & 15, "E_poynting_cum(z=0)", "a.u.", &
+     & 16, "E_poynting_cum(z=L)", "a.u.", &
      & 17, "E_em",            "a.u.", &
      & 18, "E_joule",         "a.u.", &
      & 19, "Lz_inc_flux(z=0)", "a.u.", &
@@ -1004,7 +1010,9 @@ subroutine init_singlescale(mg,lg,info,hgs,matrix_B,rho,Vh,srg_scalar,fw,Ac,div_
      & 21, "Lz_tra_flux(z=L)", "a.u.", &
      & 22, "Lz_inc_cum", "a.u.", &
      & 23, "Lz_ref_cum", "a.u.", &
-     & 24, "Lz_tra_cum", "a.u."
+     & 24, "Lz_tra_cum", "a.u.", &
+     & 25, "E_poynting_flux(z=0)", "a.u.", &
+     & 26, "E_poynting_flux(z=L)", "a.u."
 
 !  ! for spatial distribution of excitation energy
 !    write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)

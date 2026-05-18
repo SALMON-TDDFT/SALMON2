@@ -109,6 +109,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   real(8) :: ex_sr_diag
   call nvtxStartRange('time_evolution_step', __LINE__)
 
+  curr_e_tmp = 0d0
+  curr_i_tmp = 0d0
+
   if (.not. ace_state_rt_initialized) then
     call ace_update_init_from_env(ace_state_rt)
     ace_state_rt_initialized = .true.
@@ -433,11 +436,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
     if(singlescale%flag_use) then
       call timer_begin(LOG_CALC_SINGLESCALE)
-      singlescale%E_electron = energy%E_tot
+      if(itt==1 .or. itt==itotNtime .or. mod(itt,out_rt_energy_step)==0) then
+        singlescale%E_electron = energy%E_tot
+      end if
       call fdtd_singlescale(itt,lg,mg,system,info,rho, &
       & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
       if(yn_jm=='n') call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       rt%curr(1:3,itt) = singlescale%curr_ave(1:3)
+      curr_e_tmp(1:3,1) = singlescale%curr_ave(1:3)
       call timer_end(LOG_CALC_SINGLESCALE)
     else
       call timer_begin(LOG_CALC_CURRENT)

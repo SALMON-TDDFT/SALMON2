@@ -100,7 +100,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
-  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
+  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3), init_curr_local(3), init_curr_sum(3)
   integer :: itt
   integer :: nproc_rgrid_tmp(3)
   logical :: rion_update
@@ -482,6 +482,26 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call allocate_vector(mg,rt%j_e)
     call init_singlescale(mg,lg,info,system%hgs,system%rmatrix_B,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
+    if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi_in%zwf)
+    spsi_in%update_zwf_overlap = .true.
+    call calc_microscopic_current(system,mg,stencil,info,spsi_in,rt%j_e)
+    if (Mit == 0) then
+      singlescale%vec_je_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+        rt%j_e%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    end if
+    init_curr_local = 0d0
+!$omp parallel do collapse(2) private(ix,iy,iz) reduction(+:init_curr_local)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      singlescale%curr(ix,iy,iz,1:3) = rt%j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * system%Ac_micro%v(1:3,ix,iy,iz)
+      init_curr_local = init_curr_local + singlescale%curr(ix,iy,iz,1:3)
+    end do
+    end do
+    end do
+    init_curr_local = init_curr_local / dble(lg%num(1) * lg%num(2) * lg%num(3))
+    call comm_summation(init_curr_local, init_curr_sum, 3, info%icomm_r)
+    singlescale%curr_ave = init_curr_sum
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit

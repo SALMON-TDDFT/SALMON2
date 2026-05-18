@@ -381,7 +381,7 @@ contains
               allocate(g12_blk(max(1,nblk_chunk), nocc))
               call get_owned_row_block(nocc, occ_idx, owner, g12_row_sum, iocc + jblk_s - 1, iocc + jblk_e - 1, g12_blk)
               allocate(g12_fwd_blk(max(1,nocc_local), nblk_chunk), g21_blk(max(1,nocc_local), nblk_chunk), &
-                w12(max(1,nloc), nblk_chunk), w21(max(1,nloc), nblk_chunk))
+                w12(max(1,nloc_spin), nblk_chunk), w21(max(1,nloc_spin), nblk_chunk))
               do p = 1, nocc_local
                 do jloc = 1, nblk_chunk
                   g12_fwd_blk(p,jloc) = g12_blk(jloc,local_occ_glob(p))
@@ -392,7 +392,7 @@ contains
                 max(1,nocc_local), (0.0d0, 0.0d0), w12, max(1,nloc_spin))
               call zgemm('N', 'N', nloc_spin, nblk_chunk, nocc_local, (1.0d0, 0.0d0), ztmp2, max(1,nloc_spin), g21_blk, &
                 max(1,nocc_local), (0.0d0, 0.0d0), w21, max(1,nloc_spin))
-!$omp parallel do collapse(3) private(ix,iy,iz,ig,jocc,jloc,zterm12,zterm21,phase1) schedule(static)
+!$omp parallel do collapse(3) private(ix,iy,iz,ig,ispinor,jocc,jloc,zterm12,zterm21,phase1) schedule(static)
               do iz = mg%is(3), mg%ie(3)
                 do iy = mg%is(2), mg%ie(2)
                   do ix = mg%is(1), mg%ie(1)

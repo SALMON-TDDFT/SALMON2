@@ -34,6 +34,7 @@ F90_SRCS = \
 ./common/const.f90 \
 ./common/pack_unpack.f90 \
 ./common/structures.f90 \
+./rt/dg/rt_dg_fragment_types.f90 \
 ./common/zstencil_core/typical/omp.f90 \
 ./common/zstencil_core/typical/seq.f90 \
 ./common/zstencil_microac_core/typical/omp.f90 \
@@ -78,6 +79,7 @@ F90_SRCS = \
 ./maxwell/common_maxwell.f90 \
 ./atom/jellium.f90 \
 ./maxwell/fdtd_weyl_gauge.f90 \
+./maxwell/optical_vortex_field.f90 \
 ./xc/builtin_pz_sp.f90 \
 ./xc/builtin_pzm.f90 \
 ./xc/builtin_tbmbj.f90 \
@@ -123,6 +125,7 @@ F90_SRCS = \
 ./gs/subspace_diagonalization.f90 \
 ./io/write.f90 \
 ./gs/scf_iteration.f90 \
+./gs/dc/dc_fragment_geometry.f90 \
 ./gs/dc/dcdft.f90 \
 ./gs/dc/dcdft_soi.f90 \
 ./gs/dc/lcfo.f90 \
@@ -140,14 +143,15 @@ F90_SRCS = \
 ./gs/main_dft.f90 \
 ./gs/main_dft_md.f90 \
 ./rt/initialization_rt.f90 \
-./rt/rt_dg_fragment_types.f90 \
-./rt/rt_dg_basis_projection.f90 \
-./rt/rt_dg_plane_wave.f90 \
-./rt/rt_dg_fragment_ops.f90 \
+./rt/dg/rt_dg_fragment_ops.f90 \
+./rt/dg/rt_dg_basis_projection.f90 \
+./rt/dg/rt_dg_plane_wave.f90 \
 ./rt/plusu_fragment_support.f90 \
-./rt/rt_dg_fragment.f90 \
-./rt/rt_dg_fragment_soi.f90 \
+./rt/dg/rt_dg_fragment.f90 \
+./rt/dg/rt_dg_fragment_soi.f90 \
+./rt/rt_angular_momentum.f90 \
 ./rt/rt_local_chern_marker.f90 \
+./rt/rt_local_chern_marker_soi.f90 \
 ./rt/main_tddft.f90 \
 ./rt/taylor.f90 \
 ./rt/time_evolution_step.f90 \
