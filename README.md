@@ -67,7 +67,6 @@ The new parameter is:
 /
 
 &sbe
-  num_sbe = 1
   ! Other required SBE system parameters must be supplied as usual.
   ! Set a finite T2 to enable dephasing:
   t2_sbe_fs = 50.0d0
