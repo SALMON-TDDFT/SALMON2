@@ -2862,6 +2862,7 @@ contains
     call yn_argument_check(yn_copy_z)
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
+    call yn_argument_check(yn_optical_vortex)
     call yn_argument_check(yn_spinorbit)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)

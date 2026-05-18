@@ -427,7 +427,7 @@ contains
           y = (dble(iy) - 0.5d0) * hgs(2) - center_y
           call calc_boundary_em(ix, iy, lg%is(3), E_tot, B_tot)
           if (yn_optical_vortex == 'y') then
-            call calc_optical_vortex_EB_ext(dble(itt) * dt, 0d0, x + center_x, y + center_y, &
+            call calc_optical_vortex_EB_ext((dble(itt) - 0.5d0) * dt, 0d0, x + center_x, y + center_y, &
               & lg%num(1), lg%num(2), hgs, dt, E_inc, B_inc)
           else
             E_inc = 0d0
