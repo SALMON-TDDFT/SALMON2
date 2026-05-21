@@ -2,6 +2,7 @@
 
 module gs_info_ssbe
     use math_constants, only: pi, zI
+    use phys_constants, only: au_ev
     implicit none
 
     type s_sbe_gs_info
@@ -303,7 +304,7 @@ contains
 
     ! Calculate minimum band gap in atomic units
     subroutine calc_eg_au()
-        use salmon_global, only: eg_ev, au_energy_ev
+        use salmon_global, only: eg_ev
         implicit none
         integer :: ik, ib_cb, ib_vb
         real(8) :: eg_tmp
@@ -311,7 +312,7 @@ contains
         ! Check if user specified eg_ev in input file
         if (eg_ev > 0.0d0) then
             ! Use user-specified value, convert from eV to atomic units
-            gs%eg_au = eg_ev / au_energy_ev
+            gs%eg_au = eg_ev / au_ev
             return
         endif
         

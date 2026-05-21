@@ -30,8 +30,8 @@ The `&sbe` namelist now accepts:
   t2_sbe_fs = 50.0d0
   
   ! Minimum bandgap for gauge-covariant decoherence (eV)
-  ! If > 0, uses this value; if ≤ 0, auto-calculates from band structure
-  eg_ev = 1.519d0
+  ! If > 0, uses this value; if <= 0, auto-calculates from band structure
+  eg_ev = -1.0d0  ! Default: auto-calculate
 /
 ```
 
@@ -45,10 +45,10 @@ Parameter details:
 
 - **`eg_ev`**
   - **Units:** electron-volts (`eV`)
-  - **Default:** `0.0d0` (auto-calculate minimum bandgap from band structure)
+  - **Default:** `-1.0d0` (auto-calculate minimum bandgap from band structure)
   - **Usage:** Set to a positive value to override automatic calculation
   - **Physical effect:** Sets the energy scale `E_g` in the decoherence prefactor `1/(T₂·E_g²)`
-  - **Conversion:** Automatically converted to atomic units internally using `au_energy_ev`
+  - **Conversion:** Automatically converted to atomic units internally using `au_ev` (= 27.211386245988 eV/Hartree)
 
 ### Physical background
 
@@ -69,9 +69,9 @@ The new parameters are:
 
 - Declared globally as `t2_sbe_fs` and `eg_ev`;
 - Read from the `&sbe` namelist;
-- Initialized to defaults (`t2_sbe_fs = 1.0d10`, `eg_ev = 0.0d0`);
+- Initialized to defaults (`t2_sbe_fs = 1.0d10`, `eg_ev = -1.0d0`);
 - Broadcast to all MPI ranks before SBE propagation;
-- `eg_ev` is converted from eV to atomic units internally (`eg_au = eg_ev / au_energy_ev`).
+- `eg_ev` is converted from eV to atomic units internally (`eg_au = eg_ev / au_ev`).
 
 ## Minimal SBE input example
 
@@ -87,7 +87,7 @@ The new parameters are:
   t2_sbe_fs = 50.0d0
   
   ! Option 1: Use auto-calculated minimum bandgap (default behavior)
-  eg_ev = 0.0d0
+  eg_ev = -1.0d0
   
   ! Option 2: Override with a fixed bandgap value (e.g., experimental value)
   ! eg_ev = 1.519d0  ! GaAs bandgap at room temperature
@@ -97,7 +97,7 @@ The new parameters are:
 Set `t2_sbe_fs` back to the default value, or any value greater than or equal to
 `1.0d9`, to recover the original no-dephasing behavior.
 
-Set `eg_ev ≤ 0` to use the automatically calculated minimum bandgap from the
+Set `eg_ev <= 0` to use the automatically calculated minimum bandgap from the
 band structure. Set `eg_ev > 0` to override with a specific value in eV.
 
 ## License
