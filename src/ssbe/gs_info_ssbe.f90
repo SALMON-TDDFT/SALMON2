@@ -26,6 +26,9 @@ module gs_info_ssbe
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)
+
+        ! Minimum band gap in atomic units (for gauge-covariant decoherence)
+        real(8) :: eg_au
     end type
 
 
@@ -106,6 +109,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     !Initial Occupation Number
     gs%occup(:,:) = 0d0 !!Experimental!!
     gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
+
+    ! Calculate minimum band gap in atomic units (for gauge-covariant decoherence)
+    call calc_eg_au()
 
 contains
 
@@ -294,6 +300,41 @@ contains
             end do
         end do
     end subroutine prepare_matrix
+
+    ! Calculate minimum band gap in atomic units
+    subroutine calc_eg_au()
+        use salmon_global, only: eg_ev, au_energy_ev
+        implicit none
+        integer :: ik, ib_cb, ib_vb
+        real(8) :: eg_tmp
+        
+        ! Check if user specified eg_ev in input file
+        if (eg_ev > 0.0d0) then
+            ! Use user-specified value, convert from eV to atomic units
+            gs%eg_au = eg_ev / au_energy_ev
+            return
+        endif
+        
+        ! Find minimum band gap across all k-points
+        ! Assuming ne/2 is the highest occupied band (vb_max) and ne/2+1 is the lowest unoccupied (cb_min)
+        gs%eg_au = 1.0d99  ! Initialize with large value
+        
+        do ik = 1, gs%nk
+            ! For each k-point, find the minimum gap between conduction and valence bands
+            ! Using ne/2 as the top of valence band
+            do ib_cb = gs%ne/2 + 1, gs%nb
+                do ib_vb = 1, gs%ne/2
+                    eg_tmp = gs%eigen(ib_cb, ik) - gs%eigen(ib_vb, ik)
+                    if (eg_tmp > 0.0d0 .and. eg_tmp < gs%eg_au) then
+                        gs%eg_au = eg_tmp
+                    end if
+                end do
+            end do
+        end do
+        
+        ! Ensure eg_au is positive and reasonable
+        if (gs%eg_au < 1.0d-6) gs%eg_au = 1.0d-6
+    end subroutine calc_eg_au
 
 
 end subroutine init_sbe_gs_info

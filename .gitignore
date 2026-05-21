@@ -1,59 +1,26 @@
 ```
-# Build system
-CMakeFiles/
-CMakeCache.txt
-cmake_install.manifest
-Makefile
-*.cmake
-
 # Compiled and build artifacts
 *.o
 *.obj
 *.mod
-*.a
-*.so
-*.dylib
-*.dll
+*.smod
 *.exe
-build/
-dist/
-out/
 
 # Dependencies
-.venv/
-venv/
-env/
-node_modules/
+build/
+dist/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-*.swo
+
+# Editors
+.vscode/
+.idea/
 
 # Environment
 .env
 .env.local
 *.env.*
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*~
-
-# OS specific
-.DS_Store
-Thumbs.db
-
-# Testing and coverage
-.coverage
-coverage/
-htmlcov/
-
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-.Python
 ```
