@@ -73,10 +73,11 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     !$omp parallel do default(shared) private(ik, idir, ib, jb, v_mat, trace_val) reduction(+:tmp1)
     do ik = sbe%ik_min, sbe%ik_max
         do idir = 1, 3
-            ! Velocity operator in VG: v = p - A*I (in a.u. e=m=1)
+            ! Velocity operator in VG: v = p + A (in a.u. e=m=1)
+            ! SALMON convention: H_eff = H0 + A*p, therefore v = p + A
             v_mat = gs%p_tm_matrix(:, :, idir, ik)
             do ib = 1, nb
-                v_mat(ib, ib) = v_mat(ib, ib) - Ac(idir)
+                v_mat(ib, ib) = v_mat(ib, ib) + Ac(idir)
             end do
             if (sbe%flag_vnl_correction) then
                 v_mat = v_mat + gs%rvnl_tm_matrix(:, :, idir, ik)
@@ -173,11 +174,12 @@ contains
 
         ! 3. Gauge-covariant decoherence (Eq. 7 of paper 2012.00994v1)
         ! D = -1/(T2*Eg^2) * [H_eff, [H_eff, rho]]
+        ! SALMON convention: H_eff = H0 + A*p (consistent with evolution above)
         if (0.0d0 < t2_sbe_fs .and. t2_sbe_fs < 1.0d9) then
             t2_au = t2_sbe_fs / au_fs
             prefac = -1.0d0 / (t2_au * gs%eg_au**2)
 
-            ! Form H_eff = diag(eps) + A·p
+            ! Form H_eff = diag(eps) + A·p (CONSISTENT with evolution)
             Heff_k = 0d0
             do ib = 1, nb
                 Heff_k(ib, ib) = gs%eigen(ib, ik)
@@ -194,6 +196,9 @@ contains
             ! Evolution: rho += (-zi*dt)*hrho. To add dt*D, need hrho += zi*D
             hrho_k = hrho_k + zi * (prefac * C2_k)
         endif
+        
+        ! Optional: Enforce Hermiticity of hrho_k for Taylor series stability
+        ! (Done after rho update in main loop instead)
     end subroutine calc_hrho_bloch_k
 end subroutine
 
@@ -239,6 +244,7 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
         do ib = 1, sbe%nb
             do idir = 1, 3
                 do jb = 1, sbe%nb
+                    ! SALMON convention: H_eff = H0 + A*p, interaction term is +A*p
                     tmp1 = tmp1 &
                         & + Ac(idir) * real(sbe%rho(ib, jb, ik) * gs%p_mod_matrix(jb, ib, idir, ik)) * gs%kweight(ik)
                 end do

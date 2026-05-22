@@ -1013,7 +1013,7 @@ contains
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
     t2_sbe_fs = 1.0d10  ! Default: no dephasing (very large T2)
-    eg_ev = -1.0d0      ! Default: calculate from band structure
+    eg_ev = 1.5d0       ! Default: 1.5 eV (will be converted to atomic units in gs_info_ssbe)
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -2576,10 +2576,10 @@ contains
         write(fh_variables_log, '("# error: t2_sbe_fs must be positive.")')
         ierr_nml = ierr_nml + 1
       end if
-      if(eg_ev < 0.0d0 .and. inml_sbe > 0)then
-        write(fh_variables_log, '("# info: eg_ev not set, will calculate from band structure")')
+      if(eg_ev < 0.0d0)then
+        write(fh_variables_log, '("# info: eg_ev = -1, will calculate minimum band gap from band structure")')
       else if(eg_ev > 0.0d0)then
-        write(fh_variables_log, '("# info: using user-specified eg_ev =",ES12.5," eV")') eg_ev
+        write(fh_variables_log, '("# info: using user-specified eg_ev =",ES12.5," eV (default: 1.5 eV)")') eg_ev
       end if
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
