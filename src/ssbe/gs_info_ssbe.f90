@@ -309,32 +309,41 @@ contains
         integer :: ik, ib_cb, ib_vb
         real(8) :: eg_tmp
         
-        ! Check if user specified eg_ev in input file
-        if (eg_ev > 0.0d0) then
-            ! Use user-specified value, convert from eV to atomic units
-            gs%eg_au = eg_ev / au_ev
+        ! Check if user specified eg_ev = -1 (automatic calculation from band structure)
+        if (eg_ev < 0.0d0) then
+            ! Automatic calculation: find minimum band gap across all k-points
+            ! Assuming ne/2 is the highest occupied band (vb_max) and ne/2+1 is the lowest unoccupied (cb_min)
+            gs%eg_au = 1.0d99  ! Initialize with large value
+            
+            do ik = 1, gs%nk
+                ! For each k-point, find the minimum gap between conduction and valence bands
+                ! Using ne/2 as the top of valence band
+                do ib_cb = gs%ne/2 + 1, gs%nb
+                    do ib_vb = 1, gs%ne/2
+                        eg_tmp = gs%eigen(ib_cb, ik) - gs%eigen(ib_vb, ik)
+                        if (eg_tmp > 0.0d0 .and. eg_tmp < gs%eg_au) then
+                            gs%eg_au = eg_tmp
+                        end if
+                    end do
+                end do
+            end do
+            
+            ! Ensure eg_au is positive and reasonable
+            if (gs%eg_au < 1.0d-6) gs%eg_au = 1.0d-6
+            
+            if (irank == 0) then
+                write(*,'("# info: auto-calculated minimum band gap =",ES12.5," au (=",ES12.5," eV)")') &
+                    gs%eg_au, gs%eg_au * au_ev
+            end if
             return
         endif
         
-        ! Find minimum band gap across all k-points
-        ! Assuming ne/2 is the highest occupied band (vb_max) and ne/2+1 is the lowest unoccupied (cb_min)
-        gs%eg_au = 1.0d99  ! Initialize with large value
+        ! Use user-specified value (default: 1.5 eV), convert from eV to atomic units
+        gs%eg_au = eg_ev / au_ev
         
-        do ik = 1, gs%nk
-            ! For each k-point, find the minimum gap between conduction and valence bands
-            ! Using ne/2 as the top of valence band
-            do ib_cb = gs%ne/2 + 1, gs%nb
-                do ib_vb = 1, gs%ne/2
-                    eg_tmp = gs%eigen(ib_cb, ik) - gs%eigen(ib_vb, ik)
-                    if (eg_tmp > 0.0d0 .and. eg_tmp < gs%eg_au) then
-                        gs%eg_au = eg_tmp
-                    end if
-                end do
-            end do
-        end do
-        
-        ! Ensure eg_au is positive and reasonable
-        if (gs%eg_au < 1.0d-6) gs%eg_au = 1.0d-6
+        if (irank == 0) then
+            write(*,'("# info: using eg_ev =",ES12.5," eV (= ",ES12.5," au)")') eg_ev, gs%eg_au
+        end if
     end subroutine calc_eg_au
 
 
