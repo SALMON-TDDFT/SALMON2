@@ -55,31 +55,25 @@ contains
         complex(dp) :: phi_val
         real(dp) :: abs_z
         complex(dp) :: term, sum_val
-        integer :: j
+        integer :: j, fact_val, jj, kk
 
         abs_z = abs(z)
+        kk = k
 
         if (abs_z < PHI_EPS) then
             ! Taylor expansion: phi_k(z) = sum_{j=0}^{N} z^j / (j+k)!
-            ! phi_1 = 1 + z/2! + z^2/3! + ...
-            ! phi_2 = 1/2 + z/3! + z^2/4! + ...
-            ! phi_3 = 1/6 + z/4! + ...
-            
             sum_val = 0.0_dp
-            term = 1.0_dp
             
-            ! Calculate starting term 1/k! manually or via loop
-            ! Optimized: Start with 1/k! and multiply by z/(j+k+1)
-            ! Let's do direct summation for clarity and safety up to order 6
+            ! Direct summation for safety up to order 8
             do j = 0, 8
-                ! Term is z^j / (j+k)!
-                if (j == 0) then
-                    term = 1.0_dp / real(factorial(j + k), dp)
-                else
-                    term = term * z / real(j + k, dp)
-                end if
+                ! Compute factorial (j+k)! inline to avoid interface issues
+                fact_val = 1
+                do jj = 2, j + kk
+                    fact_val = fact_val * jj
+                end do
+                term = z**j / real(fact_val, dp)
                 sum_val = sum_val + term
-                if (abs(term) < 1.0d-16 * abs(sum_val)) exit
+                if (abs(term) < 1.0d-16 * max(1.0_dp, abs(sum_val))) exit
             end do
             phi_val = sum_val
         else
@@ -96,16 +90,6 @@ contains
             end select
         end if
     end function calc_phi
-
-    ! Helper for factorial (small integers only)
-    pure integer function factorial(n)
-        integer, intent(in) :: n
-        integer :: i
-        factorial = 1
-        do i = 2, n
-            factorial = factorial * i
-        end do
-    end function factorial
 
     !-------------------------------------------------------------------------
     ! Initialize ETDRK4 coefficients
@@ -160,6 +144,8 @@ contains
                 end do
             end do
         end do
+        
+        sbe%etdrk4_initialized = .true.
     end subroutine init_etdrk4_data
 
     subroutine finalize_etdrk4_data(sbe)
@@ -170,6 +156,7 @@ contains
         if (allocated(sbe%phi2)) deallocate(sbe%phi2)
         if (allocated(sbe%phi3)) deallocate(sbe%phi3)
         if (allocated(sbe%phi1_half)) deallocate(sbe%phi1_half)
+        sbe%etdrk4_initialized = .false.
     end subroutine finalize_etdrk4_data
 
     !-------------------------------------------------------------------------
@@ -218,7 +205,7 @@ contains
             ! ------------------------------------------------------------------
             ! Stage 1: Compute N1 = N(rho_n, t)
             ! ------------------------------------------------------------------
-            call build_V_and_N(gs, ik, Ac_t, rho_n, V_k, p_k, N1, C1, C2, C3, comm_tmp, factor_decoh)
+            call build_V_and_N(gs, ik, Ac_t, rho_n, V_k, p_k, N1, C1, C2, C3, tmp_mat, comm_tmp, factor_decoh)
 
             ! rho1 = A * rho_n + dt * phi1_half * N1
             do m = 1, gs%nb
@@ -231,7 +218,7 @@ contains
             ! ------------------------------------------------------------------
             ! Stage 2: Compute N2 = N(rho1, t + dt/2)
             ! ------------------------------------------------------------------
-            call build_V_and_N(gs, ik, Ac_thalf, rho1, V_k, p_k, N2, C1, C2, C3, comm_tmp, factor_decoh)
+            call build_V_and_N(gs, ik, Ac_thalf, rho1, V_k, p_k, N2, C1, C2, C3, tmp_mat, comm_tmp, factor_decoh)
 
             ! rho2 = A * rho_n + dt * phi1_half * N2
             do m = 1, gs%nb
@@ -244,7 +231,7 @@ contains
             ! ------------------------------------------------------------------
             ! Stage 3: Compute N3 = N(rho2, t + dt/2)
             ! ------------------------------------------------------------------
-            call build_V_and_N(gs, ik, Ac_thalf, rho2, V_k, p_k, N3, C1, C2, C3, comm_tmp, factor_decoh)
+            call build_V_and_N(gs, ik, Ac_thalf, rho2, V_k, p_k, N3, C1, C2, C3, tmp_mat, comm_tmp, factor_decoh)
 
             ! rho3 = A * rho1 + dt * phi1_half * (2*N3 - N1)
             do m = 1, gs%nb
@@ -290,15 +277,16 @@ contains
     ! Helper subroutine to build V and compute Nonlinear term N
     ! Inlined logic separated for clarity, called 4 times per k-step
     !-------------------------------------------------------------------------
-    subroutine build_V_and_N(gs, ik, Ac, rho_in, V_out, p_work, N_out, C1, C2, C3, tmp_mat, factor_decoh)
+    subroutine build_V_and_N(gs, ik, Ac, rho_in, V_out, p_work, N_out, C1, C2, C3, tmp_mat, comm_tmp, factor_decoh)
         type(s_sbe_gs_info), intent(in) :: gs
         integer, intent(in) :: ik
         real(dp), intent(in) :: Ac(3)
         complex(dp), intent(in) :: rho_in(:,:)
         complex(dp), intent(out) :: V_out(:,:), p_work(:,:)
-        complex(dp), intent(out) :: N_out(:,:), C1(:,:), C2(:,:), C3(:,:), tmp_mat(:,:)
+        complex(dp), intent(out) :: N_out(:,:), C1(:,:), C2(:,:), C3(:,:), tmp_mat(:,:), comm_tmp(:,:)
         complex(dp), intent(in) :: factor_decoh
         integer :: n, m, idir
+        real(dp) :: delta_e
 
         ! 1. Build V properly: V_nm = Sum_dir A_dir * p_nm_dir
         V_out = 0.0_dp
