@@ -426,8 +426,8 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     complex(8) :: rho_n(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
     complex(8) :: N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb)
     complex(8) :: p_k(nb, nb, 1:3)
-    real(8) :: t2_au, prefac, delta_e, gamma
-    complex(8) :: lambda, z, a_diag(nb, nb)
+    real(8) :: t2_au, prefac, delta_e
+    complex(8) :: a_diag(nb, nb)
     
     ! Temporary arrays for intermediate calculations
     complex(8) :: tmp_mat(nb, nb), C1(nb, nb), C2(nb, nb), V_k(nb, nb)
@@ -454,7 +454,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     
     !$omp parallel do default(shared) private(ik, p_k, rho_n, N1, N2, N3, N4, &
     !$omp                                    rho1, rho2, rho3, &
-    !$omp                                    V_k, C1, C2, tmp_mat, idir, n, m, delta_e, gamma, lambda, z, a_diag)
+    !$omp                                    V_k, C1, C2, tmp_mat, idir, n, m, a_diag)
     do ik = sbe%ik_min, sbe%ik_max
         ! Build momentum matrix including rvnl correction
         p_k(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
