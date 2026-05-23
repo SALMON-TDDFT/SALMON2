@@ -18,6 +18,7 @@ subroutine main_realtime_ssbe(icomm)
     type(s_sbe_gs_info) :: gs
     real(8) :: t,  E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
+    real(8) :: Ac_half(3)
     integer :: it, i
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
@@ -69,9 +70,34 @@ subroutine main_realtime_ssbe(icomm)
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
-        call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
+        
+        !---------------------------------------------------------------
+        ! ETDRK4 Step: Evolve rho from t=(it-1)*dt to t=it*dt
+        ! Requires A at: t_old=(it-1)*dt, t_mid=(it-0.5)*dt, t_new=it*dt
+        !---------------------------------------------------------------
+        Ac_half = 0.5d0 * (Ac_ext_t(:, it-1) + Ac_ext_t(:, it))
+        
+        call dt_evolve_bloch_etdrk4(sbe, gs, &
+             Ac_ext_t(:, it-1), Ac_half, Ac_ext_t(:, it), dt)
+        
+        !---------------------------------------------------------------
+        ! Calculate Current J(t) at t=it*dt (after evolution)
+        !---------------------------------------------------------------
         call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
-        E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
+        
+        !---------------------------------------------------------------
+        ! Calculate E-field at t=it*dt
+        ! E = -dA/dt. Use central difference for interior points.
+        !---------------------------------------------------------------
+        if (it == 1) then
+            ! Forward difference at the first step to avoid accessing invalid index
+            ! assuming Ac_ext_t is valid from -1 to nt+1, but being safe
+            E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it)) / dt 
+        else
+            E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it-1)) / (2.0d0 * dt)
+        end if
+        
+        ! Energy update: dW = -E·J·V·dt
         energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
         
         if (irank == 0) then

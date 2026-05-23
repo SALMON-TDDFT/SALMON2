@@ -1,1 +1,48 @@
-Nothing needs to be added to .gitignore since only a Fortran source file (.f90) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.mod
+*.out
+build/
+dist/
+
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+.Python
+venv/
+.venv/
+.env
+.env.local
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Distribution / packaging
+*.egg-info/
+.Python
+env/
+venv/
+ENV/
+```

@@ -374,7 +374,7 @@ pure function calc_phi(z, order) result(phi_val)
     integer, intent(in) :: order
     complex(8) :: phi_val
     
-    real(8), parameter :: eps = 1.0d-6
+    real(8), parameter :: eps = 1.0d-4  ! Safe threshold for double precision
     complex(8) :: ez, z2, z3
     
     if (abs(z) < eps) then
@@ -409,109 +409,32 @@ pure function calc_phi(z, order) result(phi_val)
 end function calc_phi
 
 
-subroutine calc_nonlinear_term(sbe, gs, Ac, t, rho_in, N_out)
-    ! Compute nonlinear term N(rho, t) = -i[V, rho] + N_decoh[rho]
-    ! where V = A(t) · p and N_decoh includes dynamic part of double commutator
-    use phys_constants, only: au_fs
-    use salmon_global, only: t2_sbe_fs
-    implicit none
-    type(s_sbe_bloch_solver), intent(in) :: sbe
-    type(s_sbe_gs_info), intent(in) :: gs
-    real(8), intent(in) :: Ac(1:3)
-    real(8), intent(in) :: t
-    complex(8), intent(in) :: rho_in(:, :)
-    complex(8), intent(out) :: N_out(:, :)
-    
-    integer :: nb, idir, n, m
-    real(8) :: t2_au, prefac
-    complex(8) :: V_k(nb, nb), C1(nb, nb), C2(nb, nb), C3(nb, nb)
-    complex(8) :: H0_rho(nb, nb), V_H0_rho(nb, nb)
-    complex(8) :: delta_e
-    
-    nb = sbe%nb
-    
-    ! Build V = sum_alpha A_alpha * p_alpha
-    V_k = dcmplx(0d0, 0d0)
-    do idir = 1, 3
-        V_k = V_k + Ac(idir) * gs%p_tm_matrix(:, :, idir, 1)  ! Note: ik passed separately
-    end do
-    if (sbe%flag_vnl_correction) then
-        do idir = 1, 3
-            V_k = V_k + Ac(idir) * gs%rvnl_tm_matrix(:, :, idir, 1)
-        end do
-    end if
-    
-    ! C1 = [V, rho] = V*rho - rho*V
-    call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho_in, nb, dcmplx(0d0, 0d0), C1, nb)
-    call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho_in, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
-    
-    ! Nonlinear term: N = -i * [V, rho]
-    N_out = -zi * C1
-    
-    ! Add decoherence part if T2 is active
-    if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-        t2_au = t2_sbe_fs / au_fs
-        prefac = -1.0d0 / (t2_au * gs%eg_au**2)
-        
-        ! C2 = [H0, [V, rho]] = [H0, C1]
-        ! Since H0 is diagonal: [H0, X]_nm = (eps_n - eps_m) * X_nm
-        do m = 1, nb
-            do n = 1, nb
-                delta_e = gs%eigen(n, 1) - gs%eigen(m, 1)  ! ik passed separately
-                C2(n, m) = delta_e * C1(n, m)
-            end do
-        end do
-        
-        ! C3 = [V, [H0, rho]]
-        ! First compute [H0, rho]
-        do m = 1, nb
-            do n = 1, nb
-                delta_e = gs%eigen(n, 1) - gs%eigen(m, 1)
-                H0_rho(n, m) = delta_e * rho_in(n, m)
-            end do
-        end do
-        ! Then [V, [H0, rho]]
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, H0_rho, nb, dcmplx(0d0, 0d0), V_H0_rho, nb)
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), H0_rho, nb, V_k, nb, dcmplx(1d0, 0d0), V_H0_rho, nb)
-        
-        ! C4 = [V, [V, rho]] = [V, C1]
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), C3, nb)
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), C3, nb)
-        
-        ! N_decoh = prefac * (C2 + V_H0_rho + C3)
-        N_out = N_out + prefac * (C2 + V_H0_rho + C3)
-    end if
-end subroutine calc_nonlinear_term
-
-
-subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
+subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     ! ETDRK4 time evolution for SBE (Kassam-Trefethen 2005)
-    ! Interface: Ac_func should return A(t) given time t
+    ! Interface: accepts three vector potential arrays at t, t+dt/2, t+dt
     use phys_constants, only: au_fs
     use salmon_global, only: t2_sbe_fs
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(inout) :: gs
-    interface
-        function Ac_func(t) result(Ac)
-            real(8), intent(in) :: t
-            real(8) :: Ac(1:3)
-        end function
-    end interface
+    real(8), intent(in) :: Ac_t(1:3)      ! A(t)
+    real(8), intent(in) :: Ac_thalf(1:3)  ! A(t + dt/2)
+    real(8), intent(in) :: Ac_tdt(1:3)    ! A(t + dt)
     real(8), intent(in) :: dt
-    real(8), intent(in) :: time_current
     
     integer :: nb, ik, n, m
     complex(8) :: rho_n(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
     complex(8) :: N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb)
-    complex(8) :: Ac_t(1:3), Ac_thalf(1:3), Ac_tdt(1:3)
     complex(8) :: p_k(nb, nb, 1:3)
-    real(8) :: t2_au, prefac, delta_e, gamma
-    complex(8) :: lambda, z, a_diag(nb, nb)
+    real(8) :: t2_au, prefac, delta_e
+    complex(8) :: a_diag(nb, nb)
     
     ! Temporary arrays for intermediate calculations
     complex(8) :: tmp_mat(nb, nb), C1(nb, nb), C2(nb, nb), V_k(nb, nb)
     integer :: idir
+    
+    ! Precompute decoherence scalars outside OpenMP to avoid race conditions and overhead
+    logical :: flag_decoh
     
     nb = sbe%nb
     
@@ -520,14 +443,18 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
         call init_etdrk4_data(sbe, gs, dt)
     end if
     
-    ! Get vector potential at required times
-    Ac_t = Ac_func(time_current)
-    Ac_thalf = Ac_func(time_current + dt * 0.5d0)
-    Ac_tdt = Ac_func(time_current + dt)
+    ! Precompute decoherence scalars outside OpenMP to avoid race conditions and overhead
+    if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+        t2_au = t2_sbe_fs / au_fs
+        prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+        flag_decoh = .true.
+    else
+        flag_decoh = .false.
+    end if
     
     !$omp parallel do default(shared) private(ik, p_k, rho_n, N1, N2, N3, N4, &
-    !$omp                                    rho1, rho2, rho3, Ac_t, Ac_thalf, Ac_tdt, &
-    !$omp                                    V_k, C1, C2, tmp_mat, idir, n, m, delta_e, gamma, lambda, z, a_diag)
+    !$omp                                    rho1, rho2, rho3, &
+    !$omp                                    V_k, C1, C2, tmp_mat, idir, n, m, a_diag)
     do ik = sbe%ik_min, sbe%ik_max
         ! Build momentum matrix including rvnl correction
         p_k(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
@@ -553,9 +480,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
         N1 = -zi * C1
         
         ! Add decoherence: N_decoh = prefac * ([H0,[V,rho]] + [V,[H0,rho]] + [V,[V,rho]])
-        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+        if (flag_decoh) then
             
             ! C2 = [H0, [V, rho]] = [H0, C1]
             do m = 1, nb
@@ -602,9 +527,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
         
         N2 = -zi * C1
         
-        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+        if (flag_decoh) then
             
             ! [H0, [V, rho1]]
             do m = 1, nb
@@ -647,9 +570,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
         
         N3 = -zi * C1
         
-        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+        if (flag_decoh) then
             
             ! [H0, [V, rho2]]
             do m = 1, nb
@@ -696,9 +617,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
         
         N4 = -zi * C1
         
-        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+        if (flag_decoh) then
             
             ! [H0, [V, rho3]]
             do m = 1, nb
@@ -770,7 +689,7 @@ end subroutine dt_evolve_bloch_etdrk4
 ! Допущения:
 ! - dt фиксирован в течение всего расчёта (коэффициенты предвычисляются один раз).
 ! - H0 диагонален в зонном базисе (стандартное приближение SBE).
-! - Векторный потенциал A(t) задаётся через интерфейс Ac_func(t).
+! - Векторный потенциал A(t) передаётся явно через три массива Ac_t, Ac_thalf, Ac_tdt.
 ! - OpenMP-параллелизация только по внешнему циклу ik (не по n,m).
 !=============================================================================
 
