@@ -18,6 +18,7 @@ subroutine main_realtime_ssbe(icomm)
     type(s_sbe_gs_info) :: gs
     real(8) :: t,  E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
+    real(8) :: Ac_half(3)
     integer :: it, i
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
@@ -71,9 +72,9 @@ subroutine main_realtime_ssbe(icomm)
         t = dt * it
         
         ! ETDRK4 requires A(t), A(t+dt/2), A(t+dt)
-        ! For leapfrog FDTD: Ac_thalf is available from E-field update
-        ! Here we use the precomputed array directly
-        call dt_evolve_bloch_etdrk4(sbe, gs, Ac_ext_t(:, it), Ac_ext_t(:, it), Ac_ext_t(:, it+1), dt)
+        ! Use linear interpolation for A(t+dt/2) from precomputed array
+        Ac_half = 0.5d0 * (Ac_ext_t(:, it) + Ac_ext_t(:, it+1))
+        call dt_evolve_bloch_etdrk4(sbe, gs, Ac_ext_t(:, it), Ac_half, Ac_ext_t(:, it+1), dt)
         
         call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
         E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
