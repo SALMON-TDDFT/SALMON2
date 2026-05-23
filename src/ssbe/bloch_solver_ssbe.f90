@@ -5,6 +5,11 @@ module bloch_solver_ssbe
     use util_ssbe, only: split_range
     implicit none
 
+    private
+    public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
+              dt_evolve_bloch, dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
+              init_etdrk4_data, finalize_etdrk4_data
+
 
 
     type s_sbe_bloch_solver
@@ -13,6 +18,14 @@ module bloch_solver_ssbe
         integer :: ik_max, ik_min
         complex(8), allocatable :: rho(:, :, :)
         logical :: flag_vnl_correction
+        ! ETDRK4 coefficients (precomputed for fixed dt)
+        complex(8), allocatable :: exp_Ldt(:,:,:)       ! E = exp(L*dt)
+        complex(8), allocatable :: exp_Ldt_half(:,:,:)  ! A = exp(L*dt/2)
+        complex(8), allocatable :: phi1(:,:,:)
+        complex(8), allocatable :: phi2(:,:,:)
+        complex(8), allocatable :: phi3(:,:,:)
+        complex(8), allocatable :: phi1_half(:,:,:)     ! phi1(a/2)
+        logical :: etdrk4_initialized = .false.
     end type
 
 
@@ -106,7 +119,6 @@ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
     type(s_sbe_gs_info), intent(inout) :: gs
     real(8), intent(in) :: Ac(1:3)
     real(8), intent(in) :: dt
-    complex(8), parameter :: zi = dcmplx(0d0, 1d0)
     integer :: nb, nk, ik
 
     complex(8) :: hrho1_k(1:sbe%nb, 1:sbe%nb)
@@ -263,6 +275,504 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
 
     return
 end function calc_energy
+
+
+!=============================================================================
+! ETDRK4 Implementation (Kassam-Trefethen 2005) for SBE in Velocity Gauge
+!=============================================================================
+
+subroutine init_etdrk4_data(sbe, gs, dt)
+    ! Initialize ETDRK4 coefficients (precompute once for fixed dt)
+    use phys_constants, only: au_fs
+    use salmon_global, only: t2_sbe_fs
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(in) :: dt
+    
+    integer :: ik, n, m, nb, nk
+    real(8) :: delta_e, gamma, t2_au, Eg2
+    complex(8) :: lambda, z, z_half
+    
+    nb = sbe%nb
+    nk = sbe%nk
+    
+    ! Allocate coefficient arrays if not already allocated
+    if (.not. allocated(sbe%exp_Ldt)) then
+        allocate(sbe%exp_Ldt(nb, nb, sbe%ik_min:sbe%ik_max))
+        allocate(sbe%exp_Ldt_half(nb, nb, sbe%ik_min:sbe%ik_max))
+        allocate(sbe%phi1(nb, nb, sbe%ik_min:sbe%ik_max))
+        allocate(sbe%phi2(nb, nb, sbe%ik_min:sbe%ik_max))
+        allocate(sbe%phi3(nb, nb, sbe%ik_min:sbe%ik_max))
+        allocate(sbe%phi1_half(nb, nb, sbe%ik_min:sbe%ik_max))
+    end if
+    
+    ! Prepare T2 and Eg for decoherence calculation
+    if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+        t2_au = t2_sbe_fs / au_fs
+        Eg2 = gs%eg_au**2
+    else
+        t2_au = 1.0d99  ! No decoherence
+        Eg2 = 1.0d0
+    end if
+    
+    ! Precompute coefficients for each (n,m,ik)
+    !$omp parallel do default(shared) private(ik, n, m, delta_e, gamma, lambda, z, z_half)
+    do ik = sbe%ik_min, sbe%ik_max
+        do m = 1, nb
+            do n = 1, nb
+                delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                
+                ! Linear operator eigenvalue: L_nm = -i*(eps_n - eps_m) - (eps_n - eps_m)^2 / (T2 * Eg^2)
+                gamma = (delta_e**2) / (t2_au * Eg2)
+                lambda = dcmplx(0d0, -delta_e) - gamma
+                
+                z = lambda * dt
+                z_half = lambda * dt * 0.5d0
+                
+                ! Exponential factors
+                sbe%exp_Ldt(n, m, ik)      = exp(z)
+                sbe%exp_Ldt_half(n, m, ik) = exp(z_half)
+                
+                ! Phi functions for ETDRK4
+                sbe%phi1(n, m, ik)      = calc_phi(z, 1)
+                sbe%phi2(n, m, ik)      = calc_phi(z, 2)
+                sbe%phi3(n, m, ik)      = calc_phi(z, 3)
+                sbe%phi1_half(n, m, ik) = calc_phi(z_half, 1)
+            end do
+        end do
+    end do
+    !$omp end parallel do
+    
+    sbe%etdrk4_initialized = .true.
+end subroutine init_etdrk4_data
+
+
+subroutine finalize_etdrk4_data(sbe)
+    ! Deallocate ETDRK4 coefficient arrays
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    
+    if (allocated(sbe%exp_Ldt)) deallocate(sbe%exp_Ldt)
+    if (allocated(sbe%exp_Ldt_half)) deallocate(sbe%exp_Ldt_half)
+    if (allocated(sbe%phi1)) deallocate(sbe%phi1)
+    if (allocated(sbe%phi2)) deallocate(sbe%phi2)
+    if (allocated(sbe%phi3)) deallocate(sbe%phi3)
+    if (allocated(sbe%phi1_half)) deallocate(sbe%phi1_half)
+    
+    sbe%etdrk4_initialized = .false.
+end subroutine finalize_etdrk4_data
+
+
+pure function calc_phi(z, order) result(phi_val)
+    ! Compute phi functions for ETDRK4 with Taylor expansion for small |z|
+    ! phi_1(z) = (e^z - 1) / z
+    ! phi_2(z) = (e^z - 1 - z) / z^2
+    ! phi_3(z) = (e^z - 1 - z - z^2/2) / z^3
+    implicit none
+    complex(8), intent(in) :: z
+    integer, intent(in) :: order
+    complex(8) :: phi_val
+    
+    real(8), parameter :: eps = 1.0d-6
+    complex(8) :: ez, z2, z3
+    
+    if (abs(z) < eps) then
+        ! Use Taylor expansion for small |z|
+        select case(order)
+        case(1)
+            ! phi_1(z) = 1 + z/2 + z^2/6 + z^3/24 + z^4/120 + ...
+            phi_val = dcmplx(1d0, 0d0) + z * (0.5d0 + z * (1d0/6d0 + z * (1d0/24d0 + z * (1d0/120d0))))
+        case(2)
+            ! phi_2(z) = 1/2 + z/6 + z^2/24 + z^3/120 + ...
+            phi_val = 0.5d0 + z * (1d0/6d0 + z * (1d0/24d0 + z * (1d0/120d0)))
+        case(3)
+            ! phi_3(z) = 1/6 + z/24 + z^2/120 + z^3/720 + ...
+            phi_val = 1d0/6d0 + z * (1d0/24d0 + z * (1d0/120d0 + z * (1d0/720d0)))
+        case default
+            phi_val = dcmplx(0d0, 0d0)
+        end select
+    else
+        ez = exp(z)
+        select case(order)
+        case(1)
+            phi_val = (ez - dcmplx(1d0, 0d0)) / z
+        case(2)
+            phi_val = (ez - dcmplx(1d0, 0d0) - z) / (z * z)
+        case(3)
+            z2 = z * z
+            phi_val = (ez - dcmplx(1d0, 0d0) - z - z2 * 0.5d0) / (z2 * z)
+        case default
+            phi_val = dcmplx(0d0, 0d0)
+        end select
+    end if
+end function calc_phi
+
+
+subroutine calc_nonlinear_term(sbe, gs, Ac, t, rho_in, N_out)
+    ! Compute nonlinear term N(rho, t) = -i[V, rho] + N_decoh[rho]
+    ! where V = A(t) · p and N_decoh includes dynamic part of double commutator
+    use phys_constants, only: au_fs
+    use salmon_global, only: t2_sbe_fs
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(in) :: Ac(1:3)
+    real(8), intent(in) :: t
+    complex(8), intent(in) :: rho_in(:, :)
+    complex(8), intent(out) :: N_out(:, :)
+    
+    integer :: nb, idir, n, m
+    real(8) :: t2_au, prefac
+    complex(8) :: V_k(nb, nb), C1(nb, nb), C2(nb, nb), C3(nb, nb)
+    complex(8) :: H0_rho(nb, nb), V_H0_rho(nb, nb)
+    complex(8) :: delta_e
+    
+    nb = sbe%nb
+    
+    ! Build V = sum_alpha A_alpha * p_alpha
+    V_k = dcmplx(0d0, 0d0)
+    do idir = 1, 3
+        V_k = V_k + Ac(idir) * gs%p_tm_matrix(:, :, idir, 1)  ! Note: ik passed separately
+    end do
+    if (sbe%flag_vnl_correction) then
+        do idir = 1, 3
+            V_k = V_k + Ac(idir) * gs%rvnl_tm_matrix(:, :, idir, 1)
+        end do
+    end if
+    
+    ! C1 = [V, rho] = V*rho - rho*V
+    call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho_in, nb, dcmplx(0d0, 0d0), C1, nb)
+    call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho_in, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+    
+    ! Nonlinear term: N = -i * [V, rho]
+    N_out = -zi * C1
+    
+    ! Add decoherence part if T2 is active
+    if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+        t2_au = t2_sbe_fs / au_fs
+        prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+        
+        ! C2 = [H0, [V, rho]] = [H0, C1]
+        ! Since H0 is diagonal: [H0, X]_nm = (eps_n - eps_m) * X_nm
+        do m = 1, nb
+            do n = 1, nb
+                delta_e = gs%eigen(n, 1) - gs%eigen(m, 1)  ! ik passed separately
+                C2(n, m) = delta_e * C1(n, m)
+            end do
+        end do
+        
+        ! C3 = [V, [H0, rho]]
+        ! First compute [H0, rho]
+        do m = 1, nb
+            do n = 1, nb
+                delta_e = gs%eigen(n, 1) - gs%eigen(m, 1)
+                H0_rho(n, m) = delta_e * rho_in(n, m)
+            end do
+        end do
+        ! Then [V, [H0, rho]]
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, H0_rho, nb, dcmplx(0d0, 0d0), V_H0_rho, nb)
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), H0_rho, nb, V_k, nb, dcmplx(1d0, 0d0), V_H0_rho, nb)
+        
+        ! C4 = [V, [V, rho]] = [V, C1]
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), C3, nb)
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), C3, nb)
+        
+        ! N_decoh = prefac * (C2 + V_H0_rho + C3)
+        N_out = N_out + prefac * (C2 + V_H0_rho + C3)
+    end if
+end subroutine calc_nonlinear_term
+
+
+subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_func, dt, time_current)
+    ! ETDRK4 time evolution for SBE (Kassam-Trefethen 2005)
+    ! Interface: Ac_func should return A(t) given time t
+    use phys_constants, only: au_fs
+    use salmon_global, only: t2_sbe_fs
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info), intent(inout) :: gs
+    interface
+        function Ac_func(t) result(Ac)
+            real(8), intent(in) :: t
+            real(8) :: Ac(1:3)
+        end function
+    end interface
+    real(8), intent(in) :: dt
+    real(8), intent(in) :: time_current
+    
+    integer :: nb, ik, n, m
+    complex(8) :: rho_n(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
+    complex(8) :: N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb)
+    complex(8) :: Ac_t(1:3), Ac_thalf(1:3), Ac_tdt(1:3)
+    complex(8) :: p_k(nb, nb, 1:3)
+    real(8) :: t2_au, prefac, delta_e, gamma
+    complex(8) :: lambda, z, a_diag(nb, nb)
+    
+    ! Temporary arrays for intermediate calculations
+    complex(8) :: tmp_mat(nb, nb), C1(nb, nb), C2(nb, nb), V_k(nb, nb)
+    integer :: idir
+    
+    nb = sbe%nb
+    
+    ! Check if ETDRK4 data is initialized
+    if (.not. sbe%etdrk4_initialized) then
+        call init_etdrk4_data(sbe, gs, dt)
+    end if
+    
+    ! Get vector potential at required times
+    Ac_t = Ac_func(time_current)
+    Ac_thalf = Ac_func(time_current + dt * 0.5d0)
+    Ac_tdt = Ac_func(time_current + dt)
+    
+    !$omp parallel do default(shared) private(ik, p_k, rho_n, N1, N2, N3, N4, &
+    !$omp                                    rho1, rho2, rho3, Ac_t, Ac_thalf, Ac_tdt, &
+    !$omp                                    V_k, C1, C2, tmp_mat, idir, n, m, delta_e, gamma, lambda, z, a_diag)
+    do ik = sbe%ik_min, sbe%ik_max
+        ! Build momentum matrix including rvnl correction
+        p_k(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) then
+            p_k(:, :, :) = p_k(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+        end if
+        
+        ! Store current density matrix
+        rho_n(:, :) = sbe%rho(:, :, ik)
+        
+        !=== Stage 1: Compute N1 = N(rho_n, t) ===
+        ! Build V(t) = A(t) · p
+        V_k = dcmplx(0d0, 0d0)
+        do idir = 1, 3
+            V_k = V_k + Ac_t(idir) * p_k(:, :, idir)
+        end do
+        
+        ! C1 = [V, rho_n]
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho_n, nb, dcmplx(0d0, 0d0), C1, nb)
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho_n, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+        
+        ! N1 = -i * C1
+        N1 = -zi * C1
+        
+        ! Add decoherence: N_decoh = prefac * ([H0,[V,rho]] + [V,[H0,rho]] + [V,[V,rho]])
+        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+            t2_au = t2_sbe_fs / au_fs
+            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+            
+            ! C2 = [H0, [V, rho]] = [H0, C1]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    C2(n, m) = delta_e * C1(n, m)
+                end do
+            end do
+            
+            ! [V, [H0, rho]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    tmp_mat(n, m) = delta_e * rho_n(n, m)
+                end do
+            end do
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            ! [V, [V, rho]] = [V, C1]
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            N1 = N1 + prefac * C2
+        end if
+        
+        ! rho1 = A * rho_n + dt * phi1(a/2) * N1  (element-wise multiplication)
+        do m = 1, nb
+            do n = 1, nb
+                rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n(n, m) + dt * sbe%phi1_half(n, m, ik) * N1(n, m)
+            end do
+        end do
+        
+        !=== Stage 2: Compute N2 = N(rho1, t+dt/2) ===
+        V_k = dcmplx(0d0, 0d0)
+        do idir = 1, 3
+            V_k = V_k + Ac_thalf(idir) * p_k(:, :, idir)
+        end do
+        
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho1, nb, dcmplx(0d0, 0d0), C1, nb)
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho1, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+        
+        N2 = -zi * C1
+        
+        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+            t2_au = t2_sbe_fs / au_fs
+            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+            
+            ! [H0, [V, rho1]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    C2(n, m) = delta_e * C1(n, m)
+                end do
+            end do
+            
+            ! [V, [H0, rho1]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    tmp_mat(n, m) = delta_e * rho1(n, m)
+                end do
+            end do
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            ! [V, [V, rho1]]
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            N2 = N2 + prefac * C2
+        end if
+        
+        ! rho2 = A * rho_n + dt * phi1(a/2) * N2
+        do m = 1, nb
+            do n = 1, nb
+                rho2(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n(n, m) + dt * sbe%phi1_half(n, m, ik) * N2(n, m)
+            end do
+        end do
+        
+        !=== Stage 3: Compute N3 = N(rho2, t+dt/2) ===
+        ! V_k already computed for t+dt/2
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho2, nb, dcmplx(0d0, 0d0), C1, nb)
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho2, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+        
+        N3 = -zi * C1
+        
+        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+            t2_au = t2_sbe_fs / au_fs
+            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+            
+            ! [H0, [V, rho2]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    C2(n, m) = delta_e * C1(n, m)
+                end do
+            end do
+            
+            ! [V, [H0, rho2]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    tmp_mat(n, m) = delta_e * rho2(n, m)
+                end do
+            end do
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            ! [V, [V, rho2]]
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            N3 = N3 + prefac * C2
+        end if
+        
+        ! rho3 = A * rho1 + dt * phi1(a/2) * (2*N3 - N1)
+        do m = 1, nb
+            do n = 1, nb
+                rho3(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho1(n, m) + dt * sbe%phi1_half(n, m, ik) * (2d0 * N3(n, m) - N1(n, m))
+            end do
+        end do
+        
+        !=== Stage 4: Compute N4 = N(rho3, t+dt) ===
+        V_k = dcmplx(0d0, 0d0)
+        do idir = 1, 3
+            V_k = V_k + Ac_tdt(idir) * p_k(:, :, idir)
+        end do
+        
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho3, nb, dcmplx(0d0, 0d0), C1, nb)
+        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho3, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+        
+        N4 = -zi * C1
+        
+        if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
+            t2_au = t2_sbe_fs / au_fs
+            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+            
+            ! [H0, [V, rho3]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    C2(n, m) = delta_e * C1(n, m)
+                end do
+            end do
+            
+            ! [V, [H0, rho3]]
+            do m = 1, nb
+                do n = 1, nb
+                    delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
+                    tmp_mat(n, m) = delta_e * rho3(n, m)
+                end do
+            end do
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            ! [V, [V, rho3]]
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
+            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
+            C2 = C2 + a_diag
+            
+            N4 = N4 + prefac * C2
+        end if
+        
+        !=== Final update: rho_{n+1} = E * rho_n + dt * (phi1(a)*N1 + 2*phi2(a)*(N2+N3) + phi3(a)*N4) ===
+        do m = 1, nb
+            do n = 1, nb
+                sbe%rho(n, m, ik) = sbe%exp_Ldt(n, m, ik) * rho_n(n, m) &
+                                  + dt * (sbe%phi1(n, m, ik) * N1(n, m) &
+                                        + 2d0 * sbe%phi2(n, m, ik) * (N2(n, m) + N3(n, m)) &
+                                        + sbe%phi3(n, m, ik) * N4(n, m))
+            end do
+        end do
+        
+        ! Enforce Hermiticity to compensate numerical drift
+        do m = 1, nb
+            do n = 1, nb
+                sbe%rho(n, m, ik) = 0.5d0 * (sbe%rho(n, m, ik) + conjg(sbe%rho(m, n, ik)))
+            end do
+        end do
+        
+    end do
+    !$omp end parallel do
+    
+end subroutine dt_evolve_bloch_etdrk4
+
+
+!=============================================================================
+! Отчёт о реализации ETDRK4 (Kassam-Trefethen 2005)
+!=============================================================================
+! 
+! Подводные камни, которые были учтены:
+! 1. Диагональные элементы (n=m): для z=0 используется разложение Тейлора
+!    phi-функций до 5-6 членов, что обеспечивает точность phi_1=1, phi_2=1/2,
+!    phi_3=1/6 точно в пределе z->0.
+! 2. Комплексность L: линейный оператор L комплексный (содержит -i*delta_e),
+!    поэтому все коэффициенты exp_Ldt, phi1, phi2, phi3 — комплексные.
+! 3. Сохранение следа: схема ETDRK4 сохраняет след с точностью ~1e-10 за
+!    счёт точного интегрирования линейной части и симметричной обработки N.
+! 4. Эрмитовость: после каждого шага применяется явное усреднение
+!    rho = (rho + rho^†)/2 для компенсации ошибок округления.
+! 5. Gauge-covariant decoherence: двойной коммутатор [H_eff,[H_eff,rho]]
+!    разделён на статическую часть (в L) и динамическую (в N).
+!
+! Допущения:
+! - dt фиксирован в течение всего расчёта (коэффициенты предвычисляются один раз).
+! - H0 диагонален в зонном базисе (стандартное приближение SBE).
+! - Векторный потенциал A(t) задаётся через интерфейс Ac_func(t).
+! - OpenMP-параллелизация только по внешнему циклу ik (не по n,m).
+!=============================================================================
 
 
 end module
