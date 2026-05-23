@@ -244,7 +244,7 @@ contains
             ! ------------------------------------------------------------------
             ! Stage 4: Compute N4 = N(rho3, t + dt)
             ! ------------------------------------------------------------------
-            call build_V_and_N(gs, ik, Ac_tdt, rho3, V_k, p_k, N4, C1, C2, C3, comm_tmp, factor_decoh)
+            call build_V_and_N(gs, ik, Ac_tdt, rho3, V_k, p_k, N4, C1, C2, C3, tmp_mat, comm_tmp, factor_decoh)
 
             ! ------------------------------------------------------------------
             ! Final Update: rho_new = E * rho_n + dt * (phi1*N1 + 2*phi2*(N2+N3) + phi3*N4)

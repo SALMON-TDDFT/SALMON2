@@ -1,1 +1,34 @@
-Nothing needs to be added to .gitignore since only a Fortran source file (.f90) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.mod
+*.exe
+
+# Dependencies
+lib/
+bin/
+build/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Backup files
+*~
+*.bak
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+```

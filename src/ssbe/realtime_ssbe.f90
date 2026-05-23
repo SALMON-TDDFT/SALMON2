@@ -69,7 +69,12 @@ subroutine main_realtime_ssbe(icomm)
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
-        call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
+        
+        ! ETDRK4 requires A(t), A(t+dt/2), A(t+dt)
+        ! For leapfrog FDTD: Ac_thalf is available from E-field update
+        ! Here we use the precomputed array directly
+        call dt_evolve_bloch_etdrk4(sbe, gs, Ac_ext_t(:, it), Ac_ext_t(:, it), Ac_ext_t(:, it+1), dt)
+        
         call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
         E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
         energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
