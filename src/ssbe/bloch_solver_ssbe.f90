@@ -101,28 +101,30 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     
     ! Broadcast is_active array using integer buffer (no logical array broadcast available)
     if (sbe%nb > 0) then
-        integer, allocatable :: is_active_buf(:)
-        allocate(is_active_buf(1:sbe%nb))
-        if (irank == 0) then
-            do ib = 1, sbe%nb
-                if (sbe%is_active(ib)) then
-                    is_active_buf(ib) = 1
-                else
-                    is_active_buf(ib) = 0
-                end if
-            end do
-        end if
-        call comm_bcast(is_active_buf, icomm, 0)
-        if (irank /= 0) then
-            do ib = 1, sbe%nb
-                if (is_active_buf(ib) == 1) then
-                    sbe%is_active(ib) = .true.
-                else
-                    sbe%is_active(ib) = .false.
-                end if
-            end do
-        end if
-        deallocate(is_active_buf)
+        block
+            integer, allocatable :: is_active_buf(:)
+            allocate(is_active_buf(1:sbe%nb))
+            if (irank == 0) then
+                do ib = 1, sbe%nb
+                    if (sbe%is_active(ib)) then
+                        is_active_buf(ib) = 1
+                    else
+                        is_active_buf(ib) = 0
+                    end if
+                end do
+            end if
+            call comm_bcast(is_active_buf, icomm, 0)
+            if (irank /= 0) then
+                do ib = 1, sbe%nb
+                    if (is_active_buf(ib) == 1) then
+                        sbe%is_active(ib) = .true.
+                    else
+                        sbe%is_active(ib) = .false.
+                    end if
+                end do
+            end if
+            deallocate(is_active_buf)
+        end block
     end if
 
     ! Build active_idx mapping: 1..n_active -> global band index
