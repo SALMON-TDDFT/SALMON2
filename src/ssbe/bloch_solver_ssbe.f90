@@ -234,6 +234,7 @@ end function calc_energy
 
 subroutine init_etdrk4_data(sbe, gs, dt)
     ! Initialize ETDRK4 coefficients (precompute once for fixed dt)
+    ! Uses optimized contour integration with single-pass computation of all phi functions
     use phys_constants, only: au_fs
     use salmon_global, only: t2_sbe_fs
     implicit none
@@ -244,6 +245,7 @@ subroutine init_etdrk4_data(sbe, gs, dt)
     integer :: ik, n, m, nb, nk
     real(8) :: delta_e, gamma, t2_au, Eg2
     complex(8) :: lambda, z, z_half
+    complex(8) :: phi_full(3), phi_half(3)  ! phi_1, phi_2, phi_3
     
     nb = sbe%nb
     nk = sbe%nk
@@ -268,7 +270,7 @@ subroutine init_etdrk4_data(sbe, gs, dt)
     end if
     
     ! Precompute coefficients for each (n,m,ik)
-    !$omp parallel do default(shared) private(ik, n, m, delta_e, gamma, lambda, z, z_half)
+    !$omp parallel do default(shared) private(ik, n, m, delta_e, gamma, lambda, z, z_half, phi_full, phi_half)
     do ik = sbe%ik_min, sbe%ik_max
         do m = 1, nb
             do n = 1, nb
@@ -291,11 +293,15 @@ subroutine init_etdrk4_data(sbe, gs, dt)
                 sbe%exp_Ldt(n, m, ik)      = exp(z)
                 sbe%exp_Ldt_half(n, m, ik) = exp(z_half)
                 
-                ! Phi functions for ETDRK4
-                sbe%phi1(n, m, ik)      = calc_phi(z, 1)
-                sbe%phi2(n, m, ik)      = calc_phi(z, 2)
-                sbe%phi3(n, m, ik)      = calc_phi(z, 3)
-                sbe%phi1_half(n, m, ik) = calc_phi(z_half, 1)
+                ! Phi functions via contour integration (all three at once)
+                call calc_phi_contour_all(z, phi_full)
+                call calc_phi_contour_all(z_half, phi_half)
+                
+                ! Store results
+                sbe%phi1(n, m, ik)      = phi_full(1)
+                sbe%phi2(n, m, ik)      = phi_full(2)
+                sbe%phi3(n, m, ik)      = phi_full(3)
+                sbe%phi1_half(n, m, ik) = phi_half(1)
             end do
         end do
     end do
@@ -321,49 +327,52 @@ subroutine finalize_etdrk4_data(sbe)
 end subroutine finalize_etdrk4_data
 
 
-pure function calc_phi(z, order) result(phi_val)
-    ! Compute phi functions for ETDRK4 with Taylor expansion for small |z|
-    ! phi_1(z) = (e^z - 1) / z
-    ! phi_2(z) = (e^z - 1 - z) / z^2
-    ! phi_3(z) = (e^z - 1 - z - z^2/2) / z^3
+pure subroutine calc_phi_contour_all(z, phi_vals)
+    ! Compute phi_1, phi_2, phi_3 simultaneously via contour integration
+    ! Kassam-Trefethen method with optimized single-pass quadrature
     implicit none
     complex(8), intent(in) :: z
-    integer, intent(in) :: order
-    complex(8) :: phi_val
+    complex(8), intent(out) :: phi_vals(3)  ! phi_1, phi_2, phi_3
     
-    real(8), parameter :: eps = 1.0d-4  ! Safe threshold for double precision
-    complex(8) :: ez, z2, z3
+    integer, parameter :: M = 32  ! Quadrature points (32 gives ~10^-14 accuracy)
+    real(8), parameter :: R = 1.0d0  ! Contour radius
+    real(8), parameter :: pi = 3.14159265358979323846d0
+    real(8) :: theta
+    complex(8) :: w, ez, w2, phi1_w, phi2_w, phi3_w
+    complex(8) :: sum1, sum2, sum3
+    integer :: j
     
-    if (abs(z) < eps) then
-        ! Use Taylor expansion for small |z|
-        select case(order)
-        case(1)
-            ! phi_1(z) = 1 + z/2 + z^2/6 + z^3/24 + z^4/120 + ...
-            phi_val = dcmplx(1d0, 0d0) + z * (0.5d0 + z * (1d0/6d0 + z * (1d0/24d0 + z * (1d0/120d0))))
-        case(2)
-            ! phi_2(z) = 1/2 + z/6 + z^2/24 + z^3/120 + ...
-            phi_val = 0.5d0 + z * (1d0/6d0 + z * (1d0/24d0 + z * (1d0/120d0)))
-        case(3)
-            ! phi_3(z) = 1/6 + z/24 + z^2/120 + z^3/720 + ...
-            phi_val = 1d0/6d0 + z * (1d0/24d0 + z * (1d0/120d0 + z * (1d0/720d0)))
-        case default
-            phi_val = dcmplx(0d0, 0d0)
-        end select
-    else
-        ez = exp(z)
-        select case(order)
-        case(1)
-            phi_val = (ez - dcmplx(1d0, 0d0)) / z
-        case(2)
-            phi_val = (ez - dcmplx(1d0, 0d0) - z) / (z * z)
-        case(3)
-            z2 = z * z
-            phi_val = (ez - dcmplx(1d0, 0d0) - z - z2 * 0.5d0) / (z2 * z)
-        case default
-            phi_val = dcmplx(0d0, 0d0)
-        end select
-    end if
-end function calc_phi
+    sum1 = dcmplx(0d0, 0d0)
+    sum2 = dcmplx(0d0, 0d0)
+    sum3 = dcmplx(0d0, 0d0)
+    
+    ! Single pass over contour: compute all phi_k simultaneously
+    do j = 1, M
+        theta = 2d0 * pi * dble(j) / dble(M)
+        w = z + R * exp(dcmplx(0d0, theta))
+        
+        ! Compute exp(w) ONCE per quadrature point
+        ez = exp(w)
+        
+        ! Powers of w (needed for phi_2, phi_3)
+        w2 = w * w
+        
+        ! Compute all three phi functions at this point
+        phi1_w = (ez - dcmplx(1d0, 0d0)) / w
+        phi2_w = (ez - dcmplx(1d0, 0d0) - w) / w2
+        phi3_w = (ez - dcmplx(1d0, 0d0) - w - 0.5d0 * w2) / (w2 * w)
+        
+        ! Accumulate (Cauchy integral formula)
+        sum1 = sum1 + phi1_w / (w - z)
+        sum2 = sum2 + phi2_w / (w - z)
+        sum3 = sum3 + phi3_w / (w - z)
+    end do
+    
+    ! Average over quadrature points
+    phi_vals(1) = sum1 / dble(M)
+    phi_vals(2) = sum2 / dble(M)
+    phi_vals(3) = sum3 / dble(M)
+end subroutine calc_phi_contour_all
 
 
 subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)

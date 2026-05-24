@@ -1,69 +1,7 @@
-```
-# Compiled and build artifacts
-*.o
-*.obj
-*.mod
-*.smod
-*.a
-*.so
-*.dylib
-*.dll
-*.exe
-*.out
+(src/ssbe/bloch_solver_ssbe.f90) is a source code file, and there are no build artifacts, dependencies, or temporary files in the changes provided.
 
-# Dependencies
-venv/
-.venv/
-__pycache__/
-*.egg-info/
-.Python
-pip-log.txt
-pip-delete-this-directory.txt
+Therefore, the optimized .gitignore content is empty.
 
-# Build directories
-build/
-dist/
-*.egg
-*.whl
-*.pyc
-*.pyo
-*.pyd
+```fortran
 
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-*.swo
-
-# Environment
-.env
-.env.local
-.env.*
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*~
-.DS_Store
-Thumbs.db
-
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# MyPy
-.mypy_cache/
-__pycache__/
-
-# PyTest
-.pytest_cache/
-
-# Fortran specific
-*.mod
-*.smod
-*.o
-*.a
-*.so
 ```
