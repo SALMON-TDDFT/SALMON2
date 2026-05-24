@@ -8,7 +8,7 @@ module bloch_solver_ssbe
 
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
-              dt_evolve_bloch, dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
+              dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
               init_etdrk4_data, finalize_etdrk4_data
 
 
@@ -164,106 +164,6 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
 end subroutine calc_current_bloch
 
 
-subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
-    implicit none
-    type(s_sbe_bloch_solver), intent(inout) :: sbe
-    type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), intent(in) :: Ac(1:3)
-    real(8), intent(in) :: dt
-    integer :: nb, nk, ik
-
-    complex(8) :: hrho1_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho2_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho3_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho4_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3)
-
-    nb = sbe%nb 
-    nk = sbe%nk
-
-    !$omp parallel do default(shared) private(ik, p_rvnl_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k)
-    do ik = sbe%ik_min, sbe%ik_max
-        p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
-        if (sbe%flag_vnl_correction) then
-            p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) =  p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) &
-                & + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
-        end if
-
-        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
-        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, hrho2_k)
-        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, hrho3_k)
-        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, hrho4_k)
-
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho1_k * (- zi * dt)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
-
-        ! Enforce Hermiticity: compensates numerical drift from Taylor series + decoherence
-        sbe%rho(:, :, ik) = 0.5d0 * (sbe%rho(:, :, ik) + conjg(transpose(sbe%rho(:, :, ik))))
-
-    end do
-    return
-
-contains
-
-
-    !Calculate [H_eff, rho] commutation and add gauge-covariant decoherence (Eq. 7):
-    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
-        use phys_constants, only: au_fs
-        use salmon_global, only: t2_sbe_fs
-        implicit none
-        integer, intent(in) :: ik
-        complex(8), intent(in) :: rho_k(nb, nb)
-        complex(8), intent(in) :: p_k(nb, nb, 1:3)
-        complex(8), intent(out) :: hrho_k(nb, nb)
-        integer :: idir, ib, jb
-        real(8) :: t2_au, prefac
-        complex(8) :: C2_k(nb, nb), Heff_k(nb, nb)
-
-        ! 1. [H0, rho]_ij = (eps_i - eps_j) * rho_ij
-        hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
-
-        ! 2. Add [A·p, rho] -> hrho_k = [H_eff, rho]
-        do idir = 1, 3
-            call ZGEMM("N","N", nb, nb, nb, &
-                dcmplx(+Ac(idir), 0d0), p_k(:, :, idir), nb, &
-                rho_k(:, :), nb, dcmplx(1d0, 0d0), hrho_k(:, :), nb)
-
-            call ZGEMM("N","N", nb, nb, nb, &
-                dcmplx(-Ac(idir), 0d0), rho_k(:, :), nb, &
-                p_k(:, :, idir), nb, dcmplx(1d0, 0d0), hrho_k(:, :), nb)
-        end do
-
-        ! 3. Gauge-covariant decoherence (Eq. 7 of paper 2012.00994v1)
-        ! D = -1/(T2*Eg^2) * [H_eff, [H_eff, rho]]
-        ! SALMON convention: H_eff = H0 + A*p (consistent with evolution above)
-        if (0.0d0 < t2_sbe_fs .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
-
-            ! Form H_eff = diag(eps) + A·p (CONSISTENT with evolution)
-            Heff_k = 0d0
-            do ib = 1, nb
-                Heff_k(ib, ib) = gs%eigen(ib, ik)
-            end do
-            do idir = 1, 3
-                Heff_k = Heff_k + Ac(idir) * p_k(:, :, idir)
-            end do
-
-            ! C2 = [H_eff, hrho_k] = [H_eff, [H_eff, rho]]
-            C2_k = 0d0
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), Heff_k, nb, hrho_k, nb, dcmplx(0d0, 0d0), C2_k, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), hrho_k, nb, Heff_k, nb, dcmplx(1d0, 0d0), C2_k, nb)
-
-            ! Evolution: rho += (-zi*dt)*hrho. To add dt*D, need hrho += zi*D
-            hrho_k = hrho_k + zi * (prefac * C2_k)
-        endif
-        
-        ! Optional: Enforce Hermiticity of hrho_k for Taylor series stability
-        ! (Done after rho update in main loop instead)
-    end subroutine calc_hrho_bloch_k
-end subroutine
 
 function calc_trace(sbe, gs, nb_max, icomm) result(tr)
     use communication
