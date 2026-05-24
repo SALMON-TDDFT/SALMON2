@@ -53,33 +53,40 @@ contains
         complex(dp), intent(in) :: z
         integer, intent(in) :: k
         complex(dp) :: phi_val
-        complex(dp) :: ez
+        real(dp) :: abs_z
+        complex(dp) :: term, sum_val
+        integer :: j, fact_val, jj, kk
 
-        ! Pure exponential implementation for maximum vectorization performance
-        ! Branch-free logic avoids pipeline stalls on modern CPUs
-        ez = exp(z)
-        
-        select case (k)
-        case (1)
-            phi_val = (ez - 1.0_dp) / z
-        case (2)
-            phi_val = (ez - 1.0_dp - z) / (z * z)
-        case (3)
-            phi_val = (ez - 1.0_dp - z - 0.5_dp * z * z) / (z * z * z)
-        case default
-            phi_val = 0.0_dp
-        end select
-        
-        ! Handle z=0 case (diagonal elements) using L'Hopital's rule limits
-        ! phi_1(0) = 1, phi_2(0) = 1/2, phi_3(0) = 1/6
-        if (abs(z) < PHI_EPS) then
+        abs_z = abs(z)
+        kk = k
+
+        if (abs_z < PHI_EPS) then
+            ! Taylor expansion: phi_k(z) = sum_{j=0}^{N} z^j / (j+k)!
+            sum_val = 0.0_dp
+            
+            ! Direct summation for safety up to order 8
+            do j = 0, 8
+                ! Compute factorial (j+k)! inline to avoid interface issues
+                fact_val = 1
+                do jj = 2, j + kk
+                    fact_val = fact_val * jj
+                end do
+                term = z**j / real(fact_val, dp)
+                sum_val = sum_val + term
+                if (abs(term) < 1.0d-16 * max(1.0_dp, abs(sum_val))) exit
+            end do
+            phi_val = sum_val
+        else
+            ! Direct formula
             select case (k)
             case (1)
-                phi_val = 1.0_dp
+                phi_val = (exp(z) - 1.0_dp) / z
             case (2)
-                phi_val = 0.5_dp
+                phi_val = (exp(z) - 1.0_dp - z) / (z * z)
             case (3)
-                phi_val = 1.0_dp / 6.0_dp
+                phi_val = (exp(z) - 1.0_dp - z - 0.5_dp * z * z) / (z * z * z)
+            case default
+                phi_val = 0.0_dp ! Should not happen in ETDRK4
             end select
         end if
     end function calc_phi
@@ -189,7 +196,7 @@ contains
         ! Ac_t, Ac_thalf, Ac_tdt are SHARED (computed once before parallel region)
         !$omp parallel do default(shared) private(ik, p_k, rho_n, N1, N2, N3, N4, &
         !$omp                                    rho1, rho2, rho3, V_k, C1, C2, C3, comm_tmp, &
-        !$omp                                    idir, n, m)
+        !$omp                                    idir, n, m, delta_e, gamma, lambda_val)
         do ik = 1, gs%nk
             
             ! Load current density matrix for this k-point
@@ -237,7 +244,7 @@ contains
             ! ------------------------------------------------------------------
             ! Stage 4: Compute N4 = N(rho3, t + dt)
             ! ------------------------------------------------------------------
-            call build_V_and_N(gs, ik, Ac_tdt, rho3, V_k, p_k, N4, C1, C2, C3, tmp_mat, comm_tmp, factor_decoh)
+            call build_V_and_N(gs, ik, Ac_tdt, rho3, V_k, p_k, N4, C1, C2, C3, comm_tmp, factor_decoh)
 
             ! ------------------------------------------------------------------
             ! Final Update: rho_new = E * rho_n + dt * (phi1*N1 + 2*phi2*(N2+N3) + phi3*N4)

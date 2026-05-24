@@ -27,7 +27,6 @@ subroutine main_multiscale_ssbe(icomm)
     integer :: nproc, irank, icomm_macro, nproc_macro, irank_macro
     real(8), allocatable :: Ac_macro(:, :), E_macro(:, :)
     real(8), allocatable :: Jmat_macro_tmp(:, :), Jmat_macro(:, :)
-    real(8) :: Ac_half(3)
     integer, allocatable :: itbl_macro_coord(:, :)
     integer, allocatable :: itbl_macro_itype_sbe(:)
     integer :: nmacro, nmacro_max
@@ -187,12 +186,7 @@ subroutine main_multiscale_ssbe(icomm)
 
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
-                ! ETDRK4: use linear interpolation for A(t+dt/2)
-                Ac_half = 0.5d0 * (Ac_macro(1:3, imacro) + fw%vec_Ac_old%v(1:3, itbl_macro_coord(1, imacro), &
-                                                                            itbl_macro_coord(2, imacro), &
-                                                                            itbl_macro_coord(3, imacro)))
-                call dt_evolve_bloch_etdrk4(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
-                                           Ac_macro(1:3, imacro), Ac_half, Ac_macro(1:3, imacro), dt)
+                call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), dt)
                 call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
                 if (irank_macro == 0) then
                     Jmat_macro_tmp(1:3, imacro) = jmat(1:3)
