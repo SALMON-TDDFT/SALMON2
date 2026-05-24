@@ -96,6 +96,9 @@ The new parameters are:
   
   ! Option 3: Override with a fixed bandgap value (e.g., experimental value)
   ! eg_ev = 1.519d0  ! GaAs bandgap at room temperature
+  ! Активные зоны около E_F (±15 eV)
+    frozen_core_threshold_ev = -15.0d0,
+    frozen_free_threshold_ev =  15.0d0,
 /
 ```
 
