@@ -96,7 +96,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end if
     
     ! Broadcast is_active and n_active_bands to all MPI ranks
-    call comm_bcast(sbe%is_active, icomm, 0)
+    do ib = 1, sbe%nb
+      call comm_bcast(sbe%is_active(ib), icomm, 0)
+    end do
     call comm_bcast(sbe%n_active_bands, icomm, 0)
 
     ! Build active_idx mapping: 1..n_active -> global band index
@@ -388,7 +390,8 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     real(8), intent(in) :: Ac_tdt(1:3)    ! A(t + dt)
     real(8), intent(in) :: dt
     
-    integer :: nb, nba, ik, n, m, i, j, in, im, idir
+    integer :: nb, ik, n, m, i, j, in, im, idir
+    integer :: nba
     complex(8) :: rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
     complex(8) :: N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb)
     complex(8) :: p_k_full(nb, nb, 1:3)
