@@ -1,6 +1,7 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
-    use communication, only: comm_get_groupinfo, comm_summation
+    use phys_constants, only: au_ev
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use gs_info_ssbe
     use util_ssbe, only: split_range
     implicit none
@@ -21,7 +22,7 @@ module bloch_solver_ssbe
         
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
-        integer :: n_active_bands
+        integer :: n_active_bands = 0
         
         ! ETDRK4 coefficients (precomputed for fixed dt)
         complex(8), allocatable :: exp_Ldt(:,:,:)       ! E = exp(L*dt)
@@ -42,7 +43,7 @@ contains
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication
-    use salmon_global, only: frozen_core_threshold_ev, nelec
+    use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -50,7 +51,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     integer, intent(in) :: icomm
     integer :: ik, ib, nk_proc, irank, nproc, ierr
     integer, allocatable :: itbl_min(:), itbl_max(:)
-    real(8) :: eigen_ev
+    real(8) :: eigen_ev, fermi_energy_ev
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -65,19 +66,37 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
 
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
     
-    ! Initialize is_active array based on frozen_core_threshold_ev
+    ! Calculate Fermi energy (average of HOMO and LUMO) in eV at Gamma point (ik=1)
+    ! HOMO is at band gs%ne/2, LUMO is at band gs%ne/2 + 1
+    ! Use Gamma point (ik=1) for consistent classification across all MPI ranks
+    fermi_energy_ev = ((gs%eigen(gs%ne/2, 1) + gs%eigen(gs%ne/2 + 1, 1)) * 0.5d0) * au_ev
+    
+    ! Initialize is_active array based on thresholds relative to Fermi level
+    ! A band is active if: E_fermi + frozen_core_threshold_ev < E_band < E_fermi + frozen_free_threshold_ev
+    ! Use Gamma point (ik=1) for consistent classification across all MPI ranks
+    ! Rank 0 calculates is_active, then broadcasts to all other ranks
     allocate(sbe%is_active(1:sbe%nb))
-    sbe%n_active_bands = 0
-    do ib = 1, sbe%nb
-        ! Convert eigenvalue from Hartree to eV for comparison
-        eigen_ev = gs%eigen(ib, sbe%ik_min) * 27.211386245988d0
-        if (eigen_ev > frozen_core_threshold_ev) then
-            sbe%is_active(ib) = .true.
-            sbe%n_active_bands = sbe%n_active_bands + 1
-        else
-            sbe%is_active(ib) = .false.
-        end if
-    end do
+    
+    if (irank == 0) then
+        sbe%n_active_bands = 0
+        do ib = 1, sbe%nb
+            ! Convert eigenvalue from Hartree to eV for comparison
+            ! Use Gamma point (ik=1) to ensure same classification on all MPI ranks
+            eigen_ev = gs%eigen(ib, 1) * au_ev
+            ! Thresholds are now relative to Fermi level
+            if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
+                eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
+                sbe%is_active(ib) = .true.
+                sbe%n_active_bands = sbe%n_active_bands + 1
+            else
+                sbe%is_active(ib) = .false.
+            end if
+        end do
+    end if
+    
+    ! Broadcast is_active and n_active_bands to all MPI ranks
+    call comm_bcast(sbe%is_active, icomm, 0)
+    call comm_bcast(sbe%n_active_bands, icomm, 0)
 
     sbe%rho(:, :, :) = 0d0
     do ik = sbe%ik_min, sbe%ik_max
