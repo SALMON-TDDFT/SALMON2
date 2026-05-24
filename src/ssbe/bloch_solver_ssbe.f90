@@ -1,7 +1,7 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
     use phys_constants, only: au_ev
-    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, comm_bcast_logical
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use gs_info_ssbe
     use util_ssbe, only: split_range
     implicit none
@@ -43,7 +43,7 @@ contains
 
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
-    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, comm_bcast_logical
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
@@ -77,9 +77,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! Use Gamma point (ik=1) for consistent classification across all MPI ranks
     ! Rank 0 calculates is_active, then broadcasts to all other ranks
     allocate(sbe%is_active(1:sbe%nb))
+    sbe%is_active = .false.  ! Initialize on all ranks before broadcast
+    sbe%n_active_bands = 0   ! Initialize on all ranks before broadcast
     
     if (irank == 0) then
-        sbe%n_active_bands = 0
         do ib = 1, sbe%nb
             ! Convert eigenvalue from Hartree to eV for comparison
             ! Use Gamma point (ik=1) to ensure same classification on all MPI ranks
@@ -96,20 +97,23 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end if
     
     ! Broadcast is_active and n_active_bands to all MPI ranks
-    do ib = 1, sbe%nb
-      call comm_bcast_logical(sbe%is_active(ib), icomm, 0)
-    end do
+    call comm_bcast(sbe%is_active, icomm, 0)
     call comm_bcast(sbe%n_active_bands, icomm, 0)
 
     ! Build active_idx mapping: 1..n_active -> global band index
-    allocate(sbe%active_idx(sbe%n_active_bands))
-    count_active = 0
-    do ib = 1, sbe%nb
-        if (sbe%is_active(ib)) then
-            count_active = count_active + 1
-            sbe%active_idx(count_active) = ib
-        end if
-    end do
+    if (sbe%n_active_bands > 0) then
+        allocate(sbe%active_idx(sbe%n_active_bands))
+        count_active = 0
+        do ib = 1, sbe%nb
+            if (sbe%is_active(ib)) then
+                count_active = count_active + 1
+                sbe%active_idx(count_active) = ib
+            end if
+        end do
+    else
+        allocate(sbe%active_idx(1))  ! Allocate dummy array to avoid segfault
+        sbe%active_idx(1) = 1
+    end if
 
     sbe%rho(:, :, :) = 0d0
     do ik = sbe%ik_min, sbe%ik_max
@@ -426,8 +430,13 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
     !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh)
     
-    allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
-             C2_a(nba, nba), tmp_a(nba, nba), V_a(nba, nba))
+    if (nba > 0) then
+        allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
+                 C2_a(nba, nba), tmp_a(nba, nba), V_a(nba, nba))
+    else
+        allocate(rho_a(1, 1), N_a(1, 1), C1_a(1, 1), &
+                 C2_a(1, 1), tmp_a(1, 1), V_a(1, 1))
+    end if
     
     !$omp do private(ik, p_k_full, rho_n_full, rho1, rho2, rho3, &
     !$omp            N1, N2, N3, N4, i, j, idir, n, m, in, im, delta_e)
