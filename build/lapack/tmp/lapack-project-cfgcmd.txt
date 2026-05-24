@@ -1,0 +1,1 @@
+cmd='/usr/bin/cmake;-D;BUILD_SHARED_LIBS=off;-D;BUILD_TESTING=off;-D;CMAKE_BUILD_TYPE=;-D;CMAKE_INSTALL_PREFIX=/workspace/build;-D;CMAKE_Fortran_COMPILER=/usr/bin/f95;-D;CMAKE_Fortran_FLAGS= -fopenmp  -cpp  ;-D;CMAKE_Fortran_FLAGS_DEBUG=-g;-D;CMAKE_Fortran_FLAGS_RELEASE=-O3 -DNDEBUG -O3;-GUnix Makefiles;<SOURCE_DIR><SOURCE_SUBDIR>'

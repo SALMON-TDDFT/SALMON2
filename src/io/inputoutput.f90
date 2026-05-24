@@ -589,7 +589,9 @@ contains
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
       & norder_correction, &
       & t2_sbe_fs, &
-      & eg_ev
+      & eg_ev, &
+      & frozen_core_threshold_ev, &
+      & frozen_free_threshold_ev
       
     namelist/dc/ &
       & num_fragment, &
@@ -1014,6 +1016,8 @@ contains
     norder_correction = 0
     t2_sbe_fs = 1.0d10  ! Default: no dephasing (very large T2)
     eg_ev = 1.5d0       ! Default: 1.5 eV (will be converted to atomic units in gs_info_ssbe)
+    frozen_core_threshold_ev = -100.0d0   ! Default: freeze nothing (very low threshold)
+    frozen_free_threshold_ev = 100.0d0    ! Default: freeze nothing (very high threshold)
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1640,6 +1644,8 @@ contains
     call comm_bcast(norder_correction,nproc_group_global)
     call comm_bcast(t2_sbe_fs        ,nproc_group_global)
     call comm_bcast(eg_ev            ,nproc_group_global)
+    call comm_bcast(frozen_core_threshold_ev, nproc_group_global)
+    call comm_bcast(frozen_free_threshold_ev, nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2610,6 +2616,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't2_sbe_fs', t2_sbe_fs
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eg_ev', eg_ev
       
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'frozen_core_threshold_ev', frozen_core_threshold_ev
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'frozen_free_threshold_ev', frozen_free_threshold_ev
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)

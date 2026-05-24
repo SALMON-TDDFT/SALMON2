@@ -1,0 +1,45 @@
+Change Dir: /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC
+
+Run Build Command(s):/usr/bin/gmake -f Makefile VerifyFortranC && gmake[3]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+/usr/bin/cmake -S/usr/share/cmake-3.25/Modules/FortranCInterface/Verify -B/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/gmake  -f CMakeFiles/Makefile2 VerifyFortranC
+gmake[4]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+/usr/bin/cmake -S/usr/share/cmake-3.25/Modules/FortranCInterface/Verify -B/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/cmake -E cmake_progress_start /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles 5
+/usr/bin/gmake  -f CMakeFiles/Makefile2 CMakeFiles/VerifyFortranC.dir/all
+gmake[5]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+/usr/bin/gmake  -f CMakeFiles/VerifyFortran.dir/build.make CMakeFiles/VerifyFortran.dir/depend
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+cd /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC && /usr/bin/cmake -E cmake_depends "Unix Makefiles" /usr/share/cmake-3.25/Modules/FortranCInterface/Verify /usr/share/cmake-3.25/Modules/FortranCInterface/Verify /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/VerifyFortran.dir/DependInfo.cmake
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+/usr/bin/gmake  -f CMakeFiles/VerifyFortran.dir/build.make CMakeFiles/VerifyFortran.dir/build
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+[ 20%] Building Fortran object CMakeFiles/VerifyFortran.dir/VerifyFortran.f.o
+/usr/bin/f95  -I/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC -fopenmp  -cpp -O2 -DNDEBUG -O2 -c /usr/share/cmake-3.25/Modules/FortranCInterface/Verify/VerifyFortran.f -o CMakeFiles/VerifyFortran.dir/VerifyFortran.f.o
+[ 40%] Linking Fortran static library libVerifyFortran.a
+/usr/bin/cmake -P CMakeFiles/VerifyFortran.dir/cmake_clean_target.cmake
+/usr/bin/cmake -E cmake_link_script CMakeFiles/VerifyFortran.dir/link.txt --verbose=1
+/usr/bin/ar qc libVerifyFortran.a CMakeFiles/VerifyFortran.dir/VerifyFortran.f.o
+/usr/bin/ranlib libVerifyFortran.a
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+[ 40%] Built target VerifyFortran
+/usr/bin/gmake  -f CMakeFiles/VerifyFortranC.dir/build.make CMakeFiles/VerifyFortranC.dir/depend
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+cd /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC && /usr/bin/cmake -E cmake_depends "Unix Makefiles" /usr/share/cmake-3.25/Modules/FortranCInterface/Verify /usr/share/cmake-3.25/Modules/FortranCInterface/Verify /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/VerifyFortranC.dir/DependInfo.cmake
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+/usr/bin/gmake  -f CMakeFiles/VerifyFortranC.dir/build.make CMakeFiles/VerifyFortranC.dir/build
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+[ 60%] Building C object CMakeFiles/VerifyFortranC.dir/main.c.o
+/usr/bin/cc  -I/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC -O3 -DNDEBUG -o CMakeFiles/VerifyFortranC.dir/main.c.o -c /usr/share/cmake-3.25/Modules/FortranCInterface/Verify/main.c
+[ 80%] Building C object CMakeFiles/VerifyFortranC.dir/VerifyC.c.o
+/usr/bin/cc  -I/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC -O3 -DNDEBUG -o CMakeFiles/VerifyFortranC.dir/VerifyC.c.o -c /usr/share/cmake-3.25/Modules/FortranCInterface/Verify/VerifyC.c
+[100%] Linking C executable VerifyFortranC
+/usr/bin/cmake -E cmake_link_script CMakeFiles/VerifyFortranC.dir/link.txt --verbose=1
+/usr/bin/cc -O3 -DNDEBUG CMakeFiles/VerifyFortranC.dir/main.c.o CMakeFiles/VerifyFortranC.dir/VerifyC.c.o -o VerifyFortranC  libVerifyFortran.a -lgfortran -lm -lgomp -lquadmath -lm -lpthread 
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+[100%] Built target VerifyFortranC
+gmake[5]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+/usr/bin/cmake -E cmake_progress_start /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles 0
+gmake[4]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+gmake[3]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC'
+

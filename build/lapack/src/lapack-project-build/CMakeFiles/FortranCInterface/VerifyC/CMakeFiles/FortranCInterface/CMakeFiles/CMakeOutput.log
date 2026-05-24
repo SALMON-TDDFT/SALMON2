@@ -1,0 +1,21 @@
+Performing C SOURCE FILE Test C_SUPPORTS_DOLLAR succeeded with the following output:
+Change Dir: /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-JJVTSu
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_bb620/fast && gmake[3]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-JJVTSu'
+/usr/bin/gmake  -f CMakeFiles/cmTC_bb620.dir/build.make CMakeFiles/cmTC_bb620.dir/build
+gmake[4]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-JJVTSu'
+Building C object CMakeFiles/cmTC_bb620.dir/src.c.o
+/usr/bin/cc -DC_SUPPORTS_DOLLAR   -o CMakeFiles/cmTC_bb620.dir/src.c.o -c /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-JJVTSu/src.c
+Linking C executable cmTC_bb620
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_bb620.dir/link.txt --verbose=1
+/usr/bin/cc CMakeFiles/cmTC_bb620.dir/src.c.o -o cmTC_bb620 
+gmake[4]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-JJVTSu'
+gmake[3]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/VerifyC/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-JJVTSu'
+
+
+Source file was:
+
+extern int dollar$(void);
+int main() { return 0; }
+
+

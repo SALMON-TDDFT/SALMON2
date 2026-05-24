@@ -1,0 +1,1 @@
+/usr/bin/f95  -fopenmp  -cpp CMakeFiles/test_zminMax.dir/test_zminMax.f.o -o test_zminMax 

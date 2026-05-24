@@ -1,0 +1,21 @@
+Performing C SOURCE FILE Test C_SUPPORTS_DOLLAR succeeded with the following output:
+Change Dir: /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-S8EeId
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_e4d91/fast && gmake[3]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-S8EeId'
+/usr/bin/gmake  -f CMakeFiles/cmTC_e4d91.dir/build.make CMakeFiles/cmTC_e4d91.dir/build
+gmake[4]: Entering directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-S8EeId'
+Building C object CMakeFiles/cmTC_e4d91.dir/src.c.o
+/usr/bin/cc -DC_SUPPORTS_DOLLAR   -o CMakeFiles/cmTC_e4d91.dir/src.c.o -c /workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-S8EeId/src.c
+Linking C executable cmTC_e4d91
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e4d91.dir/link.txt --verbose=1
+/usr/bin/cc CMakeFiles/cmTC_e4d91.dir/src.c.o -o cmTC_e4d91 
+gmake[4]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-S8EeId'
+gmake[3]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/CMakeFiles/FortranCInterface/CMakeFiles/CMakeScratch/TryCompile-S8EeId'
+
+
+Source file was:
+
+extern int dollar$(void);
+int main() { return 0; }
+
+

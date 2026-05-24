@@ -87,15 +87,10 @@ subroutine main_realtime_ssbe(icomm)
         
         !---------------------------------------------------------------
         ! Calculate E-field at t=it*dt
-        ! E = -dA/dt. Use central difference for interior points.
+        ! E = -dA/dt. Use central difference: E(t) = -(A(t+dt) - A(t-dt)) / (2*dt)
+        ! Since Ac_ext_t is allocated from -1 to nt+1, we can safely use central difference for all it >= 1
         !---------------------------------------------------------------
-        if (it == 1) then
-            ! Forward difference at the first step to avoid accessing invalid index
-            ! assuming Ac_ext_t is valid from -1 to nt+1, but being safe
-            E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it)) / dt 
-        else
-            E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it-1)) / (2.0d0 * dt)
-        end if
+        E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it-1)) / (2.0d0 * dt)
         
         ! Energy update: dW = -E·J·V·dt
         energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt

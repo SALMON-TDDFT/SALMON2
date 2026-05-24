@@ -436,6 +436,8 @@ character(256),allocatable :: atom_name(:)
   integer        :: norder_correction
   real(8)        :: t2_sbe_fs
   real(8)        :: eg_ev
+  real(8)        :: frozen_core_threshold_ev
+  real(8)        :: frozen_free_threshold_ev
 
   !! &dc
   integer        :: num_fragment(3)

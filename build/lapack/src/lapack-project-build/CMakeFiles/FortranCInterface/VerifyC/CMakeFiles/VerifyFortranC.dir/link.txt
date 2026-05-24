@@ -1,0 +1,1 @@
+/usr/bin/cc -O3 -DNDEBUG CMakeFiles/VerifyFortranC.dir/main.c.o CMakeFiles/VerifyFortranC.dir/VerifyC.c.o -o VerifyFortranC  libVerifyFortran.a -lgfortran -lm -lgomp -lquadmath -lm -lpthread 

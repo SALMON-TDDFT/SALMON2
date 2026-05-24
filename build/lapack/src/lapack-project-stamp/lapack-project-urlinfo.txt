@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/usr/bin/cmake;-P;/workspace/build/lapack/src/lapack-project-stamp/download-lapack-project.cmake;COMMAND;/usr/bin/cmake;-P;/workspace/build/lapack/src/lapack-project-stamp/verify-lapack-project.cmake;COMMAND;/usr/bin/cmake;-P;/workspace/build/lapack/src/lapack-project-stamp/extract-lapack-project.cmake
+source_dir=/workspace/build/lapack/src/lapack-project
+work_dir=/workspace/build/lapack/src
+url(s)=https://github.com/Reference-LAPACK/lapack/archive/refs/tags/v3.12.1.tar.gz
+hash=
+no_extract=
+
