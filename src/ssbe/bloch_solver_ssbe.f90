@@ -1,7 +1,7 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
     use phys_constants, only: au_ev
-    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, comm_bcast_logical
     use gs_info_ssbe
     use util_ssbe, only: split_range
     implicit none
@@ -43,7 +43,7 @@ contains
 
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
-    use communication
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, comm_bcast_logical
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
@@ -97,7 +97,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     
     ! Broadcast is_active and n_active_bands to all MPI ranks
     do ib = 1, sbe%nb
-      call comm_bcast(sbe%is_active(ib), icomm, 0)
+      call comm_bcast_logical(sbe%is_active(ib), icomm, 0)
     end do
     call comm_bcast(sbe%n_active_bands, icomm, 0)
 
@@ -168,7 +168,7 @@ end subroutine calc_current_bloch
 
 
 function calc_trace(sbe, gs, nb_max, icomm) result(tr)
-    use communication
+    use communication, only: comm_get_groupinfo, comm_summation
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -390,11 +390,11 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     real(8), intent(in) :: Ac_tdt(1:3)    ! A(t + dt)
     real(8), intent(in) :: dt
     
-    integer :: nb, ik, n, m, i, j, in, im, idir
-    integer :: nba
-    complex(8) :: rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
-    complex(8) :: N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb)
-    complex(8) :: p_k_full(nb, nb, 1:3)
+    integer :: ik, n, m, i, j, in, im, idir
+    integer :: nb, nba
+    complex(8), allocatable :: rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
+    complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
+    complex(8), allocatable :: p_k_full(:, :, :)
     real(8) :: t2_au, prefac, delta_e
     logical :: flag_decoh
     
@@ -403,6 +403,10 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     
     nb = sbe%nb
     nba = sbe%n_active_bands
+    
+    allocate(rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb))
+    allocate(N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb))
+    allocate(p_k_full(nb, nb, 1:3))
     
     ! Check if ETDRK4 data is initialized
     if (.not. sbe%etdrk4_initialized) then
@@ -419,7 +423,8 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     end if
     
     ! Correct OpenMP pattern: allocate per-thread inside parallel region
-    !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
+    !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
+    !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh)
     
     allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
              C2_a(nba, nba), tmp_a(nba, nba), V_a(nba, nba))
@@ -765,6 +770,9 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp end do
     
     deallocate(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
+    deallocate(rho_n_full, rho1, rho2, rho3)
+    deallocate(N1, N2, N3, N4)
+    deallocate(p_k_full)
     !$omp end parallel
     
 end subroutine dt_evolve_bloch_etdrk4
