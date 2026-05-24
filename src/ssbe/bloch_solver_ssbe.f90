@@ -22,9 +22,6 @@ module bloch_solver_ssbe
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
         integer :: n_active_bands
-        integer, allocatable :: active_indices(:) ! Mapping: local_idx -> global_band_idx
-        integer :: nb_active                      ! Count of active bands
-        real(8) :: E_Fermi                        ! Fermi level in Hartree
         
         ! ETDRK4 coefficients (precomputed for fixed dt)
         complex(8), allocatable :: exp_Ldt(:,:,:)       ! E = exp(L*dt)
@@ -34,9 +31,6 @@ module bloch_solver_ssbe
         complex(8), allocatable :: phi3(:,:,:)
         complex(8), allocatable :: phi1_half(:,:,:)     ! phi1(a/2)
         logical :: etdrk4_initialized = .false.
-        
-        ! Nelec storage for freezing logic
-        integer :: nelec_global
     end type
 
 
@@ -569,14 +563,14 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
             C2 = C2 + a_diag
             
             N1 = N1 + prefac * C2
-            
-            ! Final enforcement: N1 is zero for any element involving frozen zone
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N1(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
         end if
+        
+        ! ALWAYS zero frozen zones in N1 (moved outside if-block)
+        do m = 1, nb
+            do n = 1, nb
+                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N1(n, m) = dcmplx(0d0, 0d0)
+            end do
+        end do
         
         ! rho1 = A * rho_n + dt * phi1(a/2) * N1  (element-wise multiplication)
         do m = 1, nb
@@ -652,14 +646,14 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
             C2 = C2 + a_diag
             
             N2 = N2 + prefac * C2
-            
-            ! Final enforcement: N2 is zero for any element involving frozen zone
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N2(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
         end if
+        
+        ! ALWAYS zero frozen zones in N2 (moved outside if-block)
+        do m = 1, nb
+            do n = 1, nb
+                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N2(n, m) = dcmplx(0d0, 0d0)
+            end do
+        end do
         
         ! rho2 = A * rho_n + dt * phi1(a/2) * N2
         do m = 1, nb
@@ -731,14 +725,14 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
             C2 = C2 + a_diag
             
             N3 = N3 + prefac * C2
-            
-            ! Final enforcement: N3 is zero for any element involving frozen zone
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N3(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
         end if
+        
+        ! ALWAYS zero frozen zones in N3 (moved outside if-block)
+        do m = 1, nb
+            do n = 1, nb
+                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N3(n, m) = dcmplx(0d0, 0d0)
+            end do
+        end do
         
         ! rho3 = A * rho1 + dt * phi1(a/2) * (2*N3 - N1)
         do m = 1, nb
@@ -814,14 +808,14 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
             C2 = C2 + a_diag
             
             N4 = N4 + prefac * C2
-            
-            ! Final enforcement: N4 is zero for any element involving frozen zone
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N4(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
         end if
+        
+        ! ALWAYS zero frozen zones in N4 (moved outside if-block)
+        do m = 1, nb
+            do n = 1, nb
+                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N4(n, m) = dcmplx(0d0, 0d0)
+            end do
+        end do
         
         !=== Final update: rho_{n+1} = E * rho_n + dt * (phi1(a)*N1 + 2*phi2(a)*(N2+N3) + phi3(a)*N4) ===
         do m = 1, nb

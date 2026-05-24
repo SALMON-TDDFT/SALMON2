@@ -1,1 +1,45 @@
-(src/ssbe/bloch_solver_ssbe.f90)
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.mod
+*.exe
+*.dll
+*.so
+*.a
+*.out
+
+# Dependencies
+build/
+dist/
+lib/
+bin/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+.eggs/
+```
