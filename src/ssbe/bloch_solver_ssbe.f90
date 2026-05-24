@@ -103,6 +103,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! Broadcast is_active array using integer buffer
     if (sbe%nb > 0) then
         allocate(is_active_buf(1:sbe%nb))
+        is_active_buf(:) = 0
         if (irank == 0) then
             do ib = 1, sbe%nb
                 if (sbe%is_active(ib)) then
@@ -114,15 +115,14 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         end if
         ! Broadcast the entire integer array
         call comm_bcast(is_active_buf, icomm, 0)
-        if (irank /= 0) then
-            do ib = 1, sbe%nb
-                if (is_active_buf(ib) == 1) then
-                    sbe%is_active(ib) = .true.
-                else
-                    sbe%is_active(ib) = .false.
-                end if
-            end do
-        end if
+        ! All ranks convert back to logical
+        do ib = 1, sbe%nb
+            if (is_active_buf(ib) == 1) then
+                sbe%is_active(ib) = .true.
+            else
+                sbe%is_active(ib) = .false.
+            end if
+        end do
         deallocate(is_active_buf)
     end if
 
