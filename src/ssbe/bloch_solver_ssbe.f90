@@ -53,6 +53,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     integer :: ik, ib, nk_proc, irank, nproc, ierr, count_active
     integer, allocatable :: itbl_min(:), itbl_max(:)
     real(8) :: eigen_ev, fermi_energy_ev
+    integer, allocatable :: is_active_buf(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -99,9 +100,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! Broadcast n_active_bands to all MPI ranks first
     call comm_bcast(sbe%n_active_bands, icomm, 0)
     
-    ! Broadcast is_active array using integer buffer (no logical array broadcast available)
+    ! Broadcast is_active array using integer buffer
     if (sbe%nb > 0) then
-        integer, allocatable :: is_active_buf(:)
         allocate(is_active_buf(1:sbe%nb))
         if (irank == 0) then
             do ib = 1, sbe%nb
@@ -112,6 +112,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                 end if
             end do
         end if
+        ! Broadcast the entire integer array
         call comm_bcast(is_active_buf, icomm, 0)
         if (irank /= 0) then
             do ib = 1, sbe%nb
