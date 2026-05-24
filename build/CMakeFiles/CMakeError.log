@@ -1,0 +1,85 @@
+Performing Fortran SOURCE FILE Test FORTRAN_-Cpp_OPTIONS failed with the following output:
+Change Dir: /workspace/build/CMakeFiles/CMakeScratch/TryCompile-ZLuRI2
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_6eaef/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_6eaef.dir/build.make CMakeFiles/cmTC_6eaef.dir/build
+gmake[1]: Entering directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-ZLuRI2'
+Building Fortran object CMakeFiles/cmTC_6eaef.dir/src.F90.o
+/usr/bin/f95   -DFORTRAN_-Cpp_OPTIONS -Cpp -c /workspace/build/CMakeFiles/CMakeScratch/TryCompile-ZLuRI2/src.F90 -o CMakeFiles/cmTC_6eaef.dir/src.F90.o
+f95: error: unrecognized command-line option '-Cpp'; did you mean '-cpp'?
+gmake[1]: *** [CMakeFiles/cmTC_6eaef.dir/build.make:78: CMakeFiles/cmTC_6eaef.dir/src.F90.o] Error 1
+gmake[1]: Leaving directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-ZLuRI2'
+gmake: *** [Makefile:127: cmTC_6eaef/fast] Error 2
+
+
+Source file was:
+       program test
+       stop
+       end program
+
+Performing Fortran SOURCE FILE Test FORTRAN_-fpp_OPTIONS failed with the following output:
+Change Dir: /workspace/build/CMakeFiles/CMakeScratch/TryCompile-GiWgkn
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_3da74/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_3da74.dir/build.make CMakeFiles/cmTC_3da74.dir/build
+gmake[1]: Entering directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-GiWgkn'
+Building Fortran object CMakeFiles/cmTC_3da74.dir/src.F90.o
+/usr/bin/f95   -DFORTRAN_-fpp_OPTIONS -fpp -c /workspace/build/CMakeFiles/CMakeScratch/TryCompile-GiWgkn/src.F90 -o CMakeFiles/cmTC_3da74.dir/src.F90.o
+f95: error: unrecognized command-line option '-fpp'; did you mean '-cpp'?
+gmake[1]: *** [CMakeFiles/cmTC_3da74.dir/build.make:78: CMakeFiles/cmTC_3da74.dir/src.F90.o] Error 1
+gmake[1]: Leaving directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-GiWgkn'
+gmake: *** [Makefile:127: cmTC_3da74/fast] Error 2
+
+
+Source file was:
+       program test
+       stop
+       end program
+
+Determining if the __FUJITSU exist failed with the following output:
+Change Dir: /workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_1855b/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_1855b.dir/build.make CMakeFiles/cmTC_1855b.dir/build
+gmake[1]: Entering directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u'
+Building C object CMakeFiles/cmTC_1855b.dir/CheckSymbolExists.c.o
+/usr/bin/cc   -fopenmp     -std=gnu99 -o CMakeFiles/cmTC_1855b.dir/CheckSymbolExists.c.o -c /workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u/CheckSymbolExists.c
+/workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u/CheckSymbolExists.c: In function ‘main’:
+/workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u/CheckSymbolExists.c:7:19: error: ‘__FUJITSU’ undeclared (first use in this function)
+    7 |   return ((int*)(&__FUJITSU))[argc];
+      |                   ^~~~~~~~~
+/workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u/CheckSymbolExists.c:7:19: note: each undeclared identifier is reported only once for each function it appears in
+gmake[1]: *** [CMakeFiles/cmTC_1855b.dir/build.make:78: CMakeFiles/cmTC_1855b.dir/CheckSymbolExists.c.o] Error 1
+gmake[1]: Leaving directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-Nwux7u'
+gmake: *** [Makefile:127: cmTC_1855b/fast] Error 2
+
+
+File CheckSymbolExists.c:
+/* */
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef __FUJITSU
+  return ((int*)(&__FUJITSU))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the Fortran sgemm exists failed with the following output:
+Change Dir: /workspace/build/CMakeFiles/CMakeScratch/TryCompile-sk81En
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_4b249/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_4b249.dir/build.make CMakeFiles/cmTC_4b249.dir/build
+gmake[1]: Entering directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-sk81En'
+Building Fortran object CMakeFiles/cmTC_4b249.dir/testFortranCompiler.f.o
+/usr/bin/f95   -fopenmp  -cpp    -c /workspace/build/CMakeFiles/CMakeScratch/TryCompile-sk81En/testFortranCompiler.f -o CMakeFiles/cmTC_4b249.dir/testFortranCompiler.f.o
+Linking Fortran executable cmTC_4b249
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4b249.dir/link.txt --verbose=1
+/usr/bin/f95  -fopenmp  -cpp    CMakeFiles/cmTC_4b249.dir/testFortranCompiler.f.o -o cmTC_4b249 
+/usr/bin/ld: CMakeFiles/cmTC_4b249.dir/testFortranCompiler.f.o: in function `MAIN__':
+testFortranCompiler.f:(.text+0xa): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_4b249.dir/build.make:99: cmTC_4b249] Error 1
+gmake[1]: Leaving directory '/workspace/build/CMakeFiles/CMakeScratch/TryCompile-sk81En'
+gmake: *** [Makefile:127: cmTC_4b249/fast] Error 2
+
+
+

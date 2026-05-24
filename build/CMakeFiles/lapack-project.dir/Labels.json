@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/workspace/build/CMakeFiles/lapack-project"
+		},
+		{
+			"file" : "/workspace/build/CMakeFiles/lapack-project.rule"
+		},
+		{
+			"file" : "/workspace/build/CMakeFiles/lapack-project-complete.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-build.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-configure.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-download.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-install.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-mkdir.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-patch.rule"
+		},
+		{
+			"file" : "/workspace/build/lapack/src/lapack-project-stamp/lapack-project-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"lapack-project"
+		],
+		"name" : "lapack-project"
+	}
+}

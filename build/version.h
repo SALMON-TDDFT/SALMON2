@@ -1,0 +1,10 @@
+#ifndef SALMON_VERSION_H
+#define SALMON_VERSION_H
+
+#define SALMON_VERSION_STRING "2.2.2"
+
+#define SALMON_VER_MAJOR 2
+#define SALMON_VER_MINOR 2
+#define SALMON_VER_MICRO 2
+
+#endif

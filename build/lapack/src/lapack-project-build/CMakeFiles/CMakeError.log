@@ -1,0 +1,74 @@
+Fortran EXT_ETIME does not exist. 
+ Change Dir: /workspace/build/lapack/src/lapack-project-build/INSTALL
+
+Run Build Command(s):/usr/bin/gmake -f Makefile secondtst_EXT_ETIME && gmake[3]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/cmake -S/workspace/build/lapack/src/lapack-project/INSTALL -B/workspace/build/lapack/src/lapack-project-build/INSTALL --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/gmake  -f CMakeFiles/Makefile2 secondtst_EXT_ETIME
+gmake[4]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/cmake -S/workspace/build/lapack/src/lapack-project/INSTALL -B/workspace/build/lapack/src/lapack-project-build/INSTALL --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/cmake -E cmake_progress_start /workspace/build/lapack/src/lapack-project-build/INSTALL/CMakeFiles 3
+/usr/bin/gmake  -f CMakeFiles/Makefile2 CMakeFiles/secondtst_EXT_ETIME.dir/all
+gmake[5]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/gmake  -f CMakeFiles/secondtst_EXT_ETIME.dir/build.make CMakeFiles/secondtst_EXT_ETIME.dir/depend
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+cd /workspace/build/lapack/src/lapack-project-build/INSTALL && /usr/bin/cmake -E cmake_depends "Unix Makefiles" /workspace/build/lapack/src/lapack-project/INSTALL /workspace/build/lapack/src/lapack-project/INSTALL /workspace/build/lapack/src/lapack-project-build/INSTALL /workspace/build/lapack/src/lapack-project-build/INSTALL /workspace/build/lapack/src/lapack-project-build/INSTALL/CMakeFiles/secondtst_EXT_ETIME.dir/DependInfo.cmake
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/gmake  -f CMakeFiles/secondtst_EXT_ETIME.dir/build.make CMakeFiles/secondtst_EXT_ETIME.dir/build
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+[ 33%] Building Fortran object CMakeFiles/secondtst_EXT_ETIME.dir/second_EXT_ETIME.f.o
+/usr/bin/f95   -fopenmp  -cpp -frecursive -c /workspace/build/lapack/src/lapack-project/INSTALL/second_EXT_ETIME.f -o CMakeFiles/secondtst_EXT_ETIME.dir/second_EXT_ETIME.f.o
+[ 66%] Building Fortran object CMakeFiles/secondtst_EXT_ETIME.dir/secondtst.f.o
+/usr/bin/f95   -fopenmp  -cpp -frecursive -c /workspace/build/lapack/src/lapack-project/INSTALL/secondtst.f -o CMakeFiles/secondtst_EXT_ETIME.dir/secondtst.f.o
+[100%] Linking Fortran executable secondtst_EXT_ETIME
+/usr/bin/cmake -E cmake_link_script CMakeFiles/secondtst_EXT_ETIME.dir/link.txt --verbose=1
+/usr/bin/f95  -fopenmp  -cpp CMakeFiles/secondtst_EXT_ETIME.dir/second_EXT_ETIME.f.o CMakeFiles/secondtst_EXT_ETIME.dir/secondtst.f.o -o secondtst_EXT_ETIME 
+/usr/bin/ld: CMakeFiles/secondtst_EXT_ETIME.dir/second_EXT_ETIME.f.o: in function `second_':
+second_EXT_ETIME.f:(.text+0x10): undefined reference to `etime_'
+collect2: error: ld returned 1 exit status
+gmake[6]: *** [CMakeFiles/secondtst_EXT_ETIME.dir/build.make:114: secondtst_EXT_ETIME] Error 1
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+gmake[5]: *** [CMakeFiles/Makefile2:132: CMakeFiles/secondtst_EXT_ETIME.dir/all] Error 2
+gmake[5]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+gmake[4]: *** [CMakeFiles/Makefile2:139: CMakeFiles/secondtst_EXT_ETIME.dir/rule] Error 2
+gmake[4]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+gmake[3]: *** [Makefile:140: secondtst_EXT_ETIME] Error 2
+gmake[3]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+
+ 
+Fortran EXT_ETIME_ does not exist. 
+ Change Dir: /workspace/build/lapack/src/lapack-project-build/INSTALL
+
+Run Build Command(s):/usr/bin/gmake -f Makefile secondtst_EXT_ETIME_ && gmake[3]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/cmake -S/workspace/build/lapack/src/lapack-project/INSTALL -B/workspace/build/lapack/src/lapack-project-build/INSTALL --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/gmake  -f CMakeFiles/Makefile2 secondtst_EXT_ETIME_
+gmake[4]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/cmake -S/workspace/build/lapack/src/lapack-project/INSTALL -B/workspace/build/lapack/src/lapack-project-build/INSTALL --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/cmake -E cmake_progress_start /workspace/build/lapack/src/lapack-project-build/INSTALL/CMakeFiles 3
+/usr/bin/gmake  -f CMakeFiles/Makefile2 CMakeFiles/secondtst_EXT_ETIME_.dir/all
+gmake[5]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/gmake  -f CMakeFiles/secondtst_EXT_ETIME_.dir/build.make CMakeFiles/secondtst_EXT_ETIME_.dir/depend
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+cd /workspace/build/lapack/src/lapack-project-build/INSTALL && /usr/bin/cmake -E cmake_depends "Unix Makefiles" /workspace/build/lapack/src/lapack-project/INSTALL /workspace/build/lapack/src/lapack-project/INSTALL /workspace/build/lapack/src/lapack-project-build/INSTALL /workspace/build/lapack/src/lapack-project-build/INSTALL /workspace/build/lapack/src/lapack-project-build/INSTALL/CMakeFiles/secondtst_EXT_ETIME_.dir/DependInfo.cmake
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+/usr/bin/gmake  -f CMakeFiles/secondtst_EXT_ETIME_.dir/build.make CMakeFiles/secondtst_EXT_ETIME_.dir/build
+gmake[6]: Entering directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+[ 33%] Building Fortran object CMakeFiles/secondtst_EXT_ETIME_.dir/second_EXT_ETIME_.f.o
+/usr/bin/f95   -fopenmp  -cpp -frecursive -c /workspace/build/lapack/src/lapack-project/INSTALL/second_EXT_ETIME_.f -o CMakeFiles/secondtst_EXT_ETIME_.dir/second_EXT_ETIME_.f.o
+[ 66%] Building Fortran object CMakeFiles/secondtst_EXT_ETIME_.dir/secondtst.f.o
+/usr/bin/f95   -fopenmp  -cpp -frecursive -c /workspace/build/lapack/src/lapack-project/INSTALL/secondtst.f -o CMakeFiles/secondtst_EXT_ETIME_.dir/secondtst.f.o
+[100%] Linking Fortran executable secondtst_EXT_ETIME_
+/usr/bin/cmake -E cmake_link_script CMakeFiles/secondtst_EXT_ETIME_.dir/link.txt --verbose=1
+/usr/bin/f95  -fopenmp  -cpp CMakeFiles/secondtst_EXT_ETIME_.dir/second_EXT_ETIME_.f.o CMakeFiles/secondtst_EXT_ETIME_.dir/secondtst.f.o -o secondtst_EXT_ETIME_ 
+/usr/bin/ld: CMakeFiles/secondtst_EXT_ETIME_.dir/second_EXT_ETIME_.f.o: in function `second_':
+second_EXT_ETIME_.f:(.text+0x10): undefined reference to `etime__'
+collect2: error: ld returned 1 exit status
+gmake[6]: *** [CMakeFiles/secondtst_EXT_ETIME_.dir/build.make:114: secondtst_EXT_ETIME_] Error 1
+gmake[6]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+gmake[5]: *** [CMakeFiles/Makefile2:158: CMakeFiles/secondtst_EXT_ETIME_.dir/all] Error 2
+gmake[5]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+gmake[4]: *** [CMakeFiles/Makefile2:165: CMakeFiles/secondtst_EXT_ETIME_.dir/rule] Error 2
+gmake[4]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+gmake[3]: *** [Makefile:153: secondtst_EXT_ETIME_] Error 2
+gmake[3]: Leaving directory '/workspace/build/lapack/src/lapack-project-build/INSTALL'
+
+ 

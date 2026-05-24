@@ -1,0 +1,12 @@
+# Target labels
+ lapack-project
+# Source files and their labels
+/workspace/build/CMakeFiles/lapack-project-install
+/workspace/build/CMakeFiles/lapack-project-install.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-install.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-build.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-configure.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-patch.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-update.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-download.rule
+/workspace/build/lapack/src/lapack-project-stamp/lapack-project-mkdir.rule

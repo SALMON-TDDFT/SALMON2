@@ -1,0 +1,99 @@
+!########################################################################################!
+! Excercise 08: Geometry optimization of C2H2 molecule                                   !
+!----------------------------------------------------------------------------------------!
+! * The detail of this excercise is explained in our manual(see chapter: 'Exercises').   !
+!   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
+! * Input format consists of group of keywords like:                                     !
+!     &group                                                                             !
+!       input keyword = xxx                                                              !
+!     /                                                                                  !
+!   (see chapter: 'List of input keywords' in the manual)                                !
+!----------------------------------------------------------------------------------------!
+! * Conversion from unit_system = 'a.u.' to 'A_eV_fs':                                   !
+!   Length: 1 [a.u.] = 0.52917721067    [Angstrom]                                       !
+!   Energy: 1 [a.u.] = 27.21138505      [eV]                                             !
+!   Time  : 1 [a.u.] = 0.02418884326505 [fs]                                             !
+!########################################################################################!
+
+&calculation
+  !type of theory
+  theory = 'dft'
+  
+  !geometry optimization option
+  yn_opt = 'y'
+/
+
+&control
+  !common name of output files
+  sysname = 'C2H2'
+/
+
+&units
+  !units used in input and output files
+  unit_system = 'A_eV_fs'
+/
+
+&system
+  !periodic boundary condition
+  yn_periodic = 'n'
+  
+  !number of elements, atoms, electrons and states(orbitals)
+  nelem  = 2
+  natom  = 4
+  nelec  = 10
+  nstate = 6
+/
+
+&pseudo
+  !name of input pseudo potential file
+  file_pseudo(1) = './C_rps.dat'
+  file_pseudo(2) = './H_rps.dat'
+  
+  !atomic number of element
+  izatom(1) = 6
+  izatom(2) = 1
+  
+  !angular momentum of pseudopotential that will be treated as local
+  lloc_ps(1) = 1
+  lloc_ps(2) = 0
+  !--- Caution ---------------------------------------!
+  ! Indices must correspond to those in &atomic_coor. !
+  !---------------------------------------------------!
+/
+
+&functional
+  !functional('PZ' is Perdew-Zunger LDA: Phys. Rev. B 23, 5048 (1981).)
+  xc = 'PZ'
+/
+
+&rgrid
+  !spatial grid spacing(x,y,z)
+  dl(1:3) = 0.20d0, 0.20d0, 0.20d0
+  
+  !number of spatial grids(x,y,z)
+  num_rgrid(1:3) = 60, 60, 80
+/
+
+&scf
+  !maximum number of scf iteration and threshold of convergence for ground state calculation
+  nscf      = 300
+  threshold = 1.0d-9
+/
+
+&opt
+  !threshold(maximum force on atom) of convergence for geometry optimization
+  convrg_opt_fmax = 1.0d-3
+/
+
+&atomic_coor
+  !cartesian atomic coodinates
+  'C'    0.0    0.0    0.6  1  y
+  'H'    0.0    0.0    1.7  2  y
+  'C'    0.0    0.0   -0.6  1  y
+  'H'    0.0    0.0   -1.7  2  y
+  !--- Format -------------------------------------------------------!
+  ! 'symbol' x y z index(correspond to that of pseudo potential) y/n !
+  !--- Caution ------------------------------------------------------!
+  ! final index(y/n) determines free/fix for the atom coordinate.    !
+  !------------------------------------------------------------------!
+/

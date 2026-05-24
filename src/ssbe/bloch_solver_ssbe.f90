@@ -22,6 +22,9 @@ module bloch_solver_ssbe
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
         integer :: n_active_bands
+        integer, allocatable :: active_indices(:) ! Mapping: local_idx -> global_band_idx
+        integer :: nb_active                      ! Count of active bands
+        real(8) :: E_Fermi                        ! Fermi level in Hartree
         
         ! ETDRK4 coefficients (precomputed for fixed dt)
         complex(8), allocatable :: exp_Ldt(:,:,:)       ! E = exp(L*dt)
@@ -31,6 +34,9 @@ module bloch_solver_ssbe
         complex(8), allocatable :: phi3(:,:,:)
         complex(8), allocatable :: phi1_half(:,:,:)     ! phi1(a/2)
         logical :: etdrk4_initialized = .false.
+        
+        ! Nelec storage for freezing logic
+        integer :: nelec_global
     end type
 
 
