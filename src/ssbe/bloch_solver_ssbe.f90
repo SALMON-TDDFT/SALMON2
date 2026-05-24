@@ -101,9 +101,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     call comm_bcast(sbe%n_active_bands, icomm, 0)
     
     ! Broadcast is_active array using integer buffer
+    ! This must be done outside any OpenMP parallel region
     if (sbe%nb > 0) then
+        ! All ranks allocate and participate in broadcast
         allocate(is_active_buf(1:sbe%nb))
         is_active_buf(:) = 0
+        
         if (irank == 0) then
             do ib = 1, sbe%nb
                 if (sbe%is_active(ib)) then
@@ -113,8 +116,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                 end if
             end do
         end if
+        
         ! Broadcast the entire integer array
         call comm_bcast(is_active_buf, icomm, 0)
+        
         ! All ranks convert back to logical
         do ib = 1, sbe%nb
             if (is_active_buf(ib) == 1) then
@@ -123,7 +128,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                 sbe%is_active(ib) = .false.
             end if
         end do
-        deallocate(is_active_buf)
+        
+        if (allocated(is_active_buf)) deallocate(is_active_buf)
     end if
 
     ! Build active_idx mapping: 1..n_active -> global band index
