@@ -1,3 +1,63 @@
-(src/ssbe/bloch_solver_ssbe.f90) is a source code file, and there are no build artifacts, dependencies, or temporary files in the changes provided.
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.mod
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
-(empty — output nothing)
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.conda/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+
+# Build directories
+build/
+dist/
+*.egg-info/
+.tox/
+.hypothesis/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+nbproject/
+
+# System
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Icon?
+Thumbs.db
+```
