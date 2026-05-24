@@ -1,5 +1,6 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
+    use phys_constants, only: au_ev
     use communication, only: comm_get_groupinfo, comm_summation
     use gs_info_ssbe
     use util_ssbe, only: split_range
@@ -42,7 +43,7 @@ contains
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication
-    use salmon_global, only: frozen_core_threshold_ev, nelec
+    use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -50,7 +51,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     integer, intent(in) :: icomm
     integer :: ik, ib, nk_proc, irank, nproc, ierr
     integer, allocatable :: itbl_min(:), itbl_max(:)
-    real(8) :: eigen_ev
+    real(8) :: eigen_ev, fermi_energy_ev
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -65,13 +66,20 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
 
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
     
-    ! Initialize is_active array based on frozen_core_threshold_ev
+    ! Calculate Fermi energy (average of HOMO and LUMO) in eV
+    ! HOMO is at band gs%ne/2, LUMO is at band gs%ne/2 + 1
+    fermi_energy_ev = ((gs%eigen(gs%ne/2, 1) + gs%eigen(gs%ne/2 + 1, 1)) * 0.5d0) * au_ev
+    
+    ! Initialize is_active array based on thresholds relative to Fermi level
+    ! A band is active if: E_fermi + frozen_core_threshold_ev < E_band < E_fermi + frozen_free_threshold_ev
     allocate(sbe%is_active(1:sbe%nb))
     sbe%n_active_bands = 0
     do ib = 1, sbe%nb
         ! Convert eigenvalue from Hartree to eV for comparison
-        eigen_ev = gs%eigen(ib, sbe%ik_min) * 27.211386245988d0
-        if (eigen_ev > frozen_core_threshold_ev) then
+        eigen_ev = gs%eigen(ib, sbe%ik_min) * au_ev
+        ! Thresholds are now relative to Fermi level
+        if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
+            eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
             sbe%is_active(ib) = .true.
             sbe%n_active_bands = sbe%n_active_bands + 1
         else

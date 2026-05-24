@@ -1,45 +1,9 @@
 ```
-# Compiled and build artifacts
-*.o
-*.obj
-*.mod
-*.exe
-*.dll
-*.so
-*.a
-*.out
-
-# Dependencies
+# Build artifacts
 build/
-dist/
-lib/
-bin/
+CMakeCache.txt
+CMakeFiles/
 
-# Logs and temp files
+# Logs
 *.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
-.idea/
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg-info/
-.eggs/
 ```

@@ -1016,8 +1016,8 @@ contains
     norder_correction = 0
     t2_sbe_fs = 1.0d10  ! Default: no dephasing (very large T2)
     eg_ev = 1.5d0       ! Default: 1.5 eV (will be converted to atomic units in gs_info_ssbe)
-    frozen_core_threshold_ev = -100.0d0   ! Default: freeze nothing (very low threshold)
-    frozen_free_threshold_ev = 100.0d0    ! Default: freeze nothing (very high threshold)
+    frozen_core_threshold_ev = -100.0d0   ! Default: freeze nothing (very low threshold, relative to Fermi level in eV)
+    frozen_free_threshold_ev = 100.0d0    ! Default: freeze nothing (very high threshold, relative to Fermi level in eV)
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
