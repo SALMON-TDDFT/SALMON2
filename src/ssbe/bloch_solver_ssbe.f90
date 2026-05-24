@@ -8,7 +8,7 @@ module bloch_solver_ssbe
 
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
-              dt_evolve_bloch, dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
+              dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
               init_etdrk4_data, finalize_etdrk4_data
 
 
@@ -23,6 +23,7 @@ module bloch_solver_ssbe
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
         integer :: n_active_bands = 0
+        integer, allocatable :: active_idx(:)  ! Mapping: 1..n_active -> global band index
         
         ! ETDRK4 coefficients (precomputed for fixed dt)
         complex(8), allocatable :: exp_Ldt(:,:,:)       ! E = exp(L*dt)
@@ -49,7 +50,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     type(s_sbe_gs_info), intent(in) :: gs
     integer, intent(in) :: nb_sbe
     integer, intent(in) :: icomm
-    integer :: ik, ib, nk_proc, irank, nproc, ierr
+    integer :: ik, ib, nk_proc, irank, nproc, ierr, count_active
     integer, allocatable :: itbl_min(:), itbl_max(:)
     real(8) :: eigen_ev, fermi_energy_ev
 
@@ -97,6 +98,16 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! Broadcast is_active and n_active_bands to all MPI ranks
     call comm_bcast(sbe%is_active, icomm, 0)
     call comm_bcast(sbe%n_active_bands, icomm, 0)
+
+    ! Build active_idx mapping: 1..n_active -> global band index
+    allocate(sbe%active_idx(sbe%n_active_bands))
+    count_active = 0
+    do ib = 1, sbe%nb
+        if (sbe%is_active(ib)) then
+            count_active = count_active + 1
+            sbe%active_idx(count_active) = ib
+        end if
+    end do
 
     sbe%rho(:, :, :) = 0d0
     do ik = sbe%ik_min, sbe%ik_max
@@ -153,106 +164,6 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
 end subroutine calc_current_bloch
 
 
-subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
-    implicit none
-    type(s_sbe_bloch_solver), intent(inout) :: sbe
-    type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), intent(in) :: Ac(1:3)
-    real(8), intent(in) :: dt
-    integer :: nb, nk, ik
-
-    complex(8) :: hrho1_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho2_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho3_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho4_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3)
-
-    nb = sbe%nb 
-    nk = sbe%nk
-
-    !$omp parallel do default(shared) private(ik, p_rvnl_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k)
-    do ik = sbe%ik_min, sbe%ik_max
-        p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
-        if (sbe%flag_vnl_correction) then
-            p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) =  p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) &
-                & + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
-        end if
-
-        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
-        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, hrho2_k)
-        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, hrho3_k)
-        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, hrho4_k)
-
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho1_k * (- zi * dt)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
-
-        ! Enforce Hermiticity: compensates numerical drift from Taylor series + decoherence
-        sbe%rho(:, :, ik) = 0.5d0 * (sbe%rho(:, :, ik) + conjg(transpose(sbe%rho(:, :, ik))))
-
-    end do
-    return
-
-contains
-
-
-    !Calculate [H_eff, rho] commutation and add gauge-covariant decoherence (Eq. 7):
-    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
-        use phys_constants, only: au_fs
-        use salmon_global, only: t2_sbe_fs
-        implicit none
-        integer, intent(in) :: ik
-        complex(8), intent(in) :: rho_k(nb, nb)
-        complex(8), intent(in) :: p_k(nb, nb, 1:3)
-        complex(8), intent(out) :: hrho_k(nb, nb)
-        integer :: idir, ib, jb
-        real(8) :: t2_au, prefac
-        complex(8) :: C2_k(nb, nb), Heff_k(nb, nb)
-
-        ! 1. [H0, rho]_ij = (eps_i - eps_j) * rho_ij
-        hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
-
-        ! 2. Add [A·p, rho] -> hrho_k = [H_eff, rho]
-        do idir = 1, 3
-            call ZGEMM("N","N", nb, nb, nb, &
-                dcmplx(+Ac(idir), 0d0), p_k(:, :, idir), nb, &
-                rho_k(:, :), nb, dcmplx(1d0, 0d0), hrho_k(:, :), nb)
-
-            call ZGEMM("N","N", nb, nb, nb, &
-                dcmplx(-Ac(idir), 0d0), rho_k(:, :), nb, &
-                p_k(:, :, idir), nb, dcmplx(1d0, 0d0), hrho_k(:, :), nb)
-        end do
-
-        ! 3. Gauge-covariant decoherence (Eq. 7 of paper 2012.00994v1)
-        ! D = -1/(T2*Eg^2) * [H_eff, [H_eff, rho]]
-        ! SALMON convention: H_eff = H0 + A*p (consistent with evolution above)
-        if (0.0d0 < t2_sbe_fs .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
-
-            ! Form H_eff = diag(eps) + A·p (CONSISTENT with evolution)
-            Heff_k = 0d0
-            do ib = 1, nb
-                Heff_k(ib, ib) = gs%eigen(ib, ik)
-            end do
-            do idir = 1, 3
-                Heff_k = Heff_k + Ac(idir) * p_k(:, :, idir)
-            end do
-
-            ! C2 = [H_eff, hrho_k] = [H_eff, [H_eff, rho]]
-            C2_k = 0d0
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), Heff_k, nb, hrho_k, nb, dcmplx(0d0, 0d0), C2_k, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), hrho_k, nb, Heff_k, nb, dcmplx(1d0, 0d0), C2_k, nb)
-
-            ! Evolution: rho += (-zi*dt)*hrho. To add dt*D, need hrho += zi*D
-            hrho_k = hrho_k + zi * (prefac * C2_k)
-        endif
-        
-        ! Optional: Enforce Hermiticity of hrho_k for Taylor series stability
-        ! (Done after rho update in main loop instead)
-    end subroutine calc_hrho_bloch_k
-end subroutine
 
 function calc_trace(sbe, gs, nb_max, icomm) result(tr)
     use communication
@@ -456,7 +367,7 @@ end function calc_phi
 
 
 subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
-    ! ETDRK4 time evolution for SBE (Kassam-Trefethen 2005)
+    ! ETDRK4 time evolution for SBE (Kassam-Trefethen 2005) with submatrix ZGEMM
     ! Interface: accepts three vector potential arrays at t, t+dt/2, t+dt
     use phys_constants, only: au_fs
     use salmon_global, only: t2_sbe_fs
@@ -468,21 +379,18 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     real(8), intent(in) :: Ac_tdt(1:3)    ! A(t + dt)
     real(8), intent(in) :: dt
     
-    integer :: nb, ik, n, m
-    complex(8) :: rho_n(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
+    integer :: nb, nba, ik, n, m, i, j, in, im, idir
+    complex(8) :: rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb)
     complex(8) :: N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb)
-    complex(8) :: p_k(nb, nb, 1:3)
+    complex(8) :: p_k_full(nb, nb, 1:3)
     real(8) :: t2_au, prefac, delta_e
-    complex(8) :: a_diag(nb, nb)
-    
-    ! Temporary arrays for intermediate calculations
-    complex(8) :: tmp_mat(nb, nb), C1(nb, nb), C2(nb, nb), V_k(nb, nb)
-    integer :: idir
-    
-    ! Precompute decoherence scalars outside OpenMP to avoid race conditions and overhead
     logical :: flag_decoh
     
+    ! Submatrix arrays (allocated per-thread inside parallel region)
+    complex(8), allocatable :: rho_a(:, :), N_a(:, :), C1_a(:, :), C2_a(:, :), tmp_a(:, :), V_a(:, :)
+    
     nb = sbe%nb
+    nba = sbe%n_active_bands
     
     ! Check if ETDRK4 data is initialized
     if (.not. sbe%etdrk4_initialized) then
@@ -498,375 +406,343 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         flag_decoh = .false.
     end if
     
-    !$omp parallel do default(shared) private(ik, p_k, rho_n, N1, N2, N3, N4, &
-    !$omp                                    rho1, rho2, rho3, &
-    !$omp                                    V_k, C1, C2, tmp_mat, idir, n, m, delta_e, a_diag)
+    ! Correct OpenMP pattern: allocate per-thread inside parallel region
+    !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
+    
+    allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
+             C2_a(nba, nba), tmp_a(nba, nba), V_a(nba, nba))
+    
+    !$omp do private(ik, p_k_full, rho_n_full, rho1, rho2, rho3, &
+    !$omp            N1, N2, N3, N4, i, j, idir, n, m, in, im, delta_e)
     do ik = sbe%ik_min, sbe%ik_max
-        ! Build momentum matrix including rvnl correction
-        p_k(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        ! Load full momentum matrix (needed for extraction)
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
         if (sbe%flag_vnl_correction) then
-            p_k(:, :, :) = p_k(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
         end if
         
-        ! Store current density matrix
-        rho_n(:, :) = sbe%rho(:, :, ik)
+        rho_n_full(:, :) = sbe%rho(:, :, ik)
         
-        !=== Stage 1: Compute N1 = N(rho_n, t) ===
-        ! Build V(t) = A(t) · p
-        V_k = dcmplx(0d0, 0d0)
+        ! Extract active submatrix of rho
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_a(i, j) = rho_n_full(in, im)
+            end do
+        end do
+        
+        ! =====================================================================
+        ! STAGE 1: N1 = N(rho_n, t)
+        ! =====================================================================
+        
+        ! Build V_a (active submatrix only)
+        V_a = dcmplx(0d0, 0d0)
         do idir = 1, 3
-            V_k = V_k + Ac_t(idir) * p_k(:, :, idir)
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    V_a(i, j) = V_a(i, j) + Ac_t(idir) * p_k_full(in, im, idir)
+                end do
+            end do
         end do
         
-        ! C1 = [V, rho_n]
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho_n, nb, dcmplx(0d0, 0d0), C1, nb)
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho_n, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+        ! C1_a = [V_a, rho_a] (small ZGEMM: nba x nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
+                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        N_a = -zi * C1_a
         
-        ! N1 = -i * C1
-        N1 = -zi * C1
-        
-        ! Add decoherence: N_decoh = prefac * ([H0,[V,rho]] + [V,[H0,rho]] + [V,[V,rho]])
         if (flag_decoh) then
-            
-            ! === C2 = [H0, [V, rho]] = [H0, C1] ===
-            ! Apply is_active BEFORE multiplication (zero out frozen rows/cols in C1)
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        C2(n, m) = delta_e * C1(n, m)
-                    else
-                        C2(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            ! C2_a = [H0, C1_a] (diagonal operation in active space)
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    C2_a(i, j) = delta_e * C1_a(i, j)
                 end do
             end do
             
-            ! === [V, [H0, rho]] ===
-            ! Build [H0, rho] with frozen zones zeroed out
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        tmp_mat(n, m) = delta_e * rho_n(n, m)
-                    else
-                        tmp_mat(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            ! [V, [H0, rho]]
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    tmp_a(i, j) = delta_e * rho_a(i, j)
                 end do
             end do
-            ! Full ZGEMM (no submatrix extraction)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones in result
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)  ! reuse N_a as temp
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
             
-            ! === [V, [V, rho]] = [V, C1] ===
-            ! C1 already has frozen zones zeroed from commutator, but zero again for safety
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) C1(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
+            ! [V, [V, rho]] = [V, C1]
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
             
-            N1 = N1 + prefac * C2
+            N_a = N_a + prefac * C2_a
         end if
         
-        ! ALWAYS zero frozen zones in N1 (moved outside if-block)
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N1(n, m) = dcmplx(0d0, 0d0)
+        ! Embed N_a into full N1 (zero everywhere except active block)
+        N1 = dcmplx(0d0, 0d0)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                N1(in, im) = N_a(i, j)
             end do
         end do
         
-        ! rho1 = A * rho_n + dt * phi1(a/2) * N1  (element-wise multiplication)
+        ! Update rho1 (full matrix, using precomputed coeffs)
         do m = 1, nb
             do n = 1, nb
-                rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n(n, m) + dt * sbe%phi1_half(n, m, ik) * N1(n, m)
+                rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) &
+                           + dt * sbe%phi1_half(n, m, ik) * N1(n, m)
             end do
         end do
         
-        !=== Stage 2: Compute N2 = N(rho1, t+dt/2) ===
-        V_k = dcmplx(0d0, 0d0)
+        ! =====================================================================
+        ! STAGE 2: N2 = N(rho1, t+dt/2)
+        ! =====================================================================
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_a(i, j) = rho1(in, im)
+            end do
+        end do
+        
+        V_a = dcmplx(0d0, 0d0)
         do idir = 1, 3
-            V_k = V_k + Ac_thalf(idir) * p_k(:, :, idir)
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    V_a(i, j) = V_a(i, j) + Ac_thalf(idir) * p_k_full(in, im, idir)
+                end do
+            end do
         end do
         
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho1, nb, dcmplx(0d0, 0d0), C1, nb)
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho1, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
-        
-        N2 = -zi * C1
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
+                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        N_a = -zi * C1_a
         
         if (flag_decoh) then
-            
-            ! === [H0, [V, rho1]] ===
-            ! Apply is_active BEFORE multiplication
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        C2(n, m) = delta_e * C1(n, m)
-                    else
-                        C2(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    C2_a(i, j) = delta_e * C1_a(i, j)
                 end do
             end do
-            
-            ! === [V, [H0, rho1]] ===
-            ! Build [H0, rho1] with frozen zones zeroed out
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        tmp_mat(n, m) = delta_e * rho1(n, m)
-                    else
-                        tmp_mat(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    tmp_a(i, j) = delta_e * rho_a(i, j)
                 end do
             end do
-            ! Full ZGEMM
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
-            
-            ! === [V, [V, rho1]] ===
-            ! Zero frozen zones in C1
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) C1(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
-            
-            N2 = N2 + prefac * C2
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
+            N_a = N_a + prefac * C2_a
         end if
         
-        ! ALWAYS zero frozen zones in N2 (moved outside if-block)
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N2(n, m) = dcmplx(0d0, 0d0)
+        N2 = dcmplx(0d0, 0d0)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                N2(in, im) = N_a(i, j)
             end do
         end do
         
-        ! rho2 = A * rho_n + dt * phi1(a/2) * N2
         do m = 1, nb
             do n = 1, nb
-                rho2(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n(n, m) + dt * sbe%phi1_half(n, m, ik) * N2(n, m)
+                rho2(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) &
+                           + dt * sbe%phi1_half(n, m, ik) * N2(n, m)
             end do
         end do
         
-        !=== Stage 3: Compute N3 = N(rho2, t+dt/2) ===
-        ! V_k already computed for t+dt/2
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho2, nb, dcmplx(0d0, 0d0), C1, nb)
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho2, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
+        ! =====================================================================
+        ! STAGE 3: N3 = N(rho2, t+dt/2)  [V_a same as Stage 2]
+        ! =====================================================================
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_a(i, j) = rho2(in, im)
+            end do
+        end do
         
-        N3 = -zi * C1
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
+                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        N_a = -zi * C1_a
         
         if (flag_decoh) then
-            
-            ! === [H0, [V, rho2]] ===
-            ! Apply is_active BEFORE multiplication
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        C2(n, m) = delta_e * C1(n, m)
-                    else
-                        C2(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    C2_a(i, j) = delta_e * C1_a(i, j)
                 end do
             end do
-            
-            ! === [V, [H0, rho2]] ===
-            ! Build [H0, rho2] with frozen zones zeroed out
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        tmp_mat(n, m) = delta_e * rho2(n, m)
-                    else
-                        tmp_mat(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    tmp_a(i, j) = delta_e * rho_a(i, j)
                 end do
             end do
-            ! Full ZGEMM
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
-            
-            ! === [V, [V, rho2]] ===
-            ! Zero frozen zones in C1
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) C1(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
-            
-            N3 = N3 + prefac * C2
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
+            N_a = N_a + prefac * C2_a
         end if
         
-        ! ALWAYS zero frozen zones in N3 (moved outside if-block)
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N3(n, m) = dcmplx(0d0, 0d0)
+        N3 = dcmplx(0d0, 0d0)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                N3(in, im) = N_a(i, j)
             end do
         end do
         
-        ! rho3 = A * rho1 + dt * phi1(a/2) * (2*N3 - N1)
         do m = 1, nb
             do n = 1, nb
-                rho3(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho1(n, m) + dt * sbe%phi1_half(n, m, ik) * (2d0 * N3(n, m) - N1(n, m))
+                rho3(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho1(n, m) &
+                           + dt * sbe%phi1_half(n, m, ik) * (2d0 * N3(n, m) - N1(n, m))
             end do
         end do
         
-        !=== Stage 4: Compute N4 = N(rho3, t+dt) ===
-        V_k = dcmplx(0d0, 0d0)
+        ! =====================================================================
+        ! STAGE 4: N4 = N(rho3, t+dt)
+        ! =====================================================================
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_a(i, j) = rho3(in, im)
+            end do
+        end do
+        
+        V_a = dcmplx(0d0, 0d0)
         do idir = 1, 3
-            V_k = V_k + Ac_tdt(idir) * p_k(:, :, idir)
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    V_a(i, j) = V_a(i, j) + Ac_tdt(idir) * p_k_full(in, im, idir)
+                end do
+            end do
         end do
         
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, rho3, nb, dcmplx(0d0, 0d0), C1, nb)
-        call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), rho3, nb, V_k, nb, dcmplx(1d0, 0d0), C1, nb)
-        
-        N4 = -zi * C1
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
+                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        N_a = -zi * C1_a
         
         if (flag_decoh) then
-            
-            ! === [H0, [V, rho3]] ===
-            ! Apply is_active BEFORE multiplication
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        C2(n, m) = delta_e * C1(n, m)
-                    else
-                        C2(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    C2_a(i, j) = delta_e * C1_a(i, j)
                 end do
             end do
-            
-            ! === [V, [H0, rho3]] ===
-            ! Build [H0, rho3] with frozen zones zeroed out
-            do m = 1, nb
-                do n = 1, nb
-                    if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                        delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                        tmp_mat(n, m) = delta_e * rho3(n, m)
-                    else
-                        tmp_mat(n, m) = dcmplx(0d0, 0d0)
-                    end if
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                    tmp_a(i, j) = delta_e * rho_a(i, j)
                 end do
             end do
-            ! Full ZGEMM
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, tmp_mat, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), tmp_mat, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
-            
-            ! === [V, [V, rho3]] ===
-            ! Zero frozen zones in C1
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) C1(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), V_k, nb, C1, nb, dcmplx(0d0, 0d0), a_diag, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), C1, nb, V_k, nb, dcmplx(1d0, 0d0), a_diag, nb)
-            ! Post-zero frozen zones
-            do m = 1, nb
-                do n = 1, nb
-                    if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) a_diag(n, m) = dcmplx(0d0, 0d0)
-                end do
-            end do
-            C2 = C2 + a_diag
-            
-            N4 = N4 + prefac * C2
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
+                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
+                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
+            C2_a = C2_a + N_a
+            N_a = N_a + prefac * C2_a
         end if
         
-        ! ALWAYS zero frozen zones in N4 (moved outside if-block)
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) N4(n, m) = dcmplx(0d0, 0d0)
+        N4 = dcmplx(0d0, 0d0)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                N4(in, im) = N_a(i, j)
             end do
         end do
         
-        !=== Final update: rho_{n+1} = E * rho_n + dt * (phi1(a)*N1 + 2*phi2(a)*(N2+N3) + phi3(a)*N4) ===
+        ! =====================================================================
+        ! FINAL UPDATE (full matrix, using precomputed coeffs)
+        ! =====================================================================
         do m = 1, nb
             do n = 1, nb
-                sbe%rho(n, m, ik) = sbe%exp_Ldt(n, m, ik) * rho_n(n, m) &
+                sbe%rho(n, m, ik) = sbe%exp_Ldt(n, m, ik) * rho_n_full(n, m) &
                                   + dt * (sbe%phi1(n, m, ik) * N1(n, m) &
                                         + 2d0 * sbe%phi2(n, m, ik) * (N2(n, m) + N3(n, m)) &
                                         + sbe%phi3(n, m, ik) * N4(n, m))
             end do
         end do
         
-        ! Enforce Hermiticity to compensate numerical drift
+        ! Hermiticity
         do m = 1, nb
             do n = 1, nb
                 sbe%rho(n, m, ik) = 0.5d0 * (sbe%rho(n, m, ik) + conjg(sbe%rho(m, n, ik)))
             end do
         end do
         
-        ! === NEW: Freeze deep zones ===
-        ! For any (n,m) involving frozen band, enforce ground-state values
+        ! Freeze deep zones
         do m = 1, nb
             do n = 1, nb
                 if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
                     if (n == m) then
-                        ! Diagonal: occupied=1, empty=0
                         if (gs%occup(n, ik) > 0.5d0) then
                             sbe%rho(n, m, ik) = dcmplx(1.0d0, 0.0d0)
                         else
                             sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
                         end if
                     else
-                        ! Off-diagonal: strict zero
                         sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
                     end if
                 end if
@@ -874,7 +750,10 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         end do
         
     end do
-    !$omp end parallel do
+    !$omp end do
+    
+    deallocate(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
+    !$omp end parallel
     
 end subroutine dt_evolve_bloch_etdrk4
 
