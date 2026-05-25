@@ -428,9 +428,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     
     integer :: ik, n, m, i, j, in, im, idir
     integer :: nb, nba
-    complex(8), allocatable :: rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
-    complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
-    complex(8), allocatable :: p_k_full(:, :, :)
     real(8) :: t2_au, prefac, delta_e
     logical :: flag_decoh
     
@@ -439,10 +436,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     
     nb = sbe%nb
     nba = sbe%n_active_bands
-    
-    allocate(rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb))
-    allocate(N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb))
-    allocate(p_k_full(nb, nb, 1:3))
     
     ! Check if ETDRK4 data is initialized
     if (.not. sbe%etdrk4_initialized) then
@@ -458,7 +451,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         flag_decoh = .false.
     end if
     
-    ! Correct OpenMP pattern: allocate per-thread inside parallel region
+    ! Correct OpenMP pattern: allocate per-thread arrays inside parallel region
     !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
     !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh)
     
@@ -470,9 +463,13 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                  C2_a(1, 1), tmp_a(1, 1), V_a(1, 1))
     end if
     
-    !$omp do private(ik, p_k_full, rho_n_full, rho1, rho2, rho3, &
-    !$omp            N1, N2, N3, N4, i, j, idir, n, m, in, im, delta_e)
+    !$omp do private(ik, i, j, idir, n, m, in, im, delta_e)
     do ik = sbe%ik_min, sbe%ik_max
+        ! Local arrays for this k-point (automatic, stack-allocated per iteration)
+        complex(8), dimension(nb, nb, 1:3) :: p_k_full
+        complex(8), dimension(nb, nb) :: rho_n_full, rho1, rho2, rho3
+        complex(8), dimension(nb, nb) :: N1, N2, N3, N4
+        
         ! Load full momentum matrix (needed for extraction)
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
         if (sbe%flag_vnl_correction) then
@@ -811,9 +808,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp end do
     
     deallocate(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
-    deallocate(rho_n_full, rho1, rho2, rho3)
-    deallocate(N1, N2, N3, N4)
-    deallocate(p_k_full)
     !$omp end parallel
     
 end subroutine dt_evolve_bloch_etdrk4
