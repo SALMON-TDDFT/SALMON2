@@ -451,8 +451,14 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         flag_decoh = .false.
     end if
     
+    ! Static workspace arrays (allocated once per thread, reused for all k-points)
+    complex(8), allocatable :: p_k_full(:, :, :)
+    complex(8), allocatable :: rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
+    complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
+    
     ! Correct OpenMP pattern: allocate per-thread arrays inside parallel region
     !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
+    !$omp            private(p_k_full, rho_n_full, rho1, rho2, rho3, N1, N2, N3, N4) &
     !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh)
     
     if (nba > 0) then
@@ -463,12 +469,13 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                  C2_a(1, 1), tmp_a(1, 1), V_a(1, 1))
     end if
     
+    ! Allocate static workspace arrays (nb x nb, fixed size throughout calculation)
+    allocate(p_k_full(nb, nb, 1:3))
+    allocate(rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb))
+    allocate(N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb))
+    
     !$omp do private(ik, i, j, idir, n, m, in, im, delta_e)
     do ik = sbe%ik_min, sbe%ik_max
-        ! Local arrays for this k-point (automatic, stack-allocated per iteration)
-        complex(8), dimension(nb, nb, 1:3) :: p_k_full
-        complex(8), dimension(nb, nb) :: rho_n_full, rho1, rho2, rho3
-        complex(8), dimension(nb, nb) :: N1, N2, N3, N4
         
         ! Load full momentum matrix (needed for extraction)
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
@@ -808,6 +815,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp end do
     
     deallocate(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
+    deallocate(p_k_full, rho_n_full, rho1, rho2, rho3, N1, N2, N3, N4)
     !$omp end parallel
     
 end subroutine dt_evolve_bloch_etdrk4
