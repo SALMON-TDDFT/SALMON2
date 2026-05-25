@@ -434,6 +434,11 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     ! Submatrix arrays (allocated per-thread inside parallel region)
     complex(8), allocatable :: rho_a(:, :), N_a(:, :), C1_a(:, :), C2_a(:, :), tmp_a(:, :), V_a(:, :)
     
+    ! Static workspace arrays (allocated once per thread, reused for all k-points)
+    complex(8), allocatable :: p_k_full(:, :, :)
+    complex(8), allocatable :: rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
+    complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
+    
     nb = sbe%nb
     nba = sbe%n_active_bands
     
@@ -450,11 +455,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     else
         flag_decoh = .false.
     end if
-    
-    ! Static workspace arrays (allocated once per thread, reused for all k-points)
-    complex(8), allocatable :: p_k_full(:, :, :)
-    complex(8), allocatable :: rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
-    complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
     
     ! Correct OpenMP pattern: allocate per-thread arrays inside parallel region
     !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
