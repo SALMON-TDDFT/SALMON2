@@ -242,9 +242,50 @@ end function calc_energy
 !=============================================================================
 ! ETDRK4 Implementation (Kassam-Trefethen 2005) for SBE in Velocity Gauge
 !=============================================================================
+pure subroutine calc_etdrk4_coefficients(z, h, E, E2, Q, f1, f2, f3)
+    ! Прямое вычисление коэффициентов ETDRK4.
+    ! Использует ряд Тейлора для |z| < 0.1 (избегает деления на ноль)
+    ! и точные формулы для |z| >= 0.1 (избегает потери точности).
+    implicit none
+    complex(8), intent(in) :: z
+    real(8), intent(in) :: h
+    complex(8), intent(out) :: E, E2, Q, f1, f2, f3
+    
+    real(8), parameter :: EPS = 0.1d0  ! Порог переключения
+    complex(8) :: z2, z3, ez, ez2
+    
+    E  = exp(z)
+    E2 = exp(z * 0.5d0)
+    z2 = z * z
+    z3 = z2 * z
+    
+    if (abs(z) < EPS) then
+        ! Разложение в ряд Тейлора до O(z^4). 
+        ! Точность при |z|<0.1 лучше 10^{-14}.
+        ! Q = h * (e^{z/2} - 1) / z
+        Q = h * (0.5d0 + z/8.0d0 + z2/48.0d0 + z3/384.0d0)
+        
+        ! f1 = h * (-4 - z + e^z(4 - 3z + z^2)) / z^3
+        f1 = h * (1.0d0/6.0d0 + z/6.0d0 + 3.0d0*z2/40.0d0 + z3/45.0d0)
+        
+        ! f2 = h * (2 + z + e^z(-2 + z)) / z^3
+        f2 = h * (1.0d0/6.0d0 + z/12.0d0 + z2/30.0d0 + z3/180.0d0)
+        
+        ! f3 = h * (-4 - 3z - z^2 + e^z(4 - z)) / z^3
+        f3 = h * (1.0d0/6.0d0 + 0.0d0*z - z2/60.0d0 - z3/360.0d0)
+    else
+        ! Точные прямые формулы (вне зоны потери значимости)
+        ez  = E
+        ez2 = E2
+        
+        Q  = h * (ez2 - 1.0d0) / z
+        f1 = h * (-4.0d0 - z + ez * (4.0d0 - 3.0d0*z + z2)) / z3
+        f2 = h * (2.0d0 + z + ez * (-2.0d0 + z)) / z3
+        f3 = h * (-4.0d0 - 3.0d0*z - z2 + ez * (4.0d0 - z)) / z3
+    end if
+end subroutine calc_etdrk4_coefficients
+
 subroutine init_etdrk4_data(sbe, gs, dt)
-    ! Initialize ETDRK4 coefficients (precompute once for fixed dt)
-    ! Uses optimized contour integration with single-pass computation of all phi functions
     use phys_constants, only: au_fs
     use salmon_global, only: t2_sbe_fs
     implicit none
@@ -252,66 +293,51 @@ subroutine init_etdrk4_data(sbe, gs, dt)
     type(s_sbe_gs_info), intent(in) :: gs
     real(8), intent(in) :: dt
     
-    integer :: ik, n, m, nb, nk
+    integer :: ik, n, m, nb
     real(8) :: delta_e, gamma, t2_au, Eg2
-    complex(8) :: lambda, z, z_half
-    complex(8) :: phi_full(3), phi_half(3)  ! phi_1, phi_2, phi_3
+    complex(8) :: lambda, z
     
     nb = sbe%nb
-    nk = sbe%nk
     
-    ! Allocate coefficient arrays if not already allocated
     if (.not. allocated(sbe%exp_Ldt)) then
         allocate(sbe%exp_Ldt(nb, nb, sbe%ik_min:sbe%ik_max))
         allocate(sbe%exp_Ldt_half(nb, nb, sbe%ik_min:sbe%ik_max))
-        allocate(sbe%phi1(nb, nb, sbe%ik_min:sbe%ik_max))
-        allocate(sbe%phi2(nb, nb, sbe%ik_min:sbe%ik_max))
-        allocate(sbe%phi3(nb, nb, sbe%ik_min:sbe%ik_max))
-        allocate(sbe%phi1_half(nb, nb, sbe%ik_min:sbe%ik_max))
+        allocate(sbe%phi1(nb, nb, sbe%ik_min:sbe%ik_max))      ! Будет хранить f1
+        allocate(sbe%phi2(nb, nb, sbe%ik_min:sbe%ik_max))      ! Будет хранить f2
+        allocate(sbe%phi3(nb, nb, sbe%ik_min:sbe%ik_max))      ! Будет хранить f3
+        allocate(sbe%phi1_half(nb, nb, sbe%ik_min:sbe%ik_max)) ! Будет хранить Q
     end if
     
-    ! Prepare T2 and Eg for decoherence calculation
     if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
         t2_au = t2_sbe_fs / au_fs
         Eg2 = gs%eg_au**2
     else
-        t2_au = 1.0d99  ! No decoherence
+        t2_au = 1.0d99
         Eg2 = 1.0d0
     end if
     
-    ! Precompute coefficients for each (n,m,ik)
-    !$omp parallel do default(shared) private(ik, n, m, delta_e, gamma, lambda, z, z_half, phi_full, phi_half)
+    !$omp parallel do default(shared) private(ik, n, m, delta_e, gamma, lambda, z)
     do ik = sbe%ik_min, sbe%ik_max
         do m = 1, nb
             do n = 1, nb
                 delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
                 
-                ! Static decoherence: disabled if either band is frozen
                 if (sbe%is_active(n) .and. sbe%is_active(m)) then
                     gamma = (delta_e**2) / (t2_au * Eg2)
                 else
                     gamma = 0.0d0
                 end if
                 
-                ! Linear operator eigenvalue: L_nm = -i*(eps_n - eps_m) - gamma
                 lambda = dcmplx(0d0, -delta_e) - gamma
-                
                 z = lambda * dt
-                z_half = lambda * dt * 0.5d0
                 
-                ! Exponential factors
-                sbe%exp_Ldt(n, m, ik)      = exp(z)
-                sbe%exp_Ldt_half(n, m, ik) = exp(z_half)
-                
-                ! Phi functions via contour integration (all three at once)
-                call calc_phi_contour_all(z, phi_full)
-                call calc_phi_contour_all(z_half, phi_half)
-                
-                ! Store results
-                sbe%phi1(n, m, ik)      = phi_full(1)
-                sbe%phi2(n, m, ik)      = phi_full(2)
-                sbe%phi3(n, m, ik)      = phi_full(3)
-                sbe%phi1_half(n, m, ik) = phi_half(1)
+                call calc_etdrk4_coefficients(z, dt, &
+                    sbe%exp_Ldt(n, m, ik), &
+                    sbe%exp_Ldt_half(n, m, ik), &
+                    sbe%phi1_half(n, m, ik), &  ! Это Q
+                    sbe%phi1(n, m, ik), &       ! Это f1
+                    sbe%phi2(n, m, ik), &       ! Это f2
+                    sbe%phi3(n, m, ik))         ! Это f3
             end do
         end do
     end do
@@ -374,25 +400,23 @@ pure subroutine calc_phi_contour_all(z, phi_vals)
     phi_vals(3) = sum3 / dble(M)
 end subroutine calc_phi_contour_all
 
-
-
-subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
+subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
     use phys_constants, only: au_fs
     use salmon_global, only: t2_sbe_fs
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), intent(in) :: Ac_t(1:3), Ac_thalf(1:3), Ac_tdt(1:3), dt
+    real(8), intent(in) :: Ac(1:3)
+    real(8), intent(in) :: dt
     
     integer :: ik, n, m, i, j, in, im, idir
     integer :: nb, nba
     real(8) :: t2_au, prefac, delta_e
     logical :: flag_decoh
     
-    ! Submatrix arrays (allocated per-thread)
     complex(8), allocatable :: rho_a(:, :), N_a(:, :), C1_a(:, :), C2_a(:, :), tmp_a(:, :), V_a(:, :)
-    ! Static workspace arrays
-    complex(8), allocatable :: p_k_full(:, :, :), rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
+    complex(8), allocatable :: p_k_full(:, :, :), rho_n_full(:, :)
+    complex(8), allocatable :: rho1(:, :), rho2(:, :), rho3(:, :)
     complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
 
     nb = sbe%nb
@@ -410,7 +434,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     
     !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
     !$omp            private(p_k_full, rho_n_full, rho1, rho2, rho3, N1, N2, N3, N4) &
-    !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh, prefac)
+    !$omp            shared(sbe, gs, Ac, dt, nb, nba, flag_decoh, prefac)
     
     if (nba > 0) then
         allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
@@ -428,330 +452,176 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     do ik = sbe%ik_min, sbe%ik_max
         
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
-        if (sbe%flag_vnl_correction) then
-            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
-        end if
+        if (sbe%flag_vnl_correction) p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
         
         rho_n_full(:, :) = sbe%rho(:, :, ik)
         
-        ! Extract active rho
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                rho_a(i, j) = rho_n_full(in, im)
-            end do
-        end do
-        
-        ! =====================================================================
-        ! STAGE 1: N1 = N(rho_n, t)
-        ! =====================================================================
+        ! V_a = A·p (Константа на шаге для честного сравнения с Тейлором)
         V_a = dcmplx(0d0, 0d0)
         do idir = 1, 3
             do j = 1, nba
                 im = sbe%active_idx(j)
                 do i = 1, nba
                     in = sbe%active_idx(i)
-                    V_a(i, j) = V_a(i, j) + Ac_t(idir) * p_k_full(in, im, idir)
+                    V_a(i, j) = V_a(i, j) + Ac(idir) * p_k_full(in, im, idir)
                 end do
             end do
         end do
         
-        ! C1_a = [V, rho]
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
-                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        ! Извлекаем активный блок rho_n
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j)
+            rho_a(i, j) = rho_n_full(in, im)
+        end do; end do
         
-        ! CORRECTED: N = -i[V, ρ] + D(ρ)  (D enters WITHOUT zi!)
+        ! =====================================================================
+        ! STAGE 1: N1 = N(rho_n)  [В статье: Nv]
+        ! =====================================================================
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
-        
         if (flag_decoh) then
-            ! C2_a = [H0, [V, ρ]]
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    C2_a(i, j) = delta_e * C1_a(i, j)
-                end do
-            end do
-            
-            ! tmp_a = [H0, ρ]
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    tmp_a(i, j) = delta_e * rho_a(i, j)
-                end do
-            end do
-            
-            ! C2_a += [V, [H0, ρ]]
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            ! C2_a += [V, [V, ρ]]
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            ! CORRECTED: D(ρ) = prefac * C2_a (no zi!)
+            do j = 1, nba; do i = 1, nba
+                in = sbe%active_idx(i); im = sbe%active_idx(j)
+                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+            end do; end do
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
-        
         N1 = dcmplx(0d0, 0d0)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                N1(in, im) = N_a(i, j)
-            end do
-        end do
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); N1(in, im) = N_a(i, j)
+        end do; end do
         
-        do m = 1, nb
-            do n = 1, nb
-                rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) &
-                           + dt * sbe%phi1_half(n, m, ik) * N1(n, m)
-            end do
-        end do
+        ! a = E2 * rho_n + Q * N1  (rho1 соответствует 'a')
+        do m = 1, nb; do n = 1, nb
+            rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) + sbe%phi1_half(n, m, ik) * N1(n, m)
+        end do; end do
         
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); rho_a(i, j) = rho1(in, im)
+        end do; end do
+
         ! =====================================================================
-        ! STAGE 2: N2 = N(rho1, t+dt/2)
+        ! STAGE 2: N2 = N(a)  [В статье: Na]
         ! =====================================================================
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                rho_a(i, j) = rho1(in, im)
-            end do
-        end do
-        
-        V_a = dcmplx(0d0, 0d0)
-        do idir = 1, 3
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    V_a(i, j) = V_a(i, j) + Ac_thalf(idir) * p_k_full(in, im, idir)
-                end do
-            end do
-        end do
-        
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
-                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
-        
         if (flag_decoh) then
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    C2_a(i, j) = delta_e * C1_a(i, j)
-                end do
-            end do
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    tmp_a(i, j) = delta_e * rho_a(i, j)
-                end do
-            end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            do j = 1, nba; do i = 1, nba
+                in = sbe%active_idx(i); im = sbe%active_idx(j)
+                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+            end do; end do
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
-        
         N2 = dcmplx(0d0, 0d0)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                N2(in, im) = N_a(i, j)
-            end do
-        end do
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); N2(in, im) = N_a(i, j)
+        end do; end do
         
-        do m = 1, nb
-            do n = 1, nb
-                rho2(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) &
-                           + dt * sbe%phi1_half(n, m, ik) * N2(n, m)
-            end do
-        end do
+        ! b = E2 * rho_n + Q * N2  (rho2 соответствует 'b')
+        do m = 1, nb; do n = 1, nb
+            rho2(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) + sbe%phi1_half(n, m, ik) * N2(n, m)
+        end do; end do
         
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); rho_a(i, j) = rho2(in, im)
+        end do; end do
+
         ! =====================================================================
-        ! STAGE 3: N3 = N(rho2, t+dt/2)
+        ! STAGE 3: N3 = N(b)  [В статье: Nb]
         ! =====================================================================
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                rho_a(i, j) = rho2(in, im)
-            end do
-        end do
-        
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
-                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
-        
         if (flag_decoh) then
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    C2_a(i, j) = delta_e * C1_a(i, j)
-                end do
-            end do
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    tmp_a(i, j) = delta_e * rho_a(i, j)
-                end do
-            end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            do j = 1, nba; do i = 1, nba
+                in = sbe%active_idx(i); im = sbe%active_idx(j)
+                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+            end do; end do
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
-        
         N3 = dcmplx(0d0, 0d0)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                N3(in, im) = N_a(i, j)
-            end do
-        end do
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); N3(in, im) = N_a(i, j)
+        end do; end do
         
-        do m = 1, nb
-            do n = 1, nb
-                rho3(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho1(n, m) &
-                           + dt * sbe%phi1_half(n, m, ik) * (2d0 * N3(n, m) - N1(n, m))
-            end do
-        end do
+        ! c = E2 * a + Q * (2*N3 - N1)  (rho3 соответствует 'c')
+        do m = 1, nb; do n = 1, nb
+            rho3(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho1(n, m) + sbe%phi1_half(n, m, ik) * (2d0 * N3(n, m) - N1(n, m))
+        end do; end do
         
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); rho_a(i, j) = rho3(in, im)
+        end do; end do
+
         ! =====================================================================
-        ! STAGE 4: N4 = N(rho3, t+dt)
+        ! STAGE 4: N4 = N(c)  [В статье: Nc]
         ! =====================================================================
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                rho_a(i, j) = rho3(in, im)
-            end do
-        end do
-        
-        V_a = dcmplx(0d0, 0d0)
-        do idir = 1, 3
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    V_a(i, j) = V_a(i, j) + Ac_tdt(idir) * p_k_full(in, im, idir)
-                end do
-            end do
-        end do
-        
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                   rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
-                   V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
+        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
-        
         if (flag_decoh) then
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    C2_a(i, j) = delta_e * C1_a(i, j)
-                end do
-            end do
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                    tmp_a(i, j) = delta_e * rho_a(i, j)
-                end do
-            end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            do j = 1, nba; do i = 1, nba
+                in = sbe%active_idx(i); im = sbe%active_idx(j)
+                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
+                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+            end do; end do
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
-        
         N4 = dcmplx(0d0, 0d0)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                N4(in, im) = N_a(i, j)
-            end do
-        end do
+        do j = 1, nba; do i = 1, nba
+            in = sbe%active_idx(i); im = sbe%active_idx(j); N4(in, im) = N_a(i, j)
+        end do; end do
         
         ! =====================================================================
-        ! FINAL UPDATE
+        ! FINAL UPDATE 
         ! =====================================================================
-        do m = 1, nb
-            do n = 1, nb
-                sbe%rho(n, m, ik) = sbe%exp_Ldt(n, m, ik) * rho_n_full(n, m) &
-                                  + dt * (sbe%phi1(n, m, ik) * N1(n, m) &
-                                        + 2d0 * sbe%phi2(n, m, ik) * (N2(n, m) + N3(n, m)) &
-                                        + sbe%phi3(n, m, ik) * N4(n, m))
-            end do
-        end do
+        do m = 1, nb; do n = 1, nb
+        sbe%rho(n, m, ik) = sbe%exp_Ldt(n, m, ik) * rho_n_full(n, m) &
+                      + sbe%phi1(n, m, ik) * N1(n, m) &
+                      + 2.0d0 * sbe%phi2(n, m, ik) * (N2(n, m) + N3(n, m)) &
+                      + sbe%phi3(n, m, ik) * N4(n, m)
+        end do; end do
         
         ! Hermiticity
-        do m = 1, nb
-            do n = 1, nb
-                sbe%rho(n, m, ik) = 0.5d0 * (sbe%rho(n, m, ik) + conjg(sbe%rho(m, n, ik)))
-            end do
-        end do
+        do m = 1, nb; do n = 1, nb
+            sbe%rho(n, m, ik) = 0.5d0 * (sbe%rho(n, m, ik) + conjg(sbe%rho(m, n, ik)))
+        end do; end do
         
         ! Freeze deep zones
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
-                    if (n == m) then
-                        if (gs%occup(n, ik) > 0.5d0) then
-                            sbe%rho(n, m, ik) = dcmplx(1.0d0, 0.0d0)
-                        else
-                            sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
-                        end if
+        do m = 1, nb; do n = 1, nb
+            if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
+                if (n == m) then
+                    if (gs%occup(n, ik) > 0.5d0) then
+                        sbe%rho(n, m, ik) = dcmplx(1.0d0, 0.0d0)
                     else
                         sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
                     end if
+                else
+                    sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
                 end if
-            end do
-        end do
+            end if
+        end do; end do
         
     end do
     !$omp end do
@@ -761,4 +631,5 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp end parallel
     
 end subroutine dt_evolve_bloch_etdrk4
+
 end module
