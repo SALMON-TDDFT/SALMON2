@@ -16,10 +16,9 @@ subroutine main_realtime_ssbe(icomm)
 
     type(s_sbe_bloch_solver) :: sbe
     type(s_sbe_gs_info) :: gs
-    real(8) :: t,  E(3), jmat(3)
+    real(8) :: t, E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
-    real(8) :: Ac_half(3)
-    integer :: it, i
+    integer :: it
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
@@ -40,12 +39,14 @@ subroutine main_realtime_ssbe(icomm)
     call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
-    ! Prepare external pulse
+    ! Prepare external pulse (allocated from -1 to nt+1 for safe central differences)
     allocate(Ac_ext_t(1:3, -1:nt+1))
     call calc_Ac_ext_t(0.0d0, dt, 0, nt+1, Ac_ext_t)
-    ! Initial energy
+    
+    ! Initial energy and fields
     energy = 0.0d0
-    E(:) = 0.0d0; Jmat(:) = 0.0d0;
+    E(:) = 0.0d0
+    Jmat(:) = 0.0d0
 
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
@@ -73,12 +74,10 @@ subroutine main_realtime_ssbe(icomm)
         
         !---------------------------------------------------------------
         ! ETDRK4 Step: Evolve rho from t=(it-1)*dt to t=it*dt
-        ! Requires A at: t_old=(it-1)*dt, t_mid=(it-0.5)*dt, t_new=it*dt
+        ! Uses field A(t) = Ac_ext_t(:, it) as constant on the step
+        ! (matches Taylor-4 convention for direct comparison)
         !---------------------------------------------------------------
-        Ac_half = 0.5d0 * (Ac_ext_t(:, it-1) + Ac_ext_t(:, it))
-        
-        call dt_evolve_bloch_etdrk4(sbe, gs, &
-             Ac_ext_t(:, it-1), Ac_half, Ac_ext_t(:, it), dt)
+        call dt_evolve_bloch_etdrk4(sbe, gs, Ac_ext_t(:, it), dt)
         
         !---------------------------------------------------------------
         ! Calculate Current J(t) at t=it*dt (after evolution)
@@ -88,11 +87,11 @@ subroutine main_realtime_ssbe(icomm)
         !---------------------------------------------------------------
         ! Calculate E-field at t=it*dt
         ! E = -dA/dt. Use central difference: E(t) = -(A(t+dt) - A(t-dt)) / (2*dt)
-        ! Since Ac_ext_t is allocated from -1 to nt+1, we can safely use central difference for all it >= 1
+        ! Ac_ext_t is allocated from -1 to nt+1, safe for all it >= 1
         !---------------------------------------------------------------
         E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it-1)) / (2.0d0 * dt)
         
-        ! Energy update: dW = -E·J·V·dt
+        ! Energy update: dW = -E·J·V·dt (work done by field on electrons)
         energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
         
         if (irank == 0) then
