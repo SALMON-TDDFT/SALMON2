@@ -11,8 +11,6 @@ module bloch_solver_ssbe
               dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
               init_etdrk4_data, finalize_etdrk4_data
 
-
-
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
         integer :: nk, nb
@@ -35,11 +33,7 @@ module bloch_solver_ssbe
         logical :: etdrk4_initialized = .false.
     end type
 
-
-
 contains
-
-
 
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
@@ -69,24 +63,16 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
     
     ! Calculate Fermi energy (average of HOMO and LUMO) in eV at Gamma point (ik=1)
-    ! HOMO is at band gs%ne/2, LUMO is at band gs%ne/2 + 1
-    ! Use Gamma point (ik=1) for consistent classification across all MPI ranks
     fermi_energy_ev = ((gs%eigen(gs%ne/2, 1) + gs%eigen(gs%ne/2 + 1, 1)) * 0.5d0) * au_ev
     
     ! Initialize is_active array based on thresholds relative to Fermi level
-    ! A band is active if: E_fermi + frozen_core_threshold_ev < E_band < E_fermi + frozen_free_threshold_ev
-    ! Use Gamma point (ik=1) for consistent classification across all MPI ranks
-    ! Rank 0 calculates is_active, then broadcasts to all other ranks
     allocate(sbe%is_active(1:sbe%nb))
-    sbe%is_active = .false.  ! Initialize on all ranks before broadcast
-    sbe%n_active_bands = 0   ! Initialize on all ranks before broadcast
+    sbe%is_active = .false.  
+    sbe%n_active_bands = 0   
     
     if (irank == 0) then
         do ib = 1, sbe%nb
-            ! Convert eigenvalue from Hartree to eV for comparison
-            ! Use Gamma point (ik=1) to ensure same classification on all MPI ranks
             eigen_ev = gs%eigen(ib, 1) * au_ev
-            ! Thresholds are now relative to Fermi level
             if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
                 eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
                 sbe%is_active(ib) = .true.
@@ -97,13 +83,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         end do
     end if
     
-    ! Broadcast n_active_bands to all MPI ranks first
     call comm_bcast(sbe%n_active_bands, icomm, 0)
     
-    ! Broadcast is_active array using integer buffer
-    ! This must be done outside any OpenMP parallel region
     if (sbe%nb > 0) then
-        ! All ranks allocate and participate in broadcast
         allocate(is_active_buf(1:sbe%nb))
         is_active_buf(:) = 0
         
@@ -117,10 +99,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             end do
         end if
         
-        ! Broadcast the entire integer array
         call comm_bcast(is_active_buf, icomm, 0)
         
-        ! All ranks convert back to logical
         do ib = 1, sbe%nb
             if (is_active_buf(ib) == 1) then
                 sbe%is_active(ib) = .true.
@@ -132,7 +112,6 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         if (allocated(is_active_buf)) deallocate(is_active_buf)
     end if
 
-    ! Build active_idx mapping: 1..n_active -> global band index
     if (sbe%n_active_bands > 0) then
         allocate(sbe%active_idx(sbe%n_active_bands))
         count_active = 0
@@ -143,7 +122,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             end if
         end do
     else
-        allocate(sbe%active_idx(1))  ! Allocate dummy array to avoid segfault
+        allocate(sbe%active_idx(1))  
         sbe%active_idx(1) = 1
     end if
 
@@ -175,8 +154,6 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     !$omp parallel do default(shared) private(ik, idir, ib, jb, v_mat, trace_val) reduction(+:tmp1)
     do ik = sbe%ik_min, sbe%ik_max
         do idir = 1, 3
-            ! Velocity operator in VG: v = p + A (in a.u. e=m=1)
-            ! SALMON convention: H_eff = H0 + A*p, therefore v = p + A
             v_mat = gs%p_tm_matrix(:, :, idir, ik)
             do ib = 1, nb
                 v_mat(ib, ib) = v_mat(ib, ib) + Ac(idir)
@@ -185,7 +162,6 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                 v_mat = v_mat + gs%rvnl_tm_matrix(:, :, idir, ik)
             endif
 
-            ! Tr[v * rho]
             trace_val = 0d0
             do ib = 1, nb
                 do jb = 1, nb
@@ -200,7 +176,6 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     call comm_summation(tmp1, tmp, 3, icomm)
     jmat(:) = real(tmp(:)) / (sum(gs%kweight) * gs%volume)
 end subroutine calc_current_bloch
-
 
 
 function calc_trace(sbe, gs, nb_max, icomm) result(tr)
@@ -238,14 +213,13 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
     real(8), intent(in) :: Ac(1:3)
     integer :: ik, ib, jb, idir
     real(8) :: tmp1, tmp, energy
-    ! real(8) :: kvec(1:3)
+    
     tmp1 = 0d0
     !$omp parallel do default(shared) private(ik, ib, jb, idir) reduction(+: tmp1)
     do ik = sbe%ik_min, sbe%ik_max
         do ib = 1, sbe%nb
             do idir = 1, 3
                 do jb = 1, sbe%nb
-                    ! SALMON convention: H_eff = H0 + A*p, interaction term is +A*p
                     tmp1 = tmp1 &
                         & + Ac(idir) * real(sbe%rho(ib, jb, ik) * gs%p_mod_matrix(jb, ib, idir, ik)) * gs%kweight(ik)
                 end do
@@ -253,7 +227,6 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
             tmp1 = tmp1 &
                 & + real(sbe%rho(ib, ib, ik)) * ( &
                 & + gs%eigen(ib, ik) &
-                !& + dot_product(kvec(:), Ac(:))
                 & + 0.5 * dot_product(Ac, Ac) &
                 & ) * gs%kweight(ik)
         end do
@@ -269,7 +242,6 @@ end function calc_energy
 !=============================================================================
 ! ETDRK4 Implementation (Kassam-Trefethen 2005) for SBE in Velocity Gauge
 !=============================================================================
-
 subroutine init_etdrk4_data(sbe, gs, dt)
     ! Initialize ETDRK4 coefficients (precompute once for fixed dt)
     ! Uses optimized contour integration with single-pass computation of all phi functions
@@ -350,7 +322,6 @@ end subroutine init_etdrk4_data
 
 
 subroutine finalize_etdrk4_data(sbe)
-    ! Deallocate ETDRK4 coefficient arrays
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     
@@ -366,15 +337,12 @@ end subroutine finalize_etdrk4_data
 
 
 pure subroutine calc_phi_contour_all(z, phi_vals)
-    ! Compute phi_1, phi_2, phi_3 simultaneously via contour integration
-    ! Kassam-Trefethen method: phi_k(z) = (1/2pi) * integral_0^{2pi} phi_k(z + R*e^{i*theta}) dtheta
-    ! Discretized with trapezoidal rule over M equidistant points on circle |w-z| = R.
     implicit none
     complex(8), intent(in) :: z
-    complex(8), intent(out) :: phi_vals(3)  ! phi_1, phi_2, phi_3
+    complex(8), intent(out) :: phi_vals(3)  
     
-    integer, parameter :: M = 32  ! Quadrature points (32 gives ~10^-14 accuracy)
-    real(8), parameter :: R = 1.0d0  ! Contour radius
+    integer, parameter :: M = 32  
+    real(8), parameter :: R = 1.0d0  
     real(8), parameter :: TWOPI = 6.28318530717958647692d0
     real(8) :: theta
     complex(8) :: w, ez, w2, phi1_w, phi2_w, phi3_w
@@ -385,69 +353,53 @@ pure subroutine calc_phi_contour_all(z, phi_vals)
     sum2 = dcmplx(0d0, 0d0)
     sum3 = dcmplx(0d0, 0d0)
     
-    ! Single pass over contour: compute all phi_k simultaneously
     do j = 1, M
         theta = TWOPI * dble(j) / dble(M)
         w = z + R * exp(dcmplx(0d0, theta))
         
-        ! Compute exp(w) ONCE per quadrature point (main optimization)
         ez = exp(w)
         w2 = w * w
         
-        ! Evaluate phi_k at this point on the contour
-        ! Note: |w| >= R - |z|, so for small |z| this is well-defined
         phi1_w = (ez - dcmplx(1d0, 0d0)) / w
         phi2_w = (ez - dcmplx(1d0, 0d0) - w) / w2
         phi3_w = (ez - dcmplx(1d0, 0d0) - w - 0.5d0 * w2) / (w2 * w)
         
-        ! CORRECT Cauchy formula: just sum phi_k(w), NO division by (w-z)
         sum1 = sum1 + phi1_w
         sum2 = sum2 + phi2_w
         sum3 = sum3 + phi3_w
     end do
     
-    ! Trapezoidal rule: average over M points
     phi_vals(1) = sum1 / dble(M)
     phi_vals(2) = sum2 / dble(M)
     phi_vals(3) = sum3 / dble(M)
 end subroutine calc_phi_contour_all
 
 
+
 subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
-    ! ETDRK4 time evolution for SBE (Kassam-Trefethen 2005) with submatrix ZGEMM
-    ! Interface: accepts three vector potential arrays at t, t+dt/2, t+dt
     use phys_constants, only: au_fs
     use salmon_global, only: t2_sbe_fs
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), intent(in) :: Ac_t(1:3)      ! A(t)
-    real(8), intent(in) :: Ac_thalf(1:3)  ! A(t + dt/2)
-    real(8), intent(in) :: Ac_tdt(1:3)    ! A(t + dt)
-    real(8), intent(in) :: dt
+    real(8), intent(in) :: Ac_t(1:3), Ac_thalf(1:3), Ac_tdt(1:3), dt
     
     integer :: ik, n, m, i, j, in, im, idir
     integer :: nb, nba
     real(8) :: t2_au, prefac, delta_e
     logical :: flag_decoh
     
-    ! Submatrix arrays (allocated per-thread inside parallel region)
+    ! Submatrix arrays (allocated per-thread)
     complex(8), allocatable :: rho_a(:, :), N_a(:, :), C1_a(:, :), C2_a(:, :), tmp_a(:, :), V_a(:, :)
-    
-    ! Static workspace arrays (allocated once per thread, reused for all k-points)
-    complex(8), allocatable :: p_k_full(:, :, :)
-    complex(8), allocatable :: rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
+    ! Static workspace arrays
+    complex(8), allocatable :: p_k_full(:, :, :), rho_n_full(:, :), rho1(:, :), rho2(:, :), rho3(:, :)
     complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
-    
+
     nb = sbe%nb
     nba = sbe%n_active_bands
     
-    ! Check if ETDRK4 data is initialized
-    if (.not. sbe%etdrk4_initialized) then
-        call init_etdrk4_data(sbe, gs, dt)
-    end if
+    if (.not. sbe%etdrk4_initialized) call init_etdrk4_data(sbe, gs, dt)
     
-    ! Precompute decoherence scalars outside OpenMP to avoid race conditions and overhead
     if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
         t2_au = t2_sbe_fs / au_fs
         prefac = -1.0d0 / (t2_au * gs%eg_au**2)
@@ -456,10 +408,9 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         flag_decoh = .false.
     end if
     
-    ! Correct OpenMP pattern: allocate per-thread arrays inside parallel region
     !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
     !$omp            private(p_k_full, rho_n_full, rho1, rho2, rho3, N1, N2, N3, N4) &
-    !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh)
+    !$omp            shared(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt, nb, nba, flag_decoh, prefac)
     
     if (nba > 0) then
         allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
@@ -469,7 +420,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                  C2_a(1, 1), tmp_a(1, 1), V_a(1, 1))
     end if
     
-    ! Allocate static workspace arrays (nb x nb, fixed size throughout calculation)
     allocate(p_k_full(nb, nb, 1:3))
     allocate(rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb))
     allocate(N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb))
@@ -477,7 +427,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp do private(ik, i, j, idir, n, m, in, im, delta_e)
     do ik = sbe%ik_min, sbe%ik_max
         
-        ! Load full momentum matrix (needed for extraction)
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
         if (sbe%flag_vnl_correction) then
             p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
@@ -485,7 +434,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         
         rho_n_full(:, :) = sbe%rho(:, :, ik)
         
-        ! Extract active submatrix of rho
+        ! Extract active rho
         do j = 1, nba
             im = sbe%active_idx(j)
             do i = 1, nba
@@ -497,8 +446,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         ! =====================================================================
         ! STAGE 1: N1 = N(rho_n, t)
         ! =====================================================================
-        
-        ! Build V_a (active submatrix only)
         V_a = dcmplx(0d0, 0d0)
         do idir = 1, 3
             do j = 1, nba
@@ -510,15 +457,17 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
             end do
         end do
         
-        ! C1_a = [V_a, rho_a] (small ZGEMM: nba x nba)
+        ! C1_a = [V, rho]
         call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
                    rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
         call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, &
                    V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
+        
+        ! CORRECTED: N = -i[V, ρ] + D(ρ)  (D enters WITHOUT zi!)
         N_a = -zi * C1_a
         
         if (flag_decoh) then
-            ! C2_a = [H0, C1_a] (diagonal operation in active space)
+            ! C2_a = [H0, [V, ρ]]
             do j = 1, nba
                 im = sbe%active_idx(j)
                 do i = 1, nba
@@ -528,7 +477,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                 end do
             end do
             
-            ! [V, [H0, rho]]
+            ! tmp_a = [H0, ρ]
             do j = 1, nba
                 im = sbe%active_idx(j)
                 do i = 1, nba
@@ -537,23 +486,23 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                     tmp_a(i, j) = delta_e * rho_a(i, j)
                 end do
             end do
+            
+            ! C2_a += [V, [H0, ρ]]
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)  ! reuse N_a as temp
+                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             
-            ! [V, [V, rho]] = [V, C1]
+            ! C2_a += [V, [V, ρ]]
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             
+            ! CORRECTED: D(ρ) = prefac * C2_a (no zi!)
             N_a = N_a + prefac * C2_a
         end if
         
-        ! Embed N_a into full N1 (zero everywhere except active block)
         N1 = dcmplx(0d0, 0d0)
         do j = 1, nba
             im = sbe%active_idx(j)
@@ -563,7 +512,6 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
             end do
         end do
         
-        ! Update rho1 (full matrix, using precomputed coeffs)
         do m = 1, nb
             do n = 1, nb
                 rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) &
@@ -617,15 +565,13 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                 end do
             end do
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
         
@@ -646,7 +592,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         end do
         
         ! =====================================================================
-        ! STAGE 3: N3 = N(rho2, t+dt/2)  [V_a same as Stage 2]
+        ! STAGE 3: N3 = N(rho2, t+dt/2)
         ! =====================================================================
         do j = 1, nba
             im = sbe%active_idx(j)
@@ -680,15 +626,13 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                 end do
             end do
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
         
@@ -754,15 +698,13 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
                 end do
             end do
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       tmp_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, &
-                       C1_a, nba, dcmplx(0d0, 0d0), N_a, nba)
+                       C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, &
-                       V_a, nba, dcmplx(1d0, 0d0), N_a, nba)
-            C2_a = C2_a + N_a
+                       V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             N_a = N_a + prefac * C2_a
         end if
         
@@ -776,7 +718,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
         end do
         
         ! =====================================================================
-        ! FINAL UPDATE (full matrix, using precomputed coeffs)
+        ! FINAL UPDATE
         ! =====================================================================
         do m = 1, nb
             do n = 1, nb
@@ -819,34 +761,4 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac_t, Ac_thalf, Ac_tdt, dt)
     !$omp end parallel
     
 end subroutine dt_evolve_bloch_etdrk4
-
-
-!=============================================================================
-! Отчёт о реализации ETDRK4 (Kassam-Trefethen 2005)
-!=============================================================================
-! 
-! Подводные камни, которые были учтены:
-! 1. Диагональные элементы (n=m): phi-функции вычисляются через контурное
-!    интегрирование (метод Кассама-Трефетена) с 32 точками квадратуры,
-!    что обеспечивает uniform accuracy ~10^-14 для всех z, включая z=0.
-! 2. Комплексность L: линейный оператор L комплексный (содержит -i*delta_e),
-!    поэтому все коэффициенты exp_Ldt, phi1, phi2, phi3 — комплексные.
-! 3. Сохранение следа: схема ETDRK4 сохраняет след с точностью ~1e-10 за
-!    счёт точного интегрирования линейной части и симметричной обработки N.
-! 4. Эрмитовость: после каждого шага применяется явное усреднение
-!    rho = (rho + rho^†)/2 для компенсации ошибок округления.
-! 5. Gauge-covariant decoherence: двойной коммутатор [H_eff,[H_eff,rho]]
-!    разделён на статическую часть (в L) и динамическую (в N).
-!
-! Допущения:
-! - dt фиксирован в течение всего расчёта (коэффициенты предвычисляются один раз).
-! - H0 диагонален в зонном базисе (стандартное приближение SBE).
-! - Векторный потенциал A(t) передаётся явно через три массива Ac_t, Ac_thalf, Ac_tdt.
-! - OpenMP-параллелизация только по внешнему циклу ik (не по n,m).
-!=============================================================================
-
-
 end module
-
-
-
