@@ -91,14 +91,12 @@ The new parameters are:
   ! Option 1: Use default bandgap (1.5 eV)
   ! (eg_ev is optional, defaults to 1.5 eV)
   
-  ! Option 2: Auto-calculate minimum bandgap from band structure
+  ! Option 2: Auto-calculate minimum bandgap from band structure or Override with a fixed bandgap value (e.g., experimental value)
   eg_ev = -1.0d0
   
-  ! Option 3: Override with a fixed bandgap value (e.g., experimental value)
-  ! eg_ev = 1.519d0  ! GaAs bandgap at room temperature
-  ! Активные зоны около E_F (±15 eV)
-    frozen_core_threshold_ev = -15.0d0,
-    frozen_free_threshold_ev =  15.0d0,
+  ! Option 3: Active bands close to E_F (±15 eV)
+  frozen_core_threshold_ev = -15.0d0,
+  frozen_free_threshold_ev =  15.0d0,
 /
 ```
 
@@ -108,6 +106,52 @@ Set `t2_sbe_fs` back to the default value, or any value greater than or equal to
 Set `eg_ev = -1.0d0` to use the automatically calculated minimum bandgap from the
 band structure. Set `eg_ev > 0` to override with a specific value in eV (default: 1.5 eV).
 
+### ETDRK4 Solver for Semiconductor Bloch Equations
+
+The `dt_evolve_bloch_etdrk4` subroutine implements a **4th-order Exponential Time Differencing Runge-Kutta (ETDRK4)** scheme for solving the Semiconductor Bloch Equations (SBE) in the velocity gauge, following the methodology of Kassam & Trefethen (SIAM J. Sci. Comput., 2005).
+
+#### Operator Splitting
+
+The method exploits the structure of the SBE by splitting the Liouville-von Neumann equation into linear and nonlinear parts:
+
+```
+dρ/dt = L·ρ + N(ρ, t)
+```
+
+**Linear operator L (integrated exactly):**
+- Diagonal in the band basis: `L_{nm} = -i(ε_n - ε_m) - Γ_{nm}`
+- Contains the unperturbed Hamiltonian evolution `-i[H₀, ρ]`
+- Includes static decoherence: `Γ_{nm} = (ε_n - ε_m)² / (T₂·E_g²)` for active bands
+- Solved analytically via matrix exponential: `ρ → exp(L·Δt)·ρ`
+
+**Nonlinear operator N (integrated via RK4):**
+- Contains the light-matter interaction: `N = -i[V(t), ρ]` where `V = A(t)·p`
+- Includes dynamic decoherence: `D_dynamic = -1/(T₂·E_g²)·[H_eff, [H_eff, ρ]] - L_decoh`
+- Evaluated at 4 intermediate stages using Runge-Kutta quadrature
+
+#### Why ETDRK4?
+
+1. **Exact treatment of fast oscillations**: The linear part `exp(-i·ΔE·Δt)` is computed exactly, eliminating phase errors for large energy gaps (deep valence bands, high conduction bands).
+
+2. **Larger time steps**: Stable for `Δt ~ 1-5 a.u.` (compared to `Δt < 0.5 a.u.` for explicit Taylor-4), providing **3-5× speedup** at the same accuracy.
+
+3. **Contour integral stabilization**: Coefficients `Q, f₁, f₂, f₃` are computed via complex contour integration to avoid catastrophic cancellation when `|L·Δt| ≈ 0` (critical for near-degenerate bands).
+
+#### Frozen Core Approximation
+
+For systems with many deep bands (e.g., 80 bands with 60 below -20 eV), the **selective nonlinear term** optimization can be enabled:
+
+```fortran
+! In input file:
+frozen_core_threshold_ev = -15.0  ! Freeze bands below E_F - 15 eV
+frozen_free_threshold_ev = +20.0  ! Freeze bands above E_F + 20 eV
+```
+
+**How it works:**
+- Frozen bands evolve only under the linear operator (exact phase oscillation).
+- Nonlinear terms `N(ρ)` are computed only for the active subspace (e.g., 20×20 instead of 80×80 matrices).
+- After each step, frozen bands are reset to ground state: `ρ_{nn} = 1` (occupied) or `0` (empty).
+  
 ## License
 
 SALMON is available under Apache License version 2.0.
