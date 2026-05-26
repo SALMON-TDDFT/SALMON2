@@ -192,7 +192,7 @@ subroutine main_multiscale_ssbe(icomm)
                                                                             itbl_macro_coord(2, imacro), &
                                                                             itbl_macro_coord(3, imacro)))
                 call dt_evolve_bloch_etdrk4(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
-                                           Ac_macro(1:3, imacro), Ac_half, Ac_macro(1:3, imacro), dt)
+                                           Ac_macro(1:3, imacro), dt)
                 call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
                 if (irank_macro == 0) then
                     Jmat_macro_tmp(1:3, imacro) = jmat(1:3)
