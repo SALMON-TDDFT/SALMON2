@@ -87,17 +87,17 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         write(*, '(a)') 'WARNING: Odd number of electrons. Fermi energy assumes closed-shell.'
     end if
 
-    fermi_energy_ev = ((gs%eigen(homo_idx, 1) + gs%eigen(lumo_idx, 1)) * 0.5d0) * au_ev
-    
+    fermi_energy_ev = ((gs%eigen(homo_idx, 1) + gs%eigen(lumo_idx, 1)) * 0.5d0) 
+
     ! 2. Initialize active bands array
     allocate(sbe%is_active(1:sbe%nb))
-    sbe%is_active = .true.  
+    sbe%is_active = .false.  
     sbe%n_active_bands = 0   
     
     ! 3. Determine active bands on root rank
     if (irank == 0) then
         do ib = 1, sbe%nb
-            eigen_ev = gs%eigen(ib, 1) * au_ev
+            eigen_ev = gs%eigen(ib, 1)
             ! Note: Ensure frozen_core_threshold_ev is negative if it represents a window below E_F
             if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
                 eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
@@ -154,14 +154,14 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         write(*, '(a)') '----------------------------------------'
         write(*, '(a)') '  Band energies relative to Fermi level:'
         
-        do ib = 1, min(sbe%nb, 10)  ! Print first 10 bands
-            eigen_ev = gs%eigen(ib, 1) * au_ev
+        do ib = 1, min(sbe%nb, 100)  ! Print first 100 bands
+            eigen_ev = gs%eigen(ib, 1) 
             write(*, '(a, i3, a, f10.4, a, f8.2, a, l1)') &
                 '    Band ', ib, ': E = ', eigen_ev, ' eV, E-E_F = ', &
                 (eigen_ev - fermi_energy_ev), ' eV, active = ', sbe%is_active(ib)
         end do
         
-        if (sbe%nb > 10) write(*, '(a)') '    ... (more bands)'
+        if (sbe%nb > 100) write(*, '(a)') '    ... (more bands)'
         write(*, '(a)') '=========================================='
     end if
 
@@ -508,15 +508,28 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
         call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
         if (flag_decoh) then
+            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
+            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
+            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
+            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
+            
+            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
+            ! tmp_a = [H0, rho]
             do j = 1, nba; do i = 1, nba
                 in = sbe%active_idx(i); im = sbe%active_idx(j)
                 delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+                C2_a(i, j) = -delta_e * C1_a(i, j)
+                tmp_a(i, j) = delta_e * rho_a(i, j)
             end do; end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a += [V, [V, rho]]  (прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
             N_a = N_a + prefac * C2_a
         end if
         N1 = dcmplx(0d0, 0d0)
@@ -540,15 +553,28 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
         call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
         if (flag_decoh) then
+            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
+            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
+            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
+            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
+            
+            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
+            ! tmp_a = [H0, rho]
             do j = 1, nba; do i = 1, nba
                 in = sbe%active_idx(i); im = sbe%active_idx(j)
                 delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+                C2_a(i, j) = -delta_e * C1_a(i, j)
+                tmp_a(i, j) = delta_e * rho_a(i, j)
             end do; end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a += [V, [V, rho]]  (прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
             N_a = N_a + prefac * C2_a
         end if
         N2 = dcmplx(0d0, 0d0)
@@ -572,15 +598,28 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
         call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
         if (flag_decoh) then
+            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
+            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
+            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
+            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
+            
+            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
+            ! tmp_a = [H0, rho]
             do j = 1, nba; do i = 1, nba
                 in = sbe%active_idx(i); im = sbe%active_idx(j)
                 delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+                C2_a(i, j) = -delta_e * C1_a(i, j)
+                tmp_a(i, j) = delta_e * rho_a(i, j)
             end do; end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a += [V, [V, rho]]  (прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
             N_a = N_a + prefac * C2_a
         end if
         N3 = dcmplx(0d0, 0d0)
@@ -604,15 +643,28 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
         call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
         N_a = -zi * C1_a
         if (flag_decoh) then
+            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
+            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
+            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
+            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
+            
+            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
+            ! tmp_a = [H0, rho]
             do j = 1, nba; do i = 1, nba
                 in = sbe%active_idx(i); im = sbe%active_idx(j)
                 delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = delta_e * C1_a(i, j); tmp_a(i, j) = delta_e * rho_a(i, j)
+                C2_a(i, j) = -delta_e * C1_a(i, j)
+                tmp_a(i, j) = delta_e * rho_a(i, j)
             end do; end do
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
+            ! C2_a += [V, [V, rho]]  (прибавляем!)
+            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
             call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
+            
             N_a = N_a + prefac * C2_a
         end if
         N4 = dcmplx(0d0, 0d0)
@@ -641,7 +693,7 @@ subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
             if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
                 if (n == m) then
                     if (gs%occup(n, ik) > 0.5d0) then
-                        sbe%rho(n, m, ik) = dcmplx(1.0d0, 0.0d0)
+                        sbe%rho(n, m, ik) = dcmplx(2.0d0, 0.0d0)
                     else
                         sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
                     end if
@@ -702,7 +754,7 @@ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
                 if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
                     if (n == m) then
                         if (gs%occup(n, ik) > 0.5d0) then
-                            sbe%rho(n, m, ik) = dcmplx(1.0d0, 0.0d0)
+                            sbe%rho(n, m, ik) = dcmplx(2.0d0, 0.0d0)
                         else
                             sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
                         end if
