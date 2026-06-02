@@ -1,4 +1,6 @@
-  subroutine reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+  subroutine reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, &
+      Vh_buffer, Vxc_buffer, Vpsl_buffer)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
     use structures
     use communication, only: comm_summation
     use salmon_global, only: theory
@@ -12,6 +14,9 @@
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
     type(s_scalar),         intent(in)    :: Vpsl
     real(8),                intent(in)    :: Ac_tot(3)
+    real(8),      optional, intent(in)    :: Vh_buffer(:,:,:)
+    real(8),      optional, intent(in)    :: Vxc_buffer(:,:,:,:)
+    real(8),      optional, intent(in)    :: Vpsl_buffer(:,:,:)
 
     type(s_rgrid), pointer :: mg
     integer :: ifrag, ispin, io, jo, i_local
@@ -36,6 +41,7 @@
     logical, save :: debug_static_seed_logged = .false.
     logical, parameter :: enable_reconstruct_timing = .false.
     logical, parameter :: enable_hmat_nan_check = .false.
+    real(8), parameter :: hmat_abs_limit = 1.0d12
 
     if (.not. dg_frag%has_real_space_basis) return
     if (.not. associated(dg_frag%mg)) then
@@ -107,7 +113,9 @@
       max_nbf_local = max(max_nbf_local, nbf)
     end do
     if (max_nbf_local > 0) then
-      allocate(partial_total(max_nbf_local), partial_block(max_nbf_local, max_nbf_local), reduced_block(max_nbf_local, max_nbf_local))
+      allocate(partial_total(max_nbf_local), &
+               partial_block(max_nbf_local, max_nbf_local), &
+               reduced_block(max_nbf_local, max_nbf_local))
     end if
 
     frag_size = max(1, dg_frag%isize_frag)
@@ -115,7 +123,22 @@
 
     do ispin = 1, system%nspin
       call cpu_time(t0)
-      call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      if (present(Vh_buffer) .and. present(Vxc_buffer) .and. present(Vpsl_buffer)) then
+        call assert_real_hmat_reconstruct_bounded_3d("Vh_buffer", Vh_buffer, &
+          hmat_abs_limit, dg_frag%id, 0, ispin, 0)
+        call assert_real_hmat_reconstruct_bounded_3d("Vpsl_buffer", Vpsl_buffer, &
+          hmat_abs_limit, dg_frag%id, 0, ispin, 0)
+        call assert_real_hmat_reconstruct_bounded_3d("Vxc_buffer", Vxc_buffer(:, :, :, ispin), &
+          hmat_abs_limit, dg_frag%id, 0, ispin, 0)
+        call build_total_potential_grid_with_stage_buffers(mg, dg_frag%lgnum_total, &
+          Vh_buffer, Vxc_buffer, Vpsl_buffer, ispin, V_total)
+      else if (present(Vh_buffer)) then
+        call assert_real_hmat_reconstruct_bounded_3d("Vh_buffer", Vh_buffer, &
+          hmat_abs_limit, dg_frag%id, 0, ispin, 0)
+        call build_total_potential_grid_with_buffered_hartree(mg, dg_frag, Vh_buffer, Vxc(ispin), Vpsl, V_total)
+      else
+        call build_total_potential_grid(mg, Vh, Vxc(ispin), Vpsl, V_total)
+      end if
       if (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v)) then
 !$omp parallel do collapse(3) private(A2val) schedule(static)
         do i_local = mg%is(3), mg%ie(3)
@@ -132,6 +155,8 @@
       end if
       call cpu_time(t1)
       time_potential_build = time_potential_build + (t1 - t0)
+      call assert_real_hmat_reconstruct_bounded_3d("V_total", V_total, &
+        hmat_abs_limit, dg_frag%id, 0, ispin, 0)
 
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = ifrag - dg_frag%ifrag_start + 1
@@ -149,6 +174,9 @@
         if (iblk <= 0) cycle
 
         partial_block(1:nbf, 1:nbf) = 0.0d0
+        call assert_real_hmat_reconstruct_bounded_4d("phi_frag", &
+          dg_frag%phi_frag(:, :, :, 1:nbf, i_local), hmat_abs_limit, &
+          dg_frag%id, ifrag, ispin, 0)
 
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
@@ -190,6 +218,8 @@
           call cpu_time(t0)
           call build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
             lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
+          call assert_complex_hmat_reconstruct_bounded_3d("V_phi", V_phi, &
+            hmat_abs_limit, dg_frag%id, ifrag, ispin, jo)
 
           partial_total(1:nbf) = 0.0d0
 
@@ -202,6 +232,8 @@
 !$omp end parallel do
           call cpu_time(t1)
           time_local_build = time_local_build + (t1 - t0)
+          call assert_real_hmat_reconstruct_bounded_1d("partial_total", &
+            partial_total(1:nbf), hmat_abs_limit, dg_frag%id, ifrag, ispin, jo)
 
           partial_block(1:nbf, jo) = partial_total(1:nbf)
         end do
@@ -210,25 +242,37 @@
         if (allocated(map_y)) deallocate(map_y)
         if (allocated(map_z)) deallocate(map_z)
 
+        call assert_real_hmat_reconstruct_bounded_2d("partial_block", &
+          partial_block(1:nbf, 1:nbf), hmat_abs_limit, dg_frag%id, ifrag, ispin, 0)
         call cpu_time(t0)
         call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
         call cpu_time(t1)
         time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
+        call assert_real_hmat_reconstruct_bounded_2d("reduced_block", &
+          reduced_block(1:nbf, 1:nbf), hmat_abs_limit, dg_frag%id, ifrag, ispin, 0)
 
         if (.not. debug_static_seed_logged .and. dg_frag%is_frag_root .and. ispin == 1 .and. nbf >= 3) then
           write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x),a,3(1pe14.6,1x))') &
             "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " seed_t=", &
-            dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin), &
+            dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), &
+            dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), &
+            dg_frag%H_mat_blocks(iblk)%val(3,3,ispin), &
             " add_block=", reduced_block(1,1), reduced_block(2,2), reduced_block(3,3)
           flush(6)
         end if
 
         if (dg_frag%is_frag_root) then
-          dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(1:nbf, 1:nbf)
+          dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) = &
+            dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin) + reduced_block(1:nbf, 1:nbf)
+          call assert_real_hmat_reconstruct_bounded_2d("final_h_block", &
+            dg_frag%H_mat_blocks(iblk)%val(1:nbf, 1:nbf, ispin), &
+            hmat_abs_limit, dg_frag%id, ifrag, ispin, 0)
           if (.not. debug_static_seed_logged .and. ispin == 1 .and. nbf >= 3) then
             write(*,'(1x,a,i0,a,i0,a,3(1pe14.6,1x))') &
               "        reconstruct-diag probe: rank=", dg_frag%id, " ifrag=", ifrag, " final_h=", &
-              dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), dg_frag%H_mat_blocks(iblk)%val(3,3,ispin)
+              dg_frag%H_mat_blocks(iblk)%val(1,1,ispin), &
+              dg_frag%H_mat_blocks(iblk)%val(2,2,ispin), &
+              dg_frag%H_mat_blocks(iblk)%val(3,3,ispin)
             flush(6)
             debug_static_seed_logged = .true.
           end if
@@ -303,6 +347,67 @@
     end if
     if (iloc < lb .or. iloc > ub) iloc = 0
   end function map_global_to_phi_box_coord_reconstruct
+
+  integer function map_global_to_rank_buffer_coord_reconstruct(ig, lb, ub, lgtot) result(iloc)
+    implicit none
+    integer, intent(in) :: ig, lb, ub, lgtot
+
+    if (lgtot <= 0 .or. ub < lb) then
+      iloc = 0
+      return
+    end if
+
+    iloc = modulo(ig - 1, lgtot) + 1
+    if (iloc < lb) then
+      iloc = iloc + ((lb - iloc + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc > ub) then
+      iloc = iloc - ((iloc - ub + lgtot - 1) / lgtot) * lgtot
+    end if
+    if (iloc < lb .or. iloc > ub) iloc = 0
+  end function map_global_to_rank_buffer_coord_reconstruct
+
+  subroutine build_total_potential_grid_with_stage_buffers(grid, lgnum_total, &
+      Vh_buffer, Vxc_buffer, Vpsl_buffer, ispin, V_total)
+    use structures
+    implicit none
+    type(s_rgrid), intent(in) :: grid
+    integer, intent(in) :: lgnum_total(3)
+    real(8), intent(in) :: Vh_buffer(:,:,:)
+    real(8), intent(in) :: Vxc_buffer(:,:,:,:)
+    real(8), intent(in) :: Vpsl_buffer(:,:,:)
+    integer, intent(in) :: ispin
+    real(8), intent(out) :: V_total(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
+    integer :: ix, iy, iz
+    integer :: bx, by, bz
+    integer :: b_lo1, b_lo2, b_lo3, b_hi1, b_hi2, b_hi3
+
+    b_lo1 = lbound(Vh_buffer, 1)
+    b_hi1 = ubound(Vh_buffer, 1)
+    b_lo2 = lbound(Vh_buffer, 2)
+    b_hi2 = ubound(Vh_buffer, 2)
+    b_lo3 = lbound(Vh_buffer, 3)
+    b_hi3 = ubound(Vh_buffer, 3)
+
+!$omp parallel do private(ix,iy,bx,by,bz) schedule(static)
+    do iz = grid%is(3), grid%ie(3)
+      bz = map_global_to_rank_buffer_coord_reconstruct(iz, b_lo3, b_hi3, lgnum_total(3))
+      do iy = grid%is(2), grid%ie(2)
+        by = map_global_to_rank_buffer_coord_reconstruct(iy, b_lo2, b_hi2, lgnum_total(2))
+!$omp simd private(bx)
+        do ix = grid%is(1), grid%ie(1)
+          bx = map_global_to_rank_buffer_coord_reconstruct(ix, b_lo1, b_hi1, lgnum_total(1))
+          if (bx == 0 .or. by == 0 .or. bz == 0) then
+            V_total(ix, iy, iz) = 0.0d0
+          else
+            V_total(ix, iy, iz) = Vpsl_buffer(bx, by, bz) + Vh_buffer(bx, by, bz) + &
+                                  Vxc_buffer(bx, by, bz, ispin)
+          end if
+        end do
+      end do
+    end do
+!$omp end parallel do
+  end subroutine build_total_potential_grid_with_stage_buffers
 
   subroutine build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
       lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
@@ -434,3 +539,102 @@
       integral = cmplx(acc_re, acc_im, kind=8)
     end if
   end subroutine integrate_local_basis_with_field_mapped
+
+  subroutine assert_real_hmat_reconstruct_bounded_1d(label, vals, limit, rank, ifrag, ispin, jo)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
+    implicit none
+    character(*), intent(in) :: label
+    real(8), intent(in) :: vals(:)
+    real(8), intent(in) :: limit
+    integer, intent(in) :: rank, ifrag, ispin, jo
+    real(8) :: vmax
+    logical :: has_nan, has_big
+
+    has_nan = any(ieee_is_nan(vals))
+    has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
+    vmax = maxval(abs(vals))
+    call stop_if_hmat_reconstruct_unbounded(label, vmax, limit, rank, ifrag, ispin, jo, has_nan, has_big)
+  end subroutine assert_real_hmat_reconstruct_bounded_1d
+
+  subroutine assert_real_hmat_reconstruct_bounded_2d(label, vals, limit, rank, ifrag, ispin, jo)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
+    implicit none
+    character(*), intent(in) :: label
+    real(8), intent(in) :: vals(:,:)
+    real(8), intent(in) :: limit
+    integer, intent(in) :: rank, ifrag, ispin, jo
+    real(8) :: vmax
+    logical :: has_nan, has_big
+
+    has_nan = any(ieee_is_nan(vals))
+    has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
+    vmax = maxval(abs(vals))
+    call stop_if_hmat_reconstruct_unbounded(label, vmax, limit, rank, ifrag, ispin, jo, has_nan, has_big)
+  end subroutine assert_real_hmat_reconstruct_bounded_2d
+
+  subroutine assert_real_hmat_reconstruct_bounded_3d(label, vals, limit, rank, ifrag, ispin, jo)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
+    implicit none
+    character(*), intent(in) :: label
+    real(8), intent(in) :: vals(:,:,:)
+    real(8), intent(in) :: limit
+    integer, intent(in) :: rank, ifrag, ispin, jo
+    real(8) :: vmax
+    logical :: has_nan, has_big
+
+    has_nan = any(ieee_is_nan(vals))
+    has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
+    vmax = maxval(abs(vals))
+    call stop_if_hmat_reconstruct_unbounded(label, vmax, limit, rank, ifrag, ispin, jo, has_nan, has_big)
+  end subroutine assert_real_hmat_reconstruct_bounded_3d
+
+  subroutine assert_real_hmat_reconstruct_bounded_4d(label, vals, limit, rank, ifrag, ispin, jo)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
+    implicit none
+    character(*), intent(in) :: label
+    real(8), intent(in) :: vals(:,:,:,:)
+    real(8), intent(in) :: limit
+    integer, intent(in) :: rank, ifrag, ispin, jo
+    real(8) :: vmax
+    logical :: has_nan, has_big
+
+    has_nan = any(ieee_is_nan(vals))
+    has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
+    vmax = maxval(abs(vals))
+    call stop_if_hmat_reconstruct_unbounded(label, vmax, limit, rank, ifrag, ispin, jo, has_nan, has_big)
+  end subroutine assert_real_hmat_reconstruct_bounded_4d
+
+  subroutine assert_complex_hmat_reconstruct_bounded_3d(label, vals, limit, rank, ifrag, ispin, jo)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
+    implicit none
+    character(*), intent(in) :: label
+    complex(8), intent(in) :: vals(:,:,:)
+    real(8), intent(in) :: limit
+    integer, intent(in) :: rank, ifrag, ispin, jo
+    real(8) :: vmax
+    logical :: has_nan, has_big
+
+    has_nan = any(ieee_is_nan(real(vals, kind=8))) .or. any(ieee_is_nan(aimag(vals)))
+    has_big = any((.not. ieee_is_finite(real(vals, kind=8))) .or. &
+                  (.not. ieee_is_finite(aimag(vals))) .or. abs(vals) > limit)
+    vmax = maxval(abs(vals))
+    call stop_if_hmat_reconstruct_unbounded(label, vmax, limit, rank, ifrag, ispin, jo, has_nan, has_big)
+  end subroutine assert_complex_hmat_reconstruct_bounded_3d
+
+  subroutine stop_if_hmat_reconstruct_unbounded(label, vmax, limit, rank, ifrag, ispin, jo, has_nan, has_big)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
+    implicit none
+    character(*), intent(in) :: label
+    real(8), intent(in) :: vmax, limit
+    integer, intent(in) :: rank, ifrag, ispin, jo
+    logical, intent(in) :: has_nan, has_big
+
+    if (has_nan .or. has_big .or. ieee_is_nan(vmax) .or. (.not. ieee_is_finite(vmax)) .or. vmax > limit) then
+      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0,a,l1,a,l1,a,es24.16,a,es24.16)') &
+        "[FATAL] invalid reduced DG H reconstruct input: label=", trim(label), &
+        " rank=", rank, " ifrag=", ifrag, " ispin=", ispin, " jo=", jo, &
+        " has_nan=", has_nan, " has_big=", has_big, " max=", vmax, " limit=", limit
+      flush(6)
+      stop "invalid DG H reconstruct input"
+    end if
+  end subroutine stop_if_hmat_reconstruct_unbounded

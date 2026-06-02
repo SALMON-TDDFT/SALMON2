@@ -110,7 +110,7 @@ end subroutine solve_orbitals
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_hse,hse_alpha
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_hse,hse_alpha,yn_dc_for_dg
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
@@ -167,9 +167,16 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call timer_end(LOG_CALC_HARTREE)
 
+  if (yn_dc_for_dg == 'y') then
+    do j = 1, system%nspin
+      Vxc(j)%f = 0.0d0
+    end do
+    energy%E_xc = 0.0d0
+  else
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
+  end if
 
 
   if(method_mixing=='simple_potential')then
@@ -180,7 +187,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   ! HSE Hybrid Functional: Add exact exchange contribution via FFT
   ! Reuses Hartree solver infrastructure for fast Coulomb convolution
   ! ===================================================================
-  if(yn_hse=='y') then
+  if(yn_hse=='y' .and. yn_dc_for_dg/='y') then
     call timer_begin(LOG_CALC_EXC_COR)
     do j = 1, system%nspin
       call calc_xc_hse_fft(rho_s(j)%f, Vxc(j)%f, e_xc_hse, &

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 
-if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
+if ("${CMAKE_CURRENT_SOURCE_DIR}" MATCHES "${CMAKE_CURRENT_BINARY_DIR}")
   message(FATAL_ERROR
   [[in-source build does not support
     Example:
@@ -10,10 +10,10 @@ if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
   )
 endif ()
 
-include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
-
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/platforms)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Modules)
+include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
+
 
 ### Project settings
 enable_testing()
@@ -23,19 +23,6 @@ project(SALMON
         VERSION   2.2.2
         LANGUAGES Fortran C
         )
-
-if(DEFINED CMAKE_Fortran_FLAGS_DEBUG)
-  set(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG}" CACHE STRING "Fortran debug flags" FORCE)
-endif()
-if(DEFINED CMAKE_Fortran_FLAGS_RELEASE)
-  set(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE}" CACHE STRING "Fortran release flags" FORCE)
-endif()
-if(DEFINED CMAKE_C_FLAGS_DEBUG)
-  set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}" CACHE STRING "C debug flags" FORCE)
-endif()
-if(DEFINED CMAKE_C_FLAGS_RELEASE)
-  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}" CACHE STRING "C release flags" FORCE)
-endif()
 
 message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
@@ -53,15 +40,15 @@ endif()
 
 # Bulid options
 ## For third party libraries
-option(USE_MPI       "Use MPI parallelization" OFF)
-option(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
-option(USE_EIGENEXA  "Use EigenExa Library"    OFF)
-option(USE_LIBXC     "Use Libxc library"       OFF)
-option(USE_FFTW      "Use FFTW library"        OFF)
+option_set(USE_MPI       "Use MPI parallelization" OFF)
+option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
+option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
+option_set(USE_LIBXC     "Use Libxc library"       OFF)
+option_set(USE_FFTW      "Use FFTW library"        OFF)
 
 ## Optimization for stencil compitations
-option(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
-option(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
+option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
+option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
 
 
 # variables
@@ -70,33 +57,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR})
 include_directories(${CMAKE_BINARY_DIR})
 
-# Enable Fortran preprocessor for free form sources
-#set(CMAKE_Fortran_PREPROCESS_SOURCE ON)
-#set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -ffree-form -x f95-cpp-input")
-
-# Respect platform-specific preprocessing flags when provided by the toolchain.
-if(DEFINED Fortran_PP_FLAGS)
-  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${Fortran_PP_FLAGS}")
-else()
-  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
-endif()
-
 include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 
 
 # for third party libraries
 include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
-
-# Find and add OpenMP
-find_package(OpenMP REQUIRED Fortran)
-find_package(OpenMP QUIET)
-if(OpenMP_Fortran_FOUND)
-  list(APPEND EXTERNAL_LIBS OpenMP::OpenMP_Fortran)
-endif()
-if(OpenMP_C_FOUND)
-  list(APPEND EXTERNAL_LIBS OpenMP::OpenMP_C)
-endif()
-
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 
@@ -118,10 +83,8 @@ configure_file(
 )
 
 
-# Add subdirectory for sources
 add_subdirectory(${CMAKE_SOURCE_DIR}/src)        # sources
 add_subdirectory(${CMAKE_SOURCE_DIR}/testsuites) # tests
-
 
 
 

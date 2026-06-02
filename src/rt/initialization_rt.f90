@@ -57,7 +57,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use dip, only: calc_dip
   use sendrecv_grid
   use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft, yn_spinorbit, &
-                           nproc_rgrid, nproc_rgrid_tot
+                           nproc_rgrid, nproc_rgrid_tot, nproc_ob
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
@@ -100,9 +100,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
-  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3), init_curr_local(3), init_curr_sum(3)
+  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
   integer :: nproc_rgrid_tmp(3)
+  integer :: nproc_ob_tmp
+  integer :: expected_ob
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
@@ -199,13 +201,37 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   if (yn_dg_fragment_rt == 'y') then
     nproc_rgrid_tmp = nproc_rgrid
+    nproc_ob_tmp = nproc_ob
     nproc_rgrid = nproc_rgrid_tot
+    ! In DG-RT, nproc_ob is the orbital-parallel width inside each fragment
+    ! subgroup.  Keep it as an orbital dimension during the parent grid setup;
+    ! do not fold it into nproc_rgrid, or the run silently reverts to extra
+    ! real-space splitting such as 8,8,8 x nproc_ob -> 32,8,8.
   end if
 
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
 
   if (yn_dg_fragment_rt == 'y') then
+    expected_ob = max(1, nproc_ob_tmp)
+    if (comm_is_root(nproc_id_global)) then
+      write(*,'(1x,a,i0,a,3(i0,1x))') '[DG-RT-PARENT] nproc_ob=', info%nporbital, &
+        ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3)
+      flush(6)
+    end if
+    if (info%nporbital /= expected_ob .or. any(info%nprgrid(1:3) /= nproc_rgrid_tot(1:3))) then
+      if (comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') '[FATAL] DG-RT parent MPI layout mismatch.'
+        write(*,'(1x,a,i0,a,3(i0,1x))') '        actual   nproc_ob=', info%nporbital, &
+          ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3)
+        write(*,'(1x,a,i0,a,3(i0,1x))') '        expected nproc_ob=', expected_ob, &
+          ' nproc_rgrid_tot=', nproc_rgrid_tot(1), nproc_rgrid_tot(2), nproc_rgrid_tot(3)
+        write(*,'(1x,a)') '        Use &parallel nproc_ob for fragment-internal orbital parallelism; do not fold it into nproc_rgrid.'
+        flush(6)
+      end if
+      stop 'DG-RT parent MPI layout mismatch'
+    end if
     nproc_rgrid = nproc_rgrid_tmp
+    nproc_ob = nproc_ob_tmp
   end if
   
   call init_code_optimization
@@ -335,6 +361,31 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call  init_nion_div(system,lg,mg,info)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
+
+  if (yn_dg_fragment_rt == 'y') then
+    ! DG-RT initialization returns before conventional eigen-energy and
+    ! standard orbital propagation setup.  The DG branch builds its own
+    ! fragment Hamiltonian and observables in time_evolution_dg_fragment.
+    if(comm_is_root(nproc_id_global))then
+       write(ofl%file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
+       write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
+       write(ofl%file_response_data,"(2A,'_response.data')") trim(base_directory),trim(SYSname)
+       write(ofl%file_pulse_data,"(2A,'_pulse.data')") trim(base_directory),trim(SYSname)
+    endif
+    call comm_bcast(ofl%file_rt_data,       nproc_group_global)
+    call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
+    call comm_bcast(ofl%file_response_data, nproc_group_global)
+    call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
+    select case(iperiodic)
+    case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
+    case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
+    end select
+    call write_rt_energy_data(-1,ofl,dt,energy,md)
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+      write(*,'(1x,a)') "DG-Fragment RT: skip conventional calc_eigen_energy and enter DG propagation setup"
+    end if
+    return
+  end if
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
@@ -482,26 +533,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call allocate_vector(mg,rt%j_e)
     call init_singlescale(mg,lg,info,system%hgs,system%rmatrix_B,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
-    if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi_in%zwf)
-    spsi_in%update_zwf_overlap = .true.
-    call calc_microscopic_current(system,mg,stencil,info,spsi_in,rt%j_e)
-    if (Mit == 0) then
-      singlescale%vec_je_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
-        rt%j_e%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-    end if
-    init_curr_local = 0d0
-!$omp parallel do collapse(2) private(ix,iy,iz) reduction(+:init_curr_local)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      singlescale%curr(ix,iy,iz,1:3) = rt%j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * system%Ac_micro%v(1:3,ix,iy,iz)
-      init_curr_local = init_curr_local + singlescale%curr(ix,iy,iz,1:3)
-    end do
-    end do
-    end do
-    init_curr_local = init_curr_local / dble(lg%num(1) * lg%num(2) * lg%num(3))
-    call comm_summation(init_curr_local, init_curr_sum, 3, info%icomm_r)
-    singlescale%curr_ave = init_curr_sum
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit

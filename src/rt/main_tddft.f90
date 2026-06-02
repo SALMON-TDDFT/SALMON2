@@ -238,13 +238,18 @@ call finalize_xc(xc_func)
 contains
 
 subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc_func, &
-                                       srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, Vh, Vxc, Vpsl, energy, ofl, md, singlescale)
+                                       srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, &
+                                       Vh, Vxc, Vpsl, energy, ofl, md, singlescale)
   use structures
   use rt_dg_fragment_types, only: s_dg_fragment_rt
   use rt_dg_fragment, only: init_dg_fragment_rt_std => init_dg_fragment_rt, &
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
-                            calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix
+                            calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix, &
+                            prepare_fragment_local_eigen_basis, &
+                            diagonalize_initial_dg_full_distributed, &
+                            relax_initial_occupied_subspace_block_sparse, &
+                            measure_fragment_initial_surface_residual
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -280,6 +285,14 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
+  integer :: env_len, env_status
+  logical :: did_contract_dg_basis
+  logical :: did_distributed_dg_eig
+  logical :: trace_dg_current
+  character(len=16) :: env_value
+  real(8) :: curr_e_out(3,2), curr_i_zero(3)
+  real(8) :: dg_surface_rel, dg_core_rel, dg_full_rel
+  real(8) :: dg_initial_rel_tol
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -294,9 +307,58 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call calculate_hamiltonian_matrix_soi(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
   else
     call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
+    call prepare_fragment_local_eigen_basis(dg_frag, system, mg, ppg, did_contract_dg_basis)
+    if (did_contract_dg_basis) then
+      call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
+      call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[DG-DIST-EIG] full DG generalized eigensolver is the primary initial-state path'
+        write(*,'(1x,a)') '[DG-DIST-EIG] block-sparse occupied relaxation is used only as fallback'
+        write(*,'(1x,a,3(a,1pe13.5))') '[DG-DIST-EIG-INITIAL]', &
+          ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+        flush(6)
+      end if
+      call diagonalize_initial_dg_full_distributed(dg_frag, system, did_distributed_dg_eig)
+      if (.not. did_distributed_dg_eig) call relax_initial_occupied_subspace_block_sparse(dg_frag, system)
+      call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,l1)') '[DG-DIST-EIG-FINAL] distributed_solved=', did_distributed_dg_eig
+        write(*,'(1x,a,3(a,1pe13.5))') '[DG-DIST-EIG-FINAL]', &
+          ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+        flush(6)
+      end if
+      dg_initial_rel_tol = 1.0d-2
+      env_value = ''
+      call get_environment_variable("SALMON_DG_INITIAL_REL_TOL", env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        read(env_value(1:env_len), *, iostat=env_status) dg_initial_rel_tol
+        if (env_status /= 0) dg_initial_rel_tol = 1.0d-2
+      end if
+      if (dg_full_rel > dg_initial_rel_tol) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,2(a,1pe13.5))') '[FATAL] DG initial state is not stationary enough for RT propagation:', &
+            ' full_rel=', dg_full_rel, ' tol=', dg_initial_rel_tol
+          write(*,'(1x,a)') '[FATAL] Stop before RK propagation to avoid overlap-solve blow-up.'
+          flush(6)
+        end if
+        stop 'DG-Fragment RT: initial full-DG residual too large'
+      end if
+    end if
   end if
   
   ! H_mat_kinetic is constructed inside calculate_hamiltonian_matrix
+  trace_dg_current = .true.
+  env_value = ''
+  call get_environment_variable("SALMON_DG_CURRENT_TRACE", env_value, length=env_len, status=env_status)
+  if (env_status == 0 .and. env_len > 0) then
+    if (env_value(1:1) == '0' .or. env_value(1:1) == 'n' .or. env_value(1:1) == 'N' .or. &
+        env_value(1:1) == 'f' .or. env_value(1:1) == 'F') then
+      trace_dg_current = .false.
+    else if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. &
+             env_value(1:1) == 'Y' .or. env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
+      trace_dg_current = .true.
+    end if
+  end if
   
   if (comm_is_root(nproc_id_global)) then
     write(*,*)
@@ -351,11 +413,10 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     case(3)
       ! Periodic system: output current density
       ! DG-Fragment current from calculate_observables
-      ! curr_e needs shape (3, 2) for two spins, use same current for both spins
-      call write_rt_data_3d(itt, ofl, dt, system, &
-                            reshape([dg_frag%current(1), dg_frag%current(2), dg_frag%current(3), &
-                                     dg_frag%current(1), dg_frag%current(2), dg_frag%current(3)], [3,2]), &
-                            dg_frag%current(1:3))
+      curr_e_out(:, :) = 0.0d0
+      curr_e_out(:, 1) = dg_frag%current_total(:)
+      curr_i_zero(:) = 0.0d0
+      call write_rt_data_3d(itt, ofl, dt, system, curr_e_out, curr_i_zero)
     end select
     
     ! Write energy data
@@ -363,7 +424,13 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. mod(itt, 10) == 0) then
-      write(*,'(1x,i10,f12.3,3e16.6e3,e20.10e3)') itt, dble(itt)*dt, dg_frag%current(:), dg_frag%total_energy
+      write(*,'(1x,i10,f12.3,3e16.6e3,e20.10e3)') itt, dble(itt)*dt, dg_frag%current_total(:), dg_frag%total_energy
+      if (trace_dg_current) then
+        write(*,'(1x,a,i0,5(a,3es13.5))') '[DG-CURRENT] itt=', itt, &
+          ' para=', dg_frag%current_para(:), ' nl=', dg_frag%current_nl(:), &
+          ' dia=', dg_frag%current_dia(:), ' total=', dg_frag%current_total(:), &
+          ' Ac=', rt%Ac_tot(:, itt)
+      end if
     end if
   end do
   
@@ -511,7 +578,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   energy%E_ion_loc = E_sum(2) + E_sum(3)
   energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
   if (comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
-    write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+    write(*,'(1x,a,i0,22(a,1pe14.6))') &
       "        dg-energy-helper: itt=", itt, " E_one=", dg_frag%total_energy, " rhoVh=", rho_vh_sum, " rhoVxc=", rho_vxc_sum, &
       " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &
       " rhoG2=", rho_g2_sum, " rhoGmax=", rho_gmax_sum(1), " rhoVh_r=", rho_vh_sum_r, &
@@ -656,7 +723,8 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
     write(iunit,'(a)') '# x: x coordinate'
     write(iunit,'(a)') '# y: y coordinate'
     write(iunit,'(a)') '# local_chern_marker_zint: local Chern marker integrated over z'
-    write(iunit,'(a,a,a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', trim(t_unit_length%name), '] 3:local_chern_marker_zint[none]'
+    write(iunit,'(a,a,a,a,a)') '# 1:x[', trim(t_unit_length%name), '] 2:y[', &
+      trim(t_unit_length%name), '] 3:local_chern_marker_zint[none]'
     do iy = 1, ny
       do ix = 1, nx
         write(iunit,'(3(1x,es24.16))') dble(ix-1) * system%hgs(1) * t_unit_length%conv, &

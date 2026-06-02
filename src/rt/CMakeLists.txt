@@ -12,7 +12,11 @@ set(SOURCES
     rt_local_chern_marker.f90
     rt_local_chern_marker_soi.f90
     dg/rt_dg_fragment_ops.f90
+    dg/rt_dg_fragment_coefficients.f90
+    dg/rt_dg_fragment_layout.f90
+    dg/rt_dg_initial_state.f90
     dg/rt_dg_fragment.f90
+    dg/rt_dg_fragment_hamiltonian_soi.f90
     dg/rt_dg_fragment_soi.f90
 	    plusu_fragment_support.f90
     taylor.f90
@@ -33,5 +37,5 @@ set_source_files_properties(
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_soi.f90
     PROPERTIES
-    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_hamiltonian_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_basis_update_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_parallel.f90"
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_basis_update_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_parallel.f90"
 )

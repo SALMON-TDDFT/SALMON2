@@ -174,7 +174,7 @@
     complex(8), allocatable :: S_frag_pw(:,:,:)  ! Complex overlap matrix
     complex(8), allocatable :: H_frag_pw(:,:,:)  ! Hamiltonian coupling matrix
     
-    n_frag = dg_frag%n_mat_max
+    n_frag = size(dg_frag%coef, 1)
     n_pw = dg_frag%n_plane_waves
     n_total = n_frag + n_pw
     
@@ -394,13 +394,15 @@
         dg_frag%coef = coef_old
         dg_frag%coef_new = coef_old
         call zero_nonowned_coefficients(dg_frag)
-        if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
-        if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+	        if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
+	        if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+	        if (allocated(dg_frag%momentum_blocks)) deallocate(dg_frag%momentum_blocks)
+	        if (allocated(dg_frag%momentum_blocks_c)) deallocate(dg_frag%momentum_blocks_c)
+	        if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
         if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
         if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
         if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
         if (allocated(dg_frag%S_mat_prop_c)) deallocate(dg_frag%S_mat_prop_c)
-        if (allocated(dg_frag%H_nl_cache)) deallocate(dg_frag%H_nl_cache)
         dg_frag%has_nl_cache = .false.
         call calculate_momentum_matrix(dg_frag, system, mg, stencil)
         call calculate_overlap_matrix(dg_frag, system, mg)
@@ -449,7 +451,7 @@
     complex(8), allocatable :: Sm(:,:), tmp(:,:), A(:,:)
     complex(8), parameter :: zone = (1.0d0, 0.0d0), zzero = (0.0d0, 0.0d0)
 
-    n_frag = dg_frag%n_mat_max
+    n_frag = size(dg_frag%coef, 1)
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
@@ -532,7 +534,7 @@
     complex(8), intent(in) :: coef_old(:,:,:)
 
     integer :: ifrag, i_local, ispin, io, i, j, ix, iy, iz
-    integer :: iidx, jidx, nb
+    integer :: iidx, jidx, iloc, jloc, nb
     integer :: ndom(3)
     real(8) :: hvol
     real(8), allocatable :: ovlp(:,:), ovlp_orig(:,:), U(:,:), VT(:,:), S(:), work(:)
@@ -629,14 +631,20 @@
           do j = 1, nb
             do i = 1, nb
               iidx = dg_frag%index_basis(i, ifrag, ispin)
-              if (iidx < 1 .or. iidx > size(coef_old,1)) cycle
-              cnew(j) = cnew(j) + ovlp(j,i) * coef_old(iidx, io, ispin)
+              if (iidx < 1 .or. iidx > dg_frag%n_mat_max) cycle
+              if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+              iloc = dg_frag%coef_global_to_local(iidx, ispin)
+              if (iloc < 1 .or. iloc > size(coef_old,1)) cycle
+              cnew(j) = cnew(j) + ovlp(j,i) * coef_old(iloc, io, ispin)
             end do
           end do
           do j = 1, nb
             jidx = dg_frag%index_basis(j, ifrag, ispin)
-            if (jidx < 1 .or. jidx > size(dg_frag%coef,1)) cycle
-            dg_frag%coef(jidx, io, ispin) = cnew(j)
+            if (jidx < 1 .or. jidx > dg_frag%n_mat_max) cycle
+            if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+            jloc = dg_frag%coef_global_to_local(jidx, ispin)
+            if (jloc < 1 .or. jloc > size(dg_frag%coef,1)) cycle
+            dg_frag%coef(jloc, io, ispin) = cnew(j)
           end do
         end do
 
@@ -682,6 +690,8 @@
     logical :: ok_local
 
     is_valid = .true.
+    if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_c) .and. &
+        .not. allocated(dg_frag%S_mat_blocks)) return
     if (.not. allocated(dg_frag%S_mat) .and. .not. allocated(dg_frag%S_mat_c)) return
 
     do ispin = 1, dg_frag%nspin
@@ -832,6 +842,7 @@
     logical, intent(in) :: rebuild_rt_operators
 
     integer :: ifrag, i_local, ispin, io, jo, ix, iy, iz, i_halo, i, j
+    integer :: jloc
     integer :: n, ifrag_count, n_basis_local, n_basis_halo, jfrag
     integer :: is(3), ie(3), l(3), d(3), iorg(3), ndom(3), lx, ly, lz, gx, gy, gz
     integer :: halo_send_idx(3), halo_recv_idx(3)
@@ -853,13 +864,16 @@
     end if
     
     ! Recalculate RT operators only when requested or when not yet available.
-    if (rebuild_rt_operators .or. .not. allocated(dg_frag%momentum_mat) .or. .not. allocated(dg_frag%momentum_mat_c) .or. &
-        .not. allocated(dg_frag%S_mat) .or. .not. allocated(dg_frag%S_mat_c)) then
+    if (rebuild_rt_operators .or. .not. allocated(dg_frag%momentum_blocks) .or. &
+        .not. allocated(dg_frag%S_mat_blocks)) then
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  Recalculating momentum matrix for updated basis..."
       end if
-      if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
-      if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+	      if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
+	      if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
+	      if (allocated(dg_frag%momentum_blocks)) deallocate(dg_frag%momentum_blocks)
+	      if (allocated(dg_frag%momentum_blocks_c)) deallocate(dg_frag%momentum_blocks_c)
+	      if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
       if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
       if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
       if (allocated(dg_frag%S_mat_c)) deallocate(dg_frag%S_mat_c)
@@ -871,8 +885,6 @@
         write(*,*) "  Overlap matrix recalculated successfully"
       end if
     end if
-
-    call exchange_phi_frag_halo(dg_frag)
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     allocate(mat_H_local(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin, ifrag_count))
@@ -960,7 +972,10 @@
         do jo = 1, n_basis_local
           j = dg_frag%index_basis(jo, ifrag, ispin)
           if (j < 1 .or. j > dg_frag%n_mat_max) cycle
-          dg_frag%coef(j, :, ispin) = dg_frag%coef(j, :, ispin) + coef_local(jo, :, ispin, i_local)
+          if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+          jloc = dg_frag%coef_global_to_local(j, ispin)
+          if (jloc < 1 .or. jloc > size(dg_frag%coef, 1)) cycle
+          dg_frag%coef(jloc, :, ispin) = dg_frag%coef(jloc, :, ispin) + coef_local(jo, :, ispin, i_local)
         end do
       end do
     end do
@@ -978,10 +993,8 @@
       integer :: valid_local_ids(dg_frag%nstate_frag), valid_halo_ids(dg_frag%nstate_frag)
       real(8), allocatable :: mat_H(:,:), mat_V(:,:)
 
-      if (.not. allocated(dg_frag%H_mat)) then
-        allocate(dg_frag%H_mat(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-      end if
-      dg_frag%H_mat(:, :, :) = 0.0d0
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                              diagonal_only=.true.)
 
       do ispin = 1, system%nspin
         n = dg_frag%n_mat(ispin)
@@ -1034,16 +1047,25 @@
             end do
           end do
         end do
-
-        dg_frag%H_mat(1:n, 1:n, ispin) = mat_V
+        do idx_jo = 1, dg_frag%n_H_blocks
+          ifrag = dg_frag%H_mat_blocks(idx_jo)%ifrag_row
+          jfrag = dg_frag%H_mat_blocks(idx_jo)%ifrag_col
+          n_basis_local = dg_frag%n_basis(ifrag, ispin)
+          n_basis_halo = dg_frag%n_basis(jfrag, ispin)
+          do jo = 1, n_basis_halo
+            j = dg_frag%index_basis(jo, jfrag, ispin)
+            if (j < 1 .or. j > n) cycle
+            do io = 1, n_basis_local
+              i = dg_frag%index_basis(io, ifrag, ispin)
+              if (i < 1 .or. i > n) cycle
+              dg_frag%H_mat_blocks(idx_jo)%val(io, jo, ispin) = mat_V(i, j)
+            end do
+          end do
+        end do
 
         deallocate(mat_V)
       end do
 
-      if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
-        call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
-      end if
-      call sync_dense_matrix_to_blocks(dg_frag, dg_frag%H_mat, dg_frag%H_mat_blocks, dg_frag%H_block_map)
       call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-basis-diag-soi", dg_frag%icomm)
 
       do ispin = 1, system%nspin
@@ -1069,8 +1091,6 @@
 
         deallocate(mat_H, mat_V)
       end do
-      if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
-
     end subroutine diag_full_lapack
 
 #ifdef USE_EIGENEXA

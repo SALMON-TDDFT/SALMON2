@@ -193,7 +193,7 @@ contains
         end do
       ! dc%nxyz_domain: # of grid points for each domain
       ! dc%nxyz_buffer: # of grid points for the buffer region
-        if(mod(num_rgrid(n),num_fragment(n))==0 .or. yn_dc_fragment_optimization == 'y') then
+        if(mod(num_rgrid(n),num_fragment(n))==0) then
           dc%nxyz_domain(n) = num_rgrid(n) / num_fragment(n)
           dc%nxyz_buffer(n) = num_rgrid_buffer(n)
           dr = al(n)/dble(num_rgrid(n))
@@ -383,6 +383,147 @@ contains
 
   end subroutine init_dcdft
   
+!===================================================================================================================================
+
+  subroutine finalize_dcdft(dc)
+    use structures
+    implicit none
+    type(s_dcdft), intent(inout) :: dc
+    integer :: i
+
+    ! DC allocates a second full-system workspace inside main_dft.  Release it
+    ! explicitly so compiler/runtime automatic cleanup at subroutine return has
+    ! no nested DG/DC buffers left to guess about.
+    call deallocate_dft_system(dc%system_tot)
+    call finalize_parallel_info(dc%info_tot)
+    call deallocate_rgrid(dc%lg_tot)
+    call deallocate_rgrid(dc%mg_tot)
+    call deallocate_pp_grid(dc%ppg_tot)
+    call finalize_reciprocal_grid(dc%fg_tot)
+    call finalize_poisson(dc%poisson_tot)
+    call finalize_sendrecv_grid_storage(dc%srg_scalar_tot)
+
+    call deallocate_scalar(dc%vpsl_tot)
+    call deallocate_scalar(dc%vh_tot)
+    call deallocate_scalar(dc%rho_tot)
+
+    if (allocated(dc%rho_tot_s)) then
+      do i = 1, size(dc%rho_tot_s)
+        call deallocate_scalar(dc%rho_tot_s(i))
+      end do
+      deallocate(dc%rho_tot_s)
+    end if
+
+    if (allocated(dc%vloc_tot)) then
+      do i = 1, size(dc%vloc_tot)
+        call deallocate_scalar(dc%vloc_tot(i))
+      end do
+      deallocate(dc%vloc_tot)
+    end if
+
+    if (allocated(dc%vxc_tot)) then
+      do i = 1, size(dc%vxc_tot)
+        call deallocate_scalar(dc%vxc_tot(i))
+      end do
+      deallocate(dc%vxc_tot)
+    end if
+
+    if (allocated(dc%nxyz_domain_frag)) deallocate(dc%nxyz_domain_frag)
+    if (allocated(dc%ixyz_frag)) deallocate(dc%ixyz_frag)
+    if (allocated(dc%rxyz_frag)) deallocate(dc%rxyz_frag)
+    if (allocated(dc%jxyz_tot)) deallocate(dc%jxyz_tot)
+
+  contains
+
+    subroutine finalize_parallel_info(info)
+      type(s_parallel_info), intent(inout) :: info
+      if (allocated(info%imap)) deallocate(info%imap)
+      if (allocated(info%imap_isolated_ffte)) deallocate(info%imap_isolated_ffte)
+      if (allocated(info%ia_mg)) deallocate(info%ia_mg)
+      if (allocated(info%irank_io)) deallocate(info%irank_io)
+      if (allocated(info%io_s_all)) deallocate(info%io_s_all)
+      if (allocated(info%io_e_all)) deallocate(info%io_e_all)
+      if (allocated(info%numo_all)) deallocate(info%numo_all)
+#ifdef USE_SCALAPACK
+      if (allocated(info%ndiv)) deallocate(info%ndiv)
+      if (allocated(info%i_tbl)) deallocate(info%i_tbl)
+      if (allocated(info%j_tbl)) deallocate(info%j_tbl)
+      if (allocated(info%iloc_tbl)) deallocate(info%iloc_tbl)
+      if (allocated(info%jloc_tbl)) deallocate(info%jloc_tbl)
+#endif
+#ifdef USE_FFTW
+      if (allocated(info%imap_isolated_fftw)) deallocate(info%imap_isolated_fftw)
+#endif
+    end subroutine finalize_parallel_info
+
+    subroutine finalize_reciprocal_grid(fg)
+      type(s_reciprocal_grid), intent(inout) :: fg
+      if (allocated(fg%if_Gzero)) deallocate(fg%if_Gzero)
+      if (allocated(fg%vec_G)) deallocate(fg%vec_G)
+      if (allocated(fg%coef)) deallocate(fg%coef)
+      if (allocated(fg%exp_ewald)) deallocate(fg%exp_ewald)
+      if (allocated(fg%egx)) deallocate(fg%egx)
+      if (allocated(fg%egxc)) deallocate(fg%egxc)
+      if (allocated(fg%egy)) deallocate(fg%egy)
+      if (allocated(fg%egyc)) deallocate(fg%egyc)
+      if (allocated(fg%egz)) deallocate(fg%egz)
+      if (allocated(fg%egzc)) deallocate(fg%egzc)
+      if (allocated(fg%coef_nabla)) deallocate(fg%coef_nabla)
+      if (allocated(fg%coef_gxgy0)) deallocate(fg%coef_gxgy0)
+      if (allocated(fg%cos_cGdt)) deallocate(fg%cos_cGdt)
+      if (allocated(fg%sin_cGdt)) deallocate(fg%sin_cGdt)
+    end subroutine finalize_reciprocal_grid
+
+    subroutine finalize_poisson(poisson)
+      type(s_poisson), intent(inout) :: poisson
+      if (allocated(poisson%ipole_tbl)) deallocate(poisson%ipole_tbl)
+      if (allocated(poisson%ig_num)) deallocate(poisson%ig_num)
+      if (allocated(poisson%ig)) deallocate(poisson%ig)
+      if (allocated(poisson%ig_bound)) deallocate(poisson%ig_bound)
+      if (allocated(poisson%wkbound)) deallocate(poisson%wkbound)
+      if (allocated(poisson%wkbound2)) deallocate(poisson%wkbound2)
+      if (allocated(poisson%zrhoG_ele)) deallocate(poisson%zrhoG_ele)
+      if (allocated(poisson%ff1x)) deallocate(poisson%ff1x)
+      if (allocated(poisson%ff1y)) deallocate(poisson%ff1y)
+      if (allocated(poisson%ff1z)) deallocate(poisson%ff1z)
+      if (allocated(poisson%ff2x)) deallocate(poisson%ff2x)
+      if (allocated(poisson%ff2y)) deallocate(poisson%ff2y)
+      if (allocated(poisson%ff2z)) deallocate(poisson%ff2z)
+      if (allocated(poisson%ff1)) deallocate(poisson%ff1)
+      if (allocated(poisson%ff2)) deallocate(poisson%ff2)
+      if (allocated(poisson%ff3x)) deallocate(poisson%ff3x)
+      if (allocated(poisson%ff3y)) deallocate(poisson%ff3y)
+      if (allocated(poisson%ff3z)) deallocate(poisson%ff3z)
+      if (allocated(poisson%ff4x)) deallocate(poisson%ff4x)
+      if (allocated(poisson%ff4y)) deallocate(poisson%ff4y)
+      if (allocated(poisson%ff4z)) deallocate(poisson%ff4z)
+      if (allocated(poisson%dgf)) deallocate(poisson%dgf)
+      if (allocated(poisson%a_ffte)) deallocate(poisson%a_ffte)
+      if (allocated(poisson%b_ffte)) deallocate(poisson%b_ffte)
+#ifdef USE_FFTW
+      if (allocated(poisson%fftw1)) deallocate(poisson%fftw1)
+      if (allocated(poisson%fftw2)) deallocate(poisson%fftw2)
+#endif
+    end subroutine finalize_poisson
+
+    subroutine finalize_sendrecv_grid_storage(srg)
+      type(s_sendrecv_grid), intent(inout) :: srg
+      integer :: idir, iside, itype
+
+      do idir = 1, 3
+        do iside = 1, 2
+          do itype = 1, 2
+            if (allocated(srg%cache(itype, iside, idir)%dbuf)) deallocate(srg%cache(itype, iside, idir)%dbuf)
+            if (allocated(srg%cache(itype, iside, idir)%zbuf)) deallocate(srg%cache(itype, iside, idir)%zbuf)
+          end do
+        end do
+      end do
+      srg%if_pcomm_real8_initialized = .false.
+      srg%if_pcomm_complex8_initialized = .false.
+    end subroutine finalize_sendrecv_grid_storage
+
+  end subroutine finalize_dcdft
+
 !===================================================================================================================================
   
   ! rho_s (fragment) --> dc%rho_tot_s (total system)

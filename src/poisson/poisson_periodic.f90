@@ -17,8 +17,22 @@
 
 module poisson_periodic
   implicit none
+  public :: set_poisson_contract_context
+
+  character(16), save :: poisson_contract_context = 'UNSET'
+  logical, save :: dumped_dc_ft = .false.
+  logical, save :: dumped_dg_ft = .false.
+  logical, save :: dumped_dc_ffte = .false.
+  logical, save :: dumped_dg_ffte = .false.
 
 contains
+
+subroutine set_poisson_contract_context(context)
+  implicit none
+  character(*), intent(in) :: context
+  poisson_contract_context = 'UNSET'
+  poisson_contract_context = adjustl(trim(context))
+end subroutine set_poisson_contract_context
 
 subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson,kernel_mode,omega)
   use structures
@@ -38,10 +52,16 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson,kernel_mode,omega)
   !
   integer :: ix,iy,iz,kx,ky,kz
   logical :: use_hse_sr
+  logical :: enable_contract_trace
   real(8) :: omega_eff, g2, sr_factor
   call nvtxStartRange('poission_ft', __LINE__)
 
   call resolve_poisson_kernel_mode(kernel_mode, omega, use_hse_sr, omega_eff)
+  enable_contract_trace = poisson_contract_trace_enabled()
+
+  if (enable_contract_trace) then
+    call print_poisson_solver_contract('POISSON-FT-IN', lg, mg, info, rho)
+  end if
 
 #ifdef USE_OPENACC
 !$acc data copyin(poisson, fg, rho, mg, lg, vh)
@@ -208,6 +228,10 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson,kernel_mode,omega)
 
   call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info%icomm_z)
 
+  if (enable_contract_trace) then
+    call print_poisson_kernel_contract('POISSON-FT-KERNEL', mg, info, fg%coef, poisson%zrhoG_ele, poisson%ff2x, poisson%ff1z)
+  end if
+
 #ifdef USE_OPENACC
 !$acc kernels
 !$acc loop collapse(3) private(iz,ky,kx)
@@ -292,6 +316,9 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson,kernel_mode,omega)
 #ifdef USE_OPENACC
 !$acc end data
 #endif
+  if (enable_contract_trace) then
+    call print_poisson_solver_contract('POISSON-FT-OUT', lg, mg, info, Vh)
+  end if
   call nvtxEndRange
   return
 end subroutine poisson_ft
@@ -330,9 +357,15 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson,kernel_mode,omega)
   integer :: iiy,iiz,iix
   real(8) :: inv_lgnum3, g2, sr_factor, omega_eff
   logical :: use_hse_sr
+  logical :: enable_contract_trace
 
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
   call resolve_poisson_kernel_mode(kernel_mode, omega, use_hse_sr, omega_eff)
+  enable_contract_trace = poisson_contract_trace_enabled()
+
+  if (enable_contract_trace) then
+    call print_poisson_solver_contract('POISSON-FFTE-IN', lg, mg, info, rho)
+  end if
 
   poisson%b_ffte=0.d0
 !$OMP parallel do private(iiz,iiy,ix) collapse(2)
@@ -386,6 +419,11 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson,kernel_mode,omega)
     Vh%f(mg%is(1):mg%ie(1),iiy,iiz) = poisson%a_ffte(mg%is(1):mg%ie(1),iy,iz)
   end do
   end do
+
+  if (enable_contract_trace) then
+    call print_poisson_kernel_contract('POISSON-FFTE-KERNEL', mg, info, fg%coef, poisson%zrhoG_ele, poisson%b_ffte, poisson%b_ffte)
+    call print_poisson_solver_contract('POISSON-FFTE-OUT', lg, mg, info, Vh)
+  end if
 
   return
 end subroutine poisson_ffte
@@ -604,6 +642,244 @@ subroutine resolve_poisson_kernel_mode(kernel_mode, omega, use_hse_sr, omega_eff
     stop 'poisson_periodic: omega must be > 0 for hse_sr kernel'
   end if
 end subroutine resolve_poisson_kernel_mode
+
+logical function poisson_contract_trace_enabled()
+  implicit none
+  character(16) :: env_trace
+  integer :: env_status
+  poisson_contract_trace_enabled = .false.
+  env_trace = ''
+  call get_environment_variable('SALMON_POISSON_CONTRACT_TRACE', env_trace, status=env_status)
+  if (env_status /= 0) return
+  select case(trim(adjustl(env_trace)))
+  case('1','y','Y','yes','YES','true','TRUE','on','ON')
+    poisson_contract_trace_enabled = .true.
+  end select
+end function poisson_contract_trace_enabled
+
+subroutine print_poisson_solver_contract(tag, lg, mg, info, scalar)
+  use structures, only: s_rgrid, s_parallel_info, s_scalar
+  use communication, only: comm_summation, comm_get_min, comm_get_max, comm_is_root
+  use parallelization, only: nproc_id_global
+  implicit none
+  character(*),          intent(in) :: tag
+  type(s_rgrid),         intent(in) :: lg, mg
+  type(s_parallel_info), intent(in) :: info
+  type(s_scalar),        intent(in) :: scalar
+  real(8) :: lsum, gsum, lsum2, gsum2
+  real(8) :: lmin, gmin, lmax, gmax
+  real(8) :: min_in(1), min_out(1), max_in(1), max_out(1)
+  integer :: npts_global
+
+  lsum = sum(scalar%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+  lsum2 = sum(scalar%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))**2)
+  lmin = minval(scalar%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+  lmax = maxval(scalar%f(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+
+  call comm_summation(lsum, gsum, info%icomm_r)
+  call comm_summation(lsum2, gsum2, info%icomm_r)
+  min_in(1) = lmin
+  max_in(1) = lmax
+  call comm_get_min(min_in, min_out, 1, info%icomm_r)
+  call comm_get_max(max_in, max_out, 1, info%icomm_r)
+  gmin = min_out(1)
+  gmax = max_out(1)
+
+  if (.not. comm_is_root(nproc_id_global)) return
+
+  npts_global = lg%num(1) * lg%num(2) * lg%num(3)
+  write(*,'(1x,a,1x,a,1x,a,3(i0,1x),a,3(i0,1x),a,es23.15,a,es23.15,a,es23.15,a,es23.15,a,es23.15)') &
+    '[POISSON-CONTRACT]', trim(tag), 'lg_num=', lg%num(1), lg%num(2), lg%num(3), &
+    ' mg_is=', mg%is(1), mg%is(2), mg%is(3), &
+    ' sum=', gsum, ' mean=', gsum / dble(npts_global), ' l2=', sqrt(gsum2), ' min=', gmin, ' max=', gmax
+  flush(6)
+end subroutine print_poisson_solver_contract
+
+subroutine print_poisson_kernel_contract(tag, mg, info, coef, zrhoG, kernel_in, kernel_out)
+  use structures, only: s_rgrid, s_parallel_info
+  use communication, only: comm_summation, comm_is_root
+  use parallelization, only: nproc_id_global
+  implicit none
+  character(*),          intent(in) :: tag
+  type(s_rgrid),         intent(in) :: mg
+  type(s_parallel_info), intent(in) :: info
+  real(8),               intent(in) :: coef(:,:,:)
+  complex(8),            intent(in) :: zrhoG(:,:,:)
+  complex(8),            intent(in) :: kernel_in(:,:,:)
+  complex(8),            intent(in) :: kernel_out(:,:,:)
+  real(8) :: lnorm_rhog, gnorm_rhog
+  real(8) :: lnorm_vhg, gnorm_vhg
+  complex(8) :: g0_rhog, g0_kernel_in, g0_kernel_out
+  real(8) :: g0_coef
+
+  lnorm_rhog = sum(abs(zrhoG(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))**2)
+  lnorm_vhg = sum(abs(kernel_out(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))**2)
+  call comm_summation(lnorm_rhog, gnorm_rhog, info%icomm_r)
+  call comm_summation(lnorm_vhg, gnorm_vhg, info%icomm_r)
+
+  g0_rhog = (0.d0, 0.d0)
+  g0_kernel_in = (0.d0, 0.d0)
+  g0_kernel_out = (0.d0, 0.d0)
+  g0_coef = 0.d0
+  if (1 >= lbound(zrhoG,1) .and. 1 <= ubound(zrhoG,1) .and. &
+      1 >= lbound(zrhoG,2) .and. 1 <= ubound(zrhoG,2) .and. &
+      1 >= lbound(zrhoG,3) .and. 1 <= ubound(zrhoG,3)) then
+    g0_rhog = zrhoG(1,1,1)
+  end if
+  if (1 >= lbound(kernel_in,1) .and. 1 <= ubound(kernel_in,1) .and. &
+      1 >= lbound(kernel_in,2) .and. 1 <= ubound(kernel_in,2) .and. &
+      1 >= lbound(kernel_in,3) .and. 1 <= ubound(kernel_in,3)) then
+    g0_kernel_in = kernel_in(1,1,1)
+  end if
+  if (1 >= lbound(kernel_out,1) .and. 1 <= ubound(kernel_out,1) .and. &
+      1 >= lbound(kernel_out,2) .and. 1 <= ubound(kernel_out,2) .and. &
+      1 >= lbound(kernel_out,3) .and. 1 <= ubound(kernel_out,3)) then
+    g0_kernel_out = kernel_out(1,1,1)
+  end if
+  if (1 >= lbound(coef,1) .and. 1 <= ubound(coef,1) .and. &
+      1 >= lbound(coef,2) .and. 1 <= ubound(coef,2) .and. &
+      1 >= lbound(coef,3) .and. 1 <= ubound(coef,3)) then
+    g0_coef = coef(1,1,1)
+  end if
+
+  if (.not. comm_is_root(nproc_id_global)) return
+  write(*,'(1x,a,1x,a,1x,a,es23.15,a,2(es23.15,1x),a,2(es23.15,1x),a,es23.15,a,es23.15,a,es23.15)') &
+    '[POISSON-CONTRACT]', trim(tag), 'g0_coef=', g0_coef, &
+    ' g0_rhoG(re,im)=', real(g0_rhog), aimag(g0_rhog), &
+    ' g0_kernel_out(re,im)=', real(g0_kernel_out), aimag(g0_kernel_out), &
+    ' ||rhoG||_2=', sqrt(gnorm_rhog), ' ||kernel_out||_2=', sqrt(gnorm_vhg), ' g0_kernel_in_re=', real(g0_kernel_in)
+  flush(6)
+
+  call maybe_dump_poisson_spectral(tag, mg, info, zrhoG, kernel_out)
+end subroutine print_poisson_kernel_contract
+
+logical function poisson_spectral_dump_enabled()
+  implicit none
+  character(16) :: env_dump
+  integer :: env_status
+  poisson_spectral_dump_enabled = .false.
+  env_dump = ''
+  call get_environment_variable('SALMON_POISSON_SPECTRAL_DUMP', env_dump, status=env_status)
+  if (env_status /= 0) return
+  select case(trim(adjustl(env_dump)))
+  case('1','y','Y','yes','YES','true','TRUE','on','ON')
+    poisson_spectral_dump_enabled = .true.
+  end select
+end function poisson_spectral_dump_enabled
+
+subroutine maybe_dump_poisson_spectral(tag, mg, info, zrhoG, kernel_out)
+  use structures, only: s_rgrid, s_parallel_info
+  use communication, only: comm_summation, comm_is_root
+  use parallelization, only: nproc_id_global
+  implicit none
+  character(*),          intent(in) :: tag
+  type(s_rgrid),         intent(in) :: mg
+  type(s_parallel_info), intent(in) :: info
+  complex(8),            intent(in) :: zrhoG(:,:,:)
+  complex(8),            intent(in) :: kernel_out(:,:,:)
+  complex(8), allocatable :: local_rhog(:,:,:), full_rhog(:,:,:)
+  complex(8), allocatable :: local_vhg(:,:,:), full_vhg(:,:,:)
+  integer :: ixs, ixe, iys, iye, izs, ize
+  integer :: ix0, ix1, iy0, iy1, iz0, iz1
+  integer :: ix, iy, iz, nall
+  integer :: unit
+  logical :: do_dump
+  character(8) :: solver
+  character(16) :: ctx
+  character(256) :: file_rhog, file_vhg
+
+  if (.not. poisson_spectral_dump_enabled()) return
+
+  ctx = adjustl(trim(poisson_contract_context))
+  solver = 'UNKNOWN'
+  if (index(tag, 'POISSON-FT-KERNEL') > 0) solver = 'FT'
+  if (index(tag, 'POISSON-FFTE-KERNEL') > 0) solver = 'FFTE'
+
+  do_dump = .false.
+  select case (trim(ctx))
+  case ('DC')
+    if (solver == 'FT' .and. .not. dumped_dc_ft) then
+      dumped_dc_ft = .true.
+      do_dump = .true.
+    else if (solver == 'FFTE' .and. .not. dumped_dc_ffte) then
+      dumped_dc_ffte = .true.
+      do_dump = .true.
+    end if
+  case ('DG')
+    if (solver == 'FT' .and. .not. dumped_dg_ft) then
+      dumped_dg_ft = .true.
+      do_dump = .true.
+    else if (solver == 'FFTE' .and. .not. dumped_dg_ffte) then
+      dumped_dg_ffte = .true.
+      do_dump = .true.
+    end if
+  case default
+    if (solver == 'FT' .and. .not. dumped_dc_ft) then
+      dumped_dc_ft = .true.
+      do_dump = .true.
+    else if (solver == 'FFTE' .and. .not. dumped_dc_ffte) then
+      dumped_dc_ffte = .true.
+      do_dump = .true.
+    end if
+  end select
+  if (.not. do_dump) return
+
+  ixs = lbound(zrhoG,1)
+  ixe = ubound(zrhoG,1)
+  iys = lbound(zrhoG,2)
+  iye = ubound(zrhoG,2)
+  izs = lbound(zrhoG,3)
+  ize = ubound(zrhoG,3)
+
+  allocate(local_rhog(ixs:ixe, iys:iye, izs:ize), full_rhog(ixs:ixe, iys:iye, izs:ize))
+  allocate(local_vhg(ixs:ixe, iys:iye, izs:ize), full_vhg(ixs:ixe, iys:iye, izs:ize))
+  local_rhog = (0.d0, 0.d0)
+  local_vhg = (0.d0, 0.d0)
+
+  ix0 = max(mg%is(1), ixs)
+  ix1 = min(mg%ie(1), ixe)
+  iy0 = max(mg%is(2), iys)
+  iy1 = min(mg%ie(2), iye)
+  iz0 = max(mg%is(3), izs)
+  iz1 = min(mg%ie(3), ize)
+  if (ix0 <= ix1 .and. iy0 <= iy1 .and. iz0 <= iz1) then
+    local_rhog(ix0:ix1, iy0:iy1, iz0:iz1) = zrhoG(ix0:ix1, iy0:iy1, iz0:iz1)
+    local_vhg(ix0:ix1, iy0:iy1, iz0:iz1) = kernel_out(ix0:ix1, iy0:iy1, iz0:iz1)
+  end if
+
+  nall = size(local_rhog)
+  call comm_summation(local_rhog, full_rhog, nall, info%icomm_r)
+  call comm_summation(local_vhg, full_vhg, nall, info%icomm_r)
+
+  if (comm_is_root(nproc_id_global)) then
+    write(file_rhog,'(a,a,a,a)') 'poisson_spectral_', trim(ctx), '_', trim(solver)//'_rhoG.dat'
+    write(file_vhg,'(a,a,a,a)') 'poisson_spectral_', trim(ctx), '_', trim(solver)//'_vhG.dat'
+
+    open(newunit=unit, file=trim(file_rhog), status='replace', action='write')
+    write(unit,'(a)') '# ix iy iz re im'
+    do iz = izs, ize
+      do iy = iys, iye
+        do ix = ixs, ixe
+          write(unit,'(3(i0,1x),2(es23.15,1x))') ix, iy, iz, real(full_rhog(ix,iy,iz)), aimag(full_rhog(ix,iy,iz))
+        end do
+      end do
+    end do
+    close(unit)
+
+    open(newunit=unit, file=trim(file_vhg), status='replace', action='write')
+    write(unit,'(a)') '# ix iy iz re im'
+    do iz = izs, ize
+      do iy = iys, iye
+        do ix = ixs, ixe
+          write(unit,'(3(i0,1x),2(es23.15,1x))') ix, iy, iz, real(full_vhg(ix,iy,iz)), aimag(full_vhg(ix,iy,iz))
+        end do
+      end do
+    end do
+    close(unit)
+  end if
+
+  deallocate(local_rhog, full_rhog, local_vhg, full_vhg)
+end subroutine maybe_dump_poisson_spectral
 
 
 end module poisson_periodic

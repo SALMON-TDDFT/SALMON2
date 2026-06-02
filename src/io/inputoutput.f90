@@ -314,6 +314,7 @@ contains
       & yn_fix_func, &
       & yn_predictor_corrector, &
       & yn_dg_fragment_rt, &
+      & dg_fragment_parallel_mode, &
       & yn_dc_cg_basis_update, &
       & time_integrator_dg_fragment, &
       & yn_plane_wave_basis, &
@@ -626,6 +627,7 @@ contains
       & nproc_rgrid_tot, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
+      & yn_dc_for_dg, &
       & yn_dc_fragment_optimization, &
       & nstate_frag, &
       & lcfo_frag_cache_size, &
@@ -780,6 +782,7 @@ contains
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
+    dg_fragment_parallel_mode = 'orbital'
     yn_dc_cg_basis_update = 'n'
     time_integrator_dg_fragment = 'rk4'
     yn_plane_wave_basis = 'n'
@@ -1093,6 +1096,7 @@ contains
     nproc_rgrid_tot = 1
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
+    yn_dc_for_dg = 'n'
     yn_dc_fragment_optimization = 'n'
     nstate_frag = 0
     lcfo_frag_cache_size = 1
@@ -1207,6 +1211,9 @@ contains
     call string_lowercase(alibc)
 #endif
     call string_lowercase(process_allocation)
+    call string_lowercase(dg_fragment_parallel_mode)
+    call string_lowercase(time_integrator_dg_fragment)
+    call string_lowercase(dg_nmat_cap_mode)
     call string_lowercase(propagator)
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
@@ -1362,6 +1369,7 @@ contains
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
+    call comm_bcast(dg_fragment_parallel_mode,nproc_group_global)
     call comm_bcast(yn_dc_cg_basis_update,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
@@ -1765,6 +1773,7 @@ contains
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(yn_dc_for_dg, nproc_group_global)
     call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
@@ -2293,6 +2302,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_fragment_parallel_mode', trim(dg_fragment_parallel_mode)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc_cg_basis_update', yn_dc_cg_basis_update
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
@@ -2761,11 +2771,16 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_for_dg",yn_dc_for_dg
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_from_dcdft', yn_dg_fragment_from_dcdft
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_nmat_cap_mode', trim(dg_nmat_cap_mode)
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_nmat_cap_fixed', dg_nmat_cap_fixed
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nmat_cap_multiple', dg_nmat_cap_multiple
       
       close(fh_variables_log)
     end if
@@ -2867,6 +2882,7 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+    call yn_argument_check(yn_dc_for_dg)
     call yn_argument_check(yn_dc_fragment_optimization)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
@@ -2953,7 +2969,7 @@ contains
 #endif
     end if
 
-    if (yn_eigenexa == 'y' .and. yn_scalapack == 'y') then
+    if (yn_eigenexa == 'y' .and. yn_scalapack == 'y' .and. yn_dg_fragment_rt /= 'y') then
       stop "both yn_scalapack and yn_eigenexa is specified 'y'"
     end if
     
@@ -3105,7 +3121,9 @@ contains
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
       if(yn_dg_fragment_rt=='y') stop "contradiction: yn_dc=y & yn_dg_fragment_rt=y"
       ! Reduced coordinates are converted to Cartesian later in init_dft_system before DC fragment setup.
-      if(iflag_atom_coor/=ntype_atom_coor_cartesian .and. iflag_atom_coor/=ntype_atom_coor_reduced) stop "DC method (yn_dc=y): atomic coordinates must be cartesian or reduced."
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian .and. &
+         iflag_atom_coor/=ntype_atom_coor_reduced) &
+        stop "DC method (yn_dc=y): atomic coordinates must be cartesian or reduced."
       !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
       if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
       & stop "DC method (yn_dc=y): num_fragment must be specified."
@@ -3120,7 +3138,12 @@ contains
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
     end if
-    
+
+    if(yn_dc_for_dg=='y') then
+      if(yn_dc/='y') stop "DC for DG mode (yn_dc_for_dg=y): yn_dc must be y"
+      if(theory/='dft') stop "DC for DG mode (yn_dc_for_dg=y): theory must be dft"
+    end if
+
     ! DG-Fragment RT method checks
     if(yn_dg_fragment_rt=='y') then
       if(theory/='tddft_pulse' .and. theory/='tddft_response' .and. theory/='single_scale_maxwell_tddft') &
@@ -3128,7 +3151,8 @@ contains
       ! INCOMPATIBILITY: yn_conventional_from_dcdft is for CONVENTIONAL RT, not DG-Fragment RT
       ! DG-Fragment RT must use yn_dg_fragment_from_dcdft='y' instead
       if(yn_conventional_from_dcdft=='y') &
-      & stop "DG-Fragment RT: yn_conventional_from_dcdft='y' is for conventional RT. Use yn_dg_fragment_from_dcdft='y' in &dc namelist instead."
+      & stop "DG-Fragment RT: yn_conventional_from_dcdft='y' is for conventional RT. " // &
+      &      "Use yn_dg_fragment_from_dcdft='y' in &dc namelist instead."
       ! Check data source for DG-Fragment RT
       if(yn_dg_fragment_from_dcdft=='n' .and. yn_restart=='n') &
       & stop "DG-Fragment RT: requires DC-LCFO data. Set yn_dg_fragment_from_dcdft='y' in &dc (or &dg_fragment) namelist."
@@ -3140,6 +3164,8 @@ contains
          time_integrator_dg_fragment/='rk4' .and. &
          time_integrator_dg_fragment/='aetrs') &
       & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', or 'aetrs'"
+      if(trim(dg_fragment_parallel_mode)/='orbital' .and. trim(dg_fragment_parallel_mode)/='legacy_realspace') &
+      & stop "DG-Fragment RT: dg_fragment_parallel_mode must be 'orbital' or 'legacy_realspace'"
     end if
     
     call yn_argument_check(yn_dg_fragment_rt)

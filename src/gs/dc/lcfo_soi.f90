@@ -26,13 +26,16 @@ module lcfo_soi
   character(32),parameter :: binfile_wf_soi = "wavefunctions_soi.bin", &
   &                          binfile_rg_soi = "rgrid_index_soi.bin", &
   &                          binfile_bf_soi = "basis_functions_soi.bin", &
+  &                          binfile_bfb_soi = "basis_functions_buffer_soi.bin", &
   &                          binfile_hl_soi = "hamiltonian_local_soi.bin"
+  integer, parameter :: basis_buffer_magic_soi = -22022213
+  integer, parameter :: basis_buffer_version_soi = 1
 
 contains
 
   subroutine dc_lcfo_soi(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
-    use salmon_global, only: yn_dc_lcfo_diag
+    use salmon_global, only: yn_dc_lcfo_diag, yn_spinorbit
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -57,8 +60,9 @@ contains
     integer :: index_basis(dc%nstate_frag,dc%n_frag,system%nspin)
     real(8) :: hvol
     complex(8),allocatable :: f_basis(:,:,:,:,:),hf(:,:,:,:,:),wrk_array(:,:,:,:,:) &
-    & ,mat_H_local(:,:,:),coef_wf(:,:,:)
+    & ,mat_H_local(:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
     real(8),allocatable :: esp_tot(:,:)
+    logical :: use_spinor_basis
     integer :: i,j,n,ix,iy,iz,io,jo,ispin,ifrag,jfrag,i_halo
 
     if(.not. allocated(spsi%zwf)) stop "DC-LCFO(SOI): spsi%zwf is required."
@@ -66,6 +70,7 @@ contains
     if(dc%id_tot==0) write(*,*) "start DC-LCFO(SOI)"
     hvol = system%hvol
     nspin = system%nspin
+    use_spinor_basis = (yn_spinorbit=='y' .and. nspin>1)
 
     call init_lcfo
     call calc_basis
@@ -167,22 +172,24 @@ contains
 
     subroutine calc_basis
       use eigen_subdiag_sub, only: eigen_zheev
-      use salmon_global, only: energy_cut,lambda_cut,yn_spinorbit
+      use salmon_global, only: energy_cut,lambda_cut
       implicit none
       integer :: nb(nspin),itmp(dc%n_frag,nspin)
       integer :: nxyz_domain(3)
-      logical :: use_spinor_basis, include_orb
+      logical :: include_orb
       complex(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       complex(8),dimension(dc%nstate_frag,dc%nstate_frag) :: mat_S_spinor,mat_U_spinor
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
       real(8),dimension(dc%nstate_frag) :: lambda_spinor
       complex(8) :: ztmp
+      real(8) :: norm_basis
       
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
 
       allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
       allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
-      use_spinor_basis = (yn_spinorbit=='y' .and. nspin>1)
+      if(.not. allocated(basis_transform)) allocate(basis_transform(dc%nstate_frag,dc%nstate_frag,nspin))
+      basis_transform = (0d0,0d0)
 
       wrk_array = (0d0,0d0)
       if(use_spinor_basis) then
@@ -255,6 +262,7 @@ contains
             do jo=1,dc%nstate_frag
               f_basis(:,:,:,ispin,i) = f_basis(:,:,:,ispin,i) &
               & + wrk_array(:,:,:,ispin,jo) * mat_U_spinor(jo,io) / sqrt(lambda_spinor(io))
+              basis_transform(jo,i,ispin) = mat_U_spinor(jo,io) / sqrt(lambda_spinor(io))
             end do
             end do
           end if
@@ -269,6 +277,7 @@ contains
               do jo=1,dc%nstate_frag
                 f_basis(:,:,:,ispin,i) = f_basis(:,:,:,ispin,i) &
                 & + wrk_array(:,:,:,ispin,jo) * mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
+                basis_transform(jo,i,ispin) = mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
               end do
             end if
           end do
@@ -288,6 +297,8 @@ contains
             do ispin=1,nspin
               wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
               & - f_basis(:,:,:,ispin,jo) * ztmp
+              basis_transform(:,io,ispin) = basis_transform(:,io,ispin) &
+              & - basis_transform(:,jo,ispin) * ztmp
             end do
           end do
           ztmp = (0d0,0d0)
@@ -296,6 +307,7 @@ contains
           end do
           do ispin=1,nspin
             wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) / sqrt(real(ztmp))
+            basis_transform(:,io,ispin) = basis_transform(:,io,ispin) / sqrt(real(ztmp))
           end do
         end do
       else
@@ -305,9 +317,13 @@ contains
               ztmp = sum(conjg(f_basis(:,:,:,ispin,jo))*wrk_array(:,:,:,ispin,io)) * hvol
               wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
               & - f_basis(:,:,:,ispin,jo) * ztmp / (sum(conjg(f_basis(:,:,:,ispin,jo))*f_basis(:,:,:,ispin,jo)) * hvol)
+              basis_transform(:,io,ispin) = basis_transform(:,io,ispin) &
+              & - basis_transform(:,jo,ispin) * ztmp / &
+              &   (sum(conjg(f_basis(:,:,:,ispin,jo))*f_basis(:,:,:,ispin,jo)) * hvol)
             end do
-            wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-            & / sqrt(real(sum(conjg(wrk_array(:,:,:,ispin,io))*wrk_array(:,:,:,ispin,io))) * hvol)
+            norm_basis = sqrt(real(sum(conjg(wrk_array(:,:,:,ispin,io))*wrk_array(:,:,:,ispin,io))) * hvol)
+            wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) / norm_basis
+            basis_transform(:,io,ispin) = basis_transform(:,io,ispin) / norm_basis
           end do
         end do
       end if
@@ -378,17 +394,32 @@ contains
       integer :: d(3),l(3)
       integer :: itag_send,itag_recv
       integer,dimension(n_halo) :: ireq_send,ireq_recv
+      complex(8) :: ztmp
 
       allocate(mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      mat_H_local = (0d0,0d0)
       l = dc%nxyz_domain
-      do ispin=1,nspin
-      do io=1,n_basis(dc%i_frag,ispin)
-      do jo=1,n_basis(dc%i_frag,ispin)
-        mat_H_local(io,jo,ispin) = sum(conjg(f_basis(1:l(1),1:l(2),1:l(3),ispin,io)) &
-        & * hf(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol
-      end do
-      end do
-      end do
+      if(use_spinor_basis) then
+        do io=1,n_basis(dc%i_frag,1)
+        do jo=1,n_basis(dc%i_frag,1)
+          ztmp = (0d0,0d0)
+          do ispin=1,nspin
+            ztmp = ztmp + sum(conjg(f_basis(1:l(1),1:l(2),1:l(3),ispin,io)) &
+            & * hf(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol
+          end do
+          mat_H_local(io,jo,1:nspin) = ztmp
+        end do
+        end do
+      else
+        do ispin=1,nspin
+        do io=1,n_basis(dc%i_frag,ispin)
+        do jo=1,n_basis(dc%i_frag,ispin)
+          mat_H_local(io,jo,ispin) = sum(conjg(f_basis(1:l(1),1:l(2),1:l(3),ispin,io)) &
+          & * hf(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol
+        end do
+        end do
+        end do
+      end if
 
       if(dc%id_frag==0) then
         do i_halo=1,n_halo
@@ -417,20 +448,39 @@ contains
           d = halo(i_halo)%dsp_recv
           allocate(halo(i_halo)%mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
           halo(i_halo)%mat_H_local = (0d0,0d0)
-          do ispin=1,nspin
-          do io=1,dc%nstate_frag
-          do jo=1,dc%nstate_frag
-            do iz=1,l(3)
-            do iy=1,l(2)
-            do ix=1,l(1)
-              halo(i_halo)%mat_H_local(io,jo,ispin) = halo(i_halo)%mat_H_local(io,jo,ispin) &
-              & + conjg(halo(i_halo)%buf_recv(ix,iy,iz,ispin,io)) * hf(d(1)+ix,d(2)+iy,d(3)+iz,ispin,jo) * hvol
+          if(use_spinor_basis) then
+            do io=1,dc%nstate_frag
+            do jo=1,dc%nstate_frag
+              ztmp = (0d0,0d0)
+              do ispin=1,nspin
+                do iz=1,l(3)
+                do iy=1,l(2)
+                do ix=1,l(1)
+                  ztmp = ztmp + conjg(halo(i_halo)%buf_recv(ix,iy,iz,ispin,io)) &
+                  & * hf(d(1)+ix,d(2)+iy,d(3)+iz,ispin,jo) * hvol
+                end do
+                end do
+                end do
+              end do
+              halo(i_halo)%mat_H_local(io,jo,1:nspin) = ztmp
+            end do
+            end do
+          else
+            do ispin=1,nspin
+            do io=1,dc%nstate_frag
+            do jo=1,dc%nstate_frag
+              do iz=1,l(3)
+              do iy=1,l(2)
+              do ix=1,l(1)
+                halo(i_halo)%mat_H_local(io,jo,ispin) = halo(i_halo)%mat_H_local(io,jo,ispin) &
+                & + conjg(halo(i_halo)%buf_recv(ix,iy,iz,ispin,io)) * hf(d(1)+ix,d(2)+iy,d(3)+iz,ispin,jo) * hvol
+              end do
+              end do
+              end do
             end do
             end do
             end do
-          end do
-          end do
-          end do
+          end if
           deallocate(halo(i_halo)%buf_send,halo(i_halo)%buf_recv)
           if(dc%id_tot==0) write(*,*) "Halo communication #",i_halo,": done"
         end do
@@ -543,9 +593,13 @@ contains
       use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
       implicit none
       integer :: iunit,i_halo
-      integer :: nxyz_domain(3)
+      integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+      integer :: ibx, iby, ibz, sx, sy, sz, raw_io, ibasis
+      integer :: lb_zwf(3), ub_zwf(3), io_lb, io_ub
       character(256) :: filename
       real(8) :: esp_out
+      complex(8) :: coef_val
+      complex(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
 
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
         iunit = get_filehandle()
@@ -578,6 +632,8 @@ contains
         close(iunit)
       end if
 
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+
       if(dc%id_frag==0) then
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_rg_soi
@@ -591,12 +647,66 @@ contains
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bf_soi
         open(iunit,file=filename,form='unformatted',access='stream')
-        call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
         write(iunit) nxyz_domain(1:3),nspin,dc%nstate_frag
         write(iunit) n_basis(dc%i_frag,1:nspin)
         write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:dc%nstate_frag)
         close(iunit)
+      end if
 
+      ! DG surface flux needs the same SOI basis on the DC buffer box, not
+      ! only the core element.  Apply the core orthonormalization transform
+      ! to the buffered spinor wavefunctions and write an unwrapped box.
+      nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
+      nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
+      lb_zwf(1) = lbound(spsi%zwf, 1)
+      lb_zwf(2) = lbound(spsi%zwf, 2)
+      lb_zwf(3) = lbound(spsi%zwf, 3)
+      ub_zwf(1) = ubound(spsi%zwf, 1)
+      ub_zwf(2) = ubound(spsi%zwf, 2)
+      ub_zwf(3) = ubound(spsi%zwf, 3)
+      io_lb = lbound(spsi%zwf, 5)
+      io_ub = ubound(spsi%zwf, 5)
+      allocate(phi_box_local(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+      allocate(phi_box_sum(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+      if(dc%id_frag==0) then
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_bfb_soi
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) basis_buffer_magic_soi, basis_buffer_version_soi
+        write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, dc%nstate_frag
+        write(iunit) n_basis(dc%i_frag,1:nspin)
+      end if
+      do ispin=1,nspin
+        do ibasis=1,dc%nstate_frag
+          phi_box_local = (0d0,0d0)
+          if(ibasis <= n_basis(dc%i_frag,ispin)) then
+            do raw_io=max(1,io_lb),min(dc%nstate_frag,io_ub)
+              coef_val = basis_transform(raw_io,ibasis,ispin)
+              if(abs(coef_val) <= 0d0) cycle
+              do ibz=1,nxyz_box(3)
+                sz = dc_buffer_box_to_local_index_soi(ibz,nxyz_domain(3),nxyz_buffer_seed(3))
+                if(sz < lb_zwf(3) .or. sz > ub_zwf(3)) cycle
+                do iby=1,nxyz_box(2)
+                  sy = dc_buffer_box_to_local_index_soi(iby,nxyz_domain(2),nxyz_buffer_seed(2))
+                  if(sy < lb_zwf(2) .or. sy > ub_zwf(2)) cycle
+                  do ibx=1,nxyz_box(1)
+                    sx = dc_buffer_box_to_local_index_soi(ibx,nxyz_domain(1),nxyz_buffer_seed(1))
+                    if(sx < lb_zwf(1) .or. sx > ub_zwf(1)) cycle
+                    phi_box_local(ibx,iby,ibz) = phi_box_local(ibx,iby,ibz) &
+                    & + coef_val * spsi%zwf(sx,sy,sz,ispin,raw_io,1,1)
+                  end do
+                end do
+              end do
+            end do
+          end if
+          call comm_summation(phi_box_local,phi_box_sum,product(nxyz_box),dc%icomm_frag)
+          if(dc%id_frag==0) write(iunit) phi_box_sum(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+        end do
+      end do
+      if(dc%id_frag==0) close(iunit)
+      deallocate(phi_box_local,phi_box_sum)
+
+      if(dc%id_frag==0) then
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_hl_soi
         open(iunit,file=filename,form='unformatted',access='stream')
@@ -620,6 +730,19 @@ contains
         end if
       end if
     end subroutine output
+
+    integer function dc_buffer_box_to_local_index_soi(ibox, ndom, nbuf) result(iloc)
+      implicit none
+      integer, intent(in) :: ibox, ndom, nbuf
+
+      if(nbuf <= 0) then
+        iloc = ibox
+      else if(ibox <= nbuf) then
+        iloc = ndom + nbuf + ibox
+      else
+        iloc = ibox - nbuf
+      end if
+    end function dc_buffer_box_to_local_index_soi
 
   end subroutine dc_lcfo_soi
 

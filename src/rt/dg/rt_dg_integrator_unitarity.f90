@@ -11,16 +11,9 @@
     real(8) :: norm2_v, norm_v, dev_max, dev_post_max
     real(8), parameter :: eps_norm = 1.0d-14
     logical :: use_S
-    logical, parameter :: enable_unitarity_trace = .false.
 
     dev_max = 0.0d0
     dev_post_max = 0.0d0
-    if (enable_unitarity_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        unitarity trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "entry"
-      flush(6)
-    end if
 
     do ispin = 1, dg_frag%nspin
       n_frag = dg_frag%n_mat(ispin)
@@ -183,12 +176,6 @@
     if (dg_frag%id == 0 .and. mod(itt, 10) == 0 .and. (dev_max > 1.0d-8 .or. dev_post_max > 1.0d-8)) then
       write(*,'(1x,a,i0,a,es12.4,a,es12.4)') "[INFO] Unitary stabilization at itt=", itt, &
         ", pre max(norm-1)=", dev_max, ", post max(norm-1)=", dev_post_max
-    end if
-    if (enable_unitarity_trace) then
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,a)') "        unitarity trace: rank=", dg_frag%id, &
-        " id_frag=", dg_frag%id_frag, " ifrag_group=", dg_frag%ifrag_group, " itt=", itt, &
-        " stage=", "exit"
-      flush(6)
     end if
 
   end subroutine stabilize_coeff_unitarity

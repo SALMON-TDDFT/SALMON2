@@ -33,21 +33,16 @@
     complex(8), allocatable :: H_mat_metric(:,:,:)
     complex(8), allocatable :: H_mat_prev_c(:,:,:)
     real(8), allocatable :: H_mat_prev(:,:,:)
+    real(8), allocatable :: rho_buffer(:,:,:), Vh_buffer(:,:,:)
     integer :: n_metric
     logical :: use_hmat_complex
-    real(8) :: t_stage0, t_stage1
-    real(8) :: time_density, time_hartree, time_xc, time_reconstruct
-    logical, parameter :: enable_update_trace = .false.
+    logical :: use_rank_buffered_potential
 
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
     ! - Photovoltaic effects
     ! - Catalytic reactions under light
     ! - Laser excitation and ionization
-    time_density = 0.0d0
-    time_hartree = 0.0d0
-    time_xc = 0.0d0
-    time_reconstruct = 0.0d0
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
@@ -59,35 +54,36 @@
       end if
       return
     end if
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-begin"
-      flush(6)
-    end if
     ! Step 1: Calculate electron density from fragment basis coefficients
-    call cpu_time(t_stage0)
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
-    call cpu_time(t_stage1)
-    time_density = time_density + (t_stage1 - t_stage0)
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step1-density-end"
-      flush(6)
+
+    dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
+    if (system%nspin > 0) then
+      dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = 0.0d0
+      do n_metric = 1, system%nspin
+        dg_frag%rho_s_frag(:, :, :, n_metric) = rho_s(n_metric)%f(:, :, :)
+      end do
+    end if
+
+    use_rank_buffered_potential = all(dg_frag%rank_buf_hi(:) >= dg_frag%rank_buf_lo(:))
+    if (use_rank_buffered_potential) then
+      allocate(rho_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                          dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      allocate(Vh_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                         dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                         dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
     end if
     
     ! Step 2: Update Hartree potential from new density
     ! IMPORTANT: Hartree potential is LONG-RANGE (Coulomb interaction)
     !            Must be calculated for the entire system, not per-fragment
     !            Vh(r) = ∫ ρ(r')/|r-r'| dr' includes all fragments
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-begin"
-      flush(6)
-    end if
-    call cpu_time(t_stage0)
     call hartree_dg_distributed(info, lg, mg, fg, poisson, dg_frag, rho, Vh)
-    call cpu_time(t_stage1)
-    time_hartree = time_hartree + (t_stage1 - t_stage0)
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step2-hartree-end"
-      flush(6)
+    dg_frag%Vh_frag(:, :, :) = Vh%f(:, :, :)
+    if (use_rank_buffered_potential) then
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vh, Vh_buffer)
     end if
     if (any(Vh%f /= Vh%f)) then
       write(*,'(1x,a,i0,a,i0)') "[FATAL] DG-RT invalid Hartree (NaN), rank=", nproc_id_global, ", itt=", itt
@@ -98,7 +94,6 @@
         ", itt=", itt, " max=", maxval(abs(Vh%f))
       stop "DG-RT Hartree diverged"
     end if
-    
     ! Step 3: Update exchange-correlation potential
     ! IMPORTANT: XC potential is LOCAL/SEMI-LOCAL (LDA/GGA)
     !            Vxc(r) depends only on ρ(r) and ∇ρ(r) at nearby points
@@ -106,18 +101,13 @@
     !            Current implementation: calculated on full grid for simplicity
     ! Note: For meta-GGA functionals, spsi (wavefunctions) would be needed for τ and j
     !       DG-Fragment RT currently supports LDA/GGA functionals
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-begin"
-      flush(6)
-    end if
-    call cpu_time(t_stage0)
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
                  info, rt%tpsi0, stencil, Vxc, energy%E_xc)
-    call cpu_time(t_stage1)
-    time_xc = time_xc + (t_stage1 - t_stage0)
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step3-xc-end"
-      flush(6)
+    if (system%nspin > 0) then
+      dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
+      do n_metric = 1, system%nspin
+        dg_frag%Vxc_frag(:, :, :, n_metric) = Vxc(n_metric)%f(:, :, :)
+      end do
     end if
     
     ! Step 4: Update DFT+U with explicit on/off branch
@@ -150,18 +140,10 @@
                                      ") > n_mat_max(", dg_frag%n_mat_max, "); truncating adaptive metric block."
       end if
     end if
-
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-begin"
-      flush(6)
-    end if
-    call cpu_time(t_stage0)
-    call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
-    call cpu_time(t_stage1)
-    time_reconstruct = time_reconstruct + (t_stage1 - t_stage0)
-    if (enable_update_trace .and. itt == 1) then
-      write(*,'(1x,a,i0,a,i0,a)') "        update trace: rank=", nproc_id_global, ", itt=", itt, " stage=step5-reconstruct-end"
-      flush(6)
+    if (use_rank_buffered_potential) then
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
+    else
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     end if
     
     ! Step 6: Check FIELD-FREE Hamiltonian change and trigger adaptive basis update if needed
@@ -213,5 +195,8 @@
       if (allocated(H_mat_prev)) deallocate(H_mat_prev)
       if (allocated(H_mat_prev_c)) deallocate(H_mat_prev_c)
     end if
+
+    if (allocated(rho_buffer)) deallocate(rho_buffer)
+    if (allocated(Vh_buffer)) deallocate(Vh_buffer)
 
   end subroutine update_density_and_hamiltonian

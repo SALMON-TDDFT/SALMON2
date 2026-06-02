@@ -154,6 +154,7 @@ module salmon_global
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_fragment_rt
+  character(32)  :: dg_fragment_parallel_mode
   character(16)  :: time_integrator_dg_fragment
   character(1)   :: yn_dc_cg_basis_update
   
@@ -475,6 +476,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: nproc_rgrid_tot(3)
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag
+  character(1)   :: yn_dc_for_dg
   character(1)   :: yn_dc_fragment_optimization
   integer        :: nstate_frag
   integer        :: lcfo_frag_cache_size

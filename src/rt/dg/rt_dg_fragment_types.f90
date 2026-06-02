@@ -22,8 +22,8 @@ module rt_dg_fragment_types
   implicit none
 
   private
-  public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, momentum_block_info, &
-            density_recv_map_info, density_grid_point_info, real_buffer_info, s_dg_fragment_rt
+  public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, complex_vector_block_info, &
+            momentum_block_info, density_recv_map_info, density_grid_point_info, real_buffer_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -65,6 +65,14 @@ module rt_dg_fragment_types
     real(8), allocatable :: val(:,:,:,:) ! (ndir, nrow_max, ncol_max, nspin)
   end type vector_block_info
 
+  type :: complex_vector_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    complex(8), allocatable :: val(:,:,:,:) ! (ndir, nrow_max, ncol_max, nspin)
+  end type complex_vector_block_info
+
   type :: momentum_block_info
     integer :: ifrag_row = 0
     integer :: ifrag_col = 0
@@ -78,6 +86,9 @@ module rt_dg_fragment_types
     integer, allocatable :: ixg(:)
     integer, allocatable :: iyg(:)
     integer, allocatable :: izg(:)
+    integer, allocatable :: bx(:)
+    integer, allocatable :: by(:)
+    integer, allocatable :: bz(:)
   end type density_recv_map_info
 
   type :: density_grid_point_info
@@ -122,6 +133,10 @@ module rt_dg_fragment_types
     complex(8), allocatable :: coef(:,:,:)        ! (nstate_frag, nstate_tot, nspin)
     complex(8), allocatable :: coef_new(:,:,:)    ! for time propagation
     complex(8), allocatable :: coef_work(:,:,:)   ! work array
+    ! Orbital parallelism stores only the coefficient rows owned by this rank.
+    integer, allocatable :: local_coef_count(:)        ! (nspin), local coefficient-row count
+    integer, allocatable :: local_coef_global_ids(:,:) ! (local_coef_max,nspin), local row -> global basis id
+    integer, allocatable :: coef_global_to_local(:,:)  ! (n_mat_max,nspin), global basis id -> local row, 0 if absent
     integer, allocatable :: coef_owner(:,:)       ! (n_mat_max, nspin), owning rank of each fragment-basis row
     integer :: owned_coef_start = 0               ! first owned fragment-basis row (contiguous hint)
     integer :: owned_coef_end = -1                ! last owned fragment-basis row (contiguous hint)
@@ -132,6 +147,7 @@ module rt_dg_fragment_types
     real(8), allocatable :: H_mat(:,:,:)       ! (nmat, nmat, nspin)
     complex(8), allocatable :: H_mat_c(:,:,:)      ! complex Hamiltonian (SOI/mixed propagation path)
     type(matrix_block_info), allocatable :: H_mat_blocks(:)
+    type(matrix_block_info), allocatable :: H_mat_core_blocks(:)
     type(matrix_block_info), allocatable :: H_mat_kinetic_blocks(:)
     type(complex_matrix_block_info), allocatable :: H_nl_blocks(:)
     integer, allocatable :: H_block_map(:,:)
@@ -150,6 +166,9 @@ module rt_dg_fragment_types
     complex(8), allocatable :: S_mat_prop_c(:,:,:) ! complex overlap used in propagation/unitarity
     type(matrix_block_info), allocatable :: S_mat_blocks(:)
     type(matrix_block_info), allocatable :: S_mat_prop_blocks(:)
+    ! Complex overlap blocks are used by SOI and mixed/PW propagation paths.
+    type(complex_matrix_block_info), allocatable :: S_mat_blocks_c(:)
+    type(complex_matrix_block_info), allocatable :: S_mat_prop_blocks_c(:)
     integer, allocatable :: S_block_map(:,:)
     integer :: n_S_blocks = 0
     logical :: has_global_overlap_copy = .true.
@@ -158,11 +177,16 @@ module rt_dg_fragment_types
     integer, allocatable :: index_basis(:,:,:) ! (nstate_frag, n_frag, nspin), spin-resolved local->global basis map
     integer, allocatable :: n_mat(:)           ! (nspin), spin-resolved projected-matrix dimension
     integer :: n_mat_max                       ! max projected-matrix dimension over spin channels
+    logical :: identity_seed_coefficients = .false.      ! DC seed used fragment-local identity coefficients
+    logical :: defer_fragment_cap_to_local_eigen = .false. ! apply fragment_fixed cap after local H/S diagonalization
+    logical :: fragment_basis_contracted = .false.       ! phi_frag was rotated/truncated to local eigenbasis
+    integer :: requested_fragment_basis_cap = 0           ! requested cap per fragment for local-eigen contraction
 
     ! Time-dependent external field coupling (velocity gauge: H = H_0 - i*A·∇ + A^2/2)
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)
     complex(8), allocatable :: momentum_mat_c(:,:,:,:) ! complex momentum matrix for SOI/mixed propagation
     type(vector_block_info), allocatable :: momentum_blocks(:)
+    type(complex_vector_block_info), allocatable :: momentum_blocks_c(:)
     integer, allocatable :: momentum_block_map(:,:)
     integer :: n_momentum_blocks = 0
     integer, allocatable :: momentum_dense_row_gid_cache(:)    ! reusable scratch for momentum dense materialization
@@ -175,8 +199,7 @@ module rt_dg_fragment_types
     type(vector_block_info), allocatable :: dipole_blocks(:)
     integer, allocatable :: dipole_block_map(:,:)
     integer :: n_dipole_blocks = 0
-    complex(8), allocatable :: H_nl_cache(:,:,:)   ! cached non-local PP matrix (A-dependent)
-    real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_cache
+    real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_blocks
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
     complex(8), allocatable :: nl_pp_phi_self(:,:,:,:) ! (nps,natom,nstate_frag,ifrag_local)
@@ -188,15 +211,59 @@ module rt_dg_fragment_types
     real(8), allocatable :: eigenvalues(:,:)   ! eigenvalues per fragment (nstate_frag, nspin)
     real(8) :: dipole_moment(3)                ! total dipole moment
     real(8) :: current(3)                      ! current density
+    real(8) :: current_para(3)                 ! paramagnetic current density
+    real(8) :: current_nl(3)                   ! nonlocal pseudopotential current density
+    real(8) :: current_dia(3)                  ! diamagnetic current density proxy
+    real(8) :: current_total(3)                ! total current density = para + dia
     real(8) :: total_energy                    ! total energy
     real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
     real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block
     real(8) :: energy_Ap                       ! occupied expectation of -i A.p term
     real(8) :: energy_A2                       ! occupied expectation of A^2/2 term
-    real(8) :: elec_num_scaled                 ! total electrons after rho normalization
-    real(8) :: elec_num_raw                    ! total electrons before rho normalization
-    real(8) :: rho_scale_factor                ! density renormalization factor
+    real(8) :: elec_num_scaled                 ! total electrons from final real-space rho
+    real(8) :: elec_num_raw                    ! raw reconstructed real-space electron count
+    real(8) :: rho_scale_factor                ! kept at 1; RT density is not renormalized
+    real(8) :: elec_num_raw_t0                 ! baseline raw electron count for drift metric
+    real(8) :: elec_num_scaled_t0              ! baseline final electron count (diagnostic)
+    logical :: elec_num_baseline_ready         ! baseline cache status
+    real(8) :: rho_drift_indicator             ! time drift proxy using same convention: raw(t)-raw(t0)
+    real(8) :: rho_ff_elec                     ! electron count from frag-frag block (c_f^dag S_ff c_f)
+    real(8) :: rho_fp_elec                     ! electron count from frag-pw cross block
+    real(8) :: rho_pp_elec                     ! electron count from pw-pw block (c_p^dag S_pp c_p)
+    real(8) :: rho_owned_elec                  ! real-space integral from direct owner-local apply path
+    real(8) :: rho_imported_elec               ! real-space integral from imported/unpacked contributions
+    real(8) :: rho_local_all_elec              ! real-space integral over local rho before global reduction
+    real(8) :: rho_global_raw_elec             ! global real-space integral (same as elec_num_raw)
+    real(8) :: rho_global_scaled_elec          ! final global integral (same as elec_num_scaled)
+    real(8) :: rho_contract_residual_elec      ! global_raw - (owned + imported)
+    real(8) :: coef_occ_norm0                  ! occupied-coefficient norm baseline (itt=1)
+    real(8) :: coef_occ_norm                   ! occupied-coefficient norm at current step
+    real(8) :: coef_occ_norm_drift             ! occupied-coefficient norm drift from baseline
+    real(8) :: csc_occ_identity_norm           ! Frobenius norm of (C^dagger S C - I) in occupied space
+    real(8) :: csc_occ_identity_max            ! max absolute element of (C^dagger S C - I)
+    real(8) :: occvirt_leakage                 ! occupied->virtual leakage wrt reference basis
+    integer :: occvirt_top_occ                 ! top occupied state index (global) for leakage
+    integer :: occvirt_top_virt                ! top virtual state index (global) for leakage pair
+    real(8) :: occvirt_top_abs2                ! |U_vo|^2 of top leakage pair
+    integer :: jpara_top_occ_state             ! top occupied state index contributing to J_para,z
+    real(8) :: jpara_top_occ_value             ! signed contribution of top occupied state to J_para,z
+    integer :: selfexc_track_states(3)         ! tracked state IDs for self-excitation diagnostics
+    real(8) :: selfexc_track_norm(3)           ! tracked state coefficient norms at step sample
+    real(8) :: selfexc_csc_step_delta          ! per-step increment of C^dagger S C - I norm
+    real(8) :: selfexc_leak100_129_step_delta  ! per-step increment of 100->129 leakage amplitude
+    real(8) :: selfexc_csc_stage_pre_mixed     ! C^dagger S C - I norm before mixed sync
+    real(8) :: selfexc_csc_stage_post_overlap  ! C^dagger S C - I norm after overlap solve
+    real(8) :: selfexc_csc_stage_post_raw      ! C^dagger S C - I norm after raw restore
+    real(8) :: selfexc_leak100_129_pre_mixed   ! |U_129,100|^2 before mixed sync
+    real(8) :: selfexc_leak100_129_post_overlap! |U_129,100|^2 after overlap solve
+    real(8) :: selfexc_leak100_129_post_raw    ! |U_129,100|^2 after raw restore
+    real(8) :: selfexc_leak100_129_current     ! current-step |U_129,100|^2 sample
+    real(8) :: selfexc_csc_prev_step           ! previous-step C^dagger S C - I norm sample
+    real(8) :: selfexc_leak100_129_prev_step   ! previous-step |U_129,100|^2 sample
+    integer :: selfexc_prev_step_itt           ! step index cached for per-step delta
     real(8) :: pw_weight_raw                   ! simple diagnostic: sum |coef_pw|^2 over occupied states
+    complex(8), allocatable :: coef_ref_all(:,:,:) ! local-row occ/virt diagnostic reference coefficients
+    logical :: coef_ref_ready = .false.        ! reference coefficient cache status
 
     ! Fragment geometry information
     integer :: num_fragment(3)                 ! Fragment division in each direction (from salmon_global)
@@ -224,6 +291,12 @@ module rt_dg_fragment_types
     integer, allocatable :: density_subgroup_send_slot_map(:,:,:,:) ! local-fragment grid -> packed subgroup-reduce slot
     type(density_grid_point_info), allocatable :: density_grid_points(:,:) ! (max_points_per_local_fragment, ifrag_local)
     integer, allocatable :: density_grid_point_count(:)         ! valid point count per local fragment
+    integer, allocatable :: density_grid_bx(:,:)                ! cached rho_bf x index for density_grid_points
+    integer, allocatable :: density_grid_by(:,:)                ! cached rho_bf y index for density_grid_points
+    integer, allocatable :: density_grid_bz(:,:)                ! cached rho_bf z index for density_grid_points
+    integer :: density_rhobf_box_lo(3) = 0
+    integer :: density_rhobf_box_hi(3) = -1
+    logical :: density_rhobf_box_cache_valid = .false.
     integer, allocatable :: density_subgroup_self_ixg(:)        ! root-owned subgroup-reduce unpack x index
     integer, allocatable :: density_subgroup_self_iyg(:)        ! root-owned subgroup-reduce unpack y index
     integer, allocatable :: density_subgroup_self_izg(:)        ! root-owned subgroup-reduce unpack z index
@@ -238,12 +311,14 @@ module rt_dg_fragment_types
     integer, allocatable :: current_valid_iyg(:,:)              ! valid wrapped global y indices for microscopic current
     integer, allocatable :: current_valid_izg(:,:)              ! valid wrapped global z indices for microscopic current
     type(density_recv_map_info), allocatable :: density_recv_map(:) ! packed recv unpack map per source rank
-    real(8), allocatable :: density_weight_local(:,:,:) ! static overlap count on local grid
-    real(8), allocatable :: density_inv_weight_local(:,:,:) ! inverse of static overlap count on local grid
     real(8), allocatable :: density_phi_block_cache(:,:,:,:) ! block-packed basis (block_size,nstate_frag,nblock_max,ifrag_local)
     integer, allocatable :: density_phi_block_count(:)       ! block count per local fragment
     integer :: density_phi_block_size = 0
     logical :: density_phi_block_cache_valid = .false.
+    complex(8), allocatable :: density_phase_block_cache(:,:,:,:) ! block-packed PW phases (block_size,n_pw,nblock_max,ifrag_local)
+    integer :: density_phase_block_size = 0
+    integer :: density_phase_block_npw = 0
+    logical :: density_phase_block_cache_valid = .false.
     complex(8), allocatable :: density_matrix_frag(:,:,:,:) ! raw fragment density matrix cache (nbf,nbf,nspin,ifrag_local)
     logical, allocatable :: density_matrix_frag_valid(:,:)  ! raw fragment density matrix validity (nspin,ifrag_local)
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)
@@ -257,6 +332,8 @@ module rt_dg_fragment_types
     integer :: ifrag_group                     ! global fragment index owned by this subgroup
     integer :: nproc_frag                      ! # of MPI ranks assigned to one fragment
     logical :: is_frag_root                    ! subgroup root responsible for fragment-global ownership
+    character(32) :: parallel_mode = 'orbital' ! 'orbital' or 'legacy_realspace'
+    logical :: parallel_mode_orbital = .true.
 
     type(halo_info), allocatable :: halo(:)    ! Halo regions (max 26 = 3^3-1 neighbors)
     integer :: n_halo                          ! Number of active halo regions
@@ -270,6 +347,8 @@ module rt_dg_fragment_types
                                                    ! This is the shared real-space fragment basis itself.
                                                    ! Spin dependence enters through bookkeeping/operators, not here.
     complex(8), allocatable :: phi_frag_c(:,:,:,:,:) ! complex fragment basis for SOI/noncollinear path
+    complex(8), allocatable :: phi_frag_spinor_c(:,:,:,:,:,:) ! (x,y,z,nspin,basis,ifrag_local) SOI spinor basis
+    logical, allocatable :: phi_frag_has_seed_buffer(:) ! true when halo values came from DC buffer seed
     logical :: has_real_space_basis                ! flag: real-space basis available
     logical :: has_halo_exchange                   ! flag: halo exchange implemented
 
@@ -282,6 +361,12 @@ module rt_dg_fragment_types
     real(8), allocatable :: rho_s_frag(:,:,:,:)    ! spin-resolved density (ix,iy,iz,ispin)
     real(8), allocatable :: Vh_frag(:,:,:)         ! Hartree potential
     real(8), allocatable :: Vxc_frag(:,:,:,:)      ! XC potential (ix,iy,iz,ispin)
+    real(8), allocatable :: stage_Vh_buffer(:,:,:) ! RK-stage scratch: fragment-buffered Hartree potential
+    real(8), allocatable :: stage_Vpsl_buffer(:,:,:) ! RK-stage scratch: static local ionic potential
+    real(8), allocatable :: stage_Vxc_buffer(:,:,:,:) ! RK-stage scratch: fragment-buffered XC potential
+    integer, allocatable :: stage_gx_map(:), stage_gy_map(:), stage_gz_map(:) ! buffer index -> parent-grid index
+    logical :: stage_vpsl_buffer_valid = .false.  ! Vpsl is static during RT unless the scratch bounds change
+    logical :: stage_map_valid = .false.
 
     ! Self-consistent basis update (adaptive basis)
     complex(8), allocatable :: H_mat_old(:,:,:)    ! Previous Hamiltonian matrix (nstate,nstate,nspin)
@@ -327,8 +412,15 @@ module rt_dg_fragment_types
 
     ! Mixed basis operators stored in FF/FP/PP form
     complex(8), allocatable :: S_mat_frag_pw(:,:,:) ! Overlap <fragment_i | PW_j>
+    complex(8), allocatable :: S_mat_frag_pw_g(:,:,:) ! G-space overlap <fragment_i | PW_j>
     complex(8), allocatable :: H_mat_frag_pw(:,:,:) ! Hamiltonian <fragment_i | PW_j>
+    complex(8), allocatable :: P_mat_frag_pw(:,:,:,:) ! Gradient <fragment_i | nabla_idir | PW_j>
+                             ! (3, n_mat_max, n_plane_waves, nspin)
+    complex(8), allocatable :: P_mat_frag_pw_g(:,:,:,:) ! G-space gradient <fragment_i | nabla_idir | PW_j>
+                  ! (3, n_mat_max, n_plane_waves, nspin)
     complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block
+    complex(8), allocatable :: H_mat_pw(:,:,:)      ! PW-PW Hamiltonian block (non-diagonal)
+                             ! (n_plane_waves, n_plane_waves, nspin)
     real(8), allocatable :: pw_orthogonalized(:,:,:) ! [UNUSED] Orthogonalized PWs in real space
     logical :: mixed_basis_ready = .false.          ! startup/basis-update mixed diagonalization prepared
     integer, allocatable :: mixed_basis_dim(:)      ! retained mixed dimension per spin
