@@ -32,6 +32,40 @@ module rt_dg_initial_state
 
 contains
 
+  subroutine dg_scalapack_index_1d(ig, block_size, nproc_axis, proc, loc)
+    implicit none
+    integer, intent(in) :: ig, block_size, nproc_axis
+    integer, intent(out) :: proc, loc
+    integer :: iblock, inblock, local_block
+
+    if (ig <= 0 .or. block_size <= 0 .or. nproc_axis <= 0) then
+      proc = 0
+      loc = 0
+      return
+    end if
+    iblock = (ig - 1) / block_size
+    inblock = mod(ig - 1, block_size) + 1
+    proc = mod(iblock, nproc_axis)
+    local_block = iblock / nproc_axis
+    loc = local_block * block_size + inblock
+  end subroutine dg_scalapack_index_1d
+
+  subroutine dg_scalapack_global_index_1d(loc, block_size, nproc_axis, myproc_axis, ig)
+    implicit none
+    integer, intent(in) :: loc, block_size, nproc_axis, myproc_axis
+    integer, intent(out) :: ig
+    integer :: local_block, inblock, global_block
+
+    if (loc <= 0 .or. block_size <= 0 .or. nproc_axis <= 0) then
+      ig = 0
+      return
+    end if
+    local_block = (loc - 1) / block_size
+    inblock = mod(loc - 1, block_size) + 1
+    global_block = local_block * nproc_axis + myproc_axis
+    ig = global_block * block_size + inblock
+  end subroutine dg_scalapack_global_index_1d
+
   subroutine get_initial_state_spin_occ_info(dg_frag, system, ispin, occ_weight, nocc, state_cap)
     use structures
     use salmon_global, only: nelec, nelec_spin
@@ -808,10 +842,10 @@ contains
       if (i > size(dg_frag%local_coef_global_ids, 1)) cycle
       idx = dg_frag%local_coef_global_ids(i, ispin)
       if (idx < 1 .or. idx > n) cycle
-      call scalapack_index_1d(idx, mb, nprow, proc_row, loc_row)
+      call dg_scalapack_index_1d(idx, mb, nprow, proc_row, loc_row)
       if (proc_row /= myrow) cycle
       do j = 1, nkeep
-        call scalapack_index_1d(j, nb, npcol, proc_col, loc_col)
+        call dg_scalapack_index_1d(j, nb, npcol, proc_col, loc_col)
         if (proc_col == mycol .and. loc_row <= nloc_row .and. loc_col <= nloc_col) then
           coef_part(i, j) = cmplx(y_div(loc_row, loc_col), 0.0d0, kind=8)
         end if
@@ -1107,8 +1141,8 @@ contains
       integer, intent(out) :: target, lrow, lcol
       integer :: prow, pcol
 
-      call scalapack_index_1d(ig, mb, nprow, prow, lrow)
-      call scalapack_index_1d(jg, nb, npcol, pcol, lcol)
+      call dg_scalapack_index_1d(ig, mb, nprow, prow, lrow)
+      call dg_scalapack_index_1d(jg, nb, npcol, pcol, lcol)
       target = pcol * nprow + prow
     end subroutine scalapack_owner_blockcyclic
 
@@ -1122,10 +1156,10 @@ contains
       dmax = -huge(1.0d0)
       dcount = 0.0d0
       do jloc = 1, size(sloc, 2)
-        call scalapack_global_index_1d(jloc, nb, npcol, mycol, jg)
+        call dg_scalapack_global_index_1d(jloc, nb, npcol, mycol, jg)
         if (jg > n) cycle
         do iloc = 1, size(sloc, 1)
-          call scalapack_global_index_1d(iloc, mb, nprow, myrow, ig)
+          call dg_scalapack_global_index_1d(iloc, mb, nprow, myrow, ig)
           if (ig /= jg .or. ig > n) cycle
           dmin = min(dmin, sloc(iloc, jloc))
           dmax = max(dmax, sloc(iloc, jloc))

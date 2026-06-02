@@ -98,7 +98,9 @@ module rt_dg_fragment_soi
   use rt_dg_fragment_coefficients, only: get_subgroup_block_owner_rank
   use rt_dg_fragment_hamiltonian_soi, only: calculate_hamiltonian_matrix, calculate_momentum_matrix, &
                                            calculate_overlap_matrix, find_matrix_block, &
-                                           init_matrix_blocks, reduce_matrix_blocks
+                                           init_matrix_blocks, reduce_matrix_blocks, &
+                                           build_total_potential_grid, build_hpsi_for_basis, &
+                                           integrate_basis_with_field
   implicit none
 
   private

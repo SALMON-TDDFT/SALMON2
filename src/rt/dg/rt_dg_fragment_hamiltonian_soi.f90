@@ -16,12 +16,13 @@
 
 #include "config.h"
 module rt_dg_fragment_hamiltonian_soi
-  use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
+  use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info, halo_info
   implicit none
 
   private
   public :: calculate_hamiltonian_matrix, calculate_momentum_matrix, calculate_overlap_matrix
   public :: find_matrix_block, init_matrix_blocks, reduce_matrix_blocks
+  public :: build_total_potential_grid, build_hpsi_for_basis, integrate_basis_with_field
 
 contains
 
@@ -324,6 +325,20 @@ contains
     end do
 !$omp end parallel do
   end subroutine build_total_potential_grid
+
+  subroutine get_halo_block_point_indices(halo, ix_buf, iy_buf, iz_buf, send_idx, recv_idx)
+    implicit none
+    type(halo_info), intent(in) :: halo
+    integer, intent(in) :: ix_buf, iy_buf, iz_buf
+    integer, intent(out) :: send_idx(3), recv_idx(3)
+
+    send_idx(1) = halo%send_lo(1) + ix_buf - 1
+    send_idx(2) = halo%send_lo(2) + iy_buf - 1
+    send_idx(3) = halo%send_lo(3) + iz_buf - 1
+    recv_idx(1) = halo%recv_lo(1) + ix_buf - 1
+    recv_idx(2) = halo%recv_lo(2) + iy_buf - 1
+    recv_idx(3) = halo%recv_lo(3) + iz_buf - 1
+  end subroutine get_halo_block_point_indices
 
   !=======================================================================
   ! Build T|phi_j> and H|phi_j>=T|phi_j>+V|phi_j> for one fragment/basis state
