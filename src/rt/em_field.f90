@@ -26,7 +26,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
   use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em
-  use nvtx
+  use nvtx_wrapper
   implicit none
   integer   ,intent(in)    :: itt,nspin
   real(8)   ,intent(in)    :: curr_in(3,nspin)

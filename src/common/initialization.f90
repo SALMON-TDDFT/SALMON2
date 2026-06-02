@@ -33,7 +33,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   use init_poisson_sub
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
-  use nvtx
+  use nvtx_wrapper
   implicit none
   integer      ,intent(in) :: comm
   type(s_parallel_info)    :: info

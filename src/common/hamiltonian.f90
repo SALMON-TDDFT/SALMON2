@@ -17,6 +17,7 @@
 #include "config.h"
 
 module hamiltonian
+  use nvtx_wrapper
   implicit none
   integer,private,parameter :: Nd = 4
 
@@ -60,6 +61,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   !real(8) :: tmp,tmp1
   real(8) :: kAc0(3)
 
+  call nvtxStartRange('hpsi', __LINE__)
   call timer_begin(LOG_UHPSI_ALL)
 
   im_s = info%im_s
@@ -97,6 +99,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_UPDATE_OVERLAP)
 
   ! stencil
+    call nvtxStartRange('dstencil loop', __LINE__)
     call timer_begin(LOG_UHPSI_STENCIL)
     do im=im_s,im_e
     do ik=ik_s,ik_e
@@ -110,6 +113,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     end do
     end do
     call timer_end(LOG_UHPSI_STENCIL)
+    call nvtxEndRange()
 
     ! nonlocal potential
     if ( yn_spinorbit=='y' ) then
@@ -141,6 +145,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     
       if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
       
+        call nvtxStartRange('zstencil loop A', __LINE__)
         do im=im_s,im_e
         do ik=ik_s,ik_e
           if(if_kAc) then
@@ -175,7 +180,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
       
+        call nvtxEndRange()
       else
+        call nvtxStartRange('zstencil loop B', __LINE__)
       ! OpenMP parallelization: k-point & orbital indices
       
 #ifdef USE_OPENACC
@@ -225,6 +232,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
 !$omp end parallel do
 #endif
+        call nvtxEndRange()
         
       end if
 
@@ -362,13 +370,18 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_STENCIL)
 
   ! subtraction
+    call nvtxStartRange('subtraction', __LINE__)
     call timer_begin(LOG_UHPSI_SUBTRACTION)
     if(present(ttpsi)) then
       if(allocated(tpsi%rwf)) then
+#ifdef USE_OPENACC
+        !$acc kernels loop private(im,ik,io,ispin,iz,iy,ix) collapse(7) independent
+#else
         !$omp parallel do collapse(6) default(none) &
         !$omp          private(im,ik,io,ispin,iz,iy,ix) &
         !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
         !$omp          shared(ttpsi,htpsi,V_local,tpsi)
+#endif
         do im=im_s,im_e
         do ik=ik_s,ik_e
         do io=io_s,io_e
@@ -385,7 +398,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
         end do
+#ifdef USE_OPENACC
+        !$acc end kernels
+#else
         !$omp end parallel do
+#endif
       else
 #ifdef USE_OPENACC
         !$acc kernels loop private(im,ik,io,ispin,iz,iy,ix) collapse(7) independent
@@ -418,9 +435,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 #endif
       end if
     end if
+    call nvtxEndRange()
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
   ! nonlocal potential
+    call nvtxStartRange('nonlocal potential', __LINE__)
     if(yn_jm=='n') then
       if ( yn_spinorbit=='y' ) then
         call op_xc_noncollinear( tpsi, htpsi, info, mg )
@@ -433,10 +452,12 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         call pseudo_plusU(tpsi,htpsi,system,info,ppg)
       end if
     end if
+    call nvtxEndRange()
 
   end if
 
   call timer_end(LOG_UHPSI_ALL)
+  call nvtxEndRange()
 
   return
 contains
@@ -766,6 +787,7 @@ contains
     real(8) :: W0, dr, z,z0,z1,z2
     complex(8) :: W
 
+    call nvtxStartRange('add_imaginary_potential_for_absorbing_boundary_z', __LINE__)
     dr = imagnary_potential_dr
     W0 = imagnary_potential_w0
 
@@ -803,6 +825,7 @@ contains
     end do
 !$omp end parallel do
     end do
+    call nvtxEndRange()
 
   end subroutine add_imaginary_potential_for_absorbing_boundary_z
 
@@ -813,7 +836,7 @@ end subroutine hpsi
 subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   use structures
   use timer
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid), intent(in) :: mg
   integer       ,intent(in) :: nspin

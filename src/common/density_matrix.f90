@@ -32,7 +32,7 @@ contains
     use sym_rho_sub, only: sym_rho
     use salmon_global, only: yn_spinorbit
     use noncollinear_module, only: calc_dm_noncollinear, rot_dm_noncollinear
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -220,7 +220,7 @@ contains
     use code_optimization, only: current_omp_mode
     use timer
     use iso_c_binding
-    use nvtx
+    use nvtx_wrapper
     implicit none
 #if defined(USE_OPENACC)
     interface
