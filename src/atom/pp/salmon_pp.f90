@@ -23,7 +23,7 @@ module salmon_pp
     use salmon_global, only: iperiodic,nelem
     use input_pp_sub, only: input_pp
     use structures
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_dft_system) :: system
     type(s_pp_info)    :: pp
@@ -366,7 +366,7 @@ module salmon_pp
   subroutine calc_nlcc(pp, sys, rg, ppn)
     use salmon_global,only : kion,iperiodic
     use structures, only : s_dft_system, s_pp_info, s_pp_nlcc, s_rgrid
-    use nvtx
+    use nvtx_wrapper
     implicit none
     
     type(s_dft_system), intent(in) :: sys
