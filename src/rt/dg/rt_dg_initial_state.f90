@@ -249,6 +249,7 @@ contains
     real(8), allocatable :: gap(:)
     real(8) :: work_query(1)
     real(8) :: scalapack_alpha, abstol, vl, vu, orfac, scale_chol
+    real(8) :: eig_cut, eig_gap, eig_gap_tol
     real(8) :: s_diag_err, s_offdiag_max, s_frob_err, s_ortho_tol
     real(8) :: PDLAMCH
     complex(8), allocatable :: coef_part(:, :), coef_sum(:, :)
@@ -798,11 +799,12 @@ contains
     orfac = 1.0d-3
     lwork = -1
     liwork = -1
-    call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
+    call PDSYEVX('N', 'A', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work_query, lwork, &
                  iwork_query, liwork, ifail, iclustr, gap, ierr)
     if (ierr /= 0) then
-      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0)') '[WARN] DG ScaLAPACK PDSYEVX(Hstd) workspace query failed: info=', ierr
+      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0)') &
+        '[WARN] DG ScaLAPACK PDSYEVX(Hstd eigenvalues) workspace query failed: info=', ierr
       call BLACS_GRIDEXIT(ictxt)
       deallocate(h_div, s_div, eval, y_div, ifail, iclustr, gap)
       return
@@ -813,12 +815,12 @@ contains
     allocate(iwork(liwork))
 
     y_div(:, :) = 0.0d0
-    call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
+    call PDSYEVX('N', 'A', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
                  iwork, liwork, ifail, iclustr, gap, ierr)
-    if (ierr /= 0 .or. m_found < nkeep .or. nz_found < nkeep) then
+    if (ierr /= 0 .or. m_found < n) then
       if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,3(a,i0))') '[WARN] DG ScaLAPACK PDSYEVX(Hstd) failed/incomplete:', &
+        write(*,'(1x,a,3(a,i0))') '[WARN] DG ScaLAPACK PDSYEVX(Hstd eigenvalues) failed/incomplete:', &
           ' info=', ierr, ' m=', m_found, ' nz=', nz_found
         if (ierr /= 0) then
           write(*,'(1x,a,1pe13.5)') '[WARN] DG ScaLAPACK PDSYEVX min_gap=', minval(gap)
@@ -830,9 +832,84 @@ contains
       deallocate(h_div, s_div, eval, work, iwork, y_div, ifail, iclustr, gap)
       return
     end if
+    if (nkeep >= n) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,2(a,i0))') '[WARN] DG ScaLAPACK value-window path requires nkeep < n:', &
+          ' nkeep=', nkeep, ' n=', n
+      end if
+      call BLACS_GRIDEXIT(ictxt)
+      deallocate(h_div, s_div, eval, work, iwork, y_div, ifail, iclustr, gap)
+      return
+    end if
+    eig_cut = eval(nkeep)
+    eig_gap = eval(nkeep + 1) - eval(nkeep)
+    eig_gap_tol = max(1.0d-10, 1.0d-8 * max(1.0d0, abs(eig_cut)))
+    if (eig_gap <= eig_gap_tol) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,3(a,1pe13.5))') '[WARN] DG ScaLAPACK eigenvalue cutoff is degenerate; cannot use RANGE=V safely:', &
+          ' eig_cut=', eig_cut, ' gap=', eig_gap, ' tol=', eig_gap_tol
+      end if
+      call BLACS_GRIDEXIT(ictxt)
+      deallocate(h_div, s_div, eval, work, iwork, y_div, ifail, iclustr, gap)
+      return
+    end if
     if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,2(a,1pe13.5))') '[DG-DIST-EIG] ScaLAPACK partial Hstd diagonalization done', &
-        ' eig_min=', eval(1), ' eig_keep=', eval(nkeep)
+      write(*,'(1x,a,3(a,1pe13.5))') '[DG-DIST-EIG] ScaLAPACK Hstd eigenvalue window selected', &
+        ' eig_min=', eval(1), ' eig_keep=', eig_cut, ' gap=', eig_gap
+      flush(6)
+    end if
+
+    deallocate(work, iwork)
+    h_div(:, :) = 0.0d0
+    call assemble_scalapack_hs_from_blocks(h_div, s_div, ispin, .false., .false.)
+    call PDSYGST(1, 'L', n, h_div, 1, 1, desca, s_div, 1, 1, desca, scale_chol, ierr)
+    if (ierr /= 0) then
+      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0)') '[WARN] DG ScaLAPACK PDSYGST(H,S) retry failed: info=', ierr
+      call BLACS_GRIDEXIT(ictxt)
+      deallocate(h_div, s_div, eval, y_div, ifail, iclustr, gap)
+      return
+    end if
+
+    vl = eval(1) - max(1.0d0, abs(eval(1))) * 1.0d-8
+    vu = eig_cut + 0.5d0 * eig_gap
+    lwork = -1
+    liwork = -1
+    call PDSYEVX('V', 'V', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
+                 m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work_query, lwork, &
+                 iwork_query, liwork, ifail, iclustr, gap, ierr)
+    if (ierr /= 0) then
+      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0)') &
+        '[WARN] DG ScaLAPACK PDSYEVX(Hstd vectors) workspace query failed: info=', ierr
+      call BLACS_GRIDEXIT(ictxt)
+      deallocate(h_div, s_div, eval, y_div, ifail, iclustr, gap)
+      return
+    end if
+    lwork = max(1, int(work_query(1)))
+    liwork = max(1, iwork_query(1))
+    allocate(work(lwork))
+    allocate(iwork(liwork))
+
+    y_div(:, :) = 0.0d0
+    call PDSYEVX('V', 'V', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
+                 m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
+                 iwork, liwork, ifail, iclustr, gap, ierr)
+    if (ierr /= 0 .or. m_found < nkeep .or. nz_found < nkeep) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,3(a,i0),2(a,1pe13.5))') '[WARN] DG ScaLAPACK PDSYEVX(Hstd vectors) failed/incomplete:', &
+          ' info=', ierr, ' m=', m_found, ' nz=', nz_found, ' vl=', vl, ' vu=', vu
+        if (ierr /= 0) then
+          write(*,'(1x,a,1pe13.5)') '[WARN] DG ScaLAPACK PDSYEVX min_gap=', minval(gap)
+          write(*,'(1x,a,4(i0,1x))') '[WARN] DG ScaLAPACK PDSYEVX ifail sample=', &
+            ifail(1), ifail(min(2, n)), ifail(min(3, n)), ifail(min(4, n))
+        end if
+      end if
+      call BLACS_GRIDEXIT(ictxt)
+      deallocate(h_div, s_div, eval, work, iwork, y_div, ifail, iclustr, gap)
+      return
+    end if
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,1pe13.5),2(a,i0))') '[DG-DIST-EIG] ScaLAPACK partial Hstd diagonalization done', &
+        ' eig_min=', eval(1), ' eig_keep=', eval(nkeep), ' m=', m_found, ' nz=', nz_found
       flush(6)
     end if
 
@@ -896,10 +973,11 @@ contains
 #endif
   contains
 #ifdef USE_SCALAPACK
-    subroutine assemble_scalapack_hs_from_blocks(hloc, sloc, ispin_in)
+    subroutine assemble_scalapack_hs_from_blocks(hloc, sloc, ispin_in, include_s_in, do_log_in)
       implicit none
       real(8), intent(inout) :: hloc(:, :), sloc(:, :)
       integer, intent(in) :: ispin_in
+      logical, intent(in), optional :: include_s_in, do_log_in
 
       integer :: nproc_pack, total_send, total_recv, ierr_pack
       integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
@@ -910,7 +988,12 @@ contains
       real(8) :: h_abs_local, s_abs_local, h_abs_global, s_abs_global
       real(8) :: s_diag_min_local, s_diag_min_global, s_diag_max_local, s_diag_max_global
       real(8) :: s_diag_count_local, s_diag_count_global
+      logical :: include_s, do_log
 
+      include_s = .true.
+      do_log = .true.
+      if (present(include_s_in)) include_s = include_s_in
+      if (present(do_log_in)) do_log = do_log_in
       nproc_pack = dg_frag%isize
       allocate(send_counts(nproc_pack), recv_counts(nproc_pack), send_displs(nproc_pack), recv_displs(nproc_pack))
       allocate(send_counts_meta(nproc_pack), recv_counts_meta(nproc_pack))
@@ -920,7 +1003,7 @@ contains
       if (dg_frag%is_frag_root) then
         call count_real_blocks(dg_frag%H_mat_blocks, 1, send_counts)
         if (allocated(dg_frag%H_nl_blocks)) call count_complex_blocks(dg_frag%H_nl_blocks, 1, send_counts)
-        call count_real_blocks(dg_frag%S_mat_blocks, 2, send_counts)
+        if (include_s) call count_real_blocks(dg_frag%S_mat_blocks, 2, send_counts)
       end if
 
       call MPI_Alltoall(send_counts, 1, MPI_INTEGER, recv_counts, 1, MPI_INTEGER, dg_frag%icomm, ierr_pack)
@@ -944,7 +1027,7 @@ contains
         call pack_real_blocks(dg_frag%H_mat_blocks, 1, send_displs, fill_counts, send_meta, send_vals)
         if (allocated(dg_frag%H_nl_blocks)) &
           call pack_complex_blocks(dg_frag%H_nl_blocks, 1, send_displs, fill_counts, send_meta, send_vals)
-        call pack_real_blocks(dg_frag%S_mat_blocks, 2, send_displs, fill_counts, send_meta, send_vals)
+        if (include_s) call pack_real_blocks(dg_frag%S_mat_blocks, 2, send_displs, fill_counts, send_meta, send_vals)
       end if
 
       call MPI_Alltoallv(send_meta, send_counts_meta, send_displs_meta, MPI_INTEGER, &
@@ -960,32 +1043,34 @@ contains
         if (col_l < 1 .or. col_l > size(hloc, 2)) cycle
         if (kind_l == 1) then
           hloc(row_l, col_l) = hloc(row_l, col_l) + recv_vals(k)
-        else if (kind_l == 2) then
+        else if (kind_l == 2 .and. include_s) then
           sloc(row_l, col_l) = sloc(row_l, col_l) + recv_vals(k)
         end if
       end do
 
-      h_abs_local = maxval(abs(hloc))
-      s_abs_local = maxval(abs(sloc))
-      h_abs_global = -h_abs_local
-      call comm_get_min(h_abs_global, dg_frag%icomm)
-      h_abs_global = -h_abs_global
-      s_abs_global = -s_abs_local
-      call comm_get_min(s_abs_global, dg_frag%icomm)
-      s_abs_global = -s_abs_global
-      call scalapack_s_diag_stats(sloc, s_diag_min_local, s_diag_max_local, s_diag_count_local)
-      s_diag_min_global = s_diag_min_local
-      call comm_get_min(s_diag_min_global, dg_frag%icomm)
-      s_diag_max_global = -s_diag_max_local
-      call comm_get_min(s_diag_max_global, dg_frag%icomm)
-      s_diag_max_global = -s_diag_max_global
-      call comm_summation(s_diag_count_local, s_diag_count_global, dg_frag%icomm)
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,5(a,1pe13.5))') '[DG-DIST-EIG-MAT] ScaLAPACK H/S assembled', &
-          ' H_absmax=', h_abs_global, ' S_absmax=', s_abs_global, &
-          ' S_diag_min=', s_diag_min_global, ' S_diag_max=', s_diag_max_global, &
-          ' S_diag_count=', s_diag_count_global
-        flush(6)
+      if (do_log) then
+        h_abs_local = maxval(abs(hloc))
+        s_abs_local = maxval(abs(sloc))
+        h_abs_global = -h_abs_local
+        call comm_get_min(h_abs_global, dg_frag%icomm)
+        h_abs_global = -h_abs_global
+        s_abs_global = -s_abs_local
+        call comm_get_min(s_abs_global, dg_frag%icomm)
+        s_abs_global = -s_abs_global
+        call scalapack_s_diag_stats(sloc, s_diag_min_local, s_diag_max_local, s_diag_count_local)
+        s_diag_min_global = s_diag_min_local
+        call comm_get_min(s_diag_min_global, dg_frag%icomm)
+        s_diag_max_global = -s_diag_max_local
+        call comm_get_min(s_diag_max_global, dg_frag%icomm)
+        s_diag_max_global = -s_diag_max_global
+        call comm_summation(s_diag_count_local, s_diag_count_global, dg_frag%icomm)
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,5(a,1pe13.5))') '[DG-DIST-EIG-MAT] ScaLAPACK H/S assembled', &
+            ' H_absmax=', h_abs_global, ' S_absmax=', s_abs_global, &
+            ' S_diag_min=', s_diag_min_global, ' S_diag_max=', s_diag_max_global, &
+            ' S_diag_count=', s_diag_count_global
+          flush(6)
+        end if
       end if
 
       deallocate(send_counts, recv_counts, send_displs, recv_displs)
