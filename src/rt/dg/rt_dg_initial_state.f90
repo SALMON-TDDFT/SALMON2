@@ -234,7 +234,7 @@ contains
     logical :: use_eigenexa_main
 
 #ifdef USE_SCALAPACK
-    integer :: ispin, n, nkeep, nloc_row, nloc_col, i, j
+    integer :: ispin, n, nkeep, nloc_row, nloc_col, nloc_vec_col, i, j
     integer :: nprow, npcol, myrow, mycol, ictxt, ierr, iam, nprocs
     integer :: proc_row, proc_col, loc_row, loc_col
     integer :: mb, nb, nmap, idx, group_src, group_world
@@ -754,7 +754,8 @@ contains
     nloc_row = NUMROC(n, mb, myrow, 0, nprow)
     nloc_col = NUMROC(n, nb, mycol, 0, npcol)
     call DESCINIT(desca, n, n, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
-    call DESCINIT(descb, n, n, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
+    nloc_vec_col = NUMROC(nkeep, nb, mycol, 0, npcol)
+    call DESCINIT(descb, n, nkeep, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
     allocate(h_div(max(1, nloc_row), max(1, nloc_col)))
     allocate(s_div(max(1, nloc_row), max(1, nloc_col)))
     allocate(eval(n))
@@ -762,7 +763,7 @@ contains
     s_div(:, :) = 0.0d0
     call assemble_scalapack_hs_from_blocks(h_div, s_div, ispin)
 
-    allocate(y_div(max(1, nloc_row), max(1, nloc_col)))
+    allocate(y_div(max(1, nloc_row), max(1, nloc_vec_col)))
 
     call PDPOTRF('L', n, s_div, 1, 1, desca, ierr)
     if (ierr /= 0) then
@@ -844,7 +845,7 @@ contains
     deallocate(s_div)
 
     nlocal = size(dg_frag%coef, 1)
-    allocate(coef_part(nlocal, nkeep), coef_sum(nlocal, nkeep))
+    allocate(coef_part(nlocal, nkeep))
     coef_part(:, :) = (0.0d0, 0.0d0)
     do i = 1, nlocal
       if (i > size(dg_frag%local_coef_global_ids, 1)) cycle
@@ -854,11 +855,13 @@ contains
       if (proc_row /= myrow) cycle
       do j = 1, nkeep
         call dg_scalapack_index_1d(j, nb, npcol, proc_col, loc_col)
-        if (proc_col == mycol .and. loc_row <= nloc_row .and. loc_col <= nloc_col) then
+        if (proc_col == mycol .and. loc_row <= nloc_row .and. loc_col <= nloc_vec_col) then
           coef_part(i, j) = cmplx(y_div(loc_row, loc_col), 0.0d0, kind=8)
         end if
       end do
     end do
+    deallocate(y_div)
+    allocate(coef_sum(nlocal, nkeep))
     call comm_summation(coef_part, coef_sum, nlocal * nkeep, dg_frag%icomm)
     n_ortho = nkeep
     call measure_s_orthogonality_for_coef(coef_sum, ispin, n_ortho, s_diag_err, s_offdiag_max, s_frob_err)
@@ -874,7 +877,7 @@ contains
           ' diag_err=', s_diag_err, ' offdiag_max=', s_offdiag_max, ' tol=', s_ortho_tol
       end if
       call BLACS_GRIDEXIT(ictxt)
-      deallocate(eval, work, iwork, y_div, ifail, iclustr, gap, coef_part, coef_sum)
+      deallocate(eval, work, iwork, ifail, iclustr, gap, coef_part, coef_sum)
       return
     end if
     dg_frag%coef(:, 1:nkeep, ispin) = coef_sum(:, 1:nkeep)
@@ -883,7 +886,7 @@ contains
     dg_frag%esp(1:nkeep, ispin) = eval(1:nkeep)
 
     call BLACS_GRIDEXIT(ictxt)
-    deallocate(eval, work, iwork, y_div, ifail, iclustr, gap, coef_part, coef_sum)
+    deallocate(eval, work, iwork, ifail, iclustr, gap, coef_part, coef_sum)
     did_solve = .true.
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,2(a,1pe13.5))') '[DG-DIST-EIG] done', ' eig_min=', dg_frag%esp(1, ispin), &
