@@ -940,7 +940,7 @@ contains
     call PDSYEVX('V', 'V', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
                  iwork, liwork, ifail, iclustr, gap, ierr)
-    if (ierr /= 0 .or. m_found < nkeep .or. nz_found < nkeep) then
+    if ((ierr /= 0 .and. ierr /= 2) .or. m_found < nkeep .or. nz_found < nkeep) then
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a,3(a,i0),2(a,1pe13.5))') '[WARN] DG ScaLAPACK PDSYEVX(Hstd vectors) failed/incomplete:', &
           ' info=', ierr, ' m=', m_found, ' nz=', nz_found, ' vl=', vl, ' vu=', vu
@@ -953,6 +953,11 @@ contains
       call BLACS_GRIDEXIT(ictxt)
       deallocate(h_div, s_div, eval, work, iwork, y_div, ifail, iclustr, gap)
       return
+    end if
+    if (ierr == 2 .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,i0),a)') '[WARN] DG ScaLAPACK PDSYEVX(Hstd vectors) returned orthogonality warning:', &
+        ' m=', m_found, ' nz=', nz_found, '; checking S-orthogonality in DG space'
+      flush(6)
     end if
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,2(a,1pe13.5),2(a,i0))') '[DG-DIST-EIG] ScaLAPACK partial Hstd diagonalization done', &
