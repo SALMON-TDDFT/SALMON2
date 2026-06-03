@@ -251,7 +251,6 @@ contains
     real(8) :: scalapack_alpha, abstol, vl, vu, orfac, scale_chol
     real(8) :: eig_cut, eig_gap, eig_gap_tol
     real(8) :: s_diag_err, s_offdiag_max, s_frob_err, s_ortho_tol
-    real(8) :: PDLAMCH
     complex(8), allocatable :: coef_part(:, :), coef_sum(:, :)
     integer :: nlocal
     integer :: NUMROC
@@ -755,8 +754,11 @@ contains
     nloc_row = NUMROC(n, mb, myrow, 0, nprow)
     nloc_col = NUMROC(n, nb, mycol, 0, npcol)
     call DESCINIT(desca, n, n, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
-    nloc_vec_col = NUMROC(nkeep, nb, mycol, 0, npcol)
-    call DESCINIT(descb, n, nkeep, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
+    ! PDSYEVX documents Z/DESCZ as a global (N,N) matrix.  Even when RANGE
+    ! selects only the occupied window, implementations may validate DESCZ
+    ! against DESCA before the number of selected vectors is known.
+    nloc_vec_col = nloc_col
+    call DESCINIT(descb, n, n, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
     allocate(h_div(max(1, nloc_row), max(1, nloc_col)))
     allocate(s_div(max(1, nloc_row), max(1, nloc_col)))
     allocate(eval(n))
@@ -795,9 +797,10 @@ contains
     allocate(gap(max(1, nprow * npcol)))
     vl = 0.0d0
     vu = 0.0d0
-    abstol = abs(PDLAMCH(ictxt, 'U'))
-    if (.not. (abstol >= 0.0d0)) abstol = 0.0d0
-    abstol = max(abstol, 1.0d-12)
+    ! PDSYEVX checks that scalar inputs are bitwise-consistent across the
+    ! BLACS grid by broadcasting rank-0 values through WORK(1:3).  Avoid
+    ! per-rank PDLAMCH differences here; use a deterministic positive floor.
+    abstol = 1.0d-12
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,1pe13.5)') '[DG-DIST-EIG] ScaLAPACK PDSYEVX abstol=', abstol
       flush(6)
