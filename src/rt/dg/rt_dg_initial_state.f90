@@ -795,7 +795,12 @@ contains
     allocate(gap(max(1, nprow * npcol)))
     vl = 0.0d0
     vu = 0.0d0
-    abstol = PDLAMCH(ictxt, 'U')
+    abstol = abs(PDLAMCH(ictxt, 'U'))
+    if (.not. (abstol >= 0.0d0)) abstol = 0.0d0
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,1pe13.5)') '[DG-DIST-EIG] ScaLAPACK PDSYEVX abstol=', abstol
+      flush(6)
+    end if
     orfac = 1.0d-3
     lwork = -1
     liwork = -1
