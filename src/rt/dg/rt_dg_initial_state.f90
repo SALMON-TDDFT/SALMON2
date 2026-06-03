@@ -251,6 +251,8 @@ contains
     real(8) :: scalapack_alpha, abstol, vl, vu, orfac, scale_chol
     real(8) :: eig_cut, eig_gap, eig_gap_tol
     real(8) :: s_diag_err, s_offdiag_max, s_frob_err, s_ortho_tol
+    real(8) :: scalapack_est_gb_per_rank, scalapack_max_est_gb_per_rank, scalapack_max_gb_per_rank
+    real(8) :: scalapack_dense_bytes, scalapack_coef_bytes
     complex(8), allocatable :: coef_part(:, :), coef_sum(:, :)
     integer :: nlocal
     integer :: NUMROC
@@ -759,6 +761,40 @@ contains
     ! against DESCA before the number of selected vectors is known.
     nloc_vec_col = nloc_col
     call DESCINIT(descb, n, n, mb, nb, 0, 0, ictxt, max(1, nloc_row), ierr)
+    scalapack_max_gb_per_rank = 24.0d0
+    env_value_main = ''
+    call get_environment_variable('SALMON_DG_SCALAPACK_MAX_GB_PER_RANK', env_value_main, &
+                                  length=env_len_main, status=env_status_main)
+    if (env_status_main == 0 .and. env_len_main > 0) then
+      read(env_value_main(1:env_len_main), *, iostat=env_read_status) scalapack_max_gb_per_rank
+      if (env_read_status /= 0) scalapack_max_gb_per_rank = 24.0d0
+    end if
+    ! Main local dense arrays are H, S, Z/Y, plus one dense-equivalent margin
+    ! for ScaLAPACK work buffers.  Coefficient gather buffers are separate.
+    scalapack_dense_bytes = 4.0d0 * 8.0d0 * dble(max(1, nloc_row)) * dble(max(1, nloc_col))
+    scalapack_coef_bytes = 4.0d0 * 8.0d0 * dble(size(dg_frag%coef, 1)) * dble(max(1, nkeep))
+    scalapack_est_gb_per_rank = (scalapack_dense_bytes + scalapack_coef_bytes) / 1024.0d0**3
+    scalapack_max_est_gb_per_rank = -scalapack_est_gb_per_rank
+    call comm_get_min(scalapack_max_est_gb_per_rank, dg_frag%icomm)
+    scalapack_max_est_gb_per_rank = -scalapack_max_est_gb_per_rank
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,5(a,i0),2(a,1pe13.5))') '[DG-DIST-EIG-MEM] ScaLAPACK estimate', &
+        ' n=', n, ' ranks=', dg_frag%isize, ' nloc_row=', nloc_row, ' nloc_col=', nloc_col, &
+        ' nkeep=', nkeep, ' max_GB_per_rank_est=', scalapack_max_est_gb_per_rank, &
+        ' max_GB_per_rank=', scalapack_max_gb_per_rank
+      flush(6)
+    end if
+    if (scalapack_max_gb_per_rank > 0.0d0 .and. scalapack_max_est_gb_per_rank > scalapack_max_gb_per_rank) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,2(a,1pe13.5),a)') '[WARN] DG-DIST-EIG skipping ScaLAPACK full dense solve:', &
+          ' estimated_GB_per_rank=', scalapack_max_est_gb_per_rank, &
+          ' limit_GB_per_rank=', scalapack_max_gb_per_rank, &
+          ' (set SALMON_DG_SCALAPACK_MAX_GB_PER_RANK<=0 to force)'
+        flush(6)
+      end if
+      call BLACS_GRIDEXIT(ictxt)
+      return
+    end if
     allocate(h_div(max(1, nloc_row), max(1, nloc_col)))
     allocate(s_div(max(1, nloc_row), max(1, nloc_col)))
     allocate(eval(n))
