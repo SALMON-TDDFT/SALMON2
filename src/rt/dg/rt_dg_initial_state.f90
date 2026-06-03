@@ -256,6 +256,7 @@ contains
     complex(8), allocatable :: coef_part(:, :), coef_sum(:, :)
     integer :: nlocal
     integer :: NUMROC
+    logical :: have_scalapack_vectors
 #endif
 #ifdef USE_EIGENEXA
     integer, parameter :: panel_ex = 32
@@ -842,6 +843,63 @@ contains
       flush(6)
     end if
     orfac = 1.0d-3
+    have_scalapack_vectors = .false.
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0)') '[DG-DIST-EIG] trying ScaLAPACK direct index-window solve: iu=', nkeep
+      flush(6)
+    end if
+    lwork = -1
+    liwork = -1
+    work_query(:) = 0.0d0
+    call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
+                 m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work_query, lwork, &
+                 iwork_query, liwork, ifail, iclustr, gap, ierr)
+    if (ierr == 0) then
+      lwork = max(3, int(work_query(1)))
+      liwork = max(1, iwork_query(1))
+      allocate(work(lwork))
+      allocate(iwork(liwork))
+      y_div(:, :) = 0.0d0
+      call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
+                   m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
+                   iwork, liwork, ifail, iclustr, gap, ierr)
+      if ((ierr == 0 .or. ierr == 2) .and. m_found >= nkeep .and. nz_found >= nkeep) then
+        have_scalapack_vectors = .true.
+        if (ierr == 2 .and. comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,2(a,i0),a)') '[WARN] DG ScaLAPACK PDSYEVX index-window returned orthogonality warning:', &
+            ' m=', m_found, ' nz=', nz_found, '; checking S-orthogonality in DG space'
+          flush(6)
+        end if
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,2(a,1pe13.5),2(a,i0))') '[DG-DIST-EIG] ScaLAPACK index-window diagonalization done', &
+            ' eig_min=', eval(1), ' eig_keep=', eval(nkeep), ' m=', m_found, ' nz=', nz_found
+          flush(6)
+        end if
+      else
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,3(a,i0))') '[WARN] DG ScaLAPACK PDSYEVX index-window failed/incomplete; trying value-window fallback:', &
+            ' info=', ierr, ' m=', m_found, ' nz=', nz_found
+          flush(6)
+        end if
+        deallocate(work, iwork)
+        h_div(:, :) = 0.0d0
+        call assemble_scalapack_hs_from_blocks(h_div, s_div, ispin, .false., .false.)
+        call PDSYGST(1, 'L', n, h_div, 1, 1, desca, s_div, 1, 1, desca, scale_chol, ierr)
+        if (ierr /= 0) then
+          if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0)') '[WARN] DG ScaLAPACK PDSYGST(H,S) index fallback failed: info=', ierr
+          call BLACS_GRIDEXIT(ictxt)
+          deallocate(h_div, s_div, eval, y_div, ifail, iclustr, gap)
+          return
+        end if
+      end if
+    else if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a)') '[WARN] DG ScaLAPACK PDSYEVX index-window query failed: info=', ierr, &
+        '; trying value-window fallback'
+      flush(6)
+    end if
+
+    if (.not. have_scalapack_vectors) then
     lwork = -1
     liwork = -1
     work_query(:) = 0.0d0
@@ -963,6 +1021,7 @@ contains
       write(*,'(1x,a,2(a,1pe13.5),2(a,i0))') '[DG-DIST-EIG] ScaLAPACK partial Hstd diagonalization done', &
         ' eig_min=', eval(1), ' eig_keep=', eval(nkeep), ' m=', m_found, ' nz=', nz_found
       flush(6)
+    end if
     end if
 
     ! Convert standard-problem eigenvectors y back to generalized vectors:
