@@ -1499,15 +1499,15 @@ contains
     type(s_dft_system), intent(in) :: system
 
     integer, parameter :: max_iter = 4
-    real(8), parameter :: dtau = 1.0d-4
     character(len=16) :: env_relax
     integer :: iter, ispin, nocc, nrelax, io
-    integer :: max_relax_occ, env_len, env_status, env_read_status
+    integer :: max_relax_occ, lobpcg_block, ib, ie, nb, env_len, env_status, env_read_status
     logical :: ortho_ok
     real(8) :: rel_res_global, hnorm_global, rnorm_global, best_rel
     real(8), allocatable :: eps(:), eps_best(:), num_local(:), den_local(:), num_global(:), den_global(:)
     real(8), allocatable :: occ_weight(:), sums_local(:), sums_global(:)
-    complex(8), allocatable :: c(:,:), hc(:,:), sc(:,:), res(:,:), corr(:,:), coef_best(:,:)
+    complex(8), allocatable :: c(:,:), hc(:,:), sc(:,:), res(:,:), corr(:,:), pdir(:,:), coef_best(:,:)
+    complex(8), allocatable :: x_old(:,:), x_new(:,:), p_new(:,:)
 
     if (.not. allocated(dg_frag%coef)) return
     if (.not. allocated(dg_frag%esp)) return
@@ -1535,6 +1535,15 @@ contains
       read(env_relax(1:env_len), *, iostat=env_read_status) max_relax_occ
       if (env_read_status /= 0) max_relax_occ = 4096
     end if
+    lobpcg_block = 64
+    env_relax = ''
+    call get_environment_variable('SALMON_DG_LOBPCG_BLOCK', env_relax, &
+                                  length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_relax(1:env_len), *, iostat=env_read_status) lobpcg_block
+      if (env_read_status /= 0) lobpcg_block = 64
+    end if
+    lobpcg_block = max(1, min(lobpcg_block, max_relax_occ))
     nrelax = min(nocc, max(1, max_relax_occ))
     if (nrelax <= 0) then
       deallocate(occ_weight)
@@ -1543,9 +1552,12 @@ contains
 
     allocate(c(size(dg_frag%coef, 1), nrelax), hc(size(dg_frag%coef, 1), nrelax), &
              sc(size(dg_frag%coef, 1), nrelax), res(size(dg_frag%coef, 1), nrelax), &
-             corr(size(dg_frag%coef, 1), nrelax), coef_best(size(dg_frag%coef, 1), nrelax))
+             corr(size(dg_frag%coef, 1), nrelax), pdir(size(dg_frag%coef, 1), nrelax), &
+             coef_best(size(dg_frag%coef, 1), nrelax))
     allocate(eps(nrelax), eps_best(nrelax), num_local(nrelax), den_local(nrelax), &
              num_global(nrelax), den_global(nrelax), sums_local(2), sums_global(2))
+    allocate(x_old(size(dg_frag%coef, 1), lobpcg_block), x_new(size(dg_frag%coef, 1), lobpcg_block), &
+             p_new(size(dg_frag%coef, 1), lobpcg_block))
 
     call s_orthonormalize_coef_columns(dg_frag, ispin, nrelax, ortho_ok)
     if (.not. ortho_ok) then
@@ -1557,10 +1569,11 @@ contains
     coef_best(:, :) = dg_frag%coef(:, 1:nrelax, ispin)
     eps_best(:) = dg_frag%esp(1:nrelax, ispin)
     if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,i0,a,i0,a,1pe13.5)') '[DG-BLOCK-SPARSE-EIG] active occupied block=', &
-        nrelax, ' of nocc=', nocc, ' occ=', occ_weight(1)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,1pe13.5)') '[DG-BLOCK-SPARSE-LOBPCG] active occupied block=', &
+        nrelax, ' of nocc=', nocc, ' lobpcg_block=', lobpcg_block, ' occ=', occ_weight(1)
       flush(6)
     end if
+    pdir(:, :) = (0.0d0, 0.0d0)
 
     do iter = 0, max_iter
       c(:, :) = dg_frag%coef(:, 1:nrelax, ispin)
@@ -1603,7 +1616,7 @@ contains
       hnorm_global = sqrt(max(sums_global(2), 1.0d-300))
       rel_res_global = rnorm_global / hnorm_global
       if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,i0,3(a,1pe13.5))') '[DG-BLOCK-SPARSE-EIG] iter=', iter, &
+        write(*,'(1x,a,i0,3(a,1pe13.5))') '[DG-BLOCK-SPARSE-LOBPCG] iter=', iter, &
           ' rel=', rel_res_global, ' rnorm=', rnorm_global, ' hnorm=', hnorm_global
         flush(6)
       end if
@@ -1626,7 +1639,31 @@ contains
 
       corr(:, :) = (0.0d0, 0.0d0)
       call solve_overlap_operator_batch(dg_frag, ispin, res, corr, .true.)
-      dg_frag%coef(:, 1:nrelax, ispin) = dg_frag%coef(:, 1:nrelax, ispin) - dtau * corr(:, :)
+      corr(:, :) = -corr(:, :)
+      call remove_occupied_internal_residual(dg_frag, ispin, nrelax, corr)
+
+      do ib = 1, nrelax, lobpcg_block
+        ie = min(nrelax, ib + lobpcg_block - 1)
+        nb = ie - ib + 1
+        x_old(:, 1:nb) = dg_frag%coef(:, ib:ie, ispin)
+        call lobpcg_ritz_update_block(dg_frag, ispin, ib, ie, iter, &
+                                      corr(:, ib:ie), pdir(:, ib:ie), eps(ib:ie), &
+                                      x_new(:, 1:nb), ortho_ok)
+        if (.not. ortho_ok) exit
+        p_new(:, 1:nb) = x_new(:, 1:nb) - x_old(:, 1:nb)
+        dg_frag%coef(:, ib:ie, ispin) = x_new(:, 1:nb)
+        pdir(:, ib:ie) = p_new(:, 1:nb)
+      end do
+      if (.not. ortho_ok) then
+        dg_frag%coef(:, 1:nrelax, ispin) = coef_best(:, :)
+        dg_frag%esp(1:nrelax, ispin) = eps_best(:)
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,a,1pe13.5)') '[WARN] DG block-sparse LOBPCG stopped after Ritz failure: iter=', &
+            iter, ' best=', best_rel
+          flush(6)
+        end if
+        exit
+      end if
       call s_orthonormalize_coef_columns(dg_frag, ispin, nrelax, ortho_ok)
       if (.not. ortho_ok) then
         dg_frag%coef(:, 1:nrelax, ispin) = coef_best(:, :)
@@ -1645,9 +1682,142 @@ contains
     if (allocated(dg_frag%coef_work)) dg_frag%coef_work(:, 1:nrelax, ispin) = dg_frag%coef(:, 1:nrelax, ispin)
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, 1:nrelax, ispin) = dg_frag%coef(:, 1:nrelax, ispin)
 
-    deallocate(c, hc, sc, res, corr, coef_best, eps, eps_best, num_local, den_local, num_global, den_global, &
-               occ_weight, sums_local, sums_global)
+    deallocate(c, hc, sc, res, corr, pdir, coef_best, x_old, x_new, p_new, eps, eps_best, &
+               num_local, den_local, num_global, den_global, occ_weight, sums_local, sums_global)
   end subroutine relax_initial_occupied_subspace_block_sparse
+
+  subroutine lobpcg_ritz_update_block(dg_frag, ispin, first_col, last_col, iter, w_in, p_in, eig_out, x_out, success)
+    use communication, only: comm_summation
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin, first_col, last_col, iter
+    complex(8), intent(in) :: w_in(:, :), p_in(:, :)
+    real(8), intent(out) :: eig_out(:)
+    complex(8), intent(out) :: x_out(:, :)
+    logical, intent(out) :: success
+
+    integer :: nrow, nb, ntrial, nvalid, i, j
+    real(8), allocatable :: eval(:)
+    complex(8), allocatable :: v(:,:), hv(:,:), hsmall(:,:), hsmall_global(:,:), evec(:,:)
+
+    success = .false.
+    nb = last_col - first_col + 1
+    if (nb <= 0) return
+    nrow = size(dg_frag%coef, 1)
+    if (nrow <= 0) return
+    ntrial = 2 * nb
+    if (iter > 0) ntrial = 3 * nb
+
+    allocate(v(nrow, ntrial))
+    v(:, 1:nb) = dg_frag%coef(:, first_col:last_col, ispin)
+    v(:, nb + 1:2 * nb) = w_in(:, 1:nb)
+    if (iter > 0) v(:, 2 * nb + 1:3 * nb) = p_in(:, 1:nb)
+
+    call s_orthonormalize_trial_matrix(dg_frag, ispin, v, ntrial, nvalid, success)
+    if (.not. success .or. nvalid < nb) then
+      deallocate(v)
+      return
+    end if
+
+    allocate(hv(nrow, nvalid), hsmall(nvalid, nvalid), hsmall_global(nvalid, nvalid))
+    hv(:, :) = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%H_local_block_ids)) then
+      call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, v(:, 1:nvalid), hv, &
+                                     dg_frag%H_local_block_ids)
+    else
+      call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, v(:, 1:nvalid), hv)
+    end if
+    if (allocated(dg_frag%H_nl_blocks)) then
+      if (allocated(dg_frag%H_nl_local_block_ids)) then
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, v(:, 1:nvalid), hv, &
+                                               dg_frag%H_nl_local_block_ids)
+      else
+        call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, v(:, 1:nvalid), hv)
+      end if
+    end if
+
+    hsmall(:, :) = matmul(conjg(transpose(v(:, 1:nvalid))), hv(:, 1:nvalid))
+    call comm_summation(hsmall, hsmall_global, nvalid * nvalid, dg_frag%icomm)
+    do j = 1, nvalid
+      do i = j + 1, nvalid
+        hsmall_global(i, j) = 0.5d0 * (hsmall_global(i, j) + conjg(hsmall_global(j, i)))
+        hsmall_global(j, i) = conjg(hsmall_global(i, j))
+      end do
+      hsmall_global(j, j) = cmplx(real(hsmall_global(j, j), kind=8), 0.0d0, kind=8)
+    end do
+
+    allocate(eval(nvalid), evec(nvalid, nvalid))
+    hsmall(:, :) = hsmall_global(:, :)
+    call eigen_zheev(hsmall, eval, evec)
+    if (any(eval /= eval) .or. any(evec /= evec) .or. any(abs(evec) > huge(1.0d0))) then
+      deallocate(v, hv, hsmall, hsmall_global, eval, evec)
+      return
+    end if
+    x_out(:, 1:nb) = matmul(v(:, 1:nvalid), evec(1:nvalid, 1:nb))
+    eig_out(1:nb) = eval(1:nb)
+    success = .true.
+    deallocate(v, hv, hsmall, hsmall_global, eval, evec)
+  end subroutine lobpcg_ritz_update_block
+
+  subroutine s_orthonormalize_trial_matrix(dg_frag, ispin, v, ntrial, nvalid, success)
+    use communication, only: comm_summation
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin, ntrial
+    complex(8), intent(inout) :: v(:, :)
+    integer, intent(out) :: nvalid
+    logical, intent(out) :: success
+
+    integer :: nrow, i, j, k
+    real(8), parameter :: norm_floor = 1.0d-24
+    real(8), allocatable :: eval(:)
+    complex(8), allocatable :: sv(:,:), gram(:,:), gram_global(:,:), evec(:,:), transform(:,:)
+
+    success = .false.
+    nvalid = 0
+    if (ntrial <= 0) return
+    nrow = size(v, 1)
+    if (nrow <= 0) return
+
+    allocate(sv(nrow, ntrial), gram(ntrial, ntrial), gram_global(ntrial, ntrial))
+    sv(:, :) = (0.0d0, 0.0d0)
+    call apply_overlap_operator_batch(dg_frag, ispin, v(:, 1:ntrial), sv, .true.)
+    gram(:, :) = matmul(conjg(transpose(v(:, 1:ntrial))), sv(:, 1:ntrial))
+    call comm_summation(gram, gram_global, ntrial * ntrial, dg_frag%icomm)
+    do j = 1, ntrial
+      do i = j + 1, ntrial
+        gram_global(i, j) = 0.5d0 * (gram_global(i, j) + conjg(gram_global(j, i)))
+        gram_global(j, i) = conjg(gram_global(i, j))
+      end do
+      gram_global(j, j) = cmplx(real(gram_global(j, j), kind=8), 0.0d0, kind=8)
+    end do
+
+    allocate(eval(ntrial), evec(ntrial, ntrial))
+    gram(:, :) = gram_global(:, :)
+    call eigen_zheev(gram, eval, evec)
+    if (any(eval /= eval) .or. any(evec /= evec) .or. any(abs(evec) > huge(1.0d0))) then
+      deallocate(sv, gram, gram_global, eval, evec)
+      return
+    end if
+    nvalid = count(eval(1:ntrial) > norm_floor)
+    if (nvalid <= 0) then
+      deallocate(sv, gram, gram_global, eval, evec)
+      return
+    end if
+
+    allocate(transform(ntrial, nvalid))
+    k = 0
+    do i = 1, ntrial
+      if (eval(i) <= norm_floor) cycle
+      k = k + 1
+      transform(:, k) = evec(:, i) / sqrt(eval(i))
+    end do
+    v(:, 1:nvalid) = matmul(v(:, 1:ntrial), transform(:, 1:nvalid))
+    success = .true.
+    deallocate(sv, gram, gram_global, eval, evec, transform)
+  end subroutine s_orthonormalize_trial_matrix
 
   subroutine remove_occupied_internal_residual(dg_frag, ispin, nocc, res)
     use communication, only: comm_summation
