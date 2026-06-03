@@ -221,7 +221,8 @@ contains
 #endif
 #ifdef USE_SCALAPACK
     use mpi, only: MPI_COMM_WORLD, MPI_UNDEFINED, MPI_INTEGER, MPI_DOUBLE_PRECISION, &
-                   MPI_Comm_group, MPI_Group_translate_ranks, MPI_Group_free, MPI_Alltoall, MPI_Alltoallv
+                   MPI_DOUBLE_COMPLEX, MPI_Comm_group, MPI_Group_translate_ranks, MPI_Group_free, &
+                   MPI_Allgather, MPI_Allgatherv, MPI_Alltoall, MPI_Alltoallv
 #endif
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -253,7 +254,7 @@ contains
     real(8) :: s_diag_err, s_offdiag_max, s_frob_err, s_ortho_tol
     real(8) :: scalapack_est_gb_per_rank, scalapack_max_est_gb_per_rank, scalapack_max_gb_per_rank
     real(8) :: scalapack_dense_bytes, scalapack_coef_bytes
-    complex(8), allocatable :: coef_part(:, :), coef_sum(:, :)
+    complex(8), allocatable :: coef_sum(:, :)
     integer :: nlocal
     integer :: NUMROC
     logical :: have_scalapack_vectors
@@ -1042,30 +1043,16 @@ contains
     end if
 
     nlocal = size(dg_frag%coef, 1)
-    allocate(coef_part(nlocal, nkeep))
-    coef_part(:, :) = (0.0d0, 0.0d0)
+    allocate(coef_sum(nlocal, nkeep))
+    coef_sum(:, :) = (0.0d0, 0.0d0)
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,2(a,i0))') '[DG-DIST-EIG] ScaLAPACK coefficient gather start', &
         ' nlocal=', nlocal, ' nkeep=', nkeep
       flush(6)
     end if
-    do i = 1, nlocal
-      if (i > size(dg_frag%local_coef_global_ids, 1)) cycle
-      idx = dg_frag%local_coef_global_ids(i, ispin)
-      if (idx < 1 .or. idx > n) cycle
-      call INFOG2L(idx, 1, descb, nprow, npcol, myrow, mycol, loc_row, loc_col, proc_row, proc_col)
-      if (proc_row /= myrow) cycle
-      do j = 1, nkeep
-        call INFOG2L(idx, j, descb, nprow, npcol, myrow, mycol, loc_row, loc_col, proc_row, proc_col)
-        if (proc_col == mycol .and. proc_row == myrow .and. &
-            loc_row >= 1 .and. loc_row <= nloc_row .and. loc_col >= 1 .and. loc_col <= nloc_vec_col) then
-          coef_part(i, j) = cmplx(y_div(loc_row, loc_col), 0.0d0, kind=8)
-        end if
-      end do
-    end do
+    call redistribute_scalapack_vectors_to_local_coef(y_div, coef_sum, ispin, n, nkeep, &
+                                                      mb, nb, nprow, npcol, myrow, mycol)
     deallocate(y_div)
-    allocate(coef_sum(nlocal, nkeep))
-    call comm_summation(coef_part, coef_sum, nlocal * nkeep, dg_frag%icomm)
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a)') '[DG-DIST-EIG] ScaLAPACK coefficient gather done'
       flush(6)
@@ -1084,7 +1071,7 @@ contains
           ' diag_err=', s_diag_err, ' offdiag_max=', s_offdiag_max, ' tol=', s_ortho_tol
       end if
       call BLACS_GRIDEXIT(ictxt)
-      deallocate(eval, work, iwork, ifail, iclustr, gap, coef_part, coef_sum)
+      deallocate(eval, work, iwork, ifail, iclustr, gap, coef_sum)
       return
     end if
     dg_frag%coef(:, 1:nkeep, ispin) = coef_sum(:, 1:nkeep)
@@ -1093,7 +1080,7 @@ contains
     dg_frag%esp(1:nkeep, ispin) = eval(1:nkeep)
 
     call BLACS_GRIDEXIT(ictxt)
-    deallocate(eval, work, iwork, ifail, iclustr, gap, coef_part, coef_sum)
+    deallocate(eval, work, iwork, ifail, iclustr, gap, coef_sum)
     did_solve = .true.
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,2(a,1pe13.5))') '[DG-DIST-EIG] done', ' eig_min=', dg_frag%esp(1, ispin), &
@@ -1433,6 +1420,118 @@ contains
 
       deallocate(cblk, sblk, gram_local, gram_global)
     end subroutine measure_s_orthogonality_for_coef
+
+    subroutine redistribute_scalapack_vectors_to_local_coef(y_loc, coef_out, ispin_in, n_global, nkeep_in, &
+                                                            mb_in, nb_in, nprow_in, npcol_in, myrow_in, mycol_in)
+      implicit none
+      real(8), intent(in) :: y_loc(:, :)
+      complex(8), intent(inout) :: coef_out(:, :)
+      integer, intent(in) :: ispin_in, n_global, nkeep_in
+      integer, intent(in) :: mb_in, nb_in, nprow_in, npcol_in, myrow_in, mycol_in
+
+      integer :: nproc_redist, ierr_redist, nloc_out, nloc_ids
+      integer :: p, q, ii, gid, jg, lrow, lcol, prow, pcol
+      integer :: src_row, src_col, ncol_src, pos, total_send, total_recv
+      integer :: NUMROC
+      integer, allocatable :: local_ids(:), all_counts(:), all_displs(:), all_ids(:)
+      integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
+      complex(8), allocatable :: sendbuf(:), recvbuf(:)
+
+      nproc_redist = dg_frag%isize
+      nloc_out = size(coef_out, 1)
+      nloc_ids = 0
+      if (allocated(dg_frag%local_coef_global_ids)) then
+        nloc_ids = min(nloc_out, size(dg_frag%local_coef_global_ids, 1))
+      end if
+
+      allocate(local_ids(max(1, nloc_ids)))
+      if (nloc_ids > 0) local_ids(1:nloc_ids) = dg_frag%local_coef_global_ids(1:nloc_ids, ispin_in)
+      allocate(all_counts(nproc_redist), all_displs(nproc_redist))
+      call MPI_Allgather(nloc_ids, 1, MPI_INTEGER, all_counts, 1, MPI_INTEGER, dg_frag%icomm, ierr_redist)
+      all_displs(1) = 0
+      do p = 2, nproc_redist
+        all_displs(p) = all_displs(p - 1) + all_counts(p - 1)
+      end do
+      allocate(all_ids(max(1, sum(all_counts))))
+      call MPI_Allgatherv(local_ids, nloc_ids, MPI_INTEGER, all_ids, all_counts, all_displs, &
+                          MPI_INTEGER, dg_frag%icomm, ierr_redist)
+
+      allocate(send_counts(nproc_redist), recv_counts(nproc_redist))
+      allocate(send_displs(nproc_redist), recv_displs(nproc_redist))
+      send_counts(:) = 0
+      do q = 1, nproc_redist
+        do ii = 1, all_counts(q)
+          gid = all_ids(all_displs(q) + ii)
+          if (gid < 1 .or. gid > n_global) cycle
+          call dg_scalapack_index_1d(gid, mb_in, nprow_in, prow, lrow)
+          if (prow /= myrow_in) cycle
+          if (lrow < 1 .or. lrow > size(y_loc, 1)) cycle
+          do lcol = 1, size(y_loc, 2)
+            call dg_scalapack_global_index_1d(lcol, nb_in, npcol_in, mycol_in, jg)
+            if (jg >= 1 .and. jg <= nkeep_in) send_counts(q) = send_counts(q) + 1
+          end do
+        end do
+      end do
+      call MPI_Alltoall(send_counts, 1, MPI_INTEGER, recv_counts, 1, MPI_INTEGER, dg_frag%icomm, ierr_redist)
+
+      send_displs(1) = 0
+      recv_displs(1) = 0
+      do p = 2, nproc_redist
+        send_displs(p) = send_displs(p - 1) + send_counts(p - 1)
+        recv_displs(p) = recv_displs(p - 1) + recv_counts(p - 1)
+      end do
+      total_send = sum(send_counts)
+      total_recv = sum(recv_counts)
+      allocate(sendbuf(max(1, total_send)), recvbuf(max(1, total_recv)))
+
+      pos = 1
+      do q = 1, nproc_redist
+        do ii = 1, all_counts(q)
+          gid = all_ids(all_displs(q) + ii)
+          if (gid < 1 .or. gid > n_global) cycle
+          call dg_scalapack_index_1d(gid, mb_in, nprow_in, prow, lrow)
+          if (prow /= myrow_in) cycle
+          if (lrow < 1 .or. lrow > size(y_loc, 1)) cycle
+          do lcol = 1, size(y_loc, 2)
+            call dg_scalapack_global_index_1d(lcol, nb_in, npcol_in, mycol_in, jg)
+            if (jg >= 1 .and. jg <= nkeep_in) then
+              sendbuf(pos) = cmplx(y_loc(lrow, lcol), 0.0d0, kind=8)
+              pos = pos + 1
+            end if
+          end do
+        end do
+      end do
+
+      call MPI_Alltoallv(sendbuf, send_counts, send_displs, MPI_DOUBLE_COMPLEX, &
+                         recvbuf, recv_counts, recv_displs, MPI_DOUBLE_COMPLEX, &
+                         dg_frag%icomm, ierr_redist)
+
+      coef_out(:, :) = (0.0d0, 0.0d0)
+      do p = 0, nproc_redist - 1
+        src_row = mod(p, nprow_in)
+        src_col = p / nprow_in
+        ncol_src = NUMROC(n_global, nb_in, src_col, 0, npcol_in)
+        pos = recv_displs(p + 1) + 1
+        do ii = 1, nloc_ids
+          gid = local_ids(ii)
+          if (gid < 1 .or. gid > n_global) cycle
+          call dg_scalapack_index_1d(gid, mb_in, nprow_in, prow, lrow)
+          if (prow /= src_row) cycle
+          do lcol = 1, ncol_src
+            call dg_scalapack_global_index_1d(lcol, nb_in, npcol_in, src_col, jg)
+            if (jg >= 1 .and. jg <= nkeep_in) then
+              if (pos <= recv_displs(p + 1) + recv_counts(p + 1)) then
+                coef_out(ii, jg) = recvbuf(pos)
+              end if
+              pos = pos + 1
+            end if
+          end do
+        end do
+      end do
+
+      deallocate(local_ids, all_counts, all_displs, all_ids)
+      deallocate(send_counts, recv_counts, send_displs, recv_displs, sendbuf, recvbuf)
+    end subroutine redistribute_scalapack_vectors_to_local_coef
 #endif
 
     real(8) function dg_full_h_element(ig, jg, ispin_in, ifrag_of_gid, io_of_gid) result(val)
