@@ -239,6 +239,7 @@ contains
     integer :: proc_row, proc_col, loc_row, loc_col
     integer :: mb, nb, nmap, idx, group_src, group_world
     integer :: lwork, liwork, m_found, nz_found
+    integer :: n_ortho
     integer :: desca(9), descb(9)
     integer, allocatable :: gridmap_world(:, :), rank_src(:), rank_world(:)
     integer, allocatable :: iwork(:), ifail(:), iclustr(:)
@@ -248,6 +249,8 @@ contains
     real(8), allocatable :: gap(:)
     real(8) :: work_query(1)
     real(8) :: scalapack_alpha, abstol, vl, vu, orfac, scale_chol
+    real(8) :: s_diag_err, s_offdiag_max, s_frob_err, s_ortho_tol
+    real(8) :: PDLAMCH
     complex(8), allocatable :: coef_part(:, :), coef_sum(:, :)
     integer :: nlocal
     integer :: NUMROC
@@ -790,7 +793,7 @@ contains
     allocate(gap(max(1, nprow * npcol)))
     vl = 0.0d0
     vu = 0.0d0
-    abstol = 0.0d0
+    abstol = PDLAMCH(ictxt, 'U')
     orfac = 1.0d-3
     lwork = -1
     liwork = -1
@@ -812,20 +815,31 @@ contains
     call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
                  iwork, liwork, ifail, iclustr, gap, ierr)
-    if (m_found < nkeep .or. nz_found < nkeep) then
+    if (ierr /= 0) then
+      abstol = 2.0d0 * PDLAMCH(ictxt, 'S')
+      y_div(:, :) = 0.0d0
+      call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
+                   m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
+                   iwork, liwork, ifail, iclustr, gap, ierr)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,3(a,i0),a,1pe13.5)') '[DG-DIST-EIG] PDSYEVX retry with safe ABSTOL:', &
+          ' info=', ierr, ' m=', m_found, ' nz=', nz_found, ' abstol=', abstol
+        flush(6)
+      end if
+    end if
+    if (ierr /= 0 .or. m_found < nkeep .or. nz_found < nkeep) then
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a,3(a,i0))') '[WARN] DG ScaLAPACK PDSYEVX(Hstd) failed/incomplete:', &
           ' info=', ierr, ' m=', m_found, ' nz=', nz_found
+        if (ierr /= 0) then
+          write(*,'(1x,a,1pe13.5)') '[WARN] DG ScaLAPACK PDSYEVX min_gap=', minval(gap)
+          write(*,'(1x,a,4(i0,1x))') '[WARN] DG ScaLAPACK PDSYEVX ifail sample=', &
+            ifail(1), ifail(min(2, n)), ifail(min(3, n)), ifail(min(4, n))
+        end if
       end if
       call BLACS_GRIDEXIT(ictxt)
       deallocate(h_div, s_div, eval, work, iwork, y_div, ifail, iclustr, gap)
       return
-    end if
-    if (ierr /= 0 .and. comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,3(a,i0),a,1pe13.5)') '[WARN] DG ScaLAPACK PDSYEVX(Hstd) returned vectors with warning:', &
-        ' info=', ierr, ' m=', m_found, ' nz=', nz_found, ' min_gap=', minval(gap)
-      write(*,'(1x,a,4(i0,1x))') '[WARN] DG ScaLAPACK PDSYEVX ifail sample=', &
-        ifail(1), ifail(min(2, n)), ifail(min(3, n)), ifail(min(4, n))
     end if
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,2(a,1pe13.5))') '[DG-DIST-EIG] ScaLAPACK partial Hstd diagonalization done', &
@@ -858,6 +872,23 @@ contains
       end do
     end do
     call comm_summation(coef_part, coef_sum, nlocal * nkeep, dg_frag%icomm)
+    n_ortho = nkeep
+    call measure_s_orthogonality_for_coef(coef_sum, ispin, n_ortho, s_diag_err, s_offdiag_max, s_frob_err)
+    s_ortho_tol = 1.0d-7
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,3(a,1pe13.5))') '[DG-DIST-EIG-SORTHO] ncheck=', n_ortho, &
+        ' diag_err=', s_diag_err, ' offdiag_max=', s_offdiag_max, ' frob_err=', s_frob_err
+      flush(6)
+    end if
+    if (s_diag_err > s_ortho_tol .or. s_offdiag_max > s_ortho_tol) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,3(a,1pe13.5))') '[WARN] DG ScaLAPACK eigenvectors failed S-orthogonality check:', &
+          ' diag_err=', s_diag_err, ' offdiag_max=', s_offdiag_max, ' tol=', s_ortho_tol
+      end if
+      call BLACS_GRIDEXIT(ictxt)
+      deallocate(eval, work, iwork, y_div, ifail, iclustr, gap, coef_part, coef_sum)
+      return
+    end if
     dg_frag%coef(:, 1:nkeep, ispin) = coef_sum(:, 1:nkeep)
     if (allocated(dg_frag%coef_work)) dg_frag%coef_work(:, 1:nkeep, ispin) = dg_frag%coef(:, 1:nkeep, ispin)
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, 1:nkeep, ispin) = dg_frag%coef(:, 1:nkeep, ispin)
@@ -1107,40 +1138,6 @@ contains
       end do
     end subroutine pack_complex_blocks
 
-    subroutine scalapack_index_1d(ig, block_size, nproc_axis, proc, loc)
-      implicit none
-      integer, intent(in) :: ig, block_size, nproc_axis
-      integer, intent(out) :: proc, loc
-      integer :: iblock, inblock, local_block
-
-      if (ig <= 0 .or. block_size <= 0 .or. nproc_axis <= 0) then
-        proc = 0
-        loc = 0
-        return
-      end if
-      iblock = (ig - 1) / block_size
-      inblock = mod(ig - 1, block_size) + 1
-      proc = mod(iblock, nproc_axis)
-      local_block = iblock / nproc_axis
-      loc = local_block * block_size + inblock
-    end subroutine scalapack_index_1d
-
-    subroutine scalapack_global_index_1d(loc, block_size, nproc_axis, myproc_axis, ig)
-      implicit none
-      integer, intent(in) :: loc, block_size, nproc_axis, myproc_axis
-      integer, intent(out) :: ig
-      integer :: local_block, inblock, global_block
-
-      if (loc <= 0 .or. block_size <= 0 .or. nproc_axis <= 0) then
-        ig = 0
-        return
-      end if
-      local_block = (loc - 1) / block_size
-      inblock = mod(loc - 1, block_size) + 1
-      global_block = local_block * nproc_axis + myproc_axis
-      ig = global_block * block_size + inblock
-    end subroutine scalapack_global_index_1d
-
     subroutine scalapack_owner_blockcyclic(ig, jg, target, lrow, lcol)
       implicit none
       integer, intent(in) :: ig, jg
@@ -1173,6 +1170,63 @@ contains
         end do
       end do
     end subroutine scalapack_s_diag_stats
+
+    subroutine measure_s_orthogonality_for_coef(coef_candidate, ispin_in, ncheck_in, diag_err, offdiag_max, frob_err)
+      implicit none
+      complex(8), intent(in) :: coef_candidate(:, :)
+      integer, intent(in) :: ispin_in, ncheck_in
+      real(8), intent(out) :: diag_err, offdiag_max, frob_err
+
+      integer, parameter :: panel_ortho = 32
+      integer :: ncheck, nloc, jb, je, nb_panel, ii, jj, jglob
+      complex(8), allocatable :: cblk(:, :), sblk(:, :)
+      complex(8), allocatable :: gram_local(:, :), gram_global(:, :)
+      complex(8) :: target
+      real(8) :: err
+
+      ncheck = min(ncheck_in, size(coef_candidate, 2))
+      nloc = size(coef_candidate, 1)
+      diag_err = huge(1.0d0)
+      offdiag_max = huge(1.0d0)
+      frob_err = huge(1.0d0)
+      if (ncheck <= 0 .or. nloc <= 0) return
+
+      diag_err = 0.0d0
+      offdiag_max = 0.0d0
+      frob_err = 0.0d0
+      allocate(cblk(nloc, panel_ortho), sblk(nloc, panel_ortho))
+      allocate(gram_local(ncheck, panel_ortho), gram_global(ncheck, panel_ortho))
+
+      do jb = 1, ncheck, panel_ortho
+        je = min(ncheck, jb + panel_ortho - 1)
+        nb_panel = je - jb + 1
+        cblk(:, 1:nb_panel) = coef_candidate(:, jb:je)
+        sblk(:, 1:nb_panel) = (0.0d0, 0.0d0)
+        call apply_overlap_operator_batch_orbital_fragment_self(dg_frag, ispin_in, &
+          cblk(:, 1:nb_panel), sblk(:, 1:nb_panel), .true.)
+
+        gram_local(:, 1:nb_panel) = matmul(conjg(transpose(coef_candidate(:, 1:ncheck))), sblk(:, 1:nb_panel))
+        call comm_summation(gram_local(:, 1:nb_panel), gram_global(:, 1:nb_panel), ncheck * nb_panel, dg_frag%icomm)
+
+        do jj = 1, nb_panel
+          jglob = jb + jj - 1
+          do ii = 1, ncheck
+            target = (0.0d0, 0.0d0)
+            if (ii == jglob) target = (1.0d0, 0.0d0)
+            err = abs(gram_global(ii, jj) - target)
+            frob_err = frob_err + err * err
+            if (ii == jglob) then
+              diag_err = max(diag_err, err)
+            else
+              offdiag_max = max(offdiag_max, err)
+            end if
+          end do
+        end do
+      end do
+      frob_err = sqrt(max(0.0d0, frob_err))
+
+      deallocate(cblk, sblk, gram_local, gram_global)
+    end subroutine measure_s_orthogonality_for_coef
 #endif
 
     real(8) function dg_full_h_element(ig, jg, ispin_in, ifrag_of_gid, io_of_gid) result(val)
