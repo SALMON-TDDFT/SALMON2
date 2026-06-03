@@ -1028,22 +1028,37 @@ contains
     ! S = L L^T and x = L^{-T} y.
     scalapack_alpha = 1.0d0
     deallocate(h_div)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,4(a,i0))') '[DG-DIST-EIG] ScaLAPACK back-transform start', &
+        ' n=', n, ' nkeep=', nkeep, ' nloc_row=', nloc_row, ' nloc_col=', nloc_vec_col
+      flush(6)
+    end if
     call PDTRSM('L', 'L', 'T', 'N', n, nkeep, scalapack_alpha, s_div, 1, 1, desca, &
                 y_div, 1, 1, descb)
     deallocate(s_div)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[DG-DIST-EIG] ScaLAPACK back-transform done'
+      flush(6)
+    end if
 
     nlocal = size(dg_frag%coef, 1)
     allocate(coef_part(nlocal, nkeep))
     coef_part(:, :) = (0.0d0, 0.0d0)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,i0))') '[DG-DIST-EIG] ScaLAPACK coefficient gather start', &
+        ' nlocal=', nlocal, ' nkeep=', nkeep
+      flush(6)
+    end if
     do i = 1, nlocal
       if (i > size(dg_frag%local_coef_global_ids, 1)) cycle
       idx = dg_frag%local_coef_global_ids(i, ispin)
       if (idx < 1 .or. idx > n) cycle
-      call dg_scalapack_index_1d(idx, mb, nprow, proc_row, loc_row)
+      call INFOG2L(idx, 1, descb, nprow, npcol, myrow, mycol, loc_row, loc_col, proc_row, proc_col)
       if (proc_row /= myrow) cycle
       do j = 1, nkeep
-        call dg_scalapack_index_1d(j, nb, npcol, proc_col, loc_col)
-        if (proc_col == mycol .and. loc_row <= nloc_row .and. loc_col <= nloc_vec_col) then
+        call INFOG2L(idx, j, descb, nprow, npcol, myrow, mycol, loc_row, loc_col, proc_row, proc_col)
+        if (proc_col == mycol .and. proc_row == myrow .and. &
+            loc_row >= 1 .and. loc_row <= nloc_row .and. loc_col >= 1 .and. loc_col <= nloc_vec_col) then
           coef_part(i, j) = cmplx(y_div(loc_row, loc_col), 0.0d0, kind=8)
         end if
       end do
@@ -1051,6 +1066,10 @@ contains
     deallocate(y_div)
     allocate(coef_sum(nlocal, nkeep))
     call comm_summation(coef_part, coef_sum, nlocal * nkeep, dg_frag%icomm)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[DG-DIST-EIG] ScaLAPACK coefficient gather done'
+      flush(6)
+    end if
     n_ortho = nkeep
     call measure_s_orthogonality_for_coef(coef_sum, ispin, n_ortho, s_diag_err, s_offdiag_max, s_frob_err)
     s_ortho_tol = 1.0d-7
