@@ -1069,9 +1069,11 @@ contains
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a,3(a,1pe13.5))') '[WARN] DG ScaLAPACK eigenvectors failed S-orthogonality check:', &
           ' diag_err=', s_diag_err, ' offdiag_max=', s_offdiag_max, ' tol=', s_ortho_tol
+        write(*,'(1x,a)') '[WARN] DG ScaLAPACK vector path will not fall back to block-sparse LOBPCG after this failure.'
       end if
       call BLACS_GRIDEXIT(ictxt)
       deallocate(eval, work, iwork, ifail, iclustr, gap, coef_sum)
+      did_solve = .true.
       return
     end if
     dg_frag%coef(:, 1:nkeep, ispin) = coef_sum(:, 1:nkeep)
@@ -1395,7 +1397,7 @@ contains
         nb_panel = je - jb + 1
         cblk(:, 1:nb_panel) = coef_candidate(:, jb:je)
         sblk(:, 1:nb_panel) = (0.0d0, 0.0d0)
-        call apply_overlap_operator_batch_orbital_fragment_self(dg_frag, ispin_in, &
+        call apply_overlap_operator_batch(dg_frag, ispin_in, &
           cblk(:, 1:nb_panel), sblk(:, 1:nb_panel), .true.)
 
         gram_local(:, 1:nb_panel) = matmul(conjg(transpose(coef_candidate(:, 1:ncheck))), sblk(:, 1:nb_panel))
