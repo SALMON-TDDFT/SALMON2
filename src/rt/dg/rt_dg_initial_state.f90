@@ -1535,6 +1535,14 @@ contains
       read(env_relax(1:env_len), *, iostat=env_read_status) max_relax_occ
       if (env_read_status /= 0) max_relax_occ = 4096
     end if
+    if (max_relax_occ <= 0) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[DG-BLOCK-SPARSE-LOBPCG] skipped by SALMON_DG_BLOCK_SPARSE_RELAX_MAX_OCC<=0'
+        flush(6)
+      end if
+      deallocate(occ_weight)
+      return
+    end if
     lobpcg_block = 64
     env_relax = ''
     call get_environment_variable('SALMON_DG_LOBPCG_BLOCK', env_relax, &
@@ -1561,8 +1569,8 @@ contains
 
     call s_orthonormalize_coef_columns(dg_frag, ispin, nrelax, ortho_ok)
     if (.not. ortho_ok) then
-      deallocate(c, hc, sc, res, corr, coef_best, eps, eps_best, num_local, den_local, num_global, den_global, &
-                 occ_weight, sums_local, sums_global)
+      deallocate(c, hc, sc, res, corr, pdir, coef_best, x_old, x_new, p_new, eps, eps_best, &
+                 num_local, den_local, num_global, den_global, occ_weight, sums_local, sums_global)
       return
     end if
     best_rel = huge(1.0d0)
@@ -1676,6 +1684,9 @@ contains
         exit
       end if
       dg_frag%esp(1:nrelax, ispin) = eps(:)
+      ! The global S-orthonormalization above rotates/mixes occupied states.
+      ! Reset the LOBPCG history until the same transform is applied to P.
+      pdir(:, :) = (0.0d0, 0.0d0)
     end do
     dg_frag%esp(1:nrelax, ispin) = eps_best(:)
 
