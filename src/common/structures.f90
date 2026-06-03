@@ -100,13 +100,13 @@ module structures
 
 ! for persistent communication
   type s_pcomm_cache
-    #ifdef USE_OPENACC
+#ifdef USE_OPENACC
     real(8), allocatable, device :: dbuf(:, :, :, :)
     complex(8), allocatable, device :: zbuf(:, :, :, :)
-    #else
+#else
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
-    #endif
+#endif
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: dbuf, zbuf
 #endif

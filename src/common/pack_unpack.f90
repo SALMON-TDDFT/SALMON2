@@ -26,9 +26,9 @@ module pack_unpack
   public :: create_array_shape
   public :: pack_data, unpack_data
   public :: copy_data
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   public :: copy_data_d2m, copy_data_m2d
-  #endif
+#endif
 
   interface pack_data
     module procedure pack_data_3d_real8
@@ -55,7 +55,7 @@ module pack_unpack
     module procedure copy_data_6d_complex8
   end interface
 
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   interface copy_data_d2m
     module procedure copy_data_d2m_4d_real8
     module procedure copy_data_d2m_4d_complex8
@@ -65,7 +65,7 @@ module pack_unpack
     module procedure copy_data_m2d_4d_real8
     module procedure copy_data_m2d_4d_complex8
   end interface
-  #endif
+#endif
 
 contains
   function create_array_shape(nbeg,nend,nsize) result(s)
@@ -463,7 +463,7 @@ contains
     end do
     end do
   end subroutine
-  #endif
+#endif
 
   subroutine copy_data_5d_real8(src,dst)
     implicit none

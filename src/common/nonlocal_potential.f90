@@ -610,6 +610,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
 
+#ifdef USE_OPENACC
   if (.not. allocated(dev_uVpsibox)) then
     allocate(dev_uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   end if
@@ -618,7 +619,6 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
     allocate(dev_uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   end if
 
-#ifdef USE_OPENACC
 !$acc kernels
   dev_uVpsibox = 0d0
   dev_uVpsibox2 = 0d0

@@ -43,10 +43,10 @@ module communication
   ! application stops when a following routines is called in no-mpi environment
   public :: comm_send_init
   public :: comm_recv_init
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   public :: comm_send_init_device
   public :: comm_recv_init_device
-  #endif
+#endif
   public :: comm_start_all
   public :: comm_free_reqs
 
@@ -155,7 +155,7 @@ module communication
     module procedure comm_recv_init_array5d_dcomplex
   end interface
 
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   interface comm_send_init_device
     ! 4-D array
     module procedure comm_send_init_device_array4d_double
@@ -167,7 +167,7 @@ module communication
     module procedure comm_recv_init_device_array4d_double
     module procedure comm_recv_init_device_array4d_dcomplex
   end interface
-  #endif
+#endif
 
   interface comm_summation
     ! scalar
@@ -641,7 +641,7 @@ contains
     MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
   end function
 
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   function comm_send_init_device_array4d_double(invalue, ndest, ntag, ngroup) result(req)
     use cudafor
     use mpi, only: MPI_DOUBLE_PRECISION
@@ -661,7 +661,7 @@ contains
     integer :: ierr, req
     MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
   end function
-  #endif
+#endif
 
   function comm_send_init_array5d_double(invalue, ndest, ntag, ngroup) result(req)
     use mpi, only: MPI_DOUBLE_PRECISION
@@ -717,7 +717,7 @@ contains
     MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
   end function
 
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   function comm_recv_init_device_array4d_double(outvalue, nsrc, ntag, ngroup) result(req)
     use cudafor
     use mpi, only: MPI_DOUBLE_PRECISION
@@ -737,7 +737,7 @@ contains
     integer :: ierr, req
     MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
   end function
-  #endif
+#endif
 
   function comm_recv_init_array5d_double(outvalue, nsrc, ntag, ngroup) result(req)
     use mpi, only: MPI_DOUBLE_PRECISION
