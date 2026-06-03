@@ -247,7 +247,7 @@ contains
     real(8), allocatable :: h_div(:, :), s_div(:, :), eval(:), work(:)
     real(8), allocatable :: y_div(:, :)
     real(8), allocatable :: gap(:)
-    real(8) :: work_query(1)
+    real(8) :: work_query(3)
     real(8) :: scalapack_alpha, abstol, vl, vu, orfac, scale_chol
     real(8) :: eig_cut, eig_gap, eig_gap_tol
     real(8) :: s_diag_err, s_offdiag_max, s_frob_err, s_ortho_tol
@@ -805,6 +805,7 @@ contains
     orfac = 1.0d-3
     lwork = -1
     liwork = -1
+    work_query(:) = 0.0d0
     call PDSYEVX('N', 'A', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work_query, lwork, &
                  iwork_query, liwork, ifail, iclustr, gap, ierr)
@@ -815,7 +816,7 @@ contains
       deallocate(h_div, s_div, eval, y_div, ifail, iclustr, gap)
       return
     end if
-    lwork = max(1, int(work_query(1)))
+    lwork = max(3, int(work_query(1)))
     liwork = max(1, iwork_query(1))
     allocate(work(lwork))
     allocate(iwork(liwork))
@@ -880,6 +881,7 @@ contains
     vu = eig_cut + 0.5d0 * eig_gap
     lwork = -1
     liwork = -1
+    work_query(:) = 0.0d0
     call PDSYEVX('V', 'V', 'L', n, h_div, 1, 1, desca, vl, vu, 1, n, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work_query, lwork, &
                  iwork_query, liwork, ifail, iclustr, gap, ierr)
@@ -890,7 +892,7 @@ contains
       deallocate(h_div, s_div, eval, y_div, ifail, iclustr, gap)
       return
     end if
-    lwork = max(1, int(work_query(1)))
+    lwork = max(3, int(work_query(1)))
     liwork = max(1, iwork_query(1))
     allocate(work(lwork))
     allocate(iwork(liwork))
