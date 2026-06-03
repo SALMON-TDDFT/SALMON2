@@ -815,18 +815,6 @@ contains
     call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
                  m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
                  iwork, liwork, ifail, iclustr, gap, ierr)
-    if (ierr /= 0) then
-      abstol = 2.0d0 * PDLAMCH(ictxt, 'S')
-      y_div(:, :) = 0.0d0
-      call PDSYEVX('V', 'I', 'L', n, h_div, 1, 1, desca, vl, vu, 1, nkeep, abstol, &
-                   m_found, nz_found, eval, orfac, y_div, 1, 1, descb, work, lwork, &
-                   iwork, liwork, ifail, iclustr, gap, ierr)
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,3(a,i0),a,1pe13.5)') '[DG-DIST-EIG] PDSYEVX retry with safe ABSTOL:', &
-          ' info=', ierr, ' m=', m_found, ' nz=', nz_found, ' abstol=', abstol
-        flush(6)
-      end if
-    end if
     if (ierr /= 0 .or. m_found < nkeep .or. nz_found < nkeep) then
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a,3(a,i0))') '[WARN] DG ScaLAPACK PDSYEVX(Hstd) failed/incomplete:', &
