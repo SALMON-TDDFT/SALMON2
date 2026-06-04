@@ -488,6 +488,216 @@
             dg_frag%num_fragment(3) + coords(3)
   end function face_neighbor_fragment_ham
 
+  integer function find_or_create_flux_face_trace_cache(dg_frag, ifrag, jfrag, axis, side, npts, ncol, nspin) result(idx)
+    use rt_dg_fragment_types, only: flux_face_trace_info
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, axis, side, npts, ncol, nspin
+
+    integer :: i, nold
+    type(flux_face_trace_info), allocatable :: tmp(:)
+
+    idx = 0
+    if (npts <= 0 .or. ncol <= 0 .or. nspin <= 0) return
+    if (allocated(dg_frag%flux_face_trace_cache)) then
+      do i = 1, size(dg_frag%flux_face_trace_cache)
+        if (dg_frag%flux_face_trace_cache(i)%ifrag == ifrag .and. &
+            dg_frag%flux_face_trace_cache(i)%jfrag == jfrag .and. &
+            dg_frag%flux_face_trace_cache(i)%axis == axis .and. &
+            dg_frag%flux_face_trace_cache(i)%side == side) then
+          idx = i
+          exit
+        end if
+      end do
+    end if
+    if (idx <= 0) then
+      if (allocated(dg_frag%flux_face_trace_cache)) then
+        nold = size(dg_frag%flux_face_trace_cache)
+        allocate(tmp(nold + 1))
+        if (nold > 0) tmp(1:nold) = dg_frag%flux_face_trace_cache(1:nold)
+        call move_alloc(tmp, dg_frag%flux_face_trace_cache)
+        idx = nold + 1
+      else
+        allocate(dg_frag%flux_face_trace_cache(1))
+        idx = 1
+      end if
+      dg_frag%flux_face_trace_cache(idx)%ifrag = ifrag
+      dg_frag%flux_face_trace_cache(idx)%jfrag = jfrag
+      dg_frag%flux_face_trace_cache(idx)%axis = axis
+      dg_frag%flux_face_trace_cache(idx)%side = side
+    end if
+
+    if (dg_frag%flux_face_trace_cache(idx)%npts /= npts .or. &
+        dg_frag%flux_face_trace_cache(idx)%ncol_max < ncol .or. &
+        dg_frag%flux_face_trace_cache(idx)%nspin /= nspin) then
+      if (allocated(dg_frag%flux_face_trace_cache(idx)%u)) deallocate(dg_frag%flux_face_trace_cache(idx)%u)
+      if (allocated(dg_frag%flux_face_trace_cache(idx)%dn)) deallocate(dg_frag%flux_face_trace_cache(idx)%dn)
+      allocate(dg_frag%flux_face_trace_cache(idx)%u(npts, ncol, nspin))
+      allocate(dg_frag%flux_face_trace_cache(idx)%dn(npts, ncol, nspin))
+      dg_frag%flux_face_trace_cache(idx)%u(:, :, :) = 0.0d0
+      dg_frag%flux_face_trace_cache(idx)%dn(:, :, :) = 0.0d0
+      dg_frag%flux_face_trace_cache(idx)%npts = npts
+      dg_frag%flux_face_trace_cache(idx)%ncol_max = ncol
+      dg_frag%flux_face_trace_cache(idx)%nspin = nspin
+      dg_frag%flux_face_trace_cache(idx)%initialized = .false.
+    end if
+  end function find_or_create_flux_face_trace_cache
+
+  subroutine compute_local_face_trace_ham(dg_frag, mg, stencil, ifrag, axis, face_side, normal_side, npts, ncol, trace_buf)
+    use structures, only: s_rgrid, s_stencil
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_rgrid), intent(in) :: mg
+    type(s_stencil), intent(in) :: stencil
+    integer, intent(in) :: ifrag, axis, face_side, normal_side, npts, ncol
+    real(8), intent(out) :: trace_buf(:)
+
+    integer :: i_local, ispin, jo, ix, iy, iz, ipt, base
+    integer :: loop_lo(3), loop_hi(3), g_face(3)
+
+    trace_buf(:) = 0.0d0
+    if (ifrag < dg_frag%ifrag_start .or. ifrag > dg_frag%ifrag_end) return
+    i_local = ifrag - dg_frag%ifrag_start + 1
+    if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) return
+
+    loop_lo(:) = dg_frag%ixyz_frag(:, ifrag)
+    loop_hi(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+    if (face_side > 0) then
+      loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag) + dg_frag%nxyz_domain(axis, ifrag) - 1
+      loop_hi(axis) = loop_lo(axis)
+    else
+      loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag)
+      loop_hi(axis) = loop_lo(axis)
+    end if
+
+    ipt = 0
+    do iz = loop_lo(3), loop_hi(3)
+      do iy = loop_lo(2), loop_hi(2)
+        do ix = loop_lo(1), loop_hi(1)
+          ipt = ipt + 1
+          if (ipt > npts) cycle
+          g_face = [ix, iy, iz]
+          do ispin = 1, dg_frag%nspin
+            do jo = 1, min(ncol, dg_frag%n_basis(ifrag, ispin), size(dg_frag%phi_frag, 4))
+              base = (((ispin - 1) * ncol + (jo - 1)) * npts + (ipt - 1)) * 2
+              if (base + 2 > size(trace_buf)) cycle
+              trace_buf(base + 1) = phi_local_value_ham(dg_frag, i_local, jo, g_face)
+              trace_buf(base + 2) = phi_local_dn_ham(dg_frag, i_local, mg, stencil, jo, g_face, axis, normal_side)
+            end do
+          end do
+        end do
+      end do
+    end do
+  end subroutine compute_local_face_trace_ham
+
+  subroutine store_flux_face_trace_cache_ham(dg_frag, ifrag, jfrag, axis, side, npts, ncol, trace_mix, trace_buf)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, axis, side, npts, ncol
+    real(8), intent(in) :: trace_mix, trace_buf(:)
+
+    integer :: cache_idx, ispin, jo, ipt, base
+
+    cache_idx = find_or_create_flux_face_trace_cache(dg_frag, ifrag, jfrag, axis, side, npts, ncol, dg_frag%nspin)
+    if (cache_idx <= 0) return
+    do ispin = 1, dg_frag%nspin
+      do jo = 1, min(ncol, dg_frag%flux_face_trace_cache(cache_idx)%ncol_max)
+        do ipt = 1, npts
+          base = (((ispin - 1) * ncol + (jo - 1)) * npts + (ipt - 1)) * 2
+          if (base + 2 > size(trace_buf)) cycle
+          if (dg_frag%flux_face_trace_cache(cache_idx)%initialized) then
+            dg_frag%flux_face_trace_cache(cache_idx)%u(ipt, jo, ispin) = &
+              (1.0d0 - trace_mix) * dg_frag%flux_face_trace_cache(cache_idx)%u(ipt, jo, ispin) + &
+              trace_mix * trace_buf(base + 1)
+            dg_frag%flux_face_trace_cache(cache_idx)%dn(ipt, jo, ispin) = &
+              (1.0d0 - trace_mix) * dg_frag%flux_face_trace_cache(cache_idx)%dn(ipt, jo, ispin) + &
+              trace_mix * trace_buf(base + 2)
+          else
+            dg_frag%flux_face_trace_cache(cache_idx)%u(ipt, jo, ispin) = trace_buf(base + 1)
+            dg_frag%flux_face_trace_cache(cache_idx)%dn(ipt, jo, ispin) = trace_buf(base + 2)
+          end if
+        end do
+      end do
+    end do
+    dg_frag%flux_face_trace_cache(cache_idx)%initialized = .true.
+  end subroutine store_flux_face_trace_cache_ham
+
+  subroutine exchange_flux_face_trace_cache_ham(dg_frag, mg, stencil, trace_mix)
+    use structures, only: s_rgrid, s_stencil
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE, MPI_Send, MPI_Recv
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_rgrid), intent(in) :: mg
+    type(s_stencil), intent(in) :: stencil
+    real(8), intent(in) :: trace_mix
+
+    integer :: ifrag, jfrag, axis, side, npts, ncol, nbuf
+    integer :: src_root, dst_root, dst_rank, k, tag, ierr, istatus(MPI_STATUS_SIZE)
+    integer :: loop_lo(3), loop_hi(3)
+    real(8), allocatable :: trace_buf(:)
+
+    if (.not. dg_frag%flux_face_trace_mix_enabled) return
+    if (.not. allocated(dg_frag%phi_frag)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%id_array)) return
+
+    tag = 3271
+    do ifrag = 1, dg_frag%n_frag
+      do axis = 1, 3
+        if (dg_frag%num_fragment(axis) <= 1) cycle
+        do side = -1, 1, 2
+          jfrag = face_neighbor_fragment_ham(dg_frag, ifrag, axis, side)
+          if (jfrag <= 0 .or. jfrag == ifrag) cycle
+          loop_lo(:) = dg_frag%ixyz_frag(:, ifrag)
+          loop_hi(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
+          if (side > 0) then
+            loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag) + dg_frag%nxyz_domain(axis, ifrag) - 1
+            loop_hi(axis) = loop_lo(axis)
+          else
+            loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag)
+            loop_hi(axis) = loop_lo(axis)
+          end if
+          npts = max(1, (loop_hi(1) - loop_lo(1) + 1) * &
+                          (loop_hi(2) - loop_lo(2) + 1) * &
+                          (loop_hi(3) - loop_lo(3) + 1))
+          ncol = max(1, maxval(dg_frag%n_basis(jfrag, 1:dg_frag%nspin)))
+          nbuf = 2 * npts * ncol * dg_frag%nspin
+          src_root = dg_frag%id_array(jfrag)
+          dst_root = dg_frag%id_array(ifrag)
+
+          if (dg_frag%id == src_root .or. (dg_frag%id >= dst_root .and. dg_frag%id < dst_root + dg_frag%nproc_frag)) then
+            allocate(trace_buf(nbuf))
+          end if
+          if (dg_frag%id == src_root) then
+            if (jfrag < dg_frag%ifrag_start .or. jfrag > dg_frag%ifrag_end) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                '[FATAL] DG flux trace source rank does not own neighbor fragment: rank=', &
+                dg_frag%id, ' ifrag=', ifrag, ' jfrag=', jfrag, &
+                ' ifrag_start=', dg_frag%ifrag_start, ' ifrag_end=', dg_frag%ifrag_end
+              stop 'DG-Fragment RT: invalid flux trace source owner'
+            end if
+            call compute_local_face_trace_ham(dg_frag, mg, stencil, jfrag, axis, -side, side, npts, ncol, trace_buf)
+            do k = 0, dg_frag%nproc_frag - 1
+              dst_rank = dst_root + k
+              if (dst_rank == dg_frag%id) then
+                call store_flux_face_trace_cache_ham(dg_frag, ifrag, jfrag, axis, side, npts, ncol, trace_mix, trace_buf)
+              else
+                call MPI_Send(trace_buf, nbuf, MPI_DOUBLE_PRECISION, dst_rank, tag, dg_frag%icomm, ierr)
+                if (ierr /= 0) stop 'DG-Fragment RT: flux face trace send failed'
+              end if
+            end do
+          end if
+          if (dg_frag%id >= dst_root .and. dg_frag%id < dst_root + dg_frag%nproc_frag .and. dg_frag%id /= src_root) then
+            call MPI_Recv(trace_buf, nbuf, MPI_DOUBLE_PRECISION, src_root, tag, dg_frag%icomm, istatus, ierr)
+            if (ierr /= 0) stop 'DG-Fragment RT: flux face trace receive failed'
+            call store_flux_face_trace_cache_ham(dg_frag, ifrag, jfrag, axis, side, npts, ncol, trace_mix, trace_buf)
+          end if
+          if (allocated(trace_buf)) deallocate(trace_buf)
+        end do
+      end do
+    end do
+  end subroutine exchange_flux_face_trace_cache_ham
+
   logical function is_periodic_boundary_face_ham(dg_frag, ifrag, axis, side) result(is_pbc)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -710,7 +920,7 @@
     use structures, only: s_dft_system, s_rgrid, s_stencil
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system), intent(in) :: system
     type(s_rgrid), intent(in) :: mg
     type(s_stencil), intent(in) :: stencil
@@ -719,21 +929,30 @@
     integer, intent(in) :: block_map(:, :)
 
     real(8), parameter :: surface_penalty_factor = 10.0d0
+    real(8), parameter :: flux_face_trace_mix_default = 0.25d0
     integer :: ifrag, jfrag, i_local, axis, side, ispin, io, jo
     integer :: iblk_self, iblk_cross, nrow, ncol, ix, iy, iz
+    integer :: cache_idx, face_npts, face_pt
     integer :: g_row(3), g_col(3), loop_lo(3), loop_hi(3)
     integer :: col_lo(3), col_hi(3)
     real(8) :: area_weight, alpha, u_l, u_r, v_l, dnu_l, dnu_r, dnv_l
+    real(8) :: u_r_new, dnu_r_new, trace_mix
     real(8) :: term_self, term_cross
     real(8) :: face_self_sum, face_cross_sum, face_self_max, face_cross_max
     integer :: face_self_count, face_cross_count
-    logical :: pbc_face
+    logical :: pbc_face, mix_face_trace, use_cached_trace
     real(8), allocatable :: phi_col(:,:,:,:)
 
     if (.not. allocated(dg_frag%phi_frag)) return
     if (.not. allocated(dg_frag%n_basis)) return
     if (.not. allocated(dg_frag%index_basis)) return
     if (.not. dg_frag%parallel_mode_orbital) return
+    mix_face_trace = dg_frag%flux_face_trace_mix_enabled
+    trace_mix = flux_face_trace_mix_default
+    if (mix_face_trace) then
+      trace_mix = max(0.0d0, min(1.0d0, trace_mix))
+      call exchange_flux_face_trace_cache_ham(dg_frag, mg, stencil, trace_mix)
+    end if
 
     ! Equation (4) of the DG-ALB formulation: keep the volume kinetic and
     ! local-potential terms fragment-local, then add only the surface
@@ -756,8 +975,6 @@
           iblk_cross = find_matrix_block(block_map, ifrag, jfrag)
           if (iblk_self <= 0 .and. iblk_cross <= 0) cycle
 
-          call read_fragment_buffer_basis_box_ham(dg_frag, jfrag, phi_col, col_lo, col_hi)
-
           loop_lo(:) = dg_frag%ixyz_frag(:, ifrag)
           loop_hi(:) = dg_frag%ixyz_frag(:, ifrag) + dg_frag%nxyz_domain(:, ifrag) - 1
           if (side > 0) then
@@ -774,15 +991,34 @@
           face_cross_max = 0.0d0
           face_self_count = 0
           face_cross_count = 0
+          face_npts = max(1, (loop_hi(1) - loop_lo(1) + 1) * &
+                              (loop_hi(2) - loop_lo(2) + 1) * &
+                              (loop_hi(3) - loop_lo(3) + 1))
+          cache_idx = 0
+          if (mix_face_trace .and. iblk_cross > 0) then
+            cache_idx = find_or_create_flux_face_trace_cache(dg_frag, ifrag, jfrag, axis, side, &
+                                                            face_npts, max(1, maxval(dg_frag%n_basis(jfrag, :))), &
+                                                            dg_frag%nspin)
+          end if
+          use_cached_trace = (cache_idx > 0)
+          if (use_cached_trace) use_cached_trace = dg_frag%flux_face_trace_cache(cache_idx)%initialized
+          if (.not. use_cached_trace) call read_fragment_buffer_basis_box_ham(dg_frag, jfrag, phi_col, col_lo, col_hi)
 
           do ispin = 1, dg_frag%nspin
             nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), size(dg_frag%phi_frag, 4))
-            ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%index_basis, 1), size(phi_col, 4))
+            if (use_cached_trace) then
+              ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%index_basis, 1), &
+                         dg_frag%flux_face_trace_cache(cache_idx)%ncol_max)
+            else
+              ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%index_basis, 1), size(phi_col, 4))
+            end if
             if (nrow <= 0) cycle
 
+            face_pt = 0
             do iz = loop_lo(3), loop_hi(3)
               do iy = loop_lo(2), loop_hi(2)
                 do ix = loop_lo(1), loop_hi(1)
+                  face_pt = face_pt + 1
                   g_row = [ix, iy, iz]
                   g_col = g_row
                   if (side > 0) then
@@ -815,9 +1051,16 @@
 
                   if (iblk_cross > 0 .and. ncol > 0) then
                     do jo = 1, ncol
-                      u_r = phi_box_value_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, jo, g_col)
-                      dnu_r = phi_box_dn_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, stencil, &
-                                             jo, g_col, axis, side)
+                      if (use_cached_trace) then
+                        u_r = dg_frag%flux_face_trace_cache(cache_idx)%u(face_pt, jo, ispin)
+                        dnu_r = dg_frag%flux_face_trace_cache(cache_idx)%dn(face_pt, jo, ispin)
+                      else
+                        u_r_new = phi_box_value_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, jo, g_col)
+                        dnu_r_new = phi_box_dn_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, stencil, &
+                                                   jo, g_col, axis, side)
+                        u_r = u_r_new
+                        dnu_r = dnu_r_new
+                      end if
                       do io = 1, nrow
                         if (dg_frag%parallel_mode_orbital) then
                           if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle

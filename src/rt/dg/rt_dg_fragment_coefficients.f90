@@ -21,6 +21,7 @@ module rt_dg_fragment_coefficients
   private
   public :: rebuild_coef_owner_map
   public :: get_subgroup_block_owner_rank
+  public :: get_fragment_coef_owner_rank
 
 contains
 
@@ -310,5 +311,23 @@ contains
 
     owner_rank = subgroup_root_rank + min(owner_offset, subgroup_size - 1)
   end function get_subgroup_block_owner_rank
+
+  integer function get_fragment_coef_owner_rank(dg_frag, ifrag, local_row, n_local_rows) result(owner_rank)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, local_row, n_local_rows
+
+    if (ifrag < 1 .or. ifrag > size(dg_frag%id_array)) then
+      owner_rank = 0
+      return
+    end if
+
+    if (dg_frag%parallel_mode_orbital) then
+      owner_rank = get_subgroup_block_owner_rank(dg_frag%id_array(ifrag), dg_frag%isize_frag, &
+                                                 local_row, n_local_rows)
+    else
+      owner_rank = dg_frag%id_array(ifrag)
+    end if
+  end function get_fragment_coef_owner_rank
 
 end module rt_dg_fragment_coefficients

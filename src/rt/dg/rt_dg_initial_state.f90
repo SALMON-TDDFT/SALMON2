@@ -1398,7 +1398,7 @@ contains
         cblk(:, 1:nb_panel) = coef_candidate(:, jb:je)
         sblk(:, 1:nb_panel) = (0.0d0, 0.0d0)
         call apply_overlap_operator_batch(dg_frag, ispin_in, &
-          cblk(:, 1:nb_panel), sblk(:, 1:nb_panel), .true.)
+          cblk(:, 1:nb_panel), sblk(:, 1:nb_panel), .false.)
 
         gram_local(:, 1:nb_panel) = matmul(conjg(transpose(coef_candidate(:, 1:ncheck))), sblk(:, 1:nb_panel))
         call comm_summation(gram_local(:, 1:nb_panel), gram_global(:, 1:nb_panel), ncheck * nb_panel, dg_frag%icomm)

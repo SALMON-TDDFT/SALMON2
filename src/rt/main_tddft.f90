@@ -247,9 +247,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
                             calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix, &
                             prepare_fragment_local_eigen_basis, &
-                            diagonalize_initial_dg_full_distributed, &
-                            relax_initial_occupied_subspace_block_sparse, &
-                            measure_fragment_initial_surface_residual
+                            prepare_fragment_flux_scf_coefficients, &
+                            measure_fragment_initial_surface_residual, &
+                            update_density_and_hamiltonian_std => update_density_and_hamiltonian
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -283,16 +283,32 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   type(s_md),             intent(inout) :: md
   type(s_singlescale),    intent(inout) :: singlescale
   
+  integer, parameter :: flux_scf_max_iter_default = 8
+  integer, parameter :: flux_polish_max_iter_default = 1
+  real(8), parameter :: flux_scf_coef_tol_default = 1.0d-4
+  logical, parameter :: flux_scf_diag_initial_default = .false.
+  logical, parameter :: flux_scf_allow_unconverged_default = .false.
+
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
   integer :: env_len, env_status
+  integer :: flux_iter, flux_max_iter
+  integer :: flux_polish_iter, flux_polish_max_iter
   logical :: did_contract_dg_basis
-  logical :: did_distributed_dg_eig
+  logical :: did_flux_prepare
+  logical :: did_polish_update
+  logical :: adaptive_basis_saved
+  logical :: flux_diag_residual
+  logical :: flux_converged
   logical :: trace_dg_current
   character(len=16) :: env_value
+  character(len=16) :: flux_status
   real(8) :: curr_e_out(3,2), curr_i_zero(3)
+  real(8) :: Ac_zero(3)
   real(8) :: dg_surface_rel, dg_core_rel, dg_full_rel
   real(8) :: dg_initial_rel_tol
+  real(8) :: flux_coef_delta, flux_prev_delta, flux_delta_tol
+  real(8) :: flux_prev_full_rel, flux_prev_surface_rel
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -309,23 +325,170 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
     call prepare_fragment_local_eigen_basis(dg_frag, system, mg, ppg, did_contract_dg_basis)
     if (did_contract_dg_basis) then
+      dg_frag%flux_face_trace_mix_enabled = .true.
       call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
-      call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+      flux_diag_residual = flux_scf_diag_initial_default
+      dg_full_rel = 0.0d0
+      dg_core_rel = 0.0d0
+      dg_surface_rel = 0.0d0
+      if (flux_diag_residual) call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
       if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a)') '[DG-DIST-EIG] full DG generalized eigensolver is the primary initial-state path'
-        write(*,'(1x,a)') '[DG-DIST-EIG] block-sparse occupied relaxation is used only as fallback'
-        write(*,'(1x,a,3(a,1pe13.5))') '[DG-DIST-EIG-INITIAL]', &
-          ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+        write(*,'(1x,a)') '[DG-FLUX-SCF] fixed-density local projected-flux CG relaxation is the primary initial-state path'
+        write(*,'(1x,a)') '[DG-FLUX-SCF] occupations are refilled bottom-up without FD redistribution'
+        if (flux_diag_residual) then
+          write(*,'(1x,a,3(a,1pe13.5))') '[DG-FLUX-SCF-INITIAL]', &
+            ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+        else
+          write(*,'(1x,a)') '[DG-FLUX-SCF-INITIAL] residual diagnostics skipped'
+        end if
         flush(6)
       end if
-      call diagonalize_initial_dg_full_distributed(dg_frag, system, did_distributed_dg_eig)
-      if (.not. did_distributed_dg_eig) call relax_initial_occupied_subspace_block_sparse(dg_frag, system)
-      call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,l1)') '[DG-DIST-EIG-FINAL] distributed_solved=', did_distributed_dg_eig
-        write(*,'(1x,a,3(a,1pe13.5))') '[DG-DIST-EIG-FINAL]', &
-          ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+
+      flux_converged = .false.
+      flux_status = 'not_run'
+      flux_max_iter = flux_scf_max_iter_default
+      flux_max_iter = max(0, flux_max_iter)
+      if (flux_max_iter <= 0 .and. comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[WARN] DG-FLUX-SCF skipped by internal iteration setting'
         flush(6)
+      end if
+      if (flux_max_iter <= 0) flux_status = 'skipped'
+      flux_delta_tol = flux_scf_coef_tol_default
+      flux_prev_delta = huge(1.0d0)
+      flux_prev_full_rel = huge(1.0d0)
+      flux_prev_surface_rel = huge(1.0d0)
+      do flux_iter = 1, flux_max_iter
+        call prepare_fragment_flux_scf_coefficients(dg_frag, system, mg, ppg, did_flux_prepare, flux_coef_delta)
+        if (.not. did_flux_prepare) then
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0)') '[WARN] DG-FLUX-SCF basis update skipped at iter=', flux_iter
+            flush(6)
+          end if
+          exit
+        end if
+        call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
+        if (flux_diag_residual) call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+        if (comm_is_root(dg_frag%id)) then
+          if (flux_diag_residual) then
+            write(*,'(1x,a,i0,4(a,1pe13.5))') '[DG-FLUX-SCF] iter=', flux_iter, &
+              ' coef_step=', flux_coef_delta, ' full_rel=', dg_full_rel, &
+              ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+          else
+            write(*,'(1x,a,i0,a,1pe13.5)') '[DG-FLUX-SCF] iter=', flux_iter, &
+              ' coef_step=', flux_coef_delta
+          end if
+          flush(6)
+        end if
+        if (flux_coef_delta <= flux_delta_tol) then
+          flux_converged = .true.
+          flux_status = 'converged'
+          exit
+        end if
+        if (flux_iter > 1) then
+          if (flux_diag_residual) then
+            if (abs(flux_coef_delta - flux_prev_delta) <= flux_delta_tol * max(1.0d0, flux_prev_delta) .and. &
+                abs(dg_full_rel - flux_prev_full_rel) <= flux_delta_tol * max(1.0d0, flux_prev_full_rel) .and. &
+                abs(dg_surface_rel - flux_prev_surface_rel) <= flux_delta_tol * max(1.0d0, flux_prev_surface_rel)) then
+              flux_status = 'stalled'
+              exit
+            end if
+          else
+            if (abs(flux_coef_delta - flux_prev_delta) <= flux_delta_tol * max(1.0d0, flux_prev_delta)) then
+              flux_status = 'stalled'
+              exit
+            end if
+          end if
+        end if
+        flux_prev_delta = flux_coef_delta
+        flux_prev_full_rel = dg_full_rel
+        flux_prev_surface_rel = dg_surface_rel
+      end do
+      if (flux_max_iter > 0 .and. flux_status == 'not_run') flux_status = 'max_iter'
+      if (.not. flux_converged .and. flux_status /= 'skipped' .and. comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,a,a,1pe13.5,a,1pe13.5)') '[WARN] DG-FLUX-SCF stopped without convergence: status=', &
+          trim(flux_status), ' coef_step=', flux_coef_delta, ' tol=', flux_delta_tol
+        flush(6)
+      end if
+      if (.not. flux_converged .and. flux_status /= 'skipped' .and. .not. flux_scf_allow_unconverged_default) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,a,a,1pe13.5,a,1pe13.5)') '[FATAL] DG-FLUX-SCF did not converge: status=', &
+            trim(flux_status), ' coef_step=', flux_coef_delta, ' tol=', flux_delta_tol
+          write(*,'(1x,a)') '[FATAL] Stop before RK propagation to avoid starting from a drifting DG initial state.'
+          flush(6)
+        end if
+        stop 'DG-Fragment RT: flux SCF did not converge'
+      end if
+      if (flux_status /= 'skipped') then
+        call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+        flux_diag_residual = .true.
+      else if (flux_diag_residual) then
+        call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+      end if
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,a)') '[DG-FLUX-SCF-FINAL] status=', trim(flux_status)
+        if (flux_diag_residual) then
+          write(*,'(1x,a,3(a,1pe13.5))') '[DG-FLUX-SCF-FINAL]', &
+            ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+        else
+          write(*,'(1x,a)') '[DG-FLUX-SCF-FINAL] residual diagnostics skipped'
+        end if
+        flush(6)
+      end if
+      call diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, &
+                                             'fixed-density-flux-scf')
+      flux_polish_max_iter = flux_polish_max_iter_default
+      flux_polish_max_iter = max(0, flux_polish_max_iter)
+      if (flux_polish_max_iter > 0) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0)') '[DG-FLUX-POLISH] density+flux polish iterations=', flux_polish_max_iter
+          flush(6)
+        end if
+        Ac_zero(:) = 0.0d0
+        did_polish_update = .false.
+        do flux_polish_iter = 1, flux_polish_max_iter
+          adaptive_basis_saved = dg_frag%yn_adaptive_basis
+          dg_frag%yn_adaptive_basis = .false.
+          call update_density_and_hamiltonian_std(dg_frag, system, info, rt, -flux_polish_iter, Ac_zero, &
+               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+               rho, rho_s, Vh, Vxc, Vpsl, energy)
+          dg_frag%yn_adaptive_basis = adaptive_basis_saved
+          dg_frag%flux_face_trace_mix_enabled = .true.
+          call prepare_fragment_flux_scf_coefficients(dg_frag, system, mg, ppg, did_flux_prepare, flux_coef_delta)
+          if (.not. did_flux_prepare) then
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a,i0)') '[FATAL] DG-FLUX-POLISH basis update failed at iter=', flux_polish_iter
+              flush(6)
+            end if
+            stop 'DG-Fragment RT: flux polish basis update failed'
+          end if
+          did_polish_update = .true.
+          call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
+          call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+          flux_diag_residual = .true.
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,i0,4(a,1pe13.5))') '[DG-FLUX-POLISH] iter=', flux_polish_iter, &
+              ' coef_step=', flux_coef_delta, ' full_rel=', dg_full_rel, &
+              ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+            flush(6)
+          end if
+        end do
+        if (did_polish_update) then
+          adaptive_basis_saved = dg_frag%yn_adaptive_basis
+          dg_frag%yn_adaptive_basis = .false.
+          call update_density_and_hamiltonian_std(dg_frag, system, info, rt, &
+               -(flux_polish_max_iter + 1), Ac_zero, lg, mg, stencil, xc_func, &
+               srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, Vh, Vxc, Vpsl, energy)
+          dg_frag%yn_adaptive_basis = adaptive_basis_saved
+          call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
+          flux_diag_residual = .true.
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,3(a,1pe13.5))') '[DG-FLUX-POLISH-FINAL]', &
+              ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
+            flush(6)
+          end if
+        end if
+        call diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, &
+                                               'density-flux-polish')
       end if
       dg_initial_rel_tol = 1.0d-2
       env_value = ''
@@ -334,7 +497,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         read(env_value(1:env_len), *, iostat=env_status) dg_initial_rel_tol
         if (env_status /= 0) dg_initial_rel_tol = 1.0d-2
       end if
-      if (dg_full_rel > dg_initial_rel_tol) then
+      if (flux_diag_residual .and. dg_full_rel > dg_initial_rel_tol) then
         if (comm_is_root(dg_frag%id)) then
           write(*,'(1x,a,2(a,1pe13.5))') '[FATAL] DG initial state is not stationary enough for RT propagation:', &
             ' full_rel=', dg_full_rel, ' tol=', dg_initial_rel_tol
@@ -343,6 +506,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         end if
         stop 'DG-Fragment RT: initial full-DG residual too large'
       end if
+      dg_frag%flux_face_trace_mix_enabled = .false.
     end if
   end if
   
@@ -451,6 +615,75 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   end if
   
 end subroutine time_evolution_dg_fragment
+
+subroutine diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, label)
+  use structures, only: s_dft_system, s_rgrid, s_scalar
+  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_fragment, only: diagnose_density_from_fragments
+  use communication, only: comm_summation, comm_get_max, comm_is_root
+  implicit none
+  type(s_dg_fragment_rt), intent(inout) :: dg_frag
+  type(s_dft_system),     intent(in)    :: system
+  type(s_rgrid),          intent(in)    :: mg
+  type(s_scalar),         intent(inout) :: rho
+  type(s_scalar),         intent(inout) :: rho_s(system%nspin)
+  character(len=*),       intent(in)    :: label
+  real(8), allocatable :: rho_ref(:, :, :)
+  real(8), allocatable :: rho_s_ref(:, :, :, :)
+  real(8) :: drho2_local, drho2_sum, rho2_local, rho2_sum
+  real(8) :: rho_max_local(2), rho_max_sum(2)
+  real(8) :: diff, rel_l2
+  integer :: ix, iy, iz, ispin
+  integer :: ix_lo, ix_hi, iy_lo, iy_hi, iz_lo, iz_hi
+
+  ix_lo = lbound(rho%f, 1)
+  ix_hi = ubound(rho%f, 1)
+  iy_lo = lbound(rho%f, 2)
+  iy_hi = ubound(rho%f, 2)
+  iz_lo = lbound(rho%f, 3)
+  iz_hi = ubound(rho%f, 3)
+  allocate(rho_ref(ix_lo:ix_hi, iy_lo:iy_hi, iz_lo:iz_hi))
+  allocate(rho_s_ref(ix_lo:ix_hi, iy_lo:iy_hi, iz_lo:iz_hi, system%nspin))
+  rho_ref(:, :, :) = rho%f(:, :, :)
+  do ispin = 1, system%nspin
+    rho_s_ref(:, :, :, ispin) = rho_s(ispin)%f(:, :, :)
+  end do
+
+  call diagnose_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+
+  drho2_local = 0.0d0
+  rho2_local = 0.0d0
+  rho_max_local(:) = 0.0d0
+  do iz = mg%is(3), mg%ie(3)
+    do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        diff = rho%f(ix, iy, iz) - rho_ref(ix, iy, iz)
+        drho2_local = drho2_local + diff * diff
+        rho2_local = rho2_local + rho_ref(ix, iy, iz) * rho_ref(ix, iy, iz)
+        rho_max_local(1) = max(rho_max_local(1), abs(diff))
+        rho_max_local(2) = max(rho_max_local(2), abs(rho_ref(ix, iy, iz)))
+      end do
+    end do
+  end do
+  drho2_local = drho2_local * system%Hvol
+  rho2_local = rho2_local * system%Hvol
+  call comm_summation(drho2_local, drho2_sum, dg_frag%icomm)
+  call comm_summation(rho2_local, rho2_sum, dg_frag%icomm)
+  call comm_get_max(rho_max_local, rho_max_sum, 2, dg_frag%icomm)
+  rel_l2 = sqrt(drho2_sum / max(rho2_sum, 1.0d-300))
+  if (comm_is_root(dg_frag%id)) then
+    write(*,'(1x,a,a,4(a,1pe13.5))') '[DG-FLUX-RHO] label=', trim(label), &
+      ' rel_l2=', rel_l2, ' abs_l2=', sqrt(max(drho2_sum, 0.0d0)), &
+      ' drho_max=', rho_max_sum(1), ' rho_max=', rho_max_sum(2)
+    flush(6)
+  end if
+
+  rho%f(:, :, :) = rho_ref(:, :, :)
+  do ispin = 1, system%nspin
+    rho_s(ispin)%f(:, :, :) = rho_s_ref(:, :, :, ispin)
+  end do
+  deallocate(rho_ref, rho_s_ref)
+end subroutine diagnose_dg_flux_density_mismatch
 
 subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
   use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_reciprocal_grid, s_poisson, s_pp_grid, &

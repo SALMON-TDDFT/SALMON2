@@ -23,7 +23,8 @@ module rt_dg_fragment_types
 
   private
   public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, complex_vector_block_info, &
-            momentum_block_info, density_recv_map_info, density_grid_point_info, real_buffer_info, s_dg_fragment_rt
+            momentum_block_info, flux_face_trace_info, density_recv_map_info, density_grid_point_info, &
+            real_buffer_info, s_dg_fragment_rt
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -80,6 +81,19 @@ module rt_dg_fragment_types
     integer :: ncol_max = 0
     real(8), allocatable :: val(:,:,:,:) ! (3, nrow_max, ncol_max, nspin)
   end type momentum_block_info
+
+  type :: flux_face_trace_info
+    integer :: ifrag = 0
+    integer :: jfrag = 0
+    integer :: axis = 0
+    integer :: side = 0
+    integer :: npts = 0
+    integer :: ncol_max = 0
+    integer :: nspin = 0
+    logical :: initialized = .false.
+    real(8), allocatable :: u(:,:,:)   ! (face point, ket basis, spin)
+    real(8), allocatable :: dn(:,:,:)  ! (face point, ket basis, spin)
+  end type flux_face_trace_info
 
   type :: density_recv_map_info
     integer :: npts = 0
@@ -158,6 +172,8 @@ module rt_dg_fragment_types
     integer, allocatable :: H_nl_local_block_ids(:) ! row-owner-local nonlocal H block ids for RT apply
     integer, allocatable :: H_local_rows(:)      ! fragment rows owned by this rank
     logical :: H_local_block_ids_valid = .false.
+    type(flux_face_trace_info), allocatable :: flux_face_trace_cache(:)
+    logical :: flux_face_trace_mix_enabled = .false.
     logical, allocatable :: runtime_neighbor_pair_cache(:,:)    ! static fragment-pair runtime adjacency
     logical, allocatable :: momentum_neighbor_pair_cache(:,:)   ! static fragment-pair momentum adjacency
     real(8), allocatable :: S_mat(:,:,:)       ! raw fragment overlap matrix

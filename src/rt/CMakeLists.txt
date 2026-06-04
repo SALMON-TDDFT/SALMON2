@@ -14,7 +14,13 @@ set(SOURCES
     dg/rt_dg_fragment_ops.f90
     dg/rt_dg_fragment_coefficients.f90
     dg/rt_dg_fragment_layout.f90
+    dg/rt_dg_fragment_lifecycle.f90
+    dg/rt_dg_fragment_io.f90
+    dg/rt_dg_fragment_io_soi.f90
     dg/rt_dg_initial_state.f90
+    dg/rt_dg_flux_scf.f90
+    dg/rt_dg_local_basis.f90
+    dg/rt_dg_hse_exchange.f90
     dg/rt_dg_fragment.f90
     dg/rt_dg_fragment_hamiltonian_soi.f90
     dg/rt_dg_fragment_soi.f90
