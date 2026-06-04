@@ -23,6 +23,7 @@ subroutine main_realtime_ssbe(icomm)
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
     integer :: nk
+    real(8) :: bj_am(8,8)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -39,9 +40,15 @@ subroutine main_realtime_ssbe(icomm)
     call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
+    if (trim(gauge_sbe) == "length_gauge") then
+        ! Prepare qnm
+        call prepare_qnm(sbe, gs, icomm)
+        call adams_moulton_coefs(bj_am)
+    end if
+
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, nt+1, Ac_ext_t)
+    call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
     ! Initial energy
     energy = 0.0d0
     E(:) = 0.0d0; Jmat(:) = 0.0d0;
@@ -60,8 +67,8 @@ subroutine main_realtime_ssbe(icomm)
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
         ! Stdout logs:
-        write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
-        write(*, "(a)") "---------------------------------------------------------------------------------------"
+        write(*, "(a)") "  time-step  time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
+        write(*, "(a)") "-----------------------------------------------------------------------------------------"
     end if
 
     call comm_sync_all(icomm)
@@ -69,9 +76,14 @@ subroutine main_realtime_ssbe(icomm)
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
-        call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
-        call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
         E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
+        if (trim(gauge_sbe) == "velocity_gauge") then
+            call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
+            call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
+        else ! trim(gauge_sbe) == "length_gauge")
+            call dt_evolve_bloch_lg(sbe, gs, E(:), bj_am, dt, icomm)
+            call calc_current_bloch_lg(sbe, gs, Jmat, icomm)
+        end if
         energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
         
         if (irank == 0) then
@@ -83,7 +95,7 @@ subroutine main_realtime_ssbe(icomm)
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
-                write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
+                write(*, "(i8,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
             end if
         end if
         

@@ -434,6 +434,9 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: al_sbe(3,200)
   real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
   integer        :: norder_correction
+  character(16)  :: gauge_sbe
+  real(8)        :: t_2
+  integer        :: am_s
 
   !! &dc
   integer        :: num_fragment(3)
