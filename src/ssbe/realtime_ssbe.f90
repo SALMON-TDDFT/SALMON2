@@ -40,7 +40,7 @@ subroutine main_realtime_ssbe(icomm)
     call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
-    if (trim(theory) == "lg_sbe") then
+    if (trim(gauge_sbe) == "length_gauge") then
         ! Prepare qnm
         call prepare_qnm(sbe, gs, icomm)
         call adams_moulton_coefs(bj_am)
@@ -77,10 +77,10 @@ subroutine main_realtime_ssbe(icomm)
     do it = 1, nt
         t = dt * it
         E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
-        if (trim(theory) == "vg_sbe") then
+        if (trim(gauge_sbe) == "velocity_gauge") then
             call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
             call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
-        else ! trim(theory) == "lg_sbe")
+        else ! trim(gauge_sbe) == "length_gauge")
             call dt_evolve_bloch_lg(sbe, gs, E(:), bj_am, dt, icomm)
             call calc_current_bloch_lg(sbe, gs, Jmat, icomm)
         end if

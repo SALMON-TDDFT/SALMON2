@@ -120,13 +120,13 @@ subroutine main_multiscale_ssbe(icomm)
             call init_sbe_bloch_solver(sbe(i), gs(itbl_macro_itype_sbe(i)), &
                                        nstate_sbe(itbl_macro_itype_sbe(i)), icomm_macro)
             sbe(i)%flag_vnl_correction = (yn_vnl_correction == 'y')
-            if (trim(theory) == "maxwell_lg_sbe") then
+            if (trim(gauge_sbe) == "length_gauge") then
                 ! Prepare qnm
                 call prepare_qnm(sbe(i), gs(itbl_macro_itype_sbe(i)), icomm)
             end if
         end do
     end if
-    if (trim(theory) == "maxwell_lg_sbe") then
+    if (trim(gauge_sbe) == "length_gauge") then
         call adams_moulton_coefs(bj_am)
     end if
 
@@ -194,12 +194,12 @@ subroutine main_multiscale_ssbe(icomm)
 
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
-                if (trim(theory) == "maxwell_vg_sbe") then
+                if (trim(gauge_sbe) == "velocity_gauge") then
                     call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
                                          Ac_macro(1:3, imacro), dt)
                     call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
                                             Ac_macro(1:3, imacro), jmat, icomm_macro)
-                else ! trim(theory) == "maxwell_lg_sbe")
+                else ! trim(gauge_sbe) == "length_gauge"
                     call dt_evolve_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
                                             E_macro(1:3, imacro), bj_am, dt, icomm_macro)
                     call calc_current_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &

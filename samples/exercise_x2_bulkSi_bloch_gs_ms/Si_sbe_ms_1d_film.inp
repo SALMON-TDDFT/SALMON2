@@ -16,7 +16,7 @@
 !########################################################################################!
 
 &calculation
-    theory = 'maxwell_vg_sbe'
+    theory = 'maxwell_sbe'
 /
 
 &control

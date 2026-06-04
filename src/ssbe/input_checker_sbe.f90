@@ -94,16 +94,14 @@ function check_input_variables_sbe() result(flag)
     if (nk_sbe(1) <= 0) nk_sbe(1) = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
     if (nelec_sbe(1) <= 0) nelec_sbe(1) = nelec
 
-    if (trim(theory) == "lg_sbe" .or. &
-     &  trim(theory) == "maxwell_lg_sbe") then
+    if (trim(gauge_sbe) == "length_gauge") then
         if(t_2 <= 0.d0) call raise("ERROR! 't_2' must be positive.")
         if(am_s /= 4 .and. am_s /= 8) then
             call raise("ERROR! Supported only when 'am_s' is 4 or 8.")
         end if
     end if
 
-    if (trim(theory) /= "maxwell_vg_sbe" .and. &
-     &  trim(theory) /= "maxwell_lg_sbe") return
+    if (trim(theory) /= "maxwell_sbe") return
 
     if (nx_m < 1) &
         call raise("ERROR! 'nx_m' must be larger than 1!")

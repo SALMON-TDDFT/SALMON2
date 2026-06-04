@@ -409,8 +409,8 @@ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
     real(8) :: tmp, tmp1
 
     tmp1 = 0d0
-    select case(trim(theory))
-    case ("vg_sbe", "maxwell_vg_sbe")
+    select case(trim(gauge_sbe))
+    case ("velocity_gauge")
         !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2)
         do ik = sbe%ik_min, sbe%ik_max
             do ib = 1, nb_max
@@ -418,7 +418,7 @@ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
             end do
         end do
         !$omp end parallel do
-    case ("lg_sbe", "maxwell_lg_sbe")
+    case ("length_gauge")
         !$omp parallel do default(shared) private(ik, ib) reduction(+: tmp1) collapse(2)
         do ik = sbe%ik_min, sbe%ik_max
             do ib = 1, nb_max

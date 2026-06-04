@@ -9,9 +9,9 @@ subroutine main_ssbe(icomm)
     integer, intent(in) :: icomm
 
     select case(trim(theory))
-    case ("vg_sbe", "lg_sbe")
+    case ("sbe")
         call main_realtime_ssbe(icomm)
-    case ("maxwell_vg_sbe", "maxwell_lg_sbe")
+    case ("maxwell_sbe")
         call main_multiscale_ssbe(icomm)
     end select
 
