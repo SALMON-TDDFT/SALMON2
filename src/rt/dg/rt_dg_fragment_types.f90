@@ -194,9 +194,10 @@ module rt_dg_fragment_types
     integer, allocatable :: n_mat(:)           ! (nspin), spin-resolved projected-matrix dimension
     integer :: n_mat_max                       ! max projected-matrix dimension over spin channels
     logical :: identity_seed_coefficients = .false.      ! DC seed used fragment-local identity coefficients
-    logical :: defer_fragment_cap_to_local_eigen = .false. ! apply fragment_fixed cap after local H/S diagonalization
-    logical :: fragment_basis_contracted = .false.       ! phi_frag was rotated/truncated to local eigenbasis
-    integer :: requested_fragment_basis_cap = 0           ! requested cap per fragment for local-eigen contraction
+    logical :: defer_fragment_cap_to_local_eigen = .false. ! legacy identity-seed cap after local H/S cleanup
+    logical :: fragment_basis_contracted = .false.       ! phi_frag was rotated/cleaned to local core-S basis
+    integer :: requested_fragment_basis_cap = 0           ! legacy requested cap per fragment after cleanup
+    logical :: seed_basis_runtime_capped = .false.        ! RT input loader truncated the DC seed basis
 
     ! Time-dependent external field coupling (velocity gauge: H = H_0 - i*A·∇ + A^2/2)
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)

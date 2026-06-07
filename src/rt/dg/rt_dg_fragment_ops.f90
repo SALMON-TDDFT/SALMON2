@@ -7,7 +7,7 @@ module rt_dg_fragment_ops
   public :: ensure_nonlocal_pp_matrix_A
   public :: ensure_overlap_prop_available
   public :: calculate_microscopic_current_dg
-  public :: build_spatial_A_coupling_matrices
+  public :: apply_spatial_A_coupling_batch
   public :: apply_gradient_to_basis
   public :: apply_momentum_blocks
   public :: apply_matrix_blocks
@@ -34,7 +34,6 @@ module rt_dg_fragment_ops
   public :: solve_overlap_operator_batch_local
   public :: copy_overlap_operator_to_dense
   public :: pack_owned_coef
-  public :: fetch_remote_coef_rows
   public :: pack_owned_coef_pw
   public :: fetch_remote_coef_pw_rows
   public :: refresh_pw_coef_cache
@@ -5487,7 +5486,7 @@ contains
   !=======================================================================
   ! Build spatially resolved A·∇ matrix from Ac_micro(r)
   !=======================================================================
-  subroutine build_spatial_A_coupling_matrices(dg_frag, system, mg, stencil, ispin, Ap_mat, A2_mat)
+  subroutine apply_spatial_A_coupling_batch(dg_frag, system, mg, stencil, ispin, x, y)
     use structures
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -5495,22 +5494,20 @@ contains
     type(s_rgrid),          intent(in)    :: mg
     type(s_stencil),        intent(in)    :: stencil
     integer,                intent(in)    :: ispin
-    real(8),                intent(out)   :: Ap_mat(dg_frag%n_mat_max, dg_frag%n_mat_max)
-    real(8),                intent(out)   :: A2_mat(dg_frag%n_mat_max, dg_frag%n_mat_max)
+    complex(8),             intent(in)    :: x(:, :)
+    complex(8),             intent(inout) :: y(:, :)
 
-    integer :: ifrag, i_local, io, jo
-    integer :: ig_i, ig_j
+    integer :: ifrag, i_local, io, jo, iblk
     integer :: ix, iy, iz, ixg, iyg, izg, valid_grid_count, igrid
-    integer :: nxyz(3), ifrag_count, ngrid_max, point_idx
+    integer :: ifrag_count, ngrid_max, point_idx
     integer :: grid_x_lo, grid_x_hi, grid_y_lo, grid_y_hi, grid_z_lo, grid_z_hi
     real(8) :: phi_i, Ap_int
-    real(8), allocatable :: Ap_spin(:,:,:)
     type(matrix_block_info), allocatable :: Ap_blocks(:)
-    integer, allocatable :: A_block_map(:,:)
+    integer, allocatable :: A_block_map(:, :)
 
-    Ap_mat = 0.0d0
-    A2_mat = 0.0d0
     if (.not. allocated(system%Ac_micro%v)) return
+    if (ispin < 1 .or. ispin > dg_frag%nspin) return
+    if (.not. allocated(dg_frag%index_basis)) return
 
     call ensure_gradient_basis_cache(dg_frag, mg, stencil)
     grid_x_lo = mg%is(1)
@@ -5566,24 +5563,17 @@ contains
       end if
     end if
 
-    allocate(Ap_spin(dg_frag%n_mat_max, dg_frag%n_mat_max, dg_frag%nspin))
-    Ap_spin(:, :, :) = 0.0d0
+    call init_matrix_blocks_runtime(dg_frag, Ap_blocks, A_block_map)
+    if (.not. allocated(Ap_blocks)) return
 
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
-      nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
+      iblk = find_matrix_block_runtime(A_block_map, ifrag, ifrag)
+      if (iblk <= 0) cycle
       valid_grid_count = dg_frag%current_valid_grid_count(i_local)
-
-      do jo = 1, dg_frag%n_basis(ifrag, ispin)
-        ig_j = dg_frag%index_basis(jo, ifrag, ispin)
-        if (ig_j < 1 .or. ig_j > dg_frag%n_mat_max) cycle
-
-        !$omp parallel do private(io, ig_i, Ap_int, igrid, ix, iy, iz, ixg, iyg, izg, phi_i) schedule(static)
-        do io = 1, dg_frag%n_basis(ifrag, ispin)
-          ig_i = dg_frag%index_basis(io, ifrag, ispin)
-          if (ig_i < 1 .or. ig_i > dg_frag%n_mat_max) cycle
-
+      do jo = 1, min(dg_frag%n_basis(ifrag, ispin), size(Ap_blocks(iblk)%val, 2))
+        do io = 1, min(dg_frag%n_basis(ifrag, ispin), size(Ap_blocks(iblk)%val, 1))
           Ap_int = 0.0d0
           do igrid = 1, valid_grid_count
             ix = dg_frag%current_valid_ix(igrid, i_local)
@@ -5592,37 +5582,27 @@ contains
             ixg = dg_frag%current_valid_ixg(igrid, i_local)
             iyg = dg_frag%current_valid_iyg(igrid, i_local)
             izg = dg_frag%current_valid_izg(igrid, i_local)
-
             phi_i = dg_frag%phi_frag(ix, iy, iz, io, i_local)
             Ap_int = Ap_int + phi_i * ( &
                      system%Ac_micro%v(1, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 1, jo, i_local) + &
                      system%Ac_micro%v(2, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 2, jo, i_local) + &
                      system%Ac_micro%v(3, ixg, iyg, izg) * dg_frag%gradient_basis_cache(ix, iy, iz, 3, jo, i_local) ) * system%hvol
           end do
-
-          Ap_spin(ig_i, ig_j, ispin) = Ap_spin(ig_i, ig_j, ispin) + Ap_int
+          Ap_blocks(iblk)%val(io, jo, ispin) = Ap_blocks(iblk)%val(io, jo, ispin) + Ap_int
         end do
-        !$omp end parallel do
       end do
     end do
 
-    call init_matrix_blocks_runtime(dg_frag, Ap_blocks, A_block_map)
-    call sync_dense_matrix_to_blocks_runtime(dg_frag, Ap_spin, Ap_blocks, A_block_map)
     call reduce_matrix_blocks_runtime(dg_frag, Ap_blocks, "spatial-Ap", dg_frag%icomm)
-    call sync_blocks_to_dense_matrix_runtime(dg_frag, Ap_blocks, A_block_map, Ap_spin)
-
-    Ap_mat(:, :) = Ap_spin(:, :, ispin)
-    A2_mat(:, :) = 0.0d0
+    call apply_matrix_blocks_batch(dg_frag, Ap_blocks, ispin, x, y)
 
     if (allocated(Ap_blocks)) then
-      do io = 1, size(Ap_blocks)
-        if (allocated(Ap_blocks(io)%val)) deallocate(Ap_blocks(io)%val)
+      do iblk = 1, size(Ap_blocks)
+        if (allocated(Ap_blocks(iblk)%val)) deallocate(Ap_blocks(iblk)%val)
       end do
       deallocate(Ap_blocks)
     end if
     if (allocated(A_block_map)) deallocate(A_block_map)
-    deallocate(Ap_spin)
-
-  end subroutine build_spatial_A_coupling_matrices
+  end subroutine apply_spatial_A_coupling_batch
 
 end module rt_dg_fragment_ops

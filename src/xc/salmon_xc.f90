@@ -243,7 +243,7 @@ contains
       end do
 !$omp end parallel do
 
-      call calc_tau
+      if (xc_func%use_kinetic_energy .or. xc_func%use_current) call calc_tau
 
     elseif(nspin==2)then
 !$omp parallel do collapse(2) private(ix,iy,iz)

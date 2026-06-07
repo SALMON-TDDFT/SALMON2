@@ -40,6 +40,8 @@
     complex(8), allocatable :: dcoef_dt_pw(:,:,:), coef_prev_pw(:,:,:)
     logical, save :: enable_eigenstate_check = .true.
     logical, save :: eigenstate_check_initialized = .false.
+    logical, save :: iter_trace_initialized = .false.
+    logical, save :: enable_iter_trace = .false.
     logical, save :: occvirt_ref_mode_initialized = .false.
     logical, save :: enable_occvirt_ref_diag = .false.
     logical, save :: occvirt_ref_legacy_mode = .false.
@@ -49,7 +51,19 @@
     integer :: rayleigh_nonev_count, io_rayleigh, ncheck_eig, ispin_eig
     integer :: n_frag_ref, n_pw_ref, n_tot_ref, nstate_ref
     complex(8), allocatable :: eig_coef(:,:), eig_hc(:,:), eig_core_hc(:,:), eig_sc(:,:), eig_res(:,:)
+    logical :: trace_iteration
     ! Time evolution in fragment basis coefficient space
+
+    if (.not. iter_trace_initialized) then
+      env_val = ''
+      call get_environment_variable('SALMON_DG_ITER_TRACE', env_val, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_val(1:1) == '1' .or. env_val(1:1) == 'y' .or. env_val(1:1) == 'Y' .or. &
+            env_val(1:1) == 't' .or. env_val(1:1) == 'T') enable_iter_trace = .true.
+      end if
+      iter_trace_initialized = .true.
+    end if
+    trace_iteration = (enable_iter_trace .and. itt == 1 .and. dg_frag%id == 0)
 
     ! Initialize eigenstate check on iter 1
     if (itt == 1 .and. .not. eigenstate_check_initialized) then
@@ -65,7 +79,7 @@
           enable_eigenstate_check = .true.
         end if
       end if
-      if (comm_is_root(dg_frag%id)) then
+      if (enable_iter_trace .and. comm_is_root(dg_frag%id)) then
         if (enable_eigenstate_check) then
           write(*,'(1x,a)') "[DG-CONFIG] SALMON_DG_INITIAL_EIGENSTATE_CHECK=ON"
         else
@@ -164,7 +178,7 @@
     end if
 
     if (itt == 1 .and. enable_eigenstate_check) then
-      if (comm_is_root(dg_frag%id)) then
+      if (enable_iter_trace .and. comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') "[DG-FULL-EIGENSTATE] checking propagated-DG residual Hc-eSc"
         if (allocated(dg_frag%H_mat) .and. allocated(dg_frag%esp)) then
           rayleigh_max_rel_dev = 0.0d0
@@ -286,7 +300,7 @@
         end select
       end if
       occvirt_ref_mode_initialized = .true.
-      if (comm_is_root(dg_frag%id)) then
+      if (enable_iter_trace .and. comm_is_root(dg_frag%id)) then
         if (.not. enable_occvirt_ref_diag) then
           write(*,'(1x,a)') '[DG-CONFIG] SALMON_DG_OCCVIRT_DIAG=OFF (default)'
         else if (occvirt_ref_legacy_mode) then
@@ -319,26 +333,26 @@
         dg_frag%coef_ref_all(1:n_frag_ref, 1:nstate_ref, :) = dg_frag%coef(1:n_frag_ref, 1:nstate_ref, :)
         if (n_pw_ref > 0) dg_frag%coef_ref_all(n_frag_ref+1:n_tot_ref, 1:nstate_ref, :) = dg_frag%coef_pw(1:n_pw_ref, 1:nstate_ref, :)
         dg_frag%coef_ref_ready = .true.
-        if (comm_is_root(dg_frag%id)) then
+        if (enable_iter_trace .and. comm_is_root(dg_frag%id)) then
           write(*,'(1x,a)') '[DG-OBS] occvirt reference fixed at t=0 (pre-propagation)'
           flush(6)
         end if
       end if
     end if
 
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a,i0,a,i0)') '[DG-ITER] before propagation timer: itt=', itt, &
         ' integrator=', dg_frag%time_integrator
       flush(6)
     end if
     call timer_begin(LOG_CALC_TIME_PROPAGATION)
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a)') '[DG-ITER] propagation timer started'
       flush(6)
     end if
     select case(dg_frag%time_integrator)
     case(1, 3)  ! SSPRK3 or RK4
-      if (itt == 1 .and. dg_frag%id == 0) then
+      if (trace_iteration) then
         write(*,'(1x,a)') '[DG-ITER] calling RK propagator'
         flush(6)
       end if
@@ -346,7 +360,7 @@
                              lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                              rho, rho_s, Vh, Vxc, Vpsl, energy)
     case(2)  ! AETRS
-      if (itt == 1 .and. dg_frag%id == 0) then
+      if (trace_iteration) then
         write(*,'(1x,a)') '[DG-ITER] calling AETRS propagator'
         flush(6)
       end if
@@ -354,16 +368,16 @@
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a)') '[DG-ITER] propagator returned'
       flush(6)
     end if
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a)') '[DG-ITER] propagation timer stop start'
       flush(6)
     end if
     call timer_end(LOG_CALC_TIME_PROPAGATION)
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a)') '[DG-ITER] propagation timer stopped'
       flush(6)
     end if
@@ -376,19 +390,19 @@
             env_val(1:1) == 't' .or. env_val(1:1) == 'T') enable_reorth_mixed_occ = .true.
       end if
       reorth_mixed_occ_initialized = .true.
-      if (enable_reorth_mixed_occ .and. comm_is_root(dg_frag%id)) then
+      if (enable_iter_trace .and. enable_reorth_mixed_occ .and. comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') '[DG-CONFIG] SALMON_DG_REORTH_MIXED_OCC=ON'
         flush(6)
       end if
     end if
 
     if (enable_reorth_mixed_occ) then
-      if (itt == 1 .and. dg_frag%id == 0) then
+      if (trace_iteration) then
         write(*,'(1x,a)') '[DG-ITER] reorth mixed occupied start'
         flush(6)
       end if
       call reorthonormalize_mixed_occupied_subspace(dg_frag)
-      if (itt == 1 .and. dg_frag%id == 0) then
+      if (trace_iteration) then
         write(*,'(1x,a)') '[DG-ITER] reorth mixed occupied done'
         flush(6)
       end if
@@ -406,7 +420,7 @@
       if (dg_frag%time_integrator /= 3 .or. dg_frag%yn_adaptive_basis) then
         ! For adaptive-basis mode, keep post-step update active even in RK4
         ! so basis-update detection/trigger logic runs.
-        if (itt == 1 .and. dg_frag%id == 0) then
+        if (trace_iteration) then
           write(*,'(1x,a)') '[DG-ITER] post-step density/H update start'
           flush(6)
         end if
@@ -415,7 +429,7 @@
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                             rho, rho_s, Vh, Vxc, Vpsl, energy)
         call timer_end(LOG_CALC_RHO)
-        if (itt == 1 .and. dg_frag%id == 0) then
+        if (trace_iteration) then
           write(*,'(1x,a)') '[DG-ITER] post-step density/H update done'
           flush(6)
         end if
@@ -423,23 +437,23 @@
     end if
     
     ! Calculate observables
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a)') '[DG-ITER] observables start'
       flush(6)
     end if
     call calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl, rho)
-    if (itt == 1 .and. dg_frag%id == 0) then
+    if (trace_iteration) then
       write(*,'(1x,a)') '[DG-ITER] observables done'
       flush(6)
     end if
 
     if (trim(theory) == 'single_scale_maxwell_tddft') then
-      if (itt == 1 .and. dg_frag%id == 0) then
+      if (trace_iteration) then
         write(*,'(1x,a)') '[DG-ITER] microscopic current start'
         flush(6)
       end if
       call calculate_microscopic_current_dg(dg_frag, system, mg, stencil, rt%j_e)
-      if (itt == 1 .and. dg_frag%id == 0) then
+      if (trace_iteration) then
         write(*,'(1x,a)') '[DG-ITER] microscopic current done'
         flush(6)
       end if

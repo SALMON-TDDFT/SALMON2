@@ -543,7 +543,8 @@
     end if
   end function find_or_create_flux_face_trace_cache
 
-  subroutine compute_local_face_trace_ham(dg_frag, mg, stencil, ifrag, axis, face_side, normal_side, npts, ncol, trace_buf)
+  subroutine compute_local_face_trace_ham(dg_frag, mg, stencil, ifrag, axis, face_side, normal_side, npts, ncol, &
+                                          trace_buf)
     use structures, only: s_rgrid, s_stencil
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -588,6 +589,7 @@
         end do
       end do
     end do
+
   end subroutine compute_local_face_trace_ham
 
   subroutine store_flux_face_trace_cache_ham(dg_frag, ifrag, jfrag, axis, side, npts, ncol, trace_mix, trace_buf)
@@ -634,6 +636,7 @@
     integer :: ifrag, jfrag, axis, side, npts, ncol, nbuf
     integer :: src_root, dst_root, dst_rank, k, tag, ierr, istatus(MPI_STATUS_SIZE)
     integer :: loop_lo(3), loop_hi(3)
+    logical :: in_dst_group
     real(8), allocatable :: trace_buf(:)
 
     if (.not. dg_frag%flux_face_trace_mix_enabled) return
@@ -664,8 +667,9 @@
           nbuf = 2 * npts * ncol * dg_frag%nspin
           src_root = dg_frag%id_array(jfrag)
           dst_root = dg_frag%id_array(ifrag)
+          in_dst_group = (dg_frag%id >= dst_root .and. dg_frag%id < dst_root + dg_frag%nproc_frag)
 
-          if (dg_frag%id == src_root .or. (dg_frag%id >= dst_root .and. dg_frag%id < dst_root + dg_frag%nproc_frag)) then
+          if (dg_frag%id == src_root .or. in_dst_group) then
             allocate(trace_buf(nbuf))
           end if
           if (dg_frag%id == src_root) then
@@ -676,7 +680,8 @@
                 ' ifrag_start=', dg_frag%ifrag_start, ' ifrag_end=', dg_frag%ifrag_end
               stop 'DG-Fragment RT: invalid flux trace source owner'
             end if
-            call compute_local_face_trace_ham(dg_frag, mg, stencil, jfrag, axis, -side, side, npts, ncol, trace_buf)
+            call compute_local_face_trace_ham(dg_frag, mg, stencil, jfrag, axis, -side, side, npts, ncol, &
+                                              trace_buf)
             do k = 0, dg_frag%nproc_frag - 1
               dst_rank = dst_root + k
               if (dst_rank == dg_frag%id) then
@@ -687,7 +692,7 @@
               end if
             end do
           end if
-          if (dg_frag%id >= dst_root .and. dg_frag%id < dst_root + dg_frag%nproc_frag .and. dg_frag%id /= src_root) then
+          if (in_dst_group .and. dg_frag%id /= src_root) then
             call MPI_Recv(trace_buf, nbuf, MPI_DOUBLE_PRECISION, src_root, tag, dg_frag%icomm, istatus, ierr)
             if (ierr /= 0) stop 'DG-Fragment RT: flux face trace receive failed'
             call store_flux_face_trace_cache_ham(dg_frag, ifrag, jfrag, axis, side, npts, ncol, trace_mix, trace_buf)
@@ -929,7 +934,7 @@
     integer, intent(in) :: block_map(:, :)
 
     real(8), parameter :: surface_penalty_factor = 10.0d0
-    real(8), parameter :: flux_face_trace_mix_default = 0.25d0
+    real(8), parameter :: flux_face_trace_mix_default = 0.10d0
     integer :: ifrag, jfrag, i_local, axis, side, ispin, io, jo
     integer :: iblk_self, iblk_cross, nrow, ncol, ix, iy, iz
     integer :: cache_idx, face_npts, face_pt
@@ -994,6 +999,8 @@
           face_npts = max(1, (loop_hi(1) - loop_lo(1) + 1) * &
                               (loop_hi(2) - loop_lo(2) + 1) * &
                               (loop_hi(3) - loop_lo(3) + 1))
+          col_lo(:) = dg_frag%ixyz_frag(:, jfrag)
+          col_hi(:) = dg_frag%ixyz_frag(:, jfrag) + dg_frag%nxyz_domain(:, jfrag) - 1
           cache_idx = 0
           if (mix_face_trace .and. iblk_cross > 0) then
             cache_idx = find_or_create_flux_face_trace_cache(dg_frag, ifrag, jfrag, axis, side, &
@@ -3236,7 +3243,8 @@
         " reduce=", time_block_reduce, " antisym=", time_antisym
       write(*,'(a,1pe12.4)') "        Max |momentum_mat|: ", max_p
       write(*,'(a,i0,a,i0,a)') "        Total matrix elements: ", &
-                               3 * dg_frag%n_mat_max * dg_frag%n_mat_max * system%nspin, &
+                               3_8 * int(dg_frag%n_mat_max, kind=8) * &
+                               int(dg_frag%n_mat_max, kind=8) * int(system%nspin, kind=8), &
                                " (", 3, " directions × basis states × spin)"
     end if
     

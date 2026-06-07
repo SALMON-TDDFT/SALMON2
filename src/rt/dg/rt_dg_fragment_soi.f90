@@ -92,7 +92,6 @@ module rt_dg_fragment_soi
   use rt_dg_hse_exchange, only: init_hse_ri_data, add_exact_exchange_hse, finalize_hse_ri_data
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
                                 calculate_microscopic_current_dg, &
-                                build_spatial_A_coupling_matrices, &
                                 apply_gradient_to_basis_ops => apply_gradient_to_basis
   use rt_dg_fragment_coefficients, only: get_fragment_coef_owner_rank
   use rt_dg_fragment_lifecycle, only: init_rk_coefficients

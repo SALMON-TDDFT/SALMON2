@@ -8,7 +8,7 @@
                                   apply_nonlocal_pp_projector_batch_so, apply_mixed_hamiltonian, &
                                   solve_overlap_operator_batch, solve_overlap_operator_batch_local, mixed_fp_coupling_active, &
                                   copy_matrix_blocks_metric_to_complex_dense, copy_momentum_blocks_to_complex_dense, gather_full_coef_view, &
-                                  apply_overlap_operator
+                                  apply_overlap_operator, apply_spatial_A_coupling_batch
     use misc_routines, only: get_wtime
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag  ! Changed to inout for cache updates
@@ -63,7 +63,6 @@
     character(len=32) :: env_mfp
     character(len=32) :: env_mfp_mode
     integer :: env_len, env_stat
-    real(8), allocatable, save :: Ap_mat(:,:), A2_mat(:,:)
     complex(8), allocatable, save :: ap_block_dense(:,:), ap_block_ref(:,:)
     integer, parameter :: state_block_size = 64
     integer, save :: derivative_step_trace_count = 0
@@ -81,8 +80,8 @@
     logical, save :: cfg_enable_deriv_trace = .false.
     logical, save :: cfg_enable_hermit_check = .false.
     logical, save :: cfg_enable_op_mix_trace = .false.
-    logical, save :: cfg_enable_m_block_audit = .true.
-    logical, save :: cfg_enable_overlap_path_trace = .true.
+    logical, save :: cfg_enable_m_block_audit = .false.
+    logical, save :: cfg_enable_overlap_path_trace = .false.
     logical, save :: cfg_force_overlap_solve = .false.
     logical, save :: cfg_disable_mfp = .false.
     logical, save :: cfg_disable_local_overlap_solve = .true.
@@ -333,15 +332,6 @@
         ' mixed_ready=', dg_frag%mixed_basis_ready, ' orbital_mode=', dg_frag%parallel_mode_orbital
       flush(6)
     end if
-    if (use_spatial_A) then
-      if (.not. allocated(Ap_mat)) then
-        allocate(Ap_mat(n, n), A2_mat(n, n))
-      else if (size(Ap_mat, 1) /= n .or. size(Ap_mat, 2) /= n) then
-        deallocate(Ap_mat, A2_mat)
-        allocate(Ap_mat(n, n), A2_mat(n, n))
-      end if
-    end if
-
     need_source_decomp = enable_excitation_source_trace
     need_spinmix_work = need_source_decomp .or. has_spin_mix
 
@@ -394,9 +384,9 @@
                          allocated(dg_frag%mixed_basis_dim) .and. allocated(dg_frag%coef_mix))
       n_basis = 0
       if (use_mixed_basis) n_basis = min(dg_frag%mixed_basis_dim(ispin), n_tot, size(dg_frag%coef_mix, 1))
-      need_h0_dense = use_spatial_A .or. use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. &
+      need_h0_dense = use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. &
               (n_pw == 0 .and. disable_block_h_apply) .or. use_mixed_basis
-      need_m_dense = use_spatial_A .or. (.not. allocated(dg_frag%momentum_blocks)) .or. use_mixed_basis
+      need_m_dense = ((.not. allocated(dg_frag%momentum_blocks)) .and. (.not. use_spatial_A)) .or. use_mixed_basis
       if (trace_deriv_step) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,l1,a,l1,a,l1)') &
           '[DG-DERIV] spin begin call=', derivative_step_trace_id, ' ispin=', ispin, &
@@ -452,26 +442,21 @@
         H0c(n_frag+1:n_frag+n_pw, 1:n_frag) = conjg(transpose(dg_frag%H_mat_frag_pw(1:n_frag, 1:n_pw, ispin)))
       end if
 
-      if (use_spatial_A) then
-        call build_spatial_A_coupling_matrices(dg_frag, system, mg, stencil, ispin, Ap_mat, A2_mat)
-        H0c(:, :) = H0c(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
-        M(:, :) = cmplx(Ap_mat(:, :), 0.0d0, kind=8)
-      else
-        if (need_h0_dense) then
-          do io = 1, n_tot
-            H0c(io, io) = H0c(io, io) + 0.5d0 * A_squared
-          end do
-        end if
+      if (need_h0_dense) then
+        do io = 1, n_tot
+          H0c(io, io) = H0c(io, io) + 0.5d0 * A_squared
+        end do
+      end if
 
-        ! Build M = A·<∇>
-        if (need_m_dense .and. allocated(dg_frag%momentum_blocks)) then
-          call copy_momentum_blocks_to_complex_dense(dg_frag, ispin, Ac_tot, M(1:n_frag, 1:n_frag))
-        else if (.not. allocated(dg_frag%momentum_blocks)) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative requires momentum_blocks (dense momentum route removed): rank=', &
-               dg_frag%id, ' itt=', itt, ' ispin=', ispin
-          stop 1
-        end if
-        if (need_m_dense .and. n_pw > 0) then
+      ! Build dense M only for mixed/uniform-A paths that explicitly need it.
+      if (need_m_dense .and. allocated(dg_frag%momentum_blocks)) then
+        call copy_momentum_blocks_to_complex_dense(dg_frag, ispin, Ac_tot, M(1:n_frag, 1:n_frag))
+      else if ((.not. use_spatial_A) .and. (.not. allocated(dg_frag%momentum_blocks))) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] derivative requires momentum_blocks (dense momentum route removed): rank=', &
+             dg_frag%id, ' itt=', itt, ' ispin=', ispin
+        stop 1
+      end if
+      if (need_m_dense .and. n_pw > 0) then
           if (.not. allocated(mfp_vec)) then
             allocate(mfp_vec(n_pw))
           else if (size(mfp_vec, 1) /= n_pw) then
@@ -506,7 +491,6 @@
 !$omp end parallel do
             end if
           end if
-        end if
       end if
       if (need_m_dense) then
         if (any(real(M(:, :)) /= real(M(:, :))) .or. any(aimag(M(:, :)) /= aimag(M(:, :)))) then
@@ -750,9 +734,8 @@
                  coef_all(1:n_frag, :), coef_frag_other(1:n_frag, 1:dg_frag%nstate_tot), dcoef_dt_nl(1:n_frag, :))
         end if
         ! NOTE:
-        ! In mixed-basis mode, H0c already includes the diamagnetic A^2/2 term
-        ! (either from uniform A_squared on the diagonal or from A2_mat in the
-        ! spatial-A path). Adding it again here double-counts A^2.
+        ! In mixed-basis mode, H0c already includes the diamagnetic A^2/2 term.
+        ! The spatial-A route applies Ac through the block path below.
         if (need_source_decomp) then
           dcoef_dt_h0_core(1:n_tot, :) = -zi * dcoef_dt_h0_core(1:n_tot, :)
           dcoef_dt_nl(1:n_tot, :) = -zi * dcoef_dt_nl(1:n_tot, :)
@@ -1038,7 +1021,7 @@
                    coef_mix_all, n_basis, (0.0d0, 0.0d0), rhs_mix, n_basis)
         call expand_mixed_rhs_to_raw(rhs_mix, raw_rhs)
         dcoef_dt_m(:, :) = raw_rhs(:, :)
-      else if (allocated(dg_frag%momentum_blocks) .and. .not. use_spatial_A) then
+      else if (allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
         if (trace_deriv_step) then
           t_trace0 = get_wtime()
           write(*,'(1x,a,i0,a,i0,a,i0)') '[DG-DERIV] M apply start call=', &
@@ -1046,8 +1029,13 @@
           flush(6)
         end if
         dcoef_dt_m(:, :) = (0.0d0, 0.0d0)
-        call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
-        if (enable_ap_block_check .and. n_frag > 0 .and. dg_frag%nstate_tot > 0 .and. itt <= 2) then
+        if (use_spatial_A) then
+          call apply_spatial_A_coupling_batch(dg_frag, system, mg, stencil, ispin, coef_all(1:n_frag, :), &
+                                              dcoef_dt_m(1:n_frag, :))
+        else
+          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n_frag, :), dcoef_dt_m(1:n_frag, :))
+        end if
+        if ((.not. use_spatial_A) .and. enable_ap_block_check .and. n_frag > 0 .and. dg_frag%nstate_tot > 0 .and. itt <= 2) then
           if (.not. allocated(ap_block_dense)) then
             allocate(ap_block_dense(n_frag, n_frag))
           else if (size(ap_block_dense, 1) /= n_frag .or. size(ap_block_dense, 2) /= n_frag) then
@@ -1282,7 +1270,7 @@
       end if
       if (enable_overlap_path_trace .and. dg_frag%id == 0 .and. (itt <= 200 .or. mod(itt, 50) == 0)) then
         write(*,'(1x,a,i0,a,i0,a,5(i0,a),a,a)') '[OVERLAP-GATE] itt=', itt, ' ispin=', ispin, &
-          ' n_frag=', n_frag, ' n_pw=', n_pw, ' n_tot=', n_tot, ' n_basis=', n_basis, ' n_s=', n_s, &
+          ' n_frag_basis=', n_frag, ' n_pw=', n_pw, ' n_tot=', n_tot, ' n_mixed_basis=', n_basis, ' n_s=', n_s, &
           ' reason=', trim(overlap_gate_reason)
         write(*,'(1x,a,8(a,l1),a,l1)') '[OVERLAP-GATE] flags:', &
           ' use_mixed=', use_mixed_basis, ' force=', force_overlap_solve, ' mixed_ready=', dg_frag%mixed_basis_ready, &

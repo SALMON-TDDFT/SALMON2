@@ -94,7 +94,7 @@ if (yn_out_lz_rt == 'y') then
   call write_local_angular_momentum_xy(Mit, lg, mg, system, info, singlescale, spsi_in)
 end if
 
-if (iperiodic == 3) then
+if (iperiodic == 3 .and. yn_dg_fragment_rt /= 'y') then
   call write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, 'full-initial-density')
 end if
 
@@ -246,10 +246,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
                             calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix, &
+                            update_density_and_hamiltonian_std => update_density_and_hamiltonian, &
                             prepare_fragment_local_eigen_basis, &
-                            prepare_fragment_flux_scf_coefficients, &
-                            measure_fragment_initial_surface_residual, &
-                            update_density_and_hamiltonian_std => update_density_and_hamiltonian
+                            solve_projected_lcfo_seed_coefficients
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -282,33 +281,22 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   type(s_ofile),          intent(inout) :: ofl
   type(s_md),             intent(inout) :: md
   type(s_singlescale),    intent(inout) :: singlescale
-  
-  integer, parameter :: flux_scf_max_iter_default = 8
-  integer, parameter :: flux_polish_max_iter_default = 1
-  real(8), parameter :: flux_scf_coef_tol_default = 1.0d-4
-  logical, parameter :: flux_scf_diag_initial_default = .false.
-  logical, parameter :: flux_scf_allow_unconverged_default = .false.
+
+  logical, parameter :: dense_lcfo_density_diag_default = .false.
 
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
   integer :: env_len, env_status
-  integer :: flux_iter, flux_max_iter
-  integer :: flux_polish_iter, flux_polish_max_iter
-  logical :: did_contract_dg_basis
-  logical :: did_flux_prepare
-  logical :: did_polish_update
-  logical :: adaptive_basis_saved
-  logical :: flux_diag_residual
-  logical :: flux_converged
+  integer :: jspin
+  logical :: dense_seed_basis_uncapped
   logical :: trace_dg_current
+  logical :: did_contract_basis
+  logical :: did_solve_projected_seed
+  logical :: did_validate_seed
   character(len=16) :: env_value
-  character(len=16) :: flux_status
   real(8) :: curr_e_out(3,2), curr_i_zero(3)
   real(8) :: Ac_zero(3)
-  real(8) :: dg_surface_rel, dg_core_rel, dg_full_rel
-  real(8) :: dg_initial_rel_tol
-  real(8) :: flux_coef_delta, flux_prev_delta, flux_delta_tol
-  real(8) :: flux_prev_full_rel, flux_prev_surface_rel
+  real(8) :: current_abs
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -316,202 +304,146 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   else
     call init_dg_fragment_rt_std(dg_frag, system, rt, info, lg, mg, ppg)
   end if
+
+  if (dg_frag%identity_seed_coefficients) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[FATAL] DG identity/local seed is not a DGDFT/LCFO ground-state initial wavefunction.'
+      write(*,'(1x,a)') '[FATAL] The paper route requires DGDFT/LCFO coefficients from wavefunctions.bin.'
+      write(*,'(1x,a)') "[FATAL] For GS export use yn_dc_lcfo='y', yn_dc_lcfo_diag='y', and do not use yn_dc_for_dg='y'."
+      write(*,'(1x,a)') '[FATAL] Run the LCFO diagonalization export path, not the non-LCFO identity seed export.'
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: identity seed is not a valid DGDFT ground-state initial state'
+  end if
+
+  dense_seed_basis_uncapped = (.not. dg_frag%identity_seed_coefficients) .and. &
+                              (.not. dg_frag%seed_basis_runtime_capped)
+  if (dg_frag%seed_basis_runtime_capped .and. .not. dg_frag%identity_seed_coefficients) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[FATAL] DGDFT/LCFO seed was truncated by the RT-side basis loader.'
+      write(*,'(1x,a)') '[FATAL] Regenerate the DGDFT seed with the desired basis size, or disable the runtime cap.'
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: runtime-capped DGDFT seed is not a valid primary initial state'
+  end if
+  if (.not. dg_frag%has_real_space_basis) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[FATAL] DGDFT/LCFO coefficient seed requires real-space fragment basis data.'
+      write(*,'(1x,a)') '[FATAL] Cannot reconstruct density and potentials from coefficients without phi_frag.'
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: DGDFT coefficient seed requires real-space basis'
+  end if
+  if (yn_spinorbit == 'y') then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[FATAL] DGDFT/LCFO SOI coefficient seed requires a Flux-inclusive residual gate.'
+      write(*,'(1x,a)') '[FATAL] The SOI DGDFT seed path is not implemented yet; stop before RT propagation.'
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: SOI DGDFT coefficient seed gate is not implemented'
+  end if
+
+  Ac_zero(:) = 0.0d0
+  did_validate_seed = .false.
+  if (yn_spinorbit /= 'y') then
+    call update_density_and_hamiltonian_std(dg_frag, system, info, rt, 0, Ac_zero, &
+         lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+         rho, rho_s, Vh, Vxc, Vpsl, energy, &
+         skip_hamiltonian_reconstruct=.true., skip_orbital_dependent=.true.)
+    do jspin = 1, system%nspin
+      rt%rho0_s(jspin)%f = rho_s(jspin)%f
+    end do
+  end if
   
   ! Calculate Hamiltonian matrix with initial potentials
   ! Note: This must be done after init when stencil, pp, ppg, and potentials are available
   if (yn_spinorbit == 'y') then
     call calculate_hamiltonian_matrix_soi(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
   else
-    call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
-    call prepare_fragment_local_eigen_basis(dg_frag, system, mg, ppg, did_contract_dg_basis)
-    if (did_contract_dg_basis) then
+    if (dense_seed_basis_uncapped) then
       dg_frag%flux_face_trace_mix_enabled = .true.
       call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
-      flux_diag_residual = flux_scf_diag_initial_default
-      dg_full_rel = 0.0d0
-      dg_core_rel = 0.0d0
-      dg_surface_rel = 0.0d0
-      if (flux_diag_residual) call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-      if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a)') '[DG-FLUX-SCF] fixed-density local projected-flux CG relaxation is the primary initial-state path'
-        write(*,'(1x,a)') '[DG-FLUX-SCF] occupations are refilled bottom-up without FD redistribution'
-        if (flux_diag_residual) then
-          write(*,'(1x,a,3(a,1pe13.5))') '[DG-FLUX-SCF-INITIAL]', &
-            ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
-        else
-          write(*,'(1x,a)') '[DG-FLUX-SCF-INITIAL] residual diagnostics skipped'
+      call prepare_fragment_local_eigen_basis(dg_frag, system, mg, ppg, did_contract_basis)
+      if (.not. did_contract_basis) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a)') '[FATAL] DGDFT/LCFO seed requires fragment-local core-S overcomplete cleanup.'
+          write(*,'(1x,a)') '[FATAL] Stop before RT propagation because the uncleaned core-cut basis is not valid.'
+          flush(6)
         end if
-        flush(6)
+        stop 'DG-Fragment RT: required core-S cleanup was not performed'
       end if
-
-      flux_converged = .false.
-      flux_status = 'not_run'
-      flux_max_iter = flux_scf_max_iter_default
-      flux_max_iter = max(0, flux_max_iter)
-      if (flux_max_iter <= 0 .and. comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a)') '[WARN] DG-FLUX-SCF skipped by internal iteration setting'
-        flush(6)
-      end if
-      if (flux_max_iter <= 0) flux_status = 'skipped'
-      flux_delta_tol = flux_scf_coef_tol_default
-      flux_prev_delta = huge(1.0d0)
-      flux_prev_full_rel = huge(1.0d0)
-      flux_prev_surface_rel = huge(1.0d0)
-      do flux_iter = 1, flux_max_iter
-        call prepare_fragment_flux_scf_coefficients(dg_frag, system, mg, ppg, did_flux_prepare, flux_coef_delta)
-        if (.not. did_flux_prepare) then
-          if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0)') '[WARN] DG-FLUX-SCF basis update skipped at iter=', flux_iter
-            flush(6)
-          end if
-          exit
-        end if
+      if (did_contract_basis) then
         call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
-        if (flux_diag_residual) call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-        if (comm_is_root(dg_frag%id)) then
-          if (flux_diag_residual) then
-            write(*,'(1x,a,i0,4(a,1pe13.5))') '[DG-FLUX-SCF] iter=', flux_iter, &
-              ' coef_step=', flux_coef_delta, ' full_rel=', dg_full_rel, &
-              ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
-          else
-            write(*,'(1x,a,i0,a,1pe13.5)') '[DG-FLUX-SCF] iter=', flux_iter, &
-              ' coef_step=', flux_coef_delta
+        call solve_projected_lcfo_seed_coefficients(dg_frag, did_solve_projected_seed)
+        if (.not. did_solve_projected_seed) then
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a)') '[FATAL] DGDFT/LCFO seed projection was not solved in the contracted DG metric.'
+            flush(6)
           end if
-          flush(6)
+          stop 'DG-Fragment RT: projected LCFO seed solve was skipped'
         end if
-        if (flux_coef_delta <= flux_delta_tol) then
-          flux_converged = .true.
-          flux_status = 'converged'
-          exit
-        end if
-        if (flux_iter > 1) then
-          if (flux_diag_residual) then
-            if (abs(flux_coef_delta - flux_prev_delta) <= flux_delta_tol * max(1.0d0, flux_prev_delta) .and. &
-                abs(dg_full_rel - flux_prev_full_rel) <= flux_delta_tol * max(1.0d0, flux_prev_full_rel) .and. &
-                abs(dg_surface_rel - flux_prev_surface_rel) <= flux_delta_tol * max(1.0d0, flux_prev_surface_rel)) then
-              flux_status = 'stalled'
-              exit
-            end if
-          else
-            if (abs(flux_coef_delta - flux_prev_delta) <= flux_delta_tol * max(1.0d0, flux_prev_delta)) then
-              flux_status = 'stalled'
-              exit
-            end if
-          end if
-        end if
-        flux_prev_delta = flux_coef_delta
-        flux_prev_full_rel = dg_full_rel
-        flux_prev_surface_rel = dg_surface_rel
-      end do
-      if (flux_max_iter > 0 .and. flux_status == 'not_run') flux_status = 'max_iter'
-      if (.not. flux_converged .and. flux_status /= 'skipped' .and. comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,a,a,1pe13.5,a,1pe13.5)') '[WARN] DG-FLUX-SCF stopped without convergence: status=', &
-          trim(flux_status), ' coef_step=', flux_coef_delta, ' tol=', flux_delta_tol
-        flush(6)
+        call validate_dcdft_lcfo_seed_light(dg_frag, system)
+        did_validate_seed = .true.
       end if
-      if (.not. flux_converged .and. flux_status /= 'skipped' .and. .not. flux_scf_allow_unconverged_default) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,a,a,1pe13.5,a,1pe13.5)') '[FATAL] DG-FLUX-SCF did not converge: status=', &
-            trim(flux_status), ' coef_step=', flux_coef_delta, ' tol=', flux_delta_tol
-          write(*,'(1x,a)') '[FATAL] Stop before RK propagation to avoid starting from a drifting DG initial state.'
-          flush(6)
-        end if
-        stop 'DG-Fragment RT: flux SCF did not converge'
-      end if
-      if (flux_status /= 'skipped') then
-        call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-        flux_diag_residual = .true.
-      else if (flux_diag_residual) then
-        call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-      end if
+      if (.not. did_validate_seed) call validate_dcdft_lcfo_seed_light(dg_frag, system)
       if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,a)') '[DG-FLUX-SCF-FINAL] status=', trim(flux_status)
-        if (flux_diag_residual) then
-          write(*,'(1x,a,3(a,1pe13.5))') '[DG-FLUX-SCF-FINAL]', &
-            ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
-        else
-          write(*,'(1x,a)') '[DG-FLUX-SCF-FINAL] residual diagnostics skipped'
-        end if
+        write(*,'(1x,a)') '[DG-DCDFT-SEED] DGDFT/LCFO coefficients are kept rank-distributed on fragment-core rows'
+        write(*,'(1x,a)') '[DG-DCDFT-SEED] full-state dense C^H H C / C^H S C diagonalization is skipped'
+        write(*,'(1x,a)') &
+          '[DG-DCDFT-SEED] full DC-derived fragment basis is kept for RT; runtime cap is disabled'
+        write(*,'(1x,a)') &
+          '[DG-DCDFT-SEED] occupied S-orthogonality checks use full pre-RT DGDFT/LCFO seed'
+        write(*,'(1x,a)') '[DG-DCDFT-SEED] Flux face-trace operator remains enabled for RT Hamiltonian updates'
         flush(6)
       end if
-      call diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, &
-                                             'fixed-density-flux-scf')
-      flux_polish_max_iter = flux_polish_max_iter_default
-      flux_polish_max_iter = max(0, flux_polish_max_iter)
-      if (flux_polish_max_iter > 0) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,i0)') '[DG-FLUX-POLISH] density+flux polish iterations=', flux_polish_max_iter
-          flush(6)
-        end if
-        Ac_zero(:) = 0.0d0
-        did_polish_update = .false.
-        do flux_polish_iter = 1, flux_polish_max_iter
-          adaptive_basis_saved = dg_frag%yn_adaptive_basis
-          dg_frag%yn_adaptive_basis = .false.
-          call update_density_and_hamiltonian_std(dg_frag, system, info, rt, -flux_polish_iter, Ac_zero, &
-               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-               rho, rho_s, Vh, Vxc, Vpsl, energy)
-          dg_frag%yn_adaptive_basis = adaptive_basis_saved
-          dg_frag%flux_face_trace_mix_enabled = .true.
-          call prepare_fragment_flux_scf_coefficients(dg_frag, system, mg, ppg, did_flux_prepare, flux_coef_delta)
-          if (.not. did_flux_prepare) then
-            if (comm_is_root(dg_frag%id)) then
-              write(*,'(1x,a,i0)') '[FATAL] DG-FLUX-POLISH basis update failed at iter=', flux_polish_iter
-              flush(6)
-            end if
-            stop 'DG-Fragment RT: flux polish basis update failed'
-          end if
-          did_polish_update = .true.
-          call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
-          call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-          flux_diag_residual = .true.
-          if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,i0,4(a,1pe13.5))') '[DG-FLUX-POLISH] iter=', flux_polish_iter, &
-              ' coef_step=', flux_coef_delta, ' full_rel=', dg_full_rel, &
-              ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
-            flush(6)
-          end if
-        end do
-        if (did_polish_update) then
-          adaptive_basis_saved = dg_frag%yn_adaptive_basis
-          dg_frag%yn_adaptive_basis = .false.
-          call update_density_and_hamiltonian_std(dg_frag, system, info, rt, &
-               -(flux_polish_max_iter + 1), Ac_zero, lg, mg, stencil, xc_func, &
-               srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, Vh, Vxc, Vpsl, energy)
-          dg_frag%yn_adaptive_basis = adaptive_basis_saved
-          call measure_fragment_initial_surface_residual(dg_frag, dg_full_rel, dg_core_rel, dg_surface_rel)
-          flux_diag_residual = .true.
-          if (comm_is_root(dg_frag%id)) then
-            write(*,'(1x,a,3(a,1pe13.5))') '[DG-FLUX-POLISH-FINAL]', &
-              ' full_rel=', dg_full_rel, ' core_rel=', dg_core_rel, ' surface_rel=', dg_surface_rel
-            flush(6)
-          end if
-        end if
+      if (dense_lcfo_density_diag_default) then
         call diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, &
-                                               'density-flux-polish')
+                                               'dcdft-ground-state-seed')
+      else if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[DG-DCDFT-SEED] density reconstruction diagnostic is skipped in the default path'
+        write(*,'(1x,a)') '[DG-DCDFT-SEED] RT starts directly from the DGDFT/LCFO coefficient seed'
+        flush(6)
       end if
-      dg_initial_rel_tol = 1.0d-2
-      env_value = ''
-      call get_environment_variable("SALMON_DG_INITIAL_REL_TOL", env_value, length=env_len, status=env_status)
-      if (env_status == 0 .and. env_len > 0) then
-        read(env_value(1:env_len), *, iostat=env_status) dg_initial_rel_tol
-        if (env_status /= 0) dg_initial_rel_tol = 1.0d-2
+    else if (.not. dg_frag%identity_seed_coefficients) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[FATAL] DGDFT/LCFO seed did not pass the primary seed gate.'
+        flush(6)
       end if
-      if (flux_diag_residual .and. dg_full_rel > dg_initial_rel_tol) then
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(1x,a,2(a,1pe13.5))') '[FATAL] DG initial state is not stationary enough for RT propagation:', &
-            ' full_rel=', dg_full_rel, ' tol=', dg_initial_rel_tol
-          write(*,'(1x,a)') '[FATAL] Stop before RK propagation to avoid overlap-solve blow-up.'
-          flush(6)
-        end if
-        stop 'DG-Fragment RT: initial full-DG residual too large'
-      end if
-      dg_frag%flux_face_trace_mix_enabled = .false.
+      stop 'DG-Fragment RT: invalid DGDFT seed gate'
     end if
   end if
-  
+
+  if (allocated(dg_frag%coef)) then
+    if (allocated(dg_frag%coef_work)) then
+      if (size(dg_frag%coef_work, 1) /= size(dg_frag%coef, 1) .or. &
+          size(dg_frag%coef_work, 2) /= size(dg_frag%coef, 2) .or. &
+          size(dg_frag%coef_work, 3) /= size(dg_frag%coef, 3)) then
+        deallocate(dg_frag%coef_work)
+      end if
+    end if
+    if (.not. allocated(dg_frag%coef_work)) then
+      allocate(dg_frag%coef_work(size(dg_frag%coef, 1), size(dg_frag%coef, 2), size(dg_frag%coef, 3)))
+    end if
+    dg_frag%coef_work(:, :, :) = dg_frag%coef(:, :, :)
+    if (dg_frag%yn_adaptive_basis) then
+      if (allocated(dg_frag%coef_new)) then
+        if (size(dg_frag%coef_new, 1) /= size(dg_frag%coef, 1) .or. &
+            size(dg_frag%coef_new, 2) /= size(dg_frag%coef, 2) .or. &
+            size(dg_frag%coef_new, 3) /= size(dg_frag%coef, 3)) then
+          deallocate(dg_frag%coef_new)
+        end if
+      end if
+      if (.not. allocated(dg_frag%coef_new)) then
+        allocate(dg_frag%coef_new(size(dg_frag%coef, 1), size(dg_frag%coef, 2), size(dg_frag%coef, 3)))
+      end if
+      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
+    else if (allocated(dg_frag%coef_new)) then
+      deallocate(dg_frag%coef_new)
+    end if
+  end if
+
   ! H_mat_kinetic is constructed inside calculate_hamiltonian_matrix
-  trace_dg_current = .true.
+  trace_dg_current = .false.
   env_value = ''
   call get_environment_variable("SALMON_DG_CURRENT_TRACE", env_value, length=env_len, status=env_status)
   if (env_status == 0 .and. env_len > 0) then
@@ -527,6 +459,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   if (comm_is_root(nproc_id_global)) then
     write(*,*)
     write(*,*) "=== Starting DG-Fragment RT time evolution ==="
+    write(*,'(1x,a8,1x,a11,4(1x,a15))') 'step', 'time[fs]', 'Jx[a.u.]', 'Jy[a.u.]', 'Jz[a.u.]', '|J|[a.u.]'
+    write(*,'(1x,a8,1x,a11,4(1x,a15))') '--------', '-----------', '---------------', '---------------', &
+      '---------------', '---------------'
     write(*,*)
   end if
 
@@ -588,7 +523,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. mod(itt, 10) == 0) then
-      write(*,'(1x,i10,f12.3,3e16.6e3,e20.10e3)') itt, dble(itt)*dt, dg_frag%current_total(:), dg_frag%total_energy
+      current_abs = sqrt(sum(dg_frag%current_total(:)**2))
+      write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') itt, dble(itt)*dt, dg_frag%current_total(:), current_abs
       if (trace_dg_current) then
         write(*,'(1x,a,i0,5(a,3es13.5))') '[DG-CURRENT] itt=', itt, &
           ' para=', dg_frag%current_para(:), ' nl=', dg_frag%current_nl(:), &
@@ -615,6 +551,320 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   end if
   
 end subroutine time_evolution_dg_fragment
+
+subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
+  use structures, only: s_dft_system
+  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_fragment, only: get_dg_spin_occ_info
+  use rt_dg_fragment_ops, only: apply_overlap_operator_batch
+  use communication, only: comm_summation, comm_get_max, comm_is_root
+  use salmon_global, only: nelec
+  implicit none
+	  type(s_dg_fragment_rt), intent(inout) :: dg_frag
+	  type(s_dft_system),     intent(in)    :: system
+	  integer, parameter :: max_sample = 8
+	  integer, parameter :: occ_check_block_size_default = 32
+	  logical, parameter :: full_occupied_sorth_check_default = .true.
+	  logical, parameter :: exhaustive_occupied_cross_check_default = .false.
+  real(8), parameter :: min_snorm = 1.0d-12
+  real(8), parameter :: seed_sorth_tol = 1.0d-2
+  complex(8), allocatable :: coef_sample(:, :)
+  complex(8), allocatable :: scoef_sample(:, :)
+  complex(8), allocatable :: coef_occ(:, :)
+  complex(8), allocatable :: scoef_occ(:, :)
+  complex(8), allocatable :: coef_prev(:, :)
+  complex(8), allocatable :: occ_cross_local(:, :), occ_cross_global(:, :)
+  real(8), allocatable :: occ_weight(:)
+  real(8) :: coef_norm2_local, coef_norm2_global
+  real(8) :: coef_absmax_local, coef_absmax_global
+  real(8) :: coef_absmax_local_arr(1), coef_absmax_global_arr(1)
+  real(8) :: coef_nnz_local, coef_nnz_global
+  real(8) :: occ_sum, diag_local(max_sample), diag_global(max_sample)
+  real(8) :: occ_diag_local(occ_check_block_size_default), occ_diag_global(occ_check_block_size_default)
+  complex(8) :: gram_local(max_sample, max_sample), gram_global(max_sample, max_sample)
+  complex(8) :: occ_gram_local(occ_check_block_size_default, occ_check_block_size_default)
+  complex(8) :: occ_gram_global(occ_check_block_size_default, occ_check_block_size_default)
+	  real(8) :: min_diag, max_diag_dev, max_offdiag
+	  real(8) :: min_occ_diag, max_occ_diag_dev, max_occ_offdiag
+	  integer :: ispin, nocc, nsamp, sample_cols(max_sample)
+	  integer :: sample_candidates(max_sample), ncand, cand
+	  integer :: i, j, nrow, c0, c1, nb, p0, p1, np, occ_check_block_size
+	  integer :: iprobe, nprobe, p0_candidate, cross_probe_starts(3)
+	  logical :: duplicate
+
+  if (.not. allocated(dg_frag%coef)) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[FATAL] DGDFT/LCFO seed coefficients are not allocated.'
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: missing DGDFT seed coefficients'
+  end if
+
+  coef_norm2_local = sum(abs(dg_frag%coef)**2)
+  if (size(dg_frag%coef) > 0) then
+    coef_absmax_local = maxval(abs(dg_frag%coef))
+    coef_nnz_local = dble(count(abs(dg_frag%coef) > 0.0d0))
+  else
+    coef_absmax_local = 0.0d0
+    coef_nnz_local = 0.0d0
+  end if
+  call comm_summation(coef_norm2_local, coef_norm2_global, dg_frag%icomm)
+  call comm_summation(coef_nnz_local, coef_nnz_global, dg_frag%icomm)
+  coef_absmax_local_arr(1) = coef_absmax_local
+  call comm_get_max(coef_absmax_local_arr, coef_absmax_global_arr, 1, dg_frag%icomm)
+  coef_absmax_global = coef_absmax_global_arr(1)
+  if (coef_norm2_global /= coef_norm2_global .or. coef_absmax_global /= coef_absmax_global .or. &
+      coef_norm2_global <= 0.0d0 .or. coef_nnz_global <= 0.0d0) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,3(a,1pe13.5))') '[FATAL] invalid DGDFT/LCFO seed coefficient statistics:', &
+        ' norm2=', coef_norm2_global, ' absmax=', coef_absmax_global, ' nnz=', coef_nnz_global
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: invalid DGDFT seed coefficient statistics'
+  end if
+
+  allocate(occ_weight(max(1, dg_frag%nstate_tot)))
+  occ_sum = 0.0d0
+  min_diag = huge(1.0d0)
+  max_diag_dev = 0.0d0
+  max_offdiag = 0.0d0
+  min_occ_diag = huge(1.0d0)
+  max_occ_diag_dev = 0.0d0
+  max_occ_offdiag = 0.0d0
+  nrow = size(dg_frag%coef, 1)
+  ! Keep this separate from physics parameters.  It is only a validation
+  ! memory/performance tile size, and should become namelist- or memory-budget
+  ! driven once the DGDFT seed route is stabilized.
+  occ_check_block_size = min(occ_check_block_size_default, max(1, dg_frag%nstate_tot))
+  do ispin = 1, dg_frag%nspin
+    call get_dg_spin_occ_info(dg_frag, system, ispin, occ_weight, nocc)
+    occ_sum = occ_sum + sum(occ_weight)
+    nsamp = 0
+    ncand = 0
+    sample_cols(:) = 0
+    sample_candidates(:) = 0
+    if (nocc > 0) then
+      ncand = ncand + 1
+      sample_candidates(ncand) = 1
+      ncand = ncand + 1
+      sample_candidates(ncand) = max(1, (nocc + 3) / 4)
+      ncand = ncand + 1
+      sample_candidates(ncand) = max(1, (nocc + 1) / 2)
+      ncand = ncand + 1
+      sample_candidates(ncand) = nocc
+    end if
+    if (nocc < dg_frag%nstate_tot) then
+      ncand = ncand + 1
+      sample_candidates(ncand) = nocc + 1
+      ncand = ncand + 1
+      sample_candidates(ncand) = min(dg_frag%nstate_tot, &
+        nocc + max(1, (dg_frag%nstate_tot - nocc + 1) / 2))
+      ncand = ncand + 1
+      sample_candidates(ncand) = dg_frag%nstate_tot
+    end if
+    do i = 1, ncand
+      cand = sample_candidates(i)
+      duplicate = .false.
+      if (cand < 1 .or. cand > dg_frag%nstate_tot) cycle
+      do j = 1, nsamp
+        if (sample_cols(j) == cand) duplicate = .true.
+      end do
+      if (duplicate) cycle
+      if (nsamp >= max_sample) cycle
+      nsamp = nsamp + 1
+      sample_cols(nsamp) = cand
+    end do
+    if (nsamp > 0) then
+      allocate(coef_sample(nrow, nsamp), scoef_sample(nrow, nsamp))
+      do i = 1, nsamp
+        coef_sample(:, i) = dg_frag%coef(:, sample_cols(i), ispin)
+      end do
+      scoef_sample(:, :) = (0.0d0, 0.0d0)
+      call apply_overlap_operator_batch(dg_frag, ispin, coef_sample, scoef_sample, .true.)
+      diag_local(:) = 0.0d0
+      diag_global(:) = 0.0d0
+      gram_local(:, :) = (0.0d0, 0.0d0)
+      gram_global(:, :) = (0.0d0, 0.0d0)
+      do i = 1, nsamp
+        diag_local(i) = real(sum(conjg(coef_sample(:, i)) * scoef_sample(:, i)), 8)
+        do j = 1, nsamp
+          gram_local(i, j) = sum(conjg(coef_sample(:, i)) * scoef_sample(:, j))
+        end do
+      end do
+      call comm_summation(diag_local, diag_global, max_sample, dg_frag%icomm)
+      call comm_summation(gram_local, gram_global, max_sample * max_sample, dg_frag%icomm)
+      do i = 1, nsamp
+        min_diag = min(min_diag, diag_global(i))
+        max_diag_dev = max(max_diag_dev, abs(diag_global(i) - 1.0d0))
+        do j = 1, nsamp
+          if (i /= j) max_offdiag = max(max_offdiag, abs(gram_global(i, j)))
+        end do
+      end do
+      deallocate(coef_sample, scoef_sample)
+    end if
+    if (full_occupied_sorth_check_default) then
+      do c0 = 1, nocc, occ_check_block_size
+        c1 = min(nocc, c0 + occ_check_block_size - 1)
+        nb = c1 - c0 + 1
+        if (nb <= 0) cycle
+        allocate(coef_occ(nrow, nb), scoef_occ(nrow, nb))
+        coef_occ(:, :) = dg_frag%coef(:, c0:c1, ispin)
+        scoef_occ(:, :) = (0.0d0, 0.0d0)
+        call apply_overlap_operator_batch(dg_frag, ispin, coef_occ, scoef_occ, .true.)
+        occ_diag_local(:) = 0.0d0
+        occ_diag_global(:) = 0.0d0
+        occ_gram_local(:, :) = (0.0d0, 0.0d0)
+        occ_gram_global(:, :) = (0.0d0, 0.0d0)
+        do i = 1, nb
+          occ_diag_local(i) = real(sum(conjg(coef_occ(:, i)) * scoef_occ(:, i)), 8)
+          do j = 1, nb
+            occ_gram_local(i, j) = sum(conjg(coef_occ(:, i)) * scoef_occ(:, j))
+          end do
+        end do
+        call comm_summation(occ_diag_local, occ_diag_global, occ_check_block_size_default, dg_frag%icomm)
+        call comm_summation(occ_gram_local, occ_gram_global, &
+                            occ_check_block_size_default * occ_check_block_size_default, dg_frag%icomm)
+	        do i = 1, nb
+	          min_occ_diag = min(min_occ_diag, occ_diag_global(i))
+	          max_occ_diag_dev = max(max_occ_diag_dev, abs(occ_diag_global(i) - 1.0d0))
+	          do j = 1, nb
+	            if (i /= j) max_occ_offdiag = max(max_occ_offdiag, abs(occ_gram_global(i, j)))
+	          end do
+	        end do
+	        if (exhaustive_occupied_cross_check_default) then
+	          do p0 = 1, c0 - 1, occ_check_block_size
+	            p1 = min(c0 - 1, p0 + occ_check_block_size - 1)
+	            np = p1 - p0 + 1
+	            if (np <= 0) cycle
+	            allocate(coef_prev(nrow, np), occ_cross_local(np, nb), occ_cross_global(np, nb))
+	            coef_prev(:, :) = dg_frag%coef(:, p0:p1, ispin)
+	            occ_cross_local(:, :) = (0.0d0, 0.0d0)
+	            occ_cross_global(:, :) = (0.0d0, 0.0d0)
+	            do i = 1, np
+	              do j = 1, nb
+	                occ_cross_local(i, j) = sum(conjg(coef_prev(:, i)) * scoef_occ(:, j))
+	              end do
+	            end do
+	            call comm_summation(occ_cross_local, occ_cross_global, np * nb, dg_frag%icomm)
+	            do i = 1, np
+	              do j = 1, nb
+	                max_occ_offdiag = max(max_occ_offdiag, abs(occ_cross_global(i, j)))
+	              end do
+	            end do
+	            deallocate(coef_prev, occ_cross_local, occ_cross_global)
+	          end do
+        else
+          nprobe = 0
+          if (c0 > 1) then
+            nprobe = nprobe + 1
+            cross_probe_starts(nprobe) = 1
+            p0_candidate = max(1, c0 - occ_check_block_size)
+            p0_candidate = 1 + ((p0_candidate - 1) / occ_check_block_size) * occ_check_block_size
+            duplicate = .false.
+            do i = 1, nprobe
+              if (cross_probe_starts(i) == p0_candidate) duplicate = .true.
+            end do
+            if (.not. duplicate .and. nprobe < size(cross_probe_starts)) then
+              nprobe = nprobe + 1
+              cross_probe_starts(nprobe) = p0_candidate
+            end if
+            p0_candidate = max(1, c0 / 2)
+            p0_candidate = 1 + ((p0_candidate - 1) / occ_check_block_size) * occ_check_block_size
+            duplicate = .false.
+            do i = 1, nprobe
+              if (cross_probe_starts(i) == p0_candidate) duplicate = .true.
+            end do
+            if (.not. duplicate .and. nprobe < size(cross_probe_starts)) then
+              nprobe = nprobe + 1
+              cross_probe_starts(nprobe) = p0_candidate
+            end if
+          end if
+          do iprobe = 1, nprobe
+            p0 = cross_probe_starts(iprobe)
+            if (p0 < 1 .or. p0 >= c0) cycle
+            p1 = min(c0 - 1, p0 + occ_check_block_size - 1)
+            np = p1 - p0 + 1
+            if (np <= 0) cycle
+            allocate(coef_prev(nrow, np), occ_cross_local(np, nb), occ_cross_global(np, nb))
+            coef_prev(:, :) = dg_frag%coef(:, p0:p1, ispin)
+            occ_cross_local(:, :) = (0.0d0, 0.0d0)
+            occ_cross_global(:, :) = (0.0d0, 0.0d0)
+            do i = 1, np
+              do j = 1, nb
+                occ_cross_local(i, j) = sum(conjg(coef_prev(:, i)) * scoef_occ(:, j))
+              end do
+            end do
+            call comm_summation(occ_cross_local, occ_cross_global, np * nb, dg_frag%icomm)
+            do i = 1, np
+              do j = 1, nb
+                max_occ_offdiag = max(max_occ_offdiag, abs(occ_cross_global(i, j)))
+              end do
+            end do
+            deallocate(coef_prev, occ_cross_local, occ_cross_global)
+          end do
+        end if
+        deallocate(coef_occ, scoef_occ)
+      end do
+    end if
+  end do
+  deallocate(occ_weight)
+  if (.not. full_occupied_sorth_check_default) then
+    min_occ_diag = 1.0d0
+    max_occ_diag_dev = 0.0d0
+    max_occ_offdiag = 0.0d0
+  end if
+
+  if (abs(occ_sum - dble(nelec)) > 1.0d-6 * max(1.0d0, dble(nelec))) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,1pe13.5))') '[FATAL] DGDFT/LCFO occupation electron count mismatch:', &
+        ' occ_sum=', occ_sum, ' nelec=', dble(nelec)
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: DGDFT seed occupation electron count mismatch'
+  end if
+  if (min_diag /= min_diag .or. min_diag <= min_snorm) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,1pe13.5))') '[FATAL] DGDFT/LCFO seed has invalid sampled S norm:', &
+        ' min_diag=', min_diag, ' threshold=', min_snorm
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: invalid sampled DGDFT seed S norm'
+  end if
+  if (max_diag_dev > seed_sorth_tol .or. max_offdiag > seed_sorth_tol) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,3(a,1pe13.5))') '[FATAL] DGDFT/LCFO seed failed sampled S-orthogonality check:', &
+        ' diag_dev=', max_diag_dev, ' offdiag_max=', max_offdiag, ' tol=', seed_sorth_tol
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: sampled DGDFT seed S-orthogonality mismatch'
+  end if
+  if (full_occupied_sorth_check_default .and. (min_occ_diag /= min_occ_diag .or. min_occ_diag <= min_snorm)) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,1pe13.5))') '[FATAL] DGDFT/LCFO occupied seed has invalid S norm:', &
+        ' min_occ_diag=', min_occ_diag, ' threshold=', min_snorm
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: invalid occupied DGDFT seed S norm'
+  end if
+  if (full_occupied_sorth_check_default .and. &
+      (max_occ_diag_dev > seed_sorth_tol .or. max_occ_offdiag > seed_sorth_tol)) then
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,3(a,1pe13.5))') '[FATAL] DGDFT/LCFO occupied seed failed block S-orthogonality check:', &
+        ' diag_dev=', max_occ_diag_dev, ' offdiag_max=', max_occ_offdiag, ' tol=', seed_sorth_tol
+      flush(6)
+    end if
+    stop 'DG-Fragment RT: occupied DGDFT seed S-orthogonality mismatch'
+  end if
+  if (comm_is_root(dg_frag%id)) then
+    write(*,'(1x,a,9(a,1pe13.5))') '[DG-DCDFT-SEED-CHECK] lightweight seed check:', &
+      ' coef_norm2=', coef_norm2_global, ' coef_absmax=', coef_absmax_global, &
+      ' occ_sum=', occ_sum, ' sample_s_min=', min_diag, ' sample_s_dev=', max_diag_dev, &
+      ' sample_s_offdiag=', max_offdiag, ' occ_s_min=', min_occ_diag, &
+      ' occ_s_dev=', max_occ_diag_dev, ' occ_s_offdiag=', max_occ_offdiag
+    flush(6)
+	  end if
+
+	end subroutine validate_dcdft_lcfo_seed_light
 
 subroutine diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, label)
   use structures, only: s_dft_system, s_rgrid, s_scalar
@@ -708,6 +958,7 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   integer, parameter :: n_gprobe = 3
   integer, parameter :: gprobe_idx(3, n_gprobe) = reshape((/ 1,1,1, 2,1,1, 3,1,1 /), (/3, n_gprobe/))
   integer :: ix, iy, iz, ispin, ia, iprobe
+  integer :: env_len, env_stat
   real(8) :: rho_vh_local, rho_vh_sum, rho_vh_sum_r
   real(8) :: rho_vxc_local, rho_vxc_sum, rho_vxc_sum_r
   real(8) :: rho_vpsl_local, rho_vpsl_sum, rho_vpsl_sum_r
@@ -720,6 +971,19 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   real(8) :: rho_gprobe_re_sum_r(n_gprobe), rho_gprobe_im_sum_r(n_gprobe)
   real(8) :: E_wrk(3), E_sum(3), etmp, sysvol, g(3), r(3), Gd
   complex(8) :: rho_e, rho_i
+  logical, save :: trace_env_initialized = .false.
+  logical, save :: enable_energy_helper_trace = .false.
+  character(len=32) :: env_value
+
+  if (.not. trace_env_initialized) then
+    env_value = ''
+    call get_environment_variable('SALMON_DG_ENERGY_HELPER_TRACE', env_value, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+          env_value(1:1) == 't' .or. env_value(1:1) == 'T') enable_energy_helper_trace = .true.
+    end if
+    trace_env_initialized = .true.
+  end if
 
   rho_vh_local = 0.0d0
   rho_vxc_local = 0.0d0
@@ -810,7 +1074,8 @@ subroutine update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rh
   energy%E_h = E_sum(1)
   energy%E_ion_loc = E_sum(2) + E_sum(3)
   energy%E_tot = dg_frag%total_energy - rho_vh_sum - rho_vxc_sum + energy%E_h + energy%E_xc + energy%E_ion_ion
-  if (comm_is_root(nproc_id_global) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+  if (enable_energy_helper_trace .and. comm_is_root(nproc_id_global) .and. &
+      (itt == 1 .or. mod(itt, 10) == 0)) then
     write(*,'(1x,a,i0,22(a,1pe14.6))') &
       "        dg-energy-helper: itt=", itt, " E_one=", dg_frag%total_energy, " rhoVh=", rho_vh_sum, " rhoVxc=", rho_vxc_sum, &
       " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &
@@ -844,6 +1109,7 @@ end subroutine update_dg_rt_total_energy
 
 subroutine write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, label)
   use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_scalar
+  use parallelization, only: nproc_id_global
   use communication, only: comm_summation, comm_get_max, comm_is_root
   implicit none
   type(s_dft_system),    intent(in) :: system
@@ -905,7 +1171,8 @@ subroutine write_local_chern_marker_xy(itt, mg, system, info, psi_fin)
   use rt_local_chern_marker_soi, only: compute_local_chern_marker_from_orbital_soi => compute_local_chern_marker_from_orbital
   use filesystem, only: create_directory
   use inputoutput, only: t_unit_length
-  use salmon_global, only: yn_spinorbit
+  use parallelization, only: nproc_id_global
+  use salmon_global, only: base_directory, sysname, yn_spinorbit
   implicit none
   integer, intent(in) :: itt
   type(s_rgrid), intent(in) :: mg
@@ -972,9 +1239,12 @@ end subroutine write_local_chern_marker_xy
 
 subroutine print_header()
   use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
+  use salmon_global, only: iperiodic, yn_jm, yn_dg_fragment_rt
   implicit none
   !(header of standard output)
   if(comm_is_root(nproc_id_global))then
+    if (yn_dg_fragment_rt == 'y') return
     write(*,*)
     select case(iperiodic)
     case(0)

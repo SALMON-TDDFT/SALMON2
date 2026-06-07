@@ -78,7 +78,7 @@
     time_pw_mix = 0.0d0
     trace_call_id = 0
     trace_stage = .false.
-    if (itt == 1 .and. dg_frag%id == 0 .and. trace_stage_call_count < 5) then
+    if (enable_stage_timing .and. itt == 1 .and. dg_frag%id == 0 .and. trace_stage_call_count < 5) then
       trace_stage_call_count = trace_stage_call_count + 1
       trace_call_id = trace_stage_call_count
       trace_stage = .true.

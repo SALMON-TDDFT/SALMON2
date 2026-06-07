@@ -5,7 +5,7 @@
     use timer, only: timer_begin, timer_end, LOG_CALC_CURRENT
     use rt_dg_fragment_ops, only: apply_momentum_blocks, apply_matrix_blocks_batch, apply_nonlocal_pp_projector_batch, &
                     apply_mixed_hamiltonian, mixed_fp_coupling_active, copy_matrix_blocks_to_complex_dense, &
-                    apply_overlap_operator_batch
+                    apply_overlap_operator_batch, apply_spatial_A_coupling_batch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -81,7 +81,7 @@
     complex(8) :: minus_i
     complex(8) :: blk_m, blk_recon, mij_probe_val
     character(len=64) :: env_value
-    complex(8), allocatable :: op_mat(:,:), tmp_mat(:,:), coef_all(:,:), tmp_all(:,:)
+    complex(8), allocatable :: tmp_mat(:,:), tmp_spatial(:,:), coef_all(:,:), tmp_all(:,:)
     complex(8), allocatable :: coef_occ_diag(:,:), s_coef_occ(:,:), gram_occ(:,:), leak_proj(:,:)
     complex(8), allocatable :: coef_occ_frag(:,:), coef_occ_pw(:,:), s_coef_occ_frag(:,:), s_coef_occ_pw(:,:)
     complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
@@ -119,7 +119,6 @@
     real(8) :: obs_t0, obs_t1
     real(8) :: obs_charge_local, obs_charge_global, obs_charge_diff
     integer :: obs_charge_check_env_len, obs_charge_check_env_status
-    real(8), allocatable :: Ap_mat(:,:), A2_mat(:,:)
     integer, allocatable :: diag_block_ids(:)
     logical, allocatable :: fp_row_owned(:), pw_row_owned(:)
     real(8), allocatable :: occ_weight(:)
@@ -169,7 +168,7 @@
     kinetic_apply_diff_local = 0.0d0
 
     n = dg_frag%n_mat_max
-    trace_obs = (itt == 1 .and. dg_frag%id == 0)
+    trace_obs = .false.
     if (trace_obs) then
       write(*,'(1x,a,i0,a,i0,a,i0)') '[DG-OBS] enter itt=', itt, &
         ' n_mat=', n, ' nspin=', dg_frag%nspin
@@ -547,16 +546,10 @@
           tmp_all(1:n_tot, 1:nocc) = (0.0d0, 0.0d0)
           if (allocated(dg_frag%momentum_blocks)) then
             call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
-          else if (allocated(dg_frag%momentum_mat_c)) then
-            if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-            op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
-            call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                       coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
           else
-            if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-            op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
-            call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                       coef_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
+            write(*,'(1x,a,i0,a,i0)') '[FATAL] observables require momentum_blocks (dense current route removed): rank=', &
+              dg_frag%id, ' ispin=', ispin
+            stop 'DG-Fragment RT: dense observable momentum route removed'
           end if
           do jo = 1, n_pw
             kpw_dir = dg_frag%k_pw(idir, jo)
@@ -588,16 +581,10 @@
         else if (allocated(dg_frag%momentum_blocks)) then
           tmp_mat(:, :) = (0.0d0, 0.0d0)
           call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, idir), coef_frag_all(1:n, 1:nocc), tmp_mat)
-        else if (allocated(dg_frag%momentum_mat_c)) then
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
-          call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                     coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
         else
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
-          call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                     coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
+          write(*,'(1x,a,i0,a,i0)') '[FATAL] observables require momentum_blocks (dense current route removed): rank=', &
+            dg_frag%id, ' ispin=', ispin
+          stop 'DG-Fragment RT: dense observable momentum route removed'
         end if
         
         if (.not. use_mixed_current) then
@@ -842,14 +829,10 @@
 
         if (allocated(dg_frag%momentum_blocks)) then
           call apply_momentum_blocks(dg_frag, ispin, unit_dir(:, mij_audit_dir), coef_emp, tmp_emp)
-        else if (allocated(dg_frag%momentum_mat_c)) then
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          op_mat(:, :) = dg_frag%momentum_mat_c(mij_audit_dir, 1:n, 1:n, ispin)
-          call zgemm('N', 'N', n, nemp_use, n, (1.0d0, 0.0d0), op_mat, n, coef_emp, n, (0.0d0, 0.0d0), tmp_emp, n)
         else
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          op_mat(:, :) = cmplx(dg_frag%momentum_mat(mij_audit_dir, 1:n, 1:n, ispin), 0.0d0, kind=8)
-          call zgemm('N', 'N', n, nemp_use, n, (1.0d0, 0.0d0), op_mat, n, coef_emp, n, (0.0d0, 0.0d0), tmp_emp, n)
+          write(*,'(1x,a,i0,a,i0)') '[FATAL] Mij audit requires momentum_blocks (dense route removed): rank=', &
+            dg_frag%id, ' ispin=', ispin
+          stop 'DG-Fragment RT: dense Mij audit route removed'
         end if
 
         mij_mat(:, :) = matmul(conjg(transpose(coef_occ(:, :))), tmp_emp(:, :))
@@ -1136,21 +1119,33 @@
         coef_all(n+1:n_tot, 1:nocc) = coef_pw_all(1:n_pw, 1:nocc)
       end if
       use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
-      if (allocated(op_mat)) op_mat(:, :) = (0.0d0, 0.0d0)
-      if (use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. use_spatial_A .or. do_interface_check) then
-        if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-        op_mat(:, :) = (0.0d0, 0.0d0)
-        if (use_hmat_complex) then
-          op_mat(:, :) = dg_frag%H_mat_c(1:n, 1:n, ispin)
-        else if (.not. allocated(dg_frag%H_mat_blocks)) then
-          op_mat(:, :) = cmplx(dg_frag%H_mat(1:n, 1:n, ispin), 0.0d0, kind=8)
-        end if
+      if (use_hmat_complex .or. (.not. allocated(dg_frag%H_mat_blocks)) .or. do_interface_check) then
+        write(*,'(1x,a,i0,a,i0)') '[FATAL] observables require block apply route (dense op_mat removed): rank=', &
+          dg_frag%id, ' ispin=', ispin
+        stop 'DG-Fragment RT: dense observable Hamiltonian route removed'
       end if
       if (use_spatial_A) then
-        if (.not. allocated(Ap_mat)) allocate(Ap_mat(n, n), A2_mat(n, n))
-        call build_spatial_A_coupling_matrices(dg_frag, system, mg, stencil, ispin, Ap_mat, A2_mat)
-        op_mat(:, :) = op_mat(:, :) + cmplx(A2_mat(:, :), 0.0d0, kind=8)
-        op_mat(:, :) = op_mat(:, :) + minus_i * cmplx(Ap_mat(:, :), 0.0d0, kind=8)
+        if (n_pw > 0) then
+          write(*,'(1x,a,i0,a,i0)') '[FATAL] spatial Ac observables require block fragment-only route: rank=', &
+            dg_frag%id, ' ispin=', ispin
+          stop 'DG-Fragment RT: spatial Ac PW observable route is not block-sparse'
+        end if
+        if (.not. allocated(dg_frag%H_mat_blocks)) then
+          write(*,'(1x,a,i0,a,i0)') '[FATAL] spatial Ac observables require H_mat_blocks: rank=', dg_frag%id, &
+            ' ispin=', ispin
+          stop 'DG-Fragment RT: spatial Ac observable missing H blocks'
+        end if
+        tmp_mat(:, :) = (0.0d0, 0.0d0)
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, coef_frag_all(1:n, 1:nocc), tmp_mat)
+        if (has_nonlocal) then
+          call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
+            tmp_mat)
+        end if
+        if (.not. allocated(tmp_spatial)) allocate(tmp_spatial(n, max_nocc))
+        tmp_spatial(:, :) = (0.0d0, 0.0d0)
+        call apply_spatial_A_coupling_batch(dg_frag, system, mg, stencil, ispin, coef_frag_all(1:n, 1:nocc), &
+                                            tmp_spatial(1:n, 1:nocc))
+        tmp_mat(1:n, 1:nocc) = tmp_mat(1:n, 1:nocc) + minus_i * tmp_spatial(1:n, 1:nocc)
       else
         if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin)) then
           call apply_mixed_hamiltonian(dg_frag, ispin, coef_all(1:n_tot, 1:nocc), tmp_all(1:n_tot, 1:nocc))
@@ -1162,17 +1157,9 @@
           if (allocated(dg_frag%momentum_blocks)) then
             call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_all(1:n, 1:nocc), tmp_all(1:n, 1:nocc))
           else
-            do idir = 1, 3
-              if (allocated(dg_frag%momentum_mat_c)) then
-                if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-                op_mat(:, :) = dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
-              else
-                if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-                op_mat(:, :) = cmplx(dg_frag%momentum_mat(idir, 1:n, 1:n, ispin), 0.0d0, kind=8)
-              end if
-              call zgemm('N', 'N', n, nocc, n, minus_i * Ac_tot(idir), op_mat, n, &
-                         coef_all(1:n, 1:nocc), n, (1.0d0, 0.0d0), tmp_all(1:n, 1:nocc), n)
-            end do
+            write(*,'(1x,a,i0,a,i0)') '[FATAL] mixed observables require momentum_blocks (dense route removed): rank=', &
+              dg_frag%id, ' ispin=', ispin
+            stop 'DG-Fragment RT: dense mixed observable momentum route removed'
           end if
           do jo = 1, n_pw
             kpw_dir = dot_product(Ac_tot(1:3), dg_frag%k_pw(1:3, jo))
@@ -1194,55 +1181,19 @@
             end if
             tmp_mat(1:n, 1:nocc) = tmp_mat(1:n, 1:nocc) + 0.5d0 * A_squared * coef_frag_all(1:n, 1:nocc)
           else
-            if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-            do io = 1, n
-              op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
-            end do
-            call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                       coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
-            if (has_nonlocal) then
-              call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
-                tmp_mat)
-            end if
+            write(*,'(1x,a,i0,a,i0)') '[FATAL] observables require real H_mat_blocks (dense energy route removed): rank=', &
+              dg_frag%id, ' ispin=', ispin
+            stop 'DG-Fragment RT: dense observable energy route removed'
           end if
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          op_mat(:, 1:nocc) = (0.0d0, 0.0d0)
-          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), op_mat(:, 1:nocc))
-          tmp_mat(:, :) = tmp_mat(:, :) + minus_i * op_mat(:, 1:nocc)
+          if (.not. allocated(tmp_spatial)) allocate(tmp_spatial(n, max_nocc))
+          tmp_spatial(:, :) = (0.0d0, 0.0d0)
+          call apply_momentum_blocks(dg_frag, ispin, Ac_tot, coef_frag_all(1:n, 1:nocc), tmp_spatial(1:n, 1:nocc))
+          tmp_mat(:, :) = tmp_mat(:, :) + minus_i * tmp_spatial(:, 1:nocc)
         else
-          if (.not. allocated(op_mat)) allocate(op_mat(n, n))
-          do io = 1, n
-            op_mat(io, io) = op_mat(io, io) + 0.5d0 * A_squared
-          end do
-          do idir = 1, 3
-            if (allocated(dg_frag%momentum_mat_c)) then
-              op_mat(:, :) = op_mat(:, :) + minus_i * Ac_tot(idir) * dg_frag%momentum_mat_c(idir, 1:n, 1:n, ispin)
-            else
-              op_mat(:, :) = op_mat(:, :) + minus_i * Ac_tot(idir) * dg_frag%momentum_mat(idir, 1:n, 1:n, ispin)
-            end if
-          end do
+          write(*,'(1x,a,i0,a,i0)') '[FATAL] observables require momentum_blocks (dense energy route removed): rank=', &
+            dg_frag%id, ' ispin=', ispin
+          stop 'DG-Fragment RT: dense observable energy route removed'
         end if
-      end if
-
-      if (do_interface_check) then
-        do ifrag = 1, dg_frag%n_frag
-          do jfrag = 1, dg_frag%n_frag
-            if (jfrag == ifrag) cycle
-            do io = 1, nocc
-              do ib = 1, dg_frag%n_basis(ifrag, ispin)
-                i_idx = dg_frag%index_basis(ib, ifrag, ispin)
-                if (i_idx < 1 .or. i_idx > n) cycle
-                do jb = 1, dg_frag%n_basis(jfrag, ispin)
-                  j_idx = dg_frag%index_basis(jb, jfrag, ispin)
-                  if (j_idx < 1 .or. j_idx > n) cycle
-                  interface_flow(ifrag, jfrag) = interface_flow(ifrag, jfrag) + &
-                    2.0d0 * aimag(conjg(coef_frag_all(i_idx, io)) * op_mat(i_idx, j_idx) * &
-                                  coef_frag_all(j_idx, io))
-                end do
-              end do
-            end do
-          end do
-        end do
       end if
 
       if (n_pw > 0 .and. allocated(dg_frag%H_mat_frag_pw) .and. mixed_fp_coupling_active(dg_frag, ispin) .and. .not. use_spatial_A) then
@@ -1260,13 +1211,10 @@
           end if
         end do
       else
-        if (.not. allocated(dg_frag%momentum_blocks) .or. use_spatial_A) then
-          call zgemm('N', 'N', n, nocc, n, (1.0d0, 0.0d0), op_mat, n, &
-                     coef_frag_all(1:n, 1:nocc), n, (0.0d0, 0.0d0), tmp_mat, n)
-          if (has_nonlocal) then
-            call apply_nonlocal_pp_projector_batch(dg_frag, mg, ppg, system, Ac_tot, ispin, coef_frag_all(1:n, 1:nocc), &
-              tmp_mat)
-          end if
+        if ((.not. allocated(dg_frag%momentum_blocks)) .and. (.not. use_spatial_A)) then
+          write(*,'(1x,a,i0,a,i0)') '[FATAL] observables require block-applied tmp_mat (dense op_mat route removed): rank=', &
+            dg_frag%id, ' ispin=', ispin
+          stop 'DG-Fragment RT: dense observable energy route removed'
         end if
         energy_tmp = 0.0d0
         do io = 1, nocc
@@ -1319,9 +1267,7 @@
     end if
 
 
-    if (allocated(Ap_mat)) deallocate(Ap_mat)
-    if (allocated(A2_mat)) deallocate(A2_mat)
-    if (allocated(op_mat)) deallocate(op_mat)
+    if (allocated(tmp_spatial)) deallocate(tmp_spatial)
     deallocate(tmp_mat)
     if (allocated(occ_weight)) deallocate(occ_weight)
     if (allocated(coef_frag_all)) deallocate(coef_frag_all)
@@ -1524,7 +1470,7 @@
       0.0d0, 1.0d0, 0.0d0, &
       0.0d0, 0.0d0, 1.0d0 /), (/3, 3/))
 
-    trace_obs = (itt == 1 .and. dg_frag%id == 0)
+    trace_obs = .false.
     if (trace_obs) then
       write(*,'(1x,a)') '[DG-OBS-LOCAL] enter'
       flush(6)

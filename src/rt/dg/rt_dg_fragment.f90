@@ -91,8 +91,7 @@ module rt_dg_fragment
   use rt_dg_initial_state, only: measure_fragment_initial_surface_residual, &
                                 diagonalize_initial_dg_full_distributed, &
                                 relax_initial_occupied_subspace_block_sparse
-  use rt_dg_flux_scf, only: prepare_fragment_flux_scf_coefficients
-  use rt_dg_local_basis, only: prepare_fragment_local_eigen_basis
+  use rt_dg_local_basis, only: prepare_fragment_local_eigen_basis, solve_projected_lcfo_seed_coefficients
   use rt_dg_fragment_layout, only: build_density_grid_owner_maps, &
                                   wrap_global_grid_index, get_fragment_grid_sender_rank, &
                                   wrap_fragment_cartesian_index, cartesian_index_to_fragment, &
@@ -103,7 +102,6 @@ module rt_dg_fragment
   use rt_dg_fragment_coefficients, only: rebuild_coef_owner_map, get_subgroup_block_owner_rank
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
                                 calculate_microscopic_current_dg, &
-                                build_spatial_A_coupling_matrices, &
                                 apply_gradient_to_basis_ops => apply_gradient_to_basis, &
                                 rebuild_local_h_block_ids, &
                                 apply_complex_matrix_blocks_batch, apply_overlap_operator_batch, &
@@ -115,7 +113,7 @@ module rt_dg_fragment
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
   public :: prepare_fragment_local_eigen_basis
-  public :: prepare_fragment_flux_scf_coefficients
+  public :: solve_projected_lcfo_seed_coefficients
   public :: diagonalize_initial_dg_full_distributed
   public :: relax_initial_occupied_subspace_block_sparse
   public :: measure_fragment_initial_surface_residual

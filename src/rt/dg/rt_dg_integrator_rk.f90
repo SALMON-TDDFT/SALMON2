@@ -48,13 +48,6 @@
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     use_mixed_rt = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%coef_mix))
-    trace_first_step = (itt == 1 .and. dg_frag%id == 0)
-    if (trace_first_step) then
-      write(*,'(1x,a,i0,4(a,i0),a,l1)') '[DG-RK] enter itt=', itt, &
-        ' local_basis_rows=', n, ' nstate_tot=', dg_frag%nstate_tot, &
-        ' n_pw=', n_pw, ' nspin=', dg_frag%nspin, ' use_mixed=', use_mixed_rt
-      flush(6)
-    end if
     if (.not. timing_initialized) then
       env_timing = ''
       call get_environment_variable('SALMON_DG_RK_TIMING', env_timing, status=env_status)
@@ -65,6 +58,13 @@
         end select
       end if
       timing_initialized = .true.
+    end if
+    trace_first_step = (enable_rk_timing .and. itt == 1 .and. dg_frag%id == 0)
+    if (trace_first_step) then
+      write(*,'(1x,a,i0,4(a,i0),a,l1)') '[DG-RK] enter itt=', itt, &
+        ' local_basis_rows=', n, ' nstate_tot=', dg_frag%nstate_tot, &
+        ' n_pw=', n_pw, ' nspin=', dg_frag%nspin, ' use_mixed=', use_mixed_rt
+      flush(6)
     end if
     time_sync = 0.0d0
     time_stage_update = 0.0d0

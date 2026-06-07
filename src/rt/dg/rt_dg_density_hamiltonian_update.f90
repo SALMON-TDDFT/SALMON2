@@ -1,6 +1,7 @@
   subroutine update_density_and_hamiltonian(dg_frag, system, info, rt, itt, Ac_tot, &
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                            rho, rho_s, Vh, Vxc, Vpsl, energy)
+                                            rho, rho_s, Vh, Vxc, Vpsl, energy, &
+                                            skip_hamiltonian_reconstruct, skip_orbital_dependent)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional, exchange_correlation
@@ -29,6 +30,8 @@
     type(s_scalar),         intent(inout) :: rho, Vh, Vpsl
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
+    logical, optional,       intent(in)    :: skip_hamiltonian_reconstruct
+    logical, optional,       intent(in)    :: skip_orbital_dependent
     logical :: needs_basis_update
     complex(8), allocatable :: H_mat_metric(:,:,:)
     complex(8), allocatable :: H_mat_prev_c(:,:,:)
@@ -37,6 +40,27 @@
     integer :: n_metric
     logical :: use_hmat_complex
     logical :: use_rank_buffered_potential
+    logical :: do_hamiltonian_reconstruct
+    logical :: allow_orbital_dependent
+    logical, save :: adaptive_trace_initialized = .false.
+    logical, save :: enable_adaptive_trace = .false.
+    integer :: env_len, env_status
+    character(len=16) :: env_value
+
+    if (.not. adaptive_trace_initialized) then
+      env_value = ''
+      call get_environment_variable('SALMON_DG_ADAPTIVE_TRACE', env_value, length=env_len, status=env_status)
+      if (env_status == 0 .and. env_len > 0) then
+        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+            env_value(1:1) == 't' .or. env_value(1:1) == 'T') enable_adaptive_trace = .true.
+      end if
+      adaptive_trace_initialized = .true.
+    end if
+
+    do_hamiltonian_reconstruct = .true.
+    if (present(skip_hamiltonian_reconstruct)) do_hamiltonian_reconstruct = .not. skip_hamiltonian_reconstruct
+    allow_orbital_dependent = .true.
+    if (present(skip_orbital_dependent)) allow_orbital_dependent = .not. skip_orbital_dependent
 
     ! This implements self-consistent density and Hamiltonian update
     ! Essential for non-perturbative phenomena:
@@ -46,6 +70,14 @@
     
     ! Check if real-space basis functions are available
     if (.not. dg_frag%has_real_space_basis) then
+      if (.not. do_hamiltonian_reconstruct) then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,'(1x,a)') "[FATAL] DG initial density reconstruction requires real-space fragment basis data."
+          write(*,'(1x,a)') "[FATAL] Check that DC-LCFO data include fragment basis functions,"
+          write(*,'(1x,a)') "[FATAL] not only identity/local coefficients."
+        end if
+        stop "DG-Fragment RT: missing real-space basis for initial density"
+      end if
       if (itt == 1 .and. comm_is_root(nproc_id_global)) then
         write(*,*) "WARNING: Real-space basis functions not available"
         write(*,*) "         Using fixed Hamiltonian approximation"
@@ -101,8 +133,18 @@
     !            Current implementation: calculated on full grid for simplicity
     ! Note: For meta-GGA functionals, spsi (wavefunctions) would be needed for τ and j
     !       DG-Fragment RT currently supports LDA/GGA functionals
+    if (.not. allow_orbital_dependent) then
+      if (xc_func%use_laplacian .or. &
+          xc_func%use_kinetic_energy .or. xc_func%use_current) then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,'(1x,a)') "[FATAL] DG initial density path cannot evaluate orbital-dependent XC without conventional orbitals."
+          write(*,'(1x,a)') "[FATAL] Use an LDA/local XC functional or implement DG tau/current reconstruction."
+        end if
+        stop "DG-Fragment RT: orbital-dependent XC requires DG reconstruction"
+      end if
+    end if
     call exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, &
-                 info, rt%tpsi0, stencil, Vxc, energy%E_xc)
+                              info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     if (system%nspin > 0) then
       dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
       do n_metric = 1, system%nspin
@@ -111,6 +153,13 @@
     end if
     
     ! Step 4: Update DFT+U with explicit on/off branch
+    if (dg_frag%use_plusu .and. PLUS_U_ON .and. .not. allow_orbital_dependent) then
+      if (comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') "[FATAL] DG initial density path cannot update DFT+U without conventional orbitals."
+        write(*,'(1x,a)') "[FATAL] Implement DG +U density matrix reconstruction before enabling +U in this path."
+      end if
+      stop "DG-Fragment RT: +U requires DG density matrix reconstruction"
+    end if
     if (dg_frag%use_plusu .and. PLUS_U_ON) then
       if (itt == 1 .and. comm_is_root(nproc_id_global)) then
         write(*,'(1x,a)') "[DG-RT +U] ON branch: updating +U density matrix/potential"
@@ -121,6 +170,12 @@
         write(*,'(1x,a)') "[DG-RT +U] OFF branch: skipping +U update (E_U=0)"
       end if
       energy%E_U = 0.0d0
+    end if
+
+    if (.not. do_hamiltonian_reconstruct) then
+      if (allocated(rho_buffer)) deallocate(rho_buffer)
+      if (allocated(Vh_buffer)) deallocate(Vh_buffer)
+      return
     end if
     
     ! Step 5: Reconstruct Hamiltonian matrix with updated potentials
@@ -171,7 +226,7 @@
         end if
 
         ! Pass ppg for DC-CG method pseudopotential handling
-        if (comm_is_root(nproc_id_global)) then
+        if (enable_adaptive_trace .and. comm_is_root(nproc_id_global)) then
           write(*,*)
           write(*,'(1x,a,i8)') "!!! Adaptive basis update triggered at step", itt
           write(*,'(1x,a,f10.6,a)') "  Global ||ΔH|| = ", &
@@ -186,7 +241,7 @@
                 Vh, Vxc, Vpsl, pp, ppg, rt%tpsi0, Ac_tot)
       else
         ! Log monitoring info every 100 steps
-        if (mod(itt, 100) == 0 .and. comm_is_root(nproc_id_global)) then
+        if (enable_adaptive_trace .and. mod(itt, 100) == 0 .and. comm_is_root(nproc_id_global)) then
           write(*,'(1x,a,i8,a,f10.6,a)') "  Step", itt, ": Global ||ΔH|| = ", &
                                          dg_frag%hamiltonian_change_norm, " a.u. (OK)"
         end if

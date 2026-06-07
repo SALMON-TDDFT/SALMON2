@@ -678,6 +678,7 @@ contains
           & ddm_e(1:3,1) * t_unit_length%conv, &
           & dm(1:3)      * t_unit_length%conv
        write(uid,*)
+       flush(uid)
     endif
     endif
 
@@ -786,6 +787,7 @@ contains
           & curr_i(1:3) * t_unit_current%conv
        endif
        write(uid,*)
+       flush(uid)
     endif
     endif
 
@@ -887,6 +889,7 @@ contains
 
        write(uid,*)
        flush(uid)
+       if(yn_dg_fragment_rt=='y') return
        
        if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then
          write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
@@ -923,7 +926,7 @@ contains
        flush(uid)
 
     else  !it>=0
-       if(mod(it,out_rt_energy_step)==0)then
+       if(mod(it,out_rt_energy_step)==0 .or. (yn_dg_fragment_rt=='y' .and. it==1))then
           uid = ofl%fh_rt_energy
    
           if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then

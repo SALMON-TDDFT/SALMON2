@@ -18,7 +18,6 @@
 module rt_dg_initial_state
   use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
   use rt_dg_fragment_ops, only: apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, &
-                                apply_overlap_operator_batch_orbital_fragment_self, &
                                 apply_overlap_operator_batch, solve_overlap_operator_batch
   implicit none
 
@@ -173,7 +172,7 @@ contains
         call apply_complex_matrix_blocks_batch(dg_frag, dg_frag%H_nl_blocks, ispin, coef_chk, hcorec)
       end if
     end if
-    call apply_overlap_operator_batch_orbital_fragment_self(dg_frag, ispin, coef_chk, sc, .true.)
+    call apply_overlap_operator_batch(dg_frag, ispin, coef_chk, sc, .true.)
 
     do io = 1, ncheck
       num_local(io) = real(sum(conjg(coef_chk(:, io)) * hc(:, io)), kind=8)
@@ -2031,7 +2030,6 @@ contains
     if (nrow <= 0) return
 
     allocate(q(nrow, panel_size), sq(nrow, panel_size))
-    allocate(proj_local(panel_size, state_chunk), proj_global(panel_size, state_chunk))
 
     do ipanel = 1, nocc, panel_size
       panel_end = min(nocc, ipanel + panel_size - 1)
@@ -2044,16 +2042,16 @@ contains
       do istate = 1, nocc, state_chunk
         state_end = min(nocc, istate + state_chunk - 1)
         nts = state_end - istate + 1
-        proj_local(:, :) = (0.0d0, 0.0d0)
-        proj_local(1:bsz, 1:nts) = matmul(conjg(transpose(q(:, 1:bsz))), res(:, istate:state_end))
-        call comm_summation(proj_local(1:bsz, 1:nts), proj_global(1:bsz, 1:nts), &
-                            bsz * nts, dg_frag%icomm)
+        allocate(proj_local(bsz, nts), proj_global(bsz, nts))
+        proj_local(:, :) = matmul(conjg(transpose(q(:, 1:bsz))), res(:, istate:state_end))
+        call comm_summation(proj_local, proj_global, bsz * nts, dg_frag%icomm)
         res(:, istate:state_end) = res(:, istate:state_end) - &
-          matmul(sq(:, 1:bsz), proj_global(1:bsz, 1:nts))
+          matmul(sq(:, 1:bsz), proj_global)
+        deallocate(proj_local, proj_global)
       end do
     end do
 
-    deallocate(q, sq, proj_local, proj_global)
+    deallocate(q, sq)
   end subroutine remove_occupied_internal_residual
 
   subroutine s_orthonormalize_coef_columns(dg_frag, ispin, nocc, success)
@@ -2079,13 +2077,12 @@ contains
     if (nrow <= 0) return
 
     allocate(q(nrow, panel_size), sq(nrow, panel_size))
-    allocate(gram_local(panel_size, panel_size), gram_global(panel_size, panel_size))
-    allocate(proj_local(panel_size, trail_chunk), proj_global(panel_size, trail_chunk))
 
     do ipanel = 1, nocc, panel_size
       panel_end = min(nocc, ipanel + panel_size - 1)
       bsz = panel_end - ipanel + 1
 
+      allocate(gram_local(bsz, bsz), gram_global(bsz, bsz))
       q(:, :) = (0.0d0, 0.0d0)
       sq(:, :) = (0.0d0, 0.0d0)
       q(:, 1:bsz) = dg_frag%coef(:, ipanel:panel_end, ispin)
@@ -2097,7 +2094,7 @@ contains
           gram_local(i, j) = sum(conjg(q(:, i)) * sq(:, j))
         end do
       end do
-      call comm_summation(gram_local(1:bsz, 1:bsz), gram_global(1:bsz, 1:bsz), bsz * bsz, dg_frag%icomm)
+      call comm_summation(gram_local, gram_global, bsz * bsz, dg_frag%icomm)
       do j = 1, bsz
         do i = j + 1, bsz
           gram_global(i, j) = 0.5d0 * (gram_global(i, j) + conjg(gram_global(j, i)))
@@ -2114,7 +2111,7 @@ contains
           '[WARN] S-panel orthonormalization found null occupied subspace: rank=', dg_frag%id, &
           ' ispin=', ispin, ' first_col=', ipanel, ' min_norm=', minval(eval(1:bsz))
         deallocate(gram_panel, evec, evec_scaled, inv_sqrt, eval)
-        deallocate(q, sq, gram_local, gram_global, proj_local, proj_global)
+        deallocate(q, sq, gram_local, gram_global)
         return
       end if
       evec_scaled(:, :) = evec(:, :)
@@ -2125,23 +2122,24 @@ contains
       q(:, 1:bsz) = matmul(q(:, 1:bsz), inv_sqrt(:, :))
       dg_frag%coef(:, ipanel:panel_end, ispin) = q(:, 1:bsz)
       deallocate(gram_panel, evec, evec_scaled, inv_sqrt, eval)
+      deallocate(gram_local, gram_global)
 
       sq(:, :) = (0.0d0, 0.0d0)
       call apply_overlap_operator_batch(dg_frag, ispin, q(:, 1:bsz), sq(:, 1:bsz), .true.)
       do itrail = panel_end + 1, nocc, trail_chunk
         trail_end = min(nocc, itrail + trail_chunk - 1)
         nts = trail_end - itrail + 1
-        proj_local(:, :) = (0.0d0, 0.0d0)
-        proj_local(1:bsz, 1:nts) = matmul(conjg(transpose(sq(:, 1:bsz))), &
-                                           dg_frag%coef(:, itrail:trail_end, ispin))
-        call comm_summation(proj_local(1:bsz, 1:nts), proj_global(1:bsz, 1:nts), &
-                            bsz * nts, dg_frag%icomm)
+        allocate(proj_local(bsz, nts), proj_global(bsz, nts))
+        proj_local(:, :) = matmul(conjg(transpose(sq(:, 1:bsz))), &
+                                  dg_frag%coef(:, itrail:trail_end, ispin))
+        call comm_summation(proj_local, proj_global, bsz * nts, dg_frag%icomm)
         dg_frag%coef(:, itrail:trail_end, ispin) = dg_frag%coef(:, itrail:trail_end, ispin) - &
-          matmul(q(:, 1:bsz), proj_global(1:bsz, 1:nts))
+          matmul(q(:, 1:bsz), proj_global)
+        deallocate(proj_local, proj_global)
       end do
     end do
 
-    deallocate(q, sq, gram_local, gram_global, proj_local, proj_global)
+    deallocate(q, sq)
     success = .true.
   end subroutine s_orthonormalize_coef_columns
 
