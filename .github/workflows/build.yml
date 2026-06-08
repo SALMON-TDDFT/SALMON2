@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (gfortran, OpenMPI, LAPACK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran openmpi-bin libopenmpi-dev liblapack-dev libblas-dev cmake
+
+      - name: Configure
+        run: |
+          mkdir -p build
+          cmake -S . -B build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_Fortran_COMPILER=mpif90 \
+                -DCMAKE_C_COMPILER=mpicc
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
