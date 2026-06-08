@@ -8,7 +8,7 @@ module bloch_solver_ssbe
 
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
-              dt_evolve_bloch_cf4, calc_trace, calc_energy
+              dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_houston_population_k
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -649,6 +649,60 @@ subroutine houston_dephase(nba, rho, H, p_active, Ac, X, lambda, tau, V)
         end do
     end do
 end subroutine houston_dephase
+
+
+! Population of band `ib_target` resolved per k-point, in the instantaneous
+! Houston (adiabatic) eigenbasis of H_VG(t) = diag(eigen) + A(t).p -- i.e. the
+! same basis used by the CPTP dephasing step. Used to monitor, e.g., the
+! occupation of the lowest conduction band as a function of k during the
+! real-time propagation:
+!   pop_k(ik) = (W^dagger rho W)_{ib_target,ib_target},  H_VG(t) = W diag(E) W^dagger
+! The result is summed over MPI ranks (each rank contributes only its own
+! k-range, zero elsewhere) so that pop_k is identical and complete on every rank.
+subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
+    use eigen_lapack, only: eigen_zheev
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(in)  :: Ac(3)
+    integer,                  intent(in)  :: ib_target
+    real(8),                  intent(out) :: pop_k(1:sbe%nk)
+    integer,                  intent(in)  :: icomm
+
+    real(8),    allocatable :: pop_local(:)
+    real(8)    :: evals(sbe%nb)
+    complex(8) :: H(sbe%nb, sbe%nb), W(sbe%nb, sbe%nb), t1(sbe%nb, sbe%nb), t2(sbe%nb, sbe%nb)
+    integer :: ik, i, nb
+
+    nb = sbe%nb
+    allocate(pop_local(1:sbe%nk))
+    pop_local = 0d0
+
+    do ik = sbe%ik_min, sbe%ik_max
+        H(:, :) = Ac(1) * gs%p_tm_matrix(:, :, 1, ik) &
+                & + Ac(2) * gs%p_tm_matrix(:, :, 2, ik) &
+                & + Ac(3) * gs%p_tm_matrix(:, :, 3, ik)
+        if (sbe%flag_vnl_correction) then
+            H(:, :) = H(:, :) &
+                    & + Ac(1) * gs%rvnl_tm_matrix(:, :, 1, ik) &
+                    & + Ac(2) * gs%rvnl_tm_matrix(:, :, 2, ik) &
+                    & + Ac(3) * gs%rvnl_tm_matrix(:, :, 3, ik)
+        end if
+        do i = 1, nb
+            H(i, i) = H(i, i) + gs%eigen(i, ik)
+        end do
+
+        call eigen_zheev(H, evals, W)
+
+        ! rho~ = W^dagger rho W; diagonal element gives the Houston-basis population
+        call ZGEMM('C', 'N', nb, nb, nb, dcmplx(1d0, 0d0), W,  nb, sbe%rho(:, :, ik), nb, dcmplx(0d0, 0d0), t1, nb)
+        call ZGEMM('N', 'N', nb, nb, nb, dcmplx(1d0, 0d0), t1, nb, W,                 nb, dcmplx(0d0, 0d0), t2, nb)
+        pop_local(ik) = real(t2(ib_target, ib_target))
+    end do
+
+    call comm_summation(pop_local, pop_k, sbe%nk, icomm)
+    deallocate(pop_local)
+end subroutine calc_houston_population_k
 
 
 end module

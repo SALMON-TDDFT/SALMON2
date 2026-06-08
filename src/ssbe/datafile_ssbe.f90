@@ -110,6 +110,40 @@ end subroutine write_sbe_nex_line
 
 
 
+subroutine write_sbe_nex_k_header(fh, nk)
+    use inputoutput, only: t_unit_time
+    implicit none
+    integer, intent(in) :: fh, nk
+    write(fh,'(a)') "# Houston-basis population of the lowest conduction band, resolved per k-point"
+    write(fh,'(a)') "# Written every out_projection_k_step steps as one block per saved time"
+    write(fh,'(a,i0)') "# nk = ", nk
+    write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "ik", "none", &
+        & 2, "kx", "a.u.", &
+        & 3, "ky", "a.u.", &
+        & 4, "kz", "a.u.", &
+        & 5, "population_lcb", "none"
+    return
+end subroutine write_sbe_nex_k_header
+
+
+
+subroutine write_sbe_nex_k_block(fh, t, nk, kpoint, pop_k)
+    use inputoutput, only: t_unit_time
+    implicit none
+    integer, intent(in) :: fh, nk
+    real(8), intent(in) :: t, kpoint(1:3, 1:nk), pop_k(1:nk)
+    integer :: ik
+    write(fh, '(a,f16.8,a,a)') "# t = ", t * t_unit_time%conv, " ", trim(t_unit_time%name)
+    do ik = 1, nk
+        write(fh, '(I6, 4E18.10)') ik, kpoint(1:3, ik), pop_k(ik)
+    end do
+    write(fh, '(a)') ""
+    return
+end subroutine write_sbe_nex_k_block
+
+
+
 subroutine write_sbe_wave_header(fh)
     use inputoutput, only: t_unit_ac, t_unit_elec, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
     implicit none
