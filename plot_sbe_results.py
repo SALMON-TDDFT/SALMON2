@@ -36,7 +36,7 @@ def find_header(filepath):
     """Find header line with column numbers. Returns (header_text, line_index)."""
     with open(filepath, 'r') as f:
         for i, line in enumerate(f):
-            if line.startswith('#') and re.search(r'\d+:', line):
+            if line.startswith('#') and re.search(r'#\s*1\s*:\s*\S', line):
                 return line.strip(), i
     raise ValueError("Header line with column numbers not found.")
 
