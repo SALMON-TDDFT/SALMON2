@@ -37,6 +37,7 @@
   case('multi_scale_maxwell_tddft'   ); call main_ms
   case('maxwell')                     ; call main_maxwell
   case('sbe', 'maxwell_sbe')          ; call main_ssbe(nproc_group_global)
+  case('epm')                         ; call main_epm(nproc_group_global) !local empirical pseudopotential method (ground state for SBE input)
  !case('maxwell_sbe')                 ; call main_maxwell_sbe
  !case('ttm')                         ; call main_ttm
  !case('maxwell_ttm')                 ; call main_maxwell_ttm
@@ -58,6 +59,8 @@ contains
 
     select case(theory)
     case('dft','dft2tddft')
+       calc_mode='GS'
+    case('epm')
        calc_mode='GS'
     case('dft_md')
        yn_md='y'
