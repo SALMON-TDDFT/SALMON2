@@ -69,6 +69,30 @@ The `&sbe` namelist now accepts the following parameters:
 
 *Note: Internal conversions to atomic units (Hartree) are handled automatically (`kB_au`, `au_fs`).*
 
+### Real-time output frequency (`&analysis`)
+
+Real-time SBE propagation writes three diagnostic files (`SYSNAME_sbe_rt_energy.data`, `SYSNAME_sbe_nex.data`, `SYSNAME_sbe_nex_k.data`), each on its own cadence selectable in the `&analysis` namelist. The k-resolved file in particular can grow to gigabytes for dense k-grids/long runs, so its default stride is ten times coarser than the band-projection output:
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `out_rt_energy_step` | `10` | Stride (in time steps) for `SYSNAME_sbe_rt_energy.data` (total energy / trace) and the stdout progress log. |
+| `out_projection_step` | `100` | Stride for `SYSNAME_sbe_nex.data` (number of excited electrons/holes, summed over k). |
+| `out_projection_k_step` | `1000` | Stride for `SYSNAME_sbe_nex_k.data` (Houston-basis population of the lowest conduction band, resolved per k-point). Defaults to 10× `out_projection_step` to avoid producing terabyte-scale output on dense k-grids; increase the stride (larger value) further for very large `nk`/`nt`. |
+
+`SYSNAME_sbe_nex_k.data` reports, for every saved time `t`, one block of `nk` lines `ik, kx, ky, kz, population_lcb`, where `population_lcb = (W^\dagger \rho W)_{aa}` is the diagonal element of the density matrix rotated into the instantaneous Houston (adiabatic) eigenbasis $W$ of $H_{VG}(t)$ for the lowest conduction band $a = N_{elec}/2+1$ — i.e. the same gauge-independent basis used internally by the CPTP dephasing step.
+
+### Plotting the real-time output (`plot_sbe_results.py`)
+
+The repository root contains a self-contained `plot_sbe_results.py` script (matplotlib + numpy, not part of the Fortran build — copy it into the calculation directory and run it there). It scans the directory for `SYSNAME_sbe_rt_energy.data`, `SYSNAME_sbe_nex.data` and `SYSNAME_sbe_nex_k.data`, and produces (with no interactive windows, `Agg` backend):
+* line plots of total energy and excited-electron/hole counts vs time;
+* for `SYSNAME_sbe_nex_k.data`, one PNG per saved time step (the time value is encoded in the file name), each showing the Houston-basis lowest-conduction-band population as three 2D heatmap slices of the k-grid ($k_x$-$k_y$, $k_x$-$k_z$, $k_y$-$k_z$).
+
+```sh
+cp plot_sbe_results.py /path/to/calculation/
+cd /path/to/calculation/
+python3 plot_sbe_results.py            # writes PNGs into ./sbe_plots/
+```
+
 The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
 
 | Parameter | Units | Default | Description |

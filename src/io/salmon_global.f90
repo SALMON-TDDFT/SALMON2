@@ -341,6 +341,7 @@ module salmon_global
   integer        :: out_gs_sgm_eps_mu_nu(2)
   real(8)        :: out_gs_sgm_eps_width
   integer        :: out_projection_step
+  integer        :: out_projection_k_step
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data

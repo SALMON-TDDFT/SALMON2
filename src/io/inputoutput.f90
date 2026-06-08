@@ -470,6 +470,7 @@ contains
     namelist/analysis/ &
       & projection_option, &
       & out_projection_step, &
+      & out_projection_k_step, &
       & threshold_projection, &
       & nenergy, &
       & de, &
@@ -905,6 +906,7 @@ contains
 !! == default for &analysis
     projection_option   = 'no'
     out_projection_step = 100
+    out_projection_k_step = 1000
     threshold_projection = 1d-6
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
@@ -1530,6 +1532,7 @@ contains
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
     call comm_bcast(out_projection_step ,nproc_group_global)
+    call comm_bcast(out_projection_k_step ,nproc_group_global)
     call comm_bcast(threshold_projection,nproc_group_global)
     call comm_bcast(nenergy             ,nproc_group_global)
     call comm_bcast(de                  ,nproc_group_global)
@@ -2458,6 +2461,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_k_step', out_projection_k_step
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_projection', threshold_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de

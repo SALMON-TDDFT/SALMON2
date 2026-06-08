@@ -11,6 +11,7 @@ subroutine main_realtime_ssbe(icomm)
     use datafile_ssbe
     use input_checker_sbe
     use filesystem, only: get_filehandle
+    use phys_constants, only: au_fs
     implicit none
     integer, intent(in) :: icomm
 
@@ -21,8 +22,10 @@ subroutine main_realtime_ssbe(icomm)
     integer :: it
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
-    integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
+    integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_k
     integer :: nk
+    integer :: ib_lcb
+    real(8), allocatable :: pop_k(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -48,6 +51,10 @@ subroutine main_realtime_ssbe(icomm)
     E(:) = 0.0d0
     Jmat(:) = 0.0d0
 
+    ! Lowest conduction band index (Houston-basis population output)
+    ib_lcb = nelec / 2 + 1
+    allocate(pop_k(1:nk))
+
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
         fh_sbe_rt = get_filehandle()
@@ -61,6 +68,10 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
+        ! SYSNAME_sbe_nex_k.data
+        fh_sbe_nex_k = get_filehandle()
+        open(unit=fh_sbe_nex_k, file=trim(base_directory)//trim(sysname)//"_sbe_nex_k.data", action="write")
+        call write_sbe_nex_k_header(fh_sbe_nex_k, nk)
         ! Stdout logs:
         write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
         write(*, "(a)") "---------------------------------------------------------------------------------------"
@@ -101,19 +112,29 @@ subroutine main_realtime_ssbe(icomm)
                 & t, Ac_ext_t(1:3, it), E(1:3), Ac_ext_t(1:3, it), E(1:3), Jmat(1:3))
         end if
 
-        if (mod(it, 10) == 0) then
+        if (mod(it, out_rt_energy_step) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
-                write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
+                write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t * au_fs, Jmat(1:3), tr_all, energy
             end if
         end if
-        
+
         if (mod(it, out_projection_step) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
-            tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)    
+            tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)
             if (irank == 0) then
-                call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)
+                call write_sbe_nex_line(fh_sbe_nex, t, (tr_all - tr_vb) / gs%volume, (nelec - tr_vb) / gs%volume)
+            end if
+        end if
+
+        ! Houston-basis population of the lowest conduction band, per k-point.
+        ! Written far less often than _sbe_nex.data (out_projection_k_step,
+        ! default 10x out_projection_step) since this output scales with nk.
+        if (mod(it, out_projection_k_step) == 0) then
+            call calc_houston_population_k(sbe, gs, Ac_ext_t(:, it), ib_lcb, pop_k, icomm)
+            if (irank == 0) then
+                call write_sbe_nex_k_block(fh_sbe_nex_k, t, nk, gs%kpoint, pop_k)
             end if
         end if
 
@@ -122,6 +143,7 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_rt)
                 flush(fh_sbe_rt_energy)
                 flush(fh_sbe_nex)
+                flush(fh_sbe_nex_k)
             end if
         end if
     end do
@@ -132,7 +154,10 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_rt)
         close(fh_sbe_rt_energy)
         close(fh_sbe_nex)
+        close(fh_sbe_nex_k)
     end if
+
+    deallocate(pop_k)
 
     return
 end subroutine main_realtime_ssbe
