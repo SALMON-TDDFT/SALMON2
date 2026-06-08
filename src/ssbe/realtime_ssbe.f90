@@ -124,7 +124,7 @@ subroutine main_realtime_ssbe(icomm)
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)
             if (irank == 0) then
-                call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)
+                call write_sbe_nex_line(fh_sbe_nex, t, (tr_all - tr_vb) / gs%volume, (nelec - tr_vb) / gs%volume)
             end if
         end if
 
