@@ -438,6 +438,15 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: eg_ev
   real(8)        :: frozen_core_threshold_ev
   real(8)        :: frozen_free_threshold_ev
+  ! Kuhn-Zurek/Caldeira-Leggett decoherence (Houston-basis wave-packet separation):
+  ! lambda_au = kB_au * sbe_decoh_temperature_k / (hartree_kelvin_relationship * tau_m_au)
+  real(8)        :: sbe_decoh_temperature_k
+  real(8)        :: sbe_decoh_tau_m_fs
+
+  !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
+  character(32)  :: epm_material
+  real(8)        :: epm_lattice_constant_au
+  real(8)        :: epm_pw_cutoff_ry
 
   !! &dc
   integer        :: num_fragment(3)

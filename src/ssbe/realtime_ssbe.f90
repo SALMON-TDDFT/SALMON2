@@ -73,11 +73,13 @@ subroutine main_realtime_ssbe(icomm)
         t = dt * it
         
         !---------------------------------------------------------------
-        ! ETDRK4 Step: Evolve rho from t=(it-1)*dt to t=it*dt
-        ! Uses field A(t) = Ac_ext_t(:, it) as constant on the step
-        ! (matches Taylor-4 convention for direct comparison)
+        ! CF4(Gauss-Legendre)+Yoshida unitary step combined with strictly
+        ! CPTP Strang/Hadamard Kuhn-Zurek dephasing: evolve rho from
+        ! t=(it-1)*dt to t=it*dt. The propagator interpolates A(t) at the
+        ! internal Gauss-Legendre/Yoshida sub-nodes from the field values
+        ! at the step endpoints supplied here.
         !---------------------------------------------------------------
-        call dt_evolve_bloch_etdrk4(sbe, gs, Ac_ext_t(:, it), dt)
+        call dt_evolve_bloch_cf4(sbe, gs, t - dt, dt, Ac_ext_t(:, it - 1), Ac_ext_t(:, it))
         
         !---------------------------------------------------------------
         ! Calculate Current J(t) at t=it*dt (after evolution)

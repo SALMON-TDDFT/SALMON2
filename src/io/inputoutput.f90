@@ -60,6 +60,7 @@ module inputoutput
   integer :: inml_code
   integer :: inml_band
   integer :: inml_sbe
+  integer :: inml_epm
   integer :: inml_dc
 
 !Input/Output units
@@ -591,8 +592,15 @@ contains
       & t2_sbe_fs, &
       & eg_ev, &
       & frozen_core_threshold_ev, &
-      & frozen_free_threshold_ev
-      
+      & frozen_free_threshold_ev, &
+      & sbe_decoh_temperature_k, &
+      & sbe_decoh_tau_m_fs
+
+    namelist/epm/ &
+      & epm_material, &
+      & epm_lattice_constant_au, &
+      & epm_pw_cutoff_ry
+
     namelist/dc/ &
       & num_fragment, &
       & num_rgrid_buffer, &
@@ -1020,6 +1028,12 @@ contains
                                             ! Active bands: E_fermi + frozen_core_threshold_ev < E < E_fermi + frozen_free_threshold_ev
     frozen_free_threshold_ev = 100.0d0    ! Default: freeze nothing (very high threshold, relative to Fermi level in eV)
                                             ! Both thresholds are now relative to the Fermi energy for universality across materials
+    sbe_decoh_temperature_k = -1.0d0     ! Default: <=0 disables Kuhn-Zurek decoherence (lambda = 0, exactly CPTP)
+    sbe_decoh_tau_m_fs      = -1.0d0     ! Momentum relaxation time tau_m [fs]; both must be > 0 to enable decoherence
+!! == default for &epm
+    epm_material            = 'GaAs'
+    epm_lattice_constant_au = 10.68d0    ! GaAs zincblende lattice constant (a = 5.65 Angstrom = 10.68 Bohr)
+    epm_pw_cutoff_ry        = 11.1d0     ! Plane-wave cutoff |k+G|^2 [Ry] (includes Cohen-Bergstresser G^2=11 shell)
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1107,7 +1121,10 @@ contains
 
       read(fh_namelist, nml=sbe, iostat=inml_sbe)
       rewind(fh_namelist)
-      
+
+      read(fh_namelist, nml=epm, iostat=inml_epm)
+      rewind(fh_namelist)
+
       read(fh_namelist, nml=dc, iostat=inml_dc)
       rewind(fh_namelist)
 
@@ -1648,6 +1665,12 @@ contains
     call comm_bcast(eg_ev            ,nproc_group_global)
     call comm_bcast(frozen_core_threshold_ev, nproc_group_global)
     call comm_bcast(frozen_free_threshold_ev, nproc_group_global)
+    call comm_bcast(sbe_decoh_temperature_k, nproc_group_global)
+    call comm_bcast(sbe_decoh_tau_m_fs,      nproc_group_global)
+!! == bcast for epm
+    call comm_bcast(epm_material,            nproc_group_global)
+    call comm_bcast(epm_lattice_constant_au, nproc_group_global)
+    call comm_bcast(epm_pw_cutoff_ry,        nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2620,6 +2643,21 @@ contains
       
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'frozen_core_threshold_ev', frozen_core_threshold_ev
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'frozen_free_threshold_ev', frozen_free_threshold_ev
+      if(sbe_decoh_temperature_k > 0.0d0 .and. sbe_decoh_tau_m_fs > 0.0d0)then
+        write(fh_variables_log, '("# info: Kuhn-Zurek decoherence enabled (T=",ES12.5," K, tau_m=",ES12.5," fs)")') &
+          & sbe_decoh_temperature_k, sbe_decoh_tau_m_fs
+      else
+        write(fh_variables_log, '("# info: Kuhn-Zurek decoherence disabled (sbe_decoh_temperature_k or sbe_decoh_tau_m_fs <= 0)")')
+      end if
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_decoh_temperature_k', sbe_decoh_temperature_k
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_decoh_tau_m_fs', sbe_decoh_tau_m_fs
+
+      if(inml_epm >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'epm_material', trim(epm_material)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epm_lattice_constant_au', epm_lattice_constant_au
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epm_pw_cutoff_ry', epm_pw_cutoff_ry
+
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)

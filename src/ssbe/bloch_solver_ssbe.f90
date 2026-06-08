@@ -8,8 +8,7 @@ module bloch_solver_ssbe
 
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
-              dt_evolve_bloch_etdrk4, calc_trace, calc_energy, &
-              init_etdrk4_data, finalize_etdrk4_data, dt_evolve_bloch
+              dt_evolve_bloch_cf4, calc_trace, calc_energy
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -17,28 +16,46 @@ module bloch_solver_ssbe
         integer :: ik_max, ik_min
         complex(8), allocatable :: rho(:, :, :)
         logical :: flag_vnl_correction
-        
+
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
         integer :: n_active_bands = 0
         integer, allocatable :: active_idx(:)  ! Mapping: 1..n_active -> global band index
-        
-        ! ETDRK4 coefficients (precomputed for fixed dt)
-        complex(8), allocatable :: exp_Ldt(:,:,:)       ! E = exp(L*dt)
-        complex(8), allocatable :: exp_Ldt_half(:,:,:)  ! A = exp(L*dt/2)
-        complex(8), allocatable :: phi1(:,:,:)
-        complex(8), allocatable :: phi2(:,:,:)
-        complex(8), allocatable :: phi3(:,:,:)
-        complex(8), allocatable :: phi1_half(:,:,:)     ! phi1(a/2)
-        logical :: etdrk4_initialized = .false.
+
+        ! Houston-basis branch (wave-packet) positions X_a(k,t) used by the
+        ! Kuhn-Zurek/Caldeira-Leggett dephasing kernel. By the origin-shift
+        ! invariance of the dephasing map (only differences X_a-X_b enter),
+        ! the choice X_a(0)=0 is physically irrelevant; it merely fixes a
+        ! reproducible reference for restarts.
+        real(8), allocatable :: X_branch(:, :)  ! (1:nb, ik_min:ik_max)
+
+        ! Kuhn-Zurek/Caldeira-Leggett decoherence: lambda = kB*T / tau_m
+        real(8) :: lambda_decoh = 0d0
+        logical :: flag_decoh   = .false.
     end type
+
+    !=========================================================================
+    ! CF4 (commutator-free Magnus 4) + Suzuki-Yoshida composition constants
+    !=========================================================================
+    ! Two-point Gauss-Legendre nodes on [0,1]: c = 1/2 -+ sqrt(3)/6
+    real(8), parameter :: cf4_c1 = 0.21132486540518713d0
+    real(8), parameter :: cf4_c2 = 0.78867513459481287d0
+    ! CF4 combination weights: alpha = 1/4 -+ sqrt(3)/6
+    real(8), parameter :: cf4_alpha1 =  0.53867513459481287d0
+    real(8), parameter :: cf4_alpha2 = -0.03867513459481287d0
+    ! Suzuki-Yoshida triple-jump constants (4th-order composition of a
+    ! 2nd-order base scheme): p1 + p2 + p1 = 1
+    real(8), parameter :: yoshida_p1 =  1.35120719196d0
+    real(8), parameter :: yoshida_p2 = -1.70241438392d0
 
 contains
 
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
-    use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev
+    use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
+                             sbe_decoh_temperature_k, sbe_decoh_tau_m_fs
+    use phys_constants, only: au_fs, kB_au
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -73,6 +90,30 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end do
     
     sbe%flag_vnl_correction = .false.
+
+    ! =========================================================================
+    ! Houston-basis branch positions X_a(k,t): explicit zero-init.
+    ! By the invariance theorem of the dephasing kernel under a global shift
+    ! of the X_a origin (only X_a-X_b enters exp[-lambda(X_a-X_b)^2 tau]),
+    ! the choice X_a(t=0) = 0 carries no physical content; it only fixes a
+    ! reproducible convention for restarts.
+    ! =========================================================================
+    allocate(sbe%X_branch(1:sbe%nb, sbe%ik_min:sbe%ik_max))
+    sbe%X_branch = 0d0
+
+    ! =========================================================================
+    ! Kuhn-Zurek/Caldeira-Leggett decoherence strength: lambda = kB*T / tau_m
+    ! Both temperature and relaxation time must be positive to enable it;
+    ! otherwise the dephasing map reduces identically to the identity (D=0),
+    ! which is trivially CPTP.
+    ! =========================================================================
+    if (sbe_decoh_temperature_k > 0d0 .and. sbe_decoh_tau_m_fs > 0d0) then
+        sbe%lambda_decoh = kB_au * sbe_decoh_temperature_k / (sbe_decoh_tau_m_fs / au_fs)
+        sbe%flag_decoh   = .true.
+    else
+        sbe%lambda_decoh = 0d0
+        sbe%flag_decoh   = .false.
+    end if
 
     ! =========================================================================
     ! ЛОГИКА is_active (Frozen Core)
@@ -270,554 +311,344 @@ end function calc_energy
 
 
 !=============================================================================
-! ETDRK4 Implementation (Kassam-Trefethen 2005) for SBE in Velocity Gauge
+! CF4 (commutator-free Magnus, 4th order) propagator on Gauss-Legendre nodes,
+! composed via the Suzuki-Yoshida triple-jump for the unitary part, combined
+! with a strictly CPTP Kuhn-Zurek/Caldeira-Leggett dephasing map applied
+! through Strang splitting with an exact Hadamard/Gaussian kernel in the
+! instantaneous (Houston) eigenbasis:
+!
+!   rho(t+h) = D(h/2) o [ S2(p1 h) o S2(p2 h) o S2(p1 h) ] o D(h/2) [rho(t)]
+!
+! IMPORTANT: the Suzuki-Yoshida composition wraps ONLY the unitary CF4
+! sub-steps S2(.), never the dephasing map D(.). A unitary step run with a
+! negative sub-step (p2 h < 0) is simply a unitary rotation run backwards in
+! time -- always valid. A dephasing step run with tau < 0 would replace the
+! Hadamard/Gaussian kernel exp[-lambda (X_a-X_b)^2 tau] by its reciprocal,
+! exp[+lambda (X_a-X_b)^2 |tau|], which is not positive semi-definite (it
+! fails the Schoenberg/Bochner criterion for an RBF kernel and the Schur
+! product theorem for the Hadamard map), and would break completely positive
+! trace preservation. Hence D(h/2) is applied twice, with tau=+h/2>0 each
+! time, by Strang splitting around the (always-safe) unitary composition.
 !=============================================================================
-pure subroutine calc_etdrk4_coefficients(z, h, E, E2, Q, f1, f2, f3)
-    ! Строгая реализация коэффициентов ETDRK4 (Kassam-Trefethen 2005, Eq. 2.5).
-    ! Использует ряд Тейлора для |z| < 0.05 (избегает 0/0 и потери значимости)
-    ! и точные формулы для |z| >= 0.05.
-    implicit none
-    complex(8), intent(in) :: z
-    real(8), intent(in) :: h
-    complex(8), intent(out) :: E, E2, Q, f1, f2, f3
-    
-    ! Порог 0.05 гарантирует, что ошибка усечения ряда O(z^5) < 1e-15
-    real(8), parameter :: EPS = 0.05d0 
-    complex(8) :: z2, z3, z4
-    
-    E  = exp(z)
-    E2 = exp(z * 0.5d0)
-    z2 = z * z
-    z3 = z2 * z
-    z4 = z3 * z
-    
-    if (abs(z) < EPS) then
-        ! Аналитические пределы (Тейлор), выведенные вручную из Eq. 2.5
-        ! Q = h * (e^{z/2} - 1) / z
-        Q  = h * (0.5d0 + z/8.0d0 + z2/48.0d0 + z3/384.0d0 + z4/3840.0d0)
-        
-        ! f1 (alpha): 1/6 + 1/6 z + 3/40 z^2 + 1/45 z^3 + 5/1008 z^4
-        f1 = h * (1.0d0/6.0d0 + z/6.0d0 + 3.0d0*z2/40.0d0 + z3/45.0d0 + 5.0d0*z4/1008.0d0)
-        
-        ! f2 (beta):  1/6 + 1/12 z + 1/40 z^2 + 1/180 z^3 + 1/1008 z^4
-        f2 = h * (1.0d0/6.0d0 + z/12.0d0 + z2/40.0d0 + z3/180.0d0 + z4/1008.0d0)
-        
-        ! f3 (gamma): 1/6 + 0 z - 1/120 z^2 - 1/360 z^3 - 1/1680 z^4
-        f3 = h * (1.0d0/6.0d0 - z2/120.0d0 - z3/360.0d0 - z4/1680.0d0)
-    else
-        ! Прямые формулы из статьи KT2005 (Eq. 2.5)
-        Q  = h * (E2 - 1.0d0) / z
-        f1 = h * (-4.0d0 - z + E * (4.0d0 - 3.0d0*z + z2)) / z3
-        f2 = h * ( 2.0d0 + z + E * (-2.0d0 + z)) / z3
-        f3 = h * (-4.0d0 - 3.0d0*z - z2 + E * (4.0d0 - z)) / z3
-    end if
-end subroutine calc_etdrk4_coefficients
 
-subroutine init_etdrk4_data(sbe, gs, dt)
-    use phys_constants, only: au_fs
-    use salmon_global, only: t2_sbe_fs
-    implicit none
-    type(s_sbe_bloch_solver), intent(inout) :: sbe
-    type(s_sbe_gs_info), intent(in) :: gs
-    real(8), intent(in) :: dt
-    
-    integer :: ik, n, m, nb
-    real(8) :: delta_e, gamma, t2_au, Eg2
-    complex(8) :: lambda, z
-    
-    nb = sbe%nb
-    
-    if (.not. allocated(sbe%exp_Ldt)) then
-        allocate(sbe%exp_Ldt(nb, nb, sbe%ik_min:sbe%ik_max))
-        allocate(sbe%exp_Ldt_half(nb, nb, sbe%ik_min:sbe%ik_max))
-        allocate(sbe%phi1(nb, nb, sbe%ik_min:sbe%ik_max))      ! Будет хранить f1
-        allocate(sbe%phi2(nb, nb, sbe%ik_min:sbe%ik_max))      ! Будет хранить f2
-        allocate(sbe%phi3(nb, nb, sbe%ik_min:sbe%ik_max))      ! Будет хранить f3
-        allocate(sbe%phi1_half(nb, nb, sbe%ik_min:sbe%ik_max)) ! Будет хранить Q
-    end if
-    
-    if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-        t2_au = t2_sbe_fs / au_fs
-        Eg2 = gs%eg_au**2
-    else
-        t2_au = 1.0d99
-        Eg2 = 1.0d0
-    end if
-    
-    !$omp parallel do default(shared) private(ik, n, m, delta_e, gamma, lambda, z)
-    do ik = sbe%ik_min, sbe%ik_max
-        do m = 1, nb
-            do n = 1, nb
-                delta_e = gs%eigen(n, ik) - gs%eigen(m, ik)
-                
-                if (sbe%is_active(n) .and. sbe%is_active(m)) then
-                    gamma = (delta_e**2) / (t2_au * Eg2)
-                else
-                    gamma = 0.0d0
-                end if
-                
-                lambda = dcmplx(0d0, -delta_e) - gamma
-                z = lambda * dt
-                
-                call calc_etdrk4_coefficients(z, dt, &
-                    sbe%exp_Ldt(n, m, ik), &
-                    sbe%exp_Ldt_half(n, m, ik), &
-                    sbe%phi1_half(n, m, ik), &  ! Это Q
-                    sbe%phi1(n, m, ik), &       ! Это f1
-                    sbe%phi2(n, m, ik), &       ! Это f2
-                    sbe%phi3(n, m, ik))         ! Это f3
-            end do
-        end do
-    end do
-    !$omp end parallel do
-    
-    sbe%etdrk4_initialized = .true.
-end subroutine init_etdrk4_data
-
-
-subroutine finalize_etdrk4_data(sbe)
-    implicit none
-    type(s_sbe_bloch_solver), intent(inout) :: sbe
-    
-    if (allocated(sbe%exp_Ldt)) deallocate(sbe%exp_Ldt)
-    if (allocated(sbe%exp_Ldt_half)) deallocate(sbe%exp_Ldt_half)
-    if (allocated(sbe%phi1)) deallocate(sbe%phi1)
-    if (allocated(sbe%phi2)) deallocate(sbe%phi2)
-    if (allocated(sbe%phi3)) deallocate(sbe%phi3)
-    if (allocated(sbe%phi1_half)) deallocate(sbe%phi1_half)
-    
-    sbe%etdrk4_initialized = .false.
-end subroutine finalize_etdrk4_data
-
-
-pure subroutine calc_phi_contour_all(z, phi_vals)
-    implicit none
-    complex(8), intent(in) :: z
-    complex(8), intent(out) :: phi_vals(3)  
-    
-    integer, parameter :: M = 32  
-    real(8), parameter :: R = 1.0d0  
-    real(8), parameter :: TWOPI = 6.28318530717958647692d0
-    real(8) :: theta
-    complex(8) :: w, ez, w2, phi1_w, phi2_w, phi3_w
-    complex(8) :: sum1, sum2, sum3
-    integer :: j
-    
-    sum1 = dcmplx(0d0, 0d0)
-    sum2 = dcmplx(0d0, 0d0)
-    sum3 = dcmplx(0d0, 0d0)
-    
-    do j = 1, M
-        theta = TWOPI * dble(j) / dble(M)
-        w = z + R * exp(dcmplx(0d0, theta))
-        
-        ez = exp(w)
-        w2 = w * w
-        
-        phi1_w = (ez - dcmplx(1d0, 0d0)) / w
-        phi2_w = (ez - dcmplx(1d0, 0d0) - w) / w2
-        phi3_w = (ez - dcmplx(1d0, 0d0) - w - 0.5d0 * w2) / (w2 * w)
-        
-        sum1 = sum1 + phi1_w
-        sum2 = sum2 + phi2_w
-        sum3 = sum3 + phi3_w
-    end do
-    
-    phi_vals(1) = sum1 / dble(M)
-    phi_vals(2) = sum2 / dble(M)
-    phi_vals(3) = sum3 / dble(M)
-end subroutine calc_phi_contour_all
-
-subroutine dt_evolve_bloch_etdrk4(sbe, gs, Ac, dt)
-    use phys_constants, only: au_fs
-    use salmon_global, only: t2_sbe_fs
+subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), intent(in) :: Ac(1:3)
+    real(8), intent(in) :: t_start  ! time at the beginning of the step, rho(t_start) -> rho(t_start+dt)
     real(8), intent(in) :: dt
-    
-    integer :: ik, n, m, i, j, in, im, idir
-    integer :: nb, nba
-    real(8) :: t2_au, prefac, delta_e
-    logical :: flag_decoh
-    
-    complex(8), allocatable :: rho_a(:, :), N_a(:, :), C1_a(:, :), C2_a(:, :), tmp_a(:, :), V_a(:, :)
-    complex(8), allocatable :: p_k_full(:, :, :), rho_n_full(:, :)
-    complex(8), allocatable :: rho1(:, :), rho2(:, :), rho3(:, :)
-    complex(8), allocatable :: N1(:, :), N2(:, :), N3(:, :), N4(:, :)
+    real(8), intent(in) :: Ac_begin(1:3)  ! external vector potential A(t_start)
+    real(8), intent(in) :: Ac_end(1:3)    ! external vector potential A(t_start+dt)
 
-    nb = sbe%nb
+    real(8) :: tau_sub(3), t_sub(3)
+    real(8) :: t_node(2, 3), s_node
+    real(8) :: Ac_node(1:3, 2, 3)
+    integer :: isub
+
+    integer :: ik, nb, nba, i, j, idir, in, im
+
+    complex(8), allocatable :: p_active(:, :, :)
+    complex(8), allocatable :: rho_a(:, :)
+    complex(8), allocatable :: H1(:, :), H2(:, :), HVG(:, :)
+    real(8),    allocatable :: eigen_active(:)
+    real(8),    allocatable :: V_begin(:), V_end(:), X_a(:)
+    complex(8), allocatable :: p_k_full(:, :, :)
+    complex(8), allocatable :: rho_n_full(:, :)
+
+    nb  = sbe%nb
     nba = sbe%n_active_bands
-    
-    if (.not. sbe%etdrk4_initialized) call init_etdrk4_data(sbe, gs, dt)
-    
-    if (t2_sbe_fs > 0.0d0 .and. t2_sbe_fs < 1.0d9) then
-        t2_au = t2_sbe_fs / au_fs
-        prefac = -1.0d0 / (t2_au * gs%eg_au**2)
-        flag_decoh = .true.
-    else
-        flag_decoh = .false.
-    end if
-    
-    !$omp parallel private(rho_a, N_a, C1_a, C2_a, tmp_a, V_a) &
-    !$omp            private(p_k_full, rho_n_full, rho1, rho2, rho3, N1, N2, N3, N4) &
-    !$omp            shared(sbe, gs, Ac, dt, nb, nba, flag_decoh, prefac)
-    
+
+    !-------------------------------------------------------------------------
+    ! The external field is known only at the step endpoints (the analytic
+    ! pulse in realtime_ssbe, or the macroscopic Maxwell field in
+    ! multiscale_ssbe -- both callers supply Ac(t_start) and Ac(t_start+dt)).
+    ! CF4(Gauss-Legendre)+Yoshida needs A at several intermediate sub-nodes;
+    ! we obtain them by linear interpolation in time,
+    !   A(t_start + s*dt) = (1-s) Ac_begin + s Ac_end,   s in [0,1],
+    ! which is consistent with the existing multiscale convention (compare
+    ! the "linear interpolation for A(t+dt/2)" used by the previous ETDRK4
+    ! step) and strictly more accurate than the old approach of treating A as
+    ! constant over the whole step. These nodes are identical for every
+    ! k-point, so they are evaluated once before the OpenMP/k-point loop.
+    !-------------------------------------------------------------------------
+    tau_sub(1) = yoshida_p1 * dt
+    tau_sub(2) = yoshida_p2 * dt
+    tau_sub(3) = yoshida_p1 * dt
+
+    t_sub(1) = t_start
+    t_sub(2) = t_sub(1) + tau_sub(1)
+    t_sub(3) = t_sub(2) + tau_sub(2)
+    ! t_sub(3) + tau_sub(3) = t_start + dt, since p1 + p2 + p1 = 1
+
+    do isub = 1, 3
+        t_node(1, isub) = t_sub(isub) + cf4_c1 * tau_sub(isub)
+        t_node(2, isub) = t_sub(isub) + cf4_c2 * tau_sub(isub)
+
+        s_node = (t_node(1, isub) - t_start) / dt
+        Ac_node(:, 1, isub) = (1d0 - s_node) * Ac_begin + s_node * Ac_end
+
+        s_node = (t_node(2, isub) - t_start) / dt
+        Ac_node(:, 2, isub) = (1d0 - s_node) * Ac_begin + s_node * Ac_end
+    end do
+
+    !$omp parallel default(shared) &
+    !$omp    private(ik, i, j, idir, in, im, isub) &
+    !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a) &
+    !$omp    private(p_k_full, rho_n_full)
+
     if (nba > 0) then
-        allocate(rho_a(nba, nba), N_a(nba, nba), C1_a(nba, nba), &
-                 C2_a(nba, nba), tmp_a(nba, nba), V_a(nba, nba))
-    else
-        allocate(rho_a(1, 1), N_a(1, 1), C1_a(1, 1), &
-                 C2_a(1, 1), tmp_a(1, 1), V_a(1, 1))
+        allocate(p_active(nba, nba, 3), rho_a(nba, nba))
+        allocate(H1(nba, nba), H2(nba, nba), HVG(nba, nba))
+        allocate(eigen_active(nba), V_begin(nba), V_end(nba), X_a(nba))
     end if
-    
-    allocate(p_k_full(nb, nb, 1:3))
-    allocate(rho_n_full(nb, nb), rho1(nb, nb), rho2(nb, nb), rho3(nb, nb))
-    allocate(N1(nb, nb), N2(nb, nb), N3(nb, nb), N4(nb, nb))
-    
-    !$omp do private(ik, i, j, idir, n, m, in, im, delta_e)
+    allocate(p_k_full(nb, nb, 1:3), rho_n_full(nb, nb))
+
+    !$omp do
     do ik = sbe%ik_min, sbe%ik_max
-        
-        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
-        if (sbe%flag_vnl_correction) p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
-        
-        rho_n_full(:, :) = sbe%rho(:, :, ik)
-        
-        ! V_a = A·p (Константа на шаге для прямого сравнения с Тейлором)
-        V_a = dcmplx(0d0, 0d0)
-        do idir = 1, 3
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    V_a(i, j) = V_a(i, j) + Ac(idir) * p_k_full(in, im, idir)
+
+        if (nba > 0) then
+            p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+            if (sbe%flag_vnl_correction) p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+            rho_n_full(:, :) = sbe%rho(:, :, ik)
+
+            ! Restrict to the active subspace (frozen core/free bands excluded)
+            do idir = 1, 3
+                do j = 1, nba
+                    im = sbe%active_idx(j)
+                    do i = 1, nba
+                        in = sbe%active_idx(i)
+                        p_active(i, j, idir) = p_k_full(in, im, idir)
+                    end do
                 end do
             end do
-        end do
-        
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j)
-            rho_a(i, j) = rho_n_full(in, im)
-        end do; end do
-        
-        ! =====================================================================
-        ! STAGE 1: N1 = N(rho_n)
-        ! =====================================================================
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
-        N_a = -zi * C1_a
-        if (flag_decoh) then
-            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
-            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
-            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
-            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
-            
-            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
-            ! tmp_a = [H0, rho]
+            do i = 1, nba
+                eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
+            end do
             do j = 1, nba; do i = 1, nba
                 in = sbe%active_idx(i); im = sbe%active_idx(j)
-                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = -delta_e * C1_a(i, j)
-                tmp_a(i, j) = delta_e * rho_a(i, j)
+                rho_a(i, j) = rho_n_full(in, im)
             end do; end do
-            
-            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            ! C2_a += [V, [V, rho]]  (прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            N_a = N_a + prefac * C2_a
+            do i = 1, nba
+                X_a(i) = sbe%X_branch(sbe%active_idx(i), ik)
+            end do
+
+            !-----------------------------------------------------------------
+            ! Step 1: D(h/2) -- Strang/Hadamard dephasing, tau = +h/2 > 0
+            !-----------------------------------------------------------------
+            if (sbe%flag_decoh) then
+                call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
+                call houston_dephase(nba, rho_a, HVG, p_active, Ac_begin, X_a, &
+                                     sbe%lambda_decoh, 0.5d0 * dt, V_begin)
+            else
+                V_begin = 0d0
+            end if
+
+            !-----------------------------------------------------------------
+            ! Step 2: S4_unitary = S2(p1 h) o S2(p2 h) o S2(p1 h)
+            ! Each S2(tau) is a CF4 (two-exponential) commutator-free Magnus
+            ! step on the two Gauss-Legendre nodes spanning that sub-interval.
+            ! A negative tau (the middle Yoshida jump) is just a backward-time
+            ! unitary rotation -- exact and unconditionally safe.
+            !-----------------------------------------------------------------
+            do isub = 1, 3
+                call build_HVG(nba, eigen_active, p_active, Ac_node(:, 1, isub), H1)
+                call build_HVG(nba, eigen_active, p_active, Ac_node(:, 2, isub), H2)
+                call cf4_unitary_step(nba, rho_a, H1, H2, tau_sub(isub))
+            end do
+
+            !-----------------------------------------------------------------
+            ! Step 3: D(h/2) -- Strang/Hadamard dephasing, tau = +h/2 > 0
+            !-----------------------------------------------------------------
+            if (sbe%flag_decoh) then
+                call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
+                call houston_dephase(nba, rho_a, HVG, p_active, Ac_end, X_a, &
+                                     sbe%lambda_decoh, 0.5d0 * dt, V_end)
+            else
+                V_end = 0d0
+            end if
+
+            ! Branch-position update via the midpoint (average of endpoint)
+            ! velocities -- consistent with the overall 4th-order accuracy of
+            ! CF4 (a forward-Euler X_a += V_a(t_start)*h would degrade the
+            ! scheme to 1st order in the branch coordinates).
+            do i = 1, nba
+                sbe%X_branch(sbe%active_idx(i), ik) = X_a(i) + 0.5d0 * (V_begin(i) + V_end(i)) * dt
+            end do
+
+            ! Scatter the evolved active block back into the full matrix
+            do j = 1, nba; do i = 1, nba
+                in = sbe%active_idx(i); im = sbe%active_idx(j)
+                rho_n_full(in, im) = rho_a(i, j)
+            end do; end do
+            sbe%rho(:, :, ik) = rho_n_full(:, :)
         end if
-        N1 = dcmplx(0d0, 0d0)
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); N1(in, im) = N_a(i, j)
-        end do; end do
-        
-        ! rho1 = E2 * rho_n + Q * N1
-        do m = 1, nb; do n = 1, nb
-            rho1(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) + sbe%phi1_half(n, m, ik) * N1(n, m)
-        end do; end do
-        
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); rho_a(i, j) = rho1(in, im)
+
+        ! Hermiticity (numerical safeguard)
+        do j = 1, nb; do i = 1, nb
+            sbe%rho(i, j, ik) = 0.5d0 * (sbe%rho(i, j, ik) + conjg(sbe%rho(j, i, ik)))
         end do; end do
 
-        ! =====================================================================
-        ! STAGE 2: N2 = N(rho1)
-        ! =====================================================================
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
-        N_a = -zi * C1_a
-        if (flag_decoh) then
-            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
-            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
-            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
-            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
-            
-            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
-            ! tmp_a = [H0, rho]
-            do j = 1, nba; do i = 1, nba
-                in = sbe%active_idx(i); im = sbe%active_idx(j)
-                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = -delta_e * C1_a(i, j)
-                tmp_a(i, j) = delta_e * rho_a(i, j)
-            end do; end do
-            
-            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            ! C2_a += [V, [V, rho]]  (прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            N_a = N_a + prefac * C2_a
-        end if
-        N2 = dcmplx(0d0, 0d0)
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); N2(in, im) = N_a(i, j)
-        end do; end do
-        
-        ! rho2 = E2 * rho_n + Q * N2
-        do m = 1, nb; do n = 1, nb
-            rho2(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho_n_full(n, m) + sbe%phi1_half(n, m, ik) * N2(n, m)
-        end do; end do
-        
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); rho_a(i, j) = rho2(in, im)
-        end do; end do
-
-        ! =====================================================================
-        ! STAGE 3: N3 = N(rho2)
-        ! =====================================================================
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
-        N_a = -zi * C1_a
-        if (flag_decoh) then
-            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
-            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
-            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
-            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
-            
-            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
-            ! tmp_a = [H0, rho]
-            do j = 1, nba; do i = 1, nba
-                in = sbe%active_idx(i); im = sbe%active_idx(j)
-                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = -delta_e * C1_a(i, j)
-                tmp_a(i, j) = delta_e * rho_a(i, j)
-            end do; end do
-            
-            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            ! C2_a += [V, [V, rho]]  (прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            N_a = N_a + prefac * C2_a
-        end if
-        N3 = dcmplx(0d0, 0d0)
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); N3(in, im) = N_a(i, j)
-        end do; end do
-        
-        ! rho3 = E2 * rho1 + Q * (2*N3 - N1)
-        do m = 1, nb; do n = 1, nb
-            rho3(n, m) = sbe%exp_Ldt_half(n, m, ik) * rho1(n, m) + sbe%phi1_half(n, m, ik) * (2d0 * N3(n, m) - N1(n, m))
-        end do; end do
-        
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); rho_a(i, j) = rho3(in, im)
-        end do; end do
-
-        ! =====================================================================
-        ! STAGE 4: N4 = N(rho3)
-        ! =====================================================================
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(1d0, 0d0), V_a, nba, rho_a, nba, dcmplx(0d0, 0d0), C1_a, nba)
-        call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), rho_a, nba, V_a, nba, dcmplx(1d0, 0d0), C1_a, nba)
-        N_a = -zi * C1_a
-        if (flag_decoh) then
-            ! Строгий Wismer-Yakovlev для VG: L_VG = H0 - V
-            ! Раскрытие: -[H0,[V,rho]] - [V,[H0,rho]] + [V,[V,rho]]
-            ! (знаки подобраны так, чтобы после умножения на prefac=-gamma/2
-            !  получить правильные +gamma/2, +gamma/2, -gamma/2)
-            
-            ! C2_a = -[H0, [V, rho]]  (обратите внимание на МИНУС!)
-            ! tmp_a = [H0, rho]
-            do j = 1, nba; do i = 1, nba
-                in = sbe%active_idx(i); im = sbe%active_idx(j)
-                delta_e = gs%eigen(in, ik) - gs%eigen(im, ik)
-                C2_a(i, j) = -delta_e * C1_a(i, j)
-                tmp_a(i, j) = delta_e * rho_a(i, j)
-            end do; end do
-            
-            ! C2_a -= [V, [H0, rho]]  (вычитаем, а не прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), V_a, nba, tmp_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), tmp_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            ! C2_a += [V, [V, rho]]  (прибавляем!)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx( 1d0, 0d0), V_a, nba, C1_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            call ZGEMM("N", "N", nba, nba, nba, dcmplx(-1d0, 0d0), C1_a, nba, V_a, nba, dcmplx(1d0, 0d0), C2_a, nba)
-            
-            N_a = N_a + prefac * C2_a
-        end if
-        N4 = dcmplx(0d0, 0d0)
-        do j = 1, nba; do i = 1, nba
-            in = sbe%active_idx(i); im = sbe%active_idx(j); N4(in, im) = N_a(i, j)
-        end do; end do
-        
-        ! =====================================================================
-        ! FINAL UPDATE (Точная формула KT2005)
-        ! ВНИМАНИЕ: Множитель dt уже зашит в f1, f2, f3 при инициализации!
-        ! =====================================================================
-        do m = 1, nb; do n = 1, nb
-            sbe%rho(n, m, ik) = sbe%exp_Ldt(n, m, ik) * rho_n_full(n, m) &
-                              + sbe%phi1(n, m, ik) * N1(n, m) &
-                              + 2.0d0 * sbe%phi2(n, m, ik) * (N2(n, m) + N3(n, m)) &
-                              + sbe%phi3(n, m, ik) * N4(n, m)
-        end do; end do
-        
-        ! Hermiticity
-        do m = 1, nb; do n = 1, nb
-            sbe%rho(n, m, ik) = 0.5d0 * (sbe%rho(n, m, ik) + conjg(sbe%rho(m, n, ik)))
-        end do; end do
-        
-        ! Freeze deep zones
-        do m = 1, nb; do n = 1, nb
-            if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
-                if (n == m) then
-                    if (gs%occup(n, ik) > 0.5d0) then
-                        sbe%rho(n, m, ik) = dcmplx(2.0d0, 0.0d0)
+        ! Freeze deep core/high-energy zones
+        do j = 1, nb; do i = 1, nb
+            if (.not. (sbe%is_active(i) .and. sbe%is_active(j))) then
+                if (i == j) then
+                    if (gs%occup(i, ik) > 0.5d0) then
+                        sbe%rho(i, j, ik) = dcmplx(2.0d0, 0.0d0)
                     else
-                        sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
+                        sbe%rho(i, j, ik) = dcmplx(0.0d0, 0.0d0)
                     end if
                 else
-                    sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
+                    sbe%rho(i, j, ik) = dcmplx(0.0d0, 0.0d0)
                 end if
             end if
         end do; end do
-        
+
     end do
     !$omp end do
-    
-    deallocate(rho_a, N_a, C1_a, C2_a, tmp_a, V_a)
-    deallocate(p_k_full, rho_n_full, rho1, rho2, rho3, N1, N2, N3, N4)
+
+    if (nba > 0) then
+        deallocate(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a)
+    end if
+    deallocate(p_k_full, rho_n_full)
     !$omp end parallel
-    
-end subroutine dt_evolve_bloch_etdrk4
 
-subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
+end subroutine dt_evolve_bloch_cf4
+
+
+! Build the instantaneous velocity-gauge Hamiltonian in the active subspace:
+!   H_VG(t) = diag(eigen) + A(t) . pi
+subroutine build_HVG(nba, eigen_active, p_active, Ac, H)
     implicit none
-    type(s_sbe_bloch_solver), intent(inout) :: sbe
-    type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), intent(in) :: Ac(1:3)
-    real(8), intent(in) :: dt
-    integer :: nb, nk, ik, n, m
+    integer,    intent(in)  :: nba
+    real(8),    intent(in)  :: eigen_active(nba)
+    complex(8), intent(in)  :: p_active(nba, nba, 3)
+    real(8),    intent(in)  :: Ac(3)
+    complex(8), intent(out) :: H(nba, nba)
+    integer :: i, idir
 
-    complex(8) :: hrho1_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho2_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho3_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: hrho4_k(1:sbe%nb, 1:sbe%nb)
-    complex(8) :: p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3)
+    H = Ac(1) * p_active(:, :, 1) + Ac(2) * p_active(:, :, 2) + Ac(3) * p_active(:, :, 3)
+    do i = 1, nba
+        H(i, i) = H(i, i) + eigen_active(i)
+    end do
+end subroutine build_HVG
 
-    nb = sbe%nb 
-    nk = sbe%nk
 
-    !$omp parallel do default(shared) private(ik, p_rvnl_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k, n, m)
-    do ik = sbe%ik_min, sbe%ik_max
-        p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
-        if (sbe%flag_vnl_correction) then
-            p_rvnl_k = p_rvnl_k + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
-        end if
+! Single CF4 (commutator-free Magnus, 4th order) sub-step of length tau,
+! evaluated on the two Gauss-Legendre Hamiltonians H1=H(t+c1*tau), H2=H(t+c2*tau):
+!   Omega1 = tau (alpha1 H1 + alpha2 H2),  Omega2 = tau (alpha2 H1 + alpha1 H2)
+!   rho <- exp(-i Omega2) exp(-i Omega1) rho exp(+i Omega1) exp(+i Omega2)
+! Implemented as two successive exact unitary rotations (each built from an
+! eigendecomposition of the Hermitian generator, so no Pade/Krylov truncation
+! error is introduced -- the propagator is exactly unitary to machine precision).
+subroutine cf4_unitary_step(nba, rho, H1, H2, tau)
+    implicit none
+    integer,    intent(in)    :: nba
+    complex(8), intent(inout) :: rho(nba, nba)
+    complex(8), intent(in)    :: H1(nba, nba), H2(nba, nba)
+    real(8),    intent(in)    :: tau
+    complex(8) :: Omega(nba, nba)
 
-        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
-        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, hrho2_k)
-        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, hrho3_k)
-        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, hrho4_k)
+    Omega = tau * (cf4_alpha1 * H1 + cf4_alpha2 * H2)
+    call apply_unitary_rotation(nba, rho, Omega)
 
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho1_k * (- zi * dt)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
+    Omega = tau * (cf4_alpha2 * H1 + cf4_alpha1 * H2)
+    call apply_unitary_rotation(nba, rho, Omega)
+end subroutine cf4_unitary_step
 
-        ! УБРАЛИ эрмитизацию здесь!
-        
-        ! Frozen Core Enforcement (не работает при ±100 эВ, но оставляем для полноты)
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
-                    if (n == m) then
-                        if (gs%occup(n, ik) > 0.5d0) then
-                            sbe%rho(n, m, ik) = dcmplx(2.0d0, 0.0d0)
-                        else
-                            sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
-                        end if
-                    else
-                        sbe%rho(n, m, ik) = dcmplx(0.0d0, 0.0d0)
-                    end if
-                end if
-            end do
+
+! Apply rho -> U rho U^dagger with U = exp(-i*Omega) for Hermitian Omega,
+! computed exactly via eigendecomposition Omega = W diag(lambda) W^dagger:
+!   U rho U^dagger = W [ exp(-i lambda_i) (W^dagger rho W)_ij exp(+i lambda_j) ] W^dagger
+subroutine apply_unitary_rotation(nba, rho, Omega)
+    use eigen_lapack, only: eigen_zheev
+    implicit none
+    integer,    intent(in)    :: nba
+    complex(8), intent(inout) :: rho(nba, nba)
+    complex(8), intent(in)    :: Omega(nba, nba)
+
+    real(8)    :: evals(nba)
+    complex(8) :: W(nba, nba), t1(nba, nba), t2(nba, nba)
+    integer :: i, j
+
+    call eigen_zheev(Omega, evals, W)
+
+    call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, rho, nba, dcmplx(0d0, 0d0), t1, nba)
+    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,   nba, dcmplx(0d0, 0d0), t2, nba)
+
+    do j = 1, nba
+        do i = 1, nba
+            t2(i, j) = t2(i, j) * exp(dcmplx(0d0, -(evals(i) - evals(j))))
         end do
     end do
-    return
 
-contains
+    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, t2, nba, dcmplx(0d0, 0d0), t1, nba)
+    call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,  nba, dcmplx(0d0, 0d0), rho, nba)
+end subroutine apply_unitary_rotation
 
-    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
-        use phys_constants, only: au_fs
-        use salmon_global, only: t2_sbe_fs
-        implicit none
-        integer, intent(in) :: ik
-        complex(8), intent(in) :: rho_k(nb, nb)
-        complex(8), intent(in) :: p_k(nb, nb, 1:3)
-        complex(8), intent(out) :: hrho_k(nb, nb)
-        integer :: idir, ib, n, m
-        real(8) :: t2_au, prefac
-        complex(8) :: C2_k(nb, nb), Heff_k(nb, nb)
 
-        hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
+! Strang/Hadamard Kuhn-Zurek/Caldeira-Leggett dephasing step (exactly CPTP for
+! any tau >= 0, by the Schoenberg/Bochner positive-definiteness of the
+! Gaussian/RBF kernel combined with the Schur product theorem):
+!   1) diagonalize the instantaneous H_VG(t) -> Houston (adiabatic) basis U, {E_a}
+!   2) rotate rho~ = U^dagger rho U
+!   3) rho~_ab <- exp[-lambda (X_a - X_b)^2 * tau] * rho~_ab     (Hadamard product
+!      with a positive-semi-definite Gram/RBF matrix => exactly CPTP)
+!   4) rotate back rho = U rho~ U^dagger
+! Also returns the instantaneous branch (group) velocities in the field
+! polarization direction, V_a = [(U^dagger pi U)_aa . e_hat] + (A . e_hat),
+! i.e. the projection of v = p + A onto the unit vector of the external
+! vector potential (or a fixed reference axis when A ~ 0). These feed the
+! midpoint update of the branch positions X_a used by the next dephasing step.
+subroutine houston_dephase(nba, rho, H, p_active, Ac, X, lambda, tau, V)
+    use eigen_lapack, only: eigen_zheev
+    implicit none
+    integer,    intent(in)    :: nba
+    complex(8), intent(inout) :: rho(nba, nba)
+    complex(8), intent(in)    :: H(nba, nba)
+    complex(8), intent(in)    :: p_active(nba, nba, 3)
+    real(8),    intent(in)    :: Ac(3)
+    real(8),    intent(in)    :: X(nba)
+    real(8),    intent(in)    :: lambda, tau
+    real(8),    intent(out)   :: V(nba)
 
-        do idir = 1, 3
-            call ZGEMM("N","N", nb, nb, nb, dcmplx(+Ac(idir), 0d0), p_k(:, :, idir), nb, &
-                rho_k(:, :), nb, dcmplx(1d0, 0d0), hrho_k(:, :), nb)
-            call ZGEMM("N","N", nb, nb, nb, dcmplx(-Ac(idir), 0d0), rho_k(:, :), nb, &
-                p_k(:, :, idir), nb, dcmplx(1d0, 0d0), hrho_k(:, :), nb)
+    real(8)    :: evals(nba), ehat(3), Ac_norm
+    complex(8) :: W(nba, nba), t1(nba, nba), t2(nba, nba)
+    integer :: i, j, idir
+
+    call eigen_zheev(H, evals, W)
+
+    ! rho~ = U^dagger rho U
+    call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, rho, nba, dcmplx(0d0, 0d0), t1, nba)
+    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,   nba, dcmplx(0d0, 0d0), t2, nba)
+
+    ! Exact Hadamard/Gaussian kernel (PSD for tau >= 0)
+    do j = 1, nba
+        do i = 1, nba
+            t2(i, j) = t2(i, j) * exp(-lambda * (X(i) - X(j))**2 * tau)
         end do
+    end do
 
-        if (0.0d0 < t2_sbe_fs .and. t2_sbe_fs < 1.0d9) then
-            t2_au = t2_sbe_fs / au_fs
-            prefac = -1.0d0 / (t2_au * gs%eg_au**2)
+    ! rho = U rho~ U^dagger
+    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, t2, nba, dcmplx(0d0, 0d0), t1, nba)
+    call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,  nba, dcmplx(0d0, 0d0), rho, nba)
 
-            Heff_k = 0d0
-            do ib = 1, nb
-                Heff_k(ib, ib) = gs%eigen(ib, ik)
-            end do
-            do idir = 1, 3
-                Heff_k = Heff_k + Ac(idir) * p_k(:, :, idir)
-            end do
+    ! Branch velocities, projected on the polarization direction of A(t)
+    Ac_norm = sqrt(dot_product(Ac, Ac))
+    if (Ac_norm > 1.0d-12) then
+        ehat = Ac / Ac_norm
+    else
+        ehat = (/ 1d0, 0d0, 0d0 /)
+    end if
 
-            C2_k = 0d0
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(1d0, 0d0), Heff_k, nb, hrho_k, nb, dcmplx(0d0, 0d0), C2_k, nb)
-            call ZGEMM("N", "N", nb, nb, nb, dcmplx(-1d0, 0d0), hrho_k, nb, Heff_k, nb, dcmplx(1d0, 0d0), C2_k, nb)
-
-            hrho_k = hrho_k + zi * (prefac * C2_k)
-        endif
-        
-        ! Маскирование производной для замороженных зон
-        do m = 1, nb
-            do n = 1, nb
-                if (.not. (sbe%is_active(n) .and. sbe%is_active(m))) then
-                    hrho_k(n, m) = dcmplx(0.0d0, 0.0d0)
-                end if
-            end do
+    V = 0d0
+    do idir = 1, 3
+        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, p_active(:, :, idir), nba, dcmplx(0d0, 0d0), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,                     nba, dcmplx(0d0, 0d0), t2, nba)
+        do i = 1, nba
+            V(i) = V(i) + ehat(idir) * (real(t2(i, i)) + Ac(idir))
         end do
-        
-    end subroutine calc_hrho_bloch_k
-end subroutine
+    end do
+end subroutine houston_dephase
+
+
 end module
