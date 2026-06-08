@@ -10,20 +10,46 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Install toolchain (gfortran, OpenMPI, LAPACK)
+      - name: Install Toolchain (gfortran, OpenMPI, LAPACK)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gfortran openmpi-bin libopenmpi-dev liblapack-dev libblas-dev cmake
+          sudo apt-get install -y gfortran openmpi-bin libopenmpi-dev liblapack-dev libblas-dev cmake python3
 
-      - name: Configure
+      - name: Clean and Configure SALMON
         run: |
+          # Eliminate stale tracking or Docker cache directories causing conflicts
+          rm -rf build CMakeCache.txt CMakeFiles/
+          
           mkdir -p build
-          cmake -S . -B build \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_Fortran_COMPILER=mpif90 \
-                -DCMAKE_C_COMPILER=mpicc
+          cd build
+          
+          # Use official SALMON documentation build convention
+          python3 ../configure.py \
+            CC=mpicc \
+            FC=mpif90 \
+            --prefix=../
 
-      - name: Build
-        run: cmake --build build --parallel $(nproc)
+      - name: Build SALMON
+        run: |
+          cd build
+          make -j$(nproc)
+
+      - name: Install SALMON
+        run: |
+          cd build
+          make install
+
+      - name: Verify Build Execution
+        run: |
+          # Verify binary generation in installation prefix bin folder
+          if [ -f "./bin/salmon" ]; then
+            echo "SALMON binary successfully installed!"
+            # Execution check (may exit non-zero without input file; verify path presence)
+            ls -la ./bin/salmon
+          else
+            echo "Error: SALMON binary compilation/installation failed."
+            exit 1
+          fi
