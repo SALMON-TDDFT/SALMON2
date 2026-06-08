@@ -136,6 +136,16 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 ## Minimal EPM → SBE Pipeline Example
 
+### Standalone Python reference (`epm_gaas_reference.py`)
+
+For quick debugging without building/running SALMON, the repository root also contains `epm_gaas_reference.py` -- a monolithic, single-machine NumPy/SciPy reimplementation of the GaAs Cohen-Bergstresser local-EPM solver (no MPI/OpenMP). It builds the same lattice/plane-wave basis/Hamiltonian/momentum matrices as `src/epm`, and writes byte-compatible `SYSNAME_k.data`/`_eigen.data`/`_tm.data` files that `gs_info_ssbe` can read directly -- so its output can be diffed against the Fortran `theory='epm'` run, or fed straight into an SBE real-time calculation. All parameters (lattice constant, plane-wave cutoff, k-grid, number of bands/electrons, sysname) are hardcoded constants at the top of the script -- edit them there and run:
+
+```sh
+python3 epm_gaas_reference.py
+```
+
+This is a debugging aid only -- `theory='epm'` in SALMON remains the primary, MPI/OpenMP-parallel ground-state path.
+
 ```fortran
 ! Step 1: ground state via local EPM (writes GaAs_k/_eigen/_tm.data)
 &calculation
