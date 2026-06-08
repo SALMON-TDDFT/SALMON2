@@ -1,28 +1,26 @@
-# SALMON2-SBE — SALMON fork with Advanced SBE Dephasing & ETDRK4
+# SALMON2-SBE — SALMON fork with CF4/Yoshida SBE propagation, CPTP decoherence & EPM ground states
 
 This repository is a fork of the original [SALMON project](http://salmon-tddft.jp/), an open-source software package for *ab-initio* quantum-mechanical calculations of light-matter interactions. 
 
-This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with **state-of-the-art exponential time-differencing integrators**, **frozen-core optimizations**, and **physically rigorous decoherence models** tailored for strong-field and attosecond physics.
+This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with a **commutator-free Magnus 4 (CF4) / Suzuki-Yoshida exponential propagator**, a **strictly CPTP Kuhn-Zurek/Caldeira-Leggett decoherence model**, **frozen-core optimizations**, and a self-contained **local Empirical Pseudopotential Method (EPM)** ground-state solver (Cohen-Bergstresser, GaAs) that closes the EPM → SBE pipeline without external scripts.
+
 
 ## Key Fork Features
 
-### 1. Physically Rigorous Decoherence ($H_0$ vs $H_{eff}$)
-Standard phenomenological dephasing ($-\rho_{nm}/T_2$) breaks gauge invariance. Earlier strong-field models (e.g., *arXiv:2012.00994*) attempted to fix this using a gauge-covariant double-commutator based on the instantaneous dressed Hamiltonian: $H_{eff} = H_0 + \mathbf{A}(t)\cdot\mathbf{p}$. 
+### 1. Strictly CPTP Kuhn-Zurek/Caldeira-Leggett Decoherence
+Phenomenological dephasing schemes (whether $-\rho_{nm}/T_2$ in the field-free basis, or double-commutator dissipators built from the instantaneous dressed Hamiltonian $H_{eff}=H_0+\mathbf{A}(t)\cdot\mathbf{p}$) generally fail to be **completely positive and trace preserving (CPTP)** for arbitrary parameters/timesteps, and can introduce artifacts such as spurious adiabatic-following relaxation in strong fields.
 
-**The Strong-Field Artifact:** 
-While mathematically gauge-covariant, using $H_{eff}$ in the dissipator causes a catastrophic physical artifact in strong fields ($>10$ MV/cm): the system is forced to relax toward the *instantaneous* eigenstates of $H_{eff}(t)$. This suppresses non-adiabatic Zener tunneling and causes excited carriers to artificially "drain" back into the valence band once the laser pulse turns off (the *adiabatic following* artifact).
+This fork instead implements a **Kuhn-Zurek/Caldeira-Leggett wave-packet dephasing model** that is *exactly* CPTP by construction:
+* At every step the instantaneous (Houston/adiabatic) eigenbasis $U(t)$ of $H_{VG}(t)=H_0+\mathbf{A}(t)\cdot\mathbf{p}$ is computed, together with the branch (wave-packet) positions $X_a(t)$, propagated via their group velocities $V_a = (U^\dagger\boldsymbol{\pi}U)_{aa}+\mathbf{A}(t)$.
+* The density matrix is rotated into this basis, $\tilde\rho = U^\dagger\rho U$, and dephased through an **exact Hadamard/Gaussian (RBF) kernel** $\tilde\rho_{ab}\leftarrow e^{-\lambda (X_a-X_b)^2\,\tau}\,\tilde\rho_{ab}$.
+* By the Schoenberg/Bochner positive-definiteness of the Gaussian kernel and the Schur product theorem, this Hadamard map is CPTP for **any** $\tau\ge 0$ — no positivity violations, no ad-hoc clipping.
+* The decoherence rate is set physically via $\lambda = k_B T/\tau_m$ (`sbe_decoh_temperature_k`, `sbe_decoh_tau_m_fs`).
 
-**The Solution (Pure $H_0$ Dephasing):**
-To correctly capture irreversible carrier accumulation and match *ab-initio* TDDFT benchmarks, this fork implements **pure dephasing in the field-free Bloch basis**, governed by $H_0$. 
-* It strictly damps interband coherences without artificially dragging populations back to the ground state.
-* It correctly preserves strong-field Zener tunneling and residual conduction-band populations.
-* This approach aligns with the strict velocity-gauge Lindblad derivations by Wismer & Yakovlev (*Phys. Rev. B 97, 144302, 2018*) and recent findings on momentum-resolved electron-phonon scattering (Korolev et al., *2026*).
-
-### 2. ETDRK4 Time Integrator
-Replaces the standard Taylor-4 propagator with a **4th-order Exponential Time Differencing Runge-Kutta (ETDRK4)** scheme (Kassam & Trefethen, *SIAM J. Sci. Comput.*, 2005).
-* **Exact Linear Evolution:** Fast phase oscillations from deep valence/high conduction bands are integrated exactly via matrix exponentials, eliminating polynomial phase-drift errors.
-* **Contour Integral Stabilization:** $\phi$-functions are computed via complex contour integration to avoid catastrophic numerical cancellation near degenerate bands.
-* **Massive Speedup:** Allows time steps of $\Delta t \sim 1.0 - 5.0$ a.u. (compared to $\Delta t < 0.1$ a.u. for Taylor-4), yielding a **10-50× speedup** at equal or better accuracy.
+### 2. CF4 + Suzuki-Yoshida Exponential Propagator
+Replaces the previous ETDRK4/Taylor-4 propagators with a **commutator-free Magnus 4th-order (CF4)** exponential integrator evaluated on two-point Gauss-Legendre quadrature nodes, composed into a 4th-order scheme via the **Suzuki-Yoshida triple-jump** ($p_1=1.35120719196$, $p_2=-1.70241438392$):
+* Each CF4 sub-step is realized as **two exact unitary rotations** $\rho \to e^{-i\Omega_2}e^{-i\Omega_1}\rho\, e^{+i\Omega_1}e^{+i\Omega_2}$, with $\Omega_{1,2}$ Hermitian combinations of the Hamiltonian sampled at the Gauss-Legendre nodes, exponentiated *exactly* via eigendecomposition (no Padé/Krylov truncation error — unitary to machine precision).
+* The full step combines the coherent and dissipative parts via **Strang splitting**, $D(h/2)\circ\big[S_2(p_1h)\circ S_2(p_2h)\circ S_2(p_1h)\big]\circ D(h/2)$, with the Suzuki-Yoshida composition wrapping **only** the unitary part. This is essential for CPTP: a negative sub-step ($p_2 h<0$) is a harmless backward-time *unitary* rotation, but applying it to the dissipator would invert the sign of the Hadamard kernel exponent and break positive semi-definiteness.
+* Branch positions $X_a$ are advanced using the **midpoint (average of endpoint) velocities**, matching the overall 4th-order accuracy of CF4 (a forward-Euler update would degrade the scheme to 1st order).
 
 ### 3. Frozen Core / Active Subspace Optimization
 For systems with many deep bands (e.g., 80 bands where 60 lie below -20 eV), evaluating the nonlinear commutator $[V, \rho]$ is computationally wasteful. This fork introduces an **Active Subspace** projection:
@@ -33,20 +31,29 @@ For systems with many deep bands (e.g., 80 bands where 60 lie below -20 eV), eva
 ### 4. Exact Current Operator
 Computes the total current as $J = \text{Tr}[(\mathbf{p} + \mathbf{A}) \rho]$ (in atomic units) without relying on perturbative expansions, ensuring proper inter/intra-band compensation in the Velocity Gauge. Hermiticity stabilization (`ρ = ρ†`) is enforced at each step to maintain real-valued currents and FFT stability.
 
+### 5. Local Empirical Pseudopotential Method (EPM) ground states
+A self-contained local-EPM ground-state solver (`theory='epm'`, `src/epm`) that computes the Cohen-Bergstresser band structure and momentum matrix elements for zincblende GaAs directly in SALMON, and writes `SYSNAME_k.data`/`SYSNAME_eigen.data`/`SYSNAME_tm.data` in exactly the format read by `gs_info_ssbe` — closing the EPM → SBE pipeline end-to-end without external scripts (`rvnl_tm` is written as identically zero, since a local pseudopotential has no nonlocal velocity correction).
+
 ---
 
-## The ETDRK4 Operator Splitting
+## The CF4 + Suzuki-Yoshida + CPTP Operator Splitting
 
-The method exploits the structure of the SBE by splitting the Liouville-von Neumann equation into linear and nonlinear parts: $\partial_t \rho = L\rho + N(\rho, t)$.
+The propagator advances $\partial_t\rho = -i[H_{VG}(t),\rho] + \mathcal{D}[\rho]$ over a step $h$ as
 
-**Linear operator $L$ (integrated exactly via $e^{L\Delta t}$):**
-* Diagonal in the band basis: $L_{nm} = -i(\varepsilon_n - \varepsilon_m) - \Gamma_{nm}$
-* Contains the unperturbed Hamiltonian evolution $-i[H_0, \rho]$.
-* Includes static field-free decoherence: $\Gamma_{nm} = (\varepsilon_n - \varepsilon_m)^2 / (T_2 E_g^2)$ for active bands.
+$$\rho(t+h) = D(h/2)\circ\Big[S_2(p_1 h)\circ S_2(p_2 h)\circ S_2(p_1 h)\Big]\circ D(h/2)\,[\rho(t)]$$
 
-**Nonlinear operator $N$ (integrated via RK4 quadrature):**
-* Contains the light-matter interaction: $N = -i[\mathbf{A}(t)\cdot\mathbf{p}, \rho]$.
-* Evaluated at 4 intermediate stages using the exact Kassam-Trefethen coefficients ($f_1, f_2, f_3, Q$).
+**Unitary part $S_2(\tau)$ — CF4 on Gauss-Legendre nodes** (nodes $c_{1,2}=\tfrac12\mp\tfrac{\sqrt3}{6}$, weights $\alpha_{1,2}=\tfrac14\pm\tfrac{\sqrt3}{6}$):
+* $H_1=H_{VG}(t+c_1\tau)$, $H_2=H_{VG}(t+c_2\tau)$
+* $\Omega_1=\tau(\alpha_1 H_1+\alpha_2 H_2)$, $\Omega_2=\tau(\alpha_2 H_1+\alpha_1 H_2)$
+* $\rho \to e^{-i\Omega_2}e^{-i\Omega_1}\,\rho\,e^{+i\Omega_1}e^{+i\Omega_2}$, each exponential built *exactly* from an eigendecomposition of the Hermitian generator (unitary to machine precision).
+
+**Dissipative part $D(\tau)$ — Strang/Hadamard Kuhn-Zurek dephasing** (always applied with $\tau=+h/2 > 0$):
+* Diagonalize $H_{VG}(t)\to U(t),\ \{E_a\}$ (Houston/adiabatic basis); $\tilde\rho = U^\dagger\rho U$
+* $\tilde\rho_{ab}\leftarrow \exp[-\lambda(X_a-X_b)^2\tau]\,\tilde\rho_{ab}$ (PSD Hadamard/Gaussian kernel ⇒ exactly CPTP for $\tau\ge0$)
+* Rotate back $\rho = U\tilde\rho U^\dagger$; update $X_a \mathrel{+}= \tfrac12(V_a(t)+V_a(t+h))\,h$, with $V_a=(U^\dagger\boldsymbol\pi U)_{aa}+\mathbf{A}(t)$.
+
+**Why Yoshida wraps only the unitary part:** the middle Yoshida sub-step has $p_2 h<0$. For $S_2$ this is merely a unitary rotation run backwards in time — exact and always valid. For $D$, however, a negative $\tau$ would turn the Gaussian kernel $e^{-\lambda\Delta X^2\tau}$ into $e^{+\lambda\Delta X^2|\tau|}$, which is not positive semi-definite (violates the Schoenberg/Bochner criterion and the Schur product theorem) and would break CPTP. Hence $D$ is applied only with $\tau=+h/2$, via Strang splitting around the (always-safe) Yoshida-composed unitary block.
+
 ---
 
 ## Configuration Parameters
@@ -55,12 +62,20 @@ The `&sbe` namelist now accepts the following parameters:
 
 | Parameter | Units | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `t2_sbe_fs` | fs | `1.0d10` | Dephasing time. Set to `< 1.0d9` to enable $H_0$-based energy-dependent dephasing. |
-| `eg_ev` | eV | `-1.0d0` | Bandgap scale for the dephasing prefactor. `-1.0` triggers auto-calculation from the band structure. |
+| `sbe_decoh_temperature_k` | K | `-1.0d0` | Bath temperature $T$ for the Kuhn-Zurek/Caldeira-Leggett dephasing rate $\lambda=k_B T/\tau_m$. Both this and `sbe_decoh_tau_m_fs` must be `> 0` to enable decoherence. |
+| `sbe_decoh_tau_m_fs` | fs | `-1.0d0` | Wave-packet momentum-relaxation time $\tau_m$ entering $\lambda=k_B T/\tau_m$. |
 | `frozen_core_threshold_ev` | eV | `0.0d0` | Freeze bands below $E_F + \text{threshold}$. (Use negative values, e.g., `-15.0`). |
 | `frozen_free_threshold_ev` | eV | `0.0d0` | Freeze bands above $E_F + \text{threshold}$. (Use positive values, e.g., `+20.0`). |
 
-*Note: Internal conversions to atomic units (Hartree) are handled automatically using `au_ev` (27.211386 eV/Ha).*
+*Note: Internal conversions to atomic units (Hartree) are handled automatically (`kB_au`, `au_fs`).*
+
+The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
+
+| Parameter | Units | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `epm_material` | — | `'GaAs'` | Material whose tabulated Cohen-Bergstresser local form factors are used (currently `'GaAs'`). |
+| `epm_lattice_constant_au` | Bohr | `10.68d0` | Zincblende lattice constant $a$. |
+| `epm_pw_cutoff_ry` | Ry | `11.1d0` | Plane-wave cutoff $|\mathbf{k}+\mathbf{G}|^2$ for the basis set. |
 
 ---
 
@@ -73,16 +88,14 @@ The `&sbe` namelist now accepts the following parameters:
 
 &sbe
   ! ... standard SALMON SBE system parameters ...
-  
+
   ! ---------------------------------------------------------
-  ! 1. Dephasing Configuration
+  ! 1. Kuhn-Zurek/Caldeira-Leggett Decoherence (strictly CPTP)
   ! ---------------------------------------------------------
-  ! Enable pure H0 dephasing with T2 = 50 fs
-  t2_sbe_fs = 50.0d0
-  
-  ! Auto-calculate minimum bandgap from band structure for the prefactor
-  eg_ev = -1.0d0  
-  
+  ! lambda = kB*T / tau_m;  enabled only when both are > 0
+  sbe_decoh_temperature_k = 300.0d0
+  sbe_decoh_tau_m_fs      = 10.0d0
+
   ! ---------------------------------------------------------
   ! 2. Frozen Core / Active Subspace Optimization
   ! ---------------------------------------------------------
@@ -94,16 +107,42 @@ The `&sbe` namelist now accepts the following parameters:
 ```
 
 **Reverting to default behavior:**
-* Set `t2_sbe_fs >= 1.0d9` to recover the original no-dephasing (purely coherent) behavior.
+* Set `sbe_decoh_temperature_k` and/or `sbe_decoh_tau_m_fs` to a non-positive value to recover the original purely-coherent (no dephasing, $D\equiv 0$, trivially CPTP) behavior.
 * Set both `frozen_core_threshold_ev` and `frozen_free_threshold_ev` to `0.0d0` to force all bands into the active nonlinear subspace.
+
+## Minimal EPM → SBE Pipeline Example
+
+```fortran
+! Step 1: ground state via local EPM (writes GaAs_k/_eigen/_tm.data)
+&calculation
+  theory = 'epm'
+/
+&epm
+  epm_material            = 'GaAs'
+  epm_lattice_constant_au = 10.68d0
+  epm_pw_cutoff_ry        = 11.1d0
+/
+```
+```fortran
+! Step 2: real-time SBE propagation reading the files generated above
+&calculation
+  theory = 'sbe'
+/
+&system
+  ! sysname, lattice vectors, num_kgrid, nstate, nelec must match the EPM run
+/
+```
 ---
 
 ## References & Theoretical Background
 
-1. **ETDRK4 Integrator:** Kassam, A.-K., & Trefethen, L. N. "Fourth-order time-stepping for stiff PDEs." *SIAM J. Sci. Comput.* 26, 1214-1233 (2005).
-2. **Gauge-Independent Decoherence:** Wismer, M. S., & Yakovlev, V. S. "Gauge-independent decoherence models for solids in external fields." *Phys. Rev. B* 97, 144302 (2018).
-3. **Momentum-Resolved Dephasing:** Korolev, V. et al. "Strong Field Spectroscopy of Many-Body Interactions in Solids." (2026).
-4. **Original SALMON SBE:** Sato, S. A. et al. "Multiscale computational approach for light-matter interactions." *Phys. Rev. B* 92, 115145 (2015).
+1. **Commutator-Free Magnus Integrators:** Blanes, S., & Moan, P. C. "Practical symplectic partitioned Runge-Kutta and Runge-Kutta-Nyström methods." *J. Comput. Appl. Math.* 142, 313-330 (2002); Alvermann, A., & Fehske, H. "High-order commutator-free exponential time-propagation of driven quantum systems." *J. Comput. Phys.* 230, 5930-5956 (2011).
+2. **Suzuki-Yoshida Composition:** Yoshida, H. "Construction of higher order symplectic integrators." *Phys. Lett. A* 150, 262-268 (1990).
+3. **CPTP / Lindblad & RBF-kernel positivity:** Schoenberg, I. J. "Metric spaces and completely monotone functions." *Ann. Math.* 39, 811-841 (1938) (Bochner/Schoenberg PSD criterion for Gaussian/RBF kernels); Schur product theorem (Hadamard maps of PSD matrices are PSD).
+4. **Caldeira-Leggett / Kuhn-Zurek Decoherence:** Caldeira, A. O., & Leggett, A. J. "Path integral approach to quantum Brownian motion." *Physica A* 121, 587-616 (1983); Zurek, W. H. "Decoherence, einselection, and the quantum origins of the classical." *Rev. Mod. Phys.* 75, 715 (2003).
+5. **Cohen-Bergstresser Local Pseudopotentials:** Cohen, M. L., & Bergstresser, T. K. "Band Structures and Pseudopotential Form Factors for Fourteen Semiconductors of the Diamond and Zinc-blende Structures." *Phys. Rev.* 141, 789 (1966).
+6. **Velocity-Gauge SBE / Houston Basis:** Wismer, M. S., & Yakovlev, V. S. "Gauge-independent decoherence models for solids in external fields." *Phys. Rev. B* 97, 144302 (2018).
+7. **Original SALMON SBE:** Sato, S. A. et al. "Multiscale computational approach for light-matter interactions." *Phys. Rev. B* 92, 115145 (2015).
 
 ## License
 
