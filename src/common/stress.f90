@@ -918,7 +918,21 @@ contains
     do iz = ig_s(3), ig_e(3)
     do iy = ig_s(2), ig_e(2)
     do ix = ig_s(1), ig_e(1)
-      if(fg%if_Gzero(ix,iy,iz)) cycle
+      if(fg%if_Gzero(ix,iy,iz)) then
+        ! G=0 short-range (alpha-Z) term: rho(0) * sum_a V_sr,a(0).
+        ! Keeps E_sr consistent with the total-energy bookkeeping
+        ! (total_energy.f90 includes G=0 in the electron-ion core sum).
+        ! The LR term has no G=0 (1/G^2 singular, neutrality-cancelled)
+        ! and the gradient term carries G_a*G_b = 0.
+        rho_e = poisson%zrhoG_ele(ix,iy,iz)
+        V_sr_sum = (0d0, 0d0)
+        do ia = 1, system%nion
+          ik = kion(ia)
+          V_sr_sum = V_sr_sum + ppg%zVG_ion_stress(ix,iy,iz,ik)
+        end do
+        E_sr_loc = E_sr_loc + dble(conjg(rho_e) * V_sr_sum)
+        cycle
+      end if
       g(1) = fg%vec_G(1,ix,iy,iz)
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
