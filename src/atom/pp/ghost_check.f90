@@ -28,6 +28,7 @@ module ghost_check
   private
   public :: check_pp_ghosts
 
+  real(8), parameter :: pi = 3.141592653589793d0
   real(8), parameter :: ghost_tol = 0.1d0   ! Ha; eps_sep_min < eps_loc_min - tol => warn
   real(8), parameter :: mesh_h = 0.025d0    ! a.u.
   real(8), parameter :: r_box = 25d0        ! a.u.
@@ -78,9 +79,10 @@ contains
       call build_h_local(n, mesh_h, rmesh, vloc, ll, h1)
       do l = l0, l0 + pp%nproj(ll,ik) - 1
         j = l - l0 + 1
-        call interp_chi(pp, ik, l, n, rmesh, chi(:,j))
+        call interp_chi(pp, ik, l, ll, n, rmesh, chi(:,j))
         if (pp%inorm(l,ik) /= 0) then
-          call add_separable(n, mesh_h, chi(:,j), dble(pp%inorm(l,ik)), h1)
+          ! undo the (2l+1)/4pi angular factor folded into udvtbl
+          call add_separable(n, mesh_h, chi(:,j), dble(pp%inorm(l,ik)) * 4d0*pi/dble(2*ll+1), h1)
         end if
       end do
       call lowest_eigs(n, h1, 3, eps_sep, esep)
@@ -138,11 +140,11 @@ contains
     end do
   end subroutine interp_vloc
 
-  subroutine interp_chi(pp, ik, l, n, rmesh, chi)
+  subroutine interp_chi(pp, ik, l, ll, n, rmesh, chi)
     use structures, only: s_pp_info
     implicit none
     type(s_pp_info), intent(in) :: pp
-    integer, intent(in) :: ik, l, n
+    integer, intent(in) :: ik, l, ll, n
     real(8), intent(in) :: rmesh(n)
     real(8), intent(out) :: chi(n)
     integer :: i, ir, nr
@@ -159,7 +161,10 @@ contains
           ir = ir + 1
         end do
         x = (r - pp%rad(ir,ik)) / max(pp%rad(ir+1,ik) - pp%rad(ir,ik), 1d-300)
-        chi(i) = (1d0-x) * pp%udvtbl(ir,l,ik) + x * pp%udvtbl(ir+1,l,ik)
+        ! udvtbl stores the reduced form chi(r)*sqrt((2l+1)/4pi)/r^(l+1)
+        ! (input_pp scales by const/r^(l+1) for 3D interpolation);
+        ! reconstruct the radial u-representation projector here.
+        chi(i) = ((1d0-x) * pp%udvtbl(ir,l,ik) + x * pp%udvtbl(ir+1,l,ik)) * r**(ll+1)
       end if
     end do
   end subroutine interp_chi
