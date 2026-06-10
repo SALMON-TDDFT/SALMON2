@@ -521,7 +521,7 @@ contains
     integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ispin, ia, ib
     real(8) :: rc, u, v, w, r, s(3), drc_dr, contrib
     real(8) :: trho, exc_x, exc_c, vxc_x, vxc_c, vxc_sum
-    real(8) :: Rion_repr(3), strs(3,3), strs_sum(3,3), V, hvol
+    real(8) :: Rion_repr(3), strs(3,3), strs_sum(3,3), vol, hvol
     real(8), allocatable :: vxc_box(:,:,:)
     logical :: flag_cuboid
 
@@ -534,7 +534,7 @@ contains
     if(.not. pp%flag_nlcc) return
     if(.not. allocated(ppn%rho_nlcc)) return
 
-    V = system%det_a
+    vol = system%det_a
     hvol = system%Hvol
     strs = 0d0
 
@@ -567,7 +567,7 @@ contains
     ! geometry mirrors calc_nlcc (salmon_pp.f90): atoms x (+/-2 replicas) x local grid
     !$omp parallel do default(none) &
     !$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,contrib,Rion_repr,ia,ib) &
-    !$omp   shared(system,pp,mg,kion,vxc_box,hvol) &
+    !$omp   shared(system,pp,mg,kion,vxc_box,hvol,flag_cuboid) &
     !$omp   reduction(+:strs)
     do a = 1, system%nion
       ik = kion(a)
@@ -629,7 +629,7 @@ contains
     deallocate(vxc_box)
 
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
-    system%stress_xc_cc = strs_sum / V
+    system%stress_xc_cc = strs_sum / vol
     system%stress_xc = system%stress_xc + system%stress_xc_cc
   end subroutine calc_stress_xc_nlcc_cc
 
