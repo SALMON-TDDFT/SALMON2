@@ -42,7 +42,7 @@ contains
     implicit none
     type(s_pp_info), intent(in) :: pp
     integer, intent(in) :: ik
-    integer :: n, ll, l, l0, j, i, fh, nfound
+    integer :: n, ll, l, l0, j, i, fh, nfound, nbound
     real(8), allocatable :: rmesh(:), vloc(:), chi(:,:), h0(:,:), h1(:,:)
     real(8), allocatable :: eloc(:), esep(:)
     real(8) :: eps_loc(2), eps_sep(3)
@@ -58,13 +58,15 @@ contains
       rmesh(i) = i * mesh_h
     end do
     call interp_vloc(pp, ik, n, rmesh, vloc)
+    call add_valence_screening(pp, ik, n, rmesh, vloc)
 
     fname = trim(base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_ghost_check.data"
     fh = open_filehandle(trim(fname), status='replace')
     write(fh,'(a)') '# Separable-pseudopotential ghost diagnostic (radial direct diagonalization)'
-    write(fh,'(a)') '# H_sep = T_l + V_loc + sum_j |udv_lj> inorm_lj <udv_lj| ; H_loc = T_l + V_loc'
-    write(fh,'(a,es10.2,a)') '# verdict GHOST when eps_sep_min < eps_loc_min - ', ghost_tol, ' Ha'
-    write(fh,'(a)') '# 1:l 2:nproj 3:eps_loc_0[Ha] 4:eps_loc_1[Ha] 5:eps_sep_0[Ha] 6:eps_sep_1[Ha] 7:eps_sep_2[Ha] 8:verdict'
+    write(fh,'(a)') '# H_sep = T_l + V_scr + sum_j |udv_lj> c_lj <udv_lj| ; V_scr = V_loc + V_H[rho_atom] + V_xc[rho_atom]'
+    write(fh,'(a)') '# verdict GHOST when the number of screened bound levels (eps < -0.05 Ha) exceeds nproj'
+    write(fh,'(a)') '# (screened eigenvalues are directly comparable to atomic reference levels)'
+    write(fh,'(a)') '# 1:l 2:nproj 3:eps_loc_0[Ha] 4:eps_loc_1[Ha] 5:eps_sep_0[Ha] 6:eps_sep_1[Ha] 7:eps_sep_2[Ha] 8:nbound 9:verdict'
 
     flagged_any = .false.
     l0 = 0
@@ -88,16 +90,27 @@ contains
       call lowest_eigs(n, h1, 3, eps_sep, esep)
       deallocate(chi)
 
-      flagged = (eps_sep(1) < eps_loc(1) - ghost_tol)
+      ! Ghost criterion (screened): a separable channel may legitimately
+      ! create reference bound states (semicore!), but never MORE bound
+      ! states than it has projectors/reference orbitals. Flag when the
+      ! number of screened bound levels (eps < -0.05 Ha) exceeds nproj,
+      ! or when an extra level dives below the deepest physically
+      ! expected scale (3x the deepest projector-made level).
+      nbound = 0
+      do i = 1, n
+        if (esep(i) < -0.05d0) nbound = nbound + 1
+      end do
+      flagged = (nbound > pp%nproj(ll,ik))
       if (flagged) flagged_any = .true.
-      write(fh,'(1x,i2,1x,i2,5(1x,es15.7),1x,a)') ll, pp%nproj(ll,ik), &
-        eps_loc(1), eps_loc(2), eps_sep(1), eps_sep(2), eps_sep(3), &
+      write(fh,'(1x,i2,1x,i2,5(1x,es15.7),1x,i3,1x,a)') ll, pp%nproj(ll,ik), &
+        eps_loc(1), eps_loc(2), eps_sep(1), eps_sep(2), eps_sep(3), nbound, &
         merge('GHOST', 'ok   ', flagged)
       if (flagged) then
         write(*,'(a)') '!!! WARNING: ghost state(s) suspected in pseudopotential '// &
           trim(file_pseudo(ik))//' (element '//trim(pp%atom_symbol(ik))//')'
-        write(*,'(a,i2,a,f12.5,a,f12.5,a)') '!!!   channel l=', ll, &
-          ': eps_separable_min =', eps_sep(1), ' Ha vs eps_local_min =', eps_loc(1), ' Ha'
+        write(*,'(a,i2,a,i3,a,i2,a,f12.5,a)') '!!!   channel l=', ll, &
+          ': ', nbound, ' bound levels for ', pp%nproj(ll,ik), &
+          ' projectors; deepest =', eps_sep(1), ' Ha'
         write(*,'(a)') '!!!   SCF may converge to an unphysical state (huge kinetic/nonlocal stress,'
         write(*,'(a)') '!!!   flat deep bands). Consider a different pseudopotential. See '//trim(fname)
       end if
@@ -111,6 +124,79 @@ contains
     nfound = 0 ! silence unused warnings on some compilers
     deallocate(rmesh, vloc, eloc, esep, h0, h1)
   end subroutine check_pp_ghosts
+
+
+  subroutine add_valence_screening(pp, ik, n, rmesh, vloc)
+    ! Add the atomic valence screening V_H[rho] + V_xc[rho] built from the
+    ! degeneracy-weighted atomic density table rho_pp_tbl, renormalized to
+    ! zps electrons. Makes the channel spectra directly comparable to the
+    ! pseudo-atom reference levels (essential for semicore pseudopotentials,
+    ! whose separable term legitimately creates deep reference states).
+    use structures, only: s_pp_info
+    implicit none
+    type(s_pp_info), intent(in) :: pp
+    integer, intent(in) :: ik, n
+    real(8), intent(in) :: rmesh(n)
+    real(8), intent(inout) :: vloc(n)
+    integer :: i, ir, nr
+    real(8) :: r, x, qtot, rho, rs, ex, vx, vc, srs
+    real(8), allocatable :: q(:), inner(:), outer(:)
+    real(8), parameter :: pi_l = 3.141592653589793d0
+    real(8), parameter :: ca = 0.0311d0, cb = -0.048d0, cc = 0.0020d0, cd = -0.0116d0
+    real(8), parameter :: cg = -0.1423d0, cb1 = 1.0529d0, cb2 = 0.3334d0
+
+    allocate(q(n), inner(n), outer(n))
+    nr = pp%nrmax
+    do i = 1, n
+      r = rmesh(i)
+      if (r >= pp%rad(nr,ik)) then
+        q(i) = 0d0
+      else
+        ir = 1
+        do while (ir < nr .and. pp%rad(ir+1,ik) <= r)
+          ir = ir + 1
+        end do
+        x = (r - pp%rad(ir,ik)) / max(pp%rad(ir+1,ik) - pp%rad(ir,ik), 1d-300)
+        q(i) = (1d0-x) * pp%rho_pp_tbl(ir,ik) + x * pp%rho_pp_tbl(ir+1,ik)
+      end if
+      if (q(i) < 0d0) q(i) = 0d0
+    end do
+    qtot = 0d0
+    do i = 1, n
+      qtot = qtot + q(i)
+    end do
+    qtot = qtot * (rmesh(2)-rmesh(1))
+    if (qtot <= 1d-12) then
+      deallocate(q, inner, outer)
+      return
+    end if
+    q = q * (pp%zps(ik) / qtot)
+
+    ! radial Hartree: V_H(r) = (1/r) int_0^r q dr' + int_r^inf q/r' dr'
+    inner(1) = 0.5d0 * q(1) * (rmesh(2)-rmesh(1))
+    do i = 2, n
+      inner(i) = inner(i-1) + 0.5d0*(q(i)+q(i-1))*(rmesh(2)-rmesh(1))
+    end do
+    outer(n) = 0d0
+    do i = n-1, 1, -1
+      outer(i) = outer(i+1) + 0.5d0*(q(i)/rmesh(i)+q(i+1)/rmesh(i+1))*(rmesh(2)-rmesh(1))
+    end do
+    do i = 1, n
+      rho = q(i) / (4d0*pi_l*rmesh(i)**2)
+      rho = max(rho, 1d-30)
+      rs = (3d0/(4d0*pi_l*rho))**(1d0/3d0)
+      ex = -0.75d0*(3d0/pi_l)**(1d0/3d0)*rho**(1d0/3d0)
+      vx = 4d0*ex/3d0
+      if (rs >= 1d0) then
+        srs = sqrt(rs)
+        vc = cg*(1d0+7d0/6d0*cb1*srs+4d0/3d0*cb2*rs)/(1d0+cb1*srs+cb2*rs)**2
+      else
+        vc = ca*log(rs)+(cb-ca/3d0)+2d0/3d0*cc*rs*log(rs)+(2d0*cd-cc)*rs/3d0
+      end if
+      vloc(i) = vloc(i) + inner(i)/rmesh(i) + outer(i) + vx + vc
+    end do
+    deallocate(q, inner, outer)
+  end subroutine add_valence_screening
 
   subroutine interp_vloc(pp, ik, n, rmesh, vloc)
     use structures, only: s_pp_info
