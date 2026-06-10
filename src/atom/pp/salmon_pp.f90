@@ -450,11 +450,14 @@ module salmon_pp
       end do
   
       do i1 = irepr_min, irepr_max
-        Rion_repr(1) = sys%Rion(1, a) + i1 * sys%primitive_a(1, 1)
       do i2 = irepr_min, irepr_max
-        Rion_repr(2) = sys%Rion(2, a) + i2 * sys%primitive_a(2, 2)
       do i3 = irepr_min, irepr_max
-        Rion_repr(3) = sys%Rion(3, a) + i3 * sys%primitive_a(3, 3)
+        ! full lattice-vector translation: the previous diagonal-only form
+        ! (i1*primitive_a(1,1), i2*primitive_a(2,2), i3*primitive_a(3,3))
+        ! misplaces NLCC periodic images for nonorthogonal cells
+        Rion_repr(1) = sys%Rion(1, a) + i1 * sys%primitive_a(1, 1) + i2 * sys%primitive_a(1, 2) + i3 * sys%primitive_a(1, 3)
+        Rion_repr(2) = sys%Rion(2, a) + i1 * sys%primitive_a(2, 1) + i2 * sys%primitive_a(2, 2) + i3 * sys%primitive_a(2, 3)
+        Rion_repr(3) = sys%Rion(3, a) + i1 * sys%primitive_a(3, 1) + i2 * sys%primitive_a(3, 2) + i3 * sys%primitive_a(3, 3)
 
         do j1 = rg%is(1), rg%ie(1)
            u = (j1-1) * sys%hgs(1)

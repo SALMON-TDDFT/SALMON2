@@ -597,11 +597,13 @@ contains
       end do
 
       do i1 = -2, 2
-        Rion_repr(1) = system%Rion(1,a) + i1 * system%primitive_a(1,1)
       do i2 = -2, 2
-        Rion_repr(2) = system%Rion(2,a) + i2 * system%primitive_a(2,2)
       do i3 = -2, 2
-        Rion_repr(3) = system%Rion(3,a) + i3 * system%primitive_a(3,3)
+        ! full lattice-vector translation (see calc_nlcc): the diagonal-only
+        ! form misplaces NLCC periodic images for nonorthogonal cells
+        Rion_repr(1) = system%Rion(1,a) + i1 * system%primitive_a(1,1) + i2 * system%primitive_a(1,2) + i3 * system%primitive_a(1,3)
+        Rion_repr(2) = system%Rion(2,a) + i1 * system%primitive_a(2,1) + i2 * system%primitive_a(2,2) + i3 * system%primitive_a(2,3)
+        Rion_repr(3) = system%Rion(3,a) + i1 * system%primitive_a(3,1) + i2 * system%primitive_a(3,2) + i3 * system%primitive_a(3,3)
 
         do j1 = mg%is(1), mg%ie(1)
           u = (j1-1) * system%hgs(1)
