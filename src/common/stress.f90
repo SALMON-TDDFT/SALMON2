@@ -393,11 +393,8 @@ contains
       call calc_stress_xc_builtin_pz(system, info, mg, ppn, rho_s, energy, xc_func)
       call calc_stress_xc_nlcc_cc(system, pp, info, mg, ppn, rho_s)
     case ('r2scan')
-      system%stress_xc_cc = 0d0
-      if(pp%flag_nlcc .and. info%id_r == 0 .and. info%id_k == 0 .and. info%id_o == 0) then
-        write(*,'(a)') 'WARNING: NLCC core-correction stress is not implemented for r2scan; P_xc is missing the cc term.'
-      end if
       call calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
+      call calc_stress_xc_nlcc_cc_r2scan(system, pp, info, mg, ppn, Vxc)
     case default
       if(xc_func%use_gradient) call fail_stress("stress tensor supports only built-in PZ or built-in r2SCAN XC")
       call fail_stress("stress tensor supports only built-in xc='PZ' or xc='r2scan'")
@@ -518,12 +515,10 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_pp_nlcc),       intent(in)    :: ppn
     type(s_scalar),        intent(in)    :: rho_s(:)
-    integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ispin, ia, ib
-    real(8) :: rc, u, v, w, r, s(3), drc_dr, contrib
+    integer :: j1, j2, j3, ispin
     real(8) :: trho, exc_x, exc_c, vxc_x, vxc_c, vxc_sum
-    real(8) :: Rion_repr(3), strs(3,3), strs_sum(3,3), vol, hvol
+    real(8) :: strs(3,3), strs_sum(3,3), vol
     real(8), allocatable :: vxc_box(:,:,:)
-    logical :: flag_cuboid
 
     ! Strain derivative of E_xc from the rigid, atom-centered NLCC core
     ! density: sigma_cc_ab = (1/V) * int vxc(r) * sum_a rhoc'(|s|) s_a s_b / |s|.
@@ -535,7 +530,6 @@ contains
     if(.not. allocated(ppn%rho_nlcc)) return
 
     vol = system%det_a
-    hvol = system%Hvol
     strs = 0d0
 
     allocate(vxc_box(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -559,6 +553,28 @@ contains
     end do
     !$omp end parallel do
 
+    call accumulate_stress_nlcc_cc(system, pp, mg, vxc_box, strs)
+    deallocate(vxc_box)
+
+    call comm_summation(strs, strs_sum, 9, info%icomm_r)
+    system%stress_xc_cc = strs_sum / vol
+    system%stress_xc = system%stress_xc + system%stress_xc_cc
+  end subroutine calc_stress_xc_nlcc_cc
+
+  subroutine accumulate_stress_nlcc_cc(system, pp, mg, pot_box, strs)
+    use structures
+    use salmon_global, only: kion
+    implicit none
+    type(s_dft_system), intent(in)    :: system
+    type(s_pp_info),    intent(in)    :: pp
+    type(s_rgrid),      intent(in)    :: mg
+    real(8),            intent(in)    :: pot_box(mg%is(1):,mg%is(2):,mg%is(3):)
+    real(8),            intent(inout) :: strs(3,3)
+    integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ia, ib
+    real(8) :: rc, u, v, w, r, s(3), drc_dr, contrib, hvol, Rion_repr(3)
+    logical :: flag_cuboid
+
+    hvol = system%Hvol
     flag_cuboid = .true.
     if( abs(system%primitive_a(1,2)) >= 1d-10 .or. &
         abs(system%primitive_a(1,3)) >= 1d-10 .or. &
@@ -567,7 +583,7 @@ contains
     ! geometry mirrors calc_nlcc (salmon_pp.f90): atoms x (+/-2 replicas) x local grid
     !$omp parallel do default(none) &
     !$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,contrib,Rion_repr,ia,ib) &
-    !$omp   shared(system,pp,mg,kion,vxc_box,hvol,flag_cuboid) &
+    !$omp   shared(system,pp,mg,kion,pot_box,hvol,flag_cuboid) &
     !$omp   reduction(+:strs)
     do a = 1, system%nion
       ik = kion(a)
@@ -612,7 +628,7 @@ contains
           ! interpolation used to build ppn%rho_nlcc in calc_nlcc
           drc_dr = (pp%rho_nlcc_tbl(intr+1,ik) - pp%rho_nlcc_tbl(intr,ik)) &
                  / (pp%rad(intr+1,ik) - pp%rad(intr,ik))
-          contrib = vxc_box(j1,j2,j3) * drc_dr / r * hvol
+          contrib = pot_box(j1,j2,j3) * drc_dr / r * hvol
           do ib = 1, 3
           do ia = 1, 3
             strs(ia,ib) = strs(ia,ib) + contrib * s(ia) * s(ib)
@@ -626,12 +642,52 @@ contains
       end do
     end do
     !$omp end parallel do
-    deallocate(vxc_box)
+  end subroutine accumulate_stress_nlcc_cc
+
+  subroutine calc_stress_xc_nlcc_cc_r2scan(system, pp, info, mg, ppn, Vxc)
+    use structures
+    use communication, only: comm_summation
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_pp_info),       intent(in)    :: pp
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_pp_nlcc),       intent(in)    :: ppn
+    type(s_scalar),        intent(in)    :: Vxc(:)
+    integer :: j1, j2, j3
+    real(8) :: strs(3,3), strs_sum(3,3), vol
+    real(8), allocatable :: pot_box(:,:,:)
+
+    ! NLCC cc stress for the meta-GGA path. Uses the multiplicative KS
+    ! potential Vxc = vrho - div(2*vsigma*grad n), which equals dE/dn at
+    ! fixed tau, so the gradient (vsigma) core response is included by
+    ! integration by parts. No vtau term: tau_nlcc is not consumed by the XC energy
+    ! (salmon_xc.f90 passes rho_nlcc only), so adding one would break
+    ! energy/stress consistency.
+    system%stress_xc_cc = 0d0
+    if(.not. pp%flag_nlcc) return
+    if(.not. allocated(ppn%rho_nlcc)) return
+
+    vol = system%det_a
+    strs = 0d0
+    allocate(pot_box(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    !$omp parallel do collapse(2) default(none) private(j1,j2,j3) shared(mg,pot_box,Vxc)
+    do j3 = mg%is(3), mg%ie(3)
+    do j2 = mg%is(2), mg%ie(2)
+    do j1 = mg%is(1), mg%ie(1)
+      pot_box(j1,j2,j3) = Vxc(1)%f(j1,j2,j3)
+    end do
+    end do
+    end do
+    !$omp end parallel do
+
+    call accumulate_stress_nlcc_cc(system, pp, mg, pot_box, strs)
+    deallocate(pot_box)
 
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
     system%stress_xc_cc = strs_sum / vol
     system%stress_xc = system%stress_xc + system%stress_xc_cc
-  end subroutine calc_stress_xc_nlcc_cc
+  end subroutine calc_stress_xc_nlcc_cc_r2scan
 
   subroutine calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
     use structures
