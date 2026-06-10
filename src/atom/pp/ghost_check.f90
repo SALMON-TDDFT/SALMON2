@@ -30,8 +30,10 @@ module ghost_check
 
   real(8), parameter :: pi = 3.141592653589793d0
   real(8), parameter :: ghost_tol = 0.1d0   ! Ha; eps_sep_min < eps_loc_min - tol => warn
-  real(8), parameter :: mesh_h = 0.025d0    ! a.u.
-  real(8), parameter :: r_box = 25d0        ! a.u.
+  real(8), parameter :: mesh_h = 0.04d0     ! a.u.
+  real(8), parameter :: r_box = 20d0        ! a.u.
+  integer, parameter :: n_scf_iter = 12
+  real(8), parameter :: mix_scf = 0.3d0
 
 contains
 
@@ -58,7 +60,11 @@ contains
       rmesh(i) = i * mesh_h
     end do
     call interp_vloc(pp, ik, n, rmesh, vloc)
-    call add_valence_screening(pp, ik, n, rmesh, vloc)
+    ! Self-consistent pseudo-atom screening (format independent): solve the
+    ! separable-channel spectra, occupy zps electrons by aufbau, rebuild
+    ! V_H[rho]+V_xc[rho], iterate. Channel eigenvalues then correspond to
+    ! the pseudo-atom reference levels of the generator.
+    call selfconsistent_screening(pp, ik, n, rmesh, vloc)
 
     fname = trim(base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_ghost_check.data"
     fh = open_filehandle(trim(fname), status='replace')
@@ -126,77 +132,162 @@ contains
   end subroutine check_pp_ghosts
 
 
-  subroutine add_valence_screening(pp, ik, n, rmesh, vloc)
-    ! Add the atomic valence screening V_H[rho] + V_xc[rho] built from the
-    ! degeneracy-weighted atomic density table rho_pp_tbl, renormalized to
-    ! zps electrons. Makes the channel spectra directly comparable to the
-    ! pseudo-atom reference levels (essential for semicore pseudopotentials,
-    ! whose separable term legitimately creates deep reference states).
+
+
+
+  subroutine selfconsistent_screening(pp, ik, n, rmesh, vloc)
+    ! Mini atomic SCF on the radial mesh: diagonalize every separable
+    ! channel, fill zps electrons by aufbau with degeneracy 2(2l+1),
+    ! rebuild V_H + V_xc(PZ) from the resulting density, mix, iterate.
+    ! On exit vloc contains the screened potential.
     use structures, only: s_pp_info
     implicit none
     type(s_pp_info), intent(in) :: pp
     integer, intent(in) :: ik, n
     real(8), intent(in) :: rmesh(n)
     real(8), intent(inout) :: vloc(n)
-    integer :: i, ir, nr
-    real(8) :: r, x, qtot, rho, rs, ex, vx, vc, srs
-    real(8), allocatable :: q(:), inner(:), outer(:)
+    integer, parameter :: mstate = 5
+    integer :: it, ll, l, l0, j, i, k, nch, idx(((1+8)*mstate))
+    real(8) :: vion(n), vscr(n), q(n), qnew(n), inner(n), outer(n)
+    real(8) :: eall((1+8)*mstate), occ, nel, rho, rs, ex, vx, vc, srs, h
+    real(8), allocatable :: chi(:,:), ham(:,:), evec(:,:,:), eband(:,:)
     real(8), parameter :: pi_l = 3.141592653589793d0
     real(8), parameter :: ca = 0.0311d0, cb = -0.048d0, cc = 0.0020d0, cd = -0.0116d0
     real(8), parameter :: cg = -0.1423d0, cb1 = 1.0529d0, cb2 = 0.3334d0
 
-    allocate(q(n), inner(n), outer(n))
-    nr = pp%nrmax
-    do i = 1, n
-      r = rmesh(i)
-      if (r >= pp%rad(nr,ik)) then
-        q(i) = 0d0
-      else
-        ir = 1
-        do while (ir < nr .and. pp%rad(ir+1,ik) <= r)
-          ir = ir + 1
-        end do
-        x = (r - pp%rad(ir,ik)) / max(pp%rad(ir+1,ik) - pp%rad(ir,ik), 1d-300)
-        q(i) = (1d0-x) * pp%rho_pp_tbl(ir,ik) + x * pp%rho_pp_tbl(ir+1,ik)
-      end if
-      if (q(i) < 0d0) q(i) = 0d0
-    end do
-    qtot = 0d0
-    do i = 1, n
-      qtot = qtot + q(i)
-    end do
-    qtot = qtot * (rmesh(2)-rmesh(1))
-    if (qtot <= 1d-12) then
-      deallocate(q, inner, outer)
-      return
-    end if
-    q = q * (pp%zps(ik) / qtot)
+    h = rmesh(2) - rmesh(1)
+    vion = vloc
+    vscr = vion
+    nch = pp%mlps(ik) + 1
+    allocate(ham(n,n), evec(n,mstate,nch), eband(mstate,nch))
+    q = 0d0
 
-    ! radial Hartree: V_H(r) = (1/r) int_0^r q dr' + int_r^inf q/r' dr'
-    inner(1) = 0.5d0 * q(1) * (rmesh(2)-rmesh(1))
-    do i = 2, n
-      inner(i) = inner(i-1) + 0.5d0*(q(i)+q(i-1))*(rmesh(2)-rmesh(1))
-    end do
-    outer(n) = 0d0
-    do i = n-1, 1, -1
-      outer(i) = outer(i+1) + 0.5d0*(q(i)/rmesh(i)+q(i+1)/rmesh(i+1))*(rmesh(2)-rmesh(1))
-    end do
-    do i = 1, n
-      rho = q(i) / (4d0*pi_l*rmesh(i)**2)
-      rho = max(rho, 1d-30)
-      rs = (3d0/(4d0*pi_l*rho))**(1d0/3d0)
-      ex = -0.75d0*(3d0/pi_l)**(1d0/3d0)*rho**(1d0/3d0)
-      vx = 4d0*ex/3d0
-      if (rs >= 1d0) then
-        srs = sqrt(rs)
-        vc = cg*(1d0+7d0/6d0*cb1*srs+4d0/3d0*cb2*rs)/(1d0+cb1*srs+cb2*rs)**2
+    do it = 1, n_scf_iter
+      ! solve every channel with current screened potential
+      l0 = 0
+      do ll = 0, pp%mlps(ik)
+        call build_h_local_v(n, h, rmesh, vscr, ll, ham)
+        allocate(chi(n, max(1,pp%nproj(ll,ik))))
+        do l = l0, l0 + pp%nproj(ll,ik) - 1
+          j = l - l0 + 1
+          call interp_chi(pp, ik, l, ll, n, rmesh, chi(:,j))
+          if (pp%inorm(l,ik) /= 0) then
+            call add_separable(n, h, chi(:,j), dble(pp%inorm(l,ik)) * 4d0*pi/dble(2*ll+1), ham)
+          end if
+        end do
+        deallocate(chi)
+        call lowest_states(n, ham, mstate, eband(:,ll+1), evec(:,:,ll+1))
+        l0 = l0 + pp%nproj(ll,ik)
+      end do
+
+      ! aufbau filling
+      k = 0
+      do ll = 0, pp%mlps(ik)
+        do i = 1, mstate
+          k = k + 1
+          eall(k) = eband(i,ll+1)
+          idx(k) = ll*mstate + i
+        end do
+      end do
+      call sort_idx(k, eall, idx)
+      qnew = 0d0
+      nel = pp%zps(ik)
+      do i = 1, k
+        if (nel <= 0d0) exit
+        ll = (idx(i)-1) / mstate
+        j  = mod(idx(i)-1, mstate) + 1
+        occ = min(nel, 2d0*dble(2*ll+1))
+        nel = nel - occ
+        qnew(:) = qnew(:) + occ * evec(:,j,ll+1)**2 / h
+      end do
+      if (it == 1) then
+        q = qnew
       else
-        vc = ca*log(rs)+(cb-ca/3d0)+2d0/3d0*cc*rs*log(rs)+(2d0*cd-cc)*rs/3d0
+        q = (1d0-mix_scf)*q + mix_scf*qnew
       end if
-      vloc(i) = vloc(i) + inner(i)/rmesh(i) + outer(i) + vx + vc
+
+      ! screened potential from q (radial charge per dr, sum(q)*h = zps)
+      inner(1) = 0.5d0 * q(1) * h
+      do i = 2, n
+        inner(i) = inner(i-1) + 0.5d0*(q(i)+q(i-1))*h
+      end do
+      outer(n) = 0d0
+      do i = n-1, 1, -1
+        outer(i) = outer(i+1) + 0.5d0*(q(i)/rmesh(i)+q(i+1)/rmesh(i+1))*h
+      end do
+      do i = 1, n
+        rho = max(q(i) / (4d0*pi_l*rmesh(i)**2), 1d-30)
+        rs = (3d0/(4d0*pi_l*rho))**(1d0/3d0)
+        ex = -0.75d0*(3d0/pi_l)**(1d0/3d0)*rho**(1d0/3d0)
+        vx = 4d0*ex/3d0
+        if (rs >= 1d0) then
+          srs = sqrt(rs)
+          vc = cg*(1d0+7d0/6d0*cb1*srs+4d0/3d0*cb2*rs)/(1d0+cb1*srs+cb2*rs)**2
+        else
+          vc = ca*log(rs)+(cb-ca/3d0)+2d0/3d0*cc*rs*log(rs)+(2d0*cd-cc)*rs/3d0
+        end if
+        vscr(i) = vion(i) + inner(i)/rmesh(i) + outer(i) + vx + vc
+      end do
     end do
-    deallocate(q, inner, outer)
-  end subroutine add_valence_screening
+    vloc = vscr
+    deallocate(ham, evec, eband)
+  end subroutine selfconsistent_screening
+
+  subroutine build_h_local_v(n, h, rmesh, v, ll, ham)
+    implicit none
+    integer, intent(in) :: n, ll
+    real(8), intent(in) :: h, rmesh(n), v(n)
+    real(8), intent(inout) :: ham(n,n)
+    integer :: i
+    real(8) :: invh2
+    invh2 = 1d0 / (h*h)
+    ham = 0d0
+    do i = 1, n
+      ham(i,i) = invh2 + dble(ll*(ll+1)) / (2d0 * rmesh(i)**2) + v(i)
+      if (i < n) then
+        ham(i,i+1) = -0.5d0 * invh2
+        ham(i+1,i) = -0.5d0 * invh2
+      end if
+    end do
+  end subroutine build_h_local_v
+
+  subroutine lowest_states(n, ham, m, eps, vecs)
+    implicit none
+    integer, intent(in) :: n, m
+    real(8), intent(inout) :: ham(n,n)
+    real(8), intent(out) :: eps(m), vecs(n,m)
+    integer :: lwork, info, j
+    real(8), allocatable :: work(:), e(:)
+    lwork = max(1, 3*n)
+    allocate(work(lwork), e(n))
+    call dsyev('V', 'U', n, ham, n, e, work, lwork, info)
+    if (info /= 0) then
+      eps = 0d0; vecs = 0d0
+      deallocate(work, e); return
+    end if
+    do j = 1, m
+      eps(j) = e(j)
+      vecs(:,j) = ham(:,j)
+    end do
+    deallocate(work, e)
+  end subroutine lowest_states
+
+  subroutine sort_idx(k, e, idx)
+    implicit none
+    integer, intent(in) :: k
+    real(8), intent(inout) :: e(k)
+    integer, intent(inout) :: idx(k)
+    integer :: i, j, ti
+    real(8) :: te
+    do i = 2, k
+      te = e(i); ti = idx(i); j = i - 1
+      do while (j >= 1)
+        if (e(j) <= te) exit
+        e(j+1) = e(j); idx(j+1) = idx(j); j = j - 1
+      end do
+      e(j+1) = te; idx(j+1) = ti
+    end do
+  end subroutine sort_idx
 
   subroutine interp_vloc(pp, ik, n, rmesh, vloc)
     use structures, only: s_pp_info
