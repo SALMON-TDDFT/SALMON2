@@ -840,6 +840,10 @@ end subroutine hpsi
 
 !===================================================================================================================================
 
+! The variational generalized-KS tau operator is -1/2 (nabla+ik).(vtau (nabla+ik) psi)
+! for tau = 1/2 sum_occ |(nabla+ik)psi|^2 with vtau = dE/dtau (bare, as stored in the
+! payload). The accumulated corr below builds the bare -(nabla+ik).(vtau (nabla+ik) psi),
+! so the 1/2 is applied at the htpsi accumulation in every branch.
 subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)
   use structures
   use salmon_global, only: yn_periodic
@@ -929,7 +933,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
                  aminus * (tpsi%rwf(ix,iy,izm,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
         end do
 
-        htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) + corr_r
+        htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) + 0.5d0 * corr_r
       end do
       end do
       end do
@@ -1031,7 +1035,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
       end do
       corr = corr - lap_axis - zi * kvec(3) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(3)**2 * psi0
 
-      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + corr
+      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + 0.5d0 * corr
     end do
     end do
     end do
@@ -1114,7 +1118,8 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
          kvec_grid(3) * (dapsi(3,ix,iy,iz) + adpsi(3,ix,iy,iz)) )
     corr = corr + a0 * k2 * psi0
 
-    htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + corr
+    ! variational 1/2 of the generalized-KS tau operator (see add_xc_tau_operator)
+    htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + 0.5d0 * corr
   end do
   end do
   end do
