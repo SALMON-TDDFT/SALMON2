@@ -155,6 +155,7 @@ module salmon_global
   character(1)   :: yn_aux_mixing
   character(1)   :: yn_tau_nlcc
   character(1)   :: yn_nlcc_grho
+  character(1)   :: yn_ghost_check
   real(8)        :: tau_mixrate
   real(8)        :: tau_metric_weight
   real(8)        :: j_mixrate

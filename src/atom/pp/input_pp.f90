@@ -35,6 +35,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
   use prep_pp_sub, only: build_local_sr_shared_u, build_local_sr_shared_u_stress_spline
+  use ghost_check, only: check_pp_ghosts
   use read_ps_upf_module, only: read_ps_upf
   use read_paw_upf_module, only: read_paw_upf
   implicit none
@@ -234,6 +235,7 @@ subroutine input_pp(pp,hx,hy,hz)
 
       call build_local_sr_shared_u(pp, ik)
       call build_local_sr_shared_u_stress_spline(pp, ik)
+      call check_pp_ghosts(pp, ik)
 
       pp%upp_f(:,:,ik)=pp%upp(:,:)
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
