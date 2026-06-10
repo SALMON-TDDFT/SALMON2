@@ -275,7 +275,8 @@ contains
       & yn_psmask, &
       & alpha_mask, &
       & gamma_mask, &
-      & eta_mask
+      & eta_mask, &
+      & yn_tau_nlcc
 
     namelist/functional/ &
       & xc, &
@@ -736,6 +737,7 @@ contains
     alpha_mask  = 0.8d0
     gamma_mask  = 1.8d0
     eta_mask    = 15d0
+    yn_tau_nlcc = 'n'
 !! == default for &functional
     xc    = 'none'
     ! xcname = 'PZ'
@@ -1192,6 +1194,7 @@ contains
     call string_lowercase(method_min)
     call string_lowercase(method_mixing)
     call string_lowercase(yn_aux_mixing)
+    call string_lowercase(yn_tau_nlcc)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
@@ -1300,6 +1303,7 @@ contains
     call comm_bcast(alpha_mask   ,nproc_group_global)
     call comm_bcast(gamma_mask   ,nproc_group_global)
     call comm_bcast(eta_mask     ,nproc_group_global)
+    call comm_bcast(yn_tau_nlcc  ,nproc_group_global)
 !! == bcast for &functional
 
 #ifdef USE_LIBXC
@@ -2219,6 +2223,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_tau_nlcc', yn_tau_nlcc
 
       if(inml_functional >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'functional', inml_functional
@@ -3054,6 +3059,12 @@ contains
       continue
     case default
       stop "yn_aux_mixing must be 'y' or 'n'"
+    end select
+    select case(yn_tau_nlcc)
+    case('y','n')
+      continue
+    case default
+      stop "yn_tau_nlcc must be 'y' or 'n'"
     end select
     select case(yn_dual_convergence)
     case('y','n')

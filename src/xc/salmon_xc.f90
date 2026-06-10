@@ -88,7 +88,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit, yn_tau_nlcc
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx
     implicit none
@@ -315,6 +315,25 @@ contains
 !$omp end parallel do
         else
           call calc_tau_from_orbitals(system,mg,info,srg,stencil,spsi,tau=tau)
+        end if
+      end if
+
+      ! Optional NLCC core kinetic energy density (yn_tau_nlcc='y'):
+      ! the meta-GGA then sees tau_total = tau_valence + tau_core,
+      ! consistent with the rho_nlcc handling. Placed after the
+      ! aux_override branches because tau mixing operates on the
+      ! valence tau only.
+      if (xc_func%use_kinetic_energy .and. yn_tau_nlcc == 'y') then
+        if (allocated(ppn%tau_nlcc)) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+          do iz=1,mg%num(3)
+          do iy=1,mg%num(2)
+          do ix=1,mg%num(1)
+            tau(ix,iy,iz) = tau(ix,iy,iz) + ppn%tau_nlcc(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+          end do
+          end do
+          end do
+!$omp end parallel do
         end if
       end if
 

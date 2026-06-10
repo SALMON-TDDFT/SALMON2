@@ -553,7 +553,7 @@ contains
     end do
     !$omp end parallel do
 
-    call accumulate_stress_nlcc_cc(system, pp, mg, vxc_box, strs)
+    call accumulate_stress_nlcc_cc(system, pp, mg, vxc_box, tbl=pp%rho_nlcc_tbl, strs=strs)
     deallocate(vxc_box)
 
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
@@ -561,7 +561,7 @@ contains
     system%stress_xc = system%stress_xc + system%stress_xc_cc
   end subroutine calc_stress_xc_nlcc_cc
 
-  subroutine accumulate_stress_nlcc_cc(system, pp, mg, pot_box, strs)
+  subroutine accumulate_stress_nlcc_cc(system, pp, mg, pot_box, tbl, strs)
     use structures
     use salmon_global, only: kion
     implicit none
@@ -569,6 +569,7 @@ contains
     type(s_pp_info),    intent(in)    :: pp
     type(s_rgrid),      intent(in)    :: mg
     real(8),            intent(in)    :: pot_box(mg%is(1):,mg%is(2):,mg%is(3):)
+    real(8),            intent(in)    :: tbl(:,:)
     real(8),            intent(inout) :: strs(3,3)
     integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ia, ib
     real(8) :: rc, u, v, w, r, s(3), drc_dr, contrib, hvol, Rion_repr(3)
@@ -583,7 +584,7 @@ contains
     ! geometry mirrors calc_nlcc (salmon_pp.f90): atoms x (+/-2 replicas) x local grid
     !$omp parallel do default(none) &
     !$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,contrib,Rion_repr,ia,ib) &
-    !$omp   shared(system,pp,mg,kion,pot_box,hvol,flag_cuboid) &
+    !$omp   shared(system,pp,mg,kion,pot_box,tbl,hvol,flag_cuboid) &
     !$omp   reduction(+:strs)
     do a = 1, system%nion
       ik = kion(a)
@@ -625,8 +626,8 @@ contains
           intr = ir - 1
           if(intr < 1 .or. intr >= pp%nrmax) cycle
           ! segment slope of the radial NLCC table: matches the linear
-          ! interpolation used to build ppn%rho_nlcc in calc_nlcc
-          drc_dr = (pp%rho_nlcc_tbl(intr+1,ik) - pp%rho_nlcc_tbl(intr,ik)) &
+          ! interpolation used to build ppn%rho_nlcc/tau_nlcc in calc_nlcc
+          drc_dr = (tbl(intr+1,ik) - tbl(intr,ik)) &
                  / (pp%rad(intr+1,ik) - pp%rad(intr,ik))
           contrib = pot_box(j1,j2,j3) * drc_dr / r * hvol
           do ib = 1, 3
@@ -647,6 +648,7 @@ contains
   subroutine calc_stress_xc_nlcc_cc_r2scan(system, pp, info, mg, ppn, Vxc)
     use structures
     use communication, only: comm_summation
+    use salmon_global, only: yn_tau_nlcc
     implicit none
     type(s_dft_system),    intent(inout) :: system
     type(s_pp_info),       intent(in)    :: pp
@@ -656,7 +658,7 @@ contains
     type(s_scalar),        intent(in)    :: Vxc(:)
     integer :: j1, j2, j3
     real(8) :: strs(3,3), strs_sum(3,3), vol
-    real(8), allocatable :: pot_box(:,:,:)
+    real(8), allocatable :: pot_box(:,:,:), vtau_box(:,:,:)
 
     ! NLCC cc stress for the meta-GGA path. Uses the multiplicative KS
     ! potential Vxc = vrho - div(2*vsigma*grad n), which equals dE/dn at
@@ -681,8 +683,25 @@ contains
     end do
     !$omp end parallel do
 
-    call accumulate_stress_nlcc_cc(system, pp, mg, pot_box, strs)
+    call accumulate_stress_nlcc_cc(system, pp, mg, pot_box, tbl=pp%rho_nlcc_tbl, strs=strs)
     deallocate(pot_box)
+
+    if (yn_tau_nlcc == 'y' .and. allocated(system%xc_payload%vtau%f)) then
+      ! second cc term: int vtau * d(tau_core)/d(eps_ab); only meaningful
+      ! when the energy itself sees tau_core (yn_tau_nlcc='y')
+      allocate(vtau_box(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+      !$omp parallel do collapse(2) default(none) private(j1,j2,j3) shared(mg,vtau_box,system)
+      do j3 = mg%is(3), mg%ie(3)
+      do j2 = mg%is(2), mg%ie(2)
+      do j1 = mg%is(1), mg%ie(1)
+        vtau_box(j1,j2,j3) = system%xc_payload%vtau%f(mg%idx(j1), mg%idy(j2), mg%idz(j3))
+      end do
+      end do
+      end do
+      !$omp end parallel do
+      call accumulate_stress_nlcc_cc(system, pp, mg, vtau_box, tbl=pp%tau_nlcc_tbl, strs=strs)
+      deallocate(vtau_box)
+    end if
 
     call comm_summation(strs, strs_sum, 9, info%icomm_r)
     system%stress_xc_cc = strs_sum / vol

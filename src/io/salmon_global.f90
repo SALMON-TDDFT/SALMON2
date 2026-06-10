@@ -153,6 +153,7 @@ module salmon_global
   character(16)  :: method_mixing
   real(8)        :: mixrate
   character(1)   :: yn_aux_mixing
+  character(1)   :: yn_tau_nlcc
   real(8)        :: tau_mixrate
   real(8)        :: tau_metric_weight
   real(8)        :: j_mixrate
