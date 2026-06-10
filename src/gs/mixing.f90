@@ -252,7 +252,22 @@ subroutine solve_screened_density_residual(lg,mg,info,fg,poisson,q0,rho_delta,sc
   real(8),intent(in) :: q0
   type(s_scalar),intent(in) :: rho_delta
   type(s_scalar),intent(inout) :: screened_charge
+  complex(8),allocatable :: zrhoG_save(:,:,:)
+  logical :: saved_zrho
 
+  ! The periodic Poisson solvers overwrite poisson%zrhoG_ele (the density
+  ! FFT consumed by total_energy and stress) as a side effect. Feeding them
+  ! the mixing RESIDUAL would leave zrhoG_ele holding FFT(delta_rho) after
+  ! the final mixing step, corrupting the final energy/stress evaluation.
+  ! Save and restore it around the screened solve.
+  saved_zrho = allocated(poisson%zrhoG_ele)
+  if (saved_zrho) then
+    allocate(zrhoG_save, source=poisson%zrhoG_ele)
+  end if
+
+  if (q0 <= 0d0) then
+    stop "method_mixing_preconditioner='kerker' requires q0_mixing_preconditioner > 0 (or alpha_mixing_preconditioner > 0); q0=0 makes the screened kernel singular at G=0"
+  end if
   call set_screened_poisson_kernel(fg,q0)
 #ifdef USE_FFTW
   select case(yn_fftw)
@@ -270,6 +285,10 @@ subroutine solve_screened_density_residual(lg,mg,info,fg,poisson,q0,rho_delta,sc
   end select
 #endif
   call restore_poisson_kernel(fg)
+  if (saved_zrho) then
+    poisson%zrhoG_ele = zrhoG_save
+    deallocate(zrhoG_save)
+  end if
 end subroutine solve_screened_density_residual
 
 !===================================================================================================================================
