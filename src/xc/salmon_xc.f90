@@ -88,7 +88,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit, yn_tau_nlcc
+    use salmon_global, only: yn_spinorbit, yn_tau_nlcc, yn_nlcc_grho
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx
     implicit none
@@ -253,6 +253,22 @@ contains
       enddo
       enddo
 !$omp end parallel do
+
+      ! Optional NLCC core density in the gradient argument (yn_nlcc_grho='y'):
+      ! sigma then uses |grad(rho_val + rho_core)|^2, consistent with the
+      ! density argument that already includes rho_nlcc. Default 'n' keeps the
+      ! historical valence-only gradient.
+      if (yn_nlcc_grho == 'y' .and. allocated(ppn%rho_nlcc)) then
+!$omp parallel do collapse(2) private(ix,iy,iz)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          rhd(ix,iy,iz) = rhd(ix,iy,iz) + ppn%rho_nlcc(ix,iy,iz)
+        enddo
+        enddo
+        enddo
+!$omp end parallel do
+      end if
 
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
