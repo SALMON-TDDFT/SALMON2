@@ -1602,7 +1602,7 @@ contains
            write(fh,*) "Stress residual diagnostics [Hartree]"
            virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
            virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
-           virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a &
+           virial_xc = stress_tensor_trace(system%stress_xc - system%stress_xc_cc) * system%det_a &
                      + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
            virial_loc_lr_residual = stress_tensor_trace(system%stress_loc_lr_grad + system%stress_loc_lr_diag) &
                                   * system%det_a + system%stress_loc_lr_energy
@@ -1846,6 +1846,7 @@ contains
       end if
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_legacy_grad_delta [GPa]'); col = col + 1
       call write_compact_column_header(fh, line_cols, col, 'P_loc_sr_rs_sharedu_legacy_delta [GPa]'); col = col + 1
+      call write_compact_column_header(fh, line_cols, col, 'P_xc_cc [GPa]'); col = col + 1
     end if
     call end_compact_column_header(fh)
 
@@ -1919,7 +1920,8 @@ contains
       call write_data_token(fh, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,4), au_pressure_gpa))
       virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
       virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
-      virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+      virial_xc = stress_tensor_trace(system%stress_xc - system%stress_xc_cc) * system%det_a &
+                + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
       virial_xc_valence = stress_tensor_trace(system%stress_xc_valence) * system%det_a + &
                           3d0 * (system%stress_xc_e_vxc_valence - system%stress_xc_energy_valence)
       virial_xc_nlcc = stress_tensor_trace(system%stress_xc_nlcc) * system%det_a + &
@@ -1966,6 +1968,7 @@ contains
       end if
       call write_data_token(fh, pressure_loc_sr_legacy_grad_delta_gpa)
       call write_data_token(fh, pressure_loc_sr_sharedu_legacy_delta_gpa)
+      call write_data_token(fh, -stress_term_pressure_gpa(system%stress_xc_cc, au_pressure_gpa))
     end if
     write(fh,*)
 
@@ -2405,7 +2408,8 @@ contains
       call write_data_token(ofl%fh_stress, -stress_term_pressure_gpa(system%stress_loc_sr_rs_legacy_bins(:,:,4), gpa))
       virial_kin = stress_tensor_trace(system%stress_kin) * system%det_a + 2d0 * energy%E_kin
       virial_har = stress_tensor_trace(system%stress_har) * system%det_a + energy%E_h
-      virial_xc = stress_tensor_trace(system%stress_xc) * system%det_a + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
+      virial_xc = stress_tensor_trace(system%stress_xc - system%stress_xc_cc) * system%det_a &
+                + 3d0 * (system%stress_xc_e_vxc - energy%E_xc)
       virial_xc_valence = stress_tensor_trace(system%stress_xc_valence) * system%det_a + &
                           3d0 * (system%stress_xc_e_vxc_valence - system%stress_xc_energy_valence)
       virial_xc_nlcc = stress_tensor_trace(system%stress_xc_nlcc) * system%det_a + &

@@ -391,7 +391,12 @@ contains
     select case (trim(xc))
     case ('pz')
       call calc_stress_xc_builtin_pz(system, info, mg, ppn, rho_s, energy, xc_func)
+      call calc_stress_xc_nlcc_cc(system, pp, info, mg, ppn, rho_s)
     case ('r2scan')
+      system%stress_xc_cc = 0d0
+      if(pp%flag_nlcc .and. info%id_r == 0 .and. info%id_k == 0 .and. info%id_o == 0) then
+        write(*,'(a)') 'WARNING: NLCC core-correction stress is not implemented for r2scan; P_xc is missing the cc term.'
+      end if
       call calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
     case default
       if(xc_func%use_gradient) call fail_stress("stress tensor supports only built-in PZ or built-in r2SCAN XC")
@@ -501,6 +506,132 @@ contains
     system%stress_xc_e_vxc_valence = E_vxc_valence
     system%stress_xc_e_vxc_nlcc = E_vxc_nlcc
   end subroutine calc_stress_xc_builtin_pz
+
+  subroutine calc_stress_xc_nlcc_cc(system, pp, info, mg, ppn, rho_s)
+    use structures
+    use communication, only: comm_summation
+    use salmon_global, only: kion
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_pp_info),       intent(in)    :: pp
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_pp_nlcc),       intent(in)    :: ppn
+    type(s_scalar),        intent(in)    :: rho_s(:)
+    integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ispin, ia, ib
+    real(8) :: rc, u, v, w, r, s(3), drc_dr, contrib
+    real(8) :: trho, exc_x, exc_c, vxc_x, vxc_c, vxc_sum
+    real(8) :: Rion_repr(3), strs(3,3), strs_sum(3,3), V, hvol
+    real(8), allocatable :: vxc_box(:,:,:)
+    logical :: flag_cuboid
+
+    ! Strain derivative of E_xc from the rigid, atom-centered NLCC core
+    ! density: sigma_cc_ab = (1/V) * int vxc(r) * sum_a rhoc'(|s|) s_a s_b / |s|.
+    ! Real-space equivalent of QE PW/src/stres_cc.f90 (diagonal + nondiagonal,
+    ! G=0 included). The valence-dilution diagonal -(E_vxc - E_xc)/V is already
+    ! handled by calc_stress_xc_builtin_pz.
+    system%stress_xc_cc = 0d0
+    if(.not. pp%flag_nlcc) return
+    if(.not. allocated(ppn%rho_nlcc)) return
+
+    V = system%det_a
+    hvol = system%Hvol
+    strs = 0d0
+
+    allocate(vxc_box(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    ! spin-averaged PZ vxc of the total (valence + core) density,
+    ! consistent with the builtin-PZ stress energy path
+    !$omp parallel do collapse(2) default(none) &
+    !$omp   private(j1,j2,j3,ispin,trho,exc_x,exc_c,vxc_x,vxc_c,vxc_sum) &
+    !$omp   shared(mg,system,rho_s,ppn,vxc_box)
+    do j3 = mg%is(3), mg%ie(3)
+    do j2 = mg%is(2), mg%ie(2)
+    do j1 = mg%is(1), mg%ie(1)
+      vxc_sum = 0d0
+      do ispin = 1, system%nspin
+        trho = rho_s(ispin)%f(j1,j2,j3) + ppn%rho_nlcc(j1,j2,j3)
+        call calc_builtin_pz_xc_split(trho, exc_x, exc_c, vxc_x, vxc_c)
+        vxc_sum = vxc_sum + vxc_x + vxc_c
+      end do
+      vxc_box(j1,j2,j3) = vxc_sum / dble(system%nspin)
+    end do
+    end do
+    end do
+    !$omp end parallel do
+
+    flag_cuboid = .true.
+    if( abs(system%primitive_a(1,2)) >= 1d-10 .or. &
+        abs(system%primitive_a(1,3)) >= 1d-10 .or. &
+        abs(system%primitive_a(2,3)) >= 1d-10 ) flag_cuboid = .false.
+
+    ! geometry mirrors calc_nlcc (salmon_pp.f90): atoms x (+/-2 replicas) x local grid
+    !$omp parallel do default(none) &
+    !$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,contrib,Rion_repr,ia,ib) &
+    !$omp   shared(system,pp,mg,kion,vxc_box,hvol) &
+    !$omp   reduction(+:strs)
+    do a = 1, system%nion
+      ik = kion(a)
+      rc = 15d0
+      do i = 1, pp%nrmax
+        if(pp%rho_nlcc_tbl(i,ik) + pp%tau_nlcc_tbl(i,ik) < 1d-6) then
+          rc = pp%rad(i,ik)
+          exit
+        end if
+      end do
+
+      do i1 = -2, 2
+        Rion_repr(1) = system%Rion(1,a) + i1 * system%primitive_a(1,1)
+      do i2 = -2, 2
+        Rion_repr(2) = system%Rion(2,a) + i2 * system%primitive_a(2,2)
+      do i3 = -2, 2
+        Rion_repr(3) = system%Rion(3,a) + i3 * system%primitive_a(3,3)
+
+        do j1 = mg%is(1), mg%ie(1)
+          u = (j1-1) * system%hgs(1)
+        do j2 = mg%is(2), mg%ie(2)
+          v = (j2-1) * system%hgs(2)
+        do j3 = mg%is(3), mg%ie(3)
+          w = (j3-1) * system%hgs(3)
+          if(flag_cuboid) then
+            s(1) = u - Rion_repr(1)
+            s(2) = v - Rion_repr(2)
+            s(3) = w - Rion_repr(3)
+          else
+            s(1) = u*system%rmatrix_a(1,1) + v*system%rmatrix_a(1,2) + w*system%rmatrix_a(1,3) - Rion_repr(1)
+            s(2) = u*system%rmatrix_a(2,1) + v*system%rmatrix_a(2,2) + w*system%rmatrix_a(2,3) - Rion_repr(2)
+            s(3) = u*system%rmatrix_a(3,1) + v*system%rmatrix_a(3,2) + w*system%rmatrix_a(3,3) - Rion_repr(3)
+          end if
+          r = sqrt(s(1)**2 + s(2)**2 + s(3)**2)
+          if(r > rc .or. r < 1d-12) cycle
+          do ir = 1, pp%nrmax
+            if(pp%rad(ir,ik) > r) exit
+          end do
+          intr = ir - 1
+          if(intr < 1 .or. intr >= pp%nrmax) cycle
+          ! segment slope of the radial NLCC table: matches the linear
+          ! interpolation used to build ppn%rho_nlcc in calc_nlcc
+          drc_dr = (pp%rho_nlcc_tbl(intr+1,ik) - pp%rho_nlcc_tbl(intr,ik)) &
+                 / (pp%rad(intr+1,ik) - pp%rad(intr,ik))
+          contrib = vxc_box(j1,j2,j3) * drc_dr / r * hvol
+          do ib = 1, 3
+          do ia = 1, 3
+            strs(ia,ib) = strs(ia,ib) + contrib * s(ia) * s(ib)
+          end do
+          end do
+        end do
+        end do
+        end do
+      end do
+      end do
+      end do
+    end do
+    !$omp end parallel do
+    deallocate(vxc_box)
+
+    call comm_summation(strs, strs_sum, 9, info%icomm_r)
+    system%stress_xc_cc = strs_sum / V
+    system%stress_xc = system%stress_xc + system%stress_xc_cc
+  end subroutine calc_stress_xc_nlcc_cc
 
   subroutine calc_stress_xc_builtin_r2scan(system, pp, info, mg, stencil, srg, ppn, rho_s, Vxc, energy, xc_func, tpsi, field_state, srg_scalar)
     use structures

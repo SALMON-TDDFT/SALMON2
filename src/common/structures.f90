@@ -90,6 +90,7 @@ module structures
     real(8) :: stress_c(3,3)
     real(8) :: stress_xc_valence(3,3)
     real(8) :: stress_xc_nlcc(3,3)
+    real(8) :: stress_xc_cc(3,3)
     real(8) :: stress_loc(3,3)
     real(8) :: stress_loc_sr_grad(3,3)
     real(8) :: stress_loc_lr_grad(3,3)
