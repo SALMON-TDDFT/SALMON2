@@ -225,7 +225,7 @@ end if
 
    ! force
    if(yn_jm=='n' .and. yn_dc=="n")then
-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald,Vxc,ppn)
      if(comm_is_root(nproc_id_global))then
         write(*,*) "===== force ====="
         do iatom=1,natom

@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald)
+  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald,Vxc,ppn)
     use structures
     use math_constants,only : zi,pi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
@@ -47,6 +47,8 @@ contains
     type(s_pp_grid)         ,intent(in)    :: ppg
     type(s_orbital)         ,intent(inout) :: tpsi
     type(s_ewald_ion_ion)   ,intent(in)    :: ewald
+    type(s_scalar)          ,intent(in), optional :: Vxc(:)
+    type(s_pp_nlcc)         ,intent(in), optional :: ppn
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
@@ -434,6 +436,10 @@ contains
 !$omp end parallel do
 #endif
 !
+    if (present(Vxc) .and. present(ppn)) then
+      call add_force_nlcc(system, pp, mg, info, ppn, Vxc, system%Force)
+    end if
+
     if (use_symmetry) then
       call sym_vector_force_xyz( system%Force, system%Rion )
     end if
@@ -454,6 +460,142 @@ contains
     call timer_end(LOG_CALC_ION_FORCE)
     return
   end subroutine calc_force
+
+  subroutine add_force_nlcc(system, pp, mg, info, ppn, Vxc, Force)
+    ! NLCC core-correction force F_a = + int vxc(r) rhoc'(|s|) s_hat dr,
+    ! s = r - R_a (periodic replicas by FULL lattice vectors; geometry
+    ! mirrors calc_nlcc / accumulate_stress_nlcc_cc). When yn_tau_nlcc='y'
+    ! the energy also sees tau_core, so the analogous vtau term is added.
+    ! Spin: vxc averaged over channels (cf. QE PW/src/force_cc.f90).
+    use structures
+    use communication, only: comm_summation
+    use salmon_global, only: kion, yn_tau_nlcc
+    implicit none
+    type(s_dft_system),    intent(in)    :: system
+    type(s_pp_info),       intent(in)    :: pp
+    type(s_rgrid),         intent(in)    :: mg
+    type(s_parallel_info), intent(in)    :: info
+    type(s_pp_nlcc),       intent(in)    :: ppn
+    type(s_scalar),        intent(in)    :: Vxc(:)
+    real(8),               intent(inout) :: Force(:,:)
+    integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ispin, nion
+    real(8) :: rc, u, v, w, r, s(3), drc_dr, dtc_dr, pot, vts, contrib, hvol
+    real(8) :: Rion_repr(3)
+    real(8), allocatable :: F_add(:,:), F_red(:,:), vxc_box(:,:,:), vtau_box(:,:,:)
+    logical :: flag_cuboid, with_tau
+
+    if (.not. pp%flag_nlcc) return
+    if (.not. allocated(ppn%rho_nlcc)) return
+
+    nion = system%nion
+    hvol = system%Hvol
+    allocate(F_add(3,nion), F_red(3,nion))
+    F_add = 0d0
+
+    allocate(vxc_box(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+!$omp parallel do collapse(2) private(j1,j2,j3,ispin)
+    do j3 = mg%is(3), mg%ie(3)
+    do j2 = mg%is(2), mg%ie(2)
+    do j1 = mg%is(1), mg%ie(1)
+      vxc_box(j1,j2,j3) = 0d0
+      do ispin = 1, system%nspin
+        vxc_box(j1,j2,j3) = vxc_box(j1,j2,j3) + Vxc(ispin)%f(j1,j2,j3)
+      end do
+      vxc_box(j1,j2,j3) = vxc_box(j1,j2,j3) / dble(system%nspin)
+    end do
+    end do
+    end do
+!$omp end parallel do
+
+    with_tau = (yn_tau_nlcc == 'y' .and. allocated(system%xc_payload%vtau%f))
+    if (with_tau) then
+      allocate(vtau_box(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+!$omp parallel do collapse(2) private(j1,j2,j3)
+      do j3 = mg%is(3), mg%ie(3)
+      do j2 = mg%is(2), mg%ie(2)
+      do j1 = mg%is(1), mg%ie(1)
+        vtau_box(j1,j2,j3) = system%xc_payload%vtau%f(mg%idx(j1), mg%idy(j2), mg%idz(j3))
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end if
+
+    flag_cuboid = .true.
+    if( abs(system%primitive_a(1,2)) >= 1d-10 .or. &
+        abs(system%primitive_a(1,3)) >= 1d-10 .or. &
+        abs(system%primitive_a(2,3)) >= 1d-10 ) flag_cuboid = .false.
+
+!$omp parallel do schedule(dynamic) &
+!$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,dtc_dr,pot,vts,contrib,Rion_repr)
+    do a = 1, nion
+      ik = kion(a)
+      rc = 15d0
+      do i = 1, pp%nrmax
+        if(pp%rho_nlcc_tbl(i,ik) + pp%tau_nlcc_tbl(i,ik) < 1d-6) then
+          rc = pp%rad(i,ik)
+          exit
+        end if
+      end do
+
+      do i1 = -2, 2
+      do i2 = -2, 2
+      do i3 = -2, 2
+        Rion_repr(1) = system%Rion(1,a) + i1 * system%primitive_a(1,1) + i2 * system%primitive_a(1,2) + i3 * system%primitive_a(1,3)
+        Rion_repr(2) = system%Rion(2,a) + i1 * system%primitive_a(2,1) + i2 * system%primitive_a(2,2) + i3 * system%primitive_a(2,3)
+        Rion_repr(3) = system%Rion(3,a) + i1 * system%primitive_a(3,1) + i2 * system%primitive_a(3,2) + i3 * system%primitive_a(3,3)
+
+        do j1 = mg%is(1), mg%ie(1)
+          u = (j1-1) * system%hgs(1)
+        do j2 = mg%is(2), mg%ie(2)
+          v = (j2-1) * system%hgs(2)
+        do j3 = mg%is(3), mg%ie(3)
+          w = (j3-1) * system%hgs(3)
+          if(flag_cuboid) then
+            s(1) = u - Rion_repr(1)
+            s(2) = v - Rion_repr(2)
+            s(3) = w - Rion_repr(3)
+          else
+            s(1) = u*system%rmatrix_a(1,1) + v*system%rmatrix_a(1,2) + w*system%rmatrix_a(1,3) - Rion_repr(1)
+            s(2) = u*system%rmatrix_a(2,1) + v*system%rmatrix_a(2,2) + w*system%rmatrix_a(2,3) - Rion_repr(2)
+            s(3) = u*system%rmatrix_a(3,1) + v*system%rmatrix_a(3,2) + w*system%rmatrix_a(3,3) - Rion_repr(3)
+          end if
+          r = sqrt(s(1)**2 + s(2)**2 + s(3)**2)
+          if(r > rc .or. r < 1d-12) cycle
+          do ir = 1, pp%nrmax
+            if(pp%rad(ir,ik) > r) exit
+          end do
+          intr = ir - 1
+          if(intr < 1 .or. intr >= pp%nrmax) cycle
+          drc_dr = (pp%rho_nlcc_tbl(intr+1,ik) - pp%rho_nlcc_tbl(intr,ik)) &
+                 / (pp%rad(intr+1,ik) - pp%rad(intr,ik))
+          pot = vxc_box(j1,j2,j3)
+          contrib = pot * drc_dr
+          if (with_tau) then
+            dtc_dr = (pp%tau_nlcc_tbl(intr+1,ik) - pp%tau_nlcc_tbl(intr,ik)) &
+                   / (pp%rad(intr+1,ik) - pp%rad(intr,ik))
+            vts = vtau_box(j1,j2,j3)
+            contrib = contrib + vts * dtc_dr
+          end if
+          contrib = contrib / r * hvol
+          F_add(1,a) = F_add(1,a) + contrib * s(1)
+          F_add(2,a) = F_add(2,a) + contrib * s(2)
+          F_add(3,a) = F_add(3,a) + contrib * s(3)
+        end do
+        end do
+        end do
+      end do
+      end do
+      end do
+    end do
+!$omp end parallel do
+    deallocate(vxc_box)
+    if (allocated(vtau_box)) deallocate(vtau_box)
+
+    call comm_summation(F_add, F_red, 3*nion, info%icomm_r)
+    Force(:,1:nion) = Force(:,1:nion) + F_red(:,1:nion)
+    deallocate(F_add, F_red)
+  end subroutine add_force_nlcc
   
 !===================================================================================================================================
 
