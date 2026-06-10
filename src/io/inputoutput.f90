@@ -741,7 +741,7 @@ contains
     eta_mask    = 15d0
     yn_tau_nlcc = 'n'
     yn_nlcc_grho = 'n'
-    yn_ghost_check = 'y'
+    yn_ghost_check = 'n'
 !! == default for &functional
     xc    = 'none'
     ! xcname = 'PZ'
