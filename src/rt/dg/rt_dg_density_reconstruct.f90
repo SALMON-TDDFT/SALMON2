@@ -1795,6 +1795,9 @@
     call assert_real_scalar_finite_density('total_charge_local', total_charge_local)
     call assert_real_scalar_finite_density('total_charge', total_charge)
     dg_frag%rho_global_raw_elec = total_charge
+    dg_frag%rho_owned_elec = total_charge
+    dg_frag%rho_imported_elec = 0.0d0
+    dg_frag%rho_local_all_elec = total_charge
     dg_frag%rho_contract_residual_elec = 0.0d0
     dg_frag%elec_num_raw = total_charge
     dg_frag%rho_scale_factor = 1.0d0
@@ -1812,6 +1815,7 @@
         rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, ispin)
     end do
     dg_frag%rho_global_scaled_elec = dg_frag%elec_num_scaled
+    end if
     deallocate(ix_buf, iy_buf, iz_buf, owner_buf, ixg_buf, iyg_buf, izg_buf)
     deallocate(rhobf_bx_buf, rhobf_by_buf, rhobf_bz_buf)
     deallocate(slot_buf, local_grid_ids, remote_grid_ids, valid_remote_grid_ids)
