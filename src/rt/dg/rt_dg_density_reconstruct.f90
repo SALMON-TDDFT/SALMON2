@@ -15,6 +15,7 @@
     integer :: ifrag, io, i_local, ispin
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, bx, by, bz, owner_rank
+    integer :: im_pf, ipw_pf, ipw_max
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), ifrag_count, ngrid_max
     integer :: nocc_spin, nocc_cache
@@ -27,14 +28,17 @@
     integer :: valid_basis_count
     integer :: spin_offset, density_payload_count
     integer :: ix0_frag, ix1_frag, iy0_frag, iy1_frag, iz0_frag, iz1_frag
-    integer, parameter :: grid_block_size = 8192, state_block_size = 64, rho_state_block_size = 16, pw_block_size = 128
+    integer, parameter :: grid_block_size = 8192
+    integer, parameter :: state_block_size = 64
+    integer, parameter :: rho_state_block_size = 16
+    integer, parameter :: pw_block_size = 128
     integer, parameter :: mixed_io_block_size = 64
     real(8), parameter :: density_abs_limit = 1.0d12
     complex(8), parameter :: zzero = (0.0d0, 0.0d0), zone = (1.0d0, 0.0d0)
     real(8) :: rho_contrib, rho_raw_contrib, rho_accum, rho_mix_accum
     real(8) :: total_charge, total_charge_local
     real(8) :: total_charge_reduce_in(1), total_charge_reduce_out(1)
-    real(8) :: occ_factor
+    real(8) :: occ_factor, abs_max_pf
     real(8) :: boxL(3), inv_sqrt_vol, theta, inv_lgnum1
     logical :: use_mixed_density
     logical :: enable_density_phi_block_cache, enable_density_phase_block_cache
@@ -53,7 +57,10 @@
     integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
     real(8), allocatable :: send_flat(:), recv_flat(:)
     real(8), allocatable :: rho_bf(:,:,:), rho_s_bf(:,:,:,:)
-    real(8), allocatable :: phi_blk(:,:), rho_blk(:), rho_blk_accum(:), rho_blk_reduced(:), coef_blk_re(:,:), coef_blk_im(:,:), psi_blk_re(:,:), psi_blk_im(:,:)
+    real(8), allocatable :: phi_blk(:,:), rho_blk(:)
+    real(8), allocatable :: rho_blk_accum(:), rho_blk_reduced(:)
+    real(8), allocatable :: coef_blk_re(:,:), coef_blk_im(:,:)
+    real(8), allocatable :: psi_blk_re(:,:), psi_blk_im(:,:)
     real(8), allocatable :: coef_blk_ri(:,:), psi_blk_ri(:,:)
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
     real(8), allocatable :: D_partial_re(:,:)    ! (nbf_max, nbf_max) partial D per rank
@@ -63,7 +70,6 @@
     real(8), allocatable :: rho_blk_partial(:)   ! (grid_block_size) partial rho for state slice
     real(8), allocatable :: occ_cache(:), occ_sqrt_cache(:), occ_blk(:)
     complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
-    real(8) :: D_partial_trace
     integer :: io_s_frag, io_e_frag, io_loc, nocc_loc, nocc_mix_cols, nocc_per_rank_loc
     integer :: ib_s_frag, ib_e_frag, ib_loc, ib_global
     integer :: nbf_frag_is, nbf_frag_ie, nbf_frag_count, nbf_frag_cap, nbf_per_rank_loc
@@ -80,6 +86,7 @@
     complex(8), allocatable :: mix_transform_spin(:,:), mix_overlap_spin(:,:), s_mix(:,:), s_mix_work(:,:)
     complex(8), allocatable :: coef_mix_eff(:,:), coef_mix_metric(:,:), coef_mix_spin(:,:,:)
     complex(8), allocatable :: d_raw_ff(:,:), d_raw_fp(:,:), d_raw_pp(:,:)
+    complex(8) :: phase_fix
     integer, allocatable :: ipiv_mix(:)
     integer, allocatable :: n_basis_mix_spin(:)
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
@@ -89,7 +96,6 @@
     integer :: rho_mix_mode_kind
     integer :: info_lapack
     integer :: itt_tag
-    real(8) :: s_mix_dev_frob, s_mix_offdiag_frob, s_mix_diag_min, s_mix_diag_max
     logical :: need_full_coef_mix_spin
     logical :: density_on_frag_root
     logical :: density_exchange_active
@@ -222,7 +228,9 @@
     allocate(slot_buf(grid_block_size), local_grid_ids(grid_block_size), remote_grid_ids(grid_block_size))
     allocate(valid_remote_grid_ids(grid_block_size))
     allocate(basis_gid(dg_frag%nstate_frag), valid_basis_ids(dg_frag%nstate_frag))
-    allocate(basis_gid_spin(nbf_max, system%nspin), valid_basis_ids_spin(nbf_max, system%nspin), valid_basis_count_spin(system%nspin))
+    allocate(basis_gid_spin(nbf_max, system%nspin), &
+      valid_basis_ids_spin(nbf_max, system%nspin), &
+      valid_basis_count_spin(system%nspin))
     allocate(phi_blk(grid_block_size, nbf_frag_cap))
     allocate(rho_blk(grid_block_size))
     allocate(rho_blk_accum(grid_block_size))
@@ -443,7 +451,9 @@
             call zgesv(n_basis_mix, nocc_mix_cols, s_mix_work, n_basis_mix, ipiv_mix, coef_mix_metric, n_basis_mix, info_lapack)
             if (info_lapack /= 0) then
               if (dg_frag%id == 0) then
-                write(*,'(1x,a,i0,a,i0)') ' [FATAL] rho_mix metric_consistent solve failed for ispin=', ispin, ' zgesv info=', info_lapack
+                write(*,'(1x,a,i0,a,i0)') &
+                  ' [FATAL] rho_mix metric_consistent solve failed for ispin=', &
+                  ispin, ' zgesv info=', info_lapack
                 flush(6)
               end if
               stop "DG-Fragment RT: rho_mix metric_consistent solve failed"
@@ -705,26 +715,23 @@
               transform_pw_spin(1:n_pw, 1:n_basis_mix, ispin) = dg_frag%mixed_transform(n_frag+1:n_tot, 1:n_basis_mix, ispin)
               ! Phase-fixing test: rotate each mode m so max-abs PW component is real-positive
               if (enable_fp_phase_fix) then
-                block
-                  integer :: im_pf, ipw_pf, ipw_max
-                  real(8) :: abs_max_pf
-                  complex(8) :: phase_fix
-                  do im_pf = 1, n_basis_mix
-                    ipw_max = 1
-                    abs_max_pf = abs(transform_pw_spin(1, im_pf, ispin))
-                    do ipw_pf = 2, n_pw
-                      if (abs(transform_pw_spin(ipw_pf, im_pf, ispin)) > abs_max_pf) then
-                        abs_max_pf = abs(transform_pw_spin(ipw_pf, im_pf, ispin))
-                        ipw_max = ipw_pf
-                      end if
-                    end do
-                    if (abs_max_pf > 1.0d-30) then
-                      phase_fix = conjg(transform_pw_spin(ipw_max, im_pf, ispin)) / abs_max_pf
-                      transform_pw_spin(1:n_pw, im_pf, ispin) = transform_pw_spin(1:n_pw, im_pf, ispin) * phase_fix
-                      transform_frag_spin(1:nbf, im_pf, ispin) = transform_frag_spin(1:nbf, im_pf, ispin) * phase_fix
+                do im_pf = 1, n_basis_mix
+                  ipw_max = 1
+                  abs_max_pf = abs(transform_pw_spin(1, im_pf, ispin))
+                  do ipw_pf = 2, n_pw
+                    if (abs(transform_pw_spin(ipw_pf, im_pf, ispin)) > abs_max_pf) then
+                      abs_max_pf = abs(transform_pw_spin(ipw_pf, im_pf, ispin))
+                      ipw_max = ipw_pf
                     end if
                   end do
-                end block
+                  if (abs_max_pf > 1.0d-30) then
+                    phase_fix = conjg(transform_pw_spin(ipw_max, im_pf, ispin)) / abs_max_pf
+                    transform_pw_spin(1:n_pw, im_pf, ispin) = &
+                      transform_pw_spin(1:n_pw, im_pf, ispin) * phase_fix
+                    transform_frag_spin(1:nbf, im_pf, ispin) = &
+                      transform_frag_spin(1:nbf, im_pf, ispin) * phase_fix
+                  end if
+                end do
               end if
             end if
           end do
@@ -1173,7 +1180,8 @@
                       stop "DG-Fragment RT: density remote spin slot out of range"
                     end if
 !$omp atomic update
-                    rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
+                    rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = &
+                      rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                   end if
                 end do
 !$omp end parallel do
@@ -1540,7 +1548,8 @@
                         stop "DG-Fragment RT: density accum spin slot out of range"
                       end if
 !$omp atomic update
-                      rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
+                      rho_send(owner_rank)%f(spin_offset + slot, 1, 1) = &
+                        rho_send(owner_rank)%f(spin_offset + slot, 1, 1) + rho_contrib
                     end if
                   end do
 !$omp end parallel do
@@ -1584,147 +1593,142 @@
       send_total_count = 0
       recv_total_count = 0
     else
-    allocate(send_counts(1:dg_frag%isize), recv_counts(1:dg_frag%isize))
-    allocate(send_displs(1:dg_frag%isize), recv_displs(1:dg_frag%isize))
-    send_counts = 0
-    recv_counts = 0
-    do irank = 0, dg_frag%isize - 1
-      if (allocated(rho_send(irank)%f)) send_counts(irank + 1) = size(rho_send(irank)%f)
-      npts = dg_frag%density_recv_map(irank)%npts
-      if (npts > 0) recv_counts(irank + 1) = density_payload_count * npts
-    end do
-    send_displs(1) = 0
-    recv_displs(1) = 0
-    do irank = 2, dg_frag%isize
-      send_displs(irank) = send_displs(irank - 1) + send_counts(irank - 1)
-      recv_displs(irank) = recv_displs(irank - 1) + recv_counts(irank - 1)
-    end do
-    send_total_count = sum(send_counts)
-    recv_total_count = sum(recv_counts)
-    allocate(send_flat(max(1, send_total_count)), recv_flat(max(1, recv_total_count)))
-    do irank = 0, dg_frag%isize - 1
-      if (.not. allocated(rho_send(irank)%f)) cycle
-      if (send_counts(irank + 1) <= 0) cycle
-      call assert_real_vector_finite_density('rho_send-peer-before-pack', &
-        rho_send(irank)%f(:, 1, 1), send_counts(irank + 1), irank, 0, 0)
-      send_flat(send_displs(irank + 1)+1:send_displs(irank + 1)+send_counts(irank + 1)) = rho_send(irank)%f(:, 1, 1)
-      deallocate(rho_send(irank)%f)
-    end do
-    call exchange_density_sparse(send_flat, send_counts, send_displs, recv_flat, recv_counts, recv_displs)
-    do irank = 0, dg_frag%isize - 1
-      npts = dg_frag%density_recv_map(irank)%npts
-      if (npts <= 0) cycle
-      if (recv_counts(irank + 1) /= density_payload_count * npts) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
-          "[FATAL] density unpack recv size mismatch: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " peer=", irank, &
-          " recv_count=", recv_counts(irank + 1), " npts=", npts
-        flush(6)
-        stop "DG-Fragment RT: density unpack recv size mismatch"
-      end if
-      call assert_real_vector_finite_density('recv_flat-peer-after-exchange', &
-        recv_flat(recv_displs(irank + 1)+1:recv_displs(irank + 1)+recv_counts(irank + 1)), &
-        recv_counts(irank + 1), irank, 0, 0)
-      if (system%nspin == 1) then
-        do slot = 1, dg_frag%density_recv_map(irank)%npts
-          bx = dg_frag%density_recv_map(irank)%bx(slot)
-          by = dg_frag%density_recv_map(irank)%by(slot)
-          bz = dg_frag%density_recv_map(irank)%bz(slot)
-          if (bx == 0 .or. by == 0 .or. bz == 0) then
+      allocate(send_counts(1:dg_frag%isize), recv_counts(1:dg_frag%isize))
+      allocate(send_displs(1:dg_frag%isize), recv_displs(1:dg_frag%isize))
+      send_counts = 0
+      recv_counts = 0
+      do irank = 0, dg_frag%isize - 1
+        if (allocated(rho_send(irank)%f)) send_counts(irank + 1) = size(rho_send(irank)%f)
+        npts = dg_frag%density_recv_map(irank)%npts
+        if (npts > 0) recv_counts(irank + 1) = density_payload_count * npts
+      end do
+      send_displs(1) = 0
+      recv_displs(1) = 0
+      do irank = 2, dg_frag%isize
+        send_displs(irank) = send_displs(irank - 1) + send_counts(irank - 1)
+        recv_displs(irank) = recv_displs(irank - 1) + recv_counts(irank - 1)
+      end do
+      send_total_count = sum(send_counts)
+      recv_total_count = sum(recv_counts)
+      allocate(send_flat(max(1, send_total_count)), recv_flat(max(1, recv_total_count)))
+      do irank = 0, dg_frag%isize - 1
+        if (.not. allocated(rho_send(irank)%f)) cycle
+        if (send_counts(irank + 1) <= 0) cycle
+        call assert_real_vector_finite_density('rho_send-peer-before-pack', &
+          rho_send(irank)%f(:, 1, 1), send_counts(irank + 1), irank, 0, 0)
+        send_flat(send_displs(irank + 1)+1:send_displs(irank + 1)+send_counts(irank + 1)) = rho_send(irank)%f(:, 1, 1)
+        deallocate(rho_send(irank)%f)
+      end do
+      call exchange_density_sparse(send_flat, send_counts, send_displs, recv_flat, recv_counts, recv_displs)
+      do irank = 0, dg_frag%isize - 1
+        npts = dg_frag%density_recv_map(irank)%npts
+        if (npts <= 0) cycle
+        if (recv_counts(irank + 1) /= density_payload_count * npts) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+            "[FATAL] density unpack recv size mismatch: rank=", dg_frag%id, &
+            " id_frag=", dg_frag%id_frag, " peer=", irank, &
+            " recv_count=", recv_counts(irank + 1), " npts=", npts
+          flush(6)
+          stop "DG-Fragment RT: density unpack recv size mismatch"
+        end if
+        call assert_real_vector_finite_density('recv_flat-peer-after-exchange', &
+          recv_flat(recv_displs(irank + 1)+1:recv_displs(irank + 1)+recv_counts(irank + 1)), &
+          recv_counts(irank + 1), irank, 0, 0)
+        if (system%nspin == 1) then
+          do slot = 1, dg_frag%density_recv_map(irank)%npts
+            bx = dg_frag%density_recv_map(irank)%bx(slot)
+            by = dg_frag%density_recv_map(irank)%by(slot)
+            bz = dg_frag%density_recv_map(irank)%bz(slot)
+            if (bx == 0 .or. by == 0 .or. bz == 0) then
+              ixg = dg_frag%density_recv_map(irank)%ixg(slot)
+              iyg = dg_frag%density_recv_map(irank)%iyg(slot)
+              izg = dg_frag%density_recv_map(irank)%izg(slot)
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+                "[FATAL] density unpack rho_bf bounds: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
+                " idx=", ixg, iyg, izg, " lb=", lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+                " ub=", ubound(rho_bf, 1), ubound(rho_bf, 2), ubound(rho_bf, 3)
+              flush(6)
+              stop "DG-Fragment RT: density unpack rho_bf bounds"
+            end if
+            rho_contrib = recv_flat(recv_displs(irank + 1) + slot)
+            rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
+            call assert_rho_materialize_value('rho_bf-unpack-fast', irank, 0, 0, &
+              slot, bx, by, bz, dg_frag%density_recv_map(irank)%ixg(slot), &
+              dg_frag%density_recv_map(irank)%iyg(slot), dg_frag%density_recv_map(irank)%izg(slot), &
+              dg_frag%id, slot, rho_contrib, rho_bf(bx, by, bz))
+          end do
+        else
+          do slot = 1, dg_frag%density_recv_map(irank)%npts
             ixg = dg_frag%density_recv_map(irank)%ixg(slot)
             iyg = dg_frag%density_recv_map(irank)%iyg(slot)
             izg = dg_frag%density_recv_map(irank)%izg(slot)
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
-              "[FATAL] density unpack rho_bf bounds: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
-              " idx=", ixg, iyg, izg, " lb=", lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-              " ub=", ubound(rho_bf, 1), ubound(rho_bf, 2), ubound(rho_bf, 3)
-            flush(6)
-            stop "DG-Fragment RT: density unpack rho_bf bounds"
-          end if
-          rho_contrib = recv_flat(recv_displs(irank + 1) + slot)
-          rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
-          call assert_rho_materialize_value('rho_bf-unpack-fast', irank, 0, 0, &
-            slot, bx, by, bz, dg_frag%density_recv_map(irank)%ixg(slot), &
-            dg_frag%density_recv_map(irank)%iyg(slot), dg_frag%density_recv_map(irank)%izg(slot), &
-            dg_frag%id, slot, rho_contrib, rho_bf(bx, by, bz))
-        end do
-      else
-        do slot = 1, dg_frag%density_recv_map(irank)%npts
-      ixg = dg_frag%density_recv_map(irank)%ixg(slot)
-      iyg = dg_frag%density_recv_map(irank)%iyg(slot)
-      izg = dg_frag%density_recv_map(irank)%izg(slot)
-      bx = dg_frag%density_recv_map(irank)%bx(slot)
-      by = dg_frag%density_recv_map(irank)%by(slot)
-      bz = dg_frag%density_recv_map(irank)%bz(slot)
-      if (bx == 0 .or. by == 0 .or. bz == 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
-          "[FATAL] density unpack rho_bf bounds: rank=", dg_frag%id, &
-          " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
-          " idx=", ixg, iyg, izg, " lb=", lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-          " ub=", ubound(rho_bf, 1), ubound(rho_bf, 2), ubound(rho_bf, 3)
-        flush(6)
-        stop "DG-Fragment RT: density unpack rho_bf bounds"
-      end if
-      if (system%nspin > 1) then
-        if (ixg < lbound(rho_s_bf, 1) .or. ixg > ubound(rho_s_bf, 1) .or. &
-            iyg < lbound(rho_s_bf, 2) .or. iyg > ubound(rho_s_bf, 2) .or. &
-            izg < lbound(rho_s_bf, 3) .or. izg > ubound(rho_s_bf, 3)) then
-          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
-            "[FATAL] density unpack rho_s_bf bounds: rank=", dg_frag%id, &
-            " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
-            " idx=", ixg, iyg, izg, " lb=", lbound(rho_s_bf, 1), lbound(rho_s_bf, 2), lbound(rho_s_bf, 3), &
-            " ub=", ubound(rho_s_bf, 1), ubound(rho_s_bf, 2), ubound(rho_s_bf, 3)
-          flush(6)
-          stop "DG-Fragment RT: density unpack rho_s_bf bounds"
-        end if
-      end if
-      rho_raw_contrib = recv_flat(recv_displs(irank + 1) + slot)
-      rho_contrib = rho_raw_contrib
-      rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
-      call assert_rho_materialize_value('rho_bf-unpack-full', irank, 0, 0, &
-        slot, bx, by, bz, ixg, iyg, izg, dg_frag%id, slot, &
-        rho_contrib, rho_bf(bx, by, bz))
-      end if
-      if (system%nspin > 1) then
-        do ispin = 1, system%nspin
-          spin_offset = ispin * npts
-          if (spin_offset + slot < 1 .or. spin_offset + slot > recv_counts(irank + 1)) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
-              "[FATAL] density unpack spin slot bounds: rank=", dg_frag%id, &
-              " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
-              " spin_slot=", spin_offset + slot, " recv_size=", recv_counts(irank + 1)
-            flush(6)
-            stop "DG-Fragment RT: density unpack spin slot bounds"
-          end if
-          rho_contrib = recv_flat(recv_displs(irank + 1) + spin_offset + slot)
+            bx = dg_frag%density_recv_map(irank)%bx(slot)
+            by = dg_frag%density_recv_map(irank)%by(slot)
+            bz = dg_frag%density_recv_map(irank)%bz(slot)
+            if (bx == 0 .or. by == 0 .or. bz == 0) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+                "[FATAL] density unpack rho_bf bounds: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
+                " idx=", ixg, iyg, izg, " lb=", lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+                " ub=", ubound(rho_bf, 1), ubound(rho_bf, 2), ubound(rho_bf, 3)
+              flush(6)
+              stop "DG-Fragment RT: density unpack rho_bf bounds"
+            end if
+            if (ixg < lbound(rho_s_bf, 1) .or. ixg > ubound(rho_s_bf, 1) .or. &
+                iyg < lbound(rho_s_bf, 2) .or. iyg > ubound(rho_s_bf, 2) .or. &
+                izg < lbound(rho_s_bf, 3) .or. izg > ubound(rho_s_bf, 3)) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
+                "[FATAL] density unpack rho_s_bf bounds: rank=", dg_frag%id, &
+                " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
+                " idx=", ixg, iyg, izg, " lb=", lbound(rho_s_bf, 1), lbound(rho_s_bf, 2), lbound(rho_s_bf, 3), &
+                " ub=", ubound(rho_s_bf, 1), ubound(rho_s_bf, 2), ubound(rho_s_bf, 3)
+              flush(6)
+              stop "DG-Fragment RT: density unpack rho_s_bf bounds"
+            end if
+            rho_raw_contrib = recv_flat(recv_displs(irank + 1) + slot)
+            rho_contrib = rho_raw_contrib
+            rho_bf(bx, by, bz) = rho_bf(bx, by, bz) + rho_contrib
+            call assert_rho_materialize_value('rho_bf-unpack-full', irank, 0, 0, &
+              slot, bx, by, bz, ixg, iyg, izg, dg_frag%id, slot, &
+              rho_contrib, rho_bf(bx, by, bz))
+            do ispin = 1, system%nspin
+              spin_offset = ispin * npts
+              if (spin_offset + slot < 1 .or. spin_offset + slot > recv_counts(irank + 1)) then
+                write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                  "[FATAL] density unpack spin slot bounds: rank=", dg_frag%id, &
+                  " id_frag=", dg_frag%id_frag, " peer=", irank, " slot=", slot, &
+                  " spin_slot=", spin_offset + slot, " recv_size=", recv_counts(irank + 1)
+                flush(6)
+                stop "DG-Fragment RT: density unpack spin slot bounds"
+              end if
+              rho_contrib = recv_flat(recv_displs(irank + 1) + spin_offset + slot)
 !$omp atomic update
-          rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
-        end do
-      end if
-        end do
-      end if
-      call assert_real_array3_finite_density('rho_bf-after-unpack-peer', rho_bf, &
+              rho_s_bf(ixg, iyg, izg, ispin) = rho_s_bf(ixg, iyg, izg, ispin) + rho_contrib
+            end do
+          end do
+        end if
+        call assert_real_array3_finite_density('rho_bf-after-unpack-peer', rho_bf, &
+          lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+          rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
+      end do
+      call assert_real_array3_finite_density('rho_bf-after-unpack-loop', rho_bf, &
         lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
         rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
-    end do
-    call assert_real_array3_finite_density('rho_bf-after-unpack-loop', rho_bf, &
-      lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-      rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
-    call assert_real_array3_finite_density('rho_bf-after-unpack-timer', rho_bf, &
-      lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-      rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
-    call assert_real_array3_finite_density('rho_bf-after-exchange', rho_bf, &
-      lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-      rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
-    call assert_real_array3_finite_density('rho_bf-before-comm-buffer-dealloc', rho_bf, &
-      lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-      rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
-    deallocate(send_flat, recv_flat)
-    deallocate(send_counts, recv_counts, send_displs, recv_displs)
-    call assert_real_array3_finite_density('rho_bf-after-comm-buffer-dealloc', rho_bf, &
-      lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
-      rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
+      call assert_real_array3_finite_density('rho_bf-after-unpack-timer', rho_bf, &
+        lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+        rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
+      call assert_real_array3_finite_density('rho_bf-after-exchange', rho_bf, &
+        lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+        rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
+      call assert_real_array3_finite_density('rho_bf-before-comm-buffer-dealloc', rho_bf, &
+        lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+        rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
+      deallocate(send_flat, recv_flat)
+      deallocate(send_counts, recv_counts, send_displs, recv_displs)
+      call assert_real_array3_finite_density('rho_bf-after-comm-buffer-dealloc', rho_bf, &
+        lbound(rho_bf, 1), lbound(rho_bf, 2), lbound(rho_bf, 3), &
+        rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
     end if
     if (density_exchange_active) then
     call assert_rho_bf_with_sources('rho_bf-before-copy-v3', &
