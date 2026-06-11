@@ -305,90 +305,6 @@
     end do
   end subroutine init_matrix_blocks
 
-  subroutine sync_dense_matrix_to_blocks(dg_frag, mat, blocks, block_map)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    real(8), intent(in) :: mat(:, :, :)
-    type(matrix_block_info), intent(inout) :: blocks(:)
-    integer, intent(in) :: block_map(:, :)
-    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
-
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        blocks(iblk)%val(:, :, :) = 0.0d0
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
-              blocks(iblk)%val(ii, jj, ispin) = mat(ig_i, ig_j, ispin)
-            end do
-          end do
-        end do
-      end do
-    end do
-  end subroutine sync_dense_matrix_to_blocks
-
-  subroutine sync_blocks_to_dense_matrix(dg_frag, blocks, block_map, mat)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    type(matrix_block_info), intent(in) :: blocks(:)
-    integer, intent(in) :: block_map(:, :)
-    real(8), intent(inout) :: mat(:, :, :)
-    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol, idx_ii, idx_jj, valid_row_count, valid_col_count
-    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
-
-    mat(:, :, :) = 0.0d0
-    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
-    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          valid_row_count = 0
-          do ii = 1, nrow
-            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
-            valid_row_count = valid_row_count + 1
-            valid_row_ids(valid_row_count) = ii
-          end do
-          valid_col_count = 0
-          do jj = 1, ncol
-            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
-            valid_col_count = valid_col_count + 1
-            valid_col_ids(valid_col_count) = jj
-          end do
-          do idx_jj = 1, valid_col_count
-            jj = valid_col_ids(idx_jj)
-            ig_j = col_gid(jj)
-            do idx_ii = 1, valid_row_count
-              ii = valid_row_ids(idx_ii)
-              ig_i = row_gid(ii)
-              mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
-            end do
-          end do
-        end do
-      end do
-    end do
-    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
-  end subroutine sync_blocks_to_dense_matrix
-
   subroutine init_momentum_blocks(dg_frag, diagonal_only)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -733,7 +649,7 @@
     character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
     character(32), parameter :: binfile_bfb = 'basis_functions_buffer.bin'
     integer, parameter :: basis_buffer_magic = -22022212
-    integer, parameter :: basis_buffer_version = 1
+    integer, parameter :: basis_buffer_version = 2
     character(256) :: filename
     integer :: iunit, magic_file, version_file
     integer :: nxyz_domain(3), nxyz_buffer_file(3), nxyz_box(3)
@@ -759,8 +675,9 @@
     open(iunit, file=filename, form='unformatted', access='stream', status='old')
     read(iunit) magic_file, version_file
     if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
-      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] invalid neighbor basis buffer header at ifrag=', &
-        ifrag, ' magic=', magic_file, ' version=', version_file
+      write(*,'(1x,a,i0,4(a,i0))') '[FATAL] invalid neighbor basis buffer header at ifrag=', &
+        ifrag, ' magic=', magic_file, ' expected_magic=', basis_buffer_magic, &
+        ' version=', version_file, ' expected_version=', basis_buffer_version
       stop 'DG-Fragment RT: invalid neighbor basis buffer file'
     end if
     read(iunit) nxyz_domain(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
@@ -945,13 +862,22 @@
     real(8) :: term_self, term_cross
     real(8) :: face_self_sum, face_cross_sum, face_self_max, face_cross_max
     integer :: face_self_count, face_cross_count
-    logical :: pbc_face, mix_face_trace, use_cached_trace
+    logical :: pbc_face, mix_face_trace, use_cached_trace, trace_pbc_face
+    character(len=32) :: env_face_trace
+    integer :: env_face_len, env_face_status
     real(8), allocatable :: phi_col(:,:,:,:)
 
     if (.not. allocated(dg_frag%phi_frag)) return
     if (.not. allocated(dg_frag%n_basis)) return
     if (.not. allocated(dg_frag%index_basis)) return
     if (.not. dg_frag%parallel_mode_orbital) return
+    trace_pbc_face = .false.
+    env_face_trace = ''
+    call get_environment_variable('SALMON_DG_PBC_FACE_TRACE', env_face_trace, length=env_face_len, status=env_face_status)
+    if (env_face_status == 0 .and. env_face_len > 0) then
+      if (env_face_trace(1:1) == '1' .or. env_face_trace(1:1) == 'y' .or. env_face_trace(1:1) == 'Y' .or. &
+          env_face_trace(1:1) == 't' .or. env_face_trace(1:1) == 'T') trace_pbc_face = .true.
+    end if
     mix_face_trace = dg_frag%flux_face_trace_mix_enabled
     trace_mix = flux_face_trace_mix_default
     if (mix_face_trace) then
@@ -989,7 +915,7 @@
             loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag)
             loop_hi(axis) = loop_lo(axis)
           end if
-          pbc_face = is_periodic_boundary_face_ham(dg_frag, ifrag, axis, side)
+          pbc_face = trace_pbc_face .and. is_periodic_boundary_face_ham(dg_frag, ifrag, axis, side)
           face_self_sum = 0.0d0
           face_cross_sum = 0.0d0
           face_self_max = 0.0d0
@@ -1126,7 +1052,9 @@
     real(8) :: u_l, u_r, v_l, term_self, term_cross
     real(8) :: face_self_sum, face_cross_sum, face_self_max, face_cross_max
     integer :: face_self_count, face_cross_count
-    logical :: pbc_face
+    logical :: pbc_face, trace_pbc_face
+    character(len=32) :: env_face_trace
+    integer :: env_face_len, env_face_status
     real(8), allocatable :: phi_col(:,:,:,:)
 
     if (.not. allocated(dg_frag%momentum_blocks)) return
@@ -1135,6 +1063,13 @@
     if (.not. allocated(dg_frag%n_basis)) return
     if (.not. allocated(dg_frag%index_basis)) return
     if (.not. dg_frag%parallel_mode_orbital) return
+    trace_pbc_face = .false.
+    env_face_trace = ''
+    call get_environment_variable('SALMON_DG_PBC_FACE_TRACE', env_face_trace, length=env_face_len, status=env_face_status)
+    if (env_face_status == 0 .and. env_face_len > 0) then
+      if (env_face_trace(1:1) == '1' .or. env_face_trace(1:1) == 'y' .or. env_face_trace(1:1) == 'Y' .or. &
+          env_face_trace(1:1) == 't' .or. env_face_trace(1:1) == 'T') trace_pbc_face = .true.
+    end if
 
     ! Momentum/current uses the DG face correction for the normal gradient.
     ! Local volume gradients stay inside each fragment; only u_R-u_L on a
@@ -1167,7 +1102,7 @@
             loop_lo(axis) = dg_frag%ixyz_frag(axis, ifrag)
             loop_hi(axis) = loop_lo(axis)
           end if
-          pbc_face = is_periodic_boundary_face_ham(dg_frag, ifrag, axis, side)
+          pbc_face = trace_pbc_face .and. is_periodic_boundary_face_ham(dg_frag, ifrag, axis, side)
           face_self_sum = 0.0d0
           face_cross_sum = 0.0d0
           face_self_max = 0.0d0
@@ -1423,8 +1358,7 @@
     use structures
     use communication, only: comm_is_root, comm_summation, comm_get_max
     use parallelization, only: nproc_size_global
-    use rt_dg_plane_wave, only: diagonalize_mixed_basis
-    use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_complex_dense, symmetrize_real_matrix_blocks
+    use rt_dg_fragment_ops, only: symmetrize_real_matrix_blocks
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -1441,7 +1375,6 @@
     integer :: i_halo
     real(8) :: hvol
     real(8) :: max_p
-    real(8) :: Ac_zero(3)
     logical :: is_local_fragment
     integer :: is(3), ie(3)
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
@@ -1452,13 +1385,6 @@
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
     integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
     integer :: jo_s, jo_e, jo_loc, ncol_local
-    integer :: n_metric
-    logical :: release_dense_fragment_ops
-    complex(8), allocatable :: H_metric_ref(:,:)
-    
-    release_dense_fragment_ops = (.not. dg_frag%yn_adaptive_basis) .and. &
-      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
-
     if (.not. dg_frag%has_real_space_basis) then
       return
     end if
@@ -1763,35 +1689,6 @@
       write(*,*) "  [3/3] Non-local PP handled in time evolution (A-dependent)"
     end if
 
-    ! Build initial mixed basis once (fragment + PW) with A=0.
-    ! This is the first rollout of the mixed-basis orthogonalization path:
-    ! initialization uses the mixed diagonalization, while later RT updates
-    ! still fall back to the existing mixed refresh path.
-    if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
-      Ac_zero(:) = 0.0d0
-      if (comm_is_root(dg_frag%id)) then
-        write(*,*) "  [init] Diagonalizing mixed basis at startup (A=0)"
-      end if
-      call diagonalize_mixed_basis(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
-      if (allocated(dg_frag%coef_new)) dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
-    end if
-
-    ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
-    if (allocated(dg_frag%H_mat_old)) then
-      dg_frag%H_mat_old(:, :, :) = (0.0d0, 0.0d0)
-      n_metric = min(dg_frag%nstate_frag, size(dg_frag%H_mat_old, 1), size(dg_frag%H_mat_old, 2))
-      if (n_metric > 0) then
-        allocate(H_metric_ref(n_metric, n_metric))
-      end if
-      do ispin = 1, min(dg_frag%nspin, size(dg_frag%H_mat_old,3))
-        if (n_metric <= 0) cycle
-        H_metric_ref(:, :) = (0.0d0, 0.0d0)
-        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n_metric, H_metric_ref)
-        dg_frag%H_mat_old(1:n_metric, 1:n_metric, ispin) = H_metric_ref(:, :)
-      end do
-      if (allocated(H_metric_ref)) deallocate(H_metric_ref)
-    end if
-    
     if (allocated(V_total)) deallocate(V_total)
     if (allocated(V_total)) then
       write(*,*) "[FATAL] V_total still allocated before return: rank=", dg_frag%id
@@ -1804,130 +1701,6 @@
     end if
     
   end subroutine calculate_hamiltonian_matrix
-
-  subroutine reduce_matrix_fragment_blocks(dg_frag, mat, label, icomm_reduce)
-    use communication, only: comm_is_root, comm_summation, comm_get_max
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    real(8), intent(inout) :: mat(:,:,:)
-    character(*), intent(in) :: label
-    integer, intent(in) :: icomm_reduce
-    integer, parameter :: reduce_chunk_size = 262144
-    real(8), allocatable :: send_block(:), recv_block(:)
-    integer :: ifrag_row, ifrag_col, ispin, ii, jj, ig_i, ig_j
-    integer :: idx_ii, idx_jj, valid_row_count, valid_col_count
-    integer :: nrow, ncol, block_size, max_block_size, total_active_size
-    integer :: total_active_min, total_active_max, max_block_size_global
-    integer :: chunk_begin, chunk_count, offset_flat
-    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
-
-    max_block_size = 0
-    total_active_size = 0
-    do ispin = 1, dg_frag%nspin
-      do ifrag_col = 1, dg_frag%n_frag
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
-        if (ncol <= 0) cycle
-        do ifrag_row = 1, dg_frag%n_frag
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          if (nrow <= 0) cycle
-          block_size = nrow * ncol
-          max_block_size = max(max_block_size, block_size)
-          total_active_size = total_active_size + block_size
-        end do
-      end do
-    end do
-
-    max_block_size_global = max_block_size
-    call comm_get_max(max_block_size_global, icomm_reduce)
-    total_active_max = total_active_size
-    call comm_get_max(total_active_max, icomm_reduce)
-    total_active_min = -total_active_size
-    call comm_get_max(total_active_min, icomm_reduce)
-    total_active_min = -total_active_min
-
-    if (total_active_min /= total_active_max) then
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block size mismatch: label=", &
-        trim(label), " rank=", dg_frag%id, " local=", total_active_size, &
-        " min=", total_active_min, " max=", total_active_max
-      flush(6)
-      stop 1
-    end if
-
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
-        " total_active=", total_active_size, " max_block=", max_block_size_global, &
-        " chunk_size=", reduce_chunk_size
-      flush(6)
-    end if
-
-    if (max_block_size_global <= 0) return
-    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
-    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
-    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
-
-    do ispin = 1, dg_frag%nspin
-      do ifrag_col = 1, dg_frag%n_frag
-        ncol = dg_frag%n_basis(ifrag_col, ispin)
-        if (ncol <= 0) cycle
-        do ifrag_row = 1, dg_frag%n_frag
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          if (nrow <= 0) cycle
-          valid_row_count = 0
-          do ii = 1, nrow
-            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
-            valid_row_count = valid_row_count + 1
-            valid_row_ids(valid_row_count) = ii
-          end do
-          valid_col_count = 0
-          do jj = 1, ncol
-            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
-            valid_col_count = valid_col_count + 1
-            valid_col_ids(valid_col_count) = jj
-          end do
-          block_size = valid_row_count * valid_col_count
-          do idx_jj = 1, valid_col_count
-            jj = valid_col_ids(idx_jj)
-            ig_j = col_gid(jj)
-            do idx_ii = 1, valid_row_count
-              ii = valid_row_ids(idx_ii)
-              ig_i = row_gid(ii)
-              offset_flat = (idx_jj - 1) * valid_row_count + idx_ii
-              send_block(offset_flat) = mat(ig_i, ig_j, ispin)
-            end do
-          end do
-
-          chunk_begin = 1
-          do while (chunk_begin <= block_size)
-            chunk_count = min(reduce_chunk_size, block_size - chunk_begin + 1)
-            call comm_summation(send_block(chunk_begin:chunk_begin + chunk_count - 1), &
-                                recv_block(chunk_begin:chunk_begin + chunk_count - 1), chunk_count, icomm_reduce)
-            chunk_begin = chunk_begin + chunk_count
-          end do
-
-          do idx_jj = 1, valid_col_count
-            jj = valid_col_ids(idx_jj)
-            ig_j = col_gid(jj)
-            do idx_ii = 1, valid_row_count
-              ii = valid_row_ids(idx_ii)
-              ig_i = row_gid(ii)
-              offset_flat = (idx_jj - 1) * valid_row_count + idx_ii
-              mat(ig_i, ig_j, ispin) = recv_block(offset_flat)
-            end do
-          end do
-        end do
-      end do
-    end do
-
-    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
-    deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
-        " total_active=", total_active_size
-      flush(6)
-    end if
-  end subroutine reduce_matrix_fragment_blocks
 
   !=======================================================================
   ! Build total local potential on the given grid:
@@ -2404,35 +2177,6 @@
     loc_e(:) = ov_e(:) - iorg(:) + 1
   end subroutine get_fragment_owned_range
 
-  subroutine get_fragment_mg_overlap_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag
-    type(s_rgrid), intent(in) :: mg
-    integer, intent(out) :: loc_s(3), loc_e(3)
-    logical, intent(out) :: has_overlap
-
-    integer :: iorg(3), ndom(3), g_s(3), g_e(3), ov_s(3), ov_e(3)
-
-    iorg(:) = dg_frag%ixyz_frag(:, ifrag)
-    ndom(:) = dg_frag%nxyz_domain(:, ifrag)
-    g_s(:) = iorg(:)
-    g_e(:) = iorg(:) + ndom(:) - 1
-    ov_s(:) = max(g_s(:), mg%is(:))
-    ov_e(:) = min(g_e(:), mg%ie(:))
-
-    has_overlap = all(ov_s(:) <= ov_e(:))
-    if (.not. has_overlap) then
-      loc_s(:) = 1
-      loc_e(:) = 0
-      return
-    end if
-
-    loc_s(:) = ov_s(:) - iorg(:) + 1
-    loc_e(:) = ov_e(:) - iorg(:) + 1
-  end subroutine get_fragment_mg_overlap_range
-
   subroutine get_fragment_column_range(dg_frag, ncol, col_s, col_e)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -2658,104 +2402,6 @@
                            dg_frag%phi_frag(ix0, iy0, iz0 - 4, jo, i_local))
 
   end subroutine apply_gradient_at_phi_box_point
-
-  subroutine apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, t_val)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer,                intent(in) :: i_local, jo
-    type(s_rgrid),          intent(in) :: mg
-    type(s_stencil),        intent(in) :: stencil
-    integer,                intent(in) :: phi_idx(3)
-    real(8),                intent(out) :: t_val
-
-    integer :: gx, gy, gz
-    integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
-    integer :: ix0, iy0, iz0
-    real(8) :: lap0, lapt(4,3), v
-
-    lap0 = stencil%coef_lap0
-    lapt = stencil%coef_lap
-    phi_lb1 = lbound(dg_frag%phi_frag, 1)
-    phi_lb2 = lbound(dg_frag%phi_frag, 2)
-    phi_lb3 = lbound(dg_frag%phi_frag, 3)
-    phi_ub1 = ubound(dg_frag%phi_frag, 1)
-    phi_ub2 = ubound(dg_frag%phi_frag, 2)
-    phi_ub3 = ubound(dg_frag%phi_frag, 3)
-
-    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
-    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
-    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
-    ix0 = gx
-    iy0 = gy
-    iz0 = gz
-    if (ix0 - 4 < phi_lb1 .or. ix0 + 4 > phi_ub1 .or. &
-        iy0 - 4 < phi_lb2 .or. iy0 + 4 > phi_ub2 .or. &
-        iz0 - 4 < phi_lb3 .or. iz0 + 4 > phi_ub3) then
-      t_val = 0.0d0
-      return
-    end if
-
-    v = lapt(1,1) * (dg_frag%phi_frag(ix0 + 1, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 1, iy0, iz0, jo, i_local)) + &
-        lapt(2,1) * (dg_frag%phi_frag(ix0 + 2, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 2, iy0, iz0, jo, i_local)) + &
-        lapt(3,1) * (dg_frag%phi_frag(ix0 + 3, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 3, iy0, iz0, jo, i_local)) + &
-        lapt(4,1) * (dg_frag%phi_frag(ix0 + 4, iy0, iz0, jo, i_local) + dg_frag%phi_frag(ix0 - 4, iy0, iz0, jo, i_local))
-    v = v + &
-        lapt(1,2) * (dg_frag%phi_frag(ix0, iy0 + 1, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 1, iz0, jo, i_local)) + &
-        lapt(2,2) * (dg_frag%phi_frag(ix0, iy0 + 2, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 2, iz0, jo, i_local)) + &
-        lapt(3,2) * (dg_frag%phi_frag(ix0, iy0 + 3, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 3, iz0, jo, i_local)) + &
-        lapt(4,2) * (dg_frag%phi_frag(ix0, iy0 + 4, iz0, jo, i_local) + dg_frag%phi_frag(ix0, iy0 - 4, iz0, jo, i_local))
-    v = v + &
-        lapt(1,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 1, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 1, jo, i_local)) + &
-        lapt(2,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 2, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 2, jo, i_local)) + &
-        lapt(3,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 3, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 3, jo, i_local)) + &
-        lapt(4,3) * (dg_frag%phi_frag(ix0, iy0, iz0 + 4, jo, i_local) + dg_frag%phi_frag(ix0, iy0, iz0 - 4, jo, i_local))
-
-    t_val = lap0 * dg_frag%phi_frag(ix0, iy0, iz0, jo, i_local) - 0.5d0 * v
-  end subroutine apply_kinetic_at_phi_box_point
-
-  subroutine apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, t_val, h_val)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer,                intent(in) :: i_local, jo
-    type(s_rgrid),          intent(in) :: mg
-    type(s_stencil),        intent(in) :: stencil
-    real(8),                intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    integer,                intent(in) :: phi_idx(3)
-    real(8),                intent(out) :: t_val, h_val
-
-    integer :: gx, gy, gz
-
-    call apply_kinetic_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, t_val)
-    h_val = t_val
-    gx = modulo(phi_idx(1) - 1, mg%num(1)) + 1
-    gy = modulo(phi_idx(2) - 1, mg%num(2)) + 1
-    gz = modulo(phi_idx(3) - 1, mg%num(3)) + 1
-    if (gx < mg%is(1) .or. gx > mg%ie(1) .or. &
-        gy < mg%is(2) .or. gy > mg%ie(2) .or. &
-        gz < mg%is(3) .or. gz > mg%ie(3)) return
-    if (phi_idx(1) < lbound(dg_frag%phi_frag, 1) .or. phi_idx(1) > ubound(dg_frag%phi_frag, 1) .or. &
-        phi_idx(2) < lbound(dg_frag%phi_frag, 2) .or. phi_idx(2) > ubound(dg_frag%phi_frag, 2) .or. &
-        phi_idx(3) < lbound(dg_frag%phi_frag, 3) .or. phi_idx(3) > ubound(dg_frag%phi_frag, 3)) return
-    h_val = h_val + V_total(gx, gy, gz) * dg_frag%phi_frag(phi_idx(1), phi_idx(2), phi_idx(3), jo, i_local)
-  end subroutine apply_kinetic_and_hamiltonian_at_phi_box_point
-
-  subroutine apply_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, h_val)
-    use structures
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer,                intent(in) :: i_local, jo
-    type(s_rgrid),          intent(in) :: mg
-    type(s_stencil),        intent(in) :: stencil
-    real(8),                intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
-    integer,                intent(in) :: phi_idx(3)
-    real(8),                intent(out) :: h_val
-
-    real(8) :: t_dummy
-
-    call apply_kinetic_and_hamiltonian_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, V_total, phi_idx, t_dummy, h_val)
-  end subroutine apply_hamiltonian_at_phi_box_point
 
   !=======================================================================
   ! Calculate momentum matrix elements in fragment basis (velocity gauge)
@@ -3271,7 +2917,7 @@
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
-    logical :: log_frag_progress, release_dense_overlap, has_overlap
+    logical :: log_frag_progress, has_overlap
     real(8) :: hvol, integral, savg, s_min, s_max, cond_est
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
     real(8) :: frag_self_start, frag_halo_start
@@ -3283,9 +2929,6 @@
     ! Enforce fragment-local stencil policy: no halo communication path.
     dg_frag%n_halo = 0
     dg_frag%has_halo_exchange = .false.
-
-    release_dense_overlap = (.not. dg_frag%yn_adaptive_basis) .and. &
-      ((.not. dg_frag%use_plane_wave_basis) .or. dg_frag%n_plane_waves <= 0)
 
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)

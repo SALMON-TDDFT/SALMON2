@@ -21,6 +21,10 @@ subroutine main_dft
 use math_constants, only: pi, zi
 use structures
 use inputoutput
+use salmon_global, only: yn_dc_lcfo_flux
+#ifdef USE_EIGENEXA
+use eigenexa_module, only: finalize_eigenexa
+#endif
 use parallelization, only: nproc_id_global,nproc_group_global,adjust_elapse_time,nproc_size_global
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
@@ -49,6 +53,7 @@ use jellium, only: check_condition_jm
 use dcdft
 use dcdft_soi
 use lcfo
+use lcfo_flux
 use lcfo_soi
 implicit none
 integer :: ix,iy,iz
@@ -315,12 +320,18 @@ call fipp_stop ! performance profiling
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
 if(yn_dc=='y') then
-   if(yn_dc_for_dg == 'y') then
-      if(yn_spinorbit == 'y') then
-         stop "yn_dc_for_dg=y currently supports non-SOI path only"
-      end if
-      call write_dg_seed_from_dcdft(lg,system,spsi,dc)
-   else if(yn_dc_lcfo == 'y') then
+  if(yn_dc_lcfo_flux == 'y') then
+    if(yn_spinorbit == 'y') then
+      stop "yn_dc_lcfo_flux=y is not implemented for spin-orbit mode"
+    else
+      if(comm_is_root(nproc_id_global)) &
+      & write(*,'(1x,a)') '[DC-LCFO-FLUX] export phase: build Flux-LCFO basis and coefficients'
+#ifdef USE_EIGENEXA
+      call finalize_eigenexa(info)
+#endif
+      call dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+    end if
+  else if(yn_dc_lcfo == 'y') then
     if(yn_spinorbit == 'y') then
       call dc_lcfo_soi(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     else

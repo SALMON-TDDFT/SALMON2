@@ -5,8 +5,7 @@
     use salmon_global, only: yn_fix_func
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_ops, only: sync_mixed_coef_from_raw, sync_raw_coef_from_mixed
-    use misc_routines, only: get_wtime
+    use rt_dg_fragment_types, only: s_dg_fragment_rt
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -27,648 +26,217 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin), Vxc(system%nspin)
     type(s_dft_energy),     intent(inout) :: energy
     
-    complex(8), allocatable, save :: k(:,:,:), k_accum(:,:,:)
-    complex(8), allocatable, save :: k_pw(:,:,:), k_pw_accum(:,:,:)
-    complex(8), allocatable :: coef_ref(:,:,:)
-    complex(8), allocatable :: coef_pw_ref(:,:,:)
-    integer :: istage, io, jo, ispin
+    complex(8), allocatable, save :: k_blk(:,:,:)
+    complex(8), allocatable, save :: next_coef(:,:,:)
+    complex(8), allocatable, save :: acc(:,:,:)
+    integer :: istage
+    integer :: state0, state_s, state_e, nstate_blk, nstate_work, nstate_prop
     real(8) :: Ac_tot(3), t_stage
-    real(8) :: t0, t1
-    real(8) :: time_sync, time_stage_update, time_deriv, time_coef_update
-    integer :: n, n_pw
-    logical :: use_mixed_rt
-    logical :: trace_first_step
-    logical, save :: timing_initialized = .false.
-    logical, save :: enable_rk_timing = .false.
-    character(16) :: env_timing
-    integer :: env_status
+    integer :: n
+    integer, parameter :: state_work_target_mb = 512
+    integer, parameter :: state_work_vectors = 5
+    integer(8) :: target_bytes, bytes_per_state
+    logical, parameter :: trace_first_step = .false.
     
-    ! Coefficients are stored only for the fragment rows local to this rank.
+    ! Coefficients are rank-distributed in orbital mode.  The derivative
+    ! gathers global rows in state blocks internally and scatters back here.
     n = size(dg_frag%coef, 1)
-    n_pw = 0
-    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
-    use_mixed_rt = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%coef_mix))
-    if (.not. timing_initialized) then
-      env_timing = ''
-      call get_environment_variable('SALMON_DG_RK_TIMING', env_timing, status=env_status)
-      if (env_status == 0) then
-        select case(trim(adjustl(env_timing)))
-        case('1','y','Y','yes','YES','true','TRUE','on','ON')
-          enable_rk_timing = .true.
-        end select
-      end if
-      timing_initialized = .true.
+    if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then
+      stop "DG RK now supports the pure fragment block-sparse route only"
     end if
-    trace_first_step = (enable_rk_timing .and. itt == 1 .and. dg_frag%id == 0)
-    if (trace_first_step) then
-      write(*,'(1x,a,i0,4(a,i0),a,l1)') '[DG-RK] enter itt=', itt, &
-        ' local_basis_rows=', n, ' nstate_tot=', dg_frag%nstate_tot, &
-        ' n_pw=', n_pw, ' nspin=', dg_frag%nspin, ' use_mixed=', use_mixed_rt
-      flush(6)
+
+    nstate_prop = dg_frag%nstate_tot
+    if (allocated(dg_frag%nocc_spin)) then
+      nstate_prop = min(dg_frag%nstate_tot, max(1, maxval(dg_frag%nocc_spin(1:dg_frag%nspin))))
     end if
-    time_sync = 0.0d0
-    time_stage_update = 0.0d0
-    time_deriv = 0.0d0
-    time_coef_update = 0.0d0
-    
-    ! Reuse RK work arrays across calls.  Classical RK4 only needs the current
-    ! stage derivative and its weighted sum, not all four stage derivatives.
-    if (.not. allocated(k)) then
-      allocate(k(n, dg_frag%nstate_tot, dg_frag%nspin))
-      allocate(k_accum(n, dg_frag%nstate_tot, dg_frag%nspin))
-    else if (size(k, 1) /= n .or. size(k, 2) /= dg_frag%nstate_tot .or. &
-             size(k, 3) /= dg_frag%nspin) then
-      deallocate(k, k_accum)
-      allocate(k(n, dg_frag%nstate_tot, dg_frag%nspin))
-      allocate(k_accum(n, dg_frag%nstate_tot, dg_frag%nspin))
+
+    if (.not. allocated(dg_frag%coef_work)) then
+      allocate(dg_frag%coef_work(n, dg_frag%nstate_tot, dg_frag%nspin))
+    else if (size(dg_frag%coef_work, 1) /= n .or. size(dg_frag%coef_work, 2) /= dg_frag%nstate_tot .or. &
+             size(dg_frag%coef_work, 3) /= dg_frag%nspin) then
+      deallocate(dg_frag%coef_work)
+      allocate(dg_frag%coef_work(n, dg_frag%nstate_tot, dg_frag%nspin))
     end if
-    if (n_pw > 0) then
-      if (.not. allocated(k_pw)) then
-        allocate(k_pw(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-        allocate(k_pw_accum(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-      else if (size(k_pw, 1) /= n_pw .or. size(k_pw, 2) /= dg_frag%nstate_tot .or. &
-               size(k_pw, 3) /= dg_frag%nspin) then
-        deallocate(k_pw, k_pw_accum)
-        allocate(k_pw(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-        allocate(k_pw_accum(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-      end if
+
+    target_bytes = int(state_work_target_mb, kind=8) * 1024_8 * 1024_8
+    bytes_per_state = 16_8 * int(max(1, dg_frag%n_mat_max), kind=8) * int(max(1, dg_frag%nspin), kind=8) * &
+                      int(state_work_vectors, kind=8)
+    nstate_work = max(1, min(nstate_prop, int(max(1_8, target_bytes / max(1_8, bytes_per_state)))))
+
+    if (.not. allocated(k_blk)) then
+      allocate(k_blk(n, nstate_work, dg_frag%nspin))
+    else if (size(k_blk, 1) /= n .or. size(k_blk, 2) /= nstate_work .or. size(k_blk, 3) /= dg_frag%nspin) then
+      deallocate(k_blk)
+      allocate(k_blk(n, nstate_work, dg_frag%nspin))
     end if
-    if (trace_first_step) then
-      write(*,'(1x,a)') '[DG-RK] work arrays ready'
-      flush(6)
+    if (.not. allocated(next_coef)) then
+      allocate(next_coef(n, nstate_prop, dg_frag%nspin))
+    else if (size(next_coef, 1) /= n .or. size(next_coef, 2) /= nstate_prop .or. &
+             size(next_coef, 3) /= dg_frag%nspin) then
+      deallocate(next_coef)
+      allocate(next_coef(n, nstate_prop, dg_frag%nspin))
     end if
-    
+
     if (dg_frag%time_integrator == 3) then
       ! Classical RK4 (paper-aligned): k1@t, k2@t+dt/2, k3@t+dt/2, k4@t+dt
-      if (use_mixed_rt) then
-        ! Orbital-parallel matrix/density construction splits basis/state work
-        ! across ranks, so the RK reference state must be the canonical mixed
-        ! view on every rank before any stage-local column work starts.
-        t0 = get_wtime()
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-        t1 = get_wtime()
-        time_sync = time_sync + (t1 - t0)
+      dg_frag%coef_work(:, 1:nstate_prop, :) = dg_frag%coef(:, 1:nstate_prop, :)
+      if (.not. allocated(acc)) then
+        allocate(acc(n, nstate_prop, dg_frag%nspin))
+      else if (size(acc, 1) /= n .or. size(acc, 2) /= nstate_prop .or. size(acc, 3) /= dg_frag%nspin) then
+        deallocate(acc)
+        allocate(acc(n, nstate_prop, dg_frag%nspin))
       end if
-      allocate(coef_ref(n, dg_frag%nstate_tot, dg_frag%nspin))
-      coef_ref = dg_frag%coef
-      if (n_pw > 0) then
-        allocate(coef_pw_ref(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-        coef_pw_ref = dg_frag%coef_pw
-      end if
-      if (trace_first_step) then
-        write(*,'(1x,a)') '[DG-RK] RK4 reference copied'
-        flush(6)
-      end if
+      acc(:, :, :) = (0.0d0, 0.0d0)
 
       ! Stage 1
       Ac_tot = rt%Ac_tot(:, itt)
-      dg_frag%coef = coef_ref
-      ! The mixed/raw views were canonicalized immediately before coef_ref was
-      ! captured, so Stage 1 can reuse that state without another sync pair.
+      dg_frag%coef(:, 1:nstate_prop, :) = dg_frag%coef_work(:, 1:nstate_prop, :)
+      if (trace_first_step) then
+        write(*,'(1x,a,i0,a,i0)') '[DG-RT-FIRST] enter RK4 step=', itt, ' nstate_work=', nstate_work
+        flush(6)
+      end if
       if (yn_fix_func == 'n') then
-        if (trace_first_step) then
-          write(*,'(1x,a)') '[DG-RK] stage 1 density/H update start'
-          flush(6)
-        end if
-        t0 = get_wtime()
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                              rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
-        t1 = get_wtime()
-        time_stage_update = time_stage_update + (t1 - t0)
-        if (trace_first_step) then
-          write(*,'(1x,a,1pe12.4)') '[DG-RK] stage 1 density/H update done time=', t1 - t0
+                                              rho, rho_s, Vh, Vxc, Vpsl, energy)
+      end if
+      next_coef(:, :, :) = dg_frag%coef_work(:, 1:nstate_prop, :)
+      do state0 = 1, nstate_prop, nstate_work
+        nstate_blk = min(nstate_work, nstate_prop - state0 + 1)
+        state_s = state0
+        state_e = state0 + nstate_blk - 1
+        if (trace_first_step .and. state0 == 1) then
+          write(*,'(1x,a,i0,a,i0)') '[DG-RT-FIRST] stage=1 derivative begin state_e=', state_e, ' nlocal=', n
           flush(6)
         end if
-      end if
-      if (trace_first_step) then
-        write(*,'(1x,a)') '[DG-RK] stage 1 derivative start'
-        flush(6)
-      end if
-      t0 = get_wtime()
-      if (n_pw > 0) then
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k, k_pw)
-      else
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k)
-      end if
-      t1 = get_wtime()
-      time_deriv = time_deriv + (t1 - t0)
-      if (trace_first_step) then
-        write(*,'(1x,a,1pe12.4)') '[DG-RK] stage 1 derivative done time=', t1 - t0
-        flush(6)
-      end if
-      k_accum(:, :, :) = k(:, :, :)
-      if (n_pw > 0) k_pw_accum(:, :, :) = k_pw(:, :, :)
+        call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, k_blk(:, 1:nstate_blk, :), state_s, state_e)
+        call check_finite_derivative_block(1, state_s, state_e, k_blk(:, 1:nstate_blk, :))
+        if (trace_first_step .and. state0 == 1) then
+          write(*,'(1x,a)') '[DG-RT-FIRST] stage=1 derivative done'
+          flush(6)
+        end if
+        acc(:, state_s:state_e, :) = acc(:, state_s:state_e, :) + k_blk(:, 1:nstate_blk, :) / 6.0d0
+        next_coef(:, state_s:state_e, :) = dg_frag%coef_work(:, state_s:state_e, :) + &
+                                           0.5d0 * dt * k_blk(:, 1:nstate_blk, :)
+      end do
+      dg_frag%coef(:, 1:nstate_prop, :) = next_coef(:, :, :)
 
       ! Stage 2
       Ac_tot = 0.5d0 * (rt%Ac_tot(:, itt) + rt%Ac_tot(:, itt+1))
-      t0 = get_wtime()
-      if (n_pw > 0) then
-!$omp parallel private(jo)
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + 0.5d0 * dt * k_pw(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-!$omp end parallel
-      else
-!$omp parallel do collapse(2) private(jo) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
-      t1 = get_wtime()
-      time_coef_update = time_coef_update + (t1 - t0)
-      if (use_mixed_rt) then
-        t0 = get_wtime()
-        ! The provisional RK update changed raw coefficients; rebuild coef_mix
-        ! and then refresh raw coefficients from the canonical mixed view.
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-        t1 = get_wtime()
-        time_sync = time_sync + (t1 - t0)
-      end if
       if (yn_fix_func == 'n') then
-        t0 = get_wtime()
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                              rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
-        t1 = get_wtime()
-        time_stage_update = time_stage_update + (t1 - t0)
+                                              rho, rho_s, Vh, Vxc, Vpsl, energy)
       end if
-      t0 = get_wtime()
-      if (n_pw > 0) then
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k, k_pw)
-      else
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k)
-      end if
-      t1 = get_wtime()
-      time_deriv = time_deriv + (t1 - t0)
-!$omp parallel do collapse(2) private(jo) schedule(static)
-      do ispin = 1, dg_frag%nspin
-        do io = 1, dg_frag%nstate_tot
-!$omp simd
-          do jo = 1, n
-            k_accum(jo, io, ispin) = k_accum(jo, io, ispin) + 2.0d0 * k(jo, io, ispin)
-          end do
-        end do
+      next_coef(:, :, :) = dg_frag%coef_work(:, 1:nstate_prop, :)
+      do state0 = 1, nstate_prop, nstate_work
+        nstate_blk = min(nstate_work, nstate_prop - state0 + 1)
+        state_s = state0
+        state_e = state0 + nstate_blk - 1
+        if (trace_first_step .and. state0 == 1) then
+          write(*,'(1x,a)') '[DG-RT-FIRST] stage=2 derivative begin'
+          flush(6)
+        end if
+        call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, k_blk(:, 1:nstate_blk, :), state_s, state_e)
+        call check_finite_derivative_block(2, state_s, state_e, k_blk(:, 1:nstate_blk, :))
+        if (trace_first_step .and. state0 == 1) then
+          write(*,'(1x,a)') '[DG-RT-FIRST] stage=2 derivative done'
+          flush(6)
+        end if
+        acc(:, state_s:state_e, :) = acc(:, state_s:state_e, :) + k_blk(:, 1:nstate_blk, :) / 3.0d0
+        next_coef(:, state_s:state_e, :) = dg_frag%coef_work(:, state_s:state_e, :) + &
+                                           0.5d0 * dt * k_blk(:, 1:nstate_blk, :)
       end do
-!$omp end parallel do
-      if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              k_pw_accum(jo, io, ispin) = k_pw_accum(jo, io, ispin) + 2.0d0 * k_pw(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
+      dg_frag%coef(:, 1:nstate_prop, :) = next_coef(:, :, :)
 
       ! Stage 3
-      t0 = get_wtime()
-      if (n_pw > 0) then
-!$omp parallel private(jo)
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + 0.5d0 * dt * k_pw(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-!$omp end parallel
-      else
-!$omp parallel do collapse(2) private(jo) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + 0.5d0 * dt * k(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
-      t1 = get_wtime()
-      time_coef_update = time_coef_update + (t1 - t0)
-      if (use_mixed_rt) then
-        t0 = get_wtime()
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-        t1 = get_wtime()
-        time_sync = time_sync + (t1 - t0)
-      end if
       if (yn_fix_func == 'n') then
-        t0 = get_wtime()
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                              rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
-        t1 = get_wtime()
-        time_stage_update = time_stage_update + (t1 - t0)
+                                              rho, rho_s, Vh, Vxc, Vpsl, energy)
       end if
-      t0 = get_wtime()
-      if (n_pw > 0) then
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k, k_pw)
-      else
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k)
-      end if
-      t1 = get_wtime()
-      time_deriv = time_deriv + (t1 - t0)
-!$omp parallel do collapse(2) private(jo) schedule(static)
-      do ispin = 1, dg_frag%nspin
-        do io = 1, dg_frag%nstate_tot
-!$omp simd
-          do jo = 1, n
-            k_accum(jo, io, ispin) = k_accum(jo, io, ispin) + 2.0d0 * k(jo, io, ispin)
-          end do
-        end do
+      next_coef(:, :, :) = dg_frag%coef_work(:, 1:nstate_prop, :)
+      do state0 = 1, nstate_prop, nstate_work
+        nstate_blk = min(nstate_work, nstate_prop - state0 + 1)
+        state_s = state0
+        state_e = state0 + nstate_blk - 1
+        call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, k_blk(:, 1:nstate_blk, :), state_s, state_e)
+        call check_finite_derivative_block(3, state_s, state_e, k_blk(:, 1:nstate_blk, :))
+        acc(:, state_s:state_e, :) = acc(:, state_s:state_e, :) + k_blk(:, 1:nstate_blk, :) / 3.0d0
+        next_coef(:, state_s:state_e, :) = dg_frag%coef_work(:, state_s:state_e, :) + &
+                                           dt * k_blk(:, 1:nstate_blk, :)
       end do
-!$omp end parallel do
-      if (n_pw > 0) then
-!$omp parallel do collapse(2) private(jo) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              k_pw_accum(jo, io, ispin) = k_pw_accum(jo, io, ispin) + 2.0d0 * k_pw(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
+      dg_frag%coef(:, 1:nstate_prop, :) = next_coef(:, :, :)
 
       ! Stage 4
       Ac_tot = rt%Ac_tot(:, itt+1)
-      t0 = get_wtime()
-      if (n_pw > 0) then
-!$omp parallel private(jo)
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * k(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + dt * k_pw(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-!$omp end parallel
-      else
-!$omp parallel do collapse(2) private(jo) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + dt * k(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
-      t1 = get_wtime()
-      time_coef_update = time_coef_update + (t1 - t0)
-      if (use_mixed_rt) then
-        t0 = get_wtime()
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-        t1 = get_wtime()
-        time_sync = time_sync + (t1 - t0)
-      end if
       if (yn_fix_func == 'n') then
-        t0 = get_wtime()
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                              rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
-        t1 = get_wtime()
-        time_stage_update = time_stage_update + (t1 - t0)
+                                              rho, rho_s, Vh, Vxc, Vpsl, energy)
       end if
-      t0 = get_wtime()
-      if (n_pw > 0) then
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k, k_pw)
-      else
-        call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k)
-      end if
-      t1 = get_wtime()
-      time_deriv = time_deriv + (t1 - t0)
-
-      ! Final RK4 combination
-      t0 = get_wtime()
-      if (n_pw > 0) then
-!$omp parallel private(jo)
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + &
-                                             (dt / 6.0d0) * (k_accum(jo, io, ispin) + k(jo, io, ispin))
-            end do
-          end do
-        end do
-!$omp end do
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              dg_frag%coef_pw(jo, io, ispin) = coef_pw_ref(jo, io, ispin) + &
-                                                (dt / 6.0d0) * (k_pw_accum(jo, io, ispin) + k_pw(jo, io, ispin))
-            end do
-          end do
-        end do
-!$omp end do
-!$omp end parallel
-      else
-!$omp parallel do collapse(2) private(jo) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n
-              dg_frag%coef(jo, io, ispin) = coef_ref(jo, io, ispin) + &
-                                             (dt / 6.0d0) * (k_accum(jo, io, ispin) + k(jo, io, ispin))
-            end do
-          end do
-        end do
-!$omp end parallel do
-      end if
-      t1 = get_wtime()
-      time_coef_update = time_coef_update + (t1 - t0)
-      if (trace_first_step) then
-        write(*,'(1x,a,1pe12.4)') '[DG-RK] final coef update done time=', t1 - t0
-        flush(6)
-      end if
-      if (use_mixed_rt) then
-        t0 = get_wtime()
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-        t1 = get_wtime()
-        time_sync = time_sync + (t1 - t0)
-      end if
+      next_coef(:, :, :) = dg_frag%coef_work(:, 1:nstate_prop, :)
+      do state0 = 1, nstate_prop, nstate_work
+        nstate_blk = min(nstate_work, nstate_prop - state0 + 1)
+        state_s = state0
+        state_e = state0 + nstate_blk - 1
+        call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, k_blk(:, 1:nstate_blk, :), state_s, state_e)
+        call check_finite_derivative_block(4, state_s, state_e, k_blk(:, 1:nstate_blk, :))
+        acc(:, state_s:state_e, :) = acc(:, state_s:state_e, :) + k_blk(:, 1:nstate_blk, :) / 6.0d0
+        next_coef(:, state_s:state_e, :) = dg_frag%coef_work(:, state_s:state_e, :) + &
+                                           dt * acc(:, state_s:state_e, :)
+      end do
+      dg_frag%coef(:, 1:nstate_prop, :) = next_coef(:, :, :)
       if (yn_fix_func == 'n') then
         ! Rebuild H at the final RK4 state/time so next step starts from consistent rho/H.
         Ac_tot = rt%Ac_tot(:, itt+1)
-        if (trace_first_step) then
-          write(*,'(1x,a)') '[DG-RK] final density/H update start'
-          flush(6)
-        end if
-        t0 = get_wtime()
         call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_tot, &
                                               lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                              rho, rho_s, Vh, Vxc, Vpsl, energy, .true.)
-        t1 = get_wtime()
-        time_stage_update = time_stage_update + (t1 - t0)
-        if (trace_first_step) then
-          write(*,'(1x,a,1pe12.4)') '[DG-RK] final density/H update done time=', t1 - t0
-          flush(6)
-        end if
-      end if
-      if (enable_rk_timing .and. dg_frag%id == 0) then
-        write(*,'(1x,a,i0,4(a,1pe12.4))') '        rk timing: itt=', itt, &
-          ' sync=', time_sync, ' coef=', time_coef_update, ' stage_update=', time_stage_update, ' deriv=', time_deriv
-        flush(6)
-      end if
-      deallocate(coef_ref)
-      if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)
-      if (trace_first_step) then
-        write(*,'(1x,a,i0)') '[DG-RK] leave itt=', itt
-        flush(6)
+                                              rho, rho_s, Vh, Vxc, Vpsl, energy)
       end if
 
     else
       ! SSPRK3 stages.
       ! Store initial coefficients for Shu-Osher blending.
-      if (use_mixed_rt) then
-        ! Keep the saved Shu-Osher reference in the same canonical coefficient
-        ! view used by the orbital-parallel matrix and density builders.
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-      end if
-      dg_frag%coef_work = dg_frag%coef
-      ! Save initial PW coefficients for the Shu-Osher alpha*coef_work term
-      ! (analogous to dg_frag%coef_work which is already set above for fragment coef).
-      if (n_pw > 0) then
-        allocate(coef_pw_ref(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-        coef_pw_ref = dg_frag%coef_pw
-      end if
+      dg_frag%coef_work(:, 1:nstate_prop, :) = dg_frag%coef(:, 1:nstate_prop, :)
 
-      if (n_pw > 0) then
-        do istage = 1, dg_frag%rk_stages
-          ! Get vector potential at this time (velocity gauge)
-          ! For RK stages, interpolate between itt and itt+1
-          if (istage == 1) then
-            Ac_tot = rt%Ac_tot(:, itt)
-          else
-            t_stage = dble(istage-1) / dble(dg_frag%rk_stages)
-            Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
-          end if
+      do istage = 1, dg_frag%rk_stages
+        ! Get vector potential at this time (velocity gauge)
+        ! For RK stages, interpolate between itt and itt+1
+        if (istage == 1) then
+          Ac_tot = rt%Ac_tot(:, itt)
+        else
+          t_stage = dble(istage-1) / dble(dg_frag%rk_stages)
+          Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
+        end if
 
-          ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
-          ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
-          call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k, k_pw)
-
-          ! Update coefficients for next stage
-          if (istage < dg_frag%rk_stages) then
-            ! OpenMP parallelization for coefficient update
-!$omp parallel private(jo)
-!$omp do collapse(2) schedule(static)
-            do ispin = 1, dg_frag%nspin
-              do io = 1, dg_frag%nstate_tot
-!$omp simd
-                do jo = 1, n
-                  dg_frag%coef(jo, io, ispin) = dg_frag%rk_alpha(istage) * dg_frag%coef_work(jo, io, ispin) + &
-                                                 dg_frag%rk_beta(istage) * dg_frag%coef(jo, io, ispin) + &
-                                                 dg_frag%rk_gamma(istage) * dt * k(jo, io, ispin)
-                end do
-              end do
-            end do
-!$omp end do
-!$omp do collapse(2) schedule(static)
-            do ispin = 1, dg_frag%nspin
-              do io = 1, dg_frag%nstate_tot
-!$omp simd
-                do jo = 1, n_pw
-                  ! BUG FIX: was coef_pw += gamma*dt*k_pw (missing alpha/beta terms).
-                  ! Apply full Shu-Osher formula, consistent with fragment update above.
-                  dg_frag%coef_pw(jo, io, ispin) = dg_frag%rk_alpha(istage) * coef_pw_ref(jo, io, ispin) + &
-                                                   dg_frag%rk_beta(istage)  * dg_frag%coef_pw(jo, io, ispin) + &
-                                                   dg_frag%rk_gamma(istage) * dt * k_pw(jo, io, ispin)
-                end do
-              end do
-            end do
-!$omp end do
-!$omp end parallel
-            if (use_mixed_rt) then
-              do ispin = 1, dg_frag%nspin
-                call sync_mixed_coef_from_raw(dg_frag, ispin)
-              end do
-              do ispin = 1, dg_frag%nspin
-                call sync_raw_coef_from_mixed(dg_frag, ispin)
-              end do
-            end if
-          end if
+        next_coef(:, :, :) = dg_frag%coef_work(:, 1:nstate_prop, :)
+        do state0 = 1, nstate_prop, nstate_work
+          nstate_blk = min(nstate_work, nstate_prop - state0 + 1)
+          state_s = state0
+          state_e = state0 + nstate_blk - 1
+          call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, k_blk(:, 1:nstate_blk, :), state_s, state_e)
+          call check_finite_derivative_block(istage, state_s, state_e, k_blk(:, 1:nstate_blk, :))
+          next_coef(:, state_s:state_e, :) = dg_frag%rk_alpha(istage) * dg_frag%coef_work(:, state_s:state_e, :) + &
+                                             dg_frag%rk_beta(istage)  * dg_frag%coef(:, state_s:state_e, :) + &
+                                             dg_frag%rk_gamma(istage) * dt * k_blk(:, 1:nstate_blk, :)
         end do
-      else
-        do istage = 1, dg_frag%rk_stages
-          ! Get vector potential at this time (velocity gauge)
-          ! For RK stages, interpolate between itt and itt+1
-          if (istage == 1) then
-            Ac_tot = rt%Ac_tot(:, itt)
-          else
-            t_stage = dble(istage-1) / dble(dg_frag%rk_stages)
-            Ac_tot = (1.0d0 - t_stage) * rt%Ac_tot(:, itt) + t_stage * rt%Ac_tot(:, itt+1)
-          end if
-
-          ! Calculate time derivative: d/dt coef = -i*(H_0 + A^2/2)*coef + A·<∇>*coef
-          ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
-          call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_tot, itt, k)
-
-          ! Update coefficients for next stage
-          if (istage < dg_frag%rk_stages) then
-            ! OpenMP parallelization for coefficient update
-!$omp parallel do collapse(2) private(jo) schedule(static)
-            do ispin = 1, dg_frag%nspin
-              do io = 1, dg_frag%nstate_tot
-!$omp simd
-                do jo = 1, n
-                  dg_frag%coef(jo, io, ispin) = dg_frag%rk_alpha(istage) * dg_frag%coef_work(jo, io, ispin) + &
-                                                 dg_frag%rk_beta(istage) * dg_frag%coef(jo, io, ispin) + &
-                                                 dg_frag%rk_gamma(istage) * dt * k(jo, io, ispin)
-                end do
-              end do
-            end do
-!$omp end parallel do
-            if (use_mixed_rt) then
-              do ispin = 1, dg_frag%nspin
-                call sync_mixed_coef_from_raw(dg_frag, ispin)
-              end do
-              do ispin = 1, dg_frag%nspin
-                call sync_raw_coef_from_mixed(dg_frag, ispin)
-              end do
-            end if
-          end if
-        end do
-      end if
-      
-      ! Final update: apply Shu-Osher formula for stage rk_stages.
-      !
-      ! BUG FIX (fragment): the previous code reset coef = coef_work then accumulated
-      !   coef += Σ_s gamma_s * dt * k_s  →  coef_work + γ1*dt*k1 + γ2*dt*k2 + γ3*dt*k3
-      ! which is WRONG.  Expanding SSPRK3 (α=[1,3/4,1/3], β=[0,1/4,2/3], γ=[1,1/4,2/3])
-      ! the correct final result is
-      !   u^{n+1} = 1/3*u^0 + 2/3*u^{(2)} + 2/3*dt*k3
-      ! which is exactly the Shu-Osher formula for stage rk_stages applied to the
-      ! current coef (= u^{(rk_stages-1)} after the last intermediate update).
-      !
-      ! BUG FIX (PW): final step for coef_pw was missing entirely; added here.
-      associate(rs => dg_frag%rk_stages)
-!$omp parallel private(jo)
-!$omp do collapse(2) schedule(static)
-      do ispin = 1, dg_frag%nspin
-        do io = 1, dg_frag%nstate_tot
-!$omp simd
-          do jo = 1, n
-            dg_frag%coef(jo, io, ispin) = dg_frag%rk_alpha(rs) * dg_frag%coef_work(jo, io, ispin) + &
-                                          dg_frag%rk_beta(rs)  * dg_frag%coef(jo, io, ispin) + &
-                                          dg_frag%rk_gamma(rs) * dt * k(jo, io, ispin)
-          end do
-        end do
+        dg_frag%coef(:, 1:nstate_prop, :) = next_coef(:, :, :)
       end do
-!$omp end do
-      if (n_pw > 0) then
-!$omp do collapse(2) schedule(static)
-        do ispin = 1, dg_frag%nspin
-          do io = 1, dg_frag%nstate_tot
-!$omp simd
-            do jo = 1, n_pw
-              dg_frag%coef_pw(jo, io, ispin) = dg_frag%rk_alpha(rs) * coef_pw_ref(jo, io, ispin) + &
-                                               dg_frag%rk_beta(rs)  * dg_frag%coef_pw(jo, io, ispin) + &
-                                               dg_frag%rk_gamma(rs) * dt * k_pw(jo, io, ispin)
-            end do
-          end do
-        end do
-!$omp end do
-      end if
-!$omp end parallel
-      end associate
-      if (use_mixed_rt) then
-        do ispin = 1, dg_frag%nspin
-          call sync_mixed_coef_from_raw(dg_frag, ispin)
-        end do
-        do ispin = 1, dg_frag%nspin
-          call sync_raw_coef_from_mixed(dg_frag, ispin)
-        end do
-      end if
-      if (allocated(coef_pw_ref)) deallocate(coef_pw_ref)
     end if
+
+  contains
+
+    subroutine check_finite_derivative_block(stage_id, state_s_in, state_e_in, block)
+      integer, intent(in) :: stage_id, state_s_in, state_e_in
+      complex(8), intent(in) :: block(:, :, :)
+
+      if (any(real(block, kind=8) /= real(block, kind=8)) .or. &
+          any(aimag(block) /= aimag(block))) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] NaN in DG RK derivative: rank=', &
+          dg_frag%id, ' stage=', stage_id, ' state_s=', state_s_in, ' state_e=', state_e_in
+        stop 'DG-Fragment RT: NaN derivative block'
+      end if
+    end subroutine check_finite_derivative_block
+
   end subroutine time_evolution_rk

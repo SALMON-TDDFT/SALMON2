@@ -154,9 +154,7 @@ module salmon_global
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_fragment_rt
-  character(32)  :: dg_fragment_parallel_mode
   character(16)  :: time_integrator_dg_fragment
-  character(1)   :: yn_dc_cg_basis_update
   
   ! Plane wave basis mixing for DG-Fragment RT
   character(1)   :: yn_plane_wave_basis         ! Enable plane wave mixing (default: 'n')
@@ -165,7 +163,6 @@ module salmon_global
   character(1)   :: yn_dg_subspace_diag          ! Use DG subspace diagonalization for basis updates
   integer        :: dg_subspace_extra_states     ! Extra fragment states kept in the trial subspace
   integer        :: dg_subspace_pw_vectors       ! Number of PW helper vectors appended to the trial subspace
-  real(8)        :: dg_subspace_fallback_cond    ! Fallback threshold for projected overlap conditioning
 
 !! &scf
   character(8)   :: method_init_wf
@@ -475,8 +472,8 @@ character(256),allocatable :: atom_name(:)
   integer        :: num_rgrid_buffer(3)
   integer        :: nproc_rgrid_tot(3)
   character(1)   :: yn_dc_lcfo
+  character(1)   :: yn_dc_lcfo_flux
   character(1)   :: yn_dc_lcfo_diag
-  character(1)   :: yn_dc_for_dg
   character(1)   :: yn_dc_fragment_optimization
   integer        :: nstate_frag
   integer        :: lcfo_frag_cache_size
@@ -492,8 +489,6 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_adaptive_basis
   real(8)        :: basis_update_threshold
   character(1)   :: yn_dg_fragment_from_dcdft  ! Initialize DG-Fragment RT from DC-LCFO data
-  character(16)  :: dg_nmat_cap_mode
-  integer        :: dg_nmat_cap_fixed
-  real(8)        :: dg_nmat_cap_multiple
+  character(1)   :: yn_dg_lcfo_seed_exhaustive_check
 
 end module salmon_global

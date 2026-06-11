@@ -9,7 +9,6 @@
                          salmon_xctype_none, salmon_xctype_pz
     use poisson_dg_distributed, only: hartree_dg_distributed
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
-    use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A
     use salmon_global, only: yn_spinorbit, ae_shape1, ae_shape2, theory
     use misc_routines, only: get_wtime
     implicit none
@@ -44,10 +43,8 @@
     logical :: use_rank_buffered_potential, use_fragment_xc
     logical :: need_energy_update
     logical :: need_stage_buffer_alloc
-    logical :: nl_use_micro_A, nl_reuse_allowed, nl_cache_ready
     real(8) :: t0, t1
-    real(8) :: time_density, time_hartree, time_xc, time_reconstruct, time_nl_cache, time_pw_mix
-    real(8) :: nl_cache_delta
+    real(8) :: time_density, time_hartree, time_xc, time_reconstruct, time_pw_mix
     integer :: trace_call_id
     integer, save :: trace_stage_call_count = 0
     logical :: trace_stage
@@ -74,7 +71,6 @@
     time_hartree = 0.0d0
     time_xc = 0.0d0
     time_reconstruct = 0.0d0
-    time_nl_cache = 0.0d0
     time_pw_mix = 0.0d0
     trace_call_id = 0
     trace_stage = .false.
@@ -318,38 +314,9 @@
       flush(6)
     end if
 
-    if (ppg%Nlma > 0 .and. allocated(ppg%uV)) then
-      ! Cache the localized nonlocal pseudopotential blocks once per A(t).
-      ! The derivative step then applies the small DG blocks instead of
-      ! rebuilding global projector amplitudes for every RK substage.
-      nl_use_micro_A = (trim(theory) == 'single_scale_maxwell_tddft' .and. allocated(system%Ac_micro%v))
-      nl_reuse_allowed = (.not. nl_use_micro_A) .and. &
-                          (trim(ae_shape1) == 'impulse' .or. trim(ae_shape1) == 'none') .and. &
-                          (trim(ae_shape2) == 'impulse' .or. trim(ae_shape2) == 'none')
-      nl_cache_delta = maxval(abs(Ac_tot - dg_frag%Ac_nl_cache))
-      nl_cache_ready = dg_frag%has_nl_cache .and. allocated(dg_frag%H_nl_blocks) .and. &
-                       allocated(dg_frag%H_nl_block_map) .and. nl_reuse_allowed .and. &
-                       nl_cache_delta <= dg_frag%Ac_nl_cache_tol
-      if (trace_stage) then
-        if (nl_cache_ready) then
-          write(*,'(1x,a,1pe12.4)') '[DG-STAGE] nonlocal cache reuse delta=', nl_cache_delta
-        else
-          write(*,'(1x,a,l1,a,l1,a,1pe12.4)') '[DG-STAGE] nonlocal cache start has=', &
-            dg_frag%has_nl_cache, ' reuse=', nl_reuse_allowed, ' delta=', nl_cache_delta
-        end if
-        flush(6)
-      end if
-      if (.not. nl_cache_ready) then
-        t0 = get_wtime()
-        call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot)
-        t1 = get_wtime()
-        time_nl_cache = time_nl_cache + (t1 - t0)
-        if (trace_stage) then
-          write(*,'(1x,a,1pe12.4)') '[DG-STAGE] nonlocal cache done time=', t1 - t0
-          flush(6)
-        end if
-      end if
-    end if
+    ! Nonlocal PP is applied directly by the derivative/observable projector
+    ! route.  Building H_nl_blocks here would force a global block reduction at
+    ! every RT stage and breaks the rank-distributed DG-RT design.
 
     if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
       if (trace_stage) then
@@ -389,9 +356,9 @@
     end if
 
     if (enable_stage_timing .and. dg_frag%id == 0) then
-      write(*,'(1x,a,i0,6(a,1pe12.4))') '        stage timing: itt=', itt, &
+      write(*,'(1x,a,i0,5(a,1pe12.4))') '        stage timing: itt=', itt, &
         ' density=', time_density, ' hartree=', time_hartree, ' xc=', time_xc, &
-        ' reconstruct=', time_reconstruct, ' nlcache=', time_nl_cache, ' pw_mix=', time_pw_mix
+        ' reconstruct=', time_reconstruct, ' pw_mix=', time_pw_mix
       flush(6)
     end if
 

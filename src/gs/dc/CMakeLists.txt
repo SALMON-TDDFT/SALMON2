@@ -3,6 +3,7 @@ set(SOURCES
     dcdft.f90
     dcdft_soi.f90
     lcfo.f90
+    lcfo_flux.f90
     lcfo_soi.f90
     lcfo_soi_init.f90
    )

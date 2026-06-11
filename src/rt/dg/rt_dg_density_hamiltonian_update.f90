@@ -10,7 +10,6 @@
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
-    use rt_dg_fragment_ops, only: copy_hamiltonian_metric_to_complex_dense
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -32,30 +31,11 @@
     type(s_dft_energy),     intent(inout) :: energy
     logical, optional,       intent(in)    :: skip_hamiltonian_reconstruct
     logical, optional,       intent(in)    :: skip_orbital_dependent
-    logical :: needs_basis_update
-    complex(8), allocatable :: H_mat_metric(:,:,:)
-    complex(8), allocatable :: H_mat_prev_c(:,:,:)
-    real(8), allocatable :: H_mat_prev(:,:,:)
     real(8), allocatable :: rho_buffer(:,:,:), Vh_buffer(:,:,:)
-    integer :: n_metric
-    logical :: use_hmat_complex
     logical :: use_rank_buffered_potential
     logical :: do_hamiltonian_reconstruct
     logical :: allow_orbital_dependent
-    logical, save :: adaptive_trace_initialized = .false.
-    logical, save :: enable_adaptive_trace = .false.
-    integer :: env_len, env_status
-    character(len=16) :: env_value
-
-    if (.not. adaptive_trace_initialized) then
-      env_value = ''
-      call get_environment_variable('SALMON_DG_ADAPTIVE_TRACE', env_value, length=env_len, status=env_status)
-      if (env_status == 0 .and. env_len > 0) then
-        if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
-            env_value(1:1) == 't' .or. env_value(1:1) == 'T') enable_adaptive_trace = .true.
-      end if
-      adaptive_trace_initialized = .true.
-    end if
+    integer :: ispin
 
     do_hamiltonian_reconstruct = .true.
     if (present(skip_hamiltonian_reconstruct)) do_hamiltonian_reconstruct = .not. skip_hamiltonian_reconstruct
@@ -92,8 +72,8 @@
     dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
     if (system%nspin > 0) then
       dg_frag%rho_s_frag(:, :, :, 1:system%nspin) = 0.0d0
-      do n_metric = 1, system%nspin
-        dg_frag%rho_s_frag(:, :, :, n_metric) = rho_s(n_metric)%f(:, :, :)
+      do ispin = 1, system%nspin
+        dg_frag%rho_s_frag(:, :, :, ispin) = rho_s(ispin)%f(:, :, :)
       end do
     end if
 
@@ -147,8 +127,8 @@
                               info, rt%tpsi0, stencil, Vxc, energy%E_xc)
     if (system%nspin > 0) then
       dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
-      do n_metric = 1, system%nspin
-        dg_frag%Vxc_frag(:, :, :, n_metric) = Vxc(n_metric)%f(:, :, :)
+      do ispin = 1, system%nspin
+        dg_frag%Vxc_frag(:, :, :, ispin) = Vxc(ispin)%f(:, :, :)
       end do
     end if
     
@@ -178,77 +158,12 @@
       return
     end if
     
-    ! Step 5: Reconstruct Hamiltonian matrix with updated potentials
-    ! H_mat = T + V_psl + V_H + V_xc (potential-dependent terms only)
-    ! Note: Ac_tot parameter kept for future use (currently unused)
-    if (dg_frag%yn_adaptive_basis) then
-      n_metric = min(dg_frag%nstate_frag, dg_frag%n_mat_max)
-      allocate(H_mat_prev(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-      H_mat_prev(:, :, :) = 0.0d0
-      use_hmat_complex = allocated(dg_frag%H_mat_c) .and. allocated(dg_frag%phi_frag_c)
-      allocate(H_mat_prev_c(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-      H_mat_prev_c(:, :, :) = (0.0d0, 0.0d0)
-      if (n_metric > 0) call copy_hamiltonian_metric_to_complex_dense(dg_frag, n_metric, H_mat_prev_c)
-      if (n_metric > 0) H_mat_prev(1:n_metric, 1:n_metric, :) = real(H_mat_prev_c(1:n_metric, 1:n_metric, :))
-      if (n_metric < dg_frag%nstate_frag .and. itt == 1 .and. comm_is_root(nproc_id_global)) then
-        write(*,'(1x,a,i0,a,i0,a)') "[WARN] nstate_frag(", dg_frag%nstate_frag, &
-                                     ") > n_mat_max(", dg_frag%n_mat_max, "); truncating adaptive metric block."
-      end if
-    end if
+    ! Step 5: Reconstruct Hamiltonian matrix with updated potentials.
+    ! Runtime adaptive basis updates are intentionally not supported in DG-Fragment RT.
     if (use_rank_buffered_potential) then
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
     else
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
-    end if
-    
-    ! Step 6: Check FIELD-FREE Hamiltonian change and trigger adaptive basis update if needed
-    if (dg_frag%yn_adaptive_basis) then
-      ! Strategy update:
-      !   Basis-update metric excludes external-field A contributions.
-      !   A-dependent effects are absorbed by fixed PW augmentation in mixed basis.
-      allocate(H_mat_metric(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-      call copy_hamiltonian_metric_to_complex_dense(dg_frag, n_metric, H_mat_metric)
-      
-      ! Check field-free Hamiltonian change
-      needs_basis_update = check_hamiltonian_change_fragments(dg_frag, H_mat_metric)
-      deallocate(H_mat_metric)
-      
-      if (needs_basis_update) then
-        ! User policy: when adaptive basis update is triggered, do not apply
-        ! this step's Hamiltonian update to time propagation state.
-        if (n_metric > 0) then
-          if (allocated(dg_frag%H_mat)) then
-            dg_frag%H_mat(1:n_metric, 1:n_metric, :) = H_mat_prev(1:n_metric, 1:n_metric, :)
-          end if
-          if (use_hmat_complex) then
-            dg_frag%H_mat_c(1:n_metric, 1:n_metric, :) = H_mat_prev_c(1:n_metric, 1:n_metric, :)
-          end if
-        end if
-
-        ! Pass ppg for DC-CG method pseudopotential handling
-        if (enable_adaptive_trace .and. comm_is_root(nproc_id_global)) then
-          write(*,*)
-          write(*,'(1x,a,i8)') "!!! Adaptive basis update triggered at step", itt
-          write(*,'(1x,a,f10.6,a)') "  Global ||ΔH|| = ", &
-                                    dg_frag%hamiltonian_change_norm, " a.u."
-          write(*,'(1x,a,f10.6,a)') "  Threshold = ", &
-                                    dg_frag%basis_update_threshold, " a.u."
-          write(*,*) "  At least one fragment detected significant mean-field change"
-        end if
-        
-        ! Trigger DC-LCFO recalculation and basis rotation
-        call trigger_basis_update(dg_frag, system, info, itt, lg, mg, stencil, srg, &
-                Vh, Vxc, Vpsl, pp, ppg, rt%tpsi0, Ac_tot)
-      else
-        ! Log monitoring info every 100 steps
-        if (enable_adaptive_trace .and. mod(itt, 100) == 0 .and. comm_is_root(nproc_id_global)) then
-          write(*,'(1x,a,i8,a,f10.6,a)') "  Step", itt, ": Global ||ΔH|| = ", &
-                                         dg_frag%hamiltonian_change_norm, " a.u. (OK)"
-        end if
-      end if
-
-      if (allocated(H_mat_prev)) deallocate(H_mat_prev)
-      if (allocated(H_mat_prev_c)) deallocate(H_mat_prev_c)
     end if
 
     if (allocated(rho_buffer)) deallocate(rho_buffer)

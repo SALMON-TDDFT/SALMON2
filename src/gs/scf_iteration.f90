@@ -20,7 +20,7 @@ module scf_iteration_sub
 contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
-            &   miter,nscf_init_no_diagonal)
+            &   miter,nscf_init_no_diagonal,dc)
   use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
   use structures
   use timer
@@ -40,6 +40,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   type(s_scalar),         intent(in)    :: vlocal(system%nspin)
   integer,                intent(in)    :: miter
   integer,                intent(in)    :: nscf_init_no_diagonal
+  type(s_dcdft), optional,intent(in)    :: dc
   !
   integer :: nncg
   type(ace_update_state), save :: ace_state_gs
@@ -71,7 +72,6 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   else
     nncg = ncg
   end if
-  
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
@@ -90,7 +90,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
 
-  ! Gram Schmidt orghonormalization
+! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
 
   if (ace_state_gs%ace_enabled) then
@@ -110,7 +110,7 @@ end subroutine solve_orbitals
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_hse,hse_alpha,yn_dc_for_dg
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_hse,hse_alpha
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
@@ -167,16 +167,9 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call timer_end(LOG_CALC_HARTREE)
 
-  if (yn_dc_for_dg == 'y') then
-    do j = 1, system%nspin
-      Vxc(j)%f = 0.0d0
-    end do
-    energy%E_xc = 0.0d0
-  else
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
-  end if
 
 
   if(method_mixing=='simple_potential')then
@@ -187,7 +180,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   ! HSE Hybrid Functional: Add exact exchange contribution via FFT
   ! Reuses Hartree solver infrastructure for fast Coulomb convolution
   ! ===================================================================
-  if(yn_hse=='y' .and. yn_dc_for_dg/='y') then
+  if(yn_hse=='y') then
     call timer_begin(LOG_CALC_EXC_COR)
     do j = 1, system%nspin
       call calc_xc_hse_fft(rho_s(j)%f, Vxc(j)%f, e_xc_hse, &

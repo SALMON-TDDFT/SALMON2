@@ -1,7 +1,7 @@
 ! DG fragment basis-file I/O for non-SOI RT.
 #include "config.h"
 module rt_dg_fragment_io
-  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_fragment_types, only: s_dg_fragment_rt, invalidate_coef_exchange_cache
   use rt_dg_fragment_coefficients, only: rebuild_coef_owner_map
   use rt_dg_fragment_layout, only: get_fragment_group_root_rank
   implicit none
@@ -68,17 +68,17 @@ contains
   subroutine read_fragment_basis_data(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root, comm_bcast, comm_sync_all, comm_summation, comm_get_max
-    use salmon_global, only: dg_nmat_cap_mode, dg_nmat_cap_fixed, dg_nmat_cap_multiple, nelec, nelec_spin, &
-                             dg_subspace_extra_states
+    use salmon_global, only: nelec, nelec_spin, dg_subspace_extra_states
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: bdir_frag
 
     character(32), parameter :: binfile_wf = "wavefunctions.bin"
+    character(32), parameter :: binfile_bf = "basis_functions.bin"
     character(32), parameter :: binfile_bfb = "basis_functions_buffer.bin"
     character(32), parameter :: binfile_rg = "rgrid_index.bin"
     integer, parameter :: basis_buffer_magic = -22022212
-    integer, parameter :: basis_buffer_version = 1
+    integer, parameter :: basis_buffer_version = 2
     character(256) :: filename
     integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
     integer :: nstate_frag_file, nstate_tot_file, nstate_frag_keep
@@ -98,19 +98,13 @@ contains
     integer :: ix_box, iy_box, iz_box
     integer :: nb  ! halo width
     integer :: nbasis_iter
-    integer :: n_mat_cap, n_mat_cap_env, ienv
-    integer :: nocc_max, nocc_eff, ifrag_best, occ_min, occ_max, cap_min, cap_max
+    integer :: nocc_eff
     integer :: nocc_est, nocc_frag_est, n_basis_min, n_basis_max, n_basis_effective_min
     integer :: nvirt_est_min, min_virtual_required
     real(8) :: n_basis_avg, nvirt_est_avg
     integer :: state_col, occ_base, occ_extra, frag_occ_s, frag_occ_e, nocc_frag_seed
-    integer :: env_status, env_len
-    character(len=64) :: env_n_mat_cap
-    logical :: warned_spin_discard, has_buffer_file, identity_seed_coefficients
-    real(8) :: cap_avg, weight_best
+    logical :: warned_spin_discard, has_buffer_file, has_core_file, identity_seed_coefficients
     real(8) :: coef_diag_local(2), coef_diag_global(2)
-    real(8), allocatable :: frag_weight_local(:,:,:), frag_weight_sum(:,:,:)
-    integer, allocatable :: occ_count(:,:), cap_frag(:,:)
 
     ! Step 1: Root reads metadata from first fragment and broadcasts
     if (comm_is_root(dg_frag%id)) then
@@ -141,11 +135,16 @@ contains
 
     identity_seed_coefficients = (nstate_tot_file < 0)
     if (identity_seed_coefficients) nstate_tot_file = -nstate_tot_file
+    if (identity_seed_coefficients) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') "[FATAL] DG identity/local seed export is no longer supported."
+        write(*,'(1x,a)') "[FATAL] Use DC-LCFO flux ground-state export with dense LCFO coefficients."
+      end if
+      stop "DG-Fragment RT: unsupported identity seed"
+    end if
     dg_frag%identity_seed_coefficients = identity_seed_coefficients
     dg_frag%fragment_basis_contracted = .false.
-    dg_frag%defer_fragment_cap_to_local_eigen = .false.
-    dg_frag%requested_fragment_basis_cap = 0
-    dg_frag%seed_basis_runtime_capped = .false.
+    dg_frag%dc_lcfo_seed_basis_cleaned = .false.
     if (dg_frag%id == 0) then
       if (identity_seed_coefficients) then
         write(*,'(1x,a)') "[WARN] DG identity seed detected: initial occupied states are fragment-local."
@@ -156,41 +155,12 @@ contains
     end if
 
     nstate_frag_keep = nstate_frag_file
-    if (dg_frag%id == 0) then
-      write(*,'(1x,a,a,a,i0,a,1pe12.4)') "[INFO] DG fragment cap input: mode='", trim(dg_nmat_cap_mode), &
-        "' fixed=", dg_nmat_cap_fixed, " multiple=", dg_nmat_cap_multiple
+    if (nstate_frag_file /= dg_frag%nstate_frag) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,i0,a,i0,a)') "[INFO] nstate_frag differs: file=", nstate_frag_file, &
+          " runtime=", dg_frag%nstate_frag, " (using fragment-state count from file)"
+      end if
     end if
-    select case (trim(dg_nmat_cap_mode))
-    case ('fragment_fixed', 'fixed_fragment')
-      if (dg_nmat_cap_fixed < 1) then
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,a,a,i0)') "[FATAL] DG fragment cap mode='", trim(dg_nmat_cap_mode), &
-            "' requires dg_nmat_cap_fixed >= 1; got ", dg_nmat_cap_fixed
-        end if
-        stop "DG-Fragment RT: invalid fragment basis cap"
-      end if
-      if (identity_seed_coefficients) then
-        dg_frag%defer_fragment_cap_to_local_eigen = .true.
-        dg_frag%requested_fragment_basis_cap = dg_nmat_cap_fixed
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "[INFO] DG legacy identity fragment cap mode='", trim(dg_nmat_cap_mode), &
-            "' file_nstate_frag=", nstate_frag_file, " keep_for_local_diag=", nstate_frag_keep, &
-            " legacy_requested=", dg_nmat_cap_fixed
-        end if
-      else
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,a,a,i0,a)') "[WARN] DGDFT/LCFO seed ignores dg_nmat_cap_mode='", &
-            trim(dg_nmat_cap_mode), "' fixed=", dg_nmat_cap_fixed, " and keeps the full DC-derived basis."
-        end if
-      end if
-    case default
-      if (nstate_frag_file /= dg_frag%nstate_frag) then
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,i0,a,i0,a)') "[INFO] nstate_frag differs: file=", nstate_frag_file, &
-            " runtime=", dg_frag%nstate_frag, " (using fragment-state count from file)"
-        end if
-      end if
-    end select
     dg_frag%nstate_frag = nstate_frag_keep
 
     ! Use the full state count stored in fragment files (disable occupied-state subset mode).
@@ -206,6 +176,8 @@ contains
     ! eigenvector matrix.  Load the occupied-column count before constructing
     ! coef so occupied columns can be distributed over every fragment.
     if (identity_seed_coefficients) call read_dg_occupation_seed(dg_frag)
+
+    call invalidate_coef_exchange_cache(dg_frag)
 
     ! Allocate arrays
     allocate(dg_frag%n_basis(dg_frag%n_frag, dg_frag%nspin))
@@ -239,150 +211,51 @@ contains
     dg_frag%n_mat(1:dg_frag%nspin) = n_mat_tmp(1:dg_frag%nspin)
     dg_frag%n_mat_max = maxval(n_mat_tmp(1:dg_frag%nspin))
 
-    ! Optional legacy basis-size cap for fragment-comparison studies.
-    ! DGDFT/LCFO coefficient seeds keep the full DC-derived basis; cap is a
-    ! later optimization path, not part of the primary paper route.
-    n_mat_cap = 0
-    if (trim(dg_nmat_cap_mode) == 'fixed' .and. dg_nmat_cap_fixed >= 1) then
-      if (identity_seed_coefficients) then
-        n_mat_cap = dg_nmat_cap_fixed
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,a,a,i0)') "[INFO] DG fragment cap mode='", trim(dg_nmat_cap_mode), "' fixed=", n_mat_cap
-        end if
-      else
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,a,a,i0,a)') "[WARN] DGDFT/LCFO coefficient seed ignores dg_nmat_cap_mode='", &
-            trim(dg_nmat_cap_mode), "' fixed=", dg_nmat_cap_fixed, " and keeps the full DC-derived basis."
-        end if
-      end if
-    end if
-    env_n_mat_cap = ""
-    env_status = 1
-    env_len = 0
-    call get_environment_variable("SALMON_DG_NMAT_CAP", env_n_mat_cap, length=env_len, status=env_status)
-    if (env_status == 0 .and. env_len > 0) then
-      read(env_n_mat_cap(1:env_len), *, iostat=ienv) n_mat_cap_env
-      if (ienv == 0 .and. n_mat_cap_env >= 1) then
-        if (identity_seed_coefficients) then
-          n_mat_cap = n_mat_cap_env
-          if (dg_frag%id == 0) then
-            write(*,'(1x,a,i0)') "[INFO] SALMON_DG_NMAT_CAP override applied: ", n_mat_cap
-          end if
-        else
-          if (dg_frag%id == 0) then
-            write(*,'(1x,a,i0,a)') "[WARN] DGDFT/LCFO coefficient seed ignores SALMON_DG_NMAT_CAP=", &
-              n_mat_cap_env, " and keeps the full DC-derived basis."
-          end if
-        end if
-      else
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,a,a)') "[WARN] Ignoring invalid SALMON_DG_NMAT_CAP='", &
-                                trim(env_n_mat_cap(1:env_len)), "' (must be integer >= 1)"
-        end if
-      end if
-    end if
-    if (n_mat_cap >= 1) then
-      if (any(dg_frag%n_mat(1:dg_frag%nspin) > n_mat_cap)) dg_frag%seed_basis_runtime_capped = .true.
-      dg_frag%n_mat(1:dg_frag%nspin) = min(dg_frag%n_mat(1:dg_frag%nspin), n_mat_cap)
-      dg_frag%n_mat_max = maxval(dg_frag%n_mat(1:dg_frag%nspin))
-    end if
-
-    ! Enforce index_basis consistency with the active matrix dimension:
-    ! invalid indices are masked out to prevent OOB accesses.
+    ! The global row numbering is part of the wavefunctions.bin contract:
+    ! coef_wf(local_basis,state,spin), index_basis, and all DG operator blocks
+    ! must refer to the same DC/EigenExa basis rows.  Do not compact or remap it
+    ! while reading; reject inconsistent seed files instead.
     block
-      integer :: ispin_cap, ifrag_cap, io_cap, idx_cap, max_keep
-      do ispin_cap = 1, dg_frag%nspin
-        max_keep = 0
-        do ifrag_cap = 1, dg_frag%n_frag
-          nbasis_iter = min(dg_frag%n_basis(ifrag_cap, ispin_cap), size(dg_frag%index_basis, 1))
-          do io_cap = 1, nbasis_iter
-            idx_cap = dg_frag%index_basis(io_cap, ifrag_cap, ispin_cap)
-            if (idx_cap < 1 .or. idx_cap > dg_frag%n_mat(ispin_cap)) then
-              dg_frag%index_basis(io_cap, ifrag_cap, ispin_cap) = 0
+      integer :: ispin_chk, ifrag_chk, io_chk, row_id
+      integer :: dup_count, out_count, miss_count
+      logical :: bad_index_basis
+      integer, allocatable :: seen(:)
+      bad_index_basis = .false.
+      do ispin_chk = 1, dg_frag%nspin
+        allocate(seen(max(1, dg_frag%n_mat(ispin_chk))))
+        seen = 0
+        dup_count = 0
+        out_count = 0
+        do ifrag_chk = 1, dg_frag%n_frag
+          nbasis_iter = min(dg_frag%n_basis(ifrag_chk, ispin_chk), size(dg_frag%index_basis, 1))
+          do io_chk = 1, nbasis_iter
+            row_id = dg_frag%index_basis(io_chk, ifrag_chk, ispin_chk)
+            if (row_id < 1 .or. row_id > dg_frag%n_mat(ispin_chk)) then
+              out_count = out_count + 1
             else
-              max_keep = max(max_keep, idx_cap)
+              if (seen(row_id) == 1) dup_count = dup_count + 1
+              seen(row_id) = 1
             end if
           end do
         end do
-        dg_frag%n_mat(ispin_cap) = max_keep
-      end do
-    end block
-    dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
-
-    ! Compress fragmented/global basis indices to a dense contiguous range.
-    ! The DC-LCFO metadata may retain large holes between fragment-local basis blocks,
-    ! which inflates n_mat_max and all O(n_mat_max^2) operator matrices.
-    block
-      integer :: ispin_cmp, ifrag_cmp, io_cmp, idx_cmp, n_old, n_new
-      integer, allocatable :: remap(:)
-      do ispin_cmp = 1, dg_frag%nspin
-        n_old = max(1, dg_frag%n_mat(ispin_cmp))
-        allocate(remap(n_old))
-        remap = 0
-        n_new = 0
-        do ifrag_cmp = 1, dg_frag%n_frag
-          nbasis_iter = min(dg_frag%n_basis(ifrag_cmp, ispin_cmp), size(dg_frag%index_basis, 1))
-          do io_cmp = 1, nbasis_iter
-            idx_cmp = dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp)
-            if (idx_cmp <= 0) cycle
-            if (idx_cmp > n_old) then
-              dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp) = 0
-              cycle
-            end if
-            if (remap(idx_cmp) == 0) then
-              n_new = n_new + 1
-              remap(idx_cmp) = n_new
-            end if
-            dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp) = remap(idx_cmp)
-          end do
-        end do
-        if (dg_frag%id == 0 .and. n_new < n_old) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') "[INFO] Compressed DG basis indices for ispin=", ispin_cmp, &
-            ": old n_mat=", n_old, " new n_mat=", n_new
-        end if
-        if (n_new <= 0) then
-          write(*,'(1x,a,i0,a)') "[FATAL] DG basis compression produced zero active basis for ispin=", ispin_cmp, "."
-          stop "DG-Fragment RT: zero active basis after index compression"
-        end if
-        dg_frag%n_mat(ispin_cmp) = n_new
-        deallocate(remap)
-      end do
-    end block
-    dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
-
-
-    ! Validate index_basis uniqueness and coverage (root only)
-    if (comm_is_root(dg_frag%id)) then
-      block
-        integer :: ispin_chk, ifrag_chk, io_chk, global_idx
-        integer :: dup_count, out_count, miss_count
-        integer, allocatable :: seen(:)
-        do ispin_chk = 1, dg_frag%nspin
-          allocate(seen(max(1, dg_frag%n_mat_max)))
-          seen = 0
-          dup_count = 0
-          out_count = 0
-          do ifrag_chk = 1, dg_frag%n_frag
-            nbasis_iter = min(dg_frag%n_basis(ifrag_chk, ispin_chk), size(dg_frag%index_basis, 1))
-            do io_chk = 1, nbasis_iter
-              global_idx = dg_frag%index_basis(io_chk, ifrag_chk, ispin_chk)
-              if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) then
-                out_count = out_count + 1
-              else
-                if (seen(global_idx) == 1) dup_count = dup_count + 1
-                seen(global_idx) = 1
-              end if
-            end do
-          end do
-          miss_count = count(seen == 0)
-          if (dup_count > 0 .or. out_count > 0 .or. miss_count > 0) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[WARN] index_basis check (ispin=", ispin_chk, &
-              "): dup=", dup_count, " out_of_range=", out_count, " missing=", miss_count
+        miss_count = count(seen == 0)
+        if (dup_count > 0 .or. out_count > 0 .or. miss_count > 0) then
+          bad_index_basis = .true.
+          if (dg_frag%id == 0) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid DG index_basis in wavefunctions.bin (ispin=", &
+              ispin_chk, "): dup=", dup_count, " out_of_range=", out_count, " missing=", miss_count
           end if
-          deallocate(seen)
-        end do
-      end block
-    end if
+        end if
+        deallocate(seen)
+      end do
+      if (bad_index_basis) then
+        if (dg_frag%id == 0) then
+          write(*,'(1x,a)') "[FATAL] Regenerate the DC-LCFO/EigenExa seed; DG-RT no longer remaps coefficient rows."
+        end if
+        stop "DG-Fragment RT: invalid wavefunction index_basis"
+      end if
+    end block
+    dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
 
     dg_frag%owned_coef_start = 0
     dg_frag%owned_coef_end = -1
@@ -399,144 +272,6 @@ contains
     if (allocated(dg_frag%phi_frag_has_seed_buffer)) deallocate(dg_frag%phi_frag_has_seed_buffer)
     allocate(dg_frag%phi_frag_has_seed_buffer(ifrag_count))
     dg_frag%phi_frag_has_seed_buffer(:) = .false.
-
-    if (n_mat_cap < 1 .and. trim(dg_nmat_cap_mode) == 'occ_multiple' .and. dg_nmat_cap_multiple > 0.0d0) then
-      if (.not. identity_seed_coefficients) then
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a)') "[WARN] DGDFT/LCFO coefficient seed ignores occ_multiple cap and keeps the full DC-derived basis."
-        end if
-      else
-        if (dg_frag%nspin == 1) then
-          nocc_max = max(1, min((nelec + 1) / 2, dg_frag%nstate_tot))
-        else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
-          nocc_max = max(1, min(maxval(nelec_spin(1:dg_frag%nspin)), dg_frag%nstate_tot))
-        else
-          nocc_max = max(1, min(int(nelec / 2.0d0 + 1.0d-12), dg_frag%nstate_tot))
-        end if
-
-        allocate(frag_weight_local(dg_frag%n_frag, nocc_max, dg_frag%nspin))
-        allocate(frag_weight_sum(dg_frag%n_frag, nocc_max, dg_frag%nspin))
-        allocate(occ_count(dg_frag%n_frag, dg_frag%nspin))
-        allocate(cap_frag(dg_frag%n_frag, dg_frag%nspin))
-        frag_weight_local(:, :, :) = 0.0d0
-        frag_weight_sum(:, :, :) = 0.0d0
-        occ_count(:, :) = 0
-        cap_frag(:, :) = 0
-
-      do i_local = 1, ifrag_count
-        ifrag = dg_frag%ifrag_start + i_local - 1
-        do ispin = 1, dg_frag%nspin
-          if (dg_frag%nspin == 1) then
-            nocc_eff = max(1, min((nelec + 1) / 2, dg_frag%nstate_tot))
-          else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
-            nocc_eff = max(1, min(nelec_spin(ispin), dg_frag%nstate_tot))
-          else
-            nocc_eff = max(1, min(int(nelec / 2.0d0 + 1.0d-12), dg_frag%nstate_tot))
-          end if
-          nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
-          do io = 1, nbasis_iter
-            global_idx = dg_frag%index_basis(io, ifrag, ispin)
-            if (global_idx >= 1 .and. global_idx <= nocc_eff) then
-              frag_weight_local(ifrag, global_idx, ispin) = 1.0d0
-            end if
-          end do
-        end do
-      end do
-      call comm_summation(frag_weight_local, frag_weight_sum, dg_frag%n_frag * nocc_max * dg_frag%nspin, dg_frag%icomm)
-
-      do ispin = 1, dg_frag%nspin
-        if (dg_frag%nspin == 1) then
-          nocc_eff = max(1, min((nelec + 1) / 2, dg_frag%nstate_tot))
-        else if (sum(nelec_spin(1:dg_frag%nspin)) > 0) then
-          nocc_eff = max(1, min(nelec_spin(ispin), dg_frag%nstate_tot))
-        else
-          nocc_eff = max(1, min(int(nelec / 2.0d0 + 1.0d-12), dg_frag%nstate_tot))
-        end if
-        do io = 1, nocc_eff
-          ifrag_best = 1
-          weight_best = frag_weight_sum(1, io, ispin)
-          do ifrag = 2, dg_frag%n_frag
-            if (frag_weight_sum(ifrag, io, ispin) > weight_best) then
-              ifrag_best = ifrag
-              weight_best = frag_weight_sum(ifrag, io, ispin)
-            end if
-          end do
-          occ_count(ifrag_best, ispin) = occ_count(ifrag_best, ispin) + 1
-        end do
-        do ifrag = 1, dg_frag%n_frag
-          nbasis_iter = dg_frag%n_basis(ifrag, ispin)
-          cap_frag(ifrag, ispin) = min(dg_frag%n_basis(ifrag, ispin), &
-                                       int(floor(dg_nmat_cap_multiple * dble(occ_count(ifrag, ispin)))))
-          cap_frag(ifrag, ispin) = max(1, cap_frag(ifrag, ispin))
-          if (cap_frag(ifrag, ispin) < nbasis_iter) dg_frag%seed_basis_runtime_capped = .true.
-          dg_frag%n_basis(ifrag, ispin) = cap_frag(ifrag, ispin)
-          if (.false. .and. dg_frag%id == 0 .and. (cap_frag(ifrag, ispin) >= 60 .or. nbasis_iter >= 60)) then
-            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,f8.3,a,i0)') "        basis cap diag: rank=", dg_frag%id, &
-              " ifrag=", ifrag, " ispin=", ispin, " before=", nbasis_iter, " occ_count=", occ_count(ifrag, ispin), &
-              " multiple=", dg_nmat_cap_multiple, " after=", cap_frag(ifrag, ispin)
-            flush(6)
-          end if
-          do io = cap_frag(ifrag, ispin) + 1, min(dg_frag%nstate_frag, size(dg_frag%index_basis, 1))
-            dg_frag%index_basis(io, ifrag, ispin) = 0
-          end do
-        end do
-      end do
-
-      do ispin = 1, dg_frag%nspin
-        do ifrag = 1, dg_frag%n_frag
-          dg_frag%n_mat(ispin) = max(dg_frag%n_mat(ispin), 1)
-        end do
-      end do
-
-      block
-        integer :: ispin_cmp, ifrag_cmp, io_cmp, idx_cmp, n_old, n_new
-        integer, allocatable :: remap(:)
-        do ispin_cmp = 1, dg_frag%nspin
-          n_old = max(1, dg_frag%n_mat(ispin_cmp))
-          allocate(remap(n_old))
-          remap = 0
-          n_new = 0
-          do ifrag_cmp = 1, dg_frag%n_frag
-            nbasis_iter = min(dg_frag%n_basis(ifrag_cmp, ispin_cmp), size(dg_frag%index_basis, 1))
-            do io_cmp = 1, nbasis_iter
-              idx_cmp = dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp)
-              if (idx_cmp <= 0) cycle
-              if (idx_cmp > n_old) then
-                dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp) = 0
-                cycle
-              end if
-              if (remap(idx_cmp) == 0) then
-                n_new = n_new + 1
-                remap(idx_cmp) = n_new
-              end if
-              dg_frag%index_basis(io_cmp, ifrag_cmp, ispin_cmp) = remap(idx_cmp)
-            end do
-          end do
-          dg_frag%n_mat(ispin_cmp) = max(1, n_new)
-          deallocate(remap)
-        end do
-      end block
-      dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
-
-      dg_frag%owned_coef_start = 0
-      dg_frag%owned_coef_end = -1
-
-      if (dg_frag%id == 0) then
-        occ_min = minval(occ_count(:, 1:dg_frag%nspin))
-        occ_max = maxval(occ_count(:, 1:dg_frag%nspin))
-        cap_min = minval(cap_frag(:, 1:dg_frag%nspin))
-        cap_max = maxval(cap_frag(:, 1:dg_frag%nspin))
-        cap_avg = sum(dble(cap_frag(:, 1:dg_frag%nspin))) / dble(dg_frag%n_frag * dg_frag%nspin)
-        write(*,'(1x,a,a,a,f8.3)') "[INFO] DG fragment cap mode='", trim(dg_nmat_cap_mode), &
-          "' multiple=", dg_nmat_cap_multiple
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,f8.3,a,i0)') "[INFO] DG occ/cap summary: occ_min=", occ_min, &
-          " occ_max=", occ_max, " cap_min=", cap_min, " cap_max=", cap_max, " cap_avg=", cap_avg, &
-          " n_mat_max=", dg_frag%n_mat_max
-      end if
-
-        deallocate(frag_weight_local, frag_weight_sum, occ_count, cap_frag)
-      end if
-    end if
 
     if (.not. identity_seed_coefficients) then
       min_virtual_required = max(8, dg_subspace_extra_states)
@@ -567,7 +302,7 @@ contains
             write(*,'(1x,a)') "[FATAL] DGDFT/LCFO seed has too few unoccupied fragment-basis states for RT response."
             write(*,'(1x,a,i0,a,i0,a,i0)') "[FATAL] Estimated virtual states per fragment: min=", &
               nvirt_est_min, " required_min=", min_virtual_required, " ispin=", ispin
-            write(*,'(1x,a)') "[FATAL] Increase the DC-LCFO exported fragment basis size or disable/reduce RT-side caps."
+            write(*,'(1x,a)') "[FATAL] Increase the DC-LCFO exported fragment basis size before DG-Fragment RT."
           end if
           stop "DG-Fragment RT: insufficient unoccupied fragment states in DGDFT seed"
         end if
@@ -744,8 +479,12 @@ contains
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       read(iunit) magic_file, version_file
       if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "Error: invalid basis buffer header at ifrag=", ifrag, &
-          " magic=", magic_file, " version=", version_file
+        write(*,'(1x,a,i0,4(a,i0))') "Error: invalid basis buffer header at ifrag=", ifrag, &
+          " magic=", magic_file, " expected_magic=", basis_buffer_magic, &
+          " version=", version_file, " expected_version=", basis_buffer_version
+        write(*,'(1x,a,i0,a)') "[FATAL] DG-Fragment RT requires basis_functions_buffer.bin version ", &
+          basis_buffer_version, "."
+        write(*,'(1x,a)') "[FATAL] Regenerate the DC-LCFO seed with the core-S-cleaned DG export path."
         stop "DG-Fragment RT: invalid basis buffer file"
       end if
       read(iunit) nxyz_domain(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
@@ -753,6 +492,12 @@ contains
         write(*,'(1x,a,i0,a,i0)') "Error: invalid nspin_file in basis buffer header at ifrag=", ifrag, &
                                    " nspin_file=", nspin_file
         stop "DG-Fragment RT: invalid nspin_file"
+      end if
+      if (nspin_file /= dg_frag%nspin .or. nstate_frag_file /= dg_frag%nstate_frag) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') "[FATAL] DG basis buffer metadata mismatch at ifrag=", ifrag, &
+          " nspin_file=", nspin_file, " expected=", dg_frag%nspin, &
+          " nstate_frag_file=", nstate_frag_file, " expected=", dg_frag%nstate_frag
+        stop "DG-Fragment RT: basis buffer metadata mismatch"
       end if
       do n = 1, 3
         if (dg_frag%num_fragment(n) > 1 .and. nxyz_buffer_file(n) < nb) then
@@ -765,6 +510,12 @@ contains
       if (allocated(n_basis_frag)) deallocate(n_basis_frag)
       allocate(n_basis_frag(nspin_file))
       read(iunit) n_basis_frag(1:nspin_file)
+      if (any(n_basis_frag(1:dg_frag%nspin) /= dg_frag%n_basis(ifrag, 1:dg_frag%nspin))) then
+        write(*,'(1x,a,i0)') "[FATAL] DG wavefunctions/basis buffer n_basis mismatch at ifrag=", ifrag
+        write(*,'(1x,a,20(1x,i0))') "        wavefunctions:", dg_frag%n_basis(ifrag, 1:dg_frag%nspin)
+        write(*,'(1x,a,20(1x,i0))') "        basis_buffer:", n_basis_frag(1:dg_frag%nspin)
+        stop "DG-Fragment RT: inconsistent DC-LCFO seed files"
+      end if
 
       ! Store domain size for this fragment
       dg_frag%nxyz_domain(1:3, ifrag) = nxyz_domain(1:3)
@@ -848,7 +599,65 @@ contains
       end block
 
       close(iunit)
+
+      ! The DC-LCFO eigenvector coefficients are defined in the core basis
+      ! written to basis_functions.bin.  Keep the buffered file for halo/stencil
+      ! values, but overwrite the core region from basis_functions.bin so the
+      ! RT overlap/Hamiltonian integrals use exactly the DC diagonalization
+      ! basis.
+      iunit = get_filehandle()
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_bf
+      inquire(file=filename, exist=has_core_file)
+      if (.not. has_core_file) then
+        write(*,'(1x,a,i0,a,a)') "[FATAL] missing DG core basis at ifrag=", ifrag, &
+          " file=", trim(filename)
+        write(*,'(1x,a)') "Regenerate the DC-LCFO seed so basis_functions.bin is exported."
+        stop "DG-Fragment RT: missing core basis file"
+      end if
+      open(iunit, file=filename, form='unformatted', access='stream', status='old')
+      block
+        integer :: nxyz_core(3), nspin_core, nstate_core
+        integer, allocatable :: n_basis_core(:)
+        real(8), allocatable :: phi_core(:,:,:,:,:)
+        read(iunit) nxyz_core(1:3), nspin_core, nstate_core
+        if (any(nxyz_core(1:3) /= nxyz_domain(1:3)) .or. nspin_core /= nspin_file .or. &
+            nstate_core /= nstate_frag_file) then
+          write(*,'(1x,a,i0)') "[FATAL] DG core/buffer basis metadata mismatch at ifrag=", ifrag
+          stop "DG-Fragment RT: inconsistent core and buffer basis files"
+        end if
+        allocate(n_basis_core(nspin_core))
+        read(iunit) n_basis_core(1:nspin_core)
+        if (any(n_basis_core(1:dg_frag%nspin) /= dg_frag%n_basis(ifrag, 1:dg_frag%nspin))) then
+          write(*,'(1x,a,i0)') "[FATAL] DG wavefunctions/core basis n_basis mismatch at ifrag=", ifrag
+          write(*,'(1x,a,20(1x,i0))') "        wavefunctions:", dg_frag%n_basis(ifrag, 1:dg_frag%nspin)
+          write(*,'(1x,a,20(1x,i0))') "        basis_core:", n_basis_core(1:dg_frag%nspin)
+          stop "DG-Fragment RT: inconsistent DC-LCFO core basis file"
+        end if
+        allocate(phi_core(nxyz_domain(1), nxyz_domain(2), nxyz_domain(3), nspin_core, nstate_core))
+        read(iunit) phi_core(1:nxyz_domain(1), 1:nxyz_domain(2), 1:nxyz_domain(3), 1:nspin_core, 1:nstate_core)
+        if (nspin_core >= 1) then
+          do n = 1, min(dg_frag%nstate_frag, nstate_core)
+            do iz = 1, nxyz_domain(3)
+              izg_store = dg_frag%ixyz_frag(3, ifrag) + iz - 1
+              do iy = 1, nxyz_domain(2)
+                iyg_store = dg_frag%ixyz_frag(2, ifrag) + iy - 1
+                do ix = 1, nxyz_domain(1)
+                  ixg_store = dg_frag%ixyz_frag(1, ifrag) + ix - 1
+                  dg_frag%phi_frag(ixg_store, iyg_store, izg_store, n, i_local) = phi_core(ix, iy, iz, 1, n)
+                end do
+              end do
+            end do
+          end do
+        end if
+        deallocate(phi_core, n_basis_core)
+      end block
+      close(iunit)
     end do
+
+    if (.not. identity_seed_coefficients) then
+      dg_frag%dc_lcfo_seed_basis_cleaned = .true.
+      dg_frag%fragment_basis_contracted = .true.
+    end if
 
     ! Clean up temporary arrays
     if (allocated(jxyz_tot)) deallocate(jxyz_tot)

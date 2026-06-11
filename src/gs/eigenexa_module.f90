@@ -16,7 +16,7 @@
 module eigenexa_module
   implicit none
 
-  public :: init_eigenexa
+  public :: init_eigenexa, finalize_eigenexa
 
 private
 
@@ -97,5 +97,23 @@ contains
     return
 
   end subroutine init_eigenexa
+
+  subroutine finalize_eigenexa(info)
+    use structures, only: s_parallel_info
+    use eigen_libs_mod
+    implicit none
+    type(s_parallel_info),intent(inout) :: info
+
+    if (.not. info%flag_eigenexa_init) return
+
+    call eigen_free()
+    if (allocated(info%ndiv)) deallocate(info%ndiv)
+    if (allocated(info%i_tbl)) deallocate(info%i_tbl)
+    if (allocated(info%j_tbl)) deallocate(info%j_tbl)
+    if (allocated(info%iloc_tbl)) deallocate(info%iloc_tbl)
+    if (allocated(info%jloc_tbl)) deallocate(info%jloc_tbl)
+    info%flag_eigenexa_init = .false.
+
+  end subroutine finalize_eigenexa
 
 end module eigenexa_module

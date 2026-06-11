@@ -24,7 +24,7 @@ module rt_dg_fragment_types
   private
   public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, complex_vector_block_info, &
             momentum_block_info, flux_face_trace_info, density_recv_map_info, density_grid_point_info, &
-            real_buffer_info, s_dg_fragment_rt
+            real_buffer_info, s_dg_fragment_rt, invalidate_coef_exchange_cache
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -152,6 +152,11 @@ module rt_dg_fragment_types
     integer, allocatable :: local_coef_global_ids(:,:) ! (local_coef_max,nspin), local row -> global basis id
     integer, allocatable :: coef_global_to_local(:,:)  ! (n_mat_max,nspin), global basis id -> local row, 0 if absent
     integer, allocatable :: coef_owner(:,:)       ! (n_mat_max, nspin), owning rank of each fragment-basis row
+    integer, allocatable :: coef_row_fragment(:,:) ! (n_mat_max,nspin), global basis id -> fragment id
+    integer, allocatable :: coef_exchange_peer_ranks(:,:) ! cached neighbor coefficient exchange peers
+    integer, allocatable :: coef_exchange_peer_count(:)   ! (nspin), number of cached exchange peers
+    logical, allocatable :: coef_allowed_request_frag(:)  ! fragments reachable by local row-owner stencil
+    logical :: coef_exchange_peer_cache_valid = .false.
     integer :: owned_coef_start = 0               ! first owned fragment-basis row (contiguous hint)
     integer :: owned_coef_end = -1                ! last owned fragment-basis row (contiguous hint)
 
@@ -194,10 +199,8 @@ module rt_dg_fragment_types
     integer, allocatable :: n_mat(:)           ! (nspin), spin-resolved projected-matrix dimension
     integer :: n_mat_max                       ! max projected-matrix dimension over spin channels
     logical :: identity_seed_coefficients = .false.      ! DC seed used fragment-local identity coefficients
-    logical :: defer_fragment_cap_to_local_eigen = .false. ! legacy identity-seed cap after local H/S cleanup
-    logical :: fragment_basis_contracted = .false.       ! phi_frag was rotated/cleaned to local core-S basis
-    integer :: requested_fragment_basis_cap = 0           ! legacy requested cap per fragment after cleanup
-    logical :: seed_basis_runtime_capped = .false.        ! RT input loader truncated the DC seed basis
+    logical :: fragment_basis_contracted = .false.       ! basis is RT-ready after DC cleanup or legacy contraction
+    logical :: dc_lcfo_seed_basis_cleaned = .false.      ! DC export says basis is core-S-cleaned and RT-ready
 
     ! Time-dependent external field coupling (velocity gauge: H = H_0 - i*A·∇ + A^2/2)
     real(8), allocatable :: momentum_mat(:,:,:,:) ! momentum matrix elements p_ij = <phi_i|p|phi_j> (x,y,z)
@@ -219,9 +222,11 @@ module rt_dg_fragment_types
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_blocks
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
-    complex(8), allocatable :: nl_pp_phi_self(:,:,:,:) ! (nps,natom,nstate_frag,ifrag_local)
-    complex(8), allocatable :: nl_pp_phi_halo(:,:,:,:) ! (nps,natom,nstate_frag,n_halo)
-    logical :: nl_pp_phi_cache_valid = .false.
+    complex(8), allocatable :: nl_projector_overlap(:,:,:,:) ! (nstate_frag,Nlma,nspin,ifrag_local)
+    complex(8), allocatable :: nl_projector_overlap_halo(:,:,:,:) ! (nstate_frag,Nlma,nspin,halo)
+    real(8) :: Ac_nl_projector_cache(3) = 0.0d0
+    integer :: nl_projector_cache_nlma = 0
+    logical :: has_nl_projector_cache = .false.
 
     ! Observables
     real(8), allocatable :: esp(:,:)           ! eigenvalues (nstate_tot, nspin)
@@ -229,9 +234,13 @@ module rt_dg_fragment_types
     real(8) :: dipole_moment(3)                ! total dipole moment
     real(8) :: current(3)                      ! current density
     real(8) :: current_para(3)                 ! paramagnetic current density
+    real(8) :: current_para_source_norm(3)     ! density-scaled ||grad * C_occ|| diagnostic
+    real(8) :: current_para_bound(3)           ! Cauchy bound for |<C|grad|C>|/volume
+    real(8) :: current_coef_norm               ! density-scaled ||C_occ|| diagnostic
+    real(8) :: current_coef_imag_norm          ! density-scaled ||Im(C_occ)|| diagnostic
     real(8) :: current_nl(3)                   ! nonlocal pseudopotential current density
     real(8) :: current_dia(3)                  ! diamagnetic current density proxy
-    real(8) :: current_total(3)                ! total current density = para + dia
+    real(8) :: current_total(3)                ! total current density = para + nonlocal + dia
     real(8) :: total_energy                    ! total energy
     real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
     real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block
@@ -321,6 +330,8 @@ module rt_dg_fragment_types
     integer, allocatable :: density_block_first_offset(:)       ! first subgroup-owned block offset per local fragment
     integer, allocatable :: density_block_step(:)               ! subgroup density block stride per local fragment
     integer, allocatable :: current_valid_grid_count(:)         ! valid local-current grid count per local fragment
+    integer, allocatable :: current_density_grid_point_count(:) ! source density-grid count used to build current cache
+    integer(8), allocatable :: current_density_grid_checksum(:) ! source density-grid signature used to build current cache
     integer, allocatable :: current_valid_ix(:,:)               ! valid fragment-local x indices for microscopic current
     integer, allocatable :: current_valid_iy(:,:)               ! valid fragment-local y indices for microscopic current
     integer, allocatable :: current_valid_iz(:,:)               ! valid fragment-local z indices for microscopic current
@@ -336,8 +347,6 @@ module rt_dg_fragment_types
     integer :: density_phase_block_size = 0
     integer :: density_phase_block_npw = 0
     logical :: density_phase_block_cache_valid = .false.
-    complex(8), allocatable :: density_matrix_frag(:,:,:,:) ! raw fragment density matrix cache (nbf,nbf,nspin,ifrag_local)
-    logical, allocatable :: density_matrix_frag_valid(:,:)  ! raw fragment density matrix validity (nspin,ifrag_local)
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)
     real(8) :: hgs(3)                           ! Grid spacing (a.u.)
     integer :: icomm                           ! MPI communicator for fragment RT
@@ -386,7 +395,6 @@ module rt_dg_fragment_types
     logical :: stage_map_valid = .false.
 
     ! Self-consistent basis update (adaptive basis)
-    complex(8), allocatable :: H_mat_old(:,:,:)    ! Previous Hamiltonian matrix (nstate,nstate,nspin)
     real(8), allocatable :: H_mat_kinetic(:,:,:)   ! Kinetic part only (constant, nstate,nstate,nspin)
     real(8) :: hamiltonian_change_norm             ! ||H_new - H_old|| Frobenius norm
     real(8) :: basis_update_threshold              ! Threshold for basis update (default: 0.1 a.u.)
@@ -423,9 +431,7 @@ module rt_dg_fragment_types
     logical :: use_subspace_diag              ! Use compact DG subspace diagonalization path
     integer :: subspace_extra_states          ! Extra fragment states appended to occupied trial space
     integer :: subspace_pw_vectors            ! Number of PW helper vectors appended to trial space
-    real(8) :: subspace_fallback_cond         ! Threshold that triggers full dense fallback
     integer :: last_subspace_dim              ! Last accepted DG trial subspace dimension
-    integer :: subspace_fallback_count        ! Number of times full dense fallback was used
 
     ! Mixed basis operators stored in FF/FP/PP form
     complex(8), allocatable :: S_mat_frag_pw(:,:,:) ! Overlap <fragment_i | PW_j>
@@ -453,5 +459,18 @@ module rt_dg_fragment_types
     ! Actual type allocation handled in RT module after xc_hse_ri module is loaded
 
   end type s_dg_fragment_rt
+
+contains
+
+  subroutine invalidate_coef_exchange_cache(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    if (allocated(dg_frag%coef_row_fragment)) deallocate(dg_frag%coef_row_fragment)
+    if (allocated(dg_frag%coef_exchange_peer_ranks)) deallocate(dg_frag%coef_exchange_peer_ranks)
+    if (allocated(dg_frag%coef_exchange_peer_count)) deallocate(dg_frag%coef_exchange_peer_count)
+    if (allocated(dg_frag%coef_allowed_request_frag)) deallocate(dg_frag%coef_allowed_request_frag)
+    dg_frag%coef_exchange_peer_cache_valid = .false.
+  end subroutine invalidate_coef_exchange_cache
 
 end module rt_dg_fragment_types

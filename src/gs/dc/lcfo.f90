@@ -23,7 +23,7 @@ module lcfo
   implicit none
   
   private
-  public :: dc_lcfo, init_conventional_from_dcdft, write_dg_seed_from_dcdft
+  public :: dc_lcfo, init_conventional_from_dcdft
   
   character(32),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
@@ -31,7 +31,7 @@ module lcfo
   &                          binfile_bfb = "basis_functions_buffer.bin", &
   &                          binfile_hl = "hamiltonian_local.bin"
   integer, parameter :: basis_buffer_magic = -22022212
-  integer, parameter :: basis_buffer_version = 1
+  integer, parameter :: basis_buffer_version = 2
   
 contains
 
@@ -64,7 +64,7 @@ contains
     integer :: index_basis(dc%nstate_frag,dc%n_frag,system%nspin)
     real(8) :: hvol
     real(8),allocatable :: f_basis(:,:,:,:,:),hf(:,:,:,:,:),wrk_array(:,:,:,:,:) &
-    & ,esp_tot(:,:),mat_H_local(:,:,:),coef_wf(:,:,:)
+    & ,esp_tot(:,:),mat_H_local(:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
     !
     integer :: i,j,n,ix,iy,iz,io,jo,ispin,ifrag,jfrag,i_halo
     
@@ -95,6 +95,7 @@ contains
 
     if(allocated(coef_wf)) deallocate(coef_wf)
     if(allocated(f_basis)) deallocate(f_basis)
+    if(allocated(basis_transform)) deallocate(basis_transform)
     if(allocated(esp_tot)) deallocate(esp_tot)
     if(allocated(mat_H_local)) deallocate(mat_H_local)
     do i=1,n_halo
@@ -185,11 +186,14 @@ contains
       integer :: nxyz_domain(3)
       real(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
+      real(8) :: alpha_gs, norm_basis
       
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       
       allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
       allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      if(.not. allocated(basis_transform)) allocate(basis_transform(dc%nstate_frag,dc%nstate_frag,nspin))
+      basis_transform = 0d0
       
     ! f_basis <-- | \bar{\phi} > (projected fragment orbitals)
       wrk_array = 0d0
@@ -234,6 +238,7 @@ contains
             do jo=1,dc%nstate_frag
               f_basis(:,:,:,ispin,i) = f_basis(:,:,:,ispin,i) &
               & + wrk_array(:,:,:,ispin,jo) * mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
+              basis_transform(jo,i,ispin) = mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
             end do
           end if
         end do ! io
@@ -245,12 +250,19 @@ contains
       do ispin=1,nspin
         do io=1,nb(ispin)
           do jo=1,io-1
+            alpha_gs = (sum(f_basis(:,:,:,ispin,jo)*wrk_array(:,:,:,ispin,io)) * hvol) &
+            & / (sum(f_basis(:,:,:,ispin,jo)*f_basis(:,:,:,ispin,jo)) * hvol)
             wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-            & - f_basis(:,:,:,ispin,jo) * sum(f_basis(:,:,:,ispin,jo)*wrk_array(:,:,:,ispin,io)) &
-            & / sum(f_basis(:,:,:,ispin,jo)*f_basis(:,:,:,ispin,jo))
+            & - f_basis(:,:,:,ispin,jo) * alpha_gs
+            basis_transform(:,io,ispin) = basis_transform(:,io,ispin) &
+            & - basis_transform(:,jo,ispin) * alpha_gs
           end do
+          norm_basis = sqrt( sum(wrk_array(:,:,:,ispin,io)*wrk_array(:,:,:,ispin,io)) * hvol )
+          if(norm_basis <= 1.0d-12) stop "DC-LCFO: null basis after core-S cleanup"
+          basis_transform(:,io,ispin) = basis_transform(:,io,ispin) &
+          & / norm_basis
           wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-          & / sqrt( sum(wrk_array(:,:,:,ispin,io)*wrk_array(:,:,:,ispin,io)) * hvol )
+          & / norm_basis
         end do
       end do ! ispin
       f_basis = wrk_array
@@ -547,8 +559,12 @@ contains
       use inputoutput, only: uenergy_from_au
       implicit none
       integer :: iunit,i_halo
-      integer :: nxyz_domain(3)
+      integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+      integer :: ibx, iby, ibz, sx, sy, sz, raw_io, ibasis
+      integer :: lb_rwf(3), ub_rwf(3), io_lb, io_ub
       character(256) :: filename
+      real(8) :: coef_val
+      real(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
       
     ! total system data
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
@@ -594,6 +610,60 @@ contains
         write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3) &
         & ,1:nspin,1:dc%nstate_frag) ! basis functions | lambda >
         close(iunit)
+      end if
+
+    ! buffered basis functions for DG surface Flux/Flow terms
+      nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
+      nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
+      lb_rwf(1) = lbound(spsi%rwf, 1)
+      lb_rwf(2) = lbound(spsi%rwf, 2)
+      lb_rwf(3) = lbound(spsi%rwf, 3)
+      ub_rwf(1) = ubound(spsi%rwf, 1)
+      ub_rwf(2) = ubound(spsi%rwf, 2)
+      ub_rwf(3) = ubound(spsi%rwf, 3)
+      io_lb = lbound(spsi%rwf, 5)
+      io_ub = ubound(spsi%rwf, 5)
+      allocate(phi_box_local(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+      allocate(phi_box_sum(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+      if(dc%id_frag==0) then
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_bfb
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) basis_buffer_magic, basis_buffer_version
+        write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, dc%nstate_frag
+        write(iunit) n_basis(dc%i_frag,1:nspin)
+      end if
+      do ispin=1,nspin
+        do ibasis=1,dc%nstate_frag
+          phi_box_local(:,:,:) = 0d0
+          if(ibasis <= n_basis(dc%i_frag,ispin)) then
+            do raw_io=max(1,io_lb),min(dc%nstate_frag,io_ub)
+              coef_val = basis_transform(raw_io,ibasis,ispin)
+              if(abs(coef_val) <= 0d0) cycle
+              do ibz=1,nxyz_box(3)
+                sz = dc_buffer_box_to_local_index(ibz,nxyz_domain(3),nxyz_buffer_seed(3))
+                if(sz < lb_rwf(3) .or. sz > ub_rwf(3)) cycle
+                do iby=1,nxyz_box(2)
+                  sy = dc_buffer_box_to_local_index(iby,nxyz_domain(2),nxyz_buffer_seed(2))
+                  if(sy < lb_rwf(2) .or. sy > ub_rwf(2)) cycle
+                  do ibx=1,nxyz_box(1)
+                    sx = dc_buffer_box_to_local_index(ibx,nxyz_domain(1),nxyz_buffer_seed(1))
+                    if(sx < lb_rwf(1) .or. sx > ub_rwf(1)) cycle
+                    phi_box_local(ibx,iby,ibz) = phi_box_local(ibx,iby,ibz) &
+                    & + coef_val * spsi%rwf(sx,sy,sz,ispin,raw_io,1,1)
+                  end do
+                end do
+              end do
+            end do
+          end if
+          call comm_summation(phi_box_local,phi_box_sum,product(nxyz_box),dc%icomm_frag)
+          if(dc%id_frag==0) write(iunit) phi_box_sum(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+        end do
+      end do
+      if(dc%id_frag==0) close(iunit)
+      deallocate(phi_box_local,phi_box_sum)
+
+      if(dc%id_frag==0) then
       ! local hamiltonian matrix
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_hl
@@ -677,244 +747,6 @@ contains
   end subroutine dc_lcfo
 
 !===================================================================================================================================
-
-! yn_dc_for_dg==y : export DG seed data without LCFO diagonalization
-  subroutine write_dg_seed_from_dcdft(lg,system,spsi,dc)
-    use structures
-    use communication, only: comm_is_root, comm_bcast, comm_summation
-    use eigen_subdiag_sub, only: eigen_dsyev
-    use filesystem, only: get_filehandle
-    use salmon_global, only: base_directory, lambda_cut
-    implicit none
-    type(s_rgrid),        intent(in) :: lg
-    type(s_dft_system),   intent(in) :: system
-    type(s_orbital),      intent(in) :: spsi
-    type(s_dcdft),        intent(in) :: dc
-    integer :: iunit, ifrag, ispin, io, nspin, nstate_seed, nstate_frag_seed, nstate_tot_seed, nocc_seed
-    integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
-    integer :: ibx, iby, ibz, sx, sy, sz
-    integer :: lb_rwf(3), ub_rwf(3), io_lb, io_ub
-    integer :: ipt, npts_core, ieig, ibasis, nb_eff, raw_io
-    real(8) :: hvol, alpha, norm_core, coef_val
-    integer, allocatable :: n_basis(:,:), n_basis_local(:,:), n_mat(:), nocc_spin(:)
-    integer, allocatable :: index_basis(:,:,:)
-    real(8), allocatable :: raw_core_local(:,:), raw_core_sum(:,:), basis_core(:,:)
-    real(8), allocatable :: mat_S(:,:), mat_U(:,:), lambda(:), transform(:,:,:)
-    real(8), allocatable :: coeff(:), vec_core(:)
-    real(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
-    character(256) :: filename
-    logical :: has_rwf_local, has_rwf
-
-    nspin = system%nspin
-    nstate_seed = dc%nstate_frag
-    hvol = system%hvol
-
-    has_rwf_local = allocated(spsi%rwf)
-    has_rwf = has_rwf_local
-    call comm_bcast(has_rwf, dc%icomm_tot, 0)
-    if (.not. has_rwf) then
-      if (comm_is_root(dc%id_tot)) then
-        write(*,'(1x,a)') "[FATAL] yn_dc_for_dg requires real-orbital fragment wavefunctions (spsi%rwf)."
-      end if
-      stop "write_dg_seed_from_dcdft: spsi%rwf is not allocated"
-    end if
-
-    allocate(n_basis(dc%n_frag, nspin), n_basis_local(dc%n_frag, nspin), n_mat(nspin))
-    allocate(index_basis(nstate_seed, dc%n_frag, nspin))
-    call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
-    nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
-    nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
-    npts_core = product(nxyz_domain)
-    lb_rwf(1) = lbound(spsi%rwf, 1)
-    lb_rwf(2) = lbound(spsi%rwf, 2)
-    lb_rwf(3) = lbound(spsi%rwf, 3)
-    ub_rwf(1) = ubound(spsi%rwf, 1)
-    ub_rwf(2) = ubound(spsi%rwf, 2)
-    ub_rwf(3) = ubound(spsi%rwf, 3)
-    io_lb = lbound(spsi%rwf, 5)
-    io_ub = ubound(spsi%rwf, 5)
-
-    allocate(transform(nstate_seed, nstate_seed, nspin))
-    allocate(raw_core_local(npts_core, nstate_seed), raw_core_sum(npts_core, nstate_seed))
-    allocate(basis_core(npts_core, nstate_seed))
-    allocate(mat_S(nstate_seed, nstate_seed), mat_U(nstate_seed, nstate_seed))
-    allocate(lambda(nstate_seed), coeff(nstate_seed), vec_core(npts_core))
-    transform(:,:,:) = 0.0d0
-    n_basis_local(:,:) = 0
-
-    do ispin = 1, nspin
-      raw_core_local(:,:) = 0.0d0
-      do io = max(1, io_lb), min(nstate_seed, io_ub)
-        do ibz = 1, nxyz_domain(3)
-          if (ibz < lb_rwf(3) .or. ibz > ub_rwf(3)) cycle
-          do iby = 1, nxyz_domain(2)
-            if (iby < lb_rwf(2) .or. iby > ub_rwf(2)) cycle
-            do ibx = 1, nxyz_domain(1)
-              if (ibx < lb_rwf(1) .or. ibx > ub_rwf(1)) cycle
-              ipt = ((ibz - 1) * nxyz_domain(2) + (iby - 1)) * nxyz_domain(1) + ibx
-              raw_core_local(ipt, io) = spsi%rwf(ibx, iby, ibz, ispin, io, 1, 1)
-            end do
-          end do
-        end do
-      end do
-      call comm_summation(raw_core_local, raw_core_sum, npts_core * nstate_seed, dc%icomm_frag)
-
-      do io = 1, nstate_seed
-        do raw_io = 1, nstate_seed
-          mat_S(io, raw_io) = sum(raw_core_sum(:, io) * raw_core_sum(:, raw_io)) * hvol
-        end do
-      end do
-      call eigen_dsyev(mat_S, lambda, mat_U)
-
-      basis_core(:,:) = 0.0d0
-      nb_eff = 0
-      do ieig = nstate_seed, 1, -1
-        if (lambda(ieig) <= lambda_cut) cycle
-        coeff(:) = mat_U(:, ieig) / sqrt(lambda(ieig))
-        vec_core(:) = 0.0d0
-        do raw_io = 1, nstate_seed
-          if (abs(coeff(raw_io)) <= 0.0d0) cycle
-          vec_core(:) = vec_core(:) + raw_core_sum(:, raw_io) * coeff(raw_io)
-        end do
-
-        do ibasis = 1, nb_eff
-          alpha = sum(basis_core(:, ibasis) * vec_core(:)) * hvol
-          vec_core(:) = vec_core(:) - alpha * basis_core(:, ibasis)
-          coeff(:) = coeff(:) - alpha * transform(:, ibasis, ispin)
-        end do
-
-        norm_core = sqrt(max(0.0d0, sum(vec_core(:) * vec_core(:)) * hvol))
-        if (norm_core <= 1.0d-12) cycle
-        nb_eff = nb_eff + 1
-        basis_core(:, nb_eff) = vec_core(:) / norm_core
-        transform(:, nb_eff, ispin) = coeff(:) / norm_core
-      end do
-
-      if (nb_eff <= 0) then
-        write(*,'(1x,a,i0,a,i0)') "[FATAL] DG seed basis cutoff removed all states: ifrag=", dc%i_frag, &
-                                  " ispin=", ispin
-        stop "write_dg_seed_from_dcdft: zero basis after cutoff"
-      end if
-      if (dc%id_frag == 0) n_basis_local(dc%i_frag, ispin) = nb_eff
-    end do
-
-    call comm_summation(n_basis_local, n_basis, dc%n_frag * nspin, dc%icomm_tot)
-    nstate_frag_seed = max(1, maxval(n_basis(1:dc%n_frag, 1:nspin)))
-    index_basis(:,:,:) = 0
-    n_mat(:) = 0
-    do ispin = 1, nspin
-      do ifrag = 1, dc%n_frag
-        do io = 1, n_basis(ifrag, ispin)
-          n_mat(ispin) = n_mat(ispin) + 1
-          index_basis(io, ifrag, ispin) = n_mat(ispin)
-        end do
-      end do
-    end do
-    ! RT-DG propagates occupied states.  Keep the full DG basis count in
-    ! n_mat/index_basis, but avoid allocating coefficient columns for virtual
-    ! seed states that do not contribute to the real-time density.
-    nocc_seed = max(1, int(dc%elec_num_tot / 2.0d0 + 1.0d-12))
-    nstate_tot_seed = min(maxval(n_mat(1:nspin)), max(1, min(dc%nstate_tot, nocc_seed)))
-
-    if (dc%id_frag == 0) then
-      iunit = get_filehandle()
-      filename = trim(base_directory)//binfile_rg
-      open(iunit,file=filename,form='unformatted',access='stream')
-      write(iunit) lg%num(1:3), dc%lg_tot%num(1:3)
-      do io = 1, 3
-        write(iunit) dc%jxyz_tot(1:lg%num(io), io)
-      end do
-      close(iunit)
-    end if
-
-    ! Keep the DC buffer values for RT finite-difference stencils.  DG-RT
-    ! reads this unwrapped [core-buffer:core+buffer] box directly.  The same
-    ! core-overlap cutoff/orthonormalization transform is applied to the buffer.
-    allocate(phi_box_local(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
-    allocate(phi_box_sum(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
-    if (dc%id_frag == 0) then
-      iunit = get_filehandle()
-      filename = trim(base_directory)//binfile_bfb
-      open(iunit,file=filename,form='unformatted',access='stream')
-      write(iunit) basis_buffer_magic, basis_buffer_version
-      write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, nstate_frag_seed
-      write(iunit) n_basis(dc%i_frag, 1:nspin)
-    end if
-    do ispin = 1, nspin
-      do ibasis = 1, nstate_frag_seed
-        phi_box_local(:,:,:) = 0.0d0
-        if (ibasis <= n_basis(dc%i_frag, ispin)) then
-          do raw_io = max(1, io_lb), min(nstate_seed, io_ub)
-            coef_val = transform(raw_io, ibasis, ispin)
-            if (abs(coef_val) <= 0.0d0) cycle
-            do ibz = 1, nxyz_box(3)
-              sz = dc_buffer_box_to_local_index(ibz, nxyz_domain(3), nxyz_buffer_seed(3))
-              if (sz < lb_rwf(3) .or. sz > ub_rwf(3)) cycle
-              do iby = 1, nxyz_box(2)
-                sy = dc_buffer_box_to_local_index(iby, nxyz_domain(2), nxyz_buffer_seed(2))
-                if (sy < lb_rwf(2) .or. sy > ub_rwf(2)) cycle
-                do ibx = 1, nxyz_box(1)
-                  sx = dc_buffer_box_to_local_index(ibx, nxyz_domain(1), nxyz_buffer_seed(1))
-                  if (sx < lb_rwf(1) .or. sx > ub_rwf(1)) cycle
-                  phi_box_local(ibx, iby, ibz) = phi_box_local(ibx, iby, ibz) + &
-                    coef_val * spsi%rwf(sx, sy, sz, ispin, raw_io, 1, 1)
-                end do
-              end do
-            end do
-          end do
-        end if
-        call comm_summation(phi_box_local, phi_box_sum, product(nxyz_box), dc%icomm_frag)
-        if (dc%id_frag == 0) then
-          write(iunit) phi_box_sum(1:nxyz_box(1), 1:nxyz_box(2), 1:nxyz_box(3))
-        end if
-      end do
-    end do
-    if (dc%id_frag == 0) close(iunit)
-    deallocate(phi_box_local, phi_box_sum)
-
-    if (dc%id_frag == 0) then
-      iunit = get_filehandle()
-      filename = trim(base_directory)//binfile_wf
-      open(iunit,file=filename,form='unformatted',access='stream')
-      ! The DG seed coefficients are an identity map encoded by index_basis.
-      ! Store a negative nstate_tot marker so RT can reconstruct the rows without
-      ! writing or reading an O(nstate_frag*nstate_tot) dense coefficient block.
-      write(iunit) dc%n_frag, nspin, nstate_frag_seed, -nstate_tot_seed
-      write(iunit) n_mat(1:nspin)
-      write(iunit) n_basis(1:dc%n_frag,1:nspin)
-      write(iunit) index_basis(1:nstate_frag_seed,1:dc%n_frag,1:nspin)
-      close(iunit)
-
-    end if
-
-    if (dc%id_tot == 0) then
-      allocate(nocc_spin(nspin))
-      do ispin = 1, nspin
-        nocc_spin(ispin) = min(nstate_tot_seed, min(n_mat(ispin), int(dc%elec_num_tot/2.0d0 + 1.0d-12)))
-      end do
-      iunit = get_filehandle()
-      filename = trim(dc%base_directory)//'dg_occupation.bin'
-      open(iunit,file=filename,form='unformatted',access='stream')
-      write(iunit) nspin
-      write(iunit) nocc_spin(1:nspin)
-      close(iunit)
-      deallocate(nocc_spin)
-      do ispin = 1, nspin
-        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') 'DG seed basis cutoff: spin=', ispin, &
-          ' min_nbasis=', minval(n_basis(:, ispin)), ' max_nbasis=', maxval(n_basis(:, ispin)), &
-          ' n_mat=', n_mat(ispin)
-      end do
-      write(*,'(1x,a,i0,a,i0)') 'DG seed propagated states=', nstate_tot_seed, &
-        ' total DG basis=', maxval(n_mat(1:nspin))
-      write(*,'(1x,a,i0,a,i0)') 'DG seed fragment basis file rows=', nstate_frag_seed, &
-        ' original nstate_frag=', nstate_seed
-      write(*,'(1x,a)') 'DG seed export complete (non-LCFO): wavefunctions.bin + ' // &
-        'basis_functions_buffer.bin + rgrid_index.bin + dg_occupation.bin'
-    end if
-
-    deallocate(n_basis, n_basis_local, n_mat, index_basis)
-    deallocate(transform, raw_core_local, raw_core_sum, basis_core, mat_S, mat_U, lambda, coeff, vec_core)
-  end subroutine write_dg_seed_from_dcdft
 
   integer function dc_buffer_box_to_local_index(ibox, ndom, nbuf) result(iloc)
     implicit none

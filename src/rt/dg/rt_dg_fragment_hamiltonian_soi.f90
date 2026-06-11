@@ -41,9 +41,7 @@ contains
     use structures
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_size_global
-    use rt_dg_plane_wave, only: prepare_mixed_basis_startup
-    use rt_dg_fragment_ops, only: copy_matrix_blocks_metric_to_complex_dense, symmetrize_real_matrix_blocks, &
-                                  rebuild_local_h_block_ids
+    use rt_dg_fragment_ops, only: symmetrize_real_matrix_blocks, rebuild_local_h_block_ids
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -57,13 +55,10 @@ contains
     real(8) :: hvol, integral_re, integral_im, gval, phi_re, phi_im
     complex(8) :: integral_t, integral_h
     real(8) :: max_p
-    real(8) :: Ac_zero(3)
-    integer :: n_metric
     integer :: is(3), ie(3)
     complex(8), allocatable :: T_phi(:,:,:)   ! Kinetic energy operator applied to basis
     complex(8), allocatable :: H_phi(:,:,:)   ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j>
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
-    complex(8), allocatable :: H_metric_ref(:,:)
     if (.not. dg_frag%has_real_space_basis) then
       return
     end if
@@ -195,32 +190,6 @@ contains
       write(*,*) "  [3/3] Non-local PP handled in time evolution (A-dependent)"
     end if
 
-    ! Build initial mixed basis once (fragment + orthogonalized PW) with A=0.
-    if (dg_frag%use_plane_wave_basis .and. dg_frag%n_plane_waves > 0) then
-      Ac_zero(:) = 0.0d0
-      if (comm_is_root(dg_frag%id)) then
-        write(*,*) "  [init] Building mixed basis at startup (A=0)"
-      end if
-      call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_zero)
-      dg_frag%coef_new(:, :, :) = dg_frag%coef(:, :, :)
-    end if
-
-    ! Initialize field-free reference Hamiltonian for adaptive-basis metric.
-    if (allocated(dg_frag%H_mat_old)) then
-      dg_frag%H_mat_old(:, :, :) = (0.0d0, 0.0d0)
-      n_metric = min(dg_frag%nstate_frag, size(dg_frag%H_mat_old, 1), size(dg_frag%H_mat_old, 2))
-      if (n_metric > 0) then
-        allocate(H_metric_ref(n_metric, n_metric))
-      end if
-      do ispin = 1, min(dg_frag%nspin, size(dg_frag%H_mat_old,3))
-        if (n_metric <= 0) cycle
-        H_metric_ref(:, :) = (0.0d0, 0.0d0)
-        call copy_matrix_blocks_metric_to_complex_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n_metric, H_metric_ref)
-        dg_frag%H_mat_old(1:n_metric, 1:n_metric, ispin) = H_metric_ref(:, :)
-      end do
-      if (allocated(H_metric_ref)) deallocate(H_metric_ref)
-    end if
-    
     deallocate(T_phi, H_phi, V_total)
     
     if (comm_is_root(dg_frag%id)) then
@@ -980,89 +949,6 @@ contains
     end do
   end subroutine init_matrix_blocks
 
-  subroutine sync_dense_matrix_to_blocks(dg_frag, mat, blocks, block_map)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    real(8), intent(in) :: mat(:, :, :)
-    type(matrix_block_info), intent(inout) :: blocks(:)
-    integer, intent(in) :: block_map(:, :)
-    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
-
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        blocks(iblk)%val(:, :, :) = 0.0d0
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
-              blocks(iblk)%val(ii, jj, ispin) = mat(ig_i, ig_j, ispin)
-            end do
-          end do
-        end do
-      end do
-    end do
-  end subroutine sync_dense_matrix_to_blocks
-
-  subroutine sync_blocks_to_dense_matrix(dg_frag, blocks, block_map, mat)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    type(matrix_block_info), intent(in) :: blocks(:)
-    integer, intent(in) :: block_map(:, :)
-    real(8), intent(inout) :: mat(:, :, :)
-    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol, idx_ii, idx_jj, valid_row_count, valid_col_count
-    integer, allocatable :: row_gid(:), col_gid(:), valid_row_ids(:), valid_col_ids(:)
-
-    mat(:, :, :) = 0.0d0
-    allocate(row_gid(size(dg_frag%index_basis, 1)), col_gid(size(dg_frag%index_basis, 1)))
-    allocate(valid_row_ids(size(dg_frag%index_basis, 1)), valid_col_ids(size(dg_frag%index_basis, 1)))
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_matrix_block(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          valid_row_count = 0
-          do ii = 1, nrow
-            row_gid(ii) = dg_frag%index_basis(ii, ifrag_row, ispin)
-            if (row_gid(ii) < 1 .or. row_gid(ii) > size(mat, 1)) cycle
-            valid_row_count = valid_row_count + 1
-            valid_row_ids(valid_row_count) = ii
-          end do
-          valid_col_count = 0
-          do jj = 1, ncol
-            col_gid(jj) = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (col_gid(jj) < 1 .or. col_gid(jj) > size(mat, 2)) cycle
-            valid_col_count = valid_col_count + 1
-            valid_col_ids(valid_col_count) = jj
-          end do
-          do idx_jj = 1, valid_col_count
-            jj = valid_col_ids(idx_jj)
-            ig_j = col_gid(jj)
-            do idx_ii = 1, valid_row_count
-              ii = valid_row_ids(idx_ii)
-              ig_i = row_gid(ii)
-              mat(ig_i, ig_j, ispin) = blocks(iblk)%val(ii, jj, ispin)
-            end do
-          end do
-        end do
-      end do
-    end do
-    deallocate(row_gid, col_gid, valid_row_ids, valid_col_ids)
-  end subroutine sync_blocks_to_dense_matrix
 
   logical function is_momentum_neighbor_axis(lg, s1, n1, s2, n2) result(ok)
     implicit none
@@ -1249,7 +1135,7 @@ contains
     character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
     character(32), parameter :: binfile_bfb = 'basis_functions_buffer_soi.bin'
     integer, parameter :: basis_buffer_magic = -22022213
-    integer, parameter :: basis_buffer_version = 1
+    integer, parameter :: basis_buffer_version = 2
     character(256) :: filename
     integer :: iunit, magic_file, version_file
     integer :: nxyz_domain(3), nxyz_buffer_file(3), nxyz_box(3)
@@ -1275,8 +1161,9 @@ contains
     open(iunit, file=filename, form='unformatted', access='stream', status='old')
     read(iunit) magic_file, version_file
     if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
-      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] invalid neighbor SOI basis buffer header at ifrag=', &
-        ifrag, ' magic=', magic_file, ' version=', version_file
+      write(*,'(1x,a,i0,4(a,i0))') '[FATAL] invalid neighbor SOI basis buffer header at ifrag=', &
+        ifrag, ' magic=', magic_file, ' expected_magic=', basis_buffer_magic, &
+        ' version=', version_file, ' expected_version=', basis_buffer_version
       stop 'DG-Fragment RT SOI: invalid neighbor basis buffer file'
     end if
     read(iunit) nxyz_domain(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
@@ -1838,90 +1725,6 @@ contains
     end do
   end subroutine init_complex_momentum_blocks
 
-  integer function find_momentum_block_runtime(block_map, ifrag_row, ifrag_col) result(iblk)
-    implicit none
-    integer, intent(in) :: block_map(:, :)
-    integer, intent(in) :: ifrag_row, ifrag_col
-
-    iblk = 0
-    if (ifrag_row < 1 .or. ifrag_row > size(block_map, 1)) return
-    if (ifrag_col < 1 .or. ifrag_col > size(block_map, 2)) return
-    iblk = block_map(ifrag_row, ifrag_col)
-  end function find_momentum_block_runtime
-
-  subroutine sync_complex_dense_momentum_to_blocks(dg_frag, mat, blocks_re, blocks_im, block_map)
-    use rt_dg_fragment_types, only: momentum_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    complex(8), intent(in) :: mat(:, :, :, :)
-    type(momentum_block_info), intent(inout) :: blocks_re(:), blocks_im(:)
-    integer, intent(in) :: block_map(:, :)
-    integer :: ifrag_row, ifrag_col, iblk, idir, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
-
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_momentum_block_runtime(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        blocks_re(iblk)%val(:, :, :, :) = 0.0d0
-        blocks_im(iblk)%val(:, :, :, :) = 0.0d0
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 3)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 2)) cycle
-              do idir = 1, 3
-                blocks_re(iblk)%val(idir, ii, jj, ispin) = real(mat(idir, ig_i, ig_j, ispin), kind=8)
-                blocks_im(iblk)%val(idir, ii, jj, ispin) = aimag(mat(idir, ig_i, ig_j, ispin))
-              end do
-            end do
-          end do
-        end do
-      end do
-    end do
-  end subroutine sync_complex_dense_momentum_to_blocks
-
-  subroutine sync_blocks_to_complex_dense_momentum(dg_frag, blocks_re, blocks_im, block_map, mat)
-    use rt_dg_fragment_types, only: momentum_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    type(momentum_block_info), intent(in) :: blocks_re(:), blocks_im(:)
-    integer, intent(in) :: block_map(:, :)
-    complex(8), intent(inout) :: mat(:, :, :, :)
-    integer :: ifrag_row, ifrag_col, iblk, idir, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
-
-    mat(:, :, :, :) = (0.0d0, 0.0d0)
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_momentum_block_runtime(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 3)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 2)) cycle
-              do idir = 1, 3
-                mat(idir, ig_i, ig_j, ispin) = cmplx(blocks_re(iblk)%val(idir, ii, jj, ispin), &
-                                                     blocks_im(iblk)%val(idir, ii, jj, ispin), kind=8)
-              end do
-            end do
-          end do
-        end do
-      end do
-    end do
-  end subroutine sync_blocks_to_complex_dense_momentum
-
   subroutine reduce_complex_momentum_blocks(dg_frag, blocks_re, blocks_im, label, icomm_reduce)
     use communication, only: comm_get_max, comm_is_root, comm_summation
     use rt_dg_fragment_types, only: momentum_block_info
@@ -1936,6 +1739,7 @@ contains
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical, parameter :: trace_block_reduce = .false.
 
     max_block_size = 0
     total_active_size = 0
@@ -1966,7 +1770,7 @@ contains
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -2038,7 +1842,7 @@ contains
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
@@ -2059,6 +1863,7 @@ contains
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical, parameter :: trace_block_reduce = .false.
 
     max_block_size = 0
     total_active_size = 0
@@ -2089,7 +1894,7 @@ contains
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -2132,7 +1937,7 @@ contains
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
@@ -2194,74 +1999,7 @@ contains
     end do
   end subroutine init_complex_matrix_blocks
 
-  subroutine sync_complex_dense_matrix_to_blocks(dg_frag, mat, blocks_re, blocks_im, block_map)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    complex(8), intent(in) :: mat(:, :, :)
-    type(matrix_block_info), intent(inout) :: blocks_re(:), blocks_im(:)
-    integer, intent(in) :: block_map(:, :)
-    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
 
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_complex_matrix_block(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        blocks_re(iblk)%val(:, :, :) = 0.0d0
-        blocks_im(iblk)%val(:, :, :) = 0.0d0
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
-              blocks_re(iblk)%val(ii, jj, ispin) = real(mat(ig_i, ig_j, ispin), kind=8)
-              blocks_im(iblk)%val(ii, jj, ispin) = aimag(mat(ig_i, ig_j, ispin))
-            end do
-          end do
-        end do
-      end do
-    end do
-  end subroutine sync_complex_dense_matrix_to_blocks
-
-  subroutine sync_blocks_to_complex_dense_matrix(dg_frag, blocks_re, blocks_im, block_map, mat)
-    use rt_dg_fragment_types, only: matrix_block_info
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    type(matrix_block_info), intent(in) :: blocks_re(:), blocks_im(:)
-    integer, intent(in) :: block_map(:, :)
-    complex(8), intent(inout) :: mat(:, :, :)
-    integer :: ifrag_row, ifrag_col, iblk, ispin, ii, jj, ig_i, ig_j
-    integer :: nrow, ncol
-
-    mat(:, :, :) = (0.0d0, 0.0d0)
-    do ifrag_col = 1, dg_frag%n_frag
-      do ifrag_row = 1, dg_frag%n_frag
-        iblk = find_complex_matrix_block(block_map, ifrag_row, ifrag_col)
-        if (iblk <= 0) cycle
-        do ispin = 1, dg_frag%nspin
-          nrow = dg_frag%n_basis(ifrag_row, ispin)
-          ncol = dg_frag%n_basis(ifrag_col, ispin)
-          if (nrow <= 0 .or. ncol <= 0) cycle
-          do jj = 1, ncol
-            ig_j = dg_frag%index_basis(jj, ifrag_col, ispin)
-            if (ig_j < 1 .or. ig_j > size(mat, 2)) cycle
-            do ii = 1, nrow
-              ig_i = dg_frag%index_basis(ii, ifrag_row, ispin)
-              if (ig_i < 1 .or. ig_i > size(mat, 1)) cycle
-              mat(ig_i, ig_j, ispin) = cmplx(blocks_re(iblk)%val(ii, jj, ispin), &
-                                             blocks_im(iblk)%val(ii, jj, ispin), kind=8)
-            end do
-          end do
-        end do
-      end do
-    end do
-  end subroutine sync_blocks_to_complex_dense_matrix
 
   subroutine reduce_complex_matrix_blocks(dg_frag, blocks_re, blocks_im, label, icomm_reduce)
     use communication, only: comm_get_max, comm_is_root, comm_summation
@@ -2277,6 +2015,7 @@ contains
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
     integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
+    logical, parameter :: trace_block_reduce = .false.
 
     max_block_size = 0
     total_active_size = 0
@@ -2307,7 +2046,7 @@ contains
       stop 1
     end if
 
-    if (comm_is_root(dg_frag%id)) then
+    if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
         " total_active=", total_active_size, " max_block=", max_block_size_global, &
         " chunk_size=", reduce_chunk_size
@@ -2371,23 +2110,12 @@ contains
     end do
 
     deallocate(send_block, recv_block)
-    if (comm_is_root(dg_frag%id)) then
+    if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0)') "        hamiltonian block reduce done: label=", trim(label), &
         " total_active=", total_active_size
       flush(6)
     end if
   end subroutine reduce_complex_matrix_blocks
-
-  integer function find_complex_matrix_block(block_map, ifrag_row, ifrag_col) result(iblk)
-    implicit none
-    integer, intent(in) :: block_map(:, :)
-    integer, intent(in) :: ifrag_row, ifrag_col
-
-    iblk = 0
-    if (ifrag_row < 1 .or. ifrag_row > size(block_map, 1)) return
-    if (ifrag_col < 1 .or. ifrag_col > size(block_map, 2)) return
-    iblk = block_map(ifrag_row, ifrag_col)
-  end function find_complex_matrix_block
 
   !=======================================================================
   ! Calculate overlap matrix in DG basis (S_ij = <phi_i|phi_j>)

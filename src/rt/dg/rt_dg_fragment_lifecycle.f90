@@ -1,7 +1,7 @@
 ! DG fragment lifecycle helpers shared by non-SOI and SOI RT modules.
 #include "config.h"
 module rt_dg_fragment_lifecycle
-  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_fragment_types, only: s_dg_fragment_rt, invalidate_coef_exchange_cache
   implicit none
   private
   public :: init_rk_coefficients, reset_basis_dependent_operator_storage
@@ -37,6 +37,8 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer :: i
 
+    call invalidate_coef_exchange_cache(dg_frag)
+
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
     if (allocated(dg_frag%H_mat_c)) deallocate(dg_frag%H_mat_c)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
@@ -69,9 +71,13 @@ contains
     if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
     if (allocated(dg_frag%H_nl_local_block_ids)) deallocate(dg_frag%H_nl_local_block_ids)
     if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
+    if (allocated(dg_frag%nl_projector_overlap)) deallocate(dg_frag%nl_projector_overlap)
+    if (allocated(dg_frag%nl_projector_overlap_halo)) deallocate(dg_frag%nl_projector_overlap_halo)
     dg_frag%n_H_blocks = 0
     dg_frag%n_H_nl_blocks = 0
     dg_frag%H_local_block_ids_valid = .false.
+    dg_frag%nl_projector_cache_nlma = 0
+    dg_frag%has_nl_projector_cache = .false.
 
     if (allocated(dg_frag%S_mat)) deallocate(dg_frag%S_mat)
     if (allocated(dg_frag%S_mat_prop)) deallocate(dg_frag%S_mat_prop)
@@ -103,18 +109,18 @@ contains
     dg_frag%n_momentum_blocks = 0
     if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
     dg_frag%gradient_basis_cache_valid = .false.
+    if (allocated(dg_frag%nl_projector_overlap)) deallocate(dg_frag%nl_projector_overlap)
+    if (allocated(dg_frag%nl_projector_overlap_halo)) deallocate(dg_frag%nl_projector_overlap_halo)
+    dg_frag%has_nl_projector_cache = .false.
+    dg_frag%nl_projector_cache_nlma = 0
+    dg_frag%Ac_nl_projector_cache = 0.0d0
 
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     dg_frag%density_phi_block_size = 0
     dg_frag%density_phi_block_cache_valid = .false.
-    if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
-    if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%coef_ref_all)) deallocate(dg_frag%coef_ref_all)
     dg_frag%coef_ref_ready = .false.
-    if (allocated(dg_frag%nl_pp_phi_self)) deallocate(dg_frag%nl_pp_phi_self)
-    if (allocated(dg_frag%nl_pp_phi_halo)) deallocate(dg_frag%nl_pp_phi_halo)
-    dg_frag%nl_pp_phi_cache_valid = .false.
     dg_frag%has_nl_cache = .false.
   end subroutine reset_basis_dependent_operator_storage
 

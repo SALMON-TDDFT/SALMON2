@@ -17,9 +17,6 @@ set(SOURCES
     dg/rt_dg_fragment_lifecycle.f90
     dg/rt_dg_fragment_io.f90
     dg/rt_dg_fragment_io_soi.f90
-    dg/rt_dg_initial_state.f90
-    dg/rt_dg_flux_scf.f90
-    dg/rt_dg_local_basis.f90
     dg/rt_dg_hse_exchange.f90
     dg/rt_dg_fragment.f90
     dg/rt_dg_fragment_hamiltonian_soi.f90
@@ -37,11 +34,11 @@ set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment.f90
     PROPERTIES
-    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_hamiltonian.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_basis_update.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_parallel.f90"
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_hamiltonian.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_parallel.f90"
 )
 
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_soi.f90
     PROPERTIES
-    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_basis_update_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_parallel.f90"
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_halo_soi.f90;${CMAKE_CURRENT_SOURCE_DIR}/dg/rt_dg_fragment_parallel.f90"
 )

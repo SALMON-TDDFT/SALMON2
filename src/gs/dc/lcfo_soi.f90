@@ -29,7 +29,7 @@ module lcfo_soi
   &                          binfile_bfb_soi = "basis_functions_buffer_soi.bin", &
   &                          binfile_hl_soi = "hamiltonian_local_soi.bin"
   integer, parameter :: basis_buffer_magic_soi = -22022213
-  integer, parameter :: basis_buffer_version_soi = 1
+  integer, parameter :: basis_buffer_version_soi = 2
 
 contains
 

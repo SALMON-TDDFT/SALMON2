@@ -27,7 +27,6 @@ module rt_dg_basis_projection
   public :: stabilize_basis_overlap
   public :: project_wavefunction_to_new_basis
   public :: reorthonormalize_occupied_subspace
-  public :: diagonalize_and_update_basis
 
 contains
 
@@ -253,8 +252,12 @@ contains
     real(8) :: overlap_sum
     real(8) :: kahan_c, term, y, t
     real(8) :: hvol
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: coef_frag_all(:,:)
     external :: dgesv
+
+    if (allocated(dg_frag%local_coef_global_ids) .and. size(dg_frag%coef, 1) < dg_frag%n_mat_max) then
+      stop "DG basis projection is disabled for row-split DC-LCFO RT; regenerate the DC-LCFO seed instead"
+    end if
 
     nbasis_coef = size(dg_frag%coef, 1)
     allocate(coef_new(nbasis_coef, dg_frag%nstate_tot, dg_frag%nspin))
@@ -365,7 +368,11 @@ contains
     integer :: ispin, iocc, jocc, n_occ, n_basis
     complex(8) :: proj
     real(8) :: norm_val
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
+    complex(8), allocatable :: coef_frag_all(:,:)
+
+    if (allocated(dg_frag%local_coef_global_ids) .and. size(dg_frag%coef, 1) < dg_frag%n_mat_max) then
+      stop "DG occupied reorthonormalization is disabled for row-split DC-LCFO RT"
+    end if
 
     n_basis = dg_frag%nstate_frag
     n_occ = min(system%no, dg_frag%nstate_tot)
@@ -393,107 +400,5 @@ contains
     call zero_nonowned_coefficients(dg_frag)
 
   end subroutine reorthonormalize_occupied_subspace
-
-  !=======================================================================
-  ! Diagonalize Hamiltonian matrix and rotate coefficients
-  !=======================================================================
-  subroutine diagonalize_and_update_basis(dg_frag, system)
-    use structures
-    use communication, only: comm_is_root
-    use rt_dg_fragment_ops, only: zero_nonowned_coefficients, copy_matrix_blocks_metric_to_real_dense
-    implicit none
-    type(s_dg_fragment_rt), intent(inout) :: dg_frag
-    type(s_dft_system), intent(in) :: system
-
-    integer :: ispin, n, lda, lwork, info, i, j, io
-    real(8), allocatable :: H_work(:,:), eigenvalues_tmp(:), eigenvectors(:,:), work(:)
-    complex(8), allocatable :: coef_old(:,:,:), coef_new(:,:,:)
-    complex(8), allocatable :: coef_frag_all(:,:), coef_pw_all(:,:)
-    logical :: use_mixed_basis
-    external :: dsyev
-
-    use_mixed_basis = dg_frag%use_plane_wave_basis .and. (dg_frag%n_plane_waves > 0)
-
-    if (use_mixed_basis) then
-      if (comm_is_root(dg_frag%icomm)) then
-        write(*,*) "Warning: Mixed basis diagonalization requires potentials (Vh, Vxc, Vpsl)"
-        write(*,*) "         Falling back to fragment-only diagonalization"
-      end if
-      use_mixed_basis = .false.
-    end if
-
-    do ispin = 1, dg_frag%nspin
-      n = dg_frag%nstate_frag
-      lda = n
-
-      allocate(H_work(n, n))
-      allocate(eigenvalues_tmp(n))
-      allocate(eigenvectors(n, n))
-
-      if (allocated(dg_frag%H_mat)) then
-        H_work(:, :) = dg_frag%H_mat(:, :, ispin)
-      else if (allocated(dg_frag%H_mat_blocks)) then
-        H_work(:, :) = 0.0d0
-        call copy_matrix_blocks_metric_to_real_dense(dg_frag, dg_frag%H_mat_blocks, ispin, n, H_work)
-      else
-        write(*,*) "ERROR: Hamiltonian matrix unavailable in diagonalize_and_update_basis"
-        stop
-      end if
-
-      lwork = -1
-      allocate(work(1))
-      call DSYEV('V', 'U', n, H_work, lda, eigenvalues_tmp, &
-                 work, lwork, info)
-      lwork = int(work(1)) + 1
-      deallocate(work)
-      allocate(work(lwork))
-
-      call DSYEV('V', 'U', n, H_work, lda, eigenvalues_tmp, &
-                 work, lwork, info)
-
-      if (info /= 0) then
-        write(*,*) "ERROR: Hamiltonian diagonalization failed in diagonalize_and_update_basis, info=", info
-        stop
-      end if
-
-      dg_frag%eigenvalues(:, ispin) = eigenvalues_tmp(:)
-      eigenvectors(:, :) = H_work(:, :)
-
-      allocate(coef_old(n, dg_frag%nstate_tot, 1))
-      allocate(coef_new(n, dg_frag%nstate_tot, 1))
-
-      allocate(coef_frag_all(n, dg_frag%nstate_tot))
-      coef_frag_all(:, :) = dg_frag%coef(1:n, 1:dg_frag%nstate_tot, ispin)
-      coef_old(:, :, 1) = coef_frag_all(:, :)
-      coef_new = 0.0d0
-
-      do io = 1, dg_frag%nstate_tot
-        do j = 1, n
-          do i = 1, n
-            coef_new(j, io, 1) = coef_new(j, io, 1) + &
-                                 eigenvectors(i, j) * coef_old(i, io, 1)
-          end do
-        end do
-      end do
-
-      dg_frag%coef(:, :, ispin) = coef_new(:, :, 1)
-      dg_frag%coef_new(:, :, ispin) = coef_new(:, :, 1)
-      call zero_nonowned_coefficients(dg_frag)
-
-      deallocate(H_work, eigenvalues_tmp, eigenvectors, work)
-      deallocate(coef_old, coef_new)
-      if (allocated(coef_frag_all)) deallocate(coef_frag_all)
-      if (comm_is_root(dg_frag%icomm)) then
-        write(*,'(1x,a,i0,a)') "    Spin ", ispin, " diagonalized successfully"
-      end if
-
-    end do
-
-    if (comm_is_root(dg_frag%icomm)) then
-      write(*,*) "  Coefficients transformed to new eigenbasis"
-      write(*,*) "  (Note: Basis space not expanded - limitations apply)"
-    end if
-
-  end subroutine diagonalize_and_update_basis
 
 end module rt_dg_basis_projection

@@ -15,7 +15,7 @@
 !
 
 module rt_dg_fragment_coefficients
-  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_fragment_types, only: s_dg_fragment_rt, invalidate_coef_exchange_cache
   implicit none
 
   private
@@ -240,6 +240,7 @@ contains
       stop "DG-Fragment RT: missing id_array before coef owner build"
     end if
 
+    call invalidate_coef_exchange_cache(dg_frag)
     if (allocated(dg_frag%coef_owner)) deallocate(dg_frag%coef_owner)
     allocate(dg_frag%coef_owner(dg_frag%n_mat_max, dg_frag%nspin))
     dg_frag%coef_owner(:, :) = -1

@@ -19,43 +19,10 @@
 ! Time evolution in fragment basis coefficient space using Discontinuous Galerkin method
 ! Velocity gauge formulation: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
 !
-! ADAPTIVE BASIS UPDATES (NEW FEATURE):
-! =====================================
-! When strong external fields significantly modify the electronic structure,
-! the initial fragment basis may become insufficient. This module implements
-! adaptive basis updates to handle such situations:
-!
-! 1. MONITORING: Tracks ||H_new - H_old|| during RT propagation
-! 2. TRIGGER: When change exceeds threshold, updates basis functions
-! 3. UPDATE METHODS:
-!    a) DC-LCFO CG solver (RECOMMENDED): Solves KS equation with current
-!       potentials to get new eigenstates, expanding basis space
-!    b) Diagonalization (FALLBACK): Rotates existing basis without expansion
-! 4. PROJECTION: Projects current wave functions onto new basis: c'_j = Σ_i S_ji c_i
-!
-! USAGE:
-! ------
-! In input file, add:
-!   yn_adaptive_basis = 'y'
-!   basis_update_threshold = 0.1d0  ! in eV (converted to a.u. internally)
-!
-! IMPLEMENTATION STATUS:
-! ---------------------
-! ✓ Hamiltonian change monitoring (fragment-parallel)
-! ✓ Overlap matrix calculation between old and new basis
-! ✓ Wave function projection to new basis
-! ✓ DC-LCFO CG integration framework
-! ✓ ppg (pseudopotential grid) properly passed through processing chain
-! ✓ Vpsl (local pseudopotential) included in all potential calculations
-! ✓ DC-CG method enabled with full pseudopotential support
-! ✓ Initial Hamiltonian matrix (H_mat) calculation with kinetic+potential
-! ✓ Halo (ghost cell) exchange for phi_frag implemented
-! ✓ Fragment boundary treatment via MPI communication
-! ✓ System boundary: Periodic boundary conditions properly handled
-! ✓ Non-local pseudopotential matrix elements <φ_i|V_NL|φ_j> implemented
-! ✓ Input parameter yn_dc_cg_basis_update added for method selection
-! ✓ OpenMP parallelization for performance optimization
-! ✓ Memory efficiency improvements (reduced allocations)
+! RT BASIS POLICY:
+! ================
+! Runtime adaptive basis updates have been removed from the production RT path.
+! The RT basis must be generated in the DC-LCFO export path instead.
 !
 ! PERFORMANCE OPTIMIZATIONS:
 ! -------------------------
@@ -81,14 +48,11 @@
 module rt_dg_fragment_soi
   use rt_dg_fragment, only: get_dg_spin_occ_info, copy_periodic_global_scalar_to_rank_buffer, &
                             build_total_potential_grid_with_buffered_hartree
-  use rt_dg_fragment_types, only: s_dg_fragment_rt, halo_info
+  use rt_dg_fragment_types, only: s_dg_fragment_rt, halo_info, invalidate_coef_exchange_cache
   use rt_dg_basis_projection, only: calculate_new_old_basis_overlap, &
                                    stabilize_basis_overlap, &
-                                   project_wavefunction_to_new_basis, &
-                                   diagonalize_and_update_basis
-  use rt_dg_plane_wave, only: init_plane_wave_basis, compute_fragment_pw_overlap, &
-                              compute_fragment_pw_hamiltonian, build_mixed_hamiltonian, &
-                              diagonalize_mixed_basis_pw => diagonalize_mixed_basis
+                                   project_wavefunction_to_new_basis
+  use rt_dg_plane_wave, only: init_plane_wave_basis
   use rt_dg_hse_exchange, only: init_hse_ri_data, add_exact_exchange_hse, finalize_hse_ri_data
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
                                 calculate_microscopic_current_dg, &
@@ -122,8 +86,7 @@ contains
     use salmon_global, only: num_fragment, num_rgrid_buffer, nstate_frag, time_integrator_dg_fragment, &
                  yn_adaptive_basis, basis_update_threshold, yn_dg_fragment_from_dcdft, &
                  nproc_rgrid, nproc_ob, yn_dg_subspace_diag, dg_subspace_extra_states, &
-                 dg_nmat_cap_mode, dg_nmat_cap_fixed, &
-                 dg_subspace_pw_vectors, dg_subspace_fallback_cond
+                 dg_subspace_pw_vectors
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
     use filesystem, only: get_filehandle
     implicit none
@@ -176,9 +139,9 @@ contains
 
     if (.not. dg_frag%parallel_mode_orbital .and. trim(dg_frag%parallel_mode) /= 'legacy_realspace') then
       if (comm_is_root(info%id_rko)) then
-        write(*,'(1x,a,a)') "ERROR: invalid dg_fragment_parallel_mode=", trim(dg_frag%parallel_mode)
+        write(*,'(1x,a,a)') "ERROR: invalid DG fragment parallel mode=", trim(dg_frag%parallel_mode)
       end if
-      stop "DG-Fragment RT: dg_fragment_parallel_mode must be orbital or legacy_realspace"
+      stop "DG-Fragment RT: parallel mode must be orbital or legacy_realspace"
     end if
 
     if (dg_frag%parallel_mode_orbital) then
@@ -349,45 +312,30 @@ contains
     ! Initialize adaptive basis parameters from input file
     dg_frag%yn_adaptive_basis = (yn_adaptive_basis == 'y')
     dg_frag%basis_update_threshold = basis_update_threshold
+    if (dg_frag%yn_adaptive_basis) then
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a)') "[FATAL] yn_adaptive_basis is deprecated for DG-Fragment RT."
+        write(*,'(1x,a)') "[FATAL] Runtime adaptive basis updates were removed."
+        write(*,'(1x,a)') "[FATAL] Generate the RT basis in the DC-LCFO export path instead."
+      end if
+      stop "DG-Fragment RT: runtime adaptive basis update removed"
+    end if
     dg_frag%use_subspace_diag = (yn_dg_subspace_diag == 'y')
     dg_frag%subspace_extra_states = max(0, dg_subspace_extra_states)
     dg_frag%subspace_pw_vectors = max(0, dg_subspace_pw_vectors)
-    dg_frag%subspace_fallback_cond = max(1.0d0, dg_subspace_fallback_cond)
     dg_frag%last_subspace_dim = 0
-    dg_frag%subspace_fallback_count = 0
     dg_frag%has_nl_cache = .false.
+    dg_frag%has_nl_projector_cache = .false.
     dg_frag%Ac_nl_cache = 0.0d0
     dg_frag%Ac_nl_cache_tol = 1.0d-12
     dg_frag%hamiltonian_change_norm = 0.0d0
     dg_frag%nbasis_update_count = 0
     dg_frag%last_basis_update_step = 0
     
-    ! Allocate Hamiltonian tracking arrays (always allocated for monitoring)
-    allocate(dg_frag%H_mat_old(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-    dg_frag%H_mat_old = (0.0d0, 0.0d0)
-    
-    ! Allocate overlap matrix only if adaptive basis is enabled
-    if (dg_frag%yn_adaptive_basis) then
-      allocate(dg_frag%eigenvalues(dg_frag%nstate_frag, dg_frag%nspin))
-      dg_frag%eigenvalues = 0.0d0
-      allocate(dg_frag%basis_overlap(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
-      dg_frag%basis_overlap = 0.0d0
-      
-      if (comm_is_root(info%id_rko)) then
-        write(*,*)
-        write(*,*) "=== Adaptive Basis Updates ENABLED ==="
-        write(*,'(1x,a,f8.4,a)') "  Hamiltonian change threshold: ", &
-                                 dg_frag%basis_update_threshold, " a.u."
-        write(*,*) "  Basis will be recalculated when mean field changes significantly"
-        write(*,*) "  DC-LCFO returns real basis (no gauge rotation needed)"
-        write(*,*)
-      end if
-    end if
     if (comm_is_root(info%id_rko)) then
       write(*,'(1x,a,l1)') "  DG subspace diagonalization: ", dg_frag%use_subspace_diag
       write(*,'(1x,a,i0)') "  DG subspace extra states: ", dg_frag%subspace_extra_states
       write(*,'(1x,a,i0)') "  DG subspace PW vectors: ", dg_frag%subspace_pw_vectors
-      write(*,'(1x,a,1pe11.3)') "  DG subspace fallback cond: ", dg_frag%subspace_fallback_cond
     end if
     
     ! NOTE: Dipole matrix NOT needed for velocity gauge formalism
@@ -519,6 +467,8 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer :: i
+
+    call invalidate_coef_exchange_cache(dg_frag)
     
     if (allocated(dg_frag%coef)) deallocate(dg_frag%coef)
     if (allocated(dg_frag%coef_new)) deallocate(dg_frag%coef_new)
@@ -548,6 +498,10 @@ contains
       deallocate(dg_frag%H_nl_blocks)
       dg_frag%n_H_nl_blocks = 0
     end if
+    if (allocated(dg_frag%nl_projector_overlap)) deallocate(dg_frag%nl_projector_overlap)
+    if (allocated(dg_frag%nl_projector_overlap_halo)) deallocate(dg_frag%nl_projector_overlap_halo)
+    dg_frag%nl_projector_cache_nlma = 0
+    dg_frag%has_nl_projector_cache = .false.
     if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
     if (allocated(dg_frag%H_nl_block_map)) deallocate(dg_frag%H_nl_block_map)
     if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
@@ -633,6 +587,8 @@ contains
     if (allocated(dg_frag%density_block_first_offset)) deallocate(dg_frag%density_block_first_offset)
     if (allocated(dg_frag%density_block_step)) deallocate(dg_frag%density_block_step)
     if (allocated(dg_frag%current_valid_grid_count)) deallocate(dg_frag%current_valid_grid_count)
+    if (allocated(dg_frag%current_density_grid_point_count)) deallocate(dg_frag%current_density_grid_point_count)
+    if (allocated(dg_frag%current_density_grid_checksum)) deallocate(dg_frag%current_density_grid_checksum)
     if (allocated(dg_frag%current_valid_ix)) deallocate(dg_frag%current_valid_ix)
     if (allocated(dg_frag%current_valid_iy)) deallocate(dg_frag%current_valid_iy)
     if (allocated(dg_frag%current_valid_iz)) deallocate(dg_frag%current_valid_iz)
@@ -649,8 +605,6 @@ contains
     dg_frag%density_phase_block_size = 0
     dg_frag%density_phase_block_npw = 0
     dg_frag%density_phase_block_cache_valid = .false.
-    if (allocated(dg_frag%density_matrix_frag)) deallocate(dg_frag%density_matrix_frag)
-    if (allocated(dg_frag%density_matrix_frag_valid)) deallocate(dg_frag%density_matrix_frag_valid)
     if (allocated(dg_frag%density_recv_map)) then
       do i = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
         if (allocated(dg_frag%density_recv_map(i)%ixg)) deallocate(dg_frag%density_recv_map(i)%ixg)
@@ -669,13 +623,9 @@ contains
     if (allocated(dg_frag%rk_alpha)) deallocate(dg_frag%rk_alpha)
     if (allocated(dg_frag%rk_beta)) deallocate(dg_frag%rk_beta)
     if (allocated(dg_frag%rk_gamma)) deallocate(dg_frag%rk_gamma)
-    if (allocated(dg_frag%H_mat_old)) deallocate(dg_frag%H_mat_old)
     if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
     if (allocated(dg_frag%eigenvalues)) deallocate(dg_frag%eigenvalues)
     if (allocated(dg_frag%basis_overlap)) deallocate(dg_frag%basis_overlap)
-    if (allocated(dg_frag%nl_pp_phi_self)) deallocate(dg_frag%nl_pp_phi_self)
-    if (allocated(dg_frag%nl_pp_phi_halo)) deallocate(dg_frag%nl_pp_phi_halo)
-    dg_frag%nl_pp_phi_cache_valid = .false.
     
     ! Plane wave basis deallocations
     if (allocated(dg_frag%k_pw)) deallocate(dg_frag%k_pw)
@@ -730,8 +680,6 @@ contains
     ifrag = ((ix_frag - 1) * max(1, nfrag_axis(2)) + (iy_frag - 1)) * &
             max(1, nfrag_axis(3)) + iz_frag
   end function fragment_from_rank_address
-
-#include "rt_dg_fragment_basis_update_soi.f90"
 
   subroutine diagnose_density_from_fragments(dg_frag, system, mg, rho, rho_s)
     use structures

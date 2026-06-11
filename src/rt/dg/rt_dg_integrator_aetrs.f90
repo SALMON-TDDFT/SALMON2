@@ -23,26 +23,23 @@
     ! outside this subroutine).  The scheme is 2nd-order and approximately
     ! time-reversal symmetric in the frozen-H limit.
 
-    integer :: n, n_pw
+    integer :: n
     real(8) :: Ac_t(3), Ac_mid(3)
     complex(8), allocatable :: coef_save(:,:,:)
     complex(8), allocatable :: k1(:,:,:), k_mid(:,:,:)
-    complex(8), allocatable :: coef_pw_save(:,:,:)
-    complex(8), allocatable :: k1_pw(:,:,:), k_mid_pw(:,:,:)
 
-    n = size(dg_frag%coef, 1)
+    n = dg_frag%n_mat_max
     if (n <= 0) return
-    n_pw = 0
-    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then
+      stop "DG AETRS now supports the pure fragment block-sparse route only"
+    end if
+    if (allocated(dg_frag%local_coef_global_ids) .and. size(dg_frag%coef, 1) < n) then
+      stop "DG AETRS is disabled for row-split coefficients; use rk4 or ssprk3"
+    end if
 
     allocate(coef_save(n, dg_frag%nstate_tot, dg_frag%nspin))
     allocate(k1      (n, dg_frag%nstate_tot, dg_frag%nspin))
     allocate(k_mid   (n, dg_frag%nstate_tot, dg_frag%nspin))
-    if (n_pw > 0) then
-      allocate(coef_pw_save(n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-      allocate(k1_pw      (n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-      allocate(k_mid_pw   (n_pw, dg_frag%nstate_tot, dg_frag%nspin))
-    end if
 
     ! Vector potentials
     Ac_t   = rt%Ac_tot(:, itt)
@@ -50,37 +47,19 @@
 
     ! Save current state
     coef_save(1:n, :, :) = dg_frag%coef(1:n, :, :)
-    if (n_pw > 0) coef_pw_save(1:n_pw, :, :) = dg_frag%coef_pw(1:n_pw, :, :)
 
     ! Step 1: derivative at coef(t) with A(t)
-    if (n_pw > 0) then
-      call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_t, itt, k1, k1_pw)
-    else
-      call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_t, itt, k1)
-    end if
+    call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_t, k1)
 
     ! Step 2: advance to midpoint (predictor half-step)
     dg_frag%coef(1:n, :, :) = coef_save(1:n, :, :) + 0.5d0 * dt * k1(1:n, :, :)
-    if (n_pw > 0) then
-      dg_frag%coef_pw(1:n_pw, :, :) = coef_pw_save(1:n_pw, :, :) + 0.5d0 * dt * k1_pw(1:n_pw, :, :)
-    end if
 
     ! Step 3: derivative at coef_mid with A(t+dt/2)
-    if (n_pw > 0) then
-      call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_mid, itt, k_mid, k_mid_pw)
-    else
-      call calculate_time_derivative(dg_frag, system, mg, stencil, ppg, Ac_mid, itt, k_mid)
-    end if
+    call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_mid, k_mid)
 
     ! Step 4: apply midpoint propagation from original coef(t)
     dg_frag%coef(1:n, :, :) = coef_save(1:n, :, :) + dt * k_mid(1:n, :, :)
-    if (n_pw > 0) then
-      dg_frag%coef_pw(1:n_pw, :, :) = coef_pw_save(1:n_pw, :, :) + dt * k_mid_pw(1:n_pw, :, :)
-    end if
 
     deallocate(coef_save, k1, k_mid)
-    if (allocated(coef_pw_save)) deallocate(coef_pw_save)
-    if (allocated(k1_pw)) deallocate(k1_pw)
-    if (allocated(k_mid_pw)) deallocate(k_mid_pw)
 
   end subroutine time_evolution_aetrs

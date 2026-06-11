@@ -38,7 +38,7 @@
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: has_overlap
     logical :: use_block_reconstruct
-    logical, save :: debug_static_seed_logged = .false.
+    logical, save :: debug_static_seed_logged = .true.
     logical, parameter :: enable_reconstruct_timing = .false.
     logical, parameter :: enable_hmat_nan_check = .false.
     real(8), parameter :: hmat_abs_limit = 1.0d12
