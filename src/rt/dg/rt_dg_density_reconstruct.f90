@@ -27,7 +27,6 @@
     integer :: nblocks_ifrag, first_block_offset, block_step_blocks, block_offset
     integer :: valid_basis_count
     integer :: spin_offset, density_payload_count
-    integer :: ix0_frag, ix1_frag, iy0_frag, iy1_frag, iz0_frag, iz1_frag
     integer, parameter :: grid_block_size = 8192
     integer, parameter :: state_block_size = 64
     integer, parameter :: rho_state_block_size = 16
@@ -35,7 +34,7 @@
     integer, parameter :: mixed_io_block_size = 64
     real(8), parameter :: density_abs_limit = 1.0d12
     complex(8), parameter :: zzero = (0.0d0, 0.0d0), zone = (1.0d0, 0.0d0)
-    real(8) :: rho_contrib, rho_raw_contrib, rho_accum, rho_mix_accum
+    real(8) :: rho_contrib, rho_raw_contrib, rho_accum
     real(8) :: total_charge, total_charge_local
     real(8) :: total_charge_reduce_in(1), total_charge_reduce_out(1)
     real(8) :: occ_factor, abs_max_pf

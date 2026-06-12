@@ -204,151 +204,15 @@
   !=======================================================================
   subroutine init_halo_communication(dg_frag, info)
     use structures
-    use communication, only: comm_summation, comm_is_root
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_parallel_info),  intent(in)    :: info
 
-    integer :: nh(3), lx, ly, lz, i, n, ifrag, jfrag, neighbor_root_rank
-    integer :: d(3)
-    integer, allocatable :: id_tmp(:)
-    integer :: ifrag_count
-
     ! Halo communication is disabled by design in this branch.
+    call salmon_unusedvar(info)
     dg_frag%n_halo = 0
     dg_frag%has_halo_exchange = .false.
-    return
-
-    ! Build MPI rank array for all fragments (comm_summation across all ranks)
-    allocate(id_tmp(dg_frag%n_frag))
-    id_tmp = 0
-    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
-    if (dg_frag%is_frag_root) then
-      do i = 1, ifrag_count
-        ifrag = dg_frag%ifrag_start + i - 1
-        id_tmp(ifrag) = dg_frag%id + 1  ! +1 to distinguish from unset (0)
-      end do
-    end if
-    call comm_summation(id_tmp, dg_frag%id_array, dg_frag%n_frag, dg_frag%icomm)
-    dg_frag%id_array = dg_frag%id_array - 1  ! Convert back to 0-based rank
-
-    ! Debug-only diagnostics for halo setup
-#ifdef DEBUG
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a)') "  Fragment-to-rank mapping:"
-      do ifrag = 1, dg_frag%n_frag
-        write(*,'(4x,a,i2,a,i2)') "Fragment ", ifrag, " -> Rank ", dg_frag%id_array(ifrag)
-      end do
-      write(*,'(1x,a)') "  Fragment geometry (ixyz_frag):"
-      do ifrag = 1, dg_frag%n_frag
-        write(*,'(4x,a,i2,a,3i6,a,3i5,a)') &
-          "Fragment ", ifrag, ": origin=(", dg_frag%ixyz_frag(1:3, ifrag), &
-          "), domain=(", dg_frag%nxyz_domain(1:3, ifrag), ")"
-      end do
-      write(*,'(4x,a,3i5)') "Total grid size (lgnum_total): ", dg_frag%lgnum_total(1:3)
-    end if
-#endif
-
-    if (ifrag_count <= 0) then
-      dg_frag%n_halo = 0
-      dg_frag%has_halo_exchange = .false.
-      return
-    end if
-
-    ! Determine which directions require halo communication
-    nh = 0
-    do n = 1, 3
-      if (dg_frag%num_fragment(n) > 1) nh(n) = 1
-    end do
-
-    if (allocated(dg_frag%halo)) deallocate(dg_frag%halo)
-    allocate(dg_frag%halo(max(1, 26 * ifrag_count)))
-
-    i = 0
-    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-      do lx = -nh(1), nh(1)
-      do ly = -nh(2), nh(2)
-      do lz = -nh(3), nh(3)
-        if (lx == 0 .and. ly == 0 .and. lz == 0) cycle
-
-        i = i + 1
-        dg_frag%halo(i)%dvec(1:3) = [lx, ly, lz]
-        dg_frag%halo(i)%id_dst = -1
-        dg_frag%halo(i)%id_src = -1
-        dg_frag%halo(i)%ifrag_src = -1
-        dg_frag%halo(i)%ifrag_dst = ifrag
-
-        do jfrag = 1, dg_frag%n_frag
-          if (.not. fragment_matches_direction(dg_frag, ifrag, jfrag, dg_frag%halo(i)%dvec)) cycle
-
-          neighbor_root_rank = get_fragment_group_root_rank(jfrag, dg_frag%nproc_frag)
-          if (dg_frag%id_array(jfrag) /= neighbor_root_rank) then
-            write(*,'(a,i0,a,i0,a,i0,a,i0)') &
-              "[ERROR] DG-Fragment RT: inconsistent fragment root rank for ifrag=", ifrag, &
-              " jfrag=", jfrag, " stored=", dg_frag%id_array(jfrag), " expected=", neighbor_root_rank
-            stop "DG-Fragment RT: inconsistent fragment-group root rank"
-          end if
-
-          if (dg_frag%halo(i)%id_dst < 0) then
-            dg_frag%halo(i)%id_dst = neighbor_root_rank + dg_frag%id_frag
-          end if
-          if (dg_frag%halo(i)%id_src < 0) then
-            dg_frag%halo(i)%id_src = neighbor_root_rank + dg_frag%id_frag
-            dg_frag%halo(i)%ifrag_src = jfrag
-          else if (dg_frag%halo(i)%ifrag_src /= jfrag) then
-            write(*,'(a,i0,a,3(i0,a),a,i0,a,i0)') &
-              "[ERROR] DG-Fragment RT: ambiguous halo source for ifrag=", ifrag, " dir=(", &
-              dg_frag%halo(i)%dvec(1), ",", dg_frag%halo(i)%dvec(2), ",", dg_frag%halo(i)%dvec(3), &
-              ") first=", dg_frag%halo(i)%ifrag_src, " second=", jfrag
-            stop "DG-Fragment RT: ambiguous halo source fragment"
-          end if
-        end do
-
-        if (dg_frag%halo(i)%id_dst < 0 .or. dg_frag%halo(i)%id_src < 0) then
-          write(*,'(a,i2,a,i2,a,i2,a,i2,a,i3,a,i3)') &
-            "[ERROR] DG-Fragment RT: invalid halo neighbors for dir=(", &
-            dg_frag%halo(i)%dvec(1), ",", dg_frag%halo(i)%dvec(2), ",", &
-            dg_frag%halo(i)%dvec(3), ") (id_dst=", dg_frag%halo(i)%id_dst, &
-            ", id_src=", dg_frag%halo(i)%id_src, ")"
-          stop "DG-Fragment RT: dst, src"
-        end if
-
-        do n = 1, 3
-          call compute_halo_axis_block(dg_frag, n, dg_frag%halo(i)%dvec(n), &
-                                       dg_frag%halo(i)%send_lo(n), dg_frag%halo(i)%send_hi(n), &
-                                       dg_frag%halo(i)%recv_lo(n), dg_frag%halo(i)%recv_hi(n), &
-                                       dg_frag%halo(i)%length(n))
-          dg_frag%halo(i)%dsp_send(n) = dg_frag%halo(i)%send_lo(n) - 1
-          dg_frag%halo(i)%dsp_recv(n) = dg_frag%halo(i)%recv_lo(n) - 1
-        end do
-
-#ifdef DEBUG
-        if (comm_is_root(dg_frag%id)) then
-          write(*,'(a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a,i2,a)') &
-            "  [Rank ", dg_frag%id, "] Halo ", i, " dir=(", dg_frag%halo(i)%dvec(1), ",", &
-            dg_frag%halo(i)%dvec(2), ",", dg_frag%halo(i)%dvec(3), " ): frag ", ifrag, &
-            " -> dst frag ", dg_frag%halo(i)%ifrag_dst, " (rank ", dg_frag%halo(i)%id_dst, ")"
-        end if
-#endif
-
-        allocate(dg_frag%halo(i)%buf_send(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
-                                          dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
-        allocate(dg_frag%halo(i)%buf_recv(dg_frag%halo(i)%length(1), dg_frag%halo(i)%length(2), &
-                                          dg_frag%halo(i)%length(3), dg_frag%nstate_frag, 1))
-
-      end do
-      end do
-      end do
-    end do
-
-    dg_frag%n_halo = i
-    dg_frag%has_halo_exchange = (dg_frag%n_halo > 0)
-
-    if (comm_is_root(dg_frag%id)) then
-      write(*,'(1x,a,i0,a)') "Halo communication initialized: ", dg_frag%n_halo, " neighbor regions"
-    end if
-
-    deallocate(id_tmp)
 
   end subroutine init_halo_communication
 

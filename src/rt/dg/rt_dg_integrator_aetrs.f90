@@ -1,5 +1,6 @@
   subroutine time_evolution_aetrs(dg_frag, system, mg, stencil, ppg, rt, itt, dt)
     use structures
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -28,6 +29,7 @@
     complex(8), allocatable :: coef_save(:,:,:)
     complex(8), allocatable :: k1(:,:,:), k_mid(:,:,:)
 
+    call salmon_unusedvar(stencil)
     n = dg_frag%n_mat_max
     if (n <= 0) return
     if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then

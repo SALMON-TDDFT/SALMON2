@@ -11,6 +11,8 @@
     use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
     use salmon_global, only: yn_spinorbit, ae_shape1, ae_shape2, theory
     use misc_routines, only: get_wtime
+    use rt_dg_plane_wave, only: compute_fragment_pw_overlap, &
+      compute_fragment_pw_hamiltonian, build_mixed_hamiltonian
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system

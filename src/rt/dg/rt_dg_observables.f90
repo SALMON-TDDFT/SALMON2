@@ -2,6 +2,7 @@
     use structures
     use rt_dg_fragment_types, only: s_dg_fragment_rt
     use rt_dg_fragment_ops, only: calculate_macroscopic_current_dg
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -16,6 +17,11 @@
     integer :: ispin
     real(8) :: current_raw(3)
     real(8) :: nelec_ref, ne_density
+
+    call salmon_unusedvar(ppg)
+    call salmon_unusedvar(Vh)
+    call salmon_unusedvar(Vxc)
+    call salmon_unusedvar(Vpsl)
 
     if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then
       stop "DG-Fragment RT: mixed/PW observable route was removed"

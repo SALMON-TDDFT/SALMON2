@@ -6,6 +6,7 @@
     use salmon_global, only: theory
     use salmon_global, only: yn_hse
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, zero_nonlocal_h_matrix_blocks
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -44,6 +45,8 @@
     real(8), parameter :: hmat_abs_limit = 1.0d12
 
     if (.not. dg_frag%has_real_space_basis) return
+    call salmon_unusedvar(stencil)
+    call salmon_unusedvar(Ac_tot)
     if (.not. associated(dg_frag%mg)) then
       stop "reconstruct_hamiltonian_matrix requires dg_frag%mg"
     end if

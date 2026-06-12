@@ -140,6 +140,7 @@ contains
                  dg_subspace_pw_vectors, nelec, nelec_spin, process_allocation
     use density_matrix_and_energy_plusU_sub, only: PLUS_U_ON
     use filesystem, only: get_filehandle
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -155,6 +156,8 @@ contains
     real(8) :: abs_disp
     logical :: load_from_dcdft
     
+    call salmon_unusedvar(rt)
+
     if (comm_is_root(info%id_rko)) then
       write(*,*) "=== Initializing DG-Fragment RT method ==="
     end if

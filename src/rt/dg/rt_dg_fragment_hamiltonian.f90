@@ -1357,9 +1357,9 @@
                                          Vh, Vxc, Vpsl, pp, ppg)
     use structures
     use communication, only: comm_is_root, comm_summation, comm_get_max
-    use parallelization, only: nproc_size_global
     use rt_dg_fragment_ops, only: symmetrize_real_matrix_blocks
     use rt_dg_fragment_types, only: matrix_block_info
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -1374,20 +1374,20 @@
     integer :: ndom(3)
     integer :: i_halo
     real(8) :: hvol
-    real(8) :: max_p
-    logical :: is_local_fragment
-    integer :: is(3), ie(3)
     real(8), allocatable :: T_phi(:,:,:)  ! Kinetic energy operator applied to basis (fragment-local)
     real(8), allocatable :: H_phi(:,:,:)  ! Hamiltonian-applied field H|phi_j> = T|phi_j> + V|phi_j> (fragment-local)
     real(8), allocatable :: V_total(:,:,:)  ! Total potential V = Vpsl + Vh + Vxc
     real(8), allocatable :: partial_t(:), partial_h(:), reduced_t(:), reduced_h(:)
     real(8), allocatable :: partial_th(:), reduced_th(:)
     type(matrix_block_info), allocatable :: H_diag_blocks(:), H_kin_diag_blocks(:)
-    integer :: n_local_diag, nbf_max, i_diag, iblk, iblk_rev, nbf_diag, nbf_comm
-    integer :: jo_s, jo_e, jo_loc, ncol_local
+    integer :: n_local_diag, nbf_max, i_diag, iblk, nbf_diag, nbf_comm
+    integer :: jo_s, jo_e
     if (.not. dg_frag%has_real_space_basis) then
       return
     end if
+    call salmon_unusedvar(lg)
+    call salmon_unusedvar(pp)
+    call salmon_unusedvar(ppg)
 
     ! Enforce fragment-local stencil policy: no halo communication path.
     dg_frag%n_halo = 0
@@ -1469,7 +1469,6 @@
         allocate(V_total(1:ndom(1), 1:ndom(2), 1:ndom(3)))
         call build_fragment_total_potential_grid(dg_frag, ifrag, mg, Vh, Vxc(ispin), Vpsl, V_total)
 
-        is_local_fragment = .true.
         i_local = ifrag - dg_frag%ifrag_start + 1
         ! Calculate Hamiltonian matrix elements for this fragment
         ! H_ij = <φ_i | T + V | φ_j> = T_ij + V_ij
@@ -1856,7 +1855,6 @@
     real(8), intent(out) :: H_phi(:,:,:)
     integer :: gx, gy, gz, lx, ly, lz
     integer :: bx, by, bz
-    integer :: gx0, gx1, gy0, gy1, gz0, gz1
     integer :: iorg(3), ndom(3)
     integer :: loc_s(3), loc_e(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
@@ -2251,6 +2249,7 @@
 
   subroutine apply_gradient_to_basis_ops_local_2d(dg_frag, i_local, jo, mg, stencil, loc_s, loc_e, grad_phi, grad_local_2d)
     use structures
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer,                intent(in) :: i_local, jo
@@ -2266,6 +2265,7 @@
     integer :: p_lb1, p_ub1, p_lb2, p_ub2, p_lb3, p_ub3
     real(8) :: nabt(4,3), gx, gy, gz
 
+    call salmon_unusedvar(mg)
     nabt = stencil%coef_nab
     ifrag = dg_frag%ifrag_start + i_local - 1
     ndom(:) = dg_frag%nxyz_domain(:, ifrag)
@@ -2346,6 +2346,7 @@
 
   subroutine apply_gradient_at_phi_box_point(dg_frag, i_local, jo, mg, stencil, phi_idx, grad_x, grad_y, grad_z)
     use structures
+    use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer,                intent(in) :: i_local, jo
@@ -2358,6 +2359,7 @@
     integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
     real(8) :: nabt(4,3)
 
+    call salmon_unusedvar(mg)
     nabt = stencil%coef_nab
     p_lb1 = lbound(dg_frag%phi_frag, 1)
     p_ub1 = ubound(dg_frag%phi_frag, 1)
@@ -2418,27 +2420,33 @@
     integer :: ifrag, i_local, ispin, io, jo, idir, nbf, jo_progress_stride
     integer :: jloc, ncol_mom
     integer :: jo_s, jo_e
-    integer :: ix, iy, iz, is(3), ie(3), i_halo, jfrag, n_basis_halo, ig_row, ig_col, ig_i, ig_j, l(3), d(3)
-    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3), halo_s(3), halo_e(3)
+    integer :: jfrag, ig_col, ig_i, ig_j
+    integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3), phi_loc_s(3), phi_loc_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
-    integer :: halo_send_idx(3), halo_recv_idx(3)
     integer :: phi_lb1, phi_ub1, phi_lb2, phi_ub2, phi_lb3, phi_ub3
     integer :: grad_lb1, grad_ub1, grad_lb2, grad_ub2, grad_lb3, grad_ub3
-    integer :: iblk, iblk_rev, iblk_self, ii, jj, mat_size, ni, nj, ndiag
+    integer :: iblk, iblk_rev, iblk_self, ii, jj, ni, nj, ndiag
     integer :: npts_local, ipt, nx_local, ny_local
-    logical :: log_frag_progress, has_overlap
+    integer :: nrow, ncol
+    integer :: total_size, offset_flat, offset_base, chunk_size, chunk_begin, chunk_count
+    integer :: total_size_min, total_size_max, nblk_min, nblk_max, ifrag_chk
+    logical :: has_overlap
     real(8) :: hvol, integral
     real(8) :: momentum_gb, momentum_block_gb
     real(8) :: max_p, pavg
     real(8) :: t0, t1
+    real(8) :: t_reduce_start, t_reduce_end
     real(8) :: time_halo_exchange, time_self_integral, time_halo_integral
     real(8) :: time_grad_total
     real(8) :: time_block_reduce, time_antisym
     real(8) :: time_reduce_pack, time_reduce_comm, time_reduce_unpack
-    real(8) :: frag_grad_start, frag_self_start, frag_halo_start
+    real(8) :: meta_sig_blocks, meta_sig_basis
+    real(8) :: meta_sig_blocks_min(1), meta_sig_blocks_max(1)
+    real(8) :: meta_sig_basis_min(1), meta_sig_basis_max(1)
     real(8), allocatable :: grad_phi(:,:,:,:)  ! gradient of basis function (x,y,z components, fragment-local)
     real(8), allocatable :: grad_local_2d(:,:), grad_all_2d(:,:,:), phi_local_2d(:,:), self_proj(:,:)
     real(8), allocatable :: mom_full(:, :, :, :)
+    real(8), allocatable :: send_flat(:), recv_flat(:)
 
     if (.not. dg_frag%has_real_space_basis) return
     ! Enforce fragment-local stencil policy: no halo communication path.
@@ -2479,8 +2487,6 @@
         " allocated GB=", momentum_block_gb, " per rank"
       flush(6)
     end if
-    is = mg%is
-    ie = mg%ie
     hvol = system%hvol
     
     ! Halo exchange removed: stencil operations use local phi_frag with fragment PBC buffer only.
@@ -2491,10 +2497,6 @@
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
-        log_frag_progress = dg_frag%is_frag_root .and. ifrag == dg_frag%ifrag_start
-        frag_grad_start = time_grad_total
-        frag_self_start = time_self_integral
-        frag_halo_start = time_halo_integral
         iorg(:) = dg_frag%ixyz_frag(:, ifrag)
         ndom(:) = dg_frag%nxyz_domain(:, ifrag)
         call get_fragment_owned_range(dg_frag, ifrag, mg, loc_s, loc_e, has_overlap)
@@ -2641,15 +2643,6 @@
     ! Legacy real-space mode needs a global block aggregation.  Orbital mode
     ! builds the self block directly on the row-owning subgroup ranks.
     if (.not. dg_frag%parallel_mode_orbital) then
-    block
-      real(8), allocatable :: send_flat(:), recv_flat(:)
-      real(8) :: t_reduce_start, t_reduce_end
-      integer :: nrow, ncol
-      integer :: total_size, offset_flat, offset_base, chunk_size, chunk_begin, chunk_count
-      integer :: total_size_min, total_size_max, nblk_min, nblk_max, ifrag_chk
-      real(8) :: meta_sig_blocks, meta_sig_basis
-      real(8) :: meta_sig_blocks_min(1), meta_sig_blocks_max(1)
-      real(8) :: meta_sig_basis_min(1), meta_sig_basis_max(1)
       call cpu_time(t_reduce_start)
       total_size = 0
       do iblk = 1, dg_frag%n_momentum_blocks
@@ -2781,7 +2774,6 @@
       end if
       call cpu_time(t_reduce_end)
       time_block_reduce = time_block_reduce + (t_reduce_end - t_reduce_start)
-    end block
     end if
 
     ! Enforce anti-symmetry blockwise.  In orbital row-split mode self blocks
@@ -2909,18 +2901,16 @@
 
     integer :: ifrag, jfrag, i_local, ispin, io, jo, iblk, nbf, jo_progress_stride
     integer :: jo_s, jo_e, jo_loc, ncol_local
-    integer :: ix, iy, iz, is(3), ie(3), i_halo
-    integer :: ig_row, ig_col, d(3), ii, jj
-    integer :: lx, ly, lz, gx, gy, gz, iorg(3), ndom(3), loc_s(3), loc_e(3), halo_s(3), halo_e(3)
+    integer :: i_halo
+    integer :: ig_row, ig_col, ii
+    integer :: lx, ly, lz, iorg(3), ndom(3), loc_s(3), loc_e(3)
     integer :: npts_local, nx_local, ny_local, ipt
     integer :: phi_loc_s(3), phi_loc_e(3)
     integer :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
-    integer :: buf_lb1, buf_lb2, buf_lb3, buf_ub1, buf_ub2, buf_ub3
-    logical :: log_frag_progress, has_overlap
-    real(8) :: hvol, integral, savg, s_min, s_max, cond_est
+    logical :: has_overlap
+    real(8) :: hvol, integral
     real(8) :: t0, t1, time_self_integral, time_halo_integral, time_reduce_total
-    real(8) :: frag_self_start, frag_halo_start
     real(8), allocatable :: phi_local_2d(:,:), self_overlap(:,:)
 
     if (.not. dg_frag%has_real_space_basis) return
@@ -2942,8 +2932,6 @@
       end do
     end if
 
-    is = mg%is
-    ie = mg%ie
     hvol = system%hvol
     time_self_integral = 0.0d0
     time_halo_integral = 0.0d0
@@ -2959,9 +2947,6 @@
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
-        log_frag_progress = .true.
-        frag_self_start = time_self_integral
-        frag_halo_start = time_halo_integral
         if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) then
           write(*,*) "[FATAL] overlap invalid i_local: rank=", dg_frag%id, " id_frag=", dg_frag%id_frag, &
             " ifrag=", ifrag, " i_local=", i_local, " phi_dim5=", size(dg_frag%phi_frag, 5)
