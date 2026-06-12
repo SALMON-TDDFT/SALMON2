@@ -599,6 +599,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     select case(method_wf_distributor)
     case('single') ; call write_all    ! create single shared file
     case('slice')  ; call write_sliced ! sliced shared file
+    case('block')  ; call write_all    ! serial run: single file is equivalent
     case default   ; stop 'write_wavefunction: fatal error'
     end select
 #endif
@@ -1211,6 +1212,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
     select case(method_wf_distributor)
     case('single') ; call read_all    ! create single shared file
     case('slice')  ; call read_sliced ! sliced shared file
+    case('block')  ; call read_all    ! serial run: single file is equivalent
     case default   ; stop 'read_wavefunction: fatal error'
     end select
 #endif
@@ -2046,6 +2048,7 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
   select case(method_wf_distributor)
   case('single') ; call rw_all    ! create single shared file
   case('slice')  ; call rw_sliced ! sliced shared file
+  case('block')  ; call rw_block  ! one file per (k,orbital)-owner block
   case default   ; stop 'rw_wavefunction: fatal error'
   end select
 
@@ -2229,6 +2232,182 @@ contains
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
   end subroutine rw_sliced
+
+  subroutine rw_block
+    ! 'block' distributor: each (k,orbital)-parallel group writes its whole
+    ! owned (ik_s:ik_e) x (io_s:io_e) set into ONE file
+    ! wfblk_kXXXXXX_oXXXXXX.bin (named by the group's ik_s/io_s), with
+    ! fixed-size records at offset = HDR + ((ik-ik_s)*numo + (io-io_s))*rec.
+    ! File count = nproc_k*nproc_ob (vs nk*no for 'slice'); each file is
+    ! touched by a single r-communicator => no shared-file contention.
+    ! A root-written wf_blockmap.txt allows re-reading under a different
+    ! parallelization.
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root, comm_summation
+    implicit none
+    integer, parameter :: HDRLEN = 64
+    integer :: ik,io,idx_rec,iret,ng,iblk,nblk
+    integer(8) :: rec_bytes, disp
+    integer :: bytes_per
+    real(8),allocatable :: map_w(:,:), map_r(:,:)
+    type(s_parallel_info) :: dummy_info
+    integer :: iu_map
+    character(256) :: mapfile
+    integer(8) :: hdr(8)
+
+    icomm = info%icomm_r
+
+    dummy_info%io_s = 1 ; dummy_info%io_e = 1
+    dummy_info%ik_s = 1 ; dummy_info%ik_e = 1
+    dummy_info%im_s = 1 ; dummy_info%im_e = 1
+    if (rw_mode == read_mode .and. if_real_orbital) then
+      call allocate_orbital_real(system%nspin,mg,dummy_info,dummy)
+    end if
+
+    ! per-(k,ob) MPI types (same as rw_sliced)
+    gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, 1, 1, 1]
+    lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, 1, 1, 1]
+    lstart = [mg%is(1:3)       - mg%is_array(1:3) + 1, 1,            1, 1, 1] - 1
+    MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, local_type, ierr))
+    MPI_CHECK(MPI_Type_commit(local_type, ierr))
+    gsize  = [lg%ie(1:3) - lg%is(1:3) + 1, system%nspin, 1, 1, 1]
+    lstart = [mg%is(1:3)                 , 1,            1, 1, 1] - 1
+    if (yn_periodic == 'n') lstart(1:3) = lstart(1:3) + lg%num(1:3)/2
+    MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, global_type, ierr))
+    MPI_CHECK(MPI_Type_commit(global_type, ierr))
+
+    if (source_type == MPI_DOUBLE) then
+      bytes_per = 8
+    else
+      bytes_per = 16
+    end if
+    ng = (lg%ie(1)-lg%is(1)+1)*(lg%ie(2)-lg%is(2)+1)*(lg%ie(3)-lg%is(3)+1)
+    rec_bytes = int(ng,8)*int(system%nspin,8)*int(bytes_per,8)
+
+    if (rw_mode == write_mode) then
+      ! ---- write own block file ----
+      write (iofile,'(A,I6.6,A,I6.6,A)') trim(iodir)//'wfblk_k',info%ik_s,'_o',info%io_s,'.bin'
+      MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+      if (comm_is_root(info%id_r)) then
+        hdr = [int(20260612,8), int(1,8), int(info%ik_s,8), int(info%ik_e,8), &
+               int(info%io_s,8), int(info%io_e,8), int(system%nspin,8), rec_bytes]
+        MPI_CHECK(MPI_File_write_at(mfile, 0_MPI_OFFSET_KIND, hdr, 8, MPI_INTEGER8, MPI_STATUS_IGNORE, ierr))
+      end if
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+        idx_rec = (ik-info%ik_s)*info%numo + (io-info%io_s)
+        disp = int(HDRLEN,8) + int(idx_rec,8)*rec_bytes
+        MPI_CHECK(MPI_File_set_view(mfile, disp, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
+        if (allocated(spsi%rwf)) then
+          MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+        else
+          MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+        end if
+      end do
+      end do
+      MPI_CHECK(MPI_File_close(mfile, ierr))
+
+      ! ---- blockmap: gather (ik_s,ik_e,io_s,io_e) of every group ----
+      nblk = info%isize_k * info%isize_o
+      allocate(map_w(4,nblk), map_r(4,nblk))
+      map_w = 0d0
+      iblk = info%id_k * info%isize_o + info%id_o + 1
+      if (comm_is_root(info%id_r)) then
+        map_w(1,iblk) = dble(info%ik_s) ; map_w(2,iblk) = dble(info%ik_e)
+        map_w(3,iblk) = dble(info%io_s) ; map_w(4,iblk) = dble(info%io_e)
+      end if
+      call comm_summation(map_w, map_r, 4*nblk, info%icomm_rko)
+      if (comm_is_root(nproc_id_global)) then
+        mapfile = trim(iodir)//'wf_blockmap.txt'
+        open(newunit=iu_map, file=mapfile, status='replace')
+        write(iu_map,'(A)') '# wfblk block map: ik_s ik_e io_s io_e'
+        do iblk=1,nblk
+          if (map_r(2,iblk) > 0.5d0) then
+            write(iu_map,'(4I8)') int(map_r(1,iblk)), int(map_r(2,iblk)), &
+                                  int(map_r(3,iblk)), int(map_r(4,iblk))
+          end if
+        end do
+        close(iu_map)
+      end if
+      deallocate(map_w, map_r)
+    else
+      ! ---- read: locate the block file containing each needed (ik,io) ----
+      call read_block_records
+    end if
+  end subroutine rw_block
+
+  subroutine read_block_records
+    use communication, only: comm_is_root, comm_bcast
+    use parallelization, only: nproc_group_global, nproc_id_global
+    implicit none
+    integer, parameter :: HDRLEN = 64
+    integer :: nmap, imap, ik, io, iu_map, ios
+    integer, allocatable :: bmap(:,:)
+    integer(8) :: rec_bytes, disp
+    integer :: bytes_per, ng, idx_rec, numo_blk
+    character(256) :: mapfile
+
+    ! root reads blockmap and broadcasts
+    if (comm_is_root(nproc_id_global)) then
+      mapfile = trim(iodir)//'wf_blockmap.txt'
+      open(newunit=iu_map, file=mapfile, status='old', iostat=ios)
+      if (ios /= 0) stop 'block restart: wf_blockmap.txt not found'
+      read(iu_map,*)
+      nmap = 0
+      do
+        read(iu_map,*,iostat=ios)
+        if (ios /= 0) exit
+        nmap = nmap + 1
+      end do
+      rewind(iu_map); read(iu_map,*)
+    end if
+    call comm_bcast(nmap, nproc_group_global)
+    allocate(bmap(4,nmap))
+    if (comm_is_root(nproc_id_global)) then
+      do imap=1,nmap
+        read(iu_map,*) bmap(1,imap), bmap(2,imap), bmap(3,imap), bmap(4,imap)
+      end do
+      close(iu_map)
+    end if
+    call comm_bcast(bmap, nproc_group_global)
+
+    if (source_type == MPI_DOUBLE) then
+      bytes_per = 8
+    else
+      bytes_per = 16
+    end if
+    ng = (lg%ie(1)-lg%is(1)+1)*(lg%ie(2)-lg%is(2)+1)*(lg%ie(3)-lg%is(3)+1)
+    rec_bytes = int(ng,8)*int(system%nspin,8)*int(bytes_per,8)
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      do imap=1,nmap
+        if (ik>=bmap(1,imap).and.ik<=bmap(2,imap).and.io>=bmap(3,imap).and.io<=bmap(4,imap)) exit
+      end do
+      if (imap>nmap) stop 'block restart: (ik,io) not covered by blockmap'
+      numo_blk = bmap(4,imap)-bmap(3,imap)+1
+      write (iofile,'(A,I6.6,A,I6.6,A)') trim(iodir)//'wfblk_k',bmap(1,imap),'_o',bmap(3,imap),'.bin'
+      idx_rec = (ik-bmap(1,imap))*numo_blk + (io-bmap(3,imap))
+      disp = int(HDRLEN,8) + int(idx_rec,8)*rec_bytes
+      MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+      MPI_CHECK(MPI_File_set_view(mfile, disp, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
+      if (allocated(spsi%rwf)) then
+        if (source_type /= MPI_DOUBLE) stop 'source_type /= MPI_DOUBLE'
+        MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+      else if (allocated(spsi%zwf)) then
+        if (rw_mode == read_mode .and. if_real_orbital) then
+          MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+          spsi%zwf(:,:,:,:,io,ik,1) = dcmplx(dummy%rwf(:,:,:,:,1,1,1))
+        else
+          MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+        end if
+      end if
+      MPI_CHECK(MPI_File_close(mfile, ierr))
+    end do
+    end do
+    deallocate(bmap)
+  end subroutine read_block_records
+
 
   subroutine set_mpi_info
     implicit none
