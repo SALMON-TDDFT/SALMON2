@@ -716,7 +716,7 @@ contains
     use communication, only: comm_summation, comm_get_max_array1d_double
     use sendrecv_grid, only: update_overlap_real8
     use math_constants, only: zi
-    use salmon_global, only: yn_out_stress_numerics
+    use salmon_global, only: yn_out_stress_numerics, yn_nlcc_grho
     implicit none
     type(s_dft_system),         intent(inout) :: system
     type(s_pp_info),            intent(in)    :: pp
@@ -771,6 +771,22 @@ contains
     end do
     end do
     !$omp end parallel do
+    if (yn_nlcc_grho == 'y' .and. allocated(ppn%rho_nlcc)) then
+      ! NLCC core-inclusive gradient (matches the energy when yn_nlcc_grho='y'):
+      ! the r2scan grad stress (rdedd/vsigma) then uses |grad(rho_val+rho_core)|^2,
+      ! consistent with the payload computed from the core-inclusive density.
+      ! Default 'n' keeps rho_box valence-only (bit-identical, gradient unchanged).
+      ! rho_box feeds only grho_local (the local E_vxc term reads rho_s directly).
+!$omp parallel do collapse(2) private(ix,iy,iz)
+      do iz = mg%is(3), mg%ie(3)
+      do iy = mg%is(2), mg%ie(2)
+      do ix = mg%is(1), mg%ie(1)
+        rho_box(ix,iy,iz) = rho_box(ix,iy,iz) + ppn%rho_nlcc(ix,iy,iz)
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end if
     if (info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rho_box)
     call calc_gradient_field(mg, stencil%coef_nab, system%rmatrix_B, rho_box, grho_local)
 
