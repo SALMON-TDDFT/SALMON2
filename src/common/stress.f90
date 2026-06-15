@@ -21,6 +21,12 @@ module stress_sub
   integer, save :: stress_work_is(3) = 0
   integer, save :: stress_work_ie(3) = -1
 
+  ! persistent per-thread scratch for the NL species-l stress accumulation,
+  ! allocated once (per shape) to avoid an allocate/deallocate on every orbital call.
+  real(8), allocatable, save :: stress_nl_strs_thr(:,:,:,:,:)  ! (nspecies,0:lmax,3,3,nthreads)
+  real(8), allocatable, save :: stress_nl_enl_thr(:,:,:)       ! (nspecies,0:lmax,nthreads)
+  integer, save :: stress_nl_thr_ns = -1, stress_nl_thr_lmax = -2, stress_nl_thr_nth = -1
+
 contains
 
   subroutine fail_stress(message)
@@ -64,6 +70,27 @@ contains
       allocate(stress_gtpsi_work(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
     end if
   end subroutine ensure_r2scan_stress_workspace
+
+  subroutine ensure_nl_species_thread_ws(nspecies, lmax)
+    !$ use omp_lib
+    implicit none
+    integer, intent(in) :: nspecies, lmax
+    integer :: nth
+    nth = 1
+    !$ nth = omp_get_max_threads()
+    if (allocated(stress_nl_strs_thr)) then
+      if (stress_nl_thr_ns /= nspecies .or. stress_nl_thr_lmax /= lmax .or. stress_nl_thr_nth /= nth) then
+        deallocate(stress_nl_strs_thr, stress_nl_enl_thr)
+      end if
+    end if
+    if (.not. allocated(stress_nl_strs_thr)) then
+      allocate(stress_nl_strs_thr(nspecies, 0:lmax, 3, 3, nth))
+      allocate(stress_nl_enl_thr(nspecies, 0:lmax, nth))
+      stress_nl_thr_ns = nspecies
+      stress_nl_thr_lmax = lmax
+      stress_nl_thr_nth = nth
+    end if
+  end subroutine ensure_nl_species_thread_ws
 
   subroutine prepare_stress_field_state(system, theory, field_state)
     use structures, only: s_dft_system
@@ -571,8 +598,9 @@ contains
     real(8),            intent(in)    :: pot_box(mg%is(1):,mg%is(2):,mg%is(3):)
     real(8),            intent(in)    :: tbl(:,:)
     real(8),            intent(inout) :: strs(3,3)
-    integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ia, ib
+    integer :: a, ik, i, ir, intr, i1, i2, i3, j1, j2, j3, ia, ib, d
     real(8) :: rc, u, v, w, r, s(3), drc_dr, contrib, hvol, Rion_repr(3)
+    real(8) :: Mmat(3,3), uvwc(3), ext(3), edge(3), box_c(3), box_rs, dcen
     logical :: flag_cuboid
 
     hvol = system%Hvol
@@ -581,10 +609,34 @@ contains
         abs(system%primitive_a(1,3)) >= 1d-10 .or. &
         abs(system%primitive_a(2,3)) >= 1d-10 ) flag_cuboid = .false.
 
+    ! Conservative per-replica skip bound (perf): real-space center box_c and an outer
+    ! radius box_rs of THIS rank's local grid box. For any grid point P in the box,
+    ! |P - box_c| <= box_rs, so if |Rion_repr - box_c| > rc + box_rs then every local
+    ! grid point is farther than rc from the (translated) atom and the whole replica
+    ! can be skipped. box_rs = 0.5*sum_d|edge_d| >= circumradius => never skips a
+    ! contributing replica. Avoids the full-grid distance scan over far replicas.
+    if(flag_cuboid) then
+      Mmat = 0d0; Mmat(1,1) = 1d0; Mmat(2,2) = 1d0; Mmat(3,3) = 1d0
+    else
+      Mmat = system%rmatrix_a
+    end if
+    do d = 1, 3
+      uvwc(d) = 0.5d0 * ((mg%is(d)-1) + (mg%ie(d)-1)) * system%hgs(d)
+      ext(d)  = (mg%ie(d) - mg%is(d)) * system%hgs(d)
+    end do
+    box_c(1) = Mmat(1,1)*uvwc(1) + Mmat(1,2)*uvwc(2) + Mmat(1,3)*uvwc(3)
+    box_c(2) = Mmat(2,1)*uvwc(1) + Mmat(2,2)*uvwc(2) + Mmat(2,3)*uvwc(3)
+    box_c(3) = Mmat(3,1)*uvwc(1) + Mmat(3,2)*uvwc(2) + Mmat(3,3)*uvwc(3)
+    box_rs = 0d0
+    do d = 1, 3
+      edge(1) = Mmat(1,d)*ext(d); edge(2) = Mmat(2,d)*ext(d); edge(3) = Mmat(3,d)*ext(d)
+      box_rs = box_rs + 0.5d0 * sqrt(edge(1)**2 + edge(2)**2 + edge(3)**2)
+    end do
+
     ! geometry mirrors calc_nlcc (salmon_pp.f90): atoms x (+/-2 replicas) x local grid
     !$omp parallel do default(none) &
-    !$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,contrib,Rion_repr,ia,ib) &
-    !$omp   shared(system,pp,mg,kion,pot_box,tbl,hvol,flag_cuboid) &
+    !$omp   private(a,ik,rc,i,ir,intr,i1,i2,i3,j1,j2,j3,u,v,w,r,s,drc_dr,contrib,Rion_repr,ia,ib,dcen) &
+    !$omp   shared(system,pp,mg,kion,pot_box,tbl,hvol,flag_cuboid,box_c,box_rs) &
     !$omp   reduction(+:strs)
     do a = 1, system%nion
       ik = kion(a)
@@ -604,6 +656,9 @@ contains
         Rion_repr(1) = system%Rion(1,a) + i1 * system%primitive_a(1,1) + i2 * system%primitive_a(1,2) + i3 * system%primitive_a(1,3)
         Rion_repr(2) = system%Rion(2,a) + i1 * system%primitive_a(2,1) + i2 * system%primitive_a(2,2) + i3 * system%primitive_a(2,3)
         Rion_repr(3) = system%Rion(3,a) + i1 * system%primitive_a(3,1) + i2 * system%primitive_a(3,2) + i3 * system%primitive_a(3,3)
+
+        dcen = sqrt( (Rion_repr(1)-box_c(1))**2 + (Rion_repr(2)-box_c(2))**2 + (Rion_repr(3)-box_c(3))**2 )
+        if(dcen > rc + box_rs) cycle   ! whole replica out of reach of the local grid box
 
         do j1 = mg%is(1), mg%ie(1)
           u = (j1-1) * system%hgs(1)
@@ -665,9 +720,12 @@ contains
     ! NLCC cc stress for the meta-GGA path. Uses the multiplicative KS
     ! potential Vxc = vrho - div(2*vsigma*grad n), which equals dE/dn at
     ! fixed tau, so the gradient (vsigma) core response is included by
-    ! integration by parts. No vtau term: tau_nlcc is not consumed by the XC energy
-    ! (salmon_xc.f90 passes rho_nlcc only), so adding one would break
-    ! energy/stress consistency.
+    ! integration by parts (rho_nlcc term below).
+    ! tau_core is fed to the XC energy ONLY when yn_tau_nlcc='y'. In that case the
+    ! energy depends on tau_core, so a matching vtau cc term (int vtau * d tau_core/
+    ! d strain) MUST be added (done below). When yn_tau_nlcc='n' (default) the energy
+    ! sees rho_nlcc only and the vtau term is correctly skipped -> energy/stress
+    ! consistency holds in both regimes.
     system%stress_xc_cc = 0d0
     if(.not. pp%flag_nlcc) return
     if(.not. allocated(ppn%rho_nlcc)) return
@@ -1440,6 +1498,7 @@ contains
       allocate(e_nl_species_l(1:nspecies,0:lmax_nl), e_nl_species_l_sum(1:nspecies,0:lmax_nl))
       strs_species_l = 0d0
       e_nl_species_l = 0d0
+      call ensure_nl_species_thread_ws(nspecies, lmax_nl)
     end if
 
     allocate(gtpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
@@ -1498,6 +1557,7 @@ contains
                                           strs, strs_species_l, e_nl_species_l)
     use structures
     use math_constants, only: zi
+    !$ use omp_lib
     implicit none
     type(s_dft_system),         intent(in)    :: system
     type(s_parallel_info),      intent(in)    :: info
@@ -1514,11 +1574,10 @@ contains
     real(8),                    intent(inout) :: strs(3,3)
     real(8),                    intent(inout), optional :: strs_species_l(:,:,:,:), e_nl_species_l(:,:)
     integer :: ilma, ia, j, a, b, ix, iy, iz, ll, ispec
-    integer :: nspecies_local, lmax_local
+    integer :: tid
     real(8) :: contrib, nl_energy_part
     real(8) :: kAc(3), kAc_uniform(3)
     real(8) :: strs_thread(3,3)
-    real(8), allocatable :: strs_species_thread(:,:,:,:), e_nl_species_thread(:,:)
     complex(8) :: psi_r, w_a, r_uVpsi_b(3), uVpsi_ilma, projector
 
     kAc_uniform = system%vec_k(:,ik) + field_state%Ac_uniform(:)
@@ -1530,17 +1589,17 @@ contains
 
 !$omp parallel default(none) &
 !$omp shared(system,mg,ppg,tpsi,field_state,ik,io,ispin,im,gtpsi,uVpsibox2,rtmp,want_l_species,ll_of_ilma,species_of_ilma) &
-!$omp shared(strs,strs_species_l,e_nl_species_l,kAc_uniform) &
+!$omp shared(strs,strs_species_l,e_nl_species_l,kAc_uniform,stress_nl_strs_thr,stress_nl_enl_thr) &
 !$omp private(ilma,ia,j,a,b,ix,iy,iz,ll,ispec,contrib,nl_energy_part,kAc,psi_r,w_a,r_uVpsi_b,uVpsi_ilma,projector) &
-!$omp private(strs_thread,strs_species_thread,e_nl_species_thread,nspecies_local,lmax_local)
+!$omp private(strs_thread,tid)
+    tid = 1
+    !$ tid = omp_get_thread_num() + 1
     strs_thread = 0d0
+    ! per-thread l-species scratch lives in the persistent module workspace
+    ! (slice ...,tid); zero only this thread's slice (no allocate per orbital).
     if (want_l_species) then
-      nspecies_local = size(strs_species_l, 1)
-      lmax_local = ubound(strs_species_l, 2)
-      allocate(strs_species_thread(1:nspecies_local, 0:lmax_local, 3, 3))
-      allocate(e_nl_species_thread(1:nspecies_local, 0:lmax_local))
-      strs_species_thread = 0d0
-      e_nl_species_thread = 0d0
+      stress_nl_strs_thr(:,:,:,:,tid) = 0d0
+      stress_nl_enl_thr(:,:,tid) = 0d0
     end if
 !$omp do schedule(static)
     do ilma = 1, ppg%nlma
@@ -1550,7 +1609,7 @@ contains
         ll = ll_of_ilma(ilma)
         ispec = species_of_ilma(ilma)
         nl_energy_part = rtmp * dble(conjg(uVpsi_ilma) * uVpsi_ilma) / ppg%rinv_uvu(ilma)
-        e_nl_species_thread(ispec,ll) = e_nl_species_thread(ispec,ll) + nl_energy_part
+        stress_nl_enl_thr(ispec,ll,tid) = stress_nl_enl_thr(ispec,ll,tid) + nl_energy_part
       end if
       do a = 1, 3
         r_uVpsi_b = (0d0, 0d0)
@@ -1575,7 +1634,7 @@ contains
         do b = 1, 3
           contrib = 2d0 * rtmp * dble(conjg(uVpsi_ilma) * r_uVpsi_b(b))
           strs_thread(a,b) = strs_thread(a,b) + contrib
-          if (want_l_species) strs_species_thread(ispec,ll,a,b) = strs_species_thread(ispec,ll,a,b) + contrib
+          if (want_l_species) stress_nl_strs_thr(ispec,ll,a,b,tid) = stress_nl_strs_thr(ispec,ll,a,b,tid) + contrib
         end do
       end do
     end do
@@ -1583,13 +1642,10 @@ contains
 !$omp critical(stress_nl_orbital_accum)
     strs = strs + strs_thread
     if (want_l_species) then
-      strs_species_l = strs_species_l + strs_species_thread
-      e_nl_species_l = e_nl_species_l + e_nl_species_thread
+      strs_species_l = strs_species_l + stress_nl_strs_thr(:,:,:,:,tid)
+      e_nl_species_l = e_nl_species_l + stress_nl_enl_thr(:,:,tid)
     end if
 !$omp end critical(stress_nl_orbital_accum)
-    if (want_l_species) then
-      deallocate(strs_species_thread, e_nl_species_thread)
-    end if
 !$omp end parallel
   end subroutine accumulate_stress_nl_orbital
 
@@ -1634,7 +1690,7 @@ contains
       end do
     end do
 
-    if(ilma /= nlma) stop "error: build_nl_l_channel_map size mismatch"
+    if(ilma /= nlma) call fail_stress("build_nl_l_channel_map size mismatch")
   end subroutine build_nl_l_channel_map
 
   subroutine calc_stress_ewa(system, pp, fg, info, mg, ewald)
@@ -1787,7 +1843,8 @@ contains
     use filesystem,     only: open_filehandle
     use salmon_global,  only: base_directory, kion, sysname, &
                               yn_out_loc_sr_rs_sampled_dump, yn_out_loc_sr_rs_subdiv_probe, &
-                              num_loc_sr_rs_subdiv_probe, mode_loc_sr_rs_subdiv_probe_rho
+                              num_loc_sr_rs_subdiv_probe, mode_loc_sr_rs_subdiv_probe_rho, &
+                              yn_out_stress_numerics
     use inputoutput,    only: au_pressure_gpa
     use prep_pp_sub, only: eval_local_sr_shared_u_stress
     use sendrecv_grid, only: update_overlap_real8
@@ -1866,7 +1923,7 @@ contains
           exit
         end if
       end do
-      if(i1 == 0 .or. i2 == 0 .or. i3 == 0) stop 'calc_stress_loc_sr_rs: need three positive radial points'
+      if(i1 == 0 .or. i2 == 0 .or. i3 == 0) call fail_stress('calc_stress_loc_sr_rs: need three positive radial points')
       r1 = pp%rad(i1,ik)
       r2 = pp%rad(i2,ik)
       r3 = pp%rad(i3,ik)
@@ -1951,7 +2008,11 @@ contains
       system%stress_loc_sr_rs_bins(:,:,ib) = -strs_bins_sum(:,:,ib) / V
     end do
     if(fh_sampled_dump >= 0) close(fh_sampled_dump)
-    call calc_stress_loc_sr_rs_legacy_compare(system, pp, info, mg, ppg, rho_s)
+    ! legacy cross-check (old dvloctbl - Z/r^2 method) vs the spline u_sr method above:
+    ! pure developer diagnostic that doubles the loc-SR real-space loop, so only run it
+    ! when numerics diagnostics are explicitly requested.
+    if(yn_out_stress_numerics == 'y') &
+      call calc_stress_loc_sr_rs_legacy_compare(system, pp, info, mg, ppg, rho_s)
 
   contains
 
@@ -2190,7 +2251,7 @@ contains
           exit
         end if
       end do
-      if(i1 == 0 .or. i2 == 0 .or. i3 == 0) stop 'calc_stress_loc_sr_rs_legacy_compare: need three positive radial points'
+      if(i1 == 0 .or. i2 == 0 .or. i3 == 0) call fail_stress('calc_stress_loc_sr_rs_legacy_compare: need three positive radial points')
       r1 = pp%rad(i1,ik)
       r2 = pp%rad(i2,ik)
       r3 = pp%rad(i3,ik)
