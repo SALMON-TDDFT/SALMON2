@@ -3169,6 +3169,10 @@ contains
       call fail_stress_input("yn_out_stress='y' requires yn_spinorbit='n'")
     if(yn_out_stress == 'y' .and. spin /= 'unpolarized') &
       call fail_stress_input("yn_out_stress='y' requires spin='unpolarized'")
+#ifdef USE_OPENACC
+    if(yn_out_stress == 'y') &
+      call fail_stress_input("yn_out_stress='y' is not supported on GPU (OpenACC) builds: the stress kernels are CPU/OpenMP-only and read host-resident wavefunctions/density. Use a CPU build, or set yn_out_stress='n'.")
+#endif
     select case(trim(stress_l_decomp))
     case('no','species','atom')
       continue
@@ -3303,7 +3307,11 @@ contains
     case('high')
       yn_out_stress_terms = 'y'
       yn_out_stress_details = 'y'
-      yn_out_stress_numerics = 'y'
+      ! numerics (FD/G-space cross-check diagnostics) is OFF by default even at 'high'
+      ! because it is an expensive developer diagnostic (serial radial quadrature per
+      ! G-point, extra gradient passes) that runs every stress evaluation incl. RT.
+      ! Enable explicitly with yn_out_stress_numerics='y' (override applied below).
+      yn_out_stress_numerics = 'n'
       stress_l_decomp = 'species'
     case default
       call fail_stress_input("stress_output_level must be 'low', 'middle', or 'high'")
