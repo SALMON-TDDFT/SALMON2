@@ -2689,8 +2689,7 @@ contains
               call bisection(rr,intr,ikoa,pp%nrmax,pp%rad)
               if(intr==1) intr=2
               ratio1=(rr-pp%rad(intr,ikoa))/(pp%rad(intr+1,ikoa)-pp%rad(intr,ikoa)) ; ratio2=1.d0-ratio1
-              phi_r= ratio1*pp%upp_f(intr,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi)) +  &
-                     ratio2*pp%upp_f(intr-1,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi))
+              phi_r= ( ratio1*pp%upp_f(intr,L,ikoa) + ratio2*pp%upp_f(intr-1,L,ikoa) )*rinv  ! R_L(r)=u_L/r, project onto l=L (was wrongly fixed to lref; Ylm already normalized)
                                             !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
               if(allocated(tpsi%rwf)) then
                 rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
@@ -2714,14 +2713,14 @@ contains
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2)
+                  +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2)*system%wtk(iik)
               end do
             case('gaussian')
               fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)
+                  +abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)*system%wtk(iik)
               end do
             end select
           end do
