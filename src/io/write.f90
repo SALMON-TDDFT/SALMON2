@@ -2628,6 +2628,7 @@ contains
     real(8) :: ratio1,ratio2
     real(8) :: xx,yy,zz
     real(8) :: xxxx,yyyy,zzzz,rinv
+    real(8) :: dvec(3),frac(3),Ainv(3,3)
     integer :: lm
     real(8) :: rbox_pdos(25,natom)
     real(8) :: rbox_pdos2(25,natom)
@@ -2666,6 +2667,8 @@ contains
 
     pdos_l_tmp=0.d0
 
+    Ainv = transpose(system%primitive_b)/(2.d0*pi)  ! A^{-1} = B^T/(2pi); for minimum-image (handles atoms on cell boundaries / periodic images)
+
     do ispin=1,system%nspin
     do iik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
@@ -2678,9 +2681,12 @@ contains
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              xx=lg%coordinate(ix,1)-system%Rion(1,iatom)
-              yy=lg%coordinate(iy,2)-system%Rion(2,iatom)
-              zz=lg%coordinate(iz,3)-system%Rion(3,iatom)
+              dvec(1)=lg%coordinate(ix,1)-system%Rion(1,iatom)
+              dvec(2)=lg%coordinate(iy,2)-system%Rion(2,iatom)
+              dvec(3)=lg%coordinate(iz,3)-system%Rion(3,iatom)
+              frac=matmul(Ainv,dvec); frac=frac-anint(frac)  ! minimum image: wrap displacement to nearest periodic cell
+              dvec=matmul(system%primitive_a,frac)
+              xx=dvec(1); yy=dvec(2); zz=dvec(3)
               rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
               rinv=1.0d0/rr
               xxxx=xx*rinv
@@ -2689,7 +2695,7 @@ contains
               call bisection(rr,intr,ikoa,pp%nrmax,pp%rad)
               if(intr==1) intr=2
               ratio1=(rr-pp%rad(intr,ikoa))/(pp%rad(intr+1,ikoa)-pp%rad(intr,ikoa)) ; ratio2=1.d0-ratio1
-              phi_r= ( ratio1*pp%upp_f(intr,L,ikoa) + ratio2*pp%upp_f(intr-1,L,ikoa) )*rinv  ! R_L(r)=u_L/r, project onto l=L (was wrongly fixed to lref; Ylm already normalized)
+              phi_r= ( ratio1*pp%upp_f(intr,L,ikoa) + ratio2*pp%upp_f(intr-1,L,ikoa) )*rinv*sqrt((2*L+1)/(4*Pi))  ! R_L(r)=u_L/r times sqrt((2L+1)/4pi): SALMON Ylm is the unnormalized monomial (Ylm=sqrt(4pi/(2l+1)) r^l Ylm0), so this restores Ylm0; project onto l=L (was wrongly fixed to lref, with l-wrong radial power)
                                             !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
               if(allocated(tpsi%rwf)) then
                 rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
