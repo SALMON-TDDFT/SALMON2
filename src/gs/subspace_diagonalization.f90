@@ -612,7 +612,7 @@ subroutine ssdg_zwf_cblas_gpu(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     call timer_begin(LOG_SSDG_PERIODIC_CALC)
     istat = cublasZgemmStridedBatch_wrapper(CUBLAS_OP_N,CUBLAS_OP_N,nsize_rg,info%numo,info%numo_all(m),  &
                                             one,wf_block_send(:,:,:,:,:,:,:),nsize_rg, &
-                                            nsize_rg*info%numo_max,evec(info%io_s_all(m),info%io_s,info%ik_s,info%io_s,info%im_s),system%no, &
+                                            nsize_rg*info%numo_max,evec(info%io_s_all(m),info%io_s,1,info%ik_s,info%im_s),system%no, &
                                             system%no*system%no,one,wf2_block(:,:,:,:,:,:,:), &
                                             nsize_rg,nsize_rg*info%numo, &
                                             (info%im_e-info%im_s+1)*(info%ik_e-info%ik_s+1)*system%nspin)

@@ -1,5 +1,4 @@
 module cublas_wrapper
-  use nvtx
   use iso_c_binding
   use cublas
   implicit none
