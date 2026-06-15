@@ -2020,7 +2020,7 @@ contains
     implicit none
     integer,          intent(in) :: fh
     type(s_pp_info),  intent(in) :: pp
-    real(8),          intent(in) :: stress_nl_species_l(:,:,:,:), au_pressure_gpa
+    real(8),          intent(in) :: stress_nl_species_l(:,0:,:,:), au_pressure_gpa
     integer :: ielem, ll
     real(8) :: strs(3,3)
 
@@ -2094,7 +2094,7 @@ contains
     integer,         intent(in)    :: fh
     integer,         intent(inout) :: line_cols, col
     type(s_pp_info), intent(in)    :: pp
-    real(8),         intent(in)    :: stress_nl_species_l(:,:,:,:)
+    real(8),         intent(in)    :: stress_nl_species_l(:,0:,:,:)
     integer :: ielem, ll
     character(48) :: label
 
@@ -2128,7 +2128,7 @@ contains
   subroutine write_nl_species_l_pressure_values(fh, stress_nl_species_l, au_pressure_gpa)
     implicit none
     integer, intent(in) :: fh
-    real(8), intent(in) :: stress_nl_species_l(:,:,:,:), au_pressure_gpa
+    real(8), intent(in) :: stress_nl_species_l(:,0:,:,:), au_pressure_gpa
     integer :: ielem, ll
 
     do ielem = lbound(stress_nl_species_l,1), ubound(stress_nl_species_l,1)
