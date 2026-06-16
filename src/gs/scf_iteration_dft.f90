@@ -497,7 +497,7 @@ contains
     metric_ok = sum1 < threshold
     energy_ok = .true.
     if (yn_dual_convergence == 'y') then
-      ! Optional rho_dne + |dE| gate for VASP-like operational criteria.
+      ! Optional rho_dne + |dE| gate for operational (density + energy) convergence criteria.
       energy_ok = energy_residual_ready .and. dE_iter < energy_threshold
     end if
 

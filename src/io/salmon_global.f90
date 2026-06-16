@@ -335,6 +335,8 @@ module salmon_global
   integer        :: out_dos_nenergy
   real(8)        :: out_dos_width
   character(16)  :: out_dos_function
+  real(8)        :: out_pdos_width      ! PDOS broadening width; <0 => follow out_dos_width
+  character(16)  :: out_pdos_function   ! PDOS broadening shape;  '' => follow out_dos_function
   character(1)   :: yn_out_pdos
   character(1)   :: yn_out_pdos_sphere
   character(1)   :: yn_out_dns

@@ -466,7 +466,7 @@ contains
     ! s = r - R_a (periodic replicas by FULL lattice vectors; geometry
     ! mirrors calc_nlcc / accumulate_stress_nlcc_cc). When yn_tau_nlcc='y'
     ! the energy also sees tau_core, so the analogous vtau term is added.
-    ! Spin: vxc averaged over channels (cf. QE PW/src/force_cc.f90).
+    ! Spin: vxc averaged over channels (NLCC core-correction force).
     use structures
     use communication, only: comm_summation
     use salmon_global, only: kion, yn_tau_nlcc

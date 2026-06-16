@@ -549,8 +549,8 @@ contains
 
     ! Strain derivative of E_xc from the rigid, atom-centered NLCC core
     ! density: sigma_cc_ab = (1/V) * int vxc(r) * sum_a rhoc'(|s|) s_a s_b / |s|.
-    ! Real-space equivalent of QE PW/src/stres_cc.f90 (diagonal + nondiagonal,
-    ! G=0 included). The valence-dilution diagonal -(E_vxc - E_xc)/V is already
+    ! Real-space form (diagonal + nondiagonal, G=0 included) of the NLCC
+    ! core-correction stress. The valence-dilution diagonal -(E_vxc - E_xc)/V is already
     ! handled by calc_stress_xc_builtin_pz.
     system%stress_xc_cc = 0d0
     if(.not. pp%flag_nlcc) return

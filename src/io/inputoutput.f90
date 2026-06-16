@@ -500,6 +500,8 @@ contains
       & out_dos_nenergy, &
       & out_dos_width, &
       & out_dos_function, &
+      & out_pdos_width, &
+      & out_pdos_function, &
       & yn_out_pdos, &
       & yn_out_pdos_sphere, &
       & yn_out_dns, &
@@ -962,6 +964,8 @@ contains
     out_dos_nenergy     = 601
     out_dos_width       = 0.1d0 / au_energy_ev * uenergy_from_au
     out_dos_function    = 'gaussian'
+    out_pdos_width      = -1.d0   ! sentinel: inherit out_dos_width unless set (>0)
+    out_pdos_function   = ''      ! sentinel: inherit out_dos_function unless set
     yn_out_pdos         = 'n'
     yn_out_pdos_sphere  = 'n'
     yn_out_dns          = 'n'
@@ -1619,6 +1623,9 @@ contains
     call comm_bcast(out_dos_width       ,nproc_group_global)
     out_dos_width = out_dos_width * uenergy_to_au
     call comm_bcast(out_dos_function    ,nproc_group_global)
+    call comm_bcast(out_pdos_width      ,nproc_group_global)
+    if(out_pdos_width > 0.d0) out_pdos_width = out_pdos_width * uenergy_to_au  ! keep sentinel(<0)=inherit
+    call comm_bcast(out_pdos_function   ,nproc_group_global)
     call comm_bcast(yn_out_pdos         ,nproc_group_global)
     call comm_bcast(yn_out_pdos_sphere  ,nproc_group_global)
     call comm_bcast(yn_out_dns          ,nproc_group_global)
@@ -2572,6 +2579,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dos_nenergy', out_dos_nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_width', out_dos_width
       write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_function', out_dos_function
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_pdos_width', out_pdos_width
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_pdos_function', out_pdos_function
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos', yn_out_pdos
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos_sphere', yn_out_pdos_sphere
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
@@ -2935,6 +2944,15 @@ contains
         continue
       case default
         stop 'set out_dos_function to "gaussian" or "lorentzian"'
+      end select
+    end if
+
+    if(yn_out_pdos=='y' .and. len_trim(out_pdos_function) > 0)then
+      select case(out_pdos_function)
+      case("gaussian","lorentzian")
+        continue
+      case default
+        stop 'set out_pdos_function to "gaussian" or "lorentzian" (or leave empty to follow out_dos_function)'
       end select
     end if
 

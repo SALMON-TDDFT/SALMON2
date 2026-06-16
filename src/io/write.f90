@@ -2609,7 +2609,8 @@ contains
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
                                    nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit, &
-                                   base_directory,sysname, yn_out_pdos_sphere
+                                   base_directory,sysname, yn_out_pdos_sphere, &
+                                   out_pdos_width, out_pdos_function
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
     implicit none
@@ -2639,12 +2640,15 @@ contains
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
-    ! --- ABINIT-style sphere-integrated l-projection (yn_out_pdos_sphere='y') ---
+    ! --- sphere-integrated angular-momentum projection (yn_out_pdos_sphere='y') ---
     integer,parameter :: nsph = 128            ! max radial shells inside the projection sphere
     real(8) :: wpdos(25,natom)                 ! per-(lm) non-negative weight for the current (iob,ik,ispin)
     real(8) :: delta_r,rsph,rmid,domega,ylmn,rr_eff
     integer :: ish
     complex(8),allocatable :: csph(:,:,:),csph2(:,:,:)
+    ! PDOS broadening: independent of DOS but inherits the DOS setting when unset
+    real(8) :: pdos_width
+    character(16) :: pdos_function
 
     ! The atomic-orbital projection needs the pseudo-atomic wavefunction upp_f
     ! (FHI-only). The sphere method projects the raw orbital onto real Ylm inside
@@ -2675,6 +2679,12 @@ contains
     out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
 
+    ! PDOS broadening follows the DOS setting unless out_pdos_* are given explicitly.
+    pdos_width    = out_dos_width
+    if(out_pdos_width > 0.d0) pdos_width = out_pdos_width
+    pdos_function = out_dos_function
+    if(len_trim(out_pdos_function) > 0) pdos_function = out_pdos_function
+
     pdos_l_tmp=0.d0
 
     Ainv = transpose(system%primitive_b)/(2.d0*pi)  ! A^{-1} = B^T/(2pi); for minimum-image (handles atoms on cell boundaries / periodic images)
@@ -2690,7 +2700,7 @@ contains
       wpdos=0.d0
 
       if(yn_out_pdos_sphere=='y')then
-        ! ===== ABINIT-style: angular-momentum projection inside each atom's cutoff sphere =====
+        ! ===== angular-momentum projection inside each atom's cutoff sphere =====
         ! c_lm(r) = oint psi(r,Omega) Y_lm(Omega) dOmega, accumulated per radial shell; the
         ! l-weight = sum_shell |c_lm(r)|^2 r^2 dr. No pseudo-atomic wavefunction is needed, so
         ! this works for every pseudopotential (psp8/ONCV/vps), unlike the upp_f projection.
@@ -2796,20 +2806,20 @@ contains
         ikoa=Kion(iatom)
         do L=0,pp%mlps(ikoa)
           do lm=L**2+1,(L+1)**2
-            select case (out_dos_function)
+            select case (pdos_function)
             case('lorentzian')
-              fk=2.d0*out_dos_width/pi
+              fk=2.d0*pdos_width/pi
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +wpdos(lm,iatom)*fk/(ww**2+out_dos_width**2)*system%wtk(iik)
+                  +wpdos(lm,iatom)*fk/(ww**2+pdos_width**2)*system%wtk(iik)
               end do
             case('gaussian')
-              fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
+              fk=2.d0/(sqrt(2.d0*pi)*pdos_width)
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +wpdos(lm,iatom)*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)*system%wtk(iik)
+                  +wpdos(lm,iatom)*fk*exp(-(0.5d0/pdos_width**2)*ww**2)*system%wtk(iik)
               end do
             end select
           end do
