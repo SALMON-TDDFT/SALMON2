@@ -216,6 +216,17 @@ subroutine input_pp(pp,hx,hy,hz)
       write(*,*) '=========================================================='
       end if
 
+      ! Capture the RAW atomic radial wavefunction u_L into upp_f BEFORE the
+      ! making_ps_* step. making_ps_without_masking (yn_psmask='n', the DEFAULT)
+      ! overwrites pp%upp in place with u_L*sqrt((2l+1)/4pi)/r**(l+1) (the
+      ! monomial-Ylm-ready projector form). upp_f is consumed only by write_pdos,
+      ! whose projection assumes the raw u_L (phi_r = upp_f/r*sqrt((2L+1)/4pi) =
+      ! R_L*sqrt((2L+1)/4pi), times the monomial Ylm gives R_L*Ylm0). Copying
+      ! here keeps upp_f = raw u_L for every path (masking, no-masking, FHI),
+      ! so the PDOS magnitude is correct. (Was copied after the transform =>
+      ! double-applied sqrt/r => PDOS ~1e2x too small.)
+      pp%upp_f(:,:,ik)=pp%upp(:,:)
+
       if (yn_psmask == 'y') then
         call making_ps_with_masking(pp,hx,hy,hz,ik, &
                                     rhor_nlcc,flag_nlcc_element)
@@ -237,7 +248,7 @@ subroutine input_pp(pp,hx,hy,hz)
       call build_local_sr_shared_u_stress_spline(pp, ik)
       call check_pp_ghosts(pp, ik)
 
-      pp%upp_f(:,:,ik)=pp%upp(:,:)
+      ! upp_f already captured above (raw u_L, before making_ps_* transform).
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
       open(4,file=trim(base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//"_"//trim(yn_psmask)//".dat")
