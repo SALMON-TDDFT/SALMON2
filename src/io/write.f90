@@ -2651,6 +2651,7 @@ contains
     logical :: do_method(3)
     character(16) :: suffix
     real(8) :: gall(natom),dsum,wfac,sq        ! Hirshfeld partition weights (per grid point)
+    real(8) :: qa(natom),qa2(natom),sa,psi2    ! exact per-atom charge (sphere/Hirshfeld) for normalizing the l-split
     complex(8),allocatable :: csph(:,:,:),csph2(:,:,:)
     ! PDOS broadening: independent of DOS but inherits the DOS setting when unset
     real(8) :: pdos_width
@@ -2718,7 +2719,7 @@ contains
         ! this works for every pseudopotential (psp8/ONCV/vps), unlike the upp_f projection.
         ! On the uniform grid this is semi-quantitative (coarse angular sampling); sum_l of the
         ! integrated PDOS approximates the charge inside the sphere (radius pp%rps).
-        csph=(0.d0,0.d0)
+        csph=(0.d0,0.d0); qa=0.d0
         do iatom=1,natom
           ikoa=Kion(iatom)
           rsph=pp%rps(ikoa)
@@ -2738,6 +2739,9 @@ contains
             xxxx=xx*rinv; yyyy=yy*rinv; zzzz=zz*rinv
             rr_eff=max(rr,delta_r)                   ! regularize innermost cell (caps dOmega at Hvol/delta_r^3 = 1 sr)
             domega=system%Hvol/(delta_r*rr_eff**2)   ! solid angle subtended by this grid cell
+            if(allocated(tpsi%rwf)) then ; psi2=tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)**2
+            else ; psi2=abs(tpsi%zwf(ix,iy,iz,ispin,iob,iik,1))**2 ; end if
+            qa(iatom)=qa(iatom)+psi2*system%Hvol     ! exact charge inside the sphere (for normalizing the l-split)
             do L=0,pp%mlps(ikoa)
               do m=-L,L
                 lm=L*L+L+1+m
@@ -2754,6 +2758,7 @@ contains
           end do
         end do
         call comm_summation(csph,csph2,25*nsph*natom,info%icomm_r)
+        call comm_summation(qa,qa2,natom,info%icomm_r)
         do iatom=1,natom
           ikoa=Kion(iatom)
           do L=0,pp%mlps(ikoa)
@@ -2771,7 +2776,7 @@ contains
         ! weight w_a(r) = g_a / sum_b g_b, g_a = exp(-(r/pp%rps)^2) (decays smoothly, all pseudopotentials).
         ! sqrt(w_a)*psi is decomposed by the same shell+Ylm scheme; sum_l = the atom's Hirshfeld charge,
         ! and sum_atom sum_l = int|psi|^2 = 1 per state, so the l-projected PDOS sums to the total DOS.
-        csph=(0.d0,0.d0)
+        csph=(0.d0,0.d0); qa=0.d0
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
@@ -2805,6 +2810,9 @@ contains
             rr_eff=max(rr,delta_r)
             domega=system%Hvol/(delta_r*rr_eff**2)
             sq=sqrt(wfac)
+            if(allocated(tpsi%rwf)) then ; psi2=tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)**2
+            else ; psi2=abs(tpsi%zwf(ix,iy,iz,ispin,iob,iik,1))**2 ; end if
+            qa(iatom)=qa(iatom)+wfac*psi2*system%Hvol   ! exact Hirshfeld charge (sum_atom = total)
             do L=0,pp%mlps(ikoa)
               do m=-L,L
                 lm=L*L+L+1+m
@@ -2821,6 +2829,7 @@ contains
         end do
         end do
         call comm_summation(csph,csph2,25*nsph*natom,info%icomm_r)
+        call comm_summation(qa,qa2,natom,info%icomm_r)
         do iatom=1,natom
           ikoa=Kion(iatom)
           do L=0,pp%mlps(ikoa)
@@ -2880,7 +2889,29 @@ contains
         end do
       end if
 
-      ! ===== energy broadening (shared by both methods) =====
+      ! Anchor the (lossy) shell-reconstructed l-weights to the exact per-atom
+      ! charge so the l-split keeps its relative shape but the magnitude is exact:
+      ! sphere -> charge in the cutoff sphere; Hirshfeld -> sum_atom sum_l = total DOS.
+      if(imethod>=2)then
+        do iatom=1,natom
+          ikoa=Kion(iatom)
+          sa=0.d0
+          do L=0,pp%mlps(ikoa)
+            do lm=L**2+1,(L+1)**2
+              sa=sa+wpdos(lm,iatom)
+            end do
+          end do
+          if(sa>1.d-30)then
+            do L=0,pp%mlps(ikoa)
+              do lm=L**2+1,(L+1)**2
+                wpdos(lm,iatom)=wpdos(lm,iatom)*qa2(iatom)/sa
+              end do
+            end do
+          end if
+        end do
+      end if
+
+      ! ===== energy broadening (shared by all methods) =====
       do iatom=1,natom
         ikoa=Kion(iatom)
         do L=0,pp%mlps(ikoa)
