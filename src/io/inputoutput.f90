@@ -314,6 +314,7 @@ contains
       & yn_fix_func, &
       & yn_predictor_corrector, &
       & yn_dg_fragment_rt, &
+      & yn_dg_flux_realspace_rt, &
       & time_integrator_dg_fragment, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
@@ -778,6 +779,7 @@ contains
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
+    yn_dg_flux_realspace_rt = 'n'
     time_integrator_dg_fragment = 'rk4'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
@@ -1358,6 +1360,7 @@ contains
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
+    call comm_bcast(yn_dg_flux_realspace_rt,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
@@ -2286,6 +2289,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_flux_realspace_rt', yn_dg_flux_realspace_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
@@ -2809,6 +2813,7 @@ contains
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
+    call yn_argument_check(yn_dg_flux_realspace_rt)
     call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
@@ -3101,6 +3106,7 @@ contains
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
       if(yn_dg_fragment_rt=='y') stop "contradiction: yn_dc=y & yn_dg_fragment_rt=y"
+      if(yn_dg_flux_realspace_rt=='y') stop "contradiction: yn_dc=y & yn_dg_flux_realspace_rt=y"
       ! Reduced coordinates are converted to Cartesian later in init_dft_system before DC fragment setup.
       if(iflag_atom_coor/=ntype_atom_coor_cartesian .and. &
       &  iflag_atom_coor/=ntype_atom_coor_reduced) &
@@ -3171,7 +3177,22 @@ contains
          time_integrator_dg_fragment/='aetrs') &
       & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', 'taylor4pc', or 'aetrs'"
     end if
-    
+
+    if(yn_dg_flux_realspace_rt=='y') then
+      if(theory/='tddft_pulse' .and. theory/='tddft_response' .and. theory/='single_scale_maxwell_tddft') &
+      & stop "DG-Flux real-space RT (yn_dg_flux_realspace_rt=y): theory must be tddft_pulse, tddft_response, or single_scale_maxwell_tddft"
+      if(yn_conventional_from_dcdft/='y') &
+      & stop "DG-Flux real-space RT: set yn_conventional_from_dcdft='y' to reconstruct DC-LCFO wavefunctions"
+      if(yn_dg_fragment_rt=='y') &
+      & stop "DG-Flux real-space RT: disable yn_dg_fragment_rt; this mode uses real-space RT propagation"
+      if(yn_spinorbit=='y') &
+      & stop "DG-Flux real-space RT: spin-orbit mode is not implemented"
+      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
+      & stop "DG-Flux real-space RT: # of k-points must be 1."
+      if(nproc_k/=1) &
+      & stop "DG-Flux real-space RT: nproc_k must be 1."
+    end if
+
     call yn_argument_check(yn_dg_fragment_rt)
 
 #ifdef USE_FFTW

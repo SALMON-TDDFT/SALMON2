@@ -154,6 +154,7 @@ module salmon_global
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_fragment_rt
+  character(1)   :: yn_dg_flux_realspace_rt
   character(16)  :: time_integrator_dg_fragment
   
   ! Plane wave basis mixing for DG-Fragment RT
