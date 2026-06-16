@@ -2609,7 +2609,7 @@ contains
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
                                    nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit, &
-                                   base_directory,sysname, yn_out_pdos_sphere, &
+                                   base_directory,sysname, yn_out_pdos_sphere, yn_out_pdos_hirshfeld, &
                                    out_pdos_width, out_pdos_function
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
@@ -2640,22 +2640,29 @@ contains
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
-    ! --- sphere-integrated angular-momentum projection (yn_out_pdos_sphere='y') ---
+    ! --- angular-momentum projection methods ---
+    ! imethod = 1: atomic-orbital projection onto the pseudo-atomic wavefunction upp_f (FHI only)
+    !           2: sphere-integrated, radius pp%rps        (any pseudopotential)
+    !           3: Hirshfeld partition of unity            (any pseudopotential; sum_atom sum_l = total DOS)
     integer,parameter :: nsph = 128            ! max radial shells inside the projection sphere
     real(8) :: wpdos(25,natom)                 ! per-(lm) non-negative weight for the current (iob,ik,ispin)
     real(8) :: delta_r,rsph,rmid,domega,ylmn,rr_eff
-    integer :: ish
+    integer :: ish, imethod
+    logical :: do_method(3)
+    character(16) :: suffix
+    real(8) :: gall(natom),dsum,wfac,sq        ! Hirshfeld partition weights (per grid point)
     complex(8),allocatable :: csph(:,:,:),csph2(:,:,:)
     ! PDOS broadening: independent of DOS but inherits the DOS setting when unset
     real(8) :: pdos_width
     character(16) :: pdos_function
 
-    ! The atomic-orbital projection needs the pseudo-atomic wavefunction upp_f
-    ! (FHI-only). The sphere method projects the raw orbital onto real Ylm inside
-    ! each atom's cutoff sphere, so it works for every pseudopotential.
-    if( yn_out_pdos_sphere/='y' .and. all(pp%upp_f==0.0d0) )then
-      write(*,*) "@calc_pdos: Pseudoatom wave function is not available"
-      write(*,*) "@calc_pdos: set yn_out_pdos_sphere='y' for the sphere-integrated method"
+    ! Which projection methods to output (each writes its own *_pdos[_suffix]N.data).
+    do_method(1) = .not. all(pp%upp_f==0.0d0)      ! atomic: needs the pseudo-atomic w.f. (FHI)
+    do_method(2) = (yn_out_pdos_sphere=='y')        ! sphere-integrated
+    do_method(3) = (yn_out_pdos_hirshfeld=='y')     ! Hirshfeld partition
+    if( .not. any(do_method) )then
+      write(*,*) "@calc_pdos: Pseudoatom wave function is not available (atomic projection skipped)"
+      write(*,*) "@calc_pdos: set yn_out_pdos_sphere='y' or yn_out_pdos_hirshfeld='y' for a pseudo-free method"
       return
     end if
 
@@ -2685,21 +2692,26 @@ contains
     pdos_function = out_dos_function
     if(len_trim(out_pdos_function) > 0) pdos_function = out_pdos_function
 
-    pdos_l_tmp=0.d0
-
     Ainv = transpose(system%primitive_b)/(2.d0*pi)  ! A^{-1} = B^T/(2pi); for minimum-image (handles atoms on cell boundaries / periodic images)
+    delta_r = system%Hvol**(1.d0/3.d0)              ! radial shell width ~ geometric-mean grid spacing
 
-    if(yn_out_pdos_sphere=='y')then
-      delta_r = system%Hvol**(1.d0/3.d0)   ! radial shell width ~ geometric-mean grid spacing
-      allocate(csph(25,nsph,natom),csph2(25,nsph,natom))
-    end if
+    ! Each enabled method writes its own file: _pdosN (atomic), _pdos_sphereN, _pdos_hirshfeldN.
+    do imethod=1,3
+    if(.not. do_method(imethod)) cycle
+    select case(imethod)
+    case(1) ; suffix=''
+    case(2) ; suffix='_sphere'
+    case(3) ; suffix='_hirshfeld'
+    end select
+    if(imethod>=2) allocate(csph(25,nsph,natom),csph2(25,nsph,natom))
+    pdos_l_tmp=0.d0
 
     do ispin=1,system%nspin
     do iik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
       wpdos=0.d0
 
-      if(yn_out_pdos_sphere=='y')then
+      if(imethod==2)then
         ! ===== angular-momentum projection inside each atom's cutoff sphere =====
         ! c_lm(r) = oint psi(r,Omega) Y_lm(Omega) dOmega, accumulated per radial shell; the
         ! l-weight = sum_shell |c_lm(r)|^2 r^2 dr. No pseudo-atomic wavefunction is needed, so
@@ -2740,6 +2752,73 @@ contains
           end do
           end do
           end do
+        end do
+        call comm_summation(csph,csph2,25*nsph*natom,info%icomm_r)
+        do iatom=1,natom
+          ikoa=Kion(iatom)
+          do L=0,pp%mlps(ikoa)
+            do lm=L**2+1,(L+1)**2
+              do ish=1,nsph
+                rmid=(dble(ish)-0.5d0)*delta_r
+                wpdos(lm,iatom)=wpdos(lm,iatom)+abs(csph2(lm,ish,iatom))**2*rmid**2*delta_r
+              end do
+            end do
+          end do
+        end do
+
+      else if(imethod==3)then
+        ! ===== Hirshfeld partition of unity: sum_atom sum_l = total DOS =====
+        ! weight w_a(r) = g_a / sum_b g_b, g_a = exp(-(r/pp%rps)^2) (decays smoothly, all pseudopotentials).
+        ! sqrt(w_a)*psi is decomposed by the same shell+Ylm scheme; sum_l = the atom's Hirshfeld charge,
+        ! and sum_atom sum_l = int|psi|^2 = 1 per state, so the l-projected PDOS sums to the total DOS.
+        csph=(0.d0,0.d0)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          dsum=0.d0
+          do iatom=1,natom
+            ikoa=Kion(iatom)
+            dvec(1)=lg%coordinate(ix,1)-system%Rion(1,iatom)
+            dvec(2)=lg%coordinate(iy,2)-system%Rion(2,iatom)
+            dvec(3)=lg%coordinate(iz,3)-system%Rion(3,iatom)
+            frac=matmul(Ainv,dvec); frac=frac-anint(frac)  ! minimum image
+            dvec=matmul(system%primitive_a,frac)
+            rr=sqrt(dvec(1)**2+dvec(2)**2+dvec(3)**2)
+            gall(iatom)=exp(-(rr/pp%rps(ikoa))**2)
+            dsum=dsum+gall(iatom)
+          end do
+          if(dsum<1.d-300) cycle
+          do iatom=1,natom
+            wfac=gall(iatom)/dsum
+            if(wfac<1.d-6) cycle                ! skip atoms with negligible weight at this point
+            ikoa=Kion(iatom)
+            dvec(1)=lg%coordinate(ix,1)-system%Rion(1,iatom)
+            dvec(2)=lg%coordinate(iy,2)-system%Rion(2,iatom)
+            dvec(3)=lg%coordinate(iz,3)-system%Rion(3,iatom)
+            frac=matmul(Ainv,dvec); frac=frac-anint(frac)
+            dvec=matmul(system%primitive_a,frac)
+            xx=dvec(1); yy=dvec(2); zz=dvec(3)
+            rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
+            ish=min(nsph,int(rr/delta_r)+1)
+            rinv=1.0d0/rr
+            xxxx=xx*rinv; yyyy=yy*rinv; zzzz=zz*rinv
+            rr_eff=max(rr,delta_r)
+            domega=system%Hvol/(delta_r*rr_eff**2)
+            sq=sqrt(wfac)
+            do L=0,pp%mlps(ikoa)
+              do m=-L,L
+                lm=L*L+L+1+m
+                ylmn=sqrt((2*L+1)/(4*Pi))*Ylm(xxxx,yyyy,zzzz,L,m)
+                if(allocated(tpsi%rwf)) then
+                  csph(lm,ish,iatom)=csph(lm,ish,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*sq*ylmn*domega
+                else
+                  csph(lm,ish,iatom)=csph(lm,ish,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*sq*ylmn*domega
+                end if
+              end do
+            end do
+          end do
+        end do
+        end do
         end do
         call comm_summation(csph,csph2,25*nsph*natom,info%icomm_r)
         do iatom=1,natom
@@ -2835,9 +2914,14 @@ contains
       do iatom=1,natom
         ikoa=Kion(iatom)
         write(fileNumber, '(i8)') iatom
-        OutFile = trim(base_directory)//trim(sysname)//"_pdos"//trim(adjustl(fileNumber))//".data"
+        OutFile = trim(base_directory)//trim(sysname)//"_pdos"//trim(suffix)//trim(adjustl(fileNumber))//".data"
         open(101,file=OutFile)
         write(101,'("# Projected Density of States")')
+        select case(imethod)
+        case(1) ; write(101,'("# method: atomic-orbital projection (pseudo-atomic wavefunction)")')
+        case(2) ; write(101,'("# method: sphere-integrated (radius pp%rps); sum_l ~ charge in sphere")')
+        case(3) ; write(101,'("# method: Hirshfeld partition of unity; sum_atom sum_l = total DOS")')
+        end select
         select case(unit_energy)
         case('au','a.u.')
           if(pp%mlps(ikoa)==0)then
@@ -2885,6 +2969,7 @@ contains
         close(101)
       end do
     end if
+    end do  ! imethod
     return
   end subroutine write_pdos
   

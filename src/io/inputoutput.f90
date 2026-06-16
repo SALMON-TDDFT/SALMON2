@@ -504,6 +504,7 @@ contains
       & out_pdos_function, &
       & yn_out_pdos, &
       & yn_out_pdos_sphere, &
+      & yn_out_pdos_hirshfeld, &
       & yn_out_dns, &
       & yn_out_dns_rt, &
       & yn_out_dns_ac_je, &
@@ -968,6 +969,7 @@ contains
     out_pdos_function   = ''      ! sentinel: inherit out_dos_function unless set
     yn_out_pdos         = 'n'
     yn_out_pdos_sphere  = 'n'
+    yn_out_pdos_hirshfeld = 'n'
     yn_out_dns          = 'n'
     yn_out_dns_rt       = 'n'
     yn_out_dns_ac_je    = 'n'
@@ -1628,6 +1630,7 @@ contains
     call comm_bcast(out_pdos_function   ,nproc_group_global)
     call comm_bcast(yn_out_pdos         ,nproc_group_global)
     call comm_bcast(yn_out_pdos_sphere  ,nproc_group_global)
+    call comm_bcast(yn_out_pdos_hirshfeld,nproc_group_global)
     call comm_bcast(yn_out_dns          ,nproc_group_global)
     call comm_bcast(yn_out_dns_rt       ,nproc_group_global)
     call comm_bcast(yn_out_dns_ac_je    ,nproc_group_global)
@@ -2583,6 +2586,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'out_pdos_function', out_pdos_function
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos', yn_out_pdos
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos_sphere', yn_out_pdos_sphere
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos_hirshfeld', yn_out_pdos_hirshfeld
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
@@ -2828,6 +2832,7 @@ contains
     call yn_argument_check(yn_out_dos_set_fe_origin)
     call yn_argument_check(yn_out_pdos)
     call yn_argument_check(yn_out_pdos_sphere)
+    call yn_argument_check(yn_out_pdos_hirshfeld)
     call yn_argument_check(yn_out_dns)
     call yn_argument_check(yn_out_dns_rt)
     call yn_argument_check(yn_out_dns_ac_je)
