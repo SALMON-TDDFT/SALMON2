@@ -1,7 +1,6 @@
 set(SOURCES
    broyden.f90
    const.f90
-   dc_lcfo_flux_operator.f90
    hamiltonian.f90
    initialization.f90
    stencil.f90
