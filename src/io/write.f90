@@ -2609,7 +2609,7 @@ contains
     use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
                                    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
                                    nelec, kion, natom, nstate, unit_energy, temperature, yn_spinorbit, &
-                                   base_directory,sysname
+                                   base_directory,sysname, yn_out_pdos_sphere
     use inputoutput         ,only: uenergy_from_au
     use prep_pp_sub         ,only: bisection
     implicit none
@@ -2639,9 +2639,19 @@ contains
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
+    ! --- ABINIT-style sphere-integrated l-projection (yn_out_pdos_sphere='y') ---
+    integer,parameter :: nsph = 128            ! max radial shells inside the projection sphere
+    real(8) :: wpdos(25,natom)                 ! per-(lm) non-negative weight for the current (iob,ik,ispin)
+    real(8) :: delta_r,rsph,rmid,domega,ylmn,rr_eff
+    integer :: ish
+    complex(8),allocatable :: csph(:,:,:),csph2(:,:,:)
 
-    if( all(pp%upp_f==0.0d0) )then
+    ! The atomic-orbital projection needs the pseudo-atomic wavefunction upp_f
+    ! (FHI-only). The sphere method projects the raw orbital onto real Ylm inside
+    ! each atom's cutoff sphere, so it works for every pseudopotential.
+    if( yn_out_pdos_sphere/='y' .and. all(pp%upp_f==0.0d0) )then
       write(*,*) "@calc_pdos: Pseudoatom wave function is not available"
+      write(*,*) "@calc_pdos: set yn_out_pdos_sphere='y' for the sphere-integrated method"
       return
     end if
 
@@ -2669,46 +2679,119 @@ contains
 
     Ainv = transpose(system%primitive_b)/(2.d0*pi)  ! A^{-1} = B^T/(2pi); for minimum-image (handles atoms on cell boundaries / periodic images)
 
+    if(yn_out_pdos_sphere=='y')then
+      delta_r = system%Hvol**(1.d0/3.d0)   ! radial shell width ~ geometric-mean grid spacing
+      allocate(csph(25,nsph,natom),csph2(25,nsph,natom))
+    end if
+
     do ispin=1,system%nspin
     do iik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
-      rbox_pdos=0.d0
-      do iatom=1,natom
-        ikoa=Kion(iatom)
-        do L=0,pp%mlps(ikoa)
-          do m=-L,L
-            lm=L*L+L+1+m
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              dvec(1)=lg%coordinate(ix,1)-system%Rion(1,iatom)
-              dvec(2)=lg%coordinate(iy,2)-system%Rion(2,iatom)
-              dvec(3)=lg%coordinate(iz,3)-system%Rion(3,iatom)
-              frac=matmul(Ainv,dvec); frac=frac-anint(frac)  ! minimum image: wrap displacement to nearest periodic cell
-              dvec=matmul(system%primitive_a,frac)
-              xx=dvec(1); yy=dvec(2); zz=dvec(3)
-              rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
-              rinv=1.0d0/rr
-              xxxx=xx*rinv
-              yyyy=yy*rinv
-              zzzz=zz*rinv
-              call bisection(rr,intr,ikoa,pp%nrmax,pp%rad)
-              if(intr==1) intr=2
-              ratio1=(rr-pp%rad(intr,ikoa))/(pp%rad(intr+1,ikoa)-pp%rad(intr,ikoa)) ; ratio2=1.d0-ratio1
-              phi_r= ( ratio1*pp%upp_f(intr,L,ikoa) + ratio2*pp%upp_f(intr-1,L,ikoa) )*rinv*sqrt((2*L+1)/(4*Pi))  ! R_L(r)=u_L/r times sqrt((2L+1)/4pi): SALMON Ylm is the unnormalized monomial (Ylm=sqrt(4pi/(2l+1)) r^l Ylm0), so this restores Ylm0; project onto l=L (was wrongly fixed to lref, with l-wrong radial power)
-                                            !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-              if(allocated(tpsi%rwf)) then
-                rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
-              else
-                rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
-              end if
+      wpdos=0.d0
+
+      if(yn_out_pdos_sphere=='y')then
+        ! ===== ABINIT-style: angular-momentum projection inside each atom's cutoff sphere =====
+        ! c_lm(r) = oint psi(r,Omega) Y_lm(Omega) dOmega, accumulated per radial shell; the
+        ! l-weight = sum_shell |c_lm(r)|^2 r^2 dr. No pseudo-atomic wavefunction is needed, so
+        ! this works for every pseudopotential (psp8/ONCV/vps), unlike the upp_f projection.
+        ! On the uniform grid this is semi-quantitative (coarse angular sampling); sum_l of the
+        ! integrated PDOS approximates the charge inside the sphere (radius pp%rps).
+        csph=(0.d0,0.d0)
+        do iatom=1,natom
+          ikoa=Kion(iatom)
+          rsph=pp%rps(ikoa)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            dvec(1)=lg%coordinate(ix,1)-system%Rion(1,iatom)
+            dvec(2)=lg%coordinate(iy,2)-system%Rion(2,iatom)
+            dvec(3)=lg%coordinate(iz,3)-system%Rion(3,iatom)
+            frac=matmul(Ainv,dvec); frac=frac-anint(frac)  ! minimum image
+            dvec=matmul(system%primitive_a,frac)
+            xx=dvec(1); yy=dvec(2); zz=dvec(3)
+            rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
+            if(rr>rsph) cycle
+            ish=min(nsph,int(rr/delta_r)+1)
+            rinv=1.0d0/rr
+            xxxx=xx*rinv; yyyy=yy*rinv; zzzz=zz*rinv
+            rr_eff=max(rr,delta_r)                   ! regularize innermost cell (caps dOmega at Hvol/delta_r^3 = 1 sr)
+            domega=system%Hvol/(delta_r*rr_eff**2)   ! solid angle subtended by this grid cell
+            do L=0,pp%mlps(ikoa)
+              do m=-L,L
+                lm=L*L+L+1+m
+                ylmn=sqrt((2*L+1)/(4*Pi))*Ylm(xxxx,yyyy,zzzz,L,m)  ! normalized real spherical harmonic Y_lm0
+                if(allocated(tpsi%rwf)) then
+                  csph(lm,ish,iatom)=csph(lm,ish,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*ylmn*domega
+                else
+                  csph(lm,ish,iatom)=csph(lm,ish,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*ylmn*domega
+                end if
+              end do
             end do
-            end do
+          end do
+          end do
+          end do
+        end do
+        call comm_summation(csph,csph2,25*nsph*natom,info%icomm_r)
+        do iatom=1,natom
+          ikoa=Kion(iatom)
+          do L=0,pp%mlps(ikoa)
+            do lm=L**2+1,(L+1)**2
+              do ish=1,nsph
+                rmid=(dble(ish)-0.5d0)*delta_r
+                wpdos(lm,iatom)=wpdos(lm,iatom)+abs(csph2(lm,ish,iatom))**2*rmid**2*delta_r
+              end do
             end do
           end do
         end do
-      end do
-      call comm_summation(rbox_pdos,rbox_pdos2,25*natom,info%icomm_r)
+
+      else
+        ! ===== atomic-orbital projection onto the pseudo-atomic wavefunction upp_f (FHI only) =====
+        rbox_pdos=0.d0
+        do iatom=1,natom
+          ikoa=Kion(iatom)
+          do L=0,pp%mlps(ikoa)
+            do m=-L,L
+              lm=L*L+L+1+m
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                dvec(1)=lg%coordinate(ix,1)-system%Rion(1,iatom)
+                dvec(2)=lg%coordinate(iy,2)-system%Rion(2,iatom)
+                dvec(3)=lg%coordinate(iz,3)-system%Rion(3,iatom)
+                frac=matmul(Ainv,dvec); frac=frac-anint(frac)  ! minimum image
+                dvec=matmul(system%primitive_a,frac)
+                xx=dvec(1); yy=dvec(2); zz=dvec(3)
+                rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
+                rinv=1.0d0/rr
+                xxxx=xx*rinv; yyyy=yy*rinv; zzzz=zz*rinv
+                call bisection(rr,intr,ikoa,pp%nrmax,pp%rad)
+                if(intr==1) intr=2
+                ratio1=(rr-pp%rad(intr,ikoa))/(pp%rad(intr+1,ikoa)-pp%rad(intr,ikoa)) ; ratio2=1.d0-ratio1
+                phi_r= ( ratio1*pp%upp_f(intr,L,ikoa) + ratio2*pp%upp_f(intr-1,L,ikoa) )*rinv*sqrt((2*L+1)/(4*Pi))  ! R_L*sqrt((2L+1)/4pi); upp_f is raw u_L (see input_pp), monomial Ylm restores R_L*Ylm0
+                                              !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+                if(allocated(tpsi%rwf)) then
+                  rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+                else
+                  rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+                end if
+              end do
+              end do
+              end do
+            end do
+          end do
+        end do
+        call comm_summation(rbox_pdos,rbox_pdos2,25*natom,info%icomm_r)
+        do iatom=1,natom
+          ikoa=Kion(iatom)
+          do L=0,pp%mlps(ikoa)
+            do lm=L**2+1,(L+1)**2
+              wpdos(lm,iatom)=abs(rbox_pdos2(lm,iatom))**2
+            end do
+          end do
+        end do
+      end if
+
+      ! ===== energy broadening (shared by both methods) =====
       do iatom=1,natom
         ikoa=Kion(iatom)
         do L=0,pp%mlps(ikoa)
@@ -2719,14 +2802,14 @@ contains
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2)*system%wtk(iik)
+                  +wpdos(lm,iatom)*fk/(ww**2+out_dos_width**2)*system%wtk(iik)
               end do
             case('gaussian')
               fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)*system%wtk(iik)
+                  +wpdos(lm,iatom)*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)*system%wtk(iik)
               end do
             end select
           end do
@@ -2735,6 +2818,7 @@ contains
     end do
     end do
     end do
+    if(allocated(csph)) deallocate(csph,csph2)
     call comm_summation(pdos_l_tmp,pdos_l,out_dos_nenergy*5*natom,info%icomm_ko)
 
     if(comm_is_root(nproc_id_global))then

@@ -336,6 +336,7 @@ module salmon_global
   real(8)        :: out_dos_width
   character(16)  :: out_dos_function
   character(1)   :: yn_out_pdos
+  character(1)   :: yn_out_pdos_sphere
   character(1)   :: yn_out_dns
   character(1)   :: yn_out_dns_rt
   character(1)   :: yn_out_dns_ac_je
