@@ -3167,8 +3167,9 @@ contains
       ! are not part of the DG-Fragment RT path.
       if(time_integrator_dg_fragment/='ssprk3' .and. &
          time_integrator_dg_fragment/='rk4' .and. &
+         time_integrator_dg_fragment/='taylor4pc' .and. &
          time_integrator_dg_fragment/='aetrs') &
-      & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', or 'aetrs'"
+      & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', 'taylor4pc', or 'aetrs'"
     end if
     
     call yn_argument_check(yn_dg_fragment_rt)

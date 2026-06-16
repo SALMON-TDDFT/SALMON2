@@ -246,11 +246,16 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
                             calculate_hamiltonian_matrix_std => calculate_hamiltonian_matrix, &
-                            update_density_and_hamiltonian_std => update_density_and_hamiltonian
+                            update_density_and_hamiltonian_std => update_density_and_hamiltonian, &
+                            calculate_observables_std => calculate_observables, &
+                            diagnose_dcdft_lcfo_seed_stationarity_std => diagnose_dcdft_lcfo_seed_stationarity, &
+                            calibrate_dcdft_lcfo_static_hamiltonian_std => calibrate_dcdft_lcfo_static_hamiltonian, &
+                            diagnose_velocity_transition_strength_dg
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
-                                calculate_hamiltonian_matrix_soi => calculate_hamiltonian_matrix
+                                calculate_hamiltonian_matrix_soi => calculate_hamiltonian_matrix, &
+                                calculate_observables_soi => calculate_observables
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
   use sendrecv_grid, only: s_sendrecv_grid
@@ -258,6 +263,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use write_sub
   use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, &
                            out_rt_energy_step, nt, dt, iperiodic
+  use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
   use hamiltonian, only: update_kvector_nonlocalpt_microAc
   implicit none
@@ -282,19 +288,30 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   type(s_singlescale),    intent(inout) :: singlescale
 
   logical, parameter :: dense_lcfo_density_diag_default = .false.
+  logical, parameter :: trace_dcdft_seed_diagnostics = .false.
+  logical, parameter :: trace_dg_velocity_transition = .true.
 
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
+  integer :: itt_initial_obs
   integer :: env_len, env_status
   integer :: jspin
   logical :: dense_seed_basis_uncapped
   logical :: trace_dg_current
   logical :: did_validate_seed
   logical :: print_rt_step
+  logical :: write_energy_step
   character(len=16) :: env_value
+  character(len=16) :: time_label
   real(8) :: curr_e_out(3,2), curr_i_zero(3)
   real(8) :: Ac_zero(3)
+  real(8) :: Ac_seed_start(3)
   real(8) :: current_abs
+  real(8) :: current_time
+  real(8) :: rho_rebuild_diff, vh_rebuild_diff, vxc_rebuild_diff
+  real(8), allocatable :: rho_before_rebuild(:,:,:)
+  real(8), allocatable :: vh_before_rebuild(:,:,:)
+  real(8), allocatable :: vxc_before_rebuild(:,:,:)
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
@@ -370,11 +387,62 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       dg_frag%flux_face_trace_mix_enabled = .false.
       call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
       dg_frag%flux_face_trace_mix_enabled = .true.
+      call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
       ! The DC-LCFO export path already applies the core-overlap cleanup and
       ! writes the RT basis and eigenvector coefficients in that metric.  Do
       ! not repeat a local core-S diagonalization here; doing so changes the
       ! exported basis rank and can remove virtual directions needed by RT.
       call validate_dcdft_lcfo_seed_light(dg_frag, system)
+      if (trace_dcdft_seed_diagnostics) then
+        call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                       '[DG-DCDFT-SEED-HRES-EXPORT]')
+        Ac_seed_start(:) = rt%Ac_tot(:, max(Mit, lbound(rt%Ac_tot, 2)))
+        if (maxval(abs(Ac_seed_start(:) - Ac_zero(:))) > 1.0d-14) then
+          call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_seed_start, &
+                                                         '[DG-DCDFT-SEED-HRES-EXPORT-A]')
+        end if
+      end if
+      if (trace_dcdft_seed_diagnostics) then
+        allocate(rho_before_rebuild(lbound(rho%f,1):ubound(rho%f,1), &
+                                    lbound(rho%f,2):ubound(rho%f,2), &
+                                    lbound(rho%f,3):ubound(rho%f,3)))
+        allocate(vh_before_rebuild(lbound(Vh%f,1):ubound(Vh%f,1), &
+                                   lbound(Vh%f,2):ubound(Vh%f,2), &
+                                   lbound(Vh%f,3):ubound(Vh%f,3)))
+        allocate(vxc_before_rebuild(lbound(Vxc(1)%f,1):ubound(Vxc(1)%f,1), &
+                                    lbound(Vxc(1)%f,2):ubound(Vxc(1)%f,2), &
+                                    lbound(Vxc(1)%f,3):ubound(Vxc(1)%f,3)))
+        rho_before_rebuild(:, :, :) = rho%f(:, :, :)
+        vh_before_rebuild(:, :, :) = Vh%f(:, :, :)
+        vxc_before_rebuild(:, :, :) = Vxc(1)%f(:, :, :)
+      end if
+      call update_density_and_hamiltonian_std(dg_frag, system, info, rt, 0, Ac_zero, &
+           lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+           rho, rho_s, Vh, Vxc, Vpsl, energy, &
+           skip_orbital_dependent=.true.)
+      if (trace_dcdft_seed_diagnostics) then
+        rho_rebuild_diff = maxval(abs(rho%f(:, :, :) - rho_before_rebuild(:, :, :)))
+        vh_rebuild_diff = maxval(abs(Vh%f(:, :, :) - vh_before_rebuild(:, :, :)))
+        vxc_rebuild_diff = maxval(abs(Vxc(1)%f(:, :, :) - vxc_before_rebuild(:, :, :)))
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,3(1x,1pe13.5))') '[DG-DCDFT-SEED-REBUILD-DIFF] max|rho,Vh,Vxc(new-old)|=', &
+            rho_rebuild_diff, vh_rebuild_diff, vxc_rebuild_diff
+          flush(6)
+        end if
+        deallocate(rho_before_rebuild, vh_before_rebuild, vxc_before_rebuild)
+      end if
+      if (trace_dcdft_seed_diagnostics) then
+        call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                       '[DG-DCDFT-SEED-HRES-RTSCF]')
+      end if
+      if (allocated(dg_frag%flux_face_trace_cache)) deallocate(dg_frag%flux_face_trace_cache)
+      dg_frag%flux_face_trace_mix_enabled = .false.
+      call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
+      dg_frag%flux_face_trace_mix_enabled = .true.
+      call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
+      if (trace_dg_velocity_transition .and. .not. dg_frag%coef_state_block_mode) then
+        call diagnose_velocity_transition_strength_dg(dg_frag, system, 3)
+      end if
       did_validate_seed = .true.
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') '[DG-DCDFT-SEED] DGDFT/LCFO coefficients are kept rank-distributed on fragment-core rows'
@@ -434,15 +502,57 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
 
   ! H_mat_kinetic is constructed inside calculate_hamiltonian_matrix
   trace_dg_current = .false.
+  env_value = ''
+  call get_environment_variable("SALMON_DG_TRACE_CURRENT", env_value, length=env_len, status=env_status)
+  if (env_status == 0 .and. env_len > 0) then
+    if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+        env_value(1:1) == 't' .or. env_value(1:1) == 'T') trace_dg_current = .true.
+  end if
   
   if (comm_is_root(nproc_id_global)) then
+    time_label = 'time['//trim(t_unit_time%name)//']'
     write(*,*)
     write(*,*) "=== Starting DG-Fragment RT time evolution ==="
-    write(*,'(1x,a8,1x,a11,4(1x,a15))') 'step', 'time[fs]', 'Jx[a.u.]', 'Jy[a.u.]', 'Jz[a.u.]', '|J|[a.u.]'
+    write(*,'(1x,a8,1x,a11,4(1x,a15))') 'step', trim(time_label), 'Jx[a.u.]', 'Jy[a.u.]', 'Jz[a.u.]', '|J|[a.u.]'
     write(*,'(1x,a8,1x,a11,4(1x,a15))') '--------', '-----------', '---------------', '---------------', &
       '---------------', '---------------'
     write(*,*)
   end if
+
+  itt_initial_obs = max(Mit, lbound(rt%Ac_tot, 2))
+  if (yn_spinorbit == 'y') then
+    call calculate_observables_soi(dg_frag, system, mg, stencil, ppg, rt, itt_initial_obs, Vh, Vxc, Vpsl)
+  else
+    call calculate_observables_std(dg_frag, system, mg, stencil, ppg, rt, itt_initial_obs, Vh, Vxc, Vpsl)
+  end if
+  if (comm_is_root(nproc_id_global)) then
+    current_abs = sqrt(sum(dg_frag%current_total(:)**2))
+    current_time = dble(Mit) * dt * t_unit_time%conv
+    write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') Mit, current_time, dg_frag%current_total(:), current_abs
+    if (trace_dg_current) then
+      write(*,'(1x,a,i0,7(a,3es13.5),2(a,es13.5))') '[DG-CURRENT] itt=', Mit, &
+        ' para=', dg_frag%current_para(:), ' nl=', dg_frag%current_nl(:), &
+        ' dia=', dg_frag%current_dia(:), ' total=', dg_frag%current_total(:), &
+        ' Ac=', rt%Ac_tot(:, itt_initial_obs), ' pCnorm=', dg_frag%current_para_source_norm(:), &
+        ' jBound=', dg_frag%current_para_bound(:), &
+        ' cNorm=', dg_frag%current_coef_norm, ' cIm=', dg_frag%current_coef_imag_norm
+    end if
+    flush(6)
+  end if
+
+  system%vec_Ac(1:3) = rt%Ac_tot(1:3, itt_initial_obs)
+  system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3, itt_initial_obs)
+  system%vec_E(1:3) = rt%E_tot(1:3, itt_initial_obs)
+  system%vec_E_ext(1:3) = rt%E_ext(1:3, itt_initial_obs)
+  select case(iperiodic)
+  case(0)
+    call write_rt_data_0d(Mit, ofl, dt, system, rt)
+  case(3)
+    curr_e_out(:, :) = 0.0d0
+    curr_e_out(:, 1) = dg_frag%current_total(:)
+    curr_i_zero(:) = 0.0d0
+    call write_rt_data_3d(Mit, ofl, dt, system, curr_e_out, curr_i_zero)
+  end select
 
   env_value = ''
   call get_environment_variable("SALMON_DG_INITIAL_DENSITY_PROBE", env_value, length=env_len, status=env_status)
@@ -455,7 +565,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
 
   ! Time evolution loop
   do itt = Mit+1, nt
-    print_rt_step = (itt <= Mit + 5) .or. (mod(itt, 10) == 0)
+    print_rt_step = .true.
+    write_energy_step = (itt == nt .or. &
+                         (out_rt_energy_step > 0 .and. mod(itt, out_rt_energy_step) == 0))
     if (yn_spinorbit == 'y') then
       call tddft_dg_fragment_iteration_soi(dg_frag, system, info, rt, itt, dt, &
                                            lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
@@ -468,7 +580,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     
     ! Reconstruct the DFT total energy only on energy-output steps. Current-only
     ! steps should not pay for a full DG one-body energy contraction.
-    if (itt == 1 .or. itt == nt .or. (out_rt_energy_step > 0 .and. mod(itt, out_rt_energy_step) == 0)) then
+    if (write_energy_step) then
       call update_dg_rt_total_energy(system, info, mg, fg, poisson, ppg, rho, rho_s, Vh, Vxc, Vpsl, dg_frag, energy, itt)
       energy%elec_num = dg_frag%elec_num_scaled
       energy%elec_num_raw = dg_frag%elec_num_raw
@@ -510,7 +622,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. print_rt_step) then
       current_abs = sqrt(sum(dg_frag%current_total(:)**2))
-      write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') itt, dble(itt)*dt, dg_frag%current_total(:), current_abs
+      current_time = dble(itt) * dt * t_unit_time%conv
+      write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') itt, current_time, dg_frag%current_total(:), current_abs
+      flush(6)
       if (trace_dg_current) then
         write(*,'(1x,a,i0,7(a,3es13.5),2(a,es13.5))') '[DG-CURRENT] itt=', itt, &
           ' para=', dg_frag%current_para(:), ' nl=', dg_frag%current_nl(:), &
@@ -579,6 +693,7 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
 	  integer :: i, j, nrow, c0, c1, nb, p0, p1, np, occ_check_block_size
 	  integer :: ilocal, global_idx, ncoef_local
 	  integer :: iprobe, nprobe, p0_candidate, cross_probe_starts(3)
+  integer, allocatable :: block_cols(:)
 	  logical :: duplicate, include_s_contrib
 
   if (.not. allocated(dg_frag%coef)) then
@@ -639,6 +754,10 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
   end if
   include_s_contrib = .true.
   if (dg_frag%parallel_mode_orbital) include_s_contrib = dg_frag%is_frag_root
+  if (dg_frag%dc_lcfo_seed_basis_cleaned .and. .not. dg_frag%identity_seed_coefficients .and. &
+      .not. dg_frag%use_plane_wave_basis) then
+    include_s_contrib = comm_is_root(dg_frag%id)
+  end if
   ! Keep this separate from physics parameters.  It is only a validation
   ! memory/performance tile size, and should become namelist- or memory-budget
   ! driven once the DGDFT seed route is stabilized.
@@ -683,16 +802,7 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
     end do
     if (nsamp > 0) then
       allocate(coef_sample(nrow, nsamp), scoef_sample(nrow, nsamp))
-      coef_sample(:, :) = (0.0d0, 0.0d0)
-      do ilocal = 1, ncoef_local
-        global_idx = dg_frag%local_coef_global_ids(ilocal, ispin)
-        if (global_idx < 1 .or. global_idx > nrow) cycle
-        do i = 1, nsamp
-          coef_sample(global_idx, i) = dg_frag%coef(ilocal, sample_cols(i), ispin)
-        end do
-      end do
-      call comm_summation(coef_sample, scoef_sample, nrow * nsamp, dg_frag%icomm)
-      coef_sample(:, :) = scoef_sample(:, :)
+      call fill_seed_coef_columns(dg_frag, ispin, sample_cols(1:nsamp), nrow, ncoef_local, coef_sample)
       scoef_sample(:, :) = (0.0d0, 0.0d0)
       call apply_overlap_operator_batch(dg_frag, ispin, coef_sample, scoef_sample, .false.)
       diag_local(:) = 0.0d0
@@ -724,14 +834,12 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
         nb = c1 - c0 + 1
         if (nb <= 0) cycle
         allocate(coef_occ(nrow, nb), scoef_occ(nrow, nb))
-        coef_occ(:, :) = (0.0d0, 0.0d0)
-        do ilocal = 1, ncoef_local
-          global_idx = dg_frag%local_coef_global_ids(ilocal, ispin)
-          if (global_idx < 1 .or. global_idx > nrow) cycle
-          coef_occ(global_idx, :) = dg_frag%coef(ilocal, c0:c1, ispin)
+        allocate(block_cols(nb))
+        do i = 1, nb
+          block_cols(i) = c0 + i - 1
         end do
-        call comm_summation(coef_occ, scoef_occ, nrow * nb, dg_frag%icomm)
-        coef_occ(:, :) = scoef_occ(:, :)
+        call fill_seed_coef_columns(dg_frag, ispin, block_cols, nrow, ncoef_local, coef_occ)
+        deallocate(block_cols)
         scoef_occ(:, :) = (0.0d0, 0.0d0)
         call apply_overlap_operator_batch(dg_frag, ispin, coef_occ, scoef_occ, .false.)
         occ_diag_local(:) = 0.0d0
@@ -762,14 +870,12 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
             np = p1 - p0 + 1
             if (np <= 0) cycle
             allocate(coef_prev(nrow, np), coef_prev_full(nrow, np), occ_cross_local(np, nb), occ_cross_global(np, nb))
-            coef_prev(:, :) = (0.0d0, 0.0d0)
-            do ilocal = 1, ncoef_local
-              global_idx = dg_frag%local_coef_global_ids(ilocal, ispin)
-              if (global_idx < 1 .or. global_idx > nrow) cycle
-              coef_prev(global_idx, :) = dg_frag%coef(ilocal, p0:p1, ispin)
+            allocate(block_cols(np))
+            do i = 1, np
+              block_cols(i) = p0 + i - 1
             end do
-            call comm_summation(coef_prev, coef_prev_full, nrow * np, dg_frag%icomm)
-            coef_prev(:, :) = coef_prev_full(:, :)
+            call fill_seed_coef_columns(dg_frag, ispin, block_cols, nrow, ncoef_local, coef_prev)
+            deallocate(block_cols)
             occ_cross_local(:, :) = (0.0d0, 0.0d0)
             occ_cross_global(:, :) = (0.0d0, 0.0d0)
             if (include_s_contrib) then
@@ -820,14 +926,12 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
             np = p1 - p0 + 1
             if (np <= 0) cycle
             allocate(coef_prev(nrow, np), coef_prev_full(nrow, np), occ_cross_local(np, nb), occ_cross_global(np, nb))
-            coef_prev(:, :) = (0.0d0, 0.0d0)
-            do ilocal = 1, ncoef_local
-              global_idx = dg_frag%local_coef_global_ids(ilocal, ispin)
-              if (global_idx < 1 .or. global_idx > nrow) cycle
-              coef_prev(global_idx, :) = dg_frag%coef(ilocal, p0:p1, ispin)
+            allocate(block_cols(np))
+            do i = 1, np
+              block_cols(i) = p0 + i - 1
             end do
-            call comm_summation(coef_prev, coef_prev_full, nrow * np, dg_frag%icomm)
-            coef_prev(:, :) = coef_prev_full(:, :)
+            call fill_seed_coef_columns(dg_frag, ispin, block_cols, nrow, ncoef_local, coef_prev)
+            deallocate(block_cols)
             occ_cross_local(:, :) = (0.0d0, 0.0d0)
             occ_cross_global(:, :) = (0.0d0, 0.0d0)
             if (include_s_contrib) then
@@ -908,6 +1012,42 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
 	  end if
 
 	end subroutine validate_dcdft_lcfo_seed_light
+
+subroutine fill_seed_coef_columns(dg_frag, ispin, state_cols, nrow, ncoef_local, coef_full)
+  use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use communication, only: comm_summation
+  implicit none
+  type(s_dg_fragment_rt), intent(in) :: dg_frag
+  integer, intent(in) :: ispin
+  integer, intent(in) :: state_cols(:)
+  integer, intent(in) :: nrow, ncoef_local
+  complex(8), intent(out) :: coef_full(:, :)
+
+  complex(8), allocatable :: coef_sum(:, :)
+  integer :: ilocal, global_idx, jcol, state_col, local_col
+
+  coef_full(:, :) = (0.0d0, 0.0d0)
+  do ilocal = 1, ncoef_local
+    global_idx = dg_frag%local_coef_global_ids(ilocal, ispin)
+    if (global_idx < 1 .or. global_idx > nrow) cycle
+    do jcol = 1, min(size(state_cols), size(coef_full, 2))
+      state_col = state_cols(jcol)
+      if (state_col < 1 .or. state_col > dg_frag%nstate_tot) cycle
+      if (dg_frag%coef_state_block_mode) then
+        if (state_col < dg_frag%coef_state_start .or. state_col > dg_frag%coef_state_end) cycle
+        local_col = state_col - dg_frag%coef_state_start + 1
+      else
+        local_col = state_col
+      end if
+      if (local_col < 1 .or. local_col > size(dg_frag%coef, 2)) cycle
+      coef_full(global_idx, jcol) = dg_frag%coef(ilocal, local_col, ispin)
+    end do
+  end do
+  allocate(coef_sum(size(coef_full, 1), size(coef_full, 2)))
+  call comm_summation(coef_full, coef_sum, size(coef_full), dg_frag%icomm)
+  coef_full(:, :) = coef_sum(:, :)
+  deallocate(coef_sum)
+end subroutine fill_seed_coef_columns
 
 subroutine diagnose_dg_flux_density_mismatch(dg_frag, system, mg, rho, rho_s, label)
   use structures, only: s_dft_system, s_rgrid, s_scalar

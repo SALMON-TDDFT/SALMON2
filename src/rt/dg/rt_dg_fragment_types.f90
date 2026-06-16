@@ -147,6 +147,10 @@ module rt_dg_fragment_types
     complex(8), allocatable :: coef(:,:,:)        ! (nstate_frag, nstate_tot, nspin)
     complex(8), allocatable :: coef_new(:,:,:)    ! for time propagation
     complex(8), allocatable :: coef_work(:,:,:)   ! work array
+    logical :: coef_state_block_mode = .false.     ! store only local state columns, with fragment-local rows
+    integer :: coef_state_start = 1                ! first global state column stored on this rank
+    integer :: coef_state_end = 0                  ! last global state column stored on this rank
+    integer :: coef_nstate_local = 0               ! local state-column count
     ! Orbital parallelism stores only the coefficient rows owned by this rank.
     integer, allocatable :: local_coef_count(:)        ! (nspin), local coefficient-row count
     integer, allocatable :: local_coef_global_ids(:,:) ! (local_coef_max,nspin), local row -> global basis id
@@ -169,6 +173,7 @@ module rt_dg_fragment_types
     type(matrix_block_info), allocatable :: H_mat_core_blocks(:)
     type(matrix_block_info), allocatable :: H_mat_kinetic_blocks(:)
     type(complex_matrix_block_info), allocatable :: H_nl_blocks(:)
+    logical :: H_blocks_include_nonlocal = .false. ! true when H_mat_blocks are read from DC exported full H
     integer, allocatable :: H_block_map(:,:)
     integer :: n_H_blocks = 0
     integer, allocatable :: H_nl_block_map(:,:)
@@ -180,7 +185,11 @@ module rt_dg_fragment_types
     type(flux_face_trace_info), allocatable :: flux_face_trace_cache(:)
     logical :: flux_face_trace_mix_enabled = .false.
     logical, allocatable :: runtime_neighbor_pair_cache(:,:)    ! static fragment-pair runtime adjacency
+    integer, allocatable :: runtime_neighbor_frag_count(:)       ! runtime-neighbor list length for each fragment
+    integer, allocatable :: runtime_neighbor_frag_ids(:,:)       ! compact runtime-neighbor fragment ids
     logical, allocatable :: momentum_neighbor_pair_cache(:,:)   ! static fragment-pair momentum adjacency
+    integer, allocatable :: momentum_neighbor_frag_count(:)      ! face-neighbor list length for each fragment
+    integer, allocatable :: momentum_neighbor_frag_ids(:,:)      ! compact face-neighbor fragment ids, including self
     real(8), allocatable :: S_mat(:,:,:)       ! raw fragment overlap matrix
     real(8), allocatable :: S_mat_prop(:,:,:)  ! overlap matrix used in propagation/unitarity
     complex(8), allocatable :: S_mat_c(:,:,:)      ! complex raw fragment overlap matrix (SOI path)
@@ -209,6 +218,7 @@ module rt_dg_fragment_types
     type(complex_vector_block_info), allocatable :: momentum_blocks_c(:)
     integer, allocatable :: momentum_block_map(:,:)
     integer :: n_momentum_blocks = 0
+    logical :: momentum_blocks_include_dg_flux = .false. ! true after covariant DG surface-Flux A operator is added
     integer, allocatable :: momentum_dense_row_gid_cache(:)    ! reusable scratch for momentum dense materialization
     integer, allocatable :: momentum_dense_col_gid_cache(:)    ! reusable scratch for momentum dense materialization
     integer, allocatable :: momentum_dense_valid_row_ids(:)    ! reusable scratch for momentum dense materialization
@@ -224,6 +234,8 @@ module rt_dg_fragment_types
     logical :: has_nl_cache                        ! flag: cached H_nl available
     complex(8), allocatable :: nl_projector_overlap(:,:,:,:) ! (nstate_frag,Nlma,nspin,ifrag_local)
     complex(8), allocatable :: nl_projector_overlap_halo(:,:,:,:) ! (nstate_frag,Nlma,nspin,halo)
+    complex(8), allocatable :: nl_projector_r_overlap(:,:,:,:,:) ! (3,nstate_frag,Nlma,nspin,ifrag_local)
+    complex(8), allocatable :: nl_projector_r_overlap_halo(:,:,:,:,:) ! (3,nstate_frag,Nlma,nspin,halo)
     real(8) :: Ac_nl_projector_cache(3) = 0.0d0
     integer :: nl_projector_cache_nlma = 0
     logical :: has_nl_projector_cache = .false.
@@ -390,9 +402,12 @@ module rt_dg_fragment_types
     real(8), allocatable :: stage_Vh_buffer(:,:,:) ! RK-stage scratch: fragment-buffered Hartree potential
     real(8), allocatable :: stage_Vpsl_buffer(:,:,:) ! RK-stage scratch: static local ionic potential
     real(8), allocatable :: stage_Vxc_buffer(:,:,:,:) ! RK-stage scratch: fragment-buffered XC potential
+    real(8), allocatable :: H_ref_Vh_buffer(:,:,:) ! DC-LCFO seed Hartree reference for H_export + delta V
+    real(8), allocatable :: H_ref_Vxc_buffer(:,:,:,:) ! DC-LCFO seed XC reference for H_export + delta V
     integer, allocatable :: stage_gx_map(:), stage_gy_map(:), stage_gz_map(:) ! buffer index -> parent-grid index
     logical :: stage_vpsl_buffer_valid = .false.  ! Vpsl is static during RT unless the scratch bounds change
     logical :: stage_map_valid = .false.
+    logical :: H_delta_reference_valid = .false.
 
     ! Self-consistent basis update (adaptive basis)
     real(8), allocatable :: H_mat_kinetic(:,:,:)   ! Kinetic part only (constant, nstate,nstate,nspin)

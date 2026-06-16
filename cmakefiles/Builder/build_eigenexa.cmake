@@ -20,6 +20,7 @@ else ()
   set(FC     "F77=${CMAKE_Fortran_COMPILER}")
   set(CFLAGS "CFLAGS=${CMAKE_C_FLAGS}")
   set(FFLAGS "FFLAGS=${CMAKE_Fortran_FLAGS}")
+  set(FFLAGS0 "FFLAGS0=${CMAKE_Fortran_FLAGS} -O0")
 endif()
 
 include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_scalapack.cmake)
@@ -27,8 +28,8 @@ include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_scalapack.cmake)
 ExternalProject_Add(eigenexa-project
   URL               "https://www.r-ccs.riken.jp/labs/lpnctrt/assets/img/EigenExa-${EIGENEXA_VERSION}.tgz"
   PREFIX            ${CMAKE_BINARY_DIR}/eigenexa
-  CONFIGURE_COMMAND ${CMAKE_BINARY_DIR}/eigenexa/src/eigenexa-project/configure ${HOST_OPTION} --prefix=${CMAKE_CURRENT_BINARY_DIR} ${CC} ${FC} ${CFLAGS} ${FFLAGS}
-  BUILD_COMMAND     gmake -C src
+  CONFIGURE_COMMAND ${CMAKE_BINARY_DIR}/eigenexa/src/eigenexa-project/configure ${HOST_OPTION} --prefix=${CMAKE_CURRENT_BINARY_DIR} ${CC} ${FC} ${CFLAGS} ${FFLAGS} ${FFLAGS0}
+  BUILD_COMMAND     gmake -C src "FFLAGS0=${CMAKE_Fortran_FLAGS} -O0" libEigenExa.a
   STEP_TARGETS      build
   EXCLUDE_FROM_ALL  on
 )

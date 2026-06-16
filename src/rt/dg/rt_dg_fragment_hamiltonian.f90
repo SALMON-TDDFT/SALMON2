@@ -44,8 +44,25 @@
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer :: ifrag_row, ifrag_col
+    logical, save :: option_initialized = .false.
+    logical, save :: enable_pair_cache = .false.
+    character(16) :: env_value
+    integer :: env_status
 
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) return
+    if (.not. option_initialized) then
+      env_value = ''
+      call get_environment_variable('SALMON_DG_CACHE_MOMENTUM_NEIGHBOR_PAIRS', env_value, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_value)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_pair_cache = .true.
+        end select
+      end if
+      option_initialized = .true.
+    end if
+    if (.not. enable_pair_cache) return
+
     allocate(dg_frag%momentum_neighbor_pair_cache(dg_frag%n_frag, dg_frag%n_frag))
     dg_frag%momentum_neighbor_pair_cache(:, :) = .false.
     do ifrag_col = 1, dg_frag%n_frag
@@ -59,6 +76,42 @@
       end do
     end do
   end subroutine ensure_momentum_neighbor_pair_cache
+
+  subroutine ensure_momentum_neighbor_list_cache(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: ifrag, jfrag, nnei, max_nnei
+
+    if (allocated(dg_frag%momentum_neighbor_frag_count) .and. &
+        allocated(dg_frag%momentum_neighbor_frag_ids)) then
+      if (size(dg_frag%momentum_neighbor_frag_count) == dg_frag%n_frag .and. &
+          size(dg_frag%momentum_neighbor_frag_ids, 2) == dg_frag%n_frag) return
+      deallocate(dg_frag%momentum_neighbor_frag_count, dg_frag%momentum_neighbor_frag_ids)
+    end if
+
+    allocate(dg_frag%momentum_neighbor_frag_count(max(1, dg_frag%n_frag)))
+    dg_frag%momentum_neighbor_frag_count(:) = 0
+    max_nnei = 0
+    do ifrag = 1, dg_frag%n_frag
+      nnei = 0
+      do jfrag = 1, dg_frag%n_frag
+        if (ifrag == jfrag .or. is_momentum_neighbor_pair(dg_frag, ifrag, jfrag)) nnei = nnei + 1
+      end do
+      dg_frag%momentum_neighbor_frag_count(ifrag) = nnei
+      max_nnei = max(max_nnei, nnei)
+    end do
+
+    allocate(dg_frag%momentum_neighbor_frag_ids(max(1, max_nnei), max(1, dg_frag%n_frag)))
+    dg_frag%momentum_neighbor_frag_ids(:, :) = 0
+    do ifrag = 1, dg_frag%n_frag
+      nnei = 0
+      do jfrag = 1, dg_frag%n_frag
+        if (.not. (ifrag == jfrag .or. is_momentum_neighbor_pair(dg_frag, ifrag, jfrag))) cycle
+        nnei = nnei + 1
+        dg_frag%momentum_neighbor_frag_ids(nnei, ifrag) = jfrag
+      end do
+    end do
+  end subroutine ensure_momentum_neighbor_list_cache
 
   integer function map_global_to_phi_box_coord_ham(ig, lb, ub, lgtot) result(iloc)
     implicit none
@@ -189,6 +242,29 @@
     iblk = block_map(ifrag_row, ifrag_col)
   end function find_matrix_block
 
+  logical function use_block_diag_hamiltonian_mode() result(enabled)
+    implicit none
+    logical, save :: initialized = .false.
+    logical, save :: enabled_save = .false.
+    character(16) :: env_value
+    integer :: env_status
+
+    if (.not. initialized) then
+      env_value = ''
+      call get_environment_variable('SALMON_DG_BLOCK_DIAG_H', env_value, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_value)))
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          enabled_save = .false.
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enabled_save = .true.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = enabled_save
+  end function use_block_diag_hamiltonian_mode
+
   logical function fragment_row_is_locally_owned(dg_frag, ifrag_row) result(is_local)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -231,6 +307,36 @@
     is_local = (dg_frag%coef_owner(global_idx, ispin) == dg_frag%id)
   end function basis_row_is_locally_owned
 
+  subroutine collect_local_fragment_rows(dg_frag, local_rows)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, allocatable, intent(out) :: local_rows(:)
+
+    integer :: ifrag, nrow
+    logical, allocatable :: row_is_local(:)
+
+    allocate(row_is_local(max(1, dg_frag%n_frag)))
+    row_is_local(:) = .false.
+    do ifrag = 1, dg_frag%n_frag
+      row_is_local(ifrag) = fragment_row_is_locally_owned(dg_frag, ifrag)
+    end do
+    if (.not. any(row_is_local)) then
+      do ifrag = max(1, dg_frag%ifrag_start), min(dg_frag%n_frag, dg_frag%ifrag_end)
+        row_is_local(ifrag) = .true.
+      end do
+    end if
+
+    nrow = count(row_is_local)
+    allocate(local_rows(nrow))
+    nrow = 0
+    do ifrag = 1, dg_frag%n_frag
+      if (.not. row_is_local(ifrag)) cycle
+      nrow = nrow + 1
+      local_rows(nrow) = ifrag
+    end do
+    deallocate(row_is_local)
+  end subroutine collect_local_fragment_rows
+
   subroutine init_matrix_blocks(dg_frag, blocks, block_map, n_blocks, diagonal_only)
     use rt_dg_fragment_types, only: matrix_block_info
     implicit none
@@ -239,8 +345,13 @@
     integer, allocatable, intent(inout) :: block_map(:, :)
     integer, intent(out) :: n_blocks
     logical, intent(in), optional :: diagonal_only
-    integer :: ifrag_row, ifrag_col, iblk, nrow_max, ncol_max
-    logical :: diagonal_blocks_only, local_fragment_only, include_pair
+    integer :: ifrag_row, ifrag_col, iblk, nrow_max, ncol_max, inei
+    logical :: diagonal_blocks_only, local_fragment_only
+
+    if (allocated(dg_frag%H_local_block_ids)) deallocate(dg_frag%H_local_block_ids)
+    if (allocated(dg_frag%H_local_rows)) deallocate(dg_frag%H_local_rows)
+    dg_frag%H_local_block_ids_valid = .false.
+    if (allocated(dg_frag%coef_allowed_request_frag)) deallocate(dg_frag%coef_allowed_request_frag)
 
     if (allocated(blocks)) then
       do iblk = 1, size(blocks)
@@ -250,6 +361,7 @@
     end if
     if (allocated(block_map)) deallocate(block_map)
     call ensure_momentum_neighbor_pair_cache(dg_frag)
+    call ensure_momentum_neighbor_list_cache(dg_frag)
     ! Galerkin volume operators are fragment-local.  S and local-potential H
     ! must stay block diagonal; inter-fragment coupling belongs in an explicit
     ! boundary/flow term, not in these dense volume blocks.
@@ -258,20 +370,17 @@
     local_fragment_only = dg_frag%parallel_mode_orbital
 
     n_blocks = 0
-    do ifrag_col = 1, dg_frag%n_frag
+    if (diagonal_blocks_only) then
       do ifrag_row = 1, dg_frag%n_frag
-        if (local_fragment_only) then
-          if (ifrag_row /= dg_frag%ifrag_group) cycle
-          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
-        end if
-        if (diagonal_blocks_only) then
-          include_pair = (ifrag_row == ifrag_col)
-        else
-          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
-        end if
-        if (include_pair) n_blocks = n_blocks + 1
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        n_blocks = n_blocks + 1
       end do
-    end do
+    else
+      do ifrag_row = 1, dg_frag%n_frag
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        n_blocks = n_blocks + dg_frag%momentum_neighbor_frag_count(ifrag_row)
+      end do
+    end if
     if (n_blocks <= 0) return
 
     allocate(blocks(n_blocks))
@@ -279,18 +388,10 @@
     block_map = 0
 
     iblk = 0
-    do ifrag_col = 1, dg_frag%n_frag
+    if (diagonal_blocks_only) then
       do ifrag_row = 1, dg_frag%n_frag
-        if (local_fragment_only) then
-          if (ifrag_row /= dg_frag%ifrag_group) cycle
-          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
-        end if
-        if (diagonal_blocks_only) then
-          include_pair = (ifrag_row == ifrag_col)
-        else
-          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
-        end if
-        if (.not. include_pair) cycle
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        ifrag_col = ifrag_row
         iblk = iblk + 1
         nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
         ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
@@ -302,16 +403,34 @@
         allocate(blocks(iblk)%val(nrow_max, ncol_max, dg_frag%nspin))
         blocks(iblk)%val = 0.0d0
       end do
-    end do
+    else
+      do ifrag_row = 1, dg_frag%n_frag
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        do inei = 1, dg_frag%momentum_neighbor_frag_count(ifrag_row)
+          ifrag_col = dg_frag%momentum_neighbor_frag_ids(inei, ifrag_row)
+          if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+          iblk = iblk + 1
+          nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
+          ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
+          block_map(ifrag_row, ifrag_col) = iblk
+          blocks(iblk)%ifrag_row = ifrag_row
+          blocks(iblk)%ifrag_col = ifrag_col
+          blocks(iblk)%nrow_max = nrow_max
+          blocks(iblk)%ncol_max = ncol_max
+          allocate(blocks(iblk)%val(nrow_max, ncol_max, dg_frag%nspin))
+          blocks(iblk)%val = 0.0d0
+        end do
+      end do
+    end if
   end subroutine init_matrix_blocks
 
   subroutine init_momentum_blocks(dg_frag, diagonal_only)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     logical, intent(in), optional :: diagonal_only
-    integer :: ifrag_row, ifrag_col, nblk, iblk
+    integer :: ifrag_row, ifrag_col, nblk, iblk, inei
     integer :: nrow_max, ncol_max
-    logical :: diagonal_blocks_only, local_fragment_only, include_pair
+    logical :: diagonal_blocks_only, local_fragment_only
 
     if (allocated(dg_frag%momentum_blocks)) then
       do iblk = 1, size(dg_frag%momentum_blocks)
@@ -326,7 +445,9 @@
       deallocate(dg_frag%momentum_blocks_c)
     end if
     if (allocated(dg_frag%momentum_block_map)) deallocate(dg_frag%momentum_block_map)
+    dg_frag%momentum_blocks_include_dg_flux = .false.
     call ensure_momentum_neighbor_pair_cache(dg_frag)
+    call ensure_momentum_neighbor_list_cache(dg_frag)
     ! The volume momentum operator is also fragment-local.  Boundary current
     ! corrections must be added as an explicit flow term so that current across
     ! fragment faces is not confused with dense neighbor volume coupling.
@@ -335,20 +456,17 @@
     local_fragment_only = dg_frag%parallel_mode_orbital
 
     nblk = 0
-    do ifrag_col = 1, dg_frag%n_frag
+    if (diagonal_blocks_only) then
       do ifrag_row = 1, dg_frag%n_frag
-        if (local_fragment_only) then
-          if (ifrag_row /= dg_frag%ifrag_group) cycle
-          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
-        end if
-        if (diagonal_blocks_only) then
-          include_pair = (ifrag_row == ifrag_col)
-        else
-          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
-        end if
-        if (include_pair) nblk = nblk + 1
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        nblk = nblk + 1
       end do
-    end do
+    else
+      do ifrag_row = 1, dg_frag%n_frag
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        nblk = nblk + dg_frag%momentum_neighbor_frag_count(ifrag_row)
+      end do
+    end if
 
     dg_frag%n_momentum_blocks = nblk
     if (nblk <= 0) return
@@ -357,18 +475,10 @@
     dg_frag%momentum_block_map = 0
 
     iblk = 0
-    do ifrag_col = 1, dg_frag%n_frag
+    if (diagonal_blocks_only) then
       do ifrag_row = 1, dg_frag%n_frag
-        if (local_fragment_only) then
-          if (ifrag_row /= dg_frag%ifrag_group) cycle
-          if (diagonal_blocks_only .and. ifrag_col /= dg_frag%ifrag_group) cycle
-        end if
-        if (diagonal_blocks_only) then
-          include_pair = (ifrag_row == ifrag_col)
-        else
-          include_pair = is_momentum_neighbor_pair(dg_frag, ifrag_row, ifrag_col)
-        end if
-        if (.not. include_pair) cycle
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        ifrag_col = ifrag_row
         iblk = iblk + 1
         dg_frag%momentum_block_map(ifrag_row, ifrag_col) = iblk
         dg_frag%momentum_blocks(iblk)%ifrag_row = ifrag_row
@@ -380,7 +490,25 @@
         allocate(dg_frag%momentum_blocks(iblk)%val(3, nrow_max, ncol_max, dg_frag%nspin))
         dg_frag%momentum_blocks(iblk)%val = 0.0d0
       end do
-    end do
+    else
+      do ifrag_row = 1, dg_frag%n_frag
+        if (local_fragment_only .and. ifrag_row /= dg_frag%ifrag_group) cycle
+        do inei = 1, dg_frag%momentum_neighbor_frag_count(ifrag_row)
+          ifrag_col = dg_frag%momentum_neighbor_frag_ids(inei, ifrag_row)
+          if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+          iblk = iblk + 1
+          dg_frag%momentum_block_map(ifrag_row, ifrag_col) = iblk
+          dg_frag%momentum_blocks(iblk)%ifrag_row = ifrag_row
+          dg_frag%momentum_blocks(iblk)%ifrag_col = ifrag_col
+          nrow_max = max(1, maxval(dg_frag%n_basis(ifrag_row, 1:dg_frag%nspin)))
+          ncol_max = max(1, maxval(dg_frag%n_basis(ifrag_col, 1:dg_frag%nspin)))
+          dg_frag%momentum_blocks(iblk)%nrow_max = nrow_max
+          dg_frag%momentum_blocks(iblk)%ncol_max = ncol_max
+          allocate(dg_frag%momentum_blocks(iblk)%val(3, nrow_max, ncol_max, dg_frag%nspin))
+          dg_frag%momentum_blocks(iblk)%val = 0.0d0
+        end do
+      end do
+    end if
   end subroutine init_momentum_blocks
 
   integer function face_neighbor_fragment_ham(dg_frag, ifrag, axis, side) result(jfrag)
@@ -862,7 +990,7 @@
     real(8) :: term_self, term_cross
     real(8) :: face_self_sum, face_cross_sum, face_self_max, face_cross_max
     integer :: face_self_count, face_cross_count
-    logical :: pbc_face, mix_face_trace, use_cached_trace, trace_pbc_face
+    logical :: pbc_face, mix_face_trace, use_cached_trace, trace_pbc_face, fold_flux_to_self
     character(len=32) :: env_face_trace
     integer :: env_face_len, env_face_status
     real(8), allocatable :: phi_col(:,:,:,:)
@@ -871,6 +999,10 @@
     if (.not. allocated(dg_frag%n_basis)) return
     if (.not. allocated(dg_frag%index_basis)) return
     if (.not. dg_frag%parallel_mode_orbital) return
+    ! Keep the Hamiltonian block-diagonal path separate from the velocity
+    ! operator.  The fixed DG Flux velocity blocks are needed by A.p and by
+    ! the current response to satisfy the insulating f-sum cancellation.
+    fold_flux_to_self = .false.
     trace_pbc_face = .false.
     env_face_trace = ''
     call get_environment_variable('SALMON_DG_PBC_FACE_TRACE', env_face_trace, length=env_face_len, status=env_face_status)
@@ -904,6 +1036,7 @@
           if (jfrag <= 0 .or. jfrag == ifrag) cycle
           iblk_self = find_matrix_block(block_map, ifrag, ifrag)
           iblk_cross = find_matrix_block(block_map, ifrag, jfrag)
+          if (fold_flux_to_self) iblk_cross = 0
           if (iblk_self <= 0 .and. iblk_cross <= 0) cycle
 
           loop_lo(:) = dg_frag%ixyz_frag(:, ifrag)
@@ -928,7 +1061,7 @@
           col_lo(:) = dg_frag%ixyz_frag(:, jfrag)
           col_hi(:) = dg_frag%ixyz_frag(:, jfrag) + dg_frag%nxyz_domain(:, jfrag) - 1
           cache_idx = 0
-          if (mix_face_trace .and. iblk_cross > 0) then
+          if (mix_face_trace .and. (iblk_cross > 0 .or. fold_flux_to_self)) then
             cache_idx = find_or_create_flux_face_trace_cache(dg_frag, ifrag, jfrag, axis, side, &
                                                             face_npts, max(1, maxval(dg_frag%n_basis(jfrag, :))), &
                                                             dg_frag%nspin)
@@ -982,7 +1115,7 @@
                     end do
                   end if
 
-                  if (iblk_cross > 0 .and. ncol > 0) then
+                  if ((iblk_cross > 0 .or. fold_flux_to_self) .and. ncol > 0) then
                     do jo = 1, ncol
                       if (use_cached_trace) then
                         u_r = dg_frag%flux_face_trace_cache(cache_idx)%u(face_pt, jo, ispin)
@@ -1001,8 +1134,15 @@
                         v_l = phi_local_value_ham(dg_frag, i_local, io, g_row)
                         dnv_l = phi_local_dn_ham(dg_frag, i_local, mg, stencil, io, g_row, axis, side)
                         term_cross = (-0.25d0 * v_l * dnu_r + 0.25d0 * dnv_l * u_r - alpha * v_l * u_r) * area_weight
-                        H_blocks(iblk_cross)%val(io, jo, ispin) = H_blocks(iblk_cross)%val(io, jo, ispin) + term_cross
-                        T_blocks(iblk_cross)%val(io, jo, ispin) = T_blocks(iblk_cross)%val(io, jo, ispin) + term_cross
+                        if (fold_flux_to_self) then
+                          if (iblk_self > 0 .and. jo <= nrow) then
+                            H_blocks(iblk_self)%val(io, jo, ispin) = H_blocks(iblk_self)%val(io, jo, ispin) + term_cross
+                            T_blocks(iblk_self)%val(io, jo, ispin) = T_blocks(iblk_self)%val(io, jo, ispin) + term_cross
+                          end if
+                        else
+                          H_blocks(iblk_cross)%val(io, jo, ispin) = H_blocks(iblk_cross)%val(io, jo, ispin) + term_cross
+                          T_blocks(iblk_cross)%val(io, jo, ispin) = T_blocks(iblk_cross)%val(io, jo, ispin) + term_cross
+                        end if
                         if (pbc_face) then
                           face_cross_sum = face_cross_sum + term_cross * term_cross
                           face_cross_max = max(face_cross_max, abs(term_cross))
@@ -1038,6 +1178,641 @@
     end do
   end subroutine add_dg_surface_flux_blocks
 
+  subroutine load_dcdft_exported_hamiltonian_blocks(dg_frag)
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_hl = 'hamiltonian_local.bin'
+    character(256) :: filename
+    integer :: ifrag, iunit, iostat_open, n_halo_file, i_halo
+    integer :: i_read, n_read
+    integer :: axis, side, dvec(3), nonzero_dirs, jfrag, iblk, iblk_self, expected_halo
+    integer :: io, jo, ispin, nrow, ncol
+    integer :: nh(3), lx, ly, lz
+    integer, allocatable :: local_rows(:)
+    real(8), allocatable :: h_self(:,:,:), h_halo(:,:,:)
+    logical :: found_file, fold_flux_to_self
+
+    if (.not. dg_frag%dc_lcfo_seed_basis_cleaned) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%H_block_map)) return
+    call rebuild_local_h_block_ids(dg_frag)
+    ! DG propagation keeps surface Flux as neighbor sparse blocks.  Folding
+    ! the face terms into the diagonal block changes the DG operator.
+    fold_flux_to_self = .false.
+
+    do iblk = 1, size(dg_frag%H_mat_blocks)
+      dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
+      if (allocated(dg_frag%H_mat_core_blocks)) dg_frag%H_mat_core_blocks(iblk)%val(:, :, :) = 0.0d0
+    end do
+
+    found_file = .false.
+    call collect_local_fragment_rows(dg_frag, local_rows)
+    n_read = size(local_rows)
+
+    do i_read = 1, n_read
+      ifrag = local_rows(i_read)
+      if (ifrag < 1 .or. ifrag > dg_frag%n_frag) cycle
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_hl
+      iunit = get_filehandle()
+      open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+      if (iostat_open /= 0) then
+        write(*,'(1x,a,i0,a,a)') '[FATAL] missing DC exported Hamiltonian at ifrag=', ifrag, ' file=', trim(filename)
+        stop 'DG-Fragment RT: missing DC exported Hamiltonian'
+      end if
+      found_file = .true.
+
+      allocate(h_self(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+      read(iunit) h_self(1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+      iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
+      if (iblk > 0) then
+        do ispin = 1, dg_frag%nspin
+          nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 1), dg_frag%nstate_frag)
+          ncol = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 2), dg_frag%nstate_frag)
+          if (nrow > 0 .and. ncol > 0) then
+            dg_frag%H_mat_blocks(iblk)%val(1:nrow, 1:ncol, ispin) = h_self(1:nrow, 1:ncol, ispin)
+            if (allocated(dg_frag%H_mat_core_blocks)) &
+              dg_frag%H_mat_core_blocks(iblk)%val(1:nrow, 1:ncol, ispin) = h_self(1:nrow, 1:ncol, ispin)
+          end if
+        end do
+      end if
+      deallocate(h_self)
+
+      read(iunit) n_halo_file
+      nh(:) = 0
+      do axis = 1, 3
+        if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+      end do
+
+      expected_halo = 0
+      do lx = -nh(1), nh(1)
+        do ly = -nh(2), nh(2)
+          do lz = -nh(3), nh(3)
+            dvec(:) = [lx, ly, lz]
+            nonzero_dirs = count(dvec(:) /= 0)
+            if (nonzero_dirs /= 1) cycle
+            expected_halo = expected_halo + 1
+          end do
+        end do
+      end do
+      if (expected_halo /= n_halo_file) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] DC exported Hamiltonian halo count mismatch: ifrag=', &
+          ifrag, ' expected=', expected_halo, ' file=', n_halo_file
+        stop 'DG-Fragment RT: DC exported Hamiltonian halo count mismatch'
+      end if
+
+      i_halo = 0
+      do lx = -nh(1), nh(1)
+        do ly = -nh(2), nh(2)
+          do lz = -nh(3), nh(3)
+            dvec(:) = [lx, ly, lz]
+            nonzero_dirs = count(dvec(:) /= 0)
+            if (nonzero_dirs /= 1) cycle
+            i_halo = i_halo + 1
+            allocate(h_halo(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+            read(iunit) h_halo(1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+            axis = 0
+            do jo = 1, 3
+              if (dvec(jo) /= 0) axis = jo
+            end do
+            side = -dvec(axis)
+            jfrag = face_neighbor_fragment_ham(dg_frag, ifrag, axis, side)
+            iblk_self = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
+            if (fold_flux_to_self) then
+              iblk = iblk_self
+            else
+              iblk = find_matrix_block(dg_frag%H_block_map, ifrag, jfrag)
+            end if
+            if (iblk > 0) then
+              do ispin = 1, dg_frag%nspin
+                nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 1), &
+                           dg_frag%nstate_frag)
+                if (fold_flux_to_self) then
+                  ncol = min(dg_frag%n_basis(jfrag, ispin), dg_frag%n_basis(ifrag, ispin), &
+                             size(dg_frag%H_mat_blocks(iblk)%val, 2), dg_frag%nstate_frag)
+                else
+                  ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 2), &
+                             dg_frag%nstate_frag)
+                end if
+                if (nrow <= 0 .or. ncol <= 0) cycle
+                do jo = 1, ncol
+                  do io = 1, nrow
+                    if (fold_flux_to_self) then
+                      dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                        dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + &
+                        0.25d0 * (h_halo(jo, io, ispin) + h_halo(io, jo, ispin))
+                      if (allocated(dg_frag%H_mat_core_blocks)) &
+                        dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) = &
+                          dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) + &
+                          0.25d0 * (h_halo(jo, io, ispin) + h_halo(io, jo, ispin))
+                    else
+                      dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                        dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * h_halo(jo, io, ispin)
+                      if (allocated(dg_frag%H_mat_core_blocks)) &
+                        dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) = &
+                          dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * h_halo(jo, io, ispin)
+                    end if
+                  end do
+                end do
+              end do
+              call add_dcdft_hamiltonian_reverse_half(dg_frag, ifrag, jfrag, axis, side, iblk, fold_flux_to_self)
+            end if
+            deallocate(h_halo)
+          end do
+        end do
+      end do
+      close(iunit)
+    end do
+    if (allocated(local_rows)) deallocate(local_rows)
+
+    if (found_file) then
+      dg_frag%H_blocks_include_nonlocal = .true.
+      call rebuild_local_h_block_ids(dg_frag)
+    end if
+  end subroutine load_dcdft_exported_hamiltonian_blocks
+
+  subroutine load_dcdft_exported_velocity_blocks(dg_frag)
+    use communication, only: comm_is_root, comm_get_max
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_vl = 'velocity_local.bin'
+    character(256) :: filename
+    integer :: ifrag, iunit, iostat_open, n_halo_file, i_halo
+    integer :: i_read, n_read
+    integer :: axis, side, dvec(3), nonzero_dirs, jfrag, iblk, iblk_self, expected_halo
+    integer :: io, jo, ispin, nrow, ncol
+    integer :: nh(3), lx, ly, lz
+    integer, allocatable :: local_rows(:)
+    real(8), allocatable :: v_self(:,:,:,:), v_halo(:,:,:,:)
+    real(8) :: max_self, max_offdiag, max_self_global(1), max_offdiag_global(1)
+    logical :: found_file, fold_flux_to_self, trace_velocity_load
+    character(16) :: env_value
+    integer :: env_status, env_len
+
+    if (.not. dg_frag%dc_lcfo_seed_basis_cleaned) return
+    if (.not. allocated(dg_frag%momentum_blocks)) return
+    if (.not. allocated(dg_frag%momentum_block_map)) return
+    ! The velocity operator must keep neighbor Flux blocks so A.p can cancel
+    ! the diamagnetic impulse current in an insulator.
+    fold_flux_to_self = .false.
+
+    do iblk = 1, size(dg_frag%momentum_blocks)
+      dg_frag%momentum_blocks(iblk)%val(:, :, :, :) = 0.0d0
+    end do
+    dg_frag%momentum_blocks_include_dg_flux = .false.
+    max_self = 0.0d0
+    max_offdiag = 0.0d0
+    trace_velocity_load = .false.
+    env_value = ''
+    call get_environment_variable('SALMON_DG_TRACE_VELOCITY_LOAD', env_value, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_value(1:env_len))))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        trace_velocity_load = .true.
+      end select
+    end if
+
+    found_file = .false.
+    call collect_local_fragment_rows(dg_frag, local_rows)
+    n_read = size(local_rows)
+
+    do i_read = 1, n_read
+      ifrag = local_rows(i_read)
+      if (ifrag < 1 .or. ifrag > dg_frag%n_frag) cycle
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_vl
+      iunit = get_filehandle()
+      open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+      if (iostat_open /= 0) then
+        write(*,'(1x,a,i0,a,a)') '[FATAL] missing DC exported velocity operator at ifrag=', ifrag, ' file=', trim(filename)
+        write(*,'(1x,a)') '[FATAL] Regenerate the DC-LCFO-Flux seed so velocity_local.bin is exported.'
+        stop 'DG-Fragment RT: missing DC exported velocity operator'
+      end if
+      found_file = .true.
+
+      allocate(v_self(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+      read(iunit) v_self(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+      iblk = find_momentum_block(dg_frag, ifrag, ifrag)
+      if (iblk > 0) then
+        do ispin = 1, dg_frag%nspin
+          nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 2), dg_frag%nstate_frag)
+          ncol = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 3), dg_frag%nstate_frag)
+          if (nrow > 0 .and. ncol > 0) then
+            dg_frag%momentum_blocks(iblk)%val(1:3, 1:nrow, 1:ncol, ispin) = v_self(1:3, 1:nrow, 1:ncol, ispin)
+            max_self = max(max_self, maxval(abs(v_self(1:3, 1:nrow, 1:ncol, ispin))))
+          end if
+        end do
+      end if
+      deallocate(v_self)
+
+      read(iunit) n_halo_file
+      nh(:) = 0
+      do axis = 1, 3
+        if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+      end do
+
+      expected_halo = 0
+      do lx = -nh(1), nh(1)
+        do ly = -nh(2), nh(2)
+          do lz = -nh(3), nh(3)
+            dvec(:) = [lx, ly, lz]
+            nonzero_dirs = count(dvec(:) /= 0)
+            if (nonzero_dirs /= 1) cycle
+            expected_halo = expected_halo + 1
+          end do
+        end do
+      end do
+      if (expected_halo /= n_halo_file) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] DC exported velocity halo count mismatch: ifrag=', &
+          ifrag, ' expected=', expected_halo, ' file=', n_halo_file
+        stop 'DG-Fragment RT: DC exported velocity halo count mismatch'
+      end if
+
+      i_halo = 0
+      do lx = -nh(1), nh(1)
+        do ly = -nh(2), nh(2)
+          do lz = -nh(3), nh(3)
+            dvec(:) = [lx, ly, lz]
+            nonzero_dirs = count(dvec(:) /= 0)
+            if (nonzero_dirs /= 1) cycle
+            i_halo = i_halo + 1
+            allocate(v_halo(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+            read(iunit) v_halo(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+            axis = 0
+            do jo = 1, 3
+              if (dvec(jo) /= 0) axis = jo
+            end do
+            side = -dvec(axis)
+            jfrag = face_neighbor_fragment_ham(dg_frag, ifrag, axis, side)
+            iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
+            if (fold_flux_to_self) then
+              iblk = iblk_self
+            else
+              iblk = find_momentum_block(dg_frag, ifrag, jfrag)
+            end if
+            if (iblk > 0) then
+              do ispin = 1, dg_frag%nspin
+                nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 2), &
+                           dg_frag%nstate_frag)
+                if (fold_flux_to_self) then
+                  ncol = min(dg_frag%n_basis(jfrag, ispin), dg_frag%n_basis(ifrag, ispin), &
+                             size(dg_frag%momentum_blocks(iblk)%val, 3), dg_frag%nstate_frag)
+                else
+                  ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 3), &
+                             dg_frag%nstate_frag)
+                end if
+                if (nrow <= 0 .or. ncol <= 0) cycle
+                max_offdiag = max(max_offdiag, maxval(abs(v_halo(1:3, 1:nrow, 1:ncol, ispin))))
+                do jo = 1, ncol
+                  do io = 1, nrow
+                    dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) = &
+                      dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) + 0.5d0 * v_halo(1:3, jo, io, ispin)
+                  end do
+                end do
+              end do
+              call add_dcdft_velocity_reverse_half(dg_frag, ifrag, jfrag, axis, side, iblk)
+            end if
+            deallocate(v_halo)
+          end do
+        end do
+      end do
+      close(iunit)
+    end do
+    if (allocated(local_rows)) deallocate(local_rows)
+
+    if (found_file) then
+      dg_frag%momentum_blocks_include_dg_flux = .true.
+      if (trace_velocity_load) then
+        max_self_global(1) = max_self
+        max_offdiag_global(1) = max_offdiag
+        call comm_get_max(max_self_global, max_self_global, 1, dg_frag%icomm)
+        call comm_get_max(max_offdiag_global, max_offdiag_global, 1, dg_frag%icomm)
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,2(1x,1pe12.4))') '[DG-VELOCITY-LOAD] max_self max_offdiag=', &
+            max_self_global(1), max_offdiag_global(1)
+          flush(6)
+        end if
+      end if
+    end if
+  end subroutine load_dcdft_exported_velocity_blocks
+
+  subroutine add_dcdft_hamiltonian_reverse_half(dg_frag, ifrag, jfrag, axis_ref, side_ref, iblk, fold_flux_to_self)
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, axis_ref, side_ref, iblk
+    logical, intent(in) :: fold_flux_to_self
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_hl = 'hamiltonian_local.bin'
+    character(256) :: filename
+    integer :: iunit, iostat_open, n_halo_file, expected_halo
+    integer :: axis, side, dvec(3), nonzero_dirs, neigh
+    integer :: lx, ly, lz, nh(3), io, jo, ispin, nrow, ncol
+    real(8), allocatable :: h_self(:,:,:), h_halo(:,:,:)
+    logical :: found_reverse
+
+    if (jfrag < 1 .or. jfrag > dg_frag%n_frag) return
+    if (iblk < 1 .or. iblk > size(dg_frag%H_mat_blocks)) return
+    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_hl
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+    if (iostat_open /= 0) then
+      write(*,'(1x,a,i0,a,a)') '[FATAL] missing reverse DC Hamiltonian at ifrag=', jfrag, ' file=', trim(filename)
+      stop 'DG-Fragment RT: missing reverse DC Hamiltonian'
+    end if
+
+    allocate(h_self(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+    read(iunit) h_self(1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+    deallocate(h_self)
+    read(iunit) n_halo_file
+
+    nh(:) = 0
+    do axis = 1, 3
+      if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+    end do
+    expected_halo = 0
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          if (count(dvec(:) /= 0) == 1) expected_halo = expected_halo + 1
+        end do
+      end do
+    end do
+    if (expected_halo /= n_halo_file) then
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] reverse DC Hamiltonian halo count mismatch: ifrag=', &
+        jfrag, ' expected=', expected_halo, ' file=', n_halo_file
+      stop 'DG-Fragment RT: reverse DC Hamiltonian halo count mismatch'
+    end if
+
+    found_reverse = .false.
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          nonzero_dirs = count(dvec(:) /= 0)
+          if (nonzero_dirs /= 1) cycle
+          allocate(h_halo(dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+          read(iunit) h_halo(1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+          axis = 0
+          do jo = 1, 3
+            if (dvec(jo) /= 0) axis = jo
+          end do
+          side = -dvec(axis)
+          neigh = face_neighbor_fragment_ham(dg_frag, jfrag, axis, side)
+          if (neigh == ifrag .and. axis == axis_ref .and. side == -side_ref) then
+            found_reverse = .true.
+            do ispin = 1, dg_frag%nspin
+              nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 1), &
+                         dg_frag%nstate_frag)
+              ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 2), &
+                         dg_frag%nstate_frag)
+              do jo = 1, ncol
+                do io = 1, nrow
+                  if (fold_flux_to_self) then
+                    dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                      dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + &
+                      0.25d0 * (h_halo(io, jo, ispin) + h_halo(jo, io, ispin))
+                    if (allocated(dg_frag%H_mat_core_blocks)) &
+                      dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) = &
+                        dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) + &
+                        0.25d0 * (h_halo(io, jo, ispin) + h_halo(jo, io, ispin))
+                  else
+                    dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) = &
+                      dg_frag%H_mat_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * h_halo(io, jo, ispin)
+                    if (allocated(dg_frag%H_mat_core_blocks)) &
+                      dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) = &
+                        dg_frag%H_mat_core_blocks(iblk)%val(io, jo, ispin) + 0.5d0 * h_halo(io, jo, ispin)
+                  end if
+                end do
+              end do
+            end do
+          end if
+          deallocate(h_halo)
+        end do
+      end do
+    end do
+    close(iunit)
+    if (.not. found_reverse) then
+      write(*,'(1x,a,4(a,i0))') '[FATAL] missing reverse DC Hamiltonian halo block:', &
+        ' ifrag=', ifrag, ' jfrag=', jfrag, ' axis=', axis_ref, ' side=', side_ref
+      stop 'DG-Fragment RT: missing reverse DC Hamiltonian halo block'
+    end if
+  end subroutine add_dcdft_hamiltonian_reverse_half
+
+  subroutine add_dcdft_velocity_reverse_half(dg_frag, ifrag, jfrag, axis_ref, side_ref, iblk)
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, axis_ref, side_ref, iblk
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_vl = 'velocity_local.bin'
+    character(256) :: filename
+    integer :: iunit, iostat_open, n_halo_file, expected_halo
+    integer :: axis, side, dvec(3), nonzero_dirs, neigh
+    integer :: lx, ly, lz, nh(3), io, jo, ispin, nrow, ncol
+    real(8), allocatable :: v_self(:,:,:,:), v_halo(:,:,:,:)
+    logical :: found_reverse
+
+    if (jfrag < 1 .or. jfrag > dg_frag%n_frag) return
+    if (iblk < 1 .or. iblk > size(dg_frag%momentum_blocks)) return
+    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_vl
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+    if (iostat_open /= 0) then
+      write(*,'(1x,a,i0,a,a)') '[FATAL] missing reverse DC velocity operator at ifrag=', jfrag, ' file=', trim(filename)
+      stop 'DG-Fragment RT: missing reverse DC velocity operator'
+    end if
+
+    allocate(v_self(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+    read(iunit) v_self(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+    deallocate(v_self)
+    read(iunit) n_halo_file
+
+    nh(:) = 0
+    do axis = 1, 3
+      if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+    end do
+    expected_halo = 0
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          if (count(dvec(:) /= 0) == 1) expected_halo = expected_halo + 1
+        end do
+      end do
+    end do
+    if (expected_halo /= n_halo_file) then
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] reverse DC velocity halo count mismatch: ifrag=', &
+        jfrag, ' expected=', expected_halo, ' file=', n_halo_file
+      stop 'DG-Fragment RT: reverse DC velocity halo count mismatch'
+    end if
+
+    found_reverse = .false.
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          nonzero_dirs = count(dvec(:) /= 0)
+          if (nonzero_dirs /= 1) cycle
+          allocate(v_halo(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+          read(iunit) v_halo(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+          axis = 0
+          do jo = 1, 3
+            if (dvec(jo) /= 0) axis = jo
+          end do
+          side = -dvec(axis)
+          neigh = face_neighbor_fragment_ham(dg_frag, jfrag, axis, side)
+          if (neigh == ifrag .and. axis == axis_ref .and. side == -side_ref) then
+            found_reverse = .true.
+            do ispin = 1, dg_frag%nspin
+              nrow = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 2), &
+                         dg_frag%nstate_frag)
+              ncol = min(dg_frag%n_basis(jfrag, ispin), size(dg_frag%momentum_blocks(iblk)%val, 3), &
+                         dg_frag%nstate_frag)
+              do jo = 1, ncol
+                do io = 1, nrow
+                  ! Match the DC-LCFO-Flux export/diagnostic assembly of halo velocity
+                  ! blocks: the reverse fragment contributes the transposed halo block
+                  ! with the same half weight used for Hamiltonian halo symmetrization.
+                  dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) = &
+                    dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) + 0.5d0 * v_halo(1:3, io, jo, ispin)
+                end do
+              end do
+            end do
+          end if
+          deallocate(v_halo)
+        end do
+      end do
+    end do
+    close(iunit)
+    if (.not. found_reverse) then
+      write(*,'(1x,a,4(a,i0))') '[FATAL] missing reverse DC velocity halo block:', &
+        ' ifrag=', ifrag, ' jfrag=', jfrag, ' axis=', axis_ref, ' side=', side_ref
+      stop 'DG-Fragment RT: missing reverse DC velocity halo block'
+    end if
+  end subroutine add_dcdft_velocity_reverse_half
+
+  subroutine check_dcdft_velocity_reverse_block(dg_frag, ifrag, jfrag, axis_ref, side_ref, iblk, nrow, ncol)
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, axis_ref, side_ref, iblk, nrow, ncol
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_vl = 'velocity_local.bin'
+    character(256) :: filename
+    integer :: iunit, iostat_open, n_halo_file, i_halo, expected_halo
+    integer :: axis, side, dvec(3), nonzero_dirs, neigh
+    integer :: lx, ly, lz, nh(3), io, jo, idir, ispin, nr, nc
+    real(8), allocatable :: v_self(:,:,:,:), v_halo(:,:,:,:)
+    real(8) :: err_max, ref_max, err, ref, tol
+    logical :: found_reverse
+
+    if (jfrag < 1 .or. jfrag > dg_frag%n_frag) return
+    if (iblk < 1 .or. iblk > size(dg_frag%momentum_blocks)) return
+    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_vl
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+    if (iostat_open /= 0) then
+      write(*,'(1x,a,i0,a,a)') '[FATAL] missing reverse DC velocity operator at ifrag=', jfrag, ' file=', trim(filename)
+      stop 'DG-Fragment RT: missing reverse DC velocity operator'
+    end if
+
+    allocate(v_self(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+    read(iunit) v_self(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+    deallocate(v_self)
+    read(iunit) n_halo_file
+
+    nh(:) = 0
+    do axis = 1, 3
+      if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+    end do
+    found_reverse = .false.
+    err_max = 0.0d0
+    ref_max = 0.0d0
+    expected_halo = 0
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          nonzero_dirs = count(dvec(:) /= 0)
+          if (nonzero_dirs /= 1) cycle
+          expected_halo = expected_halo + 1
+        end do
+      end do
+    end do
+    if (expected_halo /= n_halo_file) then
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] reverse DC velocity halo count mismatch: ifrag=', &
+        jfrag, ' expected=', expected_halo, ' file=', n_halo_file
+      stop 'DG-Fragment RT: reverse DC velocity halo count mismatch'
+    end if
+
+    i_halo = 0
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          nonzero_dirs = count(dvec(:) /= 0)
+          if (nonzero_dirs /= 1) cycle
+          i_halo = i_halo + 1
+          allocate(v_halo(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+          read(iunit) v_halo(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+          axis = 0
+          do jo = 1, 3
+            if (dvec(jo) /= 0) axis = jo
+          end do
+          side = -dvec(axis)
+          neigh = face_neighbor_fragment_ham(dg_frag, jfrag, axis, side)
+          if (neigh == ifrag .and. axis == axis_ref .and. side == -side_ref) then
+            found_reverse = .true.
+            do ispin = 1, dg_frag%nspin
+              nr = min(nrow, dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag)
+              nc = min(ncol, dg_frag%n_basis(jfrag, ispin), dg_frag%nstate_frag)
+              do jo = 1, nc
+                do io = 1, nr
+                  do idir = 1, 3
+                    ref = max(abs(dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin)), &
+                              abs(v_halo(idir, io, jo, ispin)))
+                    err = abs(dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) + &
+                              v_halo(idir, io, jo, ispin))
+                    ref_max = max(ref_max, ref)
+                    err_max = max(err_max, err)
+                  end do
+                end do
+              end do
+            end do
+          end if
+          deallocate(v_halo)
+        end do
+      end do
+    end do
+    close(iunit)
+
+    if (.not. found_reverse) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] missing reverse DC velocity block: ifrag=', ifrag, &
+        ' jfrag=', jfrag, ' axis=', axis_ref, ' side=', side_ref
+      stop 'DG-Fragment RT: missing reverse DC velocity block'
+    end if
+    tol = max(1.0d-10, 1.0d-8 * max(1.0d0, ref_max))
+    if (err_max > tol) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,2(a,1pe12.5))') &
+        '[FATAL] DC velocity cross block is not anti-symmetric: ifrag=', ifrag, &
+        ' jfrag=', jfrag, ' axis=', axis_ref, ' side=', side_ref, &
+        ' err=', err_max, ' tol=', tol
+      stop 'DG-Fragment RT: invalid DC velocity cross-block symmetry'
+    end if
+  end subroutine check_dcdft_velocity_reverse_block
+
   subroutine add_dg_surface_momentum_blocks(dg_frag, system)
     use structures, only: s_dft_system
     implicit none
@@ -1052,7 +1827,7 @@
     real(8) :: u_l, u_r, v_l, term_self, term_cross
     real(8) :: face_self_sum, face_cross_sum, face_self_max, face_cross_max
     integer :: face_self_count, face_cross_count
-    logical :: pbc_face, trace_pbc_face
+    logical :: pbc_face, trace_pbc_face, fold_flux_to_self
     character(len=32) :: env_face_trace
     integer :: env_face_len, env_face_status
     real(8), allocatable :: phi_col(:,:,:,:)
@@ -1063,6 +1838,8 @@
     if (.not. allocated(dg_frag%n_basis)) return
     if (.not. allocated(dg_frag%index_basis)) return
     if (.not. dg_frag%parallel_mode_orbital) return
+    ! Keep the DG Flux contribution as sparse neighbor blocks.
+    fold_flux_to_self = .false.
     trace_pbc_face = .false.
     env_face_trace = ''
     call get_environment_variable('SALMON_DG_PBC_FACE_TRACE', env_face_trace, length=env_face_len, status=env_face_status)
@@ -1071,9 +1848,14 @@
           env_face_trace(1:1) == 't' .or. env_face_trace(1:1) == 'T') trace_pbc_face = .true.
     end if
 
-    ! Momentum/current uses the DG face correction for the normal gradient.
-    ! Local volume gradients stay inside each fragment; only u_R-u_L on a
-    ! shared face is written into off-diagonal flow blocks.
+    ! This is the DG surface contribution to dH(A)/dA at A=0.
+    ! In the Flux terms the normal derivative is covariant,
+    !   dn psi -> (dn + i A_n) psi,
+    ! and after multiplying the Schrodinger equation by -i this becomes the
+    ! real block operator applied below by the RT derivative. Local volume
+    ! gradients stay inside each fragment; only shared-face A_n terms are
+    ! written into off-diagonal flow blocks.
+    dg_frag%momentum_blocks_include_dg_flux = .false.
     i_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = i_local + 1
@@ -1089,6 +1871,7 @@
           if (jfrag <= 0 .or. jfrag == ifrag) cycle
           iblk_self = find_momentum_block(dg_frag, ifrag, ifrag)
           iblk_cross = find_momentum_block(dg_frag, ifrag, jfrag)
+          if (fold_flux_to_self) iblk_cross = 0
           if (iblk_self <= 0 .and. iblk_cross <= 0) cycle
 
           call read_fragment_buffer_basis_box_ham(dg_frag, jfrag, phi_col, col_lo, col_hi)
@@ -1144,15 +1927,22 @@
                     end do
                   end if
 
-                  if (iblk_cross > 0 .and. ncol > 0) then
+                  if ((iblk_cross > 0 .or. fold_flux_to_self) .and. ncol > 0) then
                     do jo = 1, ncol
                       u_r = phi_box_value_ham(phi_col, col_lo, col_hi, dg_frag%lgnum_total, jo, g_col)
                       do io = 1, nrow
                         if (.not. basis_row_is_locally_owned(dg_frag, ifrag, ispin, io)) cycle
                         v_l = phi_local_value_ham(dg_frag, i_local, io, g_row)
                         term_cross = 0.5d0 * normal_sign * v_l * u_r * area_weight
-                        dg_frag%momentum_blocks(iblk_cross)%val(axis, io, jo, ispin) = &
-                          dg_frag%momentum_blocks(iblk_cross)%val(axis, io, jo, ispin) + term_cross
+                        if (fold_flux_to_self) then
+                          if (iblk_self > 0 .and. jo <= nrow) then
+                            dg_frag%momentum_blocks(iblk_self)%val(axis, io, jo, ispin) = &
+                              dg_frag%momentum_blocks(iblk_self)%val(axis, io, jo, ispin) + term_cross
+                          end if
+                        else
+                          dg_frag%momentum_blocks(iblk_cross)%val(axis, io, jo, ispin) = &
+                            dg_frag%momentum_blocks(iblk_cross)%val(axis, io, jo, ispin) + term_cross
+                        end if
                         if (pbc_face) then
                           face_cross_sum = face_cross_sum + term_cross * term_cross
                           face_cross_max = max(face_cross_max, abs(term_cross))
@@ -1186,6 +1976,7 @@
         end do
       end do
     end do
+    dg_frag%momentum_blocks_include_dg_flux = .true.
   end subroutine add_dg_surface_momentum_blocks
 
   subroutine reduce_matrix_blocks(dg_frag, blocks, label, icomm_reduce)
@@ -1200,7 +1991,7 @@
     real(8), allocatable :: send_block(:), recv_block(:)
     integer :: iblk, ispin, ii, jj
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
-    integer :: total_active_min, total_active_max, max_block_size_global
+    integer :: max_block_size_global, total_active_min, total_active_max
     integer :: chunk_begin, chunk_count, offset_flat
     logical, save :: reduce_trace_initialized = .false.
     logical, save :: enable_reduce_trace = .false.
@@ -1264,6 +2055,8 @@
         ncol = dg_frag%n_basis(blocks(iblk)%ifrag_col, ispin)
         if (nrow <= 0 .or. ncol <= 0) cycle
         block_size = nrow * ncol
+        send_block(:) = 0.0d0
+        recv_block(:) = 0.0d0
         offset_flat = 1
         do jj = 1, ncol
           do ii = 1, nrow
@@ -1398,9 +2191,23 @@
       write(*,*) "=== Preparing Hamiltonian Matrix ==="
     end if
 
-    ! Step 1: Calculate momentum matrix elements (transition moments)
-    ! Required for velocity gauge A·p coupling
-    if (.not. allocated(dg_frag%momentum_blocks) .and. .not. allocated(dg_frag%momentum_mat)) then
+    ! Step 1: prepare the velocity operator dH/dA and overlap matrix.
+    if (dg_frag%dc_lcfo_seed_basis_cleaned .and. .not. dg_frag%identity_seed_coefficients) then
+      if (.not. allocated(dg_frag%momentum_blocks) .or. .not. dg_frag%momentum_blocks_include_dg_flux) then
+        if (comm_is_root(dg_frag%id)) then
+          write(*,*) "  [1/3] Loading DC-exported DG velocity operator dH/dA"
+        end if
+        if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
+        call init_momentum_blocks(dg_frag, diagonal_only=.false.)
+        call load_dcdft_exported_velocity_blocks(dg_frag)
+      else if (comm_is_root(dg_frag%id)) then
+        write(*,*) "  [1/3] DC-exported DG velocity operator already available"
+      end if
+      if (comm_is_root(dg_frag%id)) then
+        write(*,*) "        DC-exported velocity operator loaded"
+        write(*,*) "        DC-exported basis is treated as S-orthonormal for propagation"
+      end if
+    else if (.not. allocated(dg_frag%momentum_blocks) .and. .not. allocated(dg_frag%momentum_mat)) then
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  [1/3] Calculating momentum matrix elements (p_ij)..."
         write(*,*) "        Using 4th-order finite difference stencil"
@@ -1420,6 +2227,29 @@
           .not. allocated(dg_frag%S_mat_prop_blocks)) then
         call calculate_overlap_matrix(dg_frag, system, mg)
       end if
+    end if
+
+    if (dg_frag%dc_lcfo_seed_basis_cleaned .and. .not. dg_frag%identity_seed_coefficients) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,*) "  [2/3] Loading DC-exported Hamiltonian matrix H"
+      end if
+      if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
+      if (allocated(dg_frag%H_mat_kinetic)) deallocate(dg_frag%H_mat_kinetic)
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                              diagonal_only=.false.)
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_core_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                              diagonal_only=.false.)
+      call init_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks, &
+                              diagonal_only=.false.)
+      call load_dcdft_exported_hamiltonian_blocks(dg_frag)
+      call trace_matrix_blocks_if_enabled(dg_frag, dg_frag%H_mat_blocks, "H")
+      if (comm_is_root(dg_frag%id)) then
+        write(*,*) "        DC-exported Hamiltonian loaded"
+        write(*,*) "  [3/3] Non-local PP included in DC-exported Hamiltonian; RT adds only A-dependent delta"
+        write(*,*) "=== Hamiltonian Matrix Ready ==="
+        write(*,*)
+      end if
+      return
     end if
     
     ! Step 2: Allocate Hamiltonian matrix
@@ -1617,6 +2447,7 @@
     call add_dg_surface_flux_blocks(dg_frag, system, mg, stencil, &
                                     dg_frag%H_mat_blocks, dg_frag%H_mat_kinetic_blocks, &
                                     dg_frag%H_block_map)
+    call load_dcdft_exported_hamiltonian_blocks(dg_frag)
 
     ! Non-buffered halo projection route has been removed.
 
@@ -1670,9 +2501,11 @@
         end if
       end if
     end if
-    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_blocks)
-    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_core_blocks)
-    call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
+    if (.not. dg_frag%H_blocks_include_nonlocal) then
+      call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_blocks)
+      call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_core_blocks)
+      call symmetrize_real_matrix_blocks(dg_frag, dg_frag%H_mat_kinetic_blocks)
+    end if
     call trace_matrix_blocks_if_enabled(dg_frag, dg_frag%H_mat_blocks, "H")
     call trace_matrix_blocks_if_enabled(dg_frag, dg_frag%H_mat_kinetic_blocks, "T")
     if (allocated(dg_frag%H_mat)) deallocate(dg_frag%H_mat)
@@ -1682,10 +2515,12 @@
       write(*,*) "        Kinetic and potential terms computed"
     end if
     
-    ! Step 3: Non-local pseudopotential is handled in time evolution
-    ! with vector potential A(t), so it is not added to H_mat here.
     if (comm_is_root(dg_frag%id)) then
-      write(*,*) "  [3/3] Non-local PP handled in time evolution (A-dependent)"
+      if (dg_frag%H_blocks_include_nonlocal) then
+        write(*,*) "  [3/3] Non-local PP included in DC-exported Hamiltonian"
+      else
+        write(*,*) "  [3/3] Non-local PP handled in time evolution (A-dependent)"
+      end if
     end if
 
     if (allocated(V_total)) deallocate(V_total)
@@ -2463,14 +3298,14 @@
     time_reduce_unpack = 0.0d0
     
     if (comm_is_root(dg_frag%id)) then
-      write(*,*) "        Computing transition moments: <φ_i|∇|φ_j>"
+      write(*,*) "        Computing DG velocity operator dH/dA (volume + Flux face)"
       flush(6)
     end if
     
-    ! Momentum matrix elements for vector potential coupling: p_ij = <phi_i|p|phi_j>
-    ! In velocity gauge: H(t) = H_0 - i*A(t)·∇ + A(t)^2/2
-    ! The A·p term couples to momentum matrix elements
-    ! The A^2/2 term is diagonal (diamagnetic contribution)
+    ! Velocity-gauge operator dH(A)/dA at A=0.  The volume part is
+    ! <phi_i|grad|phi_j>; add_dg_surface_momentum_blocks appends the
+    ! covariant DG Flux face term from dn -> dn + i A_n.  The A^2/2
+    ! contribution is handled separately as the diamagnetic term.
     if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
     call init_momentum_blocks(dg_frag, diagonal_only=(.not. dg_frag%parallel_mode_orbital))
     momentum_gb = real(3_8 * int(dg_frag%n_mat_max, kind=8) * int(dg_frag%n_mat_max, kind=8) * &
@@ -2483,7 +3318,7 @@
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,i0,a,f10.3,a)') "        n_mat_max=", dg_frag%n_mat_max, &
         " dense momentum_mat GB=", momentum_gb, " (not allocated)"
-      write(*,'(1x,a,i0,a,f10.6,a)') "        momentum_blocks=", dg_frag%n_momentum_blocks, &
+      write(*,'(1x,a,i0,a,f10.6,a)') "        velocity_blocks=", dg_frag%n_momentum_blocks, &
         " allocated GB=", momentum_block_gb, " per rank"
       flush(6)
     end if
@@ -2879,7 +3714,7 @@
         " grad=", time_grad_total, " self=", time_self_integral, &
         " halo=", time_halo_integral, &
         " reduce=", time_block_reduce, " antisym=", time_antisym
-      write(*,'(a,1pe12.4)') "        Max |momentum_mat|: ", max_p
+      write(*,'(a,1pe12.4)') "        Max |DG velocity operator|: ", max_p
       write(*,'(a,i0,a,i0,a)') "        Total matrix elements: ", &
                                3_8 * int(dg_frag%n_mat_max, kind=8) * &
                                int(dg_frag%n_mat_max, kind=8) * int(system%nspin, kind=8), &

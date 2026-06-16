@@ -2,10 +2,10 @@
                                          lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                          rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
-    use salmon_global, only: yn_fix_func, theory
+    use salmon_global, only: theory
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use timer, only: timer_begin, timer_end, LOG_CALC_TIME_PROPAGATION, LOG_CALC_RHO
+    use timer, only: timer_begin, timer_end, LOG_CALC_TIME_PROPAGATION
     use rt_dg_fragment_ops, only: zero_nonowned_coefficients
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -43,6 +43,10 @@
                              rho, rho_s, Vh, Vxc, Vpsl, energy)
     case(2)  ! AETRS
       call time_evolution_aetrs(dg_frag, system, mg, stencil, ppg, rt, itt, dt)
+    case(4)  ! fourth-order Taylor predictor-corrector
+      call time_evolution_taylor4pc(dg_frag, system, info, rt, itt, dt, &
+                                    lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+                                    rho, rho_s, Vh, Vxc, Vpsl, energy)
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select
@@ -51,35 +55,6 @@
       write(*,'(1x,a)') "[DG-ITER-FIRST] after time evolution"
       flush(6)
     end if
-    ! Self-consistent update of density and Hamiltonian (if enabled)
-    ! Performance note:
-    !   - Coefficient space evolution: O(n_basis²) - very fast
-    !   - Density reconstruction: O(n_frag × n_basis² × n_occ × n_grid) - expensive!
-    !   - Hartree/XC: O(N_grid log N_grid) - moderate (same as standard RT-TDDFT)
-    ! Recommendation:
-    !   - Linear response (weak field): yn_fix_func='y' (no update, fast)
-    !   - Nonlinear response (strong field): yn_fix_func='n' (self-consistent, slower)
-    !   - Future optimization: update every N steps instead of every step
-    if (yn_fix_func == 'n') then
-      if (dg_frag%time_integrator /= 3 .or. dg_frag%yn_adaptive_basis) then
-        ! For adaptive-basis mode, keep post-step update active even in RK4
-        ! so basis-update detection/trigger logic runs.
-        if (trace_first_iteration) then
-          write(*,'(1x,a)') "[DG-ITER-FIRST] before post-step density/H update"
-          flush(6)
-        end if
-        call timer_begin(LOG_CALC_RHO)
-        call update_density_and_hamiltonian(dg_frag, system, info, rt, itt, rt%Ac_tot(:,itt), &
-                                            lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                            rho, rho_s, Vh, Vxc, Vpsl, energy)
-        call timer_end(LOG_CALC_RHO)
-        if (trace_first_iteration) then
-          write(*,'(1x,a)') "[DG-ITER-FIRST] after post-step density/H update"
-          flush(6)
-        end if
-      end if
-    end if
-    
     ! Calculate observables
     if (trace_first_iteration) then
       write(*,'(1x,a)') "[DG-ITER-FIRST] before observables"

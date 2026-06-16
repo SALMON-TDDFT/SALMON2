@@ -88,13 +88,26 @@ contains
 
     allocate(new_count(dg_frag%nspin))
     new_count(:) = 0
-    do ispin = 1, dg_frag%nspin
-      do global_idx = 1, dg_frag%n_mat_max
-        if (dg_frag%coef_owner(global_idx, ispin) == dg_frag%id) then
-          new_count(ispin) = new_count(ispin) + 1
+    if (dg_frag%coef_state_block_mode) then
+      do ispin = 1, dg_frag%nspin
+        if (allocated(dg_frag%n_basis) .and. allocated(dg_frag%index_basis)) then
+          if (dg_frag%ifrag_group >= 1 .and. dg_frag%ifrag_group <= dg_frag%n_frag) then
+            do local_idx = 1, min(dg_frag%n_basis(dg_frag%ifrag_group, ispin), size(dg_frag%index_basis, 1))
+              global_idx = dg_frag%index_basis(local_idx, dg_frag%ifrag_group, ispin)
+              if (global_idx >= 1 .and. global_idx <= dg_frag%n_mat_max) new_count(ispin) = new_count(ispin) + 1
+            end do
+          end if
         end if
       end do
-    end do
+    else
+      do ispin = 1, dg_frag%nspin
+        do global_idx = 1, dg_frag%n_mat_max
+          if (dg_frag%coef_owner(global_idx, ispin) == dg_frag%id) then
+            new_count(ispin) = new_count(ispin) + 1
+          end if
+        end do
+      end do
+    end if
 
     local_coef_max = max(1, maxval(new_count(1:dg_frag%nspin)))
     allocate(new_global_ids(local_coef_max, dg_frag%nspin))
@@ -104,12 +117,26 @@ contains
 
     do ispin = 1, dg_frag%nspin
       local_idx = 0
-      do global_idx = 1, dg_frag%n_mat_max
-        if (dg_frag%coef_owner(global_idx, ispin) /= dg_frag%id) cycle
-        local_idx = local_idx + 1
-        new_global_ids(local_idx, ispin) = global_idx
-        new_global_to_local(global_idx, ispin) = local_idx
-      end do
+      if (dg_frag%coef_state_block_mode) then
+        if (allocated(dg_frag%n_basis) .and. allocated(dg_frag%index_basis)) then
+          if (dg_frag%ifrag_group >= 1 .and. dg_frag%ifrag_group <= dg_frag%n_frag) then
+            do global_idx = 1, min(dg_frag%n_basis(dg_frag%ifrag_group, ispin), size(dg_frag%index_basis, 1))
+              old_local_idx = dg_frag%index_basis(global_idx, dg_frag%ifrag_group, ispin)
+              if (old_local_idx < 1 .or. old_local_idx > dg_frag%n_mat_max) cycle
+              local_idx = local_idx + 1
+              new_global_ids(local_idx, ispin) = old_local_idx
+              new_global_to_local(old_local_idx, ispin) = local_idx
+            end do
+          end if
+        end if
+      else
+        do global_idx = 1, dg_frag%n_mat_max
+          if (dg_frag%coef_owner(global_idx, ispin) /= dg_frag%id) cycle
+          local_idx = local_idx + 1
+          new_global_ids(local_idx, ispin) = global_idx
+          new_global_to_local(global_idx, ispin) = local_idx
+        end do
+      end if
     end do
 
     has_coef = allocated(dg_frag%coef)

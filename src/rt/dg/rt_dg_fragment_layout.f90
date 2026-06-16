@@ -74,7 +74,11 @@ contains
     if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
+    if (allocated(dg_frag%runtime_neighbor_frag_count)) deallocate(dg_frag%runtime_neighbor_frag_count)
+    if (allocated(dg_frag%runtime_neighbor_frag_ids)) deallocate(dg_frag%runtime_neighbor_frag_ids)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
+    if (allocated(dg_frag%momentum_neighbor_frag_count)) deallocate(dg_frag%momentum_neighbor_frag_count)
+    if (allocated(dg_frag%momentum_neighbor_frag_ids)) deallocate(dg_frag%momentum_neighbor_frag_ids)
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     dg_frag%density_phi_block_size = 0
@@ -120,7 +124,11 @@ contains
     if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
+    if (allocated(dg_frag%runtime_neighbor_frag_count)) deallocate(dg_frag%runtime_neighbor_frag_count)
+    if (allocated(dg_frag%runtime_neighbor_frag_ids)) deallocate(dg_frag%runtime_neighbor_frag_ids)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
+    if (allocated(dg_frag%momentum_neighbor_frag_count)) deallocate(dg_frag%momentum_neighbor_frag_count)
+    if (allocated(dg_frag%momentum_neighbor_frag_ids)) deallocate(dg_frag%momentum_neighbor_frag_ids)
     if (allocated(dg_frag%density_recv_map)) then
       do ifrag = lbound(dg_frag%density_recv_map, 1), ubound(dg_frag%density_recv_map, 1)
         if (allocated(dg_frag%density_recv_map(ifrag)%ixg)) deallocate(dg_frag%density_recv_map(ifrag)%ixg)

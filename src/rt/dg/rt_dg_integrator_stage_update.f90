@@ -4,7 +4,6 @@
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use structures
     use sendrecv_grid, only: s_sendrecv_grid
-    use communication, only: comm_summation, comm_get_min
     use salmon_xc, only: s_xc_functional, exchange_correlation, &
                          salmon_xctype_none, salmon_xctype_pz
     use poisson_dg_distributed, only: hartree_dg_distributed
@@ -34,14 +33,11 @@
     type(s_dft_energy),     intent(inout) :: energy
     logical, optional,      intent(in)    :: update_energy
     integer :: n_frag, n_pw, ispin
-    integer :: n_floor_local, n_floor_global
-    integer :: n_nan_rho_local, n_nan_rho_global
-    integer :: n_nan_vh_local, n_nan_vh_global
-    integer :: n_nan_vhbuf_local, n_nan_vhbuf_global
-    integer :: n_bad_vxcbuf_local, n_bad_vxcbuf_global
-    integer :: int_reduce_in(1), int_reduce_out(1)
-    real(8) :: rho_floor_min_local, rho_floor_min_global
-    real(8) :: rho_floor_min_in(1), rho_floor_min_out(1)
+    integer :: n_floor_local
+    integer :: n_nan_rho_local
+    integer :: n_nan_vh_local
+    integer :: n_nan_vhbuf_local
+    integer :: n_bad_vxcbuf_local
     logical :: use_rank_buffered_potential, use_fragment_xc
     logical :: need_energy_update
     logical :: need_stage_buffer_alloc
@@ -99,16 +95,10 @@
         count(.not. ieee_is_finite(rho_s(ispin)%f(mg%is(1):mg%ie(1), &
                                                   mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))))
     end do
-    int_reduce_in(1) = n_nan_rho_local
-    int_reduce_out(1) = 0
-    call comm_summation(int_reduce_in, int_reduce_out, 1, dg_frag%icomm)
-    n_nan_rho_global = int_reduce_out(1)
-    if (n_nan_rho_global > 0) then
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG stage density: itt=', itt, &
-          ' call=', trace_call_id, ' count=', n_nan_rho_global
-        flush(6)
-      end if
+    if (n_nan_rho_local > 0) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG stage density: rank=', &
+        dg_frag%id, ' itt=', itt, ' call=', trace_call_id, ' count=', n_nan_rho_local
+      flush(6)
       stop "NaN/Inf in DG stage density"
     end if
     if (trace_stage) then
@@ -179,16 +169,10 @@
     time_hartree = time_hartree + (t1 - t0)
     n_nan_vh_local = count(.not. ieee_is_finite(Vh%f(mg%is(1):mg%ie(1), &
                                                      mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))))
-    int_reduce_in(1) = n_nan_vh_local
-    int_reduce_out(1) = 0
-    call comm_summation(int_reduce_in, int_reduce_out, 1, dg_frag%icomm)
-    n_nan_vh_global = int_reduce_out(1)
-    if (n_nan_vh_global > 0) then
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG Hartree Vh: itt=', itt, &
-          ' call=', trace_call_id, ' count=', n_nan_vh_global
-        flush(6)
-      end if
+    if (n_nan_vh_local > 0) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG Hartree Vh: rank=', &
+        dg_frag%id, ' itt=', itt, ' call=', trace_call_id, ' count=', n_nan_vh_local
+      flush(6)
       stop "NaN/Inf in DG Hartree Vh"
     end if
     if (trace_stage) then
@@ -201,45 +185,20 @@
         dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
         dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
         dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3))))
-      int_reduce_in(1) = n_nan_vhbuf_local
-      int_reduce_out(1) = 0
-      call comm_summation(int_reduce_in, int_reduce_out, 1, dg_frag%icomm)
-      n_nan_vhbuf_global = int_reduce_out(1)
-      if (n_nan_vhbuf_global > 0) then
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG Hartree Vh buffer: itt=', itt, &
-            ' call=', trace_call_id, ' count=', n_nan_vhbuf_global
-          flush(6)
-        end if
+      if (n_nan_vhbuf_local > 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG Hartree Vh buffer: rank=', &
+          dg_frag%id, ' itt=', itt, ' call=', trace_call_id, ' count=', n_nan_vhbuf_local
+        flush(6)
         stop "NaN/Inf in DG Hartree Vh buffer"
       end if
     end if
     ! Guard against tiny negative rho before XC; this prevents non-physical Vxc NaN under aggressive FP reassociation.
     ! Validation note: O3 and O3+no-unsafe-math runs matched key observables (J_para/J_total/Ne_raw) in this case.
     n_floor_local = 0
-    rho_floor_min_local = huge(1.0d0)
     do ispin = 1, system%nspin
       n_floor_local = n_floor_local + count(rho_s(ispin)%f(:, :, :) < 0.0d0)
-      if (any(rho_s(ispin)%f(:, :, :) < 0.0d0)) then
-        rho_floor_min_local = min(rho_floor_min_local, minval(rho_s(ispin)%f(:, :, :), &
-          mask=rho_s(ispin)%f(:, :, :) < 0.0d0))
-      end if
       where (rho_s(ispin)%f(:, :, :) < 0.0d0) rho_s(ispin)%f(:, :, :) = 0.0d0
     end do
-    int_reduce_in(1) = n_floor_local
-    int_reduce_out(1) = 0
-    call comm_summation(int_reduce_in, int_reduce_out, 1, dg_frag%icomm)
-    n_floor_global = int_reduce_out(1)
-    if (n_floor_global > 0) then
-      rho_floor_min_in(1) = rho_floor_min_local
-      call comm_get_min(rho_floor_min_in, rho_floor_min_out, 1, dg_frag%icomm)
-      rho_floor_min_global = rho_floor_min_out(1)
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,i0,a,i0,a,1pe14.6)') '[RHO-FLOOR] itt=', itt, ' clamped_points=', n_floor_global, &
-          ' min_rho_before=', rho_floor_min_global
-        flush(6)
-      end if
-    end if
     if (trace_stage) then
       write(*,'(1x,a)') '[DG-STAGE] XC start'
       if (use_fragment_xc) then
@@ -271,16 +230,10 @@
     end if
     if (use_rank_buffered_potential) then
       n_bad_vxcbuf_local = count(.not. ieee_is_finite(dg_frag%stage_Vxc_buffer(:, :, :, 1:system%nspin)))
-      int_reduce_in(1) = n_bad_vxcbuf_local
-      int_reduce_out(1) = 0
-      call comm_summation(int_reduce_in, int_reduce_out, 1, dg_frag%icomm)
-      n_bad_vxcbuf_global = int_reduce_out(1)
-      if (n_bad_vxcbuf_global > 0) then
-        if (dg_frag%id == 0) then
-          write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG Vxc buffer: itt=', itt, &
-            ' call=', trace_call_id, ' count=', n_bad_vxcbuf_global
-          flush(6)
-        end if
+      if (n_bad_vxcbuf_local > 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') '[FATAL] NaN/Inf in DG Vxc buffer: rank=', &
+          dg_frag%id, ' itt=', itt, ' call=', trace_call_id, ' count=', n_bad_vxcbuf_local
+        flush(6)
         stop "NaN/Inf in DG Vxc buffer"
       end if
     end if

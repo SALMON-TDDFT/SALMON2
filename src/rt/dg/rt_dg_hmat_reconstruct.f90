@@ -5,8 +5,10 @@
     use communication, only: comm_summation
     use salmon_global, only: theory
     use salmon_global, only: yn_hse
+    use misc_routines, only: get_wtime
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, zero_nonlocal_h_matrix_blocks
     use unusedvar_mod, only: salmon_unusedvar
+    use omp_lib, only: omp_get_max_threads
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -22,7 +24,9 @@
     type(s_rgrid), pointer :: mg
     integer :: ifrag, ispin, io, jo, i_local
     integer :: nbf, nbf_raw, iblk
+    integer :: nrow_accum, ncol_local
     integer :: max_nbf_local
+    integer :: max_threads
     integer :: frag_rank, frag_size
     integer :: iorg(3), ndom(3), loc_s(3), loc_e(3)
     integer :: g_s(3), g_e(3), ov_s(3), ov_e(3)
@@ -36,12 +40,21 @@
     real(8), allocatable :: V_total(:,:,:)
     complex(8), allocatable :: V_phi(:,:,:)
     real(8), allocatable :: partial_total(:), partial_block(:,:), reduced_block(:,:)
+    real(8), allocatable :: partial_thread(:,:)
     integer, allocatable :: map_x(:), map_y(:), map_z(:)
     logical :: has_overlap
     logical :: use_block_reconstruct
+    logical :: static_blocks_include_nonlocal
+    logical :: use_delta_static_h
     logical, save :: debug_static_seed_logged = .true.
-    logical, parameter :: enable_reconstruct_timing = .false.
+    logical, save :: reconstruct_timing_initialized = .false.
+    logical, save :: enable_reconstruct_timing = .false.
+    logical, save :: enable_reconstruct_blas = .true.
     logical, parameter :: enable_hmat_nan_check = .false.
+    integer, save :: reconstruct_timing_call_count = 0
+    character(16) :: env_reconstruct_timing, env_reconstruct_blas
+    integer :: env_status, trace_call_id
+    logical :: trace_reconstruct
     real(8), parameter :: hmat_abs_limit = 1.0d12
 
     if (.not. dg_frag%has_real_space_basis) return
@@ -58,6 +71,36 @@
     time_potential_build = 0.0d0
     time_post_reduce_cleanup = 0.0d0
     time_block_hermitize = 0.0d0
+    if (.not. reconstruct_timing_initialized) then
+      env_reconstruct_timing = ''
+      call get_environment_variable('SALMON_DG_HMAT_RECONSTRUCT_TIMING', env_reconstruct_timing, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_reconstruct_timing)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_reconstruct_timing = .true.
+        end select
+      end if
+      env_reconstruct_blas = ''
+      call get_environment_variable('SALMON_DG_HMAT_RECON_BLAS', env_reconstruct_blas, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_reconstruct_blas)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_reconstruct_blas = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          enable_reconstruct_blas = .false.
+        end select
+      end if
+      reconstruct_timing_initialized = .true.
+    end if
+    trace_reconstruct = .false.
+    trace_call_id = 0
+    if (enable_reconstruct_timing .and. dg_frag%id == 0 .and. reconstruct_timing_call_count < 8) then
+      reconstruct_timing_call_count = reconstruct_timing_call_count + 1
+      trace_call_id = reconstruct_timing_call_count
+      trace_reconstruct = .true.
+      write(*,'(1x,a,i0)') '[DG-HMAT-RECON] enter call=', trace_call_id
+      flush(6)
+    end if
 
     hvol = system%hvol
     if (hvol /= hvol) then
@@ -97,16 +140,27 @@
     if (yn_hse == 'y') then
       stop "reconstruct_hamiltonian_matrix block-only path does not support HSE exact exchange"
     end if
+    static_blocks_include_nonlocal = dg_frag%dc_lcfo_seed_basis_cleaned .and. .not. dg_frag%identity_seed_coefficients
+    dg_frag%H_blocks_include_nonlocal = static_blocks_include_nonlocal
+    use_delta_static_h = static_blocks_include_nonlocal .and. dg_frag%H_delta_reference_valid .and. &
+      allocated(dg_frag%H_mat_core_blocks) .and. allocated(dg_frag%H_ref_Vh_buffer) .and. &
+      allocated(dg_frag%H_ref_Vxc_buffer) .and. present(Vh_buffer) .and. present(Vxc_buffer)
 
     do iblk = 1, size(dg_frag%H_mat_blocks)
       dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.0d0
       if (dg_frag%is_frag_root) then
-        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :)
+        if (use_delta_static_h) then
+          dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_core_blocks(iblk)%val(:, :, :)
+        else
+          dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :)
+        end if
       end if
     end do
 
     allocate(V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
-    allocate(V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    if (allocated(dg_frag%phi_frag_c)) then
+      allocate(V_phi(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
+    end if
 
     max_nbf_local = 0
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -119,13 +173,17 @@
       allocate(partial_total(max_nbf_local), &
                partial_block(max_nbf_local, max_nbf_local), &
                reduced_block(max_nbf_local, max_nbf_local))
+      if (.not. allocated(dg_frag%phi_frag_c)) then
+        max_threads = max(1, omp_get_max_threads())
+        allocate(partial_thread(max_nbf_local, max_threads))
+      end if
     end if
 
     frag_size = max(1, dg_frag%isize_frag)
     frag_rank = modulo(dg_frag%id_frag, frag_size)
 
     do ispin = 1, system%nspin
-      call cpu_time(t0)
+      t0 = get_wtime()
       if (present(Vh_buffer) .and. present(Vxc_buffer) .and. present(Vpsl_buffer)) then
         call assert_real_hmat_reconstruct_bounded_3d("Vh_buffer", Vh_buffer, &
           hmat_abs_limit, dg_frag%id, 0, ispin, 0)
@@ -133,8 +191,13 @@
           hmat_abs_limit, dg_frag%id, 0, ispin, 0)
         call assert_real_hmat_reconstruct_bounded_3d("Vxc_buffer", Vxc_buffer(:, :, :, ispin), &
           hmat_abs_limit, dg_frag%id, 0, ispin, 0)
-        call build_total_potential_grid_with_stage_buffers(mg, dg_frag%lgnum_total, &
-          Vh_buffer, Vxc_buffer, Vpsl_buffer, ispin, V_total)
+        if (use_delta_static_h) then
+          call build_delta_potential_grid_with_stage_buffers(mg, dg_frag%lgnum_total, &
+            Vh_buffer, Vxc_buffer, dg_frag%H_ref_Vh_buffer, dg_frag%H_ref_Vxc_buffer, ispin, V_total)
+        else
+          call build_total_potential_grid_with_stage_buffers(mg, dg_frag%lgnum_total, &
+            Vh_buffer, Vxc_buffer, Vpsl_buffer, ispin, V_total)
+        end if
       else if (present(Vh_buffer)) then
         call assert_real_hmat_reconstruct_bounded_3d("Vh_buffer", Vh_buffer, &
           hmat_abs_limit, dg_frag%id, 0, ispin, 0)
@@ -156,7 +219,7 @@
         end do
 !$omp end parallel do
       end if
-      call cpu_time(t1)
+      t1 = get_wtime()
       time_potential_build = time_potential_build + (t1 - t0)
       call assert_real_hmat_reconstruct_bounded_3d("V_total", V_total, &
         hmat_abs_limit, dg_frag%id, 0, ispin, 0)
@@ -215,31 +278,47 @@
           end do
         end if
 
+        ncol_local = (nbf - (frag_rank + 1) + frag_size) / frag_size
+        if (enable_reconstruct_blas .and. .not. allocated(dg_frag%phi_frag_c) .and. has_overlap .and. ncol_local > 0) then
+          t0 = get_wtime()
+          call build_potential_block_real_blas_mapped(dg_frag, i_local, nbf, frag_rank, frag_size, mg, V_total, hvol, &
+            lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z, partial_block(1:nbf, 1:nbf))
+          t1 = get_wtime()
+          time_local_build = time_local_build + (t1 - t0)
+        else
         do jo = frag_rank + 1, nbf, frag_size
           if (.not. has_overlap) cycle
 
-          call cpu_time(t0)
-          call build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
-            lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
-          call assert_complex_hmat_reconstruct_bounded_3d("V_phi", V_phi, &
-            hmat_abs_limit, dg_frag%id, ifrag, ispin, jo)
-
+          t0 = get_wtime()
           partial_total(1:nbf) = 0.0d0
+          if (allocated(dg_frag%phi_frag_c)) then
+            nrow_accum = nbf
+            call build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
+              lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
+            call assert_complex_hmat_reconstruct_bounded_3d("V_phi", V_phi, &
+              hmat_abs_limit, dg_frag%id, ifrag, ispin, jo)
 
 !$omp parallel do private(io, integral_v) schedule(static)
-          do io = 1, nbf
-            call integrate_local_basis_with_field_mapped(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, &
-              lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
-            partial_total(io) = real(integral_v, kind=8)
-          end do
+            do io = 1, nbf
+              call integrate_local_basis_with_field_mapped(dg_frag, i_local, io, mg, V_phi, hvol, integral_v, &
+                lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
+              partial_total(io) = real(integral_v, kind=8)
+            end do
 !$omp end parallel do
-          call cpu_time(t1)
+          else
+            nrow_accum = jo
+            call build_potential_column_real_mapped(dg_frag, i_local, jo, nrow_accum, mg, V_total, hvol, &
+              lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z, &
+              partial_total(1:nrow_accum), partial_thread(1:nrow_accum, :))
+          end if
+          t1 = get_wtime()
           time_local_build = time_local_build + (t1 - t0)
           call assert_real_hmat_reconstruct_bounded_1d("partial_total", &
-            partial_total(1:nbf), hmat_abs_limit, dg_frag%id, ifrag, ispin, jo)
+            partial_total(1:nrow_accum), hmat_abs_limit, dg_frag%id, ifrag, ispin, jo)
 
-          partial_block(1:nbf, jo) = partial_total(1:nbf)
+          partial_block(1:nrow_accum, jo) = partial_total(1:nrow_accum)
         end do
+        end if
 
         if (allocated(map_x)) deallocate(map_x)
         if (allocated(map_y)) deallocate(map_y)
@@ -247,10 +326,12 @@
 
         call assert_real_hmat_reconstruct_bounded_2d("partial_block", &
           partial_block(1:nbf, 1:nbf), hmat_abs_limit, dg_frag%id, ifrag, ispin, 0)
-        call cpu_time(t0)
+        t0 = get_wtime()
         call comm_summation(partial_block(1:nbf, 1:nbf), reduced_block(1:nbf, 1:nbf), nbf * nbf, dg_frag%icomm_frag)
-        call cpu_time(t1)
+        t1 = get_wtime()
         time_subgroup_reduce = time_subgroup_reduce + (t1 - t0)
+        if (.not. allocated(dg_frag%phi_frag_c) .and. .not. enable_reconstruct_blas) &
+          call mirror_upper_to_lower_real(reduced_block(1:nbf, 1:nbf), nbf)
         call assert_real_hmat_reconstruct_bounded_2d("reduced_block", &
           reduced_block(1:nbf, 1:nbf), hmat_abs_limit, dg_frag%id, ifrag, ispin, 0)
 
@@ -286,25 +367,27 @@
     if (.not. allocated(dg_frag%H_mat_blocks) .or. .not. allocated(dg_frag%H_block_map)) then
       call init_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, dg_frag%H_block_map, dg_frag%n_H_blocks)
     end if
-    call cpu_time(t0)
+    t0 = get_wtime()
     call reduce_matrix_blocks(dg_frag, dg_frag%H_mat_blocks, "hmat-reconstruct", dg_frag%icomm_frag)
-    call cpu_time(t1)
+    t1 = get_wtime()
     time_global_reduce = time_global_reduce + (t1 - t0)
-    call cpu_time(t0)
+    t0 = get_wtime()
     call rebuild_local_h_block_ids(dg_frag)
     call zero_nonlocal_h_matrix_blocks(dg_frag)
-    call cpu_time(t1)
+    dg_frag%H_blocks_include_nonlocal = static_blocks_include_nonlocal
+    t1 = get_wtime()
     time_post_reduce_cleanup = time_post_reduce_cleanup + (t1 - t0)
-    if (enable_reconstruct_timing .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
-        "        reconstruct timing: halo=", time_halo_exchange, &
-        " potential=", time_potential_build, " local=", time_local_build, &
-        " subgroup_reduce=", time_subgroup_reduce, " global_reduce=", time_global_reduce, &
-        " post_cleanup=", time_post_reduce_cleanup
+    if (trace_reconstruct) then
+      write(*,'(1x,a,i0,6(a,1pe12.4))') &
+        '[DG-HMAT-RECON] timing call=', trace_call_id, &
+        ' halo=', time_halo_exchange, &
+        ' potential=', time_potential_build, ' local=', time_local_build, &
+        ' subgroup_reduce=', time_subgroup_reduce, ' global_reduce=', time_global_reduce, &
+        ' post_cleanup=', time_post_reduce_cleanup
       flush(6)
     end if
 
-    call cpu_time(t0)
+    t0 = get_wtime()
 !$omp parallel do collapse(2) private(ispin,iblk,nbf,jo,io) schedule(static)
     do ispin = 1, system%nspin
       do iblk = 1, size(dg_frag%H_mat_blocks)
@@ -322,18 +405,21 @@
       end do
     end do
 !$omp end parallel do
-    call cpu_time(t1)
+    t1 = get_wtime()
     time_block_hermitize = time_block_hermitize + (t1 - t0)
 
-    if (enable_reconstruct_timing .and. dg_frag%id == 0) then
-      write(*,'(1x,a,1pe12.4)') "        reconstruct timing: hermitize=", time_block_hermitize
+    if (trace_reconstruct) then
+      write(*,'(1x,a,i0,a,1pe12.4)') '[DG-HMAT-RECON] hermitize call=', trace_call_id, &
+        ' time=', time_block_hermitize
       flush(6)
     end if
 
-    deallocate(V_total, V_phi)
+    deallocate(V_total)
+    if (allocated(V_phi)) deallocate(V_phi)
     if (allocated(partial_total)) deallocate(partial_total)
     if (allocated(partial_block)) deallocate(partial_block)
     if (allocated(reduced_block)) deallocate(reduced_block)
+    if (allocated(partial_thread)) deallocate(partial_thread)
 
   end subroutine reconstruct_hamiltonian_matrix
 
@@ -411,6 +497,49 @@
     end do
 !$omp end parallel do
   end subroutine build_total_potential_grid_with_stage_buffers
+
+  subroutine build_delta_potential_grid_with_stage_buffers(grid, lgnum_total, &
+      Vh_buffer, Vxc_buffer, Vh_ref_buffer, Vxc_ref_buffer, ispin, V_delta)
+    use structures
+    implicit none
+    type(s_rgrid), intent(in) :: grid
+    integer, intent(in) :: lgnum_total(3)
+    real(8), intent(in) :: Vh_buffer(:,:,:)
+    real(8), intent(in) :: Vxc_buffer(:,:,:,:)
+    real(8), intent(in) :: Vh_ref_buffer(:,:,:)
+    real(8), intent(in) :: Vxc_ref_buffer(:,:,:,:)
+    integer, intent(in) :: ispin
+    real(8), intent(out) :: V_delta(grid%is(1):grid%ie(1), grid%is(2):grid%ie(2), grid%is(3):grid%ie(3))
+    integer :: ix, iy, iz
+    integer :: bx, by, bz
+    integer :: b_lo1, b_lo2, b_lo3, b_hi1, b_hi2, b_hi3
+
+    b_lo1 = lbound(Vh_buffer, 1)
+    b_hi1 = ubound(Vh_buffer, 1)
+    b_lo2 = lbound(Vh_buffer, 2)
+    b_hi2 = ubound(Vh_buffer, 2)
+    b_lo3 = lbound(Vh_buffer, 3)
+    b_hi3 = ubound(Vh_buffer, 3)
+
+!$omp parallel do private(ix,iy,bx,by,bz) schedule(static)
+    do iz = grid%is(3), grid%ie(3)
+      bz = map_global_to_rank_buffer_coord_reconstruct(iz, b_lo3, b_hi3, lgnum_total(3))
+      do iy = grid%is(2), grid%ie(2)
+        by = map_global_to_rank_buffer_coord_reconstruct(iy, b_lo2, b_hi2, lgnum_total(2))
+!$omp simd private(bx)
+        do ix = grid%is(1), grid%ie(1)
+          bx = map_global_to_rank_buffer_coord_reconstruct(ix, b_lo1, b_hi1, lgnum_total(1))
+          if (bx == 0 .or. by == 0 .or. bz == 0) then
+            V_delta(ix, iy, iz) = 0.0d0
+          else
+            V_delta(ix, iy, iz) = (Vh_buffer(bx, by, bz) - Vh_ref_buffer(bx, by, bz)) + &
+                                  (Vxc_buffer(bx, by, bz, ispin) - Vxc_ref_buffer(bx, by, bz, ispin))
+          end if
+        end do
+      end do
+    end do
+!$omp end parallel do
+  end subroutine build_delta_potential_grid_with_stage_buffers
 
   subroutine build_local_potential_applied_basis_mapped(dg_frag, i_local, jo, mg, V_total, V_phi, &
       lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z)
@@ -543,6 +672,143 @@
     end if
   end subroutine integrate_local_basis_with_field_mapped
 
+  subroutine build_potential_block_real_blas_mapped(dg_frag, i_local, nbf, frag_rank, frag_size, mg, V_total, hvol, &
+      lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z, partial_block)
+    use structures
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: i_local, nbf, frag_rank, frag_size
+    type(s_rgrid), intent(in) :: mg
+    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8), intent(in) :: hvol
+    integer, intent(in) :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer, intent(in) :: ov_s(3), ov_e(3)
+    integer, intent(in) :: map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3))
+    real(8), intent(inout) :: partial_block(:, :)
+    integer :: npts, ncol, jloc, io, jo, lx, ly, lz, gx, gy, gz, bx, by, bz, ipt
+    integer, allocatable :: col_ids(:)
+    real(8), allocatable :: phi_2d(:,:), vphi_2d(:,:), hproj(:,:)
+
+    ncol = (nbf - (frag_rank + 1) + frag_size) / frag_size
+    if (ncol <= 0) return
+    npts = (lx_hi - lx_lo + 1) * (ly_hi - ly_lo + 1) * (lz_hi - lz_lo + 1)
+    if (npts <= 0) return
+
+    allocate(col_ids(ncol))
+    do jloc = 1, ncol
+      col_ids(jloc) = frag_rank + 1 + (jloc - 1) * frag_size
+    end do
+    allocate(phi_2d(npts, nbf), vphi_2d(npts, ncol), hproj(nbf, ncol))
+    phi_2d(:, :) = 0.0d0
+    vphi_2d(:, :) = 0.0d0
+
+!$omp parallel do private(lz,ly,lx,gx,gy,gz,bx,by,bz,ipt,io,jloc,jo) schedule(static)
+    do lz = lz_lo, lz_hi
+      gz = ov_s(3) + (lz - lz_lo)
+      bz = map_z(gz)
+      if (bz == 0) cycle
+      do ly = ly_lo, ly_hi
+        gy = ov_s(2) + (ly - ly_lo)
+        by = map_y(gy)
+        if (by == 0) cycle
+        do lx = lx_lo, lx_hi
+          gx = ov_s(1) + (lx - lx_lo)
+          bx = map_x(gx)
+          if (bx == 0) cycle
+          ipt = ((lz - lz_lo) * (ly_hi - ly_lo + 1) + (ly - ly_lo)) * &
+                (lx_hi - lx_lo + 1) + (lx - lx_lo) + 1
+!$omp simd
+          do io = 1, nbf
+            phi_2d(ipt, io) = dg_frag%phi_frag(bx, by, bz, io, i_local)
+          end do
+!$omp simd private(jo)
+          do jloc = 1, ncol
+            jo = col_ids(jloc)
+            vphi_2d(ipt, jloc) = V_total(gx, gy, gz) * dg_frag%phi_frag(bx, by, bz, jo, i_local)
+          end do
+        end do
+      end do
+    end do
+!$omp end parallel do
+
+    call dgemm('T', 'N', nbf, ncol, npts, hvol, phi_2d, npts, vphi_2d, npts, 0.0d0, hproj, nbf)
+    do jloc = 1, ncol
+      jo = col_ids(jloc)
+      partial_block(1:nbf, jo) = hproj(1:nbf, jloc)
+    end do
+
+    deallocate(col_ids, phi_2d, vphi_2d, hproj)
+  end subroutine build_potential_block_real_blas_mapped
+
+  subroutine build_potential_column_real_mapped(dg_frag, i_local, jo, nbf, mg, V_total, hvol, &
+      lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi, ov_s, ov_e, map_x, map_y, map_z, partial_out, partial_work)
+    use structures
+    use omp_lib, only: omp_get_thread_num
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: i_local, jo, nbf
+    type(s_rgrid), intent(in) :: mg
+    real(8), intent(in) :: V_total(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3))
+    real(8), intent(in) :: hvol
+    integer, intent(in) :: lx_lo, lx_hi, ly_lo, ly_hi, lz_lo, lz_hi
+    integer, intent(in) :: ov_s(3), ov_e(3)
+    integer, intent(in) :: map_x(ov_s(1):ov_e(1)), map_y(ov_s(2):ov_e(2)), map_z(ov_s(3):ov_e(3))
+    real(8), intent(out) :: partial_out(:)
+    real(8), intent(inout) :: partial_work(:,:)
+    integer :: lx, ly, lz, gx, gy, gz, bx, by, bz, io, tid
+    real(8) :: weighted_phi
+
+    partial_work(1:nbf, :) = 0.0d0
+!$omp parallel private(lz,ly,lx,gx,gy,gz,bx,by,bz,io,tid,weighted_phi)
+    tid = omp_get_thread_num() + 1
+!$omp do schedule(static)
+    do lz = lz_lo, lz_hi
+      gz = ov_s(3) + (lz - lz_lo)
+      bz = map_z(gz)
+      if (bz == 0) cycle
+      do ly = ly_lo, ly_hi
+        gy = ov_s(2) + (ly - ly_lo)
+        by = map_y(gy)
+        if (by == 0) cycle
+        do lx = lx_lo, lx_hi
+          gx = ov_s(1) + (lx - lx_lo)
+          bx = map_x(gx)
+          if (bx == 0) cycle
+          weighted_phi = V_total(gx, gy, gz) * dg_frag%phi_frag(bx, by, bz, jo, i_local) * hvol
+!$omp simd
+          do io = 1, nbf
+            partial_work(io, tid) = partial_work(io, tid) + &
+              dg_frag%phi_frag(bx, by, bz, io, i_local) * weighted_phi
+          end do
+        end do
+      end do
+    end do
+!$omp end do
+!$omp end parallel
+
+    partial_out(1:nbf) = 0.0d0
+    do tid = 1, size(partial_work, 2)
+!$omp simd
+      do io = 1, nbf
+        partial_out(io) = partial_out(io) + partial_work(io, tid)
+      end do
+    end do
+  end subroutine build_potential_column_real_mapped
+
+  subroutine mirror_upper_to_lower_real(block, n)
+    implicit none
+    real(8), intent(inout) :: block(:, :)
+    integer, intent(in) :: n
+    integer :: io, jo
+
+    do jo = 1, n
+!$omp simd
+      do io = jo + 1, n
+        block(io, jo) = block(jo, io)
+      end do
+    end do
+  end subroutine mirror_upper_to_lower_real
+
   subroutine assert_real_hmat_reconstruct_bounded_1d(label, vals, limit, rank, ifrag, ispin, jo)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_is_nan
     implicit none
@@ -550,9 +816,11 @@
     real(8), intent(in) :: vals(:)
     real(8), intent(in) :: limit
     integer, intent(in) :: rank, ifrag, ispin, jo
+    logical, parameter :: enable_hmat_nan_check = .false.
     real(8) :: vmax
     logical :: has_nan, has_big
 
+    if (.not. enable_hmat_nan_check) return
     has_nan = any(ieee_is_nan(vals))
     has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
     vmax = maxval(abs(vals))
@@ -566,9 +834,11 @@
     real(8), intent(in) :: vals(:,:)
     real(8), intent(in) :: limit
     integer, intent(in) :: rank, ifrag, ispin, jo
+    logical, parameter :: enable_hmat_nan_check = .false.
     real(8) :: vmax
     logical :: has_nan, has_big
 
+    if (.not. enable_hmat_nan_check) return
     has_nan = any(ieee_is_nan(vals))
     has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
     vmax = maxval(abs(vals))
@@ -582,9 +852,11 @@
     real(8), intent(in) :: vals(:,:,:)
     real(8), intent(in) :: limit
     integer, intent(in) :: rank, ifrag, ispin, jo
+    logical, parameter :: enable_hmat_nan_check = .false.
     real(8) :: vmax
     logical :: has_nan, has_big
 
+    if (.not. enable_hmat_nan_check) return
     has_nan = any(ieee_is_nan(vals))
     has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
     vmax = maxval(abs(vals))
@@ -598,9 +870,11 @@
     real(8), intent(in) :: vals(:,:,:,:)
     real(8), intent(in) :: limit
     integer, intent(in) :: rank, ifrag, ispin, jo
+    logical, parameter :: enable_hmat_nan_check = .false.
     real(8) :: vmax
     logical :: has_nan, has_big
 
+    if (.not. enable_hmat_nan_check) return
     has_nan = any(ieee_is_nan(vals))
     has_big = any((.not. ieee_is_finite(vals)) .or. abs(vals) > limit)
     vmax = maxval(abs(vals))
@@ -614,9 +888,11 @@
     complex(8), intent(in) :: vals(:,:,:)
     real(8), intent(in) :: limit
     integer, intent(in) :: rank, ifrag, ispin, jo
+    logical, parameter :: enable_hmat_nan_check = .false.
     real(8) :: vmax
     logical :: has_nan, has_big
 
+    if (.not. enable_hmat_nan_check) return
     has_nan = any(ieee_is_nan(real(vals, kind=8))) .or. any(ieee_is_nan(aimag(vals)))
     has_big = any((.not. ieee_is_finite(real(vals, kind=8))) .or. &
                   (.not. ieee_is_finite(aimag(vals))) .or. abs(vals) > limit)

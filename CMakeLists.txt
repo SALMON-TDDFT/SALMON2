@@ -13,6 +13,7 @@ endif ()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/platforms)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Modules)
 include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
+include(${CMAKE_SOURCE_DIR}/cmakefiles/configure_macos_openmp.cmake)
 
 
 ### Project settings

@@ -1,7 +1,7 @@
   subroutine calculate_observables(dg_frag, system, mg, stencil, ppg, rt, itt, Vh, Vxc, Vpsl, rho)
     use structures
     use rt_dg_fragment_types, only: s_dg_fragment_rt
-    use rt_dg_fragment_ops, only: calculate_macroscopic_current_dg
+    use rt_dg_fragment_ops, only: calculate_macroscopic_current_dg, calculate_nonlocal_current_dg
     use unusedvar_mod, only: salmon_unusedvar
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -15,10 +15,9 @@
     type(s_scalar),         intent(in)    :: Vxc(system%nspin)
     type(s_scalar),         intent(in), optional :: rho
     integer :: ispin
-    real(8) :: current_raw(3)
+    real(8) :: current_raw(3), current_nl_raw(3)
     real(8) :: nelec_ref, ne_density
 
-    call salmon_unusedvar(ppg)
     call salmon_unusedvar(Vh)
     call salmon_unusedvar(Vxc)
     call salmon_unusedvar(Vpsl)
@@ -31,13 +30,15 @@
     end if
 
     call calculate_macroscopic_current_dg(dg_frag, system, mg, stencil, current_raw)
+    call calculate_nonlocal_current_dg(dg_frag, system, mg, ppg, rt%Ac_tot(:, itt), current_nl_raw)
     if (system%ngrid > 0) then
       dg_frag%current(:) = current_raw(:) / dble(system%ngrid)
+      dg_frag%current_nl(:) = current_nl_raw(:) / dble(system%ngrid)
     else
       dg_frag%current(:) = 0.0d0
+      dg_frag%current_nl(:) = 0.0d0
     end if
     dg_frag%current_para(:) = dg_frag%current(:)
-    dg_frag%current_nl(:) = 0.0d0
     nelec_ref = 0.0d0
     if (allocated(system%rocc)) then
       do ispin = 1, min(dg_frag%nspin, size(system%rocc, 3))

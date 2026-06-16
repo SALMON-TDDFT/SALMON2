@@ -80,10 +80,10 @@ contains
     integer, parameter :: basis_buffer_magic = -22022212
     integer, parameter :: basis_buffer_version = 2
     character(256) :: filename
-    integer :: iunit, ifrag, ispin, n_frag_file, nspin_file
+    integer :: iunit, ifrag, ispin, n_frag_file, nspin_file, iostat_read
     integer :: nstate_frag_file, nstate_tot_file, nstate_frag_keep
     integer, allocatable :: n_basis_tmp(:,:), index_basis_file(:,:,:)
-    real(8), allocatable :: coef_state_file(:)
+    real(8), allocatable :: coef_state_file(:), esp_file(:,:)
     integer :: n_mat_tmp(2)   ! nspin is expected to be 1 or 2
     integer :: ifrag_count, i_local, io, global_idx
     integer :: local_coef_max, local_idx
@@ -104,6 +104,7 @@ contains
     real(8) :: n_basis_avg, nvirt_est_avg
     integer :: state_col, occ_base, occ_extra, frag_occ_s, frag_occ_e, nocc_frag_seed
     logical :: warned_spin_discard, has_buffer_file, has_core_file, identity_seed_coefficients
+    logical :: esp_loaded
     real(8) :: coef_diag_local(2), coef_diag_global(2)
 
     ! Step 1: Root reads metadata from first fragment and broadcasts
@@ -189,6 +190,12 @@ contains
     end if
     allocate(n_basis_tmp(dg_frag%n_frag, dg_frag%nspin))
     allocate(index_basis_file(nstate_frag_file, dg_frag%n_frag, dg_frag%nspin))
+    if (.not. identity_seed_coefficients) then
+      if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
+      allocate(dg_frag%esp(dg_frag%nstate_tot, dg_frag%nspin))
+      dg_frag%esp(:, :) = 0.0d0
+      allocate(esp_file(nstate_tot_file, nspin_file))
+    end if
 
     ! All ranks read global metadata from fragment 1.
     ! index_basis maps local->global indices across ALL fragments; every rank
@@ -313,11 +320,23 @@ contains
     if (allocated(dg_frag%coef)) deallocate(dg_frag%coef)
     if (allocated(dg_frag%coef_new)) deallocate(dg_frag%coef_new)
     if (allocated(dg_frag%coef_work)) deallocate(dg_frag%coef_work)
-    allocate(dg_frag%coef(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+    if (dg_frag%coef_state_block_mode) then
+      allocate(dg_frag%coef(local_coef_max, max(1, dg_frag%coef_nstate_local), dg_frag%nspin))
+    else
+      allocate(dg_frag%coef(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+    end if
     if (identity_seed_coefficients) then
-      allocate(dg_frag%coef_work(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+      if (dg_frag%coef_state_block_mode) then
+        allocate(dg_frag%coef_work(local_coef_max, max(1, dg_frag%coef_nstate_local), dg_frag%nspin))
+      else
+        allocate(dg_frag%coef_work(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+      end if
       if (dg_frag%yn_adaptive_basis) then
-        allocate(dg_frag%coef_new(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+        if (dg_frag%coef_state_block_mode) then
+          allocate(dg_frag%coef_new(local_coef_max, max(1, dg_frag%coef_nstate_local), dg_frag%nspin))
+        else
+          allocate(dg_frag%coef_new(local_coef_max, dg_frag%nstate_tot, dg_frag%nspin))
+        end if
       end if
     end if
     dg_frag%coef = 0.0d0
@@ -368,7 +387,13 @@ contains
               state_col = 0
               if (io <= nocc_frag_seed) state_col = frag_occ_s + io - 1
               if (state_col >= 1 .and. state_col <= dg_frag%nstate_tot) then
-                dg_frag%coef(local_idx, state_col, ispin) = (1.0d0, 0.0d0)
+                if (dg_frag%coef_state_block_mode) then
+                  if (state_col >= dg_frag%coef_state_start .and. state_col <= dg_frag%coef_state_end) then
+                    dg_frag%coef(local_idx, state_col - dg_frag%coef_state_start + 1, ispin) = (1.0d0, 0.0d0)
+                  end if
+                else
+                  dg_frag%coef(local_idx, state_col, ispin) = (1.0d0, 0.0d0)
+                end if
               end if
             end if
           end do
@@ -378,6 +403,7 @@ contains
       ! Step 5b: DC-LCFO coefficient seed.  wavefunctions.bin stores
       ! coef_wf(local_basis, state, spin), with each state column contiguous.
       ! Stream one column at a time so the RT rank keeps only its owned rows.
+      esp_loaded = .false.
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         iunit = get_filehandle()
         write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
@@ -393,17 +419,38 @@ contains
             read(iunit) coef_state_file(1:nstate_frag_file)
             if (ispin < 1 .or. ispin > dg_frag%nspin) cycle
             if (state_col > dg_frag%nstate_tot) cycle
+            if (dg_frag%coef_state_block_mode) then
+              if (state_col < dg_frag%coef_state_start .or. state_col > dg_frag%coef_state_end) cycle
+            end if
             nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), nstate_frag_file)
             do io = 1, nbasis_iter
               global_idx = dg_frag%index_basis(io, ifrag, ispin)
               local_idx = 0
               if (global_idx > 0 .and. global_idx <= dg_frag%n_mat_max) local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
               if (local_idx > 0 .and. local_idx <= size(dg_frag%coef, 1)) then
-                dg_frag%coef(local_idx, state_col, ispin) = dcmplx(coef_state_file(io), 0.0d0)
+                if (dg_frag%coef_state_block_mode) then
+                  dg_frag%coef(local_idx, state_col - dg_frag%coef_state_start + 1, ispin) = &
+                    dcmplx(coef_state_file(io), 0.0d0)
+                else
+                  dg_frag%coef(local_idx, state_col, ispin) = dcmplx(coef_state_file(io), 0.0d0)
+                end if
               end if
             end do
           end do
         end do
+        if (allocated(esp_file) .and. .not. esp_loaded) then
+          read(iunit, iostat=iostat_read) esp_file(1:nstate_tot_file, 1:nspin_file)
+          if (iostat_read /= 0) then
+            if (dg_frag%id == 0) then
+              write(*,'(1x,a)') "[FATAL] DC-LCFO wavefunctions.bin has no EigenExa eigenvalue block."
+              write(*,'(1x,a)') "[FATAL] Regenerate the DC-LCFO-Flux seed so RT can remove static eigenphases."
+            end if
+            stop "DG-Fragment RT: missing DC-LCFO eigenvalues"
+          end if
+          dg_frag%esp(1:min(dg_frag%nstate_tot,nstate_tot_file), 1:min(dg_frag%nspin,nspin_file)) = &
+            esp_file(1:min(dg_frag%nstate_tot,nstate_tot_file), 1:min(dg_frag%nspin,nspin_file))
+          esp_loaded = .true.
+        end if
         close(iunit)
         deallocate(coef_state_file)
       end do
@@ -431,6 +478,7 @@ contains
       end if
       stop "DG-Fragment RT: empty seed coefficient matrix"
     end if
+    if (allocated(esp_file)) deallocate(esp_file)
 
     ! Keep coefficients only on the owning fragment ranks.
 

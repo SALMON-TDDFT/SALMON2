@@ -32,6 +32,7 @@
     logical, optional,       intent(in)    :: skip_hamiltonian_reconstruct
     logical, optional,       intent(in)    :: skip_orbital_dependent
     real(8), allocatable :: rho_buffer(:,:,:), Vh_buffer(:,:,:)
+    real(8), allocatable :: Vpsl_buffer(:,:,:), Vxc_buffer(:,:,:,:)
     logical :: use_rank_buffered_potential
     logical :: do_hamiltonian_reconstruct
     logical :: allow_orbital_dependent
@@ -85,7 +86,14 @@
       allocate(Vh_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
                          dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      allocate(Vpsl_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                           dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                           dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      allocate(Vxc_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                          dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3), system%nspin))
       call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, rho, rho_buffer)
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vpsl, Vpsl_buffer)
     end if
     
     ! Step 2: Update Hartree potential from new density
@@ -129,6 +137,9 @@
       dg_frag%Vxc_frag(:, :, :, 1:system%nspin) = 0.0d0
       do ispin = 1, system%nspin
         dg_frag%Vxc_frag(:, :, :, ispin) = Vxc(ispin)%f(:, :, :)
+        if (use_rank_buffered_potential) then
+          call copy_periodic_global_scalar_to_rank_buffer(dg_frag, mg, Vxc(ispin), Vxc_buffer(:, :, :, ispin))
+        end if
       end do
     end if
     
@@ -155,18 +166,23 @@
     if (.not. do_hamiltonian_reconstruct) then
       if (allocated(rho_buffer)) deallocate(rho_buffer)
       if (allocated(Vh_buffer)) deallocate(Vh_buffer)
+      if (allocated(Vpsl_buffer)) deallocate(Vpsl_buffer)
+      if (allocated(Vxc_buffer)) deallocate(Vxc_buffer)
       return
     end if
     
     ! Step 5: Reconstruct Hamiltonian matrix with updated potentials.
     ! Runtime adaptive basis updates are intentionally not supported in DG-Fragment RT.
     if (use_rank_buffered_potential) then
-      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, Vh_buffer)
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, &
+                                          Vh_buffer, Vxc_buffer, Vpsl_buffer)
     else
       call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
     end if
 
     if (allocated(rho_buffer)) deallocate(rho_buffer)
     if (allocated(Vh_buffer)) deallocate(Vh_buffer)
+    if (allocated(Vpsl_buffer)) deallocate(Vpsl_buffer)
+    if (allocated(Vxc_buffer)) deallocate(Vxc_buffer)
 
   end subroutine update_density_and_hamiltonian

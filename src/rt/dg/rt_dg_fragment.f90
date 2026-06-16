@@ -47,9 +47,6 @@
 #include "config.h"
 module rt_dg_fragment
   use rt_dg_fragment_types, only: s_dg_fragment_rt, halo_info, invalidate_coef_exchange_cache
-  use rt_dg_basis_projection, only: calculate_new_old_basis_overlap, &
-                                   stabilize_basis_overlap, &
-                                   project_wavefunction_to_new_basis
   use rt_dg_plane_wave, only: init_plane_wave_basis
   use rt_dg_hse_exchange, only: init_hse_ri_data, add_exact_exchange_hse, finalize_hse_ri_data
   use rt_dg_fragment_layout, only: build_density_grid_owner_maps, &
@@ -64,15 +61,21 @@ module rt_dg_fragment
                                 calculate_microscopic_current_dg, &
                                 apply_gradient_to_basis_ops => apply_gradient_to_basis, &
                                 rebuild_local_h_block_ids, &
-                                apply_complex_matrix_blocks_batch, apply_overlap_operator_batch, &
-                                solve_overlap_operator_batch
+                                apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, &
+                                apply_overlap_operator_batch, fetch_remote_coef_rows, &
+                                solve_overlap_operator_batch, &
+                                diagnose_velocity_transition_strength_dg
   implicit none
 
   private
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
+  public :: calculate_observables
   public :: update_density_and_hamiltonian
   public :: diagnose_density_from_fragments
+  public :: diagnose_dcdft_lcfo_seed_stationarity
+  public :: diagnose_velocity_transition_strength_dg
+  public :: calibrate_dcdft_lcfo_static_hamiltonian
   public :: get_dg_spin_occ_info
   public :: copy_periodic_global_scalar_to_rank_buffer
   public :: build_total_potential_grid_with_buffered_hartree
@@ -177,6 +180,10 @@ contains
     dg_frag%nspin = system%nspin
     dg_frag%nstate_frag = nstate_frag
     dg_frag%nstate_tot = system%no
+    dg_frag%coef_state_block_mode = .false.
+    dg_frag%coef_state_start = 1
+    dg_frag%coef_state_end = dg_frag%nstate_tot
+    dg_frag%coef_nstate_local = dg_frag%nstate_tot
     allocate(dg_frag%nocc_spin(dg_frag%nspin))
     dg_frag%nocc_spin(:) = 0
     if (allocated(system%rocc)) then
@@ -290,6 +297,7 @@ contains
     dg_frag%isize_frag = dg_frag%nproc_frag
     dg_frag%is_frag_root = (dg_frag%id_frag == 0)
     dg_frag%icomm_frag = comm_create_group(dg_frag%icomm, dg_frag%ifrag_group - 1, dg_frag%id_frag)
+    call initialize_dg_state_block_coef_mode(dg_frag)
     
     ! Check DFT+U status
     dg_frag%use_plusu = PLUS_U_ON
@@ -323,6 +331,8 @@ contains
       dg_frag%time_integrator = 2
     case('rk4')
       dg_frag%time_integrator = 3
+    case('taylor4pc')
+      dg_frag%time_integrator = 4
     case default
       dg_frag%time_integrator = 3  ! default: RK4
     end select
@@ -395,8 +405,12 @@ contains
     ! Coefficient arrays will be allocated by read_fragment_basis_data()
     ! with proper n_mat_max dimensions for global basis compatibility
     
-    ! Allocate only ESP array (independent of basis function count)
-    allocate(dg_frag%esp(dg_frag%nstate_tot, dg_frag%nspin))
+    ! read_fragment_basis_data may already have loaded DC-LCFO EigenExa
+    ! eigenvalues for static-phase removal.  Keep them when present.
+    if (.not. allocated(dg_frag%esp)) then
+      allocate(dg_frag%esp(dg_frag%nstate_tot, dg_frag%nspin))
+      dg_frag%esp(:, :) = 0.0d0
+    end if
     
     ! Initialize RK coefficients
     call init_rk_coefficients(dg_frag)
@@ -600,22 +614,363 @@ contains
 #include "rt_dg_integrator_rk.f90"
 
   !=======================================================================
+  ! Time evolution using fourth-order Taylor predictor-corrector
+  !=======================================================================
+#include "rt_dg_integrator_taylor.f90"
+
+  !=======================================================================
   ! Stage-wise density/Hamiltonian update for RK4 (paper-aligned self-consistency)
   !=======================================================================
 #include "rt_dg_integrator_stage_update.f90"
 
   !=======================================================================
-  ! Stabilize coefficient matrix by modified Gram-Schmidt orthonormalization
-  !=======================================================================
-  !=======================================================================
-  ! Stabilize coefficient matrix by S-metric Gram-Schmidt orthonormalization
-  !=======================================================================
-#include "rt_dg_integrator_unitarity.f90"
-
-  !=======================================================================
   ! Calculate time derivative of coefficients (velocity gauge)
   !=======================================================================
 #include "rt_dg_integrator_derivative.f90"
+
+  subroutine calibrate_dcdft_lcfo_static_hamiltonian(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+    use structures
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    type(s_stencil), intent(in) :: stencil
+    type(s_scalar), intent(in) :: Vh
+    type(s_scalar), intent(in) :: Vxc(system%nspin)
+    type(s_scalar), intent(in) :: Vpsl
+    real(8), intent(in) :: Ac_tot(3)
+
+    integer :: iblk
+    real(8) :: diff_local, diff_max
+    real(8), allocatable :: Vh_buffer(:,:,:), Vpsl_buffer(:,:,:), Vxc_buffer(:,:,:,:)
+    logical :: use_rank_buffered_potential
+
+    if (.not. dg_frag%dc_lcfo_seed_basis_cleaned) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%H_mat_core_blocks)) return
+    if (.not. allocated(dg_frag%H_mat_kinetic_blocks)) return
+
+    use_rank_buffered_potential = all(dg_frag%rank_buf_hi(:) >= dg_frag%rank_buf_lo(:))
+    if (use_rank_buffered_potential) then
+      allocate(Vh_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                         dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                         dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      allocate(Vpsl_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                           dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                           dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3)))
+      allocate(Vxc_buffer(dg_frag%rank_buf_lo(1):dg_frag%rank_buf_hi(1), &
+                          dg_frag%rank_buf_lo(2):dg_frag%rank_buf_hi(2), &
+                          dg_frag%rank_buf_lo(3):dg_frag%rank_buf_hi(3), system%nspin))
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, dg_frag%mg, Vh, Vh_buffer)
+      call copy_periodic_global_scalar_to_rank_buffer(dg_frag, dg_frag%mg, Vpsl, Vpsl_buffer)
+      do iblk = 1, system%nspin
+        call copy_periodic_global_scalar_to_rank_buffer(dg_frag, dg_frag%mg, Vxc(iblk), Vxc_buffer(:, :, :, iblk))
+      end do
+    end if
+
+    do iblk = 1, size(dg_frag%H_mat_blocks)
+      if (allocated(dg_frag%H_mat_blocks(iblk)%val) .and. allocated(dg_frag%H_mat_core_blocks(iblk)%val)) then
+        dg_frag%H_mat_core_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_blocks(iblk)%val(:, :, :)
+      end if
+      if (allocated(dg_frag%H_mat_kinetic_blocks(iblk)%val)) then
+        dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = 0.0d0
+      end if
+    end do
+
+    if (use_rank_buffered_potential) then
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, &
+                                          Vh_buffer, Vxc_buffer, Vpsl_buffer)
+    else
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+    end if
+
+    do iblk = 1, size(dg_frag%H_mat_blocks)
+      if (allocated(dg_frag%H_mat_blocks(iblk)%val) .and. &
+          allocated(dg_frag%H_mat_core_blocks(iblk)%val) .and. &
+          allocated(dg_frag%H_mat_kinetic_blocks(iblk)%val)) then
+        dg_frag%H_mat_kinetic_blocks(iblk)%val(:, :, :) = &
+          dg_frag%H_mat_core_blocks(iblk)%val(:, :, :) - dg_frag%H_mat_blocks(iblk)%val(:, :, :)
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_core_blocks(iblk)%val(:, :, :)
+      end if
+    end do
+    dg_frag%H_blocks_include_nonlocal = .true.
+    call rebuild_local_h_block_ids(dg_frag)
+
+    if (use_rank_buffered_potential) then
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot, &
+                                          Vh_buffer, Vxc_buffer, Vpsl_buffer)
+    else
+      call reconstruct_hamiltonian_matrix(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_tot)
+    end if
+    diff_max = 0.0d0
+    do iblk = 1, size(dg_frag%H_mat_blocks)
+      if (allocated(dg_frag%H_mat_blocks(iblk)%val) .and. allocated(dg_frag%H_mat_core_blocks(iblk)%val)) then
+        diff_local = maxval(abs(dg_frag%H_mat_blocks(iblk)%val(:, :, :) - &
+                                dg_frag%H_mat_core_blocks(iblk)%val(:, :, :)))
+        diff_max = max(diff_max, diff_local)
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_core_blocks(iblk)%val(:, :, :)
+      end if
+    end do
+    dg_frag%H_blocks_include_nonlocal = .true.
+    call rebuild_local_h_block_ids(dg_frag)
+
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,1pe13.5)') &
+        '[DG-DCDFT-SEED] calibrated static H reference; max|H_static+V0-H_export|=', diff_max
+      flush(6)
+    end if
+    if (use_rank_buffered_potential) then
+      if (allocated(dg_frag%H_ref_Vh_buffer)) deallocate(dg_frag%H_ref_Vh_buffer)
+      if (allocated(dg_frag%H_ref_Vxc_buffer)) deallocate(dg_frag%H_ref_Vxc_buffer)
+      allocate(dg_frag%H_ref_Vh_buffer(lbound(Vh_buffer, 1):ubound(Vh_buffer, 1), &
+                                       lbound(Vh_buffer, 2):ubound(Vh_buffer, 2), &
+                                       lbound(Vh_buffer, 3):ubound(Vh_buffer, 3)))
+      allocate(dg_frag%H_ref_Vxc_buffer(lbound(Vxc_buffer, 1):ubound(Vxc_buffer, 1), &
+                                        lbound(Vxc_buffer, 2):ubound(Vxc_buffer, 2), &
+                                        lbound(Vxc_buffer, 3):ubound(Vxc_buffer, 3), &
+                                        lbound(Vxc_buffer, 4):ubound(Vxc_buffer, 4)))
+      dg_frag%H_ref_Vh_buffer(:, :, :) = Vh_buffer(:, :, :)
+      dg_frag%H_ref_Vxc_buffer(:, :, :, :) = Vxc_buffer(:, :, :, :)
+      dg_frag%H_delta_reference_valid = .true.
+    else
+      dg_frag%H_delta_reference_valid = .false.
+    end if
+    if (allocated(Vh_buffer)) deallocate(Vh_buffer)
+    if (allocated(Vpsl_buffer)) deallocate(Vpsl_buffer)
+    if (allocated(Vxc_buffer)) deallocate(Vxc_buffer)
+  end subroutine calibrate_dcdft_lcfo_static_hamiltonian
+
+  subroutine diagnose_dcdft_lcfo_seed_stationarity(dg_frag, system, mg, ppg, Ac_tot, label)
+    use structures
+    use communication, only: comm_summation, comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    type(s_rgrid), intent(in) :: mg
+    type(s_pp_grid), intent(in) :: ppg
+    real(8), intent(in) :: Ac_tot(3)
+    character(*), intent(in), optional :: label
+
+    integer, parameter :: max_probe = 512
+    integer :: ispin, nocc, nprobe, iprobe, istate, irow, local_idx
+    integer :: iblk_idx, iblk, ifrag_row, ifrag_col, n_needed, k
+    integer :: max_rel_state
+    integer :: sample_state(max_probe)
+    integer, allocatable :: needed_row_ids(:)
+    logical, allocatable :: row_needed(:)
+    real(8), allocatable :: occ_weight(:)
+    complex(8), allocatable :: coef_probe(:,:), coef_needed(:,:), hcoef_probe(:,:)
+    real(8) :: res2_local, res2_global, c2_local, c2_global
+    real(8) :: rel_res, max_rel_res, eps_absmax, eps_sample
+    real(8) :: h2_local, h2_global, max_h_norm
+    real(8) :: rayleigh_local, rayleigh_global, rayleigh
+    real(8) :: max_rayleigh_abs, max_rayleigh_eps_abs
+    complex(8) :: res_val
+    real(8) :: rsend(4), rrecv(4)
+    character(len=64) :: out_label
+
+    if (.not. allocated(dg_frag%coef)) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%esp)) return
+    if (dg_frag%nstate_tot <= 0) return
+    allocate(occ_weight(max(1, dg_frag%nstate_tot)))
+    max_rel_res = 0.0d0
+    eps_absmax = 0.0d0
+    max_h_norm = 0.0d0
+    max_rayleigh_abs = 0.0d0
+    max_rayleigh_eps_abs = 0.0d0
+    max_rel_state = 0
+    call rebuild_local_h_block_ids(dg_frag)
+    if (.not. allocated(dg_frag%H_local_block_ids)) then
+      deallocate(occ_weight)
+      return
+    end if
+
+    do ispin = 1, dg_frag%nspin
+      call build_hres_needed_rows(ispin)
+      if (n_needed <= 0) cycle
+      call get_dg_spin_occ_info(dg_frag, system, ispin, occ_weight, nocc)
+      if (nocc <= 0) cycle
+      nprobe = 0
+      if (nocc <= max_probe) then
+        do k = 1, nocc
+          call append_probe_state(k)
+        end do
+      else
+        call append_probe_state(1)
+        call append_probe_state(max(1, (nocc + 1) / 2))
+        call append_probe_state(nocc)
+      end if
+      do iprobe = 1, nprobe
+        istate = sample_state(iprobe)
+        if (allocated(dg_frag%esp)) then
+          if (istate <= size(dg_frag%esp, 1) .and. ispin <= size(dg_frag%esp, 2)) then
+            eps_sample = dg_frag%esp(istate, ispin)
+            eps_absmax = max(eps_absmax, abs(eps_sample))
+          end if
+        end if
+        call ensure_hres_work_arrays(n_needed)
+        coef_probe(:, :) = (0.0d0, 0.0d0)
+        coef_needed(:, :) = (0.0d0, 0.0d0)
+        call fetch_remote_coef_rows(dg_frag, ispin, needed_row_ids, coef_needed, istate, istate)
+        do k = 1, n_needed
+          if (needed_row_ids(k) < 1 .or. needed_row_ids(k) > size(coef_probe, 1)) cycle
+          coef_probe(needed_row_ids(k), 1) = coef_needed(k, 1)
+        end do
+        if (.not. allocated(hcoef_probe)) then
+          allocate(hcoef_probe(dg_frag%n_mat_max, 1))
+        else if (size(hcoef_probe, 1) /= dg_frag%n_mat_max) then
+          deallocate(hcoef_probe)
+          allocate(hcoef_probe(dg_frag%n_mat_max, 1))
+        end if
+        hcoef_probe(:, :) = (0.0d0, 0.0d0)
+        call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, &
+                                       coef_probe(:, 1:1), hcoef_probe(:, 1:1), &
+                                       dg_frag%H_local_block_ids)
+        res2_local = 0.0d0
+        c2_local = 0.0d0
+        h2_local = 0.0d0
+        rayleigh_local = 0.0d0
+        do irow = 1, dg_frag%n_mat_max
+          if (allocated(dg_frag%coef_owner)) then
+            if (irow > size(dg_frag%coef_owner, 1)) cycle
+            if (dg_frag%coef_owner(irow, ispin) /= dg_frag%id) cycle
+            local_idx = dg_frag%coef_global_to_local(irow, ispin)
+            if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+          else
+            local_idx = irow
+            if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+          end if
+          res_val = hcoef_probe(irow, 1) - dg_frag%esp(istate, ispin) * coef_probe(irow, 1)
+          res2_local = res2_local + abs(res_val)**2
+          h2_local = h2_local + abs(hcoef_probe(irow, 1))**2
+          c2_local = c2_local + abs(dg_frag%coef(local_idx, istate, ispin))**2
+          rayleigh_local = rayleigh_local + real(conjg(coef_probe(irow, 1)) * hcoef_probe(irow, 1), 8)
+        end do
+        rsend(1) = res2_local
+        rsend(2) = c2_local
+        rsend(3) = h2_local
+        rsend(4) = rayleigh_local
+        call comm_summation(rsend, rrecv, 4, dg_frag%icomm)
+        res2_global = rrecv(1)
+        c2_global = rrecv(2)
+        h2_global = rrecv(3)
+        rayleigh_global = rrecv(4)
+        if (c2_global > 0.0d0) then
+          rel_res = sqrt(max(0.0d0, res2_global) / c2_global)
+          rayleigh = rayleigh_global / c2_global
+        else
+          rel_res = 0.0d0
+          rayleigh = 0.0d0
+        end if
+        if (rel_res > max_rel_res) then
+          max_rel_res = rel_res
+          max_rel_state = istate
+        end if
+        max_h_norm = max(max_h_norm, sqrt(max(0.0d0, h2_global) / max(1.0d-300, c2_global)))
+        max_rayleigh_abs = max(max_rayleigh_abs, abs(rayleigh))
+        max_rayleigh_eps_abs = max(max_rayleigh_eps_abs, abs(rayleigh - eps_sample))
+      end do
+    end do
+
+    if (comm_is_root(dg_frag%id)) then
+      out_label = '[DG-DCDFT-SEED-HRES]'
+      if (present(label)) then
+        if (len_trim(label) > 0) out_label = trim(label)
+      end if
+      write(*,'(1x,a,1x,a,1pe13.5,a,i0,a,1pe13.5,a,1pe13.5,a,1pe13.5,a,1pe13.5,a,3(1x,1pe13.5))') &
+        trim(out_label), 'sampled ||(H-e)C||/||C||=', max_rel_res, &
+        ' state=', max_rel_state, ' eps_absmax=', eps_absmax, ' h_absmax=', max_h_norm, &
+        ' rayleigh_absmax=', max_rayleigh_abs, ' rayleigh_minus_eps_absmax=', max_rayleigh_eps_abs, &
+        ' Ac=', Ac_tot
+      flush(6)
+    end if
+
+    if (allocated(coef_probe)) deallocate(coef_probe)
+    if (allocated(coef_needed)) deallocate(coef_needed)
+    if (allocated(hcoef_probe)) deallocate(hcoef_probe)
+    if (allocated(needed_row_ids)) deallocate(needed_row_ids)
+    if (allocated(row_needed)) deallocate(row_needed)
+    deallocate(occ_weight)
+
+  contains
+
+    subroutine ensure_hres_work_arrays(nrow_needed)
+      integer, intent(in) :: nrow_needed
+
+      if (.not. allocated(coef_probe)) then
+        allocate(coef_probe(dg_frag%n_mat_max, 1))
+      else if (size(coef_probe, 1) /= dg_frag%n_mat_max) then
+        deallocate(coef_probe)
+        allocate(coef_probe(dg_frag%n_mat_max, 1))
+      end if
+      if (.not. allocated(coef_needed)) then
+        allocate(coef_needed(nrow_needed, 1))
+      else if (size(coef_needed, 1) /= nrow_needed) then
+        deallocate(coef_needed)
+        allocate(coef_needed(nrow_needed, 1))
+      end if
+    end subroutine ensure_hres_work_arrays
+
+    subroutine build_hres_needed_rows(ispin_current)
+      integer, intent(in) :: ispin_current
+
+      if (.not. allocated(row_needed)) then
+        allocate(row_needed(max(1, dg_frag%n_mat_max)))
+      else if (size(row_needed) /= max(1, dg_frag%n_mat_max)) then
+        deallocate(row_needed)
+        allocate(row_needed(max(1, dg_frag%n_mat_max)))
+      end if
+      row_needed(:) = .false.
+      do iblk_idx = 1, size(dg_frag%H_local_block_ids)
+        iblk = dg_frag%H_local_block_ids(iblk_idx)
+        if (iblk < 1 .or. iblk > size(dg_frag%H_mat_blocks)) cycle
+        ifrag_row = dg_frag%H_mat_blocks(iblk)%ifrag_row
+        ifrag_col = dg_frag%H_mat_blocks(iblk)%ifrag_col
+        call mark_fragment_rows(ifrag_row, ispin_current)
+        call mark_fragment_rows(ifrag_col, ispin_current)
+      end do
+      n_needed = count(row_needed)
+      if (allocated(needed_row_ids)) deallocate(needed_row_ids)
+      allocate(needed_row_ids(max(1, n_needed)))
+      n_needed = 0
+      do irow = 1, size(row_needed)
+        if (.not. row_needed(irow)) cycle
+        n_needed = n_needed + 1
+        needed_row_ids(n_needed) = irow
+      end do
+    end subroutine build_hres_needed_rows
+
+    subroutine mark_fragment_rows(ifrag, ispin_current)
+      integer, intent(in) :: ifrag, ispin_current
+      integer :: ib, gid
+
+      if (ifrag < 1 .or. ifrag > dg_frag%n_frag) return
+      if (ispin_current < 1 .or. ispin_current > dg_frag%nspin) return
+      do ib = 1, min(dg_frag%n_basis(ifrag, ispin_current), size(dg_frag%index_basis, 1))
+        gid = dg_frag%index_basis(ib, ifrag, ispin_current)
+        if (gid < 1 .or. gid > size(row_needed)) cycle
+        row_needed(gid) = .true.
+      end do
+    end subroutine mark_fragment_rows
+
+    subroutine append_probe_state(candidate)
+      integer, intent(in) :: candidate
+      integer :: i
+      logical :: duplicate
+
+      if (candidate < 1 .or. candidate > nocc) return
+      duplicate = .false.
+      do i = 1, nprobe
+        if (sample_state(i) == candidate) duplicate = .true.
+      end do
+      if (duplicate) return
+      if (nprobe >= max_probe) return
+      nprobe = nprobe + 1
+      sample_state(nprobe) = candidate
+    end subroutine append_probe_state
+
+  end subroutine diagnose_dcdft_lcfo_seed_stationarity
 
   !=======================================================================
   ! Time evolution using AETRS (Enforced Time-Reversal Symmetry)
@@ -670,7 +1025,9 @@ contains
       dg_frag%n_H_nl_blocks = 0
     end if
     if (allocated(dg_frag%nl_projector_overlap)) deallocate(dg_frag%nl_projector_overlap)
+    if (allocated(dg_frag%nl_projector_r_overlap)) deallocate(dg_frag%nl_projector_r_overlap)
     if (allocated(dg_frag%nl_projector_overlap_halo)) deallocate(dg_frag%nl_projector_overlap_halo)
+    if (allocated(dg_frag%nl_projector_r_overlap_halo)) deallocate(dg_frag%nl_projector_r_overlap_halo)
     dg_frag%nl_projector_cache_nlma = 0
     dg_frag%has_nl_projector_cache = .false.
     if (allocated(dg_frag%H_block_map)) deallocate(dg_frag%H_block_map)
@@ -714,7 +1071,9 @@ contains
     if (allocated(dg_frag%momentum_mat_c)) deallocate(dg_frag%momentum_mat_c)
     if (allocated(dg_frag%gradient_basis_cache)) deallocate(dg_frag%gradient_basis_cache)
     if (allocated(dg_frag%nl_projector_overlap)) deallocate(dg_frag%nl_projector_overlap)
+    if (allocated(dg_frag%nl_projector_r_overlap)) deallocate(dg_frag%nl_projector_r_overlap)
     if (allocated(dg_frag%nl_projector_overlap_halo)) deallocate(dg_frag%nl_projector_overlap_halo)
+    if (allocated(dg_frag%nl_projector_r_overlap_halo)) deallocate(dg_frag%nl_projector_r_overlap_halo)
     dg_frag%has_nl_projector_cache = .false.
     dg_frag%gradient_basis_cache_valid = .false.
     if (allocated(dg_frag%momentum_blocks)) then
@@ -723,6 +1082,7 @@ contains
       end do
       deallocate(dg_frag%momentum_blocks)
       dg_frag%n_momentum_blocks = 0
+      dg_frag%momentum_blocks_include_dg_flux = .false.
     end if
     if (allocated(dg_frag%momentum_blocks_c)) then
       do i = 1, size(dg_frag%momentum_blocks_c)
@@ -767,7 +1127,11 @@ contains
     if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
+    if (allocated(dg_frag%runtime_neighbor_frag_count)) deallocate(dg_frag%runtime_neighbor_frag_count)
+    if (allocated(dg_frag%runtime_neighbor_frag_ids)) deallocate(dg_frag%runtime_neighbor_frag_ids)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
+    if (allocated(dg_frag%momentum_neighbor_frag_count)) deallocate(dg_frag%momentum_neighbor_frag_count)
+    if (allocated(dg_frag%momentum_neighbor_frag_ids)) deallocate(dg_frag%momentum_neighbor_frag_ids)
     if (allocated(dg_frag%flux_face_trace_cache)) deallocate(dg_frag%flux_face_trace_cache)
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
@@ -832,6 +1196,57 @@ contains
 
     call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
   end subroutine diagnose_density_from_fragments
+
+  subroutine initialize_dg_state_block_coef_mode(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    character(16) :: env_value
+    integer :: env_status, nworker, rank_in_frag, base, extra
+
+    dg_frag%coef_state_block_mode = .false.
+    dg_frag%coef_state_start = 1
+    dg_frag%coef_state_end = dg_frag%nstate_tot
+    dg_frag%coef_nstate_local = dg_frag%nstate_tot
+
+    env_value = ''
+    call get_environment_variable('SALMON_DG_STATE_BLOCK_COEF', env_value, status=env_status)
+    if (env_status == 0) then
+      select case(trim(adjustl(env_value)))
+      case('0','n','N','no','NO','false','FALSE','off','OFF')
+        dg_frag%coef_state_block_mode = .false.
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        dg_frag%coef_state_block_mode = .true.
+      end select
+    end if
+    if (.not. dg_frag%coef_state_block_mode) return
+
+    if (.not. dg_frag%parallel_mode_orbital) then
+      stop 'DG-Fragment RT: state-block coefficients require orbital fragment mode'
+    end if
+    nworker = max(1, dg_frag%isize_frag)
+    rank_in_frag = max(0, min(dg_frag%id_frag, nworker - 1))
+    base = dg_frag%nstate_tot / nworker
+    extra = mod(dg_frag%nstate_tot, nworker)
+    if (rank_in_frag < extra) then
+      dg_frag%coef_state_start = rank_in_frag * (base + 1) + 1
+      dg_frag%coef_state_end = dg_frag%coef_state_start + base
+    else
+      dg_frag%coef_state_start = extra * (base + 1) + (rank_in_frag - extra) * base + 1
+      dg_frag%coef_state_end = dg_frag%coef_state_start + base - 1
+    end if
+    if (dg_frag%coef_state_start > dg_frag%nstate_tot) then
+      dg_frag%coef_state_start = 1
+      dg_frag%coef_state_end = 0
+    else
+      dg_frag%coef_state_end = min(dg_frag%coef_state_end, dg_frag%nstate_tot)
+    end if
+    dg_frag%coef_nstate_local = max(0, dg_frag%coef_state_end - dg_frag%coef_state_start + 1)
+    if (dg_frag%id == 0) then
+      write(*,'(1x,a)') '[INFO] DG coefficient mode: state-block local columns'
+      flush(6)
+    end if
+  end subroutine initialize_dg_state_block_coef_mode
 
 
 end module rt_dg_fragment

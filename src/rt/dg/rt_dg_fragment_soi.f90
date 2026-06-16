@@ -49,9 +49,6 @@ module rt_dg_fragment_soi
   use rt_dg_fragment, only: get_dg_spin_occ_info, copy_periodic_global_scalar_to_rank_buffer, &
                             build_total_potential_grid_with_buffered_hartree
   use rt_dg_fragment_types, only: s_dg_fragment_rt, halo_info, invalidate_coef_exchange_cache
-  use rt_dg_basis_projection, only: calculate_new_old_basis_overlap, &
-                                   stabilize_basis_overlap, &
-                                   project_wavefunction_to_new_basis
   use rt_dg_plane_wave, only: init_plane_wave_basis
   use rt_dg_hse_exchange, only: init_hse_ri_data, add_exact_exchange_hse, finalize_hse_ri_data
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
@@ -70,6 +67,7 @@ module rt_dg_fragment_soi
   private
   public :: init_dg_fragment_rt, tddft_dg_fragment_iteration, finalize_dg_fragment_rt
   public :: calculate_hamiltonian_matrix
+  public :: calculate_observables
   public :: diagnose_density_from_fragments
   public :: s_dg_fragment_rt, halo_info
   
@@ -221,6 +219,8 @@ contains
       dg_frag%time_integrator = 2
     case('rk4')
       dg_frag%time_integrator = 3
+    case('taylor4pc')
+      dg_frag%time_integrator = 4
     case default
       dg_frag%time_integrator = 3  ! default: RK4 
     end select
@@ -287,8 +287,12 @@ contains
     ! Coefficient arrays will be allocated by read_fragment_basis_data()
     ! with proper n_mat_max dimensions for global basis compatibility
     
-    ! Allocate only ESP array (independent of basis function count)
-    allocate(dg_frag%esp(dg_frag%nstate_tot, dg_frag%nspin))
+    ! read_fragment_basis_data may already have loaded DC-LCFO EigenExa
+    ! eigenvalues for static-phase removal.  Keep them when present.
+    if (.not. allocated(dg_frag%esp)) then
+      allocate(dg_frag%esp(dg_frag%nstate_tot, dg_frag%nspin))
+      dg_frag%esp(:, :) = 0.0d0
+    end if
     
     ! Initialize RK coefficients
     call init_rk_coefficients(dg_frag)
@@ -432,17 +436,14 @@ contains
 #include "rt_dg_integrator_rk.f90"
 
   !=======================================================================
+  ! Time evolution using fourth-order Taylor predictor-corrector
+  !=======================================================================
+#include "rt_dg_integrator_taylor.f90"
+
+  !=======================================================================
   ! Stage-wise density/Hamiltonian update for RK4 (paper-aligned self-consistency)
   !=======================================================================
 #include "rt_dg_integrator_stage_update.f90"
-
-  !=======================================================================
-  ! Stabilize coefficient matrix by modified Gram-Schmidt orthonormalization
-  !=======================================================================
-  !=======================================================================
-  ! Stabilize coefficient matrix by S-metric Gram-Schmidt orthonormalization
-  !=======================================================================
-#include "rt_dg_integrator_unitarity.f90"
 
   !=======================================================================
   ! Calculate time derivative of coefficients (velocity gauge)
@@ -596,7 +597,11 @@ contains
     if (allocated(dg_frag%current_valid_iyg)) deallocate(dg_frag%current_valid_iyg)
     if (allocated(dg_frag%current_valid_izg)) deallocate(dg_frag%current_valid_izg)
     if (allocated(dg_frag%runtime_neighbor_pair_cache)) deallocate(dg_frag%runtime_neighbor_pair_cache)
+    if (allocated(dg_frag%runtime_neighbor_frag_count)) deallocate(dg_frag%runtime_neighbor_frag_count)
+    if (allocated(dg_frag%runtime_neighbor_frag_ids)) deallocate(dg_frag%runtime_neighbor_frag_ids)
     if (allocated(dg_frag%momentum_neighbor_pair_cache)) deallocate(dg_frag%momentum_neighbor_pair_cache)
+    if (allocated(dg_frag%momentum_neighbor_frag_count)) deallocate(dg_frag%momentum_neighbor_frag_count)
+    if (allocated(dg_frag%momentum_neighbor_frag_ids)) deallocate(dg_frag%momentum_neighbor_frag_ids)
     if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
     if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
     dg_frag%density_phi_block_size = 0

@@ -1737,7 +1737,6 @@ contains
     real(8), allocatable :: send_block(:), recv_block(:)
     integer :: iblk, idir, ispin, ii, jj
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
-    integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
     logical, parameter :: trace_block_reduce = .false.
 
@@ -1754,31 +1753,15 @@ contains
       end do
     end do
 
-    max_block_size_global = max_block_size
-    call comm_get_max(max_block_size_global, icomm_reduce)
-    total_active_max = total_active_size
-    call comm_get_max(total_active_max, icomm_reduce)
-    total_active_min = -total_active_size
-    call comm_get_max(total_active_min, icomm_reduce)
-    total_active_min = -total_active_min
-
-    if (total_active_min /= total_active_max) then
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block size mismatch: label=", &
-        trim(label), " rank=", dg_frag%id, " local=", total_active_size, &
-        " min=", total_active_min, " max=", total_active_max
-      flush(6)
-      stop 1
-    end if
-
     if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
-        " total_active=", total_active_size, " max_block=", max_block_size_global, &
+        " total_active=", total_active_size, " max_block=", max_block_size, &
         " chunk_size=", reduce_chunk_size
       flush(6)
     end if
 
-    if (max_block_size_global <= 0) return
-    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+    if (max_block_size <= 0) return
+    allocate(send_block(max_block_size), recv_block(max_block_size))
 
     do iblk = 1, size(blocks_re)
       do ispin = 1, dg_frag%nspin
@@ -1861,7 +1844,6 @@ contains
     real(8), allocatable :: send_block(:), recv_block(:)
     integer :: iblk, ispin, ii, jj
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
-    integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
     logical, parameter :: trace_block_reduce = .false.
 
@@ -1878,31 +1860,15 @@ contains
       end do
     end do
 
-    max_block_size_global = max_block_size
-    call comm_get_max(max_block_size_global, icomm_reduce)
-    total_active_max = total_active_size
-    call comm_get_max(total_active_max, icomm_reduce)
-    total_active_min = -total_active_size
-    call comm_get_max(total_active_min, icomm_reduce)
-    total_active_min = -total_active_min
-
-    if (total_active_min /= total_active_max) then
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block size mismatch: label=", &
-        trim(label), " rank=", dg_frag%id, " local=", total_active_size, &
-        " min=", total_active_min, " max=", total_active_max
-      flush(6)
-      stop 1
-    end if
-
     if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
-        " total_active=", total_active_size, " max_block=", max_block_size_global, &
+        " total_active=", total_active_size, " max_block=", max_block_size, &
         " chunk_size=", reduce_chunk_size
       flush(6)
     end if
 
-    if (max_block_size_global <= 0) return
-    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+    if (max_block_size <= 0) return
+    allocate(send_block(max_block_size), recv_block(max_block_size))
 
     do iblk = 1, size(blocks)
       do ispin = 1, dg_frag%nspin
@@ -2013,7 +1979,6 @@ contains
     real(8), allocatable :: send_block(:), recv_block(:)
     integer :: iblk, ispin, ii, jj
     integer :: nrow, ncol, block_size, max_block_size, total_active_size
-    integer :: total_active_min, total_active_max, max_block_size_global
     integer :: chunk_begin, chunk_count, offset_flat
     logical, parameter :: trace_block_reduce = .false.
 
@@ -2030,31 +1995,15 @@ contains
       end do
     end do
 
-    max_block_size_global = max_block_size
-    call comm_get_max(max_block_size_global, icomm_reduce)
-    total_active_max = total_active_size
-    call comm_get_max(total_active_max, icomm_reduce)
-    total_active_min = -total_active_size
-    call comm_get_max(total_active_min, icomm_reduce)
-    total_active_min = -total_active_min
-
-    if (total_active_min /= total_active_max) then
-      write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0)') "        [FATAL] Hamiltonian block size mismatch: label=", &
-        trim(label), " rank=", dg_frag%id, " local=", total_active_size, &
-        " min=", total_active_min, " max=", total_active_max
-      flush(6)
-      stop 1
-    end if
-
     if (trace_block_reduce .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,a,a,i0,a,i0,a,i0)') "        hamiltonian block reduce begin: label=", trim(label), &
-        " total_active=", total_active_size, " max_block=", max_block_size_global, &
+        " total_active=", total_active_size, " max_block=", max_block_size, &
         " chunk_size=", reduce_chunk_size
       flush(6)
     end if
 
-    if (max_block_size_global <= 0) return
-    allocate(send_block(max_block_size_global), recv_block(max_block_size_global))
+    if (max_block_size <= 0) return
+    allocate(send_block(max_block_size), recv_block(max_block_size))
 
     do iblk = 1, size(blocks_re)
       do ispin = 1, dg_frag%nspin

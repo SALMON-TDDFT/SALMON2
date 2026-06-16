@@ -48,7 +48,7 @@ contains
     use rt_dg_fragment_types, only: s_dg_fragment_rt
     use poisson_periodic,     only: poisson_ft, poisson_ffte, poisson_ft_hse_sr, poisson_ffte_hse_sr, set_poisson_contract_context
     use inputoutput,          only: yn_ffte, yn_put_wall_z_boundary, wall_height, wall_width
-    use salmon_global,        only: hse_omega
+    use salmon_global,        only: hse_omega, yn_fix_func
     use math_constants,       only: pi
     use communication,        only: comm_summation, comm_get_min, comm_get_max, comm_is_root
     use parallelization,      only: nproc_id_global
@@ -120,7 +120,9 @@ contains
       warned_direct_ft = .true.
       if (dg_frag%id == 0) then
         write(*,'(1x,a)') '[DG-HARTREE][WARN] yn_ffte=n: using direct Poisson FT; set yn_ffte=y for large DG-RT grids.'
-        write(*,'(1x,a)') '[DG-HARTREE][WARN] yn_fix_func=n with RK4 updates Hartree at RK stages, so this path is very expensive.'
+        if (yn_fix_func == 'n') then
+          write(*,'(1x,a)') '[DG-HARTREE][WARN] yn_fix_func=n with RK4 updates Hartree at RK stages, so this path is very expensive.'
+        end if
         flush(6)
       end if
     end if

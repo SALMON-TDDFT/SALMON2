@@ -2,7 +2,7 @@
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use structures
     use communication, only: comm_summation, comm_bcast, COMM_GROUP_NULL
-    use rt_dg_fragment_ops, only: refresh_pw_coef_cache, apply_overlap_operator_batch
+    use rt_dg_fragment_ops, only: refresh_pw_coef_cache, apply_overlap_operator_batch, fetch_remote_coef_rows
     use rt_dg_fragment_types, only: s_dg_fragment_rt, density_grid_point_info
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -19,7 +19,7 @@
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), ifrag_count, ngrid_max
     integer :: nocc_spin, nocc_cache
-    integer :: irank, slot, npts, idx_local, idx_remote, point_idx
+    integer :: irank, slot, npts, idx_local, idx_remote, point_idx, local_coef_idx, local_state_col
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count
     integer :: igrid0, igrid, ngrid, npt_blk, io0, io1, nbatch, nstate, ipw0, npw_blk
     integer :: total_send_pts, subgroup_root_rank, block_idx_global
@@ -52,6 +52,7 @@
     integer, allocatable :: slot_buf(:), local_grid_ids(:), remote_grid_ids(:), valid_remote_grid_ids(:)
     integer, allocatable :: basis_gid(:), valid_basis_ids(:)
     integer, allocatable :: basis_gid_spin(:,:), valid_basis_ids_spin(:,:), valid_basis_count_spin(:)
+    integer, allocatable :: owned_basis_ids_spin(:,:), owned_coef_local_ids_spin(:,:), owned_basis_count_spin(:)
     type(s_scalar), allocatable :: rho_send(:), rho_recv(:)
     integer, allocatable :: send_counts(:), recv_counts(:), send_displs(:), recv_displs(:)
     real(8), allocatable :: send_flat(:), recv_flat(:)
@@ -70,7 +71,7 @@
     real(8), allocatable :: occ_cache(:), occ_sqrt_cache(:), occ_blk(:)
     complex(8), allocatable :: coef_c_full(:,:), coef_c_frag(:,:)
     integer :: io_s_frag, io_e_frag, io_loc, nocc_loc, nocc_mix_cols, nocc_per_rank_loc
-    integer :: ib_s_frag, ib_e_frag, ib_loc, ib_global
+    integer :: ib_s_frag, ib_e_frag, ib_loc, ib_global, coef_local
     integer :: nbf_frag_is, nbf_frag_ie, nbf_frag_count, nbf_frag_cap, nbf_per_rank_loc
     integer :: nblocks_max, block_cache_idx, npt_cache
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
@@ -230,6 +231,9 @@
     allocate(basis_gid_spin(nbf_max, system%nspin), &
       valid_basis_ids_spin(nbf_max, system%nspin), &
       valid_basis_count_spin(system%nspin))
+    allocate(owned_basis_ids_spin(nbf_max, system%nspin), &
+      owned_coef_local_ids_spin(nbf_max, system%nspin), &
+      owned_basis_count_spin(system%nspin))
     allocate(phi_blk(grid_block_size, nbf_frag_cap))
     allocate(rho_blk(grid_block_size))
     allocate(rho_blk_accum(grid_block_size))
@@ -684,8 +688,11 @@
         first_block_offset = dg_frag%density_block_first_offset(i_local)
         block_step_blocks = dg_frag%density_block_step(i_local)
         valid_basis_count_spin(:) = 0
+        owned_basis_count_spin(:) = 0
         basis_gid_spin(:, :) = 0
         valid_basis_ids_spin(:, :) = 0
+        owned_basis_ids_spin(:, :) = 0
+        owned_coef_local_ids_spin(:, :) = 0
         do ispin = 1, system%nspin
           nbf = dg_frag%n_basis(ifrag, ispin)
           if (nbf <= 0) cycle
@@ -695,6 +702,13 @@
             valid_basis_count_spin(ispin) = valid_basis_count_spin(ispin) + 1
             basis_gid_spin(istate_frag, ispin) = basis_gid(istate_frag)
             valid_basis_ids_spin(valid_basis_count_spin(ispin), ispin) = istate_frag
+            if (.not. allocated(dg_frag%coef_global_to_local)) cycle
+            if (.not. density_basis_owned_by_rank(basis_gid(istate_frag), ispin)) cycle
+            coef_local = dg_frag%coef_global_to_local(basis_gid(istate_frag), ispin)
+            if (coef_local < 1 .or. coef_local > size(dg_frag%coef, 1)) cycle
+            owned_basis_count_spin(ispin) = owned_basis_count_spin(ispin) + 1
+            owned_basis_ids_spin(owned_basis_count_spin(ispin), ispin) = istate_frag
+            owned_coef_local_ids_spin(owned_basis_count_spin(ispin), ispin) = coef_local
           end do
         end do
         if (use_mixed_density) then
@@ -737,9 +751,12 @@
         end if
         ! Assemble coefficients once per fragment and form the fragment density
         ! matrix D=C*occ*C^H.  The grid path then evaluates
-        ! rho(r)=phi(r)^T D phi(r), avoiding an occupied-state loop per block.
-        if (n_pw == 0) D_frag_re(:,:,:) = 0.0d0
+        ! rho(r)=phi(r)^T D phi(r), avoiding an occupied-state loop per block
+        ! where that is cheaper than repeatedly forming psi(r).
+        if (n_pw == 0) D_frag_re(:, :, :) = 0.0d0
         if (n_pw == 0) then
+          coef_re_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
+          coef_im_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
           do ispin = 1, system%nspin
             nbf = dg_frag%n_basis(ifrag, ispin)
             nocc_spin = dg_frag%nocc_spin(ispin)
@@ -754,49 +771,53 @@
             end if
             occ_sqrt_cache(1:nocc_spin) = sqrt(occ_cache(1:nocc_spin))
             call assert_real_vector_finite_density('occ_cache', occ_cache, nocc_spin, ifrag, ispin, 0)
-            valid_basis_count = valid_basis_count_spin(ispin)
-            ! Step 3a: each rank contributes its owned rows, then icomm_frag assembles
-            ! the complete coefficient matrix.  Filter ownership here as well
-            ! so this path does not depend on non-owned coefficient rows having
-            ! already been scrubbed to exact zero.
-            coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-!$omp parallel do private(io, idx_local, istate_frag, ig_i) schedule(static)
-            do io = 1, nocc_spin
-              do idx_local = 1, valid_basis_count
-                istate_frag = valid_basis_ids_spin(idx_local, ispin)
-                ig_i = basis_gid_spin(istate_frag, ispin)
-                if (.not. density_basis_owned_by_rank(ig_i, ispin)) cycle
-                if (.not. allocated(dg_frag%coef_global_to_local)) cycle
-                io_loc = dg_frag%coef_global_to_local(ig_i, ispin)
-                if (io_loc < 1 .or. io_loc > size(dg_frag%coef, 1)) cycle
-                coef_c_full(istate_frag, io) = dg_frag%coef(io_loc, io, ispin)
-              end do
-            end do
-!$omp end parallel do
-            coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
-            coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = aimag(coef_c_full(1:nbf_max, 1:nocc_spin))
-            call assert_real_matrix_finite_density('coef_re_local-before-reduce', &
-              coef_re_full(:, :, ispin), 1, nbf, 1, nocc_spin, ifrag, ispin, 0)
-            call assert_real_matrix_finite_density('coef_im_local-before-reduce', &
-              coef_im_full(:, :, ispin), 1, nbf, 1, nocc_spin, ifrag, ispin, 0)
-            if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
-              coef_c_frag(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-              call comm_summation(coef_c_full(1:nbf, 1:nocc_spin), coef_c_frag(1:nbf, 1:nocc_spin), &
-                                  nbf * nocc_spin, dg_frag%icomm_frag)
-              coef_c_full(1:nbf_max, 1:nocc_spin) = coef_c_frag(1:nbf_max, 1:nocc_spin)
+            if (dg_frag%coef_state_block_mode) then
+              io_s_frag = max(1, dg_frag%coef_state_start)
+              io_e_frag = min(nocc_spin, dg_frag%coef_state_end)
+            else
+              nocc_per_rank_loc = (nocc_spin + dg_frag%isize_frag - 1) / dg_frag%isize_frag
+              io_s_frag = dg_frag%id_frag * nocc_per_rank_loc + 1
+              io_e_frag = min((dg_frag%id_frag + 1) * nocc_per_rank_loc, nocc_spin)
             end if
-            coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = real(coef_c_full(1:nbf_max, 1:nocc_spin), kind=8)
-            coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = aimag(coef_c_full(1:nbf_max, 1:nocc_spin))
-            call assert_real_matrix_finite_density('coef_re_full', coef_re_full(:, :, ispin), &
-              1, nbf, 1, nocc_spin, ifrag, ispin, 0)
-            call assert_real_matrix_finite_density('coef_im_full', coef_im_full(:, :, ispin), &
-              1, nbf, 1, nocc_spin, ifrag, ispin, 0)
-            ! Step 3b: each rank computes weighted C C^H on its state slice
-            nocc_per_rank_loc = (nocc_spin + dg_frag%isize_frag - 1) / dg_frag%isize_frag
-            io_s_frag = dg_frag%id_frag * nocc_per_rank_loc + 1
-            io_e_frag = min((dg_frag%id_frag + 1) * nocc_per_rank_loc, nocc_spin)
             nocc_loc = max(0, io_e_frag - io_s_frag + 1)
-
+            valid_basis_count = valid_basis_count_spin(ispin)
+            coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
+            if (nocc_loc > 0 .and. valid_basis_count > 0) then
+              do idx_local = 1, valid_basis_count
+                basis_gid(idx_local) = basis_gid_spin(valid_basis_ids_spin(idx_local, ispin), ispin)
+              end do
+              coef_c_frag(1:valid_basis_count, 1:nocc_loc) = (0.0d0, 0.0d0)
+              if (dg_frag%coef_state_block_mode) then
+                do idx_local = 1, valid_basis_count
+                  local_coef_idx = dg_frag%coef_global_to_local(basis_gid(idx_local), ispin)
+                  if (local_coef_idx < 1 .or. local_coef_idx > size(dg_frag%coef, 1)) cycle
+                  do io_loc = 1, nocc_loc
+                    local_state_col = io_s_frag + io_loc - 1 - dg_frag%coef_state_start + 1
+                    if (local_state_col < 1 .or. local_state_col > size(dg_frag%coef, 2)) cycle
+                    coef_c_frag(idx_local, io_loc) = dg_frag%coef(local_coef_idx, local_state_col, ispin)
+                  end do
+                end do
+              else
+                call fetch_remote_coef_rows(dg_frag, ispin, basis_gid(1:valid_basis_count), &
+                                            coef_c_frag(1:valid_basis_count, 1:nocc_loc), &
+                                            io_s_frag, io_e_frag)
+              end if
+              do io_loc = 1, nocc_loc
+                io = io_s_frag + io_loc - 1
+                do idx_local = 1, valid_basis_count
+                  istate_frag = valid_basis_ids_spin(idx_local, ispin)
+                  coef_c_full(istate_frag, io) = coef_c_frag(idx_local, io_loc)
+                end do
+              end do
+            end if
+            coef_re_full(1:nbf_max, 1:nocc_spin, ispin) = 0.0d0
+            coef_im_full(1:nbf_max, 1:nocc_spin, ispin) = 0.0d0
+            if (nocc_loc > 0) then
+              coef_re_full(1:nbf, io_s_frag:io_e_frag, ispin) = &
+                real(coef_c_full(1:nbf, io_s_frag:io_e_frag), kind=8)
+              coef_im_full(1:nbf, io_s_frag:io_e_frag, ispin) = &
+                aimag(coef_c_full(1:nbf, io_s_frag:io_e_frag))
+            end if
             D_partial_re(1:nbf, 1:nbf) = 0.0d0
             if (nocc_loc > 0 .and. nbf > 0) then
               nbatch = 0
@@ -821,9 +842,6 @@
             end if
             call assert_real_matrix_finite_density('D_frag_re-after-reduce', D_frag_re(:, :, ispin), &
               1, nbf, 1, nbf, ifrag, ispin, 0)
-
-            ! Step 3d: symmetrize (copy upper triangle to lower).  The cap-basis
-            ! block is small, so keep this serial while isolating the SIGBUS.
             do io = 1, nbf
               do istate_frag = io + 1, nbf
                 D_frag_re(istate_frag, io, ispin) = D_frag_re(io, istate_frag, ispin)
@@ -840,17 +858,13 @@
             nbf = dg_frag%n_basis(ifrag, ispin)
             nocc_spin = dg_frag%nocc_spin(ispin)
             if (nbf <= 0 .or. nocc_spin <= 0) cycle
-            valid_basis_count = valid_basis_count_spin(ispin)
+            valid_basis_count = owned_basis_count_spin(ispin)
             coef_c_full(1:nbf_max, 1:nocc_spin) = (0.0d0, 0.0d0)
-!$omp parallel do private(io, idx_local, istate_frag, ig_i) schedule(static)
+!$omp parallel do private(io, idx_local, istate_frag, io_loc) schedule(static)
             do io = 1, nocc_spin
               do idx_local = 1, valid_basis_count
-                istate_frag = valid_basis_ids_spin(idx_local, ispin)
-                ig_i = basis_gid_spin(istate_frag, ispin)
-                if (.not. density_basis_owned_by_rank(ig_i, ispin)) cycle
-                if (.not. allocated(dg_frag%coef_global_to_local)) cycle
-                io_loc = dg_frag%coef_global_to_local(ig_i, ispin)
-                if (io_loc < 1 .or. io_loc > size(dg_frag%coef, 1)) cycle
+                istate_frag = owned_basis_ids_spin(idx_local, ispin)
+                io_loc = owned_coef_local_ids_spin(idx_local, ispin)
                 coef_c_full(istate_frag, io) = dg_frag%coef(io_loc, io, ispin)
               end do
             end do
@@ -1186,7 +1200,7 @@
 !$omp end parallel do
               end if
             else
-              ! D already computed in pre-pass for n_pw == 0
+              ! D already computed in the pre-pass for n_pw == 0.
               rho_blk_accum(1:npt_blk) = 0.0d0
               if (n_pw == 0) then
                 if (.not. allocated(rho_blk_partial)) allocate(rho_blk_partial(grid_block_size))
@@ -1208,10 +1222,6 @@
                   call assert_real_matrix_finite_density('rho_dmat_q_full', rho_dmat_q_full, &
                     1, npt_blk, 1, nbf, ifrag, ispin, block_offset)
 
-                  ! Split the final diagonal contraction by basis columns.  Each
-                  ! orbital rank owns phi(:,j) for its local basis rows, while
-                  ! rho_dmat_q_full(:,j)=sum_i phi(:,i)D(i,j) has already been
-                  ! reduced across the fragment subgroup.
                   rho_blk_partial(1:npt_blk) = 0.0d0
                   if (nbf_frag_count > 0) then
 !$omp parallel do private(igrid, ib_global, ib_loc, rho_accum) schedule(static)
@@ -1435,12 +1445,10 @@
               ! rho_blk_accum: filled by dgemm-path (n_pw==0) or AllReduce (n_pw>0)
               call assert_real_vector_finite_density('rho_blk_accum', rho_blk_accum, npt_blk, &
                 ifrag, ispin, block_offset)
-!$omp parallel private(igrid, owner_rank, ixg, iyg, izg, bx, by, bz, rho_contrib, rho_raw_contrib, slot, theta)
+                if ((.not. density_on_frag_root) .or. dg_frag%is_frag_root) then
+!$omp parallel private(igrid, ixg, iyg, izg, bx, by, bz, rho_contrib, rho_raw_contrib)
 !$omp do schedule(static)
                   do igrid = 1, npt_blk
-                    ! In orbital mode the subgroup-reduced density is complete
-                    ! on the fragment root, which owns the packed send map.
-                    if (density_on_frag_root .and. .not. dg_frag%is_frag_root) cycle
                     ixg = ixg_buf(igrid)
                     iyg = iyg_buf(igrid)
                     izg = izg_buf(igrid)
@@ -1481,11 +1489,10 @@
                   end if
 !$omp end single
 !$omp end parallel
+                end if
+                if ((.not. density_on_frag_root) .or. dg_frag%is_frag_root) then
 !$omp parallel do private(idx_remote, igrid, owner_rank, slot, rho_contrib, spin_offset, ixg, iyg, izg) schedule(static)
                   do idx_remote = 1, valid_remote_grid_count
-                    ! Remote density exchange is emitted only once per fragment
-                    ! when orbital subgroup reduction targets the root.
-                    if (density_on_frag_root .and. .not. dg_frag%is_frag_root) cycle
                     igrid = valid_remote_grid_ids(idx_remote)
                     owner_rank = owner_buf(igrid)
                     slot = slot_buf(igrid)
@@ -1552,6 +1559,7 @@
                     end if
                   end do
 !$omp end parallel do
+                end if
                 if (dg_frag%is_frag_root) then
                   call assert_rho_bf_with_sources('rho_bf-after-materialize', &
                     ifrag, ispin, block_offset, npt_blk)
@@ -1826,6 +1834,9 @@
     if (allocated(basis_gid_spin)) deallocate(basis_gid_spin)
     if (allocated(valid_basis_ids_spin)) deallocate(valid_basis_ids_spin)
     if (allocated(valid_basis_count_spin)) deallocate(valid_basis_count_spin)
+    if (allocated(owned_basis_ids_spin)) deallocate(owned_basis_ids_spin)
+    if (allocated(owned_coef_local_ids_spin)) deallocate(owned_coef_local_ids_spin)
+    if (allocated(owned_basis_count_spin)) deallocate(owned_basis_count_spin)
     deallocate(phi_blk, rho_blk, rho_blk_accum, rho_blk_reduced, coef_blk_re, coef_blk_im, psi_blk_re, psi_blk_im)
     if (allocated(coef_blk_ri)) deallocate(coef_blk_ri)
     if (allocated(psi_blk_ri)) deallocate(psi_blk_ri)
