@@ -1436,10 +1436,11 @@ contains
     complex(8), intent(in) :: coef_frag(:, :), coef_pw(:, :)
     complex(8), intent(inout) :: y_frag(:, :), y_pw(:, :)
 
-    integer :: irow_local, ipw_local, frag_row, pw_row, frag_pos, pw_pos
+    integer :: irow_local, ipw_local, jpw_local, frag_row, pw_row, pw_col, frag_pos, pw_pos, col_pos
     integer :: istate, nstate
     integer, allocatable :: frag_pos_map(:), pw_pos_map(:)
     complex(8) :: hfp
+    logical :: pw_row_owned
 
     if (.not. allocated(dg_frag%H_mat_frag_pw_local)) return
     if (.not. allocated(dg_frag%fp_local_row_ids)) return
@@ -1479,6 +1480,38 @@ contains
       if (pw_row < 1 .or. pw_row > size(pw_pos_map)) cycle
       pw_pos = pw_pos_map(pw_row)
       if (pw_pos <= 0) cycle
+      pw_row_owned = .true.
+      if (allocated(dg_frag%coef_pw_owner)) then
+        pw_row_owned = (pw_row <= size(dg_frag%coef_pw_owner) .and. dg_frag%coef_pw_owner(pw_row) == dg_frag%id)
+      end if
+      if (pw_row_owned .and. allocated(dg_frag%H_mat_pw)) then
+        if (pw_row <= size(dg_frag%H_mat_pw, 1) .and. ispin <= size(dg_frag%H_mat_pw, 3)) then
+          do jpw_local = 1, size(pw_row_ids)
+            pw_col = pw_row_ids(jpw_local)
+            if (pw_col < 1 .or. pw_col > size(pw_pos_map)) cycle
+            col_pos = pw_pos_map(pw_col)
+            if (col_pos <= 0) cycle
+            if (pw_col > size(dg_frag%H_mat_pw, 2)) cycle
+            hfp = dg_frag%H_mat_pw(pw_row, pw_col, ispin)
+            if (abs(hfp) == 0.0d0) cycle
+            do istate = 1, nstate
+              y_pw(pw_pos, istate) = y_pw(pw_pos, istate) + hfp * coef_pw(col_pos, istate)
+            end do
+          end do
+        end if
+      else if (pw_row_owned .and. allocated(dg_frag%H_mat_pw_diag)) then
+        if (pw_row <= size(dg_frag%H_mat_pw_diag, 1) .and. ispin <= size(dg_frag%H_mat_pw_diag, 2)) then
+          do istate = 1, nstate
+            y_pw(pw_pos, istate) = y_pw(pw_pos, istate) + dg_frag%H_mat_pw_diag(pw_row, ispin) * coef_pw(pw_pos, istate)
+          end do
+        end if
+      else if (pw_row_owned .and. allocated(dg_frag%k_pw)) then
+        if (pw_row <= size(dg_frag%k_pw, 2)) then
+          do istate = 1, nstate
+            y_pw(pw_pos, istate) = y_pw(pw_pos, istate) + 0.5d0 * sum(dg_frag%k_pw(:, pw_row)**2) * coef_pw(pw_pos, istate)
+          end do
+        end if
+      end if
       do irow_local = 1, min(size(dg_frag%fp_local_row_ids), size(dg_frag%H_mat_frag_pw_local, 1))
         frag_row = dg_frag%fp_local_row_ids(irow_local)
         if (frag_row < 1 .or. frag_row > size(frag_pos_map)) cycle
@@ -1489,10 +1522,7 @@ contains
         do istate = 1, nstate
           y_frag(frag_pos, istate) = y_frag(frag_pos, istate) + hfp * coef_pw(pw_pos, istate)
         end do
-        if (allocated(dg_frag%coef_pw_owner)) then
-          if (pw_row > size(dg_frag%coef_pw_owner)) cycle
-          if (dg_frag%coef_pw_owner(pw_row) /= dg_frag%id) cycle
-        end if
+        if (.not. pw_row_owned) cycle
         do istate = 1, nstate
           y_pw(pw_pos, istate) = y_pw(pw_pos, istate) + conjg(hfp) * coef_frag(frag_pos, istate)
         end do

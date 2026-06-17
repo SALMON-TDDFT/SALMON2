@@ -198,6 +198,9 @@
 
     A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
     if (A_squared /= A_squared) stop "NaN in DG derivative vector potential"
+    if (n_pw > 0 .and. A_squared > 1.0d-30) then
+      stop "DG derivative PW velocity-gauge terms require row-local mixed momentum blocks"
+    end if
 
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
     has_so_nonlocal = (allocated(ppg%uv_so) .and. allocated(dg_frag%phi_frag_c) .and. dg_frag%nspin == 2)
@@ -572,6 +575,14 @@
           call mark_fragment_basis_rows(row_needed, ifrag_row, ispin_current)
           call mark_output_fragment_rows(ifrag_row, ispin_current)
           call mark_fragment_basis_rows(row_needed, ifrag_col, ispin_current)
+        end do
+      end if
+      if (n_pw > 0 .and. allocated(dg_frag%fp_local_row_ids)) then
+        do iblk = 1, size(dg_frag%fp_local_row_ids)
+          global_idx = dg_frag%fp_local_row_ids(iblk)
+          if (global_idx < 1 .or. global_idx > n_frag) cycle
+          row_needed(global_idx) = .true.
+          output_row_needed(global_idx) = .true.
         end do
       end if
 
