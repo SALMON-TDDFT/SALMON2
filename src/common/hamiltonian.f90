@@ -947,16 +947,16 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   end if
 
   if (.not. stencil%if_orthogonal) then
-    ! work arrays allocated once per thread (was: per-call allocate inside the
-    ! routine -> O(nstate*nk*ntaylor*nstep) malloc/free, dominating r2scan RT)
-!$omp parallel default(none) &
-!$omp          private(im,ik,io,ispin,kvec,wk_dpsi,wk_apsi,wk_dapsi,wk_adpsi) &
-!$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload,yn_periodic)
+    ! single work-array set reused across the (serial) orbital/k loop. The heavy
+    ! grid loops inside add_xc_tau_operator_nonorth_complex are OMP-parallelized
+    ! over the grid (mirrors calc_laplacian_field), so the orbital/k loop must NOT
+    ! be collapsed for OMP here: doing so starves the threads when few orbitals/
+    ! k-points are local per rank (e.g. SiO2 with ob/k decomposition, where
+    ! ob/proc * k/proc < nthreads). Grid parallelism is unaffected by that.
     allocate(wk_dpsi (3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
     allocate(wk_apsi (  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
     allocate(wk_dapsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
     allocate(wk_adpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
-!$omp do collapse(4)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -971,9 +971,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
     end do
     end do
     end do
-!$omp end do
     deallocate(wk_dpsi,wk_apsi,wk_dapsi,wk_adpsi)
-!$omp end parallel
     return
   end if
 
@@ -1097,6 +1095,7 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
 
   apsi = 0d0
   adpsi = 0d0
+!$omp parallel do collapse(2) default(none) private(ix,iy,iz,a0) shared(mg,vtau,tpsi,dpsi,apsi,adpsi)
   do iz = mg%is(3), mg%ie(3)
   do iy = mg%is(2), mg%ie(2)
   do ix = mg%is(1), mg%ie(1)
@@ -1108,6 +1107,7 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
   end do
   end do
   end do
+!$omp end parallel do
 
   call calc_tau_operator_axis_derivatives_complex(apsi, mg, stencil%coef_nab, dapsi)
 
@@ -1117,6 +1117,9 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
   ! inlined direct(idir) + cross(iaxis,idir): the face-averaged vtau (ap/am) is
   ! computed once per face and reused for the diagonal (psi) and both off-diagonal
   ! (dpsi) terms. Same arithmetic/order as calc_tau_operator_{direct_axis,cross_component}.
+!$omp parallel do collapse(2) default(none) &
+!$omp   private(ix,iy,iz,ixc,iyc,izc,n,jp,jm,a0,psi0,ap,am,d1,d2,d3,c21,c31,c12,c32,c13,c23,corr) &
+!$omp   shared(mg,vtau,tpsi,dpsi,dapsi,adpsi,htpsi,idx,idy,idz,cf,lap,nab,kvec_grid,k2)
   do iz = mg%is(3), mg%ie(3)
   do iy = mg%is(2), mg%ie(2)
     iyc = idy(iy); izc = idz(iz)
@@ -1166,6 +1169,7 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
     end do
   end do
   end do
+!$omp end parallel do
 
 end subroutine add_xc_tau_operator_nonorth_complex
 
@@ -1182,6 +1186,7 @@ subroutine calc_tau_operator_axis_derivatives_complex(box, mg, nabt, deriv)
   complex(8) :: w(3)
 
   deriv = 0d0
+!$omp parallel do collapse(2) default(none) private(ix,iy,iz,w) shared(mg,nabt,box,deriv)
   do iz = mg%is(3), mg%ie(3)
   do iy = mg%is(2), mg%ie(2)
   do ix = mg%is(1), mg%ie(1)
@@ -1201,6 +1206,7 @@ subroutine calc_tau_operator_axis_derivatives_complex(box, mg, nabt, deriv)
   end do
   end do
   end do
+!$omp end parallel do
 end subroutine calc_tau_operator_axis_derivatives_complex
 
 pure function calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, lapt, idir, ix, iy, iz) result(val)
