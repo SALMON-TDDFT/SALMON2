@@ -314,6 +314,7 @@ contains
       & yn_fix_func, &
       & yn_predictor_corrector, &
       & yn_dg_fragment_rt, &
+      & yn_dg_length_gauge, &
       & time_integrator_dg_fragment, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
@@ -626,8 +627,20 @@ contains
       & yn_dc_lcfo_flux, &
       & yn_dc_lcfo_diag, &
       & yn_dc_fragment_optimization, &
+      & yn_dc_lcfo_wannier, &
+      & yn_dc_lcfo_local_wannier, &
+      & yn_dc_lcfo_wannier_pw, &
+      & wannier_projection, &
       & nstate_frag, &
       & lcfo_frag_cache_size, &
+      & wannier_num_wann, &
+      & wannier_num_bands, &
+      & wannier_num_iter, &
+      & wannier_projection_width, &
+      & wannier_dis_froz_max, &
+      & wannier_dis_win_max, &
+      & wannier_pw_cutoff, &
+      & wannier_pw_max, &
       & energy_cut, &
       & lambda_cut, &
       & yn_adaptive_basis, &
@@ -778,6 +791,7 @@ contains
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
+    yn_dg_length_gauge = 'n'
     time_integrator_dg_fragment = 'rk4'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
@@ -1091,8 +1105,20 @@ contains
     yn_dc_lcfo_flux = 'n'
     yn_dc_lcfo_diag = 'y'
     yn_dc_fragment_optimization = 'n'
+    yn_dc_lcfo_wannier = 'n'
+    yn_dc_lcfo_local_wannier = 'n'
+    yn_dc_lcfo_wannier_pw = 'n'
+    wannier_projection = ''
     nstate_frag = 0
     lcfo_frag_cache_size = 1
+    wannier_num_wann = 0
+    wannier_num_bands = 0
+    wannier_num_iter = 100
+    wannier_projection_width = 1d0
+    wannier_dis_froz_max = 0d0
+    wannier_dis_win_max = 0d0
+    wannier_pw_cutoff = 0d0
+    wannier_pw_max = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
@@ -1358,6 +1384,7 @@ contains
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
+    call comm_bcast(yn_dg_length_gauge,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
@@ -1761,8 +1788,24 @@ contains
     call comm_bcast(yn_dc_lcfo_flux, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_local_wannier, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
+    call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
+    call comm_bcast(wannier_num_wann, nproc_group_global)
+    call comm_bcast(wannier_num_bands, nproc_group_global)
+    call comm_bcast(wannier_num_iter, nproc_group_global)
+    call comm_bcast(wannier_projection_width, nproc_group_global)
+    wannier_projection_width = wannier_projection_width * ulength_to_au
+    call comm_bcast(wannier_dis_froz_max, nproc_group_global)
+    wannier_dis_froz_max = wannier_dis_froz_max * uenergy_to_au
+    call comm_bcast(wannier_dis_win_max, nproc_group_global)
+    wannier_dis_win_max = wannier_dis_win_max * uenergy_to_au
+    call comm_bcast(wannier_pw_cutoff, nproc_group_global)
+    wannier_pw_cutoff = wannier_pw_cutoff * uenergy_to_au
+    call comm_bcast(wannier_pw_max, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
@@ -2286,6 +2329,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
@@ -2754,8 +2798,20 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_flux",yn_dc_lcfo_flux
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier",yn_dc_lcfo_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_local_wannier",yn_dc_lcfo_local_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
+      write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_wann",wannier_num_wann
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_bands",wannier_num_bands
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_iter",wannier_num_iter
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_projection_width', wannier_projection_width
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_froz_max', wannier_dis_froz_max
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_win_max', wannier_dis_win_max
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_pw_cutoff', wannier_pw_cutoff
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_pw_max",wannier_pw_max
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_from_dcdft', yn_dg_fragment_from_dcdft
@@ -2865,6 +2921,10 @@ contains
     call yn_argument_check(yn_dg_lcfo_seed_exhaustive_check)
     call yn_argument_check(yn_dc_lcfo_diag)
     call yn_argument_check(yn_dc_fragment_optimization)
+    call yn_argument_check(yn_dc_lcfo_wannier)
+    call yn_argument_check(yn_dc_lcfo_local_wannier)
+    call yn_argument_check(yn_dc_lcfo_wannier_pw)
+    call yn_argument_check(yn_dg_length_gauge)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
@@ -3145,6 +3205,54 @@ contains
       end if
     end if
 
+    if(yn_dc_lcfo_wannier=='y') then
+#ifndef USE_WANNIER90
+      stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): rebuild SALMON with USE_WANNIER90=ON."
+#endif
+      if(yn_dc/='y') &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): yn_dc=y must be specified."
+      if(yn_dc_lcfo_diag/='y') &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): yn_dc_lcfo_diag=y is required."
+      if(wannier_num_wann <= 0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_wann must be positive."
+      if(wannier_num_bands < 0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_bands must be non-negative."
+      if(wannier_num_bands > 0 .and. wannier_num_bands < wannier_num_wann) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_bands must be >= wannier_num_wann."
+      if(wannier_num_iter < 0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_iter must be non-negative."
+      if(wannier_projection_width <= 0d0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_projection_width must be positive."
+      if(wannier_dis_win_max < 0d0 .or. wannier_dis_froz_max < 0d0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): Wannier energy windows must be non-negative."
+      if(wannier_dis_win_max > 0d0 .and. wannier_dis_froz_max > wannier_dis_win_max) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_dis_froz_max must not exceed wannier_dis_win_max."
+    end if
+
+    if(yn_dc_lcfo_local_wannier=='y') then
+      if(yn_dc/='y') &
+      & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc=y must be specified."
+      if(yn_dc_lcfo_flux/='y') &
+      & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc_lcfo_flux=y is required."
+      if(yn_dc_lcfo_diag/='y') &
+      & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc_lcfo_diag=y is required."
+      if(trim(wannier_projection) /= 'C:sp3' .and. trim(wannier_projection) /= 'c:sp3') &
+      & stop "DC-LCFO local Wannier export: currently only wannier_projection='C:sp3' is implemented."
+      if(wannier_projection_width <= 0d0) &
+      & stop "DC-LCFO local Wannier export: wannier_projection_width must be positive."
+      if(lambda_cut <= 0d0) &
+      & stop "DC-LCFO local Wannier export: lambda_cut must be positive for local S cleanup."
+    end if
+
+    if(yn_dc_lcfo_wannier_pw=='y') then
+      if(yn_dc_lcfo_local_wannier/='y') &
+      & stop "DC-LCFO local Wannier PW augmentation requires yn_dc_lcfo_local_wannier=y."
+      if(wannier_pw_cutoff <= 0d0) &
+      & stop "DC-LCFO local Wannier PW augmentation requires wannier_pw_cutoff > 0."
+      if(wannier_pw_max < 0) &
+      & stop "DC-LCFO local Wannier PW augmentation requires wannier_pw_max >= 0."
+    end if
+
     ! DG-Fragment RT method checks
     if(yn_dg_fragment_rt=='y') then
       if(theory/='tddft_pulse' .and. theory/='tddft_response' .and. theory/='single_scale_maxwell_tddft') &
@@ -3171,6 +3279,12 @@ contains
          time_integrator_dg_fragment/='aetrs') &
       & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', 'taylor4pc', or 'aetrs'"
     end if
+    if(yn_dg_length_gauge=='y' .and. yn_dg_fragment_rt/='y') &
+      stop "DG length gauge requires yn_dg_fragment_rt=y."
+    if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
+      stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
+    if(yn_dg_length_gauge=='y' .and. time_integrator_dg_fragment/='taylor4pc') &
+      stop "DG length gauge currently requires time_integrator_dg_fragment='taylor4pc'."
     
     call yn_argument_check(yn_dg_fragment_rt)
 

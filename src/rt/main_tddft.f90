@@ -26,7 +26,8 @@ use parallelization, only: adjust_elapse_time, nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast, comm_summation
 use salmon_xc, only: finalize_xc
 use timer
-use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
+use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d, &
+  write_dg_polarization_data
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
@@ -250,7 +251,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             calculate_observables_std => calculate_observables, &
                             diagnose_dcdft_lcfo_seed_stationarity_std => diagnose_dcdft_lcfo_seed_stationarity, &
                             calibrate_dcdft_lcfo_static_hamiltonian_std => calibrate_dcdft_lcfo_static_hamiltonian, &
-                            diagnose_velocity_transition_strength_dg
+                            diagnose_velocity_transition_strength_dg, &
+                            diagnose_wannier_position_transition_strength_dg
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -262,7 +264,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use salmon_xc, only: s_xc_functional
   use write_sub
   use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, &
-                           out_rt_energy_step, nt, dt, iperiodic
+                           out_rt_energy_step, nt, dt, iperiodic, yn_dg_length_gauge
   use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
   use hamiltonian, only: update_kvector_nonlocalpt_microAc
@@ -442,6 +444,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
       if (trace_dg_velocity_transition .and. .not. dg_frag%coef_state_block_mode) then
         call diagnose_velocity_transition_strength_dg(dg_frag, system, 3)
+        call diagnose_wannier_position_transition_strength_dg(dg_frag, system, 3)
       end if
       did_validate_seed = .true.
       if (comm_is_root(dg_frag%id)) then
@@ -513,7 +516,13 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     time_label = 'time['//trim(t_unit_time%name)//']'
     write(*,*)
     write(*,*) "=== Starting DG-Fragment RT time evolution ==="
-    write(*,'(1x,a8,1x,a11,4(1x,a15))') 'step', trim(time_label), 'Jx[a.u.]', 'Jy[a.u.]', 'Jz[a.u.]', '|J|[a.u.]'
+    if (yn_dg_length_gauge == 'y') then
+      write(*,'(1x,a8,1x,a11,4(1x,a15))') &
+        'step', trim(time_label), 'Px[a.u.]', 'Py[a.u.]', 'Pz[a.u.]', '|P|[a.u.]'
+    else
+      write(*,'(1x,a8,1x,a11,4(1x,a15))') &
+        'step', trim(time_label), 'Jx[a.u.]', 'Jy[a.u.]', 'Jz[a.u.]', '|J|[a.u.]'
+    end if
     write(*,'(1x,a8,1x,a11,4(1x,a15))') '--------', '-----------', '---------------', '---------------', &
       '---------------', '---------------'
     write(*,*)
@@ -526,9 +535,14 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call calculate_observables_std(dg_frag, system, mg, stencil, ppg, rt, itt_initial_obs, Vh, Vxc, Vpsl)
   end if
   if (comm_is_root(nproc_id_global)) then
-    current_abs = sqrt(sum(dg_frag%current_total(:)**2))
     current_time = dble(Mit) * dt * t_unit_time%conv
-    write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') Mit, current_time, dg_frag%current_total(:), current_abs
+    if (yn_dg_length_gauge == 'y') then
+      current_abs = sqrt(sum(dg_frag%polarization_lg(:)**2))
+      write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') Mit, current_time, dg_frag%polarization_lg(:), current_abs
+    else
+      current_abs = sqrt(sum(dg_frag%current_total(:)**2))
+      write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') Mit, current_time, dg_frag%current_total(:), current_abs
+    end if
     if (trace_dg_current) then
       write(*,'(1x,a,i0,7(a,3es13.5),2(a,es13.5))') '[DG-CURRENT] itt=', Mit, &
         ' para=', dg_frag%current_para(:), ' nl=', dg_frag%current_nl(:), &
@@ -538,6 +552,11 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         ' cNorm=', dg_frag%current_coef_norm, ' cIm=', dg_frag%current_coef_imag_norm
     end if
     flush(6)
+  end if
+
+  if (yn_dg_length_gauge == 'y') then
+    call write_dg_polarization_data(-1, dt, dg_frag%polarization_lg)
+    call write_dg_polarization_data(Mit, dt, dg_frag%polarization_lg)
   end if
 
   system%vec_Ac(1:3) = rt%Ac_tot(1:3, itt_initial_obs)
@@ -618,12 +637,21 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       curr_i_zero(:) = 0.0d0
       call write_rt_data_3d(itt, ofl, dt, system, curr_e_out, curr_i_zero)
     end select
+
+    if (yn_dg_length_gauge == 'y') then
+      call write_dg_polarization_data(itt, dt, dg_frag%polarization_lg)
+    end if
     
     ! Output progress
     if (comm_is_root(nproc_id_global) .and. print_rt_step) then
-      current_abs = sqrt(sum(dg_frag%current_total(:)**2))
       current_time = dble(itt) * dt * t_unit_time%conv
-      write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') itt, current_time, dg_frag%current_total(:), current_abs
+      if (yn_dg_length_gauge == 'y') then
+        current_abs = sqrt(sum(dg_frag%polarization_lg(:)**2))
+        write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') itt, current_time, dg_frag%polarization_lg(:), current_abs
+      else
+        current_abs = sqrt(sum(dg_frag%current_total(:)**2))
+        write(*,'(1x,i8,1x,f11.3,4(1x,es15.6))') itt, current_time, dg_frag%current_total(:), current_abs
+      end if
       flush(6)
       if (trace_dg_current) then
         write(*,'(1x,a,i0,7(a,3es13.5),2(a,es13.5))') '[DG-CURRENT] itt=', itt, &
@@ -694,7 +722,7 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
 	  integer :: ilocal, global_idx, ncoef_local
 	  integer :: iprobe, nprobe, p0_candidate, cross_probe_starts(3)
   integer, allocatable :: block_cols(:)
-	  logical :: duplicate, include_s_contrib
+	  logical :: duplicate, include_s_contrib, sample_occupied_only
 
   if (.not. allocated(dg_frag%coef)) then
     if (comm_is_root(dg_frag%id)) then
@@ -758,6 +786,7 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
       .not. dg_frag%use_plane_wave_basis) then
     include_s_contrib = comm_is_root(dg_frag%id)
   end if
+  sample_occupied_only = dg_frag%buffer_wannier_flux_seed_applied
   ! Keep this separate from physics parameters.  It is only a validation
   ! memory/performance tile size, and should become namelist- or memory-budget
   ! driven once the DGDFT seed route is stabilized.
@@ -779,7 +808,7 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
       ncand = ncand + 1
       sample_candidates(ncand) = nocc
     end if
-    if (nocc < dg_frag%nstate_tot) then
+    if (.not. sample_occupied_only .and. nocc < dg_frag%nstate_tot) then
       ncand = ncand + 1
       sample_candidates(ncand) = nocc + 1
       ncand = ncand + 1

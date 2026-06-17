@@ -2,13 +2,13 @@
                                       lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
     rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
-    use salmon_global, only: yn_fix_func, yn_dg_length_gauge
+    use salmon_global, only: yn_fix_func, yn_dg_length_gauge, ae_shape1, e_impulse, epdir_re1, yn_restart
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_types, only: s_dg_fragment_rt
+    use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info
     use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A
     use misc_routines, only: get_wtime
-    use communication, only: comm_get_min
+    use communication, only: comm_get_min, comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -30,12 +30,14 @@
     type(s_dft_energy),     intent(inout) :: energy
 
     complex(8), allocatable, save :: coef_base(:,:,:)
+    complex(8), allocatable, save :: coef_pred(:,:,:)
     complex(8), allocatable, save :: coef_next(:,:,:)
     complex(8), allocatable, save :: term_blk(:,:,:)
     complex(8), allocatable, save :: deriv_blk(:,:,:)
     complex(8), allocatable, save :: result_blk(:,:,:)
     complex(8), allocatable, save :: work_in(:,:,:)
     complex(8), allocatable, save :: work_out(:,:,:)
+    type(matrix_block_info), allocatable, save :: h_pc_base_blocks(:)
     integer, allocatable, save :: owned_pw_row_ids_taylor(:)
     integer :: n, nrow_taylor, nstate_prop, nstate_work, state_global_first, state_global_last
     integer :: state0, state_s, state_e, nstate_blk
@@ -49,10 +51,12 @@
     integer, save :: trace_taylor_call_count = 0
     logical, save :: taylor_env_initialized = .false.
     logical, save :: enable_taylor_timing = .false.
+    logical, save :: enable_coef_trace = .false.
     integer(8) :: target_bytes, bytes_per_state
     real(8) :: nstate_work_min_in(1), nstate_work_min_out(1)
     real(8) :: Ac_mid(3), Ac_ham(3), E_mid(3)
     real(8) :: t_taylor0, t_taylor1, time_taylor_apply
+    real(8) :: coef_trace_local(4), coef_trace_global(4)
     logical :: trace_taylor
     logical :: has_state_work
     logical :: use_length_gauge
@@ -92,6 +96,14 @@
     use_length_gauge = (yn_dg_length_gauge == 'y')
     Ac_ham(:) = Ac_mid(:)
     if (use_length_gauge) Ac_ham(:) = 0.0d0
+    if (use_length_gauge .and. trim(ae_shape1) == 'impulse' .and. yn_restart == 'n' .and. itt == 1) then
+      E_mid(:) = e_impulse * epdir_re1(:) / max(abs(dt), 1.0d-300)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,3(1x,1pe13.5),a,1pe13.5)') &
+          '[DG-LG-IMPULSE] using first-step rectangular E field=', E_mid(:), ' dt=', dt
+        flush(6)
+      end if
+    end if
     nsub_taylor = max(taylor4pc_substeps_default, ceiling(abs(dt) / taylor4pc_dt_substep_target))
     call initialize_taylor_runtime_options()
 
@@ -136,8 +148,39 @@
     call ensure_block_arrays(nrow_taylor, nstate_work, dg_frag%nspin)
     call pack_taylor_coefficients(coef_base, nstate_prop)
     call unpack_taylor_coefficients(coef_base, nstate_prop)
+    if (yn_fix_func == 'n') then
+      call save_current_hamiltonian_blocks()
+      call apply_taylor4_with_current_hamiltonian(coef_base, Ac_ham, E_mid, coef_pred, nstate_prop, nstate_work, &
+                                                  state_global_first)
+      call unpack_taylor_coefficients(coef_pred, nstate_prop)
+      call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_ham, &
+                                            lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+                                            rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
+      if (ppg%Nlma > 0 .and. allocated(ppg%uV)) then
+        call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_ham, .false.)
+      end if
+      call average_current_hamiltonian_with_saved()
+      call unpack_taylor_coefficients(coef_base, nstate_prop)
+    end if
     call apply_taylor4_with_current_hamiltonian(coef_base, Ac_ham, E_mid, coef_next, nstate_prop, nstate_work, &
                                                 state_global_first)
+    if (enable_coef_trace .and. itt <= 5) then
+      coef_trace_local(:) = 0.0d0
+      coef_trace_global(:) = 0.0d0
+      coef_trace_local(1) = sum(abs(coef_base(1:nrow_taylor,1:nstate_prop,1:dg_frag%nspin))**2)
+      coef_trace_local(2) = sum(abs(coef_next(1:nrow_taylor,1:nstate_prop,1:dg_frag%nspin))**2)
+      coef_trace_local(3) = sum(abs(coef_next(1:nrow_taylor,1:nstate_prop,1:dg_frag%nspin) - &
+                                    coef_base(1:nrow_taylor,1:nstate_prop,1:dg_frag%nspin))**2)
+      coef_trace_local(4) = maxval(abs(coef_next(1:nrow_taylor,1:nstate_prop,1:dg_frag%nspin) - &
+                                       coef_base(1:nrow_taylor,1:nstate_prop,1:dg_frag%nspin)))
+      call comm_summation(coef_trace_local, coef_trace_global, 4, dg_frag%icomm)
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a,i0,4(a,1pe13.5))') '[DG-COEF-TRACE] itt=', itt, &
+          ' norm_base=', coef_trace_global(1), ' norm_next=', coef_trace_global(2), &
+          ' diff2=', coef_trace_global(3), ' diff_max_sum=', coef_trace_global(4)
+        flush(6)
+      end if
+    end if
     call unpack_taylor_coefficients(coef_next, nstate_prop)
     t_taylor1 = get_wtime()
     time_taylor_apply = t_taylor1 - t_taylor0
@@ -164,6 +207,14 @@
         end select
       end if
       env_value = ''
+      call get_environment_variable('SALMON_DG_COEF_TRACE', env_value, length=env_len, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_value(1:env_len))))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enable_coef_trace = .true.
+        end select
+      end if
+      env_value = ''
       call get_environment_variable('SALMON_DG_TAYLOR_STATE_MB', env_value, length=env_len, status=env_status)
       if (env_status == 0 .and. env_len > 0) then
         read(env_value(1:env_len), *, iostat=read_status) env_int
@@ -176,11 +227,11 @@
       integer, intent(in) :: nrow, ncol, nspin
 
       if (.not. allocated(coef_base)) then
-        allocate(coef_base(nrow, ncol, nspin), coef_next(nrow, ncol, nspin), &
+        allocate(coef_base(nrow, ncol, nspin), coef_pred(nrow, ncol, nspin), coef_next(nrow, ncol, nspin), &
                  work_in(nrow, ncol, nspin), work_out(nrow, ncol, nspin))
       else if (size(coef_base, 1) /= nrow .or. size(coef_base, 2) /= ncol .or. size(coef_base, 3) /= nspin) then
-        deallocate(coef_base, coef_next, work_in, work_out)
-        allocate(coef_base(nrow, ncol, nspin), coef_next(nrow, ncol, nspin), &
+        deallocate(coef_base, coef_pred, coef_next, work_in, work_out)
+        allocate(coef_base(nrow, ncol, nspin), coef_pred(nrow, ncol, nspin), coef_next(nrow, ncol, nspin), &
                  work_in(nrow, ncol, nspin), work_out(nrow, ncol, nspin))
       end if
     end subroutine ensure_state_arrays
@@ -356,5 +407,52 @@
         stop 'DG-Fragment RT: NaN Taylor derivative block'
       end if
     end subroutine check_finite_taylor_block
+
+    subroutine save_current_hamiltonian_blocks()
+      integer :: iblk
+
+      if (.not. allocated(dg_frag%H_mat_blocks)) return
+      if (allocated(h_pc_base_blocks)) call deallocate_saved_hamiltonian_blocks()
+      allocate(h_pc_base_blocks(size(dg_frag%H_mat_blocks)))
+      do iblk = 1, size(dg_frag%H_mat_blocks)
+        h_pc_base_blocks(iblk)%ifrag_row = dg_frag%H_mat_blocks(iblk)%ifrag_row
+        h_pc_base_blocks(iblk)%ifrag_col = dg_frag%H_mat_blocks(iblk)%ifrag_col
+        h_pc_base_blocks(iblk)%nrow_max = dg_frag%H_mat_blocks(iblk)%nrow_max
+        h_pc_base_blocks(iblk)%ncol_max = dg_frag%H_mat_blocks(iblk)%ncol_max
+        if (allocated(dg_frag%H_mat_blocks(iblk)%val)) then
+          allocate(h_pc_base_blocks(iblk)%val(size(dg_frag%H_mat_blocks(iblk)%val, 1), &
+                                              size(dg_frag%H_mat_blocks(iblk)%val, 2), &
+                                              size(dg_frag%H_mat_blocks(iblk)%val, 3)))
+          h_pc_base_blocks(iblk)%val(:, :, :) = dg_frag%H_mat_blocks(iblk)%val(:, :, :)
+        end if
+      end do
+    end subroutine save_current_hamiltonian_blocks
+
+    subroutine average_current_hamiltonian_with_saved()
+      integer :: iblk
+
+      if (.not. allocated(h_pc_base_blocks)) return
+      if (.not. allocated(dg_frag%H_mat_blocks)) return
+      if (size(h_pc_base_blocks) /= size(dg_frag%H_mat_blocks)) return
+      do iblk = 1, size(dg_frag%H_mat_blocks)
+        if (.not. allocated(h_pc_base_blocks(iblk)%val)) cycle
+        if (.not. allocated(dg_frag%H_mat_blocks(iblk)%val)) cycle
+        if (size(h_pc_base_blocks(iblk)%val, 1) /= size(dg_frag%H_mat_blocks(iblk)%val, 1)) cycle
+        if (size(h_pc_base_blocks(iblk)%val, 2) /= size(dg_frag%H_mat_blocks(iblk)%val, 2)) cycle
+        if (size(h_pc_base_blocks(iblk)%val, 3) /= size(dg_frag%H_mat_blocks(iblk)%val, 3)) cycle
+        dg_frag%H_mat_blocks(iblk)%val(:, :, :) = 0.5d0 * &
+          (h_pc_base_blocks(iblk)%val(:, :, :) + dg_frag%H_mat_blocks(iblk)%val(:, :, :))
+      end do
+    end subroutine average_current_hamiltonian_with_saved
+
+    subroutine deallocate_saved_hamiltonian_blocks()
+      integer :: iblk
+
+      if (.not. allocated(h_pc_base_blocks)) return
+      do iblk = 1, size(h_pc_base_blocks)
+        if (allocated(h_pc_base_blocks(iblk)%val)) deallocate(h_pc_base_blocks(iblk)%val)
+      end do
+      deallocate(h_pc_base_blocks)
+    end subroutine deallocate_saved_hamiltonian_blocks
 
   end subroutine time_evolution_taylor4pc

@@ -19,6 +19,9 @@
       n_frag = dg_frag%n_mat(ispin)
       n_pw = 0
       if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+      if (n_pw > 0) then
+        stop "DG unitarity stabilization PW path requires row-local mixed overlap; full mixed vector is disabled"
+      end if
       use_S = allocated(dg_frag%S_mat_frag_pw) .or. allocated(dg_frag%S_mat_prop_c) .or. &
               allocated(dg_frag%S_mat_prop) .or. allocated(dg_frag%S_mat_c) .or. allocated(dg_frag%S_mat) .or. &
               allocated(dg_frag%S_mat_prop_blocks) .or. allocated(dg_frag%S_mat_blocks)

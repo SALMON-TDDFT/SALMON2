@@ -12,12 +12,13 @@
     type(s_scalar),         intent(inout) :: rho_s(system%nspin)
     integer, intent(in), optional :: itt_debug
 
-    integer :: ifrag, io, i_local, ispin
+    integer :: ifrag, io, i_local, ispin, iw
     integer :: istate_frag
     integer :: ix, iy, iz, ixg, iyg, izg, bx, by, bz, owner_rank
     integer :: im_pf, ipw_pf, ipw_max
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), ifrag_count, ngrid_max
+    integer :: nkeep, nkeep_max_density, nw_owned
     integer :: nocc_spin, nocc_cache
     integer :: irank, slot, npts, idx_local, idx_remote, point_idx, local_coef_idx, local_state_col
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count
@@ -38,8 +39,11 @@
     real(8) :: total_charge, total_charge_local
     real(8) :: total_charge_reduce_in(1), total_charge_reduce_out(1)
     real(8) :: occ_factor, abs_max_pf
+    real(8) :: rho_trace_min, rho_trace_max
     real(8) :: boxL(3), inv_sqrt_vol, theta, inv_lgnum1
     logical :: use_mixed_density
+    logical :: enable_wannier_density
+    logical :: use_buffer_wannier_density
     logical :: enable_density_phi_block_cache, enable_density_phase_block_cache
     logical :: rebuilt_pw_cache, rebuilt_phi_block_cache, rebuilt_phase_block_cache
     logical :: need_pw_cache_alloc, need_pw_cache_expand
@@ -65,6 +69,10 @@
     real(8), allocatable :: D_frag_re(:,:,:)   ! (nbf_max, nbf_max, nspin) pre-computed D per fragment
     real(8), allocatable :: D_partial_re(:,:)    ! (nbf_max, nbf_max) partial D per rank
     real(8), allocatable :: rho_dmat_q_local(:,:), rho_dmat_q_full(:,:)
+    real(8), allocatable :: D_wannier_re(:,:,:), D_wannier_tmp(:,:)
+    real(8), allocatable :: wannier_coef_owned(:,:,:)
+    real(8), allocatable :: wannier_blk_local(:,:), wannier_blk_full(:,:), wannier_dmat_q(:,:)
+    integer, allocatable :: wannier_owned_count_spin(:)
     real(8), allocatable :: coef_re_full(:,:,:)  ! (nbf_max, nocc_cache, nspin) upfront bcast coef (n_pw>0)
     real(8), allocatable :: coef_im_full(:,:,:)  ! (nbf_max, nocc_cache, nspin)
     real(8), allocatable :: rho_blk_partial(:)   ! (grid_block_size) partial rho for state slice
@@ -91,7 +99,9 @@
     integer, allocatable :: n_basis_mix_spin(:)
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
     character(32) :: env_phi_block_cache, env_phase_block_cache
+    character(32) :: env_wannier_density
     character(32) :: env_rho_mix_mode
+    character(32) :: env_trace_density_charge
     integer :: env_status
     integer :: rho_mix_mode_kind
     integer :: info_lapack
@@ -99,6 +109,7 @@
     logical :: need_full_coef_mix_spin
     logical :: density_on_frag_root
     logical :: density_exchange_active
+    logical :: trace_density_charge
     logical :: enable_fp_phase_fix
     character(32) :: env_fp_phase_fix
     logical, save :: density_env_initialized = .false.
@@ -109,6 +120,9 @@
     ! trade speed back for lower memory use.
     logical, save :: cfg_enable_density_phi_block_cache = .true.
     logical, save :: cfg_enable_density_phase_block_cache = .false.
+    logical, save :: cfg_enable_wannier_density = .false.
+    logical, save :: cfg_wannier_density_logged = .false.
+    logical, save :: cfg_trace_density_charge = .false.
     character(32), save :: cfg_env_rho_mix_mode = 'legacy'
     integer, save :: cfg_rho_mix_mode_kind = 0
     logical, save :: cfg_enable_fp_phase_fix = .false.
@@ -129,11 +143,14 @@
     env_phase_block_cache_seen = .false.
     env_phi_block_cache = ''
     env_phase_block_cache = ''
+    env_wannier_density = ''
     env_rho_mix_mode = 'legacy'
+    env_trace_density_charge = ''
     env_fp_phase_fix = ''
     rho_mix_mode_kind = 0
     need_full_coef_mix_spin = .false.
     enable_fp_phase_fix = .false.
+    trace_density_charge = .false.
     ! These switches are process-level controls.  Cache them once because this
     ! routine is called many times per RT step in self-consistent propagation.
     if (.not. density_env_initialized) then
@@ -155,6 +172,24 @@
           cfg_enable_density_phase_block_cache = .true.
         case('0','n','N','no','NO','false','FALSE','off','OFF')
           cfg_enable_density_phase_block_cache = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_DENSITY_WANNIER', env_wannier_density, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_wannier_density)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_wannier_density = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_wannier_density = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_DENSITY_TRACE_CHARGE', env_trace_density_charge, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_trace_density_charge)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_trace_density_charge = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_trace_density_charge = .false.
         end select
       end if
       call get_environment_variable('SALMON_DG_RHO_MIX_MODE', env_rho_mix_mode, status=env_status)
@@ -188,6 +223,19 @@
     env_phase_block_cache_seen = cfg_env_phase_block_cache_seen
     enable_density_phi_block_cache = cfg_enable_density_phi_block_cache
     enable_density_phase_block_cache = cfg_enable_density_phase_block_cache
+    enable_wannier_density = cfg_enable_wannier_density
+    trace_density_charge = cfg_trace_density_charge
+    use_buffer_wannier_density = enable_wannier_density .and. &
+      dg_frag%buffer_wannier_flux_seed_applied .and. dg_frag%has_buffer_periodic_wannier_basis .and. &
+      allocated(dg_frag%buffer_wannier_coef)
+    if (enable_wannier_density) then
+      if (use_buffer_wannier_density) then
+        if (.not. allocated(dg_frag%buffer_wannier_nkeep)) &
+          stop "DG density Wannier path requires buffer_periodic_wannier_basis.bin"
+      else if (.not. dg_frag%has_local_wannier_basis) then
+        stop "DG density Wannier path requires local_wannier_basis.bin"
+      end if
+    end if
     env_rho_mix_mode = cfg_env_rho_mix_mode
     rho_mix_mode_kind = cfg_rho_mix_mode_kind
     enable_fp_phase_fix = cfg_enable_fp_phase_fix
@@ -211,12 +259,33 @@
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     ngrid_max = 0
     if (ifrag_count > 0) then
-      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
-        ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
-      end do
+      if (allocated(dg_frag%density_grid_point_count)) then
+        ngrid_max = max(1, maxval(dg_frag%density_grid_point_count(1:ifrag_count)))
+      else
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          ngrid_max = max(ngrid_max, product(dg_frag%nxyz_domain(:, ifrag)))
+        end do
+      end if
     end if
     nbf_max = max(1, maxval(dg_frag%n_basis(:, 1:system%nspin)))
     n_pw = max(0, dg_frag%n_plane_waves)
+    if (enable_wannier_density) then
+      if (n_pw > 0) &
+        stop "DG density Wannier path is only implemented for pure fragment basis"
+      if (.not. cfg_wannier_density_logged .and. dg_frag%id == 0) then
+        if (use_buffer_wannier_density) then
+          write(*,'(1x,a)') &
+            "[DG-DENSITY-WANNIER] enabled: buffer-periodic Wannier projection on core density grid"
+        else
+          write(*,'(1x,a)') &
+            "[DG-DENSITY-WANNIER] enabled: center-owned local Wannier projection on core density grid"
+        end if
+        cfg_wannier_density_logged = .true.
+      end if
+    end if
+    if (n_pw > 0) then
+      stop "DG density PW path requires row-local PW reconstruction; full PW coefficient cache is disabled"
+    end if
     nbf_frag_cap = nbf_max
     if (dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1) then
       nbf_frag_cap = (nbf_max + dg_frag%isize_frag - 1) / dg_frag%isize_frag
@@ -528,8 +597,7 @@
       i_local = 0
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
-        nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-        ngrid = nxyz(1) * nxyz(2) * nxyz(3)
+        ngrid = dg_frag%density_grid_point_count(i_local)
         nblocks_ifrag = (ngrid + grid_block_size - 1) / grid_block_size
         dg_frag%density_block_nblocks(i_local) = nblocks_ifrag
         dg_frag%density_block_first_offset(i_local) = 0
@@ -551,6 +619,20 @@
       allocate(D_frag_re(nbf_max, nbf_max, system%nspin))
       allocate(rho_dmat_q_local(grid_block_size, nbf_max))
       allocate(rho_dmat_q_full(grid_block_size, nbf_max))
+      if (enable_wannier_density) then
+        if (use_buffer_wannier_density) then
+          nkeep_max_density = max(1, maxval(dg_frag%buffer_wannier_nkeep(1:ifrag_count)))
+        else
+          nkeep_max_density = max(1, maxval(dg_frag%local_wannier_nkeep(1:ifrag_count)))
+        end if
+        allocate(D_wannier_re(nkeep_max_density, nkeep_max_density, system%nspin))
+        allocate(D_wannier_tmp(nbf_max, nkeep_max_density))
+        allocate(wannier_coef_owned(nbf_max, nkeep_max_density, system%nspin))
+        allocate(wannier_blk_local(grid_block_size, nkeep_max_density))
+        allocate(wannier_blk_full(grid_block_size, nkeep_max_density))
+        allocate(wannier_dmat_q(grid_block_size, nkeep_max_density))
+        allocate(wannier_owned_count_spin(system%nspin))
+      end if
     end if
     allocate(coef_re_full(nbf_max, max(1, nocc_cache), system%nspin))
     allocate(coef_im_full(nbf_max, max(1, nocc_cache), system%nspin))
@@ -683,7 +765,7 @@
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
-        ngrid = nxyz(1) * nxyz(2) * nxyz(3)
+        ngrid = dg_frag%density_grid_point_count(i_local)
         nblocks_ifrag = dg_frag%density_block_nblocks(i_local)
         first_block_offset = dg_frag%density_block_first_offset(i_local)
         block_step_blocks = dg_frag%density_block_step(i_local)
@@ -754,6 +836,11 @@
         ! rho(r)=phi(r)^T D phi(r), avoiding an occupied-state loop per block
         ! where that is cheaper than repeatedly forming psi(r).
         if (n_pw == 0) D_frag_re(:, :, :) = 0.0d0
+        if (n_pw == 0 .and. enable_wannier_density) then
+          D_wannier_re(:, :, :) = 0.0d0
+          wannier_coef_owned(:, :, :) = 0.0d0
+          wannier_owned_count_spin(:) = 0
+        end if
         if (n_pw == 0) then
           coef_re_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
           coef_im_full(1:nbf_max, 1:nocc_cache, 1:system%nspin) = 0.0d0
@@ -849,6 +936,45 @@
             end do
             call assert_real_matrix_finite_density('D_frag_re-after-sym', D_frag_re(:, :, ispin), &
               1, nbf, 1, nbf, ifrag, ispin, 0)
+            if (enable_wannier_density) then
+              if (use_buffer_wannier_density) then
+                if (i_local >= 1 .and. i_local <= size(dg_frag%buffer_wannier_nkeep)) then
+                  nkeep = min(dg_frag%buffer_wannier_nkeep(i_local), size(dg_frag%buffer_wannier_coef, 2))
+                else
+                  nkeep = 0
+                end if
+              else if (i_local >= 1 .and. i_local <= size(dg_frag%local_wannier_nkeep)) then
+                nkeep = min(dg_frag%local_wannier_nkeep(i_local), size(dg_frag%local_wannier_coef, 2))
+              else
+                nkeep = 0
+              end if
+              nw_owned = 0
+              if (nkeep > 0) then
+                do iw = 1, nkeep
+                  if ((.not. use_buffer_wannier_density) .and. allocated(dg_frag%local_wannier_owned)) then
+                    if (.not. dg_frag%local_wannier_owned(iw, ispin, i_local)) cycle
+                  end if
+                  nw_owned = nw_owned + 1
+                  if (use_buffer_wannier_density) then
+                    wannier_coef_owned(1:nbf, nw_owned, ispin) = &
+                      dg_frag%buffer_wannier_coef(1:nbf, iw, ispin, i_local)
+                  else
+                    wannier_coef_owned(1:nbf, nw_owned, ispin) = &
+                      dg_frag%local_wannier_coef(1:nbf, iw, ispin, i_local)
+                  end if
+                end do
+              end if
+              wannier_owned_count_spin(ispin) = nw_owned
+              if (nw_owned > 0) then
+                D_wannier_tmp(1:nbf, 1:nw_owned) = 0.0d0
+                call dgemm('N', 'N', nbf, nw_owned, nbf, 1.0d0, D_frag_re(1, 1, ispin), nbf_max, &
+                           wannier_coef_owned(1, 1, ispin), nbf_max, 0.0d0, D_wannier_tmp, nbf_max)
+                call dgemm('T', 'N', nw_owned, nw_owned, nbf, 1.0d0, wannier_coef_owned(1, 1, ispin), nbf_max, &
+                           D_wannier_tmp, nbf_max, 0.0d0, D_wannier_re(1, 1, ispin), nkeep_max_density)
+                call assert_real_matrix_finite_density('D_wannier_re', D_wannier_re(:, :, ispin), &
+                  1, nw_owned, 1, nw_owned, ifrag, ispin, 0)
+              end if
+            end if
           end do
         else
           ! n_pw > 0: upfront subgroup assembly of coef_re/im on all icomm_frag ranks
@@ -1205,7 +1331,46 @@
               if (n_pw == 0) then
                 if (.not. allocated(rho_blk_partial)) allocate(rho_blk_partial(grid_block_size))
                 rho_blk_partial(1:npt_blk) = 0.0d0
-                if (dg_frag%parallel_mode_orbital) then
+                if (enable_wannier_density) then
+                  nw_owned = wannier_owned_count_spin(ispin)
+                  rho_blk_accum(1:npt_blk) = 0.0d0
+                  if (nw_owned > 0) then
+                    wannier_blk_local(1:npt_blk, 1:nw_owned) = 0.0d0
+                    if (nbf_frag_count > 0) then
+                      call dgemm('N', 'N', npt_blk, nw_owned, nbf_frag_count, 1.0d0, phi_blk, grid_block_size, &
+                                 wannier_coef_owned(ib_s_frag, 1, ispin), nbf_max, &
+                                 0.0d0, wannier_blk_local, grid_block_size)
+                    end if
+                    if (density_on_frag_root) then
+                      call comm_summation(wannier_blk_local(1:npt_blk, 1:nw_owned), &
+                                          wannier_blk_full(1:npt_blk, 1:nw_owned), &
+                                          npt_blk * nw_owned, dg_frag%icomm_frag, 0)
+                    else if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL) then
+                      call comm_summation(wannier_blk_local(1:npt_blk, 1:nw_owned), &
+                                          wannier_blk_full(1:npt_blk, 1:nw_owned), &
+                                          npt_blk * nw_owned, dg_frag%icomm_frag)
+                    else
+                      wannier_blk_full(1:npt_blk, 1:nw_owned) = wannier_blk_local(1:npt_blk, 1:nw_owned)
+                    end if
+                    if ((.not. density_on_frag_root) .or. dg_frag%is_frag_root) then
+                      call assert_real_matrix_finite_density('wannier_blk_full', wannier_blk_full, &
+                        1, npt_blk, 1, nw_owned, ifrag, ispin, block_offset)
+                      call dgemm('N', 'N', npt_blk, nw_owned, nw_owned, 1.0d0, wannier_blk_full, grid_block_size, &
+                                 D_wannier_re(1, 1, ispin), nkeep_max_density, &
+                                 0.0d0, wannier_dmat_q, grid_block_size)
+!$omp parallel do private(igrid, iw, rho_accum) schedule(static)
+                      do igrid = 1, npt_blk
+                        rho_accum = 0.0d0
+!$omp simd reduction(+:rho_accum)
+                        do iw = 1, nw_owned
+                          rho_accum = rho_accum + wannier_blk_full(igrid, iw) * wannier_dmat_q(igrid, iw)
+                        end do
+                        rho_blk_accum(igrid) = rho_accum
+                      end do
+!$omp end parallel do
+                    end if
+                  end if
+                else if (dg_frag%parallel_mode_orbital) then
                   rho_dmat_q_local(1:npt_blk, 1:nbf) = 0.0d0
                   if (nbf_frag_count > 0) then
                     call dgemm('N', 'N', npt_blk, nbf, nbf_frag_count, 1.0d0, phi_blk, grid_block_size, &
@@ -1585,6 +1750,13 @@
     if (allocated(D_partial_re)) deallocate(D_partial_re)
     if (allocated(rho_dmat_q_local)) deallocate(rho_dmat_q_local)
     if (allocated(rho_dmat_q_full)) deallocate(rho_dmat_q_full)
+    if (allocated(D_wannier_re)) deallocate(D_wannier_re)
+    if (allocated(D_wannier_tmp)) deallocate(D_wannier_tmp)
+    if (allocated(wannier_coef_owned)) deallocate(wannier_coef_owned)
+    if (allocated(wannier_blk_local)) deallocate(wannier_blk_local)
+    if (allocated(wannier_blk_full)) deallocate(wannier_blk_full)
+    if (allocated(wannier_dmat_q)) deallocate(wannier_dmat_q)
+    if (allocated(wannier_owned_count_spin)) deallocate(wannier_owned_count_spin)
     if (allocated(coef_re_full)) deallocate(coef_re_full)
     if (allocated(coef_im_full)) deallocate(coef_im_full)
     if (allocated(coef_c_full)) deallocate(coef_c_full)
@@ -1795,6 +1967,15 @@
     end do
     total_charge_local = total_charge_local * system%hvol
     call assert_real_scalar_finite_density('total_charge_local-scaled', total_charge_local)
+    if (trace_density_charge) then
+      rho_trace_min = minval(rho%f(rho_x_lo:rho_x_hi, rho_y_lo:rho_y_hi, rho_z_lo:rho_z_hi))
+      rho_trace_max = maxval(rho%f(rho_x_lo:rho_x_hi, rho_y_lo:rho_y_hi, rho_z_lo:rho_z_hi))
+      write(*,'(1x,a,i0,a,i0,a,i0,a,l1,a,l1,3(a,es15.6))') &
+        '[DG-DENSITY-TRACE] rank=', dg_frag%id, ' itt=', itt_tag, ' frag_group=', dg_frag%ifrag_group, &
+        ' sparse_exchange=', density_exchange_active, ' wannier=', enable_wannier_density, &
+        ' charge=', total_charge_local, ' rho_min=', rho_trace_min, ' rho_max=', rho_trace_max
+      flush(6)
+    end if
     ! Keep the raw local electron count.  Avoid a mandatory world-level
     ! collective here: in orbital-fragment RT this diagnostic reduction can be
     ! reached by a different active-rank set than the density construction

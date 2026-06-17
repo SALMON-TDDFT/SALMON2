@@ -64,7 +64,8 @@ module rt_dg_fragment
                                 apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, &
                                 apply_overlap_operator_batch, fetch_remote_coef_rows, &
                                 solve_overlap_operator_batch, &
-                                diagnose_velocity_transition_strength_dg
+                                diagnose_velocity_transition_strength_dg, &
+                                diagnose_wannier_position_transition_strength_dg
   implicit none
 
   private
@@ -75,6 +76,7 @@ module rt_dg_fragment
   public :: diagnose_density_from_fragments
   public :: diagnose_dcdft_lcfo_seed_stationarity
   public :: diagnose_velocity_transition_strength_dg
+  public :: diagnose_wannier_position_transition_strength_dg
   public :: calibrate_dcdft_lcfo_static_hamiltonian
   public :: get_dg_spin_occ_info
   public :: copy_periodic_global_scalar_to_rank_buffer
@@ -521,6 +523,10 @@ contains
     dg_frag%current_nl(:) = 0.0d0
     dg_frag%current_dia(:) = 0.0d0
     dg_frag%current_total(:) = 0.0d0
+    dg_frag%polarization_lg(:) = 0.0d0
+    dg_frag%polarization_lg_ref(:) = 0.0d0
+    dg_frag%polarization_lg_ref_ready = .false.
+    dg_frag%dipole_lg_raw(:) = 0.0d0
     dg_frag%elec_num_raw_t0 = 0.0d0
     dg_frag%elec_num_scaled_t0 = 0.0d0
     dg_frag%elec_num_baseline_ready = .false.
@@ -1100,6 +1106,22 @@ contains
       dg_frag%n_dipole_blocks = 0
     end if
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
+    if (allocated(dg_frag%local_wannier_nbasis)) deallocate(dg_frag%local_wannier_nbasis)
+    if (allocated(dg_frag%local_wannier_nproj)) deallocate(dg_frag%local_wannier_nproj)
+    if (allocated(dg_frag%local_wannier_nkeep)) deallocate(dg_frag%local_wannier_nkeep)
+    if (allocated(dg_frag%local_wannier_coef)) deallocate(dg_frag%local_wannier_coef)
+    if (allocated(dg_frag%local_wannier_r)) deallocate(dg_frag%local_wannier_r)
+    if (allocated(dg_frag%local_wannier_center)) deallocate(dg_frag%local_wannier_center)
+    if (allocated(dg_frag%local_wannier_owner_fragment)) deallocate(dg_frag%local_wannier_owner_fragment)
+    if (allocated(dg_frag%local_wannier_owned)) deallocate(dg_frag%local_wannier_owned)
+    if (allocated(dg_frag%buffer_wannier_nkeep)) deallocate(dg_frag%buffer_wannier_nkeep)
+    if (allocated(dg_frag%buffer_wannier_coef)) deallocate(dg_frag%buffer_wannier_coef)
+    if (allocated(dg_frag%buffer_wannier_spread)) deallocate(dg_frag%buffer_wannier_spread)
+    if (allocated(dg_frag%buffer_wannier_tail)) deallocate(dg_frag%buffer_wannier_tail)
+    if (allocated(dg_frag%buffer_wannier_h_flux)) deallocate(dg_frag%buffer_wannier_h_flux)
+    if (allocated(dg_frag%buffer_wannier_v)) deallocate(dg_frag%buffer_wannier_v)
+    dg_frag%has_buffer_periodic_wannier_basis = .false.
+    dg_frag%buffer_wannier_flux_seed_applied = .false.
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)

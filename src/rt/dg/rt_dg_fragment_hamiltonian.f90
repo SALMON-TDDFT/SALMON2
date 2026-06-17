@@ -2103,8 +2103,8 @@
     logical, save :: enabled = .false.
     character(16) :: env_trace
     integer :: env_status
-    integer :: iblk, ispin, nrow, ncol
-    real(8) :: frob, maxabs
+    integer :: iblk, ispin, nrow, ncol, i
+    real(8) :: frob, maxabs, diag_frob, intra_offdiag_frob
 
     if (.not. initialized) then
       env_trace = ''
@@ -2127,10 +2127,19 @@
         if (nrow <= 0 .or. ncol <= 0) cycle
         frob = sqrt(sum(blocks(iblk)%val(1:nrow, 1:ncol, ispin)**2))
         maxabs = maxval(abs(blocks(iblk)%val(1:nrow, 1:ncol, ispin)))
-        write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6)') &
+        diag_frob = 0.0d0
+        if (blocks(iblk)%ifrag_row == blocks(iblk)%ifrag_col) then
+          do i = 1, min(nrow, ncol)
+            diag_frob = diag_frob + blocks(iblk)%val(i, i, ispin)**2
+          end do
+        end if
+        diag_frob = sqrt(diag_frob)
+        intra_offdiag_frob = sqrt(max(0.0d0, frob**2 - diag_frob**2))
+        write(*,'(1x,a,a,a,i0,a,i0,a,i0,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
           '[HMAT-BLOCK] label=', trim(label), ' iblk=', iblk, &
           ' row=', blocks(iblk)%ifrag_row, ' col=', blocks(iblk)%ifrag_col, &
-          ' ispin=', ispin, ' frob=', frob, ' max=', maxabs
+          ' ispin=', ispin, ' frob=', frob, ' max=', maxabs, &
+          ' diag_frob=', diag_frob, ' intra_offdiag_frob=', intra_offdiag_frob
       end do
     end do
     flush(6)

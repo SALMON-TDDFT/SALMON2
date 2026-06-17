@@ -1,0 +1,75 @@
+&calculation
+  theory = 'dft'
+  yn_dc = 'y'
+/
+&control
+  sysname = 'c64_dc'
+  yn_reset_step_restart = 'y'
+  write_gs_restart_data = 'no'
+/
+&units
+  unit_system = 'a.u.'
+/
+&dc
+  num_fragment(1:3) = 2,2,2
+  num_rgrid_buffer(1:3) = 6,6,6
+  nproc_rgrid_tot(1:3) = 2,2,2
+  nstate_frag = 400
+  yn_dc_lcfo = 'y'
+  yn_dc_lcfo_flux = 'y'
+  yn_dc_lcfo_diag = 'y'
+  yn_dc_fragment_optimization = 'n'
+!  yn_dc_lcfo_wannier = 'y'
+!  yn_dc_lcfo_local_wannier = 'y'
+!  yn_dc_lcfo_wannier_pw = 'y'
+!  wannier_projection = 'C:sp3'
+!  wannier_num_wann = 256
+!  wannier_num_bands = 256
+!  wannier_num_iter = 100
+!  wannier_projection_width = 1.0d0
+!  wannier_dis_froz_max = 0.0d0
+!  wannier_dis_win_max = 0.0d0
+!  wannier_pw_cutoff = 0.5d0
+!  wannier_pw_max = 0
+  lambda_cut = 1.0d-8
+/
+&parallel
+  nproc_k = 1
+  nproc_ob = 1
+  nproc_rgrid(1:3) = 1,1,1
+  yn_eigenexa = 'y'
+/
+&system
+  yn_periodic = 'y'
+  al = 13.44d0, 13.44d0, 13.44d0
+  nelem = 1
+  nstate = 256
+  nelec = 256
+  natom = 64
+  file_atom_coor = 'atom.dat'
+  temperature_k = 300.0d0
+/
+&pseudo
+  izatom(1) = 6
+  file_pseudo(1) = '../../exercise_01_C2H2_gs/C_rps.dat'
+  lloc_ps(1) = 1
+/
+&functional
+  xc = 'PZ'
+/
+&rgrid
+  num_rgrid(1:3) = 32,32,32
+/
+&kgrid
+  num_kgrid(1:3) = 1,1,1
+/
+&scf
+  nscf_init_redistribution = 10
+  nscf_init_no_diagonal = 0
+  nscf = 1000
+  ncg = 5
+  method_mixing = 'simple'
+  mixrate = 0.2d0
+  threshold = 1.0d-9
+  yn_preconditioning = 'y'
+/

@@ -154,6 +154,7 @@ module salmon_global
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_fragment_rt
+  character(1)   :: yn_dg_length_gauge
   character(16)  :: time_integrator_dg_fragment
   
   ! Plane wave basis mixing for DG-Fragment RT
@@ -475,8 +476,20 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_flux
   character(1)   :: yn_dc_lcfo_diag
   character(1)   :: yn_dc_fragment_optimization
+  character(1)   :: yn_dc_lcfo_wannier
+  character(1)   :: yn_dc_lcfo_local_wannier
+  character(1)   :: yn_dc_lcfo_wannier_pw
+  character(256) :: wannier_projection
   integer        :: nstate_frag
   integer        :: lcfo_frag_cache_size
+  integer        :: wannier_num_wann
+  integer        :: wannier_num_bands
+  integer        :: wannier_num_iter
+  real(8)        :: wannier_projection_width
+  real(8)        :: wannier_dis_froz_max
+  real(8)        :: wannier_dis_win_max
+  real(8)        :: wannier_pw_cutoff
+  integer        :: wannier_pw_max
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   

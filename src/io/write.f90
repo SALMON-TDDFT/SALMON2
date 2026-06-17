@@ -795,6 +795,55 @@ contains
   
 !===================================================================================================================================
 
+  subroutine write_dg_polarization_data(it,dt,polarization)
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root
+    use filesystem, only: open_filehandle
+    use inputoutput, only: t_unit_time
+    use salmon_global, only: base_directory, sysname
+    implicit none
+    integer, intent(in) :: it
+    real(8), intent(in) :: dt
+    real(8), intent(in) :: polarization(3)
+    integer, save :: fh_dg_polarization = -1
+    integer :: uid
+    character(256) :: file_dg_polarization
+
+    if (comm_is_root(nproc_id_global)) then
+      if (it < 0) then
+        write(file_dg_polarization,"(2A,'_dg_polarization.data')") trim(base_directory),trim(sysname)
+        fh_dg_polarization = open_filehandle(file_dg_polarization, status="replace")
+        uid = fh_dg_polarization
+
+10      format("#",1X,A,":",1X,A)
+        write(uid,10) "DG length-gauge real time calculation",""
+        write(uid,10) "P", "Electronic polarization density"
+        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+          & 1, "Time", trim(t_unit_time%name), &
+          & 2, "P_x", "a.u.", &
+          & 3, "P_y", "a.u.", &
+          & 4, "P_z", "a.u.", &
+          & 5, "|P|", "a.u."
+        write(uid,*)
+        flush(uid)
+      else
+        if (fh_dg_polarization < 0) then
+          write(file_dg_polarization,"(2A,'_dg_polarization.data')") trim(base_directory),trim(sysname)
+          fh_dg_polarization = open_filehandle(file_dg_polarization)
+        end if
+        uid = fh_dg_polarization
+        write(uid, "(F16.8,99(1X,E23.15E3))") &
+          & it * dt * t_unit_time%conv, &
+          & polarization(1:3), &
+          & sqrt(sum(polarization(1:3)**2))
+        flush(uid)
+      end if
+    end if
+
+  end subroutine
+  
+!===================================================================================================================================
+
   subroutine write_rt_energy_data(it,ofl,dt,energy,md)
     use structures, only: s_ofile,s_dft_energy,s_md
     use parallelization, only: nproc_id_global

@@ -229,6 +229,23 @@ module rt_dg_fragment_types
     type(vector_block_info), allocatable :: dipole_blocks(:)
     integer, allocatable :: dipole_block_map(:,:)
     integer :: n_dipole_blocks = 0
+    logical :: has_local_wannier_basis = .false.
+    integer, allocatable :: local_wannier_nbasis(:) ! (local fragment index)
+    integer, allocatable :: local_wannier_nproj(:)  ! (local fragment index)
+    integer, allocatable :: local_wannier_nkeep(:)  ! (local fragment index)
+    real(8), allocatable :: local_wannier_coef(:,:,:,:) ! (DG basis, W basis, nspin, local fragment index)
+    real(8), allocatable :: local_wannier_r(:,:,:,:,:) ! (3, nkeep_max, nkeep_max, nspin, local fragment index)
+    real(8), allocatable :: local_wannier_center(:,:,:,:) ! (3, W basis, nspin, local fragment index)
+    integer, allocatable :: local_wannier_owner_fragment(:,:,:) ! (W basis, nspin, local fragment index)
+    logical, allocatable :: local_wannier_owned(:,:,:) ! true when center belongs to this rank's fragment
+    logical :: has_buffer_periodic_wannier_basis = .false.
+    logical :: buffer_wannier_flux_seed_applied = .false.
+    integer, allocatable :: buffer_wannier_nkeep(:) ! (local fragment index)
+    real(8), allocatable :: buffer_wannier_coef(:,:,:,:) ! (DG basis, W basis, nspin, local fragment index)
+    real(8), allocatable :: buffer_wannier_spread(:,:) ! (W basis, local fragment index)
+    real(8), allocatable :: buffer_wannier_tail(:,:) ! (W basis, local fragment index)
+    real(8), allocatable :: buffer_wannier_h_flux(:,:,:) ! (W basis, W basis, local fragment index)
+    real(8), allocatable :: buffer_wannier_v(:,:,:,:) ! (3, W basis, W basis, local fragment index)
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_blocks
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
@@ -253,6 +270,10 @@ module rt_dg_fragment_types
     real(8) :: current_nl(3)                   ! nonlocal pseudopotential current density
     real(8) :: current_dia(3)                  ! diamagnetic current density proxy
     real(8) :: current_total(3)                ! total current density = para + nonlocal + dia
+    real(8) :: polarization_lg(3)              ! length-gauge electronic polarization density
+    real(8) :: polarization_lg_ref(3)          ! initial length-gauge polarization reference
+    logical :: polarization_lg_ref_ready       ! true after initial reference is captured
+    real(8) :: dipole_lg_raw(3)                ! unnormalized length-gauge electronic dipole
     real(8) :: total_energy                    ! total energy
     real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
     real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block

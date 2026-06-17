@@ -10,7 +10,9 @@ module rt_dg_fragment_ops
   public :: calculate_microscopic_current_dg
   public :: calculate_macroscopic_current_dg
   public :: calculate_nonlocal_current_dg
+  public :: calculate_local_wannier_polarization_dg
   public :: diagnose_velocity_transition_strength_dg
+  public :: diagnose_wannier_position_transition_strength_dg
   public :: apply_gradient_to_basis
   public :: apply_momentum_blocks
   public :: ensure_nonlocal_projector_overlap_cache
@@ -336,6 +338,335 @@ contains
     deallocate(row_needed, row_output, needed_pos, top_strength, top_gap, top_state)
     deallocate(top_pair_strength, top_pair_gap, top_pair_occ, top_pair_virt)
   end subroutine diagnose_velocity_transition_strength_dg
+
+  subroutine diagnose_wannier_position_transition_strength_dg(dg_frag, system, idir)
+    use structures, only: s_dft_system
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    integer,                intent(in)    :: idir
+
+    integer, parameter :: max_auto_states = 2048
+    integer, parameter :: max_sample_occ = 64
+    integer, parameter :: max_sample_virt = 256
+    integer :: ispin, nocc_spin, nvirt, n_global, ifrag, i_local
+    integer :: ib, iw, jw, gid, pos, n_needed, nbasis, nkeep, nkeep_max
+    integer :: istate_v, occ, occ_state, ivirt_rank, k
+    integer :: iaxis, jaxis
+    integer :: occ_scan_start, nocc_scan, virt_scan_start, virt_scan_end
+    integer :: top_count, insert_pos, move_pos
+    integer, allocatable :: needed_ids(:), needed_pos(:), top_state(:)
+    integer, allocatable :: top_pair_occ(:), top_pair_virt(:)
+    logical, allocatable :: row_needed(:)
+    logical :: sample_mode, use_buffer_wannier
+    complex(8), allocatable :: coef_occ(:,:), coef_v(:,:), cw_occ(:,:), cw_v(:)
+    complex(8), allocatable :: amp_local(:), amp_global(:)
+    complex(8), allocatable :: amp_axis_local(:,:), amp_axis_global(:,:)
+    real(8), allocatable :: top_strength(:), top_gap(:)
+    real(8), allocatable :: top_pair_strength(:), top_pair_gap(:)
+    real(8) :: strength_local, strength_total, strength_max
+    real(8) :: gap, gap_pair, occ_weight, strength_pair, cumulative_top
+    real(8) :: sum_gap_weighted, mean_gap, sum_inv_gap, occ_sum, fsum_like
+    real(8) :: cw_occ_abs_first, cw_virt_abs_first, amp_abs_max
+    real(8) :: trans_tensor(3,3), trans_trace
+    real(8) :: rmat
+
+    if (idir < 1 .or. idir > 3) return
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%coef_global_to_local)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+    if (.not. allocated(dg_frag%esp)) return
+    if (.not. allocated(system%rocc)) return
+    if (dg_frag%nstate_tot <= 0) return
+
+    use_buffer_wannier = dg_frag%buffer_wannier_flux_seed_applied .and. &
+      dg_frag%has_buffer_periodic_wannier_basis .and. &
+      allocated(dg_frag%buffer_wannier_coef) .and. allocated(dg_frag%buffer_wannier_v)
+    if (.not. use_buffer_wannier) then
+      if (.not. dg_frag%has_local_wannier_basis) return
+      if (.not. allocated(dg_frag%local_wannier_coef)) return
+      if (.not. allocated(dg_frag%local_wannier_r)) return
+    end if
+
+    sample_mode = (dg_frag%nstate_tot > max_auto_states)
+    n_global = size(dg_frag%coef_owner, 1)
+    allocate(row_needed(n_global), needed_pos(n_global))
+    top_count = 8
+    allocate(top_strength(top_count), top_gap(top_count), top_state(top_count))
+    allocate(top_pair_strength(top_count), top_pair_gap(top_count))
+    allocate(top_pair_occ(top_count), top_pair_virt(top_count))
+
+    do ispin = 1, min(dg_frag%nspin, system%nspin)
+      nocc_spin = 0
+      if (allocated(dg_frag%nocc_spin)) nocc_spin = dg_frag%nocc_spin(ispin)
+      nocc_spin = min(nocc_spin, dg_frag%nstate_tot, size(dg_frag%coef, 2), size(system%rocc, 1))
+      nvirt = dg_frag%nstate_tot - nocc_spin
+      if (nocc_spin <= 0 .or. nvirt <= 0) cycle
+      if (sample_mode) then
+        nocc_scan = min(nocc_spin, max_sample_occ)
+        occ_scan_start = nocc_spin - nocc_scan + 1
+        virt_scan_start = nocc_spin + 1
+        virt_scan_end = min(dg_frag%nstate_tot, nocc_spin + max_sample_virt)
+      else
+        nocc_scan = nocc_spin
+        occ_scan_start = 1
+        virt_scan_start = nocc_spin + 1
+        virt_scan_end = dg_frag%nstate_tot
+      end if
+      if (nocc_scan <= 0 .or. virt_scan_end < virt_scan_start) cycle
+
+      row_needed(:) = .false.
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (use_buffer_wannier) then
+          if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
+          nkeep = dg_frag%buffer_wannier_nkeep(i_local)
+          nbasis = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                       size(dg_frag%buffer_wannier_coef, 1))
+        else
+          if (i_local < 1 .or. i_local > size(dg_frag%local_wannier_nkeep)) cycle
+          nkeep = dg_frag%local_wannier_nkeep(i_local)
+          nbasis = min(dg_frag%local_wannier_nbasis(i_local), dg_frag%n_basis(ifrag, ispin), &
+                       size(dg_frag%index_basis, 1))
+        end if
+        if (nkeep <= 0 .or. nbasis <= 0) cycle
+        do ib = 1, nbasis
+          gid = dg_frag%index_basis(ib, ifrag, ispin)
+          if (gid >= 1 .and. gid <= n_global) row_needed(gid) = .true.
+        end do
+      end do
+      n_needed = count(row_needed)
+      if (n_needed <= 0) cycle
+      if (allocated(needed_ids)) deallocate(needed_ids)
+      allocate(needed_ids(n_needed))
+      needed_pos(:) = 0
+      n_needed = 0
+      do gid = 1, n_global
+        if (.not. row_needed(gid)) cycle
+        n_needed = n_needed + 1
+        needed_ids(n_needed) = gid
+        needed_pos(gid) = n_needed
+      end do
+
+      if (use_buffer_wannier) then
+        nkeep_max = max(1, maxval(dg_frag%buffer_wannier_nkeep))
+      else
+        nkeep_max = max(1, maxval(dg_frag%local_wannier_nkeep))
+      end if
+      allocate(coef_occ(n_needed, nocc_scan), coef_v(n_needed, 1))
+      allocate(cw_occ(nkeep_max, nocc_scan), cw_v(nkeep_max))
+      allocate(amp_local(nocc_scan), amp_global(nocc_scan))
+      allocate(amp_axis_local(nocc_scan,3), amp_axis_global(nocc_scan,3))
+      call fetch_remote_coef_rows(dg_frag, ispin, needed_ids, coef_occ, &
+                                  occ_scan_start, occ_scan_start + nocc_scan - 1)
+
+      strength_total = 0.0d0
+      strength_max = 0.0d0
+      sum_gap_weighted = 0.0d0
+      sum_inv_gap = 0.0d0
+      occ_sum = 0.0d0
+      cw_occ_abs_first = 0.0d0
+      cw_virt_abs_first = 0.0d0
+      amp_abs_max = 0.0d0
+      trans_tensor(:,:) = 0.0d0
+      do occ = 1, nocc_scan
+        occ_state = occ_scan_start + occ - 1
+        occ_sum = occ_sum + max(0.0d0, system%rocc(occ_state, 1, ispin))
+      end do
+      top_strength(:) = -1.0d0
+      top_gap(:) = 0.0d0
+      top_state(:) = 0
+      top_pair_strength(:) = -1.0d0
+      top_pair_gap(:) = 0.0d0
+      top_pair_occ(:) = 0
+      top_pair_virt(:) = 0
+
+      do istate_v = virt_scan_start, virt_scan_end
+        call fetch_remote_coef_rows(dg_frag, ispin, needed_ids, coef_v, istate_v, istate_v)
+        amp_local(:) = (0.0d0, 0.0d0)
+        amp_axis_local(:,:) = (0.0d0, 0.0d0)
+
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = ifrag - dg_frag%ifrag_start + 1
+          if (use_buffer_wannier) then
+            if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
+            nkeep = dg_frag%buffer_wannier_nkeep(i_local)
+            nbasis = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                         size(dg_frag%buffer_wannier_coef, 1))
+          else
+            if (i_local < 1 .or. i_local > size(dg_frag%local_wannier_nkeep)) cycle
+            nkeep = dg_frag%local_wannier_nkeep(i_local)
+            nbasis = min(dg_frag%local_wannier_nbasis(i_local), dg_frag%n_basis(ifrag, ispin), &
+                         size(dg_frag%index_basis, 1))
+          end if
+          if (nkeep <= 0 .or. nbasis <= 0) cycle
+          cw_occ(1:nkeep, 1:nocc_scan) = (0.0d0, 0.0d0)
+          cw_v(1:nkeep) = (0.0d0, 0.0d0)
+          do iw = 1, nkeep
+            do ib = 1, nbasis
+              gid = dg_frag%index_basis(ib, ifrag, ispin)
+              if (gid < 1 .or. gid > n_global) cycle
+              pos = needed_pos(gid)
+              if (pos <= 0) cycle
+              if (use_buffer_wannier) then
+                cw_v(iw) = cw_v(iw) + dg_frag%buffer_wannier_coef(ib, iw, ispin, i_local) * coef_v(pos, 1)
+                do occ = 1, nocc_scan
+                  cw_occ(iw, occ) = cw_occ(iw, occ) + &
+                    dg_frag%buffer_wannier_coef(ib, iw, ispin, i_local) * coef_occ(pos, occ)
+                end do
+              else
+                cw_v(iw) = cw_v(iw) + dg_frag%local_wannier_coef(ib, iw, ispin, i_local) * coef_v(pos, 1)
+                do occ = 1, nocc_scan
+                  cw_occ(iw, occ) = cw_occ(iw, occ) + &
+                    dg_frag%local_wannier_coef(ib, iw, ispin, i_local) * coef_occ(pos, occ)
+                end do
+              end if
+            end do
+          end do
+          if (istate_v == virt_scan_start) then
+            cw_occ_abs_first = cw_occ_abs_first + sum(abs(cw_occ(1:nkeep, 1:nocc_scan)))
+            cw_virt_abs_first = cw_virt_abs_first + sum(abs(cw_v(1:nkeep)))
+          end if
+          do iw = 1, nkeep
+            do jw = 1, nkeep
+              do iaxis = 1, 3
+                if (use_buffer_wannier) then
+                  rmat = dg_frag%buffer_wannier_v(iaxis, iw, jw, i_local)
+                else
+                  rmat = dg_frag%local_wannier_r(iaxis, iw, jw, ispin, i_local)
+                end if
+                if (abs(rmat) <= 0.0d0) cycle
+                do occ = 1, nocc_scan
+                  amp_axis_local(occ,iaxis) = amp_axis_local(occ,iaxis) + &
+                    conjg(cw_occ(iw, occ)) * rmat * cw_v(jw)
+                end do
+              end do
+            end do
+          end do
+        end do
+        call comm_summation(amp_axis_local, amp_axis_global, nocc_scan * 3, dg_frag%icomm)
+        amp_global(1:nocc_scan) = amp_axis_global(1:nocc_scan, idir)
+        amp_abs_max = max(amp_abs_max, maxval(abs(amp_global(1:nocc_scan))))
+
+        strength_local = 0.0d0
+        do occ = 1, nocc_scan
+          occ_state = occ_scan_start + occ - 1
+          occ_weight = max(0.0d0, system%rocc(occ_state, 1, ispin))
+          do iaxis = 1, 3
+            do jaxis = 1, 3
+              trans_tensor(iaxis,jaxis) = trans_tensor(iaxis,jaxis) + occ_weight * &
+                real(conjg(amp_axis_global(occ,iaxis)) * amp_axis_global(occ,jaxis), 8)
+            end do
+          end do
+          strength_pair = occ_weight * abs(amp_global(occ))**2
+          gap_pair = dg_frag%esp(istate_v, ispin) - dg_frag%esp(occ_state, ispin)
+          strength_local = strength_local + strength_pair
+          sum_gap_weighted = sum_gap_weighted + strength_pair * gap_pair
+          if (gap_pair > 1.0d-12) sum_inv_gap = sum_inv_gap + strength_pair / gap_pair
+
+          insert_pos = 0
+          do k = 1, top_count
+            if (strength_pair > top_pair_strength(k)) then
+              insert_pos = k
+              exit
+            end if
+          end do
+          if (insert_pos > 0) then
+            do move_pos = top_count, insert_pos + 1, -1
+              top_pair_strength(move_pos) = top_pair_strength(move_pos - 1)
+              top_pair_gap(move_pos) = top_pair_gap(move_pos - 1)
+              top_pair_occ(move_pos) = top_pair_occ(move_pos - 1)
+              top_pair_virt(move_pos) = top_pair_virt(move_pos - 1)
+            end do
+            top_pair_strength(insert_pos) = strength_pair
+            top_pair_gap(insert_pos) = gap_pair
+            top_pair_occ(insert_pos) = occ_state
+            top_pair_virt(insert_pos) = istate_v
+          end if
+        end do
+        strength_total = strength_total + strength_local
+        strength_max = max(strength_max, strength_local)
+        gap = dg_frag%esp(istate_v, ispin) - dg_frag%esp(nocc_spin, ispin)
+
+        insert_pos = 0
+        do k = 1, top_count
+          if (strength_local > top_strength(k)) then
+            insert_pos = k
+            exit
+          end if
+        end do
+        if (insert_pos > 0) then
+          do move_pos = top_count, insert_pos + 1, -1
+            top_strength(move_pos) = top_strength(move_pos - 1)
+            top_gap(move_pos) = top_gap(move_pos - 1)
+            top_state(move_pos) = top_state(move_pos - 1)
+          end do
+          top_strength(insert_pos) = strength_local
+          top_gap(insert_pos) = gap
+          top_state(insert_pos) = istate_v
+        end if
+      end do
+
+      cumulative_top = 0.0d0
+      do k = 1, top_count
+        if (top_strength(k) > 0.0d0) cumulative_top = cumulative_top + top_strength(k)
+      end do
+      if (strength_total > 0.0d0) then
+        mean_gap = sum_gap_weighted / strength_total
+      else
+        mean_gap = 0.0d0
+      end if
+      if (occ_sum > 0.0d0) then
+        fsum_like = 2.0d0 * sum_inv_gap / occ_sum
+      else
+        fsum_like = 0.0d0
+      end if
+      trans_trace = trans_tensor(1,1) + trans_tensor(2,2) + trans_tensor(3,3)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,l1,8(a,1pe13.5))') &
+          '[DG-R-TRANSITION] idir=', idir, ' ispin=', ispin, ' nocc=', nocc_spin, &
+          ' scan_occ=', nocc_scan, ' scan_virt=', virt_scan_end - virt_scan_start + 1, &
+          ' sampled=', sample_mode, ' total=', strength_total, ' max=', strength_max, &
+          ' top8_frac=', cumulative_top / max(1.0d-300, strength_total), &
+          ' mean_gap_eV=', mean_gap * 27.211386245988d0, &
+          ' fsum_like=', fsum_like, ' cw_occ_abs=', cw_occ_abs_first, &
+          ' cw_virt_abs=', cw_virt_abs_first, ' amp_abs_max=', amp_abs_max
+        write(*,'(1x,a,i0,10(a,1pe13.5))') '[DG-R-TENSOR] ispin=', ispin, &
+          ' xx=', trans_tensor(1,1), ' yy=', trans_tensor(2,2), ' zz=', trans_tensor(3,3), &
+          ' xy=', trans_tensor(1,2), ' xz=', trans_tensor(1,3), ' yz=', trans_tensor(2,3), &
+          ' xy_rel=', trans_tensor(1,2) / max(1.0d-300, trans_trace), &
+          ' xz_rel=', trans_tensor(1,3) / max(1.0d-300, trans_trace), &
+          ' yz_rel=', trans_tensor(2,3) / max(1.0d-300, trans_trace), &
+          ' trace=', trans_trace
+        do ivirt_rank = 1, top_count
+          if (top_state(ivirt_rank) <= 0) cycle
+          write(*,'(1x,a,i0,a,i0,a,i0,3(a,1pe13.5))') &
+            '[DG-R-TRANSITION-TOP] rank=', ivirt_rank, ' state=', top_state(ivirt_rank), &
+            ' ispin=', ispin, ' strength=', top_strength(ivirt_rank), &
+            ' frac=', top_strength(ivirt_rank) / max(1.0d-300, strength_total), &
+            ' gap_eV=', top_gap(ivirt_rank) * 27.211386245988d0
+        end do
+        do ivirt_rank = 1, top_count
+          if (top_pair_virt(ivirt_rank) <= 0) cycle
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,3(a,1pe13.5))') &
+            '[DG-R-TRANSITION-PAIR] rank=', ivirt_rank, ' occ=', top_pair_occ(ivirt_rank), &
+            ' virt=', top_pair_virt(ivirt_rank), ' ispin=', ispin, &
+            ' strength=', top_pair_strength(ivirt_rank), &
+            ' frac=', top_pair_strength(ivirt_rank) / max(1.0d-300, strength_total), &
+            ' gap_eV=', top_pair_gap(ivirt_rank) * 27.211386245988d0
+        end do
+        flush(6)
+      end if
+
+      deallocate(coef_occ, coef_v, cw_occ, cw_v, amp_local, amp_global)
+      deallocate(amp_axis_local, amp_axis_global)
+      if (allocated(needed_ids)) deallocate(needed_ids)
+    end do
+
+    deallocate(row_needed, needed_pos, top_strength, top_gap, top_state)
+    deallocate(top_pair_strength, top_pair_gap, top_pair_occ, top_pair_virt)
+  end subroutine diagnose_wannier_position_transition_strength_dg
 
   subroutine ensure_gradient_basis_cache(dg_frag, mg, stencil)
     use structures
@@ -1415,7 +1746,10 @@ contains
     end if
 
     if (n_pw > 0) then
-      if (allocated(dg_frag%H_mat_pw_diag)) then
+      if (allocated(dg_frag%H_mat_pw)) then
+        y(n_frag+1:n_tot, :) = y(n_frag+1:n_tot, :) + &
+          matmul(dg_frag%H_mat_pw(1:n_pw, 1:n_pw, ispin), x(n_frag+1:n_tot, :))
+      else if (allocated(dg_frag%H_mat_pw_diag)) then
         do ipw = 1, n_pw
           y(n_frag+ipw, :) = y(n_frag+ipw, :) + dg_frag%H_mat_pw_diag(ipw, ispin) * x(n_frag+ipw, :)
         end do
@@ -4460,6 +4794,201 @@ contains
   end subroutine calculate_macroscopic_current_from_momentum_blocks
 
 
+  subroutine calculate_local_wannier_polarization_dg(dg_frag, system, polarization_raw)
+    use structures, only: s_dft_system
+    use communication, only: comm_summation
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    real(8),                intent(out)   :: polarization_raw(3)
+
+    integer, parameter :: pol_coef_cache_target_mb = 64
+    integer :: ispin, ifrag, i_local, ib, iw, jw, idir
+    integer :: istate, occ0, nbatch, state_work
+    integer :: nocc_spin, occ_first, occ_last
+    integer :: n_global, n_needed, gid, pos, nkeep, nkeep_max, nbasis
+    integer :: local_idx, local_col
+    integer, allocatable :: needed_ids(:), needed_pos(:)
+    logical, allocatable :: row_needed(:)
+    complex(8), allocatable :: coef_work(:,:), cw(:,:)
+    real(8) :: pol_local(3), pol_sum(3), occ, contrib
+    integer(8) :: target_bytes, bytes_per_state
+    logical :: use_buffer_wannier
+
+    polarization_raw(:) = 0.0d0
+    pol_local(:) = 0.0d0
+    pol_sum(:) = 0.0d0
+    use_buffer_wannier = dg_frag%buffer_wannier_flux_seed_applied .and. &
+      dg_frag%has_buffer_periodic_wannier_basis .and. &
+      allocated(dg_frag%buffer_wannier_coef) .and. allocated(dg_frag%buffer_wannier_v)
+    if (.not. use_buffer_wannier) then
+      if (.not. dg_frag%has_local_wannier_basis) return
+      if (.not. allocated(dg_frag%local_wannier_coef)) return
+      if (.not. allocated(dg_frag%local_wannier_r)) return
+    end if
+    if (.not. allocated(dg_frag%coef_owner)) return
+    if (.not. allocated(dg_frag%coef_global_to_local)) return
+    if (.not. allocated(dg_frag%index_basis)) return
+    if (.not. allocated(dg_frag%n_basis)) return
+
+    if (.not. dg_frag%coef_state_block_mode .and. .not. dg_frag%is_frag_root) then
+      call comm_summation(pol_local, pol_sum, 3, dg_frag%icomm)
+      polarization_raw(:) = pol_sum(:)
+      return
+    end if
+
+    n_global = size(dg_frag%coef_owner, 1)
+    allocate(row_needed(n_global), needed_pos(n_global))
+    do ispin = 1, min(dg_frag%nspin, system%nspin)
+      nocc_spin = 0
+      if (allocated(dg_frag%nocc_spin)) nocc_spin = dg_frag%nocc_spin(ispin)
+      if (dg_frag%coef_state_block_mode) then
+        nocc_spin = min(nocc_spin, dg_frag%nstate_tot, size(system%rocc, 1))
+      else
+        nocc_spin = min(nocc_spin, dg_frag%nstate_tot, size(dg_frag%coef, 2), size(system%rocc, 1))
+      end if
+      if (nocc_spin <= 0) cycle
+      occ_first = 1
+      occ_last = nocc_spin
+      if (dg_frag%coef_state_block_mode) then
+        occ_first = max(1, dg_frag%coef_state_start)
+        occ_last = min(nocc_spin, dg_frag%coef_state_end)
+        if (occ_first > occ_last) cycle
+      end if
+
+      row_needed(:) = .false.
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (use_buffer_wannier) then
+          if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
+          nkeep = dg_frag%buffer_wannier_nkeep(i_local)
+        else
+          if (i_local < 1 .or. i_local > size(dg_frag%local_wannier_nkeep)) cycle
+          nkeep = dg_frag%local_wannier_nkeep(i_local)
+        end if
+        if (nkeep <= 0) cycle
+        if (use_buffer_wannier) then
+          nbasis = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                       size(dg_frag%buffer_wannier_coef, 1))
+        else
+          nbasis = min(dg_frag%local_wannier_nbasis(i_local), dg_frag%n_basis(ifrag, ispin), &
+                       size(dg_frag%index_basis, 1))
+        end if
+        do ib = 1, nbasis
+          gid = dg_frag%index_basis(ib, ifrag, ispin)
+          if (gid >= 1 .and. gid <= n_global) row_needed(gid) = .true.
+        end do
+      end do
+      n_needed = count(row_needed)
+      if (n_needed <= 0) cycle
+      if (allocated(needed_ids)) deallocate(needed_ids)
+      allocate(needed_ids(n_needed))
+      needed_pos(:) = 0
+      n_needed = 0
+      do gid = 1, n_global
+        if (.not. row_needed(gid)) cycle
+        n_needed = n_needed + 1
+        needed_ids(n_needed) = gid
+        needed_pos(gid) = n_needed
+      end do
+
+      target_bytes = int(pol_coef_cache_target_mb, kind=8) * 1024_8 * 1024_8
+      bytes_per_state = 16_8 * int(max(1, n_needed), kind=8) * 4_8
+      state_work = max(1, min(occ_last - occ_first + 1, int(max(1_8, target_bytes / max(1_8, bytes_per_state)))))
+      if (use_buffer_wannier) then
+        nkeep_max = max(1, maxval(dg_frag%buffer_wannier_nkeep))
+      else
+        nkeep_max = max(1, maxval(dg_frag%local_wannier_nkeep))
+      end if
+      if (allocated(coef_work)) deallocate(coef_work)
+      if (allocated(cw)) deallocate(cw)
+      allocate(coef_work(n_needed, state_work))
+      allocate(cw(nkeep_max, state_work))
+
+      do occ0 = occ_first, occ_last, state_work
+        nbatch = min(state_work, occ_last - occ0 + 1)
+        coef_work(:, :) = (0.0d0, 0.0d0)
+        if (dg_frag%coef_state_block_mode) then
+          do pos = 1, n_needed
+            local_idx = dg_frag%coef_global_to_local(needed_ids(pos), ispin)
+            if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+            do istate = 1, nbatch
+              local_col = occ0 + istate - 1 - dg_frag%coef_state_start + 1
+              if (local_col < 1 .or. local_col > size(dg_frag%coef, 2)) cycle
+              coef_work(pos, istate) = dg_frag%coef(local_idx, local_col, ispin)
+            end do
+          end do
+        else
+          call fetch_remote_coef_rows(dg_frag, ispin, needed_ids, coef_work(1:n_needed, 1:nbatch), &
+                                      occ0, occ0 + nbatch - 1)
+        end if
+
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = ifrag - dg_frag%ifrag_start + 1
+          if (use_buffer_wannier) then
+            if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
+            nkeep = dg_frag%buffer_wannier_nkeep(i_local)
+          else
+            if (i_local < 1 .or. i_local > size(dg_frag%local_wannier_nkeep)) cycle
+            nkeep = dg_frag%local_wannier_nkeep(i_local)
+          end if
+          if (nkeep <= 0) cycle
+          if (use_buffer_wannier) then
+            nbasis = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), &
+                         size(dg_frag%buffer_wannier_coef, 1))
+          else
+            nbasis = min(dg_frag%local_wannier_nbasis(i_local), dg_frag%n_basis(ifrag, ispin), &
+                         size(dg_frag%index_basis, 1))
+          end if
+          cw(1:nkeep, 1:nbatch) = (0.0d0, 0.0d0)
+          do iw = 1, nkeep
+            do ib = 1, nbasis
+              gid = dg_frag%index_basis(ib, ifrag, ispin)
+              if (gid < 1 .or. gid > n_global) cycle
+              pos = needed_pos(gid)
+              if (pos <= 0) cycle
+!$omp simd
+              do istate = 1, nbatch
+                if (use_buffer_wannier) then
+                  cw(iw, istate) = cw(iw, istate) + &
+                    dg_frag%buffer_wannier_coef(ib, iw, ispin, i_local) * coef_work(pos, istate)
+                else
+                  cw(iw, istate) = cw(iw, istate) + &
+                    dg_frag%local_wannier_coef(ib, iw, ispin, i_local) * coef_work(pos, istate)
+                end if
+              end do
+            end do
+          end do
+          do idir = 1, 3
+            contrib = 0.0d0
+            do istate = 1, nbatch
+              occ = max(0.0d0, system%rocc(occ0 + istate - 1, 1, ispin))
+              if (occ <= 0.0d0) cycle
+              do iw = 1, nkeep
+                do jw = 1, nkeep
+                  if (use_buffer_wannier) then
+                    contrib = contrib - occ * real(conjg(cw(iw, istate)) * &
+                      dg_frag%buffer_wannier_v(idir, iw, jw, i_local) * cw(jw, istate), 8)
+                  else
+                    contrib = contrib - occ * real(conjg(cw(iw, istate)) * &
+                      dg_frag%local_wannier_r(idir, iw, jw, ispin, i_local) * cw(jw, istate), 8)
+                  end if
+                end do
+              end do
+            end do
+            pol_local(idir) = pol_local(idir) + contrib
+          end do
+        end do
+      end do
+    end do
+
+    call comm_summation(pol_local, pol_sum, 3, dg_frag%icomm)
+    if (pol_sum(1) /= pol_sum(1) .or. pol_sum(2) /= pol_sum(2) .or. pol_sum(3) /= pol_sum(3)) then
+      stop "DG-Fragment RT: NaN in local Wannier polarization reduction"
+    end if
+    polarization_raw(:) = pol_sum(:)
+  end subroutine calculate_local_wannier_polarization_dg
+
   subroutine calculate_nonlocal_current_dg(dg_frag, system, mg, ppg, Ac_tot, current_raw)
     use structures
     use communication, only: comm_summation
@@ -4790,6 +5319,9 @@ contains
           ix = dg_frag%density_grid_points(point_idx, i_local)%ix
           iy = dg_frag%density_grid_points(point_idx, i_local)%iy
           iz = dg_frag%density_grid_points(point_idx, i_local)%iz
+          if (ix < dg_frag%frag_core_lo(1, ifrag) .or. ix > dg_frag%frag_core_hi(1, ifrag)) cycle
+          if (iy < dg_frag%frag_core_lo(2, ifrag) .or. iy > dg_frag%frag_core_hi(2, ifrag)) cycle
+          if (iz < dg_frag%frag_core_lo(3, ifrag) .or. iz > dg_frag%frag_core_hi(3, ifrag)) cycle
           if (ix < phi_lb1 .or. ix > phi_ub1 .or. ix < grad_lb1 .or. ix > grad_ub1) cycle
           if (iy < phi_lb2 .or. iy > phi_ub2 .or. iy < grad_lb2 .or. iy > grad_ub2) cycle
           if (iz < phi_lb3 .or. iz > phi_ub3 .or. iz < grad_lb3 .or. iz > grad_ub3) cycle
@@ -4969,6 +5501,12 @@ contains
             if (ixg < grid_x_lo .or. ixg > grid_x_hi) cycle
             if (iyg < grid_y_lo .or. iyg > grid_y_hi) cycle
             if (izg < grid_z_lo .or. izg > grid_z_hi) cycle
+            if (dg_frag%density_grid_points(point_idx, i_local)%ix < dg_frag%frag_core_lo(1, ifrag) .or. &
+                dg_frag%density_grid_points(point_idx, i_local)%ix > dg_frag%frag_core_hi(1, ifrag)) cycle
+            if (dg_frag%density_grid_points(point_idx, i_local)%iy < dg_frag%frag_core_lo(2, ifrag) .or. &
+                dg_frag%density_grid_points(point_idx, i_local)%iy > dg_frag%frag_core_hi(2, ifrag)) cycle
+            if (dg_frag%density_grid_points(point_idx, i_local)%iz < dg_frag%frag_core_lo(3, ifrag) .or. &
+                dg_frag%density_grid_points(point_idx, i_local)%iz > dg_frag%frag_core_hi(3, ifrag)) cycle
             valid_grid_count = valid_grid_count + 1
             dg_frag%current_valid_ix(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%ix
             dg_frag%current_valid_iy(valid_grid_count, i_local) = dg_frag%density_grid_points(point_idx, i_local)%iy

@@ -25,14 +25,20 @@ module lcfo_flux
   private
   public :: dc_lcfo_flux
 
-  character(32),parameter :: binfile_wf = "wavefunctions.bin", &
+  character(48),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
   &                          binfile_bfb = "basis_functions_buffer.bin", &
   &                          binfile_hl = "hamiltonian_local.bin", &
-  &                          binfile_vl = "velocity_local.bin"
+  &                          binfile_vl = "velocity_local.bin", &
+  &                          binfile_lw = "local_wannier_basis.bin", &
+  &                          binfile_bpw = "buffer_periodic_wannier_basis.bin"
   integer, parameter :: basis_buffer_magic = -22022212
   integer, parameter :: basis_buffer_version = 2
+  integer, parameter :: local_wannier_magic = -22022214
+  integer, parameter :: local_wannier_version = 2
+  integer, parameter :: buffer_periodic_wannier_magic = -22022215
+  integer, parameter :: buffer_periodic_wannier_version = 1
 
 contains
 
@@ -1294,7 +1300,7 @@ contains
       character(16) :: env_value
       integer :: env_status
 
-      enabled = .false.
+      enabled = .true.
       env_value = ''
       call get_environment_variable('SALMON_DG_BLOCK_DIAG_H', env_value, status=env_status)
       if(env_status == 0) then
@@ -1308,7 +1314,8 @@ contains
     end function use_block_diag_hamiltonian_mode
 
     subroutine output
-      use salmon_global, only: base_directory, sysname, unit_energy
+      use salmon_global, only: base_directory, sysname, unit_energy, yn_dc_lcfo_wannier, &
+        yn_dc_lcfo_local_wannier
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
       implicit none
@@ -1343,6 +1350,7 @@ contains
         end do
         close(iunit)
       end if
+      if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') call write_wannier_seed_files()
 
     ! fragment data
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
@@ -1417,6 +1425,8 @@ contains
         end do
         if(dc%id_frag==0) close(iunit)
         deallocate(phi_box_local,phi_box_sum)
+      if(yn_dc_lcfo_local_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') &
+        call write_local_wannier_seed()
       if(dc%id_frag==0) then
       ! local hamiltonian matrix
         iunit = get_filehandle()
@@ -1454,6 +1464,907 @@ contains
       end if
 
     end subroutine output
+
+    subroutine write_local_wannier_seed()
+      use eigen_subdiag_sub, only: eigen_dsyev
+      use filesystem, only: get_filehandle
+      use salmon_global, only: izatom, wannier_projection, wannier_projection_width, &
+        lambda_cut, base_directory, yn_dc_lcfo_wannier_pw
+      implicit none
+      integer :: nproj, nproj_sp3, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, io, jo, axis
+      integer :: ix, iy, iz, ixg, iyg, izg, ispin_local
+      integer :: ibx, iby, ibz, sx, sy, sz, ispin_read, ibasis_read
+      integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+      integer :: nxyz_domain_file(3), nxyz_buffer_file(3), nspin_file, nstate_frag_file
+      integer :: magic_file, version_file
+      integer, allocatable :: n_basis_file(:)
+      integer, allocatable :: proj_atom(:), proj_hybrid(:), keep_index(:), keep_index_legacy(:)
+      real(8), allocatable :: bproj(:,:), sw(:,:), uw(:,:), lambda_w(:)
+      real(8), allocatable :: wcoef(:,:), r_basis(:,:,:), r_wann(:,:,:), tmp(:,:), wcenter(:,:)
+      real(8), allocatable :: sw_legacy(:,:), uw_legacy(:,:), lambda_legacy(:)
+      real(8), allocatable :: wcoef_legacy(:,:), r_wann_legacy(:,:,:), tmp_legacy(:,:), wcenter_legacy(:,:)
+      real(8), allocatable :: h_seed(:,:), v_seed(:,:,:)
+      real(8), allocatable :: h_wann(:,:), v_wann(:,:,:), spread_est(:), tail_est(:)
+      real(8), allocatable :: phi_box(:,:,:,:), phi_tmp(:,:,:)
+      real(8) :: x, y, z, gval, box_length(3), box_origin(3)
+      character(256) :: filename
+
+      if(nspin /= 1) stop "DC-LCFO local Wannier export: spin-polarized mode is not implemented."
+      if(.not. is_c_sp3_projection(trim(wannier_projection))) &
+        stop "DC-LCFO local Wannier export: only wannier_projection='C:sp3' is implemented."
+      if(yn_dc_lcfo_wannier_pw == 'y') &
+        stop "DC-LCFO local Wannier PW augmentation is not connected yet."
+      if(dc%id_frag /= 0) return
+
+      ispin_local = 1
+      nbasis = n_basis(dc%i_frag,ispin_local)
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
+      nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
+      box_length(1:3) = system%hgs(1:3) * dble(nxyz_box(1:3))
+      do axis=1,3
+        box_origin(axis) = dc%lg_tot%coordinate(dc%jxyz_tot(1,axis),axis) &
+          - dble(nxyz_buffer_seed(axis)) * system%hgs(axis)
+      end do
+      nproj_sp3 = count_local_c_sp3_projections(nxyz_domain)
+      if(nproj_sp3 <= 0) stop "DC-LCFO local Wannier export: no local C:sp3 projections in fragment core."
+      nproj = nproj_sp3 + nbasis
+
+      allocate(proj_atom(nproj), proj_hybrid(nproj))
+      proj_atom = 0
+      proj_hybrid = 0
+      call build_local_c_sp3_projection_map(nxyz_domain, proj_atom, proj_hybrid)
+      allocate(bproj(nbasis,nproj), sw(nproj,nproj), uw(nproj,nproj), lambda_w(nproj))
+      allocate(wcoef(nbasis,nproj), keep_index(nproj))
+      allocate(r_basis(3,nbasis,nbasis), r_wann(3,nproj,nproj), tmp(nbasis,nproj), wcenter(3,nproj))
+      allocate(sw_legacy(nproj_sp3,nproj_sp3), uw_legacy(nproj_sp3,nproj_sp3), lambda_legacy(nproj_sp3))
+      allocate(wcoef_legacy(nbasis,nproj_sp3), keep_index_legacy(nproj_sp3))
+      allocate(r_wann_legacy(3,nproj_sp3,nproj_sp3), tmp_legacy(nbasis,nproj_sp3), wcenter_legacy(3,nproj_sp3))
+      allocate(h_seed(nbasis,nbasis), v_seed(3,nbasis,nbasis))
+      allocate(h_wann(nproj,nproj), v_wann(3,nproj,nproj), spread_est(nproj), tail_est(nproj))
+      bproj = 0d0
+      sw = 0d0
+      sw_legacy = 0d0
+      r_basis = 0d0
+      wcoef_legacy = 0d0
+      r_wann_legacy = 0d0
+      wcenter_legacy = 0d0
+      h_wann = 0d0
+      v_wann = 0d0
+      h_seed = 0d0
+      v_seed = 0d0
+      spread_est = 0d0
+      tail_est = 0d0
+      allocate(phi_box(nxyz_box(1),nxyz_box(2),nxyz_box(3),nbasis))
+      allocate(phi_tmp(nxyz_box(1),nxyz_box(2),nxyz_box(3)))
+      allocate(n_basis_file(nspin))
+      phi_box = 0d0
+
+      filename = trim(base_directory)//binfile_bfb
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='old')
+      read(iunit) magic_file, version_file
+      if(magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) &
+        stop "DC-LCFO buffer-periodic Wannier export: invalid buffered basis header."
+      read(iunit) nxyz_domain_file(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
+      if(any(nxyz_domain_file(1:3) /= nxyz_domain(1:3)) .or. &
+         any(nxyz_buffer_file(1:3) /= nxyz_buffer_seed(1:3)) .or. &
+         nspin_file /= nspin .or. nstate_frag_file /= dc%nstate_frag) &
+        stop "DC-LCFO buffer-periodic Wannier export: buffered basis metadata mismatch."
+      read(iunit) n_basis_file(1:nspin)
+      do ispin_read=1,nspin_file
+        do ibasis_read=1,nstate_frag_file
+          read(iunit) phi_tmp(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+          if(ispin_read == ispin_local .and. ibasis_read <= nbasis) &
+            phi_box(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3),ibasis_read) = &
+              phi_tmp(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+        end do
+      end do
+      close(iunit)
+
+!$omp parallel do collapse(2) private(ip,io,ibz,iby,ibx,z,y,x,gval) schedule(static)
+      do ip=1,nproj_sp3
+        do io=1,nbasis
+          do ibz=1,nxyz_box(3)
+            z = box_origin(3) + dble(ibz - 1) * system%hgs(3)
+            do iby=1,nxyz_box(2)
+              y = box_origin(2) + dble(iby - 1) * system%hgs(2)
+              do ibx=1,nxyz_box(1)
+                x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
+                gval = c_sp3_projection_value_local_periodic(x, y, z, proj_atom(ip), &
+                  proj_hybrid(ip), wannier_projection_width, box_length)
+                if(abs(gval) <= 0d0) cycle
+                bproj(io,ip) = bproj(io,ip) &
+                  + phi_box(ibx,iby,ibz,io) * gval * hvol
+              end do
+            end do
+          end do
+        end do
+      end do
+!$omp end parallel do
+
+      sw_legacy(1:nproj_sp3,1:nproj_sp3) = &
+        matmul(transpose(bproj(1:nbasis,1:nproj_sp3)), bproj(1:nbasis,1:nproj_sp3))
+      call eigen_dsyev(sw_legacy, lambda_legacy, uw_legacy)
+      wcoef_legacy = 0d0
+      nkeep_legacy = 0
+      do ip=nproj_sp3,1,-1
+        if(lambda_legacy(ip) <= lambda_cut) cycle
+        nkeep_legacy = nkeep_legacy + 1
+        keep_index_legacy(nkeep_legacy) = ip
+        do io=1,nbasis
+          do jp=1,nproj_sp3
+            wcoef_legacy(io,nkeep_legacy) = wcoef_legacy(io,nkeep_legacy) &
+              + bproj(io,jp) * uw_legacy(jp,ip) / sqrt(lambda_legacy(ip))
+          end do
+        end do
+      end do
+      if(nkeep_legacy <= 0) stop "DC-LCFO local Wannier export: all local C:sp3 directions were removed."
+
+      do io=1,nbasis
+        bproj(io,nproj_sp3+io) = 1d0
+      end do
+
+      sw(1:nproj,1:nproj) = matmul(transpose(bproj(1:nbasis,1:nproj)), bproj(1:nbasis,1:nproj))
+      call eigen_dsyev(sw, lambda_w, uw)
+      wcoef = 0d0
+      nkeep = 0
+      do ip=nproj,1,-1
+        if(lambda_w(ip) <= lambda_cut) cycle
+        nkeep = nkeep + 1
+        keep_index(nkeep) = ip
+        do io=1,nbasis
+          do jp=1,nproj
+            wcoef(io,nkeep) = wcoef(io,nkeep) &
+              + bproj(io,jp) * uw(jp,ip) / sqrt(lambda_w(ip))
+          end do
+        end do
+      end do
+      if(nkeep <= 0) stop "DC-LCFO local Wannier export: all local projection directions were removed."
+
+!$omp parallel do collapse(2) private(jo,io,ibz,iby,ibx,z,y,x) schedule(static)
+      do jo=1,nbasis
+        do io=1,nbasis
+          do ibz=1,nxyz_box(3)
+            z = box_origin(3) + dble(ibz - 1) * system%hgs(3)
+            do iby=1,nxyz_box(2)
+              y = box_origin(2) + dble(iby - 1) * system%hgs(2)
+              do ibx=1,nxyz_box(1)
+                x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
+                r_basis(1,io,jo) = r_basis(1,io,jo) &
+                  + phi_box(ibx,iby,ibz,io) * x &
+                  * phi_box(ibx,iby,ibz,jo) * hvol
+                r_basis(2,io,jo) = r_basis(2,io,jo) &
+                  + phi_box(ibx,iby,ibz,io) * y &
+                  * phi_box(ibx,iby,ibz,jo) * hvol
+                r_basis(3,io,jo) = r_basis(3,io,jo) &
+                  + phi_box(ibx,iby,ibz,io) * z &
+                  * phi_box(ibx,iby,ibz,jo) * hvol
+              end do
+            end do
+          end do
+        end do
+      end do
+!$omp end parallel do
+
+      do axis=1,3
+        tmp(1:nbasis,1:nkeep) = matmul(r_basis(axis,1:nbasis,1:nbasis), wcoef(1:nbasis,1:nkeep))
+        r_wann(axis,1:nkeep,1:nkeep) = &
+          matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
+      end do
+      wcenter(1:3,1:nkeep) = 0d0
+      do iw=1,nkeep
+        wcenter(1:3,iw) = r_wann(1:3,iw,iw)
+      end do
+
+      do axis=1,3
+        tmp_legacy(1:nbasis,1:nkeep_legacy) = &
+          matmul(r_basis(axis,1:nbasis,1:nbasis), wcoef_legacy(1:nbasis,1:nkeep_legacy))
+        r_wann_legacy(axis,1:nkeep_legacy,1:nkeep_legacy) = &
+          matmul(transpose(wcoef_legacy(1:nbasis,1:nkeep_legacy)), tmp_legacy(1:nbasis,1:nkeep_legacy))
+      end do
+      wcenter_legacy(1:3,1:nkeep_legacy) = 0d0
+      do iw=1,nkeep_legacy
+        wcenter_legacy(1:3,iw) = r_wann_legacy(1:3,iw,iw)
+      end do
+
+      h_seed(1:nbasis,1:nbasis) = 0d0
+      v_seed(1:3,1:nbasis,1:nbasis) = 0d0
+      do io=1,nbasis
+        do jo=1,nbasis
+          h_seed(io,jo) = 0.5d0 * (mat_H_local(io,jo,ispin_local) + mat_H_local(jo,io,ispin_local))
+          v_seed(1:3,io,jo) = mat_V_local(1:3,io,jo,ispin_local)
+          do i_halo=1,n_halo
+            h_seed(io,jo) = h_seed(io,jo) + 0.25d0 * &
+              (halo(i_halo)%mat_H_local(jo,io,ispin_local) + halo(i_halo)%mat_H_local(io,jo,ispin_local))
+            v_seed(1:3,io,jo) = v_seed(1:3,io,jo) + 0.5d0 * &
+              (halo(i_halo)%mat_V_local(1:3,jo,io,ispin_local) + &
+               halo(i_halo)%mat_V_local(1:3,io,jo,ispin_local))
+          end do
+        end do
+      end do
+      do axis=1,3
+        do io=1,nbasis
+          v_seed(axis,io,io) = 0d0
+          do jo=io+1,nbasis
+            x = 0.5d0 * (v_seed(axis,io,jo) - v_seed(axis,jo,io))
+            v_seed(axis,io,jo) = x
+            v_seed(axis,jo,io) = -x
+          end do
+        end do
+      end do
+
+      tmp(1:nbasis,1:nkeep) = matmul(h_seed(1:nbasis,1:nbasis), wcoef(1:nbasis,1:nkeep))
+      h_wann(1:nkeep,1:nkeep) = matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
+      do axis=1,3
+        tmp(1:nbasis,1:nkeep) = matmul(v_seed(axis,1:nbasis,1:nbasis), wcoef(1:nbasis,1:nkeep))
+        v_wann(axis,1:nkeep,1:nkeep) = matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
+      end do
+
+      filename = trim(base_directory)//binfile_lw
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream')
+      write(iunit) local_wannier_magic, local_wannier_version
+      write(iunit) nxyz_domain(1:3), nspin, nbasis, nproj_sp3, nkeep_legacy
+      write(iunit) proj_atom(1:nproj_sp3), proj_hybrid(1:nproj_sp3)
+      write(iunit) lambda_legacy(1:nproj_sp3), keep_index_legacy(1:nkeep_legacy)
+      write(iunit) wcoef_legacy(1:nbasis,1:nkeep_legacy)
+      write(iunit) r_wann_legacy(1:3,1:nkeep_legacy,1:nkeep_legacy)
+      write(iunit) wcenter_legacy(1:3,1:nkeep_legacy)
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[DC-LCFO-LOCAL-WANNIER] fragment=", &
+        dc%i_frag, " sp3=", nproj_sp3, " candidates=", nproj_sp3, " keep=", nkeep_legacy
+
+      filename = trim(base_directory)//binfile_bpw
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream')
+      write(iunit) buffer_periodic_wannier_magic, buffer_periodic_wannier_version
+      write(iunit) dc%i_frag, nxyz_domain(1:3), nxyz_buffer_seed(1:3), nxyz_box(1:3)
+      write(iunit) nspin, nbasis, nproj, nkeep
+      write(iunit) proj_atom(1:nproj), proj_hybrid(1:nproj)
+      write(iunit) lambda_w(1:nproj), keep_index(1:nkeep)
+      write(iunit) spread_est(1:nkeep), tail_est(1:nkeep)
+      write(iunit) wcoef(1:nbasis,1:nkeep)
+      write(iunit) r_wann(1:3,1:nkeep,1:nkeep)
+      write(iunit) wcenter(1:3,1:nkeep)
+      write(iunit) h_wann(1:nkeep,1:nkeep)
+      write(iunit) v_wann(1:3,1:nkeep,1:nkeep)
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') "[DC-LCFO-BUFFER-WANNIER] fragment=", &
+        dc%i_frag, " candidates=", nproj, " keep=", nkeep, &
+        " lambda_min_keep=", minval(lambda_w(keep_index(1:nkeep)))
+
+      deallocate(proj_atom, proj_hybrid, bproj, sw, uw, lambda_w)
+      deallocate(wcoef, keep_index, r_basis, r_wann, tmp, wcenter)
+      deallocate(h_seed, v_seed, h_wann, v_wann, spread_est, tail_est)
+      deallocate(sw_legacy, uw_legacy, lambda_legacy, wcoef_legacy, keep_index_legacy)
+      deallocate(r_wann_legacy, tmp_legacy, wcenter_legacy)
+      deallocate(phi_box, phi_tmp, n_basis_file)
+    end subroutine write_local_wannier_seed
+
+    integer function count_local_c_sp3_projections(nxyz_domain) result(nproj)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(in) :: nxyz_domain(3)
+      integer :: ia, ix_local(3)
+
+      nproj = 0
+      do ia=1,dc%system_tot%nion
+        if(izatom(dc%system_tot%kion(ia)) /= 6) cycle
+        call find_atom_core_grid(nxyz_domain, ia, ix_local)
+        if(all(ix_local(1:3) > 0)) nproj = nproj + 4
+      end do
+    end function count_local_c_sp3_projections
+
+    subroutine build_local_c_sp3_projection_map(nxyz_domain, proj_atom, proj_hybrid)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(in) :: nxyz_domain(3)
+      integer, intent(out) :: proj_atom(:), proj_hybrid(:)
+      integer :: ia, ih, ip, ix_local(3)
+
+      ip = 0
+      do ia=1,dc%system_tot%nion
+        if(izatom(dc%system_tot%kion(ia)) /= 6) cycle
+        call find_atom_core_grid(nxyz_domain, ia, ix_local)
+        if(any(ix_local(1:3) <= 0)) cycle
+        do ih=1,4
+          ip = ip + 1
+          proj_atom(ip) = ia
+          proj_hybrid(ip) = ih
+        end do
+      end do
+    end subroutine build_local_c_sp3_projection_map
+
+    subroutine find_atom_core_grid(nxyz_domain, ia, ix_local)
+      implicit none
+      integer, intent(in) :: nxyz_domain(3), ia
+      integer, intent(out) :: ix_local(3)
+      integer :: axis, i, ig, ibest
+      real(8) :: r_atom, r_grid, dist, best_dist, length_axis, spacing_axis
+
+      ix_local = 0
+      do axis=1,3
+        r_atom = dc%system_tot%rion(axis,ia)
+        length_axis = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+          + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+        spacing_axis = length_axis / dble(dc%lg_tot%num(axis))
+        best_dist = huge(1d0)
+        ibest = 0
+        do i=1,nxyz_domain(axis)
+          ig = dc%jxyz_tot(i,axis)
+          r_grid = dc%lg_tot%coordinate(ig,axis)
+          dist = abs(periodic_delta(r_grid - r_atom, length_axis))
+          if(dist < best_dist) then
+            best_dist = dist
+            ibest = i
+          end if
+        end do
+        if(best_dist <= 0.75d0 * spacing_axis) ix_local(axis) = ibest
+      end do
+    end subroutine find_atom_core_grid
+
+    subroutine write_wannier_seed_files()
+      use salmon_global, only: izatom, sysname, &
+        wannier_projection, wannier_num_wann, wannier_num_iter, &
+        wannier_projection_width, wannier_dis_froz_max, wannier_dis_win_max
+      use filesystem, only: get_filehandle
+      use inputoutput, only: uenergy_from_au
+      implicit none
+      integer :: iunit, iband, ikpt, ia, nband_wann
+      character(256) :: winfile, eigfile
+      real(8) :: a1(3), a2(3), a3(3)
+
+      if(nspin /= 1) stop "DC-LCFO Wannier export: spin-polarized Wannier seed files are not implemented."
+
+      nband_wann = determine_wannier_num_bands()
+      winfile = trim(dc%base_directory)//trim(sysname)//".win"
+      eigfile = trim(dc%base_directory)//trim(sysname)//".eig"
+      call get_lattice_vectors(a1, a2, a3)
+
+      if(dc%id_tot == 0) then
+        write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-WANNIER] export bands=", nband_wann, &
+          " wann=", wannier_num_wann
+        iunit = get_filehandle()
+        open(iunit,file=winfile,status='replace')
+        write(iunit,'(a)') "num_bands = "//trim(adjustl(int_to_string(nband_wann)))
+        write(iunit,'(a)') "num_wann = "//trim(adjustl(int_to_string(wannier_num_wann)))
+        write(iunit,'(a)') "num_iter = "//trim(adjustl(int_to_string(wannier_num_iter)))
+        write(iunit,'(a)') "mp_grid = 1 1 1"
+        write(iunit,'(a)') "gamma_only = false"
+        if(wannier_dis_froz_max > 0d0) &
+          write(iunit,'(a,1x,es23.15)') "dis_froz_max =", wannier_dis_froz_max * uenergy_from_au
+        if(wannier_dis_win_max > 0d0) &
+          write(iunit,'(a,1x,es23.15)') "dis_win_max =", wannier_dis_win_max * uenergy_from_au
+        write(iunit,'(a)') ""
+        write(iunit,'(a)') "begin unit_cell_cart"
+        write(iunit,'(a)') "bohr"
+        write(iunit,'(3es23.15)') a1(1:3)
+        write(iunit,'(3es23.15)') a2(1:3)
+        write(iunit,'(3es23.15)') a3(1:3)
+        write(iunit,'(a)') "end unit_cell_cart"
+        write(iunit,'(a)') ""
+        write(iunit,'(a)') "begin atoms_cart"
+        write(iunit,'(a)') "bohr"
+        do ia=1,dc%system_tot%nion
+          write(iunit,'(a,3(1x,es23.15))') trim(element_symbol(izatom(dc%system_tot%kion(ia)))), &
+            dc%system_tot%rion(1:3,ia)
+        end do
+        write(iunit,'(a)') "end atoms_cart"
+        write(iunit,'(a)') ""
+        write(iunit,'(a)') "begin kpoints"
+        write(iunit,'(3f12.6)') 0.0d0, 0.0d0, 0.0d0
+        write(iunit,'(a)') "end kpoints"
+        if(len_trim(wannier_projection) > 0) then
+          write(iunit,'(a)') ""
+          write(iunit,'(a)') "begin projections"
+          write(iunit,'(a)') trim(wannier_projection)
+          write(iunit,'(a)') "end projections"
+        end if
+        close(iunit)
+
+        iunit = get_filehandle()
+        open(iunit,file=eigfile,status='replace')
+        do ikpt=1,1
+          do iband=1,nband_wann
+            write(iunit,'(2i8,1x,es23.15)') iband, ikpt, esp_tot(iband,1) * uenergy_from_au
+          end do
+        end do
+        close(iunit)
+      end if
+
+      call write_wannier_amn_file(nband_wann)
+      call write_wannier_mmn_file(nband_wann)
+
+      if(dc%id_tot == 0) &
+        write(*,'(1x,a,2a)') "[DC-LCFO-WANNIER] wrote seed files: ", trim(winfile), " and .eig/.amn/.mmn"
+      call run_wannier90_seed_files()
+    end subroutine write_wannier_seed_files
+
+    subroutine run_wannier90_seed_files()
+      use communication, only: comm_sync_all
+      use salmon_global, only: sysname
+      implicit none
+      character(1024) :: wannier_command, seedname
+      character(4096) :: command_line, change_dir_command
+      integer :: env_status, exit_status, cmd_status
+
+      seedname = trim(sysname)
+      wannier_command = ''
+      call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
+      if(env_status /= 0 .or. len_trim(wannier_command) == 0) then
+#ifdef WANNIER90_EXECUTABLE_PATH
+        wannier_command = WANNIER90_EXECUTABLE_PATH
+#else
+        wannier_command = 'wannier90.x'
+#endif
+      end if
+
+      call comm_sync_all(dc%icomm_tot)
+      if(dc%id_tot == 0) then
+        change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
+        command_line = trim(change_dir_command)//trim(wannier_command)//' '//trim(shell_quote(seedname))
+        write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
+        call execute_command_line(trim(command_line), exitstat=exit_status, cmdstat=cmd_status)
+        if(cmd_status /= 0) then
+          write(*,'(1x,a,i0)') "[DC-LCFO-WANNIER] execute_command_line cmdstat=", cmd_status
+          stop "DC-LCFO Wannier export: failed to launch Wannier90."
+        end if
+        if(exit_status /= 0) then
+          write(*,'(1x,a,i0)') "[DC-LCFO-WANNIER] Wannier90 exit status=", exit_status
+          stop "DC-LCFO Wannier export: Wannier90 failed."
+        end if
+        write(*,'(1x,a)') "[DC-LCFO-WANNIER] Wannier90 completed."
+      end if
+      call comm_sync_all(dc%icomm_tot)
+    end subroutine run_wannier90_seed_files
+
+    function shell_quote(text) result(quoted)
+      implicit none
+      character(*), intent(in) :: text
+      character(2048) :: quoted
+
+      quoted = "'"//trim(text)//"'"
+    end function shell_quote
+
+    integer function determine_wannier_num_bands() result(nband)
+      use salmon_global, only: wannier_num_bands, wannier_num_wann, wannier_dis_win_max
+      implicit none
+      integer :: iband
+
+      if(wannier_num_bands > 0) then
+        if(wannier_num_bands > dc%nstate_tot) &
+          stop "DC-LCFO Wannier export: wannier_num_bands exceeds DC-LCFO state count."
+        nband = wannier_num_bands
+      else if(wannier_dis_win_max > 0d0) then
+        nband = 0
+        do iband=1,dc%nstate_tot
+          if(esp_tot(iband,1) <= wannier_dis_win_max) nband = iband
+        end do
+        nband = max(nband, wannier_num_wann)
+      else
+        nband = dc%nstate_tot
+      end if
+      if(nband < wannier_num_wann) &
+        stop "DC-LCFO Wannier export: selected band count is smaller than wannier_num_wann."
+    end function determine_wannier_num_bands
+
+    subroutine write_wannier_mmn_file(nband_wann)
+      use salmon_global, only: sysname
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer, parameter :: nntot_gamma = 6
+      integer, parameter :: mmn_target_chunk_elems = 1000000
+      integer :: gvec(3,nntot_gamma)
+      integer :: nxyz_domain(3), iunit, inn, ibasis, jbasis
+      integer :: ix, iy, iz, ixg, iyg, izg, iband, j0, j1, nchunk, jband
+      integer :: state_chunk_size, ispin_local
+      real(8) :: x, y, z, phase_arg, cphase, sphase
+      real(8) :: gx, gy, gz
+      real(8) :: a1(3), a2(3), a3(3)
+      real(8), allocatable :: s_re(:,:), s_im(:,:), tmp_re(:,:), tmp_im(:,:)
+      real(8), allocatable :: m_re_local(:,:), m_im_local(:,:), m_re_sum(:,:), m_im_sum(:,:)
+      character(256) :: mmnfile
+
+      gvec(:,1) = (/ 1, 0, 0 /)
+      gvec(:,2) = (/ 0, 1, 0 /)
+      gvec(:,3) = (/ 0, 0, 1 /)
+      gvec(:,4) = (/ 0, 0,-1 /)
+      gvec(:,5) = (/ 0,-1, 0 /)
+      gvec(:,6) = (/-1, 0, 0 /)
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      call get_lattice_vectors(a1, a2, a3)
+
+      mmnfile = trim(dc%base_directory)//trim(sysname)//".mmn"
+      if(dc%id_tot == 0) then
+        iunit = get_filehandle()
+        open(iunit,file=mmnfile,status='replace')
+        write(iunit,'(a)') "SALMON DC-LCFO generated overlaps"
+        write(iunit,'(3i10)') nband_wann, 1, nntot_gamma
+      end if
+
+      state_chunk_size = max(1, min(nband_wann, &
+        max(1, mmn_target_chunk_elems / max(1, nband_wann))))
+      allocate(s_re(dc%nstate_frag,dc%nstate_frag), s_im(dc%nstate_frag,dc%nstate_frag))
+      allocate(tmp_re(dc%nstate_frag,state_chunk_size), tmp_im(dc%nstate_frag,state_chunk_size))
+      allocate(m_re_local(nband_wann,state_chunk_size), m_im_local(nband_wann,state_chunk_size))
+      allocate(m_re_sum(nband_wann,state_chunk_size), m_im_sum(nband_wann,state_chunk_size))
+
+      ispin_local = 1
+      do inn=1,nntot_gamma
+        if(dc%id_tot == 0) write(iunit,'(5i8)') 1, 1, gvec(1,inn), gvec(2,inn), gvec(3,inn)
+
+        s_re(:,:) = 0d0
+        s_im(:,:) = 0d0
+        if(dc%id_frag == 0) then
+          call reciprocal_vector_from_index(gvec(:,inn), a1, a2, a3, gx, gy, gz)
+          do iz=1,nxyz_domain(3)
+            izg = dc%jxyz_tot(iz,3)
+            z = dc%lg_tot%coordinate(izg,3)
+            do iy=1,nxyz_domain(2)
+              iyg = dc%jxyz_tot(iy,2)
+              y = dc%lg_tot%coordinate(iyg,2)
+              do ix=1,nxyz_domain(1)
+                ixg = dc%jxyz_tot(ix,1)
+                x = dc%lg_tot%coordinate(ixg,1)
+                phase_arg = gx*x + gy*y + gz*z
+                cphase = cos(phase_arg)
+                sphase = -sin(phase_arg)
+                do jbasis=1,n_basis(dc%i_frag,ispin_local)
+                  do ibasis=1,n_basis(dc%i_frag,ispin_local)
+                    s_re(ibasis,jbasis) = s_re(ibasis,jbasis) &
+                      + f_basis(ix,iy,iz,ispin_local,ibasis) &
+                      * f_basis(ix,iy,iz,ispin_local,jbasis) * cphase * hvol
+                    s_im(ibasis,jbasis) = s_im(ibasis,jbasis) &
+                      + f_basis(ix,iy,iz,ispin_local,ibasis) &
+                      * f_basis(ix,iy,iz,ispin_local,jbasis) * sphase * hvol
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end if
+
+        do j0=1,nband_wann,state_chunk_size
+          j1 = min(nband_wann, j0 + state_chunk_size - 1)
+          nchunk = j1 - j0 + 1
+          m_re_local(:,:) = 0d0
+          m_im_local(:,:) = 0d0
+          if(dc%id_frag == 0) then
+            tmp_re(1:dc%nstate_frag,1:nchunk) = &
+              matmul(s_re(1:dc%nstate_frag,1:dc%nstate_frag), &
+              coef_wf(1:dc%nstate_frag,j0:j1,1))
+            tmp_im(1:dc%nstate_frag,1:nchunk) = &
+              matmul(s_im(1:dc%nstate_frag,1:dc%nstate_frag), &
+              coef_wf(1:dc%nstate_frag,j0:j1,1))
+            m_re_local(1:nband_wann,1:nchunk) = &
+              matmul(transpose(coef_wf(1:dc%nstate_frag,1:nband_wann,1)), &
+              tmp_re(1:dc%nstate_frag,1:nchunk))
+            m_im_local(1:nband_wann,1:nchunk) = &
+              matmul(transpose(coef_wf(1:dc%nstate_frag,1:nband_wann,1)), &
+              tmp_im(1:dc%nstate_frag,1:nchunk))
+          end if
+          call comm_summation(m_re_local,m_re_sum,nband_wann*state_chunk_size,dc%icomm_tot)
+          call comm_summation(m_im_local,m_im_sum,nband_wann*state_chunk_size,dc%icomm_tot)
+
+          if(dc%id_tot == 0) then
+            do jband=1,nchunk
+              do iband=1,nband_wann
+                write(iunit,'(2(1x,es23.15))') m_re_sum(iband,jband), m_im_sum(iband,jband)
+              end do
+            end do
+          end if
+        end do
+      end do
+
+      if(dc%id_tot == 0) close(iunit)
+      deallocate(s_re, s_im, tmp_re, tmp_im, m_re_local, m_im_local, m_re_sum, m_im_sum)
+    end subroutine write_wannier_mmn_file
+
+    subroutine write_wannier_amn_file(nband_wann)
+      use salmon_global, only: izatom, sysname, &
+        wannier_projection, wannier_num_wann, wannier_projection_width
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: nproj, chunk_size, p0, p1, nchunk, iunit
+      integer :: iband, ip, ibasis, ix, iy, iz, ispin_local
+      integer :: ixg, iyg, izg
+      integer :: nxyz_domain(3)
+      integer, parameter :: amn_target_chunk_elems = 1000000
+      integer, allocatable :: proj_atom(:), proj_hybrid(:)
+      real(8) :: x, y, z, gval
+      real(8), allocatable :: bproj(:,:), a_local(:,:), a_sum(:,:)
+      real(8), allocatable :: norm_local(:), norm_sum(:)
+      character(256) :: amnfile
+
+      if(.not. is_c_sp3_projection(trim(wannier_projection))) &
+        stop "DC-LCFO Wannier export: only wannier_projection='C:sp3' is implemented."
+
+      nproj = count_c_sp3_projections()
+      if(nproj /= wannier_num_wann) &
+        stop "DC-LCFO Wannier export: C:sp3 projection count must match wannier_num_wann."
+      if(nproj <= 0) stop "DC-LCFO Wannier export: no C atoms found for C:sp3 projections."
+
+      allocate(proj_atom(nproj), proj_hybrid(nproj))
+      call build_c_sp3_projection_map(proj_atom, proj_hybrid)
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+
+      amnfile = trim(dc%base_directory)//trim(sysname)//".amn"
+      if(dc%id_tot == 0) then
+        iunit = get_filehandle()
+        open(iunit,file=amnfile,status='replace')
+        write(iunit,'(a)') "SALMON DC-LCFO generated projections"
+        write(iunit,'(3i10)') nband_wann, 1, nproj
+      end if
+
+      chunk_size = max(1, min(nproj, max(1, amn_target_chunk_elems / max(1, nband_wann))))
+      allocate(bproj(dc%nstate_frag,chunk_size))
+      allocate(a_local(nband_wann,chunk_size))
+      allocate(a_sum(nband_wann,chunk_size))
+      allocate(norm_local(chunk_size), norm_sum(chunk_size))
+
+      do p0=1,nproj,chunk_size
+        p1 = min(nproj, p0 + chunk_size - 1)
+        nchunk = p1 - p0 + 1
+        bproj(:,:) = 0d0
+        norm_local(:) = 0d0
+
+        ispin_local = 1
+        if(dc%id_frag == 0) then
+          do ip=1,nchunk
+            do iz=1,nxyz_domain(3)
+              izg = dc%jxyz_tot(iz,3)
+              z = dc%lg_tot%coordinate(izg,3)
+              do iy=1,nxyz_domain(2)
+                iyg = dc%jxyz_tot(iy,2)
+                y = dc%lg_tot%coordinate(iyg,2)
+                do ix=1,nxyz_domain(1)
+                  ixg = dc%jxyz_tot(ix,1)
+                  x = dc%lg_tot%coordinate(ixg,1)
+                  gval = c_sp3_projection_value(x, y, z, proj_atom(p0+ip-1), &
+                    proj_hybrid(p0+ip-1), wannier_projection_width)
+                  if(abs(gval) <= 0d0) cycle
+                  norm_local(ip) = norm_local(ip) + gval * gval * hvol
+                  do ibasis=1,n_basis(dc%i_frag,ispin_local)
+                    bproj(ibasis,ip) = bproj(ibasis,ip) &
+                      + f_basis(ix,iy,iz,ispin_local,ibasis) * gval * hvol
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end if
+
+        a_local(:,:) = 0d0
+        if(dc%id_frag == 0) then
+          a_local(1:nband_wann,1:nchunk) = &
+            matmul(transpose(coef_wf(1:dc%nstate_frag,1:nband_wann,1)), &
+            bproj(1:dc%nstate_frag,1:nchunk))
+        end if
+        call comm_summation(a_local,a_sum,nband_wann*chunk_size,dc%icomm_tot)
+        call comm_summation(norm_local,norm_sum,chunk_size,dc%icomm_tot)
+
+        if(dc%id_tot == 0) then
+          do ip=1,nchunk
+            if(norm_sum(ip) <= 1d-300) &
+              stop "DC-LCFO Wannier export: zero norm projection in .amn generation."
+            a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
+            do iband=1,nband_wann
+              write(iunit,'(3i8,2(1x,es23.15))') iband, p0+ip-1, 1, a_sum(iband,ip), 0d0
+            end do
+          end do
+        end if
+      end do
+
+      if(dc%id_tot == 0) close(iunit)
+      deallocate(proj_atom, proj_hybrid)
+      deallocate(bproj, a_local, a_sum, norm_local, norm_sum)
+    end subroutine write_wannier_amn_file
+
+    logical function is_c_sp3_projection(text) result(enabled)
+      implicit none
+      character(*), intent(in) :: text
+      character(256) :: work
+
+      work = adjustl(text)
+      enabled = (trim(work) == 'C:sp3' .or. trim(work) == 'c:sp3')
+    end function is_c_sp3_projection
+
+    integer function count_c_sp3_projections() result(nproj)
+      use salmon_global, only: izatom
+      implicit none
+      integer :: ia
+
+      nproj = 0
+      do ia=1,dc%system_tot%nion
+        if(izatom(dc%system_tot%kion(ia)) == 6) nproj = nproj + 4
+      end do
+    end function count_c_sp3_projections
+
+    subroutine build_c_sp3_projection_map(proj_atom, proj_hybrid)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(out) :: proj_atom(:), proj_hybrid(:)
+      integer :: ia, ih, ip
+
+      ip = 0
+      do ia=1,dc%system_tot%nion
+        if(izatom(dc%system_tot%kion(ia)) /= 6) cycle
+        do ih=1,4
+          ip = ip + 1
+          proj_atom(ip) = ia
+          proj_hybrid(ip) = ih
+        end do
+      end do
+    end subroutine build_c_sp3_projection_map
+
+    real(8) function c_sp3_projection_value(x, y, z, ia, ih, sigma) result(val)
+      implicit none
+      real(8), intent(in) :: x, y, z, sigma
+      integer, intent(in) :: ia, ih
+      real(8) :: dx, dy, dz, r2, gaussian, s_part, px_part, py_part, pz_part
+      real(8) :: ns, np, pi_const, sx, sy, sz
+      real(8) :: a1(3), a2(3), a3(3)
+
+      call c_sp3_signs(ih, sx, sy, sz)
+      call get_lattice_vectors(a1, a2, a3)
+      dx = periodic_delta(x - dc%system_tot%rion(1,ia), cell_length(a1))
+      dy = periodic_delta(y - dc%system_tot%rion(2,ia), cell_length(a2))
+      dz = periodic_delta(z - dc%system_tot%rion(3,ia), cell_length(a3))
+      r2 = dx*dx + dy*dy + dz*dz
+      if(r2 > (8d0*sigma)**2) then
+        val = 0d0
+        return
+      end if
+
+      pi_const = acos(-1d0)
+      gaussian = exp(-0.5d0 * r2 / (sigma*sigma))
+      ns = 1d0 / (pi_const**0.75d0 * sigma**1.5d0)
+      np = sqrt(2d0) / (pi_const**0.75d0 * sigma**2.5d0)
+      s_part = ns * gaussian
+      px_part = np * dx * gaussian
+      py_part = np * dy * gaussian
+      pz_part = np * dz * gaussian
+      val = 0.5d0 * (s_part + sx*px_part + sy*py_part + sz*pz_part)
+    end function c_sp3_projection_value
+
+    real(8) function c_sp3_projection_value_local_periodic(x, y, z, ia, ih, sigma, box_length) result(val)
+      implicit none
+      real(8), intent(in) :: x, y, z, sigma, box_length(3)
+      integer, intent(in) :: ia, ih
+      real(8) :: dx, dy, dz, r2, gaussian, s_part, px_part, py_part, pz_part
+      real(8) :: ns, np, pi_const, sx, sy, sz
+
+      call c_sp3_signs(ih, sx, sy, sz)
+      dx = periodic_delta(x - dc%system_tot%rion(1,ia), box_length(1))
+      dy = periodic_delta(y - dc%system_tot%rion(2,ia), box_length(2))
+      dz = periodic_delta(z - dc%system_tot%rion(3,ia), box_length(3))
+      r2 = dx*dx + dy*dy + dz*dz
+      if(r2 > (8d0*sigma)**2) then
+        val = 0d0
+        return
+      end if
+
+      pi_const = acos(-1d0)
+      gaussian = exp(-0.5d0 * r2 / (sigma*sigma))
+      ns = 1d0 / (pi_const**0.75d0 * sigma**1.5d0)
+      np = sqrt(2d0) / (pi_const**0.75d0 * sigma**2.5d0)
+      s_part = ns * gaussian
+      px_part = np * dx * gaussian
+      py_part = np * dy * gaussian
+      pz_part = np * dz * gaussian
+      val = 0.5d0 * (s_part + sx*px_part + sy*py_part + sz*pz_part)
+    end function c_sp3_projection_value_local_periodic
+
+    subroutine get_lattice_vectors(a1, a2, a3)
+      implicit none
+      real(8), intent(out) :: a1(3), a2(3), a3(3)
+
+      a1(1:3) = dc%system_tot%primitive_a(1:3,1)
+      a2(1:3) = dc%system_tot%primitive_a(1:3,2)
+      a3(1:3) = dc%system_tot%primitive_a(1:3,3)
+    end subroutine get_lattice_vectors
+
+    subroutine reciprocal_vector_from_index(idx, a1, a2, a3, gx, gy, gz)
+      implicit none
+      integer, intent(in) :: idx(3)
+      real(8), intent(in) :: a1(3), a2(3), a3(3)
+      real(8), intent(out) :: gx, gy, gz
+      real(8) :: b1(3), b2(3), b3(3), volume, twopi
+
+      twopi = 2d0 * acos(-1d0)
+      volume = dot_product(a1, cross_product3(a2, a3))
+      if(abs(volume) <= 1d-300) stop "DC-LCFO Wannier export: invalid lattice volume."
+      b1(1:3) = twopi * cross_product3(a2, a3) / volume
+      b2(1:3) = twopi * cross_product3(a3, a1) / volume
+      b3(1:3) = twopi * cross_product3(a1, a2) / volume
+      gx = dble(idx(1)) * b1(1) + dble(idx(2)) * b2(1) + dble(idx(3)) * b3(1)
+      gy = dble(idx(1)) * b1(2) + dble(idx(2)) * b2(2) + dble(idx(3)) * b3(2)
+      gz = dble(idx(1)) * b1(3) + dble(idx(2)) * b2(3) + dble(idx(3)) * b3(3)
+    end subroutine reciprocal_vector_from_index
+
+    function cross_product3(a, b) result(c)
+      implicit none
+      real(8), intent(in) :: a(3), b(3)
+      real(8) :: c(3)
+
+      c(1) = a(2)*b(3) - a(3)*b(2)
+      c(2) = a(3)*b(1) - a(1)*b(3)
+      c(3) = a(1)*b(2) - a(2)*b(1)
+    end function cross_product3
+
+    subroutine c_sp3_signs(ih, sx, sy, sz)
+      implicit none
+      integer, intent(in) :: ih
+      real(8), intent(out) :: sx, sy, sz
+
+      select case(ih)
+      case(1)
+        sx = 1d0; sy = 1d0; sz = 1d0
+      case(2)
+        sx = 1d0; sy = -1d0; sz = -1d0
+      case(3)
+        sx = -1d0; sy = 1d0; sz = -1d0
+      case default
+        sx = -1d0; sy = -1d0; sz = 1d0
+      end select
+    end subroutine c_sp3_signs
+
+    real(8) function periodic_delta(delta, length) result(dout)
+      implicit none
+      real(8), intent(in) :: delta, length
+
+      if(length > 0d0) then
+        dout = delta - dnint(delta / length) * length
+      else
+        dout = delta
+      end if
+    end function periodic_delta
+
+    real(8) function cell_length(vec) result(length)
+      implicit none
+      real(8), intent(in) :: vec(3)
+
+      length = sqrt(sum(vec(1:3)**2))
+    end function cell_length
+
+    function int_to_string(value) result(text)
+      implicit none
+      integer, intent(in) :: value
+      character(16) :: text
+      write(text,'(i0)') value
+    end function int_to_string
+
+    function element_symbol(z) result(sym)
+      implicit none
+      integer, intent(in) :: z
+      character(2) :: sym
+
+      select case(z)
+      case(1);  sym = 'H '
+      case(2);  sym = 'He'
+      case(3);  sym = 'Li'
+      case(4);  sym = 'Be'
+      case(5);  sym = 'B '
+      case(6);  sym = 'C '
+      case(7);  sym = 'N '
+      case(8);  sym = 'O '
+      case(9);  sym = 'F '
+      case(10); sym = 'Ne'
+      case(11); sym = 'Na'
+      case(12); sym = 'Mg'
+      case(13); sym = 'Al'
+      case(14); sym = 'Si'
+      case(15); sym = 'P '
+      case(16); sym = 'S '
+      case(17); sym = 'Cl'
+      case(18); sym = 'Ar'
+      case default
+        sym = 'X '
+      end select
+    end function element_symbol
 
   end subroutine dc_lcfo_flux
 

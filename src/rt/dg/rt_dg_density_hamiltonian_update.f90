@@ -68,7 +68,7 @@
       return
     end if
     ! Step 1: Calculate electron density from fragment basis coefficients
-    call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s)
+    call calculate_density_from_fragments(dg_frag, system, mg, rho, rho_s, itt)
 
     dg_frag%rho_frag(:, :, :) = rho%f(:, :, :)
     if (system%nspin > 0) then
