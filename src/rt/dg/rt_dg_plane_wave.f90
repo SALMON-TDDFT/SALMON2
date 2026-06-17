@@ -27,6 +27,8 @@ module rt_dg_plane_wave
   public :: compute_mean_potential
   public :: compute_fragment_pw_hamiltonian
   public :: build_mixed_hamiltonian
+  public :: build_local_fragment_pw_row_list
+  public :: prepare_local_fragment_pw_blocks
   public :: diagonalize_mixed_basis
   public :: assemble_mixed_hamiltonian_dense
   public :: prepare_mixed_basis_startup
@@ -1222,6 +1224,172 @@ contains
       dg_frag%P_mat_frag_pw_g(:, :, :, :) = P_frag_pw(:, :, :, :)
     end if
   end subroutine compute_fragment_pw_gradient_from_overlap
+
+  subroutine build_local_fragment_pw_row_list(dg_frag, ispin)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ispin
+
+    integer :: i, nrow, nvalid, nsrc, ispin_eff
+    integer, allocatable :: row_ids(:)
+
+    if (allocated(dg_frag%fp_local_row_ids)) deallocate(dg_frag%fp_local_row_ids)
+
+    ispin_eff = max(1, min(ispin, max(1, dg_frag%nspin)))
+    nvalid = 0
+
+    if (allocated(dg_frag%local_coef_global_ids)) then
+      if (ispin_eff <= size(dg_frag%local_coef_global_ids, 2)) then
+        nsrc = size(dg_frag%local_coef_global_ids, 1)
+        if (allocated(dg_frag%local_coef_count)) then
+          if (ispin_eff <= size(dg_frag%local_coef_count)) then
+            nsrc = min(nsrc, max(0, dg_frag%local_coef_count(ispin_eff)))
+          end if
+        end if
+        allocate(row_ids(max(0, nsrc)))
+        do i = 1, nsrc
+          nrow = dg_frag%local_coef_global_ids(i, ispin_eff)
+          if (nrow < 1 .or. nrow > dg_frag%n_mat_max) cycle
+          nvalid = nvalid + 1
+          row_ids(nvalid) = nrow
+        end do
+        allocate(dg_frag%fp_local_row_ids(nvalid))
+        if (nvalid > 0) dg_frag%fp_local_row_ids(1:nvalid) = row_ids(1:nvalid)
+        deallocate(row_ids)
+        return
+      end if
+    end if
+
+    if (allocated(dg_frag%coef_owner)) then
+      if (ispin_eff <= size(dg_frag%coef_owner, 2)) then
+        nsrc = min(dg_frag%n_mat_max, size(dg_frag%coef_owner, 1))
+        allocate(row_ids(nsrc))
+        do i = 1, nsrc
+          if (dg_frag%coef_owner(i, ispin_eff) /= dg_frag%id) cycle
+          nvalid = nvalid + 1
+          row_ids(nvalid) = i
+        end do
+        allocate(dg_frag%fp_local_row_ids(nvalid))
+        if (nvalid > 0) dg_frag%fp_local_row_ids(1:nvalid) = row_ids(1:nvalid)
+        deallocate(row_ids)
+        return
+      end if
+    end if
+
+    nsrc = 0
+    if (allocated(dg_frag%coef)) nsrc = min(size(dg_frag%coef, 1), dg_frag%n_mat_max)
+    allocate(dg_frag%fp_local_row_ids(nsrc))
+    do i = 1, nsrc
+      dg_frag%fp_local_row_ids(i) = i
+    end do
+  end subroutine build_local_fragment_pw_row_list
+
+  subroutine prepare_local_fragment_pw_blocks(dg_frag, ispin)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in), optional :: ispin
+
+    integer :: ispin_eff, nrow_local, npw_local, n_pw
+    integer :: idir, irow, ipw, ispin_loop, global_row, global_pw, source_row
+    logical :: have_S_full, have_H_full, have_P_full
+    complex(8), parameter :: zi = (0.0d0, 1.0d0)
+
+    ispin_eff = 1
+    if (present(ispin)) ispin_eff = ispin
+    call build_local_fragment_pw_row_list(dg_frag, ispin_eff)
+
+    n_pw = max(0, dg_frag%n_plane_waves)
+    if (allocated(dg_frag%fp_local_pw_ids)) deallocate(dg_frag%fp_local_pw_ids)
+    allocate(dg_frag%fp_local_pw_ids(n_pw))
+    ! Transitional Task-2 layout: keep every PW row requested until Task 3
+    ! adds a distributed PW-row list for Y_P.
+    do ipw = 1, n_pw
+      dg_frag%fp_local_pw_ids(ipw) = ipw
+    end do
+
+    nrow_local = size(dg_frag%fp_local_row_ids)
+    npw_local = size(dg_frag%fp_local_pw_ids)
+
+    if (.not. allocated(dg_frag%S_mat_frag_pw_local)) then
+      allocate(dg_frag%S_mat_frag_pw_local(nrow_local, npw_local, dg_frag%nspin))
+    else if (size(dg_frag%S_mat_frag_pw_local, 1) /= nrow_local .or. &
+             size(dg_frag%S_mat_frag_pw_local, 2) /= npw_local .or. &
+             size(dg_frag%S_mat_frag_pw_local, 3) /= dg_frag%nspin) then
+      deallocate(dg_frag%S_mat_frag_pw_local)
+      allocate(dg_frag%S_mat_frag_pw_local(nrow_local, npw_local, dg_frag%nspin))
+    end if
+
+    if (.not. allocated(dg_frag%H_mat_frag_pw_local)) then
+      allocate(dg_frag%H_mat_frag_pw_local(nrow_local, npw_local, dg_frag%nspin))
+    else if (size(dg_frag%H_mat_frag_pw_local, 1) /= nrow_local .or. &
+             size(dg_frag%H_mat_frag_pw_local, 2) /= npw_local .or. &
+             size(dg_frag%H_mat_frag_pw_local, 3) /= dg_frag%nspin) then
+      deallocate(dg_frag%H_mat_frag_pw_local)
+      allocate(dg_frag%H_mat_frag_pw_local(nrow_local, npw_local, dg_frag%nspin))
+    end if
+
+    if (.not. allocated(dg_frag%P_mat_frag_pw_local)) then
+      allocate(dg_frag%P_mat_frag_pw_local(3, nrow_local, npw_local, dg_frag%nspin))
+    else if (size(dg_frag%P_mat_frag_pw_local, 1) /= 3 .or. &
+             size(dg_frag%P_mat_frag_pw_local, 2) /= nrow_local .or. &
+             size(dg_frag%P_mat_frag_pw_local, 3) /= npw_local .or. &
+             size(dg_frag%P_mat_frag_pw_local, 4) /= dg_frag%nspin) then
+      deallocate(dg_frag%P_mat_frag_pw_local)
+      allocate(dg_frag%P_mat_frag_pw_local(3, nrow_local, npw_local, dg_frag%nspin))
+    end if
+
+    dg_frag%S_mat_frag_pw_local(:, :, :) = (0.0d0, 0.0d0)
+    dg_frag%H_mat_frag_pw_local(:, :, :) = (0.0d0, 0.0d0)
+    dg_frag%P_mat_frag_pw_local(:, :, :, :) = (0.0d0, 0.0d0)
+
+    have_S_full = allocated(dg_frag%S_mat_frag_pw)
+    have_H_full = allocated(dg_frag%H_mat_frag_pw)
+    have_P_full = allocated(dg_frag%P_mat_frag_pw)
+    do ispin_loop = 1, dg_frag%nspin
+      do ipw = 1, npw_local
+        global_pw = dg_frag%fp_local_pw_ids(ipw)
+        if (global_pw < 1) cycle
+        do irow = 1, nrow_local
+          global_row = dg_frag%fp_local_row_ids(irow)
+          if (global_row < 1) cycle
+          if (have_S_full) then
+            source_row = fragment_local_row_index_pw(dg_frag, global_row, ispin_loop, size(dg_frag%S_mat_frag_pw, 1))
+            if (source_row > 0 .and. &
+                global_pw <= size(dg_frag%S_mat_frag_pw, 2) .and. &
+                ispin_loop <= size(dg_frag%S_mat_frag_pw, 3)) then
+              dg_frag%S_mat_frag_pw_local(irow, ipw, ispin_loop) = &
+                dg_frag%S_mat_frag_pw(source_row, global_pw, ispin_loop)
+            end if
+          end if
+          if (have_H_full) then
+            source_row = fragment_local_row_index_pw(dg_frag, global_row, ispin_loop, size(dg_frag%H_mat_frag_pw, 1))
+            if (source_row > 0 .and. &
+                global_pw <= size(dg_frag%H_mat_frag_pw, 2) .and. &
+                ispin_loop <= size(dg_frag%H_mat_frag_pw, 3)) then
+              dg_frag%H_mat_frag_pw_local(irow, ipw, ispin_loop) = &
+                dg_frag%H_mat_frag_pw(source_row, global_pw, ispin_loop)
+            end if
+          end if
+          if (have_P_full) then
+            source_row = fragment_local_row_index_pw(dg_frag, global_row, ispin_loop, size(dg_frag%P_mat_frag_pw, 2))
+            if (source_row > 0 .and. &
+                global_pw <= size(dg_frag%P_mat_frag_pw, 3) .and. &
+                ispin_loop <= size(dg_frag%P_mat_frag_pw, 4)) then
+              dg_frag%P_mat_frag_pw_local(1:3, irow, ipw, ispin_loop) = &
+                dg_frag%P_mat_frag_pw(1:3, source_row, global_pw, ispin_loop)
+            end if
+          else if (allocated(dg_frag%k_pw)) then
+            if (global_pw <= size(dg_frag%k_pw, 2)) then
+              do idir = 1, 3
+                dg_frag%P_mat_frag_pw_local(idir, irow, ipw, ispin_loop) = &
+                  zi * dg_frag%k_pw(idir, global_pw) * dg_frag%S_mat_frag_pw_local(irow, ipw, ispin_loop)
+              end do
+            end if
+          end if
+        end do
+      end do
+    end do
+  end subroutine prepare_local_fragment_pw_blocks
 
   subroutine compute_pw_hamiltonian_local_potential(dg_frag, Vh, Vxc, Vpsl, H_pw)
     use structures
