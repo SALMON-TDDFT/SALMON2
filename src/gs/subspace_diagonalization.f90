@@ -270,10 +270,10 @@ subroutine ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   complex(8) :: hmat_block_tmp(info%numo_max, info%numo)
   real(8) :: eval(system%no)
 
-  #ifdef USE_OPENACC
+#ifdef USE_OPENACC
   call ssdg_zwf_cblas_gpu(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   return
-  #endif
+#endif
 
   call timer_begin(LOG_SSDG_PERIODIC_HPSI)
   call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
