@@ -2,7 +2,7 @@
                                       lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
     rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
-    use salmon_global, only: yn_fix_func
+    use salmon_global, only: yn_fix_func, yn_dg_length_gauge
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
     use rt_dg_fragment_types, only: s_dg_fragment_rt
@@ -51,10 +51,11 @@
     logical, save :: enable_taylor_timing = .false.
     integer(8) :: target_bytes, bytes_per_state
     real(8) :: nstate_work_min_in(1), nstate_work_min_out(1)
-    real(8) :: Ac_mid(3)
+    real(8) :: Ac_mid(3), Ac_ham(3), E_mid(3)
     real(8) :: t_taylor0, t_taylor1, time_taylor_apply
     logical :: trace_taylor
     logical :: has_state_work
+    logical :: use_length_gauge
     logical :: use_pw_taylor
     integer :: trace_call_id
 
@@ -87,16 +88,20 @@
     it0 = max(lbound(rt%Ac_tot, 2), itt - 1)
     it1 = min(ubound(rt%Ac_tot, 2), itt)
     Ac_mid(:) = 0.5d0 * (rt%Ac_tot(:, it0) + rt%Ac_tot(:, it1))
+    E_mid(:) = 0.5d0 * (rt%E_tot(:, it0) + rt%E_tot(:, it1))
+    use_length_gauge = (yn_dg_length_gauge == 'y')
+    Ac_ham(:) = Ac_mid(:)
+    if (use_length_gauge) Ac_ham(:) = 0.0d0
     nsub_taylor = max(taylor4pc_substeps_default, ceiling(abs(dt) / taylor4pc_dt_substep_target))
     call initialize_taylor_runtime_options()
 
     if (yn_fix_func == 'n') then
-      call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_mid, &
+      call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_ham, &
                                             lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                             rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
     end if
     if (ppg%Nlma > 0 .and. allocated(ppg%uV)) then
-      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_mid, .false.)
+      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_ham, .false.)
     end if
 
     if (.not. has_state_work) then
@@ -131,7 +136,7 @@
     call ensure_block_arrays(nrow_taylor, nstate_work, dg_frag%nspin)
     call pack_taylor_coefficients(coef_base, nstate_prop)
     call unpack_taylor_coefficients(coef_base, nstate_prop)
-    call apply_taylor4_with_current_hamiltonian(coef_base, Ac_mid, coef_next, nstate_prop, nstate_work, &
+    call apply_taylor4_with_current_hamiltonian(coef_base, Ac_ham, E_mid, coef_next, nstate_prop, nstate_work, &
                                                 state_global_first)
     call unpack_taylor_coefficients(coef_next, nstate_prop)
     t_taylor1 = get_wtime()
@@ -199,10 +204,10 @@
       if (.not. allocated(dg_frag%coef_pw_owner)) then
         stop "DG Taylor4-PC PW path requires PW row owners"
       end if
+      nowned = 0
       if (.not. allocated(dg_frag%fp_local_pw_ids)) then
         stop "DG Taylor4-PC PW path requires prepared local PW row ids"
       end if
-      nowned = 0
       do ipw = 1, size(dg_frag%fp_local_pw_ids)
         if (dg_frag%fp_local_pw_ids(ipw) < 1 .or. dg_frag%fp_local_pw_ids(ipw) > size(dg_frag%coef_pw_owner)) cycle
         if (dg_frag%coef_pw_owner(dg_frag%fp_local_pw_ids(ipw)) == dg_frag%id) nowned = nowned + 1
@@ -263,17 +268,18 @@
       end do
     end subroutine unpack_taylor_coefficients
 
-    subroutine apply_taylor4_with_current_hamiltonian(coef_in, Ac_use, coef_out, nstate_current, nstate_block, &
+    subroutine apply_taylor4_with_current_hamiltonian(coef_in, Ac_use, E_use, coef_out, nstate_current, nstate_block, &
                                                       state_global_offset)
       complex(8), intent(in) :: coef_in(:, :, :)
       real(8), intent(in) :: Ac_use(3)
+      real(8), intent(in) :: E_use(3)
       complex(8), intent(out) :: coef_out(:, :, :)
       integer, intent(in) :: nstate_current, nstate_block, state_global_offset
       integer :: isub
 
       work_in(:, :, :) = coef_in(:, :, :)
       do isub = 1, nsub_taylor
-        call apply_taylor4_single_step(work_in, Ac_use, work_out, nstate_current, nstate_block, &
+        call apply_taylor4_single_step(work_in, Ac_use, E_use, work_out, nstate_current, nstate_block, &
                                        dt / dble(nsub_taylor), state_global_offset)
         work_in(:, :, :) = work_out(:, :, :)
       end do
@@ -281,10 +287,11 @@
       call unpack_taylor_coefficients(coef_out, nstate_current)
     end subroutine apply_taylor4_with_current_hamiltonian
 
-    subroutine apply_taylor4_single_step(coef_in, Ac_use, coef_out, nstate_current, nstate_block, dt_step, &
+    subroutine apply_taylor4_single_step(coef_in, Ac_use, E_use, coef_out, nstate_current, nstate_block, dt_step, &
                                          state_global_offset)
       complex(8), intent(in) :: coef_in(:, :, :)
       real(8), intent(in) :: Ac_use(3)
+      real(8), intent(in) :: E_use(3)
       complex(8), intent(out) :: coef_out(:, :, :)
       integer, intent(in) :: nstate_current, nstate_block, state_global_offset
       real(8), intent(in) :: dt_step
@@ -303,7 +310,7 @@
           call unpack_taylor_state_block(term_blk(:, 1:nstate_blk, :), state0, nstate_blk)
           deriv_blk(:, 1:nstate_blk, :) = (0.0d0, 0.0d0)
           call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_use, &
-                                         deriv_blk(:, 1:nstate_blk, :), state_s, state_e, freeze_nonlocal_pp_A=.true.)
+                                         deriv_blk(:, 1:nstate_blk, :), state_s, state_e, E_use, .true.)
           call check_finite_taylor_block(order, state_s, state_e, deriv_blk(:, 1:nstate_blk, :))
           coeff = coeff * dt_step / dble(order)
           result_blk(:, 1:nstate_blk, :) = result_blk(:, 1:nstate_blk, :) + &

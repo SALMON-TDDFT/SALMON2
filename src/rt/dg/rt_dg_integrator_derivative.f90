@@ -1,10 +1,11 @@
-  subroutine calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, dcoef_dt, state_start, state_end, &
+  subroutine calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, dcoef_dt, state_start, state_end, E_tot, &
                                        freeze_nonlocal_pp_A)
     use structures
     use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, fetch_remote_coef_rows, fetch_remote_coef_pw_rows, &
                                   ensure_nonlocal_pp_matrix_A, apply_mixed_hamiltonian_local_rows
     use misc_routines, only: get_wtime
+    use salmon_global, only: yn_dg_length_gauge
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -13,6 +14,7 @@
     real(8),                intent(in)    :: Ac_tot(3)
     complex(8),             intent(out)   :: dcoef_dt(:,:,:)
     integer, optional,      intent(in)    :: state_start, state_end
+    real(8), optional,      intent(in)    :: E_tot(3)
     logical, optional,      intent(in)    :: freeze_nonlocal_pp_A
 
     integer :: ispin
@@ -24,11 +26,13 @@
     integer, parameter :: state_work_vectors = 4
     integer(8) :: target_bytes, bytes_per_state
     real(8) :: A_squared
+    real(8) :: E_field(3)
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
     logical :: has_nonlocal, use_nonlocal_blocks
     logical :: has_so_nonlocal, output_is_block, output_is_local_rows, output_has_pw_rows
     logical :: has_overlap_operator
     logical :: freeze_nonlocal
+    logical :: use_length_gauge
     logical :: trace_derivative
     logical, save :: derivative_timing_initialized = .false.
     logical, save :: enable_derivative_timing = .false.
@@ -124,7 +128,16 @@
     end if
 
     dcoef_dt = (0.0d0, 0.0d0)
+    use_length_gauge = (yn_dg_length_gauge == 'y')
+    E_field = 0.0d0
+    if (use_length_gauge) then
+      if (.not. present(E_tot)) stop "DG length gauge derivative requires E_tot"
+      if (.not. dg_frag%has_local_wannier_basis) &
+        stop "DG length gauge requires loaded local Wannier basis data"
+      E_field(1:3) = E_tot(1:3)
+    end if
 
+    n_frag = dg_frag%n_mat_max
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     if (n_pw > 0) then
@@ -133,14 +146,15 @@
         stop "DG derivative PW path requires prepared row-local fragment-PW Hamiltonian blocks"
       end if
     end if
-
     if (.not. allocated(dg_frag%H_mat_blocks)) then
       stop "DG derivative requires block-sparse H blocks"
     end if
-    if (.not. dg_frag%coef_state_block_mode .and. .not. allocated(dg_frag%momentum_blocks)) then
+    if (.not. use_length_gauge .and. .not. dg_frag%coef_state_block_mode .and. &
+        .not. allocated(dg_frag%momentum_blocks)) then
       stop "DG derivative requires block-sparse DG velocity blocks"
     end if
-    if (.not. dg_frag%coef_state_block_mode .and. dg_frag%dc_lcfo_seed_basis_cleaned .and. &
+    if (.not. use_length_gauge .and. .not. dg_frag%coef_state_block_mode .and. &
+        dg_frag%dc_lcfo_seed_basis_cleaned .and. &
         .not. dg_frag%momentum_blocks_include_dg_flux) then
       stop "DG derivative requires covariant Flux contribution in DG velocity blocks"
     end if
@@ -151,7 +165,6 @@
       stop 'DG-Fragment RT: missing row-owner-local H block ids'
     end if
 
-    n_frag = dg_frag%n_mat_max
     if (n_frag <= 0) return
     if (.not. dg_frag%coef_state_block_mode .and. dg_frag%nstate_tot > size(dg_frag%coef, 2)) then
       stop "DG derivative invalid fragment coefficient state count"
@@ -201,7 +214,7 @@
 
     A_squared = Ac_tot(1)**2 + Ac_tot(2)**2 + Ac_tot(3)**2
     if (A_squared /= A_squared) stop "NaN in DG derivative vector potential"
-    if (n_pw > 0 .and. A_squared > 1.0d-30) then
+    if (.not. use_length_gauge .and. n_pw > 0 .and. A_squared > 1.0d-30) then
       stop "DG derivative PW velocity-gauge terms require row-local mixed momentum blocks"
     end if
 
@@ -212,7 +225,8 @@
     if (has_so_nonlocal) then
       stop 'DG-Fragment RT: SO nonlocal projector route is disabled in compact RT derivative'
     end if
-    if (has_nonlocal .and. .not. dg_frag%coef_state_block_mode .and. .not. freeze_nonlocal) then
+    if (has_nonlocal .and. .not. use_length_gauge .and. .not. dg_frag%coef_state_block_mode .and. &
+        .not. freeze_nonlocal) then
       call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, .false.)
     end if
     use_nonlocal_blocks = has_nonlocal .and. allocated(dg_frag%H_nl_blocks) .and. &
@@ -290,12 +304,11 @@
                                                   coef_work(:, 1:nstate_blk), coef_pw_work(:, 1:nstate_blk, 1), &
                                                   h_work(:, 1:nstate_blk), h_pw_work(:, 1:nstate_blk))
         end if
-
         m_work(:, 1:nstate_blk) = (0.0d0, 0.0d0)
         ! momentum_blocks store the real gradient/Flux-gradient matrix G.
         ! The velocity-gauge Hamiltonian contribution is -i A.G, so the
         ! time derivative contains -A.G after applying -i H.
-        if (allocated(dg_frag%momentum_blocks)) then
+        if (.not. use_length_gauge .and. allocated(dg_frag%momentum_blocks)) then
           if (trace_derivative) t0 = get_wtime()
           call apply_momentum_blocks_compact(ispin, Ac_tot, coef_work(:, 1:nstate_blk), m_work(:, 1:nstate_blk))
           if (trace_derivative) then
@@ -305,7 +318,12 @@
         end if
 
         if (trace_derivative) t0 = get_wtime()
-        call add_diamagnetic_term(nstate_blk)
+        if (use_length_gauge) then
+          call apply_length_gauge_position_term(ispin, E_field, coef_work(:, 1:nstate_blk), &
+                                                h_work(:, 1:nstate_blk))
+        else
+          call add_diamagnetic_term(nstate_blk)
+        end if
         h_work(:, 1:nstate_blk) = -zi * h_work(:, 1:nstate_blk)
         if (n_pw > 0) h_pw_work(:, 1:nstate_blk) = -zi * h_pw_work(:, 1:nstate_blk)
         h_work(:, 1:nstate_blk) = h_work(:, 1:nstate_blk) - m_work(:, 1:nstate_blk)
@@ -1068,6 +1086,78 @@
       end do
     end subroutine add_diamagnetic_term
 
+    subroutine apply_length_gauge_position_term(ispin_current, E_use, x, y)
+      integer, intent(in) :: ispin_current
+      real(8), intent(in) :: E_use(3)
+      complex(8), intent(in) :: x(:,:)
+      complex(8), intent(inout) :: y(:,:)
+      integer :: ifrag, i_local, nrow, nkeep, nstate
+      integer :: io, jo, iw, jw, istate, row_pos, col_pos, nmax
+      real(8) :: wio, wjo, rdot
+      complex(8), allocatable :: c_w(:,:), rc_w(:,:)
+
+      if (sum(abs(E_use(1:3))) <= 1.0d-30) return
+      if (.not. allocated(dg_frag%local_wannier_coef)) &
+        stop "DG length gauge missing local Wannier coefficients"
+      if (.not. allocated(dg_frag%local_wannier_r)) &
+        stop "DG length gauge missing local Wannier position matrices"
+
+      nstate = size(x, 2)
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%local_wannier_nkeep)) cycle
+        nkeep = dg_frag%local_wannier_nkeep(i_local)
+        if (nkeep <= 0) cycle
+        nmax = max(dg_frag%n_basis(ifrag, ispin_current), 1)
+        call ensure_index_work_arrays(nmax)
+        call build_compact_basis_map(ifrag, ispin_current, row_lid_work, row_pos_work, nrow)
+        if (nrow <= 0) cycle
+        allocate(c_w(nkeep,nstate), rc_w(nkeep,nstate))
+        c_w = (0.0d0, 0.0d0)
+        rc_w = (0.0d0, 0.0d0)
+
+        do iw = 1, nkeep
+          do jo = 1, nrow
+            col_pos = row_pos_work(jo)
+            if (col_pos <= 0) cycle
+            wjo = dg_frag%local_wannier_coef(row_lid_work(jo), iw, ispin_current, i_local)
+            if (abs(wjo) <= 0.0d0) cycle
+            do istate = 1, nstate
+              c_w(iw,istate) = c_w(iw,istate) + wjo * x(col_pos,istate)
+            end do
+          end do
+        end do
+
+        do iw = 1, nkeep
+          do jw = 1, nkeep
+            rdot = E_use(1) * dg_frag%local_wannier_r(1,iw,jw,ispin_current,i_local) &
+                 + E_use(2) * dg_frag%local_wannier_r(2,iw,jw,ispin_current,i_local) &
+                 + E_use(3) * dg_frag%local_wannier_r(3,iw,jw,ispin_current,i_local)
+            if (abs(rdot) <= 0.0d0) cycle
+            do istate = 1, nstate
+              rc_w(iw,istate) = rc_w(iw,istate) + rdot * c_w(jw,istate)
+            end do
+          end do
+        end do
+
+        do io = 1, nrow
+          row_pos = row_pos_work(io)
+          if (row_pos <= 0) cycle
+          if (.not. row_is_output(needed_row_ids(row_pos))) cycle
+          if (.not. row_is_owned(needed_row_ids(row_pos), ispin_current)) cycle
+          do iw = 1, nkeep
+            wio = dg_frag%local_wannier_coef(row_lid_work(io), iw, ispin_current, i_local)
+            if (abs(wio) <= 0.0d0) cycle
+            do istate = 1, nstate
+              y(row_pos,istate) = y(row_pos,istate) - wio * rc_w(iw,istate)
+            end do
+          end do
+        end do
+
+        deallocate(c_w, rc_w)
+      end do
+    end subroutine apply_length_gauge_position_term
+
     subroutine subtract_static_seed_phase(ispin_current, state_s_current, nstate_blk_current)
       integer, intent(in) :: ispin_current, state_s_current, nstate_blk_current
       integer :: istate, state_global, irow
@@ -1172,7 +1262,8 @@
           end do
           cycle
         end if
-!$omp parallel do if(nrow*ncol*nstate*nactive >= 8192) private(iv,jv,iactive,idir,ii,jj,row_pos,col_pos,scale,val,istate) schedule(static)
+!$omp parallel do if(nrow*ncol*nstate*nactive >= 8192) &
+!$omp private(iv,jv,iactive,idir,ii,jj,row_pos,col_pos,scale,val,istate) schedule(static)
         do iv = 1, nrow
           if (allocated(frag_map_count)) then
             ii = frag_map_lid(iv, ifrag_row)
