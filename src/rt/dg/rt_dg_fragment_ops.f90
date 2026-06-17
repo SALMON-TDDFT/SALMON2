@@ -19,6 +19,7 @@ module rt_dg_fragment_ops
   public :: apply_matrix_blocks_batch
   public :: apply_complex_matrix_blocks_batch
   public :: apply_mixed_hamiltonian
+  public :: apply_mixed_hamiltonian_local_rows
   public :: rebuild_local_h_block_ids
   public :: copy_matrix_blocks_to_complex_dense
   public :: copy_momentum_blocks_to_complex_dense
@@ -1425,6 +1426,81 @@ contains
       end if
     end if
   end subroutine apply_mixed_hamiltonian
+
+  subroutine apply_mixed_hamiltonian_local_rows(dg_frag, ispin, frag_row_ids, pw_row_ids, &
+                                                coef_frag, coef_pw, y_frag, y_pw)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin
+    integer, intent(in) :: frag_row_ids(:), pw_row_ids(:)
+    complex(8), intent(in) :: coef_frag(:, :), coef_pw(:, :)
+    complex(8), intent(inout) :: y_frag(:, :), y_pw(:, :)
+
+    integer :: irow_local, ipw_local, frag_row, pw_row, frag_pos, pw_pos
+    integer :: istate, nstate
+    integer, allocatable :: frag_pos_map(:), pw_pos_map(:)
+    complex(8) :: hfp
+
+    if (.not. allocated(dg_frag%H_mat_frag_pw_local)) return
+    if (.not. allocated(dg_frag%fp_local_row_ids)) return
+    if (.not. allocated(dg_frag%fp_local_pw_ids)) return
+    if (ispin < 1 .or. ispin > size(dg_frag%H_mat_frag_pw_local, 3)) return
+
+    nstate = min(size(y_frag, 2), size(y_pw, 2), size(coef_frag, 2), size(coef_pw, 2))
+    if (nstate <= 0) return
+    if (size(frag_row_ids) > 0) then
+      allocate(frag_pos_map(max(1, dg_frag%n_mat_max)))
+      frag_pos_map(:) = 0
+      do frag_pos = 1, min(size(frag_row_ids), size(y_frag, 1), size(coef_frag, 1))
+        frag_row = frag_row_ids(frag_pos)
+        if (frag_row < 1 .or. frag_row > size(frag_pos_map)) cycle
+        frag_pos_map(frag_row) = frag_pos
+      end do
+    else
+      allocate(frag_pos_map(1))
+      frag_pos_map(:) = 0
+    end if
+
+    if (size(pw_row_ids) > 0) then
+      allocate(pw_pos_map(max(1, dg_frag%n_plane_waves)))
+      pw_pos_map(:) = 0
+      do pw_pos = 1, min(size(pw_row_ids), size(y_pw, 1), size(coef_pw, 1))
+        pw_row = pw_row_ids(pw_pos)
+        if (pw_row < 1 .or. pw_row > size(pw_pos_map)) cycle
+        pw_pos_map(pw_row) = pw_pos
+      end do
+    else
+      allocate(pw_pos_map(1))
+      pw_pos_map(:) = 0
+    end if
+
+    do ipw_local = 1, min(size(dg_frag%fp_local_pw_ids), size(dg_frag%H_mat_frag_pw_local, 2))
+      pw_row = dg_frag%fp_local_pw_ids(ipw_local)
+      if (pw_row < 1 .or. pw_row > size(pw_pos_map)) cycle
+      pw_pos = pw_pos_map(pw_row)
+      if (pw_pos <= 0) cycle
+      do irow_local = 1, min(size(dg_frag%fp_local_row_ids), size(dg_frag%H_mat_frag_pw_local, 1))
+        frag_row = dg_frag%fp_local_row_ids(irow_local)
+        if (frag_row < 1 .or. frag_row > size(frag_pos_map)) cycle
+        frag_pos = frag_pos_map(frag_row)
+        if (frag_pos <= 0) cycle
+        hfp = dg_frag%H_mat_frag_pw_local(irow_local, ipw_local, ispin)
+        if (abs(hfp) == 0.0d0) cycle
+        do istate = 1, nstate
+          y_frag(frag_pos, istate) = y_frag(frag_pos, istate) + hfp * coef_pw(pw_pos, istate)
+        end do
+        if (allocated(dg_frag%coef_pw_owner)) then
+          if (pw_row > size(dg_frag%coef_pw_owner)) cycle
+          if (dg_frag%coef_pw_owner(pw_row) /= dg_frag%id) cycle
+        end if
+        do istate = 1, nstate
+          y_pw(pw_pos, istate) = y_pw(pw_pos, istate) + conjg(hfp) * coef_frag(frag_pos, istate)
+        end do
+      end do
+    end do
+
+    deallocate(frag_pos_map, pw_pos_map)
+  end subroutine apply_mixed_hamiltonian_local_rows
 
   subroutine apply_overlap_operator(dg_frag, ispin, x, y, use_prop)
     implicit none

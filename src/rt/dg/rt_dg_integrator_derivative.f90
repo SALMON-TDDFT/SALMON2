@@ -1,7 +1,8 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, dcoef_dt, state_start, state_end)
     use structures
     use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
-    use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, fetch_remote_coef_rows, ensure_nonlocal_pp_matrix_A
+    use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, fetch_remote_coef_rows, fetch_remote_coef_pw_rows, &
+                                  ensure_nonlocal_pp_matrix_A, apply_mixed_hamiltonian_local_rows
     use misc_routines, only: get_wtime
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -14,7 +15,7 @@
 
     integer :: ispin
     integer :: irow, local_idx, local_col
-    integer :: n_frag
+    integer :: n_frag, n_pw, n_pw_local, n_pw_owned
     integer :: state_first, state_last, state0, state_s, state_e
     integer :: state_out_s, state_out_e, nstate_blk, nstate_work
     integer, parameter :: state_work_target_mb = 512
@@ -23,7 +24,7 @@
     real(8) :: A_squared
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
     logical :: has_nonlocal, use_nonlocal_blocks
-    logical :: has_so_nonlocal, output_is_block, output_is_local_rows
+    logical :: has_so_nonlocal, output_is_block, output_is_local_rows, output_has_pw_rows
     logical :: has_overlap_operator
     logical :: trace_derivative
     logical, save :: derivative_timing_initialized = .false.
@@ -42,9 +43,11 @@
     real(8) :: time_finalize, time_scatter, time_total
     complex(8), allocatable, save :: coef_work(:,:), rhs_work(:,:)
     complex(8), allocatable, save :: h_work(:,:), m_work(:,:)
+    complex(8), allocatable, save :: coef_pw_work(:,:,:), h_pw_work(:,:)
     complex(8), allocatable, save :: cmat_pack(:,:), cx_pack(:,:), cy_pack(:,:)
     real(8), allocatable, save :: rmat_pack(:,:), rx_pack(:,:), ix_pack(:,:), ry_pack(:,:), iy_pack(:,:)
     integer, allocatable, save :: needed_row_ids(:), needed_row_pos(:)
+    integer, allocatable, save :: owned_pw_row_ids(:)
     integer, allocatable, save :: row_lid_work(:), row_pos_work(:)
     integer, allocatable, save :: col_lid_work(:), col_pos_work(:)
     integer, allocatable, save :: frag_map_lid(:,:), frag_map_pos(:,:), frag_map_count(:)
@@ -119,9 +122,15 @@
 
     dcoef_dt = (0.0d0, 0.0d0)
 
-    if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then
-      stop "DG derivative supports the pure fragment block-sparse route only"
+    n_pw = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    if (n_pw > 0) then
+      if (.not. allocated(dg_frag%fp_local_row_ids) .or. .not. allocated(dg_frag%fp_local_pw_ids) .or. &
+          .not. allocated(dg_frag%H_mat_frag_pw_local)) then
+        stop "DG derivative PW path requires prepared row-local fragment-PW Hamiltonian blocks"
+      end if
     end if
+
     if (.not. allocated(dg_frag%H_mat_blocks)) then
       stop "DG derivative requires block-sparse H blocks"
     end if
@@ -146,9 +155,23 @@
     end if
 
     output_is_local_rows = allocated(dg_frag%coef_owner) .and. allocated(dg_frag%coef_global_to_local) .and. &
-                           size(dcoef_dt, 1) == size(dg_frag%coef, 1) .and. size(dcoef_dt, 1) < n_frag
+                           (size(dcoef_dt, 1) == size(dg_frag%coef, 1) .or. &
+                            (n_pw > 0 .and. size(dcoef_dt, 1) >= size(dg_frag%coef, 1))) .and. &
+                           size(dcoef_dt, 1) < n_frag
     if (.not. output_is_local_rows .and. size(dcoef_dt, 1) < n_frag) then
       stop "DG derivative output row count is neither global nor local-owned"
+    end if
+    n_pw_local = 0
+    n_pw_owned = 0
+    output_has_pw_rows = .false.
+    if (n_pw > 0) then
+      n_pw_local = size(dg_frag%fp_local_pw_ids)
+      call build_owned_pw_row_ids()
+      if (output_is_local_rows) then
+        output_has_pw_rows = (size(dcoef_dt, 1) >= size(dg_frag%coef, 1) + n_pw_owned)
+      else
+        output_has_pw_rows = (size(dcoef_dt, 1) >= n_frag + n_pw_owned)
+      end if
     end if
 
     output_is_block = present(state_start) .or. present(state_end)
@@ -193,6 +216,7 @@
     end if
 
     call build_needed_coefficient_rows(1)
+    if (n_pw > 0) call guard_no_all_fragment_rows_for_pw()
     target_bytes = int(state_work_target_mb, kind=8) * 1024_8 * 1024_8
     bytes_per_state = 16_8 * int(max(1, size(needed_row_ids)), kind=8) * int(state_work_vectors, kind=8)
     nstate_work = max(1, min(state_last - state_first + 1, int(max(1_8, target_bytes / bytes_per_state))))
@@ -204,9 +228,11 @@
     do ispin = 1, dg_frag%nspin
       if (trace_derivative) t0 = get_wtime()
       call build_needed_coefficient_rows(ispin)
+      if (n_pw > 0) call guard_no_all_fragment_rows_for_pw()
       call build_fragment_compact_maps(ispin)
       if (has_overlap_operator) call verify_local_overlap_identity(ispin)
       call ensure_work_arrays(size(needed_row_ids), nstate_work)
+      if (n_pw > 0) call ensure_pw_work_arrays(n_pw_local, nstate_work)
       if (trace_derivative) then
         t1 = get_wtime()
         time_setup = time_setup + (t1 - t0)
@@ -221,6 +247,10 @@
 
         if (trace_derivative) t0 = get_wtime()
         call fetch_remote_coef_rows(dg_frag, ispin, needed_row_ids, coef_work(:, 1:nstate_blk), state_s, state_e)
+        if (n_pw > 0) then
+          call fetch_remote_coef_pw_rows(dg_frag, dg_frag%fp_local_pw_ids, coef_pw_work(:, 1:nstate_blk, :), &
+                                         state_s, state_e, ispin)
+        end if
         if (trace_derivative) then
           t1 = get_wtime()
           time_fetch = time_fetch + (t1 - t0)
@@ -243,6 +273,13 @@
             time_nl_apply = time_nl_apply + (t1 - t0)
           end if
         end if
+        if (n_pw > 0) then
+          h_pw_work(:, 1:nstate_blk) = (0.0d0, 0.0d0)
+          call apply_mixed_hamiltonian_local_rows(dg_frag, ispin, needed_row_ids, dg_frag%fp_local_pw_ids, &
+                                                  coef_work(:, 1:nstate_blk), coef_pw_work(:, 1:nstate_blk, 1), &
+                                                  h_work(:, 1:nstate_blk), h_pw_work(:, 1:nstate_blk))
+        end if
+
         m_work(:, 1:nstate_blk) = (0.0d0, 0.0d0)
         ! momentum_blocks store the real gradient/Flux-gradient matrix G.
         ! The velocity-gauge Hamiltonian contribution is -i A.G, so the
@@ -259,6 +296,7 @@
         if (trace_derivative) t0 = get_wtime()
         call add_diamagnetic_term(nstate_blk)
         h_work(:, 1:nstate_blk) = -zi * h_work(:, 1:nstate_blk)
+        if (n_pw > 0) h_pw_work(:, 1:nstate_blk) = -zi * h_pw_work(:, 1:nstate_blk)
         h_work(:, 1:nstate_blk) = h_work(:, 1:nstate_blk) - m_work(:, 1:nstate_blk)
 
         rhs_work(:, 1:nstate_blk) = h_work(:, 1:nstate_blk)
@@ -268,6 +306,9 @@
           t0 = get_wtime()
         end if
         call scatter_owned_derivative(ispin, nstate_blk, state_out_s, state_out_e)
+        if (n_pw > 0 .and. output_has_pw_rows) then
+          call scatter_owned_pw_derivative(ispin, nstate_blk, state_out_s, state_out_e)
+        end if
         if (trace_derivative) then
           t1 = get_wtime()
           time_scatter = time_scatter + (t1 - t0)
@@ -297,6 +338,54 @@
         allocate(coef_work(nrow, ncol), rhs_work(nrow, ncol), h_work(nrow, ncol), m_work(nrow, ncol))
       end if
     end subroutine ensure_work_arrays
+
+    subroutine ensure_pw_work_arrays(nrow, ncol)
+      integer, intent(in) :: nrow, ncol
+
+      if (.not. allocated(coef_pw_work)) then
+        allocate(coef_pw_work(nrow, ncol, 1), h_pw_work(nrow, ncol))
+      else if (size(coef_pw_work, 1) /= nrow .or. size(coef_pw_work, 2) /= ncol .or. &
+               size(coef_pw_work, 3) /= 1 .or. size(h_pw_work, 1) /= nrow .or. &
+               size(h_pw_work, 2) /= ncol) then
+        deallocate(coef_pw_work, h_pw_work)
+        allocate(coef_pw_work(nrow, ncol, 1), h_pw_work(nrow, ncol))
+      end if
+    end subroutine ensure_pw_work_arrays
+
+    subroutine build_owned_pw_row_ids()
+      integer :: ipw, pw_row
+
+      if (allocated(owned_pw_row_ids)) deallocate(owned_pw_row_ids)
+      if (n_pw_local <= 0) then
+        allocate(owned_pw_row_ids(0))
+        n_pw_owned = 0
+        return
+      end if
+      allocate(owned_pw_row_ids(n_pw_local))
+      n_pw_owned = 0
+      do ipw = 1, n_pw_local
+        pw_row = dg_frag%fp_local_pw_ids(ipw)
+        if (pw_row < 1 .or. pw_row > n_pw) cycle
+        if (allocated(dg_frag%coef_pw_owner)) then
+          if (pw_row > size(dg_frag%coef_pw_owner)) cycle
+          if (dg_frag%coef_pw_owner(pw_row) /= dg_frag%id) cycle
+        end if
+        n_pw_owned = n_pw_owned + 1
+        owned_pw_row_ids(n_pw_owned) = pw_row
+      end do
+    end subroutine build_owned_pw_row_ids
+
+    subroutine guard_no_all_fragment_rows_for_pw()
+      integer :: irow
+
+      if (n_frag <= 0) return
+      if (.not. allocated(needed_row_ids)) return
+      if (size(needed_row_ids) /= n_frag) return
+      do irow = 1, n_frag
+        if (needed_row_ids(irow) /= irow) return
+      end do
+      stop "DG derivative PW path refuses all-fragment-row compact gather"
+    end subroutine guard_no_all_fragment_rows_for_pw
 
     subroutine ensure_index_work_arrays(nmax)
       integer, intent(in) :: nmax
@@ -1151,5 +1240,32 @@
         end if
       end do
     end subroutine scatter_owned_derivative
+
+    subroutine scatter_owned_pw_derivative(ispin_current, nstate_blk_current, state_out_s_current, state_out_e_current)
+      integer, intent(in) :: ispin_current, nstate_blk_current, state_out_s_current, state_out_e_current
+      integer :: ipw, pw_row, pw_slot, pw_pos, output_base
+
+      if (.not. output_has_pw_rows) return
+      if (.not. allocated(owned_pw_row_ids)) return
+      if (.not. allocated(dg_frag%fp_local_pw_ids)) return
+      if (output_is_local_rows) then
+        output_base = size(dg_frag%coef, 1)
+      else
+        output_base = n_frag
+      end if
+      do pw_slot = 1, n_pw_owned
+        pw_row = owned_pw_row_ids(pw_slot)
+        pw_pos = 0
+        do ipw = 1, n_pw_local
+          if (dg_frag%fp_local_pw_ids(ipw) /= pw_row) cycle
+          pw_pos = ipw
+          exit
+        end do
+        if (pw_pos <= 0) cycle
+        if (output_base + pw_slot < 1 .or. output_base + pw_slot > size(dcoef_dt, 1)) cycle
+        dcoef_dt(output_base + pw_slot, state_out_s_current:state_out_e_current, ispin_current) = &
+          h_pw_work(pw_pos, 1:nstate_blk_current)
+      end do
+    end subroutine scatter_owned_pw_derivative
 
   end subroutine calculate_time_derivative
