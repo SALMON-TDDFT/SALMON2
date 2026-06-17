@@ -885,6 +885,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   integer :: ixp, ixm, iyp, iym, izp, izm
   real(8) :: a0, aplus, aminus, kvec(3), corr_r
   complex(8) :: psi0, corr, lap_axis, dprod_axis, dpsi_axis
+  complex(8), allocatable :: wk_dpsi(:,:,:,:), wk_apsi(:,:,:), wk_dapsi(:,:,:,:), wk_adpsi(:,:,:,:)
 
 #ifdef USE_OPENACC
   call fail_tau_operator("support is unavailable for OpenACC builds")
@@ -969,6 +970,16 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   end if
 
   if (.not. stencil%if_orthogonal) then
+    ! work arrays allocated once per thread (was: per-call allocate inside the
+    ! routine -> O(nstate*nk*ntaylor*nstep) malloc/free, dominating r2scan RT)
+!$omp parallel default(none) &
+!$omp          private(im,ik,io,ispin,kvec,wk_dpsi,wk_apsi,wk_dapsi,wk_adpsi) &
+!$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload,yn_periodic)
+    allocate(wk_dpsi (3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+    allocate(wk_apsi (  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+    allocate(wk_dapsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+    allocate(wk_adpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+!$omp do collapse(4)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -977,11 +988,15 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
       if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
       call add_xc_tau_operator_nonorth_complex( &
            htpsi%zwf(:,:,:,ispin,io,ik,im), tpsi%zwf(:,:,:,ispin,io,ik,im), &
-           mg, stencil, system, xc_payload%vtau%f, kvec)
+           mg, stencil, system, xc_payload%vtau%f, kvec, &
+           wk_dpsi, wk_apsi, wk_dapsi, wk_adpsi)
     end do
     end do
     end do
     end do
+!$omp end do
+    deallocate(wk_dpsi,wk_apsi,wk_dapsi,wk_adpsi)
+!$omp end parallel
     return
   end if
 
@@ -1071,7 +1086,7 @@ end subroutine add_xc_tau_operator
 
 !===================================================================================================================================
 
-subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system, vtau, kvec_cart)
+subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system, vtau, kvec_cart, dpsi, apsi, dapsi, adpsi)
   use structures
   use math_constants, only: zi
   implicit none
@@ -1085,15 +1100,13 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
   real(8),            intent(in)    :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
                                             mg%is_array(3):mg%ie_array(3))
   real(8),            intent(in)    :: kvec_cart(3)
+  complex(8),         intent(inout) :: dpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
+  complex(8),         intent(inout) :: apsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
+  complex(8),         intent(inout) :: dapsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
+  complex(8),         intent(inout) :: adpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
   integer :: ix, iy, iz
   real(8) :: a0, k2, kvec_grid(3)
   complex(8) :: psi0, corr
-  complex(8), allocatable :: dpsi(:,:,:,:), apsi(:,:,:), dapsi(:,:,:,:), adpsi(:,:,:,:)
-
-  allocate(dpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
-  allocate(apsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
-  allocate(dapsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
-  allocate(adpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3)))
 
   call calc_tau_operator_axis_derivatives_complex(tpsi, mg, stencil%coef_nab, dpsi)
 
@@ -1147,10 +1160,6 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
   end do
   end do
 
-  deallocate(adpsi)
-  deallocate(dapsi)
-  deallocate(apsi)
-  deallocate(dpsi)
 end subroutine add_xc_tau_operator_nonorth_complex
 
 subroutine calc_tau_operator_axis_derivatives_complex(box, mg, nabt, deriv)
