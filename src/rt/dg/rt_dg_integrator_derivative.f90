@@ -167,10 +167,14 @@
     if (n_pw > 0) then
       n_pw_local = size(dg_frag%fp_local_pw_ids)
       call build_owned_pw_row_ids()
-      if (output_is_local_rows) then
+      if (n_pw_owned > 0) then
+        if (.not. output_is_local_rows) then
+          stop "DG derivative PW output requires compact local-fragment rows followed by owned PW rows"
+        end if
         output_has_pw_rows = (size(dcoef_dt, 1) >= size(dg_frag%coef, 1) + n_pw_owned)
-      else
-        output_has_pw_rows = (size(dcoef_dt, 1) >= n_frag + n_pw_owned)
+        if (.not. output_has_pw_rows) then
+          stop "DG derivative PW output rows require local-fragment rows followed by owned PW rows"
+        end if
       end if
     end if
 
@@ -1248,11 +1252,10 @@
       if (.not. output_has_pw_rows) return
       if (.not. allocated(owned_pw_row_ids)) return
       if (.not. allocated(dg_frag%fp_local_pw_ids)) return
-      if (output_is_local_rows) then
-        output_base = size(dg_frag%coef, 1)
-      else
-        output_base = n_frag
+      if (.not. output_is_local_rows) then
+        stop "DG derivative PW scatter requires compact local-row output"
       end if
+      output_base = size(dg_frag%coef, 1)
       do pw_slot = 1, n_pw_owned
         pw_row = owned_pw_row_ids(pw_slot)
         pw_pos = 0
