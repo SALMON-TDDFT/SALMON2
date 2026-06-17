@@ -155,9 +155,8 @@
     end if
 
     output_is_local_rows = allocated(dg_frag%coef_owner) .and. allocated(dg_frag%coef_global_to_local) .and. &
-                           (size(dcoef_dt, 1) == size(dg_frag%coef, 1) .or. &
-                            (n_pw > 0 .and. size(dcoef_dt, 1) >= size(dg_frag%coef, 1))) .and. &
-                           size(dcoef_dt, 1) < n_frag
+                           size(dcoef_dt, 1) >= size(dg_frag%coef, 1) .and. &
+                           (size(dcoef_dt, 1) < n_frag .or. n_pw > 0)
     if (.not. output_is_local_rows .and. size(dcoef_dt, 1) < n_frag) then
       stop "DG derivative output row count is neither global nor local-owned"
     end if
