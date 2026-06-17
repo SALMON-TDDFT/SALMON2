@@ -1,4 +1,5 @@
-  subroutine calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, dcoef_dt, state_start, state_end)
+  subroutine calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, dcoef_dt, state_start, state_end, &
+                                       freeze_nonlocal_pp_A)
     use structures
     use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, fetch_remote_coef_rows, fetch_remote_coef_pw_rows, &
@@ -12,6 +13,7 @@
     real(8),                intent(in)    :: Ac_tot(3)
     complex(8),             intent(out)   :: dcoef_dt(:,:,:)
     integer, optional,      intent(in)    :: state_start, state_end
+    logical, optional,      intent(in)    :: freeze_nonlocal_pp_A
 
     integer :: ispin
     integer :: irow, local_idx, local_col
@@ -26,6 +28,7 @@
     logical :: has_nonlocal, use_nonlocal_blocks
     logical :: has_so_nonlocal, output_is_block, output_is_local_rows, output_has_pw_rows
     logical :: has_overlap_operator
+    logical :: freeze_nonlocal
     logical :: trace_derivative
     logical, save :: derivative_timing_initialized = .false.
     logical, save :: enable_derivative_timing = .false.
@@ -202,12 +205,14 @@
       stop "DG derivative PW velocity-gauge terms require row-local mixed momentum blocks"
     end if
 
+    freeze_nonlocal = .false.
+    if (present(freeze_nonlocal_pp_A)) freeze_nonlocal = freeze_nonlocal_pp_A
     has_nonlocal = (ppg%Nlma > 0 .and. allocated(ppg%uV))
     has_so_nonlocal = (allocated(ppg%uv_so) .and. allocated(dg_frag%phi_frag_c) .and. dg_frag%nspin == 2)
     if (has_so_nonlocal) then
       stop 'DG-Fragment RT: SO nonlocal projector route is disabled in compact RT derivative'
     end if
-    if (has_nonlocal .and. .not. dg_frag%coef_state_block_mode) then
+    if (has_nonlocal .and. .not. dg_frag%coef_state_block_mode .and. .not. freeze_nonlocal) then
       call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_tot, .false.)
     end if
     use_nonlocal_blocks = has_nonlocal .and. allocated(dg_frag%H_nl_blocks) .and. &

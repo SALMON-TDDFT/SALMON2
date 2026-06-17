@@ -8,6 +8,7 @@
     use rt_dg_fragment_types, only: s_dg_fragment_rt
     use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A
     use misc_routines, only: get_wtime
+    use communication, only: comm_get_min
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -35,8 +36,10 @@
     complex(8), allocatable, save :: result_blk(:,:,:)
     complex(8), allocatable, save :: work_in(:,:,:)
     complex(8), allocatable, save :: work_out(:,:,:)
-    integer :: n, nstate_prop, nstate_work, state_global_first, state_global_last
+    integer, allocatable, save :: owned_pw_row_ids_taylor(:)
+    integer :: n, nrow_taylor, nstate_prop, nstate_work, state_global_first, state_global_last
     integer :: state0, state_s, state_e, nstate_blk
+    integer :: n_pw, n_pw_owned
     integer :: it0, it1, nsub_taylor
     integer, parameter :: state_work_target_mb = 512
     integer, parameter :: state_work_vectors = 8
@@ -47,15 +50,26 @@
     logical, save :: taylor_env_initialized = .false.
     logical, save :: enable_taylor_timing = .false.
     integer(8) :: target_bytes, bytes_per_state
+    real(8) :: nstate_work_min_in(1), nstate_work_min_out(1)
     real(8) :: Ac_mid(3)
     real(8) :: t_taylor0, t_taylor1, time_taylor_apply
     logical :: trace_taylor
     logical :: has_state_work
+    logical :: use_pw_taylor
     integer :: trace_call_id
 
     n = size(dg_frag%coef, 1)
-    if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then
-      stop "DG Taylor4-PC supports the pure fragment block-sparse route only"
+    nrow_taylor = n
+    n_pw = 0
+    n_pw_owned = 0
+    if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
+    use_pw_taylor = (n_pw > 0)
+    if (use_pw_taylor) then
+      if (dg_frag%coef_state_block_mode) then
+        stop "DG Taylor4-PC PW path does not yet support state-block coefficient ownership"
+      end if
+      call build_owned_pw_rows_for_taylor()
+      nrow_taylor = n + n_pw_owned
     end if
 
     nstate_prop = dg_frag%nstate_tot
@@ -76,24 +90,28 @@
     nsub_taylor = max(taylor4pc_substeps_default, ceiling(abs(dt) / taylor4pc_dt_substep_target))
     call initialize_taylor_runtime_options()
 
+    if (yn_fix_func == 'n') then
+      call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_mid, &
+                                            lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+                                            rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
+    end if
+    if (ppg%Nlma > 0 .and. allocated(ppg%uV)) then
+      call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_mid, .false.)
+    end if
+
     if (.not. has_state_work) then
-      if (yn_fix_func == 'n') then
-        call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_mid, &
-                                              lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                              rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
-        if (dg_frag%coef_state_block_mode) call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_mid, .false.)
-      end if
       return
     end if
 
-    call ensure_state_arrays(n, nstate_prop, dg_frag%nspin)
-    coef_base(:, :, :) = dg_frag%coef(:, 1:nstate_prop, :)
-
     target_bytes = int(cfg_state_work_target_mb, kind=8) * 1024_8 * 1024_8
-    bytes_per_state = 16_8 * int(max(1, n), kind=8) * int(max(1, dg_frag%nspin), kind=8) * &
+    bytes_per_state = 16_8 * int(max(1, nrow_taylor), kind=8) * int(max(1, dg_frag%nspin), kind=8) * &
                       int(state_work_vectors, kind=8)
     nstate_work = max(1, min(nstate_prop, int(max(1_8, target_bytes / max(1_8, bytes_per_state)))))
-    call ensure_block_arrays(n, nstate_work, dg_frag%nspin)
+    if (use_pw_taylor) then
+      nstate_work_min_in(1) = dble(nstate_work)
+      call comm_get_min(nstate_work_min_in, nstate_work_min_out, 1, dg_frag%icomm)
+      nstate_work = max(1, min(nstate_prop, int(nstate_work_min_out(1))))
+    end if
     time_taylor_apply = 0.0d0
     trace_taylor = .false.
     trace_call_id = 0
@@ -108,19 +126,16 @@
       flush(6)
     end if
 
-    dg_frag%coef(:, 1:nstate_prop, :) = coef_base(:, :, :)
-    if (yn_fix_func == 'n') then
-      call update_density_hamiltonian_stage(dg_frag, system, info, rt, itt, Ac_mid, &
-                                            lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
-                                            rho, rho_s, Vh, Vxc, Vpsl, energy, .false.)
-      if (dg_frag%coef_state_block_mode) call ensure_nonlocal_pp_matrix_A(dg_frag, mg, ppg, system, Ac_mid, .false.)
-    end if
     t_taylor0 = get_wtime()
+    call ensure_state_arrays(nrow_taylor, nstate_prop, dg_frag%nspin)
+    call ensure_block_arrays(nrow_taylor, nstate_work, dg_frag%nspin)
+    call pack_taylor_coefficients(coef_base, nstate_prop)
+    call unpack_taylor_coefficients(coef_base, nstate_prop)
     call apply_taylor4_with_current_hamiltonian(coef_base, Ac_mid, coef_next, nstate_prop, nstate_work, &
                                                 state_global_first)
+    call unpack_taylor_coefficients(coef_next, nstate_prop)
     t_taylor1 = get_wtime()
     time_taylor_apply = t_taylor1 - t_taylor0
-    dg_frag%coef(:, 1:nstate_prop, :) = coef_next(:, :, :)
     if (trace_taylor) then
       write(*,'(1x,a,i0,a,1pe13.5)') &
         '[DG-TAYLOR] timing call=', trace_call_id, &
@@ -176,6 +191,78 @@
       end if
     end subroutine ensure_block_arrays
 
+    subroutine build_owned_pw_rows_for_taylor()
+      integer :: ipw, nowned
+
+      if (allocated(owned_pw_row_ids_taylor)) deallocate(owned_pw_row_ids_taylor)
+      if (n_pw <= 0) return
+      if (.not. allocated(dg_frag%coef_pw_owner)) then
+        stop "DG Taylor4-PC PW path requires PW row owners"
+      end if
+      if (.not. allocated(dg_frag%fp_local_pw_ids)) then
+        stop "DG Taylor4-PC PW path requires prepared local PW row ids"
+      end if
+      nowned = 0
+      do ipw = 1, size(dg_frag%fp_local_pw_ids)
+        if (dg_frag%fp_local_pw_ids(ipw) < 1 .or. dg_frag%fp_local_pw_ids(ipw) > size(dg_frag%coef_pw_owner)) cycle
+        if (dg_frag%coef_pw_owner(dg_frag%fp_local_pw_ids(ipw)) == dg_frag%id) nowned = nowned + 1
+      end do
+      n_pw_owned = nowned
+      allocate(owned_pw_row_ids_taylor(max(1, n_pw_owned)))
+      nowned = 0
+      do ipw = 1, size(dg_frag%fp_local_pw_ids)
+        if (dg_frag%fp_local_pw_ids(ipw) < 1 .or. dg_frag%fp_local_pw_ids(ipw) > size(dg_frag%coef_pw_owner)) cycle
+        if (dg_frag%coef_pw_owner(dg_frag%fp_local_pw_ids(ipw)) /= dg_frag%id) cycle
+        nowned = nowned + 1
+        owned_pw_row_ids_taylor(nowned) = dg_frag%fp_local_pw_ids(ipw)
+      end do
+    end subroutine build_owned_pw_rows_for_taylor
+
+    subroutine pack_taylor_coefficients(buffer, nstate_current)
+      complex(8), intent(out) :: buffer(:, :, :)
+      integer, intent(in) :: nstate_current
+      integer :: ispin, ipw_slot, pw_row, state_col0, state_col1
+
+      buffer(:, :, :) = (0.0d0, 0.0d0)
+      buffer(1:n, 1:nstate_current, :) = dg_frag%coef(1:n, 1:nstate_current, :)
+      if (.not. use_pw_taylor) return
+      if (.not. allocated(owned_pw_row_ids_taylor)) return
+      state_col0 = state_global_first
+      state_col1 = state_global_first + nstate_current - 1
+      if (state_col1 > size(dg_frag%coef_pw, 2)) then
+        stop "DG Taylor4-PC PW coefficient state range exceeds coef_pw columns"
+      end if
+      do ispin = 1, dg_frag%nspin
+        do ipw_slot = 1, n_pw_owned
+          pw_row = owned_pw_row_ids_taylor(ipw_slot)
+          if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
+          buffer(n + ipw_slot, 1:nstate_current, ispin) = dg_frag%coef_pw(pw_row, state_col0:state_col1, ispin)
+        end do
+      end do
+    end subroutine pack_taylor_coefficients
+
+    subroutine unpack_taylor_coefficients(buffer, nstate_current)
+      complex(8), intent(in) :: buffer(:, :, :)
+      integer, intent(in) :: nstate_current
+      integer :: ispin, ipw_slot, pw_row, state_col0, state_col1
+
+      dg_frag%coef(1:n, 1:nstate_current, :) = buffer(1:n, 1:nstate_current, :)
+      if (.not. use_pw_taylor) return
+      if (.not. allocated(owned_pw_row_ids_taylor)) return
+      state_col0 = state_global_first
+      state_col1 = state_global_first + nstate_current - 1
+      if (state_col1 > size(dg_frag%coef_pw, 2)) then
+        stop "DG Taylor4-PC PW coefficient state range exceeds coef_pw columns"
+      end if
+      do ispin = 1, dg_frag%nspin
+        do ipw_slot = 1, n_pw_owned
+          pw_row = owned_pw_row_ids_taylor(ipw_slot)
+          if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
+          dg_frag%coef_pw(pw_row, state_col0:state_col1, ispin) = buffer(n + ipw_slot, 1:nstate_current, ispin)
+        end do
+      end do
+    end subroutine unpack_taylor_coefficients
+
     subroutine apply_taylor4_with_current_hamiltonian(coef_in, Ac_use, coef_out, nstate_current, nstate_block, &
                                                       state_global_offset)
       complex(8), intent(in) :: coef_in(:, :, :)
@@ -191,7 +278,7 @@
         work_in(:, :, :) = work_out(:, :, :)
       end do
       coef_out(:, :, :) = work_in(:, :, :)
-      dg_frag%coef(:, 1:nstate_current, :) = coef_out(:, 1:nstate_current, :)
+      call unpack_taylor_coefficients(coef_out, nstate_current)
     end subroutine apply_taylor4_with_current_hamiltonian
 
     subroutine apply_taylor4_single_step(coef_in, Ac_use, coef_out, nstate_current, nstate_block, dt_step, &
@@ -213,10 +300,10 @@
         result_blk(:, 1:nstate_blk, :) = coef_in(:, state0:state0+nstate_blk-1, :)
         coeff = 1.0d0
         do order = 1, 4
-          dg_frag%coef(:, state0:state0+nstate_blk-1, :) = term_blk(:, 1:nstate_blk, :)
+          call unpack_taylor_state_block(term_blk(:, 1:nstate_blk, :), state0, nstate_blk)
           deriv_blk(:, 1:nstate_blk, :) = (0.0d0, 0.0d0)
           call calculate_time_derivative(dg_frag, system, mg, ppg, Ac_use, &
-                                         deriv_blk(:, 1:nstate_blk, :), state_s, state_e)
+                                         deriv_blk(:, 1:nstate_blk, :), state_s, state_e, freeze_nonlocal_pp_A=.true.)
           call check_finite_taylor_block(order, state_s, state_e, deriv_blk(:, 1:nstate_blk, :))
           coeff = coeff * dt_step / dble(order)
           result_blk(:, 1:nstate_blk, :) = result_blk(:, 1:nstate_blk, :) + &
@@ -226,6 +313,30 @@
         coef_out(:, state0:state0+nstate_blk-1, :) = result_blk(:, 1:nstate_blk, :)
       end do
     end subroutine apply_taylor4_single_step
+
+    subroutine unpack_taylor_state_block(buffer, state_local_first, nstate_current)
+      complex(8), intent(in) :: buffer(:, :, :)
+      integer, intent(in) :: state_local_first, nstate_current
+      integer :: ispin, ipw_slot, pw_row, state_local_last, state_col0, state_col1
+
+      state_local_last = state_local_first + nstate_current - 1
+      dg_frag%coef(1:n, state_local_first:state_local_last, :) = buffer(1:n, 1:nstate_current, :)
+      if (.not. use_pw_taylor) return
+      if (.not. allocated(owned_pw_row_ids_taylor)) return
+      state_col0 = state_global_first + state_local_first - 1
+      state_col1 = state_col0 + nstate_current - 1
+      if (state_col1 > size(dg_frag%coef_pw, 2)) then
+        stop "DG Taylor4-PC PW coefficient state block exceeds coef_pw columns"
+      end if
+      do ispin = 1, dg_frag%nspin
+        do ipw_slot = 1, n_pw_owned
+          pw_row = owned_pw_row_ids_taylor(ipw_slot)
+          if (pw_row < 1 .or. pw_row > size(dg_frag%coef_pw, 1)) cycle
+          dg_frag%coef_pw(pw_row, state_col0:state_col1, ispin) = &
+            buffer(n + ipw_slot, 1:nstate_current, ispin)
+        end do
+      end do
+    end subroutine unpack_taylor_state_block
 
     subroutine check_finite_taylor_block(order, state_s_in, state_e_in, block)
       integer, intent(in) :: order, state_s_in, state_e_in
