@@ -1255,6 +1255,11 @@ contains
           do i = 1, nsrc
             nrow = dg_frag%local_coef_global_ids(i, ispin_loop)
             if (nrow < 1 .or. nrow > dg_frag%n_mat_max) cycle
+            if (allocated(dg_frag%coef_owner)) then
+              if (nrow <= size(dg_frag%coef_owner, 1) .and. ispin_loop <= size(dg_frag%coef_owner, 2)) then
+                if (dg_frag%coef_owner(nrow, ispin_loop) /= dg_frag%id) cycle
+              end if
+            end if
             if (row_seen(nrow)) cycle
             nvalid = nvalid + 1
             row_ids(nvalid) = nrow
@@ -1311,6 +1316,11 @@ contains
         do i = 1, nsrc
           nrow = dg_frag%local_coef_global_ids(i, ispin_eff)
           if (nrow < 1 .or. nrow > dg_frag%n_mat_max) cycle
+          if (allocated(dg_frag%coef_owner)) then
+            if (nrow <= size(dg_frag%coef_owner, 1) .and. ispin_eff <= size(dg_frag%coef_owner, 2)) then
+              if (dg_frag%coef_owner(nrow, ispin_eff) /= dg_frag%id) cycle
+            end if
+          end if
           nvalid = nvalid + 1
           row_ids(nvalid) = nrow
         end do
