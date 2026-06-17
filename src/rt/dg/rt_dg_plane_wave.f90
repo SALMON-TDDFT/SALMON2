@@ -1230,13 +1230,74 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: ispin
 
-    integer :: i, nrow, nvalid, nsrc, ispin_eff
+    integer :: i, nrow, nvalid, nsrc, ispin_eff, ispin_loop, nspin_src
     integer, allocatable :: row_ids(:)
+    logical, allocatable :: row_seen(:)
 
     if (allocated(dg_frag%fp_local_row_ids)) deallocate(dg_frag%fp_local_row_ids)
 
-    ispin_eff = max(1, min(ispin, max(1, dg_frag%nspin)))
+    ispin_eff = ispin
     nvalid = 0
+
+    if (ispin_eff <= 0) then
+      if (allocated(dg_frag%local_coef_global_ids)) then
+        nspin_src = min(max(1, dg_frag%nspin), size(dg_frag%local_coef_global_ids, 2))
+        allocate(row_ids(max(0, dg_frag%n_mat_max)))
+        allocate(row_seen(max(0, dg_frag%n_mat_max)))
+        row_seen(:) = .false.
+        do ispin_loop = 1, nspin_src
+          nsrc = size(dg_frag%local_coef_global_ids, 1)
+          if (allocated(dg_frag%local_coef_count)) then
+            if (ispin_loop <= size(dg_frag%local_coef_count)) then
+              nsrc = min(nsrc, max(0, dg_frag%local_coef_count(ispin_loop)))
+            end if
+          end if
+          do i = 1, nsrc
+            nrow = dg_frag%local_coef_global_ids(i, ispin_loop)
+            if (nrow < 1 .or. nrow > dg_frag%n_mat_max) cycle
+            if (row_seen(nrow)) cycle
+            nvalid = nvalid + 1
+            row_ids(nvalid) = nrow
+            row_seen(nrow) = .true.
+          end do
+        end do
+        allocate(dg_frag%fp_local_row_ids(nvalid))
+        if (nvalid > 0) dg_frag%fp_local_row_ids(1:nvalid) = row_ids(1:nvalid)
+        deallocate(row_ids, row_seen)
+        return
+      end if
+
+      if (allocated(dg_frag%coef_owner)) then
+        nspin_src = min(max(1, dg_frag%nspin), size(dg_frag%coef_owner, 2))
+        nsrc = min(dg_frag%n_mat_max, size(dg_frag%coef_owner, 1))
+        allocate(row_ids(max(0, nsrc)))
+        allocate(row_seen(max(0, dg_frag%n_mat_max)))
+        row_seen(:) = .false.
+        do ispin_loop = 1, nspin_src
+          do i = 1, nsrc
+            if (dg_frag%coef_owner(i, ispin_loop) /= dg_frag%id) cycle
+            if (row_seen(i)) cycle
+            nvalid = nvalid + 1
+            row_ids(nvalid) = i
+            row_seen(i) = .true.
+          end do
+        end do
+        allocate(dg_frag%fp_local_row_ids(nvalid))
+        if (nvalid > 0) dg_frag%fp_local_row_ids(1:nvalid) = row_ids(1:nvalid)
+        deallocate(row_ids, row_seen)
+        return
+      end if
+
+      nsrc = 0
+      if (allocated(dg_frag%coef)) nsrc = min(size(dg_frag%coef, 1), dg_frag%n_mat_max)
+      allocate(dg_frag%fp_local_row_ids(nsrc))
+      do i = 1, nsrc
+        dg_frag%fp_local_row_ids(i) = i
+      end do
+      return
+    end if
+
+    ispin_eff = max(1, min(ispin_eff, max(1, dg_frag%nspin)))
 
     if (allocated(dg_frag%local_coef_global_ids)) then
       if (ispin_eff <= size(dg_frag%local_coef_global_ids, 2)) then
@@ -1294,7 +1355,7 @@ contains
     logical :: have_S_full, have_H_full, have_P_full
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
 
-    ispin_eff = 1
+    ispin_eff = 0
     if (present(ispin)) ispin_eff = ispin
     call build_local_fragment_pw_row_list(dg_frag, ispin_eff)
 

@@ -11,8 +11,7 @@
     use salmon_global, only: yn_spinorbit, ae_shape1, ae_shape2, theory
     use misc_routines, only: get_wtime
     use rt_dg_plane_wave, only: compute_fragment_pw_overlap, &
-      compute_fragment_pw_hamiltonian, build_mixed_hamiltonian, &
-      prepare_local_fragment_pw_blocks
+      compute_fragment_pw_hamiltonian, prepare_local_fragment_pw_blocks
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -302,8 +301,7 @@
       end if
 
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
-      call build_mixed_hamiltonian(dg_frag, lg, Vh, Vxc, Vpsl, Ac_tot, dg_frag%S_mat_frag_pw, dg_frag%H_mat_frag_pw)
-      call prepare_local_fragment_pw_blocks(dg_frag, 1)
+      call prepare_local_fragment_pw_blocks(dg_frag)
       t1 = get_wtime()
       time_pw_mix = time_pw_mix + (t1 - t0)
       if (trace_stage) then
