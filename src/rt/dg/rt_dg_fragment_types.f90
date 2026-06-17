@@ -454,6 +454,14 @@ module rt_dg_fragment_types
     complex(8), allocatable :: H_mat_frag_pw(:,:,:) ! Hamiltonian <fragment_i | PW_j>
     complex(8), allocatable :: P_mat_frag_pw(:,:,:,:) ! Gradient <fragment_i | nabla_idir | PW_j>
                              ! (3, n_mat_max, n_plane_waves, nspin)
+    integer, allocatable :: fp_local_row_ids(:) ! Local fragment-row ids for row-local FP operators
+    integer, allocatable :: fp_local_pw_ids(:)  ! Requested PW row ids for row-local FP operators
+    complex(8), allocatable :: S_mat_frag_pw_local(:,:,:) ! Row-local overlap <fragment_i | PW_j>
+                             ! (n_local_fragment_rows, n_requested_pw_rows, nspin)
+    complex(8), allocatable :: H_mat_frag_pw_local(:,:,:) ! Row-local Hamiltonian <fragment_i | PW_j>
+                             ! (n_local_fragment_rows, n_requested_pw_rows, nspin)
+    complex(8), allocatable :: P_mat_frag_pw_local(:,:,:,:) ! Row-local gradient <fragment_i | nabla_idir | PW_j>
+                             ! (3, n_local_fragment_rows, n_requested_pw_rows, nspin)
     complex(8), allocatable :: P_mat_frag_pw_g(:,:,:,:) ! G-space gradient <fragment_i | nabla_idir | PW_j>
                   ! (3, n_mat_max, n_plane_waves, nspin)
     complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block
