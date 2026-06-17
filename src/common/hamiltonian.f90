@@ -1104,9 +1104,17 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
   complex(8),         intent(inout) :: apsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
   complex(8),         intent(inout) :: dapsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
   complex(8),         intent(inout) :: adpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
-  integer :: ix, iy, iz
-  real(8) :: a0, k2, kvec_grid(3)
-  complex(8) :: psi0, corr
+  integer :: ix, iy, iz, n, ixc, iyc, izc, jp, jm
+  real(8) :: a0, k2, kvec_grid(3), ap, am, cf(6), lap(4,3), nab(4,3)
+  complex(8) :: psi0, corr, d1, d2, d3, c21, c31, c12, c32, c13, c23
+  integer :: idx(mg%is(1)-4:mg%ie(1)+4), idy(mg%is(2)-4:mg%ie(2)+4), idz(mg%is(3)-4:mg%ie(3)+4)
+
+  ! local copies (idx as plain 1D arrays + stencil coefs) so the hot loop below
+  ! vectorizes instead of repeatedly dereferencing derived-type components
+  idx = mg%idx(mg%is(1)-4:mg%ie(1)+4)
+  idy = mg%idy(mg%is(2)-4:mg%ie(2)+4)
+  idz = mg%idz(mg%is(3)-4:mg%ie(3)+4)
+  cf = stencil%coef_F; lap = stencil%coef_lap; nab = stencil%coef_nab
 
   call calc_tau_operator_axis_derivatives_complex(tpsi, mg, stencil%coef_nab, dpsi)
 
@@ -1129,34 +1137,56 @@ subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system,
   kvec_grid = matmul(system%rmatrix_B, kvec_cart)
   k2 = sum(kvec_cart(1:3)**2)
 
+  ! inlined direct(idir) + cross(iaxis,idir): the face-averaged vtau (ap/am) is
+  ! computed once per face and reused for the diagonal (psi) and both off-diagonal
+  ! (dpsi) terms. Same arithmetic/order as calc_tau_operator_{direct_axis,cross_component}.
   do iz = mg%is(3), mg%ie(3)
   do iy = mg%is(2), mg%ie(2)
-  do ix = mg%is(1), mg%ie(1)
-    a0 = vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz))
-    psi0 = tpsi(ix,iy,iz)
-
-    corr = 0d0
-    corr = corr - stencil%coef_F(1) * calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, stencil%coef_lap, 1, ix, iy, iz)
-    corr = corr - stencil%coef_F(2) * calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, stencil%coef_lap, 2, ix, iy, iz)
-    corr = corr - stencil%coef_F(3) * calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, stencil%coef_lap, 3, ix, iy, iz)
-    corr = corr - 0.5d0 * stencil%coef_F(4) * ( &
-         calc_tau_operator_cross_component_complex(vtau, dpsi, 2, mg, stencil%coef_nab, 3, ix, iy, iz) + &
-         calc_tau_operator_cross_component_complex(vtau, dpsi, 3, mg, stencil%coef_nab, 2, ix, iy, iz) )
-    corr = corr - 0.5d0 * stencil%coef_F(5) * ( &
-         calc_tau_operator_cross_component_complex(vtau, dpsi, 1, mg, stencil%coef_nab, 3, ix, iy, iz) + &
-         calc_tau_operator_cross_component_complex(vtau, dpsi, 3, mg, stencil%coef_nab, 1, ix, iy, iz) )
-    corr = corr - 0.5d0 * stencil%coef_F(6) * ( &
-         calc_tau_operator_cross_component_complex(vtau, dpsi, 1, mg, stencil%coef_nab, 2, ix, iy, iz) + &
-         calc_tau_operator_cross_component_complex(vtau, dpsi, 2, mg, stencil%coef_nab, 1, ix, iy, iz) )
-    corr = corr - zi * ( &
-         kvec_grid(1) * (dapsi(1,ix,iy,iz) + adpsi(1,ix,iy,iz)) + &
-         kvec_grid(2) * (dapsi(2,ix,iy,iz) + adpsi(2,ix,iy,iz)) + &
-         kvec_grid(3) * (dapsi(3,ix,iy,iz) + adpsi(3,ix,iy,iz)) )
-    corr = corr + a0 * k2 * psi0
-
-    ! variational 1/2 of the generalized-KS tau operator (see add_xc_tau_operator)
-    htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + 0.5d0 * corr
-  end do
+    iyc = idy(iy); izc = idz(iz)
+    do ix = mg%is(1), mg%ie(1)
+      ixc = idx(ix)
+      a0 = vtau(ixc, iyc, izc)
+      psi0 = tpsi(ix,iy,iz)
+      d1 = 0d0; d2 = 0d0; d3 = 0d0
+      c21 = 0d0; c31 = 0d0; c12 = 0d0; c32 = 0d0; c13 = 0d0; c23 = 0d0
+      do n = 1, 4
+        jp = idx(ix+n); jm = idx(ix-n)
+        ap = 0.5d0 * (a0 + vtau(jp, iyc, izc))
+        am = 0.5d0 * (a0 + vtau(jm, iyc, izc))
+        d1  = d1  + lap(n,1) * (ap * (tpsi(jp,iy,iz) - psi0) + am * (tpsi(jm,iy,iz) - psi0))
+        c21 = c21 + nab(n,1) * (ap * dpsi(2,jp,iy,iz) - am * dpsi(2,jm,iy,iz))
+        c31 = c31 + nab(n,1) * (ap * dpsi(3,jp,iy,iz) - am * dpsi(3,jm,iy,iz))
+      end do
+      do n = 1, 4
+        jp = idy(iy+n); jm = idy(iy-n)
+        ap = 0.5d0 * (a0 + vtau(ixc, jp, izc))
+        am = 0.5d0 * (a0 + vtau(ixc, jm, izc))
+        d2  = d2  + lap(n,2) * (ap * (tpsi(ix,jp,iz) - psi0) + am * (tpsi(ix,jm,iz) - psi0))
+        c12 = c12 + nab(n,2) * (ap * dpsi(1,ix,jp,iz) - am * dpsi(1,ix,jm,iz))
+        c32 = c32 + nab(n,2) * (ap * dpsi(3,ix,jp,iz) - am * dpsi(3,ix,jm,iz))
+      end do
+      do n = 1, 4
+        jp = idz(iz+n); jm = idz(iz-n)
+        ap = 0.5d0 * (a0 + vtau(ixc, iyc, jp))
+        am = 0.5d0 * (a0 + vtau(ixc, iyc, jm))
+        d3  = d3  + lap(n,3) * (ap * (tpsi(ix,iy,jp) - psi0) + am * (tpsi(ix,iy,jm) - psi0))
+        c13 = c13 + nab(n,3) * (ap * dpsi(1,ix,iy,jp) - am * dpsi(1,ix,iy,jm))
+        c23 = c23 + nab(n,3) * (ap * dpsi(2,ix,iy,jp) - am * dpsi(2,ix,iy,jm))
+      end do
+      corr = 0d0
+      corr = corr - cf(1) * d1
+      corr = corr - cf(2) * d2
+      corr = corr - cf(3) * d3
+      corr = corr - 0.5d0 * cf(4) * (c23 + c32)
+      corr = corr - 0.5d0 * cf(5) * (c13 + c31)
+      corr = corr - 0.5d0 * cf(6) * (c12 + c21)
+      corr = corr - zi * ( kvec_grid(1) * (dapsi(1,ix,iy,iz) + adpsi(1,ix,iy,iz)) &
+                         + kvec_grid(2) * (dapsi(2,ix,iy,iz) + adpsi(2,ix,iy,iz)) &
+                         + kvec_grid(3) * (dapsi(3,ix,iy,iz) + adpsi(3,ix,iy,iz)) )
+      corr = corr + a0 * k2 * psi0
+      ! variational 1/2 of the generalized-KS tau operator (see add_xc_tau_operator)
+      htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + 0.5d0 * corr
+    end do
   end do
   end do
 
