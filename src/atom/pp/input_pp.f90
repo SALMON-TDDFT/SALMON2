@@ -91,8 +91,17 @@ subroutine input_pp(pp,hx,hy,hz)
 
       if ( flag_beta_proj_is_given ) then
         flag_potential_is_given=.false.
-        if(method_init_density/='read_dns_cube' .and. method_init_density/='wf' .and. ps_format(ik)/='UPF') then
-          stop "radial density is not available (method_init_density=pp...)"
+        if(method_init_density/='read_dns_cube' .and. method_init_density/='wf') then
+          ! method_init_density='pp' needs a radial atomic density. It is read
+          ! from the file for UPF (<PP_RHOATOM>) and psp8 (valence density). If
+          ! the pseudopotential provides none (rho_pp_tbl is still all zero),
+          ! fall back to a generic atomic density built from the valence charge
+          ! so that 'pp' works for any pseudopotential instead of aborting.
+          if( maxval(abs(pp%rho_pp_tbl(:,ik))) < 1d-30 ) then
+            call set_generic_atomic_density(pp,ik)
+            write(*,'(a,i3,a)') " method_init_density=pp: pseudopotential of element ",ik, &
+              & " has no tabulated atomic density; using a generic atomic density."
+          end if
         end if
       end if
       if ( any(pp%vpp_so/=0.0d0) ) flag_so=.true.
@@ -284,6 +293,26 @@ subroutine input_pp(pp,hx,hy,hz)
 
   return
 end subroutine input_pp
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine set_generic_atomic_density(pp,ik)
+  use structures,only : s_pp_info
+  implicit none
+  type(s_pp_info),intent(inout) :: pp
+  integer,intent(in) :: ik
+  integer :: i
+  real(8) :: rs, r
+  ! Generic spherical atomic valence density used as an initial-density guess
+  ! (method_init_density='pp') when the pseudopotential provides no tabulated
+  ! atomic density. Exponential model rho(r) = N*exp(-r/rs) normalized to the
+  ! number of valence electrons (pp%zps), stored as 4*pi*r^2*rho:
+  !   rho_pp_tbl(i) = (zps/(2*rs^3)) * r^2 * exp(-r/rs),  with  Int rho_pp_tbl dr = zps.
+  rs = 1.5d0  ! exponential scale length [a.u.]; this is only an initial guess
+  pp%rho_pp_tbl(:,ik) = 0.0d0
+  do i=1,pp%mr(ik)
+    r = pp%rad(i,ik)
+    pp%rho_pp_tbl(i,ik) = (dble(pp%zps(ik))/(2.0d0*rs**3)) * r**2 * exp(-r/rs)
+  end do
+end subroutine set_generic_atomic_density
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine read_ps_ky(pp,rrc,ik,ps_file)
   use structures,only : s_pp_info
@@ -575,9 +604,13 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
     write(*,*) "sum(rho_nlcc)=",sum_rho_nlcc*pi4*dr
   end if
 ! valence charge density
+! The psp8 file stores the valence density as 4*pi*rho (same convention as its
+! NLCC data). Store it as 4*pi*r^2*rho in rho_pp_tbl (the convention used by
+! calc_density_pp / method_init_density='pp'), i.e. r^2 * (4*pi*rho) = r^2*rho_tmp.
   sum_rho_pp=0.0d0
   do i=1,pp%mr(ik)+1
     read(4,*) dummy_text, r_tmp, rho_tmp
+    if (i <= pp%nrmax) pp%rho_pp_tbl(i,ik) = pp%rad(i,ik)**2 * rho_tmp
     sum_rho_pp=sum_rho_pp+rho_tmp*r_tmp**2
   end do
   write(*,*) "sum(rho_pp)=",sum_rho_pp*dr
