@@ -281,7 +281,8 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,sing
   end if
 
   call write_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
-  
+  call write_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself)
+
 end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
@@ -313,8 +314,10 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
        
   if(yn_restart =='y') then
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
+    ! restore the t=0 (GS) density used as the difference-density reference
+    call read_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself,rt%rho0_loaded)
   end if
-  
+
   call nvtxEndRange
 end subroutine restart_rt
 
@@ -983,6 +986,117 @@ subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint
   end if
 
 end subroutine write_Vh_stock
+
+!===================================================================================================================================
+
+subroutine write_rho0_s(odir,lg,mg,system,info,rho0_s,is_self_checkpoint)
+  ! Save the t=0 (ground-state) spin density used as the reference for the
+  ! difference-density output, so that a restarted RT keeps the original GS
+  ! reference instead of rebuilding it from the time-evolved wavefunction.
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_scalar
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation
+  implicit none
+  character(*)   :: odir
+  type(s_rgrid), intent(in)    :: lg,mg
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_scalar),intent(in) :: rho0_s(system%nspin)
+  logical,intent(in) :: is_self_checkpoint
+
+  character(256) :: dir_file_out
+  integer :: iu1_w,jspin,ix,iy,iz
+  real(8),allocatable :: matbox0(:,:,:),matbox1(:,:,:)
+
+  iu1_w = 98
+  dir_file_out = trim(odir)//"rho0_s.bin"
+
+  if (is_self_checkpoint) then
+    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
+    do jspin=1,system%nspin
+      write(iu1_w) rho0_s(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    end do
+    close(iu1_w)
+  else
+    allocate(matbox0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    if(comm_is_root(nproc_id_global)) open(iu1_w,file=dir_file_out,form='unformatted')
+    do jspin=1,system%nspin
+      matbox0 = 0d0
+!$omp parallel do collapse(2) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        matbox0(ix,iy,iz) = rho0_s(jspin)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+      call comm_summation(matbox0,matbox1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
+      if(comm_is_root(nproc_id_global)) &
+        write(iu1_w) matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+    end do
+    if(comm_is_root(nproc_id_global)) close(iu1_w)
+    deallocate(matbox0,matbox1)
+  end if
+
+end subroutine write_rho0_s
+
+!===================================================================================================================================
+
+subroutine read_rho0_s(idir,lg,mg,system,info,rho0_s,is_self_checkpoint,success)
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_scalar
+  use parallelization, only: nproc_id_global, nproc_group_global
+  use communication, only: comm_is_root, comm_bcast
+  implicit none
+  character(*), intent(in) :: idir
+  type(s_rgrid), intent(in)    :: lg,mg
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_scalar),intent(inout) :: rho0_s(system%nspin)
+  logical,intent(in)  :: is_self_checkpoint
+  logical,intent(out) :: success
+
+  integer :: iu1_r,jspin,ix,iy,iz
+  real(8),allocatable :: matbox(:,:,:)
+  character(256) :: dir_file_in
+  logical :: file_exists
+
+  iu1_r = 96
+  dir_file_in = trim(idir)//"rho0_s.bin"
+
+  ! Backward compatibility: older restart data has no rho0_s.bin.
+  if(comm_is_root(nproc_id_global)) inquire(file=dir_file_in,exist=file_exists)
+  call comm_bcast(file_exists,nproc_group_global)
+  success = file_exists
+  if(.not. file_exists) return
+
+  if (is_self_checkpoint) then
+    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
+    do jspin=1,system%nspin
+      read(iu1_r) rho0_s(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    end do
+    close(iu1_r)
+  else
+    allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    if(comm_is_root(nproc_id_global)) open(iu1_r,file=dir_file_in,form='unformatted')
+    do jspin=1,system%nspin
+      if(comm_is_root(nproc_id_global)) &
+        read(iu1_r) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+      call comm_bcast(matbox,info%icomm_rko)
+!$omp parallel do collapse(2) private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho0_s(jspin)%f(ix,iy,iz) = matbox(ix,iy,iz)
+      end do
+      end do
+      end do
+    end do
+    if(comm_is_root(nproc_id_global)) close(iu1_r)
+    deallocate(matbox)
+  end if
+
+end subroutine read_rho0_s
 
 !===================================================================================================================================
 
