@@ -24,7 +24,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   use structures
   use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system

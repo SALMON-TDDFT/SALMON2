@@ -17,6 +17,11 @@
 
 module sendrecv_grid
   use structures, only: s_rgrid, s_pcomm_cache, s_sendrecv_grid
+#ifdef USE_OPENACC
+  use cudafor
+#define comm_send_init comm_send_init_device
+#define comm_recv_init comm_recv_init_device
+#endif
 
   implicit none
 
@@ -281,25 +286,41 @@ module sendrecv_grid
     end subroutine init_pcomm
 
     subroutine pack_cache(jside, jdir)
+#ifdef USE_OPENACC
+      use pack_unpack, only: copy_data_m2d
+#else
       use pack_unpack, only: copy_data
+#endif
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
       is_s(1:3) = srg%is_block(1:3, itype_send, jside, jdir)
       ie_s(1:3) = srg%ie_block(1:3, itype_send, jside, jdir)
+#ifdef USE_OPENACC
+      call copy_data_m2d( &
+#else
       call copy_data( &
+#endif
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
         srg%cache(itype_send, jside, jdir)%dbuf)
     end subroutine pack_cache
 
     subroutine unpack_cache(jside, jdir)
+#ifdef USE_OPENACC
+      use pack_unpack, only: copy_data_d2m
+#else
       use pack_unpack, only: copy_data
+#endif
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_d(1:3), ie_d(1:3) ! dst region
       is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
       ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
+#ifdef USE_OPENACC
+      call copy_data_d2m( &
+#else
       call copy_data( &
+#endif
         srg%cache(itype_recv, jside, jdir)%dbuf, &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine unpack_cache
@@ -432,25 +453,41 @@ module sendrecv_grid
     end subroutine init_pcomm
 
     subroutine pack_cache(jside, jdir)
+#ifdef USE_OPENACC
+      use pack_unpack, only: copy_data_m2d
+#else
       use pack_unpack, only: copy_data
+#endif
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
       is_s(1:3) = srg%is_block(1:3, itype_send, jside, jdir)
       ie_s(1:3) = srg%ie_block(1:3, itype_send, jside, jdir)
+#ifdef USE_OPENACC
+      call copy_data_m2d( &
+#else
       call copy_data( &
+#endif
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
         srg%cache(itype_send, jside, jdir)%zbuf)
     end subroutine pack_cache
 
     subroutine unpack_cache(jside, jdir)
+#ifdef USE_OPENACC
+      use pack_unpack, only: copy_data_d2m
+#else
       use pack_unpack, only: copy_data
+#endif
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_d(1:3), ie_d(1:3) ! dst region
       is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
       ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
+#ifdef USE_OPENACC
+      call copy_data_d2m( &
+#else
       call copy_data( &
+#endif
         srg%cache(itype_recv, jside, jdir)%zbuf, &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine unpack_cache

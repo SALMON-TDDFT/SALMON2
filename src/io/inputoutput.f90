@@ -630,7 +630,10 @@ contains
       & nelec_sbe, &
       & al_sbe, &
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
-      & norder_correction
+      & norder_correction, &
+      & gauge_sbe, &
+      & t_2, &
+      & am_s
       
     namelist/dc/ &
       & num_fragment, &
@@ -1094,6 +1097,9 @@ contains
     al_vec2_sbe(:,:) = 0.d0
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
+    gauge_sbe = 'velocity_gauge'
+    t_2 = -1.d0
+    am_s = 4
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1765,6 +1771,10 @@ contains
     al_vec2_sbe = al_vec2_sbe * ulength_to_au
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
+    call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(t_2              ,nproc_group_global)
+    t_2 = t_2 * utime_to_au
+    call comm_bcast(am_s             ,nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2763,6 +2773,9 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc

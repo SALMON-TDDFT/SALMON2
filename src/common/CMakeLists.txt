@@ -32,6 +32,8 @@ else ()
   if(USE_OPENACC)
       set(SOURCES ${SOURCES}
           zstencil_core/gpu/seq.f90
+          cublas_wrapper.f90
+          cusolver_wrapper.f90
           )
     if(USE_CUDA)
         set(SOURCES ${SOURCES}

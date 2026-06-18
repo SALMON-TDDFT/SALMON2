@@ -239,26 +239,26 @@ end subroutine ssdg_rwf
 
 !===================================================================================================================================
 
-  !===================================================================================================================================
+!===================================================================================================================================
 
-  subroutine ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    use salmon_global, only: yn_scalapack
-    use structures
-    use communication, only: comm_summation,comm_bcast
-    use timer
-    use hamiltonian, only: hpsi
-    use eigen_subdiag_sub
-    use sendrecv_grid, only: s_sendrecv_grid
-    use pack_unpack, only: copy_data
-    implicit none
-    type(s_rgrid)        ,intent(in) :: mg
-    type(s_dft_system)   ,intent(in) :: system
-    type(s_parallel_info),intent(in) :: info
-    type(s_stencil),intent(in) :: stencil
-    type(s_pp_grid),intent(in) :: ppg
-    type(s_scalar) ,intent(in) :: vlocal(system%nspin)
-    type(s_orbital)            :: spsi,shpsi
-    type(s_sendrecv_grid)      :: srg
+subroutine ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  use salmon_global, only: yn_scalapack
+  use structures
+  use communication, only: comm_summation,comm_bcast
+  use timer
+  use hamiltonian, only: hpsi
+  use eigen_subdiag_sub
+  use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
+  implicit none
+  type(s_rgrid)        ,intent(in) :: mg
+  type(s_dft_system)   ,intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_stencil),intent(in) :: stencil
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)            :: spsi,shpsi
+  type(s_sendrecv_grid)      :: srg
 
   complex(8),parameter :: zero = 0d0, one = 1d0
   integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,m
@@ -269,6 +269,11 @@ end subroutine ssdg_rwf
   complex(8) :: hmat_block(info%numo_max, info%numo)
   complex(8) :: hmat_block_tmp(info%numo_max, info%numo)
   real(8) :: eval(system%no)
+
+#ifdef USE_OPENACC
+  call ssdg_zwf_cblas_gpu(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  return
+#endif
 
   call timer_begin(LOG_SSDG_PERIODIC_HPSI)
   call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg,xc_payload=system%xc_payload)
@@ -400,6 +405,245 @@ end subroutine ssdg_rwf
 return
 
 end subroutine ssdg_zwf_cblas
+
+#ifdef USE_OPENACC
+subroutine ssdg_zwf_cblas_gpu(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  use salmon_global, only: yn_scalapack
+  use structures
+  use communication, only: comm_summation,comm_bcast
+  use timer
+  use hamiltonian, only: hpsi
+  use eigen_subdiag_sub
+  use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
+  use openacc
+  use cusolver_wrapper
+  use cublas_wrapper
+  implicit none
+  type(s_rgrid)     ,intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  type(s_stencil)   ,intent(in) :: stencil
+  type(s_pp_grid)   ,intent(in) :: ppg
+  type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)               :: spsi,shpsi
+  type(s_sendrecv_grid)         :: srg
+  !
+  logical,save :: initialized = .false.
+  integer :: istat
+  complex(8),parameter :: zero=0d0,one=1d0
+  integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,m,ix,iy,iz
+  complex(8),save,allocatable :: hmat(:,:,:,:,:),hmat_tmp(:,:,:,:,:),evec(:,:,:,:,:)
+  complex(8),save,allocatable :: wf1_block(:,:,:,:,:,:,:)
+  complex(8),save,allocatable :: wf2_block(:,:,:,:,:,:,:)
+  complex(8),save,allocatable :: wf_block_send(:,:,:,:,:,:,:)
+  complex(8),save,allocatable :: hmat_block(:,:,:,:,:)
+  complex(8),save,allocatable :: hmat_block_tmp(:,:,:,:,:)
+  real(8)   ,save,allocatable :: eval(:,:,:,:)
+
+  call timer_begin(LOG_SSDG_PERIODIC_HPSI)
+  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_SSDG_PERIODIC_HPSI)
+
+  nsize_rg = (mg%ie(1)-mg%is(1)+1)*(mg%ie(2)-mg%is(2)+1)*(mg%ie(3)-mg%is(3)+1)
+
+  if(.not. initialized) then
+    allocate(hmat(system%no,system%no,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(hmat_tmp(system%no,system%no,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(evec(system%no,system%no,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(wf1_block(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+                       info%numo,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(wf2_block(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+                       info%numo,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(wf_block_send(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+                           info%numo_max,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(hmat_block(info%numo_max,info%numo,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(hmat_block_tmp(info%numo_max,info%numo,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    allocate(eval(system%no,system%nspin,info%ik_s:info%ik_e,info%im_s:info%im_e))
+
+    initialized = .true.
+  end if
+
+  !$acc kernels
+  do im=info%im_s,info%im_e
+  do ik=info%ik_s,info%ik_e
+  do ispin=1,system%nspin
+  do io=info%io_s,info%io_e
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    jo = io - info%io_s + 1
+    wf1_block(ix,iy,iz,jo,ispin,ik,im) = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
+    wf2_block(ix,iy,iz,jo,ispin,ik,im) = shpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+  end do
+  end do
+  end do
+  end do
+  end do
+  end do
+  end do
+  !$acc end kernels
+
+  !$acc kernels
+  wf_block_send(:,:,:,:,:,:,:) = 0d0
+  hmat_tmp(:,:,:,:,:) = 0d0
+  !$acc end kernels
+
+  do m=0,info%nporbital-1
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    if(m==info%id_o) then
+      !$acc kernels
+      wf_block_send(:,:,:,1:info%numo,:,:,:) = wf1_block(:,:,:,:,:,:,:)
+      !$acc end kernels
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_orbit) then
+      do im=info%im_s,info%im_e
+      do ik=info%ik_s,info%ik_e
+      do ispin=1,system%nspin
+        call comm_bcast(wf_block_send(:,:,:,1:info%numo_all(m),ispin,ik,im), &
+                        info%icomm_o,info%irank_io(info%io_s_all(m)))
+      end do ! ispin
+      end do ! ik
+      end do ! im
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    !$acc kernels
+    hmat_block_tmp(:,:,:,:,:) = 0d0
+    !$acc end kernels
+
+    istat = cublasZgemmStridedBatch_wrapper(CUBLAS_OP_C,CUBLAS_OP_N,info%numo_all(m),info%numo,nsize_rg,  &
+                                            one*system%hvol,wf_block_send(:,:,:,:,:,:,:),nsize_rg, &
+                                            nsize_rg*info%numo_max,wf2_block(:,:,:,:,:,:,:),nsize_rg, &
+                                            nsize_rg*info%numo,zero,hmat_block_tmp(:,:,:,:,:), &
+                                            info%numo_max,info%numo_max*info%numo, &
+                                            (info%im_e-info%im_s+1)*(info%ik_e-info%ik_s+1)*system%nspin)
+    call acc_wait(acc_async_sync)
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_rspace) then
+      do im=info%im_s,info%im_e
+      do ik=info%ik_s,info%ik_e
+      do ispin=1,system%nspin
+        call comm_summation(hmat_block_tmp(:,:,ispin,ik,im),hmat_block(:,:,ispin,ik,im), &
+                            info%numo_max*info%numo,info%icomm_r)
+      end do ! ispin
+      end do ! ik
+      end do ! im
+    else
+      !$acc kernels
+      hmat_block(:,:,:,:,:) = hmat_block_tmp(:,:,:,:,:)
+      !$acc end kernels
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    !$acc parallel loop collapse(5) gang vector
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do ispin=1,system%nspin
+    do io1=info%io_s_all(m),info%io_e_all(m)
+    do io2=info%io_s,info%io_e
+      hmat_tmp(io1,io2,ispin,ik,im) = &
+        & hmat_block(io1-info%io_s_all(m)+1,io2-info%io_s+1,ispin,ik,im)
+    end do
+    end do
+    end do ! ispin
+    end do ! ik
+    end do ! im
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+  end do ! m
+
+  call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+  if (info%if_divide_orbit) then
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do ispin=1,system%nspin
+      call comm_summation(hmat_tmp(:,:,ispin,ik,im),hmat(:,:,ispin,ik,im), &
+                          system%no*system%no,info%icomm_o)
+    end do ! ispin
+    end do ! ik
+    end do ! im
+  else
+    !$acc kernels
+    hmat(:,:,:,:,:) = hmat_tmp(:,:,:,:,:)
+    !$acc end kernels
+  end if
+  call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+  call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
+  call eigen_zheev_batched_gpu(hmat(:,:,:,:,:),eval,evec(:,:,:,:,:),system%no, &
+                               info%im_s,info%im_e,info%ik_s,info%ik_e,system%nspin)
+  call timer_end(LOG_SSDG_PERIODIC_EIGEN)
+
+  !$acc kernels
+  wf2_block(:,:,:,:,:,:,:) = 0d0
+  wf_block_send(:,:,:,:,:,:,:) = 0d0
+  !$acc end kernels
+
+  do m=0,info%nporbital-1
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    if(m==info%id_o) then
+      !$acc kernels
+      wf_block_send(:,:,:,1:info%numo,:,:,:) = wf1_block(:,:,:,:,:,:,:)
+      !$acc end kernels
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_orbit) then
+      do im=info%im_s,info%im_e
+      do ik=info%ik_s,info%ik_e
+      do ispin=1,system%nspin
+        call comm_bcast(wf_block_send(:,:,:,1:info%numo_all(m),ispin,ik,im), &
+                        info%icomm_o,info%irank_io(info%io_s_all(m)))
+      end do ! ispin
+      end do ! ik
+      end do ! im
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    istat = cublasZgemmStridedBatch_wrapper(CUBLAS_OP_N,CUBLAS_OP_N,nsize_rg,info%numo,info%numo_all(m),  &
+                                            one,wf_block_send(:,:,:,:,:,:,:),nsize_rg, &
+                                            nsize_rg*info%numo_max,evec(info%io_s_all(m),info%io_s,1,info%ik_s,info%im_s),system%no, &
+                                            system%no*system%no,one,wf2_block(:,:,:,:,:,:,:), &
+                                            nsize_rg,nsize_rg*info%numo, &
+                                            (info%im_e-info%im_s+1)*(info%ik_e-info%ik_s+1)*system%nspin)
+    call acc_wait(acc_async_sync)
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+  end do ! m
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
+  !$acc kernels
+  do im=info%im_s,info%im_e
+  do ik=info%ik_s,info%ik_e
+  do ispin=1,system%nspin
+  do io=info%io_s,info%io_e
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    jo = io - info%io_s + 1
+    spsi%zwf(ix,iy,iz,ispin,io,ik,im) = wf2_block(ix,iy,iz,jo,ispin,ik,im)
+  end do
+  end do
+  end do
+  end do
+  end do
+  end do
+  end do
+  !$acc end kernels
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+  return
+end subroutine ssdg_zwf_cblas_gpu
+#endif
 !===================================================================================================================================
 
 !===================================================================================================================================

@@ -30,7 +30,7 @@ use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pu
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
-use nvtx
+use nvtx_wrapper
 use parallelization, only: nproc_id_global
 implicit none
 
@@ -219,4 +219,3 @@ subroutine print_header()
 end subroutine print_header
 
 end subroutine main_tddft
-

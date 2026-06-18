@@ -90,7 +90,7 @@ contains
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
     use salmon_global, only: yn_spinorbit, yn_tau_nlcc, yn_nlcc_grho
     use noncollinear_module, only: rot_vxc_noncollinear
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_dft_system)      ,intent(inout), target :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
@@ -1338,7 +1338,7 @@ contains
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     use structures, only: s_pp_info, s_xc_operator_payload
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_xc_functional), intent(in) :: xc
     type(s_pp_info),       intent(in) :: pp
@@ -1520,7 +1520,7 @@ contains
     end subroutine exec_builtin_calc_axpy
 
     subroutine exec_builtin_pz()
-      use nvtx
+      use nvtx_wrapper
       implicit none
       call nvtxStartRange('exec_builtin_pz', __LINE__)
 
@@ -1615,7 +1615,7 @@ contains
 
 
     subroutine exec_builtin_pzm()
-      use nvtx
+      use nvtx_wrapper
       implicit none
       real(8) :: rho_s_1d(nl)
       real(8) :: exc_1d(nl)
@@ -1706,7 +1706,7 @@ contains
     
 
     subroutine exec_builtin_tbmbj()
-      use nvtx
+      use nvtx_wrapper
       implicit none
       real(8) :: rho_1d(nl)
       real(8) :: rho_s_1d(nl)
@@ -1842,7 +1842,7 @@ contains
 #if XC_MAJOR_VERSION >= 5
       use, intrinsic :: iso_c_binding
 #endif
-      use nvtx
+      use nvtx_wrapper
       implicit none
       integer, intent(in) :: ii
       integer :: ix,iy,iz,idir

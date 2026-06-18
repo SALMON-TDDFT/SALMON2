@@ -36,7 +36,7 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use poisson_isolated
   use poisson_periodic
   use poisson_dirichlet, only: jones
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: mg
