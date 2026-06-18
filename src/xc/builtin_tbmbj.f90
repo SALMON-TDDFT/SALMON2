@@ -35,9 +35,10 @@ contains
     !real(8), intent(in) :: Hxyz, aLxyz
     
     real(8),parameter :: alpha=-0.012d0,beta=1.023d0,gamma=0.80d0
+    real(8),parameter :: rho_thr=1d-10 ! skip MBJ where the density is negligible
     real(8) :: c,tau_s_jrho,D_s_jrho,Q_s,rhs,x_s,b_s,Vx_BR,Vx_MBJ
     real(8) :: trho,rs,rhos,ec,dec_drhoa,dec_drhob
-    integer :: i
+    integer :: i,ncnt
     
     ! call rho_j_tau(GS_RT,rho_s,tau_s,j_s,grho_s,lrho_s)
 
@@ -47,7 +48,18 @@ contains
          c=cval ! use c-value given by input file
        else
          !c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:))*Hxyz/aLxyz
-         c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:)) / nl
+         ! Average |grad rho|/rho only over points with non-negligible density.
+         ! rho_s -> 0 (e.g. vacuum-like regions of a localized initial guess)
+         ! would otherwise make this sum diverge.
+         c=0d0
+         ncnt=0
+         do i=1,nl
+           if(rho_s(i) > rho_thr) then
+             c=c+sqrt(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rho_s(i)
+             ncnt=ncnt+1
+           end if
+         end do
+         if(ncnt > 0) c=c/dble(ncnt)
          c=alpha+beta*sqrt(c)
        endif
     ! case('BJ_PW')
@@ -55,6 +67,14 @@ contains
     ! end select
     
     do i=1,NL
+      ! The MBJ potential divides by rho_s and feeds BR_Newton, whose root search
+      ! does not terminate for a zero-density point. Skip negligible-density
+      ! points (the XC potential there is ~0) to avoid Inf/NaN and a silent hang.
+      if(rho_s(i) <= rho_thr) then
+        Vexc(i)=0d0
+        Eexc(i)=0d0
+        cycle
+      end if
       tau_s_jrho=tau_s(i)-(j_s(i,1)**2+j_s(i,2)**2+j_s(i,3)**2)/rho_s(i)/2
       D_s_jrho=2*tau_s_jrho-0.25d0*(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rho_s(i)
       Q_s=(lrho_s(i)-2*gamma*D_s_jrho)/6d0
@@ -86,10 +106,12 @@ contains
     integer iter
     real(8) :: xmin,xmax,x,fx,dfx
 
-  ! find xmax
+  ! find xmax (for any finite rhs>0 this terminates within a few doublings; the
+  ! iteration cap is a safeguard so a degenerate rhs cannot loop forever)
     xmin=0d0
     x=1d0
-    do
+    xmax=x
+    do iter=1,100
       fx=x*exp(-2d0/3d0*x)/rhs-(x-2)
       if(fx < 0) then
         xmax=x
