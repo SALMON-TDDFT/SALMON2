@@ -53,12 +53,16 @@ contains
   end if
 end function check_numcpu
 
-subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
+subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
   use structures, only: s_parallel_info
   use communication, only: comm_get_groupinfo
   implicit none
   integer,intent(in)                :: iprefer_dist,numk,numo,icomm1
   type(s_parallel_info),intent(out) :: info
+  ! rspace_allowed=.false. forbids real-space (domain) parallelization, used for
+  ! non-orthogonal lattices. Optional; defaults to .true. (previous behaviour).
+  logical,intent(in),optional       :: rspace_allowed
+  logical :: allow_rspace
   integer :: nproc_size_comm1, nproc_id_comm1
 
   integer :: ip
@@ -72,6 +76,9 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
   integer :: num_factor5
 
   integer :: nk,no
+
+  allow_rspace = .true.
+  if (present(rspace_allowed)) allow_rspace = rspace_allowed
 
   call comm_get_groupinfo(icomm1, nproc_id_comm1, nproc_size_comm1)
   nproc_size_comm1_tmp=nproc_size_comm1
@@ -113,6 +120,16 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
 
     ! rgrid
     case(iprefer_domain_distribution)
+      if(.not. allow_rspace)then
+        ! Non-orthogonal lattice: real-space (domain) parallelization is not
+        ! supported. Any processes left after k/orbital distribution cannot be
+        ! placed without it, so this is a user configuration error.
+        if(nproc_size_comm1_tmp /= 1) &
+          stop "automatic process distribution: a non-orthogonal lattice cannot use &
+               &r-space parallelization; set nproc_k*nproc_ob = (number of MPI processes)."
+        nproc_d_o = 1
+        cycle
+      end if
       num_factor2=0
       do ii=1,26
         if(mod(nproc_size_comm1_tmp,2)==0)then
