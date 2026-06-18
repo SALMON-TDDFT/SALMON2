@@ -448,11 +448,17 @@ module salmon_pp
       end do
   
       do i1 = irepr_min, irepr_max
-        Rion_repr(1) = sys%Rion(1, a) + i1 * sys%primitive_a(1, 1)
       do i2 = irepr_min, irepr_max
-        Rion_repr(2) = sys%Rion(2, a) + i2 * sys%primitive_a(2, 2)
       do i3 = irepr_min, irepr_max
-        Rion_repr(3) = sys%Rion(3, a) + i3 * sys%primitive_a(3, 3)
+        ! Periodic replica of the ion. Use the full lattice vectors so that a
+        ! non-orthogonal (or non-axis-aligned) cell is handled correctly; the
+        ! previous code displaced by the diagonal components only
+        ! (i1*primitive_a(1,1), i2*primitive_a(2,2), i3*primitive_a(3,3)), which
+        ! is correct only for a cuboid cell. For a cuboid cell this is identical.
+        Rion_repr(1:3) = sys%Rion(1:3, a)                  &
+                       + i1 * sys%primitive_a(1:3, 1)        &
+                       + i2 * sys%primitive_a(1:3, 2)        &
+                       + i3 * sys%primitive_a(1:3, 3)
 
         if(flag_cuboid) then
           j1s = max(rg%is(1), 1 + ceiling((Rion_repr(1) - rc) / sys%hgs(1)))
