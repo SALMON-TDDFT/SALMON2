@@ -482,7 +482,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald,Vxc)
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0
