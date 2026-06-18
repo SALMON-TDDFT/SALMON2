@@ -36,8 +36,14 @@ SUBROUTINE init_lattice(system,stencil)
   a2 = A(1:3,2)
   a3 = A(1:3,3)
   call calc_inverse(A,wrk,detA)
-  system%det_a = detA
-  system%Hvol = detA/dble(system%ngrid)
+  ! detA is the signed scalar triple product a1.(a2 x a3); it is negative when the
+  ! primitive vectors are given in a left-handed order (e.g. swapped orthorhombic
+  ! axes). The cell volume and grid-volume element must be positive, otherwise
+  ! sqrt(rbox2*Hvol) in the wavefunction normalization yields NaN. Use |detA| for
+  ! the volume; the (signed) inverse wrk is left untouched so the reciprocal
+  ! lattice primitive_b = 2*pi*A^{-1} stays correct regardless of handedness.
+  system%det_a = abs(detA)
+  system%Hvol = abs(detA)/dble(system%ngrid)
   system%primitive_b = 2d0*pi* transpose(wrk) ! reciprocal primitive lattice vectors
   ! [ b1 b2 b3 ]^{T} = 2*pi* [ a1 a2 a3 ]^{-1}
 
