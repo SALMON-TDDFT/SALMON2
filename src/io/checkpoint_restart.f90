@@ -76,11 +76,22 @@ subroutine generate_restart_directory_name(basedir,gdir,pdir)
   character(*),  intent(in)  :: basedir
   character(256),intent(out) :: gdir
   character(256),intent(out) :: pdir
+  character(6) :: crank
 
-  ! global directory
-  write(gdir,'(A,I6.6,A)')   trim(basedir)
+  ! Build the directory names with plain string operations. The previous code,
+  !   write(gdir,'(A,I6.6,A)') trim(basedir)
+  !   write(pdir,'(A,A,I6.6,A)') trim(gdir),'rank_',nproc_id_global,'/'
+  ! used internal-file list-directed writes whose formats did not match the
+  ! output list (the gdir write has an I6.6 with no integer argument), which
+  ! aborts with jwe0131i ("end of the character variable in an internal file
+  ! I/O statement") on strict compilers and broke the (RT) restart checkpoint.
+
+  ! global directory (the restart directory itself; no iteration index, unlike
+  ! generate_checkpoint_directory_name)
+  gdir = trim(basedir)
   ! process private directory
-  write(pdir,'(A,A,I6.6,A)') trim(gdir),'rank_',nproc_id_global,'/'
+  write(crank,'(i6.6)') nproc_id_global
+  pdir = trim(gdir)//'rank_'//crank//'/'
 end subroutine generate_restart_directory_name
 
 
