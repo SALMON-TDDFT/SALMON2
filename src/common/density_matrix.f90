@@ -750,7 +750,7 @@ contains
     type(s_vector)                   :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin,ix,iy,iz
-    real(8) :: k(3)
+    real(8) :: k(3),BT(3,3)
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
 
     call timer_begin(LOG_MCURRENT_CALC)
@@ -765,6 +765,10 @@ contains
     allocate(wrk(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)),wrk2(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
     nsize = 3* mg%num(1) * mg%num(2) * mg%num(3)
 
+    ! transform from lattice-direction gradients to Cartesian (cf. calc_current);
+    ! identity for an orthogonal, axis-aligned cell.
+    BT = transpose(system%rmatrix_B)
+
     wrk2 = 0d0
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -772,7 +776,7 @@ contains
 
       k(1:3) = system%vec_k(1:3,ik)
       call micro_current(mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz, &
-      & stencil%coef_nab,k,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
+      & stencil%coef_nab,k,BT,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
 
 !$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=is(3),ie(3)
@@ -806,17 +810,18 @@ contains
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,k,tpsi,jw)
+    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,k,BT,tpsi,jw)
       implicit none
       integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3), &
                              & idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
-      real(8)   ,intent(in) :: nabt(Nd,3),k(3)
+      real(8)   ,intent(in) :: nabt(Nd,3),k(3),BT(3,3)
       complex(8),intent(in) :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
       integer :: ix,iy,iz
       complex(8) :: xtmp,ytmp,ztmp,px,py,pz
-!$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp,px,py,pz)
+      real(8) :: gx,gy,gz,rho_p
+!$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp,px,py,pz,gx,gy,gz,rho_p)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
 
@@ -827,7 +832,7 @@ contains
                + nabt(2,1) * ( tpsi(DX(2)) - tpsi(DX(-2)) ) &
                + nabt(3,1) * ( tpsi(DX(3)) - tpsi(DX(-3)) ) &
                + nabt(4,1) * ( tpsi(DX(4)) - tpsi(DX(-4)) )
-          jw(1,ix,iy,iz) = aimag(px*xtmp) + k(1) * abs(px)**2
+          jw(1,ix,iy,iz) = aimag(px*xtmp)
         end do
 
 !OCL swp
@@ -837,7 +842,7 @@ contains
                + nabt(2,2) * ( tpsi(DY(2)) - tpsi(DY(-2)) ) &
                + nabt(3,2) * ( tpsi(DY(3)) - tpsi(DY(-3)) ) &
                + nabt(4,2) * ( tpsi(DY(4)) - tpsi(DY(-4)) )
-          jw(2,ix,iy,iz) = aimag(py*ytmp) + k(2) * abs(py)**2
+          jw(2,ix,iy,iz) = aimag(py*ytmp)
         end do
 
 !OCL swp
@@ -847,7 +852,21 @@ contains
                + nabt(2,3) * ( tpsi(DZ(2)) - tpsi(DZ(-2)) ) &
                + nabt(3,3) * ( tpsi(DZ(3)) - tpsi(DZ(-3)) ) &
                + nabt(4,3) * ( tpsi(DZ(4)) - tpsi(DZ(-4)) )
-          jw(3,ix,iy,iz) = aimag(pz*ztmp) + k(3) * abs(pz)**2
+          jw(3,ix,iy,iz) = aimag(pz*ztmp)
+        end do
+
+        ! rotate the lattice-direction paramagnetic current to Cartesian via
+        ! BT = transpose(rmatrix_B) (cf. calc_current), then add the Cartesian
+        ! k-point term. BT is the identity for an orthogonal, axis-aligned cell.
+!OCL swp
+        do ix=is(1),ie(1)
+          gx = jw(1,ix,iy,iz)
+          gy = jw(2,ix,iy,iz)
+          gz = jw(3,ix,iy,iz)
+          rho_p = abs(tpsi(ix,iy,iz))**2
+          jw(1,ix,iy,iz) = BT(1,1)*gx + BT(1,2)*gy + BT(1,3)*gz + k(1)*rho_p
+          jw(2,ix,iy,iz) = BT(2,1)*gx + BT(2,2)*gy + BT(2,3)*gz + k(2)*rho_p
+          jw(3,ix,iy,iz) = BT(3,1)*gx + BT(3,2)*gy + BT(3,3)*gz + k(3)*rho_p
         end do
 
       end do
