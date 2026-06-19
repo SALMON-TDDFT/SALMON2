@@ -739,7 +739,8 @@ end subroutine inner_product
 
 subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
   !$ use omp_lib
-  use preconditioning_sub, only: zstencil_preconditioning,zstencil_nonorthogonal_preconditioning
+  use preconditioning_sub, only: zstencil_preconditioning,zstencil_nonorthogonal_preconditioning &
+                                ,zstencil_nonorthogonal_preconditioning_diag
   use structures
   use sendrecv_grid, only: update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping,alpha_pre
@@ -781,6 +782,16 @@ subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,nspin
+      if (info%if_divide_rspace) then
+      ! r-space parallel: diagonal-metric preconditioner (cross term dropped; preconditioner-only)
+      call zstencil_nonorthogonal_preconditioning_diag(mg%is_array,mg%ie_array,mg%is,  &
+                                    mg%ie,mg%idx,mg%idy,mg%idz, &
+                                    gk%zwf(:,:,:,ispin,io,ik,1), &
+                                    pre_gk%zwf(:,:,:,ispin,io,ik,1), &
+                                    stencil%coef_lap0_nd1, &
+                                    stencil%coef_lap_nd1,stencil%coef_nab_nd1, &
+                                    stencil%coef_F,alpha)
+      else
       call zstencil_nonorthogonal_preconditioning(mg%is_array,mg%ie_array,mg%is,  &
                                     mg%ie,mg%idx,mg%idy,mg%idz, &
                                     gk%zwf(:,:,:,ispin,io,ik,1), &
@@ -788,6 +799,7 @@ subroutine preconditioning_zgk(mg,system,info,gk,pre_gk)
                                     stencil%coef_lap0_nd1, &
                                     stencil%coef_lap_nd1,stencil%coef_nab_nd1, &
                                     stencil%coef_F,alpha)
+      end if
     end do
     end do
     end do

@@ -311,6 +311,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       endif
 
 
+    else if(.not.stencil%if_orthogonal .and. info%if_divide_rspace) then
+    ! non-orthogonal lattice, r-space parallelized: pass1 -> halo(df/dx,df/dy) -> pass2
+      call hpsi_nonorth_rspace(tpsi,htpsi,info,mg,V_local,system,stencil,srg)
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
@@ -830,6 +833,95 @@ contains
   end subroutine add_imaginary_potential_for_absorbing_boundary_z
 
 end subroutine hpsi
+
+!===================================================================================================================================
+
+subroutine hpsi_nonorth_rspace(tpsi,htpsi,info,mg,V_local,system,stencil,srg)
+! Nonorthogonal-lattice kinetic operator for the r-space-parallel case (nproc_rgrid>1).
+! Two-pass scheme: pass1 fills htpsi's diagonal-metric + Bk*nabla part and stores the
+! per-axis first derivatives df/dx, df/dy; their halos are then exchanged (update_overlap,
+! using the same srg as the wavefunction) so pass2 can form the off-diagonal-metric cross
+! derivatives whose stencils reach into the halo. For nproc_rgrid=1 this routine is not
+! reached (the serial path zstencil_nonorthogonal uses the periodic index wrap); the
+! orthogonal stencils are untouched. Math is identical to zstencil_nonorthogonal.
+  use structures
+  use stencil_sub, only: zstencil_nonorth_rspace_pass1, zstencil_nonorth_rspace_pass2
+  use sendrecv_grid, only: update_overlap_complex8
+  use salmon_global, only: yn_periodic
+  implicit none
+  type(s_dft_system)   ,intent(in)    :: system
+  type(s_parallel_info),intent(in)    :: info
+  type(s_rgrid)        ,intent(in)    :: mg
+  type(s_scalar)       ,intent(in)    :: V_local(system%Nspin)
+  type(s_stencil)      ,intent(in)    :: stencil
+  type(s_sendrecv_grid),intent(inout) :: srg
+  type(s_orbital)                     :: tpsi,htpsi
+  !
+  integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
+  real(8) :: k_lap0,kAc(3)
+  logical :: if_kAc
+  complex(8),allocatable :: wrk1(:,:,:,:,:,:,:),wrk2(:,:,:,:,:,:,:)
+
+  im_s=info%im_s; im_e=info%im_e
+  ik_s=info%ik_s; ik_e=info%ik_e
+  io_s=info%io_s; io_e=info%io_e
+  nspin=system%nspin
+  if_kAc = (yn_periodic=='y')
+
+  allocate(wrk1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3) &
+               ,nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+  allocate(wrk2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3) &
+               ,nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+
+  ! pass1: diagonal-metric Laplacian + Bk*nabla into htpsi; store df/dx, df/dy in wrk1, wrk2
+!$omp parallel do collapse(4) default(none) &
+!$omp private(im,ik,io,ispin,kAc,k_lap0) &
+!$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kAc,system,stencil,mg,tpsi,htpsi,V_local,wrk1,wrk2)
+  do im=im_s,im_e
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,nspin
+    kAc = 0d0
+    k_lap0 = 0d0
+    if(if_kAc) then
+      kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+      kAc(1:3) = matmul(system%rmatrix_B,kAc)
+    end if
+    call zstencil_nonorth_rspace_pass1(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+        ,wrk1(:,:,:,ispin,io,ik,im),wrk2(:,:,:,ispin,io,ik,im) &
+        ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
+  end do
+  end do
+  end do
+  end do
+!$omp end parallel do
+
+  ! exchange halos of df/dx, df/dy (same srg/layout as the wavefunction block)
+  call update_overlap_complex8(srg, mg, wrk1)
+  call update_overlap_complex8(srg, mg, wrk2)
+
+  ! pass2: add off-diagonal-metric cross derivatives from the halo-exchanged wrk1, wrk2
+!$omp parallel do collapse(4) default(none) &
+!$omp private(im,ik,io,ispin) &
+!$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,stencil,mg,htpsi,wrk1,wrk2)
+  do im=im_s,im_e
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,nspin
+    call zstencil_nonorth_rspace_pass2(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+        ,wrk1(:,:,:,ispin,io,ik,im),wrk2(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+        ,stencil%coef_nab,stencil%coef_F)
+  end do
+  end do
+  end do
+  end do
+!$omp end parallel do
+
+  deallocate(wrk1,wrk2)
+  return
+end subroutine hpsi_nonorth_rspace
 
 !===================================================================================================================================
 

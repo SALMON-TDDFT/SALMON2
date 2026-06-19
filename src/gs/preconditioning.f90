@@ -226,4 +226,61 @@ subroutine zstencil_nonorthogonal_preconditioning(is_array,ie_array,is,ie,idx,id
 #endif
 end subroutine zstencil_nonorthogonal_preconditioning
 
+!===================================================================================================================================
+
+subroutine zstencil_nonorthogonal_preconditioning_diag(is_array,ie_array,is,ie,idx,idy,idz &
+                                   ,tpsi,htpsi,lap0,lapt,nabt,F,alpha)
+! Diagonal-metric variant of zstencil_nonorthogonal_preconditioning for the r-space-parallel
+! case (nproc_rgrid>1). The off-diagonal-metric cross-derivative term (which would require
+! halo-exchanging the df/dx, df/dy intermediates) is omitted. This only changes the
+! preconditioner, not the converged Kohn-Sham state, so the SCF result is unaffected (CG may
+! take slightly more iterations). The diagonal part reads tpsi at face neighbors, whose halo
+! is exchanged by the caller. Serial nonorthogonal CG keeps the full routine; signature is
+! identical for a drop-in swap. nabt is unused here (kept for signature compatibility).
+  use structures
+  implicit none
+
+  integer   ,intent(in)    :: is_array(3),ie_array(3),is(3),ie(3) &
+                             ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  complex(8),intent(in)    :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  complex(8),intent(inout) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  real(8)   ,intent(in)    :: lap0,lapt(1,3),nabt(1,3)
+  real(8)   ,intent(in)    :: F(6)
+  real(8)   ,intent(in)    :: alpha
+  !
+  integer :: ix,iy,iz
+  real(8) :: omega
+  real(8) :: d
+  complex(8) :: v(3)
+
+  omega=2.d0*(1.d0-alpha)
+  d = lap0
+#ifdef USE_OPENACC
+!$acc parallel
+!$acc loop collapse(2) private(iz,iy,ix,v)
+#else
+!$OMP parallel
+!$OMP do collapse(2) private(iz,iy,ix,v)
+#endif
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+    v(1) =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1)))
+    v(2) =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1)))
+    v(3) =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1)))
+
+    htpsi(ix,iy,iz) = lap0 * tpsi(ix,iy,iz) &
+                    - 0.5d0* ( F(1)*v(1) + F(2)*v(2) + F(3)*v(3) )
+    htpsi(ix,iy,iz) = omega/d*(2.d0*tpsi(ix,iy,iz)-omega/d*htpsi(ix,iy,iz))
+  end do
+  end do
+  end do
+#ifdef USE_OPENACC
+!$acc end parallel
+#else
+!$OMP end do
+!$OMP end parallel
+#endif
+end subroutine zstencil_nonorthogonal_preconditioning_diag
+
 end module preconditioning_sub

@@ -215,6 +215,126 @@ end subroutine zstencil_nonorthogonal
 
 !===================================================================================================================================
 
+subroutine zstencil_nonorth_rspace_pass1(is_array,ie_array,is,ie,idx,idy,idz &
+                                        ,tpsi,htpsi,wrk1,wrk2,V_local,lap0,lapt,nabt,Bk,F)
+! Nonorthogonal lattice, r-space-parallel path (pass 1 of 2).
+! Identical math to zstencil_nonorthogonal's first loop, but stores the per-axis
+! first derivatives df/dx, df/dy into wrk1, wrk2 instead of consuming them in-place.
+! The cross-derivative term is added by zstencil_nonorth_rspace_pass2 AFTER wrk1/wrk2
+! halos are exchanged (update_overlap). Serial nonorthogonal runs keep using
+! zstencil_nonorthogonal (index-wrap supplies the neighbors); orthogonal stencils are
+! untouched. This routine is reached only for nonorthogonal lattice with nproc_rgrid>1.
+  implicit none
+  integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
+                           ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  complex(8),intent(in)  :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  real(8)   ,intent(in)  :: V_local(is(1):ie(1),is(2):ie(2),is(3):ie(3)),lap0,lapt(4,3),nabt(4,3)
+  real(8)   ,intent(in)  :: Bk(3),F(6)
+  complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  complex(8),intent(out) :: wrk1(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  complex(8),intent(out) :: wrk2(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  !
+  integer :: ix,iy,iz
+  complex(8) :: w(3),v(3)
+
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+
+    v(1) =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
+         & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
+         & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
+         & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
+
+    v(2) =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
+         & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
+         & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
+         & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4)))
+
+    v(3) =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
+         & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
+         & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
+         & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4)))
+
+    w(1) =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
+         & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+         & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+         & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+
+    w(2) =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
+         & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+         & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+         & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
+
+    w(3) =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
+         & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+         & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+         & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
+
+    htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )* tpsi(ix,iy,iz) &
+                    - 0.5d0* ( F(1)*v(1) + F(2)*v(2) + F(3)*v(3) ) - zI* ( Bk(1)*w(1) + Bk(2)*w(2) + Bk(3)*w(3) )
+    wrk1(ix,iy,iz) = w(1) ! df/dx
+    wrk2(ix,iy,iz) = w(2) ! df/dy
+  end do
+  end do
+  end do
+
+  return
+end subroutine zstencil_nonorth_rspace_pass1
+
+!===================================================================================================================================
+
+subroutine zstencil_nonorth_rspace_pass2(is_array,ie_array,is,ie,idx,idy,idz &
+                                        ,wrk1,wrk2,htpsi,nabt,F)
+! Nonorthogonal lattice, r-space-parallel path (pass 2 of 2).
+! Identical math to zstencil_nonorthogonal's second loop. Adds the off-diagonal-metric
+! cross-derivative contribution from the (already halo-exchanged) wrk1=df/dx, wrk2=df/dy.
+! Access is face-direction only (DZ, DY), so the existing face halo (update_overlap)
+! supplies the required neighbors; no edge/corner ghosts are needed.
+  implicit none
+  integer   ,intent(in)    :: is_array(3),ie_array(3),is(3),ie(3) &
+                             ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  complex(8),intent(in)    :: wrk1(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  complex(8),intent(in)    :: wrk2(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  real(8)   ,intent(in)    :: nabt(4,3),F(6)
+  complex(8),intent(inout) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  !
+  integer :: ix,iy,iz
+  complex(8) :: w(3)
+
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+
+  ! yz: (d/dz) * (df/dy)
+    w(1) =  nabt(1,3)*(wrk2(DZ(1)) - wrk2(DZ(-1))) &
+         & +nabt(2,3)*(wrk2(DZ(2)) - wrk2(DZ(-2))) &
+         & +nabt(3,3)*(wrk2(DZ(3)) - wrk2(DZ(-3))) &
+         & +nabt(4,3)*(wrk2(DZ(4)) - wrk2(DZ(-4)))
+
+  ! zx: (d/dz) * (df/dx)
+    w(2) =  nabt(1,3)*(wrk1(DZ(1)) - wrk1(DZ(-1))) &
+         & +nabt(2,3)*(wrk1(DZ(2)) - wrk1(DZ(-2))) &
+         & +nabt(3,3)*(wrk1(DZ(3)) - wrk1(DZ(-3))) &
+         & +nabt(4,3)*(wrk1(DZ(4)) - wrk1(DZ(-4)))
+
+  ! xy: (d/dy) * (df/dx)
+    w(3) =  nabt(1,2)*(wrk1(DY(1)) - wrk1(DY(-1))) &
+         & +nabt(2,2)*(wrk1(DY(2)) - wrk1(DY(-2))) &
+         & +nabt(3,2)*(wrk1(DY(3)) - wrk1(DY(-3))) &
+         & +nabt(4,2)*(wrk1(DY(4)) - wrk1(DY(-4)))
+
+    htpsi(ix,iy,iz) = htpsi(ix,iy,iz) - 0.5d0* ( F(4)*w(1) + F(5)*w(2) + F(6)*w(3) )
+
+  end do
+  end do
+  end do
+
+  return
+end subroutine zstencil_nonorth_rspace_pass2
+
+!===================================================================================================================================
+
 # define DR(dt) idx(ix+(sx)*(dt)),idy(iy+(sy)*(dt)),idz(iz+(sz)*(dt))
 
 ! (future works)
