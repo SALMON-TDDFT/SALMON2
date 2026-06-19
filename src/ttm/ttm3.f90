@@ -28,6 +28,9 @@ module ttm3
   public :: ttm3_get_state
   public :: ttm3_get_max
   public :: ttm3_permittivity
+  public :: ttm3_eps_sig
+  public :: ttm3_ninterior
+  public :: ttm3_interior_cell
   public :: ttm3_generation
   public :: ttm3_gap
 
@@ -55,7 +58,9 @@ module ttm3
 
   integer,allocatable :: ijk_media_whole(:,:)
   integer,allocatable :: ijk_media_myrnk(:,:)
+  integer,allocatable :: ijk_interior(:,:)   ! interior medium cells (all 6 neighbours same medium)
   integer :: nmedia_myrnk
+  integer :: ninterior
   integer :: is_array(3), ie_array(3)
   integer :: comm
   real(8) :: hgs(3)
@@ -237,6 +242,38 @@ contains
        if( imedia(ix,iy,iz) /= 0 )then
           m = m + 1
           ijk_media_myrnk(1:3,m) = (/ix,iy,iz/)
+       end if
+    end do
+    end do
+    end do
+
+    ! interior medium cells (all 6 neighbours the same medium): used by the
+    ! permittivity back-action so it never touches fs%imedia (which the FDTD
+    ! setup deallocates) and keeps the interface cells' init coefficients.
+    m = 0
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+       if( imedia(ix,iy,iz)/=0 .and. &
+           imedia(ix+1,iy,iz)==imedia(ix,iy,iz) .and. imedia(ix-1,iy,iz)==imedia(ix,iy,iz) .and. &
+           imedia(ix,iy+1,iz)==imedia(ix,iy,iz) .and. imedia(ix,iy-1,iz)==imedia(ix,iy,iz) .and. &
+           imedia(ix,iy,iz+1)==imedia(ix,iy,iz) .and. imedia(ix,iy,iz-1)==imedia(ix,iy,iz) ) m = m + 1
+    end do
+    end do
+    end do
+    ninterior = m
+    if( allocated(ijk_interior) ) deallocate(ijk_interior)
+    allocate( ijk_interior(3,max(m,1)) )
+    m = 0
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+       if( imedia(ix,iy,iz)/=0 .and. &
+           imedia(ix+1,iy,iz)==imedia(ix,iy,iz) .and. imedia(ix-1,iy,iz)==imedia(ix,iy,iz) .and. &
+           imedia(ix,iy+1,iz)==imedia(ix,iy,iz) .and. imedia(ix,iy-1,iz)==imedia(ix,iy,iz) .and. &
+           imedia(ix,iy,iz+1)==imedia(ix,iy,iz) .and. imedia(ix,iy,iz-1)==imedia(ix,iy,iz) )then
+          m = m + 1
+          ijk_interior(1:3,m) = (/ix,iy,iz/)
        end if
     end do
     end do
@@ -469,6 +506,30 @@ contains
     eps_re = tp3%eps_bg - wp2/(omega*omega)
     sig    = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)
   end subroutine ttm3_permittivity
+
+  !---------------------------------------------------------------------------
+  ! Stage 2 back-action: carrier-dependent permittivity/conductivity at a cell
+  ! (drives the FDTD media coefficients; single-frequency static eps at omega,
+  ! the same approximation the reference uses).
+  subroutine ttm3_eps_sig( ix, iy, iz, omega, eps_re, sig )
+    implicit none
+    integer,intent(in)  :: ix,iy,iz
+    real(8),intent(in)  :: omega
+    real(8),intent(out) :: eps_re, sig
+    call ttm3_permittivity( Ne(ix,iy,iz), Nh(ix,iy,iz), omega, eps_re, sig )
+  end subroutine ttm3_eps_sig
+
+  integer function ttm3_ninterior()
+    implicit none
+    ttm3_ninterior = ninterior
+  end function ttm3_ninterior
+
+  subroutine ttm3_interior_cell( m, ix, iy, iz )
+    implicit none
+    integer,intent(in)  :: m
+    integer,intent(out) :: ix,iy,iz
+    ix=ijk_interior(1,m); iy=ijk_interior(2,m); iz=ijk_interior(3,m)
+  end subroutine ttm3_interior_cell
 
   !---------------------------------------------------------------------------
   ! Stage 3: carrier generation rate from the field-intensity envelope.

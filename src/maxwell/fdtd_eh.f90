@@ -3299,7 +3299,10 @@ contains
     use misc_routines,   only: get_wtime
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
-    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max
+    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_eps_sig,&
+                               ttm3_ninterior,ttm3_interior_cell
+    use phys_constants,  only: cspeed_au
+    use math_constants,  only: pi
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -3314,6 +3317,8 @@ contains
     real(8),allocatable :: t3_S(:,:,:,:), t3_divS(:,:,:), t3_S_g(:,:,:,:), t3_divS_g(:,:,:)
     real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
+    real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj
+    integer :: t3_im
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
     real(8)             :: dV, tmp(4)
@@ -3549,6 +3554,33 @@ contains
         end do
         end do
         call ttm3_main( fs%srg_ng, fs%mg, t3_power, t3_gen )
+
+        !--- Stage 2 back-action: carrier-dependent permittivity drives the FDTD media
+        !    coefficients.  Only TRUE-INTERIOR medium cells (all 6 neighbours the same
+        !    medium) are updated, so the surface cells keep their interface-consistent
+        !    init coefficients.  The interior-cell list is built by ttm3 at init time;
+        !    fs%imedia must NOT be used here (the FDTD setup deallocates it).
+        !    Single-frequency static eps at omega1 (the reference's approximation);
+        !    SALMON's dt is vacuum-CFL-sized, so eps>=1 stays CFL-stable.
+        do t3_im=1,ttm3_ninterior()
+          call ttm3_interior_cell( t3_im, ix,iy,iz )
+            call ttm3_eps_sig( ix,iy,iz, omega1, t3_eps, t3_sig )
+            t3_eps = max( t3_eps, 1.0d0 )
+            t3_de  = 1.0d0/( 1.0d0 + 2.0d0*pi*t3_sig/t3_eps*dt_em )
+            t3_c1  = ( 1.0d0 - 2.0d0*pi*t3_sig/t3_eps*dt_em )*t3_de
+            t3_cx  = ( cspeed_au/t3_eps*dt_em )*t3_de/fs%hgs(1)
+            t3_cy  = ( cspeed_au/t3_eps*dt_em )*t3_de/fs%hgs(2)
+            t3_cz  = ( cspeed_au/t3_eps*dt_em )*t3_de/fs%hgs(3)
+            t3_cj  = ( 4.0d0*pi/t3_eps*dt_em )*t3_de
+            fe%c1_ex_y(ix,iy,iz)=t3_c1; fe%c2_ex_y(ix,iy,iz)= t3_cy
+            fe%c1_ex_z(ix,iy,iz)=t3_c1; fe%c2_ex_z(ix,iy,iz)=-t3_cz
+            fe%c1_ey_z(ix,iy,iz)=t3_c1; fe%c2_ey_z(ix,iy,iz)= t3_cz
+            fe%c1_ey_x(ix,iy,iz)=t3_c1; fe%c2_ey_x(ix,iy,iz)=-t3_cx
+            fe%c1_ez_x(ix,iy,iz)=t3_c1; fe%c2_ez_x(ix,iy,iz)= t3_cx
+            fe%c1_ez_y(ix,iy,iz)=t3_c1; fe%c2_ez_y(ix,iy,iz)=-t3_cy
+            fe%c2_jx(ix,iy,iz)=-t3_cj; fe%c2_jy(ix,iy,iz)=-t3_cj; fe%c2_jz(ix,iy,iz)=-t3_cj
+        end do
+
         if( mod(iter,obs_samp_em)==0 )then
           !report the peak over medium cells (the absorbing front, not the screened core).
           !single-domain diagnostic: local peak equals the global peak for nproc_rgrid=1.
