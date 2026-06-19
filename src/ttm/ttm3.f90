@@ -75,6 +75,14 @@ module ttm3
   real(8),allocatable :: rhs_te(:,:,:), rhs_th(:,:,:), rhs_tl(:,:,:)
   real(8),allocatable :: rhs_ne(:,:,:), rhs_nh(:,:,:)
 
+  ! Fermi-Dirac integral table F_j(eta) for j = -1/2, 1/2, 3/2 (indices 1,2,3),
+  ! built once at init by quadrature, interpolated in the inner loop (the same
+  ! table approach as the reference's Table_Fermi).  eta grid: f_eta0 + k*f_deta.
+  integer,parameter   :: f_neta = 2400
+  real(8),parameter   :: f_eta0 = -60.0d0, f_deta = 0.05d0
+  real(8)             :: f_tab(0:f_neta,3)
+  logical             :: f_built = .false.
+
   ! density floor to keep the carrier heat capacity well defined
   real(8),parameter :: N_floor = 1.0d-9    ! [1/bohr^3] (~7e15 cm^-3 carrier floor)
   real(8),parameter :: T_clamp = 31.67d0   ! [a.u.] (~1e7 K) numerical temperature cap
@@ -187,6 +195,9 @@ contains
                        * atomic_unit_of_length**3 &
                        * hartree_kelvin_relationship
     tp3%Tini = tp3%Tini / hartree_kelvin_relationship
+
+    ! Fermi-Dirac integral table for the carrier heat capacity (built once)
+    call ttm3_build_fermi_table()
     ! mu_e, mu_h, eps_bg, beta2, dgap_c are taken as given (eps_bg,mu dimensionless; beta2,dgap_c in a.u.)
     tp3%N0    = tp3%N0 * (atomic_unit_of_length*1.0d2)**3                 ! [cm^-3] -> [bohr^-3]
     tp3%Ddiff = tp3%Ddiff * (1.0d-2/atomic_unit_of_length)**2 * atomic_unit_of_time   ! [cm^2/s] -> a.u.
@@ -302,6 +313,81 @@ contains
   end subroutine init_ttm3_alloc
 
   !---------------------------------------------------------------------------
+  ! Build the Fermi-Dirac integral table F_j(eta), j = -1/2, 1/2, 3/2, once.
+  ! F_j(eta) = (2/Gamma(j+1)) * Integral_0^inf u^(2j+1)/(exp(u^2-eta)+1) du
+  ! (the substitution t=u^2 removes the t^(-1/2) endpoint singularity).
+  subroutine ttm3_build_fermi_table()
+    implicit none
+    integer,parameter :: nq=4000
+    integer :: k,q,jj
+    real(8) :: eta,umax,du,u,integ,s,gam(3),jval(3)
+    jval = (/ -0.5d0, 0.5d0, 1.5d0 /)
+    gam  = (/ 1.7724538509055160d0, 0.8862269254527580d0, 1.3293403881791370d0 /) ! Gamma(j+1)
+    do k=0,f_neta
+       eta = f_eta0 + dble(k)*f_deta
+       umax = sqrt( max(eta,0.0d0) + 50.0d0 )
+       du = umax/dble(nq)
+       do jj=1,3
+          integ = 0.0d0
+          do q=0,nq
+             u = dble(q)*du
+             s = u**(2.0d0*jval(jj)+1.0d0)/( exp(u*u-eta) + 1.0d0 )
+             if(q==0 .or. q==nq)then       ; integ=integ+s
+             elseif(mod(q,2)==1)then        ; integ=integ+4.0d0*s
+             else                           ; integ=integ+2.0d0*s
+             end if
+          end do
+          f_tab(k,jj) = 2.0d0*integ*du/3.0d0/gam(jj)
+       end do
+    end do
+    f_built = .true.
+  end subroutine ttm3_build_fermi_table
+
+  ! F_j(eta) by linear interpolation of the table (jidx: 1=-1/2, 2=1/2, 3=3/2).
+  pure function ttm3_fermi( jidx, eta ) result( F )
+    implicit none
+    integer,intent(in) :: jidx
+    real(8),intent(in) :: eta
+    real(8) :: F,x,w
+    integer :: k
+    x = (eta - f_eta0)/f_deta
+    if(x <= 0.0d0)then            ; k=0       ; w=0.0d0
+    elseif(x >= dble(f_neta))then ; k=f_neta-1; w=1.0d0
+    else                          ; k=int(x)  ; w=x-dble(k)
+    end if
+    F = (1.0d0-w)*f_tab(k,jidx) + w*f_tab(k+1,jidx)
+  end function ttm3_fermi
+
+  ! Reduced chemical potential eta from (T,mass,N) by bisecting N = Neff*F_{1/2}(eta),
+  ! Neff = 2*(mass*T/(2*pi))^(3/2)  (atomic units).
+  pure function ttm3_chem_pot( T, mc, N ) result( eta )
+    implicit none
+    real(8),intent(in) :: T,mc,N
+    real(8) :: eta,Neff,lo,hi,mid,f
+    integer :: it
+    Neff = 2.0d0*( mc*max(T,1.0d-12)/(2.0d0*pi_) )**1.5d0
+    lo = f_eta0; hi = f_eta0 + dble(f_neta)*f_deta
+    do it=1,60
+       mid = 0.5d0*(lo+hi)
+       f = N - Neff*ttm3_fermi(2,mid)
+       if(f > 0.0d0)then; lo=mid; else; hi=mid; end if
+    end do
+    eta = 0.5d0*(lo+hi)
+  end function ttm3_chem_pot
+
+  ! Fermi-Dirac carrier heat capacity (per volume, atomic units, kB=1):
+  ! Ce/N = (15/4) F_{3/2}/F_{1/2} - (9/4) F_{1/2}/F_{-1/2}
+  ! (-> 3/2 in the non-degenerate limit, recovering the classical value).
+  pure function ttm3_heat_capacity( T, mc, N ) result( Ce )
+    implicit none
+    real(8),intent(in) :: T,mc,N
+    real(8) :: Ce,eta,Fm,F0,Fp
+    eta = ttm3_chem_pot(T,mc,N)
+    Fm = ttm3_fermi(1,eta); F0 = ttm3_fermi(2,eta); Fp = ttm3_fermi(3,eta)
+    Ce = N*( 3.75d0*Fp/F0 - 2.25d0*F0/Fm )
+  end function ttm3_heat_capacity
+
+  !---------------------------------------------------------------------------
   ! Local rates for one cell (the right-hand side of the five ODEs).
   pure subroutine ttm3_rates( Te_,Th_,Tl_,Ne_,Nh_, source_, gen_, &
                               dTe,dTh,dTl,dNe,dNh )
@@ -310,9 +396,10 @@ contains
     real(8),intent(out) :: dTe,dTh,dTl,dNe,dNh
     real(8) :: Ce,Ch,R,inv_tau,geff,q_heat
 
-    ! classical carrier heat capacities (floored to stay well defined)
-    Ce = 1.5d0*(Ne_ + N_floor)
-    Ch = 1.5d0*(Nh_ + N_floor)
+    ! Fermi-Dirac carrier heat capacities (reduce to the classical 3/2 N when
+    ! non-degenerate; suppressed when degenerate)
+    Ce = ttm3_heat_capacity( Te_, tp3%mu_e, Ne_+N_floor )
+    Ch = ttm3_heat_capacity( Th_, tp3%mu_h, Nh_+N_floor )
     inv_tau = 1.0d0/tp3%tau
 
     ! generation, saturated at the reference/atomic density N0 (cannot exceed it)
