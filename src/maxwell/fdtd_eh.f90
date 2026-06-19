@@ -99,6 +99,8 @@ module fdtd_eh
     integer             :: ihz_x_is(3),ihz_x_ie(3),ihz_y_is(3),ihz_y_ie(3)                                     !h
     real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)     !e for save
     real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)     !h for save
+    real(8),allocatable :: ex_s_g(:,:,:),ey_s_g(:,:,:),ez_s_g(:,:,:) !ghost e for envelope poynting
+    real(8),allocatable :: hx_s_g(:,:,:),hy_s_g(:,:,:),hz_s_g(:,:,:) !ghost h for envelope poynting
     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)  !coeff. for general curr. dens.
     integer             :: num_ld                                  !LD: number of LD media
     integer             :: max_pole_num_ld                         !LD: maximum of pole_num_ld
@@ -803,6 +805,13 @@ contains
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_x_g)
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_x_g)
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_y_g)
+      !ghost cell-centered fields for envelope Poynting (cycle-averaged TTM source)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_s_g)
       !ghost LD state (only when LD media are present)
       if(fe%flag_ld) then
         call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_ld_g    )
@@ -3281,6 +3290,7 @@ contains
     !for ttm
     integer             :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
+    real(8),allocatable :: Spoynting_g(:,:,:,:), divS_g(:,:,:)
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
     real(8)             :: dV, tmp(4)
@@ -3422,11 +3432,21 @@ contains
         if ( .not.allocated(Spoynting) ) then
           call allocate_poynting(fs, Spoynting, divS, u_energy)
           call allocate_poynting(fs, u=u_energy_p)
+          if(yn_em_envelope=='y') call allocate_poynting(fs, Spoynting_g, divS_g)
         end if
         call calc_es_and_hs(fs, fe)
         call calc_poynting_vector(fs, fe, Spoynting)
         call calc_poynting_vector_div(fs, Spoynting, divS)
-        u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
+        if(yn_em_envelope=='y') then
+          !--- cycle-averaged (envelope) absorbed power via ghost Poynting:        ---!
+          !--- <-divS> = 0.5*( -divS[real] - divS[ghost] ) removes the 2*omega ripple ---!
+          call calc_es_and_hs_g(fs, fe)
+          call calc_poynting_vector_g(fs, fe, Spoynting_g)
+          call calc_poynting_vector_div(fs, Spoynting_g, divS_g)
+          u_energy(:,:,:) = u_energy(:,:,:) - 0.5d0*( divS(:,:,:) + divS_g(:,:,:) )*dt_em
+        else
+          u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
+        end if
         
         u_energy_p = u_energy
         call ttm_penetration( fs%mg%is, u_energy_p )
@@ -6274,6 +6294,69 @@ contains
       
       !deallocate temporary variable
       deallocate(f1,f2,f3)
+    elseif(var=='s_g') then
+      !ghost cell-centered collocation, mirror of 's' on the ghost (_g) fields
+      allocate(f1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)),&
+               f2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)),&
+               f3(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)))
+      f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
+      !spatially adjust ghost e
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        f1(ix,iy,iz)=( fe%ex_s_g(ix,iy,iz)+fe%ex_s_g(ix-1,iy,iz) )/2.0d0
+        f2(ix,iy,iz)=( fe%ey_s_g(ix,iy,iz)+fe%ey_s_g(ix,iy-1,iz) )/2.0d0
+        f3(ix,iy,iz)=( fe%ez_s_g(ix,iy,iz)+fe%ez_s_g(ix,iy,iz-1) )/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      fe%ex_s_g(:,:,:)=f1(:,:,:); fe%ey_s_g(:,:,:)=f2(:,:,:); fe%ez_s_g(:,:,:)=f3(:,:,:);
+      f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
+      !spatially adjust ghost h
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        f1(ix,iy,iz)=( fe%hx_s_g(ix,iy,iz)+fe%hx_s_g(ix,iy-1,iz) )/2.0d0
+        f2(ix,iy,iz)=( fe%hy_s_g(ix,iy,iz)+fe%hy_s_g(ix,iy,iz-1) )/2.0d0
+        f3(ix,iy,iz)=( fe%hz_s_g(ix,iy,iz)+fe%hz_s_g(ix-1,iy,iz) )/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      fe%hx_s_g(:,:,:)=f1(:,:,:); fe%hy_s_g(:,:,:)=f2(:,:,:); fe%hz_s_g(:,:,:)=f3(:,:,:);
+      f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_s_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s_g)
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        f1(ix,iy,iz)=( fe%hx_s_g(ix,iy,iz)+fe%hx_s_g(ix,iy,iz-1) )/2.0d0
+        f2(ix,iy,iz)=( fe%hy_s_g(ix,iy,iz)+fe%hy_s_g(ix-1,iy,iz) )/2.0d0
+        f3(ix,iy,iz)=( fe%hz_s_g(ix,iy,iz)+fe%hz_s_g(ix,iy-1,iz) )/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      fe%hx_s_g(:,:,:)=f1(:,:,:); fe%hy_s_g(:,:,:)=f2(:,:,:); fe%hz_s_g(:,:,:)=f3(:,:,:);
+      !deallocate temporary variable
+      deallocate(f1,f2,f3)
     end if
     
     return
@@ -6932,6 +7015,40 @@ contains
   end subroutine calc_es_and_hs
 
   !===========================================================================================
+  != cell-centered ghost fields for envelope Poynting (mirror of calc_es_and_hs) =============
+  subroutine calc_es_and_hs_g(fs, fe)
+    use structures, only: s_fdtd_system
+    use sendrecv_grid, only: update_overlap_real8
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh), intent(inout)   :: fe
+    integer :: ix,iy,iz
+!$omp parallel
+!$omp do private(ix,iy,iz)
+    do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
+    do iy=(fs%mg%is_array(2)),(fs%mg%ie_array(2))
+    do ix=(fs%mg%is_array(1)),(fs%mg%ie_array(1))
+       fe%ex_s_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)
+       fe%ey_s_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)
+       fe%ez_s_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)
+       fe%hx_s_g(ix,iy,iz)=( fe%hx_s_g(ix,iy,iz)+(fe%hx_y_g(ix,iy,iz)+fe%hx_z_g(ix,iy,iz)) )*0.5d0
+       fe%hy_s_g(ix,iy,iz)=( fe%hy_s_g(ix,iy,iz)+(fe%hy_z_g(ix,iy,iz)+fe%hy_x_g(ix,iy,iz)) )*0.5d0
+       fe%hz_s_g(ix,iy,iz)=( fe%hz_s_g(ix,iy,iz)+(fe%hz_x_g(ix,iy,iz)+fe%hz_y_g(ix,iy,iz)) )*0.5d0
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+    call eh_sendrecv(fs,fe,'s_g')
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ex_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ey_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ez_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hx_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hy_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hz_s_g )
+  end subroutine calc_es_and_hs_g
+
+  !===========================================================================================
   != For ttm =================================================================================
   subroutine allocate_poynting(fs, S, divS, u)
     use structures, only: s_fdtd_system
@@ -6994,6 +7111,39 @@ contains
 !$omp end do
 !$omp end parallel
   end subroutine calc_poynting_vector
+
+  !===========================================================================================
+  != ghost Poynting vector for envelope (mirror of calc_poynting_vector on _g fields) ========
+  subroutine calc_poynting_vector_g(fs, fe, Spoynting)
+    use structures, only: s_fdtd_system
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh), intent(inout)   :: fe
+    real(8), intent(inout) :: Spoynting(:,:,:,:)
+    integer :: ix,iy,iz,jx,jy,jz,ix0,iy0,iz0,ix1,iy1,iz1
+    ix0=fs%mg%is_array(1)
+    iy0=fs%mg%is_array(2)
+    iz0=fs%mg%is_array(3)
+    ix1=fs%mg%ie_array(1)
+    iy1=fs%mg%ie_array(2)
+    iz1=fs%mg%ie_array(3)
+!$omp parallel
+!$omp do private(ix,iy,iz,jx,jy,jz)
+    do iz = iz0, iz1
+       jz=iz-iz0+1
+    do iy = iy0, iy1
+       jy=iy-iy0+1
+    do ix = ix0, ix1
+       jx=ix-ix0+1
+       Spoynting(jx,jy,jz,1) = fe%ey_s_g(ix,iy,iz)*fe%hz_s_g(ix,iy,iz) - fe%ez_s_g(ix,iy,iz)*fe%hy_s_g(ix,iy,iz)
+       Spoynting(jx,jy,jz,2) = fe%ez_s_g(ix,iy,iz)*fe%hx_s_g(ix,iy,iz) - fe%ex_s_g(ix,iy,iz)*fe%hz_s_g(ix,iy,iz)
+       Spoynting(jx,jy,jz,3) = fe%ex_s_g(ix,iy,iz)*fe%hy_s_g(ix,iy,iz) - fe%ey_s_g(ix,iy,iz)*fe%hx_s_g(ix,iy,iz)
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+  end subroutine calc_poynting_vector_g
 
   !===========================================================================================
   != For ttm =================================================================================
