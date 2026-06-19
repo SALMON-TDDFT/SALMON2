@@ -7146,6 +7146,48 @@ contains
   end subroutine calc_poynting_vector_g
 
   !===========================================================================================
+  != per-cell field-intensity envelope E^2 + E_g^2 (reuse hook) ==============================
+  != Returns the cycle-averaged field intensity |E|^2 + |E_g|^2 per cell, where E_g is the   =
+  != pi/2 quadrature (ghost) field. This is the smooth (2*omega-free) intensity envelope,    =
+  != the natural EM input for envelope-level models such as 3TM photo-ionization /            =
+  != carrier generation (distinct from the absorbed-power envelope used by the TTM source).   =
+  != Self-contained: built from the always-current split-Yee E components, independent of     =
+  != use_ttm / calc_es_and_hs. Valid only when yn_em_envelope=='y' (else returns 0).          =
+  subroutine eh_get_field_envelope(fs, fe, env)
+    use structures,    only: s_fdtd_system
+    use salmon_global, only: yn_em_envelope
+    implicit none
+    type(s_fdtd_system),intent(in) :: fs
+    type(ls_fdtd_eh),   intent(in) :: fe
+    real(8),intent(out) :: env(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                               fs%mg%is_array(2):fs%mg%ie_array(2),&
+                               fs%mg%is_array(3):fs%mg%ie_array(3))
+    integer :: ix,iy,iz
+    real(8) :: ex,ey,ez,exg,eyg,ezg
+    if(yn_em_envelope/='y') then
+      env(:,:,:)=0.0d0
+      return
+    end if
+!$omp parallel
+!$omp do private(ix,iy,iz,ex,ey,ez,exg,eyg,ezg)
+    do iz=fs%mg%is_array(3),fs%mg%ie_array(3)
+    do iy=fs%mg%is_array(2),fs%mg%ie_array(2)
+    do ix=fs%mg%is_array(1),fs%mg%ie_array(1)
+      ex =fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
+      ey =fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
+      ez =fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
+      exg=fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)
+      eyg=fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)
+      ezg=fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)
+      env(ix,iy,iz)=ex*ex+ey*ey+ez*ez+exg*exg+eyg*eyg+ezg*ezg
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+  end subroutine eh_get_field_envelope
+
+  !===========================================================================================
   != For ttm =================================================================================
   subroutine calc_poynting_vector_div(fs, Spoynting, divS)
     use structures, only: s_fdtd_system
