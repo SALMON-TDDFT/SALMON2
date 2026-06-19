@@ -20,6 +20,7 @@ module ttm3
   implicit none
   private
   public :: init_ttm3_parameters
+  public :: ttm3_set_dt
   public :: init_ttm3_grid
   public :: init_ttm3_alloc
   public :: ttm3_main
@@ -70,7 +71,8 @@ module ttm3
   real(8),allocatable :: rhs_ne(:,:,:), rhs_nh(:,:,:)
 
   ! density floor to keep the carrier heat capacity well defined
-  real(8),parameter :: N_floor = 1.0d-24   ! [1/bohr^3]
+  real(8),parameter :: N_floor = 1.0d-9    ! [1/bohr^3] (~7e15 cm^-3 carrier floor)
+  real(8),parameter :: T_clamp = 31.67d0   ! [a.u.] (~1e7 K) numerical temperature cap
   real(8),parameter :: pi_ = 3.14159265358979323846d0
 
   character(12) :: ttm3_file = 'ttm3.inp_3tm'
@@ -194,6 +196,16 @@ contains
   end subroutine init_ttm3_parameters
 
   !---------------------------------------------------------------------------
+  ! Set the time step.  init_ttm3_parameters is called early (so use_ttm3 can
+  ! feed flag_save) before dt_em is finalised by the CFL condition; this setter
+  ! is called afterwards with the correct dt_em.
+  subroutine ttm3_set_dt( dt_em )
+    implicit none
+    real(8),intent(in) :: dt_em
+    dt = dt_em
+  end subroutine ttm3_set_dt
+
+  !---------------------------------------------------------------------------
   subroutine init_ttm3_grid( hgs_in, is_a, is, ie, imedia )
     implicit none
     real(8),intent(in) :: hgs_in(3)
@@ -303,7 +315,11 @@ contains
 
     y = y + (dt_in/6.0d0)*( k1 + 2.0d0*k2 + 2.0d0*k3 + k4 )
 
-    Te_=y(1); Th_=y(2); Tl_=y(3); Ne_=max(y(4),0.0d0); Nh_=max(y(5),0.0d0)
+    ! numerical guard: clamp temperatures to a finite range so the coupled run
+    ! stays bounded where the recommended source/C heating is stiff at low Ne
+    ! (the exact Fermi heat capacity removes this stiffness; see the design notes).
+    Te_=min(max(y(1),0.0d0),T_clamp); Th_=min(max(y(2),0.0d0),T_clamp); Tl_=max(y(3),0.0d0)
+    Ne_=max(y(4),0.0d0); Nh_=max(y(5),0.0d0)
   end subroutine ttm3_step_cell
 
   !---------------------------------------------------------------------------
