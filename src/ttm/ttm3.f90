@@ -25,6 +25,7 @@ module ttm3
   public :: ttm3_main
   public :: ttm3_step_cell
   public :: ttm3_get_state
+  public :: ttm3_get_max
   public :: ttm3_permittivity
   public :: ttm3_generation
   public :: ttm3_gap
@@ -405,6 +406,27 @@ contains
     Ne_o = Ne(a(1),a(2),a(3)) / cm3_per_bohr3
     Nh_o = Nh(a(1),a(2),a(3)) / cm3_per_bohr3
   end subroutine ttm3_get_state
+
+  !---------------------------------------------------------------------------
+  ! Peak values over this rank's medium cells (output units), for diagnostics.
+  subroutine ttm3_get_max( Te_o, Th_o, Tl_o, Ne_o, Nh_o )
+    implicit none
+    real(8),intent(out) :: Te_o, Th_o, Tl_o, Ne_o, Nh_o   ! [K],[K],[K],[1/cm^3],[1/cm^3]
+    real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5
+    real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11
+    real(8) :: cm3_per_bohr3
+    integer :: m,ix,iy,iz
+    Te_o=0d0; Th_o=0d0; Tl_o=0d0; Ne_o=0d0; Nh_o=0d0
+    cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
+    do m=1,nmedia_myrnk
+       ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+       Te_o=max(Te_o,Te(ix,iy,iz)); Th_o=max(Th_o,Th(ix,iy,iz)); Tl_o=max(Tl_o,Tl(ix,iy,iz))
+       Ne_o=max(Ne_o,Ne(ix,iy,iz)); Nh_o=max(Nh_o,Nh(ix,iy,iz))
+    end do
+    Te_o=Te_o*hartree_kelvin_relationship; Th_o=Th_o*hartree_kelvin_relationship
+    Tl_o=Tl_o*hartree_kelvin_relationship
+    Ne_o=Ne_o/cm3_per_bohr3; Nh_o=Nh_o/cm3_per_bohr3
+  end subroutine ttm3_get_max
 
   !---------------------------------------------------------------------------
   ! Stage 2: carrier-dependent permittivity (recommended Drude model).

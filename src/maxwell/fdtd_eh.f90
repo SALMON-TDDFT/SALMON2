@@ -3298,7 +3298,7 @@ contains
     use misc_routines,   only: get_wtime
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
-    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_state
+    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -3549,10 +3549,9 @@ contains
         end do
         call ttm3_main( fs%srg_ng, fs%mg, t3_power, t3_gen )
         if( mod(iter,obs_samp_em)==0 )then
-          call ttm3_get_state( (/ (fs%mg%is(1)+fs%mg%ie(1))/2, &
-                                  (fs%mg%is(2)+fs%mg%ie(2))/2, &
-                                  (fs%mg%is(3)+fs%mg%ie(3))/2 /), &
-                               t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh )
+          !report the peak over medium cells (the absorbing front, not the screened core).
+          !single-domain diagnostic: local peak equals the global peak for nproc_rgrid=1.
+          call ttm3_get_max( t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh )
           if( comm_is_root(nproc_id_global) )then
             open(unit2,file='3tm_rt.data',status='old',position='append')
             write(unit2,"(F16.8,99(1X,E23.15E3))") &
