@@ -25,12 +25,15 @@ module ttm3
   public :: ttm3_main
   public :: ttm3_step_cell
   public :: ttm3_get_state
+  public :: ttm3_permittivity
+  public :: ttm3_generation
+  public :: ttm3_gap
 
   logical,public :: use_ttm3=.false.
 
   ! material parameters
   type ttm3_param
-     real(8) :: Egap     ! band gap                        [Hartree]
+     real(8) :: Egap     ! band gap (cold)                 [Hartree]
      real(8) :: mu_e     ! electron effective mass ratio    [-]
      real(8) :: mu_h     ! hole effective mass ratio        [-]
      real(8) :: A_e      ! electron Auger coefficient        [bohr^6 / a.u.time]
@@ -38,6 +41,14 @@ module ttm3
      real(8) :: tau      ! carrier-lattice relaxation time   [a.u.time]
      real(8) :: Cl       ! lattice heat capacity             [a.u. / (volume * temperature)]
      real(8) :: Tini     ! initial temperature (Te=Th=Tl)    [a.u.]
+     ! stage 2-5 (recommended models)
+     real(8) :: eps_bg   ! background relative permittivity  [-]            (Stage 2)
+     real(8) :: N0       ! saturation/reference density      [1/bohr^3]     (Stage 2,5)
+     real(8) :: beta2    ! two-photon generation coefficient [a.u.]         (Stage 3)
+     real(8) :: Ddiff    ! ambipolar carrier diffusivity     [bohr^2/a.u.t] (Stage 4)
+     real(8) :: kappa_e  ! carrier thermal conductivity      [a.u.]         (Stage 4)
+     real(8) :: kappa_l  ! lattice thermal conductivity      [a.u.]         (Stage 4)
+     real(8) :: dgap_c   ! gap-renormalisation coefficient   [a.u.]         (Stage 5)
   end type ttm3_param
 
   integer,allocatable :: ijk_media_whole(:,:)
@@ -53,9 +64,13 @@ module ttm3
   ! state and Runge-Kutta stage buffers
   real(8),allocatable :: Te(:,:,:), Th(:,:,:), Tl(:,:,:)
   real(8),allocatable :: Ne(:,:,:), Nh(:,:,:)
+  ! transport increment buffers (Stage 4)
+  real(8),allocatable :: rhs_te(:,:,:), rhs_th(:,:,:), rhs_tl(:,:,:)
+  real(8),allocatable :: rhs_ne(:,:,:), rhs_nh(:,:,:)
 
   ! density floor to keep the carrier heat capacity well defined
   real(8),parameter :: N_floor = 1.0d-24   ! [1/bohr^3]
+  real(8),parameter :: pi_ = 3.14159265358979323846d0
 
   character(12) :: ttm3_file = 'ttm3.inp_3tm'
   logical :: DISPLAY=.false.
@@ -112,6 +127,13 @@ contains
        read(unit,*) tp3%tau
        read(unit,*) tp3%Cl
        read(unit,*) tp3%Tini
+       read(unit,*) tp3%eps_bg
+       read(unit,*) tp3%N0
+       read(unit,*) tp3%beta2
+       read(unit,*) tp3%Ddiff
+       read(unit,*) tp3%kappa_e
+       read(unit,*) tp3%kappa_l
+       read(unit,*) tp3%dgap_c
        close(unit)
        write(*,*) "Egap[eV]    =",tp3%Egap
        write(*,*) "mu_e        =",tp3%mu_e
@@ -121,6 +143,13 @@ contains
        write(*,*) "tau[fs]     =",tp3%tau
        write(*,*) "Cl[J/m3K]   =",tp3%Cl
        write(*,*) "Tini[K]     =",tp3%Tini
+       write(*,*) "eps_bg      =",tp3%eps_bg
+       write(*,*) "N0[cm-3]    =",tp3%N0
+       write(*,*) "beta2[a.u.] =",tp3%beta2
+       write(*,*) "Ddiff[cm2/s]=",tp3%Ddiff
+       write(*,*) "kappa_e[W/mK]=",tp3%kappa_e
+       write(*,*) "kappa_l[W/mK]=",tp3%kappa_l
+       write(*,*) "dgap_c[a.u.]=",tp3%dgap_c
     end if
 
     call comm_bcast(tp3%Egap,comm,0)
@@ -131,6 +160,13 @@ contains
     call comm_bcast(tp3%tau ,comm,0)
     call comm_bcast(tp3%Cl  ,comm,0)
     call comm_bcast(tp3%Tini,comm,0)
+    call comm_bcast(tp3%eps_bg ,comm,0)
+    call comm_bcast(tp3%N0     ,comm,0)
+    call comm_bcast(tp3%beta2  ,comm,0)
+    call comm_bcast(tp3%Ddiff  ,comm,0)
+    call comm_bcast(tp3%kappa_e,comm,0)
+    call comm_bcast(tp3%kappa_l,comm,0)
+    call comm_bcast(tp3%dgap_c ,comm,0)
 
 ! Convert to atomic units
     tp3%Egap = tp3%Egap / hartree_ev
@@ -143,7 +179,14 @@ contains
                        * atomic_unit_of_length**3 &
                        * hartree_kelvin_relationship
     tp3%Tini = tp3%Tini / hartree_kelvin_relationship
-    ! mu_e, mu_h are dimensionless
+    ! mu_e, mu_h, eps_bg, beta2, dgap_c are taken as given (eps_bg,mu dimensionless; beta2,dgap_c in a.u.)
+    tp3%N0    = tp3%N0 * (atomic_unit_of_length*1.0d2)**3                 ! [cm^-3] -> [bohr^-3]
+    tp3%Ddiff = tp3%Ddiff * (1.0d-2/atomic_unit_of_length)**2 * atomic_unit_of_time   ! [cm^2/s] -> a.u.
+    ! thermal conductivity [W/(m K)] -> a.u. (same form as the two-temperature model)
+    tp3%kappa_e = tp3%kappa_e / hartree_joule_relationship*atomic_unit_of_length &
+                              * hartree_kelvin_relationship*atomic_unit_of_time
+    tp3%kappa_l = tp3%kappa_l / hartree_joule_relationship*atomic_unit_of_length &
+                              * hartree_kelvin_relationship*atomic_unit_of_time
 
     if ( DISPLAY ) write(*,'(a60)') repeat("-",30)//" init_ttm3_parameters(end  )"
 
@@ -201,6 +244,8 @@ contains
 
     allocate( Te(i1:j1,i2:j2,i3:j3), Th(i1:j1,i2:j2,i3:j3), Tl(i1:j1,i2:j2,i3:j3) )
     allocate( Ne(i1:j1,i2:j2,i3:j3), Nh(i1:j1,i2:j2,i3:j3) )
+    allocate( rhs_te(i1:j1,i2:j2,i3:j3), rhs_th(i1:j1,i2:j2,i3:j3), rhs_tl(i1:j1,i2:j2,i3:j3) )
+    allocate( rhs_ne(i1:j1,i2:j2,i3:j3), rhs_nh(i1:j1,i2:j2,i3:j3) )
 
     Te = tp3%Tini ; Th = tp3%Tini ; Tl = tp3%Tini
     Ne = N_floor  ; Nh = N_floor
@@ -279,7 +324,69 @@ contains
                             source(ix,iy,iz), gen(ix,iy,iz), dt )
     end do
 !$omp end parallel do
+
+    ! Stage 4: spatial transport (operator-split explicit diffusion + heat conduction)
+    call ttm3_transport( srg, rg )
   end subroutine ttm3_main
+
+  !---------------------------------------------------------------------------
+  ! Stage 4: carrier diffusion + heat conduction (recommended explicit scheme,
+  ! operator-split from the local step).  Skipped when all coefficients are zero
+  ! (then ttm3_main reproduces the verified Stage-1 local engine exactly).
+  subroutine ttm3_transport( srg, rg )
+    use structures,    only: s_rgrid, s_sendrecv_grid
+    use sendrecv_grid, only: update_overlap_real8
+    implicit none
+    type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_rgrid),         intent(in)    :: rg
+    integer :: m,ix,iy,iz
+    real(8) :: cx,cy,cz,Ce,Ch,lNe,lNh,lTe,lTh,lTl
+
+    if( tp3%Ddiff<=0.0d0 .and. tp3%kappa_e<=0.0d0 .and. tp3%kappa_l<=0.0d0 ) return
+
+    cx=1.0d0/hgs(1)**2; cy=1.0d0/hgs(2)**2; cz=1.0d0/hgs(3)**2
+    call update_overlap_real8(srg, rg, Ne); call update_overlap_real8(srg, rg, Nh)
+    call update_overlap_real8(srg, rg, Te); call update_overlap_real8(srg, rg, Th)
+    call update_overlap_real8(srg, rg, Tl)
+
+!$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl)
+    do m=1,nmedia_myrnk
+       ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+       lNe=(Ne(ix+1,iy,iz)-2*Ne(ix,iy,iz)+Ne(ix-1,iy,iz))*cx &
+          +(Ne(ix,iy+1,iz)-2*Ne(ix,iy,iz)+Ne(ix,iy-1,iz))*cy &
+          +(Ne(ix,iy,iz+1)-2*Ne(ix,iy,iz)+Ne(ix,iy,iz-1))*cz
+       lNh=(Nh(ix+1,iy,iz)-2*Nh(ix,iy,iz)+Nh(ix-1,iy,iz))*cx &
+          +(Nh(ix,iy+1,iz)-2*Nh(ix,iy,iz)+Nh(ix,iy-1,iz))*cy &
+          +(Nh(ix,iy,iz+1)-2*Nh(ix,iy,iz)+Nh(ix,iy,iz-1))*cz
+       lTe=(Te(ix+1,iy,iz)-2*Te(ix,iy,iz)+Te(ix-1,iy,iz))*cx &
+          +(Te(ix,iy+1,iz)-2*Te(ix,iy,iz)+Te(ix,iy-1,iz))*cy &
+          +(Te(ix,iy,iz+1)-2*Te(ix,iy,iz)+Te(ix,iy,iz-1))*cz
+       lTh=(Th(ix+1,iy,iz)-2*Th(ix,iy,iz)+Th(ix-1,iy,iz))*cx &
+          +(Th(ix,iy+1,iz)-2*Th(ix,iy,iz)+Th(ix,iy-1,iz))*cy &
+          +(Th(ix,iy,iz+1)-2*Th(ix,iy,iz)+Th(ix,iy,iz-1))*cz
+       lTl=(Tl(ix+1,iy,iz)-2*Tl(ix,iy,iz)+Tl(ix-1,iy,iz))*cx &
+          +(Tl(ix,iy+1,iz)-2*Tl(ix,iy,iz)+Tl(ix,iy-1,iz))*cy &
+          +(Tl(ix,iy,iz+1)-2*Tl(ix,iy,iz)+Tl(ix,iy,iz-1))*cz
+       Ce=1.5d0*(Ne(ix,iy,iz)+N_floor); Ch=1.5d0*(Nh(ix,iy,iz)+N_floor)
+       rhs_ne(ix,iy,iz)=dt*tp3%Ddiff*lNe
+       rhs_nh(ix,iy,iz)=dt*tp3%Ddiff*lNh
+       rhs_te(ix,iy,iz)=dt*tp3%kappa_e/Ce*lTe
+       rhs_th(ix,iy,iz)=dt*tp3%kappa_e/Ch*lTh
+       rhs_tl(ix,iy,iz)=dt*tp3%kappa_l/tp3%Cl*lTl
+    end do
+!$omp end parallel do
+
+!$omp parallel do private(m,ix,iy,iz)
+    do m=1,nmedia_myrnk
+       ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+       Ne(ix,iy,iz)=max(Ne(ix,iy,iz)+rhs_ne(ix,iy,iz),0.0d0)
+       Nh(ix,iy,iz)=max(Nh(ix,iy,iz)+rhs_nh(ix,iy,iz),0.0d0)
+       Te(ix,iy,iz)=Te(ix,iy,iz)+rhs_te(ix,iy,iz)
+       Th(ix,iy,iz)=Th(ix,iy,iz)+rhs_th(ix,iy,iz)
+       Tl(ix,iy,iz)=Tl(ix,iy,iz)+rhs_tl(ix,iy,iz)
+    end do
+!$omp end parallel do
+  end subroutine ttm3_transport
 
   !---------------------------------------------------------------------------
   ! Return the five fields at a probe cell, converted to output units.
@@ -298,5 +405,40 @@ contains
     Ne_o = Ne(a(1),a(2),a(3)) / cm3_per_bohr3
     Nh_o = Nh(a(1),a(2),a(3)) / cm3_per_bohr3
   end subroutine ttm3_get_state
+
+  !---------------------------------------------------------------------------
+  ! Stage 2: carrier-dependent permittivity (recommended Drude model).
+  ! eps(omega) = eps_bg - omega_p^2/omega^2,  omega_p^2 = 4*pi*(Ne/m_e + Nh/m_h);
+  ! the Drude damping (rate 1/tau) gives the conductivity sigma. All atomic units.
+  pure subroutine ttm3_permittivity( Ne_, Nh_, omega, eps_re, sig )
+    implicit none
+    real(8),intent(in)  :: Ne_, Nh_, omega
+    real(8),intent(out) :: eps_re, sig
+    real(8) :: wp2
+    wp2    = 4.0d0*pi_*( Ne_/tp3%mu_e + Nh_/tp3%mu_h )
+    eps_re = tp3%eps_bg - wp2/(omega*omega)
+    sig    = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)
+  end subroutine ttm3_permittivity
+
+  !---------------------------------------------------------------------------
+  ! Stage 3: carrier generation rate from the field-intensity envelope.
+  ! Recommended two-photon form gen = beta2 * I^2, with I = |E|^2 + |E_g|^2
+  ! (the cycle-averaged intensity from eh_get_field_envelope), atomic units.
+  pure function ttm3_generation( intensity ) result( gen )
+    implicit none
+    real(8),intent(in) :: intensity
+    real(8) :: gen
+    gen = tp3%beta2 * intensity*intensity
+  end function ttm3_generation
+
+  !---------------------------------------------------------------------------
+  ! Stage 5: band-gap renormalisation (recommended form).
+  ! Eg(Ne) = Egap - dgap_c * Ne^(1/3)  (band-gap shrinkage with carrier density).
+  pure function ttm3_gap( Ne_ ) result( Eg )
+    implicit none
+    real(8),intent(in) :: Ne_
+    real(8) :: Eg
+    Eg = tp3%Egap - tp3%dgap_c*( max(Ne_,0.0d0) )**(1.0d0/3.0d0)
+  end function ttm3_gap
 
 end module ttm3
