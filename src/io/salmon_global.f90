@@ -269,6 +269,7 @@ module salmon_global
   character(1)   :: yn_obs_plane_em(200)
   character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
+  character(1)   :: yn_em_envelope
   real(8)        :: film_thickness
   integer        :: media_id_pml(3,2)
   integer        :: media_id_source1
