@@ -514,8 +514,11 @@ contains
     if( tp3%Ddiff<=0.0d0 .and. tp3%kappa_e<=0.0d0 .and. tp3%kappa_l<=0.0d0 ) return
 
     cx=1.0d0/hgs(1)**2; cy=1.0d0/hgs(2)**2; cz=1.0d0/hgs(3)**2
-    ! explicit-scheme stability cap: cap every diffusivity at 0.4*h^2/dt (CFL)
-    Dmax = 0.4d0*min(hgs(1),hgs(2),hgs(3))**2/dt
+    ! explicit FTCS diffusion stability: the update u += dt*D*lap with the 7-point
+    ! Laplacian amplifies unless dt*D*2*(cx+cy+cz) <= 1.  Cap every diffusivity so
+    ! this factor stays at 0.5 (safety).  [The previous 0.4*min(h)^2/dt cap was the
+    ! 1-D form; in 3-D it gives dt*D*6/h^2 = 2.4 > 1, i.e. unstable -> Te blow-up.]
+    Dmax = 0.5d0/( 2.0d0*dt*(cx+cy+cz) )
     Dd   = min(tp3%Ddiff, Dmax)
     call update_overlap_real8(srg, rg, Ne); call update_overlap_real8(srg, rg, Nh)
     call update_overlap_real8(srg, rg, Te); call update_overlap_real8(srg, rg, Th)
