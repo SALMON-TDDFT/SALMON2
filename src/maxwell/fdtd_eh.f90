@@ -3546,10 +3546,17 @@ contains
         else
           t3_power(:,:,:) = -t3_divS(:,:,:)
         end if
+        ! Energy-consistent carrier generation: one electron-hole pair per absorbed
+        ! photon, gen = (absorbed power)/(hbar*omega).  This ties generation to the
+        ! SAME absorbed power that heats (t3_power=-divS), so the gap cost gen*Egap is
+        ! always a bounded fraction (1-Egap/hw) of the absorbed power and Te cannot
+        ! diverge.  It mirrors the reference Se = alpha*I/(hbar*omega) (linear channel,
+        ! which dominates at 1.55 eV where two-photon absorption is negligible).
+        ! omega1 is the angular frequency in a.u., so hbar*omega = omega1 (hbar=1).
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
-          t3_gen(ix,iy,iz) = ttm3_generation( t3_env(ix,iy,iz) )
+          t3_gen(ix,iy,iz) = max( t3_power(ix,iy,iz), 0.0d0 )/omega1
         end do
         end do
         end do
