@@ -1279,23 +1279,30 @@ subroutine init_nion_div(system,lg,mg,info)
 
   else !(flag_cuboid=.false.)
 
-     ! nonorthogonal lattice: replicate all atoms on every r-space rank (info%nion_mg = nion).
-     ! nonlocal/force integrals are reduced over icomm_r so each grid point is counted once.
-     ! The "dividing atom" sum-check below applies only to the cuboid (domain-split) path.
-     info%nion_mg = system%nion
-     allocate( info%ia_mg(info%nion_mg) )
+     ! nonorthogonal lattice: the cuboid Cartesian domain test does not apply (skewed grid),
+     ! so partition the atoms round-robin over the r-space ranks (each atom on exactly one
+     ! rank). info%ia_mg is used only by the Ewald ion-ion sums (energy/stress/force), which
+     ! loop over the local atoms and reduce over icomm_r; the round-robin split makes that
+     ! reduction give the full sum (replicating all atoms over-counts it by nproc_rgrid).
+     info%nion_mg = 0
      do ia=1,system%nion
-        info%ia_mg(ia) = ia
+        if( mod(ia-1, info%isize_r) == info%id_r ) info%nion_mg = info%nion_mg + 1
+     enddo
+     allocate( info%ia_mg(info%nion_mg) )
+     iia = 0
+     do ia=1,system%nion
+        if( mod(ia-1, info%isize_r) == info%id_r ) then
+           iia = iia + 1
+           info%ia_mg(iia) = ia
+        endif
      enddo
 
   endif
 
-  !check (cuboid only: each atom belongs to exactly one r-space domain. The nonorthogonal
-  ! path replicates all atoms on every rank, so this sum would be nproc_rgrid*nion.)
-  if (flag_cuboid) then
-    call comm_summation(info%nion_mg, nion_total, info%icomm_r)
-    if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
-  end if
+  !check: each atom is assigned to exactly one r-space rank (cuboid: by domain; nonorthogonal:
+  ! round-robin), so the per-rank counts must sum to the total over icomm_r.
+  call comm_summation(info%nion_mg, nion_total, info%icomm_r)
+  if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
 
   !write(*,*) "  #nion_mg=", system%nion_mg
   !write(*,*) "  #check nion_total=", nion_total
