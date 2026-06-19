@@ -405,7 +405,7 @@ contains
     implicit none
     real(8),intent(in)  :: Te_,Th_,Tl_,Ne_,Nh_, source_, gen_
     real(8),intent(out) :: dTe,dTh,dTl,dNe,dNh
-    real(8) :: Ce,Ch,R,inv_tau,geff,q_heat
+    real(8) :: Ce,Ch,R,inv_tau,geff,q_heat,red_e,red_h
 
     ! Fermi-Dirac carrier heat capacities (reduce to the classical 3/2 N when
     ! non-degenerate; suppressed when degenerate)
@@ -416,22 +416,30 @@ contains
     ! generation, saturated at the reference/atomic density N0 (cannot exceed it)
     geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
 
-    ! standard Auger recombination (removes electron-hole pairs)
+    ! standard Auger recombination (removes electron-hole pairs).  This is the
+    ! unsaturated limit of the reference R = N*A*N*Ne*Nh/(1+T_au*A*Ne*Nh): at the
+    ! carrier densities reached here (T_au*A*Ne*Nh << 1) the two coincide.
     R = ( tp3%A_e*Ne_ + tp3%A_h*Nh_ )*Ne_*Nh_
 
     ! carrier densities: generation - recombination (charge-neutral)
     dNe = geff - R
     dNh = geff - R
 
+    ! Reference energy partition between the electron and hole subsystems:
+    ! red_e = mu_h/(mu_e+mu_h), red_h = mu_e/(mu_e+mu_h) (lighter carrier takes
+    ! the larger share).  For Si this is 0.692/0.308, setting the Te:Th ratio.
+    red_e = tp3%mu_h/(tp3%mu_e+tp3%mu_h)
+    red_h = tp3%mu_e/(tp3%mu_e+tp3%mu_h)
+
     ! only the absorbed power in excess of the gap cost (Egap per generated pair)
     ! becomes carrier kinetic energy (heating); the rest creates the pair
-    q_heat = 0.5d0*max( source_ - geff*tp3%Egap, 0.0d0 )
+    q_heat = max( source_ - geff*tp3%Egap, 0.0d0 )
 
-    ! carrier temperatures: relaxation toward the lattice + bounded heating +
+    ! carrier temperatures: relaxation toward the lattice + partitioned heating +
     ! dilution by freshly generated carriers (born near the lattice temperature),
     ! which caps Te near the hot-carrier value (~(hw-Egap)) instead of diverging.
-    dTe = -(Te_-Tl_)*inv_tau + (geff/(Ne_+N_floor))*(Tl_-Te_) + q_heat/Ce
-    dTh = -(Th_-Tl_)*inv_tau + (geff/(Nh_+N_floor))*(Tl_-Th_) + q_heat/Ch
+    dTe = -(Te_-Tl_)*inv_tau + (geff/(Ne_+N_floor))*(Tl_-Te_) + red_e*q_heat/Ce
+    dTh = -(Th_-Tl_)*inv_tau + (geff/(Nh_+N_floor))*(Tl_-Th_) + red_h*q_heat/Ch
 
     ! lattice receives the energy lost by the carriers (energy-conserving coupling)
     dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / tp3%Cl
