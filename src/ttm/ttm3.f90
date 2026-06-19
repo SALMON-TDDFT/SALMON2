@@ -271,25 +271,34 @@ contains
     implicit none
     real(8),intent(in)  :: Te_,Th_,Tl_,Ne_,Nh_, source_, gen_
     real(8),intent(out) :: dTe,dTh,dTl,dNe,dNh
-    real(8) :: Ce,Ch,R,inv_tau
+    real(8) :: Ce,Ch,R,inv_tau,geff,q_heat
 
     ! classical carrier heat capacities (floored to stay well defined)
     Ce = 1.5d0*(Ne_ + N_floor)
     Ch = 1.5d0*(Nh_ + N_floor)
     inv_tau = 1.0d0/tp3%tau
 
+    ! generation, saturated at the reference/atomic density N0 (cannot exceed it)
+    geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
+
     ! standard Auger recombination (removes electron-hole pairs)
     R = ( tp3%A_e*Ne_ + tp3%A_h*Nh_ )*Ne_*Nh_
 
     ! carrier densities: generation - recombination (charge-neutral)
-    dNe = gen_ - R
-    dNh = gen_ - R
+    dNe = geff - R
+    dNh = geff - R
 
-    ! temperatures: relaxation toward the lattice + heating source (split e/h).
-    ! The lattice term is energy-conserving: the energy lost by the carriers
-    ! (Ce*(Te-Tl) + Ch*(Th-Tl))/tau is deposited into the lattice / Cl.
-    dTe = -(Te_-Tl_)*inv_tau + 0.5d0*source_/Ce
-    dTh = -(Th_-Tl_)*inv_tau + 0.5d0*source_/Ch
+    ! only the absorbed power in excess of the gap cost (Egap per generated pair)
+    ! becomes carrier kinetic energy (heating); the rest creates the pair
+    q_heat = 0.5d0*max( source_ - geff*tp3%Egap, 0.0d0 )
+
+    ! carrier temperatures: relaxation toward the lattice + bounded heating +
+    ! dilution by freshly generated carriers (born near the lattice temperature),
+    ! which caps Te near the hot-carrier value (~(hw-Egap)) instead of diverging.
+    dTe = -(Te_-Tl_)*inv_tau + (geff/(Ne_+N_floor))*(Tl_-Te_) + q_heat/Ce
+    dTh = -(Th_-Tl_)*inv_tau + (geff/(Nh_+N_floor))*(Tl_-Th_) + q_heat/Ch
+
+    ! lattice receives the energy lost by the carriers (energy-conserving coupling)
     dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / tp3%Cl
   end subroutine ttm3_rates
 
@@ -357,11 +366,14 @@ contains
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid),         intent(in)    :: rg
     integer :: m,ix,iy,iz
-    real(8) :: cx,cy,cz,Ce,Ch,lNe,lNh,lTe,lTh,lTl
+    real(8) :: cx,cy,cz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,Dmax,Dd
 
     if( tp3%Ddiff<=0.0d0 .and. tp3%kappa_e<=0.0d0 .and. tp3%kappa_l<=0.0d0 ) return
 
     cx=1.0d0/hgs(1)**2; cy=1.0d0/hgs(2)**2; cz=1.0d0/hgs(3)**2
+    ! explicit-scheme stability cap: cap every diffusivity at 0.4*h^2/dt (CFL)
+    Dmax = 0.4d0*min(hgs(1),hgs(2),hgs(3))**2/dt
+    Dd   = min(tp3%Ddiff, Dmax)
     call update_overlap_real8(srg, rg, Ne); call update_overlap_real8(srg, rg, Nh)
     call update_overlap_real8(srg, rg, Te); call update_overlap_real8(srg, rg, Th)
     call update_overlap_real8(srg, rg, Tl)
@@ -385,11 +397,11 @@ contains
           +(Tl(ix,iy+1,iz)-2*Tl(ix,iy,iz)+Tl(ix,iy-1,iz))*cy &
           +(Tl(ix,iy,iz+1)-2*Tl(ix,iy,iz)+Tl(ix,iy,iz-1))*cz
        Ce=1.5d0*(Ne(ix,iy,iz)+N_floor); Ch=1.5d0*(Nh(ix,iy,iz)+N_floor)
-       rhs_ne(ix,iy,iz)=dt*tp3%Ddiff*lNe
-       rhs_nh(ix,iy,iz)=dt*tp3%Ddiff*lNh
-       rhs_te(ix,iy,iz)=dt*tp3%kappa_e/Ce*lTe
-       rhs_th(ix,iy,iz)=dt*tp3%kappa_e/Ch*lTh
-       rhs_tl(ix,iy,iz)=dt*tp3%kappa_l/tp3%Cl*lTl
+       rhs_ne(ix,iy,iz)=dt*Dd*lNe
+       rhs_nh(ix,iy,iz)=dt*Dd*lNh
+       rhs_te(ix,iy,iz)=dt*min(tp3%kappa_e/Ce,Dmax)*lTe
+       rhs_th(ix,iy,iz)=dt*min(tp3%kappa_e/Ch,Dmax)*lTh
+       rhs_tl(ix,iy,iz)=dt*min(tp3%kappa_l/tp3%Cl,Dmax)*lTl
     end do
 !$omp end parallel do
 
