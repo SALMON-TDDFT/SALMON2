@@ -511,6 +511,41 @@
     end if
   end subroutine init_momentum_blocks
 
+  subroutine init_buffer_wannier_xi_flux_blocks_from_momentum(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: iblk, nblk
+
+    if (allocated(dg_frag%buffer_wannier_xi_flux_blocks)) then
+      do iblk = 1, size(dg_frag%buffer_wannier_xi_flux_blocks)
+        if (allocated(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val)) &
+          deallocate(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val)
+      end do
+      deallocate(dg_frag%buffer_wannier_xi_flux_blocks)
+    end if
+    if (allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) &
+      deallocate(dg_frag%buffer_wannier_xi_flux_local_block_ids)
+    dg_frag%n_buffer_wannier_xi_flux_blocks = 0
+    dg_frag%buffer_wannier_xi_flux_available = .false.
+
+    if (.not. allocated(dg_frag%momentum_blocks)) return
+    nblk = size(dg_frag%momentum_blocks)
+    if (nblk <= 0) return
+    allocate(dg_frag%buffer_wannier_xi_flux_blocks(nblk))
+    allocate(dg_frag%buffer_wannier_xi_flux_local_block_ids(nblk))
+    do iblk = 1, nblk
+      dg_frag%buffer_wannier_xi_flux_local_block_ids(iblk) = iblk
+      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
+      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
+      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%nrow_max = dg_frag%momentum_blocks(iblk)%nrow_max
+      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ncol_max = dg_frag%momentum_blocks(iblk)%ncol_max
+      allocate(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(3, &
+        dg_frag%momentum_blocks(iblk)%nrow_max, dg_frag%momentum_blocks(iblk)%ncol_max, dg_frag%nspin))
+      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val = 0.0d0
+    end do
+    dg_frag%n_buffer_wannier_xi_flux_blocks = nblk
+  end subroutine init_buffer_wannier_xi_flux_blocks_from_momentum
+
   integer function face_neighbor_fragment_ham(dg_frag, ifrag, axis, side) result(jfrag)
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
@@ -1500,6 +1535,260 @@
     end if
   end subroutine load_dcdft_exported_velocity_blocks
 
+  subroutine load_dcdft_exported_position_flux_blocks(dg_frag)
+    use communication, only: comm_is_root, comm_get_max
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_xfl = 'position_flux_local.bin'
+    character(256) :: filename
+    integer :: ifrag, iunit, iostat_open, n_halo_file, i_halo
+    integer :: i_read, n_read
+    integer :: axis, side, dvec(3), nonzero_dirs, jfrag, iblk, expected_halo
+    integer :: io, jo, ispin, nrow, ncol
+    integer :: nh(3), lx, ly, lz
+    integer, allocatable :: local_rows(:)
+    real(8), allocatable :: xi_self(:,:,:,:), xi_halo(:,:,:,:)
+    real(8) :: max_offdiag, max_offdiag_global(1)
+    logical :: found_file, enable_xi_flux
+    character(16) :: env_value
+    integer :: env_status, env_len
+
+    if (.not. dg_frag%dc_lcfo_seed_basis_cleaned) return
+    if (.not. allocated(dg_frag%momentum_blocks)) return
+
+    enable_xi_flux = .true.
+    env_value = ''
+    call get_environment_variable('SALMON_DG_BPW_XI_FLUX', env_value, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_value(1:env_len))))
+      case('0','n','N','no','NO','false','FALSE','off','OFF','disable','DISABLE','disabled','DISABLED')
+        enable_xi_flux = .false.
+      end select
+    end if
+    if (.not. enable_xi_flux) then
+      dg_frag%buffer_wannier_xi_flux_available = .false.
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[DG-BPW-XI-FLUX] disabled by SALMON_DG_BPW_XI_FLUX.'
+        flush(6)
+      end if
+      return
+    end if
+
+    call init_buffer_wannier_xi_flux_blocks_from_momentum(dg_frag)
+    if (.not. allocated(dg_frag%buffer_wannier_xi_flux_blocks)) return
+
+    found_file = .false.
+    max_offdiag = 0.0d0
+    call collect_local_fragment_rows(dg_frag, local_rows)
+    n_read = size(local_rows)
+
+    do i_read = 1, n_read
+      ifrag = local_rows(i_read)
+      if (ifrag < 1 .or. ifrag > dg_frag%n_frag) cycle
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_xfl
+      iunit = get_filehandle()
+      open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+      if (iostat_open /= 0) cycle
+      found_file = .true.
+
+      allocate(xi_self(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+      read(iunit) xi_self(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+      deallocate(xi_self)
+
+      read(iunit) n_halo_file
+      nh(:) = 0
+      do axis = 1, 3
+        if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+      end do
+      expected_halo = 0
+      do lx = -nh(1), nh(1)
+        do ly = -nh(2), nh(2)
+          do lz = -nh(3), nh(3)
+            dvec(:) = [lx, ly, lz]
+            nonzero_dirs = count(dvec(:) /= 0)
+            if (nonzero_dirs /= 1) cycle
+            expected_halo = expected_halo + 1
+          end do
+        end do
+      end do
+      if (expected_halo /= n_halo_file) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] DC exported xi_flux halo count mismatch: ifrag=', &
+          ifrag, ' expected=', expected_halo, ' file=', n_halo_file
+        stop 'DG-Fragment RT: DC exported xi_flux halo count mismatch'
+      end if
+
+      i_halo = 0
+      do lx = -nh(1), nh(1)
+        do ly = -nh(2), nh(2)
+          do lz = -nh(3), nh(3)
+            dvec(:) = [lx, ly, lz]
+            nonzero_dirs = count(dvec(:) /= 0)
+            if (nonzero_dirs /= 1) cycle
+            i_halo = i_halo + 1
+            allocate(xi_halo(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+            read(iunit) xi_halo(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+            axis = 0
+            do jo = 1, 3
+              if (dvec(jo) /= 0) axis = jo
+            end do
+            side = -dvec(axis)
+            jfrag = face_neighbor_fragment_ham(dg_frag, ifrag, axis, side)
+            iblk = find_xi_flux_block(ifrag, jfrag)
+            if (iblk > 0) then
+              do ispin = 1, dg_frag%nspin
+                nrow = min(dg_frag%n_basis(ifrag, ispin), &
+                           size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 2), dg_frag%nstate_frag)
+                ncol = min(dg_frag%n_basis(jfrag, ispin), &
+                           size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 3), dg_frag%nstate_frag)
+                if (nrow <= 0 .or. ncol <= 0) cycle
+                max_offdiag = max(max_offdiag, maxval(abs(xi_halo(1:3, 1:nrow, 1:ncol, ispin))))
+                do jo = 1, ncol
+                  do io = 1, nrow
+                    dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(1:3, io, jo, ispin) = &
+                      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(1:3, io, jo, ispin) + &
+                      0.5d0 * xi_halo(1:3, jo, io, ispin)
+                  end do
+                end do
+              end do
+              call add_dcdft_position_flux_reverse_half(dg_frag, ifrag, jfrag, axis, side, iblk)
+            end if
+            deallocate(xi_halo)
+          end do
+        end do
+      end do
+      close(iunit)
+    end do
+    if (allocated(local_rows)) deallocate(local_rows)
+
+    if (found_file) then
+      dg_frag%buffer_wannier_xi_flux_available = .true.
+      max_offdiag_global(1) = max_offdiag
+      call comm_get_max(max_offdiag_global, max_offdiag_global, 1, dg_frag%icomm)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,1x,1pe12.4)') '[DG-BPW-XI-FLUX] loaded neighbor xi_flux blocks; max=', &
+          max_offdiag_global(1)
+        flush(6)
+      end if
+    else if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a)') '[DG-BPW-XI-FLUX] position_flux_local.bin not found; neighbor xi_flux disabled.'
+      flush(6)
+    end if
+
+  contains
+
+    integer function find_xi_flux_block(ifrag_row, ifrag_col) result(found)
+      integer, intent(in) :: ifrag_row, ifrag_col
+      integer :: ib
+
+      found = 0
+      do ib = 1, dg_frag%n_buffer_wannier_xi_flux_blocks
+        if (dg_frag%buffer_wannier_xi_flux_blocks(ib)%ifrag_row == ifrag_row .and. &
+            dg_frag%buffer_wannier_xi_flux_blocks(ib)%ifrag_col == ifrag_col) then
+          found = ib
+          return
+        end if
+      end do
+    end function find_xi_flux_block
+
+  end subroutine load_dcdft_exported_position_flux_blocks
+
+  subroutine add_dcdft_position_flux_reverse_half(dg_frag, ifrag, jfrag, axis_ref, side_ref, iblk)
+    use filesystem, only: get_filehandle
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag, jfrag, axis_ref, side_ref, iblk
+
+    character(32), parameter :: bdir_frag = './data_dcdft/fragments/'
+    character(32), parameter :: binfile_xfl = 'position_flux_local.bin'
+    character(256) :: filename
+    integer :: iunit, iostat_open, n_halo_file, i_halo
+    integer :: axis, side, dvec(3), nonzero_dirs, neigh, expected_halo
+    integer :: io, jo, ispin, nrow, ncol
+    integer :: nh(3), lx, ly, lz
+    real(8), allocatable :: xi_self(:,:,:,:), xi_halo(:,:,:,:)
+    logical :: matched
+
+    if (iblk < 1 .or. iblk > dg_frag%n_buffer_wannier_xi_flux_blocks) return
+    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_xfl
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+    if (iostat_open /= 0) return
+
+    allocate(xi_self(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+    read(iunit) xi_self(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+    deallocate(xi_self)
+    read(iunit) n_halo_file
+
+    nh(:) = 0
+    do axis = 1, 3
+      if (dg_frag%num_fragment(axis) > 1) nh(axis) = 1
+    end do
+    expected_halo = 0
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          nonzero_dirs = count(dvec(:) /= 0)
+          if (nonzero_dirs /= 1) cycle
+          expected_halo = expected_halo + 1
+        end do
+      end do
+    end do
+    if (expected_halo /= n_halo_file) then
+      write(*,'(1x,a,i0,a,i0,a,i0)') '[FATAL] reverse DC xi_flux halo count mismatch: ifrag=', &
+        jfrag, ' expected=', expected_halo, ' file=', n_halo_file
+      stop 'DG-Fragment RT: reverse DC xi_flux halo count mismatch'
+    end if
+
+    matched = .false.
+    i_halo = 0
+    do lx = -nh(1), nh(1)
+      do ly = -nh(2), nh(2)
+        do lz = -nh(3), nh(3)
+          dvec(:) = [lx, ly, lz]
+          nonzero_dirs = count(dvec(:) /= 0)
+          if (nonzero_dirs /= 1) cycle
+          i_halo = i_halo + 1
+          allocate(xi_halo(3, dg_frag%nstate_frag, dg_frag%nstate_frag, dg_frag%nspin))
+          read(iunit) xi_halo(1:3, 1:dg_frag%nstate_frag, 1:dg_frag%nstate_frag, 1:dg_frag%nspin)
+          axis = 0
+          do jo = 1, 3
+            if (dvec(jo) /= 0) axis = jo
+          end do
+          side = -dvec(axis)
+          neigh = face_neighbor_fragment_ham(dg_frag, jfrag, axis, side)
+          if (neigh == ifrag .and. axis == axis_ref .and. side == -side_ref) then
+            matched = .true.
+            do ispin = 1, dg_frag%nspin
+              nrow = min(dg_frag%n_basis(ifrag, ispin), &
+                         size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 2), dg_frag%nstate_frag)
+              ncol = min(dg_frag%n_basis(jfrag, ispin), &
+                         size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 3), dg_frag%nstate_frag)
+              if (nrow <= 0 .or. ncol <= 0) cycle
+              do jo = 1, ncol
+                do io = 1, nrow
+                  dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(1:3, io, jo, ispin) = &
+                    dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(1:3, io, jo, ispin) + &
+                    0.5d0 * xi_halo(1:3, io, jo, ispin)
+                end do
+              end do
+            end do
+          end if
+          deallocate(xi_halo)
+        end do
+      end do
+    end do
+    close(iunit)
+    if (.not. matched) then
+      write(*,'(1x,a,4(a,i0))') '[FATAL] missing reverse DC xi_flux block:', &
+        ' ifrag=', ifrag, ' jfrag=', jfrag, ' axis=', axis_ref, ' side=', side_ref
+      stop 'DG-Fragment RT: missing reverse DC xi_flux block'
+    end if
+  end subroutine add_dcdft_position_flux_reverse_half
+
   subroutine add_dcdft_hamiltonian_reverse_half(dg_frag, ifrag, jfrag, axis_ref, side_ref, iblk, fold_flux_to_self)
     use filesystem, only: get_filehandle
     implicit none
@@ -2209,8 +2498,13 @@
         if (allocated(dg_frag%momentum_mat)) deallocate(dg_frag%momentum_mat)
         call init_momentum_blocks(dg_frag, diagonal_only=.false.)
         call load_dcdft_exported_velocity_blocks(dg_frag)
-      else if (comm_is_root(dg_frag%id)) then
-        write(*,*) "  [1/3] DC-exported DG velocity operator already available"
+        call load_dcdft_exported_position_flux_blocks(dg_frag)
+      else
+        if (comm_is_root(dg_frag%id)) then
+          write(*,*) "  [1/3] DC-exported DG velocity operator already available"
+        end if
+        if (.not. dg_frag%buffer_wannier_xi_flux_available) &
+          call load_dcdft_exported_position_flux_blocks(dg_frag)
       end if
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "        DC-exported velocity operator loaded"

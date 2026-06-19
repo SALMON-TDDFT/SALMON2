@@ -1,11 +1,12 @@
   subroutine calculate_time_derivative(dg_frag, system, mg, ppg, Ac_tot, dcoef_dt, state_start, state_end, E_tot, &
                                        freeze_nonlocal_pp_A)
     use structures
-    use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
+    use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info, vector_block_info
     use rt_dg_fragment_ops, only: rebuild_local_h_block_ids, fetch_remote_coef_rows, fetch_remote_coef_pw_rows, &
                                   ensure_nonlocal_pp_matrix_A, apply_mixed_hamiltonian_local_rows
     use misc_routines, only: get_wtime
     use salmon_global, only: yn_dg_length_gauge
+    use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -34,6 +35,8 @@
     logical :: freeze_nonlocal
     logical :: use_length_gauge
     logical :: use_buffer_wannier_h
+    logical :: use_formal_dg_wannier_lg
+    logical :: use_global_wannier_lg
     logical :: trace_derivative
     logical, save :: derivative_timing_initialized = .false.
     logical, save :: enable_derivative_timing = .false.
@@ -148,10 +151,16 @@
     use_buffer_wannier_h = use_length_gauge .and. dg_frag%buffer_wannier_flux_seed_applied .and. &
       dg_frag%has_buffer_periodic_wannier_basis .and. allocated(dg_frag%buffer_wannier_coef) .and. &
       allocated(dg_frag%buffer_wannier_h_flux)
+    use_formal_dg_wannier_lg = use_length_gauge .and. dg_frag%has_formal_dg_wannier_basis .and. &
+      allocated(dg_frag%dg_wannier_basis_coef) .and. allocated(dg_frag%dg_wannier_xi_local) .and. &
+      allocated(dg_frag%dg_wannier_ref_center) .and. allocated(dg_frag%dg_wannier_nkeep)
+    use_global_wannier_lg = use_length_gauge .and. dg_frag%has_global_wannier_basis .and. &
+      allocated(dg_frag%global_wannier_coef) .and. allocated(dg_frag%global_wannier_center)
     E_field = 0.0d0
     if (use_length_gauge) then
       if (.not. present(E_tot)) stop "DG length gauge derivative requires E_tot"
-      if (.not. dg_frag%has_local_wannier_basis) &
+      if (.not. dg_frag%has_local_wannier_basis .and. .not. use_buffer_wannier_h .and. &
+          .not. use_formal_dg_wannier_lg .and. .not. use_global_wannier_lg) &
         stop "DG length gauge requires loaded local Wannier basis data"
       E_field(1:3) = E_tot(1:3)
     end if
@@ -304,6 +313,10 @@
         if (trace_derivative) t0 = get_wtime()
         if (use_buffer_wannier_h) then
           call apply_buffer_wannier_h_flux_term(ispin, coef_work(:, 1:nstate_blk), h_work(:, 1:nstate_blk))
+          if (allocated(dg_frag%H_mat_blocks) .and. allocated(dg_frag%H_local_block_ids)) then
+            call apply_real_blocks_compact_offdiag(dg_frag%H_mat_blocks, dg_frag%H_local_block_ids, ispin, &
+                                                   coef_work(:, 1:nstate_blk), h_work(:, 1:nstate_blk))
+          end if
         else
           call apply_real_blocks_compact(dg_frag%H_mat_blocks, dg_frag%H_local_block_ids, ispin, &
                                          coef_work(:, 1:nstate_blk), h_work(:, 1:nstate_blk))
@@ -343,8 +356,29 @@
 
         if (trace_derivative) t0 = get_wtime()
         if (use_length_gauge) then
-          call apply_length_gauge_position_term(ispin, E_field, coef_work(:, 1:nstate_blk), &
-                                                h_work(:, 1:nstate_blk))
+          if (use_formal_dg_wannier_lg) then
+            call apply_formal_dg_wannier_position_term(ispin, E_field, coef_work(:, 1:nstate_blk), &
+                                                       h_work(:, 1:nstate_blk))
+          else if (use_global_wannier_lg .and. .not. dg_frag%has_local_wannier_basis .and. .not. use_buffer_wannier_h) then
+            call apply_global_wannier_center_position_term(ispin, E_field, coef_work(:, 1:nstate_blk), &
+                                                           h_work(:, 1:nstate_blk))
+          else
+            call apply_length_gauge_position_term(ispin, E_field, coef_work(:, 1:nstate_blk), &
+                                                  h_work(:, 1:nstate_blk))
+          end if
+          if (dg_frag%buffer_wannier_xi_flux_available .and. &
+              allocated(dg_frag%buffer_wannier_xi_flux_blocks) .and. &
+              allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) then
+            call apply_vector_blocks_compact_offdiag_dot(E_field, dg_frag%buffer_wannier_xi_flux_blocks, &
+                                                         dg_frag%buffer_wannier_xi_flux_local_block_ids, ispin, &
+                                                         coef_work(:, 1:nstate_blk), h_work(:, 1:nstate_blk))
+          else if (use_buffer_wannier_h .and. .not. dg_frag%buffer_wannier_xi_flux_warned) then
+            if (dg_frag%id == 0) then
+              write(*,'(1x,a)') "[DG-BPW-XI-FLUX] neighbor xi_flux blocks are not loaded; using H_flux only."
+              flush(6)
+            end if
+            dg_frag%buffer_wannier_xi_flux_warned = .true.
+          end if
         else
           call add_diamagnetic_term(nstate_blk)
         end if
@@ -872,6 +906,38 @@
       end do
     end subroutine apply_real_blocks_compact
 
+    subroutine apply_real_blocks_compact_offdiag(blocks, block_ids, ispin_current, x, y)
+      type(matrix_block_info), intent(in) :: blocks(:)
+      integer, intent(in) :: block_ids(:), ispin_current
+      complex(8), intent(in) :: x(:, :)
+      complex(8), intent(inout) :: y(:, :)
+      integer :: iblk_idx, iblk
+
+      do iblk_idx = 1, size(block_ids)
+        iblk = block_ids(iblk_idx)
+        if (iblk < 1 .or. iblk > size(blocks)) cycle
+        if (blocks(iblk)%ifrag_row == blocks(iblk)%ifrag_col) cycle
+        call apply_one_real_block(blocks(iblk), ispin_current, x, y)
+      end do
+    end subroutine apply_real_blocks_compact_offdiag
+
+    subroutine apply_vector_blocks_compact_offdiag_dot(E_use, blocks, block_ids, ispin_current, x, y)
+      real(8), intent(in) :: E_use(3)
+      type(vector_block_info), intent(in) :: blocks(:)
+      integer, intent(in) :: block_ids(:), ispin_current
+      complex(8), intent(in) :: x(:, :)
+      complex(8), intent(inout) :: y(:, :)
+      integer :: iblk_idx, iblk
+
+      if (sum(abs(E_use(1:3))) <= 1.0d-30) return
+      do iblk_idx = 1, size(block_ids)
+        iblk = block_ids(iblk_idx)
+        if (iblk < 1 .or. iblk > size(blocks)) cycle
+        if (blocks(iblk)%ifrag_row == blocks(iblk)%ifrag_col) cycle
+        call apply_one_vector_dot_block_scalar(E_use, blocks(iblk), ispin_current, x, y)
+      end do
+    end subroutine apply_vector_blocks_compact_offdiag_dot
+
     subroutine apply_complex_blocks_compact(blocks, block_ids, ispin_current, x, y)
       type(complex_matrix_block_info), intent(in) :: blocks(:)
       integer, intent(in) :: block_ids(:), ispin_current
@@ -885,6 +951,63 @@
         call apply_one_complex_block(blocks(iblk), ispin_current, x, y)
       end do
     end subroutine apply_complex_blocks_compact
+
+    subroutine apply_one_vector_dot_block_scalar(E_use, block, ispin_current, x, y)
+      real(8), intent(in) :: E_use(3)
+      type(vector_block_info), intent(in) :: block
+      integer, intent(in) :: ispin_current
+      complex(8), intent(in) :: x(:, :)
+      complex(8), intent(inout) :: y(:, :)
+      integer :: iv, jv, ii, jj, istate, ifrag_row, ifrag_col, nrow, ncol
+      integer :: row_pos, col_pos, nstate, nmax
+      real(8) :: val
+
+      nstate = min(size(x, 2), size(y, 2))
+      ifrag_row = block%ifrag_row
+      ifrag_col = block%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) return
+      if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) return
+      if (.not. allocated(block%val)) return
+      if (size(block%val, 1) < 3) return
+      if (allocated(frag_map_count)) then
+        nrow = frag_map_count(ifrag_row)
+        ncol = frag_map_count(ifrag_col)
+      else
+        nmax = max(dg_frag%n_basis(ifrag_row, ispin_current), dg_frag%n_basis(ifrag_col, ispin_current))
+        call ensure_index_work_arrays(max(1, nmax))
+        call build_compact_basis_map(ifrag_row, ispin_current, row_lid_work, row_pos_work, nrow)
+        call build_compact_basis_map(ifrag_col, ispin_current, col_lid_work, col_pos_work, ncol)
+      end if
+      if (nrow <= 0 .or. ncol <= 0) return
+!$omp parallel do if(nrow*ncol*nstate >= 8192) private(iv,jv,ii,jj,row_pos,col_pos,val,istate) schedule(static)
+      do iv = 1, nrow
+        if (allocated(frag_map_count)) then
+          ii = frag_map_lid(iv, ifrag_row)
+          row_pos = frag_map_pos(iv, ifrag_row)
+        else
+          ii = row_lid_work(iv)
+          row_pos = row_pos_work(iv)
+        end if
+        do jv = 1, ncol
+          if (allocated(frag_map_count)) then
+            jj = frag_map_lid(jv, ifrag_col)
+            col_pos = frag_map_pos(jv, ifrag_col)
+          else
+            jj = col_lid_work(jv)
+            col_pos = col_pos_work(jv)
+          end if
+          val = -(E_use(1) * block%val(1,ii,jj,ispin_current) &
+                + E_use(2) * block%val(2,ii,jj,ispin_current) &
+                + E_use(3) * block%val(3,ii,jj,ispin_current))
+          if (abs(val) == 0.0d0) cycle
+          !$omp simd
+          do istate = 1, nstate
+            y(row_pos, istate) = y(row_pos, istate) + val * x(col_pos, istate)
+          end do
+        end do
+      end do
+!$omp end parallel do
+    end subroutine apply_one_vector_dot_block_scalar
 
     subroutine apply_one_real_block(block, ispin_current, x, y)
       type(matrix_block_info), intent(in) :: block
@@ -1177,6 +1300,261 @@
       end do
     end subroutine apply_buffer_wannier_h_flux_term
 
+    subroutine apply_global_wannier_center_position_term(ispin_current, E_use, x, y)
+      integer, intent(in) :: ispin_current
+      real(8), intent(in) :: E_use(3)
+      complex(8), intent(in) :: x(:,:)
+      complex(8), intent(inout) :: y(:,:)
+      integer :: ifrag, i_local, nrow, nstate, nmax
+      integer :: io, iw, istate, row_pos, col_pos, n_wann
+      real(8) :: rdot
+      complex(8), allocatable :: c_w_local(:,:), c_w_sum(:,:), rc_w(:,:)
+
+      if (sum(abs(E_use(1:3))) <= 1.0d-30) return
+      if (.not. allocated(dg_frag%global_wannier_coef)) return
+      if (.not. allocated(dg_frag%global_wannier_center)) return
+      if (dg_frag%has_global_wannier_local_basis .and. allocated(dg_frag%global_wannier_local_coef) .and. &
+          allocated(dg_frag%global_wannier_local_center) .and. allocated(dg_frag%global_wannier_local_nkeep)) then
+        call apply_global_wannier_local_center_position_term(ispin_current, E_use, x, y)
+        return
+      end if
+      n_wann = dg_frag%global_wannier_num_wann
+      if (n_wann <= 0) return
+      nstate = size(x, 2)
+      allocate(c_w_local(n_wann,nstate), c_w_sum(n_wann,nstate), rc_w(n_wann,nstate))
+      c_w_local = (0.0d0, 0.0d0)
+      c_w_sum = (0.0d0, 0.0d0)
+      rc_w = (0.0d0, 0.0d0)
+
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
+        nmax = max(dg_frag%n_basis(ifrag, ispin_current), 1)
+        call ensure_index_work_arrays(nmax)
+        call build_compact_basis_map(ifrag, ispin_current, row_lid_work, row_pos_work, nrow)
+        if (nrow <= 0) cycle
+        do iw = 1, n_wann
+          do io = 1, nrow
+            col_pos = row_pos_work(io)
+            if (col_pos <= 0) cycle
+            do istate = 1, nstate
+              c_w_local(iw,istate) = c_w_local(iw,istate) + &
+                conjg(dg_frag%global_wannier_coef(row_lid_work(io), iw, ispin_current, i_local)) * &
+                x(col_pos,istate)
+            end do
+          end do
+        end do
+      end do
+
+      if (dg_frag%isize > 1) then
+        call comm_summation(c_w_local, c_w_sum, n_wann * nstate, dg_frag%icomm)
+      else
+        c_w_sum = c_w_local
+      end if
+
+      do iw = 1, n_wann
+        rdot = E_use(1) * dg_frag%global_wannier_center(1,iw) &
+             + E_use(2) * dg_frag%global_wannier_center(2,iw) &
+             + E_use(3) * dg_frag%global_wannier_center(3,iw)
+        if (abs(rdot) <= 0.0d0) cycle
+        do istate = 1, nstate
+          rc_w(iw,istate) = rdot * c_w_sum(iw,istate)
+        end do
+      end do
+
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
+        nmax = max(dg_frag%n_basis(ifrag, ispin_current), 1)
+        call ensure_index_work_arrays(nmax)
+        call build_compact_basis_map(ifrag, ispin_current, row_lid_work, row_pos_work, nrow)
+        if (nrow <= 0) cycle
+        do io = 1, nrow
+          row_pos = row_pos_work(io)
+          if (row_pos <= 0) cycle
+          if (.not. row_is_output(needed_row_ids(row_pos))) cycle
+          if (.not. row_is_owned(needed_row_ids(row_pos), ispin_current)) cycle
+          do iw = 1, n_wann
+            do istate = 1, nstate
+              y(row_pos,istate) = y(row_pos,istate) - &
+                dg_frag%global_wannier_coef(row_lid_work(io), iw, ispin_current, i_local) * &
+                rc_w(iw,istate)
+            end do
+          end do
+        end do
+      end do
+
+      deallocate(c_w_local, c_w_sum, rc_w)
+    end subroutine apply_global_wannier_center_position_term
+
+    subroutine apply_formal_dg_wannier_position_term(ispin_current, E_use, x, y)
+      integer, intent(in) :: ispin_current
+      real(8), intent(in) :: E_use(3)
+      complex(8), intent(in) :: x(:,:)
+      complex(8), intent(inout) :: y(:,:)
+      integer :: ifrag, i_local, nrow, nstate, nmax
+      integer :: io, iw, jw, istate, row_pos, col_pos, nkeep
+      complex(8) :: zdot
+      complex(8), allocatable :: c_w(:,:), rc_w(:,:)
+
+      if (sum(abs(E_use(1:3))) <= 1.0d-30) return
+      if (.not. dg_frag%has_formal_dg_wannier_basis) return
+      if (.not. allocated(dg_frag%dg_wannier_basis_coef)) return
+      if (.not. allocated(dg_frag%dg_wannier_xi_local)) return
+      if (.not. allocated(dg_frag%dg_wannier_ref_center)) return
+      if (.not. allocated(dg_frag%dg_wannier_nkeep)) return
+
+      nstate = size(x, 2)
+      if (size(dg_frag%dg_wannier_basis_coef, 2) <= 0) return
+      allocate(c_w(size(dg_frag%dg_wannier_basis_coef, 2), nstate))
+      allocate(rc_w(size(dg_frag%dg_wannier_basis_coef, 2), nstate))
+
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%dg_wannier_nkeep)) cycle
+        nkeep = dg_frag%dg_wannier_nkeep(i_local)
+        if (nkeep <= 0) cycle
+        nmax = max(dg_frag%n_basis(ifrag, ispin_current), 1)
+        call ensure_index_work_arrays(nmax)
+        call build_compact_basis_map(ifrag, ispin_current, row_lid_work, row_pos_work, nrow)
+        if (nrow <= 0) cycle
+
+        c_w(1:nkeep, 1:nstate) = (0.0d0, 0.0d0)
+        rc_w(1:nkeep, 1:nstate) = (0.0d0, 0.0d0)
+        do iw = 1, nkeep
+          do io = 1, nrow
+            col_pos = row_pos_work(io)
+            if (col_pos <= 0) cycle
+            do istate = 1, nstate
+              c_w(iw,istate) = c_w(iw,istate) + &
+                conjg(dg_frag%dg_wannier_basis_coef(row_lid_work(io), iw, ispin_current, i_local)) * &
+                x(col_pos,istate)
+            end do
+          end do
+        end do
+
+        do iw = 1, nkeep
+          do jw = 1, nkeep
+            zdot = E_use(1) * dg_frag%dg_wannier_xi_local(1, iw, jw, ispin_current, i_local) &
+                 + E_use(2) * dg_frag%dg_wannier_xi_local(2, iw, jw, ispin_current, i_local) &
+                 + E_use(3) * dg_frag%dg_wannier_xi_local(3, iw, jw, ispin_current, i_local)
+            if (iw == jw) then
+              zdot = zdot + cmplx(E_use(1) * dg_frag%dg_wannier_ref_center(1, i_local) &
+                                + E_use(2) * dg_frag%dg_wannier_ref_center(2, i_local) &
+                                + E_use(3) * dg_frag%dg_wannier_ref_center(3, i_local), 0.0d0, kind=8)
+            end if
+            if (abs(zdot) <= 0.0d0) cycle
+            do istate = 1, nstate
+              rc_w(iw,istate) = rc_w(iw,istate) + zdot * c_w(jw,istate)
+            end do
+          end do
+        end do
+
+        do io = 1, nrow
+          row_pos = row_pos_work(io)
+          if (row_pos <= 0) cycle
+          if (.not. row_is_output(needed_row_ids(row_pos))) cycle
+          if (.not. row_is_owned(needed_row_ids(row_pos), ispin_current)) cycle
+          do iw = 1, nkeep
+            do istate = 1, nstate
+              y(row_pos,istate) = y(row_pos,istate) - &
+                dg_frag%dg_wannier_basis_coef(row_lid_work(io), iw, ispin_current, i_local) * &
+                rc_w(iw,istate)
+            end do
+          end do
+        end do
+      end do
+
+      deallocate(c_w, rc_w)
+    end subroutine apply_formal_dg_wannier_position_term
+
+    subroutine apply_global_wannier_local_center_position_term(ispin_current, E_use, x, y)
+      integer, intent(in) :: ispin_current
+      real(8), intent(in) :: E_use(3)
+      complex(8), intent(in) :: x(:,:)
+      complex(8), intent(inout) :: y(:,:)
+      integer :: ifrag, i_local, nrow, nstate, nmax
+      integer :: io, iw, jw, istate, row_pos, col_pos, nkeep
+      real(8) :: rdot
+      complex(8) :: zdot
+      complex(8), allocatable :: c_w(:,:), rc_w(:,:)
+
+      if (sum(abs(E_use(1:3))) <= 1.0d-30) return
+      if (.not. dg_frag%has_global_wannier_local_basis) return
+      if (.not. allocated(dg_frag%global_wannier_local_coef)) return
+      if (.not. allocated(dg_frag%global_wannier_local_center)) return
+      if (.not. allocated(dg_frag%global_wannier_local_nkeep)) return
+      nstate = size(x, 2)
+      if (size(dg_frag%global_wannier_local_coef, 2) <= 0) return
+      allocate(c_w(size(dg_frag%global_wannier_local_coef, 2), nstate))
+      allocate(rc_w(size(dg_frag%global_wannier_local_coef, 2), nstate))
+
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_local_nkeep)) cycle
+        nkeep = dg_frag%global_wannier_local_nkeep(i_local)
+        if (nkeep <= 0) cycle
+        nmax = max(dg_frag%n_basis(ifrag, ispin_current), 1)
+        call ensure_index_work_arrays(nmax)
+        call build_compact_basis_map(ifrag, ispin_current, row_lid_work, row_pos_work, nrow)
+        if (nrow <= 0) cycle
+
+        c_w(1:nkeep, 1:nstate) = (0.0d0, 0.0d0)
+        rc_w(1:nkeep, 1:nstate) = (0.0d0, 0.0d0)
+        do iw = 1, nkeep
+          do io = 1, nrow
+            col_pos = row_pos_work(io)
+            if (col_pos <= 0) cycle
+            do istate = 1, nstate
+              c_w(iw,istate) = c_w(iw,istate) + &
+                conjg(dg_frag%global_wannier_local_coef(row_lid_work(io), iw, ispin_current, i_local)) * &
+                x(col_pos,istate)
+            end do
+          end do
+        end do
+
+        if (dg_frag%has_global_wannier_position .and. allocated(dg_frag%global_wannier_local_position)) then
+          do iw = 1, nkeep
+            do jw = 1, nkeep
+              zdot = E_use(1) * dg_frag%global_wannier_local_position(1, iw, jw, i_local) &
+                   + E_use(2) * dg_frag%global_wannier_local_position(2, iw, jw, i_local) &
+                   + E_use(3) * dg_frag%global_wannier_local_position(3, iw, jw, i_local)
+              if (abs(zdot) <= 0.0d0) cycle
+              do istate = 1, nstate
+                rc_w(iw,istate) = rc_w(iw,istate) + zdot * c_w(jw,istate)
+              end do
+            end do
+          end do
+        else
+          do iw = 1, nkeep
+            rdot = E_use(1) * dg_frag%global_wannier_local_center(1, iw, i_local) &
+                 + E_use(2) * dg_frag%global_wannier_local_center(2, iw, i_local) &
+                 + E_use(3) * dg_frag%global_wannier_local_center(3, iw, i_local)
+            if (abs(rdot) <= 0.0d0) cycle
+            do istate = 1, nstate
+              rc_w(iw,istate) = rdot * c_w(iw,istate)
+            end do
+          end do
+        end if
+
+        do io = 1, nrow
+          row_pos = row_pos_work(io)
+          if (row_pos <= 0) cycle
+          if (.not. row_is_output(needed_row_ids(row_pos))) cycle
+          if (.not. row_is_owned(needed_row_ids(row_pos), ispin_current)) cycle
+          do iw = 1, nkeep
+            do istate = 1, nstate
+              y(row_pos,istate) = y(row_pos,istate) - &
+                dg_frag%global_wannier_local_coef(row_lid_work(io), iw, ispin_current, i_local) * &
+                rc_w(iw,istate)
+            end do
+          end do
+        end do
+      end do
+
+      deallocate(c_w, rc_w)
+    end subroutine apply_global_wannier_local_center_position_term
+
     subroutine apply_length_gauge_position_term(ispin_current, E_use, x, y)
       integer, intent(in) :: ispin_current
       real(8), intent(in) :: E_use(3)
@@ -1255,6 +1633,13 @@
               rdot = E_use(1) * dg_frag%buffer_wannier_v(1,iw,jw,i_local) &
                    + E_use(2) * dg_frag%buffer_wannier_v(2,iw,jw,i_local) &
                    + E_use(3) * dg_frag%buffer_wannier_v(3,iw,jw,i_local)
+              if (iw == jw .and. allocated(dg_frag%buffer_wannier_frag_center)) then
+                if (i_local >= 1 .and. i_local <= size(dg_frag%buffer_wannier_frag_center, 2)) then
+                  rdot = rdot + E_use(1) * dg_frag%buffer_wannier_frag_center(1,i_local) &
+                              + E_use(2) * dg_frag%buffer_wannier_frag_center(2,i_local) &
+                              + E_use(3) * dg_frag%buffer_wannier_frag_center(3,i_local)
+                end if
+              end if
             else
               rdot = E_use(1) * dg_frag%local_wannier_r(1,iw,jw,ispin_current,i_local) &
                    + E_use(2) * dg_frag%local_wannier_r(2,iw,jw,ispin_current,i_local) &

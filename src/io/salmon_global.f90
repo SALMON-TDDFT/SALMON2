@@ -479,12 +479,15 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_wannier
   character(1)   :: yn_dc_lcfo_local_wannier
   character(1)   :: yn_dc_lcfo_wannier_pw
+  character(1)   :: yn_dc_lcfo_wannier_cluster
   character(256) :: wannier_projection
   integer        :: nstate_frag
   integer        :: lcfo_frag_cache_size
   integer        :: wannier_num_wann
   integer        :: wannier_num_bands
   integer        :: wannier_num_iter
+  integer        :: num_wannier_cluster(3)
+  integer        :: wannier_cluster_size(3)
   real(8)        :: wannier_projection_width
   real(8)        :: wannier_dis_froz_max
   real(8)        :: wannier_dis_win_max

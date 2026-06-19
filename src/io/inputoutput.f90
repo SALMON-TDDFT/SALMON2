@@ -630,12 +630,15 @@ contains
       & yn_dc_lcfo_wannier, &
       & yn_dc_lcfo_local_wannier, &
       & yn_dc_lcfo_wannier_pw, &
+      & yn_dc_lcfo_wannier_cluster, &
       & wannier_projection, &
       & nstate_frag, &
       & lcfo_frag_cache_size, &
       & wannier_num_wann, &
       & wannier_num_bands, &
       & wannier_num_iter, &
+      & num_wannier_cluster, &
+      & wannier_cluster_size, &
       & wannier_projection_width, &
       & wannier_dis_froz_max, &
       & wannier_dis_win_max, &
@@ -1108,12 +1111,15 @@ contains
     yn_dc_lcfo_wannier = 'n'
     yn_dc_lcfo_local_wannier = 'n'
     yn_dc_lcfo_wannier_pw = 'n'
+    yn_dc_lcfo_wannier_cluster = 'n'
     wannier_projection = ''
     nstate_frag = 0
     lcfo_frag_cache_size = 1
     wannier_num_wann = 0
     wannier_num_bands = 0
     wannier_num_iter = 100
+    num_wannier_cluster = 0
+    wannier_cluster_size = 1
     wannier_projection_width = 1d0
     wannier_dis_froz_max = 0d0
     wannier_dis_win_max = 0d0
@@ -1791,12 +1797,15 @@ contains
     call comm_bcast(yn_dc_lcfo_wannier, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_local_wannier, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
     call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
     call comm_bcast(wannier_num_wann, nproc_group_global)
     call comm_bcast(wannier_num_bands, nproc_group_global)
     call comm_bcast(wannier_num_iter, nproc_group_global)
+    call comm_bcast(num_wannier_cluster, nproc_group_global)
+    call comm_bcast(wannier_cluster_size, nproc_group_global)
     call comm_bcast(wannier_projection_width, nproc_group_global)
     wannier_projection_width = wannier_projection_width * ulength_to_au
     call comm_bcast(wannier_dis_froz_max, nproc_group_global)
@@ -2801,12 +2810,15 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier",yn_dc_lcfo_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_local_wannier",yn_dc_lcfo_local_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
       write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_wann",wannier_num_wann
       write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_bands",wannier_num_bands
       write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_iter",wannier_num_iter
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_wannier_cluster",num_wannier_cluster(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "wannier_cluster_size",wannier_cluster_size(1:3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_projection_width', wannier_projection_width
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_froz_max', wannier_dis_froz_max
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_win_max', wannier_dis_win_max
@@ -2924,6 +2936,7 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier)
     call yn_argument_check(yn_dc_lcfo_local_wannier)
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
+    call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dg_length_gauge)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
@@ -3229,6 +3242,32 @@ contains
       & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_dis_froz_max must not exceed wannier_dis_win_max."
     end if
 
+    if(yn_dc_lcfo_wannier_cluster=='y') then
+      if(yn_dc_lcfo_wannier/='y') &
+      & stop "DC-LCFO Wannier cluster partition requires yn_dc_lcfo_wannier=y."
+      if(any(num_wannier_cluster(1:3) > 0)) then
+        if(any(num_wannier_cluster(1:3) <= 0)) &
+        & stop "DC-LCFO Wannier cluster partition: num_wannier_cluster must be all positive or all omitted."
+        do i=1,3
+          if(num_fragment(i) <= 0) &
+          & stop "DC-LCFO Wannier cluster partition: num_fragment must be specified."
+          if(mod(num_fragment(i), num_wannier_cluster(i)) /= 0) &
+          & stop "DC-LCFO Wannier cluster partition: num_fragment must be divisible by num_wannier_cluster."
+          wannier_cluster_size(i) = num_fragment(i) / num_wannier_cluster(i)
+        end do
+      end if
+      if(yn_dc_lcfo_local_wannier=='y' .and. any(wannier_cluster_size(1:3) /= 1)) &
+      & stop "DC-LCFO Wannier cluster partition is not compatible with fragment-local Wannier export yet."
+      do i=1,3
+        if(wannier_cluster_size(i) <= 0) &
+        & stop "DC-LCFO Wannier cluster partition: wannier_cluster_size must be positive."
+        if(num_fragment(i) <= 0) &
+        & stop "DC-LCFO Wannier cluster partition: num_fragment must be specified."
+        if(mod(num_fragment(i), wannier_cluster_size(i)) /= 0) &
+        & stop "DC-LCFO Wannier cluster partition: num_fragment must be divisible by wannier_cluster_size."
+      end do
+    end if
+
     if(yn_dc_lcfo_local_wannier=='y') then
       if(yn_dc/='y') &
       & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc=y must be specified."
@@ -3276,15 +3315,17 @@ contains
       if(time_integrator_dg_fragment/='ssprk3' .and. &
          time_integrator_dg_fragment/='rk4' .and. &
          time_integrator_dg_fragment/='taylor4pc' .and. &
+         time_integrator_dg_fragment/='expdiag' .and. &
          time_integrator_dg_fragment/='aetrs') &
-      & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', 'taylor4pc', or 'aetrs'"
+      & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', 'taylor4pc', 'expdiag', or 'aetrs'"
     end if
     if(yn_dg_length_gauge=='y' .and. yn_dg_fragment_rt/='y') &
       stop "DG length gauge requires yn_dg_fragment_rt=y."
     if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
       stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
-    if(yn_dg_length_gauge=='y' .and. time_integrator_dg_fragment/='taylor4pc') &
-      stop "DG length gauge currently requires time_integrator_dg_fragment='taylor4pc'."
+    if(yn_dg_length_gauge=='y' .and. time_integrator_dg_fragment/='taylor4pc' .and. &
+       time_integrator_dg_fragment/='expdiag') &
+      stop "DG length gauge currently requires time_integrator_dg_fragment='taylor4pc' or 'expdiag'."
     
     call yn_argument_check(yn_dg_fragment_rt)
 

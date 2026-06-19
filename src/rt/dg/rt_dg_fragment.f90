@@ -55,7 +55,7 @@ module rt_dg_fragment
                                   find_density_grid_owner, get_fragment_group_root_rank, &
                                   fragment_from_rank_address
   use rt_dg_fragment_lifecycle, only: init_rk_coefficients
-  use rt_dg_fragment_io, only: read_fragment_basis_data
+  use rt_dg_fragment_io, only: read_fragment_basis_data, initialize_coefficients_from_buffer_wannier_flux
   use rt_dg_fragment_coefficients, only: rebuild_coef_owner_map, get_subgroup_block_owner_rank
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
                                 calculate_microscopic_current_dg, &
@@ -63,9 +63,7 @@ module rt_dg_fragment
                                 rebuild_local_h_block_ids, &
                                 apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, &
                                 apply_overlap_operator_batch, fetch_remote_coef_rows, &
-                                solve_overlap_operator_batch, &
-                                diagnose_velocity_transition_strength_dg, &
-                                diagnose_wannier_position_transition_strength_dg
+                                solve_overlap_operator_batch
   implicit none
 
   private
@@ -75,9 +73,8 @@ module rt_dg_fragment
   public :: update_density_and_hamiltonian
   public :: diagnose_density_from_fragments
   public :: diagnose_dcdft_lcfo_seed_stationarity
-  public :: diagnose_velocity_transition_strength_dg
-  public :: diagnose_wannier_position_transition_strength_dg
   public :: calibrate_dcdft_lcfo_static_hamiltonian
+  public :: refresh_buffer_wannier_flux_seed_from_current_hamiltonian
   public :: get_dg_spin_occ_info
   public :: copy_periodic_global_scalar_to_rank_buffer
   public :: build_total_potential_grid_with_buffered_hartree
@@ -335,6 +332,8 @@ contains
       dg_frag%time_integrator = 3
     case('taylor4pc')
       dg_frag%time_integrator = 4
+    case('expdiag')
+      dg_frag%time_integrator = 5
     case default
       dg_frag%time_integrator = 3  ! default: RK4
     end select
@@ -624,6 +623,9 @@ contains
   !=======================================================================
 #include "rt_dg_integrator_taylor.f90"
 
+  ! Time evolution by direct diagonal exponential in local BPW blocks
+#include "rt_dg_integrator_expdiag.f90"
+
   !=======================================================================
   ! Stage-wise density/Hamiltonian update for RK4 (paper-aligned self-consistency)
   !=======================================================================
@@ -745,6 +747,76 @@ contains
     if (allocated(Vpsl_buffer)) deallocate(Vpsl_buffer)
     if (allocated(Vxc_buffer)) deallocate(Vxc_buffer)
   end subroutine calibrate_dcdft_lcfo_static_hamiltonian
+
+  subroutine refresh_buffer_wannier_flux_seed_from_current_hamiltonian(dg_frag, label)
+    use communication, only: comm_is_root, comm_summation, comm_get_max
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in), optional :: label
+
+    integer :: ifrag, i_local, ispin, iblk, nw, nbf
+    real(8), allocatable :: h_dg(:,:), hw_tmp(:,:)
+    real(8) :: stat_local(2), stat_global(2), diff_local, diff_max
+    real(8) :: diff_local_arr(1), diff_global_arr(1)
+    character(128) :: label_use
+
+    if (.not. dg_frag%has_buffer_periodic_wannier_basis) return
+    if (.not. allocated(dg_frag%buffer_wannier_coef)) return
+    if (.not. allocated(dg_frag%buffer_wannier_h_flux)) return
+    if (.not. allocated(dg_frag%buffer_wannier_nkeep)) return
+    if (.not. allocated(dg_frag%H_block_map)) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+
+    label_use = '[DG-BPW-SCF-SEED]'
+    if (present(label)) label_use = trim(label)
+
+    stat_local(:) = 0.0d0
+    stat_global(:) = 0.0d0
+    diff_max = 0.0d0
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = ifrag - dg_frag%ifrag_start + 1
+      if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
+      nw = dg_frag%buffer_wannier_nkeep(i_local)
+      if (nw <= 0) cycle
+      do ispin = 1, dg_frag%nspin
+        nbf = min(dg_frag%n_basis(ifrag, ispin), dg_frag%nstate_frag, &
+                  size(dg_frag%buffer_wannier_coef, 1))
+        if (nbf <= 0) cycle
+        iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
+        if (iblk <= 0 .or. iblk > size(dg_frag%H_mat_blocks)) cycle
+        if (.not. allocated(dg_frag%H_mat_blocks(iblk)%val)) cycle
+        allocate(h_dg(nbf,nbf), hw_tmp(nbf,nw))
+        h_dg(1:nbf,1:nbf) = dg_frag%H_mat_blocks(iblk)%val(1:nbf,1:nbf,ispin)
+        hw_tmp(1:nbf,1:nw) = matmul(h_dg(1:nbf,1:nbf), &
+          dg_frag%buffer_wannier_coef(1:nbf,1:nw,ispin,i_local))
+        if (ispin == 1) then
+          diff_local = maxval(abs(dg_frag%buffer_wannier_h_flux(1:nw,1:nw,i_local) - &
+            matmul(transpose(dg_frag%buffer_wannier_coef(1:nbf,1:nw,ispin,i_local)), &
+                   hw_tmp(1:nbf,1:nw))))
+          diff_max = max(diff_max, diff_local)
+          dg_frag%buffer_wannier_h_flux(1:nw,1:nw,i_local) = &
+            matmul(transpose(dg_frag%buffer_wannier_coef(1:nbf,1:nw,ispin,i_local)), &
+                   hw_tmp(1:nbf,1:nw))
+        end if
+        stat_local(1) = stat_local(1) + 1.0d0
+        stat_local(2) = stat_local(2) + dble(nw)
+        deallocate(h_dg, hw_tmp)
+      end do
+    end do
+
+    call comm_summation(stat_local, stat_global, 2, dg_frag%icomm)
+    diff_local_arr(1) = diff_max
+    call comm_get_max(diff_local_arr, diff_global_arr, 1, dg_frag%icomm)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,3(a,1pe13.5))') trim(label_use), &
+        ' projected_blocks=', stat_global(1), &
+        ' total_wannier=', stat_global(2), &
+        ' max|Hproj-Hseed|=', diff_global_arr(1)
+      flush(6)
+    end if
+
+    call initialize_coefficients_from_buffer_wannier_flux(dg_frag)
+  end subroutine refresh_buffer_wannier_flux_seed_from_current_hamiltonian
 
   subroutine diagnose_dcdft_lcfo_seed_stationarity(dg_frag, system, mg, ppg, Ac_tot, label)
     use structures
@@ -1106,6 +1178,17 @@ contains
       dg_frag%n_dipole_blocks = 0
     end if
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
+    if (allocated(dg_frag%buffer_wannier_xi_flux_blocks)) then
+      do i = 1, size(dg_frag%buffer_wannier_xi_flux_blocks)
+        if (allocated(dg_frag%buffer_wannier_xi_flux_blocks(i)%val)) &
+          deallocate(dg_frag%buffer_wannier_xi_flux_blocks(i)%val)
+      end do
+      deallocate(dg_frag%buffer_wannier_xi_flux_blocks)
+      dg_frag%n_buffer_wannier_xi_flux_blocks = 0
+      dg_frag%buffer_wannier_xi_flux_available = .false.
+    end if
+    if (allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) &
+      deallocate(dg_frag%buffer_wannier_xi_flux_local_block_ids)
     if (allocated(dg_frag%local_wannier_nbasis)) deallocate(dg_frag%local_wannier_nbasis)
     if (allocated(dg_frag%local_wannier_nproj)) deallocate(dg_frag%local_wannier_nproj)
     if (allocated(dg_frag%local_wannier_nkeep)) deallocate(dg_frag%local_wannier_nkeep)
@@ -1120,8 +1203,32 @@ contains
     if (allocated(dg_frag%buffer_wannier_tail)) deallocate(dg_frag%buffer_wannier_tail)
     if (allocated(dg_frag%buffer_wannier_h_flux)) deallocate(dg_frag%buffer_wannier_h_flux)
     if (allocated(dg_frag%buffer_wannier_v)) deallocate(dg_frag%buffer_wannier_v)
+    if (allocated(dg_frag%buffer_wannier_frag_center)) deallocate(dg_frag%buffer_wannier_frag_center)
     dg_frag%has_buffer_periodic_wannier_basis = .false.
     dg_frag%buffer_wannier_flux_seed_applied = .false.
+    if (allocated(dg_frag%dg_wannier_nkeep)) deallocate(dg_frag%dg_wannier_nkeep)
+    if (allocated(dg_frag%dg_wannier_global_ids)) deallocate(dg_frag%dg_wannier_global_ids)
+    if (allocated(dg_frag%dg_wannier_owner_frag)) deallocate(dg_frag%dg_wannier_owner_frag)
+    if (allocated(dg_frag%dg_wannier_ref_center)) deallocate(dg_frag%dg_wannier_ref_center)
+    if (allocated(dg_frag%dg_wannier_basis_coef)) deallocate(dg_frag%dg_wannier_basis_coef)
+    if (allocated(dg_frag%dg_wannier_h0_local)) deallocate(dg_frag%dg_wannier_h0_local)
+    if (allocated(dg_frag%dg_wannier_xi_local)) deallocate(dg_frag%dg_wannier_xi_local)
+    if (allocated(dg_frag%dg_wannier_coef)) deallocate(dg_frag%dg_wannier_coef)
+    if (allocated(dg_frag%dg_wannier_neighbor_blocks)) then
+      do i = 1, size(dg_frag%dg_wannier_neighbor_blocks)
+        if (allocated(dg_frag%dg_wannier_neighbor_blocks(i)%h_flux)) &
+          deallocate(dg_frag%dg_wannier_neighbor_blocks(i)%h_flux)
+        if (allocated(dg_frag%dg_wannier_neighbor_blocks(i)%xi_flux)) &
+          deallocate(dg_frag%dg_wannier_neighbor_blocks(i)%xi_flux)
+      end do
+      deallocate(dg_frag%dg_wannier_neighbor_blocks)
+    end if
+    if (allocated(dg_frag%dg_wannier_local_neighbor_block_ids)) &
+      deallocate(dg_frag%dg_wannier_local_neighbor_block_ids)
+    dg_frag%has_formal_dg_wannier_basis = .false.
+    dg_frag%n_dg_wannier_neighbor_blocks = 0
+    dg_frag%dg_wannier_blocks_gauge_consistent = .false.
+    dg_frag%dg_wannier_uses_full_global_position = .false.
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)

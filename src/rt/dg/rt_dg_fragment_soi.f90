@@ -221,6 +221,8 @@ contains
       dg_frag%time_integrator = 3
     case('taylor4pc')
       dg_frag%time_integrator = 4
+    case('expdiag')
+      dg_frag%time_integrator = 5
     case default
       dg_frag%time_integrator = 3  ! default: RK4 
     end select
@@ -439,6 +441,9 @@ contains
   ! Time evolution using fourth-order Taylor predictor-corrector
   !=======================================================================
 #include "rt_dg_integrator_taylor.f90"
+
+  ! Time evolution by direct diagonal exponential in local BPW blocks
+#include "rt_dg_integrator_expdiag.f90"
 
   !=======================================================================
   ! Stage-wise density/Hamiltonian update for RK4 (paper-aligned self-consistency)

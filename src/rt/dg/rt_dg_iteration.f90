@@ -47,6 +47,10 @@
       call time_evolution_taylor4pc(dg_frag, system, info, rt, itt, dt, &
                                     lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                     rho, rho_s, Vh, Vxc, Vpsl, energy)
+    case(5)  ! direct diagonal exponential in local BPW blocks
+      call time_evolution_expdiag(dg_frag, system, info, rt, itt, dt, &
+                                  lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+                                  rho, rho_s, Vh, Vxc, Vpsl, energy)
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select

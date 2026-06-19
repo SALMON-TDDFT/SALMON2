@@ -24,7 +24,7 @@ module rt_dg_fragment_types
   private
   public :: halo_info, matrix_block_info, complex_matrix_block_info, vector_block_info, complex_vector_block_info, &
             momentum_block_info, flux_face_trace_info, density_recv_map_info, density_grid_point_info, &
-            real_buffer_info, s_dg_fragment_rt, invalidate_coef_exchange_cache
+            real_buffer_info, dg_wannier_neighbor_block_info, s_dg_fragment_rt, invalidate_coef_exchange_cache
 
   ! Halo communication structure (for phi_frag exchange between fragments)
   type :: halo_info
@@ -121,6 +121,16 @@ module rt_dg_fragment_types
   type :: real_buffer_info
     real(8), allocatable :: val(:)
   end type real_buffer_info
+
+  type :: dg_wannier_neighbor_block_info
+    integer :: ifrag_row = 0
+    integer :: ifrag_col = 0
+    integer :: nrow_max = 0
+    integer :: ncol_max = 0
+    integer :: peer_rank = -1
+    complex(8), allocatable :: h_flux(:,:,:)     ! (nrow_max,ncol_max,nspin)
+    complex(8), allocatable :: xi_flux(:,:,:,:)  ! (3,nrow_max,ncol_max,nspin)
+  end type dg_wannier_neighbor_block_info
 
   ! Fragment basis data structure
   !
@@ -245,7 +255,45 @@ module rt_dg_fragment_types
     real(8), allocatable :: buffer_wannier_spread(:,:) ! (W basis, local fragment index)
     real(8), allocatable :: buffer_wannier_tail(:,:) ! (W basis, local fragment index)
     real(8), allocatable :: buffer_wannier_h_flux(:,:,:) ! (W basis, W basis, local fragment index)
-    real(8), allocatable :: buffer_wannier_v(:,:,:,:) ! (3, W basis, W basis, local fragment index)
+    real(8), allocatable :: buffer_wannier_v(:,:,:,:) ! xi: (3, W basis, W basis, local fragment index)
+    real(8), allocatable :: buffer_wannier_frag_center(:,:) ! R_I: (3, local fragment index)
+    type(vector_block_info), allocatable :: buffer_wannier_xi_flux_blocks(:) ! neighbor xi_flux blocks
+    integer, allocatable :: buffer_wannier_xi_flux_local_block_ids(:)
+    integer :: n_buffer_wannier_xi_flux_blocks = 0
+    logical :: buffer_wannier_xi_flux_available = .false.
+    logical :: buffer_wannier_xi_flux_warned = .false.
+    logical :: has_global_wannier_basis = .false.
+    integer :: global_wannier_num_bands = 0
+    integer :: global_wannier_num_wann = 0
+    integer :: global_wannier_n_frag = 0
+    integer, allocatable :: global_wannier_owner_frag(:) ! (num_wann)
+    real(8), allocatable :: global_wannier_center(:,:) ! (3,num_wann), bohr
+    real(8), allocatable :: global_wannier_spread(:) ! (num_wann), Angstrom^2 from Wannier90
+    complex(8), allocatable :: global_wannier_transform(:,:) ! (num_bands,num_wann)
+    complex(8), allocatable :: global_wannier_position(:,:,:) ! (3,num_wann,num_wann), bohr
+    logical :: has_global_wannier_position = .false.
+    complex(8), allocatable :: global_wannier_coef(:,:,:,:) ! (DG basis,W basis,nspin,local fragment)
+    logical :: has_global_wannier_local_basis = .false.
+    integer, allocatable :: global_wannier_local_nkeep(:) ! (local fragment)
+    integer, allocatable :: global_wannier_local_ids(:,:) ! (local W, local fragment) -> global W id
+    integer, allocatable :: global_wannier_local_owner_frag(:,:) ! (local W, local fragment)
+    real(8), allocatable :: global_wannier_local_center(:,:,:) ! (3, local W, local fragment)
+    complex(8), allocatable :: global_wannier_local_coef(:,:,:,:) ! (DG basis, local W, nspin, local fragment)
+    complex(8), allocatable :: global_wannier_local_position(:,:,:,:) ! (3, local W, local W, local fragment)
+    logical :: has_formal_dg_wannier_basis = .false.
+    integer, allocatable :: dg_wannier_nkeep(:) ! (local fragment)
+    integer, allocatable :: dg_wannier_global_ids(:,:) ! (local W, local fragment)
+    integer, allocatable :: dg_wannier_owner_frag(:,:) ! (local W, local fragment)
+    real(8), allocatable :: dg_wannier_ref_center(:,:) ! R_I: (3, local fragment)
+    complex(8), allocatable :: dg_wannier_basis_coef(:,:,:,:) ! (DG basis, local W, nspin, local fragment)
+    complex(8), allocatable :: dg_wannier_h0_local(:,:,:,:) ! (local W, local W, nspin, local fragment)
+    complex(8), allocatable :: dg_wannier_xi_local(:,:,:,:,:) ! (3, local W, local W, nspin, local fragment)
+    complex(8), allocatable :: dg_wannier_coef(:,:,:,:) ! C_aI(t): (local W, state, nspin, local fragment)
+    type(dg_wannier_neighbor_block_info), allocatable :: dg_wannier_neighbor_blocks(:)
+    integer, allocatable :: dg_wannier_local_neighbor_block_ids(:)
+    integer :: n_dg_wannier_neighbor_blocks = 0
+    logical :: dg_wannier_blocks_gauge_consistent = .false.
+    logical :: dg_wannier_uses_full_global_position = .false.
     real(8) :: Ac_nl_cache(3)                      ! cached vector potential for H_nl_blocks
     real(8) :: Ac_nl_cache_tol                     ! tolerance for cache reuse
     logical :: has_nl_cache                        ! flag: cached H_nl available
@@ -326,6 +374,12 @@ module rt_dg_fragment_types
 
     ! Fragment geometry information
     integer :: num_fragment(3)                 ! Fragment division in each direction (from salmon_global)
+    logical :: has_wannier_cluster_partition = .false. ! DC provided cluster-level Wannier partition
+    integer :: wannier_cluster_size(3) = 1     ! # of DG fragments grouped into one Wannier cluster
+    integer :: num_wannier_cluster(3) = 0      ! Wannier cluster grid
+    integer :: n_wannier_cluster = 0           ! total number of Wannier clusters
+    integer, allocatable :: wannier_cluster_id(:) ! (n_frag) fragment -> Wannier cluster id
+    integer, allocatable :: wannier_cluster_range(:,:) ! (6,n_wannier_cluster): xlo,xhi,ylo,yhi,zlo,zhi in fragment coords
     integer, allocatable :: nxyz_domain(:,:)   ! (3, n_frag) domain size of each fragment
     integer, allocatable :: ixyz_frag(:,:)     ! (3, n_frag) r-grid index of fragment origin
     integer, allocatable :: frag_core_lo(:,:)  ! (3, n_frag) unwrapped fragment-core lower bounds

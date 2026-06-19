@@ -43,6 +43,8 @@
     real(8) :: boxL(3), inv_sqrt_vol, theta, inv_lgnum1
     logical :: use_mixed_density
     logical :: enable_wannier_density
+    logical :: enable_global_wannier_density
+    logical :: use_global_wannier_sparse_density
     logical :: use_buffer_wannier_density
     logical :: enable_density_phi_block_cache, enable_density_phase_block_cache
     logical :: rebuilt_pw_cache, rebuilt_phi_block_cache, rebuilt_phase_block_cache
@@ -100,6 +102,8 @@
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
     character(32) :: env_phi_block_cache, env_phase_block_cache
     character(32) :: env_wannier_density
+    character(32) :: env_global_wannier_density
+    character(32) :: env_global_wannier_center_range
     character(32) :: env_rho_mix_mode
     character(32) :: env_trace_density_charge
     integer :: env_status
@@ -122,6 +126,10 @@
     logical, save :: cfg_enable_density_phase_block_cache = .false.
     logical, save :: cfg_enable_wannier_density = .false.
     logical, save :: cfg_wannier_density_logged = .false.
+    logical, save :: cfg_enable_global_wannier_density = .false.
+    logical, save :: cfg_global_wannier_density_logged = .false.
+    logical, save :: cfg_global_wannier_sparse_logged = .false.
+    integer, save :: cfg_global_wannier_center_range = 1
     logical, save :: cfg_trace_density_charge = .false.
     character(32), save :: cfg_env_rho_mix_mode = 'legacy'
     integer, save :: cfg_rho_mix_mode_kind = 0
@@ -144,6 +152,8 @@
     env_phi_block_cache = ''
     env_phase_block_cache = ''
     env_wannier_density = ''
+    env_global_wannier_density = ''
+    env_global_wannier_center_range = ''
     env_rho_mix_mode = 'legacy'
     env_trace_density_charge = ''
     env_fp_phase_fix = ''
@@ -181,6 +191,31 @@
           cfg_enable_wannier_density = .true.
         case('0','n','N','no','NO','false','FALSE','off','OFF')
           cfg_enable_wannier_density = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_GLOBAL_WANNIER_DENSITY', env_global_wannier_density, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_global_wannier_density)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_enable_global_wannier_density = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_enable_global_wannier_density = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_GLOBAL_WANNIER_CENTER_RANGE', &
+        env_global_wannier_center_range, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_global_wannier_center_range)))
+        case('all','ALL','full','FULL')
+          cfg_global_wannier_center_range = -1
+        case('0')
+          cfg_global_wannier_center_range = 0
+        case('1')
+          cfg_global_wannier_center_range = 1
+        case('2')
+          cfg_global_wannier_center_range = 2
+        case('3')
+          cfg_global_wannier_center_range = 3
         end select
       end if
       call get_environment_variable('SALMON_DG_DENSITY_TRACE_CHARGE', env_trace_density_charge, status=env_status)
@@ -224,6 +259,7 @@
     enable_density_phi_block_cache = cfg_enable_density_phi_block_cache
     enable_density_phase_block_cache = cfg_enable_density_phase_block_cache
     enable_wannier_density = cfg_enable_wannier_density
+    enable_global_wannier_density = cfg_enable_global_wannier_density
     trace_density_charge = cfg_trace_density_charge
     use_buffer_wannier_density = enable_wannier_density .and. &
       dg_frag%buffer_wannier_flux_seed_applied .and. dg_frag%has_buffer_periodic_wannier_basis .and. &
@@ -254,6 +290,21 @@
     need_rhobf_box_cache = .false.
 
     if (.not. allocated(dg_frag%phi_frag)) return
+    n_pw = max(0, dg_frag%n_plane_waves)
+    if (enable_global_wannier_density) then
+      if (n_pw > 0) &
+        stop "DG global Wannier density path is only implemented for pure fragment basis"
+      if (.not. dg_frag%has_global_wannier_basis .or. .not. allocated(dg_frag%global_wannier_coef)) &
+        stop "DG global Wannier density path requires wannier90_global_basis.bin"
+      if (.not. dg_frag%has_global_wannier_local_basis .or. .not. allocated(dg_frag%global_wannier_local_coef)) &
+        stop "DG global Wannier weak-scaling density path requires local-selected global Wannier basis"
+      if (.not. cfg_global_wannier_density_logged .and. dg_frag%id == 0) then
+        write(*,'(1x,a)') &
+          "[DG-DENSITY-W90-GLOBAL] enabled: local-selected weak-scaling global Wannier density"
+        cfg_global_wannier_density_logged = .true.
+      end if
+    end if
+    use_global_wannier_sparse_density = enable_global_wannier_density
     inv_lgnum1 = 1.0d0 / dble(max(1, dg_frag%lgnum_total(1)))
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
@@ -762,6 +813,9 @@
     end if
       i_local = 0
       block_idx_global = 0
+      if (use_global_wannier_sparse_density) then
+        call calculate_density_global_wannier_local_sparse_path()
+      else
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = i_local + 1
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
@@ -1740,6 +1794,7 @@
         end if
         block_idx_global = block_idx_global + nblocks_ifrag
       end do
+      end if
     density_on_frag_root = dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1 .and. &
       dg_frag%icomm_frag /= COMM_GROUP_NULL
     if ((.not. density_on_frag_root) .or. dg_frag%is_frag_root) then
@@ -2049,6 +2104,222 @@
     if (allocated(rho_s_bf)) deallocate(rho_s_bf)
     deallocate(rho_send, rho_recv)
   contains
+
+    subroutine calculate_density_global_wannier_local_sparse_path()
+      implicit none
+      type(density_grid_point_info) :: point
+      integer :: s_ifrag, s_i_local, s_ispin, s_ib, s_iw, s_io, s_pt
+      integer :: s_nbf, s_nocc, s_nw, s_ix, s_iy, s_iz, s_ixg, s_iyg, s_izg
+      integer :: s_owner_rank, s_slot, s_spin_offset, s_bx, s_by, s_bz
+      integer :: s_center_range
+      integer :: s_wgid
+      integer :: s_igrid0, s_igrid, s_npt, s_state0, s_state, s_nbatch
+      integer, allocatable :: s_basis_ids(:)
+      integer, allocatable :: s_wids(:)
+      complex(8), allocatable :: s_coef_full(:,:), s_cw(:,:), s_wblk(:,:), s_psiblk(:,:)
+      complex(8), allocatable :: s_phi_blk(:,:), s_wcoef(:,:)
+      real(8) :: s_occ, s_rho_contrib
+      real(8), allocatable :: s_rho_blk(:)
+
+      s_center_range = cfg_global_wannier_center_range
+      if (.not. cfg_global_wannier_sparse_logged .and. dg_frag%id == 0) then
+        write(*,'(1x,a,i0)') &
+          "[DG-DENSITY-W90-GLOBAL-SPARSE] center_range=", s_center_range
+        cfg_global_wannier_sparse_logged = .true.
+      end if
+
+      block_idx_global = 0
+      do s_i_local = 1, ifrag_count
+        block_idx_global = block_idx_global + dg_frag%density_block_nblocks(s_i_local)
+      end do
+
+      do s_ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        s_i_local = s_ifrag - dg_frag%ifrag_start + 1
+        s_nw = 0
+        do s_iw = 1, dg_frag%global_wannier_num_wann
+          if (global_wannier_owner_in_fragment_range(dg_frag%global_wannier_owner_frag(s_iw), &
+              s_ifrag, s_center_range)) s_nw = s_nw + 1
+        end do
+        if (s_nw <= 0) cycle
+        allocate(s_wids(s_nw))
+        s_nw = 0
+        do s_iw = 1, dg_frag%global_wannier_num_wann
+          if (.not. global_wannier_owner_in_fragment_range(dg_frag%global_wannier_owner_frag(s_iw), &
+              s_ifrag, s_center_range)) cycle
+          s_nw = s_nw + 1
+          s_wids(s_nw) = s_iw
+        end do
+        ngrid = dg_frag%density_grid_point_count(s_i_local)
+        if (ngrid <= 0) then
+          deallocate(s_wids)
+          cycle
+        end if
+        do s_ispin = 1, system%nspin
+          s_nbf = dg_frag%n_basis(s_ifrag, s_ispin)
+          s_nocc = dg_frag%nocc_spin(s_ispin)
+          if (s_nbf <= 0 .or. s_nocc <= 0) cycle
+          allocate(s_basis_ids(s_nbf), s_coef_full(s_nbf, s_nocc))
+          allocate(s_cw(s_nw, s_nocc))
+          allocate(s_wblk(grid_block_size, s_nw), s_psiblk(grid_block_size, state_block_size))
+          allocate(s_phi_blk(grid_block_size, s_nbf), s_wcoef(s_nbf, s_nw))
+          allocate(s_rho_blk(grid_block_size))
+          s_basis_ids(1:s_nbf) = dg_frag%index_basis(1:s_nbf, s_ifrag, s_ispin)
+          s_coef_full(:, :) = (0.0d0, 0.0d0)
+          call fetch_remote_coef_rows(dg_frag, s_ispin, s_basis_ids(1:s_nbf), &
+                                      s_coef_full(1:s_nbf, 1:s_nocc), 1, s_nocc)
+
+          s_cw(:, :) = (0.0d0, 0.0d0)
+          s_wcoef(:, :) = (0.0d0, 0.0d0)
+          do s_iw = 1, s_nw
+            s_wgid = s_wids(s_iw)
+            s_wcoef(1:s_nbf, s_iw) = dg_frag%global_wannier_coef(1:s_nbf, s_wgid, s_ispin, s_i_local)
+          end do
+          call zgemm('C', 'N', s_nw, s_nocc, s_nbf, zone, &
+                     s_wcoef, s_nbf, s_coef_full, s_nbf, &
+                     zzero, s_cw, s_nw)
+
+          do s_igrid0 = 1, ngrid, grid_block_size
+            s_npt = min(grid_block_size, ngrid - s_igrid0 + 1)
+            s_phi_blk(1:s_npt, 1:s_nbf) = (0.0d0, 0.0d0)
+            do s_igrid = 1, s_npt
+              s_pt = s_igrid0 + s_igrid - 1
+              point = dg_frag%density_grid_points(s_pt, s_i_local)
+              s_ix = point%ix
+              s_iy = point%iy
+              s_iz = point%iz
+              if (s_ix < lbound(dg_frag%phi_frag, 1) .or. s_ix > ubound(dg_frag%phi_frag, 1)) cycle
+              if (s_iy < lbound(dg_frag%phi_frag, 2) .or. s_iy > ubound(dg_frag%phi_frag, 2)) cycle
+              if (s_iz < lbound(dg_frag%phi_frag, 3) .or. s_iz > ubound(dg_frag%phi_frag, 3)) cycle
+              do s_ib = 1, s_nbf
+                s_phi_blk(s_igrid, s_ib) = cmplx(dg_frag%phi_frag(s_ix, s_iy, s_iz, s_ib, s_i_local), 0.0d0, kind=8)
+              end do
+            end do
+            call zgemm('N', 'N', s_npt, s_nw, s_nbf, zone, &
+                       s_phi_blk, grid_block_size, s_wcoef, s_nbf, &
+                       zzero, s_wblk, grid_block_size)
+
+            s_rho_blk(1:s_npt) = 0.0d0
+            do s_state0 = 1, s_nocc, state_block_size
+              s_nbatch = min(state_block_size, s_nocc - s_state0 + 1)
+              call zgemm('N', 'N', s_npt, s_nbatch, s_nw, zone, &
+                         s_wblk, grid_block_size, s_cw(1, s_state0), s_nw, &
+                         zzero, s_psiblk, grid_block_size)
+              do s_state = 1, s_nbatch
+                s_io = s_state0 + s_state - 1
+                s_occ = 1.0d0
+                if (allocated(system%rocc)) then
+                  if (s_io <= size(system%rocc, 1) .and. s_ispin <= size(system%rocc, 3)) &
+                    s_occ = max(0.0d0, system%rocc(s_io, 1, s_ispin))
+                end if
+                if (s_occ <= 0.0d0) cycle
+!$omp simd
+                do s_igrid = 1, s_npt
+                  s_rho_blk(s_igrid) = s_rho_blk(s_igrid) + s_occ * &
+                    (real(s_psiblk(s_igrid, s_state), kind=8)**2 + aimag(s_psiblk(s_igrid, s_state))**2)
+                end do
+              end do
+            end do
+
+            do s_igrid = 1, s_npt
+              s_pt = s_igrid0 + s_igrid - 1
+              point = dg_frag%density_grid_points(s_pt, s_i_local)
+              s_rho_contrib = s_rho_blk(s_igrid)
+              s_ixg = point%ixg
+              s_iyg = point%iyg
+              s_izg = point%izg
+              s_owner_rank = point%owner_rank
+              s_slot = point%send_slot
+              if (s_slot > 0) then
+                if (s_owner_rank < 0 .or. s_owner_rank > dg_frag%isize - 1) then
+                  write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                    "DG global-Wannier density owner out of range: rank=", dg_frag%id, &
+                    " ifrag=", s_ifrag, " point=", s_pt, " owner=", s_owner_rank
+                  flush(6)
+                  stop "DG-Fragment RT: global Wannier density owner out of range"
+                end if
+                if (.not. allocated(rho_send(s_owner_rank)%f)) cycle
+                if (s_slot < 1 .or. s_slot > dg_frag%density_send_count(s_owner_rank)) cycle
+!$omp atomic update
+                rho_send(s_owner_rank)%f(s_slot, 1, 1) = rho_send(s_owner_rank)%f(s_slot, 1, 1) + s_rho_contrib
+                if (system%nspin > 1) then
+                  s_spin_offset = s_ispin * dg_frag%density_send_count(s_owner_rank)
+                  if (s_spin_offset + s_slot >= 1 .and. s_spin_offset + s_slot <= size(rho_send(s_owner_rank)%f, 1)) then
+!$omp atomic update
+                    rho_send(s_owner_rank)%f(s_spin_offset + s_slot, 1, 1) = &
+                      rho_send(s_owner_rank)%f(s_spin_offset + s_slot, 1, 1) + s_rho_contrib
+                  end if
+                end if
+              else
+                if (.not. target_rank_owned_by_handler(s_owner_rank)) cycle
+                s_bx = dg_frag%density_grid_bx(s_pt, s_i_local)
+                s_by = dg_frag%density_grid_by(s_pt, s_i_local)
+                s_bz = dg_frag%density_grid_bz(s_pt, s_i_local)
+                if (s_bx == 0 .or. s_by == 0 .or. s_bz == 0) cycle
+!$omp atomic update
+                rho_bf(s_bx, s_by, s_bz) = rho_bf(s_bx, s_by, s_bz) + s_rho_contrib
+                if (system%nspin > 1) then
+                  if (s_ixg >= lbound(rho_s_bf, 1) .and. s_ixg <= ubound(rho_s_bf, 1) .and. &
+                      s_iyg >= lbound(rho_s_bf, 2) .and. s_iyg <= ubound(rho_s_bf, 2) .and. &
+                      s_izg >= lbound(rho_s_bf, 3) .and. s_izg <= ubound(rho_s_bf, 3)) then
+!$omp atomic update
+                    rho_s_bf(s_ixg, s_iyg, s_izg, s_ispin) = &
+                      rho_s_bf(s_ixg, s_iyg, s_izg, s_ispin) + s_rho_contrib
+                  end if
+                end if
+              end if
+            end do
+          end do
+
+          deallocate(s_basis_ids, s_coef_full, s_cw, s_wblk, s_psiblk, s_phi_blk, s_wcoef, s_rho_blk)
+        end do
+        deallocate(s_wids)
+      end do
+
+      call assert_rho_bf_with_sources('rho_bf-after-global-wannier-local-sparse', &
+        max(0, dg_frag%ifrag_group), 0, block_idx_global, max(1, min(grid_block_size, ngrid_max)))
+    end subroutine calculate_density_global_wannier_local_sparse_path
+
+    logical function global_wannier_owner_in_fragment_range(owner_frag, center_frag, center_range) result(in_range)
+      implicit none
+      integer, intent(in) :: owner_frag, center_frag, center_range
+
+      if (center_range < 0) then
+        in_range = .true.
+      else if (owner_frag < 1 .or. owner_frag > dg_frag%n_frag .or. &
+               center_frag < 1 .or. center_frag > dg_frag%n_frag) then
+        in_range = .false.
+      else
+        in_range = (fragment_periodic_chebyshev_distance(owner_frag, center_frag) <= center_range)
+      end if
+    end function global_wannier_owner_in_fragment_range
+
+    integer function fragment_periodic_chebyshev_distance(ifrag_a, ifrag_b) result(dist)
+      implicit none
+      integer, intent(in) :: ifrag_a, ifrag_b
+      integer :: ca(3), cb(3), axis, d, nfrag_axis
+
+      call fragment_coord3_from_id(ifrag_a, ca)
+      call fragment_coord3_from_id(ifrag_b, cb)
+      dist = 0
+      do axis = 1, 3
+        nfrag_axis = max(1, dg_frag%num_fragment(axis))
+        d = abs(ca(axis) - cb(axis))
+        if (nfrag_axis > 1) d = min(d, nfrag_axis - d)
+        dist = max(dist, d)
+      end do
+    end function fragment_periodic_chebyshev_distance
+
+    subroutine fragment_coord3_from_id(ifrag_id, coord)
+      implicit none
+      integer, intent(in) :: ifrag_id
+      integer, intent(out) :: coord(3)
+      integer :: rem
+
+      coord(1) = (ifrag_id - 1) / max(1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3)) + 1
+      rem = modulo(ifrag_id - 1, max(1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3)))
+      coord(2) = rem / max(1, dg_frag%num_fragment(3)) + 1
+      coord(3) = modulo(rem, max(1, dg_frag%num_fragment(3))) + 1
+    end subroutine fragment_coord3_from_id
 
     logical function density_basis_owned_by_rank(global_basis, ispin_arg) result(is_owned)
       implicit none

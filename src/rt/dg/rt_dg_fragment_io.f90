@@ -1,12 +1,14 @@
 ! DG fragment basis-file I/O for non-SOI RT.
 #include "config.h"
 module rt_dg_fragment_io
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use rt_dg_fragment_types, only: s_dg_fragment_rt, invalidate_coef_exchange_cache
   use rt_dg_fragment_coefficients, only: rebuild_coef_owner_map
   use rt_dg_fragment_layout, only: get_fragment_group_root_rank
   implicit none
   private
   public :: read_fragment_basis_data
+  public :: initialize_coefficients_from_buffer_wannier_flux
 
 contains
   subroutine read_dg_occupation_seed(dg_frag)
@@ -92,7 +94,7 @@ contains
     integer :: magic_file, version_file
     integer, allocatable :: n_basis_frag(:)
     integer, allocatable :: jxyz_tot(:,:)
-    integer :: ix, iy, iz, n
+    integer :: ix, iy, iz, n, iw
     integer :: ixg_store, iyg_store, izg_store
     integer :: ix_src, iy_src, iz_src
     integer :: ix_box, iy_box, iz_box
@@ -104,6 +106,7 @@ contains
     real(8) :: n_basis_avg, nvirt_est_avg
     integer :: state_col, occ_base, occ_extra, frag_occ_s, frag_occ_e, nocc_frag_seed
     logical :: warned_spin_discard, has_buffer_file, has_core_file, identity_seed_coefficients
+    logical :: has_global_wannier_file
     logical :: esp_loaded
     real(8) :: coef_diag_local(2), coef_diag_global(2)
 
@@ -177,6 +180,7 @@ contains
     ! eigenvector matrix.  Load the occupied-column count before constructing
     ! coef so occupied columns can be distributed over every fragment.
     if (identity_seed_coefficients) call read_dg_occupation_seed(dg_frag)
+    call read_wannier_cluster_partition(dg_frag)
 
     call invalidate_coef_exchange_cache(dg_frag)
 
@@ -220,8 +224,9 @@ contains
 
     ! The global row numbering is part of the wavefunctions.bin contract:
     ! coef_wf(local_basis,state,spin), index_basis, and all DG operator blocks
-    ! must refer to the same DC/EigenExa basis rows.  Do not compact or remap it
-    ! while reading; reject inconsistent seed files instead.
+    ! must refer to the same DC/EigenExa basis rows.  Sparse row ids are allowed
+    ! because the DC basis keeps only the active n_basis rows in each fragment;
+    ! reject only duplicate or out-of-range ids.
     block
       integer :: ispin_chk, ifrag_chk, io_chk, row_id
       integer :: dup_count, out_count, miss_count
@@ -246,12 +251,16 @@ contains
           end do
         end do
         miss_count = count(seen == 0)
-        if (dup_count > 0 .or. out_count > 0 .or. miss_count > 0) then
+        if (dup_count > 0 .or. out_count > 0) then
           bad_index_basis = .true.
           if (dg_frag%id == 0) then
             write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[FATAL] invalid DG index_basis in wavefunctions.bin (ispin=", &
               ispin_chk, "): dup=", dup_count, " out_of_range=", out_count, " missing=", miss_count
           end if
+        else if (miss_count > 0 .and. dg_frag%id == 0) then
+          write(*,'(1x,a,i0,a,i0)') &
+            "[WARN] sparse DG index_basis in wavefunctions.bin: ispin=", ispin_chk, &
+            " missing_rows=", miss_count
         end if
         deallocate(seen)
       end do
@@ -264,8 +273,11 @@ contains
     end block
     dg_frag%n_mat_max = max(1, maxval(dg_frag%n_mat(1:dg_frag%nspin)))
     if (yn_dg_length_gauge == 'y') then
-      call read_local_wannier_basis_data(dg_frag, bdir_frag)
       call read_buffer_periodic_wannier_basis_data(dg_frag, bdir_frag)
+      inquire(file='./data_dcdft/total/wannier90_global_basis.bin', exist=has_global_wannier_file)
+      if (.not. dg_frag%has_buffer_periodic_wannier_basis .and. .not. has_global_wannier_file) &
+        call read_local_wannier_basis_data(dg_frag, bdir_frag)
+      call read_wannier90_global_basis_metadata_if_requested(dg_frag)
     end if
 
     dg_frag%owned_coef_start = 0
@@ -346,6 +358,7 @@ contains
     dg_frag%coef = 0.0d0
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new = 0.0d0
     if (allocated(dg_frag%coef_work)) dg_frag%coef_work = 0.0d0
+    if (yn_dg_length_gauge == 'y') call read_wannier90_global_basis_data(dg_frag, ifrag_count)
 
     if (identity_seed_coefficients) then
       ! Step 5a: Build the initial occupied coefficient columns.  DC writes an
@@ -409,6 +422,7 @@ contains
       ! Stream one column at a time so the RT rank keeps only its owned rows.
       esp_loaded = .false.
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
         iunit = get_filehandle()
         write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
         open(iunit, file=filename, form='unformatted', access='stream', status='old')
@@ -421,12 +435,19 @@ contains
         do ispin = 1, nspin_file
           do state_col = 1, nstate_tot_file
             read(iunit) coef_state_file(1:nstate_frag_file)
+            nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), nstate_frag_file)
+            if (any(coef_state_file(1:nbasis_iter) /= coef_state_file(1:nbasis_iter)) .or. &
+                any(abs(coef_state_file(1:nbasis_iter)) > huge(1.0d0))) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+                "[FATAL] non-finite coefficient in wavefunctions.bin: rank=", dg_frag%id, &
+                " ifrag=", ifrag, " ispin=", ispin, " state=", state_col
+              stop "DG-Fragment RT: non-finite wavefunction coefficient"
+            end if
             if (ispin < 1 .or. ispin > dg_frag%nspin) cycle
             if (state_col > dg_frag%nstate_tot) cycle
             if (dg_frag%coef_state_block_mode) then
               if (state_col < dg_frag%coef_state_start .or. state_col > dg_frag%coef_state_end) cycle
             end if
-            nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), nstate_frag_file)
             do io = 1, nbasis_iter
               global_idx = dg_frag%index_basis(io, ifrag, ispin)
               local_idx = 0
@@ -440,6 +461,16 @@ contains
                 end if
               end if
             end do
+            if (dg_frag%has_global_wannier_basis .and. allocated(dg_frag%global_wannier_coef)) then
+              if (state_col <= dg_frag%global_wannier_num_bands) then
+                do iw = 1, dg_frag%global_wannier_num_wann
+                  dg_frag%global_wannier_coef(1:nbasis_iter, iw, ispin, i_local) = &
+                    dg_frag%global_wannier_coef(1:nbasis_iter, iw, ispin, i_local) + &
+                    dcmplx(coef_state_file(1:nbasis_iter), 0.0d0) * &
+                    dg_frag%global_wannier_transform(state_col, iw)
+                end do
+              end if
+            end if
           end do
         end do
         if (allocated(esp_file) .and. .not. esp_loaded) then
@@ -458,6 +489,12 @@ contains
         close(iunit)
         deallocate(coef_state_file)
       end do
+    end if
+
+    if (yn_dg_length_gauge == 'y' .and. dg_frag%has_global_wannier_basis) then
+      call apply_wannier_flux_eigen_seed_if_available(dg_frag, ifrag_count)
+      call build_global_wannier_local_basis(dg_frag)
+      call build_formal_dg_wannier_from_global_local(dg_frag)
     end if
 
     if (yn_dg_length_gauge == 'y' .and. dg_frag%has_buffer_periodic_wannier_basis) then
@@ -752,6 +789,122 @@ contains
 
   end subroutine read_fragment_basis_data
 
+  subroutine read_wannier_cluster_partition(dg_frag)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root, comm_bcast
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, parameter :: wannier_cluster_magic = -22022217
+    integer, parameter :: wannier_cluster_version = 1
+    integer :: iunit, iostat_open, io
+    integer :: magic_file, version_file, n_frag_file, ncluster_file
+    integer :: num_fragment_file(3), cluster_size_file(3), num_cluster_file(3)
+    integer :: ifrag
+    logical :: has_file
+    character(256) :: filename
+
+    has_file = .false.
+    n_frag_file = dg_frag%n_frag
+    ncluster_file = dg_frag%n_frag
+    num_fragment_file(1:3) = dg_frag%num_fragment(1:3)
+    cluster_size_file(1:3) = 1
+    num_cluster_file(1:3) = dg_frag%num_fragment(1:3)
+
+    if(allocated(dg_frag%wannier_cluster_id)) deallocate(dg_frag%wannier_cluster_id)
+    if(allocated(dg_frag%wannier_cluster_range)) deallocate(dg_frag%wannier_cluster_range)
+
+    if(comm_is_root(dg_frag%id)) then
+      filename = './data_dcdft/total/wannier_cluster_partition.bin'
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=iostat_open)
+      if(iostat_open == 0) then
+        read(iunit,iostat=io) magic_file, version_file
+        if(io == 0 .and. magic_file == wannier_cluster_magic .and. version_file == wannier_cluster_version) then
+          read(iunit,iostat=io) num_fragment_file(1:3), cluster_size_file(1:3), num_cluster_file(1:3)
+          if(io == 0) read(iunit,iostat=io) n_frag_file, ncluster_file
+          if(io == 0 .and. n_frag_file == dg_frag%n_frag .and. &
+             all(num_fragment_file(1:3) == dg_frag%num_fragment(1:3)) .and. ncluster_file > 0) then
+            allocate(dg_frag%wannier_cluster_id(dg_frag%n_frag))
+            allocate(dg_frag%wannier_cluster_range(6,ncluster_file))
+            read(iunit,iostat=io) dg_frag%wannier_cluster_id(1:dg_frag%n_frag)
+            if(io == 0) read(iunit,iostat=io) dg_frag%wannier_cluster_range(1:6,1:ncluster_file)
+            if(io == 0) has_file = .true.
+          end if
+        end if
+        close(iunit)
+      end if
+      if(.not. has_file) then
+        if(allocated(dg_frag%wannier_cluster_id)) deallocate(dg_frag%wannier_cluster_id)
+        if(allocated(dg_frag%wannier_cluster_range)) deallocate(dg_frag%wannier_cluster_range)
+        n_frag_file = dg_frag%n_frag
+        ncluster_file = dg_frag%n_frag
+        num_fragment_file(1:3) = dg_frag%num_fragment(1:3)
+        cluster_size_file(1:3) = 1
+        num_cluster_file(1:3) = dg_frag%num_fragment(1:3)
+      end if
+    end if
+
+    call comm_bcast(has_file, dg_frag%icomm, 0)
+    call comm_bcast(cluster_size_file, dg_frag%icomm, 0)
+    call comm_bcast(num_cluster_file, dg_frag%icomm, 0)
+    call comm_bcast(ncluster_file, dg_frag%icomm, 0)
+
+    dg_frag%has_wannier_cluster_partition = has_file
+    dg_frag%wannier_cluster_size(1:3) = cluster_size_file(1:3)
+    dg_frag%num_wannier_cluster(1:3) = num_cluster_file(1:3)
+    dg_frag%n_wannier_cluster = ncluster_file
+
+    if(has_file) then
+      if(.not. allocated(dg_frag%wannier_cluster_id)) allocate(dg_frag%wannier_cluster_id(dg_frag%n_frag))
+      if(.not. allocated(dg_frag%wannier_cluster_range)) allocate(dg_frag%wannier_cluster_range(6,max(1,ncluster_file)))
+      call comm_bcast(dg_frag%wannier_cluster_id, dg_frag%icomm, 0)
+      call comm_bcast(dg_frag%wannier_cluster_range, dg_frag%icomm, 0)
+    else
+      dg_frag%wannier_cluster_size(1:3) = 1
+      dg_frag%num_wannier_cluster(1:3) = dg_frag%num_fragment(1:3)
+      dg_frag%n_wannier_cluster = dg_frag%n_frag
+      if(allocated(dg_frag%wannier_cluster_id)) deallocate(dg_frag%wannier_cluster_id)
+      if(allocated(dg_frag%wannier_cluster_range)) deallocate(dg_frag%wannier_cluster_range)
+      allocate(dg_frag%wannier_cluster_id(dg_frag%n_frag))
+      allocate(dg_frag%wannier_cluster_range(6,dg_frag%n_frag))
+      do ifrag=1,dg_frag%n_frag
+        dg_frag%wannier_cluster_id(ifrag) = ifrag
+        dg_frag%wannier_cluster_range(1,ifrag) = fragment_coord_from_id(ifrag, dg_frag%num_fragment, 1)
+        dg_frag%wannier_cluster_range(2,ifrag) = fragment_coord_from_id(ifrag, dg_frag%num_fragment, 1)
+        dg_frag%wannier_cluster_range(3,ifrag) = fragment_coord_from_id(ifrag, dg_frag%num_fragment, 2)
+        dg_frag%wannier_cluster_range(4,ifrag) = fragment_coord_from_id(ifrag, dg_frag%num_fragment, 2)
+        dg_frag%wannier_cluster_range(5,ifrag) = fragment_coord_from_id(ifrag, dg_frag%num_fragment, 3)
+        dg_frag%wannier_cluster_range(6,ifrag) = fragment_coord_from_id(ifrag, dg_frag%num_fragment, 3)
+      end do
+    end if
+
+    if(comm_is_root(dg_frag%id)) then
+      if(has_file) then
+        write(*,'(1x,a,3(i0,1x),a,i0)') "[DG-WANNIER-CLUSTER] loaded cluster_size=", &
+          dg_frag%wannier_cluster_size(1:3), " ncluster=", dg_frag%n_wannier_cluster
+      else
+        write(*,'(1x,a)') "[DG-WANNIER-CLUSTER] no cluster partition file; using one fragment per Wannier cluster."
+      end if
+    end if
+  end subroutine read_wannier_cluster_partition
+
+  integer function fragment_coord_from_id(ifrag, num_fragment, axis) result(coord)
+    implicit none
+    integer, intent(in) :: ifrag, num_fragment(3), axis
+    integer :: rem
+    coord = 1
+    select case(axis)
+    case(1)
+      coord = (ifrag - 1) / max(1, num_fragment(2) * num_fragment(3)) + 1
+    case(2)
+      rem = modulo(ifrag - 1, max(1, num_fragment(2) * num_fragment(3)))
+      coord = rem / max(1, num_fragment(3)) + 1
+    case(3)
+      rem = modulo(ifrag - 1, max(1, num_fragment(2) * num_fragment(3)))
+      coord = modulo(rem, max(1, num_fragment(3))) + 1
+    end select
+  end function fragment_coord_from_id
+
   subroutine read_local_wannier_basis_data(dg_frag, bdir_frag)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root
@@ -934,24 +1087,66 @@ contains
 
     character(48), parameter :: binfile_bpw = "buffer_periodic_wannier_basis.bin"
     integer, parameter :: buffer_periodic_wannier_magic = -22022215
-    integer, parameter :: buffer_periodic_wannier_version = 1
+    integer, parameter :: buffer_periodic_wannier_version = 3
     character(256) :: filename
     integer :: ifrag, i_local, ifrag_count, iunit, iostat_open
     integer :: magic_file, version_file, ifrag_file
+    integer :: aa_wann_source
     integer :: nxyz_domain(3), nxyz_buffer_file(3), nxyz_box(3), nspin_file
     integer :: nbasis_file, nproj_file, nkeep_file, nkeep_max, ispin_store
-    integer :: iw_diag, jw_diag
+    integer :: iw_diag, jw_diag, irow, jcol, axis_center, idx_lo, idx_hi
+    integer :: env_status, env_len
     integer, allocatable :: proj_atom(:), proj_hybrid(:), keep_index(:)
     real(8), allocatable :: lambda_w(:), spread_est(:), tail_est(:)
     real(8), allocatable :: wcoef(:,:), r_wann(:,:,:), wcenter(:,:), h_wann(:,:), v_wann(:,:,:)
+    real(8), allocatable :: aa_wann(:,:,:)
     real(8), allocatable :: h_diag(:,:), evec(:,:), eval(:), v_eig(:,:), r_eig(:,:), r_eff(:,:)
     real(8) :: h_diag_abs_local, h_diag_abs_global, h_offdiag_abs_local, h_offdiag_abs_global
     real(8) :: r_diag_abs_local(3), r_diag_abs_global(3)
     real(8) :: r_offdiag_abs_local(3), r_offdiag_abs_global(3)
+    real(8) :: position_scale
+    character(32) :: env_position_mode
+    character(32) :: env_position_scale
+    logical :: use_direct_r_wann
+    logical :: use_berry_position
+    logical :: force_v_over_gap
+    logical :: berry_position_used
+    logical :: aa_available_axis
     logical :: has_first_seed
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     if (ifrag_count <= 0) return
+    env_position_mode = ''
+    call get_environment_variable('SALMON_DG_BPW_POSITION_MODE', env_position_mode, length=env_len, status=env_status)
+    use_direct_r_wann = .false.
+    use_berry_position = .false.
+    force_v_over_gap = .false.
+    berry_position_used = .false.
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_position_mode(1:env_len))))
+      case('rwann','RWANN','r_wann','R_WANN','direct','DIRECT','file','FILE')
+        use_direct_r_wann = .true.
+        use_berry_position = .false.
+      case('berry','BERRY','aa','AA','aa_r','AA_R','a_wann','A_WANN')
+        use_direct_r_wann = .false.
+        use_berry_position = .true.
+      case('v_over_gap','V_OVER_GAP','velocity','VELOCITY','legacy','LEGACY')
+        use_direct_r_wann = .false.
+        use_berry_position = .false.
+        force_v_over_gap = .true.
+      case default
+        use_direct_r_wann = .false.
+        use_berry_position = .false.
+        force_v_over_gap = .true.
+      end select
+    end if
+    position_scale = 1.0d0
+    env_position_scale = ''
+    call get_environment_variable('SALMON_DG_BPW_POSITION_SCALE', env_position_scale, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      read(env_position_scale(1:env_len), *, iostat=env_status) position_scale
+      if (env_status /= 0) position_scale = 1.0d0
+    end if
 
     if (allocated(dg_frag%buffer_wannier_nkeep)) deallocate(dg_frag%buffer_wannier_nkeep)
     if (allocated(dg_frag%buffer_wannier_coef)) deallocate(dg_frag%buffer_wannier_coef)
@@ -959,6 +1154,19 @@ contains
     if (allocated(dg_frag%buffer_wannier_tail)) deallocate(dg_frag%buffer_wannier_tail)
     if (allocated(dg_frag%buffer_wannier_h_flux)) deallocate(dg_frag%buffer_wannier_h_flux)
     if (allocated(dg_frag%buffer_wannier_v)) deallocate(dg_frag%buffer_wannier_v)
+    if (allocated(dg_frag%buffer_wannier_frag_center)) deallocate(dg_frag%buffer_wannier_frag_center)
+    if (allocated(dg_frag%buffer_wannier_xi_flux_blocks)) then
+      do irow = 1, size(dg_frag%buffer_wannier_xi_flux_blocks)
+        if (allocated(dg_frag%buffer_wannier_xi_flux_blocks(irow)%val)) &
+          deallocate(dg_frag%buffer_wannier_xi_flux_blocks(irow)%val)
+      end do
+      deallocate(dg_frag%buffer_wannier_xi_flux_blocks)
+    end if
+    if (allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) &
+      deallocate(dg_frag%buffer_wannier_xi_flux_local_block_ids)
+    dg_frag%n_buffer_wannier_xi_flux_blocks = 0
+    dg_frag%buffer_wannier_xi_flux_available = .false.
+    dg_frag%buffer_wannier_xi_flux_warned = .false.
     dg_frag%has_buffer_periodic_wannier_basis = .false.
 
     ifrag = dg_frag%ifrag_start
@@ -984,10 +1192,11 @@ contains
         stop "DG length gauge: incomplete buffer-periodic Wannier seed"
       end if
       read(iunit) magic_file, version_file
-      if (magic_file /= buffer_periodic_wannier_magic .or. version_file /= buffer_periodic_wannier_version) then
+      if (magic_file /= buffer_periodic_wannier_magic .or. &
+          version_file < 1 .or. version_file > buffer_periodic_wannier_version) then
         write(*,'(1x,a,i0,4(a,i0))') "[FATAL] invalid buffer-periodic Wannier seed at ifrag=", ifrag, &
           " magic=", magic_file, " expected_magic=", buffer_periodic_wannier_magic, &
-          " version=", version_file, " expected_version=", buffer_periodic_wannier_version
+          " version=", version_file, " max_supported_version=", buffer_periodic_wannier_version
         stop "DG length gauge: invalid buffer-periodic Wannier seed"
       end if
       read(iunit) ifrag_file, nxyz_domain(1:3), nxyz_buffer_file(1:3), nxyz_box(1:3)
@@ -1012,11 +1221,13 @@ contains
     allocate(dg_frag%buffer_wannier_tail(nkeep_max, ifrag_count))
     allocate(dg_frag%buffer_wannier_h_flux(nkeep_max, nkeep_max, ifrag_count))
     allocate(dg_frag%buffer_wannier_v(3, nkeep_max, nkeep_max, ifrag_count))
+    allocate(dg_frag%buffer_wannier_frag_center(3, ifrag_count))
     dg_frag%buffer_wannier_spread = 0.0d0
     dg_frag%buffer_wannier_coef = 0.0d0
     dg_frag%buffer_wannier_tail = 0.0d0
     dg_frag%buffer_wannier_h_flux = 0.0d0
     dg_frag%buffer_wannier_v = 0.0d0
+    dg_frag%buffer_wannier_frag_center = 0.0d0
     h_diag_abs_local = 0.0d0
     h_offdiag_abs_local = 0.0d0
     r_diag_abs_local(:) = 0.0d0
@@ -1034,6 +1245,7 @@ contains
       allocate(lambda_w(nproj_file), spread_est(nkeep_file), tail_est(nkeep_file))
       allocate(wcoef(nbasis_file,nkeep_file), r_wann(3,nkeep_file,nkeep_file), &
                wcenter(3,nkeep_file), h_wann(nkeep_file,nkeep_file), v_wann(3,nkeep_file,nkeep_file))
+      allocate(aa_wann(3,nkeep_file,nkeep_file))
       allocate(h_diag(nkeep_file,nkeep_file), evec(nkeep_file,nkeep_file), eval(nkeep_file))
       allocate(v_eig(nkeep_file,nkeep_file), r_eig(nkeep_file,nkeep_file), r_eff(nkeep_file,nkeep_file))
       read(iunit) proj_atom(1:nproj_file), proj_hybrid(1:nproj_file)
@@ -1044,6 +1256,10 @@ contains
       read(iunit) wcenter(1:3,1:nkeep_file)
       read(iunit) h_wann(1:nkeep_file,1:nkeep_file)
       read(iunit) v_wann(1:3,1:nkeep_file,1:nkeep_file)
+      aa_wann = 0.0d0
+      if (version_file >= 2) read(iunit) aa_wann(1:3,1:nkeep_file,1:nkeep_file)
+      aa_wann_source = 0
+      if (version_file >= 3) read(iunit) aa_wann_source
       close(iunit)
 
       dg_frag%buffer_wannier_spread(1:nkeep_file,i_local) = spread_est(1:nkeep_file)
@@ -1053,6 +1269,24 @@ contains
       end do
       dg_frag%buffer_wannier_tail(1:nkeep_file,i_local) = tail_est(1:nkeep_file)
       dg_frag%buffer_wannier_h_flux(1:nkeep_file,1:nkeep_file,i_local) = h_wann(1:nkeep_file,1:nkeep_file)
+      do axis_center = 1, 3
+        if (allocated(dg_frag%ixyz_frag) .and. ifrag >= 1 .and. ifrag <= size(dg_frag%ixyz_frag, 2)) then
+          idx_lo = dg_frag%ixyz_frag(axis_center,ifrag)
+          idx_hi = idx_lo + nxyz_domain(axis_center) - 1
+          if (associated(dg_frag%lg) .and. allocated(dg_frag%lg%coordinate) .and. &
+              idx_lo >= lbound(dg_frag%lg%coordinate, 1) .and. &
+              idx_hi <= ubound(dg_frag%lg%coordinate, 1)) then
+            dg_frag%buffer_wannier_frag_center(axis_center,i_local) = &
+              0.5d0 * (dg_frag%lg%coordinate(idx_lo, axis_center) + &
+                       dg_frag%lg%coordinate(idx_hi, axis_center))
+          else
+            dg_frag%buffer_wannier_frag_center(axis_center,i_local) = dg_frag%hgs(axis_center) * &
+              (dble(idx_lo - 1) + 0.5d0 * dble(nxyz_domain(axis_center) - 1))
+          end if
+        else
+          dg_frag%buffer_wannier_frag_center(axis_center,i_local) = 0.0d0
+        end if
+      end do
       do iw_diag = 1, nkeep_file
         h_diag_abs_local = h_diag_abs_local + abs(h_wann(iw_diag,iw_diag))
         do jw_diag = 1, nkeep_file
@@ -1063,31 +1297,47 @@ contains
       h_diag(1:nkeep_file,1:nkeep_file) = h_wann(1:nkeep_file,1:nkeep_file)
       call eigen_dsyev(h_diag, eval, evec)
       do ispin_store = 1, 3
-        v_eig(1:nkeep_file,1:nkeep_file) = matmul(transpose(evec(1:nkeep_file,1:nkeep_file)), &
-          matmul(v_wann(ispin_store,1:nkeep_file,1:nkeep_file), evec(1:nkeep_file,1:nkeep_file)))
-        r_eig(1:nkeep_file,1:nkeep_file) = 0.0d0
-        do magic_file = 1, nkeep_file
-          do version_file = 1, nkeep_file
-            if (magic_file == version_file) cycle
-            if (abs(eval(version_file) - eval(magic_file)) <= 1.0d-10) cycle
-            r_eig(magic_file,version_file) = v_eig(magic_file,version_file) / &
-              (eval(version_file) - eval(magic_file))
+        aa_available_axis = version_file >= 3 .and. aa_wann_source == 1 .and. &
+          maxval(abs(aa_wann(ispin_store,1:nkeep_file,1:nkeep_file))) > 0.0d0
+        if (use_direct_r_wann) then
+          r_eff(1:nkeep_file,1:nkeep_file) = r_wann(ispin_store,1:nkeep_file,1:nkeep_file)
+        else if (use_berry_position .and. .not. aa_available_axis) then
+          write(*,'(1x,a,i0,a,i0)') &
+            "[FATAL] SALMON_DG_BPW_POSITION_MODE=AA_R was requested, but no Wannier90 AA_R block is available for ifrag=", &
+            ifrag, " axis=", ispin_store
+          stop "DG length gauge: requested BPW AA_R position matrix is unavailable"
+        else if (use_berry_position .or. &
+                 (.not. force_v_over_gap .and. .not. use_direct_r_wann .and. aa_available_axis)) then
+          r_eff(1:nkeep_file,1:nkeep_file) = aa_wann(ispin_store,1:nkeep_file,1:nkeep_file)
+          berry_position_used = .true.
+        else
+          v_eig(1:nkeep_file,1:nkeep_file) = matmul(transpose(evec(1:nkeep_file,1:nkeep_file)), &
+            matmul(v_wann(ispin_store,1:nkeep_file,1:nkeep_file), evec(1:nkeep_file,1:nkeep_file)))
+          r_eig(1:nkeep_file,1:nkeep_file) = 0.0d0
+          do irow = 1, nkeep_file
+            do jcol = 1, nkeep_file
+              if (irow == jcol) cycle
+              if (abs(eval(jcol) - eval(irow)) <= 1.0d-10) cycle
+              r_eig(irow,jcol) = v_eig(irow,jcol) / &
+                (eval(jcol) - eval(irow))
+            end do
           end do
-        end do
-        r_eff(1:nkeep_file,1:nkeep_file) = matmul(evec(1:nkeep_file,1:nkeep_file), &
-          matmul(r_eig(1:nkeep_file,1:nkeep_file), transpose(evec(1:nkeep_file,1:nkeep_file))))
+          r_eff(1:nkeep_file,1:nkeep_file) = matmul(evec(1:nkeep_file,1:nkeep_file), &
+            matmul(r_eig(1:nkeep_file,1:nkeep_file), transpose(evec(1:nkeep_file,1:nkeep_file))))
+        end if
         dg_frag%buffer_wannier_v(ispin_store,1:nkeep_file,1:nkeep_file,i_local) = &
-          r_eff(1:nkeep_file,1:nkeep_file)
+          position_scale * r_eff(1:nkeep_file,1:nkeep_file)
         do iw_diag = 1, nkeep_file
-          r_diag_abs_local(ispin_store) = r_diag_abs_local(ispin_store) + abs(r_eff(iw_diag,iw_diag))
+          r_diag_abs_local(ispin_store) = r_diag_abs_local(ispin_store) + abs(position_scale * r_eff(iw_diag,iw_diag))
           do jw_diag = 1, nkeep_file
             if (iw_diag == jw_diag) cycle
-            r_offdiag_abs_local(ispin_store) = r_offdiag_abs_local(ispin_store) + abs(r_eff(iw_diag,jw_diag))
+            r_offdiag_abs_local(ispin_store) = r_offdiag_abs_local(ispin_store) + &
+              abs(position_scale * r_eff(iw_diag,jw_diag))
           end do
         end do
       end do
       deallocate(proj_atom, proj_hybrid, keep_index, lambda_w, spread_est, tail_est)
-      deallocate(wcoef, r_wann, wcenter, h_wann, v_wann)
+      deallocate(wcoef, r_wann, wcenter, h_wann, v_wann, aa_wann)
       deallocate(h_diag, evec, eval, v_eig, r_eig, r_eff)
     end do
 
@@ -1100,6 +1350,14 @@ contains
       write(*,'(1x,a,i0,a,i0,a,i0)') "[INFO] DG buffer-periodic Wannier seed loaded: local_fragments=", &
         ifrag_count, " keep_min=", minval(dg_frag%buffer_wannier_nkeep), &
         " keep_max=", maxval(dg_frag%buffer_wannier_nkeep)
+      if (use_direct_r_wann) then
+        write(*,'(1x,a)') "[DG-BPW-POSITION] mode=rwann"
+      else if (berry_position_used .and. .not. force_v_over_gap) then
+        write(*,'(1x,a)') "[DG-BPW-POSITION] mode=berry"
+      else
+        write(*,'(1x,a)') "[DG-BPW-POSITION] mode=v_over_gap"
+      end if
+      write(*,'(1x,a,1pe13.5)') "[DG-BPW-POSITION] scale=", position_scale
       write(*,'(1x,a,8(a,1pe13.5))') "[DG-BPW-MATRIX]", &
         " h_diag_abs=", h_diag_abs_global, " h_offdiag_abs=", h_offdiag_abs_global, &
         " r_diag_abs_x=", r_diag_abs_global(1), " r_offdiag_abs_x=", r_offdiag_abs_global(1), &
@@ -1108,6 +1366,692 @@ contains
     end if
   end subroutine read_buffer_periodic_wannier_basis_data
 
+  subroutine read_wannier90_global_basis_metadata_if_requested(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    character(16) :: env_value
+    integer :: env_status, env_len
+    logical :: enabled
+
+    enabled = .false.
+    env_value = ''
+    call get_environment_variable('SALMON_DG_W90_GLOBAL_METADATA', env_value, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_value(1:env_len))))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        enabled = .true.
+      end select
+    end if
+    if (.not. enabled) return
+    call read_wannier90_global_basis_metadata(dg_frag)
+  end subroutine read_wannier90_global_basis_metadata_if_requested
+
+  subroutine read_wannier90_global_basis_metadata(dg_frag)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    character(48), parameter :: binfile_w90g = "wannier90_global_basis.bin"
+    integer, parameter :: wannier90_global_magic = -22022216
+    integer, parameter :: wannier90_global_version = 2
+    character(256) :: filename
+    integer :: iunit, iostat_open, magic_file, version_file
+    integer :: num_bands_file, num_wann_file, n_frag_file, iw, ifrag
+    integer, allocatable :: owner_frag(:), owner_count(:)
+    real(8), allocatable :: center_bohr(:,:), spread_aa2(:)
+    real(8) :: spread_min, spread_max
+
+    if (.not. comm_is_root(dg_frag%id)) return
+
+    filename = './data_dcdft/total/'//binfile_w90g
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+    if (iostat_open /= 0) return
+
+    read(iunit) magic_file, version_file
+    if (magic_file /= wannier90_global_magic .or. version_file < 1 .or. version_file > wannier90_global_version) then
+      close(iunit)
+      write(*,'(1x,a,4(a,i0))') "[WARN] invalid Wannier90 global basis metadata:", &
+        " magic=", magic_file, " expected_magic=", wannier90_global_magic, &
+        " version=", version_file, " max_supported_version=", wannier90_global_version
+      return
+    end if
+    read(iunit) num_bands_file, num_wann_file, n_frag_file
+    allocate(owner_frag(num_wann_file), owner_count(max(1,n_frag_file)))
+    allocate(center_bohr(3,num_wann_file), spread_aa2(num_wann_file))
+    read(iunit) owner_frag(1:num_wann_file)
+    read(iunit) center_bohr(1:3,1:num_wann_file)
+    read(iunit) spread_aa2(1:num_wann_file)
+    close(iunit)
+
+    owner_count(:) = 0
+    do iw=1,num_wann_file
+      ifrag = owner_frag(iw)
+      if (ifrag >= 1 .and. ifrag <= n_frag_file) owner_count(ifrag) = owner_count(ifrag) + 1
+    end do
+    spread_min = minval(spread_aa2(1:num_wann_file))
+    spread_max = maxval(spread_aa2(1:num_wann_file))
+    write(*,'(1x,a,i0,a,i0,a,i0,2(a,1pe12.4))') "[DG-W90-GLOBAL] metadata loaded: bands=", &
+      num_bands_file, " wann=", num_wann_file, " fragments=", n_frag_file, &
+      " spread_min=", spread_min, " spread_max=", spread_max
+    write(*,'(1x,a,*(1x,i0))') "[DG-W90-GLOBAL] owner_count:", owner_count(1:n_frag_file)
+
+    deallocate(owner_frag, owner_count, center_bohr, spread_aa2)
+  end subroutine read_wannier90_global_basis_metadata
+
+  subroutine apply_wannier_flux_eigen_seed_if_available(dg_frag, ifrag_count)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root, comm_summation
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag_count
+
+    character(48), parameter :: binfile_w90seed = "wannier_flux_eigen_seed.bin"
+    integer, parameter :: wannier_flux_eigen_seed_magic = -22022219
+    integer, parameter :: wannier_flux_eigen_seed_version = 1
+    character(256) :: filename
+    integer :: iunit, io
+    integer :: magic_file, version_file
+    integer :: num_bands_file, num_wann_file, nstate_seed, nspin_file, n_frag_file
+    integer :: ifrag, i_local, ispin, io_basis, iw, state_col, local_idx, global_idx, local_state_col
+    integer :: nbasis_iter
+    real(8), allocatable :: eval_seed(:,:)
+    complex(8), allocatable :: seed_wannier_to_eigen(:,:)
+    complex(8) :: coeff
+    real(8) :: norm_local(2), norm_global(2)
+    logical :: has_file
+
+    if (.not. dg_frag%has_global_wannier_basis) return
+    if (.not. allocated(dg_frag%global_wannier_coef)) return
+    if (ifrag_count <= 0) return
+
+    filename = './data_dcdft/total/'//binfile_w90seed
+    inquire(file=filename, exist=has_file)
+    if (.not. has_file) return
+
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=io)
+    if (io /= 0) return
+    read(iunit, iostat=io) magic_file, version_file
+    if (io /= 0 .or. magic_file /= wannier_flux_eigen_seed_magic .or. &
+        version_file /= wannier_flux_eigen_seed_version) then
+      close(iunit)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,4(a,i0))') "[WARN] invalid Wannier Flux eigen seed:", &
+          " magic=", magic_file, " expected_magic=", wannier_flux_eigen_seed_magic, &
+          " version=", version_file, " expected_version=", wannier_flux_eigen_seed_version
+      end if
+      return
+    end if
+    read(iunit, iostat=io) num_bands_file, num_wann_file, nstate_seed, nspin_file, n_frag_file
+    if (io /= 0 .or. num_wann_file <= 0 .or. nstate_seed <= 0 .or. nspin_file <= 0) then
+      close(iunit)
+      if (comm_is_root(dg_frag%id)) &
+        write(*,'(1x,a)') "[WARN] invalid Wannier Flux eigen seed dimensions; keeping LCFO seed."
+      return
+    end if
+    allocate(eval_seed(nstate_seed,nspin_file))
+    allocate(seed_wannier_to_eigen(num_wann_file,nstate_seed))
+    read(iunit, iostat=io) eval_seed(1:nstate_seed,1:nspin_file)
+    if (io == 0) read(iunit, iostat=io) seed_wannier_to_eigen(1:num_wann_file,1:nstate_seed)
+    close(iunit)
+    if (io /= 0) then
+      if (comm_is_root(dg_frag%id)) &
+        write(*,'(1x,a)') "[WARN] failed to read complete Wannier Flux eigen seed; keeping LCFO seed."
+      deallocate(eval_seed, seed_wannier_to_eigen)
+      return
+    end if
+
+    if (num_wann_file /= dg_frag%global_wannier_num_wann .or. &
+        num_bands_file /= dg_frag%global_wannier_num_bands .or. &
+        nstate_seed > dg_frag%nstate_tot .or. nspin_file /= dg_frag%nspin) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,8(a,i0))') "[FATAL] Wannier Flux eigen seed mismatch:", &
+          " seed_bands=", num_bands_file, " rt_bands=", dg_frag%global_wannier_num_bands, &
+          " seed_wann=", num_wann_file, " rt_wann=", dg_frag%global_wannier_num_wann, &
+          " seed_states=", nstate_seed, " rt_states=", dg_frag%nstate_tot, &
+          " seed_nspin=", nspin_file, " rt_nspin=", dg_frag%nspin
+      end if
+      stop "DG-Fragment RT: incompatible Wannier Flux eigen seed"
+    end if
+    if (nstate_seed /= dg_frag%nstate_tot .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,i0)') "[WARN] Wannier Flux eigen seed does not cover all RT states: seed=", &
+        nstate_seed, " rt=", dg_frag%nstate_tot
+    end if
+    if (n_frag_file /= dg_frag%n_frag .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,i0)') "[WARN] Wannier Flux eigen seed fragment count differs: seed=", &
+        n_frag_file, " rt=", dg_frag%n_frag
+    end if
+
+    dg_frag%coef = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%coef_work)) dg_frag%coef_work = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%coef_new)) dg_frag%coef_new = (0.0d0, 0.0d0)
+    do i_local = 1, ifrag_count
+      ifrag = dg_frag%ifrag_start + i_local - 1
+      do ispin = 1, dg_frag%nspin
+        nbasis_iter = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1), &
+                          dg_frag%nstate_frag)
+        do state_col = 1, nstate_seed
+          if (dg_frag%coef_state_block_mode) then
+            if (state_col < dg_frag%coef_state_start .or. state_col > dg_frag%coef_state_end) cycle
+            local_state_col = state_col - dg_frag%coef_state_start + 1
+          else
+            local_state_col = state_col
+          end if
+          if (local_state_col < 1 .or. local_state_col > size(dg_frag%coef, 2)) cycle
+          do io_basis = 1, nbasis_iter
+            global_idx = dg_frag%index_basis(io_basis, ifrag, ispin)
+            local_idx = 0
+            if (global_idx > 0 .and. global_idx <= dg_frag%n_mat_max) &
+              local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+            if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+            coeff = (0.0d0, 0.0d0)
+            do iw = 1, num_wann_file
+              coeff = coeff + dg_frag%global_wannier_coef(io_basis, iw, ispin, i_local) * &
+                seed_wannier_to_eigen(iw, state_col)
+            end do
+            dg_frag%coef(local_idx, local_state_col, ispin) = coeff
+          end do
+        end do
+      end do
+    end do
+    dg_frag%esp(1:nstate_seed,1:nspin_file) = eval_seed(1:nstate_seed,1:nspin_file)
+    call invalidate_coef_exchange_cache(dg_frag)
+
+    norm_local(:) = 0.0d0
+    norm_local(1) = sum(abs(dg_frag%coef)**2)
+    norm_local(2) = dble(count(abs(dg_frag%coef) > 0.0d0))
+    call comm_summation(norm_local, norm_global, 2, dg_frag%icomm)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,i0,2(a,1pe13.5))') &
+        "[DG-W90-SEED] applied prepared Flux eigen seed from global Wannier basis: states=", &
+        nstate_seed, " wann=", num_wann_file, " norm2=", norm_global(1), " nonzero=", norm_global(2)
+    end if
+    if (norm_global(1) <= 0.0d0 .or. norm_global(2) <= 0.0d0) then
+      if (comm_is_root(dg_frag%id)) &
+        write(*,'(1x,a)') "[FATAL] Wannier Flux eigen seed produced an empty coefficient matrix."
+      stop "DG-Fragment RT: empty Wannier Flux eigen seed"
+    end if
+
+    deallocate(eval_seed, seed_wannier_to_eigen)
+  end subroutine apply_wannier_flux_eigen_seed_if_available
+
+  subroutine read_wannier90_global_basis_data(dg_frag, ifrag_count)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer, intent(in) :: ifrag_count
+    character(48), parameter :: binfile_w90g = "wannier90_global_basis.bin"
+    integer, parameter :: wannier90_global_magic = -22022216
+    integer, parameter :: wannier90_global_version = 2
+    character(256) :: filename
+    integer :: iunit, iostat_open, io
+    integer :: magic_file, version_file, position_available
+    integer :: num_bands_file, num_wann_file, n_frag_file
+    logical :: ok_position
+
+    call clear_formal_dg_wannier_data(dg_frag)
+    dg_frag%has_global_wannier_basis = .false.
+    dg_frag%global_wannier_num_bands = 0
+    dg_frag%global_wannier_num_wann = 0
+    dg_frag%global_wannier_n_frag = 0
+    if (allocated(dg_frag%global_wannier_owner_frag)) deallocate(dg_frag%global_wannier_owner_frag)
+    if (allocated(dg_frag%global_wannier_center)) deallocate(dg_frag%global_wannier_center)
+    if (allocated(dg_frag%global_wannier_spread)) deallocate(dg_frag%global_wannier_spread)
+    if (allocated(dg_frag%global_wannier_transform)) deallocate(dg_frag%global_wannier_transform)
+    if (allocated(dg_frag%global_wannier_position)) deallocate(dg_frag%global_wannier_position)
+    if (allocated(dg_frag%global_wannier_coef)) deallocate(dg_frag%global_wannier_coef)
+    if (allocated(dg_frag%global_wannier_local_nkeep)) deallocate(dg_frag%global_wannier_local_nkeep)
+    if (allocated(dg_frag%global_wannier_local_ids)) deallocate(dg_frag%global_wannier_local_ids)
+    if (allocated(dg_frag%global_wannier_local_owner_frag)) deallocate(dg_frag%global_wannier_local_owner_frag)
+    if (allocated(dg_frag%global_wannier_local_center)) deallocate(dg_frag%global_wannier_local_center)
+    if (allocated(dg_frag%global_wannier_local_coef)) deallocate(dg_frag%global_wannier_local_coef)
+    if (allocated(dg_frag%global_wannier_local_position)) deallocate(dg_frag%global_wannier_local_position)
+    dg_frag%has_global_wannier_local_basis = .false.
+    dg_frag%has_global_wannier_position = .false.
+
+    if (ifrag_count <= 0) return
+    filename = './data_dcdft/total/'//binfile_w90g
+    iunit = get_filehandle()
+    open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
+    if (iostat_open /= 0) return
+
+    read(iunit, iostat=io) magic_file, version_file
+    if (io /= 0 .or. magic_file /= wannier90_global_magic .or. &
+        version_file < 1 .or. version_file > wannier90_global_version) then
+      close(iunit)
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,4(a,i0))') "[WARN] invalid Wannier90 global basis data:", &
+          " magic=", magic_file, " expected_magic=", wannier90_global_magic, &
+          " version=", version_file, " max_supported_version=", wannier90_global_version
+      end if
+      return
+    end if
+
+    read(iunit, iostat=io) num_bands_file, num_wann_file, n_frag_file
+    if (io /= 0 .or. num_bands_file <= 0 .or. num_wann_file <= 0 .or. n_frag_file <= 0) then
+      close(iunit)
+      if (comm_is_root(dg_frag%id)) &
+        write(*,'(1x,a)') "[WARN] invalid Wannier90 global basis dimensions; ignoring global Wannier data."
+      return
+    end if
+    if (num_bands_file > dg_frag%nstate_tot) then
+      close(iunit)
+      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0,a,i0)') &
+        "[WARN] Wannier90 global basis has more bands than RT states: bands=", &
+        num_bands_file, " nstate_tot=", dg_frag%nstate_tot
+      return
+    end if
+    if (n_frag_file /= dg_frag%n_frag .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,i0)') "[WARN] Wannier90 global basis fragment count differs: file=", &
+        n_frag_file, " runtime=", dg_frag%n_frag
+    end if
+
+    allocate(dg_frag%global_wannier_owner_frag(num_wann_file))
+    allocate(dg_frag%global_wannier_center(3,num_wann_file))
+    allocate(dg_frag%global_wannier_spread(num_wann_file))
+    allocate(dg_frag%global_wannier_transform(num_bands_file,num_wann_file))
+    allocate(dg_frag%global_wannier_position(3,num_wann_file,num_wann_file))
+    dg_frag%global_wannier_position = (0.0d0, 0.0d0)
+    read(iunit, iostat=io) dg_frag%global_wannier_owner_frag(1:num_wann_file)
+    if (io == 0) read(iunit, iostat=io) dg_frag%global_wannier_center(1:3,1:num_wann_file)
+    if (io == 0) read(iunit, iostat=io) dg_frag%global_wannier_spread(1:num_wann_file)
+    if (io == 0) read(iunit, iostat=io) dg_frag%global_wannier_transform(1:num_bands_file,1:num_wann_file)
+    if (io == 0 .and. version_file >= 2) then
+      position_available = 0
+      read(iunit, iostat=io) position_available
+      if (io == 0) read(iunit, iostat=io) dg_frag%global_wannier_position(1:3,1:num_wann_file,1:num_wann_file)
+      dg_frag%has_global_wannier_position = (io == 0 .and. position_available /= 0)
+    end if
+    close(iunit)
+    if (io == 0 .and. .not. dg_frag%has_global_wannier_position) then
+      call read_wannier90_global_position_rdat(num_wann_file, dg_frag%global_wannier_position, ok_position)
+      dg_frag%has_global_wannier_position = ok_position
+    end if
+    if (io /= 0) then
+      if (comm_is_root(dg_frag%id)) &
+        write(*,'(1x,a)') "[WARN] failed to read complete Wannier90 global basis data; ignoring it."
+      if (allocated(dg_frag%global_wannier_owner_frag)) deallocate(dg_frag%global_wannier_owner_frag)
+      if (allocated(dg_frag%global_wannier_center)) deallocate(dg_frag%global_wannier_center)
+      if (allocated(dg_frag%global_wannier_spread)) deallocate(dg_frag%global_wannier_spread)
+      if (allocated(dg_frag%global_wannier_transform)) deallocate(dg_frag%global_wannier_transform)
+      if (allocated(dg_frag%global_wannier_position)) deallocate(dg_frag%global_wannier_position)
+      return
+    end if
+
+    allocate(dg_frag%global_wannier_coef(dg_frag%nstate_frag, num_wann_file, dg_frag%nspin, ifrag_count))
+    dg_frag%global_wannier_coef = (0.0d0, 0.0d0)
+    dg_frag%global_wannier_num_bands = num_bands_file
+    dg_frag%global_wannier_num_wann = num_wann_file
+    dg_frag%global_wannier_n_frag = n_frag_file
+    dg_frag%has_global_wannier_basis = .true.
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,i0,a,i0)') "[DG-W90-GLOBAL] full basis loaded for RT: bands=", &
+        num_bands_file, " wann=", num_wann_file, " fragments=", n_frag_file
+      if (dg_frag%has_global_wannier_position) then
+        write(*,'(1x,a)') "[DG-W90-GLOBAL] Wannier90 AA_R position matrix loaded."
+      else
+        write(*,'(1x,a)') "[DG-W90-GLOBAL] AA_R position matrix unavailable; center-only position is used."
+      end if
+    end if
+  end subroutine read_wannier90_global_basis_data
+
+  subroutine read_wannier90_global_position_rdat(num_wann_expected, position_aa_r, ok)
+    use filesystem, only: get_filehandle
+    use inputoutput, only: au_length_aa
+    use salmon_global, only: sysname
+    implicit none
+    integer, intent(in) :: num_wann_expected
+    complex(8), intent(inout) :: position_aa_r(:,:,:)
+    logical, intent(out) :: ok
+    character(256) :: filename, header, env_filename
+    integer :: iunit, io, num_wann_file, nrpts_file, ir
+    integer :: env_status, env_len
+    integer :: rvec(3), n, m
+    real(8) :: rx_re, rx_im, ry_re, ry_im, rz_re, rz_im
+    logical :: exists
+
+    ok = .false.
+    if (num_wann_expected <= 0) return
+    if (size(position_aa_r, 1) < 3 .or. size(position_aa_r, 2) < num_wann_expected .or. &
+        size(position_aa_r, 3) < num_wann_expected) return
+
+    env_filename = ''
+    call get_environment_variable('SALMON_DG_W90_R_DAT', env_filename, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      filename = trim(env_filename(1:env_len))
+    else
+      filename = './data_dcdft/total/'//trim(sysname)//'_r.dat'
+    end if
+    inquire(file=filename, exist=exists)
+    if (.not. exists) return
+
+    iunit = get_filehandle()
+    open(iunit, file=filename, status='old', action='read', iostat=io)
+    if (io /= 0) return
+    read(iunit, '(a)', iostat=io) header
+    if (io == 0) read(iunit, *, iostat=io) num_wann_file
+    if (io == 0) read(iunit, *, iostat=io) nrpts_file
+    if (io /= 0 .or. num_wann_file /= num_wann_expected .or. nrpts_file <= 0) then
+      close(iunit)
+      return
+    end if
+
+    position_aa_r(1:3,1:num_wann_expected,1:num_wann_expected) = (0.0d0, 0.0d0)
+    do ir = 1, nrpts_file * num_wann_file * num_wann_file
+      read(iunit, *, iostat=io) rvec(1:3), n, m, rx_re, rx_im, ry_re, ry_im, rz_re, rz_im
+      if (io /= 0) exit
+      if (any(rvec(1:3) /= 0)) cycle
+      if (n < 1 .or. n > num_wann_file .or. m < 1 .or. m > num_wann_file) cycle
+      position_aa_r(1,n,m) = cmplx(rx_re, rx_im, kind=8) / au_length_aa
+      position_aa_r(2,n,m) = cmplx(ry_re, ry_im, kind=8) / au_length_aa
+      position_aa_r(3,n,m) = cmplx(rz_re, rz_im, kind=8) / au_length_aa
+    end do
+    close(iunit)
+    ok = (io == 0)
+  end subroutine read_wannier90_global_position_rdat
+
+  subroutine clear_formal_dg_wannier_data(dg_frag)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    integer :: iblock
+
+    if (allocated(dg_frag%dg_wannier_nkeep)) deallocate(dg_frag%dg_wannier_nkeep)
+    if (allocated(dg_frag%dg_wannier_global_ids)) deallocate(dg_frag%dg_wannier_global_ids)
+    if (allocated(dg_frag%dg_wannier_owner_frag)) deallocate(dg_frag%dg_wannier_owner_frag)
+    if (allocated(dg_frag%dg_wannier_ref_center)) deallocate(dg_frag%dg_wannier_ref_center)
+    if (allocated(dg_frag%dg_wannier_basis_coef)) deallocate(dg_frag%dg_wannier_basis_coef)
+    if (allocated(dg_frag%dg_wannier_h0_local)) deallocate(dg_frag%dg_wannier_h0_local)
+    if (allocated(dg_frag%dg_wannier_xi_local)) deallocate(dg_frag%dg_wannier_xi_local)
+    if (allocated(dg_frag%dg_wannier_coef)) deallocate(dg_frag%dg_wannier_coef)
+    if (allocated(dg_frag%dg_wannier_neighbor_blocks)) then
+      do iblock = 1, size(dg_frag%dg_wannier_neighbor_blocks)
+        if (allocated(dg_frag%dg_wannier_neighbor_blocks(iblock)%h_flux)) &
+          deallocate(dg_frag%dg_wannier_neighbor_blocks(iblock)%h_flux)
+        if (allocated(dg_frag%dg_wannier_neighbor_blocks(iblock)%xi_flux)) &
+          deallocate(dg_frag%dg_wannier_neighbor_blocks(iblock)%xi_flux)
+      end do
+      deallocate(dg_frag%dg_wannier_neighbor_blocks)
+    end if
+    if (allocated(dg_frag%dg_wannier_local_neighbor_block_ids)) &
+      deallocate(dg_frag%dg_wannier_local_neighbor_block_ids)
+    dg_frag%has_formal_dg_wannier_basis = .false.
+    dg_frag%n_dg_wannier_neighbor_blocks = 0
+    dg_frag%dg_wannier_blocks_gauge_consistent = .false.
+    dg_frag%dg_wannier_uses_full_global_position = .false.
+  end subroutine clear_formal_dg_wannier_data
+
+  subroutine build_formal_dg_wannier_from_global_local(dg_frag)
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ifrag_count, nkeep_max, nstate_cols
+    integer :: i_local, ifrag, ispin, iaxis, iw, jw, ib, jb
+    integer :: ib_global, jb_global, nbf, nkeep
+    complex(8) :: hsum
+
+    call clear_formal_dg_wannier_data(dg_frag)
+    if (.not. dg_frag%has_global_wannier_local_basis) return
+    if (.not. allocated(dg_frag%global_wannier_local_nkeep)) return
+    if (.not. allocated(dg_frag%global_wannier_local_ids)) return
+    if (.not. allocated(dg_frag%global_wannier_local_coef)) return
+
+    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    if (ifrag_count <= 0) return
+    nkeep_max = max(1, maxval(dg_frag%global_wannier_local_nkeep))
+    nstate_cols = 0
+    if (allocated(dg_frag%coef)) nstate_cols = size(dg_frag%coef, 2)
+
+    allocate(dg_frag%dg_wannier_nkeep(ifrag_count))
+    allocate(dg_frag%dg_wannier_global_ids(nkeep_max, ifrag_count))
+    allocate(dg_frag%dg_wannier_owner_frag(nkeep_max, ifrag_count))
+    allocate(dg_frag%dg_wannier_ref_center(3, ifrag_count))
+    allocate(dg_frag%dg_wannier_basis_coef(dg_frag%nstate_frag, nkeep_max, dg_frag%nspin, ifrag_count))
+    allocate(dg_frag%dg_wannier_h0_local(nkeep_max, nkeep_max, dg_frag%nspin, ifrag_count))
+    allocate(dg_frag%dg_wannier_xi_local(3, nkeep_max, nkeep_max, dg_frag%nspin, ifrag_count))
+    if (nstate_cols > 0) allocate(dg_frag%dg_wannier_coef(nkeep_max, nstate_cols, dg_frag%nspin, ifrag_count))
+
+    dg_frag%dg_wannier_nkeep = dg_frag%global_wannier_local_nkeep
+    dg_frag%dg_wannier_global_ids = 0
+    dg_frag%dg_wannier_owner_frag = 0
+    dg_frag%dg_wannier_ref_center = 0.0d0
+    dg_frag%dg_wannier_basis_coef = (0.0d0, 0.0d0)
+    dg_frag%dg_wannier_h0_local = (0.0d0, 0.0d0)
+    dg_frag%dg_wannier_xi_local = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%dg_wannier_coef)) dg_frag%dg_wannier_coef = (0.0d0, 0.0d0)
+
+    dg_frag%dg_wannier_global_ids(1:size(dg_frag%global_wannier_local_ids,1),1:ifrag_count) = &
+      dg_frag%global_wannier_local_ids(1:size(dg_frag%global_wannier_local_ids,1),1:ifrag_count)
+    dg_frag%dg_wannier_owner_frag(1:size(dg_frag%global_wannier_local_owner_frag,1),1:ifrag_count) = &
+      dg_frag%global_wannier_local_owner_frag(1:size(dg_frag%global_wannier_local_owner_frag,1),1:ifrag_count)
+    dg_frag%dg_wannier_basis_coef(1:size(dg_frag%global_wannier_local_coef,1),1:size(dg_frag%global_wannier_local_coef,2), &
+      1:dg_frag%nspin,1:ifrag_count) = dg_frag%global_wannier_local_coef(1:size(dg_frag%global_wannier_local_coef,1), &
+      1:size(dg_frag%global_wannier_local_coef,2),1:dg_frag%nspin,1:ifrag_count)
+
+    do i_local = 1, ifrag_count
+      ifrag = dg_frag%ifrag_start + i_local - 1
+      if (allocated(dg_frag%buffer_wannier_frag_center) .and. &
+          i_local <= size(dg_frag%buffer_wannier_frag_center, 2)) then
+        dg_frag%dg_wannier_ref_center(1:3, i_local) = dg_frag%buffer_wannier_frag_center(1:3, i_local)
+      else if (dg_frag%dg_wannier_nkeep(i_local) > 0 .and. allocated(dg_frag%global_wannier_local_center)) then
+        dg_frag%dg_wannier_ref_center(1:3, i_local) = &
+          sum(dg_frag%global_wannier_local_center(1:3,1:dg_frag%dg_wannier_nkeep(i_local),i_local), dim=2) / &
+          dble(dg_frag%dg_wannier_nkeep(i_local))
+      end if
+
+      nkeep = dg_frag%dg_wannier_nkeep(i_local)
+      do ispin = 1, dg_frag%nspin
+        nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%dg_wannier_basis_coef, 1))
+        if (nkeep <= 0 .or. nbf <= 0) cycle
+        if (allocated(dg_frag%global_wannier_local_position) .and. dg_frag%has_global_wannier_position) then
+          do jw = 1, nkeep
+            do iw = 1, nkeep
+              dg_frag%dg_wannier_xi_local(1:3, iw, jw, ispin, i_local) = &
+                dg_frag%global_wannier_local_position(1:3, iw, jw, i_local)
+            end do
+          end do
+        else if (allocated(dg_frag%global_wannier_local_center)) then
+          do iw = 1, nkeep
+            dg_frag%dg_wannier_xi_local(1:3, iw, iw, ispin, i_local) = &
+              cmplx(dg_frag%global_wannier_local_center(1:3, iw, i_local), 0.0d0, kind=8)
+          end do
+        end if
+        do iaxis = 1, 3
+          do iw = 1, nkeep
+            dg_frag%dg_wannier_xi_local(iaxis, iw, iw, ispin, i_local) = &
+              dg_frag%dg_wannier_xi_local(iaxis, iw, iw, ispin, i_local) - &
+              cmplx(dg_frag%dg_wannier_ref_center(iaxis, i_local), 0.0d0, kind=8)
+          end do
+        end do
+
+        if (allocated(dg_frag%H_mat) .and. allocated(dg_frag%index_basis)) then
+          do jw = 1, nkeep
+            do iw = 1, nkeep
+              hsum = (0.0d0, 0.0d0)
+              do jb = 1, nbf
+                jb_global = dg_frag%index_basis(jb, ifrag, ispin)
+                if (jb_global < 1 .or. jb_global > size(dg_frag%H_mat, 2)) cycle
+                do ib = 1, nbf
+                  ib_global = dg_frag%index_basis(ib, ifrag, ispin)
+                  if (ib_global < 1 .or. ib_global > size(dg_frag%H_mat, 1)) cycle
+                  hsum = hsum + conjg(dg_frag%dg_wannier_basis_coef(ib, iw, ispin, i_local)) * &
+                    cmplx(dg_frag%H_mat(ib_global, jb_global, ispin), 0.0d0, kind=8) * &
+                    dg_frag%dg_wannier_basis_coef(jb, jw, ispin, i_local)
+                end do
+              end do
+              dg_frag%dg_wannier_h0_local(iw, jw, ispin, i_local) = hsum
+            end do
+          end do
+        end if
+      end do
+    end do
+
+    dg_frag%has_formal_dg_wannier_basis = .true.
+    dg_frag%dg_wannier_blocks_gauge_consistent = dg_frag%has_global_wannier_position
+    dg_frag%dg_wannier_uses_full_global_position = dg_frag%has_global_wannier_position
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,i0,a,i0,a,l1)') &
+        "[DG-WANNIER-FORMAL] local blocks initialized from global Wannier data: nkeep_max=", &
+        nkeep_max, " local_fragments=", ifrag_count, " has_AA_R=", dg_frag%has_global_wannier_position
+    end if
+  end subroutine build_formal_dg_wannier_from_global_local
+
+  subroutine build_global_wannier_local_basis(dg_frag)
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+
+    integer :: ifrag_count, ifrag, i_local, iw, ilw, jlw, ispin, nbf
+    integer :: nkeep_max, nkeep_min, nkeep_total
+    integer :: center_range, env_status, env_len
+    character(32) :: env_center_range
+
+    dg_frag%has_global_wannier_local_basis = .false.
+    if (.not. dg_frag%has_global_wannier_basis) return
+    if (.not. allocated(dg_frag%global_wannier_coef)) return
+    if (.not. allocated(dg_frag%global_wannier_owner_frag)) return
+    if (.not. allocated(dg_frag%global_wannier_center)) return
+
+    ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
+    if (ifrag_count <= 0) return
+    center_range = 1
+    env_center_range = ''
+    call get_environment_variable('SALMON_DG_GLOBAL_WANNIER_H_CENTER_RANGE', env_center_range, &
+      length=env_len, status=env_status)
+    if (env_status /= 0 .or. env_len <= 0) then
+      call get_environment_variable('SALMON_DG_GLOBAL_WANNIER_CENTER_RANGE', env_center_range, &
+        length=env_len, status=env_status)
+    end if
+    if (env_status == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_center_range(1:env_len))))
+      case ('all','ALL','global','GLOBAL','full','FULL')
+        center_range = -1
+      case default
+        read(env_center_range(1:env_len), *, iostat=env_status) center_range
+        if (env_status /= 0) center_range = 1
+      end select
+    end if
+
+    if (allocated(dg_frag%global_wannier_local_nkeep)) deallocate(dg_frag%global_wannier_local_nkeep)
+    if (allocated(dg_frag%global_wannier_local_ids)) deallocate(dg_frag%global_wannier_local_ids)
+    if (allocated(dg_frag%global_wannier_local_owner_frag)) deallocate(dg_frag%global_wannier_local_owner_frag)
+    if (allocated(dg_frag%global_wannier_local_center)) deallocate(dg_frag%global_wannier_local_center)
+    if (allocated(dg_frag%global_wannier_local_coef)) deallocate(dg_frag%global_wannier_local_coef)
+    if (allocated(dg_frag%global_wannier_local_position)) deallocate(dg_frag%global_wannier_local_position)
+
+    allocate(dg_frag%global_wannier_local_nkeep(ifrag_count))
+    dg_frag%global_wannier_local_nkeep(:) = 0
+    do i_local = 1, ifrag_count
+      ifrag = dg_frag%ifrag_start + i_local - 1
+      do iw = 1, dg_frag%global_wannier_num_wann
+        if (global_wannier_owner_in_h_range(dg_frag%global_wannier_owner_frag(iw), ifrag, &
+            center_range, dg_frag%num_fragment)) then
+          dg_frag%global_wannier_local_nkeep(i_local) = dg_frag%global_wannier_local_nkeep(i_local) + 1
+        end if
+      end do
+    end do
+
+    nkeep_max = max(1, maxval(dg_frag%global_wannier_local_nkeep))
+    allocate(dg_frag%global_wannier_local_ids(nkeep_max, ifrag_count))
+    allocate(dg_frag%global_wannier_local_owner_frag(nkeep_max, ifrag_count))
+    allocate(dg_frag%global_wannier_local_center(3, nkeep_max, ifrag_count))
+    allocate(dg_frag%global_wannier_local_coef(dg_frag%nstate_frag, nkeep_max, dg_frag%nspin, ifrag_count))
+    allocate(dg_frag%global_wannier_local_position(3, nkeep_max, nkeep_max, ifrag_count))
+    dg_frag%global_wannier_local_ids = 0
+    dg_frag%global_wannier_local_owner_frag = 0
+    dg_frag%global_wannier_local_center = 0.0d0
+    dg_frag%global_wannier_local_coef = (0.0d0, 0.0d0)
+    dg_frag%global_wannier_local_position = (0.0d0, 0.0d0)
+
+    do i_local = 1, ifrag_count
+      ifrag = dg_frag%ifrag_start + i_local - 1
+      ilw = 0
+      do iw = 1, dg_frag%global_wannier_num_wann
+        if (.not. global_wannier_owner_in_h_range(dg_frag%global_wannier_owner_frag(iw), ifrag, &
+            center_range, dg_frag%num_fragment)) cycle
+        ilw = ilw + 1
+        dg_frag%global_wannier_local_ids(ilw, i_local) = iw
+        dg_frag%global_wannier_local_owner_frag(ilw, i_local) = dg_frag%global_wannier_owner_frag(iw)
+        dg_frag%global_wannier_local_center(1:3, ilw, i_local) = dg_frag%global_wannier_center(1:3, iw)
+        do ispin = 1, dg_frag%nspin
+          nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1), &
+                    size(dg_frag%global_wannier_local_coef, 1))
+          if (nbf > 0) then
+            dg_frag%global_wannier_local_coef(1:nbf, ilw, ispin, i_local) = &
+              dg_frag%global_wannier_coef(1:nbf, iw, ispin, i_local)
+          end if
+        end do
+      end do
+      if (dg_frag%has_global_wannier_position .and. allocated(dg_frag%global_wannier_position)) then
+        do ilw = 1, dg_frag%global_wannier_local_nkeep(i_local)
+          iw = dg_frag%global_wannier_local_ids(ilw, i_local)
+          do jlw = 1, dg_frag%global_wannier_local_nkeep(i_local)
+            dg_frag%global_wannier_local_position(1:3, ilw, jlw, i_local) = &
+              dg_frag%global_wannier_position(1:3, iw, dg_frag%global_wannier_local_ids(jlw, i_local))
+          end do
+        end do
+      end if
+    end do
+
+    dg_frag%has_global_wannier_local_basis = .true.
+    if (comm_is_root(dg_frag%id)) then
+      nkeep_min = minval(dg_frag%global_wannier_local_nkeep)
+      nkeep_total = sum(dg_frag%global_wannier_local_nkeep)
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+        "[DG-W90-GLOBAL-LOCAL] built local-selected global Wannier basis: h_center_range=", &
+        center_range, " keep_min=", nkeep_min, " keep_max=", maxval(dg_frag%global_wannier_local_nkeep), &
+        " keep_local_total=", nkeep_total
+    end if
+  end subroutine build_global_wannier_local_basis
+
+  logical function global_wannier_owner_in_h_range(owner_frag, center_frag, center_range, num_fragment) result(in_range)
+    implicit none
+    integer, intent(in) :: owner_frag, center_frag, center_range, num_fragment(3)
+
+    if (owner_frag <= 0 .or. center_frag <= 0) then
+      in_range = .false.
+    else if (center_range < 0) then
+      in_range = .true.
+    else
+      in_range = (fragment_periodic_manhattan_distance(owner_frag, center_frag, num_fragment) <= center_range)
+    end if
+  end function global_wannier_owner_in_h_range
+
+  integer function fragment_periodic_manhattan_distance(ifrag_a, ifrag_b, num_fragment) result(dist)
+    implicit none
+    integer, intent(in) :: ifrag_a, ifrag_b, num_fragment(3)
+    integer :: axis, da, ca(3), cb(3)
+
+    dist = huge(1)
+    if (any(num_fragment(1:3) <= 0)) return
+    call fragment_coord3_from_id_io(ifrag_a, num_fragment, ca)
+    call fragment_coord3_from_id_io(ifrag_b, num_fragment, cb)
+    dist = 0
+    do axis = 1, 3
+      da = abs(ca(axis) - cb(axis))
+      da = min(da, max(0, num_fragment(axis) - da))
+      dist = dist + da
+    end do
+  end function fragment_periodic_manhattan_distance
+
+  subroutine fragment_coord3_from_id_io(ifrag, num_fragment, coord)
+    implicit none
+    integer, intent(in) :: ifrag, num_fragment(3)
+    integer, intent(out) :: coord(3)
+    integer :: tmp
+
+    coord(1:3) = 1
+    if (ifrag <= 0 .or. any(num_fragment(1:3) <= 0)) return
+    tmp = ifrag - 1
+    coord(3) = mod(tmp, num_fragment(3)) + 1
+    tmp = tmp / num_fragment(3)
+    coord(2) = mod(tmp, num_fragment(2)) + 1
+    tmp = tmp / num_fragment(2)
+    coord(1) = mod(tmp, num_fragment(1)) + 1
+  end subroutine fragment_coord3_from_id_io
+
   subroutine initialize_coefficients_from_buffer_wannier_flux(dg_frag)
     use eigen_subdiag_sub, only: eigen_dsyev
     use communication, only: comm_is_root, comm_summation
@@ -1115,12 +2059,17 @@ contains
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
     integer :: ifrag, i_local, ifrag_count, ispin, iw, io, k, state_col
+    integer :: iaxis, occ, virt, env_status, env_len
     integer :: nocc_eff, occ_base, occ_extra, frag_occ_s, frag_occ_e, nocc_frag_seed
     integer :: nvirt_eff, virt_base, virt_extra, frag_virt_s, frag_virt_e, nvirt_frag_seed
     integer :: nseed_frag
     integer :: nw, nbf, global_idx, local_idx, local_state_col
-    real(8), allocatable :: h_work(:,:), evec(:,:), eval(:), coef_vec(:)
+    real(8), allocatable :: h_work(:,:), evec(:,:), eval(:), coef_vec(:), r_work(:,:), r_eig(:,:)
     real(8) :: diag_local(4), diag_global(4)
+    real(8) :: trans_local(3,5), trans_global(3,5), amp, gap, strength_pair
+    real(8) :: min_gap_local(3), max_pair_local(3), max_pair_gap_local(3)
+    logical :: trace_bpw_transition
+    character(32) :: env_bpw_transition
 
     if (.not. dg_frag%has_buffer_periodic_wannier_basis) return
     if (.not. allocated(dg_frag%buffer_wannier_coef)) return
@@ -1133,6 +2082,17 @@ contains
     dg_frag%buffer_wannier_flux_seed_applied = .false.
     diag_local(:) = 0.0d0
     diag_global(:) = 0.0d0
+    trans_local(:, :) = 0.0d0
+    trans_global(:, :) = 0.0d0
+    trace_bpw_transition = .false.
+    env_bpw_transition = ''
+    call get_environment_variable('SALMON_DG_BPW_TRANSITION_TRACE', env_bpw_transition, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case(trim(adjustl(env_bpw_transition(1:env_len))))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        trace_bpw_transition = .true.
+      end select
+    end if
 
     do i_local = 1, ifrag_count
       ifrag = dg_frag%ifrag_start + i_local - 1
@@ -1170,6 +2130,46 @@ contains
         allocate(h_work(nw,nw), evec(nw,nw), eval(nw), coef_vec(nbf))
         h_work(1:nw,1:nw) = dg_frag%buffer_wannier_h_flux(1:nw,1:nw,i_local)
         call eigen_dsyev(h_work, eval, evec)
+
+        if (trace_bpw_transition .and. nocc_frag_seed > 0 .and. nvirt_frag_seed > 0) then
+          min_gap_local(:) = 1.0d300
+          max_pair_local(:) = 0.0d0
+          max_pair_gap_local(:) = 0.0d0
+          allocate(r_work(nw,nw), r_eig(nw,nw))
+          do iaxis = 1, 3
+            r_work(1:nw,1:nw) = matmul(dg_frag%buffer_wannier_v(iaxis,1:nw,1:nw,i_local), &
+              evec(1:nw,1:nw))
+            r_eig(1:nw,1:nw) = matmul(transpose(evec(1:nw,1:nw)), r_work(1:nw,1:nw))
+            do virt = nocc_frag_seed + 1, nseed_frag
+              do occ = 1, nocc_frag_seed
+                gap = eval(virt) - eval(occ)
+                amp = r_eig(occ,virt)
+                strength_pair = amp * amp
+                min_gap_local(iaxis) = min(min_gap_local(iaxis), gap)
+                if (strength_pair > max_pair_local(iaxis)) then
+                  max_pair_local(iaxis) = strength_pair
+                  max_pair_gap_local(iaxis) = gap
+                end if
+                trans_local(iaxis,1) = trans_local(iaxis,1) + 1.0d0
+                trans_local(iaxis,2) = trans_local(iaxis,2) + strength_pair
+                if (gap > 1.0d-12) then
+                  trans_local(iaxis,3) = trans_local(iaxis,3) + strength_pair / gap
+                  trans_local(iaxis,4) = trans_local(iaxis,4) + 2.0d0 * gap * strength_pair
+                  trans_local(iaxis,5) = trans_local(iaxis,5) + gap * strength_pair
+                end if
+              end do
+            end do
+          end do
+          deallocate(r_work, r_eig)
+          do iaxis = 1, 3
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,4(a,1pe13.5))') &
+              "[DG-BPW-TRANSITION-LOCAL] rank=", dg_frag%id, " ifrag=", ifrag, " ispin=", ispin, &
+              " axis=", iaxis, " min_gap_eV=", min_gap_local(iaxis) * 27.211386245988d0, &
+              " max_pair_r2=", max_pair_local(iaxis), &
+              " max_pair_gap_eV=", max_pair_gap_local(iaxis) * 27.211386245988d0, &
+              " nvirt_frag=", dble(nvirt_frag_seed)
+          end do
+        end if
 
         do k = 1, nseed_frag
           if (k <= nocc_frag_seed) then
@@ -1216,12 +2216,24 @@ contains
     end do
 
     call comm_summation(diag_local, diag_global, 4, dg_frag%icomm)
+    if (trace_bpw_transition) call comm_summation(trans_local, trans_global, 15, dg_frag%icomm)
     if (diag_global(1) > 0.0d0) dg_frag%buffer_wannier_flux_seed_applied = .true.
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,4(a,1pe13.5))') "[INFO] DG buffer-periodic Flux eigenstate seed applied:", &
         " seeded_states=", diag_global(1), " virtual_states=", diag_global(4), &
         " total_local_wannier=", diag_global(2), &
         " eval1_sum=", diag_global(3)
+      if (trace_bpw_transition) then
+        do iaxis = 1, 3
+          write(*,'(1x,a,i0,6(a,1pe13.5))') "[DG-BPW-TRANSITION] axis=", iaxis, &
+            " pairs=", trans_global(iaxis,1), &
+            " sum_r2=", trans_global(iaxis,2), &
+            " sum_r2_over_gap=", trans_global(iaxis,3), &
+            " fsum_like=", trans_global(iaxis,4) / max(1.0d0, diag_global(1) - diag_global(4)), &
+            " mean_gap_eV=", 27.211386245988d0 * trans_global(iaxis,5) / max(1.0d-300, trans_global(iaxis,2)), &
+            " per_occ_r2=", trans_global(iaxis,2) / max(1.0d0, diag_global(1) - diag_global(4))
+        end do
+      end if
     end if
   end subroutine initialize_coefficients_from_buffer_wannier_flux
 

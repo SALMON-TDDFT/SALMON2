@@ -19,6 +19,7 @@
 
 #include "config.h"
 module lcfo_flux
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use dc_fragment_geometry, only: get_fragment_domain
   implicit none
 
@@ -30,15 +31,30 @@ module lcfo_flux
   &                          binfile_bf = "basis_functions.bin", &
   &                          binfile_bfb = "basis_functions_buffer.bin", &
   &                          binfile_hl = "hamiltonian_local.bin", &
+  &                          binfile_hc = "hamiltonian_flux_components.bin", &
+  &                          binfile_hcw = "hamiltonian_flux_weak_components.bin", &
   &                          binfile_vl = "velocity_local.bin", &
+  &                          binfile_xfl = "position_flux_local.bin", &
   &                          binfile_lw = "local_wannier_basis.bin", &
-  &                          binfile_bpw = "buffer_periodic_wannier_basis.bin"
+  &                          binfile_bpw = "buffer_periodic_wannier_basis.bin", &
+  &                          binfile_bpwt = "buffer_periodic_wannier_trace.bin", &
+  &                          binfile_w90g = "wannier90_global_basis.bin", &
+  &                          binfile_w90seed = "wannier_flux_eigen_seed.bin", &
+  &                          binfile_wcl = "wannier_cluster_partition.bin"
   integer, parameter :: basis_buffer_magic = -22022212
   integer, parameter :: basis_buffer_version = 2
   integer, parameter :: local_wannier_magic = -22022214
   integer, parameter :: local_wannier_version = 2
   integer, parameter :: buffer_periodic_wannier_magic = -22022215
-  integer, parameter :: buffer_periodic_wannier_version = 1
+  integer, parameter :: buffer_periodic_wannier_version = 3
+  integer, parameter :: buffer_periodic_wannier_trace_magic = -22022218
+  integer, parameter :: buffer_periodic_wannier_trace_version = 1
+  integer, parameter :: wannier90_global_magic = -22022216
+  integer, parameter :: wannier90_global_version = 2
+  integer, parameter :: wannier_flux_eigen_seed_magic = -22022219
+  integer, parameter :: wannier_flux_eigen_seed_version = 1
+  integer, parameter :: wannier_cluster_magic = -22022217
+  integer, parameter :: wannier_cluster_version = 1
 
 contains
 
@@ -62,7 +78,9 @@ contains
     type halo_info
       integer :: id_src,id_dst,ifrag_src,dvec(3),length(3),dsp_send(3),dsp_recv(3),axis
       real(8),allocatable :: mat_H_local(:,:,:)
+      real(8),allocatable :: mat_H_surface_cross(:,:,:)
       real(8),allocatable :: mat_V_local(:,:,:,:)
+      real(8),allocatable :: mat_Xi_flux_local(:,:,:,:)
       real(8),allocatable :: trace_send(:,:,:),trace_recv(:,:,:)
     end type halo_info
     !
@@ -74,7 +92,9 @@ contains
     integer :: index_basis(dc%nstate_frag,dc%n_frag,system%nspin)
     real(8) :: hvol
     real(8),allocatable :: f_basis(:,:,:,:,:),hf(:,:,:,:,:),wrk_array(:,:,:,:,:) &
-    & ,esp_tot(:,:),mat_H_local(:,:,:),mat_V_local(:,:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
+    & ,esp_tot(:,:),mat_H_local(:,:,:),mat_H_volume_local(:,:,:),mat_H_volume_weak_local(:,:,:) &
+    & ,mat_H_surface_self(:,:,:) &
+    & ,mat_V_local(:,:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
     !
     integer :: i,j,n,ix,iy,iz,io,jo,ispin,ifrag,jfrag,i_halo
 
@@ -108,11 +128,16 @@ contains
     if(allocated(basis_transform)) deallocate(basis_transform)
     if(allocated(esp_tot)) deallocate(esp_tot)
     if(allocated(mat_H_local)) deallocate(mat_H_local)
-    if(allocated(mat_V_local)) deallocate(mat_V_local)
-    do i=1,n_halo
-      if(allocated(halo(i)%mat_H_local)) deallocate(halo(i)%mat_H_local)
-      if(allocated(halo(i)%mat_V_local)) deallocate(halo(i)%mat_V_local)
-    end do
+    if(allocated(mat_H_volume_local)) deallocate(mat_H_volume_local)
+    if(allocated(mat_H_volume_weak_local)) deallocate(mat_H_volume_weak_local)
+    if(allocated(mat_H_surface_self)) deallocate(mat_H_surface_self)
+      if(allocated(mat_V_local)) deallocate(mat_V_local)
+      do i=1,n_halo
+        if(allocated(halo(i)%mat_H_local)) deallocate(halo(i)%mat_H_local)
+        if(allocated(halo(i)%mat_H_surface_cross)) deallocate(halo(i)%mat_H_surface_cross)
+        if(allocated(halo(i)%mat_V_local)) deallocate(halo(i)%mat_V_local)
+        if(allocated(halo(i)%mat_Xi_flux_local)) deallocate(halo(i)%mat_Xi_flux_local)
+      end do
     if(dc%id_tot==0) write(*,*) "end DC-LCFO-Flux"
 
   contains
@@ -478,21 +503,65 @@ contains
       real(8), parameter :: surface_penalty_factor = 10.0d0
       real(8) :: area_weight, alpha, u_l, v_l, dnu_l, dnv_l, u_r, dnu_r
       real(8) :: term_sum, term_face, term_vsum, term_vface, pavg
+      real(8) :: xi_rel(3), term_xisum(3), term_xiface
       real(8), allocatable :: trace_local(:,:,:)
       real(8), allocatable :: grad_work(:,:,:)
+      real(8), allocatable :: basis_grad_all(:,:,:,:,:,:)
+      real(8), allocatable :: basis_kinetic_core(:,:,:,:,:)
 
     ! diagonal block < lambda_{ifrag,io} | H | lambda_{ifrag,jo} >
       allocate(mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      allocate(mat_H_volume_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      allocate(mat_H_volume_weak_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      allocate(mat_H_surface_self(dc%nstate_frag,dc%nstate_frag,nspin))
       allocate(mat_V_local(3,dc%nstate_frag,dc%nstate_frag,nspin))
       mat_H_local = 0d0
+      mat_H_volume_local = 0d0
+      mat_H_volume_weak_local = 0d0
+      mat_H_surface_self = 0d0
       mat_V_local = 0d0
       l = dc%nxyz_domain
+      allocate(basis_grad_all(l(1),l(2),l(3),nspin,dc%nstate_frag,3))
+      allocate(basis_kinetic_core(l(1),l(2),l(3),nspin,dc%nstate_frag))
+      basis_grad_all = 0d0
+      basis_kinetic_core = 0d0
       do ispin=1,nspin
-!$omp parallel do private(io,jo,idir) schedule(static)
+      do io=1,n_basis(dc%i_frag,ispin)
+!$omp parallel do collapse(3) private(ix,iy,iz,idir) schedule(static)
+        do iz=1,l(3)
+        do iy=1,l(2)
+        do ix=1,l(1)
+          basis_kinetic_core(ix,iy,iz,ispin,io) = local_basis_kinetic_core(ix,iy,iz,ispin,io)
+          do idir=1,3
+            basis_grad_all(ix,iy,iz,ispin,io,idir) = local_basis_grad(ix,iy,iz,ispin,io,idir)
+          end do
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end do
+      end do
+      do ispin=1,nspin
+!$omp parallel do private(io,jo,idir,term_sum) schedule(static)
       do io=1,n_basis(dc%i_frag,ispin)
       do jo=1,n_basis(dc%i_frag,ispin)
-        mat_H_local(io,jo,ispin) = &
+        mat_H_volume_local(io,jo,ispin) = &
         & + sum(f_basis(1:l(1),1:l(2),1:l(3),ispin,io)*hf(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol
+        term_sum = 0d0
+        do idir=1,3
+          term_sum = term_sum &
+          & + 0.5d0 * sum(basis_grad_all(1:l(1),1:l(2),1:l(3),ispin,io,idir) &
+          &              * basis_grad_all(1:l(1),1:l(2),1:l(3),ispin,jo,idir)) * hvol
+        end do
+        mat_H_volume_weak_local(io,jo,ispin) = mat_H_volume_local(io,jo,ispin) &
+        & - sum(f_basis(1:l(1),1:l(2),1:l(3),ispin,io) &
+        &       * basis_kinetic_core(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol &
+        & + term_sum
+        if(use_weak_volume_hamiltonian_mode()) then
+          mat_H_local(io,jo,ispin) = mat_H_volume_weak_local(io,jo,ispin)
+        else
+          mat_H_local(io,jo,ispin) = mat_H_volume_local(io,jo,ispin)
+        end if
       end do
       end do
 !$omp end parallel do
@@ -505,7 +574,7 @@ contains
         do iz=1,l(3)
         do iy=1,l(2)
         do ix=1,l(1)
-          grad_work(ix,iy,iz) = local_basis_grad(ix,iy,iz,ispin,jo,idir)
+          grad_work(ix,iy,iz) = basis_grad_all(ix,iy,iz,ispin,jo,idir)
         end do
         end do
         end do
@@ -529,9 +598,13 @@ contains
           side = -halo(i_halo)%dvec(axis)
           jfrag = halo(i_halo)%ifrag_src
           allocate(halo(i_halo)%mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
+          allocate(halo(i_halo)%mat_H_surface_cross(dc%nstate_frag,dc%nstate_frag,nspin))
           allocate(halo(i_halo)%mat_V_local(3,dc%nstate_frag,dc%nstate_frag,nspin))
+          allocate(halo(i_halo)%mat_Xi_flux_local(3,dc%nstate_frag,dc%nstate_frag,nspin))
           halo(i_halo)%mat_H_local = 0d0
+          halo(i_halo)%mat_H_surface_cross = 0d0
           halo(i_halo)%mat_V_local = 0d0
+          halo(i_halo)%mat_Xi_flux_local = 0d0
           area_weight = system%hvol / system%hgs(axis)
           alpha = surface_penalty_factor / system%hgs(axis)
           allocate(trace_local(face_point_count(axis),nspin,2*dc%nstate_frag))
@@ -576,7 +649,9 @@ contains
             end do
             end do
             end do
-            mat_H_local(io,jo,ispin) = mat_H_local(io,jo,ispin) + term_sum
+            if(use_surface_self_hamiltonian_mode()) &
+              mat_H_local(io,jo,ispin) = mat_H_local(io,jo,ispin) + term_sum
+            mat_H_surface_self(io,jo,ispin) = mat_H_surface_self(io,jo,ispin) + term_sum
             mat_V_local(axis,io,jo,ispin) = mat_V_local(axis,io,jo,ispin) + term_vsum
           end do
           end do
@@ -588,11 +663,12 @@ contains
           ! traces and is placed transposed by construction for EigenExa.
           do ispin=1,nspin
 !$omp parallel do private(io,jo,face_pt,ix_face,iy_face,iz_face,v_l,dnv_l,u_r,dnu_r, &
-!$omp& term_sum,term_face,term_vsum,term_vface) schedule(static)
+!$omp& term_sum,term_face,term_vsum,term_vface,term_xisum,term_xiface,xi_rel,idir) schedule(static)
           do io=1,n_basis(jfrag,ispin)
           do jo=1,n_basis(dc%i_frag,ispin)
             term_sum = 0d0
             term_vsum = 0d0
+            term_xisum(1:3) = 0d0
             face_pt = 0
             do iz_face=1,dc%nxyz_domain(3)
             do iy_face=1,dc%nxyz_domain(2)
@@ -605,13 +681,25 @@ contains
               dnu_r = halo(i_halo)%trace_recv(face_pt,ispin,dc%nstate_frag+io)
               term_face = (-0.25d0 * v_l * dnu_r + 0.25d0 * dnv_l * u_r - alpha * v_l * u_r) * area_weight
               term_vface = 0.5d0 * real(side,8) * v_l * u_r * area_weight
+              xi_rel(1) = (dble(ix_face) - 0.5d0 * dble(dc%nxyz_domain(1) + 1)) * system%hgs(1)
+              xi_rel(2) = (dble(iy_face) - 0.5d0 * dble(dc%nxyz_domain(2) + 1)) * system%hgs(2)
+              xi_rel(3) = (dble(iz_face) - 0.5d0 * dble(dc%nxyz_domain(3) + 1)) * system%hgs(3)
+              xi_rel(axis) = 0d0
+              term_xiface = v_l * u_r * area_weight
               term_sum = term_sum + term_face
               term_vsum = term_vsum + term_vface
+              do idir=1,3
+                term_xisum(idir) = term_xisum(idir) + xi_rel(idir) * term_xiface
+              end do
             end do
             end do
             end do
             halo(i_halo)%mat_H_local(io,jo,ispin) = halo(i_halo)%mat_H_local(io,jo,ispin) + term_sum
+            halo(i_halo)%mat_H_surface_cross(io,jo,ispin) = &
+              halo(i_halo)%mat_H_surface_cross(io,jo,ispin) + term_sum
             halo(i_halo)%mat_V_local(axis,io,jo,ispin) = halo(i_halo)%mat_V_local(axis,io,jo,ispin) + term_vsum
+            halo(i_halo)%mat_Xi_flux_local(1:3,io,jo,ispin) = &
+              halo(i_halo)%mat_Xi_flux_local(1:3,io,jo,ispin) + term_xisum(1:3)
           end do
           end do
 !$omp end parallel do
@@ -634,6 +722,8 @@ contains
         end do
       end do
       deallocate(hf)
+      deallocate(basis_grad_all)
+      deallocate(basis_kinetic_core)
 
     end subroutine calc_hamiltonian_matrix
 
@@ -733,6 +823,82 @@ contains
       end do
     end function local_basis_grad
 
+    real(8) function local_basis_value_core(ix,iy,iz,ispin,ibasis) result(val)
+      implicit none
+      integer,intent(in) :: ix,iy,iz,ispin,ibasis
+
+      val = 0d0
+      if(ibasis < 1 .or. ibasis > dc%nstate_frag) return
+      if(ispin < 1 .or. ispin > nspin) return
+      if(ix < 1 .or. ix > dc%nxyz_domain(1)) return
+      if(iy < 1 .or. iy > dc%nxyz_domain(2)) return
+      if(iz < 1 .or. iz > dc%nxyz_domain(3)) return
+      val = f_basis(ix,iy,iz,ispin,ibasis)
+    end function local_basis_value_core
+
+    real(8) function local_basis_kinetic_core(ix,iy,iz,ispin,ibasis) result(tval)
+      implicit none
+      integer,intent(in) :: ix,iy,iz,ispin,ibasis
+      integer :: dist, axis
+      real(8) :: v
+
+      v = 0d0
+      do axis=1,3
+        do dist=1,size(stencil%coef_lap,1)
+          select case(axis)
+          case(1)
+            v = v + stencil%coef_lap(dist,axis) * &
+            & (local_basis_value_core(ix+dist,iy,iz,ispin,ibasis) + &
+            &  local_basis_value_core(ix-dist,iy,iz,ispin,ibasis))
+          case(2)
+            v = v + stencil%coef_lap(dist,axis) * &
+            & (local_basis_value_core(ix,iy+dist,iz,ispin,ibasis) + &
+            &  local_basis_value_core(ix,iy-dist,iz,ispin,ibasis))
+          case(3)
+            v = v + stencil%coef_lap(dist,axis) * &
+            & (local_basis_value_core(ix,iy,iz+dist,ispin,ibasis) + &
+            &  local_basis_value_core(ix,iy,iz-dist,ispin,ibasis))
+          end select
+        end do
+      end do
+      tval = stencil%coef_lap0 * local_basis_value_core(ix,iy,iz,ispin,ibasis) - 0.5d0 * v
+    end function local_basis_kinetic_core
+
+    real(8) function strong_core_kinetic_integral(io,jo,ispin,l) result(val)
+      implicit none
+      integer,intent(in) :: io,jo,ispin,l(3)
+      integer :: ix,iy,iz
+
+      val = 0d0
+      do iz=1,l(3)
+      do iy=1,l(2)
+      do ix=1,l(1)
+        val = val + f_basis(ix,iy,iz,ispin,io) * local_basis_kinetic_core(ix,iy,iz,ispin,jo)
+      end do
+      end do
+      end do
+      val = val * hvol
+    end function strong_core_kinetic_integral
+
+    real(8) function weak_buffer_kinetic_integral(io,jo,ispin,l) result(val)
+      implicit none
+      integer,intent(in) :: io,jo,ispin,l(3)
+      integer :: ix,iy,iz,axis
+
+      val = 0d0
+      do axis=1,3
+      do iz=1,l(3)
+      do iy=1,l(2)
+      do ix=1,l(1)
+        val = val + 0.5d0 * local_basis_grad(ix,iy,iz,ispin,io,axis) &
+        &                 * local_basis_grad(ix,iy,iz,ispin,jo,axis)
+      end do
+      end do
+      end do
+      end do
+      val = val * hvol
+    end function weak_buffer_kinetic_integral
+
     real(8) function local_basis_dn(ix,iy,iz,ispin,ibasis,axis,side) result(dn)
       implicit none
       integer,intent(in) :: ix,iy,iz,ispin,ibasis,axis,side
@@ -772,6 +938,7 @@ contains
       use communication, only: comm_bcast, comm_summation
       use eigen_subdiag_sub, only: eigen_dsyev
       use eigen_libs_mod
+      use salmon_global, only: nelec, nelec_spin
       implicit none
       integer, parameter :: coef_gather_target_elems = 2000000
       integer, parameter :: velocity_diag_max_dim = 1024
@@ -785,6 +952,7 @@ contains
       integer, parameter :: nsample_max = 3
       integer :: nsample, isample, sample_state(nsample_max)
       integer :: nstate_use, nocc_diag, occ, virt, idir_diag
+      integer :: nocc_nelec
       real(8) :: eps, hval, rel_col, rel_row, rel_col_max, rel_row_max
       real(8) :: occ_weight, gap, amp, strength_pair
       real(8) :: strength_total, strength_max, sum_gap_weighted, sum_inv_gap, occ_sum
@@ -893,6 +1061,8 @@ contains
         h_ref_div = h_div
         call eigen_sx(n, n, h_div, nx, esp_tot(1:n,ispin), v_div, nx)
         if(dc%id_tot==0) write(*,*) "eigen_sx: done"
+        nocc_nelec = occupied_index_from_input(ispin)
+        if(dc%id_tot==0) call print_flux_gap_diagnostic("full", ispin, nocc_nelec, n)
 
         nsample = 1
         sample_state(1) = 1
@@ -1243,7 +1413,19 @@ contains
             allocate(evec_local(nbasis_diag,nbasis_diag))
             allocate(eval_local(nbasis_diag))
             h_local_diag(:,:) = h_block(1:nbasis_diag,1:nbasis_diag,ifrag)
+            if (any(.not. ieee_is_finite(h_local_diag(1:nbasis_diag,1:nbasis_diag)))) then
+              if (dc%id_tot == 0) write(*,'(1x,a,i0,a,i0)') &
+                "[FATAL] non-finite block Flux Hamiltonian before local diagonalization: ifrag=", &
+                ifrag, " ispin=", ispin
+              stop "DC-LCFO block Flux H contains non-finite values"
+            end if
             call eigen_dsyev(h_local_diag, eval_local, evec_local)
+            if (any(.not. ieee_is_finite(evec_local(1:nbasis_diag,1:nbasis_diag))) .or. &
+                any(.not. ieee_is_finite(eval_local(1:nbasis_diag)))) then
+              if (dc%id_tot == 0) write(*,'(1x,a,i0,a,i0)') &
+                "[FATAL] non-finite block Flux eigenpair: ifrag=", ifrag, " ispin=", ispin
+              stop "DC-LCFO block Flux eigensolver returned non-finite values"
+            end if
             max_level = min(nbasis_diag, dc%nstate_tot)
             do level=1,max_level
               if(n_entry >= n) exit
@@ -1283,6 +1465,7 @@ contains
               coef_wf(1:nbasis_diag,state_col,ispin) = h_block(1:nbasis_diag,level,ifrag)
             end if
           end do
+          if(dc%id_tot==0) call print_flux_gap_diagnostic("block", ispin, nocc_nelec, min(n_entry,dc%nstate_tot))
           deallocate(h_block,eval_list,frag_list,level_list)
         end if
 
@@ -1293,6 +1476,43 @@ contains
 
       deallocate(h)
     end subroutine diag_eigenexa
+
+    integer function occupied_index_from_input(ispin_in) result(nocc_input)
+      use salmon_global, only: nelec_spin
+      implicit none
+      integer, intent(in) :: ispin_in
+
+      if(nspin == 1) then
+        nocc_input = int(0.5d0 * dc%elec_num_tot + 1.0d-12)
+        if(abs(2.0d0 * dble(nocc_input) - dc%elec_num_tot) > 1.0d-8) nocc_input = nocc_input + 1
+      else if(sum(nelec_spin(1:min(2,size(nelec_spin)))) > 0) then
+        nocc_input = nelec_spin(ispin_in)
+      else
+        nocc_input = int(dc%elec_num_tot + 1.0d-12)
+      end if
+      nocc_input = max(1, min(nocc_input, dc%nstate_tot - 1))
+    end function occupied_index_from_input
+
+    subroutine print_flux_gap_diagnostic(label, ispin_in, nocc_input, nstate_available)
+      implicit none
+      character(*), intent(in) :: label
+      integer, intent(in) :: ispin_in, nocc_input, nstate_available
+      real(8) :: gap_ev
+
+      if(nocc_input < 1 .or. nocc_input + 1 > nstate_available) then
+        write(*,'(1x,a,a,a,i0,a,i0,a,i0,a)') &
+          "[DC-LCFO-FLUX-GAP] mode=", trim(label), " ispin=", ispin_in, &
+          " nocc_input=", nocc_input, " nstate_available=", nstate_available, " unavailable"
+        return
+      end if
+      gap_ev = (esp_tot(nocc_input+1,ispin_in) - esp_tot(nocc_input,ispin_in)) * 27.211386245988d0
+      write(*,'(1x,a,a,a,i0,a,i0,3(a,1pe13.5))') &
+        "[DC-LCFO-FLUX-GAP] mode=", trim(label), " ispin=", ispin_in, &
+        " nocc_input=", nocc_input, &
+        " homo_eV=", esp_tot(nocc_input,ispin_in) * 27.211386245988d0, &
+        " lumo_eV=", esp_tot(nocc_input+1,ispin_in) * 27.211386245988d0, &
+        " gap_eV=", gap_ev
+    end subroutine print_flux_gap_diagnostic
 #endif
 
     logical function use_block_diag_hamiltonian_mode() result(enabled)
@@ -1313,9 +1533,53 @@ contains
       end if
     end function use_block_diag_hamiltonian_mode
 
+    logical function use_weak_volume_hamiltonian_mode() result(enabled)
+      implicit none
+      logical, save :: initialized = .false.
+      logical, save :: enabled_save = .false.
+      character(16) :: env_value
+      integer :: env_status
+
+      if(.not. initialized) then
+        env_value = ''
+        call get_environment_variable('SALMON_DG_FLUX_WEAK_VOLUME', env_value, status=env_status)
+        if(env_status == 0) then
+          select case(trim(adjustl(env_value)))
+          case('1','y','Y','yes','YES','true','TRUE','on','ON')
+            enabled_save = .true.
+          end select
+        end if
+        initialized = .true.
+      end if
+      enabled = enabled_save
+    end function use_weak_volume_hamiltonian_mode
+
+    logical function use_surface_self_hamiltonian_mode() result(enabled)
+      implicit none
+      logical, save :: initialized = .false.
+      logical, save :: enabled_save = .true.
+      character(16) :: env_value
+      integer :: env_status
+
+      if(.not. initialized) then
+        env_value = ''
+        call get_environment_variable('SALMON_DG_FLUX_SELF_SURFACE', env_value, status=env_status)
+        if(env_status == 0) then
+          select case(trim(adjustl(env_value)))
+          case('0','n','N','no','NO','false','FALSE','off','OFF')
+            enabled_save = .false.
+          case('1','y','Y','yes','YES','true','TRUE','on','ON')
+            enabled_save = .true.
+          end select
+        end if
+        initialized = .true.
+      end if
+      enabled = enabled_save
+    end function use_surface_self_hamiltonian_mode
+
     subroutine output
       use salmon_global, only: base_directory, sysname, unit_energy, yn_dc_lcfo_wannier, &
-        yn_dc_lcfo_local_wannier
+        yn_dc_lcfo_local_wannier, yn_dc_lcfo_wannier_cluster, wannier_cluster_size
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
       implicit none
@@ -1350,6 +1614,7 @@ contains
         end do
         close(iunit)
       end if
+      if(yn_dc_lcfo_wannier_cluster == 'y' .and. yn_dc_lcfo_diag == 'y') call write_wannier_cluster_partition_file()
       if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') call write_wannier_seed_files()
 
     ! fragment data
@@ -1427,6 +1692,16 @@ contains
         deallocate(phi_box_local,phi_box_sum)
       if(yn_dc_lcfo_local_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') &
         call write_local_wannier_seed()
+      if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_wannier_cluster == 'y' .and. &
+         yn_dc_lcfo_local_wannier /= 'y' .and. yn_dc_lcfo_diag == 'y') then
+        if(all(wannier_cluster_size(1:3) == 1)) then
+          call write_wannier90_global_bpw_seed()
+        else if(dc%id_tot == 0) then
+          write(*,'(1x,a,3(i0,1x),a)') &
+            "[DC-LCFO-W90-BPW] skip fragment BPW: cluster_size=", &
+            wannier_cluster_size(1:3), " requires cluster/global BPW export."
+        end if
+      end if
       if(dc%id_frag==0) then
       ! local hamiltonian matrix
         iunit = get_filehandle()
@@ -1438,6 +1713,29 @@ contains
           write(iunit) halo(i_halo)%mat_H_local(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
         end do
         close(iunit)
+      ! diagnostic decomposition of the Flux Hamiltonian.
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_hc
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) mat_H_volume_local(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        write(iunit) mat_H_surface_self(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        write(iunit) n_halo
+        do i_halo=1,n_halo
+          write(iunit) halo(i_halo)%mat_H_surface_cross(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        end do
+        close(iunit)
+      ! diagnostic decomposition with the kinetic volume replaced by the
+      ! weak-form fragment volume term.
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_hcw
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) mat_H_volume_weak_local(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        write(iunit) mat_H_surface_self(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        write(iunit) n_halo
+        do i_halo=1,n_halo
+          write(iunit) halo(i_halo)%mat_H_surface_cross(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        end do
+        close(iunit)
       ! local velocity matrix dH/dA at A=0, built from the same Flux-LCFO basis
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_vl
@@ -1446,6 +1744,16 @@ contains
         write(iunit) n_halo
         do i_halo=1,n_halo
           write(iunit) halo(i_halo)%mat_V_local(1:3,1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        end do
+        close(iunit)
+      ! local DG boundary position correction xi_flux for length-gauge RT
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_xfl
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) 0d0 * mat_V_local(1:3,1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
+        write(iunit) n_halo
+        do i_halo=1,n_halo
+          write(iunit) halo(i_halo)%mat_Xi_flux_local(1:3,1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
         end do
         close(iunit)
         if(yn_dc_lcfo_diag=='y') then
@@ -1465,13 +1773,115 @@ contains
 
     end subroutine output
 
+    subroutine write_wannier_cluster_partition_file()
+      use salmon_global, only: num_fragment, num_wannier_cluster, wannier_cluster_size
+      use filesystem, only: get_filehandle
+      implicit none
+      integer :: iunit, ifrag, cid, ix_frag, iy_frag, iz_frag, rem
+      integer :: icx, icy, icz, num_cluster(3), ncluster_tot
+      integer, allocatable :: frag_cluster_id(:), cluster_frag_range(:,:)
+      character(256) :: filename
+
+      if(dc%id_tot /= 0) return
+      num_cluster(1:3) = num_fragment(1:3) / wannier_cluster_size(1:3)
+      ncluster_tot = product(num_cluster(1:3))
+      allocate(frag_cluster_id(dc%n_frag), cluster_frag_range(6,ncluster_tot))
+      cluster_frag_range = 0
+
+      do icx=1,num_cluster(1)
+      do icy=1,num_cluster(2)
+      do icz=1,num_cluster(3)
+        cid = ((icx - 1) * num_cluster(2) + (icy - 1)) * num_cluster(3) + icz
+        cluster_frag_range(1,cid) = (icx - 1) * wannier_cluster_size(1) + 1
+        cluster_frag_range(2,cid) = icx * wannier_cluster_size(1)
+        cluster_frag_range(3,cid) = (icy - 1) * wannier_cluster_size(2) + 1
+        cluster_frag_range(4,cid) = icy * wannier_cluster_size(2)
+        cluster_frag_range(5,cid) = (icz - 1) * wannier_cluster_size(3) + 1
+        cluster_frag_range(6,cid) = icz * wannier_cluster_size(3)
+      end do
+      end do
+      end do
+
+      do ifrag=1,dc%n_frag
+        ix_frag = (ifrag - 1) / max(1, num_fragment(2) * num_fragment(3)) + 1
+        rem = modulo(ifrag - 1, max(1, num_fragment(2) * num_fragment(3)))
+        iy_frag = rem / max(1, num_fragment(3)) + 1
+        iz_frag = modulo(rem, max(1, num_fragment(3))) + 1
+        icx = (ix_frag - 1) / wannier_cluster_size(1) + 1
+        icy = (iy_frag - 1) / wannier_cluster_size(2) + 1
+        icz = (iz_frag - 1) / wannier_cluster_size(3) + 1
+        frag_cluster_id(ifrag) = ((icx - 1) * num_cluster(2) + (icy - 1)) * num_cluster(3) + icz
+      end do
+
+      filename = trim(dc%base_directory)//binfile_wcl
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+      write(iunit) wannier_cluster_magic, wannier_cluster_version
+      write(iunit) num_fragment(1:3), wannier_cluster_size(1:3), num_cluster(1:3)
+      write(iunit) dc%n_frag, ncluster_tot
+      write(iunit) frag_cluster_id(1:dc%n_frag)
+      write(iunit) cluster_frag_range(1:6,1:ncluster_tot)
+      close(iunit)
+      write(*,'(1x,a,i0,a,a)') "[DC-LCFO-WANNIER-CLUSTER] wrote ", ncluster_tot, &
+        " clusters to ", trim(filename)
+      call write_wannier_cluster_manifest_file(num_cluster, ncluster_tot, frag_cluster_id, cluster_frag_range)
+      deallocate(frag_cluster_id, cluster_frag_range)
+    end subroutine write_wannier_cluster_partition_file
+
+    subroutine write_wannier_cluster_manifest_file(num_cluster, ncluster_tot, frag_cluster_id, cluster_frag_range)
+      use salmon_global, only: num_fragment, num_wannier_cluster, wannier_cluster_size
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: num_cluster(3), ncluster_tot
+      integer, intent(in) :: frag_cluster_id(dc%n_frag), cluster_frag_range(6,ncluster_tot)
+      integer :: iunit, cid, ifrag, nmember
+      character(256) :: filename
+
+      filename = trim(dc%base_directory)//"wannier_cluster_partition.txt"
+      iunit = get_filehandle()
+      open(iunit,file=filename,status='replace')
+      write(iunit,'(a)') "# SALMON DC-LCFO Wannier cluster partition"
+      write(iunit,'(a,3(1x,i0))') "# num_fragment", num_fragment(1:3)
+      write(iunit,'(a,3(1x,i0))') "# input_num_wannier_cluster", num_wannier_cluster(1:3)
+      write(iunit,'(a,3(1x,i0))') "# wannier_cluster_size", wannier_cluster_size(1:3)
+      write(iunit,'(a,3(1x,i0))') "# effective_num_wannier_cluster", num_cluster(1:3)
+      write(iunit,'(a)') "# columns: cluster_id owner_fragment xlo xhi ylo yhi zlo zhi nmember members..."
+      do cid=1,ncluster_tot
+        nmember = count(frag_cluster_id(1:dc%n_frag) == cid)
+        write(iunit,'(i8,1x,i8,6(1x,i8),1x,i8)', advance='no') cid, &
+          first_fragment_in_cluster(cid, frag_cluster_id), cluster_frag_range(1:6,cid), nmember
+        do ifrag=1,dc%n_frag
+          if(frag_cluster_id(ifrag) == cid) write(iunit,'(1x,i8)', advance='no') ifrag
+        end do
+        write(iunit,*)
+      end do
+      close(iunit)
+      write(*,'(1x,2a)') "[DC-LCFO-WANNIER-CLUSTER] manifest: ", trim(filename)
+    end subroutine write_wannier_cluster_manifest_file
+
+    integer function first_fragment_in_cluster(cid, frag_cluster_id) result(ifrag_first)
+      implicit none
+      integer, intent(in) :: cid, frag_cluster_id(dc%n_frag)
+      integer :: ifrag
+
+      ifrag_first = 1
+      do ifrag=1,dc%n_frag
+        if(frag_cluster_id(ifrag) == cid) then
+          ifrag_first = ifrag
+          return
+        end if
+      end do
+    end function first_fragment_in_cluster
+
     subroutine write_local_wannier_seed()
       use eigen_subdiag_sub, only: eigen_dsyev
       use filesystem, only: get_filehandle
-      use salmon_global, only: izatom, wannier_projection, wannier_projection_width, &
-        lambda_cut, base_directory, yn_dc_lcfo_wannier_pw
+      use salmon_global, only: izatom, sysname, wannier_projection, wannier_projection_width, &
+        lambda_cut, base_directory, yn_dc_lcfo_wannier, yn_dc_lcfo_wannier_pw, &
+        yn_dc_lcfo_wannier_cluster, wannier_cluster_size
       implicit none
       integer :: nproj, nproj_sp3, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, io, jo, axis
+      integer :: aa_wann_source
       integer :: ix, iy, iz, ixg, iyg, izg, ispin_local
       integer :: ibx, iby, ibz, sx, sy, sz, ispin_read, ibasis_read
       integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
@@ -1484,7 +1894,7 @@ contains
       real(8), allocatable :: sw_legacy(:,:), uw_legacy(:,:), lambda_legacy(:)
       real(8), allocatable :: wcoef_legacy(:,:), r_wann_legacy(:,:,:), tmp_legacy(:,:), wcenter_legacy(:,:)
       real(8), allocatable :: h_seed(:,:), v_seed(:,:,:)
-      real(8), allocatable :: h_wann(:,:), v_wann(:,:,:), spread_est(:), tail_est(:)
+      real(8), allocatable :: h_wann(:,:), v_wann(:,:,:), aa_wann(:,:,:), spread_est(:), tail_est(:)
       real(8), allocatable :: phi_box(:,:,:,:), phi_tmp(:,:,:)
       real(8) :: x, y, z, gval, box_length(3), box_origin(3)
       character(256) :: filename
@@ -1494,6 +1904,14 @@ contains
         stop "DC-LCFO local Wannier export: only wannier_projection='C:sp3' is implemented."
       if(yn_dc_lcfo_wannier_pw == 'y') &
         stop "DC-LCFO local Wannier PW augmentation is not connected yet."
+      if(yn_dc_lcfo_wannier_cluster == 'y' .and. any(wannier_cluster_size(1:3) /= 1)) then
+        if(dc%id_tot == 0) then
+          write(*,'(1x,a)') "[DC-LCFO-LOCAL-WANNIER] cluster partition is enabled."
+          write(*,'(1x,a)') "  Fragment-local BPW generation is disabled because it would ignore the requested larger Wannier space."
+          write(*,'(1x,a)') "  Use the global Wannier90 export path for now, or generate cluster BPW seeds in a follow-up step."
+        end if
+        stop "DC-LCFO local Wannier cluster BPW generation is not implemented yet."
+      end if
       if(dc%id_frag /= 0) return
 
       ispin_local = 1
@@ -1521,7 +1939,7 @@ contains
       allocate(wcoef_legacy(nbasis,nproj_sp3), keep_index_legacy(nproj_sp3))
       allocate(r_wann_legacy(3,nproj_sp3,nproj_sp3), tmp_legacy(nbasis,nproj_sp3), wcenter_legacy(3,nproj_sp3))
       allocate(h_seed(nbasis,nbasis), v_seed(3,nbasis,nbasis))
-      allocate(h_wann(nproj,nproj), v_wann(3,nproj,nproj), spread_est(nproj), tail_est(nproj))
+      allocate(h_wann(nproj,nproj), v_wann(3,nproj,nproj), aa_wann(3,nproj,nproj), spread_est(nproj), tail_est(nproj))
       bproj = 0d0
       sw = 0d0
       sw_legacy = 0d0
@@ -1531,6 +1949,8 @@ contains
       wcenter_legacy = 0d0
       h_wann = 0d0
       v_wann = 0d0
+      aa_wann = 0d0
+      aa_wann_source = 0
       h_seed = 0d0
       v_seed = 0d0
       spread_est = 0d0
@@ -1652,6 +2072,10 @@ contains
         r_wann(axis,1:nkeep,1:nkeep) = &
           matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
       end do
+
+      if(yn_dc_lcfo_wannier == 'y') then
+        call project_wannier90_aa_to_bpw(nbasis, nkeep, wcoef, aa_wann, aa_wann_source)
+      end if
       wcenter(1:3,1:nkeep) = 0d0
       do iw=1,nkeep
         wcenter(1:3,iw) = r_wann(1:3,iw,iw)
@@ -1729,6 +2153,8 @@ contains
       write(iunit) wcenter(1:3,1:nkeep)
       write(iunit) h_wann(1:nkeep,1:nkeep)
       write(iunit) v_wann(1:3,1:nkeep,1:nkeep)
+      write(iunit) aa_wann(1:3,1:nkeep,1:nkeep)
+      write(iunit) aa_wann_source
       close(iunit)
       write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') "[DC-LCFO-BUFFER-WANNIER] fragment=", &
         dc%i_frag, " candidates=", nproj, " keep=", nkeep, &
@@ -1736,11 +2162,218 @@ contains
 
       deallocate(proj_atom, proj_hybrid, bproj, sw, uw, lambda_w)
       deallocate(wcoef, keep_index, r_basis, r_wann, tmp, wcenter)
-      deallocate(h_seed, v_seed, h_wann, v_wann, spread_est, tail_est)
+      deallocate(h_seed, v_seed, h_wann, v_wann, aa_wann, spread_est, tail_est)
       deallocate(sw_legacy, uw_legacy, lambda_legacy, wcoef_legacy, keep_index_legacy)
       deallocate(r_wann_legacy, tmp_legacy, wcenter_legacy)
       deallocate(phi_box, phi_tmp, n_basis_file)
     end subroutine write_local_wannier_seed
+
+    subroutine project_wannier90_aa_to_bpw(nbasis, nkeep, wcoef, aa_wann, aa_wann_source)
+      use inputoutput, only: au_length_aa
+      implicit none
+      integer, intent(in) :: nbasis, nkeep
+      real(8), intent(in) :: wcoef(nbasis,nkeep)
+      real(8), intent(inout) :: aa_wann(3,nkeep,nkeep)
+      integer, intent(out) :: aa_wann_source
+      integer :: num_bands_file, num_wann_file
+      integer :: axis, n, m
+      logical :: ok_transform, ok_position
+      complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
+      complex(8), allocatable :: coef_local(:,:), wcoef_local(:,:), psi_wann(:,:)
+      complex(8), allocatable :: tmat(:,:), tmp_c(:,:), aa_proj(:,:)
+
+      aa_wann_source = 0
+      call read_wannier90_global_transform_file(num_bands_file, num_wann_file, v_matrix, ok_transform)
+      if(.not. ok_transform) return
+      call read_wannier90_global_rmn_gamma_block(num_wann_file, aa_global, ok_position)
+      if(.not. ok_position) then
+        deallocate(v_matrix)
+        return
+      end if
+
+      if(num_bands_file /= dc%nstate_tot) then
+        write(*,'(1x,a,i0,a,i0,a)') "[DC-LCFO-BUFFER-WANNIER] global Wannier AA_R band space is not full BPW: bands=", &
+          num_bands_file, " dc_nstate_tot=", dc%nstate_tot, "; BPW AA_R block is left zero."
+        write(*,'(1x,a)') &
+          "[DC-LCFO-BUFFER-WANNIER] Regenerate Wannier90 with num_bands=num_wann=the full BPW target subspace."
+        deallocate(v_matrix, aa_global)
+        return
+      end if
+
+      if(num_wann_file /= dc%nstate_tot) then
+        write(*,'(1x,a,i0,a,i0,a)') "[DC-LCFO-BUFFER-WANNIER] global Wannier AA_R dimension is not full BPW: wann=", &
+          num_wann_file, " dc_nstate_tot=", dc%nstate_tot, "; BPW AA_R block is left zero."
+        write(*,'(1x,a)') &
+          "[DC-LCFO-BUFFER-WANNIER] Regenerate Wannier90 with num_bands=num_wann=the full BPW target subspace."
+        deallocate(v_matrix, aa_global)
+        return
+      end if
+
+      allocate(coef_local(nbasis,num_bands_file), wcoef_local(nbasis,nkeep))
+      allocate(psi_wann(nbasis,num_wann_file), tmat(nkeep,num_wann_file))
+      allocate(tmp_c(nkeep,num_wann_file), aa_proj(nkeep,nkeep))
+      coef_local(1:nbasis,1:num_bands_file) = &
+        cmplx(coef_wf(1:nbasis,1:num_bands_file,1), 0d0, kind=8)
+      wcoef_local(1:nbasis,1:nkeep) = cmplx(wcoef(1:nbasis,1:nkeep), 0d0, kind=8)
+
+      psi_wann(1:nbasis,1:num_wann_file) = &
+        matmul(coef_local(1:nbasis,1:num_bands_file), &
+               v_matrix(1:num_bands_file,1:num_wann_file))
+      tmat(1:nkeep,1:num_wann_file) = &
+        matmul(transpose(conjg(wcoef_local(1:nbasis,1:nkeep))), &
+               psi_wann(1:nbasis,1:num_wann_file))
+
+      aa_wann(1:3,1:nkeep,1:nkeep) = 0d0
+      do axis=1,3
+        tmp_c(1:nkeep,1:num_wann_file) = &
+          matmul(tmat(1:nkeep,1:num_wann_file), &
+                 aa_global(axis,1:num_wann_file,1:num_wann_file))
+        aa_proj(1:nkeep,1:nkeep) = &
+          matmul(tmp_c(1:nkeep,1:num_wann_file), &
+                 transpose(conjg(tmat(1:nkeep,1:num_wann_file))))
+        do n=1,nkeep
+          aa_wann(axis,n,n) = real(aa_proj(n,n), kind=8)
+          do m=n+1,nkeep
+            aa_wann(axis,n,m) = 0.5d0 * real(aa_proj(n,m) + conjg(aa_proj(m,n)), kind=8)
+            aa_wann(axis,m,n) = aa_wann(axis,n,m)
+          end do
+        end do
+      end do
+      aa_wann_source = 1
+      write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') &
+        "[DC-LCFO-BUFFER-WANNIER] projected Wannier90 AA_R to BPW: fragment=", dc%i_frag, &
+        " keep=", nkeep, " global_wann=", num_wann_file, " max_abs=", &
+        maxval(abs(aa_wann(1:3,1:nkeep,1:nkeep)))
+
+      deallocate(v_matrix, aa_global, coef_local, wcoef_local, psi_wann, tmat, tmp_c, aa_proj)
+    end subroutine project_wannier90_aa_to_bpw
+
+    subroutine read_wannier90_global_transform_file(num_bands_file, num_wann_file, v_matrix, ok)
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(out) :: num_bands_file, num_wann_file
+      complex(8), allocatable, intent(out) :: v_matrix(:,:)
+      logical, intent(out) :: ok
+      integer :: iunit, io, magic_file, version_file, nfrag_file
+      integer, allocatable :: owner_frag(:)
+      real(8), allocatable :: center_bohr(:,:), spread_aa2(:)
+      character(256) :: filename
+      logical :: exists
+
+      ok = .false.
+      num_bands_file = 0
+      num_wann_file = 0
+      filename = trim(dc%base_directory)//binfile_w90g
+      inquire(file=filename, exist=exists)
+      if(.not. exists) then
+        write(*,'(1x,3a)') "[DC-LCFO-BUFFER-WANNIER] global Wannier basis not found: ", &
+          trim(filename), "; BPW AA_R block is left zero."
+        return
+      end if
+
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+      if(io /= 0) then
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] failed to open global Wannier basis: ", trim(filename)
+        return
+      end if
+      read(iunit,iostat=io) magic_file, version_file
+      if(io /= 0 .or. magic_file /= wannier90_global_magic .or. &
+          version_file < 1 .or. version_file > wannier90_global_version) then
+        close(iunit)
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] invalid global Wannier basis header: ", trim(filename)
+        return
+      end if
+      read(iunit,iostat=io) num_bands_file, num_wann_file, nfrag_file
+      if(io /= 0 .or. num_bands_file <= 0 .or. num_wann_file <= 0) then
+        close(iunit)
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] invalid global Wannier basis dimensions: ", trim(filename)
+        return
+      end if
+      allocate(owner_frag(num_wann_file), center_bohr(3,num_wann_file), spread_aa2(num_wann_file))
+      allocate(v_matrix(num_bands_file,num_wann_file))
+      read(iunit,iostat=io) owner_frag(1:num_wann_file)
+      if(io == 0) read(iunit,iostat=io) center_bohr(1:3,1:num_wann_file)
+      if(io == 0) read(iunit,iostat=io) spread_aa2(1:num_wann_file)
+      if(io == 0) read(iunit,iostat=io) v_matrix(1:num_bands_file,1:num_wann_file)
+      close(iunit)
+      deallocate(owner_frag, center_bohr, spread_aa2)
+      if(io /= 0) then
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] failed to read global Wannier transform: ", trim(filename)
+        if(allocated(v_matrix)) deallocate(v_matrix)
+        num_bands_file = 0
+        num_wann_file = 0
+        return
+      end if
+      ok = .true.
+    end subroutine read_wannier90_global_transform_file
+
+    subroutine read_wannier90_global_rmn_gamma_block(num_wann_expected, aa_global, ok)
+      use filesystem, only: get_filehandle
+      use inputoutput, only: au_length_aa
+      use salmon_global, only: sysname
+      implicit none
+      integer, intent(in) :: num_wann_expected
+      complex(8), allocatable, intent(out) :: aa_global(:,:,:)
+      logical, intent(out) :: ok
+      integer :: iunit, io, num_wann_file, nrpts_file, ir
+      integer :: rvec(3), n, m
+      real(8) :: rx_re, rx_im, ry_re, ry_im, rz_re, rz_im
+      character(256) :: filename
+      character(256) :: header
+      logical :: exists
+
+      ok = .false.
+      filename = trim(dc%base_directory)//trim(sysname)//"_r.dat"
+      inquire(file=filename, exist=exists)
+      if(.not. exists) then
+        write(*,'(1x,3a)') "[DC-LCFO-BUFFER-WANNIER] Wannier90 r-matrix not found: ", &
+          trim(filename), "; BPW AA_R block is left zero."
+        return
+      end if
+
+      iunit = get_filehandle()
+      open(iunit,file=filename,status='old',action='read')
+      read(iunit,'(a)',iostat=io) header
+      if(io /= 0) then
+        close(iunit)
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] failed to read Wannier90 r header: ", trim(filename)
+        return
+      end if
+      read(iunit,*,iostat=io) num_wann_file
+      if(io /= 0) then
+        close(iunit)
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] failed to read Wannier90 r num_wann: ", trim(filename)
+        return
+      end if
+      read(iunit,*,iostat=io) nrpts_file
+      if(io /= 0) then
+        close(iunit)
+        write(*,'(1x,2a)') "[DC-LCFO-BUFFER-WANNIER] failed to read Wannier90 r nrpts: ", trim(filename)
+        return
+      end if
+
+      if(num_wann_file /= num_wann_expected) then
+        close(iunit)
+        write(*,'(1x,a,i0,a,i0,a)') "[DC-LCFO-BUFFER-WANNIER] Wannier90 r-matrix size mismatch: file=", &
+          num_wann_file, " expected=", num_wann_expected, "; BPW AA_R block is left zero."
+        return
+      end if
+
+      allocate(aa_global(3,num_wann_file,num_wann_file))
+      aa_global = (0d0,0d0)
+      do ir=1,nrpts_file*num_wann_file*num_wann_file
+        read(iunit,*,iostat=io) rvec(1:3), n, m, rx_re, rx_im, ry_re, ry_im, rz_re, rz_im
+        if(io /= 0) exit
+        if(any(rvec(1:3) /= 0)) cycle
+        if(n < 1 .or. n > num_wann_file .or. m < 1 .or. m > num_wann_file) cycle
+        aa_global(1,n,m) = cmplx(rx_re, rx_im, kind=8) / au_length_aa
+        aa_global(2,n,m) = cmplx(ry_re, ry_im, kind=8) / au_length_aa
+        aa_global(3,n,m) = cmplx(rz_re, rz_im, kind=8) / au_length_aa
+      end do
+      close(iunit)
+      ok = .true.
+    end subroutine read_wannier90_global_rmn_gamma_block
 
     integer function count_local_c_sp3_projections(nxyz_domain) result(nproj)
       use salmon_global, only: izatom
@@ -1807,20 +2440,23 @@ contains
     subroutine write_wannier_seed_files()
       use salmon_global, only: izatom, sysname, &
         wannier_projection, wannier_num_wann, wannier_num_iter, &
-        wannier_projection_width, wannier_dis_froz_max, wannier_dis_win_max
+        wannier_projection_width, wannier_dis_froz_max, wannier_dis_win_max, &
+        yn_dc_lcfo_wannier_cluster, yn_dc_lcfo_local_wannier
       use filesystem, only: get_filehandle
-      use inputoutput, only: uenergy_from_au
       implicit none
-      integer :: iunit, iband, ikpt, ia, nband_wann
+      real(8), parameter :: hartree_to_ev = 27.211386245988d0
+      integer :: iunit, iband, ikpt, ia, nband_wann, nproj_csp3
       character(256) :: winfile, eigfile
       real(8) :: a1(3), a2(3), a3(3)
 
       if(nspin /= 1) stop "DC-LCFO Wannier export: spin-polarized Wannier seed files are not implemented."
 
       nband_wann = determine_wannier_num_bands()
+      nproj_csp3 = count_c_sp3_projections()
       winfile = trim(dc%base_directory)//trim(sysname)//".win"
       eigfile = trim(dc%base_directory)//trim(sysname)//".eig"
       call get_lattice_vectors(a1, a2, a3)
+      if(yn_dc_lcfo_wannier_cluster == 'y') call log_wannier_cluster_partition()
 
       if(dc%id_tot == 0) then
         write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-WANNIER] export bands=", nband_wann, &
@@ -1832,10 +2468,12 @@ contains
         write(iunit,'(a)') "num_iter = "//trim(adjustl(int_to_string(wannier_num_iter)))
         write(iunit,'(a)') "mp_grid = 1 1 1"
         write(iunit,'(a)') "gamma_only = false"
+        write(iunit,'(a)') "write_hr = true"
+        write(iunit,'(a)') "write_rmn = true"
         if(wannier_dis_froz_max > 0d0) &
-          write(iunit,'(a,1x,es23.15)') "dis_froz_max =", wannier_dis_froz_max * uenergy_from_au
+          write(iunit,'(a,1x,es23.15)') "dis_froz_max =", wannier_dis_froz_max * hartree_to_ev
         if(wannier_dis_win_max > 0d0) &
-          write(iunit,'(a,1x,es23.15)') "dis_win_max =", wannier_dis_win_max * uenergy_from_au
+          write(iunit,'(a,1x,es23.15)') "dis_win_max =", wannier_dis_win_max * hartree_to_ev
         write(iunit,'(a)') ""
         write(iunit,'(a)') "begin unit_cell_cart"
         write(iunit,'(a)') "bohr"
@@ -1858,6 +2496,8 @@ contains
         if(len_trim(wannier_projection) > 0) then
           write(iunit,'(a)') ""
           write(iunit,'(a)') "begin projections"
+          if(is_c_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
+            write(iunit,'(a)') "random"
           write(iunit,'(a)') trim(wannier_projection)
           write(iunit,'(a)') "end projections"
         end if
@@ -1867,7 +2507,7 @@ contains
         open(iunit,file=eigfile,status='replace')
         do ikpt=1,1
           do iband=1,nband_wann
-            write(iunit,'(2i8,1x,es23.15)') iband, ikpt, esp_tot(iband,1) * uenergy_from_au
+            write(iunit,'(2i8,1x,es23.15)') iband, ikpt, esp_tot(iband,1) * hartree_to_ev
           end do
         end do
         close(iunit)
@@ -1878,8 +2518,744 @@ contains
 
       if(dc%id_tot == 0) &
         write(*,'(1x,a,2a)') "[DC-LCFO-WANNIER] wrote seed files: ", trim(winfile), " and .eig/.amn/.mmn"
+      if(is_wannier90_export_only_requested()) then
+        if(dc%id_tot == 0) then
+          write(*,'(1x,a)') "[DC-LCFO-WANNIER] export-only mode: external Wannier90 and checkpoint import are skipped."
+          write(*,'(1x,a)') "  Run Wannier90 separately in the seed directory, then rerun/import with SALMON_WANNIER90_COMMAND=reuse."
+        end if
+        return
+      end if
+
       call run_wannier90_seed_files()
+      call write_wannier90_global_basis_file(nband_wann)
+      call write_wannier90_flux_eigen_seed_file(nband_wann)
     end subroutine write_wannier_seed_files
+
+    subroutine log_wannier_cluster_partition()
+      use salmon_global, only: num_fragment, num_wannier_cluster, wannier_cluster_size
+      implicit none
+      integer :: num_cluster(3), icx, icy, icz, cid, frag_lo(3), frag_hi(3)
+      integer :: ncluster_tot
+
+      if(dc%id_tot /= 0) return
+      num_cluster(1:3) = num_fragment(1:3) / wannier_cluster_size(1:3)
+      ncluster_tot = num_cluster(1) * num_cluster(2) * num_cluster(3)
+      write(*,'(1x,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,i0)') &
+        "[DC-LCFO-WANNIER-CLUSTER] fragment_grid=", num_fragment(1:3), &
+        " input_num_wannier_cluster=", num_wannier_cluster(1:3), &
+        " cluster_size=", wannier_cluster_size(1:3), " ncluster=", ncluster_tot
+      do icx=1,num_cluster(1)
+      do icy=1,num_cluster(2)
+      do icz=1,num_cluster(3)
+        cid = ((icx - 1) * num_cluster(2) + (icy - 1)) * num_cluster(3) + icz
+        if(ncluster_tot > 64 .and. cid > 8) cycle
+        frag_lo(1) = (icx - 1) * wannier_cluster_size(1) + 1
+        frag_hi(1) = icx * wannier_cluster_size(1)
+        frag_lo(2) = (icy - 1) * wannier_cluster_size(2) + 1
+        frag_hi(2) = icy * wannier_cluster_size(2)
+        frag_lo(3) = (icz - 1) * wannier_cluster_size(3) + 1
+        frag_hi(3) = icz * wannier_cluster_size(3)
+        write(*,'(1x,a,i0,a,3(i0,a,i0,1x))') &
+          "[DC-LCFO-WANNIER-CLUSTER] cluster=", cid, " frag_ranges=", &
+          frag_lo(1), ":", frag_hi(1), frag_lo(2), ":", frag_hi(2), frag_lo(3), ":", frag_hi(3)
+      end do
+      end do
+      end do
+      if(ncluster_tot > 64) write(*,'(1x,a)') &
+        "[DC-LCFO-WANNIER-CLUSTER] cluster list truncated after the first 8 clusters."
+    end subroutine log_wannier_cluster_partition
+
+    subroutine write_wannier90_global_basis_file(nband_wann)
+      use communication, only: comm_sync_all
+      use filesystem, only: get_filehandle
+      use inputoutput, only: au_length_aa
+      use salmon_global, only: sysname, wannier_num_wann
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: iunit, iw
+      integer :: num_bands_chk, num_wann_chk
+      integer :: position_available
+      integer, allocatable :: owner_frag(:)
+      real(8), allocatable :: center_aa(:,:), center_bohr(:,:), spread_aa2(:)
+      complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
+      logical :: ok_position
+      character(256) :: filename
+
+      if(dc%id_tot == 0) then
+        call read_wannier90_checkpoint_transform(num_bands_chk, num_wann_chk, v_matrix, center_aa, spread_aa2)
+        if(num_bands_chk /= nband_wann .or. num_wann_chk /= wannier_num_wann) then
+          write(*,'(1x,a,4(a,i0))') "[DC-LCFO-W90-GLOBAL] checkpoint dimension mismatch:", &
+            " chk_bands=", num_bands_chk, " expected_bands=", nband_wann, &
+            " chk_wann=", num_wann_chk, " expected_wann=", wannier_num_wann
+          stop "DC-LCFO Wannier export: checkpoint dimension mismatch"
+        end if
+        allocate(owner_frag(num_wann_chk), center_bohr(3,num_wann_chk))
+        center_bohr(1:3,1:num_wann_chk) = center_aa(1:3,1:num_wann_chk) / au_length_aa
+        do iw=1,num_wann_chk
+          owner_frag(iw) = find_owner_fragment_from_center(center_bohr(1:3,iw))
+        end do
+        call rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann_chk)
+        call read_wannier90_global_rmn_gamma_block(num_wann_chk, aa_global, ok_position)
+        if(.not. ok_position) then
+          allocate(aa_global(3,num_wann_chk,num_wann_chk))
+          aa_global = (0d0,0d0)
+        end if
+        position_available = merge(1, 0, ok_position)
+
+        filename = trim(dc%base_directory)//binfile_w90g
+        iunit = get_filehandle()
+        open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+        write(iunit) wannier90_global_magic, wannier90_global_version
+        write(iunit) num_bands_chk, num_wann_chk, dc%n_frag
+        write(iunit) owner_frag(1:num_wann_chk)
+        write(iunit) center_bohr(1:3,1:num_wann_chk)
+        write(iunit) spread_aa2(1:num_wann_chk)
+        write(iunit) v_matrix(1:num_bands_chk,1:num_wann_chk)
+        write(iunit) position_available
+        write(iunit) aa_global(1:3,1:num_wann_chk,1:num_wann_chk)
+        close(iunit)
+        write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-GLOBAL] wrote ", num_wann_chk, &
+          " Wannier functions to ", trim(filename)
+        if(ok_position) then
+          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] stored Wannier90 AA_R position matrix."
+        else
+          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] AA_R position matrix unavailable; stored zero matrix."
+        end if
+        deallocate(owner_frag, center_bohr, center_aa, spread_aa2, v_matrix, aa_global)
+      end if
+      call comm_sync_all(dc%icomm_tot)
+    end subroutine write_wannier90_global_basis_file
+
+    subroutine write_wannier90_flux_eigen_seed_file(nband_wann)
+      use communication, only: comm_sync_all
+      use filesystem, only: get_filehandle
+      use salmon_global, only: wannier_num_wann
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: iunit, iw, istate
+      integer :: num_bands_chk, num_wann_chk, nstate_seed
+      real(8), allocatable :: center_aa(:,:), spread_aa2(:), eval_seed(:,:)
+      complex(8), allocatable :: v_matrix(:,:), seed_wannier_to_eigen(:,:)
+      character(256) :: filename
+
+      if(dc%id_tot == 0) then
+        call read_wannier90_checkpoint_transform(num_bands_chk, num_wann_chk, v_matrix, center_aa, spread_aa2)
+        if(num_bands_chk /= nband_wann .or. num_wann_chk /= wannier_num_wann) then
+          write(*,'(1x,a,4(a,i0))') "[DC-LCFO-W90-SEED] checkpoint dimension mismatch:", &
+            " chk_bands=", num_bands_chk, " expected_bands=", nband_wann, &
+            " chk_wann=", num_wann_chk, " expected_wann=", wannier_num_wann
+          stop "DC-LCFO Wannier flux seed: checkpoint dimension mismatch"
+        end if
+        if(num_bands_chk /= num_wann_chk) then
+          write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-SEED] rectangular/disentangled transform is not supported yet:", &
+            " bands=", num_bands_chk, " wann=", num_wann_chk
+          write(*,'(1x,a)') "[DC-LCFO-W90-SEED] Use a full square Wannier subspace or add explicit H_W diagonalization."
+          stop "DC-LCFO Wannier flux seed: non-square transform"
+        end if
+        nstate_seed = min(dc%nstate_tot, num_wann_chk)
+        allocate(seed_wannier_to_eigen(num_wann_chk,nstate_seed))
+        allocate(eval_seed(nstate_seed,nspin))
+        do istate=1,nstate_seed
+          do iw=1,num_wann_chk
+            seed_wannier_to_eigen(iw,istate) = conjg(v_matrix(istate,iw))
+          end do
+        end do
+        eval_seed(1:nstate_seed,1:nspin) = esp_tot(1:nstate_seed,1:nspin)
+
+        filename = trim(dc%base_directory)//binfile_w90seed
+        iunit = get_filehandle()
+        open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+        write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
+        write(iunit) num_bands_chk, num_wann_chk, nstate_seed, nspin, dc%n_frag
+        write(iunit) eval_seed(1:nstate_seed,1:nspin)
+        write(iunit) seed_wannier_to_eigen(1:num_wann_chk,1:nstate_seed)
+        close(iunit)
+        write(*,'(1x,a,i0,a,i0,a,a)') "[DC-LCFO-W90-SEED] wrote Flux-LCFO eigen seed in Wannier basis: states=", &
+          nstate_seed, " wann=", num_wann_chk, " file=", trim(filename)
+        deallocate(seed_wannier_to_eigen, eval_seed, center_aa, spread_aa2, v_matrix)
+      end if
+      call comm_sync_all(dc%icomm_tot)
+    end subroutine write_wannier90_flux_eigen_seed_file
+
+    subroutine write_wannier90_global_bpw_seed()
+      use eigen_subdiag_sub, only: eigen_dsyev
+      use communication, only: comm_sync_all
+      use filesystem, only: get_filehandle
+      use salmon_global, only: base_directory, lambda_cut
+      implicit none
+      integer :: iunit, nbasis, num_bands_file, num_wann_file, nfrag_file
+      integer :: iw, jw, iband, axis, nkeep, io, jo, i_full, j_full, nsel
+      integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+      integer :: magic_file, version_file, io_stat
+      integer, allocatable :: owner_frag(:), proj_atom(:), proj_hybrid(:), keep_index(:), selected_wann(:)
+      real(8), allocatable :: center_bohr(:,:), spread_aa2(:), lambda_w(:), spread_est(:), tail_est(:)
+      real(8), allocatable :: wcoef(:,:), r_wann(:,:,:), wcenter(:,:), h_wann(:,:), v_wann(:,:,:), aa_wann(:,:,:)
+      real(8), allocatable :: p_frag(:,:), p_eval(:), p_evec(:,:), tmp_r(:,:), tmat(:,:)
+      complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
+      complex(8), allocatable :: psi_wann_c(:,:)
+      real(8) :: h_imag_max, w_imag_max
+      logical :: ok_position
+      character(256) :: filename
+
+      if(dc%id_frag /= 0) return
+      if(nspin /= 1) stop "DC-LCFO global Wannier BPW seed: spin-polarized mode is not implemented."
+
+      call read_wannier90_global_basis_file_full(num_bands_file, num_wann_file, nfrag_file, &
+        owner_frag, center_bohr, spread_aa2, v_matrix)
+      if(num_bands_file <= 0 .or. num_wann_file <= 0) return
+      if(num_bands_file /= dc%nstate_tot) then
+        if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0)') &
+          "[DC-LCFO-W90-BPW] skip: global bands=", num_bands_file, " dc_nstate_tot=", dc%nstate_tot
+        deallocate(owner_frag, center_bohr, spread_aa2, v_matrix)
+        return
+      end if
+      if(nfrag_file /= dc%n_frag) then
+        if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0)') &
+          "[DC-LCFO-W90-BPW] skip: global nfrag=", nfrag_file, " dc_n_frag=", dc%n_frag
+        deallocate(owner_frag, center_bohr, spread_aa2, v_matrix)
+        return
+      end if
+
+      nkeep = num_wann_file / max(1, dc%n_frag)
+      if(mod(num_wann_file, max(1, dc%n_frag)) /= 0) then
+        if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0)') &
+          "[FATAL] global Wannier count is not divisible by fragments: wann=", &
+          num_wann_file, " nfrag=", dc%n_frag
+        stop "DC-LCFO global Wannier BPW seed: nonuniform target count"
+      end if
+
+      call read_wannier90_global_rmn_gamma_block(num_wann_file, aa_global, ok_position)
+      if(.not. ok_position) allocate(aa_global(3,num_wann_file,num_wann_file))
+      if(.not. ok_position) aa_global = (0d0,0d0)
+
+      nbasis = n_basis(dc%i_frag,1)
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
+      nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
+
+      allocate(proj_atom(nkeep), proj_hybrid(nkeep), keep_index(nkeep), selected_wann(nkeep))
+      allocate(lambda_w(nkeep), spread_est(nkeep), tail_est(nkeep))
+      allocate(wcoef(nbasis,nkeep), psi_wann_c(nbasis,num_wann_file))
+      allocate(r_wann(3,nkeep,nkeep), wcenter(3,nkeep), h_wann(nkeep,nkeep), &
+        v_wann(3,nkeep,nkeep), aa_wann(3,nkeep,nkeep))
+      allocate(p_frag(nbasis,nbasis), p_eval(nbasis), p_evec(nbasis,nbasis), &
+        tmp_r(nkeep,nkeep), tmat(nkeep,num_wann_file))
+
+      proj_atom = 0
+      proj_hybrid = 0
+      keep_index = 0
+
+      psi_wann_c = (0d0,0d0)
+      do iw=1,num_wann_file
+        do iband=1,num_bands_file
+          psi_wann_c(1:nbasis,iw) = psi_wann_c(1:nbasis,iw) + &
+            cmplx(coef_wf(1:nbasis,iband,1), 0d0, kind=8) * &
+            v_matrix(iband,iw)
+        end do
+      end do
+      w_imag_max = maxval(abs(aimag(psi_wann_c(1:nbasis,1:num_wann_file))))
+
+      nsel = 0
+      do iw=1,num_wann_file
+        if(owner_frag(iw) /= dc%i_frag) cycle
+        nsel = nsel + 1
+        if(nsel <= nkeep) selected_wann(nsel) = iw
+      end do
+      if(nsel /= nkeep) then
+        if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,i0)') &
+          "[FATAL] global Wannier owner count mismatch: fragment=", dc%i_frag, &
+          " owner_count=", nsel, " expected=", nkeep
+        stop "DC-LCFO global Wannier BPW seed: nonuniform owner count"
+      end if
+
+      tmp_r = 0d0
+      do iw=1,nkeep
+        do jw=1,nkeep
+          do io=1,nbasis
+            tmp_r(iw,jw) = tmp_r(iw,jw) + real(psi_wann_c(io,selected_wann(iw)),kind=8) * &
+              real(psi_wann_c(io,selected_wann(jw)),kind=8)
+          end do
+        end do
+      end do
+      call eigen_dsyev(tmp_r, p_eval(1:nkeep), tmp_r)
+      wcoef = 0d0
+      do iw=1,nkeep
+        if(p_eval(iw) <= lambda_cut) then
+          if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,1pe12.4)') &
+            "[FATAL] owned Wannier projection is singular: fragment=", dc%i_frag, &
+            " mode=", iw, " lambda=", p_eval(iw)
+          stop "DC-LCFO global Wannier BPW seed: singular owned Wannier projection"
+        end if
+        do jw=1,nkeep
+          do io=1,nbasis
+            wcoef(io,iw) = wcoef(io,iw) + real(psi_wann_c(io,selected_wann(jw)),kind=8) * &
+              tmp_r(jw,iw) / sqrt(p_eval(iw))
+          end do
+        end do
+        lambda_w(iw) = p_eval(iw)
+        keep_index(iw) = selected_wann(iw)
+        spread_est(iw) = spread_aa2(selected_wann(iw))
+      end do
+      tail_est(1:nkeep) = 0d0
+      tmat(1:nkeep,1:num_wann_file) = matmul(transpose(wcoef(1:nbasis,1:nkeep)), &
+        real(psi_wann_c(1:nbasis,1:num_wann_file), kind=8))
+
+      h_imag_max = 0d0
+      h_wann = 0d0
+      do iw=1,nkeep
+        do jw=1,nkeep
+          do io=1,nbasis
+            do jo=1,nbasis
+              h_wann(iw,jw) = h_wann(iw,jw) + &
+                wcoef(io,iw) * mat_H_local(io,jo,1) * wcoef(jo,jw)
+            end do
+          end do
+        end do
+      end do
+
+      v_wann = 0d0
+      do axis=1,3
+        do iw=1,nkeep
+          do jw=1,nkeep
+            do io=1,nbasis
+              do jo=1,nbasis
+                v_wann(axis,iw,jw) = v_wann(axis,iw,jw) + &
+                  wcoef(io,iw) * mat_V_local(axis,io,jo,1) * wcoef(jo,jw)
+              end do
+            end do
+          end do
+        end do
+      end do
+
+      r_wann = 0d0
+      aa_wann = 0d0
+      do axis=1,3
+        do iw=1,nkeep
+          wcenter(axis,iw) = 0d0
+          do j_full=1,num_wann_file
+            wcenter(axis,iw) = wcenter(axis,iw) + tmat(iw,j_full) * tmat(iw,j_full) * &
+              center_bohr(axis,j_full)
+          end do
+          r_wann(axis,iw,iw) = wcenter(axis,iw)
+        end do
+      end do
+      do axis=1,3
+        do iw=1,nkeep
+          do jw=1,nkeep
+            aa_wann(axis,iw,jw) = 0d0
+            do i_full=1,num_wann_file
+              do j_full=1,num_wann_file
+                aa_wann(axis,iw,jw) = aa_wann(axis,iw,jw) + tmat(iw,i_full) * &
+                  real(aa_global(axis,i_full,j_full), kind=8) * tmat(jw,j_full)
+              end do
+            end do
+          end do
+        end do
+      end do
+
+      filename = trim(base_directory)//binfile_bpw
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace',iostat=io_stat)
+      if(io_stat /= 0) stop "DC-LCFO global Wannier BPW seed: failed to open output file"
+      write(iunit) buffer_periodic_wannier_magic, buffer_periodic_wannier_version
+      write(iunit) dc%i_frag, nxyz_domain(1:3), nxyz_buffer_seed(1:3), nxyz_box(1:3)
+      write(iunit) nspin, nbasis, nkeep, nkeep
+      write(iunit) proj_atom(1:nkeep), proj_hybrid(1:nkeep)
+      write(iunit) lambda_w(1:nkeep), keep_index(1:nkeep)
+      write(iunit) spread_est(1:nkeep), tail_est(1:nkeep)
+      write(iunit) wcoef(1:nbasis,1:nkeep)
+      write(iunit) r_wann(1:3,1:nkeep,1:nkeep)
+      write(iunit) wcenter(1:3,1:nkeep)
+      write(iunit) h_wann(1:nkeep,1:nkeep)
+      write(iunit) v_wann(1:3,1:nkeep,1:nkeep)
+      write(iunit) aa_wann(1:3,1:nkeep,1:nkeep)
+      write(iunit) merge(1, 0, ok_position)
+      close(iunit)
+
+      call write_wannier90_global_trace_file(nbasis, nkeep, wcoef, &
+        nxyz_domain, nxyz_buffer_seed, nxyz_box)
+
+      write(*,'(1x,a,i0,a,i0,a,1pe12.4,a,1pe12.4,a,1pe12.4)') &
+        "[DC-LCFO-W90-BPW] fragment=", dc%i_frag, " keep=", nkeep, &
+        " min_proj_eval=", minval(lambda_w(1:nkeep)), &
+        " max_coef_imag=", w_imag_max, " max_h_imag_term=", h_imag_max
+
+      deallocate(owner_frag, center_bohr, spread_aa2, v_matrix, aa_global)
+      deallocate(proj_atom, proj_hybrid, keep_index, selected_wann, lambda_w, spread_est, tail_est)
+      deallocate(wcoef, psi_wann_c, r_wann, wcenter, h_wann, v_wann, aa_wann)
+      deallocate(p_frag, p_eval, p_evec, tmp_r, tmat)
+      call comm_sync_all(dc%icomm_tot)
+    end subroutine write_wannier90_global_bpw_seed
+
+    subroutine write_wannier90_global_trace_file(nbasis, nkeep, wcoef, &
+        nxyz_domain, nxyz_buffer_seed, nxyz_box)
+      use filesystem, only: get_filehandle
+      use salmon_global, only: base_directory
+      implicit none
+      integer, intent(in) :: nbasis, nkeep
+      integer, intent(in) :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+      real(8), intent(in) :: wcoef(nbasis,nkeep)
+      integer :: iunit, ibasis_read, ispin_read, iw
+      integer :: magic_file, version_file, nspin_file, nstate_frag_file
+      integer :: nxyz_domain_file(3), nxyz_buffer_file(3)
+      integer :: axis, side, face, npts, face_pt
+      integer :: ix_face, iy_face, iz_face, ibx, iby, ibz, dist
+      integer, allocatable :: n_basis_file(:)
+      real(8), allocatable :: phi_tmp(:,:,:), phi_wann(:,:,:,:)
+      real(8), allocatable :: face_u(:,:), face_dn(:,:)
+      real(8) :: grad_axis, area_weight, alpha
+      character(256) :: filename
+      real(8), parameter :: surface_penalty_factor = 10.0d0
+
+      if(dc%id_frag /= 0) return
+      if(nspin /= 1) return
+
+      allocate(phi_tmp(nxyz_box(1),nxyz_box(2),nxyz_box(3)))
+      allocate(phi_wann(nxyz_box(1),nxyz_box(2),nxyz_box(3),nkeep))
+      allocate(n_basis_file(nspin))
+      phi_wann = 0d0
+
+      filename = trim(base_directory)//binfile_bfb
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='old')
+      read(iunit) magic_file, version_file
+      if(magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) &
+        stop "DC-LCFO global Wannier trace export: invalid buffered basis header."
+      read(iunit) nxyz_domain_file(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
+      if(any(nxyz_domain_file(1:3) /= nxyz_domain(1:3)) .or. &
+         any(nxyz_buffer_file(1:3) /= nxyz_buffer_seed(1:3)) .or. &
+         nspin_file /= nspin .or. nstate_frag_file /= dc%nstate_frag) &
+        stop "DC-LCFO global Wannier trace export: buffered basis metadata mismatch."
+      read(iunit) n_basis_file(1:nspin)
+      if(n_basis_file(1) < nbasis) stop "DC-LCFO global Wannier trace export: basis count mismatch."
+      do ispin_read=1,nspin_file
+        do ibasis_read=1,nstate_frag_file
+          read(iunit) phi_tmp(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+          if(ispin_read /= 1 .or. ibasis_read > nbasis) cycle
+          do iw=1,nkeep
+            if(abs(wcoef(ibasis_read,iw)) <= 0d0) cycle
+            phi_wann(:,:,:,iw) = phi_wann(:,:,:,iw) + &
+              wcoef(ibasis_read,iw) * phi_tmp(:,:,:)
+          end do
+        end do
+      end do
+      close(iunit)
+
+      filename = trim(base_directory)//binfile_bpwt
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+      write(iunit) buffer_periodic_wannier_trace_magic, buffer_periodic_wannier_trace_version
+      write(iunit) dc%i_frag, nxyz_domain(1:3), nxyz_buffer_seed(1:3), nxyz_box(1:3)
+      write(iunit) system%hgs(1:3), hvol, nkeep
+      do face=1,6
+        axis = (face + 1) / 2
+        if(mod(face,2) == 1) then
+          side = -1
+        else
+          side = 1
+        end if
+        npts = face_point_count(axis)
+        area_weight = hvol / system%hgs(axis)
+        alpha = surface_penalty_factor / system%hgs(axis)
+        allocate(face_u(npts,nkeep), face_dn(npts,nkeep))
+        face_u = 0d0
+        face_dn = 0d0
+        face_pt = 0
+        do iz_face=1,nxyz_domain(3)
+        do iy_face=1,nxyz_domain(2)
+        do ix_face=1,nxyz_domain(1)
+          if(face_axis_index([ix_face,iy_face,iz_face], axis) /= face_coord(axis, side)) cycle
+          face_pt = face_pt + 1
+          ibx = ix_face + nxyz_buffer_seed(1)
+          iby = iy_face + nxyz_buffer_seed(2)
+          ibz = iz_face + nxyz_buffer_seed(3)
+          do iw=1,nkeep
+            face_u(face_pt,iw) = phi_wann(ibx,iby,ibz,iw)
+            grad_axis = 0d0
+            do dist=1,size(stencil%coef_nab,1)
+              select case(axis)
+              case(1)
+                grad_axis = grad_axis + stencil%coef_nab(dist,axis) * &
+                  (phi_wann(ibx+dist,iby,ibz,iw) - phi_wann(ibx-dist,iby,ibz,iw))
+              case(2)
+                grad_axis = grad_axis + stencil%coef_nab(dist,axis) * &
+                  (phi_wann(ibx,iby+dist,ibz,iw) - phi_wann(ibx,iby-dist,ibz,iw))
+              case(3)
+                grad_axis = grad_axis + stencil%coef_nab(dist,axis) * &
+                  (phi_wann(ibx,iby,ibz+dist,iw) - phi_wann(ibx,iby,ibz-dist,iw))
+              end select
+            end do
+            face_dn(face_pt,iw) = real(side,8) * grad_axis
+          end do
+        end do
+        end do
+        end do
+        write(iunit) axis, side, npts, area_weight, alpha
+        write(iunit) face_u(1:npts,1:nkeep)
+        write(iunit) face_dn(1:npts,1:nkeep)
+        deallocate(face_u, face_dn)
+      end do
+      close(iunit)
+      write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-BPW-TRACE] fragment=", dc%i_frag, &
+        " wrote ", trim(filename)
+
+      deallocate(phi_tmp, phi_wann, n_basis_file)
+    end subroutine write_wannier90_global_trace_file
+
+    subroutine read_wannier90_global_basis_file_full(num_bands_file, num_wann_file, nfrag_file, &
+        owner_frag, center_bohr, spread_aa2, v_matrix)
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(out) :: num_bands_file, num_wann_file, nfrag_file
+      integer, allocatable, intent(out) :: owner_frag(:)
+      real(8), allocatable, intent(out) :: center_bohr(:,:), spread_aa2(:)
+      complex(8), allocatable, intent(out) :: v_matrix(:,:)
+      integer :: iunit_local, io_local, magic_file, version_file
+      character(256) :: filename_local
+      logical :: exists_local
+
+      num_bands_file = 0
+      num_wann_file = 0
+      nfrag_file = 0
+      filename_local = trim(dc%base_directory)//binfile_w90g
+      inquire(file=filename_local, exist=exists_local)
+      if(.not. exists_local) then
+        write(*,'(1x,2a)') "[DC-LCFO-W90-BPW] global Wannier basis not found: ", trim(filename_local)
+        return
+      end if
+      iunit_local = get_filehandle()
+      open(iunit_local,file=filename_local,form='unformatted',access='stream',status='old',iostat=io_local)
+      if(io_local /= 0) return
+      read(iunit_local,iostat=io_local) magic_file, version_file
+      if(io_local /= 0 .or. magic_file /= wannier90_global_magic .or. &
+          version_file < 1 .or. version_file > wannier90_global_version) then
+        close(iunit_local)
+        return
+      end if
+      read(iunit_local,iostat=io_local) num_bands_file, num_wann_file, nfrag_file
+      if(io_local /= 0 .or. num_bands_file <= 0 .or. num_wann_file <= 0) then
+        close(iunit_local)
+        num_bands_file = 0
+        num_wann_file = 0
+        return
+      end if
+      allocate(owner_frag(num_wann_file), center_bohr(3,num_wann_file), spread_aa2(num_wann_file))
+      allocate(v_matrix(num_bands_file,num_wann_file))
+      read(iunit_local,iostat=io_local) owner_frag(1:num_wann_file)
+      if(io_local == 0) read(iunit_local,iostat=io_local) center_bohr(1:3,1:num_wann_file)
+      if(io_local == 0) read(iunit_local,iostat=io_local) spread_aa2(1:num_wann_file)
+      if(io_local == 0) read(iunit_local,iostat=io_local) v_matrix(1:num_bands_file,1:num_wann_file)
+      close(iunit_local)
+      if(io_local /= 0) then
+        if(allocated(owner_frag)) deallocate(owner_frag)
+        if(allocated(center_bohr)) deallocate(center_bohr)
+        if(allocated(spread_aa2)) deallocate(spread_aa2)
+        if(allocated(v_matrix)) deallocate(v_matrix)
+        num_bands_file = 0
+        num_wann_file = 0
+        nfrag_file = 0
+      end if
+    end subroutine read_wannier90_global_basis_file_full
+
+    subroutine read_wannier90_checkpoint_transform(num_bands_chk, num_wann_chk, v_matrix, center_aa, spread_aa2)
+      use filesystem, only: get_filehandle
+      use salmon_global, only: sysname
+      implicit none
+      integer, intent(out) :: num_bands_chk, num_wann_chk
+      complex(8), allocatable, intent(out) :: v_matrix(:,:)
+      real(8), allocatable, intent(out) :: center_aa(:,:), spread_aa2(:)
+      integer :: iunit, io, i, j, k, nkp
+      integer :: num_exclude_bands_chk, num_kpts_chk, nntot_chk
+      integer :: mp_grid_chk(3)
+      integer, allocatable :: exclude_bands_chk(:), ndimwin(:)
+      real(8) :: real_lattice_chk(3,3), recip_lattice_chk(3,3), omega_invariant_chk
+      real(8), allocatable :: kpt_latt_chk(:,:)
+      logical :: have_disentangled_chk
+      logical, allocatable :: lwindow(:,:)
+      complex(8), allocatable :: u_matrix(:,:,:), u_matrix_opt(:,:,:), m_matrix(:,:,:,:)
+      character(256) :: filename
+      character(33) :: header_chk
+      character(20) :: checkpoint_chk
+
+      filename = trim(dc%base_directory)//trim(sysname)//".chk"
+      iunit = get_filehandle()
+      open(iunit,file=filename,status='old',form='unformatted',iostat=io)
+      if(io /= 0) then
+        write(*,'(1x,2a)') "[DC-LCFO-W90-GLOBAL] failed to open checkpoint: ", trim(filename)
+        stop "DC-LCFO Wannier export: missing Wannier90 checkpoint"
+      end if
+      read(iunit) header_chk
+      read(iunit) num_bands_chk
+      read(iunit) num_exclude_bands_chk
+      allocate(exclude_bands_chk(max(0,num_exclude_bands_chk)))
+      if(num_exclude_bands_chk > 0) then
+        read(iunit) (exclude_bands_chk(i), i=1,num_exclude_bands_chk)
+      else
+        read(iunit)
+      end if
+      read(iunit) ((real_lattice_chk(i,j), i=1,3), j=1,3)
+      read(iunit) ((recip_lattice_chk(i,j), i=1,3), j=1,3)
+      read(iunit) num_kpts_chk
+      read(iunit) (mp_grid_chk(i), i=1,3)
+      allocate(kpt_latt_chk(3,num_kpts_chk))
+      read(iunit) ((kpt_latt_chk(i,nkp), i=1,3), nkp=1,num_kpts_chk)
+      read(iunit) nntot_chk
+      read(iunit) num_wann_chk
+      read(iunit) checkpoint_chk
+      read(iunit) have_disentangled_chk
+
+      if(num_kpts_chk /= 1) stop "DC-LCFO Wannier export: only Gamma checkpoint is supported."
+      if(have_disentangled_chk) then
+        read(iunit) omega_invariant_chk
+        allocate(lwindow(num_bands_chk,num_kpts_chk), ndimwin(num_kpts_chk))
+        read(iunit) ((lwindow(i,nkp), i=1,num_bands_chk), nkp=1,num_kpts_chk)
+        read(iunit) (ndimwin(nkp), nkp=1,num_kpts_chk)
+        allocate(u_matrix_opt(num_bands_chk,num_wann_chk,num_kpts_chk))
+        read(iunit) (((u_matrix_opt(i,j,nkp), i=1,num_bands_chk), j=1,num_wann_chk), nkp=1,num_kpts_chk)
+      end if
+
+      allocate(u_matrix(num_wann_chk,num_wann_chk,num_kpts_chk))
+      read(iunit) (((u_matrix(i,j,k), i=1,num_wann_chk), j=1,num_wann_chk), k=1,num_kpts_chk)
+      allocate(m_matrix(num_wann_chk,num_wann_chk,nntot_chk,num_kpts_chk))
+      read(iunit) ((((m_matrix(i,j,k,nkp), i=1,num_wann_chk), j=1,num_wann_chk), k=1,nntot_chk), nkp=1,num_kpts_chk)
+      allocate(center_aa(3,num_wann_chk), spread_aa2(num_wann_chk))
+      read(iunit) ((center_aa(i,j), i=1,3), j=1,num_wann_chk)
+      read(iunit) (spread_aa2(i), i=1,num_wann_chk)
+      close(iunit)
+
+      allocate(v_matrix(num_bands_chk,num_wann_chk))
+      v_matrix = (0d0,0d0)
+      if(have_disentangled_chk) then
+        v_matrix(1:num_bands_chk,1:num_wann_chk) = matmul(u_matrix_opt(:,:,1), u_matrix(:,:,1))
+      else
+        if(num_bands_chk < num_wann_chk) &
+          stop "DC-LCFO Wannier export: invalid checkpoint without disentanglement."
+        v_matrix(1:num_wann_chk,1:num_wann_chk) = u_matrix(:,:,1)
+      end if
+      write(*,'(1x,a,i0,a,i0,a,l1)') "[DC-LCFO-W90-GLOBAL] read checkpoint: bands=", &
+        num_bands_chk, " wann=", num_wann_chk, " disentangled=", have_disentangled_chk
+
+      deallocate(exclude_bands_chk, kpt_latt_chk, u_matrix, m_matrix)
+      if(allocated(lwindow)) deallocate(lwindow)
+      if(allocated(ndimwin)) deallocate(ndimwin)
+      if(allocated(u_matrix_opt)) deallocate(u_matrix_opt)
+    end subroutine read_wannier90_checkpoint_transform
+
+    integer function find_owner_fragment_from_center(center_bohr) result(owner)
+      implicit none
+      real(8), intent(in) :: center_bohr(3)
+      integer :: ifrag_try, axis, idx0, idx1
+      real(8) :: frag_center(3), dist2, best_dist2, delta_axis, length_axis
+      integer :: nxyz_domain(3)
+
+      owner = 1
+      best_dist2 = huge(1d0)
+      do ifrag_try=1,dc%n_frag
+        call get_fragment_domain(dc, ifrag_try, nxyz_domain)
+        do axis=1,3
+          idx0 = dc%ixyz_frag(axis,ifrag_try)
+          idx1 = idx0 + nxyz_domain(axis) - 1
+          frag_center(axis) = 0.5d0 * (dc%lg_tot%coordinate(idx0,axis) + dc%lg_tot%coordinate(idx1,axis))
+        end do
+        dist2 = 0d0
+        do axis=1,3
+          length_axis = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+            + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+          delta_axis = periodic_delta(center_bohr(axis) - frag_center(axis), length_axis)
+          dist2 = dist2 + delta_axis * delta_axis
+        end do
+        if(dist2 < best_dist2) then
+          best_dist2 = dist2
+          owner = ifrag_try
+        end if
+      end do
+    end function find_owner_fragment_from_center
+
+    subroutine rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann)
+      implicit none
+      integer, intent(in) :: num_wann
+      real(8), intent(in) :: center_bohr(3,num_wann)
+      integer, intent(inout) :: owner_frag(num_wann)
+      integer :: target_base, target_rem, ifrag, iw, donor, receiver, moved, iw_best
+      integer, allocatable :: target(:), count_frag(:)
+      real(8) :: dist2, best_dist2
+
+      if(dc%n_frag <= 0) return
+      allocate(target(dc%n_frag), count_frag(dc%n_frag))
+      target_base = num_wann / dc%n_frag
+      target_rem = mod(num_wann, dc%n_frag)
+      do ifrag=1,dc%n_frag
+        target(ifrag) = target_base
+        if(ifrag <= target_rem) target(ifrag) = target(ifrag) + 1
+        count_frag(ifrag) = count(owner_frag(1:num_wann) == ifrag)
+      end do
+
+      moved = 0
+      do
+        receiver = 0
+        donor = 0
+        do ifrag=1,dc%n_frag
+          if(count_frag(ifrag) < target(ifrag)) then
+            receiver = ifrag
+            exit
+          end if
+        end do
+        if(receiver == 0) exit
+        do ifrag=1,dc%n_frag
+          if(count_frag(ifrag) > target(ifrag)) then
+            donor = ifrag
+            exit
+          end if
+        end do
+        if(donor == 0) exit
+
+        iw_best = 0
+        best_dist2 = huge(1d0)
+        do iw=1,num_wann
+          if(owner_frag(iw) /= donor) cycle
+          dist2 = distance_to_fragment_center(center_bohr(1:3,iw), receiver)
+          if(dist2 < best_dist2) then
+            best_dist2 = dist2
+            iw_best = iw
+          end if
+        end do
+        if(iw_best == 0) exit
+        owner_frag(iw_best) = receiver
+        count_frag(donor) = count_frag(donor) - 1
+        count_frag(receiver) = count_frag(receiver) + 1
+        moved = moved + 1
+      end do
+
+      if(dc%id_tot == 0 .and. moved > 0) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') &
+          "[DC-LCFO-W90-GLOBAL] rebalanced Wannier owners: moved=", moved, &
+          " min_count=", minval(count_frag), " max_count=", maxval(count_frag)
+      end if
+      deallocate(target, count_frag)
+    end subroutine rebalance_wannier_owner_fragments
+
+    real(8) function distance_to_fragment_center(center_bohr, ifrag_target) result(dist2)
+      implicit none
+      real(8), intent(in) :: center_bohr(3)
+      integer, intent(in) :: ifrag_target
+      integer :: axis, idx0, idx1
+      integer :: nxyz_domain(3)
+      real(8) :: frag_center(3), delta_axis, length_axis
+
+      call get_fragment_domain(dc, ifrag_target, nxyz_domain)
+      do axis=1,3
+        idx0 = dc%ixyz_frag(axis,ifrag_target)
+        idx1 = idx0 + nxyz_domain(axis) - 1
+        frag_center(axis) = 0.5d0 * (dc%lg_tot%coordinate(idx0,axis) + dc%lg_tot%coordinate(idx1,axis))
+      end do
+      dist2 = 0d0
+      do axis=1,3
+        length_axis = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+          + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+        delta_axis = periodic_delta(center_bohr(axis) - frag_center(axis), length_axis)
+        dist2 = dist2 + delta_axis * delta_axis
+      end do
+    end function distance_to_fragment_center
 
     subroutine run_wannier90_seed_files()
       use communication, only: comm_sync_all
@@ -1902,6 +3278,11 @@ contains
 
       call comm_sync_all(dc%icomm_tot)
       if(dc%id_tot == 0) then
+        if(is_wannier90_skip_command(wannier_command)) then
+          write(*,'(1x,a)') "[DC-LCFO-WANNIER] skip external Wannier90; reuse existing checkpoint."
+          call comm_sync_all(dc%icomm_tot)
+          return
+        end if
         change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
         command_line = trim(change_dir_command)//trim(wannier_command)//' '//trim(shell_quote(seedname))
         write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
@@ -1918,6 +3299,32 @@ contains
       end if
       call comm_sync_all(dc%icomm_tot)
     end subroutine run_wannier90_seed_files
+
+    logical function is_wannier90_skip_command(command) result(is_skip)
+      implicit none
+      character(*), intent(in) :: command
+      character(1024) :: value
+
+      value = adjustl(command)
+      is_skip = trim(value) == 'skip' .or. trim(value) == 'SKIP' .or. &
+        trim(value) == 'reuse' .or. trim(value) == 'REUSE'
+    end function is_wannier90_skip_command
+
+    logical function is_wannier90_export_only_requested() result(export_only)
+      implicit none
+      character(1024) :: wannier_command, value
+      integer :: env_status
+
+      export_only = .false.
+      wannier_command = ''
+      call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
+      if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+      value = adjustl(wannier_command)
+      export_only = trim(value) == 'export_only' .or. trim(value) == 'EXPORT_ONLY' .or. &
+        trim(value) == 'export-only' .or. trim(value) == 'EXPORT-ONLY' .or. &
+        trim(value) == 'seed_only' .or. trim(value) == 'SEED_ONLY' .or. &
+        trim(value) == 'seed-only' .or. trim(value) == 'SEED-ONLY'
+    end function is_wannier90_export_only_requested
 
     function shell_quote(text) result(quoted)
       implicit none
@@ -2068,13 +3475,14 @@ contains
       use filesystem, only: get_filehandle
       implicit none
       integer, intent(in) :: nband_wann
-      integer :: nproj, chunk_size, p0, p1, nchunk, iunit
+      integer :: nproj, nproj_csp3, chunk_size, p0, p1, nchunk, iunit
       integer :: iband, ip, ibasis, ix, iy, iz, ispin_local
+      integer :: ip_global, ip_base, ip_shell
       integer :: ixg, iyg, izg
       integer :: nxyz_domain(3)
       integer, parameter :: amn_target_chunk_elems = 1000000
       integer, allocatable :: proj_atom(:), proj_hybrid(:)
-      real(8) :: x, y, z, gval
+      real(8) :: x, y, z, gval, projection_width_eff
       real(8), allocatable :: bproj(:,:), a_local(:,:), a_sum(:,:)
       real(8), allocatable :: norm_local(:), norm_sum(:)
       character(256) :: amnfile
@@ -2082,12 +3490,15 @@ contains
       if(.not. is_c_sp3_projection(trim(wannier_projection))) &
         stop "DC-LCFO Wannier export: only wannier_projection='C:sp3' is implemented."
 
-      nproj = count_c_sp3_projections()
-      if(nproj /= wannier_num_wann) &
-        stop "DC-LCFO Wannier export: C:sp3 projection count must match wannier_num_wann."
-      if(nproj <= 0) stop "DC-LCFO Wannier export: no C atoms found for C:sp3 projections."
+      nproj_csp3 = count_c_sp3_projections()
+      if(nproj_csp3 <= 0) stop "DC-LCFO Wannier export: no C atoms found for C:sp3 projections."
+      if(nproj_csp3 > wannier_num_wann) &
+        stop "DC-LCFO Wannier export: C:sp3 projection count exceeds wannier_num_wann."
+      if(wannier_num_wann > nband_wann) &
+        stop "DC-LCFO Wannier export: wannier_num_wann must not exceed exported band count."
+      nproj = wannier_num_wann
 
-      allocate(proj_atom(nproj), proj_hybrid(nproj))
+      allocate(proj_atom(nproj_csp3), proj_hybrid(nproj_csp3))
       call build_c_sp3_projection_map(proj_atom, proj_hybrid)
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
 
@@ -2114,6 +3525,10 @@ contains
         ispin_local = 1
         if(dc%id_frag == 0) then
           do ip=1,nchunk
+            ip_global = p0 + ip - 1
+            ip_base = modulo(ip_global - 1, nproj_csp3) + 1
+            ip_shell = (ip_global - 1) / nproj_csp3
+            projection_width_eff = wannier_projection_width / sqrt(1d0 + 0.75d0 * dble(ip_shell))
             do iz=1,nxyz_domain(3)
               izg = dc%jxyz_tot(iz,3)
               z = dc%lg_tot%coordinate(izg,3)
@@ -2123,8 +3538,8 @@ contains
                 do ix=1,nxyz_domain(1)
                   ixg = dc%jxyz_tot(ix,1)
                   x = dc%lg_tot%coordinate(ixg,1)
-                  gval = c_sp3_projection_value(x, y, z, proj_atom(p0+ip-1), &
-                    proj_hybrid(p0+ip-1), wannier_projection_width)
+                  gval = c_sp3_projection_value(x, y, z, proj_atom(ip_base), &
+                    proj_hybrid(ip_base), projection_width_eff)
                   if(abs(gval) <= 0d0) cycle
                   norm_local(ip) = norm_local(ip) + gval * gval * hvol
                   do ibasis=1,n_basis(dc%i_frag,ispin_local)
@@ -2148,11 +3563,12 @@ contains
 
         if(dc%id_tot == 0) then
           do ip=1,nchunk
+            ip_global = p0 + ip - 1
             if(norm_sum(ip) <= 1d-300) &
               stop "DC-LCFO Wannier export: zero norm projection in .amn generation."
             a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
             do iband=1,nband_wann
-              write(iunit,'(3i8,2(1x,es23.15))') iband, p0+ip-1, 1, a_sum(iband,ip), 0d0
+              write(iunit,'(3i8,2(1x,es23.15))') iband, ip_global, 1, a_sum(iband,ip), 0d0
             end do
           end do
         end if

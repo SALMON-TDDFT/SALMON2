@@ -251,8 +251,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             calculate_observables_std => calculate_observables, &
                             diagnose_dcdft_lcfo_seed_stationarity_std => diagnose_dcdft_lcfo_seed_stationarity, &
                             calibrate_dcdft_lcfo_static_hamiltonian_std => calibrate_dcdft_lcfo_static_hamiltonian, &
-                            diagnose_velocity_transition_strength_dg, &
-                            diagnose_wannier_position_transition_strength_dg
+                            refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std => &
+                              refresh_buffer_wannier_flux_seed_from_current_hamiltonian
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -291,7 +291,6 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
 
   logical, parameter :: dense_lcfo_density_diag_default = .false.
   logical, parameter :: trace_dcdft_seed_diagnostics = .false.
-  logical, parameter :: trace_dg_velocity_transition = .true.
 
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
@@ -301,6 +300,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   logical :: dense_seed_basis_uncapped
   logical :: trace_dg_current
   logical :: did_validate_seed
+  logical :: refreshed_bpw_scf_seed
   logical :: print_rt_step
   logical :: write_energy_step
   character(len=16) :: env_value
@@ -369,6 +369,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
 
   Ac_zero(:) = 0.0d0
   did_validate_seed = .false.
+  refreshed_bpw_scf_seed = .false.
   if (yn_spinorbit /= 'y') then
     call update_density_and_hamiltonian_std(dg_frag, system, info, rt, 0, Ac_zero, &
          lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
@@ -442,9 +443,11 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
       dg_frag%flux_face_trace_mix_enabled = .true.
       call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
-      if (trace_dg_velocity_transition .and. .not. dg_frag%coef_state_block_mode) then
-        call diagnose_velocity_transition_strength_dg(dg_frag, system, 3)
-        call diagnose_wannier_position_transition_strength_dg(dg_frag, system, 3)
+      if (yn_fix_func == 'n' .and. yn_dg_length_gauge == 'y' .and. &
+          trim(time_integrator_dg_fragment) == 'expdiag') then
+        call refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std(dg_frag, &
+          '[DG-BPW-SCF-SEED] refreshed from initial self-consistent DG Hamiltonian;')
+        refreshed_bpw_scf_seed = .true.
       end if
       did_validate_seed = .true.
       if (comm_is_root(dg_frag%id)) then
@@ -462,7 +465,12 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                                                'dcdft-ground-state-seed')
       else if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') '[DG-DCDFT-SEED] density reconstruction diagnostic is skipped in the default path'
-        write(*,'(1x,a)') '[DG-DCDFT-SEED] RT starts directly from the DGDFT/LCFO coefficient seed'
+        if (refreshed_bpw_scf_seed) then
+          write(*,'(1x,a)') &
+            '[DG-DCDFT-SEED] RT starts from BPW states diagonalized with the initial self-consistent DG Hamiltonian'
+        else
+          write(*,'(1x,a)') '[DG-DCDFT-SEED] RT starts directly from the DGDFT/LCFO coefficient seed'
+        end if
         flush(6)
       end if
     else if (.not. dg_frag%identity_seed_coefficients) then
