@@ -1279,7 +1279,9 @@ subroutine init_nion_div(system,lg,mg,info)
 
   else !(flag_cuboid=.false.)
 
-     ! assuming r-space parallelization is not available in nonorthogonal lattice cell
+     ! nonorthogonal lattice: replicate all atoms on every r-space rank (info%nion_mg = nion).
+     ! nonlocal/force integrals are reduced over icomm_r so each grid point is counted once.
+     ! The "dividing atom" sum-check below applies only to the cuboid (domain-split) path.
      info%nion_mg = system%nion
      allocate( info%ia_mg(info%nion_mg) )
      do ia=1,system%nion
@@ -1288,9 +1290,12 @@ subroutine init_nion_div(system,lg,mg,info)
 
   endif
 
-  !check
-  call comm_summation(info%nion_mg, nion_total, info%icomm_r)
-  if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
+  !check (cuboid only: each atom belongs to exactly one r-space domain. The nonorthogonal
+  ! path replicates all atoms on every rank, so this sum would be nproc_rgrid*nion.)
+  if (flag_cuboid) then
+    call comm_summation(info%nion_mg, nion_total, info%icomm_r)
+    if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
+  end if
 
   !write(*,*) "  #nion_mg=", system%nion_mg
   !write(*,*) "  #check nion_total=", nion_total
