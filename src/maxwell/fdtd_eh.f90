@@ -245,6 +245,7 @@ contains
                                input_i3d_em,output_i3d_em,stop_em,input_r_txt_em,output_r_txt_em,input_r_bin_em, &
                                txtfile_copy_em
     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
+    use ttm3,            only: use_ttm3, init_ttm3_parameters, init_ttm3_grid, init_ttm3_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -315,8 +316,12 @@ contains
       fe%flag_art = .false.
     end if
     
+    !three-temperature model parameters (read early so its need for the cell-centred
+    ! fields can be folded into flag_save below)
+    call init_ttm3_parameters( dt_em )
+
     !save option: calculate variables used for save(typically, ex-z_s and hx-z_s)
-    if(fe%flag_obs .or. fe%flag_ase .or. fe%flag_art) then
+    if(fe%flag_obs .or. fe%flag_ase .or. fe%flag_art .or. use_ttm3) then
       fe%flag_save = .true.
     else
       fe%flag_save = .false.
@@ -859,6 +864,19 @@ contains
           close(unit2)
        end if
     end if !use_ttm
+
+    !--- three-temperature + carrier model (ttm3) grid/allocation (parameters read earlier) ------!
+    if( use_ttm3 )then
+       call init_ttm3_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
+       call init_ttm3_alloc( fs%srg_ng, fs%mg )
+       if( comm_is_root(nproc_id_global) )then
+          open(unit2,file='3tm_rt.data')
+          write(unit2,'("#",99(1X,I0,":",A))') &
+               1, "Time[fs]", 2, "T_ele[K]", 3, "T_hole[K]", 4, "T_lat[K]", &
+               5, "N_ele[cm-3]", 6, "N_hole[cm-3]"
+          close(unit2)
+       end if
+    end if !use_ttm3
 
     !*** write media information ******************************************************************************!
     if(comm_is_root(nproc_id_global)) then
@@ -3280,6 +3298,7 @@ contains
     use misc_routines,   only: get_wtime
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
+    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_state
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -3291,6 +3310,9 @@ contains
     integer             :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
     real(8),allocatable :: Spoynting_g(:,:,:,:), divS_g(:,:,:)
+    real(8),allocatable :: t3_S(:,:,:,:), t3_divS(:,:,:), t3_S_g(:,:,:,:), t3_divS_g(:,:,:)
+    real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
+    real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
     real(8)             :: dV, tmp(4)
@@ -3491,6 +3513,54 @@ contains
           deallocate( work )
         end if
       end if !use_ttm
+
+      !--- three-temperature + carrier model (ttm3): laser -> carrier generation + heating -----!
+      !  forward coupling (field -> carriers): absorbed-power heating + intensity-envelope-driven
+      !  carrier generation drive the ttm3 state.  (Single-domain, like the two-temperature path;
+      !  the carrier -> permittivity back-action via ttm3_permittivity is the next integration.)
+      if( use_ttm3 )then
+        if( .not.allocated(t3_power) )then
+          call allocate_poynting(fs, t3_S, t3_divS)
+          call allocate_poynting(fs, u=t3_power)
+          call allocate_poynting(fs, u=t3_gen)
+          allocate( t3_env(fs%mg%is_array(1):fs%mg%ie_array(1), &
+                           fs%mg%is_array(2):fs%mg%ie_array(2), &
+                           fs%mg%is_array(3):fs%mg%ie_array(3)) ); t3_env=0.0d0
+          if(yn_em_envelope=='y') call allocate_poynting(fs, t3_S_g, t3_divS_g)
+        end if
+        call calc_es_and_hs(fs, fe)
+        call calc_poynting_vector(fs, fe, t3_S)
+        call calc_poynting_vector_div(fs, t3_S, t3_divS)
+        if(yn_em_envelope=='y')then
+          call calc_es_and_hs_g(fs, fe)
+          call calc_poynting_vector_g(fs, fe, t3_S_g)
+          call calc_poynting_vector_div(fs, t3_S_g, t3_divS_g)
+          t3_power(:,:,:) = -0.5d0*( t3_divS(:,:,:) + t3_divS_g(:,:,:) )
+          call eh_get_field_envelope(fs, fe, t3_env)
+        else
+          t3_power(:,:,:) = -t3_divS(:,:,:)
+        end if
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          t3_gen(ix,iy,iz) = ttm3_generation( t3_env(ix,iy,iz) )
+        end do
+        end do
+        end do
+        call ttm3_main( fs%srg_ng, fs%mg, t3_power, t3_gen )
+        if( mod(iter,obs_samp_em)==0 )then
+          call ttm3_get_state( (/ (fs%mg%is(1)+fs%mg%ie(1))/2, &
+                                  (fs%mg%is(2)+fs%mg%ie(2))/2, &
+                                  (fs%mg%is(3)+fs%mg%ie(3))/2 /), &
+                               t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh )
+          if( comm_is_root(nproc_id_global) )then
+            open(unit2,file='3tm_rt.data',status='old',position='append')
+            write(unit2,"(F16.8,99(1X,E23.15E3))") &
+                 dble(iter)*dt_em*utime_from_au, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
+            close(unit2)
+          end if
+        end if
+      end if !use_ttm3
 
       !output
       if( fe%flag_save .and. mod(iter,obs_samp_em)==0 )then

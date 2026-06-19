@@ -310,10 +310,10 @@ contains
   subroutine ttm3_main( srg, rg, source, gen )
     use structures, only: s_rgrid, s_sendrecv_grid
     implicit none
-    type(s_sendrecv_grid), intent(inout) :: srg     ! reserved for the transport stage
+    type(s_sendrecv_grid), intent(inout) :: srg     ! used by ttm3_transport (Stage 4)
     type(s_rgrid),         intent(in)    :: rg
-    real(8),intent(in) :: source(rg%is_array(1):,rg%is_array(2):,rg%is_array(3):)
-    real(8),intent(in) :: gen   (rg%is_array(1):,rg%is_array(2):,rg%is_array(3):)
+    real(8),intent(in) :: source(rg%is(1):,rg%is(2):,rg%is(3):)
+    real(8),intent(in) :: gen   (rg%is(1):,rg%is(2):,rg%is(3):)
     integer :: m,ix,iy,iz
 
 !$omp parallel do private(m,ix,iy,iz)
