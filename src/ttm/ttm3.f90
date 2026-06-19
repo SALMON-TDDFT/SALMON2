@@ -341,6 +341,17 @@ contains
        end do
     end do
     f_built = .true.
+    if(DISPLAY)then
+       write(*,'(a)') " ttm3 Fermi heat-capacity self-test  Ce/N = 15/4 F3/2/F1/2 - 9/4 F1/2/F-1/2 :"
+       write(*,'(a,f9.5,a)') "   eta=-20 (non-degenerate): ", &
+            3.75d0*ttm3_fermi(3,-20.0d0)/ttm3_fermi(2,-20.0d0)-2.25d0*ttm3_fermi(2,-20.0d0)/ttm3_fermi(1,-20.0d0), &
+            "  (classical limit 1.5)"
+       write(*,'(a,f9.5)') "   eta=  0                  : ", &
+            3.75d0*ttm3_fermi(3,0.0d0)/ttm3_fermi(2,0.0d0)-2.25d0*ttm3_fermi(2,0.0d0)/ttm3_fermi(1,0.0d0)
+       write(*,'(a,f9.5,a)') "   eta=+20 (degenerate)     : ", &
+            3.75d0*ttm3_fermi(3,20.0d0)/ttm3_fermi(2,20.0d0)-2.25d0*ttm3_fermi(2,20.0d0)/ttm3_fermi(1,20.0d0), &
+            "  (Sommerfeld-suppressed)"
+    end if
   end subroutine ttm3_build_fermi_table
 
   ! F_j(eta) by linear interpolation of the table (jidx: 1=-1/2, 2=1/2, 3=3/2).
