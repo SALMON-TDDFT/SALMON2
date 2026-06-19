@@ -1,5 +1,6 @@
 set(SOURCES
     ttm.f90
+    ttm3.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
