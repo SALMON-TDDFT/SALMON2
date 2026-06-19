@@ -87,6 +87,13 @@ module fdtd_eh
     real(8),allocatable :: hx_y(:,:,:),c1_hx_y(:,:,:),c2_hx_y(:,:,:),hx_z(:,:,:),c1_hx_z(:,:,:),c2_hx_z(:,:,:) !h
     real(8),allocatable :: hy_z(:,:,:),c1_hy_z(:,:,:),c2_hy_z(:,:,:),hy_x(:,:,:),c1_hy_x(:,:,:),c2_hy_x(:,:,:) !h
     real(8),allocatable :: hz_x(:,:,:),c1_hz_x(:,:,:),c2_hz_x(:,:,:),hz_y(:,:,:),c1_hz_y(:,:,:),c2_hz_y(:,:,:) !h
+    !ghost (quadrature) EM field state arrays — allocated only when yn_em_envelope='y'
+    real(8),allocatable :: ex_y_g(:,:,:),ex_z_g(:,:,:)  !ghost e-field split-Yee state
+    real(8),allocatable :: ey_z_g(:,:,:),ey_x_g(:,:,:)  !ghost e-field split-Yee state
+    real(8),allocatable :: ez_x_g(:,:,:),ez_y_g(:,:,:)  !ghost e-field split-Yee state
+    real(8),allocatable :: hx_y_g(:,:,:),hx_z_g(:,:,:)  !ghost h-field split-Yee state
+    real(8),allocatable :: hy_z_g(:,:,:),hy_x_g(:,:,:)  !ghost h-field split-Yee state
+    real(8),allocatable :: hz_x_g(:,:,:),hz_y_g(:,:,:)  !ghost h-field split-Yee state
     integer             :: ihx_y_is(3),ihx_y_ie(3),ihx_z_is(3),ihx_z_ie(3)                                     !h
     integer             :: ihy_z_is(3),ihy_z_ie(3),ihy_x_is(3),ihy_x_ie(3)                                     !h
     integer             :: ihz_x_is(3),ihz_x_ie(3),ihz_y_is(3),ihz_y_ie(3)                                     !h
@@ -117,6 +124,19 @@ module fdtd_eh
     real(8),allocatable :: ex_old_ld(:,:,:),&                      !LD: old E
                            ey_old_ld(:,:,:),&                      !    (x,y,z)
                            ez_old_ld(:,:,:)                        !
+    !ghost LD state arrays — allocated only when yn_em_envelope='y' and flag_ld=.true.
+    real(8),allocatable :: rjx_ld_g(:,:,:,:),rjx_old_ld_g(:,:,:,:),& !ghost LD J and stock
+                           rjy_ld_g(:,:,:,:),rjy_old_ld_g(:,:,:,:),& !
+                           rjz_ld_g(:,:,:,:),rjz_old_ld_g(:,:,:,:)   !
+    real(8),allocatable ::  px_ld_g(:,:,:,:),&                        !ghost LD P vector
+                            py_ld_g(:,:,:,:),&                        !
+                            pz_ld_g(:,:,:,:)                          !
+    real(8),allocatable :: rjx_fdtd_ld_g(:,:,:),&                    !ghost LD J into FDTD
+                           rjy_fdtd_ld_g(:,:,:),&                    !
+                           rjz_fdtd_ld_g(:,:,:)                      !
+    real(8),allocatable :: ex_old_ld_g(:,:,:),&                      !ghost LD old E
+                           ey_old_ld_g(:,:,:),&                      !
+                           ez_old_ld_g(:,:,:)                        !
     real(8),allocatable :: rmedia(:,:,:)                           !Material information for tmp.
     real(8),allocatable :: time_lr(:)                              !LR: time
     real(8),allocatable :: fr_lr(:,:)                              !LR: Re[f]
@@ -209,7 +229,7 @@ contains
                                ase_smedia_id_em,ase_box_cent_em,ase_box_size_em,                           &
                                art_num_em,art_ene_min_em,art_ene_max_em,art_wav_min_em,art_wav_max_em,     &
                                art_smedia_id_em,art_plane_bot_em,art_plane_top_em,                         &
-                               yn_restart,directory_read_data,checkpoint_interval
+                               yn_restart,directory_read_data,checkpoint_interval,yn_em_envelope
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
@@ -766,7 +786,43 @@ contains
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ey_old_ld  )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ez_old_ld  )
     end if
-    
+
+    !*** allocate ghost (quadrature) EM field state arrays when envelope feature is enabled *******************!
+    if(yn_em_envelope=='y') then
+      !ghost split-Yee E field state
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_y_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_y_g)
+      !ghost split-Yee H field state
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_y_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_y_g)
+      !ghost LD state (only when LD media are present)
+      if(fe%flag_ld) then
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_ld_g    )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_ld_g    )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_ld_g    )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_old_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_old_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_old_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%px_ld_g     )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%py_ld_g     )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%pz_ld_g     )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjx_fdtd_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjy_fdtd_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjz_fdtd_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ex_old_ld_g  )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ey_old_ld_g  )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ez_old_ld_g  )
+      end if
+    end if
+
     !*** set fdtd coeffient and light speed for media ID = 0 **************************************************!
     allocate(fe%rep(0:media_num),fe%rmu(0:media_num),fe%sig(0:media_num))
     fe%rep(:)=1.0d0; fe%rmu(:)=1.0d0; fe%sig(:)=0.0d0;
