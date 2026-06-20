@@ -3310,7 +3310,7 @@ contains
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
-                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen
+                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     implicit none
@@ -3613,11 +3613,14 @@ contains
           ! reads high in a finite slab).  Both written so the two can be compared.
           call ttm3_get_front( t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf )
           call ttm3_get_max  ( t3_Te ,t3_Th ,t3_Tl ,t3_Ne ,t3_Nh  )
+          call ttm3_front_ijk( ix, iy, iz )                  ! front cell, for the field-envelope diagnostic (col 12)
           if( comm_is_root(nproc_id_global) )then
             open(unit2,file='3tm_rt.data',status='old',position='append')
+            ! col 12 = front-cell field-intensity envelope |E|^2+|E_g|^2 [a.u.]; compare to the
+            ! reference surface intensity out_all(6)=3.509e16*|E|^2*n to localize the ~2x field factor.
             write(unit2,"(F16.8,99(1X,E23.15E3))") &
                  dble(iter)*dt_em*utime_from_au, &
-                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
+                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, t3_env(ix,iy,iz)
             close(unit2)
           end if
         end if

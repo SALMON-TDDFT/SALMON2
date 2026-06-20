@@ -28,6 +28,7 @@ module ttm3
   public :: ttm3_get_state
   public :: ttm3_get_max
   public :: ttm3_get_front
+  public :: ttm3_front_ijk
   public :: ttm3_permittivity
   public :: ttm3_linear_gen
   public :: ttm3_eps_sig
@@ -892,6 +893,38 @@ contains
     Tl_o=Tl(a(1),a(2),a(3))*hartree_kelvin_relationship
     Ne_o=Ne(a(1),a(2),a(3))/cm3_per_bohr3; Nh_o=Nh(a(1),a(2),a(3))/cm3_per_bohr3
   end subroutine ttm3_get_front
+
+  ! Index of the illuminated front-face medium cell (same selection as ttm3_get_front).
+  ! Diagnostic: lets the caller read the field envelope there to compare the surface
+  ! intensity against the reference's out_all(6).
+  subroutine ttm3_front_ijk( jx, jy, jz )
+    implicit none
+    integer,intent(out) :: jx,jy,jz
+    integer :: m,iy,iz,ixmin,nmin,a(3),dbest,d
+    real(8) :: cy,cz
+    jx=is_inner(1); jy=is_inner(2); jz=is_inner(3)
+    if( nmedia_myrnk<=0 ) return
+    ixmin = ijk_media_myrnk(1,1)
+    do m=2,nmedia_myrnk
+       if( ijk_media_myrnk(1,m) < ixmin ) ixmin = ijk_media_myrnk(1,m)
+    end do
+    cy=0d0; cz=0d0; nmin=0
+    do m=1,nmedia_myrnk
+       if( ijk_media_myrnk(1,m)==ixmin )then
+          cy=cy+ijk_media_myrnk(2,m); cz=cz+ijk_media_myrnk(3,m); nmin=nmin+1
+       end if
+    end do
+    cy=cy/max(nmin,1); cz=cz/max(nmin,1)
+    a = ijk_media_myrnk(1:3,1); dbest=huge(0)
+    do m=1,nmedia_myrnk
+       if( ijk_media_myrnk(1,m)==ixmin )then
+          iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+          d = (iy-nint(cy))**2 + (iz-nint(cz))**2
+          if( d<dbest )then; dbest=d; a=ijk_media_myrnk(1:3,m); end if
+       end if
+    end do
+    jx=a(1); jy=a(2); jz=a(3)
+  end subroutine ttm3_front_ijk
 
   !---------------------------------------------------------------------------
   ! Stage 2: carrier-dependent permittivity (recommended Drude model).
