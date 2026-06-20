@@ -76,12 +76,15 @@ module ttm3
   real(8),allocatable :: rhs_te(:,:,:), rhs_th(:,:,:), rhs_tl(:,:,:)
   real(8),allocatable :: rhs_ne(:,:,:), rhs_nh(:,:,:)
 
-  ! Fermi-Dirac integral table F_j(eta) for j = -1/2, 1/2, 3/2 (indices 1,2,3),
-  ! built once at init by quadrature, interpolated in the inner loop (the same
-  ! table approach as the reference's Table_Fermi).  eta grid: f_eta0 + k*f_deta.
+  ! Fermi-Dirac integral table F_j(eta).  Indices 1,2,3 = j = -1/2,1/2,3/2 (heat
+  ! capacity / chemical potential); indices 4,5 = j = 1,2 (transport: mobility,
+  ! diffusion, thermal conductivity).  F_0(eta)=ln(1+exp(eta)) is analytic (ttm3_F0),
+  ! no table.  Built once at init by quadrature; interpolated in the inner loop (the
+  ! same table approach as the reference's Table_Fermi).  eta grid: f_eta0 + k*f_deta.
   integer,parameter   :: f_neta = 2400
   real(8),parameter   :: f_eta0 = -60.0d0, f_deta = 0.05d0
-  real(8)             :: f_tab(0:f_neta,3)
+  integer,parameter   :: f_nj   = 5
+  real(8)             :: f_tab(0:f_neta,f_nj)
   logical             :: f_built = .false.
 
   ! density floor to keep the carrier heat capacity well defined.  Set to the
@@ -325,14 +328,16 @@ contains
     implicit none
     integer,parameter :: nq=4000
     integer :: k,q,jj
-    real(8) :: eta,umax,du,u,integ,s,gam(3),jval(3)
-    jval = (/ -0.5d0, 0.5d0, 1.5d0 /)
-    gam  = (/ 1.7724538509055160d0, 0.8862269254527580d0, 1.3293403881791370d0 /) ! Gamma(j+1)
+    real(8) :: eta,umax,du,u,integ,s,gam(f_nj),jval(f_nj)
+    ! indices 1..5 = j = -1/2, 1/2, 3/2, 1, 2  (gam = Gamma(j+1))
+    jval = (/ -0.5d0, 0.5d0, 1.5d0, 1.0d0, 2.0d0 /)
+    gam  = (/ 1.7724538509055160d0, 0.8862269254527580d0, 1.3293403881791370d0, &
+              1.0d0, 2.0d0 /)                                            ! Gamma(2)=1, Gamma(3)=2
     do k=0,f_neta
        eta = f_eta0 + dble(k)*f_deta
        umax = sqrt( max(eta,0.0d0) + 50.0d0 )
        du = umax/dble(nq)
-       do jj=1,3
+       do jj=1,f_nj
           integ = 0.0d0
           do q=0,nq
              u = dble(q)*du
@@ -359,7 +364,7 @@ contains
     end if
   end subroutine ttm3_build_fermi_table
 
-  ! F_j(eta) by linear interpolation of the table (jidx: 1=-1/2, 2=1/2, 3=3/2).
+  ! F_j(eta) by linear interpolation of the table (jidx: 1=-1/2, 2=1/2, 3=3/2, 4=1, 5=2).
   pure function ttm3_fermi( jidx, eta ) result( F )
     implicit none
     integer,intent(in) :: jidx
@@ -373,6 +378,16 @@ contains
     end if
     F = (1.0d0-w)*f_tab(k,jidx) + w*f_tab(k+1,jidx)
   end function ttm3_fermi
+
+  ! F_0(eta) = ln(1+exp(eta)) (analytic; no table).  Overflow-guarded: -> eta for eta>>0.
+  pure function ttm3_F0( eta ) result( F )
+    implicit none
+    real(8),intent(in) :: eta
+    real(8) :: F
+    if( eta > 40.0d0 )then ; F = eta
+    else                   ; F = log( 1.0d0 + exp(eta) )
+    end if
+  end function ttm3_F0
 
   ! Reduced chemical potential eta from (T,mass,N) by bisecting N = Neff*F_{1/2}(eta),
   ! Neff = 2*(mass*T/(2*pi))^(3/2)  (atomic units).
