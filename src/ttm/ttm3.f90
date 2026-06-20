@@ -891,21 +891,58 @@ contains
   ! Stage 2: carrier-dependent permittivity (recommended Drude model).
   ! eps(omega) = eps_bg - omega_p^2/omega^2,  omega_p^2 = 4*pi*(Ne/m_e + Nh/m_h);
   ! the Drude damping (rate 1/tau) gives the conductivity sigma. All atomic units.
-  pure subroutine ttm3_permittivity( Ne_, Nh_, omega, eps_re, sig )
+  ! Layer C-b1: strong carrier-temperature-dependent Drude (reference TOTAL_DIELE + Diel_Func).
+  ! The electron-hole scattering rate gamma_eh rises with carrier density and temperature, so
+  ! the free-carrier absorption climbs sharply as the material metallizes -- the T_e "second
+  ! rise" that the fixed-tau Drude misses.  Ported verbatim with the reference constants
+  ! (kbT, a_t, E_h, optical masses mu_eo/mu_ho); ttm3 stores T_e = k_B T [Ha] so the reference's
+  ! Kelvin temperature is T/kbT.  Ne in bohr^-3 matches the reference.
+  pure subroutine ttm3_drude( Ne_, Te_, Th_, Tl_, omega, eps_re, sig )
     implicit none
-    real(8),intent(in)  :: Ne_, Nh_, omega
+    real(8),intent(in)  :: Ne_, Te_, Th_, Tl_, omega
     real(8),intent(out) :: eps_re, sig
-    real(8) :: wp2, sig_d, bf
-    wp2   = 4.0d0*pi_*( Ne_/tp3%mu_e + Nh_/tp3%mu_h )
-    sig_d = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)        ! Drude (free-carrier)
+    real(8),parameter :: mu_eo=0.26d0, mu_ho=0.37d0                 ! Drude optical masses
+    real(8),parameter :: kbT_r=3.1668d-6, a_t_=2.419d-2, E_h_=27.2114d0
+    real(8) :: red,red2,Cg,Tryd,Pe,Tf,aa,gsp,gph,g1e,g1h,ge,gh,TeK,ThK,TlK,xE,xH,w2,wpe,wph,argl
+    TeK=max(Te_,1.0d-12)/kbT_r; ThK=max(Th_,1.0d-12)/kbT_r; TlK=Tl_/kbT_r
+    red  = 1.0d0/(1.0d0/mu_eo+1.0d0/mu_ho)
+    red2 = 1.0d0/(1.0d0/tp3%mu_e+1.0d0/tp3%mu_h)                    ! band masses
+    Cg   = 16.0d0/9.0d0*pi_**(-1.5d0)
+    Tryd = red*0.5d0/(11.7d0**2)*(16.0d0*pi_*pi_)
+    Pe   = (3.0d0*pi_*pi_*max(Ne_,1.0d-30))**(2.0d0/3.0d0)
+    Tf   = 0.5d0*Pe/(red2*kbT_r)                                   ! Fermi temperature [K]
+    argl = sqrt(Tryd*Tf)*Tf
+    aa   = 1.0d0/sqrt( sqrt(kbT_r)/argl )*exp(2.0d0/3.0d0)
+    if( TeK > aa )then                                             ! Spitzer e-h scattering
+       gsp = abs( Cg*Tryd*(Tf/TeK)**1.5d0 * log( TeK*TeK*sqrt(kbT_r)/argl ) )
+    else
+       gsp = Cg*Tryd*(Tf/aa)**1.5d0 * log( aa*aa*sqrt(kbT_r)/argl )
+    end if
+    gph = 4.0d-4*TlK*a_t_                                          ! phonon
+    g1e = a_t_/( 0.98d0 + 0.2d0*(kbT_r*TeK*E_h_)**(-3.5d0) )       ! correction (electron temp)
+    g1h = a_t_/( 0.98d0 + 0.2d0*(kbT_r*ThK*E_h_)**(-3.5d0) )       ! correction (hole temp)
+    ge  = max( gsp+gph+g1e, 1.0d-30 ); gh = max( gsp+gph+g1h, 1.0d-30 )
+    w2  = omega*omega; xE = ge/omega; xH = gh/omega
+    wpe = 4.0d0*pi_*Ne_/mu_eo; wph = 4.0d0*pi_*Ne_/mu_ho           ! ambipolar: Nh=Ne
+    eps_re = -wpe/w2/(1.0d0+xE*xE) - wph/w2/(1.0d0+xH*xH)          ! Re(eps_Drude), e+h
+    sig    = ( wpe/w2*xE/(1.0d0+xE*xE) + wph/w2*xH/(1.0d0+xH*xH) )*omega/(4.0d0*pi_)
+  end subroutine ttm3_drude
+
+  pure subroutine ttm3_permittivity( Ne_, Nh_, Te_, Th_, Tl_, omega, eps_re, sig )
+    implicit none
+    real(8),intent(in)  :: Ne_, Nh_, Te_, Th_, Tl_, omega
+    real(8),intent(out) :: eps_re, sig
+    real(8) :: wp2, bf, eps_d, sig_d
     if( tp3%sig_cold > 0.0d0 )then
-       ! Layer C-a: bound interband part scaled by band filling (1-Ne/N0), plus Drude.
+       ! Layer C-a/b: band-filled bound interband part + strong carrier-T Drude.
+       call ttm3_drude( Ne_, Te_, Th_, Tl_, omega, eps_d, sig_d )
        bf     = max( 1.0d0 - Ne_/tp3%N0, 0.0d0 )
-       eps_re = tp3%eps_bg*bf - wp2/(omega*omega)
+       eps_re = tp3%eps_bg*bf + eps_d
        sig    = tp3%sig_cold*bf + sig_d
     else
+       wp2    = 4.0d0*pi_*( Ne_/tp3%mu_e + Nh_/tp3%mu_h )          ! legacy simple Drude
        eps_re = tp3%eps_bg - wp2/(omega*omega)
-       sig    = sig_d
+       sig    = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)
     end if
   end subroutine ttm3_permittivity
 
@@ -920,7 +957,7 @@ contains
     implicit none
     integer,intent(in) :: ix,iy,iz
     real(8),intent(in) :: omega, power
-    real(8) :: gen, bf, sig_b, sig_d, wp2
+    real(8) :: gen, bf, sig_b, sig_d, eps_d
     if( power <= 0.0d0 )then
        gen = 0.0d0; return
     end if
@@ -929,8 +966,7 @@ contains
     end if
     bf    = max( 1.0d0 - Ne(ix,iy,iz)/tp3%N0, 0.0d0 )
     sig_b = tp3%sig_cold*bf
-    wp2   = 4.0d0*pi_*( Ne(ix,iy,iz)/tp3%mu_e + Nh(ix,iy,iz)/tp3%mu_h )
-    sig_d = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)
+    call ttm3_drude( Ne(ix,iy,iz), Te(ix,iy,iz), Th(ix,iy,iz), Tl(ix,iy,iz), omega, eps_d, sig_d )
     gen   = power/omega * sig_b/( sig_b + sig_d + 1.0d-50 )      ! bound fraction only
   end function ttm3_linear_gen
 
@@ -943,7 +979,7 @@ contains
     integer,intent(in)  :: ix,iy,iz
     real(8),intent(in)  :: omega
     real(8),intent(out) :: eps_re, sig
-    call ttm3_permittivity( Ne(ix,iy,iz), Nh(ix,iy,iz), omega, eps_re, sig )
+    call ttm3_permittivity( Ne(ix,iy,iz), Nh(ix,iy,iz), Te(ix,iy,iz), Th(ix,iy,iz), Tl(ix,iy,iz), omega, eps_re, sig )
   end subroutine ttm3_eps_sig
 
   integer function ttm3_ninterior()
