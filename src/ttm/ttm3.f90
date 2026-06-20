@@ -344,19 +344,25 @@ contains
     allocate( Ne(i1:j1,i2:j2,i3:j3), Nh(i1:j1,i2:j2,i3:j3) )
     allocate( rhs_te(i1:j1,i2:j2,i3:j3), rhs_th(i1:j1,i2:j2,i3:j3), rhs_tl(i1:j1,i2:j2,i3:j3) )
     allocate( rhs_ne(i1:j1,i2:j2,i3:j3), rhs_nh(i1:j1,i2:j2,i3:j3) )
-    allocate( Kc_e(i1:j1,i2:j2,i3:j3), Kc_h(i1:j1,i2:j2,i3:j3) )
-    allocate( Dc_e(i1:j1,i2:j2,i3:j3), Dc_h(i1:j1,i2:j2,i3:j3) )
-    allocate( Mc_e(i1:j1,i2:j2,i3:j3), Mc_h(i1:j1,i2:j2,i3:j3) )
-    allocate( Jc_e(i1:j1,i2:j2,i3:j3,3), Jc_h(i1:j1,i2:j2,i3:j3,3) )
-    allocate( rgap(i1:j1,i2:j2,i3:j3), Efld(i1:j1,i2:j2,i3:j3) )
-    allocate( Cj_e(i1:j1,i2:j2,i3:j3), Cj_h(i1:j1,i2:j2,i3:j3) )
 
     Te = tp3%Tini ; Th = tp3%Tini ; Tl = tp3%Tini
     Ne = N_floor  ; Nh = N_floor
-    Kc_e = 0.0d0  ; Kc_h = 0.0d0
-    Dc_e = 0.0d0  ; Dc_h = 0.0d0 ; Mc_e = 0.0d0 ; Mc_h = 0.0d0
-    Jc_e = 0.0d0  ; Jc_h = 0.0d0 ; rgap = tp3%Egap ; Efld = 0.0d0
-    Cj_e = 0.0d0  ; Cj_h = 0.0d0
+
+    ! Set A (Fermi transport) coefficient/current arrays: ~18 full-grid arrays accessed only
+    ! inside the use_fermi branch of ttm3_transport.  Allocate them only when transport is on
+    ! (mobility>0) so a non-transport run does not pay their memory.
+    if( tp3%mob_e0>0.0d0 .or. tp3%mob_h0>0.0d0 )then
+       allocate( Kc_e(i1:j1,i2:j2,i3:j3), Kc_h(i1:j1,i2:j2,i3:j3) )
+       allocate( Dc_e(i1:j1,i2:j2,i3:j3), Dc_h(i1:j1,i2:j2,i3:j3) )
+       allocate( Mc_e(i1:j1,i2:j2,i3:j3), Mc_h(i1:j1,i2:j2,i3:j3) )
+       allocate( Jc_e(i1:j1,i2:j2,i3:j3,3), Jc_h(i1:j1,i2:j2,i3:j3,3) )
+       allocate( rgap(i1:j1,i2:j2,i3:j3), Efld(i1:j1,i2:j2,i3:j3) )
+       allocate( Cj_e(i1:j1,i2:j2,i3:j3), Cj_h(i1:j1,i2:j2,i3:j3) )
+       Kc_e = 0.0d0  ; Kc_h = 0.0d0
+       Dc_e = 0.0d0  ; Dc_h = 0.0d0 ; Mc_e = 0.0d0 ; Mc_h = 0.0d0
+       Jc_e = 0.0d0  ; Jc_h = 0.0d0 ; rgap = tp3%Egap ; Efld = 0.0d0
+       Cj_e = 0.0d0  ; Cj_h = 0.0d0
+    end if
   end subroutine init_ttm3_alloc
 
   !---------------------------------------------------------------------------
@@ -428,21 +434,31 @@ contains
     end if
   end function ttm3_F0
 
-  ! Reduced chemical potential eta from (T,mass,N) by bisecting N = Neff*F_{1/2}(eta),
-  ! Neff = 2*(mass*T/(2*pi))^(3/2)  (atomic units).
+  ! Reduced chemical potential eta from (T,mass,N): invert N = Neff*F_{1/2}(eta),
+  ! Neff = 2*(mass*T/(2*pi))^(3/2).  F_{1/2} is tabulated (monotone in eta), so invert by a
+  ! binary search on the table + linear interpolation.  Because the table is piecewise-linear
+  ! in eta, this returns the SAME eta as inverting that piecewise-linear F_{1/2} -- i.e. it is
+  ! mathematically identical to the old 60-iteration bisection, but ~10x cheaper (no repeated
+  ! Fermi-table evaluation in the loop).
   pure function ttm3_chem_pot( T, mc, N ) result( eta )
     implicit none
     real(8),intent(in) :: T,mc,N
-    real(8) :: eta,Neff,lo,hi,mid,f
-    integer :: it
+    real(8) :: eta,Neff,y,w
+    integer :: lo,hi,mid
     Neff = 2.0d0*( mc*max(T,1.0d-12)/(2.0d0*pi_) )**1.5d0
-    lo = f_eta0; hi = f_eta0 + dble(f_neta)*f_deta
-    do it=1,60
-       mid = 0.5d0*(lo+hi)
-       f = N - Neff*ttm3_fermi(2,mid)
-       if(f > 0.0d0)then; lo=mid; else; hi=mid; end if
+    y = N/Neff                                       ! target value of F_{1/2}(eta)
+    if( y <= f_tab(0,2) )then
+       eta = f_eta0; return
+    elseif( y >= f_tab(f_neta,2) )then
+       eta = f_eta0 + dble(f_neta)*f_deta; return
+    end if
+    lo = 0; hi = f_neta
+    do while( hi-lo > 1 )                            ! binary search: f_tab(lo,2) <= y < f_tab(hi,2)
+       mid = (lo+hi)/2
+       if( f_tab(mid,2) <= y )then; lo=mid; else; hi=mid; end if
     end do
-    eta = 0.5d0*(lo+hi)
+    w = ( y - f_tab(lo,2) )/( f_tab(lo+1,2) - f_tab(lo,2) )
+    eta = f_eta0 + ( dble(lo) + w )*f_deta
   end function ttm3_chem_pot
 
   ! Fermi-Dirac carrier heat capacity (per volume, atomic units, kB=1):
