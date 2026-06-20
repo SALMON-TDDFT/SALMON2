@@ -55,6 +55,12 @@ module ttm3
      real(8) :: kappa_e  ! carrier thermal conductivity      [a.u.]         (Stage 4)
      real(8) :: kappa_l  ! lattice thermal conductivity      [a.u.]         (Stage 4)
      real(8) :: dgap_c   ! gap-renormalisation coefficient   [a.u.]         (Stage 5)
+     ! Set A (Fermi transport): carrier mobilities (optional 16th,17th input lines).
+     ! When >0 the diffusion/conductivity are computed from the Fermi-Dirac integrals
+     ! (mu=mob0*F0/F12, D=mob0*Te*F0/Fm, K=(6 F2/F0-4(F1/F0)^2) N Te mu), superseding
+     ! the constant Ddiff/kappa_e.  Input m^2/Vs, converted to a.u. at read.
+     real(8) :: mob_e0   ! electron mobility                 [a.u. = m^2/Vs*2.353e-5]
+     real(8) :: mob_h0   ! hole mobility                     [a.u.]
   end type ttm3_param
 
   integer,allocatable :: ijk_media_whole(:,:)
@@ -75,6 +81,8 @@ module ttm3
   ! transport increment buffers (Stage 4)
   real(8),allocatable :: rhs_te(:,:,:), rhs_th(:,:,:), rhs_tl(:,:,:)
   real(8),allocatable :: rhs_ne(:,:,:), rhs_nh(:,:,:)
+  ! Set A (Fermi transport): per-cell thermal conductivity (electron/hole)
+  real(8),allocatable :: Kc_e(:,:,:), Kc_h(:,:,:)
 
   ! Fermi-Dirac integral table F_j(eta).  Indices 1,2,3 = j = -1/2,1/2,3/2 (heat
   ! capacity / chemical potential); indices 4,5 = j = 1,2 (transport: mobility,
@@ -107,6 +115,7 @@ contains
     implicit none
     real(8), intent(in) :: dt_em
     integer, parameter :: unit=1112
+    integer :: ios
     integer :: npid, nprocs
     logical :: flag
     real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11 ! [m]
@@ -158,6 +167,9 @@ contains
        read(unit,*) tp3%kappa_e
        read(unit,*) tp3%kappa_l
        read(unit,*) tp3%dgap_c
+       tp3%mob_e0 = 0.0d0; tp3%mob_h0 = 0.0d0     ! optional (Set A Fermi transport)
+       read(unit,*,iostat=ios) tp3%mob_e0
+       read(unit,*,iostat=ios) tp3%mob_h0
        close(unit)
        write(*,*) "Egap[eV]    =",tp3%Egap
        write(*,*) "mu_e        =",tp3%mu_e
@@ -191,9 +203,15 @@ contains
     call comm_bcast(tp3%kappa_e,comm,0)
     call comm_bcast(tp3%kappa_l,comm,0)
     call comm_bcast(tp3%dgap_c ,comm,0)
+    call comm_bcast(tp3%mob_e0 ,comm,0)
+    call comm_bcast(tp3%mob_h0 ,comm,0)
 
 ! Convert to atomic units
     tp3%Egap = tp3%Egap / hartree_ev
+    ! mobility [m^2/Vs] -> a.u.  (mob_au = mob_SI * E_h * a_t * 1e-5 / a_B^2, the reference's
+    ! conversion: 8.5e-3 -> 2.0e-7).  Kept in SI-derived form via the atomic-unit constants.
+    tp3%mob_e0 = tp3%mob_e0 * hartree_ev*(atomic_unit_of_time*1.0d15)*1.0d-5/(atomic_unit_of_length*1.0d10)**2
+    tp3%mob_h0 = tp3%mob_h0 * hartree_ev*(atomic_unit_of_time*1.0d15)*1.0d-5/(atomic_unit_of_length*1.0d10)**2
     ! Auger coefficient [cm^6/s] -> [bohr^6 / a.u.time]
     tp3%A_e  = tp3%A_e * (1.0d-2/atomic_unit_of_length)**6 * atomic_unit_of_time
     tp3%A_h  = tp3%A_h * (1.0d-2/atomic_unit_of_length)**6 * atomic_unit_of_time
@@ -315,9 +333,11 @@ contains
     allocate( Ne(i1:j1,i2:j2,i3:j3), Nh(i1:j1,i2:j2,i3:j3) )
     allocate( rhs_te(i1:j1,i2:j2,i3:j3), rhs_th(i1:j1,i2:j2,i3:j3), rhs_tl(i1:j1,i2:j2,i3:j3) )
     allocate( rhs_ne(i1:j1,i2:j2,i3:j3), rhs_nh(i1:j1,i2:j2,i3:j3) )
+    allocate( Kc_e(i1:j1,i2:j2,i3:j3), Kc_h(i1:j1,i2:j2,i3:j3) )
 
     Te = tp3%Tini ; Th = tp3%Tini ; Tl = tp3%Tini
     Ne = N_floor  ; Nh = N_floor
+    Kc_e = 0.0d0  ; Kc_h = 0.0d0
   end subroutine init_ttm3_alloc
 
   !---------------------------------------------------------------------------
@@ -417,6 +437,22 @@ contains
     Fm = ttm3_fermi(1,eta); F0 = ttm3_fermi(2,eta); Fp = ttm3_fermi(3,eta)
     Ce = N*( 3.75d0*Fp/F0 - 2.25d0*F0/Fm )
   end function ttm3_heat_capacity
+
+  ! Set A: Fermi-Dirac carrier thermal conductivity (Wiedemann-Franz with degeneracy
+  ! corrections), reference Coef_Nc NTc(3)/(10).  K = (6 F_2/F_0 - 4 (F_1/F_0)^2) N Te mu,
+  ! mu = mob0 F_0/F_{1/2}.  (T is in energy units, so the reference's extra kbT is absorbed.)
+  pure function ttm3_thermal_cond( T, mc, N, mob0 ) result( K )
+    implicit none
+    real(8),intent(in) :: T,mc,N,mob0
+    real(8) :: K,eta,F0,F12,F1,F2,mu
+    eta = ttm3_chem_pot(T,mc,N)
+    F0  = ttm3_F0(eta)                       ! F_0 = ln(1+exp(eta))
+    F12 = ttm3_fermi(2,eta)                  ! F_{1/2}
+    F1  = ttm3_fermi(4,eta)                  ! F_1
+    F2  = ttm3_fermi(5,eta)                  ! F_2
+    mu  = mob0*F0/F12
+    K   = ( 6.0d0*F2/F0 - 4.0d0*(F1/F0)**2 )*N*T*mu
+  end function ttm3_thermal_cond
 
   !---------------------------------------------------------------------------
   ! Local rates for one cell (the right-hand side of the five ODEs).
@@ -551,21 +587,41 @@ contains
     type(s_rgrid),         intent(in)    :: rg
     integer :: m,ix,iy,iz
     real(8) :: cx,cy,cz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,Dmax,Dd
+    real(8) :: gx,gy,gz,gKe,gKh
+    logical :: use_fermi
 
-    if( tp3%Ddiff<=0.0d0 .and. tp3%kappa_e<=0.0d0 .and. tp3%kappa_l<=0.0d0 ) return
+    use_fermi = ( tp3%mob_e0>0.0d0 .or. tp3%mob_h0>0.0d0 )
+    if( tp3%Ddiff<=0.0d0 .and. tp3%kappa_e<=0.0d0 .and. tp3%kappa_l<=0.0d0 &
+        .and. .not.use_fermi ) return
 
     cx=1.0d0/hgs(1)**2; cy=1.0d0/hgs(2)**2; cz=1.0d0/hgs(3)**2
+    gx=0.5d0/hgs(1); gy=0.5d0/hgs(2); gz=0.5d0/hgs(3)   ! central first-difference
     ! explicit FTCS diffusion stability: the update u += dt*D*lap with the 7-point
     ! Laplacian amplifies unless dt*D*2*(cx+cy+cz) <= 1.  Cap every diffusivity so
     ! this factor stays at 0.5 (safety).  [The previous 0.4*min(h)^2/dt cap was the
     ! 1-D form; in 3-D it gives dt*D*6/h^2 = 2.4 > 1, i.e. unstable -> Te blow-up.]
     Dmax = 0.5d0/( 2.0d0*dt*(cx+cy+cz) )
     Dd   = min(tp3%Ddiff, Dmax)
+
+    ! Set A: per-cell Fermi-Dirac thermal conductivity (electron/hole), replacing the
+    ! constant kappa_e in the conduction term.  Density-dependent (K ~ N*mu), so the
+    ! conductivity shrinks with the carrier population, as in the reference.
+    if( use_fermi )then
+!$omp parallel do private(m,ix,iy,iz)
+       do m=1,nmedia_myrnk
+          ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+          Kc_e(ix,iy,iz)=ttm3_thermal_cond( Te(ix,iy,iz),tp3%mu_e,Ne(ix,iy,iz)+N_floor,tp3%mob_e0 )
+          Kc_h(ix,iy,iz)=ttm3_thermal_cond( Th(ix,iy,iz),tp3%mu_h,Nh(ix,iy,iz)+N_floor,tp3%mob_h0 )
+       end do
+!$omp end parallel do
+       call update_overlap_real8(srg, rg, Kc_e); call update_overlap_real8(srg, rg, Kc_h)
+    end if
+
     call update_overlap_real8(srg, rg, Ne); call update_overlap_real8(srg, rg, Nh)
     call update_overlap_real8(srg, rg, Te); call update_overlap_real8(srg, rg, Th)
     call update_overlap_real8(srg, rg, Tl)
 
-!$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl)
+!$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,gKe,gKh)
     do m=1,nmedia_myrnk
        ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
        lNe=(Ne(ix+1,iy,iz)-2*Ne(ix,iy,iz)+Ne(ix-1,iy,iz))*cx &
@@ -583,11 +639,26 @@ contains
        lTl=(Tl(ix+1,iy,iz)-2*Tl(ix,iy,iz)+Tl(ix-1,iy,iz))*cx &
           +(Tl(ix,iy+1,iz)-2*Tl(ix,iy,iz)+Tl(ix,iy-1,iz))*cy &
           +(Tl(ix,iy,iz+1)-2*Tl(ix,iy,iz)+Tl(ix,iy,iz-1))*cz
-       Ce=1.5d0*(Ne(ix,iy,iz)+N_floor); Ch=1.5d0*(Nh(ix,iy,iz)+N_floor)
+       Ce=ttm3_heat_capacity(Te(ix,iy,iz),tp3%mu_e,Ne(ix,iy,iz)+N_floor)
+       Ch=ttm3_heat_capacity(Th(ix,iy,iz),tp3%mu_h,Nh(ix,iy,iz)+N_floor)
        rhs_ne(ix,iy,iz)=dt*Dd*lNe
        rhs_nh(ix,iy,iz)=dt*Dd*lNh
-       rhs_te(ix,iy,iz)=dt*min(tp3%kappa_e/Ce,Dmax)*lTe
-       rhs_th(ix,iy,iz)=dt*min(tp3%kappa_e/Ch,Dmax)*lTh
+       if( use_fermi )then
+          ! heat conduction nab.(K nabT) = nabK.nabT + K lap(T), divided by the heat
+          ! capacity; the K lap(T) diffusivity K/Ce is CFL-capped, the nabK.nabT term
+          ! is a bounded first-order correction.
+          gKe=(Kc_e(ix+1,iy,iz)-Kc_e(ix-1,iy,iz))*gx*(Te(ix+1,iy,iz)-Te(ix-1,iy,iz))*gx &
+             +(Kc_e(ix,iy+1,iz)-Kc_e(ix,iy-1,iz))*gy*(Te(ix,iy+1,iz)-Te(ix,iy-1,iz))*gy &
+             +(Kc_e(ix,iy,iz+1)-Kc_e(ix,iy,iz-1))*gz*(Te(ix,iy,iz+1)-Te(ix,iy,iz-1))*gz
+          gKh=(Kc_h(ix+1,iy,iz)-Kc_h(ix-1,iy,iz))*gx*(Th(ix+1,iy,iz)-Th(ix-1,iy,iz))*gx &
+             +(Kc_h(ix,iy+1,iz)-Kc_h(ix,iy-1,iz))*gy*(Th(ix,iy+1,iz)-Th(ix,iy-1,iz))*gy &
+             +(Kc_h(ix,iy,iz+1)-Kc_h(ix,iy,iz-1))*gz*(Th(ix,iy,iz+1)-Th(ix,iy,iz-1))*gz
+          rhs_te(ix,iy,iz)=dt*( min(Kc_e(ix,iy,iz)/Ce,Dmax)*lTe + gKe/Ce )
+          rhs_th(ix,iy,iz)=dt*( min(Kc_h(ix,iy,iz)/Ch,Dmax)*lTh + gKh/Ch )
+       else
+          rhs_te(ix,iy,iz)=dt*min(tp3%kappa_e/Ce,Dmax)*lTe
+          rhs_th(ix,iy,iz)=dt*min(tp3%kappa_e/Ch,Dmax)*lTh
+       end if
        rhs_tl(ix,iy,iz)=dt*min(tp3%kappa_l/tp3%Cl,Dmax)*lTl
     end do
 !$omp end parallel do
