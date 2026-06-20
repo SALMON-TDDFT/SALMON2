@@ -3187,13 +3187,13 @@ contains
       
       !check ae_shape
       select case(ae_shape)
-      case('Ecos2','Acos2')
+      case('Ecos2','Acos2','Agauss')
         continue
       case default
         if     (ipulse==1) then
-          call stop_em('set ae_shape1 to "Ecos2" or "Acos2".')
+          call stop_em('set ae_shape1 to "Ecos2", "Acos2" or "Agauss".')
         elseif (ipulse==2) then
-          call stop_em('set ae_shape2 to "Ecos2" or "Acos2".')
+          call stop_em('set ae_shape2 to "Ecos2", "Acos2" or "Agauss".')
         end if
       end select
       
@@ -6620,6 +6620,18 @@ contains
                       -beta*cos(theta1)**2*sin(theta2_r))/beta*gamma
       e_inc_i = -amp*(-alpha*sin(2.d0*theta1)*cos(theta2_i) &
                       -beta*cos(theta1)**2*sin(theta2_i))/beta*gamma
+    elseif(aes=='Agauss') then
+      ! Gaussian-envelope pulse centred at 4*tw (so the field is ~0 at t=0 and rises
+      ! smoothly), envelope width tw.  Reproduces the standalone 3D3TM reference pulse
+      ! exp(-(t-4*tpulse)^2/tpulse^2) used for the carrier-generation study, where the
+      ! simulation window catches only the rising edge.  e_inc_i is the pi/2 quadrature
+      ! partner for the envelope feature.  No 0<=t<=tw window: the Gaussian decays itself.
+      gamma    = t - 4.0d0*tw                       ! time from the Gaussian centre
+      alpha    = exp( -gamma*gamma/(tw*tw) )        ! Gaussian envelope
+      theta2_r = omega*gamma + cep*2d0*pi
+      theta2_i = omega*gamma + cep*2d0*pi + 1.5d0*pi
+      e_inc_r  = amp*alpha*cos(theta2_r)
+      e_inc_i  = amp*alpha*cos(theta2_i)
     else
       e_inc_r=0.0d0; e_inc_i=0.0d0;
     end if
