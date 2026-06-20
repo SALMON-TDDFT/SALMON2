@@ -319,6 +319,11 @@ contains
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
       & k_cutoff_plane_wave, &
+      & dg_bpw_auto, &
+      & dg_bpw_auto_accuracy, &
+      & dg_bpw_auto_max_n, &
+      & dg_bpw_auto_min_n, &
+      & dg_bpw_auto_report, &
       & yn_dg_subspace_diag, &
       & dg_subspace_extra_states, &
       & dg_subspace_pw_vectors
@@ -799,6 +804,11 @@ contains
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
     k_cutoff_plane_wave = 0.5d0
+    dg_bpw_auto = 'n'
+    dg_bpw_auto_accuracy = 1.0d-3
+    dg_bpw_auto_max_n = -1
+    dg_bpw_auto_min_n = -1
+    dg_bpw_auto_report = 'y'
     yn_dg_subspace_diag = 'n'
     dg_subspace_extra_states = 8
     dg_subspace_pw_vectors = 4
@@ -1394,6 +1404,11 @@ contains
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
+    call comm_bcast(dg_bpw_auto,nproc_group_global)
+    call comm_bcast(dg_bpw_auto_accuracy,nproc_group_global)
+    call comm_bcast(dg_bpw_auto_max_n,nproc_group_global)
+    call comm_bcast(dg_bpw_auto_min_n,nproc_group_global)
+    call comm_bcast(dg_bpw_auto_report,nproc_group_global)
     call comm_bcast(yn_dg_subspace_diag,nproc_group_global)
     call comm_bcast(dg_subspace_extra_states,nproc_group_global)
     call comm_bcast(dg_subspace_pw_vectors,nproc_group_global)
@@ -2343,6 +2358,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'k_cutoff_plane_wave', k_cutoff_plane_wave
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_auto', dg_bpw_auto
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_bpw_auto_accuracy', dg_bpw_auto_accuracy
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_max_n', dg_bpw_auto_max_n
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_min_n', dg_bpw_auto_min_n
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_auto_report', dg_bpw_auto_report
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_subspace_diag', yn_dg_subspace_diag
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_extra_states', dg_subspace_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_pw_vectors', dg_subspace_pw_vectors
