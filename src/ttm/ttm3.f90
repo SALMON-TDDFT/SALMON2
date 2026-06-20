@@ -83,8 +83,12 @@ module ttm3
   real(8)             :: f_tab(0:f_neta,3)
   logical             :: f_built = .false.
 
-  ! density floor to keep the carrier heat capacity well defined
-  real(8),parameter :: N_floor = 1.0d-9    ! [1/bohr^3] (~7e15 cm^-3 carrier floor)
+  ! density floor to keep the carrier heat capacity well defined.  Set to the
+  ! reference's intrinsic seed density Ns ~ 5.4e-15 bohr^-3 (~3.4e10 cm^-3) so the
+  ! carrier population can reach the reference's near-transparent regime; this is
+  ! safe only because the carrier temperatures use the exponential integrator
+  ! (the old RK4 step blew up at such low Ne -- see ttm3_step_cell).
+  real(8),parameter :: N_floor = 5.4d-15   ! [1/bohr^3] (~3.4e10 cm^-3, reference seed)
   real(8),parameter :: T_clamp = 31.67d0   ! [a.u.] (~1e7 K) numerical temperature cap
   real(8),parameter :: pi_ = 3.14159265358979323846d0
 
@@ -446,32 +450,53 @@ contains
   end subroutine ttm3_rates
 
   !---------------------------------------------------------------------------
-  ! One classical Runge-Kutta (RK4) step for a single cell.  Pure scalar core
-  ! with no grid/MPI dependence, so it can be exercised standalone.
+  ! Advance a single cell by one step: an exponential integrator for the (stiff)
+  ! carrier temperatures and explicit Euler for the (non-stiff) densities/lattice.
+  ! The carrier-temperature ODE is a relaxation toward the diluted+heated target
+  !   dTe/dt = -rate_e*(Te - Te_star),   rate_e = 1/tau + geff/Ne,
+  !   Te_star = Tl + (red_e*q_heat/Ce)/rate_e
+  ! whose rate geff/Ne (dilution by cold, freshly-generated carriers) can far
+  ! exceed 1/dt at low Ne.  The exact update Te <- Te_star+(Te-Te_star)*exp(-rate_e*dt)
+  ! is unconditionally stable there (RK4 was not -- it blew up once Ne was small),
+  ! and since Te_star -> Tl + (2/3)red_e*(hw-Egap) as geff/Ne dominates, the hot-
+  ! carrier fixed point is reached without a clamp.  This removes the stiffness
+  ! limit on the carrier-density floor, so Ne can reach the reference's near-
+  ! transparent regime.
   subroutine ttm3_step_cell( Te_,Th_,Tl_,Ne_,Nh_, source_, gen_, dt_in )
     implicit none
     real(8),intent(inout) :: Te_,Th_,Tl_,Ne_,Nh_
     real(8),intent(in)    :: source_, gen_, dt_in
-    real(8) :: k1(5),k2(5),k3(5),k4(5)
-    real(8) :: y(5), yt(5)
+    real(8) :: Ce,Ch,R,geff,q_heat,red_e,red_h,inv_tau
+    real(8) :: rate_e,rate_h,Te_star,Th_star,dTl
 
-    y = (/Te_,Th_,Tl_,Ne_,Nh_/)
+    Ce = ttm3_heat_capacity( Te_, tp3%mu_e, Ne_+N_floor )
+    Ch = ttm3_heat_capacity( Th_, tp3%mu_h, Nh_+N_floor )
+    inv_tau = 1.0d0/tp3%tau
+    geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
+    R    = ( tp3%A_e*Ne_ + tp3%A_h*Nh_ )*Ne_*Nh_
+    red_e = tp3%mu_h/(tp3%mu_e+tp3%mu_h)
+    red_h = tp3%mu_e/(tp3%mu_e+tp3%mu_h)
+    q_heat = max( source_ - geff*tp3%Egap, 0.0d0 )
 
-    call ttm3_rates( y(1),y(2),y(3),y(4),y(5), source_,gen_, k1(1),k1(2),k1(3),k1(4),k1(5) )
-    yt = y + 0.5d0*dt_in*k1
-    call ttm3_rates( yt(1),yt(2),yt(3),yt(4),yt(5), source_,gen_, k2(1),k2(2),k2(3),k2(4),k2(5) )
-    yt = y + 0.5d0*dt_in*k2
-    call ttm3_rates( yt(1),yt(2),yt(3),yt(4),yt(5), source_,gen_, k3(1),k3(2),k3(3),k3(4),k3(5) )
-    yt = y + dt_in*k3
-    call ttm3_rates( yt(1),yt(2),yt(3),yt(4),yt(5), source_,gen_, k4(1),k4(2),k4(3),k4(4),k4(5) )
+    ! lattice: relaxation heating from the carriers (non-stiff, Cl large), using
+    ! the start-of-step carrier temperatures (energy-conserving relaxation channel)
+    dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / tp3%Cl
 
-    y = y + (dt_in/6.0d0)*( k1 + 2.0d0*k2 + 2.0d0*k3 + k4 )
+    ! carrier temperatures: exponential integrator (stiff relaxation + dilution)
+    rate_e = inv_tau + geff/(Ne_+N_floor)
+    rate_h = inv_tau + geff/(Nh_+N_floor)
+    Te_star = Tl_ + (red_e*q_heat/Ce)/rate_e
+    Th_star = Tl_ + (red_h*q_heat/Ch)/rate_h
+    Te_ = Te_star + (Te_-Te_star)*exp( -rate_e*dt_in )
+    Th_ = Th_star + (Th_-Th_star)*exp( -rate_h*dt_in )
 
-    ! numerical guard: clamp temperatures to a finite range so the coupled run
-    ! stays bounded where the recommended source/C heating is stiff at low Ne
-    ! (the exact Fermi heat capacity removes this stiffness; see the design notes).
-    Te_=min(max(y(1),0.0d0),T_clamp); Th_=min(max(y(2),0.0d0),T_clamp); Tl_=max(y(3),0.0d0)
-    Ne_=max(y(4),0.0d0); Nh_=max(y(5),0.0d0)
+    ! carrier densities and lattice: explicit Euler (non-stiff)
+    Ne_ = max( Ne_ + dt_in*(geff - R), 0.0d0 )
+    Nh_ = max( Nh_ + dt_in*(geff - R), 0.0d0 )
+    Tl_ = max( Tl_ + dt_in*dTl, 0.0d0 )
+
+    ! numerical guard (should not trigger now that the stiff modes are integrated exactly)
+    Te_ = min(max(Te_,0.0d0),T_clamp); Th_ = min(max(Th_,0.0d0),T_clamp)
   end subroutine ttm3_step_cell
 
   !---------------------------------------------------------------------------
