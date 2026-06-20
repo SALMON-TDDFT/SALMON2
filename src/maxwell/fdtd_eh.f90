@@ -210,6 +210,13 @@ module fdtd_eh
   private :: calc_poynting_vector_div
   integer,      private, parameter :: unit2=3000
   character(11),private, parameter :: file_unit2='ttm_rt.data'
+  ! three-temperature time-series output cadence (steps).  Set in eh_init so the
+  ! single 3tm_rt.data file stays bounded: at least every obs_samp_em steps, but
+  ! coarsened so the total row count never exceeds n_3tm_out_max (a long run with a
+  ! small obs_samp_em therefore cannot blow the file up).  open/append/close each
+  ! write keeps it to one descriptor (no per-cell unit, unlike the legacy TTM path).
+  integer,      private            :: i_3tm_out=1
+  integer,      private, parameter :: n_3tm_out_max=20000
 
 contains
   
@@ -870,6 +877,8 @@ contains
        call ttm3_set_dt( dt_em )   ! dt_em is finalised (CFL) by here; the early init captured 0
        call init_ttm3_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
        call init_ttm3_alloc( fs%srg_ng, fs%mg )
+       ! bound the time-series file: emit at most n_3tm_out_max rows, never finer than obs_samp_em
+       i_3tm_out = max( obs_samp_em, (nt_em + n_3tm_out_max - 1)/n_3tm_out_max )
        if( comm_is_root(nproc_id_global) )then
           open(unit2,file='3tm_rt.data')
           write(unit2,'("#",99(1X,I0,":",A))') &
@@ -3588,9 +3597,10 @@ contains
             fe%c2_jx(ix,iy,iz)=-t3_cj; fe%c2_jy(ix,iy,iz)=-t3_cj; fe%c2_jz(ix,iy,iz)=-t3_cj
         end do
 
-        if( mod(iter,obs_samp_em)==0 )then
+        if( mod(iter,i_3tm_out)==0 )then
           !report the peak over medium cells (the absorbing front, not the screened core).
           !single-domain diagnostic: local peak equals the global peak for nproc_rgrid=1.
+          !i_3tm_out (>= obs_samp_em) bounds 3tm_rt.data to <= n_3tm_out_max rows.
           call ttm3_get_max( t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh )
           if( comm_is_root(nproc_id_global) )then
             open(unit2,file='3tm_rt.data',status='old',position='append')
