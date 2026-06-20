@@ -69,6 +69,7 @@ module ttm3
   integer :: nmedia_myrnk
   integer :: ninterior
   integer :: is_array(3), ie_array(3)
+  integer :: is_inner(3), ie_inner(3)   ! inner (no-halo) bounds, for the space-charge prefix sum
   integer :: comm
   real(8) :: hgs(3)
   real(8) :: dt
@@ -83,6 +84,11 @@ module ttm3
   real(8),allocatable :: rhs_ne(:,:,:), rhs_nh(:,:,:)
   ! Set A (Fermi transport): per-cell thermal conductivity (electron/hole)
   real(8),allocatable :: Kc_e(:,:,:), Kc_h(:,:,:)
+  ! Set A layer 2 (carrier transport): diffusion Dc, mobility Mc, current components
+  ! Jc(species,dir)=grad N + coefjE grad gap + coefjT grad T, band gap, space-charge field.
+  real(8),allocatable :: Dc_e(:,:,:), Dc_h(:,:,:), Mc_e(:,:,:), Mc_h(:,:,:)
+  real(8),allocatable :: Jc_e(:,:,:,:), Jc_h(:,:,:,:)   ! (i,j,k,dir) -- dir last for contiguous halo
+  real(8),allocatable :: rgap(:,:,:), Efld(:,:,:)       ! local gap, space-charge field (x)
 
   ! Fermi-Dirac integral table F_j(eta).  Indices 1,2,3 = j = -1/2,1/2,3/2 (heat
   ! capacity / chemical potential); indices 4,5 = j = 1,2 (transport: mobility,
@@ -258,6 +264,8 @@ contains
     hgs(:)      = hgs_in(:)
     is_array(:) = is_a(:)
     ie_array(:) = ie(:)
+    is_inner(:) = is(:)
+    ie_inner(:) = ie(:)
 
     ! the temperatures/carriers live only on medium cells (imedia /= 0):
     ! build the local medium-cell index list, mirroring the two-temperature setup
@@ -334,10 +342,16 @@ contains
     allocate( rhs_te(i1:j1,i2:j2,i3:j3), rhs_th(i1:j1,i2:j2,i3:j3), rhs_tl(i1:j1,i2:j2,i3:j3) )
     allocate( rhs_ne(i1:j1,i2:j2,i3:j3), rhs_nh(i1:j1,i2:j2,i3:j3) )
     allocate( Kc_e(i1:j1,i2:j2,i3:j3), Kc_h(i1:j1,i2:j2,i3:j3) )
+    allocate( Dc_e(i1:j1,i2:j2,i3:j3), Dc_h(i1:j1,i2:j2,i3:j3) )
+    allocate( Mc_e(i1:j1,i2:j2,i3:j3), Mc_h(i1:j1,i2:j2,i3:j3) )
+    allocate( Jc_e(i1:j1,i2:j2,i3:j3,3), Jc_h(i1:j1,i2:j2,i3:j3,3) )
+    allocate( rgap(i1:j1,i2:j2,i3:j3), Efld(i1:j1,i2:j2,i3:j3) )
 
     Te = tp3%Tini ; Th = tp3%Tini ; Tl = tp3%Tini
     Ne = N_floor  ; Nh = N_floor
     Kc_e = 0.0d0  ; Kc_h = 0.0d0
+    Dc_e = 0.0d0  ; Dc_h = 0.0d0 ; Mc_e = 0.0d0 ; Mc_h = 0.0d0
+    Jc_e = 0.0d0  ; Jc_h = 0.0d0 ; rgap = tp3%Egap ; Efld = 0.0d0
   end subroutine init_ttm3_alloc
 
   !---------------------------------------------------------------------------
@@ -588,6 +602,8 @@ contains
     integer :: m,ix,iy,iz
     real(8) :: cx,cy,cz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,Dmax,Dd
     real(8) :: gx,gy,gz,gKe,gKh
+    real(8) :: eta,F0,Fm,F12,F1,F2,kT,cjE,cjT,fp4i
+    real(8) :: dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh
     logical :: use_fermi
 
     use_fermi = ( tp3%mob_e0>0.0d0 .or. tp3%mob_h0>0.0d0 )
@@ -596,57 +612,77 @@ contains
 
     cx=1.0d0/hgs(1)**2; cy=1.0d0/hgs(2)**2; cz=1.0d0/hgs(3)**2
     gx=0.5d0/hgs(1); gy=0.5d0/hgs(2); gz=0.5d0/hgs(3)   ! central first-difference
-    ! explicit FTCS diffusion stability: the update u += dt*D*lap with the 7-point
-    ! Laplacian amplifies unless dt*D*2*(cx+cy+cz) <= 1.  Cap every diffusivity so
-    ! this factor stays at 0.5 (safety).  [The previous 0.4*min(h)^2/dt cap was the
-    ! 1-D form; in 3-D it gives dt*D*6/h^2 = 2.4 > 1, i.e. unstable -> Te blow-up.]
+    ! explicit FTCS diffusion stability: cap every diffusivity so dt*D*2*(cx+cy+cz)<=0.5.
     Dmax = 0.5d0/( 2.0d0*dt*(cx+cy+cz) )
     Dd   = min(tp3%Ddiff, Dmax)
+    fp4i = 4.0d0*pi_/tp3%eps_bg                ! 4*pi*inveps (local Gauss term, dEf)
 
-    ! Set A: per-cell Fermi-Dirac thermal conductivity (electron/hole), replacing the
-    ! constant kappa_e in the conduction term.  Density-dependent (K ~ N*mu), so the
-    ! conductivity shrinks with the carrier population, as in the reference.
+    ! Set A: per-cell Fermi-Dirac transport coefficients + carrier current components.
     if( use_fermi )then
 !$omp parallel do private(m,ix,iy,iz)
        do m=1,nmedia_myrnk
           ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
-          Kc_e(ix,iy,iz)=ttm3_thermal_cond( Te(ix,iy,iz),tp3%mu_e,Ne(ix,iy,iz)+N_floor,tp3%mob_e0 )
-          Kc_h(ix,iy,iz)=ttm3_thermal_cond( Th(ix,iy,iz),tp3%mu_h,Nh(ix,iy,iz)+N_floor,tp3%mob_h0 )
+          rgap(ix,iy,iz)=ttm3_gap( Ne(ix,iy,iz) )    ! carrier-renormalised band gap
        end do
 !$omp end parallel do
-       call update_overlap_real8(srg, rg, Kc_e); call update_overlap_real8(srg, rg, Kc_h)
+       call update_overlap_real8(srg, rg, rgap)
     end if
 
     call update_overlap_real8(srg, rg, Ne); call update_overlap_real8(srg, rg, Nh)
     call update_overlap_real8(srg, rg, Te); call update_overlap_real8(srg, rg, Th)
     call update_overlap_real8(srg, rg, Tl)
 
-!$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,gKe,gKh)
+    if( use_fermi )then
+       ! pass 1: Fermi coefficients (mobility Mc, diffusion Dc, conductivity Kc) and the
+       ! current components Jc(dir)=grad N + coefjE grad gap + coefjT grad T (per species).
+!$omp parallel do private(m,ix,iy,iz,eta,F0,Fm,F12,F1,F2,kT,cjE,cjT)
+       do m=1,nmedia_myrnk
+          ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+          ! electrons
+          kT=Te(ix,iy,iz); eta=ttm3_chem_pot(kT,tp3%mu_e,Ne(ix,iy,iz)+N_floor)
+          F0=ttm3_F0(eta); Fm=ttm3_fermi(1,eta); F12=ttm3_fermi(2,eta)
+          F1=ttm3_fermi(4,eta); F2=ttm3_fermi(5,eta)
+          Mc_e(ix,iy,iz)=tp3%mob_e0*F0/F12
+          Dc_e(ix,iy,iz)=tp3%mob_e0*kT*F0/Fm
+          Kc_e(ix,iy,iz)=(6.0d0*F2/F0-4.0d0*(F1/F0)**2)*Ne(ix,iy,iz)*kT*Mc_e(ix,iy,iz)
+          cjE=(tp3%mu_h/(tp3%mu_e+tp3%mu_h))*(Ne(ix,iy,iz)+N_floor)*Fm/F12/kT
+          cjT=(Ne(ix,iy,iz)+N_floor)*(2.0d0*Fm*F1/(F12*F0)-1.5d0)/kT
+          Jc_e(ix,iy,iz,1)=(Ne(ix+1,iy,iz)-Ne(ix-1,iy,iz))*gx + cjE*(rgap(ix+1,iy,iz)-rgap(ix-1,iy,iz))*gx + cjT*(Te(ix+1,iy,iz)-Te(ix-1,iy,iz))*gx
+          Jc_e(ix,iy,iz,2)=(Ne(ix,iy+1,iz)-Ne(ix,iy-1,iz))*gy + cjE*(rgap(ix,iy+1,iz)-rgap(ix,iy-1,iz))*gy + cjT*(Te(ix,iy+1,iz)-Te(ix,iy-1,iz))*gy
+          Jc_e(ix,iy,iz,3)=(Ne(ix,iy,iz+1)-Ne(ix,iy,iz-1))*gz + cjE*(rgap(ix,iy,iz+1)-rgap(ix,iy,iz-1))*gz + cjT*(Te(ix,iy,iz+1)-Te(ix,iy,iz-1))*gz
+          ! holes
+          kT=Th(ix,iy,iz); eta=ttm3_chem_pot(kT,tp3%mu_h,Nh(ix,iy,iz)+N_floor)
+          F0=ttm3_F0(eta); Fm=ttm3_fermi(1,eta); F12=ttm3_fermi(2,eta)
+          F1=ttm3_fermi(4,eta); F2=ttm3_fermi(5,eta)
+          Mc_h(ix,iy,iz)=tp3%mob_h0*F0/F12
+          Dc_h(ix,iy,iz)=tp3%mob_h0*kT*F0/Fm
+          Kc_h(ix,iy,iz)=(6.0d0*F2/F0-4.0d0*(F1/F0)**2)*Nh(ix,iy,iz)*kT*Mc_h(ix,iy,iz)
+          cjE=(tp3%mu_e/(tp3%mu_e+tp3%mu_h))*(Nh(ix,iy,iz)+N_floor)*Fm/F12/kT
+          cjT=(Nh(ix,iy,iz)+N_floor)*(2.0d0*Fm*F1/(F12*F0)-1.5d0)/kT
+          Jc_h(ix,iy,iz,1)=(Nh(ix+1,iy,iz)-Nh(ix-1,iy,iz))*gx + cjE*(rgap(ix+1,iy,iz)-rgap(ix-1,iy,iz))*gx + cjT*(Th(ix+1,iy,iz)-Th(ix-1,iy,iz))*gx
+          Jc_h(ix,iy,iz,2)=(Nh(ix,iy+1,iz)-Nh(ix,iy-1,iz))*gy + cjE*(rgap(ix,iy+1,iz)-rgap(ix,iy-1,iz))*gy + cjT*(Th(ix,iy+1,iz)-Th(ix,iy-1,iz))*gy
+          Jc_h(ix,iy,iz,3)=(Nh(ix,iy,iz+1)-Nh(ix,iy,iz-1))*gz + cjE*(rgap(ix,iy,iz+1)-rgap(ix,iy,iz-1))*gz + cjT*(Th(ix,iy,iz+1)-Th(ix,iy,iz-1))*gz
+       end do
+!$omp end parallel do
+       call update_overlap_real8(srg, rg, Dc_e); call update_overlap_real8(srg, rg, Dc_h)
+       call update_overlap_real8(srg, rg, Mc_e); call update_overlap_real8(srg, rg, Mc_h)
+       call update_overlap_real8(srg, rg, Kc_e); call update_overlap_real8(srg, rg, Kc_h)
+       call update_overlap_real8(srg, rg, Jc_e(:,:,:,1)); call update_overlap_real8(srg, rg, Jc_e(:,:,:,2)); call update_overlap_real8(srg, rg, Jc_e(:,:,:,3))
+       call update_overlap_real8(srg, rg, Jc_h(:,:,:,1)); call update_overlap_real8(srg, rg, Jc_h(:,:,:,2)); call update_overlap_real8(srg, rg, Jc_h(:,:,:,3))
+       call ttm3_space_charge()                 ! Efld = space-charge field (prefix sum along x)
+    end if
+
+!$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,gKe,gKh, &
+!$omp&                    dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh)
     do m=1,nmedia_myrnk
        ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
-       lNe=(Ne(ix+1,iy,iz)-2*Ne(ix,iy,iz)+Ne(ix-1,iy,iz))*cx &
-          +(Ne(ix,iy+1,iz)-2*Ne(ix,iy,iz)+Ne(ix,iy-1,iz))*cy &
-          +(Ne(ix,iy,iz+1)-2*Ne(ix,iy,iz)+Ne(ix,iy,iz-1))*cz
-       lNh=(Nh(ix+1,iy,iz)-2*Nh(ix,iy,iz)+Nh(ix-1,iy,iz))*cx &
-          +(Nh(ix,iy+1,iz)-2*Nh(ix,iy,iz)+Nh(ix,iy-1,iz))*cy &
-          +(Nh(ix,iy,iz+1)-2*Nh(ix,iy,iz)+Nh(ix,iy,iz-1))*cz
-       lTe=(Te(ix+1,iy,iz)-2*Te(ix,iy,iz)+Te(ix-1,iy,iz))*cx &
-          +(Te(ix,iy+1,iz)-2*Te(ix,iy,iz)+Te(ix,iy-1,iz))*cy &
-          +(Te(ix,iy,iz+1)-2*Te(ix,iy,iz)+Te(ix,iy,iz-1))*cz
-       lTh=(Th(ix+1,iy,iz)-2*Th(ix,iy,iz)+Th(ix-1,iy,iz))*cx &
-          +(Th(ix,iy+1,iz)-2*Th(ix,iy,iz)+Th(ix,iy-1,iz))*cy &
-          +(Th(ix,iy,iz+1)-2*Th(ix,iy,iz)+Th(ix,iy,iz-1))*cz
-       lTl=(Tl(ix+1,iy,iz)-2*Tl(ix,iy,iz)+Tl(ix-1,iy,iz))*cx &
-          +(Tl(ix,iy+1,iz)-2*Tl(ix,iy,iz)+Tl(ix,iy-1,iz))*cy &
-          +(Tl(ix,iy,iz+1)-2*Tl(ix,iy,iz)+Tl(ix,iy,iz-1))*cz
+       lTe=(Te(ix+1,iy,iz)-2*Te(ix,iy,iz)+Te(ix-1,iy,iz))*cx+(Te(ix,iy+1,iz)-2*Te(ix,iy,iz)+Te(ix,iy-1,iz))*cy+(Te(ix,iy,iz+1)-2*Te(ix,iy,iz)+Te(ix,iy,iz-1))*cz
+       lTh=(Th(ix+1,iy,iz)-2*Th(ix,iy,iz)+Th(ix-1,iy,iz))*cx+(Th(ix,iy+1,iz)-2*Th(ix,iy,iz)+Th(ix,iy-1,iz))*cy+(Th(ix,iy,iz+1)-2*Th(ix,iy,iz)+Th(ix,iy,iz-1))*cz
+       lTl=(Tl(ix+1,iy,iz)-2*Tl(ix,iy,iz)+Tl(ix-1,iy,iz))*cx+(Tl(ix,iy+1,iz)-2*Tl(ix,iy,iz)+Tl(ix,iy-1,iz))*cy+(Tl(ix,iy,iz+1)-2*Tl(ix,iy,iz)+Tl(ix,iy,iz-1))*cz
        Ce=ttm3_heat_capacity(Te(ix,iy,iz),tp3%mu_e,Ne(ix,iy,iz)+N_floor)
        Ch=ttm3_heat_capacity(Th(ix,iy,iz),tp3%mu_h,Nh(ix,iy,iz)+N_floor)
-       rhs_ne(ix,iy,iz)=dt*Dd*lNe
-       rhs_nh(ix,iy,iz)=dt*Dd*lNh
        if( use_fermi )then
-          ! heat conduction nab.(K nabT) = nabK.nabT + K lap(T), divided by the heat
-          ! capacity; the K lap(T) diffusivity K/Ce is CFL-capped, the nabK.nabT term
-          ! is a bounded first-order correction.
+          ! heat conduction nab.(K nabT) = nabK.nabT + K lap(T), /Ce (K/Ce CFL-capped)
           gKe=(Kc_e(ix+1,iy,iz)-Kc_e(ix-1,iy,iz))*gx*(Te(ix+1,iy,iz)-Te(ix-1,iy,iz))*gx &
              +(Kc_e(ix,iy+1,iz)-Kc_e(ix,iy-1,iz))*gy*(Te(ix,iy+1,iz)-Te(ix,iy-1,iz))*gy &
              +(Kc_e(ix,iy,iz+1)-Kc_e(ix,iy,iz-1))*gz*(Te(ix,iy,iz+1)-Te(ix,iy,iz-1))*gz
@@ -655,7 +691,23 @@ contains
              +(Kc_h(ix,iy,iz+1)-Kc_h(ix,iy,iz-1))*gz*(Th(ix,iy,iz+1)-Th(ix,iy,iz-1))*gz
           rhs_te(ix,iy,iz)=dt*( min(Kc_e(ix,iy,iz)/Ce,Dmax)*lTe + gKe/Ce )
           rhs_th(ix,iy,iz)=dt*( min(Kc_h(ix,iy,iz)/Ch,Dmax)*lTh + gKh/Ch )
+          ! carrier transport: nab.(Dc Jc) - drift(space charge).  reference Evolve_N_T.
+          dJe=(Jc_e(ix+1,iy,iz,1)-Jc_e(ix-1,iy,iz,1))*gx+(Jc_e(ix,iy+1,iz,2)-Jc_e(ix,iy-1,iz,2))*gy+(Jc_e(ix,iy,iz+1,3)-Jc_e(ix,iy,iz-1,3))*gz
+          dJh=(Jc_h(ix+1,iy,iz,1)-Jc_h(ix-1,iy,iz,1))*gx+(Jc_h(ix,iy+1,iz,2)-Jc_h(ix,iy-1,iz,2))*gy+(Jc_h(ix,iy,iz+1,3)-Jc_h(ix,iy,iz-1,3))*gz
+          gDJe=(Dc_e(ix+1,iy,iz)-Dc_e(ix-1,iy,iz))*gx*Jc_e(ix,iy,iz,1)+(Dc_e(ix,iy+1,iz)-Dc_e(ix,iy-1,iz))*gy*Jc_e(ix,iy,iz,2)+(Dc_e(ix,iy,iz+1)-Dc_e(ix,iy,iz-1))*gz*Jc_e(ix,iy,iz,3)
+          gDJh=(Dc_h(ix+1,iy,iz)-Dc_h(ix-1,iy,iz))*gx*Jc_h(ix,iy,iz,1)+(Dc_h(ix,iy+1,iz)-Dc_h(ix,iy-1,iz))*gy*Jc_h(ix,iy,iz,2)+(Dc_h(ix,iy,iz+1)-Dc_h(ix,iy,iz-1))*gz*Jc_h(ix,iy,iz,3)
+          gMxe=(Mc_e(ix+1,iy,iz)-Mc_e(ix-1,iy,iz))*gx; gNxe=(Ne(ix+1,iy,iz)-Ne(ix-1,iy,iz))*gx
+          gMxh=(Mc_h(ix+1,iy,iz)-Mc_h(ix-1,iy,iz))*gx; gNxh=(Nh(ix+1,iy,iz)-Nh(ix-1,iy,iz))*gx
+          dEf=fp4i*(Ne(ix,iy,iz)-Nh(ix,iy,iz))               ! 4*pi*inveps*(Ne-Nh)
+          nabNe=min(Dc_e(ix,iy,iz),Dmax)*dJe + gDJe - (gMxe*Ne(ix,iy,iz)+Mc_e(ix,iy,iz)*gNxe)*Efld(ix,iy,iz) - Mc_e(ix,iy,iz)*Ne(ix,iy,iz)*dEf
+          nabNh=min(Dc_h(ix,iy,iz),Dmax)*dJh + gDJh + (gMxh*Nh(ix,iy,iz)+Mc_h(ix,iy,iz)*gNxh)*Efld(ix,iy,iz) + Mc_h(ix,iy,iz)*Nh(ix,iy,iz)*dEf
+          rhs_ne(ix,iy,iz)=dt*nabNe
+          rhs_nh(ix,iy,iz)=dt*nabNh
        else
+          lNe=(Ne(ix+1,iy,iz)-2*Ne(ix,iy,iz)+Ne(ix-1,iy,iz))*cx+(Ne(ix,iy+1,iz)-2*Ne(ix,iy,iz)+Ne(ix,iy-1,iz))*cy+(Ne(ix,iy,iz+1)-2*Ne(ix,iy,iz)+Ne(ix,iy,iz-1))*cz
+          lNh=(Nh(ix+1,iy,iz)-2*Nh(ix,iy,iz)+Nh(ix-1,iy,iz))*cx+(Nh(ix,iy+1,iz)-2*Nh(ix,iy,iz)+Nh(ix,iy-1,iz))*cy+(Nh(ix,iy,iz+1)-2*Nh(ix,iy,iz)+Nh(ix,iy,iz-1))*cz
+          rhs_ne(ix,iy,iz)=dt*Dd*lNe
+          rhs_nh(ix,iy,iz)=dt*Dd*lNh
           rhs_te(ix,iy,iz)=dt*min(tp3%kappa_e/Ce,Dmax)*lTe
           rhs_th(ix,iy,iz)=dt*min(tp3%kappa_e/Ch,Dmax)*lTh
        end if
@@ -674,6 +726,35 @@ contains
     end do
 !$omp end parallel do
   end subroutine ttm3_transport
+
+  !---------------------------------------------------------------------------
+  ! Space-charge field Efld along x: Ef(ix)=2*pi*inveps*[sum_{i<ix} - sum_{i>ix}] rho dV,
+  ! rho=(Nh-Ne) (charge density; zero in non-medium cells, Ne=Nh=floor).  Per (iy,iz)
+  ! line, a prefix sum over the local inner x-range (single-domain; nproc_rgrid=1).
+  subroutine ttm3_space_charge()
+    implicit none
+    integer :: ix,iy,iz
+    real(8) :: dV,c2,total,pre,rho
+    dV = hgs(1)*hgs(2)*hgs(3)
+    c2 = 2.0d0*pi_/tp3%eps_bg
+!$omp parallel do collapse(2) private(ix,iy,iz,total,pre,rho)
+    do iz=is_inner(3),ie_inner(3)
+    do iy=is_inner(2),ie_inner(2)
+       total=0.0d0
+       do ix=is_inner(1),ie_inner(1)
+          total=total+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
+       end do
+       pre=0.0d0                                  ! exclusive prefix sum (i<ix)
+       do ix=is_inner(1),ie_inner(1)
+          rho=Nh(ix,iy,iz)-Ne(ix,iy,iz)
+          ! Ef = (left - right)*dV*c2 ;  right = total - pre - rho
+          Efld(ix,iy,iz)=c2*dV*( 2.0d0*pre + rho - total )
+          pre=pre+rho
+       end do
+    end do
+    end do
+!$omp end parallel do
+  end subroutine ttm3_space_charge
 
   !---------------------------------------------------------------------------
   ! Return the five fields at a probe cell, converted to output units.
