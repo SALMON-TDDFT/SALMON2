@@ -450,4 +450,11 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
 
+  !! &gw
+  real(8)        :: epsilon_cutoff      ! Ry, dielectric-matrix G cutoff
+  integer        :: n_empty_gw          ! empty bands for chi0 / sigma_c sums
+  integer        :: qgrid_gw(3)         ! q-grid (= k-grid by default)
+  character(16)  :: sigma_type          ! 'sigx' | 'cohsex' | 'gpp'
+  integer        :: nband_qp_min, nband_qp_max  ! band window to correct/output
+
 end module salmon_global

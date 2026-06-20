@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_gw
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -604,6 +605,14 @@ contains
       & energy_cut, &
       & lambda_cut
 
+    namelist/gw/ &
+      & epsilon_cutoff, &
+      & n_empty_gw, &
+      & qgrid_gw, &
+      & sigma_type, &
+      & nband_qp_min, &
+      & nband_qp_max
+
 !! == default for &unit ==
     unit_system='au'
 !! =======================
@@ -1028,6 +1037,14 @@ contains
     energy_cut = 0d0
     lambda_cut = 1d-3
 
+!! == default for &gw
+    epsilon_cutoff = 10.0d0
+    n_empty_gw     = 0
+    qgrid_gw       = (/0,0,0/)
+    sigma_type     = 'sigx'
+    nband_qp_min   = 1
+    nband_qp_max   = 0
+
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
       open(fh_namelist, file='.namelist.tmp', status='old')
@@ -1105,6 +1122,9 @@ contains
       rewind(fh_namelist)
       
       read(fh_namelist, nml=dc, iostat=inml_dc)
+      rewind(fh_namelist)
+
+      read(fh_namelist, nml=gw, iostat=inml_gw)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1656,6 +1676,13 @@ contains
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
+!! == bcast for &gw
+    call comm_bcast(epsilon_cutoff, nproc_group_global)
+    call comm_bcast(n_empty_gw    , nproc_group_global)
+    call comm_bcast(qgrid_gw      , nproc_group_global)
+    call comm_bcast(sigma_type    , nproc_group_global)
+    call comm_bcast(nband_qp_min  , nproc_group_global)
+    call comm_bcast(nband_qp_max  , nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2618,7 +2645,16 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
-      
+
+      if(inml_gw >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'gw', inml_gw
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epsilon_cutoff', epsilon_cutoff
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_empty_gw',     n_empty_gw
+      write(fh_variables_log, '("#",4X,A,"=",3I4)')    'qgrid_gw',       qgrid_gw(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'sigma_type',     trim(sigma_type)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
+
       close(fh_variables_log)
     end if
 
