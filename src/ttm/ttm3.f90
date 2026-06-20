@@ -27,6 +27,7 @@ module ttm3
   public :: ttm3_step_cell
   public :: ttm3_get_state
   public :: ttm3_get_max
+  public :: ttm3_get_front
   public :: ttm3_permittivity
   public :: ttm3_eps_sig
   public :: ttm3_ninterior
@@ -626,6 +627,49 @@ contains
     Tl_o=Tl_o*hartree_kelvin_relationship
     Ne_o=Ne_o/cm3_per_bohr3; Nh_o=Nh_o/cm3_per_bohr3
   end subroutine ttm3_get_max
+
+  !---------------------------------------------------------------------------
+  ! State at the illuminated front face: the minimum-ix medium cell nearest the
+  ! transverse centroid.  This is the analogue of the reference's x=0 surface cell
+  ! and, unlike ttm3_get_max, is not biased by the Fabry-Perot field antinodes that
+  ! form inside a finite slab (which sit deeper than the front face and read high).
+  subroutine ttm3_get_front( Te_o, Th_o, Tl_o, Ne_o, Nh_o )
+    implicit none
+    real(8),intent(out) :: Te_o, Th_o, Tl_o, Ne_o, Nh_o   ! [K],[K],[K],[1/cm^3],[1/cm^3]
+    real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5
+    real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11
+    real(8) :: cm3_per_bohr3, cy, cz
+    integer :: m,ix,iy,iz,ixmin,nmin,a(3),dbest,d
+    Te_o=tp3%Tini*hartree_kelvin_relationship; Th_o=Te_o; Tl_o=Te_o; Ne_o=0d0; Nh_o=0d0
+    if( nmedia_myrnk<=0 ) return
+    cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
+    ! minimum ix among medium cells = the illuminated face
+    ixmin = ijk_media_myrnk(1,1)
+    do m=2,nmedia_myrnk
+       if( ijk_media_myrnk(1,m) < ixmin ) ixmin = ijk_media_myrnk(1,m)
+    end do
+    ! transverse centroid of that face
+    cy=0d0; cz=0d0; nmin=0
+    do m=1,nmedia_myrnk
+       if( ijk_media_myrnk(1,m)==ixmin )then
+          cy=cy+ijk_media_myrnk(2,m); cz=cz+ijk_media_myrnk(3,m); nmin=nmin+1
+       end if
+    end do
+    cy=cy/max(nmin,1); cz=cz/max(nmin,1)
+    ! face cell nearest the centroid
+    a = ijk_media_myrnk(1:3,1); dbest=huge(0)
+    do m=1,nmedia_myrnk
+       if( ijk_media_myrnk(1,m)==ixmin )then
+          iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+          d = (iy-nint(cy))**2 + (iz-nint(cz))**2
+          if( d<dbest )then; dbest=d; a=ijk_media_myrnk(1:3,m); end if
+       end if
+    end do
+    Te_o=Te(a(1),a(2),a(3))*hartree_kelvin_relationship
+    Th_o=Th(a(1),a(2),a(3))*hartree_kelvin_relationship
+    Tl_o=Tl(a(1),a(2),a(3))*hartree_kelvin_relationship
+    Ne_o=Ne(a(1),a(2),a(3))/cm3_per_bohr3; Nh_o=Nh(a(1),a(2),a(3))/cm3_per_bohr3
+  end subroutine ttm3_get_front
 
   !---------------------------------------------------------------------------
   ! Stage 2: carrier-dependent permittivity (recommended Drude model).

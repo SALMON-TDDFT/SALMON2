@@ -882,8 +882,9 @@ contains
        if( comm_is_root(nproc_id_global) )then
           open(unit2,file='3tm_rt.data')
           write(unit2,'("#",99(1X,I0,":",A))') &
-               1, "Time[fs]", 2, "T_ele[K]", 3, "T_hole[K]", 4, "T_lat[K]", &
-               5, "N_ele[cm-3]", 6, "N_hole[cm-3]"
+               1, "Time[fs]", &
+               2, "Te_front[K]", 3, "Th_front[K]", 4, "Tl_front[K]", 5, "Ne_front[cm-3]", 6, "Nh_front[cm-3]", &
+               7, "Te_max[K]",   8, "Th_max[K]",   9, "Tl_max[K]",  10, "Ne_max[cm-3]",  11, "Nh_max[cm-3]"
           close(unit2)
        end if
     end if !use_ttm3
@@ -3308,7 +3309,7 @@ contains
     use misc_routines,   only: get_wtime
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
-    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_eps_sig,&
+    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
                                ttm3_ninterior,ttm3_interior_cell
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
@@ -3326,6 +3327,7 @@ contains
     real(8),allocatable :: t3_S(:,:,:,:), t3_divS(:,:,:), t3_S_g(:,:,:,:), t3_divS_g(:,:,:)
     real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
+    real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
     real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj
     integer :: t3_im
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
@@ -3601,11 +3603,16 @@ contains
           !report the peak over medium cells (the absorbing front, not the screened core).
           !single-domain diagnostic: local peak equals the global peak for nproc_rgrid=1.
           !i_3tm_out (>= obs_samp_em) bounds 3tm_rt.data to <= n_3tm_out_max rows.
-          call ttm3_get_max( t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh )
+          ! front = illuminated face cell (matches the reference's x=0 surface cell);
+          ! max = global peak over medium cells (sits at internal Fabry-Perot antinodes,
+          ! reads high in a finite slab).  Both written so the two can be compared.
+          call ttm3_get_front( t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf )
+          call ttm3_get_max  ( t3_Te ,t3_Th ,t3_Tl ,t3_Ne ,t3_Nh  )
           if( comm_is_root(nproc_id_global) )then
             open(unit2,file='3tm_rt.data',status='old',position='append')
             write(unit2,"(F16.8,99(1X,E23.15E3))") &
-                 dble(iter)*dt_em*utime_from_au, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
+                 dble(iter)*dt_em*utime_from_au, &
+                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
             close(unit2)
           end if
         end if
