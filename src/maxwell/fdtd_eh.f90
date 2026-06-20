@@ -3328,7 +3328,7 @@ contains
     real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
     real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
-    real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj
+    real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj,t3_gtpa
     integer :: t3_im
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
@@ -3557,17 +3557,20 @@ contains
         else
           t3_power(:,:,:) = -t3_divS(:,:,:)
         end if
-        ! Energy-consistent carrier generation: one electron-hole pair per absorbed
-        ! photon, gen = (absorbed power)/(hbar*omega).  This ties generation to the
-        ! SAME absorbed power that heats (t3_power=-divS), so the gap cost gen*Egap is
-        ! always a bounded fraction (1-Egap/hw) of the absorbed power and Te cannot
-        ! diverge.  It mirrors the reference Se = alpha*I/(hbar*omega) (linear channel,
-        ! which dominates at 1.55 eV where two-photon absorption is negligible).
-        ! omega1 is the angular frequency in a.u., so hbar*omega = omega1 (hbar=1).
+        ! Carrier generation channels (reference Se):
+        !  - linear (1 pair / absorbed photon): gen = max(-divS,0)/(hbar*omega), tied to the
+        !    SAME absorbed power that heats, so the gap cost is a bounded fraction of it;
+        !  - two-photon (TPA): gen_tpa = beta2*I_env^2 (ttm3_generation), 2 photons per pair.
+        !    Its absorbed power 2*hbar*omega*gen_tpa is added to the heating source so the
+        !    energy book-keeping stays consistent.  beta2=0 (physical at 1.55 eV, below the
+        !    TPA threshold) leaves the validated linear result unchanged; beta2>0 activates
+        !    the channel for higher photon energy / intensity.  hbar*omega = omega1 (hbar=1).
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
-          t3_gen(ix,iy,iz) = max( t3_power(ix,iy,iz), 0.0d0 )/omega1
+          t3_gtpa = ttm3_generation( t3_env(ix,iy,iz) )                       ! beta2 * I_env^2
+          t3_gen(ix,iy,iz)   = max( t3_power(ix,iy,iz), 0.0d0 )/omega1 + t3_gtpa
+          t3_power(ix,iy,iz) = t3_power(ix,iy,iz) + 2.0d0*omega1*t3_gtpa      ! TPA: 2 hbar w per pair
         end do
         end do
         end do
