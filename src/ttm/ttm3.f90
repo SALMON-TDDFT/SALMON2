@@ -273,6 +273,12 @@ contains
     integer,intent(in) :: is_a(3), is(3), ie(3)
     integer,intent(in) :: imedia(is_a(1):,is_a(2):,is_a(3):)
     integer :: ix,iy,iz,m
+    logical :: allmed
+
+    ! Ablation mode (sig_cold>0): the surface metallizes, so the carrier-dependent optics
+    ! back-action must reach the illuminated face cell too -> include ALL medium cells, not
+    ! only the 6-neighbour interior.  Layer B / regression (sig_cold<=0) keeps interior-only.
+    allmed = ( tp3%sig_cold > 0.0d0 )
 
     hgs(:)      = hgs_in(:)
     is_array(:) = is_a(:)
@@ -312,10 +318,10 @@ contains
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
     do ix=is(1),ie(1)
-       if( imedia(ix,iy,iz)/=0 .and. &
+       if( imedia(ix,iy,iz)/=0 .and. ( allmed .or. ( &
            imedia(ix+1,iy,iz)==imedia(ix,iy,iz) .and. imedia(ix-1,iy,iz)==imedia(ix,iy,iz) .and. &
            imedia(ix,iy+1,iz)==imedia(ix,iy,iz) .and. imedia(ix,iy-1,iz)==imedia(ix,iy,iz) .and. &
-           imedia(ix,iy,iz+1)==imedia(ix,iy,iz) .and. imedia(ix,iy,iz-1)==imedia(ix,iy,iz) ) m = m + 1
+           imedia(ix,iy,iz+1)==imedia(ix,iy,iz) .and. imedia(ix,iy,iz-1)==imedia(ix,iy,iz) ) ) ) m = m + 1
     end do
     end do
     end do
@@ -326,10 +332,10 @@ contains
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
     do ix=is(1),ie(1)
-       if( imedia(ix,iy,iz)/=0 .and. &
+       if( imedia(ix,iy,iz)/=0 .and. ( allmed .or. ( &
            imedia(ix+1,iy,iz)==imedia(ix,iy,iz) .and. imedia(ix-1,iy,iz)==imedia(ix,iy,iz) .and. &
            imedia(ix,iy+1,iz)==imedia(ix,iy,iz) .and. imedia(ix,iy-1,iz)==imedia(ix,iy,iz) .and. &
-           imedia(ix,iy,iz+1)==imedia(ix,iy,iz) .and. imedia(ix,iy,iz-1)==imedia(ix,iy,iz) )then
+           imedia(ix,iy,iz+1)==imedia(ix,iy,iz) .and. imedia(ix,iy,iz-1)==imedia(ix,iy,iz) ) ) )then
           m = m + 1
           ijk_interior(1:3,m) = (/ix,iy,iz/)
        end if
