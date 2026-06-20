@@ -29,6 +29,7 @@ module ttm3
   public :: ttm3_get_max
   public :: ttm3_get_front
   public :: ttm3_permittivity
+  public :: ttm3_linear_gen
   public :: ttm3_eps_sig
   public :: ttm3_ninterior
   public :: ttm3_interior_cell
@@ -61,6 +62,12 @@ module ttm3
      ! the constant Ddiff/kappa_e.  Input m^2/Vs, converted to a.u. at read.
      real(8) :: mob_e0   ! electron mobility                 [a.u. = m^2/Vs*2.353e-5]
      real(8) :: mob_h0   ! hole mobility                     [a.u.]
+     ! Layer C-a (ablation): cold bound (interband) conductivity (optional 18th input line).
+     ! When >0, carrier generation is restricted to the BOUND absorption fraction
+     ! sig_bound/(sig_bound+sig_drude) with sig_bound=sig_cold*(1-Ne/N0) (band filling), so
+     ! free-carrier (Drude) absorption heats rather than ionises -> generation self-limits in
+     ! the metallisation regime.  <=0 disables the split (generation = full absorbed power).
+     real(8) :: sig_cold ! cold interband conductivity       [a.u.]         (Layer C-a)
   end type ttm3_param
 
   integer,allocatable :: ijk_media_whole(:,:)
@@ -179,6 +186,8 @@ contains
        tp3%mob_e0 = 0.0d0; tp3%mob_h0 = 0.0d0     ! optional (Set A Fermi transport)
        read(unit,*,iostat=ios) tp3%mob_e0
        read(unit,*,iostat=ios) tp3%mob_h0
+       tp3%sig_cold = 0.0d0                        ! optional (Layer C-a bound/Drude split); <=0 disables
+       read(unit,*,iostat=ios) tp3%sig_cold
        close(unit)
        write(*,*) "Egap[eV]    =",tp3%Egap
        write(*,*) "mu_e        =",tp3%mu_e
@@ -214,6 +223,7 @@ contains
     call comm_bcast(tp3%dgap_c ,comm,0)
     call comm_bcast(tp3%mob_e0 ,comm,0)
     call comm_bcast(tp3%mob_h0 ,comm,0)
+    call comm_bcast(tp3%sig_cold,comm,0)
 
 ! Convert to atomic units
     tp3%Egap = tp3%Egap / hartree_ev
@@ -885,11 +895,44 @@ contains
     implicit none
     real(8),intent(in)  :: Ne_, Nh_, omega
     real(8),intent(out) :: eps_re, sig
-    real(8) :: wp2
-    wp2    = 4.0d0*pi_*( Ne_/tp3%mu_e + Nh_/tp3%mu_h )
-    eps_re = tp3%eps_bg - wp2/(omega*omega)
-    sig    = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)
+    real(8) :: wp2, sig_d, bf
+    wp2   = 4.0d0*pi_*( Ne_/tp3%mu_e + Nh_/tp3%mu_h )
+    sig_d = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)        ! Drude (free-carrier)
+    if( tp3%sig_cold > 0.0d0 )then
+       ! Layer C-a: bound interband part scaled by band filling (1-Ne/N0), plus Drude.
+       bf     = max( 1.0d0 - Ne_/tp3%N0, 0.0d0 )
+       eps_re = tp3%eps_bg*bf - wp2/(omega*omega)
+       sig    = tp3%sig_cold*bf + sig_d
+    else
+       eps_re = tp3%eps_bg - wp2/(omega*omega)
+       sig    = sig_d
+    end if
   end subroutine ttm3_permittivity
+
+  !---------------------------------------------------------------------------
+  ! Layer C-a carrier generation: only the BOUND (interband) fraction of the absorbed
+  ! power creates electron-hole pairs.  sig_bound = sig_cold*(1-Ne/N0) depletes by band
+  ! filling; sig_drude grows with carriers.  As the material metallises the bound fraction
+  ! -> 0, so Drude absorption heats existing carriers instead of ionising -> generation
+  ! self-limits (the reference's metallisation behaviour).  sig_cold<=0 reproduces the old
+  ! "all absorbed power ionises" behaviour exactly (gen = max(power,0)/omega).
+  pure function ttm3_linear_gen( ix, iy, iz, omega, power ) result( gen )
+    implicit none
+    integer,intent(in) :: ix,iy,iz
+    real(8),intent(in) :: omega, power
+    real(8) :: gen, bf, sig_b, sig_d, wp2
+    if( power <= 0.0d0 )then
+       gen = 0.0d0; return
+    end if
+    if( tp3%sig_cold <= 0.0d0 )then
+       gen = power/omega; return                                ! old behaviour (no split)
+    end if
+    bf    = max( 1.0d0 - Ne(ix,iy,iz)/tp3%N0, 0.0d0 )
+    sig_b = tp3%sig_cold*bf
+    wp2   = 4.0d0*pi_*( Ne(ix,iy,iz)/tp3%mu_e + Nh(ix,iy,iz)/tp3%mu_h )
+    sig_d = wp2/(4.0d0*pi_)*(1.0d0/tp3%tau)/(omega*omega)
+    gen   = power/omega * sig_b/( sig_b + sig_d + 1.0d-50 )      ! bound fraction only
+  end function ttm3_linear_gen
 
   !---------------------------------------------------------------------------
   ! Stage 2 back-action: carrier-dependent permittivity/conductivity at a cell

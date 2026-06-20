@@ -3310,7 +3310,7 @@ contains
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
-                               ttm3_ninterior,ttm3_interior_cell
+                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     implicit none
@@ -3569,7 +3569,9 @@ contains
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
           t3_gtpa = ttm3_generation( t3_env(ix,iy,iz) )                       ! beta2 * I_env^2
-          t3_gen(ix,iy,iz)   = max( t3_power(ix,iy,iz), 0.0d0 )/omega1 + t3_gtpa
+          ! linear generation = BOUND-absorption fraction of the absorbed power (Layer C-a);
+          ! reduces to max(power,0)/omega1 when sig_cold<=0 (split disabled).
+          t3_gen(ix,iy,iz)   = ttm3_linear_gen( ix,iy,iz, omega1, t3_power(ix,iy,iz) ) + t3_gtpa
           t3_power(ix,iy,iz) = t3_power(ix,iy,iz) + 2.0d0*omega1*t3_gtpa      ! TPA: 2 hbar w per pair
         end do
         end do
