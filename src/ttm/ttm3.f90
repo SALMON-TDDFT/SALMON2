@@ -110,6 +110,8 @@ module ttm3
   real(8),parameter :: N_floor = 5.4d-15   ! [1/bohr^3] (~3.4e10 cm^-3, reference seed)
   real(8),parameter :: T_clamp = 31.67d0   ! [a.u.] (~1e7 K) numerical temperature cap
   real(8),parameter :: pi_ = 3.14159265358979323846d0
+  real(8),parameter :: hk_kelvin = 3.1577502480407d5   ! a.u. temperature -> Kelvin
+  real(8),parameter :: T_au = 2.48036d5                ! [a.u.time] Auger saturation timescale
 
   character(12) :: ttm3_file = 'ttm3.inp_3tm'
   logical :: DISPLAY=.false.
@@ -537,19 +539,28 @@ contains
     real(8),intent(in)    :: source_, gen_, dt_in
     real(8) :: Ce,Ch,R,geff,q_heat,red_e,red_h,inv_tau
     real(8) :: rate_e,rate_h,Te_star,Th_star,dTl
+    real(8) :: Cef_e,Cef_h,Re,Rh,gap,TlK,Cl_eff,Col
 
     Ce = ttm3_heat_capacity( Te_, tp3%mu_e, Ne_+N_floor )
     Ch = ttm3_heat_capacity( Th_, tp3%mu_h, Nh_+N_floor )
-    inv_tau = 1.0d0/tp3%tau
+    inv_tau = (1.0d0/tp3%tau)/( 1.0d0 + (Ne_*8443.9d0)**2 )      ! density-dependent e-ph relaxation
     geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
-    R    = ( tp3%A_e*Ne_ + tp3%A_h*Nh_ )*Ne_*Nh_
+    Cef_e = tp3%A_e*Ne_*Nh_ ; Re = Ne_*Cef_e/( 1.0d0 + T_au*Cef_e )   ! saturated Auger (e)
+    Cef_h = tp3%A_h*Ne_*Nh_ ; Rh = Nh_*Cef_h/( 1.0d0 + T_au*Cef_h )   ! saturated Auger (h)
+    R    = Re + Rh
     red_e = tp3%mu_h/(tp3%mu_e+tp3%mu_h)
     red_h = tp3%mu_e/(tp3%mu_e+tp3%mu_h)
-    q_heat = max( source_ - geff*tp3%Egap, 0.0d0 )
+    gap = ttm3_gap( Ne_, Tl_ )                                   ! carrier + thermal (Varshni) gap
+    q_heat = max( source_ - geff*gap, 0.0d0 )
+    ! thermal across-gap (collisional) carrier generation, Pauli-blocked
+    Col = 3.6d-5*2.419d-2*0.5d0*( Ne_*exp(-1.5d0*gap/Te_) + Nh_*exp(-1.5d0*gap/Th_) ) &
+          * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
 
-    ! lattice: relaxation heating from the carriers (non-stiff, Cl large), using
-    ! the start-of-step carrier temperatures (energy-conserving relaxation channel)
-    dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / tp3%Cl
+    ! lattice: relaxation heating from the carriers (non-stiff, Cl large), with the
+    ! temperature-dependent lattice heat capacity Cl(Tl) (= input value at 300 K)
+    TlK    = Tl_*hk_kelvin
+    Cl_eff = tp3%Cl*( 1.978d0 + 3.54d-4*TlK - 3.68d0/(TlK*TlK) )/2.084d0
+    dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / Cl_eff
 
     ! carrier temperatures: exponential integrator (stiff relaxation + dilution)
     rate_e = inv_tau + geff/(Ne_+N_floor)
@@ -559,9 +570,9 @@ contains
     Te_ = Te_star + (Te_-Te_star)*exp( -rate_e*dt_in )
     Th_ = Th_star + (Th_-Th_star)*exp( -rate_h*dt_in )
 
-    ! carrier densities and lattice: explicit Euler (non-stiff)
-    Ne_ = max( Ne_ + dt_in*(geff - R), 0.0d0 )
-    Nh_ = max( Nh_ + dt_in*(geff - R), 0.0d0 )
+    ! carrier densities and lattice: explicit Euler (non-stiff); +Col thermal generation
+    Ne_ = max( Ne_ + dt_in*(geff - R + Col), 0.0d0 )
+    Nh_ = max( Nh_ + dt_in*(geff - R + Col), 0.0d0 )
     Tl_ = max( Tl_ + dt_in*dTl, 0.0d0 )
 
     ! numerical guard (should not trigger now that the stiff modes are integrated exactly)
@@ -625,7 +636,7 @@ contains
 !$omp parallel do private(m,ix,iy,iz)
        do m=1,nmedia_myrnk
           ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
-          rgap(ix,iy,iz)=ttm3_gap( Ne(ix,iy,iz) )    ! carrier-renormalised band gap
+          rgap(ix,iy,iz)=ttm3_gap( Ne(ix,iy,iz), Tl(ix,iy,iz) )    ! carrier + thermal renormalised gap
        end do
 !$omp end parallel do
        call update_overlap_real8(srg, rg, rgap)
@@ -723,7 +734,7 @@ contains
           rhs_te(ix,iy,iz)=dt*min(tp3%kappa_e/Ce,Dmax)*lTe
           rhs_th(ix,iy,iz)=dt*min(tp3%kappa_e/Ch,Dmax)*lTh
        end if
-       rhs_tl(ix,iy,iz)=dt*min(tp3%kappa_l/tp3%Cl,Dmax)*lTl
+       rhs_tl(ix,iy,iz)=dt*min( tp3%kappa_l*(Tl(ix,iy,iz)*hk_kelvin/300.0d0)**(-1.23d0)/tp3%Cl, Dmax )*lTl  ! Kl(Tl)
     end do
 !$omp end parallel do
 
@@ -900,13 +911,15 @@ contains
   end function ttm3_generation
 
   !---------------------------------------------------------------------------
-  ! Stage 5: band-gap renormalisation (recommended form).
-  ! Eg(Ne) = Egap - dgap_c * Ne^(1/3)  (band-gap shrinkage with carrier density).
-  pure function ttm3_gap( Ne_ ) result( Eg )
+  ! Band-gap renormalisation: carrier-density shrinkage (dgap_c*Ne^(1/3)) plus the
+  ! thermal (Varshni) shift dET = 7.02e-4*TlK^2/(TlK+1108)/E_h [Hartree], TlK = Tl in K.
+  pure function ttm3_gap( Ne_, Tl_ ) result( Eg )
     implicit none
-    real(8),intent(in) :: Ne_
-    real(8) :: Eg
-    Eg = tp3%Egap - tp3%dgap_c*( max(Ne_,0.0d0) )**(1.0d0/3.0d0)
+    real(8),intent(in) :: Ne_, Tl_
+    real(8) :: Eg, TlK
+    TlK = Tl_*hk_kelvin
+    Eg = tp3%Egap - tp3%dgap_c*( max(Ne_,0.0d0) )**(1.0d0/3.0d0) &
+                  - 7.02d-4*TlK*TlK/(TlK+1108.0d0)/27.2114d0
   end function ttm3_gap
 
 end module ttm3
