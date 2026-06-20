@@ -89,6 +89,7 @@ module ttm3
   real(8),allocatable :: Dc_e(:,:,:), Dc_h(:,:,:), Mc_e(:,:,:), Mc_h(:,:,:)
   real(8),allocatable :: Jc_e(:,:,:,:), Jc_h(:,:,:,:)   ! (i,j,k,dir) -- dir last for contiguous halo
   real(8),allocatable :: rgap(:,:,:), Efld(:,:,:)       ! local gap, space-charge field (x)
+  real(8),allocatable :: Cj_e(:,:,:), Cj_h(:,:,:)       ! Set A layer 3: heat per carrier (cJeh)
 
   ! Fermi-Dirac integral table F_j(eta).  Indices 1,2,3 = j = -1/2,1/2,3/2 (heat
   ! capacity / chemical potential); indices 4,5 = j = 1,2 (transport: mobility,
@@ -346,12 +347,14 @@ contains
     allocate( Mc_e(i1:j1,i2:j2,i3:j3), Mc_h(i1:j1,i2:j2,i3:j3) )
     allocate( Jc_e(i1:j1,i2:j2,i3:j3,3), Jc_h(i1:j1,i2:j2,i3:j3,3) )
     allocate( rgap(i1:j1,i2:j2,i3:j3), Efld(i1:j1,i2:j2,i3:j3) )
+    allocate( Cj_e(i1:j1,i2:j2,i3:j3), Cj_h(i1:j1,i2:j2,i3:j3) )
 
     Te = tp3%Tini ; Th = tp3%Tini ; Tl = tp3%Tini
     Ne = N_floor  ; Nh = N_floor
     Kc_e = 0.0d0  ; Kc_h = 0.0d0
     Dc_e = 0.0d0  ; Dc_h = 0.0d0 ; Mc_e = 0.0d0 ; Mc_h = 0.0d0
     Jc_e = 0.0d0  ; Jc_h = 0.0d0 ; rgap = tp3%Egap ; Efld = 0.0d0
+    Cj_e = 0.0d0  ; Cj_h = 0.0d0
   end subroutine init_ttm3_alloc
 
   !---------------------------------------------------------------------------
@@ -603,7 +606,7 @@ contains
     real(8) :: cx,cy,cz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,Dmax,Dd
     real(8) :: gx,gy,gz,gKe,gKh
     real(8) :: eta,F0,Fm,F12,F1,F2,kT,cjE,cjT,fp4i
-    real(8) :: dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh
+    real(8) :: dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh,gCJe,gCJh
     logical :: use_fermi
 
     use_fermi = ( tp3%mob_e0>0.0d0 .or. tp3%mob_h0>0.0d0 )
@@ -650,6 +653,7 @@ contains
           Jc_e(ix,iy,iz,1)=(Ne(ix+1,iy,iz)-Ne(ix-1,iy,iz))*gx + cjE*(rgap(ix+1,iy,iz)-rgap(ix-1,iy,iz))*gx + cjT*(Te(ix+1,iy,iz)-Te(ix-1,iy,iz))*gx
           Jc_e(ix,iy,iz,2)=(Ne(ix,iy+1,iz)-Ne(ix,iy-1,iz))*gy + cjE*(rgap(ix,iy+1,iz)-rgap(ix,iy-1,iz))*gy + cjT*(Te(ix,iy+1,iz)-Te(ix,iy-1,iz))*gy
           Jc_e(ix,iy,iz,3)=(Ne(ix,iy,iz+1)-Ne(ix,iy,iz-1))*gz + cjE*(rgap(ix,iy,iz+1)-rgap(ix,iy,iz-1))*gz + cjT*(Te(ix,iy,iz+1)-Te(ix,iy,iz-1))*gz
+          Cj_e(ix,iy,iz)=2.0d0*kT*F1/F0 + (tp3%mu_h/(tp3%mu_e+tp3%mu_h))*rgap(ix,iy,iz)   ! heat per carrier
           ! holes
           kT=Th(ix,iy,iz); eta=ttm3_chem_pot(kT,tp3%mu_h,Nh(ix,iy,iz)+N_floor)
           F0=ttm3_F0(eta); Fm=ttm3_fermi(1,eta); F12=ttm3_fermi(2,eta)
@@ -662,18 +666,20 @@ contains
           Jc_h(ix,iy,iz,1)=(Nh(ix+1,iy,iz)-Nh(ix-1,iy,iz))*gx + cjE*(rgap(ix+1,iy,iz)-rgap(ix-1,iy,iz))*gx + cjT*(Th(ix+1,iy,iz)-Th(ix-1,iy,iz))*gx
           Jc_h(ix,iy,iz,2)=(Nh(ix,iy+1,iz)-Nh(ix,iy-1,iz))*gy + cjE*(rgap(ix,iy+1,iz)-rgap(ix,iy-1,iz))*gy + cjT*(Th(ix,iy+1,iz)-Th(ix,iy-1,iz))*gy
           Jc_h(ix,iy,iz,3)=(Nh(ix,iy,iz+1)-Nh(ix,iy,iz-1))*gz + cjE*(rgap(ix,iy,iz+1)-rgap(ix,iy,iz-1))*gz + cjT*(Th(ix,iy,iz+1)-Th(ix,iy,iz-1))*gz
+          Cj_h(ix,iy,iz)=2.0d0*kT*F1/F0 + (tp3%mu_e/(tp3%mu_e+tp3%mu_h))*rgap(ix,iy,iz)   ! heat per carrier
        end do
 !$omp end parallel do
        call update_overlap_real8(srg, rg, Dc_e); call update_overlap_real8(srg, rg, Dc_h)
        call update_overlap_real8(srg, rg, Mc_e); call update_overlap_real8(srg, rg, Mc_h)
        call update_overlap_real8(srg, rg, Kc_e); call update_overlap_real8(srg, rg, Kc_h)
+       call update_overlap_real8(srg, rg, Cj_e); call update_overlap_real8(srg, rg, Cj_h)
        call update_overlap_real8(srg, rg, Jc_e(:,:,:,1)); call update_overlap_real8(srg, rg, Jc_e(:,:,:,2)); call update_overlap_real8(srg, rg, Jc_e(:,:,:,3))
        call update_overlap_real8(srg, rg, Jc_h(:,:,:,1)); call update_overlap_real8(srg, rg, Jc_h(:,:,:,2)); call update_overlap_real8(srg, rg, Jc_h(:,:,:,3))
        call ttm3_space_charge()                 ! Efld = space-charge field (prefix sum along x)
     end if
 
 !$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,gKe,gKh, &
-!$omp&                    dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh)
+!$omp&                    dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh,gCJe,gCJh)
     do m=1,nmedia_myrnk
        ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
        lTe=(Te(ix+1,iy,iz)-2*Te(ix,iy,iz)+Te(ix-1,iy,iz))*cx+(Te(ix,iy+1,iz)-2*Te(ix,iy,iz)+Te(ix,iy-1,iz))*cy+(Te(ix,iy,iz+1)-2*Te(ix,iy,iz)+Te(ix,iy,iz-1))*cz
@@ -696,6 +702,12 @@ contains
           dJh=(Jc_h(ix+1,iy,iz,1)-Jc_h(ix-1,iy,iz,1))*gx+(Jc_h(ix,iy+1,iz,2)-Jc_h(ix,iy-1,iz,2))*gy+(Jc_h(ix,iy,iz+1,3)-Jc_h(ix,iy,iz-1,3))*gz
           gDJe=(Dc_e(ix+1,iy,iz)-Dc_e(ix-1,iy,iz))*gx*Jc_e(ix,iy,iz,1)+(Dc_e(ix,iy+1,iz)-Dc_e(ix,iy-1,iz))*gy*Jc_e(ix,iy,iz,2)+(Dc_e(ix,iy,iz+1)-Dc_e(ix,iy,iz-1))*gz*Jc_e(ix,iy,iz,3)
           gDJh=(Dc_h(ix+1,iy,iz)-Dc_h(ix-1,iy,iz))*gx*Jc_h(ix,iy,iz,1)+(Dc_h(ix,iy+1,iz)-Dc_h(ix,iy-1,iz))*gy*Jc_h(ix,iy,iz,2)+(Dc_h(ix,iy,iz+1)-Dc_h(ix,iy,iz-1))*gz*Jc_h(ix,iy,iz,3)
+          ! Layer 3: convective heat -- the carrier current carries energy cJeh per carrier:
+          ! nabW += cJeh*(Dc div Jc + grad Dc . Jc) + Dc*(grad cJeh . Jc).  Added to the heat RHS.
+          gCJe=(Cj_e(ix+1,iy,iz)-Cj_e(ix-1,iy,iz))*gx*Jc_e(ix,iy,iz,1)+(Cj_e(ix,iy+1,iz)-Cj_e(ix,iy-1,iz))*gy*Jc_e(ix,iy,iz,2)+(Cj_e(ix,iy,iz+1)-Cj_e(ix,iy,iz-1))*gz*Jc_e(ix,iy,iz,3)
+          gCJh=(Cj_h(ix+1,iy,iz)-Cj_h(ix-1,iy,iz))*gx*Jc_h(ix,iy,iz,1)+(Cj_h(ix,iy+1,iz)-Cj_h(ix,iy-1,iz))*gy*Jc_h(ix,iy,iz,2)+(Cj_h(ix,iy,iz+1)-Cj_h(ix,iy,iz-1))*gz*Jc_h(ix,iy,iz,3)
+          rhs_te(ix,iy,iz)=rhs_te(ix,iy,iz)+dt*( Cj_e(ix,iy,iz)*(Dc_e(ix,iy,iz)*dJe+gDJe) + Dc_e(ix,iy,iz)*gCJe )/Ce
+          rhs_th(ix,iy,iz)=rhs_th(ix,iy,iz)+dt*( Cj_h(ix,iy,iz)*(Dc_h(ix,iy,iz)*dJh+gDJh) + Dc_h(ix,iy,iz)*gCJh )/Ch
           gMxe=(Mc_e(ix+1,iy,iz)-Mc_e(ix-1,iy,iz))*gx; gNxe=(Ne(ix+1,iy,iz)-Ne(ix-1,iy,iz))*gx
           gMxh=(Mc_h(ix+1,iy,iz)-Mc_h(ix-1,iy,iz))*gx; gNxh=(Nh(ix+1,iy,iz)-Nh(ix-1,iy,iz))*gx
           dEf=fp4i*(Ne(ix,iy,iz)-Nh(ix,iy,iz))               ! 4*pi*inveps*(Ne-Nh)
