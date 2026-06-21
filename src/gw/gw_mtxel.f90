@@ -99,6 +99,13 @@
 !
 ! No proper nouns appear in this file.
 !
+! Pull in the generated build-configuration macros.  This is where the optional
+! serial-FFT switch is defined; without this include the preprocessor never sees
+! the switch, the fast path below is silently dropped, and only the direct-sum
+! fallback is compiled (the cause of an "FFT built but no transform symbols"
+! binary).  The header lives in the build directory, which is on the include
+! path, and is the same one the core modules use to gate the same switch.
+#include "config.h"
 module gw_mtxel_sub
   implicit none
   private
