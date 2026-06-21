@@ -1030,7 +1030,7 @@ contains
     wp2 = 4.0d0*pi_*Ne_*( 1.0d0/mu_eo + 1.0d0/mu_ho )             ! combined e+h plasma freq^2
     c0  = 1.0d0 + ge*dt/2.0d0
     c1  = ( 1.0d0 - ge*dt/2.0d0 )/c0
-    c2  = wp2*dt/( 8.0d0*pi_*c0 )
+    c2  = wp2*dt/( 4.0d0*pi_*c0 )                 ! drive with ex (=ex_y+ex_z); 4pi gives correct Drude sigma
   end subroutine ttm3_drude_coef
 
   ! Cell wrapper: ADE Drude coefficients from the cell's carrier state (for the FDTD coupling).
