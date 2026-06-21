@@ -36,7 +36,7 @@ subroutine main_gw
   use gw_qp_output_sub,   only: write_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel, replicate_orbitals_k
-  use gw_epsilon_sub,     only: calc_epsinv, calc_chi0_freq
+  use gw_epsilon_sub,     only: calc_epsinv, calc_chi0_freq, calc_w_freq
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
@@ -91,6 +91,11 @@ subroutine main_gw
   real(8)               :: qvec_cw(3), qabs_cw, qabs_min_cw, eta_cw, omg_cw(1)
   complex(8),allocatable:: chi0_cw(:,:,:)
   logical               :: ok_cw
+  ! --- W-level gate (b1-2): epsinv_w(w=0) vs calc_epsinv static ---
+  complex(8),allocatable:: epsinv_w_cw(:,:,:), epsinv_ref_cw(:,:)
+  real(8),  allocatable :: vcoul_cw(:)
+  real(8)               :: wmax_cw
+  integer               :: igw_cw, jgw_cw
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -451,6 +456,20 @@ subroutine main_gw
                         ismall_cw, qvec_cw, 1, 1, omg_cw, eta_cw, chi0_cw, &
                         ok=ok_cw, run_sanity=.true.)
     write(*,'(A,L2)') "  [gw][chi0w] q_ok =", ok_cw
+    ! W-level gate (b1-2): eps = 1 - v chi0_w(0) inverted == calc_epsinv static.
+    allocate(epsinv_w_cw(ng_cw,ng_cw,1), epsinv_ref_cw(ng_cw,ng_cw), vcoul_cw(ng_cw))
+    call calc_w_freq(system, gvec_cw, gg_cw, ng_cw, qvec_cw, 1, chi0_cw, &
+                     epsinv_w_cw, vcoul_cw)
+    call calc_epsinv(system, info, mg, lg, spsi, energy%esp, gvec_cw, gg_cw, ng_cw, &
+                     ismall_cw, qvec_cw, 1, epsinv_ref_cw)
+    wmax_cw = 0.0d0
+    do jgw_cw = 1, ng_cw
+      do igw_cw = 1, ng_cw
+        wmax_cw = max(wmax_cw, abs(epsinv_w_cw(igw_cw,jgw_cw,1) - epsinv_ref_cw(igw_cw,jgw_cw)))
+      end do
+    end do
+    write(*,'(A,ES12.4)') "  [gw][wfreq] max|epsinv_w(0)-epsinv_static| = ", wmax_cw
+    deallocate(epsinv_w_cw, epsinv_ref_cw, vcoul_cw)
     deallocate(gvec_cw, gg_cw, chi0_cw)
   end if
 

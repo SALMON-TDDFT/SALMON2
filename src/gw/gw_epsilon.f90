@@ -79,6 +79,7 @@ module gw_epsilon_sub
   public :: find_kpq
   public :: calc_epsinv
   public :: calc_chi0_freq
+  public :: calc_w_freq
 
   real(8), parameter :: g_match_tol = 1.0d-6   ! |G|-match tolerance (bohr^-1)^2
   real(8), parameter :: occ_thr     = 1.0d-6   ! occupied if rocc > occ_thr
@@ -664,5 +665,62 @@ contains
       write(*,*) "  [gw][chi0w] WARN: omega_grid has no 0 point; static gate skipped"
     deallocate(iGm, imap)
   end subroutine calc_chi0_freq
+
+
+  ! ----------------------------------------------------------------------
+  ! Real-frequency dielectric inversion (spec-b1).  For each omega:
+  !   eps_{GG'}(q,w) = delta_{GG'} - v(q+G) chi0_{GG'}(q,w)   (v on the ROW
+  !                    index G, the same convention as calc_epsinv)
+  ! invert with LAPACK (zgetrf+zgetri) -> epsinv_w(:,:,iw).  vcoul is returned
+  ! so callers can form W = epsinv . v (the absorption head needs only
+  ! eps_M = 1/epsinv_w(0,0); the correlation self-energy needs W).  chi0_w is
+  ! supplied by calc_chi0_freq.  At w=0,eta->0 the result equals calc_epsinv's
+  ! static epsinv to machine precision (regression gate iii at the W level).
+  ! ----------------------------------------------------------------------
+  subroutine calc_w_freq(system, gvec, gg, ng, qvec, nomega, chi0_w, epsinv_w, vcoul, ok)
+    use structures,    only: s_dft_system
+    use gw_coulomb_sub,only: build_vcoul
+    implicit none
+    type(s_dft_system), intent(in)  :: system
+    integer,            intent(in)  :: ng
+    real(8),            intent(in)  :: gvec(3,ng)
+    real(8),            intent(in)  :: gg(ng)
+    real(8),            intent(in)  :: qvec(3)
+    integer,            intent(in)  :: nomega
+    complex(8),         intent(in)  :: chi0_w(ng,ng,nomega)
+    complex(8),         intent(out) :: epsinv_w(ng,ng,nomega)
+    real(8),            intent(out) :: vcoul(ng)
+    logical, optional,  intent(out) :: ok
+
+    complex(8), allocatable :: epsm(:,:), zwork(:)
+    integer,    allocatable :: ipiv(:)
+    integer :: ig, jg, iw, lwork, linfo, nsub_head
+    real(8) :: omega
+
+    omega = abs(system%det_a)
+    nsub_head = 10
+    call build_vcoul(ng, gvec, gg, qvec, omega, system%nk, nsub_head, vcoul)
+
+    allocate(epsm(ng,ng), ipiv(ng))
+    lwork = ng * max(ng, 64)
+    allocate(zwork(lwork))
+
+    do iw = 1, nomega
+      do jg = 1, ng
+        do ig = 1, ng
+          epsm(ig,jg) = - vcoul(ig) * chi0_w(ig,jg,iw)
+        end do
+        epsm(jg,jg) = epsm(jg,jg) + (1.0d0, 0.0d0)
+      end do
+      call zgetrf(ng, ng, epsm, ng, ipiv, linfo)
+      if (linfo /= 0) write(*,*) "[gw][wfreq] zgetrf info=", linfo, " iw=", iw
+      call zgetri(ng, epsm, ng, ipiv, zwork, lwork, linfo)
+      if (linfo /= 0) write(*,*) "[gw][wfreq] zgetri info=", linfo, " iw=", iw
+      epsinv_w(:,:,iw) = epsm(:,:)
+    end do
+
+    deallocate(epsm, ipiv, zwork)
+    if (present(ok)) ok = .true.
+  end subroutine calc_w_freq
 
 end module gw_epsilon_sub
