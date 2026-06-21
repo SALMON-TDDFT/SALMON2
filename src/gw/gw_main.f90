@@ -81,7 +81,7 @@ subroutine main_gw
   logical, parameter :: run_sanity_t234 = .false.
   ! [gw][sym] self-test: validate the eps^{-1} G-rotation against a direct solve
   ! (set .true. + provide sym.dat + run on one rank).
-  logical, parameter :: run_sanity_sym  = .true.
+  logical, parameter :: run_sanity_sym  = .false.
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
