@@ -20,7 +20,7 @@ subroutine write_qp_energies(system, energy_ks, eqp, zfac, sigx, sigc, vxc)
   use structures,      only: s_dft_system
   use parallelization, only: nproc_id_global
   use communication,   only: comm_is_root
-  use inputoutput,     only: uenergy_from_au, iperiodic, base_directory, sysname
+  use inputoutput,     only: uenergy_from_au, iperiodic, base_directory, sysname, unit_energy
   use filesystem,      only: open_filehandle
   implicit none
   type(s_dft_system),intent(in) :: system
@@ -40,7 +40,12 @@ subroutine write_qp_energies(system, energy_ks, eqp, zfac, sigx, sigc, vxc)
   uid   = open_filehandle(trim(fname))
 
   write(uid,'("# quasiparticle energies (QP=KS passthrough scaffold)")')
-  write(uid,'("# 1:io 2:Eks[eV] 3:Eqp[eV] 4:Z 5:<Sigx>[eV] 6:<Sigc>[eV] 7:<Vxc>[eV] 8:occ")')
+  select case(unit_energy)
+  case('au','a.u.')
+    write(uid,'("# 1:io 2:Eks[a.u.] 3:Eqp[a.u.] 4:Z 5:<Sigx>[a.u.] 6:<Sigc>[a.u.] 7:<Vxc>[a.u.] 8:occ")')
+  case default
+    write(uid,'("# 1:io 2:Eks[eV] 3:Eqp[eV] 4:Z 5:<Sigx>[eV] 6:<Sigc>[eV] 7:<Vxc>[eV] 8:occ")')
+  end select
 
   do is  = 1, system%nspin
   do iik = 1, system%nk
