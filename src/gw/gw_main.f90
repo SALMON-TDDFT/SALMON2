@@ -35,6 +35,7 @@ subroutine main_gw
   use initialization_dft
   use gw_qp_output_sub,   only: write_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
+  use gw_mtxel_sub,       only: build_gmap, calc_mtxel
   use sendrecv_grid
   implicit none
 
@@ -76,6 +77,14 @@ subroutine main_gw
   real(8)               :: qzero(3)
   integer               :: ig_t2, nprint_t2, nsub1, nsub2
   real(8)               :: fourpi_t2, analytic_t2
+
+  ! --- variables for the task-3 sanity block (plane-wave matrix elements) ---
+  integer               :: ng_t3, ik_t3, nb_t3, ig0_t3, ib, jb
+  real(8),  allocatable :: gvec_t3(:,:), gg_t3(:)
+  integer,  allocatable :: gmap_t3(:,:)
+  logical,  allocatable :: iown_t3(:)
+  complex(8),allocatable:: mtxel_t3(:,:,:)
+  real(8)               :: errmax_t3, offmax_t3
 
   ! ----------------------------------------------------------------
   ! Step 0: report active GW input parameters (root only)
@@ -201,6 +210,76 @@ subroutine main_gw
 
     deallocate(gvec_t2, gg_t2, vcoul_t2)
   end if
+
+  ! ----------------------------------------------------------------
+  ! Task-3 sanity block: plane-wave matrix elements M_{nn'}(k,q=0,G).
+  ! All output prefixed with [gw][t3].  calc_mtxel performs collective
+  ! MPI (FFT + comm_summation), so the build/compute runs on ALL ranks;
+  ! only the printing is root-only.
+  !
+  !   M_{nn}(k,0,G=0)  must equal 1   (pins the FFT normalisation)
+  !   M_{nn'}(k,0,G=0) (n/=n') must be ~0 (orthonormality)
+  !
+  ! The G-vector list is rebuilt here on every rank (cheap, deterministic);
+  ! the gmap is built once and reused.  q=0 means ikq = ik (no umklapp).
+  ! ----------------------------------------------------------------
+  allocate(gvec_t3(3, ngmax_t2))
+  allocate(gg_t3(ngmax_t2))
+  call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                      ng_t3, gvec_t3, gg_t3)
+
+  allocate(gmap_t3(3, ng_t3))
+  allocate(iown_t3(ng_t3))
+  call build_gmap(fg, mg, ng_t3, gvec_t3, gmap_t3, iown_t3)
+
+  ! index of the G=0 entry in the gvec list (build_gvectors sorts |G|^2
+  ! ascending, so ig=1 is G=0).
+  ig0_t3 = 1
+
+  ! Use the first k-point and the first few bands; spin 1 (non-magnetic test).
+  ik_t3 = 1
+  nb_t3 = min(5, system%no)
+
+  allocate(mtxel_t3(ng_t3, nb_t3, nb_t3))
+  call calc_mtxel(system, info, mg, lg, fg, poisson, spsi, &
+                  gmap_t3, iown_t3, ng_t3, ik_t3, ik_t3, 1, nb_t3, nb_t3, mtxel_t3)
+
+  if (comm_is_root(nproc_id_global)) then
+    write(*,*)
+    write(*,*) "[gw][t3] plane-wave matrix elements M_{nn'}(k,q=0,G)"
+    write(*,*) "[gw][t3] ng =", ng_t3, "  k-index =", ik_t3, "  bands =", nb_t3
+    write(*,*) "[gw][t3] diagonal M_{nn}(k,0,G=0) (target 1.0):"
+    errmax_t3 = 0.0d0
+    do ib = 1, nb_t3
+      write(*,'(A,I3,A,ES16.8,A,ES12.4)') "  [gw][t3]   n=", ib, &
+        "  Re=", dble(mtxel_t3(ig0_t3,ib,ib)), &
+        "  Im=", aimag(mtxel_t3(ig0_t3,ib,ib))
+      errmax_t3 = max(errmax_t3, abs(mtxel_t3(ig0_t3,ib,ib) - (1.0d0,0.0d0)))
+    end do
+    write(*,'(A,ES12.4)') "  [gw][t3]   max |M_nn - 1| =", errmax_t3
+
+    write(*,*) "[gw][t3] off-diagonal M_{nn'}(k,0,G=0) (target 0.0):"
+    offmax_t3 = 0.0d0
+    do ib = 1, nb_t3
+    do jb = 1, nb_t3
+      if (ib == jb) cycle
+      offmax_t3 = max(offmax_t3, abs(mtxel_t3(ig0_t3,ib,jb)))
+    end do
+    end do
+    ! print a couple of representative off-diagonal entries
+    if (nb_t3 >= 2) then
+      write(*,'(A,ES16.8,A,ES16.8)') "  [gw][t3]   M_{12}(G=0): Re=", &
+        dble(mtxel_t3(ig0_t3,1,2)), "  Im=", aimag(mtxel_t3(ig0_t3,1,2))
+    end if
+    if (nb_t3 >= 3) then
+      write(*,'(A,ES16.8,A,ES16.8)') "  [gw][t3]   M_{13}(G=0): Re=", &
+        dble(mtxel_t3(ig0_t3,1,3)), "  Im=", aimag(mtxel_t3(ig0_t3,1,3))
+    end if
+    write(*,'(A,ES12.4)') "  [gw][t3]   max |M_nn'(n/=n')| =", offmax_t3
+    write(*,*)
+  end if
+
+  deallocate(gvec_t3, gg_t3, gmap_t3, iown_t3, mtxel_t3)
 
   ! ----------------------------------------------------------------
   ! Step 5: QP passthrough — allocate and fill
