@@ -3638,9 +3638,13 @@ contains
             open(unit2,file='3tm_rt.data',status='old',position='append')
             ! col 12 = front-cell field-intensity envelope |E|^2+|E_g|^2 [a.u.]; compare to the
             ! reference surface intensity out_all(6)=3.509e16*|E|^2*n to localize the ~2x field factor.
+            ! col 13 = front-cell heating source -divS [a.u. power/vol]; col 14 = front-cell
+            ! generation rate [a.u.].  With Te/Ne/Tl these reconstruct the full dTe balance
+            ! externally (Ce, e-phonon, dilution, Col, gap cost) -> localize what sets Te.
             write(unit2,"(F16.8,99(1X,E23.15E3))") &
                  dble(iter)*dt_em*utime_from_au, &
-                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, t3_env(ix,iy,iz)
+                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, t3_env(ix,iy,iz), &
+                 t3_power(ix,iy,iz), t3_gen(ix,iy,iz)
             close(unit2)
             ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K], |E|^2[a.u.]) for spatial diagnostics
             call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2, t3_env )
