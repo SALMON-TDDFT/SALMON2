@@ -7,6 +7,7 @@ set(SOURCES
     gw_sigma_gpp.f90
     gw_qp.f90
     gw_qp_output.f90
+    gw_symmetry.f90
     gw_main.f90
    )
 

@@ -41,6 +41,7 @@ subroutine main_gw
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
+  use gw_symmetry_sub,    only: gw_sym_selftest
   use sendrecv_grid
   implicit none
 
@@ -78,6 +79,9 @@ subroutine main_gw
   ! t2/t3/t4 sanity blocks are validated; compile them out of production runs
   ! (set .true. to re-enable the per-stage diagnostics).
   logical, parameter :: run_sanity_t234 = .false.
+  ! [gw][sym] self-test: validate the eps^{-1} G-rotation against a direct solve
+  ! (set .true. + provide sym.dat + run on one rank).
+  logical, parameter :: run_sanity_sym  = .true.
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -397,6 +401,14 @@ subroutine main_gw
 
   deallocate(gvec_t4, gg_t4, epsinv_t4, epsd_t4)
   end if  ! run_sanity_t234
+
+  ! ----------------------------------------------------------------
+  ! [gw][sym] self-test: validate the eps^{-1} G-rotation convention used by the
+  ! symmetry-reduced BZ sum, in isolation, before it feeds the self-energy.
+  ! ----------------------------------------------------------------
+  if (run_sanity_sym) then
+    call gw_sym_selftest(system, info, mg, lg, spsi, energy%esp, epsilon_cutoff)
+  end if
 
   ! ----------------------------------------------------------------
   ! Step 5: QP energies — full (no,nk,nspin) arrays for the output file.
