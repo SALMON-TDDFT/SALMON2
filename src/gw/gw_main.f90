@@ -36,7 +36,7 @@ subroutine main_gw
   use gw_qp_output_sub,   only: write_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel, replicate_orbitals_k
-  use gw_epsilon_sub,     only: calc_epsinv
+  use gw_epsilon_sub,     only: calc_epsinv, calc_chi0_freq
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
@@ -82,6 +82,15 @@ subroutine main_gw
   ! [gw][sym] self-test: validate the eps^{-1} G-rotation against a direct solve
   ! (set .true. + provide sym.dat + run on one rank).
   logical, parameter :: run_sanity_sym  = .false.
+  ! [gw][chi0w] self-test (spec-b1): omega=0,eta=0 limit of the real-frequency
+  ! chi0 reproduces calc_epsinv's static weight (set .true., run -n1).
+  logical, parameter :: run_sanity_chi0w = .false.
+  ! --- variables for the [gw][chi0w] self-test ---
+  integer               :: ng_cw, iq_cw, ismall_cw
+  real(8),  allocatable :: gvec_cw(:,:), gg_cw(:)
+  real(8)               :: qvec_cw(3), qabs_cw, qabs_min_cw, eta_cw, omega1(1)
+  complex(8),allocatable:: chi0_cw(:,:,:)
+  logical               :: ok_cw
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -412,6 +421,37 @@ subroutine main_gw
     ! eps G-rotation discrepancy should collapse to machine precision.
     call gw_symmetrize_orbitals(system, info, lg, spsi, energy)
     call gw_sym_selftest(system, info, mg, lg, spsi, energy%esp, epsilon_cutoff)
+  end if
+
+  ! ----------------------------------------------------------------
+  ! [gw][chi0w] self-test (spec-b1): the omega=0, eta=0 limit of the
+  ! real-frequency polarizability must reproduce calc_epsinv's static
+  ! per-pair weight (regression gate iii).  One omega=0 point, zero
+  ! broadening, smallest non-zero q (exercises the umklapp/imap path).
+  ! ----------------------------------------------------------------
+  if (run_sanity_chi0w) then
+    allocate(gvec_cw(3, ngmax_t2), gg_cw(ngmax_t2))
+    call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                        ng_cw, gvec_cw, gg_cw)
+    qabs_min_cw = huge(1.0d0); ismall_cw = 0
+    do iq_cw = 1, system%nk
+      qvec_cw(1:3) = system%vec_k(1:3,iq_cw) - system%vec_k(1:3,1)
+      qabs_cw = sqrt(sum(qvec_cw(1:3)**2))
+      if (qabs_cw > 1.0d-8 .and. qabs_cw < qabs_min_cw) then
+        qabs_min_cw = qabs_cw; ismall_cw = iq_cw
+      end if
+    end do
+    if (ismall_cw == 0) ismall_cw = 1
+    qvec_cw(1:3) = system%vec_k(1:3,ismall_cw) - system%vec_k(1:3,1)
+    omega1(1) = 0.0d0
+    eta_cw    = 0.0d0
+    allocate(chi0_cw(ng_cw, ng_cw, 1))
+    write(*,'(A,I6,A,I4)') "  [gw][chi0w] ng =", ng_cw, "  q-index =", ismall_cw
+    call calc_chi0_freq(system, info, mg, lg, spsi, energy%esp, gvec_cw, ng_cw, &
+                        ismall_cw, qvec_cw, 1, 1, omega1, eta_cw, chi0_cw, &
+                        ok=ok_cw, run_sanity=.true.)
+    write(*,'(A,L2)') "  [gw][chi0w] q_ok =", ok_cw
+    deallocate(gvec_cw, gg_cw, chi0_cw)
   end if
 
   ! ----------------------------------------------------------------

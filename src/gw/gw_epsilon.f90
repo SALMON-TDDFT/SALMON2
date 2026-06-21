@@ -78,6 +78,7 @@ module gw_epsilon_sub
   public :: build_gminus
   public :: find_kpq
   public :: calc_epsinv
+  public :: calc_chi0_freq
 
   real(8), parameter :: g_match_tol = 1.0d-6   ! |G|-match tolerance (bohr^-1)^2
   real(8), parameter :: occ_thr     = 1.0d-6   ! occupied if rocc > occ_thr
@@ -497,5 +498,171 @@ contains
     deallocate(chi0, eps, iGm, imap, vcoul)
 
   end subroutine calc_epsinv
+
+
+  ! ----------------------------------------------------------------------
+  ! Real-frequency RPA polarizability chi0_{GG'}(q,omega) on a real-omega
+  ! grid (spec-b1).  Same occ->unocc assembly as calc_epsinv, but the single
+  ! static denominator (f_v-f_c)/(e_v-e_c) is generalised to the omega-
+  ! dependent two-pole form, normalised so its omega=0, eta->0 limit
+  ! reproduces calc_epsinv's static weight EXACTLY (regression gate iii):
+  !
+  !   wgt(w) = (1/Omega)(f_v-f_c) * (1/2)[ 1/(w - Delta + i eta)
+  !                                      - 1/(w + Delta - i eta) ]
+  !   Delta = e_c - e_v > 0 ;  at w=0,eta->0 : (1/2)(-1/Delta - 1/Delta)
+  !                                          = -1/Delta = 1/(e_v-e_c).
+  !
+  ! NOTE on the prefactor: the static weight here sums occ->unocc ONCE with a
+  ! single denominator, i.e. the 1/2 normalisation of the symmetric two-pole
+  ! form.  The absolute scale of Im eps (vs RT-TDDFT, spec gate ii) is what
+  ! arbitrates whether this convention needs the historical x2 (the long-open
+  ! chi0 prefactor / eps_inf question).  Here we only guarantee the w=0 limit
+  ! matches the existing static path so the QP/GPP gap is reproduced.
+  !
+  ! This returns the BARE polarizability only (no vcoul, no inversion); the
+  ! dielectric inversion eps = 1 - v chi0 -> eps^{-1}, W is calc_w_freq.
+  ! ----------------------------------------------------------------------
+  subroutine calc_chi0_freq(system, info, mg, lg, spsi, esp, gvec, ng, iq, qvec, &
+                            ispin, nomega, omega_grid, eta, chi0_w, ok, local_only, run_sanity)
+    use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
+    use gw_mtxel_sub,  only: calc_mtxel
+    implicit none
+    type(s_dft_system),    intent(in)  :: system
+    type(s_parallel_info), intent(in)  :: info
+    type(s_rgrid),         intent(in)  :: mg
+    type(s_rgrid),         intent(in)  :: lg
+    type(s_orbital),       intent(in)  :: spsi
+    real(8),               intent(in)  :: esp(system%no, system%nk, system%nspin)
+    integer,               intent(in)  :: ng
+    real(8),               intent(in)  :: gvec(3,ng)
+    integer,               intent(in)  :: iq
+    real(8),               intent(in)  :: qvec(3)
+    integer,               intent(in)  :: ispin
+    integer,               intent(in)  :: nomega
+    real(8),               intent(in)  :: omega_grid(nomega)   ! a.u.
+    real(8),               intent(in)  :: eta                  ! a.u.
+    complex(8),            intent(out) :: chi0_w(ng,ng,nomega)
+    logical,    optional,  intent(out) :: ok
+    logical,    optional,  intent(in)  :: local_only
+    logical,    optional,  intent(in)  :: run_sanity
+
+    complex(8), allocatable :: mtxel(:,:,:)
+    complex(8), allocatable :: mcv(:,:), prodw(:,:)
+    real(8),    allocatable :: dwp(:), delp(:)        ! per-pair (f_v-f_c) and Delta
+    integer,    allocatable :: iGm(:), imap(:)
+    integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, iw, iw0
+    real(8) :: g0vec(3), gtarget(3), omega, inv_omega
+    real(8) :: fv, fc, de, smax
+    complex(8) :: zi, zw, zden, wgt_w, zfac
+    logical :: q_ok, ll, dosan
+
+    zi   = (0.0d0, 1.0d0)
+    ll   = .false.;  if (present(local_only)) ll = local_only
+    dosan= .false.;  if (present(run_sanity)) dosan = run_sanity
+    no   = system%no;  nk = system%nk
+    omega= abs(system%det_a);  inv_omega = 1.0d0/omega
+
+    allocate(iGm(ng), imap(ng))
+    chi0_w(:,:,:) = (0.0d0, 0.0d0)
+    call build_gminus(ng, gvec, iGm)
+    if (any(iGm(:)==0)) write(*,*) "[gw][chi0w] FATAL: gvec not closed under -G (iq=", iq, ")"
+    q_ok = .true.
+
+    iw0 = 0
+    do iw = 1, nomega
+      if (abs(omega_grid(iw)) < 1.0d-12) iw0 = iw     ! locate the omega=0 point
+    end do
+    smax = 0.0d0
+
+    do ik = 1, nk
+      call find_kpq(system, ik, qvec, ikq, g0vec)
+      if (ikq == 0) then
+        q_ok = .false.; exit
+      end if
+      do ig = 1, ng
+        gtarget(1) = -( gvec(1,ig) + g0vec(1) )
+        gtarget(2) = -( gvec(2,ig) + g0vec(2) )
+        gtarget(3) = -( gvec(3,ig) + g0vec(3) )
+        imap(ig) = gindex_of(ng, gvec, gtarget)
+      end do
+
+      allocate(mtxel(ng, no, no))
+      call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikq, ispin, &
+                      no, no, mtxel, local_only=ll)
+
+      npair = 0
+      do iv = 1, no
+        if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
+        do ic = 1, no
+          if (system%rocc(ic,ikq,ispin) > occ_thr) cycle
+          npair = npair + 1
+        end do
+      end do
+
+      if (npair > 0) then
+        allocate(mcv(ng,npair), prodw(ng,npair), dwp(npair), delp(npair))
+        ! Pass 1: build remapped M and the (omega-independent) per-pair data.
+        ipair = 0
+        do iv = 1, no
+          fv = system%rocc(iv,ik,ispin)
+          if (fv <= occ_thr) cycle
+          do ic = 1, no
+            fc = system%rocc(ic,ikq,ispin)
+            if (fc > occ_thr) cycle
+            de = esp(iv,ik,ispin) - esp(ic,ikq,ispin)
+            if (abs(de) < denom_tiny) cycle
+            ipair = ipair + 1
+            dwp(ipair)  = fv - fc
+            delp(ipair) = -de                       ! Delta = e_c - e_v > 0
+            do ig = 1, ng
+              jg = imap(ig)
+              if (jg == 0) then
+                mcv(ig,ipair) = (0.0d0, 0.0d0)
+              else
+                mcv(ig,ipair) = mtxel(jg, ic, iv)
+              end if
+            end do
+          end do
+        end do
+        nfill = ipair
+
+        ! Pass 2: per-omega weighted rank-1 accumulation.
+        do iw = 1, nomega
+          zw = cmplx(omega_grid(iw), 0.0d0, 8)
+          do ipair = 1, nfill
+            zden  = 0.5d0*( 1.0d0/(zw - delp(ipair) + zi*eta) &
+                         -  1.0d0/(zw + delp(ipair) - zi*eta) )
+            wgt_w = inv_omega * dwp(ipair) * zden
+            if (dosan .and. iw == iw0) &
+              smax = max(smax, abs(wgt_w - cmplx(-inv_omega*dwp(ipair)/delp(ipair), 0.0d0, 8)))
+            do ig = 1, ng
+              prodw(ig,ipair) = wgt_w * mcv(ig,ipair)
+            end do
+          end do
+          do ipair = 1, nfill
+            do jg = 1, ng
+              zfac = prodw(jg,ipair)
+              if (zfac == (0.0d0,0.0d0)) cycle
+              do ig = 1, ng
+                chi0_w(ig,jg,iw) = chi0_w(ig,jg,iw) + conjg(mcv(ig,ipair)) * zfac
+              end do
+            end do
+          end do
+        end do
+
+        deallocate(mcv, prodw, dwp, delp)
+      end if
+
+      deallocate(mtxel)
+    end do  ! ik
+
+    if (.not. q_ok) chi0_w(:,:,:) = (0.0d0, 0.0d0)
+    if (present(ok)) ok = q_ok
+    if (dosan .and. iw0 > 0) &
+      write(*,'(A,ES12.4)') "  [gw][chi0w] max|wgt_w(0)-wgt_static| = ", smax
+    if (dosan .and. iw0 == 0) &
+      write(*,*) "  [gw][chi0w] WARN: omega_grid has no 0 point; static gate skipped"
+    deallocate(iGm, imap)
+  end subroutine calc_chi0_freq
 
 end module gw_epsilon_sub
