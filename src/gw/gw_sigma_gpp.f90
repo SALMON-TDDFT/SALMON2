@@ -117,6 +117,7 @@ module gw_sigma_gpp_sub
   private
 
   public :: calc_sigma_gpp
+  public :: calc_sigma_gpp_qcache
 
   real(8), parameter :: occ_thr     = 1.0d-6   ! occupied if rocc > occ_thr
   real(8), parameter :: g_match_tol = 1.0d-6   ! |G|-match tolerance (bohr^-1)^2
@@ -656,6 +657,276 @@ contains
     deallocate(eband, focc, e0, sc0, scp, scm)
 
   end subroutine calc_sigma_gpp
+
+  ! --------------------------------------------------------------------------
+  ! calc_sigma_gpp_qcache
+  !
+  ! Same physics as calc_sigma_gpp, reordered so eps^{-1}(q), v(q) and the GPP
+  ! weights {wgpp,wt,phys} -- all functions of the momentum transfer q ALONE --
+  ! are built ONCE per distinct q rather than once per (ik,iq) pair.  The
+  ! distinct q (the difference set vec_k(iq)-vec_k(ik)) are distributed over
+  ! info%icomm_k; the inner per-pair body is byte-for-byte that of
+  ! calc_sigma_gpp, so the answer matches it up to reduction order.  Selected by
+  ! yn_gw_qcache='y'.  Requires replicated orbitals (spsi spans all k); the inner
+  ! kernels run in local mode.  Cost O(nk^2) vs the default O(nk^3).
+  ! --------------------------------------------------------------------------
+  subroutine calc_sigma_gpp_qcache(system, info, mg, lg, spsi, esp, rho, gvec, gg, &
+                                   ng, ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac)
+    use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
+    use gw_mtxel_sub,   only: calc_mtxel
+    use gw_coulomb_sub, only: build_vcoul, build_gvectors
+    use gw_epsilon_sub, only: find_kpq, calc_epsinv
+    use communication,  only: comm_summation
+    implicit none
+    type(s_dft_system),    intent(in)  :: system
+    type(s_parallel_info), intent(in)  :: info
+    type(s_rgrid),         intent(in)  :: mg
+    type(s_rgrid),         intent(in)  :: lg
+    type(s_orbital),       intent(in)  :: spsi
+    real(8),               intent(in)  :: esp(system%no, system%nk, system%nspin)
+    type(s_scalar),        intent(in)  :: rho
+    integer,               intent(in)  :: ng
+    real(8),               intent(in)  :: gvec(3,ng)
+    real(8),               intent(in)  :: gg(ng)
+    integer,               intent(in)  :: ispin
+    integer,               intent(in)  :: nb_lo, nb_hi
+    real(8),               intent(out) :: sigc_re(nb_lo:nb_hi, system%nk)
+    real(8),               intent(out) :: zfac   (nb_lo:nb_hi, system%nk)
+    real(8),    optional,  intent(out) :: skip_frac
+
+    complex(8), allocatable :: epsinv(:,:), mblk(:,:,:), msig(:,:), wgpp(:,:), rhoft(:)
+    real(8),    allocatable :: vcoul(:), wt(:,:), gvecl(:,:), ggl(:), eband(:), focc(:)
+    real(8),    allocatable :: e0(:,:)
+    logical,    allocatable :: phys(:,:)
+    integer,    allocatable :: imap(:), idiff(:,:), qid(:,:)
+    real(8),    allocatable :: qrep(:,:)
+    complex(8), allocatable :: sc_all(:,:), scp_all(:,:), scm_all(:,:), scg(:,:)
+
+    integer :: no, nk, ik, iq, ikm, inp, in, ig, jg, kg
+    integer :: ngl, nchan_phys_tot, nchan_unphys_tot, ncnt(2), ncnt_g(2)
+    integer :: nqd, iqd, qd_lo, qd_hi, nper
+    real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
+    real(8) :: omega, rnk, ecut_l, gmax2, fourpi, pi
+    real(8) :: rho0, wp2, qgi(3), qg2i, qgj(3), proj, om2, denom, wt2
+    real(8) :: eta_au, de_au, e0nk, dsig, qtol
+    complex(8) :: rhod, s0, sp, sm
+    logical   :: q_ok
+
+    no    = system%no
+    nk    = system%nk
+    omega = abs(system%det_a)
+    rnk   = 1.0d0 / (dble(nk) * omega)
+    pi     = acos(-1.0d0)
+    fourpi = 4.0d0 * pi
+    eta_au = eta_ev / ha2ev
+    de_au  = dE_ev  / ha2ev
+    qtol   = 1.0d-6                       ! |q1-q2| (bohr^-1) below which q's match
+
+    sigc_re(:,:) = 0.0d0
+    zfac(:,:)    = 1.0d0
+
+    ! ---- larger G-set + rho(G'') (q-independent) -- same as calc_sigma_gpp --
+    gmax2 = 0.0d0
+    do ig = 1, ng
+      if (gg(ig) > gmax2) gmax2 = gg(ig)
+    end do
+    ecut_l = gset_factor * gmax2
+    allocate(gvecl(3, ngmax_l), ggl(ngmax_l))
+    call build_gvectors(system%primitive_b, ecut_l, ngmax_l, ngl, gvecl, ggl)
+    allocate(rhoft(ngl))
+    call build_density_ft(system, info, mg, lg, rho, gvecl, ngl, rhoft, local_only=.true.)
+    rho0 = dble(rhoft(1))
+    wp2  = fourpi * rho0
+
+    allocate(epsinv(ng,ng), vcoul(ng), imap(ng))
+    allocate(wgpp(ng,ng), wt(ng,ng), phys(ng,ng), idiff(ng,ng))
+    allocate(mblk(ng, no, no), msig(ng, no))
+    allocate(eband(no), focc(no), e0(nb_lo:nb_hi, nk))
+
+    do jg = 1, ng
+      do ig = 1, ng
+        gtarget(1) = gvec(1,ig) - gvec(1,jg)
+        gtarget(2) = gvec(2,ig) - gvec(2,jg)
+        gtarget(3) = gvec(3,ig) - gvec(3,jg)
+        idiff(ig,jg) = gindex_of(ngl, gvecl, gtarget)
+      end do
+    end do
+
+    do ik = 1, nk
+      do in = nb_lo, nb_hi
+        e0(in,ik) = esp(in,ik,ispin)
+      end do
+    end do
+
+    ! ---- (1) group all (ik,iq) pairs by distinct q = vec_k(iq)-vec_k(ik) ----
+    ! Exact for a uniform mesh: equal q's give identical qvec to machine
+    ! precision, distinct q's differ by >= |b|/N >> qtol.
+    allocate(qid(nk,nk), qrep(3, nk*nk))
+    nqd = 0
+    do ik = 1, nk
+      do iq = 1, nk
+        qvec(1:3) = system%vec_k(1:3,iq) - system%vec_k(1:3,ik)
+        qid(ik,iq) = 0
+        do iqd = 1, nqd
+          if ( abs(qvec(1)-qrep(1,iqd)) + abs(qvec(2)-qrep(2,iqd)) &
+             + abs(qvec(3)-qrep(3,iqd)) < qtol ) then
+            qid(ik,iq) = iqd
+            exit
+          end if
+        end do
+        if (qid(ik,iq) == 0) then
+          nqd = nqd + 1
+          qid(ik,iq) = nqd
+          qrep(1:3,nqd) = qvec(1:3)
+        end if
+      end do
+    end do
+
+    ! ---- (2) block-distribute the distinct q over icomm_k ------------------
+    nper  = (nqd + info%isize_k - 1) / info%isize_k
+    qd_lo = info%id_k * nper + 1
+    qd_hi = min((info%id_k + 1) * nper, nqd)
+
+    nchan_phys_tot   = 0
+    nchan_unphys_tot = 0
+    allocate(sc_all (nb_lo:nb_hi,nk), scp_all(nb_lo:nb_hi,nk), scm_all(nb_lo:nb_hi,nk))
+    sc_all  = (0.0d0,0.0d0)
+    scp_all = (0.0d0,0.0d0)
+    scm_all = (0.0d0,0.0d0)
+
+    ! ---- (3) per distinct q: eps^{-1}/v/W once, then its (ik,iq) pairs ------
+    do iqd = qd_lo, qd_hi
+      qvec(1:3)  =  qrep(1:3,iqd)
+      mqvec(1:3) = -qvec(1:3)
+
+      call calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, iqd, &
+                       qvec, ispin, epsinv, ok=q_ok, local_only=.true.)
+      if (.not. q_ok) cycle
+      call build_vcoul(ng, gvec, gg, qvec, omega, nk, nsub_head, vcoul)
+
+      do ig = 1, ng
+        qgi(1) = qvec(1) + gvec(1,ig)
+        qgi(2) = qvec(2) + gvec(2,ig)
+        qgi(3) = qvec(3) + gvec(3,ig)
+        qg2i   = qgi(1)*qgi(1) + qgi(2)*qgi(2) + qgi(3)*qgi(3)
+        do jg = 1, ng
+          phys(ig,jg) = .false.
+          wt(ig,jg)   = 0.0d0
+          wgpp(ig,jg) = (0.0d0, 0.0d0)
+          if (qg2i < 1.0d-12) cycle
+          kg = idiff(ig,jg)
+          if (kg == 0) cycle
+          qgj(1) = qvec(1) + gvec(1,jg)
+          qgj(2) = qvec(2) + gvec(2,jg)
+          qgj(3) = qvec(3) + gvec(3,jg)
+          proj   = ( qgi(1)*qgj(1) + qgi(2)*qgj(2) + qgi(3)*qgj(3) ) / qg2i
+          rhod = rhoft(kg)
+          om2  = wp2 * proj * ( dble(rhod) / rho0 )
+          denom = -dble(epsinv(ig,jg))
+          if (ig == jg) denom = denom + 1.0d0
+          if (abs(denom) < wt2_tiny) cycle
+          wt2 = om2 / denom
+          if (wt2 <= 0.0d0) cycle
+          phys(ig,jg) = .true.
+          wt(ig,jg)   = sqrt(wt2)
+          wgpp(ig,jg) = cmplx( vcoul(jg) * om2 / (2.0d0 * wt(ig,jg)), 0.0d0, 8 )
+        end do
+      end do
+
+      do ik = 1, nk
+        do iq = 1, nk
+          if (qid(ik,iq) /= iqd) cycle
+
+          call find_kpq(system, ik, mqvec, ikm, g0vec)
+          if (ikm == 0) cycle
+
+          do jg = 1, ng
+            do ig = 1, ng
+              if (phys(ig,jg)) then
+                nchan_phys_tot = nchan_phys_tot + 1
+              else
+                nchan_unphys_tot = nchan_unphys_tot + 1
+              end if
+            end do
+          end do
+
+          do ig = 1, ng
+            gtarget(1) = gvec(1,ig) - g0vec(1)
+            gtarget(2) = gvec(2,ig) - g0vec(2)
+            gtarget(3) = gvec(3,ig) - g0vec(3)
+            imap(ig) = gindex_of(ng, gvec, gtarget)
+          end do
+
+          call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
+                          no, no, mblk, local_only=.true.)
+
+          do inp = 1, no
+            eband(inp) = esp(inp,ikm,ispin)
+            focc(inp)  = system%rocc(inp,ikm,ispin)
+          end do
+          call normalize_occ(no, focc)
+
+          do in = nb_lo, nb_hi
+            do inp = 1, no
+              do ig = 1, ng
+                jg = imap(ig)
+                if (jg == 0) then
+                  msig(ig,inp) = (0.0d0, 0.0d0)
+                else
+                  msig(ig,inp) = mblk(jg, inp, in)
+                end if
+              end do
+            end do
+            e0nk = e0(in,ik)
+            call sigma_c_at_energy(ng, no, wgpp, wt, phys, msig, eband, focc, &
+                                   e0nk,         eta_au, s0)
+            call sigma_c_at_energy(ng, no, wgpp, wt, phys, msig, eband, focc, &
+                                   e0nk + de_au, eta_au, sp)
+            call sigma_c_at_energy(ng, no, wgpp, wt, phys, msig, eband, focc, &
+                                   e0nk - de_au, eta_au, sm)
+            sc_all (in,ik) = sc_all (in,ik) + s0
+            scp_all(in,ik) = scp_all(in,ik) + sp
+            scm_all(in,ik) = scm_all(in,ik) + sm
+          end do
+
+        end do
+      end do
+    end do
+
+    ! ---- (4) assemble the per-(band,k) sums across the q distribution -------
+    allocate(scg(nb_lo:nb_hi,nk))
+    call comm_summation(sc_all,  scg, size(sc_all),  info%icomm_k);  sc_all  = scg
+    call comm_summation(scp_all, scg, size(scp_all), info%icomm_k);  scp_all = scg
+    call comm_summation(scm_all, scg, size(scm_all), info%icomm_k);  scm_all = scg
+    deallocate(scg)
+    ncnt(1) = nchan_phys_tot
+    ncnt(2) = nchan_unphys_tot
+    call comm_summation(ncnt, ncnt_g, 2, info%icomm_k)
+    nchan_phys_tot   = ncnt_g(1)
+    nchan_unphys_tot = ncnt_g(2)
+
+    ! ---- (5) Re Sigma_c and Z for every output k ---------------------------
+    do ik = 1, nk
+      do in = nb_lo, nb_hi
+        sigc_re(in,ik) = rnk * dble(sc_all(in,ik))
+        dsig = rnk * ( dble(scp_all(in,ik)) - dble(scm_all(in,ik)) ) / (2.0d0 * de_au)
+        zfac(in,ik) = 1.0d0 / (1.0d0 - dsig)
+      end do
+    end do
+
+    if (present(skip_frac)) then
+      if (nchan_phys_tot + nchan_unphys_tot > 0) then
+        skip_frac = dble(nchan_unphys_tot) / dble(nchan_phys_tot + nchan_unphys_tot)
+      else
+        skip_frac = 0.0d0
+      end if
+    end if
+
+    deallocate(epsinv, vcoul, imap, wgpp, wt, phys, idiff)
+    deallocate(mblk, msig, rhoft, gvecl, ggl, eband, focc, e0)
+    deallocate(qid, qrep, sc_all, scp_all, scm_all)
+
+  end subroutine calc_sigma_gpp_qcache
 
   ! --------------------------------------------------------------------------
   ! normalize_occ

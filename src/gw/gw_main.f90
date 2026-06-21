@@ -39,7 +39,7 @@ subroutine main_gw
   use gw_epsilon_sub,     only: calc_epsinv
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
-  use gw_sigma_gpp_sub,   only: calc_sigma_gpp
+  use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use sendrecv_grid
   implicit none
@@ -685,9 +685,17 @@ subroutine main_gw
       call calc_sigma_x(system, info, mg, lg, spsi_full, gvec_t7, gg_t7, ng_t7, &
                         is_t7, ib_min, ib_max, sigx_w7, local_only=.true.)
       ! dynamic correlation Re Sigma_c(eps^KS) and the renormalization Z.
-      call calc_sigma_gpp(system, info, mg, lg, spsi_full, energy%esp, rho, &
-                          gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
-                          sigc_w7, zfac_w7, skip_frac=skipfrac7, local_only=.true.)
+      ! yn_gw_qcache='y' selects the q-cached BZ sum (O(nk^2), identical result);
+      ! both take the replicated orbitals built above.
+      if (yn_gw_qcache == 'y') then
+        call calc_sigma_gpp_qcache(system, info, mg, lg, spsi_full, energy%esp, rho, &
+                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                            sigc_w7, zfac_w7, skip_frac=skipfrac7)
+      else
+        call calc_sigma_gpp(system, info, mg, lg, spsi_full, energy%esp, rho, &
+                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                            sigc_w7, zfac_w7, skip_frac=skipfrac7, local_only=.true.)
+      end if
       call calc_vxc_expect(system, info, mg, spsi, Vxc, is_t7, &
                            ib_min, ib_max, vxc_w7)
 
