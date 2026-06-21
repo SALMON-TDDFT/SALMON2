@@ -72,6 +72,9 @@ subroutine main_gw
   integer :: Miter, nspin
   logical :: rion_update
   integer :: ib_min, ib_max
+  ! t2/t3/t4 sanity blocks are validated; compile them out of production runs
+  ! (set .true. to re-enable the per-stage diagnostics).
+  logical, parameter :: run_sanity_t234 = .false.
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -179,6 +182,7 @@ subroutine main_gw
   !   system%rocc  (no, nk, nspin) -- occupations
   !   system%nk, system%no, system%nspin -- dimensions
 
+  if (run_sanity_t234) then
   ! ----------------------------------------------------------------
   ! Task-2 sanity block: verify build_gvectors and build_vcoul.
   ! All output prefixed with [gw][t2] for grep.
@@ -373,6 +377,7 @@ subroutine main_gw
   end if
 
   deallocate(gvec_t4, gg_t4, epsinv_t4, epsd_t4)
+  end if  ! run_sanity_t234
 
   ! ----------------------------------------------------------------
   ! Step 5: QP energies — full (no,nk,nspin) arrays for the output file.
