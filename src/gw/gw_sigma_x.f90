@@ -145,11 +145,12 @@ contains
   !   sigx(nb_lo:nb_hi, system%nk) [out] -- exchange expectation (a.u.).
   ! --------------------------------------------------------------------------
   subroutine calc_sigma_x(system, info, mg, lg, spsi, gvec, gg, ng, &
-                          ispin, nb_lo, nb_hi, sigx)
+                          ispin, nb_lo, nb_hi, sigx, local_only)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_coulomb_sub, only: build_vcoul
     use gw_epsilon_sub, only: find_kpq
+    use communication,  only: comm_summation
     implicit none
     type(s_dft_system),    intent(in)  :: system
     type(s_parallel_info), intent(in)  :: info
@@ -162,14 +163,24 @@ contains
     integer,               intent(in)  :: ispin
     integer,               intent(in)  :: nb_lo, nb_hi
     real(8),               intent(out) :: sigx(nb_lo:nb_hi, system%nk)
+    ! Node-parallel mode: the orbitals are replicated and the output-state k-loop
+    ! is split over info%icomm_k (each rank fills its own k columns), assembled by
+    ! a single reduction at the end.  Absent/false = the original collective path
+    ! (every rank loops all k; calc_mtxel assembles each block).
+    logical, optional,     intent(in)  :: local_only
 
     complex(8), allocatable :: mblk(:,:,:)   ! < u_{.,ikm}|e^{-iG.r}|u_{.,ik} >
     real(8),    allocatable :: vcoul(:)
+    real(8),    allocatable :: sigx_g(:,:)
     integer,    allocatable :: imap(:)
 
-    integer :: no, nk, nq, ik, iq, ikm, iv, in, ig, jg
+    integer :: no, nk, nq, ik, iq, ikm, iv, in, ig, jg, ik_lo, ik_hi
     real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
     real(8) :: omega, rnk, acc, m2
+    logical :: ll
+
+    ll = .false.
+    if (present(local_only)) ll = local_only
 
     no    = system%no
     nk    = system%nk
@@ -181,10 +192,20 @@ contains
 
     sigx(:,:) = 0.0d0
 
+    ! Output-state k-points handled by this rank: its own share in the parallel
+    ! mode, the whole BZ otherwise.
+    if (ll) then
+      ik_lo = info%ik_s
+      ik_hi = info%ik_e
+    else
+      ik_lo = 1
+      ik_hi = nk
+    end if
+
     allocate(mblk(ng, no, no), vcoul(ng), imap(ng))
 
     ! ---- output-state loop (n at k) ---------------------------------------
-    do ik = 1, nk
+    do ik = ik_lo, ik_hi
 
       ! ---- BZ q-sum: q = vec_k(:,iq) - vec_k(:,ik) ------------------------
       do iq = 1, nq
@@ -210,9 +231,9 @@ contains
         end do
 
         ! Full M block at (ik, ikm): mblk(ig', nb=bra@ikm, nk2=ket@ik).
-        ! calc_mtxel is collective -> entered on all ranks.
+        ! Collective unless local_only (replicated orbitals -> local block).
         call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
-                        no, no, mblk)
+                        no, no, mblk, local_only=ll)
 
         ! ---- occupied-v sum and G sum -------------------------------------
         do iv = 1, no
@@ -235,6 +256,14 @@ contains
 
       end do  ! iq
     end do  ! ik
+
+    ! Assemble the per-k columns filled on each rank (disjoint -> sum is exact).
+    if (ll) then
+      allocate(sigx_g(nb_lo:nb_hi, nk))
+      call comm_summation(sigx, sigx_g, size(sigx), info%icomm_k)
+      sigx(:,:) = sigx_g(:,:)
+      deallocate(sigx_g)
+    end if
 
     deallocate(mblk, vcoul, imap)
 

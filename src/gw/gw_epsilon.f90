@@ -270,7 +270,7 @@ contains
   !   ok       [out,opt]     -- .true. if q was representable and inverted.
   ! --------------------------------------------------------------------------
   subroutine calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, iq, qvec, &
-                         ispin, epsinv, eps_diag, residual, ok)
+                         ispin, epsinv, eps_diag, residual, ok, local_only)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,  only: calc_mtxel
     use gw_coulomb_sub,only: build_vcoul
@@ -291,6 +291,9 @@ contains
     real(8),    optional,  intent(out) :: eps_diag(ng)
     real(8),    optional,  intent(out) :: residual
     logical,    optional,  intent(out) :: ok
+    ! Forwarded to calc_mtxel: when set, the orbitals are replicated and this
+    ! rank builds the whole chi0/eps locally (no inner collective).
+    logical,    optional,  intent(in)  :: local_only
 
     complex(8), allocatable :: chi0(:,:), eps(:,:), mtxel(:,:,:)
     complex(8), allocatable :: mcv(:,:)        ! M_{cv,G}(ig, ipair), remapped
@@ -307,6 +310,10 @@ contains
     real(8) :: fv, fc, dw, de, wgt
     complex(8) :: zfac
     logical :: q_ok
+    logical :: ll
+
+    ll = .false.
+    if (present(local_only)) ll = local_only
 
     no    = system%no
     nk    = system%nk
@@ -355,7 +362,7 @@ contains
       ! calc_mtxel is collective -> entered on all ranks unconditionally.
       allocate(mtxel(ng, no, no))
       call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikq, ispin, &
-                      no, no, mtxel)
+                      no, no, mtxel, local_only=ll)
 
       ! Remapped, umklapp-shifted M for every occ->unocc pair at this k.
       ! Count pairs first.

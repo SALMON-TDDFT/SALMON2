@@ -111,8 +111,79 @@ module gw_mtxel_sub
   private
 
   public :: calc_mtxel
+  public :: replicate_orbitals_k
 
 contains
+
+  ! --------------------------------------------------------------------------
+  ! replicate_orbitals_k
+  !
+  ! Build a full-k copy of the orbitals so every rank holds every k-point.  The
+  ! restart read distributes the orbitals over k (the 6th index runs only over
+  ! info%ik_s..ik_e on each rank, with nproc_ob=nproc_rgrid=1 so bands and the
+  ! r-grid are whole).  Here each rank zeroes a full-k array, drops its local
+  ! k-block into the matching global slots, and sums over info%icomm_k; the
+  ! per-rank fills are disjoint so the sum is an exact gather (works for any,
+  ! including non-uniform, k-split).  The reduction is done per im on the 6-D
+  ! (r,r,r,spin,band,k) slice because comm_summation tops out at rank 6.
+  ! spsi_full carries the same storage kind (zwf or rwf) and the same bounds as
+  ! spsi, with the k-axis widened to 1:system%nk.  Pair with local_only=.true.
+  ! in the matrix-element / dielectric / self-energy routines.
+  ! --------------------------------------------------------------------------
+  subroutine replicate_orbitals_k(system, info, spsi, spsi_full)
+    use structures,    only: s_dft_system, s_parallel_info, s_orbital
+    use communication, only: comm_summation
+    implicit none
+    type(s_dft_system),    intent(in)    :: system
+    type(s_parallel_info), intent(in)    :: info
+    type(s_orbital),       intent(in)    :: spsi
+    type(s_orbital),       intent(inout) :: spsi_full
+
+    complex(8), allocatable :: zloc(:,:,:,:,:,:)
+    real(8),    allocatable :: rloc(:,:,:,:,:,:)
+    integer :: l1,u1, l2,u2, l3,u3, ls,us, lo,uo, lm,um, nk, im, n6
+
+    nk = system%nk
+
+    if (allocated(spsi%zwf)) then
+      l1=lbound(spsi%zwf,1); u1=ubound(spsi%zwf,1)
+      l2=lbound(spsi%zwf,2); u2=ubound(spsi%zwf,2)
+      l3=lbound(spsi%zwf,3); u3=ubound(spsi%zwf,3)
+      ls=lbound(spsi%zwf,4); us=ubound(spsi%zwf,4)
+      lo=lbound(spsi%zwf,5); uo=ubound(spsi%zwf,5)
+      lm=lbound(spsi%zwf,7); um=ubound(spsi%zwf,7)
+      allocate(spsi_full%zwf(l1:u1, l2:u2, l3:u3, ls:us, lo:uo, 1:nk, lm:um))
+      allocate(zloc(l1:u1, l2:u2, l3:u3, ls:us, lo:uo, 1:nk))
+      n6 = (u1-l1+1)*(u2-l2+1)*(u3-l3+1)*(us-ls+1)*(uo-lo+1)*nk
+      do im = lm, um
+        zloc(:,:,:,:,:,:) = (0.0d0, 0.0d0)
+        zloc(:,:,:,:,:, info%ik_s:info%ik_e) = &
+             spsi%zwf(:,:,:,:,:, info%ik_s:info%ik_e, im)
+        call comm_summation(zloc, spsi_full%zwf(:,:,:,:,:,:,im), n6, info%icomm_k)
+      end do
+      deallocate(zloc)
+    end if
+
+    if (allocated(spsi%rwf)) then
+      l1=lbound(spsi%rwf,1); u1=ubound(spsi%rwf,1)
+      l2=lbound(spsi%rwf,2); u2=ubound(spsi%rwf,2)
+      l3=lbound(spsi%rwf,3); u3=ubound(spsi%rwf,3)
+      ls=lbound(spsi%rwf,4); us=ubound(spsi%rwf,4)
+      lo=lbound(spsi%rwf,5); uo=ubound(spsi%rwf,5)
+      lm=lbound(spsi%rwf,7); um=ubound(spsi%rwf,7)
+      allocate(spsi_full%rwf(l1:u1, l2:u2, l3:u3, ls:us, lo:uo, 1:nk, lm:um))
+      allocate(rloc(l1:u1, l2:u2, l3:u3, ls:us, lo:uo, 1:nk))
+      n6 = (u1-l1+1)*(u2-l2+1)*(u3-l3+1)*(us-ls+1)*(uo-lo+1)*nk
+      do im = lm, um
+        rloc(:,:,:,:,:,:) = 0.0d0
+        rloc(:,:,:,:,:, info%ik_s:info%ik_e) = &
+             spsi%rwf(:,:,:,:,:, info%ik_s:info%ik_e, im)
+        call comm_summation(rloc, spsi_full%rwf(:,:,:,:,:,:,im), n6, info%icomm_k)
+      end do
+      deallocate(rloc)
+    end if
+
+  end subroutine replicate_orbitals_k
 
   ! --------------------------------------------------------------------------
   ! calc_mtxel
@@ -160,7 +231,7 @@ contains
   !   mtxel       [out] -- mtxel(ng,nb_bra,nb_ket), assembled across all ranks.
   ! --------------------------------------------------------------------------
   subroutine calc_mtxel(system, info, mg, lg, spsi, &
-                        gvec, ng, ik, ikq, ispin, nb_bra, nb_ket, mtxel)
+                        gvec, ng, ik, ikq, ispin, nb_bra, nb_ket, mtxel, local_only)
     use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use communication, only: comm_summation
     implicit none
@@ -174,6 +245,10 @@ contains
     integer,               intent(in) :: ik, ikq, ispin
     integer,               intent(in) :: nb_bra, nb_ket
     complex(8),            intent(out):: mtxel(ng, nb_bra, nb_ket)
+    ! When .true., the caller has replicated the orbitals so every k is held on
+    ! this rank: compute the full block locally and skip the assembling
+    ! collective.  Absent/false reproduces the original collective path exactly.
+    logical, optional,     intent(in) :: local_only
 
     complex(8), allocatable :: mloc(:,:,:)
     real(8) :: hvol, norm
@@ -182,6 +257,7 @@ contains
     logical :: have_k, have_kq
     logical :: bra_owned, ket_owned
     logical :: use_zwf
+    logical :: ll
 
     ! Full-grid sizes (nproc_rgrid=1 => mg spans the whole cell).
     integer :: n1, n2, n3
@@ -217,9 +293,19 @@ contains
     allocate(mloc(ng, nb_bra, nb_ket))
     mloc = (0.0d0, 0.0d0)
 
+    ! Replicated-orbital (local) mode: the caller has gathered every k onto this
+    ! rank, so both blocks are present and this rank forms the whole element.
+    ll = .false.
+    if (present(local_only)) ll = local_only
+
     ! Does this rank hold the k and k+q orbital blocks?
-    have_k  = (ik  >= info%ik_s .and. ik  <= info%ik_e)
-    have_kq = (ikq >= info%ik_s .and. ikq <= info%ik_e)
+    if (ll) then
+      have_k  = .true.
+      have_kq = .true.
+    else
+      have_k  = (ik  >= info%ik_s .and. ik  <= info%ik_e)
+      have_kq = (ikq >= info%ik_s .and. ikq <= info%ik_e)
+    end if
 
     if (have_k .and. have_kq) then
 
@@ -324,8 +410,14 @@ contains
     end if
 
     ! Assemble the full M over the r-space, k and orbital partitions.  The FFT
-    ! above is purely local; the only MPI is this single collective.
-    call comm_summation(mloc, mtxel, ng*nb_bra*nb_ket, info%icomm_rko)
+    ! above is purely local; the only MPI is this single collective.  In the
+    ! replicated-orbital mode this rank already holds the whole block, so the
+    ! collective is skipped (summing it over ranks would multiply-count).
+    if (ll) then
+      mtxel = mloc
+    else
+      call comm_summation(mloc, mtxel, ng*nb_bra*nb_ket, info%icomm_rko)
+    end if
 
     deallocate(mloc)
 

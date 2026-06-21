@@ -171,7 +171,7 @@ contains
   ! G''=0 entry; build_gvectors puts G=0 first) equals the average density
   ! N_elec/Omega and pins wp^2 = 4 pi rhoft(1).
   ! --------------------------------------------------------------------------
-  subroutine build_density_ft(system, info, mg, lg, rho, gvl, ngl, rhoft)
+  subroutine build_density_ft(system, info, mg, lg, rho, gvl, ngl, rhoft, local_only)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_scalar
     use communication, only: comm_summation
     implicit none
@@ -183,11 +183,19 @@ contains
     integer,               intent(in)  :: ngl
     real(8),               intent(in)  :: gvl(3,ngl)
     complex(8),            intent(out) :: rhoft(ngl)
+    ! With nproc_rgrid=1 each rank already holds the whole grid, so the local sum
+    ! IS the full density-FT; local_only skips the assembling collective (which,
+    ! over a k-replicated communicator, would multiply-count the identical sum).
+    logical, optional,     intent(in)  :: local_only
 
     complex(8), allocatable :: rloc(:)
     complex(8) :: zacc
     real(8) :: hvol, omega, rx, ry, rz, phase, nr, inv_ngrid
     integer :: ig, ix, iy, iz
+    logical :: ll
+
+    ll = .false.
+    if (present(local_only)) ll = local_only
 
     omega = abs(system%det_a)
     hvol  = system%hvol
@@ -219,7 +227,11 @@ contains
 
     ! Assemble across the r-space (and any k/orbital) partitions (same
     ! communicator calc_mtxel / calc_vxc_expect use).
-    call comm_summation(rloc, rhoft, ngl, info%icomm_rko)
+    if (ll) then
+      rhoft(:) = rloc(:)
+    else
+      call comm_summation(rloc, rhoft, ngl, info%icomm_rko)
+    end if
 
     deallocate(rloc)
 
@@ -326,11 +338,12 @@ contains
   !                          representable q-points.
   ! --------------------------------------------------------------------------
   subroutine calc_sigma_gpp(system, info, mg, lg, spsi, esp, rho, gvec, gg, ng, &
-                            ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac)
+                            ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac, local_only)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_coulomb_sub, only: build_vcoul, build_gvectors
     use gw_epsilon_sub, only: find_kpq, calc_epsinv
+    use communication,  only: comm_summation
     implicit none
     type(s_dft_system),    intent(in)  :: system
     type(s_parallel_info), intent(in)  :: info
@@ -347,6 +360,10 @@ contains
     real(8),               intent(out) :: sigc_re(nb_lo:nb_hi, system%nk)
     real(8),               intent(out) :: zfac   (nb_lo:nb_hi, system%nk)
     real(8),    optional,  intent(out) :: skip_frac
+    ! Node-parallel mode: replicated orbitals + the output-state k-loop split over
+    ! info%icomm_k, with one reduction of the per-k results at the end.  Absent =
+    ! the original collective path (all k per rank).
+    logical,    optional,  intent(in)  :: local_only
 
     complex(8), allocatable :: epsinv(:,:)       ! eps^{-1}_{GG'}(q,0)
     complex(8), allocatable :: mblk(:,:,:)       ! < u_{.,ikm}|e^{-iG.r}|u_{.,ik} >
@@ -363,15 +380,21 @@ contains
 
     real(8),    allocatable :: e0(:,:)           ! eps^KS over the window (probe)
     complex(8), allocatable :: sc0(:), scp(:), scm(:)  ! Sigma_c at E0, E0+dE, E0-dE
+    real(8),    allocatable :: sigc_g(:,:), zfac_g(:,:)  ! reduction buffers
 
-    integer :: no, nk, nq, ik, iq, ikm, inp, in, ig, jg, kg
+    integer :: no, nk, nq, ik, iq, ikm, inp, in, ig, jg, kg, ik_lo, ik_hi
     integer :: ngl, nchan_phys_tot, nchan_unphys_tot
+    integer :: ncnt(2), ncnt_g(2)
     real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
     real(8) :: omega, rnk, ecut_l, gmax2, fourpi, pi
     real(8) :: rho0, wp2, qgi(3), qg2i, qgj(3), proj, om2, denom, wt2
     real(8) :: eta_au, de_au, e0nk, dsig
     complex(8) :: rhod, s0, sp, sm
     logical   :: q_ok
+    logical   :: ll
+
+    ll = .false.
+    if (present(local_only)) ll = local_only
 
     no    = system%no
     nk    = system%nk
@@ -385,7 +408,13 @@ contains
     de_au  = dE_ev  / ha2ev
 
     sigc_re(:,:) = 0.0d0
-    zfac(:,:)    = 1.0d0
+    ! In the parallel mode zfac is summed over icomm_k (each k filled by its sole
+    ! owner), so it must start at zero; the serial path keeps the 1.0 default.
+    if (ll) then
+      zfac(:,:) = 0.0d0
+    else
+      zfac(:,:) = 1.0d0
+    end if
 
     ! ---- larger G-set for rho(G-G') (the off-diagonal density structure) ----
     ! G and G' each range over the eps G-list, so the argument G-G' can reach
@@ -403,7 +432,7 @@ contains
     call build_gvectors(system%primitive_b, ecut_l, ngmax_l, ngl, gvecl, ggl)
 
     allocate(rhoft(ngl))
-    call build_density_ft(system, info, mg, lg, rho, gvecl, ngl, rhoft)
+    call build_density_ft(system, info, mg, lg, rho, gvecl, ngl, rhoft, local_only=ll)
 
     ! Average density and plasma frequency.  rhoft(1) is the G''=0 component
     ! (build_gvectors lists G=0 first) = N_elec/Omega; it must be real & positive.
@@ -439,8 +468,17 @@ contains
       end do
     end do
 
+    ! Output-state k-points owned by this rank (its share when parallel).
+    if (ll) then
+      ik_lo = info%ik_s
+      ik_hi = info%ik_e
+    else
+      ik_lo = 1
+      ik_hi = nk
+    end if
+
     ! ---- output-state loop -------------------------------------------------
-    do ik = 1, nk
+    do ik = ik_lo, ik_hi
 
       sc0(:) = (0.0d0, 0.0d0)
       scp(:) = (0.0d0, 0.0d0)
@@ -451,9 +489,9 @@ contains
         qvec(1:3)  =  system%vec_k(1:3,iq) - system%vec_k(1:3,ik)
         mqvec(1:3) = -qvec(1:3)
 
-        ! eps^{-1}_{GG'}(q,0) on the eps G-set (collective inside).
+        ! eps^{-1}_{GG'}(q,0) on the eps G-set (collective unless local_only).
         call calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, iq, &
-                         qvec, ispin, epsinv, ok=q_ok)
+                         qvec, ispin, epsinv, ok=q_ok, local_only=ll)
         if (.not. q_ok) cycle              ! q not representable on this mesh
 
         ! v(q+G'): bare Coulomb kernel; q->0 head averaged over the mini-BZ.
@@ -532,7 +570,7 @@ contains
 
         ! Full M block at (ik,ikm): mblk(ig', bra@ikm, ket@ik) on the eps set.
         call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
-                        no, no, mblk)
+                        no, no, mblk, local_only=ll)
 
         ! Intermediate-band energies and occupations at k-q (ALL bands n').
         do inp = 1, no
@@ -583,6 +621,24 @@ contains
       end do
 
     end do  ! ik
+
+    ! ---- assemble per-k results across the output-state partition ----------
+    ! Each rank filled only its own k columns (disjoint), so the sum is exact.
+    ! The pole-skip counters are likewise partial and are reduced for the global
+    ! fraction below.
+    if (ll) then
+      allocate(sigc_g(nb_lo:nb_hi, nk), zfac_g(nb_lo:nb_hi, nk))
+      call comm_summation(sigc_re, sigc_g, size(sigc_re), info%icomm_k)
+      call comm_summation(zfac,    zfac_g, size(zfac),    info%icomm_k)
+      sigc_re(:,:) = sigc_g(:,:)
+      zfac(:,:)    = zfac_g(:,:)
+      deallocate(sigc_g, zfac_g)
+      ncnt(1) = nchan_phys_tot
+      ncnt(2) = nchan_unphys_tot
+      call comm_summation(ncnt, ncnt_g, 2, info%icomm_k)
+      nchan_phys_tot   = ncnt_g(1)
+      nchan_unphys_tot = ncnt_g(2)
+    end if
 
     ! Channel skip fraction (physical pole missing): averaged over the
     ! representable q-points and all (G,G').

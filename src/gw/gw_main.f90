@@ -35,7 +35,7 @@ subroutine main_gw
   use initialization_dft
   use gw_qp_output_sub,   only: write_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
-  use gw_mtxel_sub,       only: calc_mtxel
+  use gw_mtxel_sub,       only: calc_mtxel, replicate_orbitals_k
   use gw_epsilon_sub,     only: calc_epsinv
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
@@ -49,6 +49,7 @@ subroutine main_gw
   type(s_parallel_info)  :: info
   type(s_sendrecv_grid)  :: srg, srg_scalar
   type(s_orbital)        :: spsi, shpsi, sttpsi
+  type(s_orbital)        :: spsi_full   ! k-replicated orbitals for node-parallel sigma
   type(s_dft_system)     :: system
   type(s_poisson)        :: poisson
   type(s_stencil)        :: stencil
@@ -671,14 +672,22 @@ subroutine main_gw
 
     skipfrac7 = 0.0d0
 
+    ! Node scaling: replicate the orbitals to every rank so the output-state
+    ! k-loop inside calc_sigma_x / calc_sigma_gpp can be split over info%icomm_k
+    ! (each rank owns a k-share; matrix elements / dielectric are then local and
+    ! a single reduction assembles the per-k self-energy).  With one rank this is
+    ! a copy and reproduces the serial result.  calc_vxc_expect keeps the
+    ! distributed spsi (it already guards by k and assembles collectively).
+    call replicate_orbitals_k(system, info, spsi, spsi_full)
+
     do is_t7 = 1, system%nspin
       ! bare exchange Sigma_x (the exchange part of Sigma = Sigma_x + Sigma_c).
-      call calc_sigma_x(system, info, mg, lg, spsi, gvec_t7, gg_t7, ng_t7, &
-                        is_t7, ib_min, ib_max, sigx_w7)
+      call calc_sigma_x(system, info, mg, lg, spsi_full, gvec_t7, gg_t7, ng_t7, &
+                        is_t7, ib_min, ib_max, sigx_w7, local_only=.true.)
       ! dynamic correlation Re Sigma_c(eps^KS) and the renormalization Z.
-      call calc_sigma_gpp(system, info, mg, lg, spsi, energy%esp, rho, &
+      call calc_sigma_gpp(system, info, mg, lg, spsi_full, energy%esp, rho, &
                           gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
-                          sigc_w7, zfac_w7, skip_frac=skipfrac7)
+                          sigc_w7, zfac_w7, skip_frac=skipfrac7, local_only=.true.)
       call calc_vxc_expect(system, info, mg, spsi, Vxc, is_t7, &
                            ib_min, ib_max, vxc_w7)
 
@@ -755,6 +764,8 @@ subroutine main_gw
 
     deallocate(sigc_w7, zfac_w7, vxc_w7, eqp_w7, sigx_w7)
     deallocate(gvec_t7, gg_t7)
+    if (allocated(spsi_full%zwf)) deallocate(spsi_full%zwf)
+    if (allocated(spsi_full%rwf)) deallocate(spsi_full%rwf)
 
     if (comm_is_root(nproc_id_global)) then
       write(*,*) "  [gw] computed dynamic G0W0 QP energies (sigma_type=gpp)"
