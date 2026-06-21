@@ -35,7 +35,7 @@ subroutine main_gw
   use initialization_dft
   use gw_qp_output_sub,   only: write_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
-  use gw_mtxel_sub,       only: build_gmap, calc_mtxel
+  use gw_mtxel_sub,       only: calc_mtxel
   use sendrecv_grid
   implicit none
 
@@ -81,8 +81,6 @@ subroutine main_gw
   ! --- variables for the task-3 sanity block (plane-wave matrix elements) ---
   integer               :: ng_t3, ik_t3, nb_t3, ig0_t3, ib, jb
   real(8),  allocatable :: gvec_t3(:,:), gg_t3(:)
-  integer,  allocatable :: gmap_t3(:,:)
-  logical,  allocatable :: iown_t3(:)
   complex(8),allocatable:: mtxel_t3(:,:,:)
   real(8)               :: errmax_t3, offmax_t3
 
@@ -214,23 +212,19 @@ subroutine main_gw
   ! ----------------------------------------------------------------
   ! Task-3 sanity block: plane-wave matrix elements M_{nn'}(k,q=0,G).
   ! All output prefixed with [gw][t3].  calc_mtxel performs collective
-  ! MPI (FFT + comm_summation), so the build/compute runs on ALL ranks;
-  ! only the printing is root-only.
+  ! MPI (comm_summation over icomm_rko), so the build/compute runs on ALL
+  ! ranks; only the printing is root-only.
   !
-  !   M_{nn}(k,0,G=0)  must equal 1   (pins the FFT normalisation)
+  !   M_{nn}(k,0,G=0)  must equal 1   (pins the normalisation)
   !   M_{nn'}(k,0,G=0) (n/=n') must be ~0 (orthonormality)
   !
-  ! The G-vector list is rebuilt here on every rank (cheap, deterministic);
-  ! the gmap is built once and reused.  q=0 means ikq = ik (no umklapp).
+  ! The G-vector list is rebuilt here on every rank (cheap, deterministic).
+  ! q=0 means ikq = ik (no umklapp).
   ! ----------------------------------------------------------------
   allocate(gvec_t3(3, ngmax_t2))
   allocate(gg_t3(ngmax_t2))
   call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
                       ng_t3, gvec_t3, gg_t3)
-
-  allocate(gmap_t3(3, ng_t3))
-  allocate(iown_t3(ng_t3))
-  call build_gmap(fg, mg, ng_t3, gvec_t3, gmap_t3, iown_t3)
 
   ! index of the G=0 entry in the gvec list (build_gvectors sorts |G|^2
   ! ascending, so ig=1 is G=0).
@@ -241,8 +235,8 @@ subroutine main_gw
   nb_t3 = min(5, system%no)
 
   allocate(mtxel_t3(ng_t3, nb_t3, nb_t3))
-  call calc_mtxel(system, info, mg, lg, fg, poisson, spsi, &
-                  gmap_t3, iown_t3, ng_t3, ik_t3, ik_t3, 1, nb_t3, nb_t3, mtxel_t3)
+  call calc_mtxel(system, info, mg, lg, spsi, &
+                  gvec_t3, ng_t3, ik_t3, ik_t3, 1, nb_t3, nb_t3, mtxel_t3)
 
   if (comm_is_root(nproc_id_global)) then
     write(*,*)
@@ -279,7 +273,7 @@ subroutine main_gw
     write(*,*)
   end if
 
-  deallocate(gvec_t3, gg_t3, gmap_t3, iown_t3, mtxel_t3)
+  deallocate(gvec_t3, gg_t3, mtxel_t3)
 
   ! ----------------------------------------------------------------
   ! Step 5: QP passthrough — allocate and fill
