@@ -3329,6 +3329,8 @@ contains
     real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
     real(8),allocatable :: t3_jx(:,:,:),t3_jy(:,:,:),t3_jz(:,:,:)        ! carrier Drude ADE current J
     real(8),allocatable :: t3_rjfx(:,:,:),t3_rjfy(:,:,:),t3_rjfz(:,:,:) ! J injected via eh_add_curr
+    real(8),allocatable :: t3_jx_g(:,:,:),t3_jy_g(:,:,:),t3_jz_g(:,:,:)        ! ghost (quadrature) carrier current
+    real(8),allocatable :: t3_rjfx_g(:,:,:),t3_rjfy_g(:,:,:),t3_rjfz_g(:,:,:) ! ghost J injected via eh_add_curr_g
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
     real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
     real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj,t3_gtpa
@@ -3447,6 +3449,7 @@ contains
         end if
         !ghost LD current
         if(fe%flag_ld) call eh_add_curr_g(fe%rjx_fdtd_ld_g,fe%rjy_fdtd_ld_g,fe%rjz_fdtd_ld_g)
+        if(use_ttm3 .and. allocated(t3_rjfx_g)) call eh_add_curr_g(t3_rjfx_g,t3_rjfy_g,t3_rjfz_g)  ! ghost carrier Drude
         call eh_sendrecv(fs,fe,'e_g')
 
         !update ghost LD
@@ -3550,7 +3553,15 @@ contains
           call allocate_poynting(fs, u=t3_jx  ); call allocate_poynting(fs, u=t3_jy  ); call allocate_poynting(fs, u=t3_jz  )
           call allocate_poynting(fs, u=t3_rjfx); call allocate_poynting(fs, u=t3_rjfy); call allocate_poynting(fs, u=t3_rjfz)
           t3_jx=0d0; t3_jy=0d0; t3_jz=0d0; t3_rjfx=0d0; t3_rjfy=0d0; t3_rjfz=0d0
-          if(yn_em_envelope=='y') call allocate_poynting(fs, t3_S_g, t3_divS_g)
+          if(yn_em_envelope=='y')then
+            call allocate_poynting(fs, t3_S_g, t3_divS_g)
+            !ghost (quadrature) carrier current: the envelope generation/heating use
+            !env = |E|^2 + |E_g|^2 and -0.5*(divS+divS_g), so the ghost field must be damped
+            !by the same carrier Drude as the real field, else |E_g|^2 stays undamped -> runaway.
+            call allocate_poynting(fs, u=t3_jx_g  ); call allocate_poynting(fs, u=t3_jy_g  ); call allocate_poynting(fs, u=t3_jz_g  )
+            call allocate_poynting(fs, u=t3_rjfx_g); call allocate_poynting(fs, u=t3_rjfy_g); call allocate_poynting(fs, u=t3_rjfz_g)
+            t3_jx_g=0d0; t3_jy_g=0d0; t3_jz_g=0d0; t3_rjfx_g=0d0; t3_rjfy_g=0d0; t3_rjfz_g=0d0
+          end if
         end if
         call calc_es_and_hs(fs, fe)
         call calc_poynting_vector(fs, fe, t3_S)
@@ -3603,6 +3614,14 @@ contains
             t3_rjfx(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jx(ix,iy,iz)
             t3_rjfy(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jy(ix,iy,iz)
             t3_rjfz(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz(ix,iy,iz)
+            if(yn_em_envelope=='y')then   ! same carrier Drude on the ghost (quadrature) field
+              t3_jx_g(ix,iy,iz) = t3_c1*t3_jx_g(ix,iy,iz) + t3_cj*( fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz) )
+              t3_jy_g(ix,iy,iz) = t3_c1*t3_jy_g(ix,iy,iz) + t3_cj*( fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz) )
+              t3_jz_g(ix,iy,iz) = t3_c1*t3_jz_g(ix,iy,iz) + t3_cj*( fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz) )
+              t3_rjfx_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jx_g(ix,iy,iz)
+              t3_rjfy_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jy_g(ix,iy,iz)
+              t3_rjfz_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz_g(ix,iy,iz)
+            end if
         end do
 
         if( mod(iter,i_3tm_out)==0 )then
