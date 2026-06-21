@@ -41,7 +41,7 @@ subroutine main_gw
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
-  use gw_symmetry_sub,    only: gw_sym_selftest
+  use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest
   use sendrecv_grid
   implicit none
 
@@ -81,7 +81,7 @@ subroutine main_gw
   logical, parameter :: run_sanity_t234 = .false.
   ! [gw][sym] self-test: validate the eps^{-1} G-rotation against a direct solve
   ! (set .true. + provide sym.dat + run on one rank).
-  logical, parameter :: run_sanity_sym  = .false.
+  logical, parameter :: run_sanity_sym  = .true.
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -407,6 +407,7 @@ subroutine main_gw
   ! symmetry-reduced BZ sum, in isolation, before it feeds the self-energy.
   ! ----------------------------------------------------------------
   if (run_sanity_sym) then
+    call gw_grid_perm_selftest(system, lg)
     call gw_sym_selftest(system, info, mg, lg, spsi, energy%esp, epsilon_cutoff)
   end if
 

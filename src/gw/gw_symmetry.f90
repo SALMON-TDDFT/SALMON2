@@ -18,6 +18,7 @@ module gw_symmetry_sub
   implicit none
   private
   public :: gw_sym_selftest
+  public :: gw_grid_perm_selftest
 
 contains
 
@@ -162,5 +163,121 @@ contains
 
     deallocate(gvec, gg, mind, gperm, eps_test, eps_irr)
   end subroutine gw_sym_selftest
+
+  ! --------------------------------------------------------------------------
+  ! gw_grid_perm_selftest
+  !
+  ! Build, for each point-group operation R, the real-space grid-index map that
+  ! realises u_{Rk}(r) = u_k(R^{-1} r):  perm_R(i) = grid index of R^{-1} r_i,
+  ! with r_i the fractional coordinate (i-1)/N of grid point i (origin at i=1,
+  ! periodic).  For the cubic grid + signed-permutation (Td) operations this is
+  ! an exact index permutation (sign flips fold via modulo).  Then check it is a
+  ! BIJECTION (catches a wrong fold/reflection) and that the identity operation
+  ! gives the identity map, and that the group closes under composition.  This
+  ! isolates the trickiest part of the orbital rotation before it touches data.
+  ! Requires a cubic grid (N1=N2=N3) so axis swaps map the grid to itself.
+  ! --------------------------------------------------------------------------
+  subroutine gw_grid_perm_selftest(system, lg)
+    use structures,     only: s_dft_system, s_rgrid
+    use sym_sub,        only: SymMatA, init_sym_sub, use_symmetry, read_sw_symmetry
+    use parallelization,only: nproc_id_global
+    use communication,  only: comm_is_root
+    implicit none
+    type(s_dft_system), intent(in) :: system
+    type(s_rgrid),      intent(in) :: lg
+
+    integer, allocatable :: perm(:,:), hit(:), comp(:)
+    real(8) :: sa(3,3), sainv(3,3), f(3), fp(3)
+    integer :: n1, n2, n3, ntot, nsym, isym, jsym, ksym
+    integer :: ix, iy, iz, jx, jy, jz, i, nbad, nident, nclose, nfound
+    logical :: rootp, ok
+
+    rootp = comm_is_root(nproc_id_global)
+
+    call read_sw_symmetry('yyy')
+    call init_sym_sub(system%primitive_a, system%primitive_b)
+    use_symmetry = .false.
+    nsym = size(SymMatA, 3)
+
+    n1 = lg%num(1); n2 = lg%num(2); n3 = lg%num(3)
+    ntot = n1*n2*n3
+    if (n1 /= n2 .or. n2 /= n3) then
+      if (rootp) write(*,*) "[gw][sym2] non-cubic grid; axis-swap ops need N1=N2=N3"
+    end if
+
+    allocate(perm(ntot,nsym), hit(ntot), comp(ntot))
+
+    do isym = 1, nsym
+      sa = SymMatA(1:3,1:3,isym)
+      call inv3(sa, sainv)
+      do iz = 1, n3
+      do iy = 1, n2
+      do ix = 1, n1
+        i = ix + (iy-1)*n1 + (iz-1)*n1*n2
+        f(1) = dble(ix-1)/dble(n1)
+        f(2) = dble(iy-1)/dble(n2)
+        f(3) = dble(iz-1)/dble(n3)
+        fp(1) = sainv(1,1)*f(1)+sainv(1,2)*f(2)+sainv(1,3)*f(3)
+        fp(2) = sainv(2,1)*f(1)+sainv(2,2)*f(2)+sainv(2,3)*f(3)
+        fp(3) = sainv(3,1)*f(1)+sainv(3,2)*f(2)+sainv(3,3)*f(3)
+        jx = modulo(nint(fp(1)*dble(n1)), n1) + 1
+        jy = modulo(nint(fp(2)*dble(n2)), n2) + 1
+        jz = modulo(nint(fp(3)*dble(n3)), n3) + 1
+        perm(i,isym) = jx + (jy-1)*n1 + (jz-1)*n1*n2
+      end do
+      end do
+      end do
+    end do
+
+    ! (1) each map a bijection?
+    nbad = 0
+    do isym = 1, nsym
+      hit(:) = 0
+      do i = 1, ntot
+        hit(perm(i,isym)) = hit(perm(i,isym)) + 1
+      end do
+      if (any(hit(:) /= 1)) nbad = nbad + 1
+    end do
+
+    ! (2) the identity operation -> identity map?
+    nident = 0
+    do isym = 1, nsym
+      ok = .true.
+      do i = 1, ntot
+        if (abs(SymMatA(1,1,isym)-1d0)+abs(SymMatA(2,2,isym)-1d0)+abs(SymMatA(3,3,isym)-1d0) < 1d-8 &
+            .and. abs(SymMatA(1,2,isym))+abs(SymMatA(1,3,isym))+abs(SymMatA(2,3,isym)) < 1d-8) then
+          if (perm(i,isym) /= i) ok = .false.
+        end if
+      end do
+      if (.not. ok) nident = nident + 1
+    end do
+
+    ! (3) closure: perm_isym ( perm_jsym (i) ) must equal some perm_ksym for all i.
+    nclose = 0
+    do isym = 1, nsym
+      do jsym = 1, nsym
+        do i = 1, ntot
+          comp(i) = perm(perm(i,jsym), isym)   ! apply jsym then isym
+        end do
+        nfound = 0
+        do ksym = 1, nsym
+          if (all(comp(:) == perm(:,ksym))) then; nfound = 1; exit; end if
+        end do
+        if (nfound == 0) nclose = nclose + 1
+      end do
+    end do
+
+    if (rootp) then
+      write(*,*)
+      write(*,'(A,I3,A,3I4)') " [gw][sym2] grid-perm: nsym=", nsym, "  grid=", n1,n2,n3
+      write(*,'(A,I4,A)')     " [gw][sym2] non-bijective maps     =", nbad,   " (must be 0)"
+      write(*,'(A,I4,A)')     " [gw][sym2] identity-op mismatches  =", nident, " (must be 0)"
+      write(*,'(A,I4,A)')     " [gw][sym2] non-closed compositions =", nclose, " (must be 0)"
+      write(*,'(A,L2)')       " [gw][sym2] grid permutation group OK? ", (nbad==0 .and. nident==0 .and. nclose==0)
+      write(*,*)
+    end if
+
+    deallocate(perm, hit, comp)
+  end subroutine gw_grid_perm_selftest
 
 end module gw_symmetry_sub
