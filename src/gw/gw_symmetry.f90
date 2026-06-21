@@ -20,6 +20,9 @@ module gw_symmetry_sub
   public :: gw_sym_selftest
   public :: gw_grid_perm_selftest
   public :: gw_symmetrize_orbitals
+  public :: gw_sym_init_ops
+  public :: build_g_perm
+  public :: build_ibz_map
 
 contains
 
@@ -427,5 +430,115 @@ contains
 
     deallocate(perm, gx, gy, gz, rep, kop, assigned, zbuf, rbuf)
   end subroutine gw_symmetrize_orbitals
+
+  ! --------------------------------------------------------------------------
+  ! gw_sym_init_ops : populate SymMatA/SymMatB from sym.dat without disturbing
+  ! the already-built full k-mesh (read_sw_symmetry sets the per-direction
+  ! filter; init_sym_sub reads the operations).  Returns the operation count.
+  ! Safe to call repeatedly (init_sym_sub guards on its own flag).
+  ! --------------------------------------------------------------------------
+  subroutine gw_sym_init_ops(system, nsym)
+    use structures, only: s_dft_system
+    use sym_sub,    only: SymMatB, init_sym_sub, use_symmetry, read_sw_symmetry
+    implicit none
+    type(s_dft_system), intent(in)  :: system
+    integer,            intent(out) :: nsym
+    call read_sw_symmetry('yyy')
+    call init_sym_sub(system%primitive_a, system%primitive_b)
+    use_symmetry = .false.
+    nsym = size(SymMatB, 3)
+  end subroutine gw_sym_init_ops
+
+  ! --------------------------------------------------------------------------
+  ! build_g_perm : gperm(ig,isym) = index in the G-list of R_isym . G_ig, i.e.
+  ! the integer reciprocal index m' = SymMatB(isym) . m_ig.  Point-group ops
+  ! preserve |G| so they permute the cutoff sphere.  Used for the dielectric
+  ! G-rotation eps^-1_{G,G'}(q) = eps^-1_{R G, R G'}(q_irr) (validated to 3e-15).
+  ! Requires SymMatB populated (gw_sym_init_ops).
+  ! --------------------------------------------------------------------------
+  subroutine build_g_perm(bmat, gvec, ng, gperm)
+    use sym_sub, only: SymMatB
+    implicit none
+    real(8), intent(in)  :: bmat(3,3)
+    integer, intent(in)  :: ng
+    real(8), intent(in)  :: gvec(3,ng)
+    integer, allocatable, intent(out) :: gperm(:,:)
+    real(8) :: binv(3,3), mr(3)
+    integer, allocatable :: mind(:,:)
+    integer :: nsym, isym, ig, jg, m1, m2, m3
+    nsym = size(SymMatB,3)
+    call inv3(bmat, binv)
+    allocate(mind(3,ng), gperm(ng,nsym))
+    do ig = 1, ng
+      mind(1,ig) = nint(binv(1,1)*gvec(1,ig)+binv(1,2)*gvec(2,ig)+binv(1,3)*gvec(3,ig))
+      mind(2,ig) = nint(binv(2,1)*gvec(1,ig)+binv(2,2)*gvec(2,ig)+binv(2,3)*gvec(3,ig))
+      mind(3,ig) = nint(binv(3,1)*gvec(1,ig)+binv(3,2)*gvec(2,ig)+binv(3,3)*gvec(3,ig))
+    end do
+    gperm(:,:) = 0
+    do isym = 1, nsym
+      do ig = 1, ng
+        mr(1) = SymMatB(1,1,isym)*mind(1,ig)+SymMatB(1,2,isym)*mind(2,ig)+SymMatB(1,3,isym)*mind(3,ig)
+        mr(2) = SymMatB(2,1,isym)*mind(1,ig)+SymMatB(2,2,isym)*mind(2,ig)+SymMatB(2,3,isym)*mind(3,ig)
+        mr(3) = SymMatB(3,1,isym)*mind(1,ig)+SymMatB(3,2,isym)*mind(2,ig)+SymMatB(3,3,isym)*mind(3,ig)
+        m1 = nint(mr(1)); m2 = nint(mr(2)); m3 = nint(mr(3))
+        do jg = 1, ng
+          if (mind(1,jg)==m1 .and. mind(2,jg)==m2 .and. mind(3,jg)==m3) then
+            gperm(ig,isym) = jg; exit
+          end if
+        end do
+      end do
+    end do
+    deallocate(mind)
+  end subroutine build_g_perm
+
+  ! --------------------------------------------------------------------------
+  ! build_ibz_map : reduce a set of momentum vectors vec(3,nv) (Cartesian) to
+  ! the irreducible set.  rep(i) = the representative index, kop(i) = the op with
+  ! vec(:,i) = R_kop . vec(:,rep(i))  (mod reciprocal lattice).  kop=0 marks a
+  ! representative.  Requires SymMatB populated.
+  ! --------------------------------------------------------------------------
+  subroutine build_ibz_map(bmat, vec, nv, rep, kop, nrep)
+    use sym_sub, only: SymMatB
+    implicit none
+    real(8), intent(in)  :: bmat(3,3)
+    integer, intent(in)  :: nv
+    real(8), intent(in)  :: vec(3,nv)
+    integer, intent(out) :: rep(nv), kop(nv)
+    integer, intent(out) :: nrep
+    real(8) :: binv(3,3), vf(3), rf(3), f(3), d
+    integer :: nsym, isym, i, j
+    logical, allocatable :: assigned(:)
+    nsym = size(SymMatB,3)
+    call inv3(bmat, binv)
+    allocate(assigned(nv)); assigned(:) = .false.
+    rep(:) = 0; kop(:) = 0; nrep = 0
+    do i = 1, nv
+      if (assigned(i)) cycle
+      rep(i) = i; kop(i) = 0; assigned(i) = .true.; nrep = nrep + 1
+      vf(1) = binv(1,1)*vec(1,i)+binv(1,2)*vec(2,i)+binv(1,3)*vec(3,i)
+      vf(2) = binv(2,1)*vec(1,i)+binv(2,2)*vec(2,i)+binv(2,3)*vec(3,i)
+      vf(3) = binv(3,1)*vec(1,i)+binv(3,2)*vec(2,i)+binv(3,3)*vec(3,i)
+      do isym = 1, nsym
+        rf(1) = SymMatB(1,1,isym)*vf(1)+SymMatB(1,2,isym)*vf(2)+SymMatB(1,3,isym)*vf(3)
+        rf(2) = SymMatB(2,1,isym)*vf(1)+SymMatB(2,2,isym)*vf(2)+SymMatB(2,3,isym)*vf(3)
+        rf(3) = SymMatB(3,1,isym)*vf(1)+SymMatB(3,2,isym)*vf(2)+SymMatB(3,3,isym)*vf(3)
+        do j = 1, nv
+          f(1) = binv(1,1)*vec(1,j)+binv(1,2)*vec(2,j)+binv(1,3)*vec(3,j)
+          f(2) = binv(2,1)*vec(1,j)+binv(2,2)*vec(2,j)+binv(2,3)*vec(3,j)
+          f(3) = binv(3,1)*vec(1,j)+binv(3,2)*vec(2,j)+binv(3,3)*vec(3,j)
+          d = abs(modulo(rf(1)-f(1)+0.5d0,1d0)-0.5d0) &
+            + abs(modulo(rf(2)-f(2)+0.5d0,1d0)-0.5d0) &
+            + abs(modulo(rf(3)-f(3)+0.5d0,1d0)-0.5d0)
+          if (d < 1d-6) then
+            if (.not. assigned(j)) then
+              rep(j) = i; kop(j) = isym; assigned(j) = .true.
+            end if
+            exit
+          end if
+        end do
+      end do
+    end do
+    deallocate(assigned)
+  end subroutine build_ibz_map
 
 end module gw_symmetry_sub
