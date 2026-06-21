@@ -3622,8 +3622,8 @@ contains
                  dble(iter)*dt_em*utime_from_au, &
                  t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, t3_env(ix,iy,iz)
             close(unit2)
-            ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K]) for spatial-distribution diagnostics
-            call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2 )
+            ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K], |E|^2[a.u.]) for spatial diagnostics
+            call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2, t3_env )
           end if
         end if
       end if !use_ttm3
