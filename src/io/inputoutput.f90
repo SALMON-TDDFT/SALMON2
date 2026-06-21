@@ -262,6 +262,7 @@ contains
       & file_atom_red_coor, &
       & yn_spinorbit, &
       & yn_symmetry, &
+      & yn_sym_kreduce, &
       & absorbing_boundary, &
       & imagnary_potential_w0, &
       & imagnary_potential_dr
@@ -700,6 +701,7 @@ contains
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
     yn_symmetry        = 'n'
+    yn_sym_kreduce     = 'y'
     absorbing_boundary = 'none'
     imagnary_potential_w0 = 0d0
     imagnary_potential_dr = 0d0
@@ -1242,6 +1244,7 @@ contains
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
     call comm_bcast(yn_symmetry        ,nproc_group_global)
+    call comm_bcast(yn_sym_kreduce     ,nproc_group_global)
     call comm_bcast(absorbing_boundary    ,nproc_group_global)
     call comm_bcast(imagnary_potential_w0 ,nproc_group_global)
     call comm_bcast(imagnary_potential_dr ,nproc_group_global)
@@ -2132,6 +2135,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sym_kreduce', yn_sym_kreduce
 
       write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0

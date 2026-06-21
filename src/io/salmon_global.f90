@@ -102,6 +102,9 @@ module salmon_global
   character(256) :: file_atom_red_coor
   character(1)   :: yn_spinorbit
   character(3)   :: yn_symmetry
+  character(1)   :: yn_sym_kreduce   ! 'n': keep the FULL k-mesh while still
+                                     ! symmetrising the density (sym_rho) -- gives
+                                     ! symmetric orbitals on the full mesh (for GW)
   character(16)  :: absorbing_boundary
   real(8)        :: imagnary_potential_w0
   real(8)        :: imagnary_potential_dr

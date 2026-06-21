@@ -103,7 +103,7 @@ SUBROUTINE init_kvector(num_kgrid,system)
   use sym_kvector, only: init_sym_kvector
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
-  use salmon_global, only: file_kw, dk_shift
+  use salmon_global, only: file_kw, dk_shift, yn_sym_kreduce
   implicit none
   integer            :: num_kgrid(3)
   type(s_dft_system) :: system
@@ -164,7 +164,13 @@ SUBROUTINE init_kvector(num_kgrid,system)
     system%vec_k(2,ik) = k(1,ik)*B(2,1) + k(2,ik)*B(2,2) + k(3,ik)*B(2,3)
     system%vec_k(3,ik) = k(1,ik)*B(3,1) + k(2,ik)*B(3,2) + k(3,ik)*B(3,3)
   end do
-  call init_sym_kvector( system%vec_k, system%wtk, system%nk, B ) 
+  ! yn_sym_kreduce='n' keeps the full k-mesh (no reduction to the irreducible
+  ! wedge) while leaving use_symmetry on, so the density is still symmetrised
+  ! (sym_rho) during the SCF -> symmetric orbitals on the FULL mesh, which the
+  ! GW Brillouin-zone sum needs.
+  if ( yn_sym_kreduce /= 'n' ) then
+    call init_sym_kvector( system%vec_k, system%wtk, system%nk, B )
+  end if
 
   return
 end SUBROUTINE init_kvector
