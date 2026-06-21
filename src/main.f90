@@ -66,7 +66,8 @@ contains
     case('dft_band')
        calc_mode='DFT_BAND'
     case('gw')
-       calc_mode='DFT_BAND'   ! post-GS static step: reuse band/restart infra
+       calc_mode='GS'   ! load a converged GS via restart; sets if_real_orbital
+                        ! deterministically (DFT_BAND leaves it uninitialised)
     case('tddft_response','tddft_pulse')
        calc_mode='RT'
     case('multi_scale_maxwell_tddft')
