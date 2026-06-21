@@ -88,7 +88,7 @@ subroutine main_gw
   ! --- variables for the [gw][chi0w] self-test ---
   integer               :: ng_cw, iq_cw, ismall_cw
   real(8),  allocatable :: gvec_cw(:,:), gg_cw(:)
-  real(8)               :: qvec_cw(3), qabs_cw, qabs_min_cw, eta_cw, omega1(1)
+  real(8)               :: qvec_cw(3), qabs_cw, qabs_min_cw, eta_cw, omg_cw(1)
   complex(8),allocatable:: chi0_cw(:,:,:)
   logical               :: ok_cw
 
@@ -443,12 +443,12 @@ subroutine main_gw
     end do
     if (ismall_cw == 0) ismall_cw = 1
     qvec_cw(1:3) = system%vec_k(1:3,ismall_cw) - system%vec_k(1:3,1)
-    omega1(1) = 0.0d0
+    omg_cw(1) = 0.0d0
     eta_cw    = 0.0d0
     allocate(chi0_cw(ng_cw, ng_cw, 1))
     write(*,'(A,I6,A,I4)') "  [gw][chi0w] ng =", ng_cw, "  q-index =", ismall_cw
     call calc_chi0_freq(system, info, mg, lg, spsi, energy%esp, gvec_cw, ng_cw, &
-                        ismall_cw, qvec_cw, 1, 1, omega1, eta_cw, chi0_cw, &
+                        ismall_cw, qvec_cw, 1, 1, omg_cw, eta_cw, chi0_cw, &
                         ok=ok_cw, run_sanity=.true.)
     write(*,'(A,L2)') "  [gw][chi0w] q_ok =", ok_cw
     deallocate(gvec_cw, gg_cw, chi0_cw)
