@@ -613,7 +613,8 @@ contains
       & sigma_type, &
       & nband_qp_min, &
       & nband_qp_max, &
-      & yn_gw_qcache
+      & yn_gw_qcache, &
+      & yn_gw_sym
 
 !! == default for &unit ==
     unit_system='au'
@@ -1048,6 +1049,7 @@ contains
     nband_qp_min   = 1
     nband_qp_max   = 0
     yn_gw_qcache   = 'n'
+    yn_gw_sym      = 'n'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1689,6 +1691,7 @@ contains
     call comm_bcast(nband_qp_min  , nproc_group_global)
     call comm_bcast(nband_qp_max  , nproc_group_global)
     call comm_bcast(yn_gw_qcache  , nproc_group_global)
+    call comm_bcast(yn_gw_sym     , nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2660,6 +2663,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)')    'qgrid_gw',       qgrid_gw(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'sigma_type',     trim(sigma_type)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qcache',    trim(yn_gw_qcache)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_sym',       trim(yn_gw_sym)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
 

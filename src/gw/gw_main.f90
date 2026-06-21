@@ -696,6 +696,14 @@ subroutine main_gw
     ! distributed spsi (it already guards by k and assembles collectively).
     call replicate_orbitals_k(system, info, spsi, spsi_full)
 
+    ! Optional exact point-group symmetrisation of the (now full-mesh) orbitals
+    ! by grid rotation: every star member is overwritten by the rotated
+    ! representative so the dielectric matrix is symmetric to machine precision,
+    ! which the symmetry-reduced BZ sum relies on.  Needs sym.dat in the run dir.
+    if (yn_gw_sym == 'y') then
+      call gw_symmetrize_orbitals(system, info, lg, spsi_full, energy)
+    end if
+
     do is_t7 = 1, system%nspin
       ! bare exchange Sigma_x (the exchange part of Sigma = Sigma_x + Sigma_c).
       call calc_sigma_x(system, info, mg, lg, spsi_full, gvec_t7, gg_t7, ng_t7, &

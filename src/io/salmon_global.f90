@@ -461,5 +461,8 @@ character(256),allocatable :: atom_name(:)
   integer        :: nband_qp_min, nband_qp_max  ! band window to correct/output
   character(1)   :: yn_gw_qcache        ! 'y': cache eps^{-1}(q) once per distinct q
                                         ! (gpp BZ-sum, O(nk^3)->O(nk^2)); 'n': default
+  character(1)   :: yn_gw_sym           ! 'y': symmetrise the full-mesh orbitals by
+                                        ! grid rotation (needs sym.dat) -> exact
+                                        ! point-group symmetry for the BZ-sum reduction
 
 end module salmon_global
