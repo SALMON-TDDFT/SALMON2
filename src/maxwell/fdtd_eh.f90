@@ -3197,13 +3197,13 @@ contains
       
       !check ae_shape
       select case(ae_shape)
-      case('Ecos2','Acos2','Agauss')
+      case('Ecos2','Acos2','Agauss','Adgauss')
         continue
       case default
         if     (ipulse==1) then
-          call stop_em('set ae_shape1 to "Ecos2", "Acos2" or "Agauss".')
+          call stop_em('set ae_shape1 to "Ecos2", "Acos2", "Agauss" or "Adgauss".')
         elseif (ipulse==2) then
-          call stop_em('set ae_shape2 to "Ecos2", "Acos2" or "Agauss".')
+          call stop_em('set ae_shape2 to "Ecos2", "Acos2", "Agauss" or "Adgauss".')
         end if
       end select
       
@@ -6661,6 +6661,20 @@ contains
       theta2_i = omega*gamma + cep*2d0*pi + 1.5d0*pi
       e_inc_r  = amp*alpha*( sin(theta2_r) + beta/omega*cos(theta2_r) )
       e_inc_i  = amp*alpha*( sin(theta2_i) + beta/omega*cos(theta2_i) )
+    elseif(aes=='Adgauss') then
+      ! Gaussian-DERIVATIVE field envelope (peak at the rising/falling inflection
+      ! t=4tw-+tw/sqrt2, zero at the centre 4tw).  This reproduces the standalone 3D3TM
+      ! reference's effective surface drive (its complex-envelope solver yields a field
+      ! intensity following |d(Gaussian)/dt|^2 rather than the Gaussian itself).  The
+      ! envelope is odd about the centre, so the carrier oscillation already gives
+      ! \int E dt = 0.  Used for faithful numerical comparison against the reference;
+      ! the physically standard envelope is 'Agauss'.
+      gamma    = t - 4.0d0*tw                                 ! time from the Gaussian centre
+      alpha    = 2.3315d0*gamma/tw*exp( -gamma*gamma/(tw*tw) ) ! Gaussian-derivative envelope, peak ~amp
+      theta2_r = omega*gamma + cep*2d0*pi
+      theta2_i = omega*gamma + cep*2d0*pi + 1.5d0*pi
+      e_inc_r  = amp*alpha*sin(theta2_r)
+      e_inc_i  = amp*alpha*sin(theta2_i)
     else
       e_inc_r=0.0d0; e_inc_i=0.0d0;
     end if
