@@ -38,6 +38,7 @@ subroutine main_gw
   use gw_mtxel_sub,       only: calc_mtxel
   use gw_epsilon_sub,     only: calc_epsinv
   use gw_sigma_x_sub,     only: calc_sigma_x
+  use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use sendrecv_grid
   implicit none
@@ -108,6 +109,14 @@ subroutine main_gw
   real(8)               :: gap_ks, gap_qp
   real(8),  parameter   :: hartree2ev = 27.21138505d0  ! eV per Hartree (display only)
   real(8),  allocatable :: sigx_w0(:,:)
+
+  ! --- variables for task 6 (static COHSEX self-energy + QP solve) ---
+  integer               :: ng_t6
+  real(8),  allocatable :: gvec_t6(:,:), gg_t6(:)
+  real(8),  allocatable :: sigc_w6(:,:), sex_w6(:,:), coh_w6(:,:)
+  real(8),  allocatable :: vxc_w6(:,:), eqp_w6(:,:), sigx_w6(:,:)
+  integer               :: is_t6, ik_t6, ivtop6, icbot6
+  real(8)               :: gap_ks6, gap_cohsex6, skipfrac6
 
   ! ----------------------------------------------------------------
   ! Step 0: report active GW input parameters (root only)
@@ -517,6 +526,117 @@ subroutine main_gw
 
     if (comm_is_root(nproc_id_global)) then
       write(*,*) "  [gw] computed bare-exchange QP energies (sigma_type=sigx)"
+    end if
+
+  ! ----------------------------------------------------------------
+  ! Static COHSEX rung: sigma_type=='cohsex'
+  !   Sigma_COHSEX = Sigma_SEX + Sigma_COH over [ib_min,ib_max], <Vxc> over the
+  !   same window, Z=1, then eps^QP = eps^KS + (Sigma_COHSEX - Vxc).  The sigx
+  !   column is left at the bare-exchange reference (Sigma_x) for comparison; it
+  !   is NOT folded into the QP energy (SEX already carries the screened
+  !   exchange).  sigc holds Sigma_COHSEX.
+  ! ----------------------------------------------------------------
+  else if (trim(sigma_type) == 'cohsex') then
+
+    ! G-vector list (eps G-set; rebuilt on every rank, deterministic).
+    allocate(gvec_t6(3, ngmax_t2))
+    allocate(gg_t6(ngmax_t2))
+    call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                        ng_t6, gvec_t6, gg_t6)
+
+    allocate(sigc_w6(ib_min:ib_max, system%nk))
+    allocate(sex_w6 (ib_min:ib_max, system%nk))
+    allocate(coh_w6 (ib_min:ib_max, system%nk))
+    allocate(vxc_w6 (ib_min:ib_max, system%nk))
+    allocate(eqp_w6 (ib_min:ib_max, system%nk))
+    allocate(sigx_w6(ib_min:ib_max, system%nk))
+
+    skipfrac6 = 0.0d0
+
+    do is_t6 = 1, system%nspin
+      ! Sigma_COHSEX (=SEX+COH), its SEX/COH parts, and <Vxc> for the window.
+      call calc_sigma_cohsex(system, info, mg, lg, spsi, energy%esp, &
+                             gvec_t6, gg_t6, ng_t6, is_t6, ib_min, ib_max, &
+                             sigc_w6, sex_out=sex_w6, coh_out=coh_w6, &
+                             skip_frac=skipfrac6)
+      call calc_vxc_expect(system, info, mg, spsi, Vxc, is_t6, &
+                           ib_min, ib_max, vxc_w6)
+      ! Bare-exchange reference (Sigma_x) for the sigx output column only.
+      call calc_sigma_x(system, info, mg, lg, spsi, gvec_t6, gg_t6, ng_t6, &
+                        is_t6, ib_min, ib_max, sigx_w6)
+
+      ! Linearised QP update (Z=1): eqp = eks + (Sigma_COHSEX - vxc).  Pass
+      ! sigc=Sigma_COHSEX and sigx-column=0 so solve_qp adds only (sigc - vxc).
+      call solve_qp(energy%esp(ib_min:ib_max,:,is_t6), &
+                    0.0d0*sigc_w6, sigc_w6, vxc_w6, 1.0d0, eqp_w6)
+
+      ! Scatter into the full output arrays for this spin.
+      sigx   (ib_min:ib_max,:,is_t6) = sigx_w6(:,:)   ! bare-exchange reference
+      sigc   (ib_min:ib_max,:,is_t6) = sigc_w6(:,:)   ! Sigma_COHSEX
+      vxc_arr(ib_min:ib_max,:,is_t6) = vxc_w6 (:,:)
+      eqp    (ib_min:ib_max,:,is_t6) = eqp_w6 (:,:)
+      ! zfac stays at its default (1).
+    end do
+
+    ! ----------------------------------------------------------------
+    ! [gw][t6] sanity block (root only): for spin 1, k=1, report the top
+    ! valence and bottom conduction states.  Reports Sigma_SEX, Sigma_COH (eV),
+    ! the COHSEX gap, and the skipped-(G,G') fraction.
+    ! ----------------------------------------------------------------
+    is_t6 = 1
+    ik_t6 = 1
+    ivtop6 = 0
+    do io = 1, system%no
+      if (system%rocc(io,ik_t6,is_t6) > 1.0d-6) ivtop6 = io
+    end do
+    icbot6 = min(ivtop6 + 1, system%no)
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*)
+      write(*,*) "[gw][t6] static COHSEX self-energy + QP solve"
+      write(*,*) "[gw][t6] ng =", ng_t6, "  band window:", ib_min, "..", ib_max
+      write(*,'(A,I4,A,I4)') "  [gw][t6] at k=1: top valence n=", ivtop6, &
+        "  bottom conduction n=", icbot6
+      write(*,'(A,ES12.4)') "  [gw][t6] skipped (G,G') fraction (COH) =", skipfrac6
+
+      if (ivtop6 >= ib_min .and. ivtop6 <= ib_max) then
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t6] top valence: <Sig_SEX>=", &
+          sex_w6(ivtop6,ik_t6)*hartree2ev, " eV   <Sig_COH>=", &
+          coh_w6(ivtop6,ik_t6)*hartree2ev, " eV"
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t6]   <Sig_COHSEX>=", &
+          sigc(ivtop6,ik_t6,is_t6)*hartree2ev, " eV   <Vxc>=", &
+          vxc_arr(ivtop6,ik_t6,is_t6)*hartree2ev, " eV"
+      end if
+      if (icbot6 >= ib_min .and. icbot6 <= ib_max) then
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t6] bot conduction: <Sig_SEX>=", &
+          sex_w6(icbot6,ik_t6)*hartree2ev, " eV   <Sig_COH>=", &
+          coh_w6(icbot6,ik_t6)*hartree2ev, " eV"
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t6]   <Sig_COHSEX>=", &
+          sigc(icbot6,ik_t6,is_t6)*hartree2ev, " eV   <Vxc>=", &
+          vxc_arr(icbot6,ik_t6,is_t6)*hartree2ev, " eV"
+      end if
+      ! KS gap vs COHSEX gap at k=1 (direct gap proxy)
+      if (ivtop6 >= 1 .and. icbot6 <= system%no .and. icbot6 > ivtop6) then
+        gap_ks6 = ( energy%esp(icbot6,ik_t6,is_t6) - energy%esp(ivtop6,ik_t6,is_t6) ) &
+                  * hartree2ev
+        if (icbot6 >= ib_min .and. icbot6 <= ib_max .and. &
+            ivtop6 >= ib_min .and. ivtop6 <= ib_max) then
+          gap_cohsex6 = ( eqp(icbot6,ik_t6,is_t6) - eqp(ivtop6,ik_t6,is_t6) ) * hartree2ev
+          write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t6] direct gap @k=1: KS=", &
+            gap_ks6, " eV   COHSEX=", gap_cohsex6, " eV  (expect COHSEX wider)"
+        else
+          write(*,'(A,F12.5,A)') "  [gw][t6] direct gap @k=1: KS=", gap_ks6, &
+            " eV  (COHSEX gap needs both gap states inside the band window)"
+        end if
+      end if
+      write(*,*)
+    end if
+
+    deallocate(sigc_w6, sex_w6, coh_w6, vxc_w6, eqp_w6, sigx_w6)
+    deallocate(gvec_t6, gg_t6)
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) "  [gw] computed static COHSEX QP energies (sigma_type=cohsex)"
     end if
 
   else
