@@ -41,7 +41,7 @@ subroutine main_gw
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
-  use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest
+  use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest, gw_symmetrize_orbitals
   use sendrecv_grid
   implicit none
 
@@ -408,6 +408,9 @@ subroutine main_gw
   ! ----------------------------------------------------------------
   if (run_sanity_sym) then
     call gw_grid_perm_selftest(system, lg)
+    ! make the full-mesh orbitals exactly symmetric (orbital rotation), then the
+    ! eps G-rotation discrepancy should collapse to machine precision.
+    call gw_symmetrize_orbitals(system, info, lg, spsi, energy)
     call gw_sym_selftest(system, info, mg, lg, spsi, energy%esp, epsilon_cutoff)
   end if
 

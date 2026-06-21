@@ -19,6 +19,7 @@ module gw_symmetry_sub
   private
   public :: gw_sym_selftest
   public :: gw_grid_perm_selftest
+  public :: gw_symmetrize_orbitals
 
 contains
 
@@ -279,5 +280,152 @@ contains
 
     deallocate(perm, hit, comp)
   end subroutine gw_grid_perm_selftest
+
+  ! --------------------------------------------------------------------------
+  ! gw_symmetrize_orbitals
+  !
+  ! Make the full-mesh orbitals EXACTLY symmetric by overwriting every star
+  ! member with the grid-rotated copy of its star representative:
+  !   u_k(r) = u_{k_irr}(R^{-1} r)   for k = R k_irr,
+  ! realised on the grid via the validated index permutation perm_R, and the
+  ! star energies/occupations set equal to the representative's (these are
+  ! point-group invariants).  After this the dielectric matrix is symmetric to
+  ! machine precision, so the G-rotation reduction is EXACT.  This is the
+  ! orbital-rotation that replaces the (broken on the full mesh) density
+  ! symmetrisation.  Single rank (full mesh on one rank).
+  ! --------------------------------------------------------------------------
+  subroutine gw_symmetrize_orbitals(system, info, lg, spsi, energy)
+    use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_dft_energy
+    use sym_sub,        only: SymMatA, SymMatB, init_sym_sub, use_symmetry, read_sw_symmetry
+    use parallelization,only: nproc_id_global
+    use communication,  only: comm_is_root
+    implicit none
+    type(s_dft_system),    intent(inout) :: system
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: lg
+    type(s_orbital),       intent(inout) :: spsi
+    type(s_dft_energy),    intent(inout) :: energy
+
+    integer, allocatable :: perm(:,:), rep(:), kop(:), gx(:), gy(:), gz(:)
+    logical, allocatable :: assigned(:)
+    real(8) :: sa(3,3), sainv(3,3), binv(3,3), f(3), fp(3), kf(3), rf(3), d
+    integer :: n1, n2, n3, ntot, nsym, isym, ix, iy, iz, i, j
+    integer :: nk, ik, kk, k, r, is, io, im, nstar, nrep
+    integer :: jx, jy, jz
+    logical :: rootp, use_zwf
+    real(8), allocatable :: rbuf(:)
+    complex(8), allocatable :: zbuf(:)
+
+    rootp = comm_is_root(nproc_id_global)
+    call read_sw_symmetry('yyy')
+    call init_sym_sub(system%primitive_a, system%primitive_b)
+    use_symmetry = .false.
+    nsym = size(SymMatB, 3)
+
+    n1 = lg%num(1); n2 = lg%num(2); n3 = lg%num(3); ntot = n1*n2*n3
+    nk = system%nk
+    use_zwf = allocated(spsi%zwf)
+
+    ! ---- grid-index permutation perm_R(i) = grid point of R^{-1} r_i ----------
+    allocate(perm(ntot,nsym), gx(ntot), gy(ntot), gz(ntot))
+    do iz = 1, n3
+    do iy = 1, n2
+    do ix = 1, n1
+      i = ix + (iy-1)*n1 + (iz-1)*n1*n2
+      gx(i) = ix; gy(i) = iy; gz(i) = iz
+    end do
+    end do
+    end do
+    do isym = 1, nsym
+      sa = SymMatA(1:3,1:3,isym)
+      call inv3(sa, sainv)
+      do i = 1, ntot
+        f(1) = dble(gx(i)-1)/dble(n1)
+        f(2) = dble(gy(i)-1)/dble(n2)
+        f(3) = dble(gz(i)-1)/dble(n3)
+        fp(1) = sainv(1,1)*f(1)+sainv(1,2)*f(2)+sainv(1,3)*f(3)
+        fp(2) = sainv(2,1)*f(1)+sainv(2,2)*f(2)+sainv(2,3)*f(3)
+        fp(3) = sainv(3,1)*f(1)+sainv(3,2)*f(2)+sainv(3,3)*f(3)
+        jx = modulo(nint(fp(1)*dble(n1)), n1) + 1
+        jy = modulo(nint(fp(2)*dble(n2)), n2) + 1
+        jz = modulo(nint(fp(3)*dble(n3)), n3) + 1
+        perm(i,isym) = jx + (jy-1)*n1 + (jz-1)*n1*n2
+      end do
+    end do
+
+    ! ---- star map: each k -> (rep, op) with k = R_op . rep ; rep -> kop=0 -----
+    call inv3(system%primitive_b, binv)
+    allocate(rep(nk), kop(nk), assigned(nk))
+    assigned(:) = .false.
+    rep(:) = 0; kop(:) = 0
+    do ik = 1, nk
+      if (assigned(ik)) cycle
+      rep(ik) = ik; kop(ik) = 0; assigned(ik) = .true.
+      kf(1) = binv(1,1)*system%vec_k(1,ik)+binv(1,2)*system%vec_k(2,ik)+binv(1,3)*system%vec_k(3,ik)
+      kf(2) = binv(2,1)*system%vec_k(1,ik)+binv(2,2)*system%vec_k(2,ik)+binv(2,3)*system%vec_k(3,ik)
+      kf(3) = binv(3,1)*system%vec_k(1,ik)+binv(3,2)*system%vec_k(2,ik)+binv(3,3)*system%vec_k(3,ik)
+      do isym = 1, nsym
+        rf(1) = SymMatB(1,1,isym)*kf(1)+SymMatB(1,2,isym)*kf(2)+SymMatB(1,3,isym)*kf(3)
+        rf(2) = SymMatB(2,1,isym)*kf(1)+SymMatB(2,2,isym)*kf(2)+SymMatB(2,3,isym)*kf(3)
+        rf(3) = SymMatB(3,1,isym)*kf(1)+SymMatB(3,2,isym)*kf(2)+SymMatB(3,3,isym)*kf(3)
+        ! find the mesh point with fractional coord rf (mod 1)
+        do kk = 1, nk
+          f(1) = binv(1,1)*system%vec_k(1,kk)+binv(1,2)*system%vec_k(2,kk)+binv(1,3)*system%vec_k(3,kk)
+          f(2) = binv(2,1)*system%vec_k(1,kk)+binv(2,2)*system%vec_k(2,kk)+binv(2,3)*system%vec_k(3,kk)
+          f(3) = binv(3,1)*system%vec_k(1,kk)+binv(3,2)*system%vec_k(2,kk)+binv(3,3)*system%vec_k(3,kk)
+          d = abs(modulo(rf(1)-f(1)+0.5d0,1d0)-0.5d0) &
+            + abs(modulo(rf(2)-f(2)+0.5d0,1d0)-0.5d0) &
+            + abs(modulo(rf(3)-f(3)+0.5d0,1d0)-0.5d0)
+          if (d < 1d-6) then
+            if (.not. assigned(kk)) then
+              rep(kk) = ik; kop(kk) = isym; assigned(kk) = .true.
+            end if
+            exit
+          end if
+        end do
+      end do
+    end do
+    nrep  = count(kop(:) == 0)
+    nstar = nk - nrep
+
+    ! ---- overwrite each non-representative k by the rotated representative ----
+    allocate(zbuf(ntot), rbuf(ntot))
+    im = info%im_s
+    do k = 1, nk
+      if (kop(k) == 0) cycle           ! representative: leave as is
+      r = rep(k); isym = kop(k)
+      do is = 1, system%nspin
+        do io = 1, system%no
+          if (use_zwf) then
+            do i = 1, ntot
+              zbuf(i) = spsi%zwf(gx(perm(i,isym)), gy(perm(i,isym)), gz(perm(i,isym)), is, io, r, im)
+            end do
+            do i = 1, ntot
+              spsi%zwf(gx(i), gy(i), gz(i), is, io, k, im) = zbuf(i)
+            end do
+          else
+            do i = 1, ntot
+              rbuf(i) = spsi%rwf(gx(perm(i,isym)), gy(perm(i,isym)), gz(perm(i,isym)), is, io, r, im)
+            end do
+            do i = 1, ntot
+              spsi%rwf(gx(i), gy(i), gz(i), is, io, k, im) = rbuf(i)
+            end do
+          end if
+        end do
+        ! energies and occupations are point-group invariants
+        energy%esp(:,k,is)   = energy%esp(:,r,is)
+        system%rocc(:,k,is)  = system%rocc(:,r,is)
+      end do
+    end do
+
+    if (rootp) then
+      write(*,*)
+      write(*,'(A,I4,A,I4,A,I4)') " [gw][sym3] orbital symmetrise: nk=", nk, &
+        "  representatives=", nrep, "  star members rotated=", nstar
+      write(*,*)
+    end if
+
+    deallocate(perm, gx, gy, gz, rep, kop, assigned, zbuf, rbuf)
+  end subroutine gw_symmetrize_orbitals
 
 end module gw_symmetry_sub
