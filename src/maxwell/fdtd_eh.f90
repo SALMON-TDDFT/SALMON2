@@ -3310,7 +3310,8 @@ contains
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
-                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk,ttm3_write_profile
+                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk,ttm3_write_profile,&
+                               ttm3_drude_coef_cell
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     implicit none
@@ -3326,6 +3327,8 @@ contains
     real(8),allocatable :: Spoynting_g(:,:,:,:), divS_g(:,:,:)
     real(8),allocatable :: t3_S(:,:,:,:), t3_divS(:,:,:), t3_S_g(:,:,:,:), t3_divS_g(:,:,:)
     real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
+    real(8),allocatable :: t3_jx(:,:,:),t3_jy(:,:,:),t3_jz(:,:,:)        ! carrier Drude ADE current J
+    real(8),allocatable :: t3_rjfx(:,:,:),t3_rjfy(:,:,:),t3_rjfz(:,:,:) ! J injected via eh_add_curr
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
     real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
     real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj,t3_gtpa
@@ -3370,6 +3373,7 @@ contains
                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
       if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
+      if(use_ttm3 .and. allocated(t3_rjfx)) call eh_add_curr(t3_rjfx,t3_rjfy,t3_rjfz)  ! carrier Drude current
       call eh_sendrecv(fs,fe,'e')
       
       !update lorentz-drude
@@ -3543,6 +3547,9 @@ contains
           allocate( t3_env(fs%mg%is_array(1):fs%mg%ie_array(1), &
                            fs%mg%is_array(2):fs%mg%ie_array(2), &
                            fs%mg%is_array(3):fs%mg%ie_array(3)) ); t3_env=0.0d0
+          call allocate_poynting(fs, u=t3_jx  ); call allocate_poynting(fs, u=t3_jy  ); call allocate_poynting(fs, u=t3_jz  )
+          call allocate_poynting(fs, u=t3_rjfx); call allocate_poynting(fs, u=t3_rjfy); call allocate_poynting(fs, u=t3_rjfz)
+          t3_jx=0d0; t3_jy=0d0; t3_jz=0d0; t3_rjfx=0d0; t3_rjfy=0d0; t3_rjfz=0d0
           if(yn_em_envelope=='y') call allocate_poynting(fs, t3_S_g, t3_divS_g)
         end if
         call calc_es_and_hs(fs, fe)
@@ -3578,30 +3585,24 @@ contains
         end do
         call ttm3_main( fs%srg_ng, fs%mg, t3_power, t3_gen )
 
-        !--- Stage 2 back-action: carrier-dependent permittivity drives the FDTD media
-        !    coefficients.  Only TRUE-INTERIOR medium cells (all 6 neighbours the same
-        !    medium) are updated, so the surface cells keep their interface-consistent
-        !    init coefficients.  The interior-cell list is built by ttm3 at init time;
-        !    fs%imedia must NOT be used here (the FDTD setup deallocates it).
-        !    Single-frequency static eps at omega1 (the reference's approximation);
-        !    SALMON's dt is vacuum-CFL-sized, so eps>=1 stays CFL-stable.
+        !--- carrier-Drude back-action via the STABLE current-source coupling (SALMON-native):
+        !    each medium cell carries an auxiliary Drude polarization current J evolved by the
+        !    ADE  J_new = c1*J + c2*E  (c1,c2 from the carrier plasma frequency/collision rate),
+        !    and injected into the FDTD E-update next step through the existing eh_add_curr
+        !    interface (same scheme as the validated Lorentz-Drude media).  The media
+        !    coefficients (c1_ex_*, c2_jx) are NOT touched -- they keep the fixed cold-bound
+        !    optics (eps_bg + sig_cold) from init.  This replaces the old eps/sigma coefficient
+        !    back-action, which is numerically unstable in the real-field FDTD when sigma grows
+        !    fast (abrupt coefficient change -> front/antinode runaway).
         do t3_im=1,ttm3_ninterior()
           call ttm3_interior_cell( t3_im, ix,iy,iz )
-            call ttm3_eps_sig( ix,iy,iz, omega1, t3_eps, t3_sig )
-            t3_eps = max( t3_eps, 1.0d0 )
-            t3_de  = 1.0d0/( 1.0d0 + 2.0d0*pi*t3_sig/t3_eps*dt_em )
-            t3_c1  = ( 1.0d0 - 2.0d0*pi*t3_sig/t3_eps*dt_em )*t3_de
-            t3_cx  = ( cspeed_au/t3_eps*dt_em )*t3_de/fs%hgs(1)
-            t3_cy  = ( cspeed_au/t3_eps*dt_em )*t3_de/fs%hgs(2)
-            t3_cz  = ( cspeed_au/t3_eps*dt_em )*t3_de/fs%hgs(3)
-            t3_cj  = ( 4.0d0*pi/t3_eps*dt_em )*t3_de
-            fe%c1_ex_y(ix,iy,iz)=t3_c1; fe%c2_ex_y(ix,iy,iz)= t3_cy
-            fe%c1_ex_z(ix,iy,iz)=t3_c1; fe%c2_ex_z(ix,iy,iz)=-t3_cz
-            fe%c1_ey_z(ix,iy,iz)=t3_c1; fe%c2_ey_z(ix,iy,iz)= t3_cz
-            fe%c1_ey_x(ix,iy,iz)=t3_c1; fe%c2_ey_x(ix,iy,iz)=-t3_cx
-            fe%c1_ez_x(ix,iy,iz)=t3_c1; fe%c2_ez_x(ix,iy,iz)= t3_cx
-            fe%c1_ez_y(ix,iy,iz)=t3_c1; fe%c2_ez_y(ix,iy,iz)=-t3_cy
-            fe%c2_jx(ix,iy,iz)=-t3_cj; fe%c2_jy(ix,iy,iz)=-t3_cj; fe%c2_jz(ix,iy,iz)=-t3_cj
+            call ttm3_drude_coef_cell( ix,iy,iz, omega1, dt_em, t3_c1, t3_cj )   ! c1, c2 (ADE)
+            t3_jx(ix,iy,iz) = t3_c1*t3_jx(ix,iy,iz) + t3_cj*( fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz) )
+            t3_jy(ix,iy,iz) = t3_c1*t3_jy(ix,iy,iz) + t3_cj*( fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz) )
+            t3_jz(ix,iy,iz) = t3_c1*t3_jz(ix,iy,iz) + t3_cj*( fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz) )
+            t3_rjfx(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jx(ix,iy,iz)
+            t3_rjfy(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jy(ix,iy,iz)
+            t3_rjfz(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz(ix,iy,iz)
         end do
 
         if( mod(iter,i_3tm_out)==0 )then

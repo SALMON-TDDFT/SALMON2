@@ -32,6 +32,8 @@ module ttm3
   public :: ttm3_write_profile
   public :: ttm3_permittivity
   public :: ttm3_linear_gen
+  public :: ttm3_drude_coef
+  public :: ttm3_drude_coef_cell
   public :: ttm3_eps_sig
   public :: ttm3_ninterior
   public :: ttm3_interior_cell
@@ -995,6 +997,50 @@ contains
     eps_re = -wpe/w2/(1.0d0+xE*xE) - wph/w2/(1.0d0+xH*xH)          ! Re(eps_Drude), e+h
     sig    = ( wpe/w2*xE/(1.0d0+xE*xE) + wph/w2*xH/(1.0d0+xH*xH) )*omega/(4.0d0*pi_)
   end subroutine ttm3_drude
+
+  ! ADE-FDTD coefficients for the carrier Drude polarization current J (the STABLE,
+  ! SALMON-native current-source coupling): J_new = c1*J + c2*E, with the current injected
+  ! via eh_add_curr.  Same gamma_eh as ttm3_drude; combined e+h plasma frequency
+  ! wp^2 = 4*pi*Ne*(1/mu_eo+1/mu_ho).  c1=(1-g dt/2)/(1+g dt/2), c2=wp^2 dt/(8 pi (1+g dt/2))
+  ! (the same form as the validated Lorentz-Drude pole, c2_jx_ld).  This replaces the
+  ! eps/sigma back-action (which is unstable in the real-field FDTD as sigma grows fast).
+  pure subroutine ttm3_drude_coef( Ne_, Te_, Tl_, omega, dt, c1, c2 )
+    implicit none
+    real(8),intent(in)  :: Ne_, Te_, Tl_, omega, dt
+    real(8),intent(out) :: c1, c2
+    real(8),parameter :: mu_eo=0.26d0, mu_ho=0.37d0, kbT_r=3.1668d-6, a_t_=2.419d-2, E_h_=27.2114d0
+    real(8) :: red,red2,Cg,Tryd,Pe,Tf,aa,gsp,gph,g1e,ge,TeK,TlK,argl,wp2,c0
+    TeK=max(Te_,1.0d-12)/kbT_r; TlK=Tl_/kbT_r
+    red  = 1.0d0/(1.0d0/mu_eo+1.0d0/mu_ho)
+    red2 = 1.0d0/(1.0d0/tp3%mu_e+1.0d0/tp3%mu_h)
+    Cg   = 16.0d0/9.0d0*pi_**(-1.5d0)
+    Tryd = red*0.5d0/(11.7d0**2)*(16.0d0*pi_*pi_)
+    Pe   = (3.0d0*pi_*pi_*max(Ne_,1.0d-30))**(2.0d0/3.0d0)
+    Tf   = 0.5d0*Pe/(red2*kbT_r)
+    argl = sqrt(Tryd*Tf)*Tf
+    aa   = 1.0d0/sqrt( sqrt(kbT_r)/argl )*exp(2.0d0/3.0d0)
+    if( TeK > aa )then
+       gsp = abs( Cg*Tryd*(Tf/TeK)**1.5d0 * log( TeK*TeK*sqrt(kbT_r)/argl ) )
+    else
+       gsp = Cg*Tryd*(Tf/aa)**1.5d0 * log( aa*aa*sqrt(kbT_r)/argl )
+    end if
+    gph = 4.0d-4*TlK*a_t_
+    g1e = a_t_/( 0.98d0 + 0.2d0*(kbT_r*TeK*E_h_)**(-3.5d0) )
+    ge  = max( gsp+gph+g1e, 1.0d-30 )                              ! collision rate
+    wp2 = 4.0d0*pi_*Ne_*( 1.0d0/mu_eo + 1.0d0/mu_ho )             ! combined e+h plasma freq^2
+    c0  = 1.0d0 + ge*dt/2.0d0
+    c1  = ( 1.0d0 - ge*dt/2.0d0 )/c0
+    c2  = wp2*dt/( 8.0d0*pi_*c0 )
+  end subroutine ttm3_drude_coef
+
+  ! Cell wrapper: ADE Drude coefficients from the cell's carrier state (for the FDTD coupling).
+  subroutine ttm3_drude_coef_cell( ix, iy, iz, omega, dt, c1, c2 )
+    implicit none
+    integer,intent(in)  :: ix,iy,iz
+    real(8),intent(in)  :: omega, dt
+    real(8),intent(out) :: c1, c2
+    call ttm3_drude_coef( Ne(ix,iy,iz)+N_floor, Te(ix,iy,iz), Tl(ix,iy,iz), omega, dt, c1, c2 )
+  end subroutine ttm3_drude_coef_cell
 
   pure subroutine ttm3_permittivity( Ne_, Nh_, Te_, Th_, Tl_, omega, eps_re, sig )
     implicit none
