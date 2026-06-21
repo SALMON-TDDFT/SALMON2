@@ -55,7 +55,7 @@ contains
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_coulomb_sub, only: build_gvectors
     use gw_epsilon_sub, only: calc_epsinv
-    use sym_sub,        only: SymMatB, init_sym_sub, use_symmetry
+    use sym_sub,        only: SymMatB, init_sym_sub, use_symmetry, read_sw_symmetry
     use parallelization,only: nproc_id_global
     use communication,  only: comm_is_root
     implicit none
@@ -79,9 +79,14 @@ contains
     rootp = comm_is_root(nproc_id_global)
 
     ! Build the operations (full k-mesh already set; this only fills SymMatB).
-    use_symmetry = .true.
+    ! read_sw_symmetry sets BOTH use_symmetry and the per-direction filter flags
+    ! that init_sym_sub uses to keep operations (without it only the identity
+    ! survives the filter).  Called here, after init_dft, so the full k-mesh that
+    ! init_dft already built is undisturbed.
+    call read_sw_symmetry('yyy')
     call init_sym_sub(system%primitive_a, system%primitive_b)
     nsym = size(SymMatB, 3)
+    use_symmetry = .false.   ! ops persist in SymMatB; keep the rest of GW unaffected
 
     ! eps G-set.
     allocate(gvec(3,ngmax), gg(ngmax))
