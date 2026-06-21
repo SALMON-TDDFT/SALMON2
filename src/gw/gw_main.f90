@@ -37,6 +37,8 @@ subroutine main_gw
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel
   use gw_epsilon_sub,     only: calc_epsinv
+  use gw_sigma_x_sub,     only: calc_sigma_x
+  use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use sendrecv_grid
   implicit none
 
@@ -94,6 +96,15 @@ subroutine main_gw
   real(8)               :: eps_M, eps_inf
   logical               :: ok_t4
   integer               :: nskip_t4
+
+  ! --- variables for task 5 (bare exchange Sigma_x + QP solve) ---
+  integer               :: ng_t5
+  real(8),  allocatable :: gvec_t5(:,:), gg_t5(:)
+  real(8),  allocatable :: sigx_w(:,:), vxc_w(:,:), sigc_w(:,:), eqp_w(:,:)
+  integer               :: is_t5, ik_t5, ivtop, icbot, io
+  real(8)               :: gap_ks, gap_qp
+  real(8),  parameter   :: hartree2ev = 27.21138505d0  ! eV per Hartree (display only)
+  real(8),  allocatable :: sigx_w0(:,:)
 
   ! ----------------------------------------------------------------
   ! Step 0: report active GW input parameters (root only)
@@ -364,7 +375,9 @@ subroutine main_gw
   deallocate(gvec_t4, gg_t4, epsinv_t4, epsd_t4)
 
   ! ----------------------------------------------------------------
-  ! Step 5: QP passthrough — allocate and fill
+  ! Step 5: QP energies — full (no,nk,nspin) arrays for the output file.
+  ! Defaults are the KS passthrough; the sigma_type=='sigx' branch below
+  ! overwrites the band window [ib_min,ib_max] with the bare-exchange QP solve.
   ! ----------------------------------------------------------------
   allocate(eqp    (system%no, system%nk, system%nspin))
   allocate(zfac   (system%no, system%nk, system%nspin))
@@ -372,7 +385,7 @@ subroutine main_gw
   allocate(sigc   (system%no, system%nk, system%nspin))
   allocate(vxc_arr(system%no, system%nk, system%nspin))
 
-  eqp     = energy%esp  ! QP = KS passthrough
+  eqp     = energy%esp  ! default: QP = KS passthrough
   zfac    = 1.0d0
   sigx    = 0.0d0
   sigc    = 0.0d0
@@ -387,12 +400,134 @@ subroutine main_gw
   end if
 
   ! ----------------------------------------------------------------
+  ! Bare-exchange (Fock) rung: sigma_type=='sigx'
+  !   Sigma_x over [ib_min,ib_max], <Vxc> over the same window, sigc=0, Z=1,
+  !   then eps^QP = eps^KS + (Sigma_x - Vxc).  Real columns only.
+  ! ----------------------------------------------------------------
+  if (trim(sigma_type) == 'sigx') then
+
+    ! G-vector list (rebuilt on every rank; deterministic) for Sigma_x.
+    allocate(gvec_t5(3, ngmax_t2))
+    allocate(gg_t5(ngmax_t2))
+    call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                        ng_t5, gvec_t5, gg_t5)
+
+    allocate(sigx_w(ib_min:ib_max, system%nk))
+    allocate(vxc_w (ib_min:ib_max, system%nk))
+    allocate(sigc_w(ib_min:ib_max, system%nk))
+    allocate(eqp_w (ib_min:ib_max, system%nk))
+    sigc_w(:,:) = 0.0d0
+
+    do is_t5 = 1, system%nspin
+      ! Sigma_x and <Vxc> for the band window (both collective inside).
+      call calc_sigma_x(system, info, mg, lg, spsi, gvec_t5, gg_t5, ng_t5, &
+                        is_t5, ib_min, ib_max, sigx_w)
+      call calc_vxc_expect(system, info, mg, spsi, Vxc, is_t5, &
+                           ib_min, ib_max, vxc_w)
+
+      ! Linearised QP update (Z=1, sigc=0): eqp = eks + (sigx - vxc).
+      call solve_qp(energy%esp(ib_min:ib_max,:,is_t5), sigx_w, sigc_w, vxc_w, &
+                    1.0d0, eqp_w)
+
+      ! Scatter the window into the full output arrays for this spin.
+      sigx   (ib_min:ib_max,:,is_t5) = sigx_w(:,:)
+      vxc_arr(ib_min:ib_max,:,is_t5) = vxc_w (:,:)
+      eqp    (ib_min:ib_max,:,is_t5) = eqp_w (:,:)
+      ! sigc and zfac stay at their defaults (0 and 1).
+    end do
+
+    ! ----------------------------------------------------------------
+    ! [gw][t5] sanity block (root only): for spin 1, k=1, report the top
+    ! valence and bottom conduction states.  Checks:
+    !   - <Sigma_x> negative, O(-10 eV) for valence,
+    !   - <Vxc> (eV),
+    !   - KS gap vs exchange-corrected (QP) gap -> expect the QP gap WIDER,
+    !   - <Sigma_x> invariance to n_empty (Sigma_x sums only occupied v):
+    !       recomputed over occupied bands only and compared to the window value.
+    ! ----------------------------------------------------------------
+    is_t5 = 1
+    ik_t5 = 1
+
+    ! locate the top occupied (ivtop) and bottom unoccupied (icbot) bands at k=1
+    ivtop = 0
+    do io = 1, system%no
+      if (system%rocc(io,ik_t5,is_t5) > 1.0d-6) ivtop = io
+    end do
+    icbot = min(ivtop + 1, system%no)
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*)
+      write(*,*) "[gw][t5] bare exchange Sigma_x + QP solve"
+      write(*,*) "[gw][t5] ng =", ng_t5, "  band window:", ib_min, "..", ib_max
+      write(*,'(A,I4,A,I4)') "  [gw][t5] at k=1: top valence n=", ivtop, &
+        "  bottom conduction n=", icbot
+    end if
+
+    ! n_empty invariance check: Sigma_x(n,k) sums ONLY occupied bands v, so it
+    ! must be identical regardless of how many empty/output bands the run carries.
+    ! Demonstrate by recomputing Sigma_x over a window that STOPS at ivtop (no
+    ! empty states above it) and comparing the ivtop entry to the full-window
+    ! value.  Only meaningful when ivtop is itself inside the output window.
+    if (ivtop >= ib_min .and. ivtop <= ib_max) then
+      allocate(sigx_w0(ib_min:ivtop, system%nk))
+      call calc_sigma_x(system, info, mg, lg, spsi, gvec_t5, gg_t5, ng_t5, &
+                        is_t5, ib_min, ivtop, sigx_w0)
+    end if
+
+    if (comm_is_root(nproc_id_global)) then
+      if (ivtop >= ib_min .and. ivtop <= ib_max) then
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t5] top valence: <Sigx>=", &
+          sigx(ivtop,ik_t5,is_t5)*hartree2ev, " eV   <Vxc>=", &
+          vxc_arr(ivtop,ik_t5,is_t5)*hartree2ev, " eV"
+        write(*,'(A,L2,A,ES12.4)') "  [gw][t5] <Sigx> negative? ", &
+          (sigx(ivtop,ik_t5,is_t5) < 0.0d0), &
+          "   n_empty-invariance |dSigx| (eV)=", &
+          abs(sigx_w0(ivtop,ik_t5) - sigx(ivtop,ik_t5,is_t5))*hartree2ev
+      end if
+      if (icbot >= ib_min .and. icbot <= ib_max) then
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t5] bot conduction: <Sigx>=", &
+          sigx(icbot,ik_t5,is_t5)*hartree2ev, " eV   <Vxc>=", &
+          vxc_arr(icbot,ik_t5,is_t5)*hartree2ev, " eV"
+      end if
+      ! KS gap vs exchange-corrected gap at k=1 (direct gap proxy)
+      if (ivtop >= 1 .and. icbot <= system%no .and. icbot > ivtop) then
+        gap_ks = ( energy%esp(icbot,ik_t5,is_t5) - energy%esp(ivtop,ik_t5,is_t5) ) &
+                 * hartree2ev
+        if (icbot >= ib_min .and. icbot <= ib_max .and. &
+            ivtop >= ib_min .and. ivtop <= ib_max) then
+          gap_qp = ( eqp(icbot,ik_t5,is_t5) - eqp(ivtop,ik_t5,is_t5) ) * hartree2ev
+          write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t5] direct gap @k=1: KS=", &
+            gap_ks, " eV   QP(Sigx)=", gap_qp, " eV  (expect QP wider)"
+        else
+          write(*,'(A,F12.5,A)') "  [gw][t5] direct gap @k=1: KS=", gap_ks, &
+            " eV  (QP gap needs both gap states inside the band window)"
+        end if
+      end if
+      write(*,*)
+    end if
+
+    if (allocated(sigx_w0)) deallocate(sigx_w0)
+    deallocate(sigx_w, vxc_w, sigc_w, eqp_w)
+    deallocate(gvec_t5, gg_t5)
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) "  [gw] computed bare-exchange QP energies (sigma_type=sigx)"
+    end if
+
+  else
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) "  [gw] sigma_type='"//trim(sigma_type)// &
+                 "' not a self-energy rung here: QP = KS passthrough"
+    end if
+  end if
+
+  ! ----------------------------------------------------------------
   ! Step 6: write output
   ! ----------------------------------------------------------------
   call write_qp_energies(system, energy%esp, eqp, zfac, sigx, sigc, vxc_arr)
 
   if (comm_is_root(nproc_id_global)) then
-    write(*,*) "  [gw] wrote QP energies (scaffold passthrough)"
+    write(*,*) "  [gw] wrote QP energies"
     write(*,*) "  [gw] band window: ", ib_min, " to ", ib_max
   end if
 
