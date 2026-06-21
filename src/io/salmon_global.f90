@@ -464,5 +464,11 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_gw_sym           ! 'y': symmetrise the full-mesh orbitals by
                                         ! grid rotation (needs sym.dat) -> exact
                                         ! point-group symmetry for the BZ-sum reduction
+  ! --- full-frequency (real-axis) dielectric / absorption (spec-b1) ---
+  integer        :: nomega_gw           ! number of real-frequency grid points
+  real(8)        :: omega_max_gw        ! eV, upper end of the real-frequency grid
+  real(8)        :: eta_gw              ! eV, Lorentzian broadening (= hbar/T_mask)
+  character(1)   :: yn_gw_absorption    ! 'y': run full-frequency W(w) + Im eps path
+  character(8)   :: gw_head_mode        ! 'proxy' | 'velocity' : q->0 head treatment
 
 end module salmon_global

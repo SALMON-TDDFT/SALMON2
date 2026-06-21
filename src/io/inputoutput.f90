@@ -614,7 +614,12 @@ contains
       & nband_qp_min, &
       & nband_qp_max, &
       & yn_gw_qcache, &
-      & yn_gw_sym
+      & yn_gw_sym, &
+      & nomega_gw, &
+      & omega_max_gw, &
+      & eta_gw, &
+      & yn_gw_absorption, &
+      & gw_head_mode
 
 !! == default for &unit ==
     unit_system='au'
@@ -1050,6 +1055,11 @@ contains
     nband_qp_max   = 0
     yn_gw_qcache   = 'n'
     yn_gw_sym      = 'n'
+    nomega_gw        = 200
+    omega_max_gw     = 25.0d0
+    eta_gw           = 0.068d0      ! hbar/T_mask, T_mask=400 a.u. (prod RT-TDDFT mask)
+    yn_gw_absorption = 'n'
+    gw_head_mode     = 'proxy'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1692,6 +1702,11 @@ contains
     call comm_bcast(nband_qp_max  , nproc_group_global)
     call comm_bcast(yn_gw_qcache  , nproc_group_global)
     call comm_bcast(yn_gw_sym     , nproc_group_global)
+    call comm_bcast(nomega_gw       , nproc_group_global)
+    call comm_bcast(omega_max_gw    , nproc_group_global)
+    call comm_bcast(eta_gw          , nproc_group_global)
+    call comm_bcast(yn_gw_absorption, nproc_group_global)
+    call comm_bcast(gw_head_mode    , nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2666,6 +2681,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_sym',       trim(yn_gw_sym)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nomega_gw',      nomega_gw
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega_max_gw',   omega_max_gw
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_gw',         eta_gw
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_absorption',trim(yn_gw_absorption)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'gw_head_mode',   trim(gw_head_mode)
 
       close(fh_variables_log)
     end if
