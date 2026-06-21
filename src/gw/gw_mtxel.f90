@@ -158,9 +158,16 @@ contains
     integer :: im
     logical :: have_k, have_kq
     logical :: bra_owned, ket_owned
+    logical :: use_zwf
 
     hvol = system%hvol
     im   = info%im_s   ! single Maxwell replica for the GW use case
+    ! Orbitals at time-reversal-invariant k-points are stored real (spsi%rwf);
+    ! the others complex (spsi%zwf).  A rank holds a single storage type for
+    ! its whole k-block, so branch once.  (General q with a real k paired to a
+    ! complex k+q on a different rank is a Task-4 concern; q=0 keeps ik=ikq on
+    ! one rank with one storage type.)
+    use_zwf = allocated(spsi%zwf)
 
     allocate(mloc(ng, nb_bra, nb_ket))
     mloc = (0.0d0, 0.0d0)
@@ -190,8 +197,13 @@ contains
               ry = lg%coordinate(iy,2)
             do ix = mg%is(1), mg%ie(1)
               rx = lg%coordinate(ix,1)
-              zd = conjg(spsi%zwf(ix,iy,iz,ispin,nb ,ikq,im)) &
-                 *       spsi%zwf(ix,iy,iz,ispin,nk2,ik ,im)
+              if (use_zwf) then
+                zd = conjg(spsi%zwf(ix,iy,iz,ispin,nb ,ikq,im)) &
+                   *       spsi%zwf(ix,iy,iz,ispin,nk2,ik ,im)
+              else
+                zd = spsi%rwf(ix,iy,iz,ispin,nb ,ikq,im) &
+                   * spsi%rwf(ix,iy,iz,ispin,nk2,ik ,im)
+              end if
               phase = -( gvec(1,ig)*rx + gvec(2,ig)*ry + gvec(3,ig)*rz )
               zacc = zacc + zd * cmplx(cos(phase), sin(phase), 8)
             end do
