@@ -39,7 +39,7 @@ subroutine main_gw
   use gw_epsilon_sub,     only: calc_epsinv
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
-  use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache
+  use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest, gw_symmetrize_orbitals
   use sendrecv_grid
@@ -711,7 +711,12 @@ subroutine main_gw
       ! dynamic correlation Re Sigma_c(eps^KS) and the renormalization Z.
       ! yn_gw_qcache='y' selects the q-cached BZ sum (O(nk^2), identical result);
       ! both take the replicated orbitals built above.
-      if (yn_gw_qcache == 'y') then
+      if (yn_gw_sym == 'y') then
+        ! point-group symmetry-reduced sum (needs the symmetrised orbitals above).
+        call calc_sigma_gpp_sym(system, info, mg, lg, spsi_full, energy%esp, rho, &
+                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                            sigc_w7, zfac_w7, skip_frac=skipfrac7)
+      else if (yn_gw_qcache == 'y') then
         call calc_sigma_gpp_qcache(system, info, mg, lg, spsi_full, energy%esp, rho, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
                             sigc_w7, zfac_w7, skip_frac=skipfrac7)
