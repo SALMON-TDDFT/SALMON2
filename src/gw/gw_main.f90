@@ -82,6 +82,20 @@ subroutine main_gw
   end if
 
   ! ----------------------------------------------------------------
+  ! Guard: GW reads a converged GS through the restart path
+  ! (yn_restart='y' + directory_read_data). Otherwise initialization2_dft
+  ! falls back to random orbitals (init_wf) and the eigenvalues are
+  ! meaningless. Enforce the precondition with a clear message.
+  ! ----------------------------------------------------------------
+  if (yn_restart /= 'y') then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) "  [gw] ERROR: theory=gw requires yn_restart='y' with"
+      write(*,*) "  [gw]        directory_read_data pointing at a converged GS."
+    end if
+    stop
+  end if
+
+  ! ----------------------------------------------------------------
   ! Step 1: initialise XC functional (identical to main_dft line 100)
   ! ----------------------------------------------------------------
   call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
