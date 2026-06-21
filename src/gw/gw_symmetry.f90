@@ -526,9 +526,11 @@ contains
           f(1) = binv(1,1)*vec(1,j)+binv(1,2)*vec(2,j)+binv(1,3)*vec(3,j)
           f(2) = binv(2,1)*vec(1,j)+binv(2,2)*vec(2,j)+binv(2,3)*vec(3,j)
           f(3) = binv(3,1)*vec(1,j)+binv(3,2)*vec(2,j)+binv(3,3)*vec(3,j)
-          d = abs(modulo(rf(1)-f(1)+0.5d0,1d0)-0.5d0) &
-            + abs(modulo(rf(2)-f(2)+0.5d0,1d0)-0.5d0) &
-            + abs(modulo(rf(3)-f(3)+0.5d0,1d0)-0.5d0)
+          ! EXACT match (no mod-reciprocal-lattice fold): on the MP-shifted mesh R
+          ! maps every point to another mesh point exactly, so grouping by the
+          ! exact vector avoids umklapp ambiguity (q and q+G both present), which
+          ! the pure G-rotation could not undo.
+          d = abs(rf(1)-f(1)) + abs(rf(2)-f(2)) + abs(rf(3)-f(3))
           if (d < 1d-6) then
             if (.not. assigned(j)) then
               rep(j) = i; kop(j) = isym; assigned(j) = .true.
