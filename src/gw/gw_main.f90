@@ -39,6 +39,7 @@ subroutine main_gw
   use gw_epsilon_sub,     only: calc_epsinv
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
+  use gw_sigma_gpp_sub,   only: calc_sigma_gpp
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use sendrecv_grid
   implicit none
@@ -117,6 +118,14 @@ subroutine main_gw
   real(8),  allocatable :: vxc_w6(:,:), eqp_w6(:,:), sigx_w6(:,:)
   integer               :: is_t6, ik_t6, ivtop6, icbot6
   real(8)               :: gap_ks6, gap_cohsex6, skipfrac6
+
+  ! --- variables for task 7 (dynamic G0W0 via the GPP self-energy) ---
+  integer               :: ng_t7
+  real(8),  allocatable :: gvec_t7(:,:), gg_t7(:)
+  real(8),  allocatable :: sigc_w7(:,:), zfac_w7(:,:)
+  real(8),  allocatable :: vxc_w7(:,:), eqp_w7(:,:), sigx_w7(:,:)
+  integer               :: is_t7, ik_t7, ivtop7, icbot7
+  real(8)               :: gap_ks7, gap_g0w0_7, skipfrac7
 
   ! ----------------------------------------------------------------
   ! Step 0: report active GW input parameters (root only)
@@ -637,6 +646,118 @@ subroutine main_gw
 
     if (comm_is_root(nproc_id_global)) then
       write(*,*) "  [gw] computed static COHSEX QP energies (sigma_type=cohsex)"
+    end if
+
+  ! ----------------------------------------------------------------
+  ! Dynamic G0W0 (generalized plasmon-pole) rung: sigma_type=='gpp'
+  !   Sigma_x from calc_sigma_x (bare exchange), Re Sigma_c and Z from
+  !   calc_sigma_gpp, <Vxc> over the window, then the linearised one-shot
+  !   QP solve  eps^QP = eps^KS + Z (Sigma_x + Re Sigma_c - Vxc).  This is
+  !   the PoC goal: the gap must fall BELOW the static COHSEX value.
+  ! ----------------------------------------------------------------
+  else if (trim(sigma_type) == 'gpp') then
+
+    ! G-vector list (eps G-set; rebuilt on every rank, deterministic).
+    allocate(gvec_t7(3, ngmax_t2))
+    allocate(gg_t7(ngmax_t2))
+    call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                        ng_t7, gvec_t7, gg_t7)
+
+    allocate(sigc_w7(ib_min:ib_max, system%nk))
+    allocate(zfac_w7(ib_min:ib_max, system%nk))
+    allocate(vxc_w7 (ib_min:ib_max, system%nk))
+    allocate(eqp_w7 (ib_min:ib_max, system%nk))
+    allocate(sigx_w7(ib_min:ib_max, system%nk))
+
+    skipfrac7 = 0.0d0
+
+    do is_t7 = 1, system%nspin
+      ! bare exchange Sigma_x (the exchange part of Sigma = Sigma_x + Sigma_c).
+      call calc_sigma_x(system, info, mg, lg, spsi, gvec_t7, gg_t7, ng_t7, &
+                        is_t7, ib_min, ib_max, sigx_w7)
+      ! dynamic correlation Re Sigma_c(eps^KS) and the renormalization Z.
+      call calc_sigma_gpp(system, info, mg, lg, spsi, energy%esp, rho, &
+                          gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                          sigc_w7, zfac_w7, skip_frac=skipfrac7)
+      call calc_vxc_expect(system, info, mg, spsi, Vxc, is_t7, &
+                           ib_min, ib_max, vxc_w7)
+
+      ! Linearised one-shot QP update: eqp = eks + Z (sigx + sigc - vxc).
+      call solve_qp(energy%esp(ib_min:ib_max,:,is_t7), sigx_w7, sigc_w7, &
+                    vxc_w7, zfac_w7, eqp_w7)
+
+      ! Scatter into the full output arrays for this spin.
+      sigx   (ib_min:ib_max,:,is_t7) = sigx_w7(:,:)   ! bare exchange
+      sigc   (ib_min:ib_max,:,is_t7) = sigc_w7(:,:)   ! Re Sigma_c
+      zfac   (ib_min:ib_max,:,is_t7) = zfac_w7(:,:)
+      vxc_arr(ib_min:ib_max,:,is_t7) = vxc_w7 (:,:)
+      eqp    (ib_min:ib_max,:,is_t7) = eqp_w7 (:,:)
+    end do
+
+    ! ----------------------------------------------------------------
+    ! [gw][t7] sanity block (root only): for spin 1, k=1, report the top
+    ! valence and bottom conduction states.  Reports Sigma_x, Re Sigma_c, Z,
+    ! the direct gap@Gamma (k=1) KS vs G0W0, and the unphysical-pole skip
+    ! fraction.  Asserts the PoC ordering KS < G0W0 < COHSEX(5.39 eV).
+    ! ----------------------------------------------------------------
+    is_t7 = 1
+    ik_t7 = 1
+    ivtop7 = 0
+    do io = 1, system%no
+      if (system%rocc(io,ik_t7,is_t7) > 1.0d-6) ivtop7 = io
+    end do
+    icbot7 = min(ivtop7 + 1, system%no)
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*)
+      write(*,*) "[gw][t7] dynamic G0W0 self-energy (generalized plasmon-pole)"
+      write(*,*) "[gw][t7] ng =", ng_t7, "  band window:", ib_min, "..", ib_max
+      write(*,'(A,I4,A,I4)') "  [gw][t7] at k=1: top valence n=", ivtop7, &
+        "  bottom conduction n=", icbot7
+      write(*,'(A,ES12.4)') "  [gw][t7] unphysical-pole skip fraction =", skipfrac7
+
+      if (ivtop7 >= ib_min .and. ivtop7 <= ib_max) then
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t7] top valence: <Sig_x>=", &
+          sigx(ivtop7,ik_t7,is_t7)*hartree2ev, " eV   Re<Sig_c>=", &
+          sigc(ivtop7,ik_t7,is_t7)*hartree2ev, " eV"
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t7]   Z=", &
+          zfac(ivtop7,ik_t7,is_t7), "      <Vxc>=", &
+          vxc_arr(ivtop7,ik_t7,is_t7)*hartree2ev, " eV"
+      end if
+      if (icbot7 >= ib_min .and. icbot7 <= ib_max) then
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t7] bot conduction: <Sig_x>=", &
+          sigx(icbot7,ik_t7,is_t7)*hartree2ev, " eV   Re<Sig_c>=", &
+          sigc(icbot7,ik_t7,is_t7)*hartree2ev, " eV"
+        write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t7]   Z=", &
+          zfac(icbot7,ik_t7,is_t7), "      <Vxc>=", &
+          vxc_arr(icbot7,ik_t7,is_t7)*hartree2ev, " eV"
+      end if
+      ! direct gap@Gamma (k=1): KS vs one-shot G0W0
+      if (ivtop7 >= 1 .and. icbot7 <= system%no .and. icbot7 > ivtop7) then
+        gap_ks7 = ( energy%esp(icbot7,ik_t7,is_t7) - energy%esp(ivtop7,ik_t7,is_t7) ) &
+                  * hartree2ev
+        if (icbot7 >= ib_min .and. icbot7 <= ib_max .and. &
+            ivtop7 >= ib_min .and. ivtop7 <= ib_max) then
+          gap_g0w0_7 = ( eqp(icbot7,ik_t7,is_t7) - eqp(ivtop7,ik_t7,is_t7) ) * hartree2ev
+          write(*,'(A,F12.5,A,F12.5,A)') "  [gw][t7] direct gap @k=1: KS=", &
+            gap_ks7, " eV   G0W0=", gap_g0w0_7, " eV"
+          write(*,'(A,L2)') "  [gw][t7]   ordering KS < G0W0 ?         ", &
+            (gap_g0w0_7 > gap_ks7)
+          write(*,'(A,L2,A)') "  [gw][t7]   ordering G0W0 < COHSEX(5.39)? ", &
+            (gap_g0w0_7 < 5.39d0), "  (PoC: KS < G0W0 < COHSEX)"
+        else
+          write(*,'(A,F12.5,A)') "  [gw][t7] direct gap @k=1: KS=", gap_ks7, &
+            " eV  (G0W0 gap needs both gap states inside the band window)"
+        end if
+      end if
+      write(*,*)
+    end if
+
+    deallocate(sigc_w7, zfac_w7, vxc_w7, eqp_w7, sigx_w7)
+    deallocate(gvec_t7, gg_t7)
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) "  [gw] computed dynamic G0W0 QP energies (sigma_type=gpp)"
     end if
 
   else

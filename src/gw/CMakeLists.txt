@@ -4,6 +4,7 @@ set(SOURCES
     gw_epsilon.f90
     gw_sigma_x.f90
     gw_sigma_cohsex.f90
+    gw_sigma_gpp.f90
     gw_qp.f90
     gw_qp_output.f90
     gw_main.f90
