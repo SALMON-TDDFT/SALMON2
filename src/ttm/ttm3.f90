@@ -35,6 +35,7 @@ module ttm3
   public :: ttm3_drude_coef
   public :: ttm3_drude_coef_cell
   public :: ttm3_eps_sig
+  public :: ttm3_coupling_mode
   public :: ttm3_ninterior
   public :: ttm3_interior_cell
   public :: ttm3_generation
@@ -72,6 +73,9 @@ module ttm3
      ! free-carrier (Drude) absorption heats rather than ionises -> generation self-limits in
      ! the metallisation regime.  <=0 disables the split (generation = full absorbed power).
      real(8) :: sig_cold ! cold interband conductivity       [a.u.]         (Layer C-a)
+     integer :: coupling_mode ! 0=J-update (current-source ADE, default), 1=eps-update
+                              ! (carrier eps/sigma folded into the FDTD media coefficients).
+                              ! For isolating the Maxwell-coupling METHOD on an identical run.
   end type ttm3_param
 
   integer,allocatable :: ijk_media_whole(:,:)
@@ -192,6 +196,8 @@ contains
        read(unit,*,iostat=ios) tp3%mob_h0
        tp3%sig_cold = 0.0d0                        ! optional (Layer C-a bound/Drude split); <=0 disables
        read(unit,*,iostat=ios) tp3%sig_cold
+       tp3%coupling_mode = 0                       ! optional: 0=J-update (default), 1=eps-update
+       read(unit,*,iostat=ios) tp3%coupling_mode
        close(unit)
        write(*,*) "Egap[eV]    =",tp3%Egap
        write(*,*) "mu_e        =",tp3%mu_e
@@ -228,6 +234,7 @@ contains
     call comm_bcast(tp3%mob_e0 ,comm,0)
     call comm_bcast(tp3%mob_h0 ,comm,0)
     call comm_bcast(tp3%sig_cold,comm,0)
+    call comm_bcast(tp3%coupling_mode,comm,0)
 
 ! Convert to atomic units
     tp3%Egap = tp3%Egap / hartree_ev
@@ -1105,6 +1112,12 @@ contains
     real(8),intent(out) :: eps_re, sig
     call ttm3_permittivity( Ne(ix,iy,iz), Nh(ix,iy,iz), Te(ix,iy,iz), Th(ix,iy,iz), Tl(ix,iy,iz), omega, eps_re, sig )
   end subroutine ttm3_eps_sig
+
+  pure function ttm3_coupling_mode() result( m )
+    implicit none
+    integer :: m
+    m = tp3%coupling_mode
+  end function ttm3_coupling_mode
 
   integer function ttm3_ninterior()
     implicit none

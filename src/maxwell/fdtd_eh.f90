@@ -3311,7 +3311,7 @@ contains
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
                                ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk,ttm3_write_profile,&
-                               ttm3_drude_coef_cell
+                               ttm3_drude_coef_cell,ttm3_coupling_mode
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     implicit none
@@ -3375,7 +3375,8 @@ contains
                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
       if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
-      if(use_ttm3 .and. allocated(t3_rjfx)) call eh_add_curr(t3_rjfx,t3_rjfy,t3_rjfz)  ! carrier Drude current
+      if(use_ttm3 .and. allocated(t3_rjfx) .and. ttm3_coupling_mode()==0) &
+        call eh_add_curr(t3_rjfx,t3_rjfy,t3_rjfz)  ! carrier Drude current (J-update only)
       call eh_sendrecv(fs,fe,'e')
       
       !update lorentz-drude
@@ -3449,7 +3450,8 @@ contains
         end if
         !ghost LD current
         if(fe%flag_ld) call eh_add_curr_g(fe%rjx_fdtd_ld_g,fe%rjy_fdtd_ld_g,fe%rjz_fdtd_ld_g)
-        if(use_ttm3 .and. allocated(t3_rjfx_g)) call eh_add_curr_g(t3_rjfx_g,t3_rjfy_g,t3_rjfz_g)  ! ghost carrier Drude
+        if(use_ttm3 .and. allocated(t3_rjfx_g) .and. ttm3_coupling_mode()==0) &
+          call eh_add_curr_g(t3_rjfx_g,t3_rjfy_g,t3_rjfz_g)  ! ghost carrier Drude (J-update only)
         call eh_sendrecv(fs,fe,'e_g')
 
         !update ghost LD
@@ -3605,6 +3607,7 @@ contains
         !    optics (eps_bg + sig_cold) from init.  This replaces the old eps/sigma coefficient
         !    back-action, which is numerically unstable in the real-field FDTD when sigma grows
         !    fast (abrupt coefficient change -> front/antinode runaway).
+        if( ttm3_coupling_mode()==0 )then
         do t3_im=1,ttm3_ninterior()
           call ttm3_interior_cell( t3_im, ix,iy,iz )
             call ttm3_drude_coef_cell( ix,iy,iz, omega1, dt_em, t3_c1, t3_cj )   ! c1, c2 (ADE)
@@ -3623,6 +3626,25 @@ contains
               t3_rjfz_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz_g(ix,iy,iz)
             end if
         end do
+        else
+          !--- eps-update coupling (reference 3D3TM style): fold the carrier eps/sigma into the
+          !    FDTD media coefficients each step (same dielectric formula as init), instead of a
+          !    current source.  Isolates the Maxwell-coupling METHOD on an identical run.
+          do t3_im=1,ttm3_ninterior()
+            call ttm3_interior_cell( t3_im, ix,iy,iz )
+            call ttm3_eps_sig( ix,iy,iz, omega1, t3_eps, t3_sig )
+            t3_de = 1.0d0 + 2.0d0*pi*t3_sig/t3_eps*dt_em
+            t3_c1 = ( 1.0d0 - 2.0d0*pi*t3_sig/t3_eps*dt_em )/t3_de
+            t3_cx = cspeed_au/t3_eps*dt_em/t3_de/fs%hgs(1)
+            t3_cy = cspeed_au/t3_eps*dt_em/t3_de/fs%hgs(2)
+            t3_cz = cspeed_au/t3_eps*dt_em/t3_de/fs%hgs(3)
+            t3_cj = ( 4.0d0*pi/t3_eps*dt_em )/t3_de
+            fe%c1_ex_y(ix,iy,iz)= t3_c1; fe%c2_ex_y(ix,iy,iz)= t3_cy; fe%c1_ex_z(ix,iy,iz)= t3_c1; fe%c2_ex_z(ix,iy,iz)=-t3_cz
+            fe%c1_ey_z(ix,iy,iz)= t3_c1; fe%c2_ey_z(ix,iy,iz)= t3_cz; fe%c1_ey_x(ix,iy,iz)= t3_c1; fe%c2_ey_x(ix,iy,iz)=-t3_cx
+            fe%c1_ez_x(ix,iy,iz)= t3_c1; fe%c2_ez_x(ix,iy,iz)= t3_cx; fe%c1_ez_y(ix,iy,iz)= t3_c1; fe%c2_ez_y(ix,iy,iz)=-t3_cy
+            fe%c2_jx(ix,iy,iz)  =-t3_cj; fe%c2_jy(ix,iy,iz)  =-t3_cj; fe%c2_jz(ix,iy,iz)  =-t3_cj
+          end do
+        end if
 
         if( mod(iter,i_3tm_out)==0 )then
           !report the peak over medium cells (the absorbing front, not the screened core).
