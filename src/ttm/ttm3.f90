@@ -598,11 +598,21 @@ contains
     Cl_eff = tp3%Cl*( 1.978d0 + 3.54d-4*TlK - 3.68d0/(TlK*TlK) )/2.084d0
     dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / Cl_eff
 
-    ! carrier temperatures: exponential integrator (stiff relaxation + dilution)
-    rate_e = inv_tau + geff/(Ne_+N_floor)
-    rate_h = inv_tau + geff/(Nh_+N_floor)
-    Te_star = Tl_ + (red_e*q_heat/Ce)/rate_e
-    Th_star = Tl_ + (red_h*q_heat/Ch)/rate_h
+    ! carrier temperatures: exponential integrator (stiff relaxation + dilution).
+    ! Carrier-number energy bookkeeping, matching the reference Tnt = -(dN/dt)*Cnteh
+    ! with Cnteh = (thermal energy per carrier) + red*gap:
+    !  - ALL freshly generated carriers (optical geff AND collisional Col) are born
+    !    near Tl and dilute the carrier temperature -> dilution rate (geff+Col)/N;
+    !  - impact ionization (Col) draws the carriers' share red*gap from the carrier
+    !    kinetic energy to pay for each new pair (an energy SINK).  Col ~ exp(-gap/Te)
+    !    grows with Te, so this is a negative feedback that self-limits Te -- the
+    !    physical cap, vs the unphysical free-carrier heating runaway when it is left
+    !    out (Col was previously fed into dN/dt only, not the energy balance);
+    !  - Auger recombination (R) returns red*gap to the carriers (recombination heating).
+    rate_e = inv_tau + (geff+Col)/(Ne_+N_floor)
+    rate_h = inv_tau + (geff+Col)/(Nh_+N_floor)
+    Te_star = Tl_ + ( red_e*( q_heat + gap*(R-Col) )/Ce )/rate_e
+    Th_star = Tl_ + ( red_h*( q_heat + gap*(R-Col) )/Ch )/rate_h
     Te_ = Te_star + (Te_-Te_star)*exp( -rate_e*dt_in )
     Th_ = Th_star + (Th_-Th_star)*exp( -rate_h*dt_in )
 
