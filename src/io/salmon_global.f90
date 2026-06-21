@@ -456,5 +456,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: qgrid_gw(3)         ! q-grid (= k-grid by default)
   character(16)  :: sigma_type          ! 'sigx' | 'cohsex' | 'gpp'
   integer        :: nband_qp_min, nband_qp_max  ! band window to correct/output
+  character(1)   :: yn_gw_qcache        ! 'y': cache eps^{-1}(q) once per distinct q
+                                        ! (gpp BZ-sum, O(nk^3)->O(nk^2)); 'n': default
 
 end module salmon_global
