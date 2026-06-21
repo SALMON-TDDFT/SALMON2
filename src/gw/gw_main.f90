@@ -34,6 +34,7 @@ subroutine main_gw
   use initialization_sub
   use initialization_dft
   use gw_qp_output_sub,   only: write_qp_energies
+  use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use sendrecv_grid
   implicit none
 
@@ -67,6 +68,14 @@ subroutine main_gw
   integer :: Miter, nspin
   logical :: rion_update
   integer :: ib_min, ib_max
+
+  ! --- variables for the task-2 sanity block ---
+  integer,  parameter   :: ngmax_t2 = 100000
+  integer               :: ng_t2
+  real(8),  allocatable :: gvec_t2(:,:), gg_t2(:), vcoul_t2(:)
+  real(8)               :: qzero(3)
+  integer               :: ig_t2, nprint_t2, nsub1, nsub2
+  real(8)               :: fourpi_t2, analytic_t2
 
   ! ----------------------------------------------------------------
   ! Step 0: report active GW input parameters (root only)
@@ -140,6 +149,58 @@ subroutine main_gw
   !   energy%esp   (no, nk, nspin) -- KS eigenvalues in a.u.
   !   system%rocc  (no, nk, nspin) -- occupations
   !   system%nk, system%no, system%nspin -- dimensions
+
+  ! ----------------------------------------------------------------
+  ! Task-2 sanity block: verify build_gvectors and build_vcoul.
+  ! All output prefixed with [gw][t2] for grep.
+  ! Runs on the root process only; allocations are root-local.
+  ! ----------------------------------------------------------------
+  if (comm_is_root(nproc_id_global)) then
+    allocate(gvec_t2(3, ngmax_t2))
+    allocate(gg_t2(ngmax_t2))
+    allocate(vcoul_t2(ngmax_t2))
+
+    call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                        ng_t2, gvec_t2, gg_t2)
+    write(*,*)
+    write(*,*) "[gw][t2] G-vector count  ng =", ng_t2
+    write(*,*) "[gw][t2] ecut (Ry)          =", epsilon_cutoff
+    nprint_t2 = min(5, ng_t2)
+    write(*,*) "[gw][t2] smallest |G|^2 values (bohr^-2):"
+    do ig_t2 = 1, nprint_t2
+      write(*,'(A,I4,A,ES14.6)') "  [gw][t2]   ig=", ig_t2, "  |G|^2=", gg_t2(ig_t2)
+    end do
+
+    ! v(q=0, G) should equal 4*pi/|G|^2 for G /= 0.
+    fourpi_t2 = 4.0d0 * acos(-1.0d0)
+    qzero     = 0.0d0
+    nsub1     = 10
+    nsub2     = 30
+    call build_vcoul(ng_t2, gvec_t2, gg_t2, qzero, system%det_a, system%nk, nsub1, vcoul_t2)
+    write(*,*)
+    write(*,*) "[gw][t2] v(q=0,G) vs 4pi/|G|^2 for 3 non-zero G (nsub=", nsub1, "):"
+    nprint_t2 = min(4, ng_t2)  ! print ig=2..4 (skip ig=1 which is G=0 head)
+    do ig_t2 = 2, nprint_t2
+      if (gg_t2(ig_t2) > 0.0d0) then
+        analytic_t2 = fourpi_t2 / gg_t2(ig_t2)
+        write(*,'(A,I4,A,ES14.6,A,ES14.6)') &
+          "  [gw][t2]   ig=", ig_t2, &
+          "  vcoul=", vcoul_t2(ig_t2), "  4pi/|G|^2=", analytic_t2
+      end if
+    end do
+
+    ! q->0 head at two sampling densities to show convergence
+    write(*,*)
+    write(*,*) "[gw][t2] q->0 head (mini-BZ average) convergence:"
+    write(*,'(A,I3,A,ES14.6)') "  [gw][t2]   nsub=", nsub1, &
+      "  head=", vcoul_t2(1)
+    call build_vcoul(ng_t2, gvec_t2, gg_t2, qzero, system%det_a, system%nk, nsub2, vcoul_t2)
+    write(*,'(A,I3,A,ES14.6)') "  [gw][t2]   nsub=", nsub2, &
+      "  head=", vcoul_t2(1)
+    write(*,*)
+
+    deallocate(gvec_t2, gg_t2, vcoul_t2)
+  end if
 
   ! ----------------------------------------------------------------
   ! Step 5: QP passthrough — allocate and fill
