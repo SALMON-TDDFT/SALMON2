@@ -36,6 +36,7 @@ subroutine main_gw
   use gw_qp_output_sub,   only: write_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel
+  use gw_epsilon_sub,     only: calc_epsinv
   use sendrecv_grid
   implicit none
 
@@ -83,6 +84,16 @@ subroutine main_gw
   real(8),  allocatable :: gvec_t3(:,:), gg_t3(:)
   complex(8),allocatable:: mtxel_t3(:,:,:)
   real(8)               :: errmax_t3, offmax_t3
+
+  ! --- variables for the task-4 sanity block (static RPA dielectric) ---
+  integer               :: ng_t4, iq_t4, nq_t4, ismallest
+  real(8),  allocatable :: gvec_t4(:,:), gg_t4(:)
+  complex(8),allocatable:: epsinv_t4(:,:)
+  real(8),  allocatable :: epsd_t4(:)
+  real(8)               :: qvec_t4(3), resid_t4, qabs, qabs_min
+  real(8)               :: eps_M, eps_inf
+  logical               :: ok_t4
+  integer               :: nskip_t4
 
   ! ----------------------------------------------------------------
   ! Step 0: report active GW input parameters (root only)
@@ -274,6 +285,83 @@ subroutine main_gw
   end if
 
   deallocate(gvec_t3, gg_t3, mtxel_t3)
+
+  ! ----------------------------------------------------------------
+  ! Task-4 sanity block: static (omega=0) RPA dielectric matrix.
+  ! All output prefixed with [gw][t4].  calc_epsinv calls calc_mtxel
+  ! (collective), so it is entered on ALL ranks; only printing is root-only.
+  !
+  ! q-set: q_iq = vec_k(:,iq) - vec_k(:,1), iq = 1..nk (the mesh-point
+  ! differences relative to the first k-point).  iq=1 is q=0 (head).  For each
+  ! q we report the macroscopic dielectric eps_M(q) = 1/epsinv(1,1) (ig=1 is
+  ! G=0).  For the smallest non-zero |q| we also report the inversion residual
+  ! and use eps_M there as a (coarse) epsilon_infinity estimate.
+  ! ----------------------------------------------------------------
+  allocate(gvec_t4(3, ngmax_t2))
+  allocate(gg_t4(ngmax_t2))
+  call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                      ng_t4, gvec_t4, gg_t4)
+  allocate(epsinv_t4(ng_t4, ng_t4))
+  allocate(epsd_t4(ng_t4))
+
+  nq_t4 = system%nk
+  ! locate the smallest non-zero |q| in the q-set (relative to vec_k(:,1))
+  qabs_min  = huge(1.0d0)
+  ismallest = 0
+  do iq_t4 = 1, nq_t4
+    qvec_t4(1:3) = system%vec_k(1:3,iq_t4) - system%vec_k(1:3,1)
+    qabs = sqrt(qvec_t4(1)**2 + qvec_t4(2)**2 + qvec_t4(3)**2)
+    if (qabs > 1.0d-8 .and. qabs < qabs_min) then
+      qabs_min  = qabs
+      ismallest = iq_t4
+    end if
+  end do
+
+  if (comm_is_root(nproc_id_global)) then
+    write(*,*)
+    write(*,*) "[gw][t4] static RPA dielectric matrix (omega=0)"
+    write(*,*) "[gw][t4] ng =", ng_t4, "  nq =", nq_t4, &
+               "  smallest |q| at iq=", ismallest
+    write(*,*) "[gw][t4] eps_M(q) = 1/epsinv(G=0,G=0) per q:"
+  end if
+
+  nskip_t4 = 0
+  eps_inf  = 0.0d0
+  do iq_t4 = 1, nq_t4
+    qvec_t4(1:3) = system%vec_k(1:3,iq_t4) - system%vec_k(1:3,1)
+    qabs = sqrt(qvec_t4(1)**2 + qvec_t4(2)**2 + qvec_t4(3)**2)
+
+    call calc_epsinv(system, info, mg, lg, spsi, energy%esp, gvec_t4, gg_t4, ng_t4, &
+                     iq_t4, qvec_t4, 1, epsinv_t4, eps_diag=epsd_t4, &
+                     residual=resid_t4, ok=ok_t4)
+
+    if (comm_is_root(nproc_id_global)) then
+      if (.not. ok_t4) then
+        nskip_t4 = nskip_t4 + 1
+        write(*,'(A,I4,A,ES12.4,A)') "  [gw][t4]   iq=", iq_t4, "  |q|=", qabs, &
+          "  SKIPPED (no k+q partner; symmetry-reduced mesh)"
+      else
+        eps_M = dble( 1.0d0 / epsinv_t4(1,1) )
+        write(*,'(A,I4,A,ES12.4,A,F12.5)') "  [gw][t4]   iq=", iq_t4, &
+          "  |q|=", qabs, "  eps_M=", eps_M
+        if (iq_t4 == ismallest) then
+          eps_inf = eps_M
+          write(*,'(A,ES12.4)') "  [gw][t4]   inversion residual max|eps.epsinv-I| =", resid_t4
+        end if
+      end if
+    end if
+  end do
+
+  if (comm_is_root(nproc_id_global)) then
+    write(*,'(A,F12.5)') "  [gw][t4] epsilon_infinity estimate (eps_M at smallest |q|) =", eps_inf
+    write(*,*) "[gw][t4] (coarse on a small k-mesh; q->0 head and BZ sampling are limiting factors)"
+    if (nskip_t4 > 0) then
+      write(*,*) "[gw][t4] NOTE: ", nskip_t4, " q-point(s) skipped (no mesh partner)."
+    end if
+    write(*,*)
+  end if
+
+  deallocate(gvec_t4, gg_t4, epsinv_t4, epsd_t4)
 
   ! ----------------------------------------------------------------
   ! Step 5: QP passthrough — allocate and fill

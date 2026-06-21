@@ -1,6 +1,7 @@
 set(SOURCES
     gw_coulomb.f90
     gw_mtxel.f90
+    gw_epsilon.f90
     gw_qp_output.f90
     gw_main.f90
    )
