@@ -3310,7 +3310,7 @@ contains
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
-                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk
+                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk,ttm3_write_profile
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     implicit none
@@ -3622,6 +3622,8 @@ contains
                  dble(iter)*dt_em*utime_from_au, &
                  t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, t3_env(ix,iy,iz)
             close(unit2)
+            ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K]) for spatial-distribution diagnostics
+            call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2 )
           end if
         end if
       end if !use_ttm3

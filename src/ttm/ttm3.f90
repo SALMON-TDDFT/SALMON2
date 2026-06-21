@@ -29,6 +29,7 @@ module ttm3
   public :: ttm3_get_max
   public :: ttm3_get_front
   public :: ttm3_front_ijk
+  public :: ttm3_write_profile
   public :: ttm3_permittivity
   public :: ttm3_linear_gen
   public :: ttm3_eps_sig
@@ -925,6 +926,33 @@ contains
     end do
     jx=a(1); jy=a(2); jz=a(3)
   end subroutine ttm3_front_ijk
+
+  ! Depth profile along x at the transverse centre line (front cell's iy,iz): writes
+  ! one block per call (time, ix, Te[K], Ne[cm^-3], Tl[K]) for spatial-distribution diagnostics.
+  subroutine ttm3_write_profile( fname, t_fs, u )
+    implicit none
+    character(*),intent(in) :: fname
+    real(8),     intent(in) :: t_fs
+    integer,     intent(in) :: u
+    real(8),parameter :: hk = 3.1577502480407d5, aul = 5.29177210903d-11
+    real(8) :: cm3
+    integer :: m,ix,iy,iz,fx,fy,fz
+    if( nmedia_myrnk<=0 ) return
+    call ttm3_front_ijk( fx, fy, fz )                 ! transverse centre = front cell line
+    cm3 = (aul*1.0d2)**3
+    open(u, file=fname, status='unknown', position='append')
+    do ix=is_inner(1),ie_inner(1)                     ! sorted by depth
+       do m=1,nmedia_myrnk
+          if( ijk_media_myrnk(1,m)==ix .and. ijk_media_myrnk(2,m)==fy .and. ijk_media_myrnk(3,m)==fz )then
+             iy=fy; iz=fz
+             write(u,'(F12.4,1X,I6,3(1X,E16.8))') t_fs, ix, &
+                  Te(ix,iy,iz)*hk, Ne(ix,iy,iz)/cm3, Tl(ix,iy,iz)*hk
+          end if
+       end do
+    end do
+    write(u,*) ' '                                    ! blank line separates time blocks
+    close(u)
+  end subroutine ttm3_write_profile
 
   !---------------------------------------------------------------------------
   ! Stage 2: carrier-dependent permittivity (recommended Drude model).
