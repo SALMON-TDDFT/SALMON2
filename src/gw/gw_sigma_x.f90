@@ -175,7 +175,9 @@ contains
     nk    = system%nk
     nq    = system%nk
     omega = abs(system%det_a)
-    rnk   = 1.0d0 / dble(nk)            ! the Fock 1/N_k mesh factor
+    rnk   = 1.0d0 / (dble(nk) * omega)  ! Fock mesh+cell factor 1/(N_k*Omega):
+                                        ! v(q+G)=4pi/|q+G|^2 (build_vcoul) carries
+                                        ! no 1/Omega, so the cell volume enters here
 
     sigx(:,:) = 0.0d0
 
