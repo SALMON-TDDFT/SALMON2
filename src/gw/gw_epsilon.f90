@@ -320,10 +320,14 @@ contains
     no    = system%no
     nk    = system%nk
     omega = abs(system%det_a)
-    ! BZ k-sum factor 1/(N_k*Omega): chi0(q)=(1/(N_k Omega)) sum_k ... (the M and
-    ! v carry no 1/N_k).  Was 1/Omega -> the dielectric was over-screened by N_k
-    ! (eps_M grew with mesh at fixed |q|); matches gw_sigma_x / gpp rnk.
-    inv_omega = 1.0d0 / (dble(nk) * omega)
+    ! chi0 prefactor 2/(N_k*Omega).  Two factors of 2 enter the static RPA chi0
+    ! summed once over occ->unocc: the spin 2 (here in dw = f_v-f_c = 2) and the
+    ! static-response 2 (the antiresonant pole, lumped into the prefactor).  The
+    ! reference convention is fact = 4/(N_k*Omega*nspin) summed occ->unocc once;
+    ! with dw=2 this needs inv_omega = 2/(N_k*Omega).  (Confirmed by the f-sum
+    ! rule: with 1/(N_k Omega) the absorption f-sum was ~0.48 of (pi/2)wp^2.)
+    ! 1/N_k was also missing earlier (eps_M grew with mesh at fixed |q|).
+    inv_omega = 2.0d0 / (dble(nk) * omega)
     nsub_head = 10            ! mini-BZ sub-sampling density for the v head
 
     allocate(chi0(ng,ng), eps(ng,ng))
@@ -564,7 +568,7 @@ contains
     ll   = .false.;  if (present(local_only)) ll = local_only
     dosan= .false.;  if (present(run_sanity)) dosan = run_sanity
     no   = system%no;  nk = system%nk
-    omega= abs(system%det_a);  inv_omega = 1.0d0/(dble(nk)*omega)  ! 1/(N_k Omega) BZ k-sum
+    omega= abs(system%det_a);  inv_omega = 2.0d0/(dble(nk)*omega)  ! 2/(N_k Omega): spin(in dw)+static-response 2
 
     allocate(iGm(ng), imap(ng))
     chi0_w(:,:,:) = (0.0d0, 0.0d0)

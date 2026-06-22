@@ -127,9 +127,10 @@ contains
 
     no = system%no;  nk = system%nk;  im = 1
     ll = .false.;  if (present(local_only)) ll = local_only
-    ! BZ k-sum factor 1/(N_k*Omega) (same as the Fock rnk in gw_sigma_x); the
-    ! per-cell M and v_cv carry no 1/N_k, so the mesh factor is explicit here.
-    omega = abs(system%det_a);  inv_omega = 1.0d0/(dble(nk)*omega)
+    ! chi0 prefactor 2/(N_k*Omega): spin 2 (in dwp = f_v-f_c) + static-response 2
+    ! (antiresonant pole, in the prefactor) -> reference fact = 4/(N_k Omega).
+    ! (f-sum rule: 1/(N_k Omega) gave ~0.48 of (pi/2)wp^2; x2 -> ~1.)
+    omega = abs(system%det_a);  inv_omega = 2.0d0/(dble(nk)*omega)
     if (ll) then
       ik_lo = info%ik_s;  ik_hi = info%ik_e   ! this rank's k-share
     else
