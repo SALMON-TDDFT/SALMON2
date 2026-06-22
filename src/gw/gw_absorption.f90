@@ -119,7 +119,9 @@ contains
     complex(8) :: zw, pole, hv, wgt, zlfe
 
     no = system%no;  nk = system%nk;  im = 1
-    omega = abs(system%det_a);  inv_omega = 1.0d0/omega
+    ! BZ k-sum factor 1/(N_k*Omega) (same as the Fock rnk in gw_sigma_x); the
+    ! per-cell M and v_cv carry no 1/N_k, so the mesh factor is explicit here.
+    omega = abs(system%det_a);  inv_omega = 1.0d0/(dble(nk)*omega)
 
     allocate(iGm(ng));  call build_gminus(ng, gvec, iGm)
     allocate(Bw(nomega), Aw(ng,nomega), Atw(ng,nomega), chi0b(ng,ng,nomega))
