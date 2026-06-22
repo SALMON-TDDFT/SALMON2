@@ -34,6 +34,7 @@ module ttm3
   public :: ttm3_linear_gen
   public :: ttm3_drude_coef
   public :: ttm3_drude_coef_cell
+  public :: ttm3_drude_osc_cell
   public :: ttm3_eps_sig
   public :: ttm3_coupling_mode
   public :: ttm3_ninterior
@@ -624,8 +625,8 @@ contains
     Th_ = Th_star + (Th_-Th_star)*exp( -rate_h*dt_in )
 
     ! carrier densities and lattice: explicit Euler (non-stiff); +Col thermal generation
-    Ne_ = max( Ne_ + dt_in*(geff - R + Col), 0.0d0 )
-    Nh_ = max( Nh_ + dt_in*(geff - R + Col), 0.0d0 )
+    Ne_ = min( max( Ne_ + dt_in*(geff - R + Col), 0.0d0 ), tp3%N0 )   ! cap at valence density
+    Nh_ = min( max( Nh_ + dt_in*(geff - R + Col), 0.0d0 ), tp3%N0 )
     Tl_ = max( Tl_ + dt_in*dTl, 0.0d0 )
 
     ! numerical guard (should not trigger now that the stiff modes are integrated exactly)
@@ -1021,12 +1022,12 @@ contains
   ! wp^2 = 4*pi*Ne*(1/mu_eo+1/mu_ho).  c1=(1-g dt/2)/(1+g dt/2), c2=wp^2 dt/(8 pi (1+g dt/2))
   ! (the same form as the validated Lorentz-Drude pole, c2_jx_ld).  This replaces the
   ! eps/sigma back-action (which is unstable in the real-field FDTD as sigma grows fast).
-  pure subroutine ttm3_drude_coef( Ne_, Te_, Tl_, omega, dt, c1, c2 )
+  pure subroutine ttm3_gamma_wp2( Ne_, Te_, Tl_, ge, wp2 )
     implicit none
-    real(8),intent(in)  :: Ne_, Te_, Tl_, omega, dt
-    real(8),intent(out) :: c1, c2
+    real(8),intent(in)  :: Ne_, Te_, Tl_
+    real(8),intent(out) :: ge, wp2
     real(8),parameter :: mu_eo=0.26d0, mu_ho=0.37d0, kbT_r=3.1668d-6, a_t_=2.419d-2, E_h_=27.2114d0
-    real(8) :: red,red2,Cg,Tryd,Pe,Tf,aa,gsp,gph,g1e,ge,TeK,TlK,argl,wp2,c0
+    real(8) :: red,red2,Cg,Tryd,Pe,Tf,aa,gsp,gph,g1e,TeK,TlK,argl
     TeK=max(Te_,1.0d-12)/kbT_r; TlK=Tl_/kbT_r
     red  = 1.0d0/(1.0d0/mu_eo+1.0d0/mu_ho)
     red2 = 1.0d0/(1.0d0/tp3%mu_e+1.0d0/tp3%mu_h)
@@ -1043,11 +1044,24 @@ contains
     end if
     gph = 4.0d-4*TlK*a_t_
     g1e = a_t_/( 0.98d0 + 0.2d0*(kbT_r*TeK*E_h_)**(-3.5d0) )
-    ge  = max( gsp+gph+g1e, 1.0d-30 )                              ! collision rate
-    wp2 = 4.0d0*pi_*Ne_*( 1.0d0/mu_eo + 1.0d0/mu_ho )             ! combined e+h plasma freq^2
-    c0  = 1.0d0 + ge*dt/2.0d0
-    c1  = ( 1.0d0 - ge*dt/2.0d0 )/c0
-    c2  = wp2*dt/( 4.0d0*pi_*c0 )                 ! drive with ex (=ex_y+ex_z); 4pi gives correct Drude sigma
+    ge  = max( gsp+gph+g1e, 1.0d-30 )
+    wp2 = 4.0d0*pi_*Ne_*( 1.0d0/mu_eo + 1.0d0/mu_ho )
+  end subroutine ttm3_gamma_wp2
+
+  pure subroutine ttm3_drude_coef( Ne_, Te_, Tl_, omega, dt, c1, c2 )
+    implicit none
+    real(8),intent(in)  :: Ne_, Te_, Tl_, omega, dt
+    real(8),intent(out) :: c1, c2
+    real(8) :: ge, wp2, c0
+    call ttm3_gamma_wp2( Ne_, Te_, Tl_, ge, wp2 )
+    if( tp3%coupling_mode == 2 )then              ! ETD (exponential) Drude current integrator
+       c1  = exp( -ge*dt )
+       c2  = ( 1.0d0 - c1 )/ge * wp2/( 4.0d0*pi_ )
+    else                                          ! bilinear (Crank-Nicolson), mode 0
+       c0  = 1.0d0 + ge*dt/2.0d0
+       c1  = ( 1.0d0 - ge*dt/2.0d0 )/c0
+       c2  = wp2*dt/( 4.0d0*pi_*c0 )
+    end if
   end subroutine ttm3_drude_coef
 
   ! Cell wrapper: ADE Drude coefficients from the cell's carrier state (for the FDTD coupling).
@@ -1058,6 +1072,16 @@ contains
     real(8),intent(out) :: c1, c2
     call ttm3_drude_coef( Ne(ix,iy,iz)+N_floor, Te(ix,iy,iz), Tl(ix,iy,iz), omega, dt, c1, c2 )
   end subroutine ttm3_drude_coef_cell
+
+  ! Cell wrapper: raw Drude-oscillator parameters (eps_bg, gamma, wp^2) for the exact
+  ! exponential sub-step (coupling_mode=3).
+  subroutine ttm3_drude_osc_cell( ix, iy, iz, eps_bg, gamma, wp2 )
+    implicit none
+    integer,intent(in)  :: ix,iy,iz
+    real(8),intent(out) :: eps_bg, gamma, wp2
+    call ttm3_gamma_wp2( Ne(ix,iy,iz)+N_floor, Te(ix,iy,iz), Tl(ix,iy,iz), gamma, wp2 )
+    eps_bg = tp3%eps_bg
+  end subroutine ttm3_drude_osc_cell
 
   pure subroutine ttm3_permittivity( Ne_, Nh_, Te_, Th_, Tl_, omega, eps_re, sig )
     implicit none
@@ -1152,6 +1176,7 @@ contains
     TlK = Tl_*hk_kelvin
     Eg = tp3%Egap - tp3%dgap_c*( max(Ne_,0.0d0) )**(1.0d0/3.0d0) &
                   - 7.02d-4*TlK*TlK/(TlK+1108.0d0)/27.2114d0
+    Eg = max( Eg, 0.0d0 )   ! gap collapse: clamp at 0 (Mott handoff), matches standalone
   end function ttm3_gap
 
 end module ttm3

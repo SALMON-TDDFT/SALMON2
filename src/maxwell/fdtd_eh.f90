@@ -3311,7 +3311,7 @@ contains
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
                                ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk,ttm3_write_profile,&
-                               ttm3_drude_coef_cell,ttm3_coupling_mode
+                               ttm3_drude_coef_cell,ttm3_coupling_mode,ttm3_drude_osc_cell
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     implicit none
@@ -3334,6 +3334,7 @@ contains
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
     real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
     real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj,t3_gtpa
+    real(8) :: t3_ge,t3_wp2,t3_a,t3_b,t3_d2,t3_p,t3_dd,t3_cc,t3_ss,t3_m11,t3_m12,t3_m21,t3_m22,t3_estar,t3_enew,t3_dfld
     integer :: t3_im
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
@@ -3375,7 +3376,7 @@ contains
                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
       if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
-      if(use_ttm3 .and. allocated(t3_rjfx) .and. ttm3_coupling_mode()==0) &
+      if(use_ttm3 .and. allocated(t3_rjfx) .and. ( ttm3_coupling_mode()==0 .or. ttm3_coupling_mode()==2 )) &
         call eh_add_curr(t3_rjfx,t3_rjfy,t3_rjfz)  ! carrier Drude current (J-update only)
       call eh_sendrecv(fs,fe,'e')
       
@@ -3450,7 +3451,7 @@ contains
         end if
         !ghost LD current
         if(fe%flag_ld) call eh_add_curr_g(fe%rjx_fdtd_ld_g,fe%rjy_fdtd_ld_g,fe%rjz_fdtd_ld_g)
-        if(use_ttm3 .and. allocated(t3_rjfx_g) .and. ttm3_coupling_mode()==0) &
+        if(use_ttm3 .and. allocated(t3_rjfx_g) .and. ( ttm3_coupling_mode()==0 .or. ttm3_coupling_mode()==2 )) &
           call eh_add_curr_g(t3_rjfx_g,t3_rjfy_g,t3_rjfz_g)  ! ghost carrier Drude (J-update only)
         call eh_sendrecv(fs,fe,'e_g')
 
@@ -3607,7 +3608,7 @@ contains
         !    optics (eps_bg + sig_cold) from init.  This replaces the old eps/sigma coefficient
         !    back-action, which is numerically unstable in the real-field FDTD when sigma grows
         !    fast (abrupt coefficient change -> front/antinode runaway).
-        if( ttm3_coupling_mode()==0 )then
+        if( ( ttm3_coupling_mode()==0 .or. ttm3_coupling_mode()==2 ) )then
         do t3_im=1,ttm3_ninterior()
           call ttm3_interior_cell( t3_im, ix,iy,iz )
             call ttm3_drude_coef_cell( ix,iy,iz, omega1, dt_em, t3_c1, t3_cj )   ! c1, c2 (ADE)
@@ -3626,6 +3627,62 @@ contains
               t3_rjfz_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz_g(ix,iy,iz)
             end if
         end do
+        else if( ttm3_coupling_mode()==3 )then
+          !--- mode 3: exact local Drude-oscillator exponential sub-step (semi-implicit JE).
+          !    After the lossless E-update, advance each interior cell (E_a,J_a) under the local
+          !    Drude oscillator d/dt[E;J]=[[0,-4pi/eps],[wp2/4pi,-gamma]][E;J] by the exact 2x2
+          !    matrix exponential, then redistribute dE equally to the split-Yee components.
+          !    Unconditionally stable, energy-conserving, broadband.  No eh_add_curr injection.
+          do t3_im=1,ttm3_ninterior()
+            call ttm3_interior_cell( t3_im, ix,iy,iz )
+            call ttm3_drude_osc_cell( ix,iy,iz, t3_eps, t3_ge, t3_wp2 )
+            t3_b  = 4.0d0*pi/t3_eps ; t3_a = t3_wp2/(4.0d0*pi)
+            t3_d2 = (0.5d0*t3_ge)**2 - t3_a*t3_b
+            t3_p  = exp( -0.5d0*t3_ge*dt_em )
+            if( t3_d2 > 1.0d-30 )then
+              t3_dd = sqrt(t3_d2) ; t3_cc = cosh(t3_dd*dt_em) ; t3_ss = sinh(t3_dd*dt_em)/t3_dd
+            else if( t3_d2 < -1.0d-30 )then
+              t3_dd = sqrt(-t3_d2) ; t3_cc = cos(t3_dd*dt_em) ; t3_ss = sin(t3_dd*dt_em)/t3_dd
+            else
+              t3_cc = 1.0d0 ; t3_ss = dt_em
+            end if
+            t3_m11 = t3_p*( t3_cc + 0.5d0*t3_ge*t3_ss )
+            t3_m12 = t3_p*( -t3_b*t3_ss )
+            t3_m21 = t3_p*(  t3_a*t3_ss )
+            t3_m22 = t3_p*( t3_cc - 0.5d0*t3_ge*t3_ss )
+            t3_estar = fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
+            t3_enew  = t3_m11*t3_estar + t3_m12*t3_jx(ix,iy,iz)
+            t3_jx(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jx(ix,iy,iz)
+            t3_dfld = 0.5d0*( t3_enew - t3_estar )
+            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+t3_dfld ; fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+t3_dfld
+            t3_estar = fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
+            t3_enew  = t3_m11*t3_estar + t3_m12*t3_jy(ix,iy,iz)
+            t3_jy(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jy(ix,iy,iz)
+            t3_dfld = 0.5d0*( t3_enew - t3_estar )
+            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+t3_dfld ; fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+t3_dfld
+            t3_estar = fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
+            t3_enew  = t3_m11*t3_estar + t3_m12*t3_jz(ix,iy,iz)
+            t3_jz(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jz(ix,iy,iz)
+            t3_dfld = 0.5d0*( t3_enew - t3_estar )
+            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+t3_dfld ; fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+t3_dfld
+            if(yn_em_envelope=="y")then
+              t3_estar = fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)
+              t3_enew  = t3_m11*t3_estar + t3_m12*t3_jx_g(ix,iy,iz)
+              t3_jx_g(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jx_g(ix,iy,iz)
+              t3_dfld = 0.5d0*( t3_enew - t3_estar )
+              fe%ex_y_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+t3_dfld ; fe%ex_z_g(ix,iy,iz)=fe%ex_z_g(ix,iy,iz)+t3_dfld
+              t3_estar = fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)
+              t3_enew  = t3_m11*t3_estar + t3_m12*t3_jy_g(ix,iy,iz)
+              t3_jy_g(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jy_g(ix,iy,iz)
+              t3_dfld = 0.5d0*( t3_enew - t3_estar )
+              fe%ey_z_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+t3_dfld ; fe%ey_x_g(ix,iy,iz)=fe%ey_x_g(ix,iy,iz)+t3_dfld
+              t3_estar = fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)
+              t3_enew  = t3_m11*t3_estar + t3_m12*t3_jz_g(ix,iy,iz)
+              t3_jz_g(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jz_g(ix,iy,iz)
+              t3_dfld = 0.5d0*( t3_enew - t3_estar )
+              fe%ez_x_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+t3_dfld ; fe%ez_y_g(ix,iy,iz)=fe%ez_y_g(ix,iy,iz)+t3_dfld
+            end if
+          end do
         else
           !--- eps-update coupling (reference 3D3TM style): fold the carrier eps/sigma into the
           !    FDTD media coefficients each step (same dielectric formula as init), instead of a
