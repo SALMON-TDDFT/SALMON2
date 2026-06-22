@@ -548,7 +548,7 @@ contains
     logical,    optional,  intent(in)  :: run_sanity
 
     complex(8), allocatable :: mtxel(:,:,:)
-    complex(8), allocatable :: mcv(:,:), prodw(:,:)
+    complex(8), allocatable :: mcv(:,:)
     real(8),    allocatable :: dwp(:), delp(:)        ! per-pair (f_v-f_c) and Delta
     integer,    allocatable :: iGm(:), imap(:)
     integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, iw, iw0
@@ -601,7 +601,7 @@ contains
       end do
 
       if (npair > 0) then
-        allocate(mcv(ng,npair), prodw(ng,npair), dwp(npair), delp(npair))
+        allocate(mcv(ng,npair), dwp(npair), delp(npair))
         ! Pass 1: build remapped M and the (omega-independent) per-pair data.
         ipair = 0
         do iv = 1, no
@@ -627,7 +627,11 @@ contains
         end do
         nfill = ipair
 
-        ! Pass 2: per-omega weighted rank-1 accumulation.
+        ! Pass 2: per-omega weighted rank-1 accumulation.  OMP over omega -- each
+        ! omega writes a disjoint chi0_w(:,:,iw) slice, so there is no race; this
+        ! is the work-dominant loop (nomega * nfill * ng^2 per k).
+!$omp parallel do default(shared) schedule(dynamic) &
+!$omp   private(iw, zw, ipair, zden, wgt_w, jg, ig, zfac) reduction(max:smax)
         do iw = 1, nomega
           zw = cmplx(omega_grid(iw), 0.0d0, 8)
           do ipair = 1, nfill
@@ -636,13 +640,8 @@ contains
             wgt_w = inv_omega * dwp(ipair) * zden
             if (dosan .and. iw == iw0) &
               smax = max(smax, abs(wgt_w - cmplx(-inv_omega*dwp(ipair)/delp(ipair), 0.0d0, 8)))
-            do ig = 1, ng
-              prodw(ig,ipair) = wgt_w * mcv(ig,ipair)
-            end do
-          end do
-          do ipair = 1, nfill
             do jg = 1, ng
-              zfac = prodw(jg,ipair)
+              zfac = wgt_w * mcv(jg,ipair)
               if (zfac == (0.0d0,0.0d0)) cycle
               do ig = 1, ng
                 chi0_w(ig,jg,iw) = chi0_w(ig,jg,iw) + conjg(mcv(ig,ipair)) * zfac
@@ -650,8 +649,9 @@ contains
             end do
           end do
         end do
+!$omp end parallel do
 
-        deallocate(mcv, prodw, dwp, delp)
+        deallocate(mcv, dwp, delp)
       end if
 
       deallocate(mtxel)
